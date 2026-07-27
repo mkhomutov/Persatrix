@@ -8,7 +8,8 @@ Pins the RFC 0031 fact-scope amendment's shadow implementation
   room-scoped;
 * the RFC 0037 §D gate on every candidate — a ``restricted``-stamped
   fact is *withheld* (counted, never listed) when the turn acts below
-  its level;
+  its level, and the trace splits the count by cause (above-rank
+  ``withheld`` vs rule-(c) ``unknown_label``);
 * the absolute walls — ``epoch`` and ``principal`` rows never appear
   in a shadow trace (cross-room is never cross-run / cross-tenant);
 * the no-prompt-leak property — shadow candidates never reach the
@@ -223,6 +224,7 @@ class TestEmitFactsShadow:
         (trace,) = _traces(shadow_log)
         assert trace["candidates"] == []
         assert trace["withheld"] == 1
+        assert trace["unknown_label"] == 0
 
     async def test_restricted_fact_admitted_acting_restricted(
         self, fact_store: FactStore, shadow_log,
@@ -248,7 +250,43 @@ class TestEmitFactsShadow:
         (trace,) = _traces(shadow_log)
         assert trace["candidates"] == []
         assert trace["withheld"] == 1
+        assert trace["unknown_label"] == 0
         assert trace["acting"] is None
+
+    async def test_unknown_label_counted_separately(
+        self, fact_store: FactStore, shadow_log,
+    ):
+        """Rule (c) on the shadow path: a row whose stored label fails
+        to parse is withheld under ``unknown_label``, not folded into
+        the above-rank ``withheld`` count — the PR 4 measurement must
+        tell "gate working" from "labels corrupt" (the store persists
+        labels verbatim, so a skewed writer CAN produce such a row)."""
+        await _seed_fact(fact_store, protection_level="mystery")
+        await _emit(fact_store, _channel_event())
+        (trace,) = _traces(shadow_log)
+        assert trace["candidates"] == []
+        assert trace["withheld"] == 0
+        assert trace["unknown_label"] == 1
+
+    async def test_failed_seed_skipped_not_fatal(
+        self, fact_store: FactStore, shadow_log, monkeypatch,
+    ):
+        """Per-seed log-and-continue, the live path's idiom: one seed's
+        recall failure must not blank the turn's trace — live would
+        still inject the surviving seeds' facts, and the shadow
+        measurement must not skew against that partial recall."""
+        fact_id = await _seed_fact(fact_store)  # subject "bob"
+        real_recall = fact_store.recall
+
+        async def _flaky(*, subject, **kwargs):
+            if subject == "self":
+                raise RuntimeError("db exploded for this seed only")
+            return await real_recall(subject=subject, **kwargs)
+
+        monkeypatch.setattr(fact_store, "recall", _flaky)
+        await _emit(fact_store, _channel_event())
+        (trace,) = _traces(shadow_log)
+        assert [c["fact_id"] for c in trace["candidates"]] == [fact_id]
 
     async def test_epoch_wall_absolute(
         self, fact_store: FactStore, shadow_log,

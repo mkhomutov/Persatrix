@@ -138,6 +138,11 @@ async def _widened_candidates(
     (room-scoped) recall already returned are dropped: the delta is the
     widening's *contribution*, and a same-room-but-gate-withheld row
     must not be re-reported as cross-room.
+
+    Per-seed failures log-and-continue, the live path's idiom: on a
+    partially-failing backend the live prompt still gets the surviving
+    seeds' facts, so a whole-turn abort here would skew the PR 4
+    shadow-vs-live measurement against that partial recall.
     """
     person_seeds = _subject_seeds(event)
     if not person_seeds:
@@ -155,10 +160,18 @@ async def _widened_candidates(
     delta: list[Fact] = []
     seen: set[str] = set(live_fact_ids)
     for subject, predicates in seeds:
-        rows = await fact_store.recall(
-            subject=subject, limit=FACTS_RECALL_LIMIT,
-            predicates=predicates, sessions=SESSIONS_ALL,
-        )
+        try:
+            rows = await fact_store.recall(
+                subject=subject, limit=FACTS_RECALL_LIMIT,
+                predicates=predicates, sessions=SESSIONS_ALL,
+            )
+        except Exception:
+            logger.warning(
+                "Agent %s: shadow facts recall for subject=%r failed; "
+                "skipping seed",
+                fact_store.agent_id, subject, exc_info=True,
+            )
+            continue
         for fact in rows:
             if fact.fact_id in seen:
                 continue
@@ -189,7 +202,10 @@ async def emit_facts_shadow(
     instance whose aggregated log emission is intentionally **not**
     fired: the live gate's WARNING describes entries withheld from a
     real prompt, and a shadow row never had a prompt to be withheld
-    from.  Withhold counts ride the shadow trace instead.
+    from.  Withhold counts ride the shadow trace instead, split by
+    cause — ``withheld`` (clean above-rank) vs ``unknown_label`` (rule
+    (c): the stored label failed to parse) — so the PR 4 measurement
+    can tell "gate working" from "labels corrupt".
     """
     if mode != CROSS_ROOM_SHADOW or fact_store is None:
         return
@@ -217,13 +233,15 @@ async def emit_facts_shadow(
                 }
                 for f in candidates
             ],
-            "withheld": len(delta) - len(candidates),
+            "withheld": gate.withheld_count,
+            "unknown_label": gate.unknown_label_count,
         }
         logger.info(
             "Agent %s: L2 cross-room shadow — %d fact(s) would inject "
-            "at acting=%r (%d withheld by the §D gate); live prompt "
-            "unchanged",
-            agent_id, len(candidates), acting, trace["withheld"],
+            "at acting=%r (%d withheld above rank, %d unknown-label); "
+            "live prompt unchanged",
+            agent_id, len(candidates), acting,
+            trace["withheld"], trace["unknown_label"],
             extra={SHADOW_TRACE_ATTR: trace},
         )
     except Exception:
