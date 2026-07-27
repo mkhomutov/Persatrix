@@ -506,6 +506,12 @@
               "minimum": 0,
               "default": 200,
               "description": "Per-tier soft slice of the RFC 0017 1500-token allocator (default ≈13% per RFC 0026 OQ #2). The shared allocator still owns the 1500-token cap; this knob bounds how much of that cap the facts tier may consume on a single event so the notes / episodic tiers downstream still receive their share when many facts apply to the sender."
+            },
+            "cross_room": {
+              "type": "string",
+              "enum": ["off", "shadow"],
+              "default": "shadow",
+              "description": "L2 cross-room fact recall mode (RFC 0049 P1 / the RFC 0031 fact-scope amendment). 'shadow' (default) computes the cross-room candidate delta each sender-bearing turn, passes it through the RFC 0037 §D gate, and records it as a structured log trace WITHOUT injecting any of it into the prompt — the measurement input for the shadow→live promotion gate. 'off' skips the shadow pass entirely. 'live' arrives with the RFC 0049 PR 4 promotion; until then it is rejected here and at agent construction."
             }
           }
         },

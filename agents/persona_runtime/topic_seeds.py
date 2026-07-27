@@ -136,6 +136,7 @@ async def topic_subject_seeds(
     *,
     exclude: Collection[str],
     limit: int = TOPIC_SEED_LIMIT,
+    sessions: list[str] | str | None = None,
 ) -> list[str]:
     """Derive topic seeds for one event, fail-open to ``[]``.
 
@@ -144,6 +145,11 @@ async def topic_subject_seeds(
     Callers gate on the person-seed short-circuit first (sender-less
     events never reach here), so the empty-context cost guard for TICK
     events is preserved one layer up.
+
+    ``sessions`` forwards to :meth:`FactStore.topic_subjects` — the
+    live path leaves it ``None`` (§D default scope); the L2 cross-room
+    SHADOW pass (:mod:`.facts_shadow`, RFC 0049 PR 2) widens it so a
+    topic taught in another room can seed the shadow read.
     """
     if (
         fact_store is None
@@ -160,6 +166,7 @@ async def topic_subject_seeds(
     try:
         subjects = await fact_store.topic_subjects(
             limit=TOPIC_SUBJECT_SCAN_LIMIT,
+            sessions=sessions,
         )
     except Exception:
         logger.warning(

@@ -33,6 +33,7 @@ from evaluators.runner import (
     main,
     parse_elapsed,
     run_eval,
+    run_suite,
 )
 
 # A complete, valid recipe (state-only + final_transcript, no event assertions —
@@ -253,3 +254,50 @@ def test_main_no_recipes_exits_zero(tmp_path: Path, capsys: pytest.CaptureFixtur
     code = main(["--mode", "replay", "--eval-sets-dir", str(tmp_path)])
     assert code == 0
     assert "no eval sets" in capsys.readouterr().out.lower()
+
+
+# ─── RFC 0049 PR 2: shadow traces in the report artifact ─────────────────────
+
+
+_TRACE = {
+    "agent_id": "ember-owl",
+    "acting": "internal",
+    "candidates": [{"fact_id": "f-1", "subject": "alice"}],
+    "withheld": 0,
+}
+
+
+async def test_report_to_dict_carries_shadow_traces(tmp_path: Path) -> None:
+    es = load_eval_set(_write(tmp_path, _RECIPE))
+    report = await run_eval(es, provider=object(), driver=_FakeDriver(_passing_run()))
+    d = report_to_dict(
+        report, tier=es.tier, mode=EvalMode.REPLAY, shadow_traces=[_TRACE],
+    )
+    assert d["shadow_traces"] == [_TRACE]
+
+
+async def test_report_to_dict_omits_empty_shadow_traces(tmp_path: Path) -> None:
+    """Single-room runs keep the pre-shadow artifact shape byte-identical."""
+    es = load_eval_set(_write(tmp_path, _RECIPE))
+    report = await run_eval(es, provider=object(), driver=_FakeDriver(_passing_run()))
+    with_none = report_to_dict(report, tier=es.tier, mode=EvalMode.REPLAY)
+    with_empty = report_to_dict(
+        report, tier=es.tier, mode=EvalMode.REPLAY, shadow_traces=[],
+    )
+    assert "shadow_traces" not in with_none
+    assert with_none == with_empty
+
+
+async def test_run_suite_threads_shadow_traces_into_artifact(tmp_path: Path) -> None:
+    """The suite path carries the driver-captured traces into the per-recipe
+    artifact — the PR 4 measurement's read surface."""
+    recipe = _write(tmp_path, _RECIPE)
+    golden = golden_path_for(recipe)
+    golden.write_text("{}\n", encoding="utf-8")  # replay provider accepts empty
+    run = _passing_run()
+    run.shadow_traces = [_TRACE]
+    dicts = await run_suite(
+        [recipe], mode=EvalMode.REPLAY, driver=_FakeDriver(run),
+    )
+    (artifact,) = dicts
+    assert artifact["shadow_traces"] == [_TRACE]

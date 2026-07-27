@@ -22,17 +22,28 @@ from typing import Any
 from evaluators.eval_set import EvalReport
 
 
-def report_to_dict(report: EvalReport, *, tier: str, mode: Any) -> dict[str, Any]:
+def report_to_dict(
+    report: EvalReport,
+    *,
+    tier: str,
+    mode: Any,
+    shadow_traces: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Serialize one recipe's :class:`EvalReport` to a JSON-safe artifact dict.
 
     ``mode`` may be an ``EvalMode`` member or a string; its ``.value`` is used
     when present so the artifact records the plain mode name (``"replay"``).
+
+    ``shadow_traces`` (RFC 0049 PR 2) are the run's captured L2 cross-room
+    shadow records; included under a ``"shadow_traces"`` key only when
+    non-empty, so single-room recipes' artifacts are byte-identical to the
+    pre-shadow shape. The PR 4 shadow→live measurement gate reads them.
     """
     mode_value = getattr(mode, "value", mode)
     rows = [{"name": r.name, "passed": r.passed, "detail": r.detail} for r in report.results]
     passed = sum(1 for r in report.results if r.passed)
     total = len(report.results)
-    return {
+    out: dict[str, Any] = {
         "eval_id": report.eval_id,
         "tier": tier,
         "mode": mode_value,
@@ -40,6 +51,9 @@ def report_to_dict(report: EvalReport, *, tier: str, mode: Any) -> dict[str, Any
         "summary": {"total": total, "passed": passed, "failed": total - passed},
         "assertions": rows,
     }
+    if shadow_traces:
+        out["shadow_traces"] = shadow_traces
+    return out
 
 
 def suite_report(eval_dicts: list[dict[str, Any]]) -> dict[str, Any]:
