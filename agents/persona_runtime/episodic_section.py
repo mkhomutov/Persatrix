@@ -35,6 +35,14 @@ if TYPE_CHECKING:
 EPISODIC_SECTION_NAME = "episodic_recall"
 EPISODIC_SECTION_PRIORITY = 7
 
+#: Per-turn episodic recall row cap (was an inline ``limit=5`` in
+#: ``_inject_memory_context``).  Hoisted (RFC 0049 PR 3, the
+#: ``FACTS_RECALL_LIMIT`` precedent) so the live recall and the L1
+#: cross-room shadow pass (``episodes_shadow``) read the same bound —
+#: the shadow's "what would the widened top-N contain" comparison is
+#: only meaningful against the live N.
+EPISODIC_RECALL_LIMIT: int = 5
+
 
 def render_episodic_section(
     episodes: list[Episode],

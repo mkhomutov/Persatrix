@@ -189,6 +189,20 @@ class TurnInjectionGate:
             )
         ]
 
+    @property
+    def withheld_count(self) -> int:
+        """Clean above-rank withholds so far — rule-(c) casualties are
+        counted separately (:attr:`unknown_label_count`).  Read by the
+        RFC 0049 shadow trace, which reports the split instead of firing
+        :meth:`emit_log`."""
+        return self._withheld
+
+    @property
+    def unknown_label_count(self) -> int:
+        """Rule-(c) casualties so far: entries withheld because their
+        stored protection label failed to parse."""
+        return len(self._unknown)
+
     def emit_log(self) -> None:
         """One aggregated emission per turn (never per entry — §A volume
         rationale): WARNING naming every rule-(c) unknown-label casualty,

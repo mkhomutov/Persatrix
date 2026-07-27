@@ -33,7 +33,8 @@ from __future__ import annotations
 
 import copy
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -150,6 +151,67 @@ def _apply_seed_state(config: dict[str, Any], seed_state: dict[str, Any], *, per
         config["relationships"] = relationships
 
 
+class _ShadowTraceHandler(logging.Handler):
+    """Collects the structured payload off each shadow log record.
+
+    ``traces`` may be shared across handlers (RFC 0049 PR 3: one handler
+    per shadow logger, one merged stream) — records append in emission
+    order, so a run's L2 (facts) and L1 (episodes) traces interleave
+    chronologically; consumers partition on each payload's ``tier`` key.
+    """
+
+    def __init__(self, attr: str, traces: list[dict[str, Any]]) -> None:
+        super().__init__(level=logging.INFO)
+        self._attr = attr
+        self.traces = traces
+
+    def emit(self, record: logging.LogRecord) -> None:
+        payload = getattr(record, self._attr, None)
+        if isinstance(payload, dict):
+            self.traces.append(payload)
+
+
+@contextmanager
+def capture_shadow_traces() -> Iterator[list[dict[str, Any]]]:
+    """Capture RFC 0049 cross-room shadow traces for the block's duration.
+
+    Attaches a collecting handler directly to each of the runtime's
+    shadow loggers — ``agents.persona_runtime.facts_shadow`` (L2, PR 2)
+    and ``agents.persona_runtime.episodes_shadow`` (L1, PR 3) — and,
+    because a handler only sees records the logger's effective level
+    admits, temporarily lowers each to ``INFO`` when the ambient config
+    would filter the trace. Both are restored on exit, so the harness
+    never perturbs the process's logging outside the run. Shadow traces
+    are the measurement input for the RFC 0049 PR 4 shadow→live
+    promotion gate; the runner threads the captured (merged, ``tier``-
+    keyed) list into the report artifact.
+
+    The runtime imports are deferred (module convention: ``agents``
+    loads only on the driver paths, never from ``import evaluators``).
+    """
+    from agents.persona_runtime import (  # noqa: PLC0415
+        episodes_shadow,
+        facts_shadow,
+    )
+
+    traces: list[dict[str, Any]] = []
+    attached: list[tuple[logging.Logger, logging.Handler, int]] = []
+    try:
+        for mod in (facts_shadow, episodes_shadow):
+            shadow_logger = logging.getLogger(mod.SHADOW_LOGGER_NAME)
+            handler = _ShadowTraceHandler(mod.SHADOW_TRACE_ATTR, traces)
+            prev_level = shadow_logger.level
+            shadow_logger.addHandler(handler)
+            if shadow_logger.getEffectiveLevel() > logging.INFO:
+                shadow_logger.setLevel(logging.INFO)
+            attached.append((shadow_logger, handler, prev_level))
+        yield traces
+    finally:
+        for attached_logger, attached_handler, level in attached:
+            attached_logger.removeHandler(attached_handler)
+            attached_logger.setLevel(level)
+
+
 def _collect_events() -> list[dict[str, Any]]:
     """The flat event stream for this run — empty in Phase 1.
 
@@ -227,64 +289,71 @@ class PersonaRuntimeDriver:
         # user turn is still delivered (the conversation advances); only asserted
         # replies occupy an output slot.
         last_reply = ""
+        # RFC 0049 PR 2/PR 3 — capture the runtime's cross-room shadow logs
+        # (L2 facts + L1 episodes, ``tier``-keyed) for the run: the traces
+        # ride the EvalRun (and the report artifact) as the PR 4 measurement
+        # input. Single-room recipes capture [] — the shadow passes emit
+        # nothing when the cross-room delta is empty.
+        shadow_traces: list[dict[str, Any]] = []
         try:
             await agent.initialize_memory()  # inside the try so a partial init still closes
-            for interaction in eval_set.interactions:
-                if interaction.elapsed:
-                    clock.advance(parse_elapsed(interaction.elapsed))
-                for turn in interaction.turns:
-                    if turn.role == "user":
-                        # Log the inbound turn *before* dispatch (as the
-                        # orchestrator persists an inbound message before the
-                        # persona acts) so it is the ordering anchor the window
-                        # dedups the current event against.
-                        message_id: str | None = None
-                        if history is not None and channel:
-                            message_id = f"m{msg_seq}"
-                            msg_seq += 1
-                            history.append(
+            with capture_shadow_traces() as shadow_traces:
+                for interaction in eval_set.interactions:
+                    if interaction.elapsed:
+                        clock.advance(parse_elapsed(interaction.elapsed))
+                    for turn in interaction.turns:
+                        if turn.role == "user":
+                            # Log the inbound turn *before* dispatch (as the
+                            # orchestrator persists an inbound message before the
+                            # persona acts) so it is the ordering anchor the window
+                            # dedups the current event against.
+                            message_id: str | None = None
+                            if history is not None and channel:
+                                message_id = f"m{msg_seq}"
+                                msg_seq += 1
+                                history.append(
+                                    channel_id=channel,
+                                    message_id=message_id,
+                                    sender_id=user,
+                                    content=turn.user_text or "",
+                                )
+                            event = AgentEvent(
+                                event_type=EventType.CHANNEL_MESSAGE,
+                                payload={
+                                    "content": turn.user_text or "",
+                                    "user_id": user,
+                                    "participant_type": "user",
+                                },
+                                sender_id=user,
                                 channel_id=channel,
                                 message_id=message_id,
-                                sender_id=user,
-                                content=turn.user_text or "",
+                                metadata={
+                                    "chat_session_id": session,
+                                    "sender_participant_type": "user",
+                                    # RFC 0037 §B (PR 4): mirror the orchestrator's
+                                    # dispatch-time classification stamp (DM default
+                                    # ``internal``) — without it the turn floors to
+                                    # the §D ``public`` acting level (rule (b)) and
+                                    # every internal-stamped memory is withheld,
+                                    # which is the version-skew posture, not the
+                                    # production wire shape this driver replays.
+                                    "channel_classification": "internal",
+                                },
                             )
-                        event = AgentEvent(
-                            event_type=EventType.CHANNEL_MESSAGE,
-                            payload={
-                                "content": turn.user_text or "",
-                                "user_id": user,
-                                "participant_type": "user",
-                            },
-                            sender_id=user,
-                            channel_id=channel,
-                            message_id=message_id,
-                            metadata={
-                                "chat_session_id": session,
-                                "sender_participant_type": "user",
-                                # RFC 0037 §B (PR 4): mirror the orchestrator's
-                                # dispatch-time classification stamp (DM default
-                                # ``internal``) — without it the turn floors to
-                                # the §D ``public`` acting level (rule (b)) and
-                                # every internal-stamped memory is withheld,
-                                # which is the version-skew posture, not the
-                                # production wire shape this driver replays.
-                                "channel_classification": "internal",
-                            },
-                        )
-                        actions = await agent.on_event(event)
-                        last_reply, _status = extract_chat_reply(actions, user)
-                        # Log the persona's reply *after* — so the window replays
-                        # it as the persona's own prior ``assistant`` turn next time.
-                        if history is not None and channel:
-                            history.append(
-                                channel_id=channel,
-                                message_id=f"m{msg_seq}",
-                                sender_id=setup.persona,
-                                content=last_reply,
-                            )
-                            msg_seq += 1
-                    elif turn.role == "assistant":
-                        turn_outputs.append(last_reply)
+                            actions = await agent.on_event(event)
+                            last_reply, _status = extract_chat_reply(actions, user)
+                            # Log the persona's reply *after* — so the window replays
+                            # it as the persona's own prior ``assistant`` turn next time.
+                            if history is not None and channel:
+                                history.append(
+                                    channel_id=channel,
+                                    message_id=f"m{msg_seq}",
+                                    sender_id=setup.persona,
+                                    content=last_reply,
+                                )
+                                msg_seq += 1
+                        elif turn.role == "assistant":
+                            turn_outputs.append(last_reply)
             terminal_state = await _snapshot_state(agent, setup.persona)
         finally:
             await agent.close_memory()
@@ -293,6 +362,7 @@ class PersonaRuntimeDriver:
             turn_outputs=turn_outputs,
             terminal_state=terminal_state,
             events=_collect_events(),
+            shadow_traces=list(shadow_traces),
         )
 
 

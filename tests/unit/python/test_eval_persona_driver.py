@@ -336,3 +336,93 @@ def test_default_config_resolver_unknown_persona_raises(tmp_path: Path) -> None:
     resolve = default_config_resolver(cfg)
     with pytest.raises(KeyError):
         resolve("ghost-persona")
+
+
+# ─── RFC 0049 PR 2: shadow-trace capture ─────────────────────────────────────
+
+
+def test_capture_shadow_traces_collects_payloads() -> None:
+    """The capture handler collects the structured payload off each shadow
+    record — and only records carrying the payload attribute."""
+    import logging
+
+    from agents.persona_runtime.facts_shadow import (
+        SHADOW_LOGGER_NAME,
+        SHADOW_TRACE_ATTR,
+    )
+    from evaluators.persona_driver import capture_shadow_traces
+
+    shadow_logger = logging.getLogger(SHADOW_LOGGER_NAME)
+    with capture_shadow_traces() as traces:
+        shadow_logger.info(
+            "shadow", extra={SHADOW_TRACE_ATTR: {"candidates": [1]}},
+        )
+        shadow_logger.info("no payload — ignored")
+    assert traces == [{"candidates": [1]}]
+
+
+def test_capture_shadow_traces_restores_logger() -> None:
+    """The capture must not perturb logging outside the block: handler
+    detached, level restored — even when it had to lower the level to
+    admit INFO records."""
+    import logging
+
+    from agents.persona_runtime.facts_shadow import SHADOW_LOGGER_NAME
+    from evaluators.persona_driver import capture_shadow_traces
+
+    shadow_logger = logging.getLogger(SHADOW_LOGGER_NAME)
+    prev_level, prev_handlers = shadow_logger.level, list(shadow_logger.handlers)
+    shadow_logger.setLevel(logging.ERROR)  # would filter INFO without the lower
+    try:
+        with capture_shadow_traces() as traces:
+            logging.getLogger(SHADOW_LOGGER_NAME).info(
+                "shadow", extra={"facts_shadow": {"candidates": []}},
+            )
+        assert traces == [{"candidates": []}]
+        assert shadow_logger.level == logging.ERROR
+        assert shadow_logger.handlers == prev_handlers
+    finally:
+        shadow_logger.setLevel(prev_level)
+
+
+async def test_driver_run_carries_shadow_traces_field(tmp_path: Path) -> None:
+    """A single-room recipe captures no traces — the field exists and is
+    empty, so landed artifacts/goldens are unperturbed."""
+    es = _recipe(tmp_path)
+    driver = PersonaRuntimeDriver(config_resolver=_resolver())
+    run = await driver.run(es, _ScriptFake(list(_REPLIES)))
+    assert run.shadow_traces == []
+
+
+# ─── RFC 0049 PR 3: both shadow loggers, one merged stream ───────────────────
+
+
+def test_capture_shadow_traces_merges_both_loggers() -> None:
+    """The capture collects off BOTH shadow loggers — L2 facts and L1
+    episodes — into one stream in emission order (consumers partition on
+    each payload's ``tier`` key), and restores both loggers on exit."""
+    import logging
+
+    from agents.persona_runtime import episodes_shadow, facts_shadow
+    from evaluators.persona_driver import capture_shadow_traces
+
+    facts_logger = logging.getLogger(facts_shadow.SHADOW_LOGGER_NAME)
+    episodes_logger = logging.getLogger(episodes_shadow.SHADOW_LOGGER_NAME)
+    facts_handlers = list(facts_logger.handlers)
+    episodes_handlers = list(episodes_logger.handlers)
+    with capture_shadow_traces() as traces:
+        facts_logger.info(
+            "shadow",
+            extra={facts_shadow.SHADOW_TRACE_ATTR: {"tier": "facts"}},
+        )
+        episodes_logger.info(
+            "shadow",
+            extra={episodes_shadow.SHADOW_TRACE_ATTR: {"tier": "episodic"}},
+        )
+        facts_logger.info(
+            "shadow",
+            extra={facts_shadow.SHADOW_TRACE_ATTR: {"tier": "facts", "n": 2}},
+        )
+    assert [t.get("tier") for t in traces] == ["facts", "episodic", "facts"]
+    assert facts_logger.handlers == facts_handlers
+    assert episodes_logger.handlers == episodes_handlers

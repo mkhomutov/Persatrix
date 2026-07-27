@@ -23,13 +23,15 @@ from .channel_history import (
     render_channel_history_section,
 )
 from .channel_roster import inject_channel_roster
-from .episodic_section import render_episodic_section
+from .episodes_shadow import DEFAULT_EPISODIC_CROSS_ROOM, emit_episodes_shadow
+from .episodic_section import EPISODIC_RECALL_LIMIT, render_episodic_section
 from .facts_section import (
     DEFAULT_FACTS_BUDGET_TOKENS,
     FACTS_SECTION_NAME,
     recall_facts_for_event,
     render_facts_section,
 )
+from .facts_shadow import DEFAULT_FACTS_CROSS_ROOM, emit_facts_shadow
 from .injection_gate import (
     InjectionManifestEntry,
     TurnInjectionGate,
@@ -204,6 +206,9 @@ class _MemoryContextMixin:
     _fact_store: FactStore | None = None
     _facts_enabled: bool = True
     _facts_budget_tokens: int = DEFAULT_FACTS_BUDGET_TOKENS
+    # RFC 0049 PR 2/PR 3 — ``memory.{facts,episodic}.cross_room`` (off|shadow).
+    _facts_cross_room: str = DEFAULT_FACTS_CROSS_ROOM
+    _episodic_cross_room: str = DEFAULT_EPISODIC_CROSS_ROOM
     # F-4: channel-roster fetcher, wired in ``server_persona`` like the
     # history fetcher. ``None`` (default) → no roster section, so the
     # legacy mixin harnesses and DM-only paths are unaffected.
@@ -255,15 +260,10 @@ class _MemoryContextMixin:
         :meth:`MemoryBudget.try_add`; items that exceed the remaining budget
         are truncated or dropped.
 
-        PR 4 (RFC 0017): the TICK skip and ``should_fall_back`` recency-note
-        fallback have been removed.  ``recall()`` and ``recall_notes()`` are
-        now invoked for every event type; the ``min_score`` thresholds
-        (``DEFAULT_EPISODIC_MIN_SCORE`` / ``DEFAULT_NOTES_MIN_SCORE``)
-        applied at the DB layer are the sole filters for low-signal content.
-        Zero-admission events (TICK, short greetings) are expected to be
-        short-circuited by PR 5's empty-context guard, which consumes the
-        ``memory_admitted_tokens`` field on the returned
-        :class:`MemoryInjectionResult`.
+        RFC 0017 PR 4: recall runs for every event type; the DB-layer
+        ``min_score`` thresholds are the sole low-signal filters, and
+        zero-admission events short-circuit via PR 5's empty-context
+        guard on the returned ``memory_admitted_tokens``.
 
         Design: each memory tier is wrapped in ``except Exception`` to ensure
         one tier's failure (DB lock, I/O error, corrupted data) never blocks
@@ -287,16 +287,11 @@ class _MemoryContextMixin:
         if query is None:
             query = self._format_event(event)
 
-        # Always remove all three memory sections before (re-)injecting.
-        # WorkingMemory.add_section() overwrites a section by name when the
-        # tier finds results.  But when a tier finds NO results (e.g. no FTS5
-        # matches, or a TICK event that skips episodic recall), add_section()
-        # is never called — so a stale section from the previous event silently
-        # persists and contaminates the next event's LLM system prompt.
-        # Removing unconditionally here makes all three tiers symmetric:
-        # section is absent after the call if and only if no results were found.
-        # (PR #60 review F-60-R1: stale episodic_recall/recent_notes sections
-        # not cleared between events.)
+        # Always remove the memory sections before (re-)injecting: a tier
+        # with NO results never calls add_section(), so a stale section from
+        # the previous event would silently persist into this event's LLM
+        # system prompt.  Unconditional removal keeps the tiers symmetric —
+        # section present iff results found.  (PR #60 review F-60-R1.)
         self._working_memory.remove_section("episodic_recall")
         self._working_memory.remove_section(NOTES_SECTION_NAME)
         self._working_memory.remove_section(RELATIONSHIP_SECTION_NAME)
@@ -304,12 +299,9 @@ class _MemoryContextMixin:
         self._working_memory.remove_section(FACTS_SECTION_NAME)
 
         # ── Query all three tiers ──────────────────────────────────────────
-        # Sequential, not concurrent: all three share the same aiosqlite
-        # connection (same db_path).  aiosqlite serialises operations on a
-        # single connection, so concurrent gather() would not increase
-        # throughput and would add complexity.  If the tiers ever move to
-        # separate DB files, this can be revisited.
-        # (PR #60 review: document why sequential rather than gather().)
+        # Sequential, not concurrent (PR #60 review): the tiers share one
+        # aiosqlite connection, which serialises operations anyway — a
+        # gather() would add complexity for zero throughput gain.
 
         # Tier 1 (priority 8): Relationship context for the event sender.
         # Recall is delegated to ``relationship_section`` which handles
@@ -336,19 +328,24 @@ class _MemoryContextMixin:
             facts = await recall_facts_for_event(
                 self._fact_store, event, stimulus=query,
             )
+            # RFC 0049 P1 PR 2 — L2 cross-room SHADOW (0031 fact-scope
+            # amendment): log what the widened fact recall would inject;
+            # never enters the prompt/budget (see ``facts_shadow``).
+            await emit_facts_shadow(
+                self._fact_store, event, stimulus=query,
+                live_fact_ids={f.fact_id for f in facts},
+                agent_id=self.agent_id, mode=self._facts_cross_room,
+            )
         else:
             facts = []
 
-        # Tier 2 (priority 7): Episodic recall.
-        # PR 4: TICK skip removed — the recall-layer min_score threshold
-        # filters low-signal TICK content at the DB layer; zero-admission
-        # TICK events are handled by the PR 5 empty-context short-circuit.
-        # (RFC 0017 §D; previously: PR #60 TICK skip preserved through PR 2/3.)
+        # Tier 2 (priority 7): Episodic recall (TICK skip removed —
+        # RFC 0017 §D min_score + the PR 5 empty-context short-circuit).
         try:
             # PR 4: ``sessions=None`` = §D default; ``"*"`` pinned unreachable.
             episodes = await self._episodic_memory.recall(
                 query,
-                limit=5,
+                limit=EPISODIC_RECALL_LIMIT,
                 min_score=DEFAULT_EPISODIC_MIN_SCORE,
                 sessions=None,
             )
@@ -358,21 +355,19 @@ class _MemoryContextMixin:
                 self.agent_id, exc_info=True,
             )
             episodes = []
+        # RFC 0049 P1 PR 3 — L1 cross-room SHADOW (L1 amendment): log what
+        # the room-first-RANKED widened recall would inject; never enters
+        # the prompt/budget (see ``episodes_shadow``).
+        await emit_episodes_shadow(
+            self._episodic_memory, event, query=query,
+            live_episode_ids={e.id for e in episodes},
+            agent_id=self.agent_id, mode=self._episodic_cross_room,
+        )
 
-        # Tier 3 (priority 6): Recent notes matching event content.
-        # Notes recall runs for all event types (including TICK) because notes
-        # are agent-authored curated knowledge relevant to autonomous goal review.
-        # PR 4: min_score threshold filters low-signal matches at the DB layer;
-        # the recency fallback (should_fall_back) is removed because
-        # min_score makes "no FTS5 matches" a reliable signal — a threshold-
-        # filtered empty result means genuinely no relevant notes, not a
-        # missing FTS5 index fallback.  The fallback's recency query would
-        # re-admit those low-signal notes, defeating the threshold.
-        # (RFC 0017 §D; PR #131 F-1 fallback removed.)
-        # Notes tier: room-scoped query recall (§D default). Person identity
-        # that follows a person across rooms now lives on the relationship
-        # tier (F-7 Option D / PR D3), not a cross-room contact note.
-        # Encapsulated in ``notes_section`` like the other tiers' helpers.
+        # Tier 3 (priority 6): Recent notes matching event content — all
+        # event types, min_score at the DB layer (recency fallback removed,
+        # RFC 0017 §D / PR #131 F-1).  Room-scoped §D default; cross-room
+        # person identity lives on the relationship tier (F-7 Option D).
         notes = await recall_notes_for_event(
             self._episodic_memory,
             query=query,

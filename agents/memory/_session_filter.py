@@ -62,8 +62,10 @@ from typing import Final
 from ..session_id import LEGACY_SESSION_ID, current_session_id
 
 __all__ = [
+    "ROOM_BOOST_FACTOR",
     "SESSIONS_ALL",
     "_resolve_session_list",
+    "session_boost_expr",
     "session_in_clause",
     "session_in_predicate",
 ]
@@ -164,6 +166,48 @@ def session_in_predicate(
         return "", []
     placeholders = ",".join("?" for _ in session_list)
     return f"{column} IN ({placeholders})", list(session_list)
+
+
+#: Multiplicative same-room ranking boost for the RFC 0049 L1 amendment's
+#: room-first recall mode: the RFC 0031 §D session filter, converted from
+#: hard WHERE-exclusion to a ranking cue.  ``2.0`` means a cross-room
+#: episode must score more than twice a same-room episode's composite
+#: score to outrank it — same-room first at equal relevance (the
+#: dementia-test continuity bar as a *ranking* property), while a clearly
+#: better other-room episode remains admissible.  Calibration against the
+#: RFC 0017 injection budget is the RFC 0049 PR 4 measurement's concern.
+ROOM_BOOST_FACTOR: Final[float] = 2.0
+
+
+def session_boost_expr(
+    session_list: list[str] | None,
+    *,
+    column: str,
+) -> tuple[str, list[str]]:
+    """Build the ``" * (CASE WHEN col IN (…) THEN 2.0 ELSE 1.0 END)"``
+    ORDER-BY multiplier + params for room-first ranking (RFC 0049 L1).
+
+    The ranking twin of :func:`session_in_clause`: the same resolved
+    session list (room + ``legacy`` carve-out), applied as a score
+    multiplier instead of a WHERE wall.  ``session_list`` empty/``None``
+    → ``("", [])`` (no boost).  A caller supplies EITHER the wall or the
+    boost, never both — boosting a subset of an already-filtered set is
+    a contract error enforced at the recall layer
+    (:func:`agents.memory.episodic_room_ranked.recall_room_ranked`).
+
+    SECURITY: ``column`` and :data:`ROOM_BOOST_FACTOR` are interpolated
+    verbatim — both must be trusted internal literals (the
+    :func:`session_in_predicate` contract; the factor is a module
+    ``Final`` float, never user input).  Session ids ride ``?`` params.
+    """
+    if not session_list:
+        return "", []
+    placeholders = ",".join("?" for _ in session_list)
+    return (
+        f" * (CASE WHEN {column} IN ({placeholders})"
+        f" THEN {ROOM_BOOST_FACTOR} ELSE 1.0 END)",
+        list(session_list),
+    )
 
 
 def session_in_clause(

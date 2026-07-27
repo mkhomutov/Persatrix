@@ -415,19 +415,28 @@ class FactStore:
         # RFC 0026 PR 4 — see :mod:`._facts_reinforce` for §G rationale.
         await _mark_recalled_for_agent(self._ensure_db(), self._agent_id, fact_ids, at=at)
 
-    async def topic_subjects(self, *, limit: int = 200) -> list[str]:
+    async def topic_subjects(
+        self,
+        *,
+        limit: int = 200,
+        sessions: list[str] | str | None = None,
+    ) -> list[str]:
         """Distinct live ``topic.*`` subjects, most-recent-first.
 
         The recall-seeding enumeration (RFC 0026 topic amendment /
         RFC 0049 P1) — scoped exactly like :meth:`recall`, adding no
-        scope of its own.  See :mod:`agents.memory._facts_topics`.
+        scope of its own.  ``sessions`` takes the same four-mode §D
+        shape as :meth:`recall`; the L2 cross-room SHADOW pass (RFC
+        0049 PR 2) passes ``"*"`` so a topic taught in another room can
+        seed the widened read — epoch/principal equality still applies
+        unconditionally.  See :mod:`agents.memory._facts_topics`.
         """
         return await _topic_subjects_for_agent(
             self._ensure_db(),
             agent_id=self._agent_id,
             limit=min(limit, _MAX_RECALL_LIMIT * 2),
             session_list=_resolve_session_list(
-                None, self._active_session_id,
+                sessions, self._active_session_id,
             ),
             principal_id=resolve_active_principal(
                 self._active_principal_id,
