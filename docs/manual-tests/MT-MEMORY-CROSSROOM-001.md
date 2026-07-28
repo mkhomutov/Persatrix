@@ -30,7 +30,7 @@
 - The three amendments: [0026 topic predicates](../rfcs/0026-amendment-topic-subject-predicates.md) · [0031 fact-scope](../rfcs/0031-amendment-fact-scope-by-consolidation-level.md) · [0049-L1](../rfcs/0049-amendment-l1-cross-room-availability.md) (each carries its Promotion section with the recorded verdict).
 - [RFC 0037 — Memory Confidentiality](../rfcs/0037-memory-confidentiality-channel-classification.md) — the §D gate every cross-room candidate passes.
 - [Sessions guide](../guides/sessions.md) — session = room continuity; [epochs guide](../guides/epochs.md) — the run-isolation axis Leg 4 exercises.
-- [MT-MEMORY-005 — the dementia test](MT-MEMORY-005-dementia-test.md) — the single-room continuity gate this MT extends to the multi-room case (its V5 no-bleed leg is the *cross-session* wall, unchanged).
+- [MT-MEMORY-005 — the dementia test](MT-MEMORY-005-dementia-test.md) — the single-room continuity gate this MT extends to the multi-room case (its V5 no-bleed leg is re-anchored to the **epoch** axis by §V6 — Leg 4 here asserts the same wall).
 
 **Related Automated Tests** — the deterministic CI backbone of this MT:
 

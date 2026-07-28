@@ -244,11 +244,13 @@ common false-fail (called out in [MT-MEMORY-005 Setup](MT-MEMORY-005-dementia-te
 
 ### Edge Case 3: Cross-session opt-in has no operator verb
 
-Reading across sessions (`sessions="*"` or an explicit id list) is a
-library/debug capability with **no operator entry point** — deliberately
+An operator *dump* verb across sessions (`sessions="*"` or an explicit id
+list) remains unbuilt — deliberately
 ([ISSUE-0086](../issues/ISSUE-0086-operator-all-sessions-recall-verb.md),
-[sessions guide §7](../guides/sessions.md#7-cross-room-recall--the-v0312-posture)). There is no
-CLI flag to make Step 3 surface arc 1; the absence is structural.
+[sessions guide §7](../guides/sessions.md#7-cross-room-recall--the-v0312-posture)). Since
+v0.3.12, Step 3 surfacing arc-one *facts* needs no flag at all — that is the
+classification-gated runtime widening (the re-anchor note above), not an
+operator read.
 
 ---
 
