@@ -2,10 +2,10 @@
 
 **Test ID**: `MT-MEMORY-005`
 **Feature Area**: Memory (qualitative acceptance gate)
-**Version**: 1.0
+**Version**: 1.1
 **Created**: 2026-05-01
-**Last Updated**: 2026-05-17
-**Status**: Active (promoted from Draft scaffold after the v0.3.1 release-prep PR 4 re-run — RFC 0026 Phase 1 landed)
+**Last Updated**: 2026-07-28
+**Status**: Active (promoted from Draft scaffold after the v0.3.1 release-prep PR 4 re-run — RFC 0026 Phase 1 landed). **From v0.3.12 every run is a V6 run** — the V5 multi-session no-bleed extension is re-anchored to the epoch axis (see §V6; RFC 0049 cross-room recall is live).
 
 ---
 
@@ -210,7 +210,16 @@ Re-run after [RFC 0031 Phase 2](../rfcs/0031-per-session-namespacing-channels.md
 1. **Single-session arc**: canonical V2 run with the Setup `PERSATRIX_SESSION_ID` pin — every leg passes with default recall ([OQ #1 1a](../rfcs/0031-per-session-namespacing-channels.md#open-questions)). The Phase 2 PR-plan calls this the **dementia-test bridge**.
 2. **Multi-session no-bleed**: close the arc, re-export a fresh `PERSATRIX_SESSION_ID`, and re-run Leg 1's Interaction 4 trigger. The persona must **not** reference Mira — absence is the v0.3.5 promise; a reference is the F-3 reproduction. Cross-session continuity by opt-in is the Phase 3 CLI path (`persatrix memory recall --sessions=…`).
 
-V5 supersedes the v0.3.x re-run cadence — every v0.3.5+ run is a V5 run.
+V5 supersedes the v0.3.x re-run cadence for v0.3.5–v0.3.11; from v0.3.12 the V6 re-anchor below applies.
+
+### V6 — Post-RFC 0049 P0–1 (cross-room recall live, v0.3.12)
+
+Re-run after the [RFC 0049](../rfcs/0049-memory-consolidation-gradient.md) Phase 0–1 widenings ship **live** (v0.3.12, the [0031 fact-scope](../rfcs/0031-amendment-fact-scope-by-consolidation-level.md) + [0049-L1](../rfcs/0049-amendment-l1-cross-room-availability.md) amendments). Two changes:
+
+1. **The single-arc legs run unchanged.** A one-room arc under the pinned session id behaves identically — room-first ranking equals the old wall when only one room exists (`EVAL-MEMORY-001` replays byte-identical under the live default, pinned in CI).
+2. **The V5 "multi-session no-bleed" extension is re-anchored to the epoch axis.** Under a fresh `PERSATRIX_SESSION_ID` in the *same epoch*, a Mira reference is now **expected, not a failure**: person-facts travel with the person across rooms by design (the L2 widening, every candidate classification-gated at injection). The absence bar moves to a fresh **`PERSATRIX_EPOCH`** ([epochs guide](../guides/epochs.md)): re-run the Leg 1 trigger under a fresh epoch and the persona must **not** reference Mira — a reference there is the release-blocking isolation regression. Cross-room recall behaviour itself is [MT-MEMORY-CROSSROOM-001](MT-MEMORY-CROSSROOM-001.md)'s surface.
+
+Every v0.3.12+ run is a V6 run.
 
 ---
 

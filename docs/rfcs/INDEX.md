@@ -13,7 +13,6 @@ See [README.md](README.md) for RFC process, format, and lifecycle. Reserved RFC 
 | [RFC-0041](0041-typed-event-taxonomy-lifecycle-callbacks.md) | 🚧 Implementing | architecture | v0.4.0+ | 2026-05-20 | Typed Event Taxonomy and Lifecycle Callbacks |
 | [RFC-0044](0044-eval-set-golden-traces.md) | 🚧 Implementing | process | v0.3.11 (Phase 1 format + replay) + v0.4.0+ (typed-event goldens) | 2026-05-20 | Eval-Set Shape with Golden Traces |
 | [RFC-0045](0045-open-core-extraction-policy.md) | 🚧 Implementing | process | v0.3.10 (policy + dependency-direction CI gate) + v0.4.0+ (per-extraction RFCs) | 2026-05-24 | Open-Core Library Extraction Policy |
-| [RFC-0049](0049-memory-consolidation-gradient.md) | 🚧 Implementing | architecture | v0.3.12 (Phases 0–1) + v0.4.0 (Phases 2–4); design ratified v0.3.7 | 2026-06-06 | Memory Consolidation Gradient & Scope Reconciliation |
 | [RFC-0007](0007-conditional-looped-workflow-control-flow.md) | 📋 Proposed | feature | v0.4.0 | 2026-04-15 | Conditional and Looped Workflow Control Flow |
 | [RFC-0012](0012-protocols-organizations.md) | 📋 Proposed | architecture | v0.4.0 (Phases 1–3 — organizations & authority); v0.5.0 (Phases 4–5 — meeting/negotiation protocols, inter-org federation) | 2026-05-16 | Protocols & Organizations |
 | [RFC-0013](0013-legal-ethical-compliance.md) | 📋 Proposed | architecture | v0.5.0 | 2026-04-16 | Legal, Ethical & Regulatory Compliance Framework |
@@ -34,6 +33,7 @@ See [README.md](README.md) for RFC process, format, and lifecycle. Reserved RFC 
 | [RFC-0024](0024-event-driven-scheduling.md) | ⚠️ Partially Implemented | architecture | v0.3.3 (Phases 1–4) + v0.4.0 (Phase 5) + v0.5+ (Phase 6) | 2026-05-09 | Event-Driven Agent Scheduling |
 | [RFC-0029](0029-personal-society-storage-split.md) | ⚠️ Partially Implemented | architecture | Phase 1 v0.3.2 (facade + tier rename); Phases 2–6 v0.4.0 — see docs/v0.3.2-plan.md and docs/rfcs/0029-pr-plan.md | 2026-05-10 | Personal/Society Storage Split |
 | [RFC-0048](0048-operator-tester-web-console.md) | ⚠️ Partially Implemented | feature | v0.3.6 (Phase 1 / Slice 1) + v0.4.0+ (Phases 2–5) | 2026-06-01 | Operator & Tester Web Console (Vertical-Slice, Feature-Toggled UI) |
+| [RFC-0049](0049-memory-consolidation-gradient.md) | ⚠️ Partially Implemented | architecture | v0.3.12 (Phases 0–1) + v0.4.0 (Phases 2–4); design ratified v0.3.7 | 2026-06-06 | Memory Consolidation Gradient & Scope Reconciliation |
 | [RFC-0001](0001-core-orchestration-pipeline.md) | ✅ Implemented | architecture | v0.1 (MVP) | 2026-04-08 | Core Orchestration Pipeline (Planner + State + Registry) |
 | [RFC-0002](0002-rest-api-server.md) | ✅ Implemented | architecture | v0.1 (MVP) | 2026-04-09 | REST API Server (HTTP Layer + Workflow Submission) |
 | [RFC-0003](0003-scheduler-executor.md) | ✅ Implemented | architecture | v0.1 (MVP) | 2026-04-09 | Scheduler & Executor (Parallel Stage Execution + gRPC Task Dispatch) |

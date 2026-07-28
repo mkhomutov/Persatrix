@@ -31,8 +31,8 @@ This plan covers Phase 1 across **5 PRs**:
 | 1 | capture: `topic.*` predicates + extractor + recall seeding + blast-radius review | `feature/v0312-rfc0049-post-gate-topic-capture` | ✅ Merged | [#781](https://github.com/mkhomutov/Persatrix/pull/781) | 2026-07-27 |
 | 2 | L2 fact widening, SHADOW (0031 fact-scope amendment) | `feature/v0312-rfc0049-post-gate-l2-widening` | ✅ Merged | [#782](https://github.com/mkhomutov/Persatrix/pull/782) | 2026-07-27 |
 | 3 | L1 room-first ranking, SHADOW (L1 amendment) | `feature/v0312-rfc0049-post-gate-l1-ranking` | ✅ Merged | [#783](https://github.com/mkhomutov/Persatrix/pull/783) | 2026-07-27 |
-| 4 | measurement gate → live flip (verdict GREEN — both widenings LIVE) | `feature/v0312-rfc0049-post-gate-promotion` | 🔀 PR open | [#784](https://github.com/mkhomutov/Persatrix/pull/784) | — |
-| 5 | closeout: MT + docs + ISSUE-0084 close + RFC flip | `feature/v0312-rfc0049-closeout` | ⬜ | — | — |
+| 4 | measurement gate → live flip (verdict GREEN — both widenings LIVE) | `feature/v0312-rfc0049-post-gate-promotion` | ✅ Merged | [#784](https://github.com/mkhomutov/Persatrix/pull/784) | 2026-07-28 |
+| 5 | closeout: MT + docs + ISSUE-0084 close + RFC flip | `feature/v0312-rfc0049-closeout` | 🔀 PR open | [#785](https://github.com/mkhomutov/Persatrix/pull/785) | — |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged
 
@@ -97,6 +97,8 @@ RFC 0037 PR 5 on main (§D gate + §F filter)                       ══ MERGE
 - `MT-MEMORY-CROSSROOM-001` (the DM→standup scenario, live) authored + run.
 - Docs: `docs/guides/persona-agents.md` + `sessions.md` gradient/scope sections; [memory-scope-axes.md](../memory-scope-axes.md) cross-links verified (decision 4 already annotated).
 - Close [ISSUE-0084](../issues/ISSUE-0084-fact-scope-by-subject-not-uniform-session.md) (re-rooted, not implemented-as-filed); RFC 0049 front-matter → ⚠️ Partially Implemented (P0–1 v0.3.12 ✅; P2–4 v0.4.0); ROADMAP row flip.
+
+**As-implemented.** [MT-MEMORY-CROSSROOM-001](../manual-tests/MT-MEMORY-CROSSROOM-001.md) is authored with **live execution slated for v0.3.12 release-prep** — the MT-AUTONOMOUS precedent, and [v0.3.12-plan §Release-prep](../v0.3.12-plan.md) already lists it as a live gate-sweep deliverable (the deterministic backbone runs in CI: `test_cross_room_seed_replay.py` + `EVAL-MEMORY-003`). The docs sweep also **re-anchored the two MTs whose absence bars the promotion redefined**: [MT-MEMORY-005 §V6](../manual-tests/MT-MEMORY-005-dementia-test.md) and [MT-SESSION-003](../manual-tests/MT-SESSION-003.md) now carry the cross-run bar on the **epoch** axis (a fresh session surfacing a person-fact is the v0.3.12 feature, not the F-3 reproduction), and [sessions guide §7](../guides/sessions.md) documents the live per-tier posture + rollback levers. memory-scope-axes decision 4's supersession annotation verified in place — no edit needed. ISSUE-0084 closed re-rooted per §D (subject-classification machinery deliberately never built).
 
 ---
 

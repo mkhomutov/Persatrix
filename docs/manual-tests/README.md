@@ -133,6 +133,7 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 | [MT-MEMORY-003](MT-MEMORY-003.md) | Working memory: summarisation triggers near context-window threshold | Complete |
 | [MT-MEMORY-004](MT-MEMORY-004.md) | Memory injection token budget: per-event bound holds (RFC 0017 §B) | Active |
 | [MT-MEMORY-005](MT-MEMORY-005-dementia-test.md) | Persona Memory — Dementia Test | Active |
+| [MT-MEMORY-CROSSROOM-001](MT-MEMORY-CROSSROOM-001.md) | Memory that travels — a project fact taught in a DM is recalled in the standup (cross-room L2 recall + `topic.*` capture behind the RFC 0037 gate; fresh-epoch wall holds) (RFC 0049 Phases 0–1) | Active (live execution = v0.3.12 release-prep) |
 
 ## Cost
 
