@@ -28,16 +28,17 @@ import pytest
 from agents.epoch_id import epoch_scope
 from agents.memory.episodic import EpisodicMemory
 from agents.persona_runtime import episodes_shadow
+from agents.persona_runtime.cross_room import (
+    CROSS_ROOM_LIVE,
+    CROSS_ROOM_OFF,
+    CROSS_ROOM_SHADOW,
+)
 from agents.persona_runtime.episodes_shadow import (
     DEFAULT_EPISODIC_CROSS_ROOM,
     SHADOW_LOGGER_NAME,
     SHADOW_TRACE_ATTR,
     emit_episodes_shadow,
     resolve_episodic_cross_room,
-)
-from agents.persona_runtime.facts_shadow import (
-    CROSS_ROOM_OFF,
-    CROSS_ROOM_SHADOW,
 )
 from agents.persona_types import AgentEvent, EventType
 from agents.principal_id import principal_scope
@@ -123,15 +124,17 @@ def shadow_log(caplog: pytest.LogCaptureFixture):
 
 
 class TestResolveEpisodicCrossRoom:
-    def test_absent_defaults_to_shadow(self):
-        assert resolve_episodic_cross_room({}) == CROSS_ROOM_SHADOW
-        assert DEFAULT_EPISODIC_CROSS_ROOM == CROSS_ROOM_SHADOW
+    def test_absent_defaults_to_live(self):
+        """Live is the shipped posture since the PR 4 promotion."""
+        assert resolve_episodic_cross_room({}) == CROSS_ROOM_LIVE
+        assert DEFAULT_EPISODIC_CROSS_ROOM == CROSS_ROOM_LIVE
 
     def test_explicit_off(self):
         cfg = {"memory": {"episodic": {"cross_room": "off"}}}
         assert resolve_episodic_cross_room(cfg) == CROSS_ROOM_OFF
 
     def test_explicit_shadow(self):
+        """The pre-promotion posture stays configurable (rollback lever)."""
         cfg = {"memory": {"episodic": {"cross_room": "shadow"}}}
         assert resolve_episodic_cross_room(cfg) == CROSS_ROOM_SHADOW
 
@@ -143,11 +146,11 @@ class TestResolveEpisodicCrossRoom:
         """The two knobs are independent blocks — a facts setting must
         not steer the episodic mode."""
         cfg = {"memory": {"facts": {"cross_room": "off"}}}
-        assert resolve_episodic_cross_room(cfg) == CROSS_ROOM_SHADOW
+        assert resolve_episodic_cross_room(cfg) == CROSS_ROOM_LIVE
 
     def test_unknown_mode_raises(self):
-        """``"live"`` must fail loudly until the PR 4 promotion lands."""
-        cfg = {"memory": {"episodic": {"cross_room": "live"}}}
+        """Unknown modes reject loudly at construction."""
+        cfg = {"memory": {"episodic": {"cross_room": "mirror"}}}
         with pytest.raises(ValueError, match="cross_room"):
             resolve_episodic_cross_room(cfg)
 
@@ -388,8 +391,11 @@ class TestShadowNeverEntersPrompt:
     async def test_cross_room_episode_shadowed_but_not_injected(
         self, episodic: EpisodicMemory, shadow_log,
     ):
-        """The full ``_inject_memory_context`` pass: the cross-room row
-        is traced, while the prompt, the §G manifest, and reinforcement
+        """The full ``_inject_memory_context`` pass under SHADOW mode
+        (pinned explicitly — the shipped default is ``live`` since the
+        PR 4 promotion; the live counterpart lives in
+        ``test_cross_room_live.py``): the cross-room row is traced,
+        while the prompt, the §G manifest, and reinforcement
         (``access_count``) see only the live (room-walled) row."""
         cross_id = await _seed_episode(
             episodic, "atlas deployment retro cross-room-marker",
@@ -399,6 +405,8 @@ class TestShadowNeverEntersPrompt:
             session_id="legacy",
         )
         mixin = _build_mixin(episodic)
+        mixin._facts_cross_room = CROSS_ROOM_SHADOW
+        mixin._episodic_cross_room = CROSS_ROOM_SHADOW
         result = await mixin._inject_memory_context(_channel_event())
 
         rendered = "\n".join(

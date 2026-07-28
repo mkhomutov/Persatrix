@@ -165,8 +165,14 @@ class TestInjectMemoryContext:
         deleted.  Recall is now called for all event types; the min_score
         threshold filters low-signal results at the DB layer.  Notes recall
         is still attempted for all events.
-        (Previously: PR #60 review TICK skip; removed in RFC 0017 PR 4.)
+        (Previously: PR #60 review TICK skip; removed in RFC 0017 PR 4.
+        Since the RFC 0049 PR 4 promotion the default episodic read is the
+        room-first-RANKED ``recall_room_ranked`` — the spy targets that
+        seam; ``EpisodicMemory.recall`` remains the shadow/off-mode path.)
         """
+        import agents.persona_runtime.memory_context as memory_context_module
+        from agents.memory.episodic_room_ranked import recall_room_ranked
+
         agent = create_persona_agent(
             agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
         )
@@ -179,19 +185,21 @@ class TestInjectMemoryContext:
             importance=0.8,
         )
 
-        # Spy on recall to verify it IS called for TICK (skip removed).
-        recall_spy = AsyncMock(wraps=agent._episodic_memory.recall)
-        agent._episodic_memory.recall = recall_spy
+        # Spy on the promoted (live-default) episodic read seam.
+        ranked_spy = AsyncMock(wraps=recall_room_ranked)
 
         # Spy on recall_notes to verify it IS still called.
         notes_spy = AsyncMock(wraps=agent._episodic_memory.recall_notes)
         agent._episodic_memory.recall_notes = notes_spy
 
         event = AgentEvent(event_type=EventType.TICK, payload={})
-        await agent._inject_memory_context(event)
+        with patch.object(
+            memory_context_module, "recall_room_ranked", ranked_spy,
+        ):
+            await agent._inject_memory_context(event)
 
         # Episodic recall MUST be called for TICK events (skip removed).
-        recall_spy.assert_called_once()
+        ranked_spy.assert_called_once()
         # Notes recall is still attempted.
         assert notes_spy.call_count >= 1
 

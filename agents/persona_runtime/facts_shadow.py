@@ -51,6 +51,13 @@ from typing import TYPE_CHECKING, Final
 
 from ..memory._session_filter import SESSIONS_ALL
 from ..memory.fact_predicates import TOPIC_PREDICATES
+from .cross_room import (
+    CROSS_ROOM_MODES,
+    CROSS_ROOM_OFF,
+    CROSS_ROOM_SHADOW,
+    DEFAULT_FACTS_CROSS_ROOM,
+    resolve_facts_cross_room,
+)
 from .facts_section import FACTS_RECALL_LIMIT, _subject_seeds
 from .injection_gate import TurnInjectionGate, acting_classification_for_event
 from .topic_seeds import topic_subject_seeds
@@ -81,45 +88,13 @@ SHADOW_LOGGER_NAME: Final[str] = __name__
 #: payload (set via ``logger.info(..., extra={SHADOW_TRACE_ATTR: ...})``).
 SHADOW_TRACE_ATTR: Final[str] = "facts_shadow"
 
-#: ``memory.facts.cross_room`` modes.  PR 4 adds ``"live"`` behind the
-#: golden-trace measurement gate; until then the schema and this
-#: resolver both reject it, so a config cannot flip early.
-CROSS_ROOM_OFF: Final[str] = "off"
-CROSS_ROOM_SHADOW: Final[str] = "shadow"
-CROSS_ROOM_MODES: Final[frozenset[str]] = frozenset(
-    {CROSS_ROOM_OFF, CROSS_ROOM_SHADOW},
-)
-
-#: Shadow-first is the shipped v0.3.12 posture (master plan §Scope): the
-#: widening runs everywhere so traces accumulate for the PR 4 verdict.
-DEFAULT_FACTS_CROSS_ROOM: Final[str] = CROSS_ROOM_SHADOW
-
-
-def resolve_facts_cross_room(config: dict) -> str:
-    """Resolve ``memory.facts.cross_room`` from a persona config.
-
-    Absent / ``None`` → :data:`DEFAULT_FACTS_CROSS_ROOM` (the
-    ``resolve_facts_config`` null-collapse precedent).  An unknown
-    string raises ``ValueError`` at agent construction — deliberately
-    louder than a silent floor, because the value a future config is
-    most likely to carry early is ``"live"`` (the PR 4 flip), and
-    silently degrading a requested live widening to shadow would
-    misreport what the deployment is doing.  Production configs are
-    already schema-gated to the enum; this is the programmatic-path
-    twin of that gate.
-    """
-    facts_cfg = (config.get("memory") or {}).get("facts") or {}
-    raw = facts_cfg.get("cross_room")
-    if raw is None:
-        return DEFAULT_FACTS_CROSS_ROOM
-    # ``isinstance`` narrows the untyped config value for mypy AND folds
-    # non-str garbage into the same loud rejection as an unknown mode.
-    if not isinstance(raw, str) or raw not in CROSS_ROOM_MODES:
-        raise ValueError(
-            f"memory.facts.cross_room must be one of "
-            f"{sorted(CROSS_ROOM_MODES)}, got {raw!r}",
-        )
-    return raw
+# The mode vocabulary and both resolvers moved to :mod:`.cross_room`
+# when PR 4 added ``"live"`` (two tiers, one closed vocabulary — the
+# #783 review follow-up); re-exported above so every existing import
+# (``from agents.persona_runtime.facts_shadow import CROSS_ROOM_SHADOW,
+# resolve_facts_cross_room``) keeps resolving.  In ``live`` mode this
+# module's shadow pass does not run — the widened read happens once, on
+# the live path in ``memory_context`` (no doubled DB cost).
 
 
 async def _widened_candidates(

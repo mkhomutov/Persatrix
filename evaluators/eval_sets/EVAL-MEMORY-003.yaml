@@ -1,0 +1,66 @@
+id: EVAL-MEMORY-003
+title: Cross-room carry, LIVE — the RFC 0049 room-axis integration eval
+description: |
+  The RFC 0049 scenario-2 arc (a fact taught in a DM, asked about in the
+  standup) under the PROMOTED posture — the L1 amendment's room-axis
+  integration eval, landed with the PR 4 shadow→live flip. `setup.memory`
+  pins both `cross_room` knobs at `live` explicitly (the shipped default,
+  but pinned so this golden never silently changes posture), so the room-B
+  prompt carries the DM-taught facts: the widened L2 recall crosses the
+  room wall behind the RFC 0037 §D gate, and the persona answers with the
+  deadline it learned in the DM — "Atlas ships Friday" recallable in the
+  standup, the carry the consolidation gradient exists to provide.
+
+  The load-bearing pin is the request hash: the room-B asking turn's prompt
+  includes the cross-room facts section, so a regression that re-walls the
+  live recall shifts the request and misses the cassette
+  (`tests/integration/test_cross_room_seed_replay.py` also proves it by
+  replaying this golden under a shadow-pinned override and asserting the
+  miss). The SHADOW twin of this arc is EVAL-MEMORY-002 — together they pin
+  both postures of the `cross_room` knobs.
+
+  Mechanically, `room:` binds each interaction's RFC 0031 memory session
+  (`persatrix_session` metadata), and the 11m gap rotates the DM interaction
+  on the first standup turn, so the close-path extractor stores the Atlas
+  facts stamped with the DM room BEFORE the asking turn runs. The golden is
+  recorded offline (`make eval-record-offline`); a live re-record rides
+  release-prep.
+spawned_from: ../../docs/rfcs/0049-amendment-l1-cross-room-availability.md
+tier: experimental
+
+setup:
+  persona: ember-owl
+  user: sam
+  session_id: EVAL-MEMORY-003-S
+  seed_state:
+    persona:ember-owl:trust.scores.sam: 0.3
+  llm_mode: replay
+  memory:
+    facts: {cross_room: live}
+    episodic: {cross_room: live}
+
+interactions:
+  # ── teach (room: the DM) ───────────────────────────────────────────────────
+  - id: i1-dm-teach
+    room: dm-sam
+    turns:
+      - user: "Quick heads-up on the Atlas launch: it ships Friday — that's the hard deadline."
+      - assistant: {match: contains, value: "Friday"}
+  # ── switch rooms (11m rotates the DM interaction → facts extract) ──────────
+  - id: i2-standup-bridge
+    room: standup
+    elapsed: 11m
+    turns:
+      - user: "Morning standup — what's on your plate today?"
+  # ── ask (room: the standup; the live widened prompt carries the DM fact) ───
+  - id: i3-standup-ask
+    room: standup
+    elapsed: 1m
+    turns:
+      - user: "Standup check on Atlas — what's the deadline we're working toward?"
+      - assistant: {match: contains, value: "Friday"}
+
+assertions:
+  final_transcript:
+    must_reference: ["Friday"]
+    must_not_reference: ["I don't recall", "[error]"]

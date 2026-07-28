@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -375,7 +375,13 @@ class TestMinScoreWiredIntoRecallCalls:
 
     @pytest.mark.asyncio
     async def test_episodic_recall_receives_min_score_kwarg(self) -> None:
-        """recall() is called with min_score=DEFAULT_EPISODIC_MIN_SCORE."""
+        """The episodic read is called with min_score=DEFAULT_EPISODIC_MIN_SCORE.
+
+        Since the RFC 0049 PR 4 promotion the default episodic read is the
+        room-first-RANKED ``recall_room_ranked`` — the spy targets that
+        seam (the ``test_memory_injection`` tick-spy precedent)."""
+        import agents.persona_runtime.memory_context as memory_context_module
+
         mixin = _ConcreteMemoryMixin()
         mixin.agent_id = "wire-test"
         mixin._working_memory = WorkingMemory(max_tokens=8192)
@@ -391,9 +397,11 @@ class TestMinScoreWiredIntoRecallCalls:
         event.metadata = {}
         event.payload = {"content": "some query"}
 
-        await mixin._inject_memory_context(event)
+        ranked = AsyncMock(return_value=[])
+        with patch.object(memory_context_module, "recall_room_ranked", ranked):
+            await mixin._inject_memory_context(event)
 
-        call_kwargs = mixin._episodic_memory.recall.call_args
+        call_kwargs = ranked.call_args
         assert call_kwargs.kwargs.get("min_score") == DEFAULT_EPISODIC_MIN_SCORE, (
             f"recall() min_score kwarg is "
             f"{call_kwargs.kwargs.get('min_score')!r}, "
@@ -429,7 +437,10 @@ class TestMinScoreWiredIntoRecallCalls:
 
     @pytest.mark.asyncio
     async def test_tick_event_episodic_recall_receives_min_score(self) -> None:
-        """TICK event: recall() still called with min_score (no TICK skip in PR 4)."""
+        """TICK event: the episodic read is still issued with min_score (no
+        TICK skip in PR 4; the promoted ranked seam, as above)."""
+        import agents.persona_runtime.memory_context as memory_context_module
+
         mixin = _ConcreteMemoryMixin()
         mixin.agent_id = "wire-test"
         mixin._working_memory = WorkingMemory(max_tokens=8192)
@@ -445,9 +456,11 @@ class TestMinScoreWiredIntoRecallCalls:
         event.metadata = {}
         event.payload = {"content": ""}
 
-        await mixin._inject_memory_context(event)
+        ranked = AsyncMock(return_value=[])
+        with patch.object(memory_context_module, "recall_room_ranked", ranked):
+            await mixin._inject_memory_context(event)
 
-        # TICK skip removed: recall() must have been called.
-        mixin._episodic_memory.recall.assert_called_once()
-        call_kwargs = mixin._episodic_memory.recall.call_args
+        # TICK skip removed: the episodic read must have been issued.
+        ranked.assert_called_once()
+        call_kwargs = ranked.call_args
         assert call_kwargs.kwargs.get("min_score") == DEFAULT_EPISODIC_MIN_SCORE

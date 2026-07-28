@@ -2,8 +2,10 @@
 
 The §D security guarantee this file pins: the persona-runtime default
 context path **must never reach** ``sessions="*"`` (the all-sessions
-debug mode).  Wiring ``"*"`` into a prompt context re-introduces F-3 —
-the very cross-run state bleed Phase 2 closes.
+debug mode) *ungated* — wiring ``"*"`` into a prompt context
+re-introduces F-3.  (Since the RFC 0049 PR 4 promotion the
+facts/episodic tiers widen the room axis behind the RFC 0037 §D gate —
+see the ``memory_context.py`` carve-out note below.)
 
 The pins are split into two halves so a regression cannot bypass both:
 
@@ -52,24 +54,22 @@ from agents.memory.shared_pool import (
 # recall --all-sessions``, Phase 3) are NOT on this list; they are
 # allowed to pass ``"*"`` explicitly.
 #
-# ``agents/persona_runtime/facts_shadow.py`` (RFC 0049 PR 2) is a
-# deliberate carve-out: it reads ``sessions="*"`` for the L2 cross-room
-# SHADOW pass but is NOT a prompt-context path — nothing it computes
-# touches WorkingMemory, the RFC 0017 budget, the §G manifest, or the
-# reinforcement write (its sole output is a log trace).  The §D pin's
-# F-3 property — no all-sessions content wired into the LLM prompt —
-# is held for that module by
-# ``test_facts_shadow.py::TestShadowNeverEntersPrompt`` instead of by
-# this source scan.
-# ``episodes_shadow.py`` + ``episodic_room_ranked.py`` (RFC 0049 PR 3)
-# are the L1 twin of that carve-out: the room-ranked read widens the
-# session axis (no wall, boost-only) for the episodic SHADOW pass,
-# side-effect-free, sole output a log trace — F-3 held by
-# ``test_episodes_shadow.py::TestShadowNeverEntersPrompt``.  The live
-# prompt path in ``memory_context.py`` (on this list) still calls
-# ``recall(sessions=None)`` — the wall — until the PR 4 flip.
+# ``facts_shadow.py`` (RFC 0049 PR 2) and ``episodes_shadow.py`` +
+# ``episodic_room_ranked.py`` (PR 3) are deliberate carve-outs: they
+# read all-sessions for the cross-room SHADOW passes but are NOT
+# prompt-context paths — nothing they compute touches WorkingMemory,
+# the RFC 0017 budget, the §G manifest, or any reinforcement write
+# (sole output: a log trace).  F-3 is held for them by the two
+# ``TestShadowNeverEntersPrompt`` suites instead of this source scan.
+# ``memory_context.py`` came OFF this list at the RFC 0049 PR 4
+# promotion: ``cross_room: live`` (the shipped default) legitimately
+# widens the facts recall (``SESSIONS_ALL``) and room-ranks episodes.
+# F-3 is REDEFINED, not dropped — the bar is now "no UNGATED widening":
+# every widened row passes the RFC 0037 §D gate before the budget
+# (``test_cross_room_live.py::TestLiveCrossRoomInjection``), and
+# epoch/principal stay absolute walls on every widened branch.  The
+# tiers that stay room-walled keep their source pins below.
 PROMPT_CONTEXT_RECALL_MODULES = (
-    Path("agents/persona_runtime/memory_context.py"),
     Path("agents/persona_runtime/channel_history.py"),
     # ``facts_section.py`` issues ``FactStore.recall(subject=...)`` at
     # :func:`recall_facts_for_event` — also on the persona prompt-

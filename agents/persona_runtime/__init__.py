@@ -107,9 +107,8 @@ class Linkable(Protocol):
 
 # Cap on queued tick links.  PR #167 review *Should Fix*: an unbounded
 # buffer combined with a slow / paused tick consumer accumulates links
-# indefinitely (memory growth, plus every eventual tick span carries a
-# pathological link list).  Oldest-drop semantics preserve the most
-# recent causality, which is what operators usually want.
+# indefinitely (memory growth + pathological link lists on eventual tick
+# spans).  Oldest-drop semantics preserve the most recent causality.
 _PENDING_TICK_LINKS_CAP: Final[int] = 32
 
 
@@ -167,8 +166,10 @@ class _LLMPersonaAgent(
         self._fact_store = fact_store  # RFC 0026 PR 2; optional.
         from .facts_section import resolve_facts_config  # noqa: PLC0415 — RFC 0026 PR 3
         self._facts_enabled, self._facts_budget_tokens = resolve_facts_config(config)
-        from .episodes_shadow import resolve_episodic_cross_room  # noqa: PLC0415 — RFC 0049 PR 3
-        from .facts_shadow import resolve_facts_cross_room  # noqa: PLC0415 — RFC 0049 PR 2
+        from .cross_room import (  # noqa: PLC0415 — RFC 0049
+            resolve_episodic_cross_room,
+            resolve_facts_cross_room,
+        )
         self._facts_cross_room = resolve_facts_cross_room(config)
         self._episodic_cross_room = resolve_episodic_cross_room(config)
         self._memory_tools = memory_tools
