@@ -382,6 +382,19 @@ class PersonaRuntimeDriver:
                                 metadata=metadata,
                             )
                             actions = await agent.on_event(event)
+                            # Settle the turn before the next one dispatches: the
+                            # RFC 0020 Phase-2 close finalisation (summarise +
+                            # facts write) is a fire-and-forget task spawned when
+                            # a turn rotates an idle interaction, and its
+                            # aiosqlite work runs on a worker thread — left
+                            # undrained it RACES the next turn's memory read, so
+                            # whether the just-closed room's facts reach the next
+                            # prompt is OS-scheduler timing. The goldens are
+                            # recorded under the settled interleaving; this drain
+                            # is what makes that interleaving a contract instead
+                            # of a coin flip (the CI-observed EVAL-MEMORY-003
+                            # cassette miss).
+                            await agent.drain_pending_summaries()
                             last_reply, _status = extract_chat_reply(actions, user)
                             # Log the persona's reply *after* — so the window replays
                             # it as the persona's own prior ``assistant`` turn next time.
