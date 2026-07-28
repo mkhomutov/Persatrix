@@ -7,8 +7,10 @@ protection level above ``L`` is injected in verbatim form.  Runs in
 ._inject_memory_context` over every channel-derived tier (channel-history,
 episodic recall, facts, notes) **before** the RFC 0017 token budget, so a
 withheld entry never competes for tokens and never reaches the prompt.
-The declassification-projection branch (§E) arrives in PR 6; until then a
-withheld entry is withheld entirely.
+The declassification-projection branch (§E, PR 6) lives in
+:mod:`agents.persona_runtime.projection_branch`, fed by this gate's
+per-tier decision record; an entry with no admissible projection is
+withheld entirely.
 
 Two deliberately ungated surfaces, recorded here so the review trail does
 not re-litigate them:
@@ -143,6 +145,18 @@ class TurnInjectionGate:
         self._unknown: list[tuple[str, str, str | None, str | None]] = []
         # (tier, entry_id) → protection level for gate-PASSED entries only.
         self._passed_levels: dict[tuple[str, str], str] = {}
+        # Per-tier candidate decisions in arrival order, recorded by
+        # :meth:`filter_entries` for the §E projection branch (PR 6) —
+        # the order-preserving merge that reinserts a projected
+        # replacement where the withheld original stood.
+        self._decisions: dict[str, list[tuple[object, bool]]] = {}
+
+    @property
+    def acting(self) -> str | None:
+        """The turn's acting classification as resolved at construction —
+        read by the §E projection branch to build its admissible-level
+        IN-set (rule (b) flooring happens inside ``injectable_levels``)."""
+        return self._acting
 
     def admit(
         self,
@@ -178,16 +192,46 @@ class TurnInjectionGate:
         Entries expose ``protection_level`` and (nullable)
         ``source_channel_id`` — the RFC 0037 §C columns projected onto the
         ``Episode`` / ``Fact`` / ``Note`` dataclasses in this PR.
+
+        Every candidate's decision is also recorded (in order) on the
+        per-tier decision list :meth:`decisions` so the §E projection
+        branch can rebuild the tier with declassified replacements in
+        the withheld originals' positions.
         """
-        return [
-            entry for entry in entries
-            if self.admit(
+        admitted: list = []
+        decisions = self._decisions.setdefault(tier, [])
+        for entry in entries:
+            ok = self.admit(
                 tier=tier,
                 entry_id=getattr(entry, id_attr),
                 protection_level=getattr(entry, "protection_level", None),
                 source_channel_id=getattr(entry, "source_channel_id", None),
             )
-        ]
+            decisions.append((entry, ok))
+            if ok:
+                admitted.append(entry)
+        return admitted
+
+    def decisions(self, tier: str) -> tuple[tuple[object, bool], ...]:
+        """This tier's ``(entry, admitted)`` pairs in candidate order —
+        the §E projection branch's input.  Empty for a tier never
+        filtered through this gate."""
+        return tuple(self._decisions.get(tier, ()))
+
+    def record_projection(self, *, tier: str, entry_id: str, level: str) -> None:
+        """Label a §E projection served in place of a withheld entry.
+
+        Registers the PROJECTION's own (lower) level under the entry's id
+        so :meth:`manifest` reports what actually reached the prompt —
+        the abstraction at ``level``, not the verbatim entry at its
+        protection level.  The verbatim withhold tallies
+        (:attr:`withheld_count` / :attr:`unknown_label_count`) are
+        deliberately NOT decremented: the verbatim entry WAS withheld —
+        that is the §D guarantee — and the RFC 0049 shadow traces that
+        read the split predate (and must not shift under) the
+        projection affordance.
+        """
+        self._passed_levels[(tier, entry_id)] = level
 
     @property
     def withheld_count(self) -> int:

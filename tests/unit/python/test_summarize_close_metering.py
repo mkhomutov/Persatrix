@@ -191,7 +191,7 @@ class TestAutonomousCloseSummaryIsLeased:
         with caplog.at_level(
             logging.WARNING, logger="agents.persona_runtime.summarize_close",
         ):
-            summary, failed, facts = await summarize_closed_interaction(
+            summary, failed, facts, _projections = await summarize_closed_interaction(
                 _DenyingClient(), "ember-owl", _interaction(metered=True),
             )
 

@@ -225,7 +225,7 @@ class TestEmptySummaryFieldFallsBack:
         # returned so dispatch_facts_from_response ran against an
         # empty prose half.  Post-fix: summary failed, facts not
         # dispatched.
-        assert result == (SUMMARY_UNAVAILABLE_TEXT, True, None)
+        assert result == (SUMMARY_UNAVAILABLE_TEXT, True, None, {})
 
     async def test_whitespace_only_summary_returns_unavailable_and_drops_facts(
         self,
@@ -249,7 +249,7 @@ class TestEmptySummaryFieldFallsBack:
             "test-agent",
             _multi_turn_interaction(),
         )
-        assert result == (SUMMARY_UNAVAILABLE_TEXT, True, None)
+        assert result == (SUMMARY_UNAVAILABLE_TEXT, True, None, {})
 
     async def test_empty_summary_bumps_failed_counter_with_empty_field_reason(
         self,
@@ -289,7 +289,7 @@ class TestEmptySummaryFieldFallsBack:
             "summary": "Bob said hi.",
             "facts": facts_payload,
         })
-        summary, failed, facts_raw = await summarize_closed_interaction(
+        summary, failed, facts_raw, _projections = await summarize_closed_interaction(
             _make_envelope_client(envelope),
             "test-agent",
             _multi_turn_interaction(),
@@ -419,7 +419,7 @@ class TestSingleTurnInteractionFactExtraction:
             "summary": "Bob is picking up his daughter Mira from school.",
             "facts": facts_payload,
         })
-        summary, failed, facts_raw = await summarize_closed_interaction(
+        summary, failed, facts_raw, _projections = await summarize_closed_interaction(
             _make_envelope_client(envelope),
             "test-agent",
             _single_turn_interaction(with_text=True),
@@ -443,7 +443,7 @@ class TestSingleTurnInteractionFactExtraction:
             "summary": "this summary must never be used",
             "facts": [{"subject": "bob", "predicate": "x", "object": "y"}],
         })
-        summary, failed, facts_raw = await summarize_closed_interaction(
+        summary, failed, facts_raw, _projections = await summarize_closed_interaction(
             _make_envelope_client(envelope),
             "test-agent",
             interaction,
@@ -477,7 +477,7 @@ class TestUnresolvableSummarizationModelFallsBack:
             "test-agent",
             _multi_turn_interaction(),
         )
-        assert result == (SUMMARY_UNAVAILABLE_TEXT, True, None)
+        assert result == (SUMMARY_UNAVAILABLE_TEXT, True, None, {})
 
     async def test_unresolvable_model_bumps_failed_counter(
         self, monkeypatch: pytest.MonkeyPatch,
