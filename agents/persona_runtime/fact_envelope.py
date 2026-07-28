@@ -22,6 +22,7 @@ from typing import Any
 
 __all__ = [
     "FactsParseError",
+    "extract_projections",
     "parse_facts_payload",
     "split_combined_response",
 ]
@@ -166,6 +167,46 @@ def split_combined_response(raw: str) -> tuple[str, str]:
     facts = envelope.get("facts", [])
     facts_json = json.dumps(facts)
     return summary, facts_json
+
+
+def extract_projections(
+    raw: str, *, levels: tuple[str, ...],
+) -> dict[str, str]:
+    """Best-effort parse of the §E ``projections`` half of the envelope.
+
+    RFC 0037 PR 6 — deliberately a SEPARATE, lenient re-parse rather than
+    a third return slot on :func:`split_combined_response`: projections
+    are the RFC's honest-boundary *best-effort* affordance ("verbatim
+    text is gated; abstractions are best-effort"), so no projection
+    malformation may ever fail — or change the observable shape of — the
+    load-bearing summary/facts path.  Every failure mode degrades to
+    ``{}`` (the persona stays blunt-withheld, exactly the Phase-1
+    posture); nothing raises.
+
+    ``levels`` is the requested set the prompt asked for
+    (``classification.levels_below_stamp`` at the call site) — keys
+    outside it are dropped, so a model that hallucinates a level at or
+    above the interaction's own classification cannot write a projection
+    row the gate would serve *at that level*.  Non-string and
+    empty/whitespace values are dropped per level (the snippet maps
+    "no safe restatement" to ``""``).
+    """
+    text = _strip_code_fence((raw or "").strip())
+    try:
+        envelope = json.loads(text)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(envelope, Mapping):
+        return {}
+    projections = envelope.get("projections")
+    if not isinstance(projections, Mapping):
+        return {}
+    out: dict[str, str] = {}
+    for level in levels:
+        value = projections.get(level)
+        if isinstance(value, str) and value.strip():
+            out[level] = value.strip()
+    return out
 
 
 def parse_facts_payload(raw: str) -> list[dict[str, Any]]:

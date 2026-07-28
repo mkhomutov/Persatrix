@@ -285,7 +285,7 @@ class TestCallerSiteCounter:
                 "test-agent",
                 _multi_turn_interaction(),
             )
-            assert result == (SUMMARY_UNAVAILABLE_TEXT, True, None), (
+            assert result == (SUMMARY_UNAVAILABLE_TEXT, True, None, {}), (
                 "a truncated envelope must resolve to a summary failure, "
                 "not commit the raw broken JSON as the episode summary"
             )
@@ -330,7 +330,7 @@ class TestCallerSiteCounter:
             )
             # Backward-compat behaviour is unchanged: prose commits
             # as the summary; facts half is None.
-            assert result == ("Bob said hi.", False, None)
+            assert result == ("Bob said hi.", False, None, {})
             assert _envelope_parse_failed_points(reader) == [], (
                 "plain-prose backward-compat path must NOT increment "
                 "envelope_parse_failed; that bucket is for shapes the "
@@ -357,7 +357,7 @@ class TestCallerSiteCounter:
                 _multi_turn_interaction(),
             )
             # Pre-existing PR 2 fix: empty-field → fallback summary.
-            assert result == (SUMMARY_UNAVAILABLE_TEXT, True, None)
+            assert result == (SUMMARY_UNAVAILABLE_TEXT, True, None, {})
             assert _envelope_parse_failed_points(reader) == [], (
                 "empty-summary-field already increments "
                 "interactions.summary.failed{reason=empty_field}; the "
@@ -423,7 +423,7 @@ class TestCallerSiteCounter:
                 })
                 + "\n```"
             )
-            summary, failed, facts_raw = await summarize_closed_interaction(
+            summary, failed, facts_raw, _projections = await summarize_closed_interaction(
                 _make_text_client(envelope),
                 "test-agent",
                 _multi_turn_interaction(),

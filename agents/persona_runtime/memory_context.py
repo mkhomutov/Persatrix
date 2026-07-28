@@ -54,6 +54,7 @@ from .notes_section import (
     recall_notes_for_event,
     render_notes_section,
 )
+from .projection_branch import apply_episode_projections
 from .relationship_section import (
     RELATIONSHIP_SECTION_NAME,
     recall_relationship_summary,
@@ -82,11 +83,8 @@ __all__ = [
 ]
 
 
-# ─── Constants ─────────────────────────────────────────────
-# Budget totals and per-tier token floors live in memory_budget.py so
-# tuning stays co-located with MemoryBudget.try_add() call sites.
-# Trust thresholds for the relationship tier live in relationship_section.py
-# alongside the rendering logic that consumes them.
+# Budget totals / per-tier floors live in memory_budget.py; relationship
+# trust thresholds live in relationship_section.py beside their consumers.
 
 
 # ─── Result type ───────────────────────────────────────────
@@ -116,11 +114,9 @@ class MemoryInjectionResult:
     manifest: tuple[InjectionManifestEntry, ...] = ()
 
     def __post_init__(self) -> None:
-        # PR 6 — RFC 0017 PR 5 review finding 4: a negative admitted count
-        # would silently bypass the ``== 0`` short-circuit in
-        # ``_ActionLoopMixin._on_event_inner`` (PR 5).  Refuse to construct
-        # in that case so a future ``MemoryBudget`` accounting bug surfaces
-        # at the boundary, not as a missed cost-saving opportunity.
+        # RFC 0017 PR 5 review finding 4: a negative admitted count would
+        # silently bypass the ``== 0`` short-circuit in ``_on_event_inner``;
+        # refuse to construct so an accounting bug surfaces at the boundary.
         if self.memory_admitted_tokens < 0:
             raise ValueError(
                 f"memory_admitted_tokens must be >= 0, got {self.memory_admitted_tokens}"
@@ -390,9 +386,9 @@ class _MemoryContextMixin:
         # the prompt.  The acting level resolves from the trusted event via
         # the positive-list class rule (channel-anchored types read the §B
         # wire stamp; the tick-shaped class floors to ``public`` — §A rule
-        # (b)); withhold-only until the PR 6 projection branch.  The
-        # relationship tier is deliberately ungated (§C write-through rule
-        # + the Non-Goals trust-score carve-out — see ``injection_gate``).
+        # (b)).  The relationship tier is deliberately ungated (§C
+        # write-through rule + the Non-Goals trust-score carve-out — see
+        # ``injection_gate``).
         gate = TurnInjectionGate(
             acting=acting_classification_for_event(event),
             agent_id=self.agent_id,
@@ -401,6 +397,12 @@ class _MemoryContextMixin:
         episodes = gate.filter_entries("episodic", episodes)
         facts = gate.filter_entries("facts", facts, id_attr="fact_id")
         notes = gate.filter_entries("notes", notes)
+        # §E projection branch (PR 6): a withheld episode with a stored
+        # declassified projection ``≤ L`` re-enters as that projection.
+        channel_episodes, episodes = await apply_episode_projections(
+            gate, self._episodic_memory,
+            channel_history=channel_episodes, episodic_entries=episodes,
+        )
         gate.emit_log()
 
         # ── Allocate-loop ──────────────────────────────────────────────────
@@ -489,10 +491,8 @@ class _MemoryContextMixin:
         )
 
         memory_admitted_tokens = MEMORY_BUDGET_TOKENS - budget.remaining
-        # Consumed by ``_ActionLoopMixin._on_event_inner`` for the RFC 0017
-        # §F empty-context TICK short-circuit (PR 5): a zero value, combined
-        # with no active goal and no pending turn, suppresses the LLM call
-        # on autonomous TICK events.  The §G manifest labels the admitted
+        # Consumed by ``_on_event_inner`` for the RFC 0017 §F empty-context
+        # TICK short-circuit (PR 5).  The §G manifest labels the admitted
         # subset off the MQ-11 registry (RFC 0037 PR 4 — dark until PR 7).
         return MemoryInjectionResult(
             memory_admitted_tokens=memory_admitted_tokens,

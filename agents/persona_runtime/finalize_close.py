@@ -21,6 +21,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
+from ..memory.projections import ENTRY_TIER_EPISODE, replace_entry_projections
 from ..observability.metrics import current_agent_id, try_get_instruments
 from .fact_extractor import dispatch_facts_from_response
 from .record_close import record_closed_interaction
@@ -72,7 +73,9 @@ async def finalize_closed_interaction(
         )
         return
     try:
-        summary, summary_failed, facts_raw = await summarize_closed_interaction(
+        (
+            summary, summary_failed, facts_raw, projections,
+        ) = await summarize_closed_interaction(
             llm_client, agent_id, interaction,
         )
         try:
@@ -121,6 +124,28 @@ async def finalize_closed_interaction(
                 agent_id=agent_id,
                 session_id=session_id,
             )
+        # RFC 0037 §E (PR 6) — persist the declassified projections the
+        # combined call returned for a protected interaction, keyed by the
+        # interaction id the ``episodes`` row also carries.  Best-effort
+        # like the facts half: a failed write leaves the entry
+        # blunt-withheld at the gate (the Phase-1 posture), never fails
+        # the close.  Non-empty only when the summary succeeded, so no
+        # extra guard is needed.
+        if projections:
+            try:
+                await replace_entry_projections(
+                    episodic,
+                    entry_id=interaction.interaction_id,
+                    entry_tier=ENTRY_TIER_EPISODE,
+                    projections=projections,
+                    created_at=interaction.closed_at or interaction.started_at,
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to persist §E projections for agent %s "
+                    "(interaction_id=%s)",
+                    agent_id, interaction.interaction_id, exc_info=True,
+                )
         await record_closed_interaction(
             memory_ns, agent_id, interaction, summary, summary_failed,
             session_id=session_id,
