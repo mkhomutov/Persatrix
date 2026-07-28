@@ -2,10 +2,23 @@
 
 **Test ID**: `MT-SESSION-003`
 **Feature Area**: Sessions (RFC 0031 Phase 2 — per-session recall filtering)
-**Version**: 1.0
+**Version**: 1.1
 **Created**: 2026-06-01
-**Last Updated**: 2026-06-01
-**Status**: Active
+**Last Updated**: 2026-07-28
+**Status**: Active — **re-anchored for v0.3.12** (see the note below): the Step-3 absence bar moved to the **epoch** axis; facts + episodic absence across sessions is no longer asserted (RFC 0049 cross-room recall is live, classification-gated).
+
+> **v0.3.12 re-anchor ([RFC 0049](../rfcs/0049-memory-consolidation-gradient.md) Phases 0–1 live).** From v0.3.12, fact recall is
+> **cross-room by default** and episodic recall is **room-first-ranked** (other-room
+> episodes admissible, demoted), every cross-room candidate passing the
+> [RFC 0037 §D gate](../rfcs/0037-memory-confidentiality-channel-classification.md#d-the-hard-gate-at-memory-injection).
+> A Step-3 arc-two surface of arc-one's *fact* (or a demoted episode) is therefore
+> **expected behaviour, not the F-3 reproduction** — the cross-run absence bar this
+> MT pinned is carried by a fresh **`PERSATRIX_EPOCH`** ([MT-EPOCH-001](MT-EPOCH-001.md)),
+> which must still surface nothing. Run Step 3 under a fresh epoch to assert absence;
+> run it under a fresh session (same epoch) to observe the v0.3.12 cross-room
+> continuity instead ([MT-MEMORY-CROSSROOM-001](MT-MEMORY-CROSSROOM-001.md)). The
+> within-session continuity leg (Step 2) and the `legacy` carve-out (Step 4) are
+> unchanged.
 
 ---
 
@@ -231,11 +244,13 @@ common false-fail (called out in [MT-MEMORY-005 Setup](MT-MEMORY-005-dementia-te
 
 ### Edge Case 3: Cross-session opt-in has no operator verb
 
-Reading across sessions (`sessions="*"` or an explicit id list) is a
-library/debug capability with **no operator entry point** — deliberately
+An operator *dump* verb across sessions (`sessions="*"` or an explicit id
+list) remains unbuilt — deliberately
 ([ISSUE-0086](../issues/ISSUE-0086-operator-all-sessions-recall-verb.md),
-[sessions guide §7](../guides/sessions.md#7-cross-session-recall)). There is no
-CLI flag to make Step 3 surface arc 1; the absence is structural.
+[sessions guide §7](../guides/sessions.md#7-cross-room-recall--the-v0312-posture)). Since
+v0.3.12, Step 3 surfacing arc-one *facts* needs no flag at all — that is the
+classification-gated runtime widening (the re-anchor note above), not an
+operator read.
 
 ---
 

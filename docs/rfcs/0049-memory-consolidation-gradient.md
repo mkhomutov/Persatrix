@@ -3,7 +3,7 @@ id: RFC-0049
 title: Memory Consolidation Gradient & Scope Reconciliation
 summary: Add the vertical "consolidation level" axis (working → episodic → semantic → procedural → experiential) on top of the horizontal scope axes already settled in memory-scope-axes.md, and state one law — a memory's recall scope is a function of how consolidated it is, not of which subsystem stores it. Raw episodic memory stays room-scoped; consolidated knowledge and learned experience cross rooms, made safe by the RFC 0037 egress gate rather than by walling recall. This is the model the "personas behave like real people" goal and the v0.4.0 experience/decision work both require.
 type: architecture
-status: implementing
+status: partially_implemented
 author: Maksim Khomutov
 created: 2026-06-06
 target: v0.3.12 (Phases 0–1) + v0.4.0 (Phases 2–4); design ratified v0.3.7
@@ -18,7 +18,7 @@ depends_on:
 # RFC 0049 — Memory Consolidation Gradient & Scope Reconciliation
 
 **Type**: architecture (memory model — meta-RFC over the memory tier RFCs)
-**Status**: 🚧 Implementing (Phases 0–1, v0.3.12 — plan opened 2026-07-25; [PR plan](0049-pr-plan.md), [v0.3.12 plan](../v0.3.12-plan.md)) — the gradient, the one law, and the §D re-rooting (cross-room topic knowledge) are **ratified** (2026-06-06). **Pulled forward to v0.3.12** (cross-channel persona experience) per the 2026-07-15 planning decision; Phases 0–1 target v0.3.12, Phases 2–4 stay v0.4.0. **The 2026-07-15 lock also reverses ratified Non-Goal #1 — applied 2026-07-19 via the [L1 amendment](0049-amendment-l1-cross-room-availability.md) (raw episodic recall becomes cross-room *available* behind the RFC 0037 gate, room-first-ranked).**
+**Status**: ⚠️ Partially Implemented — **Phases 0–1 ✅ v0.3.12, LIVE** (closeout 2026-07-28; [PR plan](0049-pr-plan.md) PRs 1–5 = [#781](https://github.com/mkhomutov/Persatrix/pull/781)/[#782](https://github.com/mkhomutov/Persatrix/pull/782)/[#783](https://github.com/mkhomutov/Persatrix/pull/783)/[#784](https://github.com/mkhomutov/Persatrix/pull/784) + the closeout: the `topic.*` capture path + both widenings, shadow→live on the green measurement verdict — see the amendments' Promotion sections); **Phases 2–4 stay v0.4.0** (they need the unimplemented RFC 0027/0028 engines). The gradient, the one law, and the §D re-rooting (cross-room topic knowledge) are **ratified** (2026-06-06). The 2026-07-15 lock also reversed ratified Non-Goal #1 — applied via the [L1 amendment](0049-amendment-l1-cross-room-availability.md) (raw episodic recall cross-room *available* behind the RFC 0037 gate, room-first-ranked).
 **Author**: Maksim Khomutov
 **Date**: 2026-06-06
 **Target**: v0.3.12 (Phases 0–1) + v0.4.0 (Phases 2–4); **design ratified in v0.3.7** (docs-only, no code before v0.3.12 opens)
@@ -245,9 +245,11 @@ Amendment files (created; the stubs expand into full implementation amendments w
 
 ## Decision / Next Steps
 
+**Status 2026-07-28 (Phase 0–1 closeout)**: items 1–4 are ✅ done — the law is ratified, the amendments are expanded and **implemented live**, RFC 0037 Phase 1 shipped as the v0.3.12 keystone (its own PRs 1–5), and the shadow-measurement gate ran **green** (`evaluators/shadow_measurement.py`, re-executed in CI). What remains is the v0.4.0 slice: Phases 2–4 on the RFC 0027/0028 engines.
+
 1. Ratify the gradient + the one law as the memory model of record (v0.3.7 docs).
 2. Expand the four amendment stubs into their own files.
-3. Confirm RFC 0037 as v0.4.0 Phase 0 (already roadmapped) and bind the sequencing rule above to it.
+3. Confirm RFC 0037 as v0.4.0 Phase 0 (already roadmapped) and bind the sequencing rule above to it. *(0037 was subsequently pulled forward with this RFC — it shipped as the v0.3.12 keystone.)*
 4. Add the Phase-1→2 shadow-measurement gate to the RFC 0044 golden-trace suite as the promotion criterion for cross-room L2 recall.
 
 ## Related Documentation
