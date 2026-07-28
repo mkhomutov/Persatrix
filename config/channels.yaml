@@ -78,12 +78,13 @@ default_max_replies_per_participant: 0
 # Declare it per group channel with `classification:` (absent means `internal` —
 # a channel nobody classified is confidential-by-default, never public). DMs
 # open on demand and are stamped from the fleet-wide knob below at creation.
-# STATUS: the fields parse, validate, and persist ahead of the enforcement
-# gates landing across v0.3.12, so a level above `internal` is REJECTED AT
-# STARTUP for now (the dark-window rule) — nothing would enforce it yet, and a
-# declaration the gates ignore is worse than none. `restricted`/`secret` open
-# up when the full RFC 0037 Phase-1 set ships in this release; the operator
-# opt-in path is documented then.
+# STATUS: LIVE (v0.3.12) — all four levels are declarable; the PR 1–3
+# dark-window startup rejection was deleted when the enforcement gates armed
+# (RFC 0037 PR 4, #776). Enforcement is the §D memory-injection hard gate — a
+# memory entry whose protection level outranks the acting channel's
+# classification is withheld from prompts (#776) — plus the §F recall
+# classification filter applying the same rank check to cross-channel recall
+# (#778).
 # dm_default_classification: internal
 
 # Governance (RFC 0030, v0.3.8) — fleet-wide knobs that are not per-channel.
@@ -131,8 +132,9 @@ channels:
   - name: planning
     description: "v0.3.0 demo channel — engineering + product planning discussion"
     # classification: internal is the default (RFC 0037, v0.3.12); shown for
-    # discoverability. Levels above `internal` are rejected at load until the
-    # full RFC 0037 Phase-1 gate set ships (see the dark-window note above).
+    # discoverability. All four lattice levels are declarable; the §D injection
+    # gate and §F recall filter enforce them (live since v0.3.12 — see the
+    # classification note above).
     classification: internal
     # floor_control: true is the resolved default for group channels (v0.3.6);
     # shown here for discoverability. Remove or set false to opt out.
