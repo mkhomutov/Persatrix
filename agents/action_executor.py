@@ -21,6 +21,7 @@ from .channel_publisher import (
     ChannelsDisabledError,
 )
 from .channel_wire_metadata import DispatchContext
+from .confidentiality_tripwire import run_channel_message_tripwire
 from .end_vote_action import publish_end_interaction_vote
 from .observability.spans import SUBAGENT_SPAWN_SPAN
 from .persona_types import (
@@ -50,16 +51,12 @@ _MAX_MENTIONS_PER_ACTION = 10
 # (PR #60 review: hard-coded 60s dispatch timeout.)
 _DEFAULT_DISPATCH_TIMEOUT: float = 60.0
 
-# Per-publish HTTP timeout (seconds) for the REST channels publish path.
-#
-# Defense-in-depth ceiling that wraps any :class:`ChannelPublisher` impl
-# (the HTTP one already self-times via :class:`aiohttp.ClientTimeout`,
-# but Protocol allows non-HTTP implementations that may not).
-#
-# PR #250 review (Should-Fix #1): aliased to the publisher's
+# Per-publish HTTP timeout (seconds): a defense-in-depth ceiling wrapping any
+# :class:`ChannelPublisher` impl (the HTTP one self-times via
+# :class:`aiohttp.ClientTimeout`, but the Protocol allows non-HTTP impls that
+# may not). PR #250 review (Should-Fix #1): aliased to the publisher's
 # :data:`DEFAULT_PUBLISH_TIMEOUT_SECONDS` so both timers always agree —
-# raising the ceiling for RFC 0009 Phase 4 mTLS cold starts is a
-# one-line change in :mod:`agents.channel_publisher`.
+# raise the ceiling in :mod:`agents.channel_publisher`.
 _DEFAULT_PUBLISH_HTTP_TIMEOUT: float = DEFAULT_PUBLISH_TIMEOUT_SECONDS
 
 
@@ -346,6 +343,16 @@ class ActionExecutor:
                 sender_id, len(mentions), _MAX_MENTIONS_PER_ACTION,
             )
             mentions = mentions[:_MAX_MENTIONS_PER_ACTION]
+
+        # RFC 0037 §G (PR 7): the leak tripwire — observability only, runs
+        # once per outgoing message over the turn's §D-withheld watch
+        # (threaded structurally on the context), never blocks or raises.
+        run_channel_message_tripwire(
+            watch=context.origin_tripwire_watch,
+            agent_id=sender_id,
+            channel_id=target_channel,
+            content=content,
+        )
 
         # ── REST publish branch (channel-routed) ──
         if target_channel and self._channel_publisher is not None:

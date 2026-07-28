@@ -475,8 +475,12 @@ class TestSanitizeInboundEventMutationContract:
         # leak into the original.
         assert rebuilt.payload is not original_payload
         assert rebuilt.payload["content"] == "[QUARANTINED]"
-        # Contract 5: metadata is also defensively copied — a future
-        # downstream mutator on ``rebuilt.metadata`` cannot leak into
-        # the original event's metadata.
-        assert rebuilt.metadata is not original_metadata
-        assert original_metadata == {"trace_id": "abc-123"}
+        # Contract 5 (inverted by RFC 0037 §G — PR #788 review finding 2):
+        # metadata is deliberately SHARED, not copied.  The §G tripwire
+        # watch is stamped onto the rebuilt event's metadata DURING the
+        # turn, and the dispatch side lifts its ``DispatchContext`` from
+        # the ORIGINAL event post-turn — a copied dict would silently
+        # unwatch exactly the sanitize-flagged traffic.  Payload isolation
+        # (contracts 2–4) is the mutation boundary; metadata is the
+        # intra-turn stamp channel.
+        assert rebuilt.metadata is original_metadata

@@ -54,6 +54,20 @@ const (
 	// channel.recall / memory.read read-telemetry siblings.
 	AuditAgentDeliberated AuditEventType = "agent.deliberated"
 
+	// Leak tripwire (RFC 0037 §G, v0.3.12 PR 7) — a normalized verbatim span
+	// of a §D-withheld memory entry observed in an outgoing channel message.
+	// The check runs in the Python runtime's ActionExecutor, which emits the
+	// record on its own structured-log egress (the agent.deliberated
+	// precedent — there is no Python→Go audit RPC), so this constant is
+	// RESERVED: registered to keep the canonical name registry + the
+	// severity-classifier table closed. Security-class (unlike its
+	// telemetry-class read siblings): a hit indicates a possible
+	// confidentiality failure — a mis-stamped entry, a §E projection that
+	// copied source text verbatim, or a missed injection path — and losing
+	// it on crash would defeat the audit. The record carries metadata only,
+	// never the implicated text (§G / Security Considerations "Audit").
+	AuditChannelConfidentialityTripwire AuditEventType = "channel.confidentiality_tripwire"
+
 	// Input handling (Phase 2 wiring)
 	AuditInputFlagged AuditEventType = "input.flagged"
 
@@ -111,6 +125,7 @@ func AllAuditEventTypes() []AuditEventType {
 		AuditMemoryDenied,
 		AuditChannelRecall,
 		AuditAgentDeliberated,
+		AuditChannelConfidentialityTripwire,
 		AuditInputFlagged,
 		AuditHITLGateOpened,
 		AuditHITLApproved,
@@ -146,26 +161,27 @@ func AllAuditEventTypes() []AuditEventType {
 // Everything else (`tool.invoked`, `memory.read`, etc.) is telemetry-class
 // and may be batched.
 var securityEvents = map[AuditEventType]struct{}{
-	AuditCapabilityViolation:          {},
-	AuditAgentTokenIssued:             {},
-	AuditAgentTokenInvalid:            {},
-	AuditToolDenied:                   {},
-	AuditToolRateLimited:              {},
-	AuditMemoryDenied:                 {},
-	AuditInputFlagged:                 {},
-	AuditHITLGateOpened:               {},
-	AuditHITLApproved:                 {},
-	AuditHITLRejected:                 {},
-	AuditRateLimitViolated:            {},
-	AuditRateLimitUnauthenticatedCall: {},
-	AuditRateLimitDisabled:            {},
-	AuditRateLimitReset:               {},
-	AuditAgentQuarantined:             {},
-	AuditAgentUnquarantined:           {},
-	AuditUnquarantineEndpointOpen:     {},
-	AuditChainBootstrap:               {},
-	AuditChainRestart:                 {},
-	AuditChainRecovered:               {},
+	AuditCapabilityViolation:            {},
+	AuditChannelConfidentialityTripwire: {},
+	AuditAgentTokenIssued:               {},
+	AuditAgentTokenInvalid:              {},
+	AuditToolDenied:                     {},
+	AuditToolRateLimited:                {},
+	AuditMemoryDenied:                   {},
+	AuditInputFlagged:                   {},
+	AuditHITLGateOpened:                 {},
+	AuditHITLApproved:                   {},
+	AuditHITLRejected:                   {},
+	AuditRateLimitViolated:              {},
+	AuditRateLimitUnauthenticatedCall:   {},
+	AuditRateLimitDisabled:              {},
+	AuditRateLimitReset:                 {},
+	AuditAgentQuarantined:               {},
+	AuditAgentUnquarantined:             {},
+	AuditUnquarantineEndpointOpen:       {},
+	AuditChainBootstrap:                 {},
+	AuditChainRestart:                   {},
+	AuditChainRecovered:                 {},
 }
 
 // telemetryEvents is the explicit allow-list of batched event types.
