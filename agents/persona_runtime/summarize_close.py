@@ -415,10 +415,23 @@ def _build_summarization_prompt(
     )
     levels = _projection_levels(interaction)
     if levels:
-        prompt += "\n" + load_snippet("projection-suffix").format(
-            interaction_level=normalize_for_stamp(interaction.classification),
-            levels_list=", ".join(f"`{level}`" for level in levels),
-        ) + "\n"
+        # §E honest boundary at the prompt seam: this render runs BEFORE
+        # the summariser's try blocks, so a missing snippet — or a stray
+        # literal brace breaking ``.format`` — would otherwise fail the
+        # whole protected close (summary, facts, record).  Degrade to the
+        # unsuffixed prompt instead: no projections requested → blunt
+        # withhold, the Phase-1 posture.
+        try:
+            prompt += "\n" + load_snippet("projection-suffix").format(
+                interaction_level=normalize_for_stamp(interaction.classification),
+                levels_list=", ".join(f"`{level}`" for level in levels),
+            ) + "\n"
+        except Exception:
+            logger.warning(
+                "Failed to render the §E projection suffix; requesting no "
+                "projections for this close (scope=%s)",
+                interaction.scope, exc_info=True,
+            )
     return prompt
 
 

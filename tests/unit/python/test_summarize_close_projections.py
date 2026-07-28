@@ -16,7 +16,7 @@ Three surfaces of the close-consolidation projection request:
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -30,6 +30,7 @@ from agents.persona_runtime.summarize_close import (
     _projection_levels,
     summarize_closed_interaction,
 )
+from agents.prompt_loader import load_snippet
 
 _LEVELS = ("public", "internal")
 
@@ -135,6 +136,27 @@ class TestPromptShape:
         # The §E ask sits AFTER the facts suffix — the summary and facts
         # halves of the prompt keep their exact prior bytes.
         assert build_combined_prompt_suffix() in prompt
+
+    def test_broken_suffix_degrades_to_the_unsuffixed_prompt(self) -> None:
+        """§E honest boundary at the prompt seam: the render runs BEFORE
+        the summariser's try blocks, so a snippet that breaks ``.format``
+        (a stray literal brace) must degrade to the pre-PR-6 prompt bytes
+        — no projections requested, blunt withhold — never fail the
+        protected close's summary."""
+        def _broken(name: str) -> str:
+            if name == "projection-suffix":
+                return "ask for projections at {oops} — a literal brace"
+            return load_snippet(name)
+
+        with patch(
+            "agents.persona_runtime.summarize_close.load_snippet",
+            side_effect=_broken,
+        ):
+            prompt = _build_summarization_prompt(
+                _interaction("restricted"), self._VIEW,
+            )
+        assert prompt.endswith(build_combined_prompt_suffix())
+        assert "projections" not in prompt
 
 
 def _envelope_client(envelope: dict) -> LLMClient:

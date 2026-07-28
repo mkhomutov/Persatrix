@@ -67,9 +67,14 @@ async def replace_entry_projections(
     """Persist one entry's projection set, replacing any prior set.
 
     A re-consolidation replaces, never accumulates (the table's
-    natural-key contract): every existing row for ``(entry_id,
-    entry_tier)`` is deleted first, so a later set that dropped a level
-    cannot leave that level's stale text serving at the gate.  Returns
+    natural-key contract): every existing row THIS AGENT holds for
+    ``(entry_id, entry_tier)`` is deleted first, so a later set that
+    dropped a level cannot leave that level's stale text serving at the
+    gate.  The delete is agent-scoped like the read — in a shared DB a
+    neighbour's rows for a colliding entry id must never be clobbered
+    by this agent's re-consolidation (a cross-agent key collision then
+    surfaces as an ``IntegrityError``, caught by the best-effort close
+    path — the safe direction).  Returns
     the number of rows written.  Levels arrive pre-resolved from the
     persona side (see module docstring); empty/whitespace texts are
     skipped here as a final guard even though the parser already drops
@@ -77,8 +82,9 @@ async def replace_entry_projections(
     """
     db = episodic._ensure_db()
     await db.execute(
-        "DELETE FROM memory_projections WHERE entry_id = ? AND entry_tier = ?",
-        (entry_id, entry_tier),
+        "DELETE FROM memory_projections "
+        "WHERE agent_id = ? AND entry_id = ? AND entry_tier = ?",
+        (episodic._agent_id, entry_id, entry_tier),
     )
     written = 0
     for level, text in projections.items():

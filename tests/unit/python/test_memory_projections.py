@@ -161,6 +161,36 @@ async def test_agent_scope_is_the_acl_axis(memory) -> None:
     assert got == {}
 
 
+async def test_replace_never_clobbers_another_agents_rows(memory) -> None:
+    """The DELETE is agent-scoped like the read: in a shared DB, a
+    neighbour's rows for a colliding entry id survive this agent's
+    re-consolidation of the same ``(entry_id, entry_tier)``."""
+    db = memory._ensure_db()
+    await db.execute(
+        "INSERT INTO memory_projections "
+        "(agent_id, entry_id, entry_tier, level, text, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        ("other-agent", "ix-1", ENTRY_TIER_EPISODE, "internal", "theirs", 1.0),
+    )
+    await replace_entry_projections(
+        memory,
+        entry_id="ix-1",
+        entry_tier=ENTRY_TIER_EPISODE,
+        projections={"public": "mine"},
+        created_at=100.0,
+    )
+    async with db.execute(
+        "SELECT agent_id, level, text FROM memory_projections "
+        "WHERE entry_id = ? ORDER BY agent_id",
+        ("ix-1",),
+    ) as cursor:
+        rows = [tuple(row) async for row in cursor]
+    assert rows == [
+        ("other-agent", "internal", "theirs"),
+        ("test-agent", "public", "mine"),
+    ]
+
+
 async def test_empty_inputs_short_circuit(memory) -> None:
     assert await projections_for(
         memory, entry_tier=ENTRY_TIER_EPISODE, entry_ids=[], levels=["public"],
