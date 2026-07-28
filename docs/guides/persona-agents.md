@@ -395,6 +395,32 @@ prompt
 > [RFC 0036](../rfcs/0036-persona-message-recall.md) and
 > [RFC 0035](../rfcs/0035-channel-membership-interval-ledger.md).
 
+> **v0.3.12 — memory that travels.** A persona now carries what it learns
+> across the rooms it belongs to, governed by classification instead of a
+> recall wall ([RFC 0049](../rfcs/0049-memory-consolidation-gradient.md)
+> Phases 0–1 on the [RFC 0037](../rfcs/0037-memory-confidentiality-channel-classification.md)
+> keystone). Three pieces: **capture** — the close-path extractor also
+> proposes *topic* facts under the closed `topic.*` predicate namespace
+> ("Atlas ships Friday" → `(atlas, topic.has_deadline, …)`), and an inbound
+> turn that names a known topic seeds its recall deterministically
+> ([0026 amendment](../rfcs/0026-amendment-topic-subject-predicates.md));
+> **facts cross rooms** — fact recall is cross-room by default
+> ([0031 fact-scope amendment](../rfcs/0031-amendment-fact-scope-by-consolidation-level.md)),
+> so a fact taught in a DM is a candidate in the standup; **episodic is
+> room-first ranked** — same-room episodes are boosted, other-room episodes
+> admissible but demoted ([L1 amendment](../rfcs/0049-amendment-l1-cross-room-availability.md)).
+> Every memory row carries a `protection_level` inherited from the room it
+> was learned in, and every candidate — cross-room or not — passes the
+> deterministic RFC 0037 §D gate against the *acting* channel's
+> classification before injection, so a `restricted`-room fact never
+> surfaces in an `internal` room; channel-less turns (ticks) act at the
+> public floor and see only public-stamped memory. Both widenings shipped
+> shadow-first and were promoted on a green golden-trace verdict; the
+> per-tier knobs `memory.facts.cross_room` / `memory.episodic.cross_room`
+> (`live | shadow | off`, default `live`) are the rollback levers. The
+> `epoch` and `principal` walls stay absolute. Live acceptance:
+> [MT-MEMORY-CROSSROOM-001](../manual-tests/MT-MEMORY-CROSSROOM-001.md).
+
 ### Episodic memory
 
 Episodes are ranked, searchable records of past interactions. The agent calls

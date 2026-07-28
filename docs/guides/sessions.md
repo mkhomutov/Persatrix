@@ -2,9 +2,10 @@
 
 A practical walkthrough of the `persatrix session …` operator surface: what a
 session is, how to create / list / switch / archive one, how the active session
-is resolved for a run, and the operational footguns to avoid. Sessions scope
-persona-memory recall so that one room's conversation does not bleed into
-another's.
+is resolved for a run, and the operational footguns to avoid. Sessions name
+rooms — they bind channels and persona-memory rows to one room's continuity.
+(Since v0.3.12, room boundaries *rank and gate* persona recall rather than
+hard-walling it — see §7.)
 
 > **Spec-level detail** lives in [RFC 0031](../rfcs/0031-per-session-namespacing-channels.md)
 > (§E operator surface, §D recall semantics, §B lifecycle). The scope-axes model
@@ -35,12 +36,14 @@ tagged. Each session has:
 - a human-readable **label** (e.g. `demo-2026-05-30`);
 - a **created** timestamp and a **status** (`active` / `archived`).
 
-Default persona-memory recall is **session-scoped**: a run reads rows tagged
-with its active session plus the always-visible `legacy` carve-out (§5), and
-nothing else. Reaching across sessions is an explicit opt-in, not a default
-(§7). This is what closes the F-3 cross-run state bleed at the root — a run
-under a *different* session id surfaces none of another session's participants,
-topics, or facts.
+How much recall the session boundary scopes is **tier-dependent since v0.3.12**
+(§7): fact recall is cross-room by default and episodic recall is room-first
+*ranked* rather than walled — every cross-room candidate passing the RFC 0037
+classification gate — while the notes tier and the in-room conversation window
+stay room-scoped, and the always-visible `legacy` carve-out (§5) applies
+throughout. Cross-**run** isolation (the F-3 bleed fix) is owned by the
+**epoch** axis, not the session id — a fresh epoch inherits nothing
+([epochs guide](epochs.md)).
 
 The registry of sessions lives with channels in the orchestrator-owned
 `channels.db`; per-agent `memory.db` files carry the `session_id` on each row.
@@ -174,15 +177,35 @@ Because the session **registry** (`channels.db`) and the per-agent
 **Reset both volumes together, or neither.** A future single-transaction society
 store (RFC 0029 Phase 3) closes this gap structurally.
 
-## 7. Cross-session recall
+## 7. Cross-room recall — the v0.3.12 posture
 
-Reading across sessions (`sessions="*"`) is a library/debug capability with
-**no operator entry point** — deliberately. The only proposed route, a
-`persatrix memory recall --all-sessions` verb, is carved out as a follow-up
-([ISSUE-0086](../issues/ISSUE-0086-operator-all-sessions-recall-verb.md)).
-Leaving it unbuilt is the stronger posture: the all-sessions sentinel cannot
-reach a prompt context, so it cannot re-introduce cross-run bleed against the
-fix sessions ship.
+Since v0.3.12 ([RFC 0049](../rfcs/0049-memory-consolidation-gradient.md)
+Phases 0–1, live), the session boundary is a **ranking and provenance axis**
+for persona memory, not a recall wall. Per tier:
+
+- **Facts** cross rooms by default — a project fact taught in a DM is a recall
+  candidate in every room the persona belongs to (topic knowledge included,
+  via the `topic.*` predicates). Knob: `memory.facts.cross_room:
+  live | shadow | off` (default `live`; `shadow` computes + traces without
+  injecting — the rollback lever).
+- **Episodic** recall is **room-first ranked**: same-room episodes are boosted,
+  other-room episodes admissible but demoted. Knob:
+  `memory.episodic.cross_room` (same values).
+- **Relationship** was always cross-room (trust follows the person).
+- **Notes** and the in-room conversation window stay room-scoped.
+
+Every cross-room candidate passes the deterministic
+[RFC 0037 §D classification gate](../rfcs/0037-memory-confidentiality-channel-classification.md#d-the-hard-gate-at-memory-injection)
+before injection — a fact learned in a `restricted` room never surfaces in an
+`internal` one. What stays absolute: the **epoch** (run/test) and **principal**
+(tenant) walls; cross-room recall ranges over rooms, never across those.
+[MT-MEMORY-CROSSROOM-001](../manual-tests/MT-MEMORY-CROSSROOM-001.md) is the
+live acceptance arc.
+
+An *operator* recall verb across sessions remains unbuilt
+([ISSUE-0086](../issues/ISSUE-0086-operator-all-sessions-recall-verb.md) —
+the widened *runtime* read above is classification-gated and budgeted; a raw
+dump verb would be neither).
 
 ## 8. Security and operational notes
 
@@ -199,7 +222,9 @@ fix sessions ship.
 
 ## Related documentation
 
-- [RFC 0031 — Per-Session Namespacing for Channels and Persona Memory](../rfcs/0031-per-session-namespacing-channels.md) — the spec; §E operator surface, §D recall semantics, §B lifecycle.
+- [RFC 0031 — Per-Session Namespacing for Channels and Persona Memory](../rfcs/0031-per-session-namespacing-channels.md) — the spec; §E operator surface, §D recall semantics, §B lifecycle. Its [fact-scope amendment](../rfcs/0031-amendment-fact-scope-by-consolidation-level.md) is the §7 L2 widening.
+- [RFC 0049 — Memory Consolidation Gradient](../rfcs/0049-memory-consolidation-gradient.md) — the one law behind §7: recall scope follows consolidation level; the [L1 amendment](../rfcs/0049-amendment-l1-cross-room-availability.md) is the room-first episodic ranking.
+- [RFC 0037 — Memory Confidentiality](../rfcs/0037-memory-confidentiality-channel-classification.md) — the classification gate every cross-room candidate passes.
 - [Memory Scope Axes](../memory-scope-axes.md) — the reframing: session = room continuity, epoch = run isolation, relationship = cross-room, principal = tenant.
 - [Channels — User Guide](channels.md) — channels are created under a session; §10 covers `make reset`.
 - [Persona Agents — User Guide](persona-agents.md) — persona memory is what sessions scope.
