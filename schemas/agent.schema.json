@@ -491,9 +491,9 @@
             },
             "cross_room": {
               "type": "string",
-              "enum": ["off", "shadow"],
-              "default": "shadow",
-              "description": "L1 cross-room episodic recall mode (RFC 0049 P1 / the RFC 0049 L1 amendment). 'shadow' (default) re-runs each channel-anchored turn's episodic recall with the RFC 0031 session wall converted to room-first RANKING (same-room boosted, other-room admissible but demoted), passes the cross-room delta through the RFC 0037 §D gate, and records it as a structured log trace WITHOUT injecting any of it into the prompt — the measurement input for the shadow→live promotion gate. 'off' skips the shadow pass entirely. 'live' arrives with the RFC 0049 PR 4 promotion; until then it is rejected here and at agent construction."
+              "enum": ["off", "shadow", "live"],
+              "default": "live",
+              "description": "L1 cross-room episodic recall mode (RFC 0049 P1 / the RFC 0049 L1 amendment). 'live' (default since the RFC 0049 PR 4 measurement-gated promotion) makes the live episodic recall room-first-RANKED: the RFC 0031 session wall becomes a ranking cue (same-room boosted, other-room admissible but demoted), one widened reinforcing query per turn, every candidate still passing the RFC 0037 §D gate before the RFC 0017 budget. 'shadow' keeps the room-walled live recall and records what the ranked recall WOULD have injected as a structured log trace (the pre-promotion posture — the measurement input the promotion was gated on). 'off' skips the cross-room pass entirely; the live recall stays room-walled."
             }
           }
         },
@@ -515,9 +515,9 @@
             },
             "cross_room": {
               "type": "string",
-              "enum": ["off", "shadow"],
-              "default": "shadow",
-              "description": "L2 cross-room fact recall mode (RFC 0049 P1 / the RFC 0031 fact-scope amendment). 'shadow' (default) computes the cross-room candidate delta each sender-bearing turn, passes it through the RFC 0037 §D gate, and records it as a structured log trace WITHOUT injecting any of it into the prompt — the measurement input for the shadow→live promotion gate. 'off' skips the shadow pass entirely. 'live' arrives with the RFC 0049 PR 4 promotion; until then it is rejected here and at agent construction."
+              "enum": ["off", "shadow", "live"],
+              "default": "live",
+              "description": "L2 cross-room fact recall mode (RFC 0049 P1 / the RFC 0031 fact-scope amendment). 'live' (default since the RFC 0049 PR 4 measurement-gated promotion) drops the RFC 0031 session wall from the ONE live fact recall — a consolidated fact is cross-room regardless of subject, visibility owned by the RFC 0037 §D gate (topic seeds stay predicate-scoped, so the PR 1 subject-reachability bound holds). 'shadow' keeps the room-walled live recall and records the cross-room delta as a structured log trace (the pre-promotion posture — the measurement input the promotion was gated on). 'off' skips the cross-room pass entirely; the live recall stays room-walled."
             }
           }
         },

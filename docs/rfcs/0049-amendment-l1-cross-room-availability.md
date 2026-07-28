@@ -1,7 +1,7 @@
 # RFC 0049 Amendment — L1 Cross-Room Availability (Gated Raw Recall)
 
 **Type**: amendment to [RFC 0049](0049-memory-consolidation-gradient.md) Non-Goal #1, §B (gradient table, L1 row), §C (corollary "L1 → room"), §D (reconciliation table, row 1); recall-semantics touchpoint on [RFC 0031](0031-per-session-namespacing-channels.md) §D
-**Status**: ⚠️ Implemented in SHADOW — v0.3.12, [RFC 0049](0049-memory-consolidation-gradient.md) Phase 1 PR 3 ([0049-pr-plan.md](0049-pr-plan.md)); the live-prompt promotion is PR 4's measurement-gated flip. Reverses ratified Non-Goal #1 per the maintainer's 2026-07-15 v0.3.12 scope lock ("everything crosses channels, gated by classification"), applied 2026-07-19; implemented 2026-07-27
+**Status**: ✅ Implemented — **LIVE**, v0.3.12 ([RFC 0049](0049-memory-consolidation-gradient.md) Phase 1: shadow in PR 3, promoted by PR 4's green measurement verdict — see [Promotion](#promotion-v0312-pr-4--the-measurement-gated-flip); [0049-pr-plan.md](0049-pr-plan.md)). Reverses ratified Non-Goal #1 per the maintainer's 2026-07-15 v0.3.12 scope lock ("everything crosses channels, gated by classification"), applied 2026-07-19; shadow implemented 2026-07-27; promoted 2026-07-28
 **Author**: Maksim Khomutov
 **Date**: 2026-07-19
 **Target**: v0.3.12 — **behind the RFC 0037 keystone** (nothing widens before the §D gate + §F filter land; the [RFC 0049 §E](0049-memory-consolidation-gradient.md#e-confidentiality-is-the-keystone-not-an-add-on) hard sequencing rule extends to L1)
@@ -62,6 +62,16 @@ The widening ships **shadow-first** (the [measurement gate](#sequencing--depende
 - **The knob** — `memory.episodic.cross_room: off | shadow` (schema-gated enum, default `shadow`; resolved at agent construction; `"live"` rejected at both the schema and the resolver until PR 4), the exact twin of `memory.facts.cross_room`.
 - **Harness recording** — `capture_shadow_traces` now listens on **both** shadow loggers into one chronologically-merged, `tier`-keyed `EvalRun.shadow_traces` stream → the `shadow_traces` report-artifact key. Landed goldens replay byte-identically (the pass shifts no request hash and reinforces nothing).
 
+## Promotion (v0.3.12 PR 4 — the measurement-gated flip)
+
+The shadow verdict ran **green** and the ranked mode is LIVE: `memory.episodic.cross_room: live` is the shipped default (schema + resolver; `shadow`/`off` remain configurable — `shadow` is the documented rollback lever). The verdict machinery, criteria, and the recorded numbers are documented once, in the [fact-scope amendment's Promotion section](0031-amendment-fact-scope-by-consolidation-level.md#promotion-v0312-pr-4--the-measurement-gated-flip) — this section records the three L1-specific decisions PR 3 deferred to the promotion:
+
+- **The live path is ONE ranked query.** `memory_context`'s episodic tier calls `recall_room_ranked` directly in live mode; the shadow pass does not run, so the episodic tier costs one read per turn in every mode (the #783 "fold live+widened into one query" follow-up — shadow mode's doubled read was a shadow-only cost). The §D gate + RFC 0017 budget apply to the ranked result exactly as to the walled one, and `EVAL-MEMORY-001` replays **byte-identically** under the flip (a single-room store ranks as it walled — the continuity tripwire holds without a re-record).
+- **The promoted live read REINFORCES** (`reinforce=True`): the pre-promotion live recall's access-bump contract is preserved byte-for-byte, cross-room rows included — a recalled-and-used episode is a used episode wherever it was formed. The shadow caller keeps the default `reinforce=False` (a pure observer; the PR 3 rationale stands).
+- **Either-wall-or-boost is now enforced at the query helpers** (`_reject_wall_and_boost`, all three branches): with the live prompt path a routine second caller of the ranked mode, the contract stopped being holdable by "`recall_room_ranked` is the sole caller" (the #783 guard follow-up).
+
+FTS5's implicit-AND term semantics make cross-room episodic deltas naturally rare on full channel-turn queries (every query term must appear in a stored summary) — observed during the measurement, worth knowing when reading L1 trace volume: the flood risk the boost calibration guards is correspondingly low, and the L1 quantitative pins ride the deterministic unit/integration suites (`test_episodic_room_ranked.py`, `test_cross_room_live.py`) rather than eval-borne traces.
+
 ## Security considerations
 
 - **Gate before trace.** Every cross-room candidate passes the §D gate *before* it is recorded — a `restricted`-stamped episode on a turn acting below `restricted` appears only as a withheld count (change item 2, pinned by test).
@@ -91,9 +101,9 @@ The widening ships **shadow-first** (the [measurement gate](#sequencing--depende
 
 RFC 0037 Phase 1 (§D gate + §F filter) **must land first — SATISFIED**
 ([RFC 0037 PR 5](0037-pr-plan.md), #778, 2026-07-26); the L1 widening
-lands behind it in the same release ([0049 PR plan](0049-pr-plan.md)
-PR 3, this implementation), with the room-first ranking change and the
-gated cross-room recall mode as one shadow slice. Shadow evaluation
-against RFC 0044 golden traces (the 0049 Phase-1→2 measurement-gate
-pattern) applies to the L1 widening the same way it applies to L2 —
-the PR 4 flip promotes both or documents a shadow-ship.
+landed behind it in the same release ([0049 PR plan](0049-pr-plan.md)
+PR 3), with the room-first ranking change and the gated cross-room
+recall mode as one shadow slice. Shadow evaluation against RFC 0044
+golden traces applied to the L1 widening the same way it applied to
+L2 — **the PR 4 flip ran green and promoted both** (2026-07-28; see
+[Promotion](#promotion-v0312-pr-4--the-measurement-gated-flip)).

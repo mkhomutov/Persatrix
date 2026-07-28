@@ -14,10 +14,9 @@ end-state).  Two helpers:
 - :func:`render_facts_section` runs :class:`MemoryBudget` admission and
   builds the ``"facts_context"`` :class:`WorkingMemory` section.  The
   per-tier slice is bounded by ``facts_budget_tokens`` (default 200,
-  per RFC 0026 OQ #2).  The header is charged against the budget
-  inside the ``if items:`` block so the RFC 0017 PR 2 finding #2
-  under-report bug does not recur — see :ref:`PR plan §PR 3 key
-  details <facts-recall-budget>`.
+  per RFC 0026 OQ #2); the header is charged against the budget inside
+  the ``if items:`` block (RFC 0017 PR 2 finding #2 — see :ref:`PR
+  plan §PR 3 key details <facts-recall-budget>`).
 
 The facts tier is the load-bearing fix for MT-MEMORY-005 Legs 1 / 2 / 5
 (the dementia-test core): a fact stored at interaction N is injected at
@@ -141,16 +140,14 @@ def _subject_seeds(event: AgentEvent) -> list[str]:
       counterparty.
 
     "Always seed self even when sender is missing" was tried in the
-    initial PR 4 cut and reverted (PR #342 review M-2): it issued an
-    unconditional self-recall on every TICK and defeated the PR-5
-    empty-context cost guard.  Gating the self seed on sender presence
-    keeps the Leg-5 admit without paying the cost on internal events.
+    initial PR 4 cut and reverted (PR #342 review M-2): an
+    unconditional self-recall on every TICK defeated the PR-5
+    empty-context cost guard, so the self seed gates on sender
+    presence.
 
     Returns canonicalised subjects in admit-priority order (self
-    first so introspective rows survive when the per-tier slice is
-    tight).  Duplicates between the two are de-duplicated here at
-    the seed-list level (``self`` plus a sender that canonicalises
-    to ``"self"`` collapses to one seed); the downstream
+    first so introspective rows survive a tight per-tier slice),
+    de-duplicated at the seed-list level; the downstream
     :func:`recall_facts_for_event` ``seen_ids`` set dedupes fact
     rows, not seeds.
     """
@@ -158,18 +155,16 @@ def _subject_seeds(event: AgentEvent) -> list[str]:
     if not sender_id or not sender_id.strip():
         return []
     try:
-        # Load-bearing, not redundant — though FactStore.recall also
-        # canonicalises its query (PR 5c), the canonical form is used
-        # locally for the ``== SELF_SUBJECT`` check and seed dedup
-        # below.  Removing it breaks the self-collapse. (PR #346 N-2)
+        # Load-bearing, not redundant — the canonical form is used
+        # locally for the ``== SELF_SUBJECT`` check and seed dedup;
+        # removing it breaks the self-collapse. (PR #346 N-2)
         canonical = canonicalize_subject(sender_id)
     except ValueError:
         # Defensive forward-guard (PR #342 third-pass review L-2):
-        # unreachable today — the truthiness check above filters the
-        # only input ``canonicalize_subject`` rejects, and the topic
-        # amendment's bounds live at the WRITE boundary precisely so
-        # read paths stay total.  Keeps the ``self`` seed rather than
-        # dropping the tier, so a malformed sender degrades to
+        # unreachable today — the truthiness check filters the only
+        # rejected input, and the topic amendment's bounds are
+        # WRITE-boundary so read paths stay total.  Keeping the
+        # ``self`` seed degrades a malformed sender to
         # introspective-only recall, not a silent Leg-5 regression.
         return [SELF_SUBJECT]
     if canonical == SELF_SUBJECT:
@@ -183,6 +178,7 @@ async def recall_facts_for_event(
     *,
     limit: int = FACTS_RECALL_LIMIT,
     stimulus: str | None = None,
+    sessions: list[str] | str | None = None,
 ) -> list[Fact]:
     """Recall declarative facts for every subject derived from *event*.
 
@@ -204,6 +200,13 @@ async def recall_facts_for_event(
     person seeds via :mod:`.topic_seeds`, BEHIND the person-seed
     short-circuit so a TICK still issues zero DB round-trips.
 
+    ``sessions`` (RFC 0049 PR 4 — the fact-scope amendment's live flip)
+    forwards to the topic enumeration and every per-seed recall.
+    ``None`` (default) keeps the §D room wall; the live cross-room
+    caller (``memory.facts.cross_room: live``) passes ``"*"`` —
+    visibility is then owned by the downstream RFC 0037 §D gate, and
+    topic seeds stay ``TOPIC_PREDICATES``-scoped at every width.
+
     Signature note (PR 5c — PR #341 review N-2): the earlier
     ``agent_id`` kwarg fed only the WARNING template while
     ``recall`` already filters by its own agent id (RFC 0008 §H ACL).
@@ -224,6 +227,7 @@ async def recall_facts_for_event(
         (subject, TOPIC_PREDICATES)
         for subject in await topic_subject_seeds(
             fact_store, stimulus, exclude=set(person_seeds),
+            sessions=sessions,
         )
     ]
     collected: list[Fact] = []
@@ -232,6 +236,7 @@ async def recall_facts_for_event(
         try:
             rows = await fact_store.recall(
                 subject=subject, limit=limit, predicates=predicates,
+                sessions=sessions,
             )
         except Exception:
             logger.warning(

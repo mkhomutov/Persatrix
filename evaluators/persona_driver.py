@@ -78,6 +78,34 @@ def default_config_resolver(config_path: str | Path) -> ConfigResolver:
     return resolve
 
 
+def _merge_memory_overrides(config: dict[str, Any], overrides: dict[str, Any]) -> None:
+    """Deep-merge a recipe's ``setup.memory`` block into the persona config.
+
+    RFC 0049 PR 4: a recipe can pin runtime memory knobs — e.g.
+    ``{facts: {cross_room: shadow}}`` — so its golden stays stable when the
+    shipped default changes (the shadow-measurement seed records the
+    pre-promotion posture; the live seed pins the promoted one explicitly).
+    Nested dicts merge recursively; scalars/lists replace. Runs BEFORE
+    :func:`_force_in_memory_db`, so an override naming ``db_path`` is
+    overridden right back — golden portability is non-negotiable.
+    """
+    if not overrides:
+        return
+    memory_cfg = config.get("memory")
+    if not isinstance(memory_cfg, dict):
+        memory_cfg = {}
+        config["memory"] = memory_cfg
+    _deep_merge(memory_cfg, overrides)
+
+
+def _deep_merge(dst: dict[str, Any], src: dict[str, Any]) -> None:
+    for key, value in src.items():
+        if isinstance(value, dict) and isinstance(dst.get(key), dict):
+            _deep_merge(dst[key], value)
+        else:
+            dst[key] = copy.deepcopy(value)
+
+
 def _force_in_memory_db(config: dict[str, Any]) -> None:
     """Pin the persona's memory to an isolated ``:memory:`` SQLite DB.
 
@@ -249,9 +277,11 @@ class PersonaRuntimeDriver:
         from agents.llm_client import LLMClient  # noqa: PLC0415
         from agents.persona import create_persona_agent  # noqa: PLC0415
         from agents.persona_types import AgentEvent, EventType  # noqa: PLC0415
+        from agents.session_id import EVENT_SESSION_METADATA_KEY  # noqa: PLC0415
 
         setup = eval_set.setup
         config = copy.deepcopy(self._resolve(setup.persona))
+        _merge_memory_overrides(config, setup.memory)
         _force_in_memory_db(config)
         _apply_seed_state(config, setup.seed_state, persona=setup.persona)
         clock = self._clock if self._clock is not None else FrozenClock(self._epoch, tz="UTC")
@@ -317,6 +347,28 @@ class PersonaRuntimeDriver:
                                     sender_id=user,
                                     content=turn.user_text or "",
                                 )
+                            metadata: dict[str, Any] = {
+                                "chat_session_id": session,
+                                "sender_participant_type": "user",
+                                # RFC 0037 §B (PR 4): mirror the orchestrator's
+                                # dispatch-time classification stamp (DM default
+                                # ``internal``) — without it the turn floors to
+                                # the §D ``public`` acting level (rule (b)) and
+                                # every internal-stamped memory is withheld,
+                                # which is the version-skew posture, not the
+                                # production wire shape this driver replays.
+                                "channel_classification": "internal",
+                            }
+                            if interaction.room:
+                                # RFC 0049 PR 4: bind the interaction's memory
+                                # room, mirroring production's per-(agent,
+                                # channel) session binding — ``on_event`` enters
+                                # a ``session_scope`` from this key, so memory
+                                # written during the turn stamps this session
+                                # and default recall walls/ranks against it.
+                                # Room-less recipes never set the key, keeping
+                                # the landed single-room goldens byte-identical.
+                                metadata[EVENT_SESSION_METADATA_KEY] = interaction.room
                             event = AgentEvent(
                                 event_type=EventType.CHANNEL_MESSAGE,
                                 payload={
@@ -327,18 +379,7 @@ class PersonaRuntimeDriver:
                                 sender_id=user,
                                 channel_id=channel,
                                 message_id=message_id,
-                                metadata={
-                                    "chat_session_id": session,
-                                    "sender_participant_type": "user",
-                                    # RFC 0037 §B (PR 4): mirror the orchestrator's
-                                    # dispatch-time classification stamp (DM default
-                                    # ``internal``) — without it the turn floors to
-                                    # the §D ``public`` acting level (rule (b)) and
-                                    # every internal-stamped memory is withheld,
-                                    # which is the version-skew posture, not the
-                                    # production wire shape this driver replays.
-                                    "channel_classification": "internal",
-                                },
+                                metadata=metadata,
                             )
                             actions = await agent.on_event(event)
                             last_reply, _status = extract_chat_reply(actions, user)

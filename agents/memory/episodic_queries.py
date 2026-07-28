@@ -90,6 +90,29 @@ _FTS5_SANITIZE = re.compile(r'[^a-zA-Z0-9\s]+')
 # ─── Recall query helpers ────────────────────────────────────
 
 
+def _reject_wall_and_boost(
+    sessions: list[str] | None,
+    boost_sessions: list[str] | None,
+) -> None:
+    """Enforce the either-wall-or-boost contract (RFC 0049 L1 amendment).
+
+    A caller supplies the resolved session list as the WHERE wall
+    (``sessions``) or as the ranking boost (``boost_sessions``), never
+    both — boosting a subset of an already-filtered set silently
+    re-creates the wall the ranked mode exists to drop.  Originally the
+    contract was held only by ``recall_room_ranked`` being the sole
+    boost caller; PR 4's live-prompt promotion made that path routine,
+    so the three query helpers now refuse the combination themselves
+    (the #783 review follow-up).
+    """
+    if sessions is not None and boost_sessions:
+        raise ValueError(
+            "sessions and boost_sessions are mutually exclusive — pass the "
+            "resolved room list as the WHERE wall or as the ranking boost, "
+            "never both (RFC 0049 L1 either-wall-or-boost)",
+        )
+
+
 def _normalize_bm25(raw: float | None) -> float:
     """Normalise an FTS5 BM25 raw score into [0, 1].
 
@@ -169,6 +192,7 @@ async def recall_fts5(
     carve-out, no ``"*"`` bypass).  Defaults to :data:`DEFAULT_EPOCH_ID`
     so a single-world direct caller is fail-safe.
     """
+    _reject_wall_and_boost(sessions, boost_sessions)
     sess_clause, sess_params = session_in_clause(sessions, column="e.session_id")
     boost_expr, boost_params = session_boost_expr(
         boost_sessions, column="e.session_id",
@@ -246,6 +270,7 @@ async def recall_like(
     per RFC 0017 §C.  ``sessions`` / ``boost_sessions`` /
     ``principal_id`` / ``epoch_id`` — see :func:`recall_fts5`.
     """
+    _reject_wall_and_boost(sessions, boost_sessions)
     sess_clause, sess_params = session_in_clause(sessions, column="session_id")
     boost_expr, boost_params = session_boost_expr(
         boost_sessions, column="session_id",
@@ -301,6 +326,7 @@ async def recall_recency(
     for closing F-3 (and the ISSUE-0081 / ISSUE-0085 cross-axis leaks)
     on the empty-query surface.
     """
+    _reject_wall_and_boost(sessions, boost_sessions)
     sess_clause, sess_params = session_in_clause(sessions, column="session_id")
     boost_expr, boost_params = session_boost_expr(
         boost_sessions, column="session_id",

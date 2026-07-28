@@ -451,3 +451,34 @@ def test_event_extra_fields_captured(tmp_path: Path) -> None:
     ev = es.interactions[0].turns[1].events[0]
     assert ev.type == "StateDelta"
     assert ev.fields == {"scope": "persona", "key_pattern": "ember-owl:trust.*"}
+
+
+# ─── RFC 0049 PR 4: per-interaction room + setup.memory override ─────────────
+
+
+def test_room_and_memory_override_parse(tmp_path: Path) -> None:
+    """The cross-room seed surface: `room:` parses per interaction (absent →
+    None, the pre-extension shape) and `setup.memory` parses as the deep-merge
+    override dict (absent → {})."""
+    body = _VALID_RECIPE.replace(
+        "  llm_mode: replay",
+        "  llm_mode: replay\n"
+        "  memory:\n"
+        "    facts: {cross_room: shadow}",
+    ).replace("- id: i1", "- id: i1\n    room: dm-sam")
+    es = load_eval_set(_write(tmp_path, body))
+    assert es.setup.memory == {"facts": {"cross_room": "shadow"}}
+    assert es.interactions[0].room == "dm-sam"
+    assert es.interactions[1].room is None
+
+    plain = load_eval_set(_write(tmp_path, _VALID_RECIPE, name="plain.yaml"))
+    assert plain.setup.memory == {}
+    assert all(i.room is None for i in plain.interactions)
+
+
+def test_empty_room_rejected_by_schema(tmp_path: Path) -> None:
+    """`room: ""` would bind an empty session (normalized to the legacy
+    carve-out downstream) — the schema's minLength rejects it at load."""
+    body = _VALID_RECIPE.replace("- id: i1", '- id: i1\n    room: ""')
+    with pytest.raises(ValueError, match="schema validation failed"):
+        load_eval_set(_write(tmp_path, body))

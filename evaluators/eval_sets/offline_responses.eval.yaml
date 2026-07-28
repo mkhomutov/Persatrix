@@ -14,6 +14,24 @@
 # NOT read at replay time (replay plays the golden).
 responses:
   ember-owl:
+    # EVAL-MEMORY-002/003 — the room-A interaction close's combined
+    # summarize + extract call. FIRST in the list on purpose: the
+    # summarizer's own INSTRUCTION text contains words that collide with
+    # reply-keyed entries below (empirically it all-matches
+    # ["committed", "prefer"], which shadowed this entry when it sat
+    # lower and silently baked a non-envelope reply into the golden —
+    # no facts stored, no shadow trace). Keying: "json" = the envelope
+    # instruction (absent from every action prompt) + the PHRASE "atlas
+    # launch" = the room-A transcript (bare "atlas" would over-match:
+    # the fact-extractor suffix's own predicate example names `atlas`,
+    # so EVERY recipe's close prompt contains that substring — keying on
+    # it hijacked EVAL-MEMORY-001's close replies at re-record and bled
+    # Atlas facts into its store). Returns the RFC 0026 envelope so a
+    # REAL topic fact + person fact land in the store — the cross-room
+    # candidates the 002 shadow trace records and the 003 live prompt
+    # injects.
+    - match: ["json", "atlas launch"]
+      reply: '{"summary": "Sam said the Atlas launch ships Friday; ember-owl acknowledged the hard deadline.", "facts": [{"subject": "atlas", "predicate": "topic.has_deadline", "object": "ships Friday", "certainty": 0.9}, {"subject": "sam", "predicate": "committed_to", "object": "shipping Atlas by Friday", "certainty": 0.85}]}'
     # EVAL-MEMORY-001 — dementia test. One entry per user turn, keyed on
     # keywords unique to that turn so exactly one matches.
     - match: ["daughter", "mira"]           # i1 — establish the named entity
@@ -35,3 +53,19 @@ responses:
       reply: "Happy to help with the deploy — should I ship to staging or production?"
     - match: ["soon", "waiting"]            # i1 t2 — persona references its own prior question
       reply: "I still need one thing before I run it: staging or production? Say the word and it's out."
+    # EVAL-MEMORY-002 / EVAL-MEMORY-003 — RFC 0049 cross-room carry (shared arc:
+    # a DM teaches "Atlas ships Friday"; a standup room asks about it). The
+    # summarize+extract entry for the room-A close sits at the TOP of this
+    # list (see the note there). The two recipes' final questions differ
+    # ("should know" vs "working toward") so each keys its own reply: the 002
+    # (shadow) hedge mirrors a walled prompt; the 003 (live) answer references
+    # the DM fact a widened prompt provides. A live re-record swaps real
+    # model text at release-prep.
+    - match: ["atlas launch", "friday"]     # 002/003 i1 — the DM teach turn
+      reply: "Noted — the Atlas launch ships Friday. I'll hold us to that deadline."
+    - match: ["standup", "plate"]           # 002/003 i2 — the room-B bridge turn
+      reply: "Morning! Nothing blocking on my plate — what's up in this standup?"
+    - match: ["atlas", "should know"]       # 002 i3 — shadow: the prompt stays walled
+      reply: "I don't have a deadline on record for Atlas in this room — want me to chase one down?"
+    - match: ["atlas", "working toward"]    # 003 i3 — live: the DM fact is in the prompt
+      reply: "Atlas ships Friday — that's the deadline we're working toward; Sam committed to it in our DM."
