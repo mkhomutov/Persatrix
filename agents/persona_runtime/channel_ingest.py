@@ -29,8 +29,13 @@ def sanitize_inbound_event(event: AgentEvent) -> AgentEvent:
     Runs once on ingest so the LLM prompt, ``InteractionTracker``, and
     persistence path all see the cleared text. Non-channel events pass
     through unchanged. Returns a new ``AgentEvent`` with a copied
-    payload when a substitution lands; the original event is not
-    mutated (callers may hold references).
+    payload when a substitution lands, so the content swap never leaks
+    to callers holding the original — but the metadata dict is
+    deliberately SHARED, not copied: mid-turn metadata stamps (the RFC
+    0037 §G tripwire watch, written by ``_inject_memory_context``) must
+    stay visible on the outer event the dispatch side lifts its
+    ``DispatchContext`` from, and dispatch has already deep-copied
+    metadata per target so intra-turn sharing is isolation-safe.
 
     In the v0.3.0 passthrough configuration the rebuild branch is
     unreachable — :func:`agents.security.sanitize` only substitutes
@@ -78,5 +83,7 @@ def sanitize_inbound_event(event: AgentEvent) -> AgentEvent:
         message_id=event.message_id,
         thread_id=event.thread_id,
         timestamp=event.timestamp,
-        metadata=dict(event.metadata),
+        # Shared, not copied — mid-turn stamps (§G tripwire watch) must
+        # land on the dict the outer event holds (see docstring).
+        metadata=event.metadata,
     )

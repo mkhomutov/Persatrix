@@ -29,6 +29,7 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Awaitable
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 import grpc
@@ -36,6 +37,7 @@ import grpc.aio
 
 from .channel_publisher import ChannelPublisher
 from .channel_wire_metadata import DispatchContext
+from .confidentiality_tripwire import tripwire_watch_from_event
 from .generated import task_pb2
 from .persona_types import ActionType, AgentAction
 from .wallet_client import BudgetExceededError
@@ -390,7 +392,18 @@ async def process_inbound_channel_event(
 
     async def _decide_and_execute() -> None:
         actions = await agent.on_event(event)
-        await executor.execute(agent.agent_id, actions, context=context)
+        # RFC 0037 §G: unlike every other ``for_event`` field (wire-seeded
+        # before dispatch), the tripwire watch is stamped onto the event's
+        # metadata DURING the turn — the pre-turn ``context`` snapshot above
+        # cannot carry it, so re-lift it here or this (dominant) channel
+        # path executes every action unwatched.
+        await executor.execute(
+            agent.agent_id, actions,
+            context=replace(
+                context,
+                origin_tripwire_watch=tripwire_watch_from_event(event),
+            ),
+        )
 
     # PR #718 review: a §D synthesis turn's reply is claim-correlated by the
     # orchestrator (the fanout-head close-on-reply intercept), so its
