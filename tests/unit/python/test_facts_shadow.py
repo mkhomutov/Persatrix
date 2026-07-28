@@ -26,6 +26,7 @@ import pytest
 
 from agents.epoch_id import epoch_scope
 from agents.memory.facts import FactStore
+from agents.persona_runtime.cross_room import CROSS_ROOM_LIVE
 from agents.persona_runtime.facts_shadow import (
     CROSS_ROOM_OFF,
     CROSS_ROOM_SHADOW,
@@ -125,15 +126,17 @@ def shadow_log(caplog: pytest.LogCaptureFixture):
 
 
 class TestResolveFactsCrossRoom:
-    def test_absent_defaults_to_shadow(self):
-        assert resolve_facts_cross_room({}) == CROSS_ROOM_SHADOW
-        assert DEFAULT_FACTS_CROSS_ROOM == CROSS_ROOM_SHADOW
+    def test_absent_defaults_to_live(self):
+        # Live is the shipped posture since the PR 4 promotion.
+        assert resolve_facts_cross_room({}) == CROSS_ROOM_LIVE
+        assert DEFAULT_FACTS_CROSS_ROOM == CROSS_ROOM_LIVE
 
     def test_explicit_off(self):
         cfg = {"memory": {"facts": {"cross_room": "off"}}}
         assert resolve_facts_cross_room(cfg) == CROSS_ROOM_OFF
 
     def test_explicit_shadow(self):
+        # The pre-promotion posture stays configurable (rollback lever).
         cfg = {"memory": {"facts": {"cross_room": "shadow"}}}
         assert resolve_facts_cross_room(cfg) == CROSS_ROOM_SHADOW
 
@@ -142,10 +145,8 @@ class TestResolveFactsCrossRoom:
         assert resolve_facts_cross_room(cfg) == DEFAULT_FACTS_CROSS_ROOM
 
     def test_unknown_mode_raises(self):
-        """``"live"`` must fail loudly until the PR 4 promotion lands —
-        silently degrading a requested live widening to shadow would
-        misreport what the deployment is doing."""
-        cfg = {"memory": {"facts": {"cross_room": "live"}}}
+        """Unknown modes reject loudly at construction."""
+        cfg = {"memory": {"facts": {"cross_room": "mirror"}}}
         with pytest.raises(ValueError, match="cross_room"):
             resolve_facts_cross_room(cfg)
 
@@ -423,9 +424,11 @@ class TestShadowNeverEntersPrompt:
     async def test_cross_room_fact_shadowed_but_not_injected(
         self, fact_store: FactStore, shadow_log,
     ):
-        """The full ``_inject_memory_context`` pass: the cross-room row
-        is traced, while the prompt, the §G manifest, and the
-        reinforcement write see only the live (room-scoped) row."""
+        """``_inject_memory_context`` under SHADOW mode (pinned — the
+        shipped default is ``live`` since PR 4; live counterpart in
+        ``test_cross_room_live.py``): the cross-room row is traced,
+        while the prompt, §G manifest, and reinforcement write see
+        only the live (room-scoped) row."""
         cross_id = await _seed_fact(
             fact_store, object_="atlas-labs-cross-room",
         )
@@ -434,6 +437,8 @@ class TestShadowNeverEntersPrompt:
             session_id="legacy",
         )
         mixin = _build_mixin(fact_store)
+        mixin._facts_cross_room = CROSS_ROOM_SHADOW
+        mixin._episodic_cross_room = CROSS_ROOM_SHADOW
         await mixin._episodic_memory.initialize()
         try:
             result = await mixin._inject_memory_context(_channel_event())
@@ -449,12 +454,8 @@ class TestShadowNeverEntersPrompt:
         assert live_id in manifest_ids
         assert cross_id not in manifest_ids
         # Reinforcement targets only what reached the prompt.
-        (cross_row,) = [
-            f for f in await fact_store.recall(
-                subject="bob", sessions="*",
-            )
-            if f.fact_id == cross_id
-        ]
+        all_rows = await fact_store.recall(subject="bob", sessions="*")
+        (cross_row,) = [f for f in all_rows if f.fact_id == cross_id]
         assert cross_row.last_recalled_at is None
         # And the shadow trace recorded the cross-room row end-to-end.
         (trace,) = _traces(shadow_log)

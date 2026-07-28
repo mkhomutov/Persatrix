@@ -1,7 +1,7 @@
 # RFC 0031 Amendment — Fact Scope Follows Consolidation Level, Not Subject
 
 **Type**: amendment to [RFC 0031](0031-per-session-namespacing-channels.md) §C (Storage Model) + §D (Recall Semantics), and to [RFC 0026](0026-declarative-facts-tier.md) (facts-tier scope boundary)
-**Status**: ⚠️ Implemented in SHADOW — v0.3.12, [RFC 0049](0049-memory-consolidation-gradient.md) Phase 1 PR 2 ([0049-pr-plan.md](0049-pr-plan.md)); the live-prompt promotion is PR 4's measurement-gated flip. Decision ratified ([RFC 0049 §D](0049-memory-consolidation-gradient.md#d-reconciliation-with-memory-scope-axesmd-and-the-one-decision-reopened), 2026-06-06); stub expanded to this implementation amendment 2026-07-27.
+**Status**: ✅ Implemented — **LIVE**, v0.3.12 ([RFC 0049](0049-memory-consolidation-gradient.md) Phase 1: shadow in PR 2, promoted by PR 4's green measurement verdict — see [Promotion](#promotion-v0312-pr-4--the-measurement-gated-flip); [0049-pr-plan.md](0049-pr-plan.md)). Decision ratified ([RFC 0049 §D](0049-memory-consolidation-gradient.md#d-reconciliation-with-memory-scope-axesmd-and-the-one-decision-reopened), 2026-06-06); stub expanded to the implementation amendment 2026-07-27; promoted 2026-07-28.
 **Author**: Maksim Khomutov
 **Date**: 2026-06-06 (stub) / 2026-07-27 (implementation)
 **Target**: v0.3.12 — lands with [RFC 0049](0049-memory-consolidation-gradient.md) Phase 1 (this amendment *is* the Phase-1 L2 widening), **behind the RFC 0037 keystone** (see [Sequencing](#sequencing--dependencies)). *(Retargeted from v0.4.0 2026-07-20, following the 2026-07-15 pull-forward of RFC 0049 Phases 0–1; its capture-half companion is the [RFC 0026 topic-predicate amendment](0026-amendment-topic-subject-predicates.md).)*
@@ -36,6 +36,14 @@ The widening ships **shadow-first** (the [measurement gate](#sequencing--depende
 - **The knob** — `memory.facts.cross_room: off | shadow` (schema-gated enum, default `shadow`; resolved at agent construction). Shadow-first is the shipped v0.3.12 posture, so traces accumulate everywhere for the PR 4 verdict; `"live"` is rejected at both the schema and the resolver until PR 4 lands the promotion.
 - **Harness recording** — the RFC 0044 driver (`evaluators/persona_driver.py::capture_shadow_traces`) captures the run's shadow records into `EvalRun.shadow_traces`, and the runner threads them into the report artifact (a `shadow_traces` key, present only when non-empty). That artifact is the PR 4 measurement's read surface; landed single-room goldens replay byte-identically (the shadow pass never shifts a request hash).
 
+## Promotion (v0.3.12 PR 4 — the measurement-gated flip)
+
+The shadow verdict ran **green** and the widening is LIVE: `memory.facts.cross_room: live` is the shipped default (schema + resolver; `shadow` and `off` remain configurable — `shadow` is the documented rollback lever, still trace-emitting).
+
+- **The verdict.** `evaluators/shadow_measurement.py` partitions the report artifact's `tier`-keyed `shadow_traces` and renders three criteria, each able to go red: `label_integrity` (zero rule-(c) `unknown_label` withholds — clean above-rank `withheld` counts are the gate *working* and do not fail promotion), `bounded_volume` (no turn's gate-admitted delta exceeds the tier recall limits), and `continuity` (the full golden suite replays green — the dementia bar EVAL-MEMORY-001 byte-identical, un-re-recorded, under the live default). Measured over the new cross-room seed **EVAL-MEMORY-002** (the scenario-2 arc, shadow-pinned via the recipe's `setup.memory` override): 2 gate-admitted cross-room candidates (one topic-seeded, one person-seeded), 0 withheld, 0 unknown-label, goldens 4/4. The run is committed and reproducible — `tests/integration/test_cross_room_seed_replay.py` re-executes replay → traces → verdict on every CI run, with the tier bounds taken from the live runtime constants.
+- **The live read.** `recall_facts_for_event` gained a `sessions=` passthrough (topic enumeration + every per-seed recall); `memory_context` passes `"*"` in live mode. ONE widened read per turn — the shadow pass does not run in live mode (the #783 no-doubled-read follow-up) — and the §D gate + RFC 0017 budget apply to it exactly as they did to the walled read. Topic seeds stay `TOPIC_PREDICATES`-scoped at every width (the PR 1 reachability bound).
+- **The integration eval.** **EVAL-MEMORY-003** pins the promoted posture: the room-B request hash carries the DM-taught facts, and a shadow-pinned replay of its golden *must miss the cassette* — the strip test that makes the seed load-bearing at the request level, not the (mock-authored) transcript level.
+
 ## Security considerations
 
 - **Gate before trace.** Every cross-room candidate passes the §D gate *before* it is recorded — a `restricted`-stamped fact on a turn acting below `restricted` appears only as a withheld count, exactly the live gate's posture (Decision 3).
@@ -52,7 +60,7 @@ The widening ships **shadow-first** (the [measurement gate](#sequencing--depende
 ## Sequencing / dependencies
 
 - **Hard dependency: RFC 0037 lands first — SATISFIED.** The §D gate + §F filter merged in [RFC 0037 PR 5](0037-pr-plan.md) (#778, 2026-07-26) before this widening; the capture-half companion ([0026 amendment](0026-amendment-topic-subject-predicates.md)) merged as RFC 0049 PR 1 (#781).
-- **Measurement gate.** Cross-room L2 recall ships in *shadow* (this PR) and promotes to the live prompt only on a green [RFC 0044](0044-eval-set-golden-traces.md) golden-trace verdict under the [RFC 0017](0017-persona-memory-injection-budget.md) injection budget — the [0049 PR plan](0049-pr-plan.md) PR 4 flip. A red verdict ships v0.3.12 shadow-only with the flip criterion documented; the release does not block.
+- **Measurement gate — SATISFIED (green, 2026-07-28).** Cross-room L2 recall shipped in *shadow* (PR 2) and promoted to the live prompt on the green [RFC 0044](0044-eval-set-golden-traces.md) golden-trace verdict under the [RFC 0017](0017-persona-memory-injection-budget.md) injection budget — see [Promotion](#promotion-v0312-pr-4--the-measurement-gated-flip).
 - Pairs with the [RFC 0027 cross-scope consolidation amendment](0027-amendment-cross-scope-consolidation.md) (the pump that *produces* cross-room L2 facts — v0.4.0; until it lands, cross-room candidates are facts a persona itself extracted in another room).
 
 ## Non-goals
@@ -60,7 +68,7 @@ The widening ships **shadow-first** (the [measurement gate](#sequencing--depende
 - Unifying **episodic** (L1) recall *here* — the L1 axis is owned by the [RFC 0049 L1 amendment](0049-amendment-l1-cross-room-availability.md); this amendment touches only the L2 facts tier. *(Reworded 2026-07-20 — originally "episodes stay room-scoped", which the L1 amendment reverses.)*
 - Removing the capture-time "is this worth consolidating?" judgment.
 - Cross-room **ranking** (same-room boost / provenance-aware ordering) — the shadow trace carries the provenance for it, but ranking is the PR 3 (L1) / PR 4 (promotion) surface.
-- The live-prompt flip itself — PR 4, behind the measurement gate.
+- ~~The live-prompt flip itself — PR 4, behind the measurement gate.~~ *(Landed — see [Promotion](#promotion-v0312-pr-4--the-measurement-gated-flip).)*
 
 ## Related documentation
 

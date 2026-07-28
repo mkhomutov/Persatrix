@@ -54,11 +54,12 @@ from typing import TYPE_CHECKING, Final
 
 from ..memory.episodic import DEFAULT_EPISODIC_MIN_SCORE
 from ..memory.episodic_room_ranked import recall_room_ranked
-from .episodic_section import EPISODIC_RECALL_LIMIT
-from .facts_shadow import (
-    CROSS_ROOM_MODES,
+from .cross_room import (
     CROSS_ROOM_SHADOW,
+    DEFAULT_EPISODIC_CROSS_ROOM,
+    resolve_episodic_cross_room,
 )
+from .episodic_section import EPISODIC_RECALL_LIMIT
 from .injection_gate import (
     CHANNEL_ACTING_EVENT_TYPES,
     TurnInjectionGate,
@@ -89,32 +90,12 @@ SHADOW_LOGGER_NAME: Final[str] = __name__
 #: loggers can read each record's payload off its own key.
 SHADOW_TRACE_ATTR: Final[str] = "episodes_shadow"
 
-#: ``memory.episodic.cross_room`` shares the facts knob's closed mode
-#: vocabulary (``off`` | ``shadow``; ``"live"`` rejected until the PR 4
-#: promotion) and its shadow-first shipped posture.
-DEFAULT_EPISODIC_CROSS_ROOM: Final[str] = CROSS_ROOM_SHADOW
-
-
-def resolve_episodic_cross_room(config: dict) -> str:
-    """Resolve ``memory.episodic.cross_room`` from a persona config.
-
-    The exact twin of
-    :func:`~agents.persona_runtime.facts_shadow.resolve_facts_cross_room`
-    on the ``memory.episodic`` block: absent/``None`` → the shadow
-    default; anything outside the closed mode set — most likely an early
-    ``"live"`` — raises at agent construction rather than silently
-    degrading a requested live widening to shadow.
-    """
-    episodic_cfg = (config.get("memory") or {}).get("episodic") or {}
-    raw = episodic_cfg.get("cross_room")
-    if raw is None:
-        return DEFAULT_EPISODIC_CROSS_ROOM
-    if not isinstance(raw, str) or raw not in CROSS_ROOM_MODES:
-        raise ValueError(
-            f"memory.episodic.cross_room must be one of "
-            f"{sorted(CROSS_ROOM_MODES)}, got {raw!r}",
-        )
-    return raw
+# ``memory.episodic.cross_room`` shares the closed mode vocabulary in
+# :mod:`.cross_room` (``off`` | ``shadow`` | ``live`` since the PR 4
+# promotion); the resolver + default are re-exported above so existing
+# imports keep resolving.  In ``live`` mode this module's shadow pass
+# does not run — the room-first-RANKED read happens once, on the live
+# path in ``memory_context`` (no doubled episodic-tier DB cost).
 
 
 async def emit_episodes_shadow(

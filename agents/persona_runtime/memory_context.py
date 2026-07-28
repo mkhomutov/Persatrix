@@ -10,11 +10,13 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
+from ..memory._session_filter import SESSIONS_ALL
 from ..memory.episodic import (
     DEFAULT_EPISODIC_MIN_SCORE,
     DEFAULT_NOTES_MIN_SCORE,
     EpisodicMemory,
 )
+from ..memory.episodic_room_ranked import recall_room_ranked
 from ..memory.relationship import RelationshipMemory
 from ..memory.working import WorkingMemory
 from .channel_history import (
@@ -23,7 +25,12 @@ from .channel_history import (
     render_channel_history_section,
 )
 from .channel_roster import inject_channel_roster
-from .episodes_shadow import DEFAULT_EPISODIC_CROSS_ROOM, emit_episodes_shadow
+from .cross_room import (
+    CROSS_ROOM_LIVE,
+    DEFAULT_EPISODIC_CROSS_ROOM,
+    DEFAULT_FACTS_CROSS_ROOM,
+)
+from .episodes_shadow import emit_episodes_shadow
 from .episodic_section import EPISODIC_RECALL_LIMIT, render_episodic_section
 from .facts_section import (
     DEFAULT_FACTS_BUDGET_TOKENS,
@@ -31,7 +38,7 @@ from .facts_section import (
     recall_facts_for_event,
     render_facts_section,
 )
-from .facts_shadow import DEFAULT_FACTS_CROSS_ROOM, emit_facts_shadow
+from .facts_shadow import emit_facts_shadow
 from .injection_gate import (
     InjectionManifestEntry,
     TurnInjectionGate,
@@ -134,21 +141,17 @@ def _truncate_with_ellipsis(
     If *text* fits within *limit* (measured in chars or tokens, depending on
     *mode*), it is returned unchanged.
 
-    In ``"chars"`` mode (default):
-        Slices to *limit* chars, cuts at the last space so the LLM sees a
-        complete word, and appends ``"..."`` to signal truncation.  If the
-        slice contains no space, the full slice is used (3-char overage in
-        the worst case, which is acceptable).
+    In ``"chars"`` mode (default): slices to *limit* chars, cuts at the
+    last space so the LLM sees a complete word, and appends ``"..."``;
+    a space-free slice is used whole (3-char worst-case overage).
 
-    In ``"tokens"`` mode:
-        Truncates at a token boundary using tiktoken ``cl100k_base`` when
-        available, falling back to char-proportional slicing when tiktoken is
-        absent.  The ellipsis ``"\u2026"`` (U+2026) counts toward the token
-        budget.  Never panics on missing tiktoken.
+    In ``"tokens"`` mode: truncates at a token boundary via tiktoken
+    ``cl100k_base``, falling back to char-proportional slicing when
+    tiktoken is absent (never panics).  The ellipsis ``"\u2026"``
+    counts toward the token budget.
 
-    Extracted from _inject_memory_context() where the same pattern was
-    copy-pasted for episode summaries, relationship notes, and note content.
-    (PR #60 review: truncation pattern duplicated 3 times.)
+    Extracted from _inject_memory_context() where the pattern was
+    copy-pasted three times.  (PR #60 review.)
     """
     if mode == "tokens":
         # PR 1 review finding 4: ``_truncate_with_ellipsis_tokens`` was a
@@ -265,15 +268,11 @@ class _MemoryContextMixin:
         zero-admission events short-circuit via PR 5's empty-context
         guard on the returned ``memory_admitted_tokens``.
 
-        Design: each memory tier is wrapped in ``except Exception`` to ensure
-        one tier's failure (DB lock, I/O error, corrupted data) never blocks
-        event processing.  ``exc_info=True`` logs the full traceback so
-        failures are visible to operators.  We intentionally catch broad
-        ``Exception`` rather than specific types (OSError, aiosqlite.Error)
-        because the memory tier implementations may evolve to raise different
-        exception types, and the contract here is "never fail the event".
-        ``BaseException`` subclasses (SystemExit, KeyboardInterrupt) are NOT
-        caught by ``except Exception``.
+        Design: each memory tier is wrapped in a broad ``except
+        Exception`` (deliberately not specific types — implementations
+        evolve) so one tier's failure never blocks event processing;
+        ``exc_info=True`` keeps failures operator-visible.
+        ``BaseException`` (SystemExit, KeyboardInterrupt) is not caught.
 
         Returns:
             :class:`MemoryInjectionResult` with ``memory_admitted_tokens``
@@ -287,11 +286,10 @@ class _MemoryContextMixin:
         if query is None:
             query = self._format_event(event)
 
-        # Always remove the memory sections before (re-)injecting: a tier
-        # with NO results never calls add_section(), so a stale section from
-        # the previous event would silently persist into this event's LLM
-        # system prompt.  Unconditional removal keeps the tiers symmetric —
-        # section present iff results found.  (PR #60 review F-60-R1.)
+        # Always remove the memory sections before (re-)injecting: a
+        # tier with NO results never calls add_section(), so a stale
+        # section would silently persist into this event's prompt.
+        # Section present iff results found.  (PR #60 review F-60-R1.)
         self._working_memory.remove_section("episodic_recall")
         self._working_memory.remove_section(NOTES_SECTION_NAME)
         self._working_memory.remove_section(RELATIONSHIP_SECTION_NAME)
@@ -299,9 +297,8 @@ class _MemoryContextMixin:
         self._working_memory.remove_section(FACTS_SECTION_NAME)
 
         # ── Query all three tiers ──────────────────────────────────────────
-        # Sequential, not concurrent (PR #60 review): the tiers share one
-        # aiosqlite connection, which serialises operations anyway — a
-        # gather() would add complexity for zero throughput gain.
+        # Sequential, not concurrent (PR #60 review): the tiers share
+        # one aiosqlite connection, which serialises operations anyway.
 
         # Tier 1 (priority 8): Relationship context for the event sender.
         # Recall is delegated to ``relationship_section`` which handles
@@ -321,16 +318,18 @@ class _MemoryContextMixin:
         # Facts tier (RFC 0026 PR 3) — declarative facts about the
         # canonical sender (dementia-test invariant: stored at N,
         # injects at N+1 without subject-string overlap) plus topic
-        # subjects ``query`` mentions (RFC 0049 P1 — raw content for
-        # channel messages, formatted otherwise).  Returns ``[]`` when
-        # disabled / sender-less / backend raises — all non-fatal.
+        # subjects ``query`` mentions (RFC 0049 P1).  Returns ``[]``
+        # when disabled / sender-less / backend raises — all non-fatal.
+        # ``cross_room: live`` (RFC 0049 PR 4, the promoted default)
+        # widens the ONE live read past the §D room wall — visibility
+        # belongs to the RFC 0037 gate below; shadow mode keeps the
+        # walled read and logs the widened delta instead.
         if self._facts_enabled:
             facts = await recall_facts_for_event(
                 self._fact_store, event, stimulus=query,
+                sessions=SESSIONS_ALL
+                if self._facts_cross_room == CROSS_ROOM_LIVE else None,
             )
-            # RFC 0049 P1 PR 2 — L2 cross-room SHADOW (0031 fact-scope
-            # amendment): log what the widened fact recall would inject;
-            # never enters the prompt/budget (see ``facts_shadow``).
             await emit_facts_shadow(
                 self._fact_store, event, stimulus=query,
                 live_fact_ids={f.fact_id for f in facts},
@@ -341,33 +340,42 @@ class _MemoryContextMixin:
 
         # Tier 2 (priority 7): Episodic recall (TICK skip removed —
         # RFC 0017 §D min_score + the PR 5 empty-context short-circuit).
+        # ``cross_room: live`` (RFC 0049 PR 4, the promoted default) =
+        # room-first-RANKED recall in ONE widened, reinforcing query
+        # (the shadow pass does not run in live mode, so the episodic
+        # tier costs one read per turn in every mode); otherwise the
+        # RFC 0031 §D wall (``sessions=None``; ``"*"`` pinned
+        # unreachable) with shadow mode logging the widened delta.
         try:
-            # PR 4: ``sessions=None`` = §D default; ``"*"`` pinned unreachable.
-            episodes = await self._episodic_memory.recall(
-                query,
-                limit=EPISODIC_RECALL_LIMIT,
-                min_score=DEFAULT_EPISODIC_MIN_SCORE,
-                sessions=None,
-            )
+            if self._episodic_cross_room == CROSS_ROOM_LIVE:
+                episodes = await recall_room_ranked(
+                    self._episodic_memory, query,
+                    limit=EPISODIC_RECALL_LIMIT,
+                    min_score=DEFAULT_EPISODIC_MIN_SCORE,
+                    reinforce=True,
+                )
+            else:
+                episodes = await self._episodic_memory.recall(
+                    query,
+                    limit=EPISODIC_RECALL_LIMIT,
+                    min_score=DEFAULT_EPISODIC_MIN_SCORE,
+                    sessions=None,
+                )
         except Exception:
             logger.warning(
                 "Agent %s: episodic recall failed, skipping",
                 self.agent_id, exc_info=True,
             )
             episodes = []
-        # RFC 0049 P1 PR 3 — L1 cross-room SHADOW (L1 amendment): log what
-        # the room-first-RANKED widened recall would inject; never enters
-        # the prompt/budget (see ``episodes_shadow``).
         await emit_episodes_shadow(
             self._episodic_memory, event, query=query,
             live_episode_ids={e.id for e in episodes},
             agent_id=self.agent_id, mode=self._episodic_cross_room,
         )
 
-        # Tier 3 (priority 6): Recent notes matching event content — all
-        # event types, min_score at the DB layer (recency fallback removed,
-        # RFC 0017 §D / PR #131 F-1).  Room-scoped §D default; cross-room
-        # person identity lives on the relationship tier (F-7 Option D).
+        # Tier 3 (priority 6): Recent notes — min_score at the DB layer
+        # (RFC 0017 §D / PR #131 F-1).  Room-scoped §D default;
+        # cross-room person identity rides the relationship tier (F-7).
         notes = await recall_notes_for_event(
             self._episodic_memory,
             query=query,
@@ -434,12 +442,9 @@ class _MemoryContextMixin:
             )
             if facts_section is not None:
                 self._working_memory.add_section(facts_section)
-                # RFC 0026 PR 4 — use-based reinforcement; failure is
-                # non-fatal because the section is already staged in
-                # ``_working_memory`` and the caller builds the LLM
-                # prompt after ``_inject_memory_context`` returns
-                # (PR #342 third-pass M-3 — fixes earlier misleading
-                # "prompt already shipped" wording).
+                # RFC 0026 PR 4 — use-based reinforcement; non-fatal
+                # because the section is already staged and the caller
+                # builds the prompt after this returns (PR #342 M-3).
                 admitted_fact_ids = budget.admissions_by_tier("facts")
                 if admitted_fact_ids and self._fact_store is not None:
                     try:

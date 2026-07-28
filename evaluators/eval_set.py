@@ -87,6 +87,10 @@ class Interaction:
     id: str
     turns: list[Turn]
     elapsed: str | None = None
+    #: RFC 0049 PR 4 — optional RFC 0031 memory room for this interaction's
+    #: turns; the driver binds it as ``persatrix_session`` event metadata.
+    #: ``None`` (the single-room seeds) keeps the pre-extension path.
+    room: str | None = None
 
 
 @dataclass
@@ -97,6 +101,9 @@ class Setup:
     session_id: str | None = None
     seed_state: dict[str, Any] = field(default_factory=dict)
     llm_mode: str = "replay"
+    #: RFC 0049 PR 4 — optional deep-merge override for the resolved persona
+    #: config's ``memory`` block (pins runtime memory knobs per recipe).
+    memory: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -234,6 +241,7 @@ def _parse_setup(raw: dict[str, Any]) -> Setup:
         session_id=raw.get("session_id"),
         seed_state=dict(raw.get("seed_state") or {}),
         llm_mode=raw.get("llm_mode", "replay"),
+        memory=dict(raw.get("memory") or {}),
     )
 
 
@@ -241,6 +249,7 @@ def _parse_interaction(raw: dict[str, Any]) -> Interaction:
     return Interaction(
         id=raw["id"],
         elapsed=raw.get("elapsed"),
+        room=raw.get("room"),
         turns=[_parse_turn(t) for t in raw["turns"]],
     )
 

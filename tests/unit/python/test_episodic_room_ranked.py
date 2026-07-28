@@ -12,13 +12,18 @@ RFC 0031 §D session filter becomes a ranking cue instead of a wall:
   (ranking, not a hard two-tier sort);
 * the ``legacy`` carve-out rides the boost set exactly as it rides the
   live wall;
-* ``epoch`` and ``principal`` stay hard walls on the widened read; and
-* the read is SIDE-EFFECT-FREE — no ``access_count`` bump — which is
-  what lets the shadow pass observe without perturbing live ranking
-  (and keeps the landed RFC 0044 goldens on their cassettes).
+* ``epoch`` and ``principal`` stay hard walls on the widened read;
+* the read is SIDE-EFFECT-FREE by default — no ``access_count`` bump —
+  which is what lets the shadow pass observe without perturbing live
+  ranking, while ``reinforce=True`` (the PR 4 live prompt path) applies
+  exactly the :meth:`EpisodicMemory.recall` bump; and
+* ``sessions`` / ``boost_sessions`` are mutually exclusive at the query
+  helpers themselves (the #783 either-wall-or-boost follow-up).
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 import pytest
 
@@ -175,16 +180,35 @@ class TestRecallContract:
     async def test_side_effect_free_no_access_bump(
         self, memory: EpisodicMemory,
     ):
-        """The load-bearing shadow property: the ranked read must not
-        reinforce — ``access_count`` feeds the live composite score, so
-        a bumping shadow would perturb live ranking on later turns and
-        shift the landed goldens off their cassettes."""
+        """The load-bearing shadow property: the DEFAULT ranked read
+        must not reinforce — ``access_count`` feeds the live composite
+        score, so a bumping shadow would perturb live ranking on later
+        turns and shift the landed goldens off their cassettes."""
         ep_id = await _seed(memory)
         await _ranked(memory)
         row = await memory.get_episode(ep_id)
         assert row is not None
         assert row.access_count == 0
         assert row.last_accessed_at is None
+
+    async def test_reinforce_bumps_like_live_recall(
+        self, memory: EpisodicMemory,
+    ):
+        """``reinforce=True`` (the PR 4 live prompt path) applies the
+        :meth:`EpisodicMemory.recall` access bump to every returned row
+        — cross-room included (a used episode is a used episode
+        wherever it was formed) — and refreshes the in-memory objects."""
+        same = await _seed(memory, session_id=ROOM)
+        cross = await _seed(memory, session_id=OTHER_ROOM)
+        with session_scope(ROOM):
+            rows = await recall_room_ranked(memory, "atlas", reinforce=True)
+        assert {ep.id for ep in rows} == {same, cross}
+        assert all(ep.access_count == 1 for ep in rows)
+        for ep_id in (same, cross):
+            row = await memory.get_episode(ep_id)
+            assert row is not None
+            assert row.access_count == 1
+            assert row.last_accessed_at is not None
 
     async def test_pending_summary_rows_dropped(
         self, memory: EpisodicMemory,
@@ -207,3 +231,41 @@ class TestRecallContract:
     async def test_min_score_validated(self, memory: EpisodicMemory):
         with pytest.raises(ValueError, match="min_score"):
             await recall_room_ranked(memory, "atlas", min_score=1.5)
+
+
+@_asyncio
+class TestWallBoostGuard:
+    """The #783 either-wall-or-boost follow-up: the three query helpers
+    refuse ``sessions`` + ``boost_sessions`` together — boosting a
+    subset of an already-filtered set silently re-creates the wall the
+    ranked mode drops.  The guard runs before any DB access, so a
+    ``None`` connection proves it fires first."""
+
+    _NO_DB: Any = None  # the guard must fire before the connection is touched
+
+    async def test_fts5_rejects_wall_plus_boost(self):
+        from agents.memory.episodic_queries import recall_fts5
+
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            await recall_fts5(
+                self._NO_DB, "a", "q", 5, 0.0,
+                sessions=["room-b"], boost_sessions=["room-b"],
+            )
+
+    async def test_like_rejects_wall_plus_boost(self):
+        from agents.memory.episodic_queries import recall_like
+
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            await recall_like(
+                self._NO_DB, "a", "q", 5, 0.0,
+                sessions=["room-b"], boost_sessions=["room-b"],
+            )
+
+    async def test_recency_rejects_wall_plus_boost(self):
+        from agents.memory.episodic_queries import recall_recency
+
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            await recall_recency(
+                self._NO_DB, "a", 5, 0.0,
+                sessions=["room-b"], boost_sessions=["room-b"],
+            )
