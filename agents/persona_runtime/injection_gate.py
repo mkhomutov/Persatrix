@@ -111,9 +111,11 @@ def acting_classification_for_event(event: AgentEvent) -> str | None:
 
 @dataclass(frozen=True)
 class InjectionManifestEntry:
-    """One injected (budget-admitted) memory entry — the §G tripwire's
-    future per-turn input (RFC 0037 PR 7 threads it to ``ActionExecutor``
-    and adds the normalized-span hashes; dark until then)."""
+    """One injected (budget-admitted) memory entry — the record of what
+    reached the prompt.  The §G tripwire (PR 7) watches the WITHHELD
+    complement instead (see ``tripwire_watch``): an admitted entry's
+    level is ≤ the acting level = the §B-guarded publish target, so it
+    can never satisfy §G's above-target condition."""
 
     tier: str
     entry_id: str

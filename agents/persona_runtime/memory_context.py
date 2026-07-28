@@ -60,6 +60,7 @@ from .relationship_section import (
     recall_relationship_summary,
     render_relationship_section,
 )
+from .tripwire_watch import stamp_turn_tripwire_watch
 
 if TYPE_CHECKING:
     # ``from __future__ import annotations`` makes every annotation in this
@@ -104,10 +105,9 @@ class MemoryInjectionResult:
             short-circuit to decide whether to suppress the LLM call.
         manifest: RFC 0037 §G's per-turn injection manifest (PR 4) — every
             §D-gated, budget-admitted entry as ``(tier, entry_id,
-            protection_level)``.  Dark until PR 7 threads it to the
-            ``ActionExecutor`` tripwire (which also adds the
-            normalized-span hashes); carried here so the turn that
-            assembled the prompt owns the record of what reached it.
+            protection_level)``: the record of what reached the prompt.
+            The PR 7 tripwire watches the WITHHELD complement (span
+            hashes stamped on the event — see ``tripwire_watch``).
     """
 
     memory_admitted_tokens: int
@@ -386,9 +386,8 @@ class _MemoryContextMixin:
         # the prompt.  The acting level resolves from the trusted event via
         # the positive-list class rule (channel-anchored types read the §B
         # wire stamp; the tick-shaped class floors to ``public`` — §A rule
-        # (b)).  The relationship tier is deliberately ungated (§C
-        # write-through rule + the Non-Goals trust-score carve-out — see
-        # ``injection_gate``).
+        # (b)).  The relationship tier is deliberately ungated (§C write-
+        # through + the Non-Goals trust-score carve-out — see injection_gate).
         gate = TurnInjectionGate(
             acting=acting_classification_for_event(event),
             agent_id=self.agent_id,
@@ -404,6 +403,8 @@ class _MemoryContextMixin:
             channel_history=channel_episodes, episodic_entries=episodes,
         )
         gate.emit_log()
+        # §G (PR 7): stamp the withheld-entry tripwire watch for the executor.
+        stamp_turn_tripwire_watch(event, gate)
 
         # ── Allocate-loop ──────────────────────────────────────────────────
         # Process tiers in fixed priority order (relationship=8 → episodic=7
@@ -492,8 +493,7 @@ class _MemoryContextMixin:
 
         memory_admitted_tokens = MEMORY_BUDGET_TOKENS - budget.remaining
         # Consumed by ``_on_event_inner`` for the RFC 0017 §F empty-context
-        # TICK short-circuit (PR 5).  The §G manifest labels the admitted
-        # subset off the MQ-11 registry (RFC 0037 PR 4 — dark until PR 7).
+        # TICK short-circuit (PR 5); the §G manifest labels the admitted subset.
         return MemoryInjectionResult(
             memory_admitted_tokens=memory_admitted_tokens,
             manifest=gate.manifest(budget),
