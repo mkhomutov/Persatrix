@@ -91,6 +91,11 @@ class Interaction:
     #: turns; the driver binds it as ``persatrix_session`` event metadata.
     #: ``None`` (the single-room seeds) keeps the pre-extension path.
     room: str | None = None
+    #: RFC 0037 PR 8 — optional §A channel classification for this
+    #: interaction's turns; the driver seeds it as the event's
+    #: ``channel_classification`` wire stamp (schema-enforced vocabulary).
+    #: ``None`` keeps the driver's DM default ``internal``.
+    classification: str | None = None
 
 
 @dataclass
@@ -250,6 +255,7 @@ def _parse_interaction(raw: dict[str, Any]) -> Interaction:
         id=raw["id"],
         elapsed=raw.get("elapsed"),
         room=raw.get("room"),
+        classification=raw.get("classification"),
         turns=[_parse_turn(t) for t in raw["turns"]],
     )
 

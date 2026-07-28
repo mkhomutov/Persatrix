@@ -418,8 +418,19 @@ prompt
 > shadow-first and were promoted on a green golden-trace verdict; the
 > per-tier knobs `memory.facts.cross_room` / `memory.episodic.cross_room`
 > (`live | shadow | off`, default `live`) are the rollback levers. The
-> `epoch` and `principal` walls stay absolute. Live acceptance:
-> [MT-MEMORY-CROSSROOM-001](../manual-tests/MT-MEMORY-CROSSROOM-001.md).
+> `epoch` and `principal` walls stay absolute. The gate's blunt withhold
+> also has two shipped refinements: a protected interaction's close emits
+> **§E projections** — one-line lower-level summaries served in place of
+> the withheld original, so a `public`-acting turn can be *informed by*
+> a `restricted` memory without disclosing it (#787) — and the **§G
+> tripwire** logs a metadata-only audit record
+> (`channel.confidentiality_tripwire`) if a withheld entry's verbatim
+> text ever appears in an outbound channel message (#788; observability,
+> not blocking). Live acceptance:
+> [MT-MEMORY-CROSSROOM-001](../manual-tests/MT-MEMORY-CROSSROOM-001.md)
+> (the carry half) +
+> [MT-PERSONA-CONFIDENTIALITY-001](../manual-tests/MT-PERSONA-CONFIDENTIALITY-001.md)
+> (the confidentiality half).
 
 ### Episodic memory
 

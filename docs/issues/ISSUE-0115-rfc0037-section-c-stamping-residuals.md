@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0115
 summary: "Three RFC 0037 §C residuals left open by the PR 3 (memory substrate, #775) review, each owned by a later PR in the same plan but none currently scoped there: (a) §C promises operators a one-time flag to backfill all pre-migration notes at a chosen level, the escape hatch for the notes tier's documented under-protection residual — the notes backfill happens in PR 3's v16 column DEFAULT, and the flag appears in no PR's scope; (b) §C still specifies backfilling each entry from its recorded source channel's classification where resolvable, with the facts leg joining through the episode's interaction, while v16 ships a blanket `internal` DEFAULT — provably equivalent today (channel rows live in the orchestrator's channel store, unreachable from the memory DB, and channel-store v11 backfills every channel to `internal`), but the RFC text now describes a join that does not exist; (c) frozen-at-open capture means an interaction open across an UPWARD reclassification stamps the pre-raise level onto an episode/facts batch that includes post-raise turns — §C's read-once-per-interaction rule and the retroactive-reclassification non-goal cover the backfill case, not this live one, so the residual is currently undocumented rather than decided."
-status: open
+status: resolved
 severity: medium
 area: memory
 created: 2026-07-26
+closed: 2026-07-29
+closed_pr: 789
 refs:
   - docs/rfcs/0037-memory-confidentiality-channel-classification.md
   - docs/rfcs/0037-pr-plan.md
@@ -125,6 +127,19 @@ is currently neither ruled in nor ruled out.
 > 2026-07-26 — initial capture during the PR #775 (RFC 0037 PR 3) review.
 > The same review's two fixed findings (`agent_id` on `memory_projections`,
 > the untested wire→capture→stamp seam) landed in that PR.
+
+> 2026-07-29 — **CLOSED at the RFC 0037 PR 8 closeout.** (b) resolved: §C's
+> *Migration backfill* paragraph now states the shipped blanket `internal`
+> DEFAULT and the two reasons it is equivalent to the specified join
+> (cross-store unreachability + the channel-store v11 `internal` backfill).
+> (c) decided **accept-and-document**: §C gains an *Upward reclassification
+> across an open interaction* paragraph — the frozen-at-open stamp is the
+> level promised when the conversation began, the window is bounded by the
+> close triggers, the operator remedy is closing the open interaction before
+> teaching at the raised level, and the §G tripwire audit trail is the
+> detection path; close-on-reclassify (the RFC 0030 rotation-seam split) is
+> recorded there as the upgrade path if tripwire evidence ever justifies it.
+> All three residuals now have owners-of-record in the RFC text.
 
 > 2026-07-26 — **(a) RESOLVED by RFC 0037 PR 4** (the §D hard-gate PR): the
 > one-time flag ships as the `PERSATRIX_NOTES_BACKFILL_PROTECTION_LEVEL`
