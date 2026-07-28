@@ -36,6 +36,14 @@ from ..observability.metrics import current_agent_id, try_get_instruments
 from ..optimization import summarization_model
 from ..prompt_loader import load_snippet
 from ..wallet_client import BudgetExceededError
+from .classification import (
+    CLASSIFICATION_INTERNAL,
+    CLASSIFICATION_RANKS,
+    levels_below_stamp,
+    normalize_for_stamp,
+    rank_for_stamp,
+)
+from .fact_envelope import extract_projections
 from .fact_extractor import (
     FactsParseError,
     build_combined_prompt_suffix,
@@ -77,11 +85,34 @@ SUMMARIZATION_TARGET_TOKENS: int = 2000
 SUMMARIZATION_MAX_OUTPUT_TOKENS: int = 1024
 
 
+def _projection_levels(interaction: Interaction) -> tuple[str, ...]:
+    """The §E projection levels this close should request — possibly none.
+
+    RFC 0037 PR 6 scope decision: projections are requested only for a
+    *protected* interaction — one whose rule-(a) stamp ranks ABOVE
+    ``internal`` (``restricted`` / ``secret``), i.e. the operator
+    opt-in class the Phase-1 dark-window rule guarded.  The universal
+    ``internal`` default deliberately requests none: emitting a
+    ``public`` projection on every mundane close would add output
+    tokens to every interaction, change the prompt bytes under every
+    landed RFC 0044 golden, and hand the ``public``-floored tick class
+    a context feed the RFC 0017 §F empty-context economics never
+    priced.  An ``internal`` entry in a ``public`` acting turn
+    therefore stays blunt-withheld — the Phase-1 posture, which the
+    RFC states is already correct without projections.
+    """
+    if rank_for_stamp(interaction.classification) <= (
+        CLASSIFICATION_RANKS[CLASSIFICATION_INTERNAL]
+    ):
+        return ()
+    return levels_below_stamp(interaction.classification)
+
+
 async def summarize_closed_interaction(
     llm_client: LLMClient,
     agent_id: str,
     interaction: Interaction,
-) -> tuple[str, bool, str | None]:
+) -> tuple[str, bool, str | None, dict[str, str]]:
     """Build an LLM-generated summary + extract declarative facts.
 
     RFC 0026 PR 2 — the summariser prompt is now a **two-output**
@@ -92,7 +123,7 @@ async def summarize_closed_interaction(
     string and returned alongside so the orchestrator can dispatch
     :func:`store_extracted_facts` after the summary commits.
 
-    Returns ``(summary_text, failed_bool, facts_raw_or_None)``:
+    Returns ``(summary_text, failed_bool, facts_raw_or_None, projections)``:
 
     * ``summary_text`` — the prose summary (or
       :data:`SUMMARY_UNAVAILABLE_TEXT` when ``failed_bool`` is
@@ -105,6 +136,13 @@ async def summarize_closed_interaction(
       response is plain text (backward-compat path — older mock
       clients and legacy LLM responses without the envelope still
       yield a valid summary write but no facts).
+    * ``projections`` — RFC 0037 §E (PR 6): the declassified one-line
+      restatements the model returned for the levels
+      :func:`_projection_levels` requested, ``{level: text}``.  Empty
+      for an unprotected interaction (nothing requested — the prompt
+      is byte-identical to the pre-PR-6 shape), on every failure path,
+      and on any projections-half malformation (best-effort per the
+      §E honest boundary — a bad projection never fails the summary).
     """
     if interaction.turn_count == 1:
         payload = interaction.turns[0].payload or {}
@@ -127,6 +165,7 @@ async def summarize_closed_interaction(
                 f"first[{single}] last[{single}]",
                 False,
                 None,
+                {},
             )
 
     entries = _interaction_to_entries(interaction)
@@ -159,7 +198,7 @@ async def summarize_closed_interaction(
             summarization_model_ref, agent_id, interaction.scope, exc,
         )
         _emit_summary_failed("model_unresolvable")
-        return (SUMMARY_UNAVAILABLE_TEXT, True, None)
+        return (SUMMARY_UNAVAILABLE_TEXT, True, None, {})
     # RFC 0052 PR 4b-ii (OQ #6): on the AUTONOMOUS bounded close — the
     # interaction ``close_notification.py`` marked ``meter_close_summary`` off
     # the typed wire trigger — the summariser call draws an RFC 0023 wallet
@@ -218,7 +257,7 @@ async def summarize_closed_interaction(
             agent_id, interaction.scope,
         )
         _emit_summary_failed("timeout")
-        return (SUMMARY_UNAVAILABLE_TEXT, True, None)
+        return (SUMMARY_UNAVAILABLE_TEXT, True, None, {})
     except BudgetExceededError as exc:
         # OQ #6 residual (PR #718 review): a METERED close summary's lease can
         # be denied at the wallet hard cap — the reserve is trigger-side only
@@ -238,14 +277,14 @@ async def summarize_closed_interaction(
             agent_id, interaction.scope, exc.reason, exc,
         )
         _emit_summary_failed("budget_denied")
-        return (SUMMARY_UNAVAILABLE_TEXT, True, None)
+        return (SUMMARY_UNAVAILABLE_TEXT, True, None, {})
     except Exception as exc:
         logger.warning(
             "Summarisation failed for agent %s (scope=%s): %s",
             agent_id, interaction.scope, exc,
         )
         _emit_summary_failed("llm_error")
-        return (SUMMARY_UNAVAILABLE_TEXT, True, None)
+        return (SUMMARY_UNAVAILABLE_TEXT, True, None, {})
 
     text = (response.text or "").strip()
     if not text:
@@ -255,7 +294,7 @@ async def summarize_closed_interaction(
             agent_id, interaction.scope,
         )
         _emit_summary_failed("empty")
-        return (SUMMARY_UNAVAILABLE_TEXT, True, None)
+        return (SUMMARY_UNAVAILABLE_TEXT, True, None, {})
     # Combined-envelope path; plain prose falls through to the
     # backward-compat branch (commit text as summary, facts=None).
     # PR 5b — ``exc.reason`` partitions truncated / missing-summary /
@@ -275,8 +314,9 @@ async def summarize_closed_interaction(
             # backward-compat commit below.
             emit_envelope_parse_failed(exc.reason)
             _emit_summary_failed(exc.reason)
-            return (SUMMARY_UNAVAILABLE_TEXT, True, None)
-        return (text, False, None)
+            return (SUMMARY_UNAVAILABLE_TEXT, True, None, {})
+        # Plain prose carries no envelope, hence no projections either.
+        return (text, False, None, {})
     # PR #340 deep-review S2: a well-formed envelope with an empty
     # ``summary`` field parses cleanly today and commits ``""`` to
     # ``update_episode_summary`` while letting facts dispatch fire
@@ -297,8 +337,16 @@ async def summarize_closed_interaction(
             agent_id, interaction.scope,
         )
         _emit_summary_failed("empty_field")
-        return (SUMMARY_UNAVAILABLE_TEXT, True, None)
-    return (summary, False, facts_raw)
+        return (SUMMARY_UNAVAILABLE_TEXT, True, None, {})
+    # RFC 0037 §E (PR 6) — the projections half rides the same envelope,
+    # parsed leniently and only when the prompt actually requested levels
+    # (a protected interaction); see ``extract_projections`` for why a
+    # malformed half degrades to ``{}`` instead of failing the summary.
+    requested = _projection_levels(interaction)
+    projections = (
+        extract_projections(text, levels=requested) if requested else {}
+    )
+    return (summary, False, facts_raw, projections)
 
 
 def _interaction_to_entries(interaction: Interaction) -> list[MemoryEntry]:
@@ -347,8 +395,14 @@ def _build_summarization_prompt(
     onto the existing RFC 0020 PR 4 summary prompt — one LLM call,
     two structured outputs.  The summary prompt body itself stays
     unchanged so the RFC 0020 PR 4 regression suite remains green.
+
+    RFC 0037 §E (PR 6) appends a third output — the ``projections``
+    key — but ONLY for a protected interaction
+    (:func:`_projection_levels` non-empty): every unprotected close
+    keeps the exact pre-PR-6 prompt bytes, which is what holds the
+    landed RFC 0044 goldens (and every mocked close fixture) stable.
     """
-    return (
+    prompt = (
         load_snippet("interaction-summarizer") + "\n\n"
         f"Scope: {interaction.scope}\n"
         f"Turns: {interaction.turn_count}\n"
@@ -359,6 +413,13 @@ def _build_summarization_prompt(
         f"Compressed turns:\n{view.summary}\n"
         + build_combined_prompt_suffix()
     )
+    levels = _projection_levels(interaction)
+    if levels:
+        prompt += "\n" + load_snippet("projection-suffix").format(
+            interaction_level=normalize_for_stamp(interaction.classification),
+            levels_list=", ".join(f"`{level}`" for level in levels),
+        ) + "\n"
+    return prompt
 
 
 def _emit_summary_failed(reason: str) -> None:

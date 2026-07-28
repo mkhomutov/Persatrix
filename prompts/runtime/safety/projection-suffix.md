@@ -1,0 +1,4 @@
+This interaction took place in a channel classified `{interaction_level}`. Add ONE more top-level key to the same JSON object:
+  * `projections` (object): for EACH of the following lower confidentiality levels, one entry mapping the level name to a single-sentence declassified restatement of the interaction, safe to show at that level: {levels_list}.
+
+Each restatement must convey the *bearing* of the interaction (that something relevant happened, its general topic area, any resulting stance) WITHOUT the protected content itself: no verbatim phrases from the conversation, no names, numbers, identifiers, quotes, or other specifics that the classification protects. A lower level must reveal no more than a higher one. If no safe restatement exists for a level, map that level to an empty string.

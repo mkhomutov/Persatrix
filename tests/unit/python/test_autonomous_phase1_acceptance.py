@@ -114,7 +114,7 @@ async def _summarize(agent: _PersonaAgent) -> tuple[str, dict[str, object]]:
     return (summary, the create_message kwargs)."""
     assert len(agent.persisted) == 1, "exactly one record persisted on close"
     client = _SpyClient()
-    summary, failed, _facts = await summarize_closed_interaction(
+    summary, failed, _facts, _projections = await summarize_closed_interaction(
         client,  # type: ignore[arg-type]  # a duck-typed LLM double
         agent.agent_id, agent.persisted[0],
     )
