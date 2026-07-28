@@ -25,6 +25,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from agents.channel_wire_metadata import DispatchContext
+from agents.chat_reply import process_inbound_channel_event
 from agents.confidentiality_tripwire import (
     AUDIT_EVENT_TRIPWIRE,
     TRIPWIRE_WATCH_METADATA_KEY,
@@ -240,5 +241,105 @@ class TestTripwireEndToEnd:
             assert TRIPWIRE_WATCH_METADATA_KEY not in event.metadata
             context = DispatchContext.for_event(event, cascade_depth=1)
             assert context.origin_tripwire_watch is None
+        finally:
+            await agent.close_memory()
+
+
+class TestInboundSeam:
+    """The dominant production channel path (RFC 0024 Phase 4): gRPC
+    ``ReceiveChannelMessage`` → ``EventDispatcher.enqueue_inbound`` → the
+    event loop's ``on_inbound`` → ``process_inbound_channel_event``.
+
+    That body snapshots its ``DispatchContext`` BEFORE the turn runs,
+    while the §G watch is stamped DURING the turn — so the executor
+    context must re-lift the watch post-turn (PR #788 review finding 1),
+    and the ingest sanitize rebuild must share the metadata dict so the
+    stamp lands where that re-lift looks (finding 2).  ``_run_turn``
+    above hand-orders turn-then-context (the ``EventDispatcher.dispatch``
+    shape); these tests drive the real inbound body instead."""
+
+    async def test_verbatim_echo_fires_through_the_inbound_seam(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        agent = await _make_agent(
+            _send_reply(f"Sharing broadly: {_PROTECTED_SUMMARY}."),
+        )
+        try:
+            await agent._episodic_memory.store_episode(
+                summary=_PROTECTED_SUMMARY,
+                context={},
+                importance=0.9,
+                protection_level="restricted",
+                source_channel_id="group:leadership",
+            )
+            event = _event("internal", "sunset next quarter")
+            executor, publisher = _executor()
+            with caplog.at_level(logging.INFO):
+                await process_inbound_channel_event(
+                    agent=agent,
+                    executor=executor,
+                    event=event,
+                    max_cascade_depth=4,
+                )
+            publisher.publish.assert_awaited_once()
+            records = _audit_records(caplog)
+            assert len(records) == 1
+            assert records[0].protection_level == "restricted"  # type: ignore[attr-defined]
+            assert records[0].acting_classification == "internal"  # type: ignore[attr-defined]
+        finally:
+            await agent.close_memory()
+
+    async def test_sanitize_rebuild_keeps_the_watch_liftable(
+        self,
+        caplog: pytest.LogCaptureFixture,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A quarantining sanitizer rebuilds the event mid-ingest; the
+        stamp then lands on the rebuilt event's metadata — which must be
+        the SAME dict the outer event (and the post-turn re-lift) holds,
+        or exactly the sanitize-flagged traffic goes unwatched."""
+        import agents.persona_runtime.channel_ingest as ingest
+        from agents.security import SanitizedInput
+
+        sanitized_calls: list[str] = []
+
+        def _quarantine(content: str, *, source: str) -> SanitizedInput:
+            sanitized_calls.append(content)
+            # The real quarantine action's substitution shape: flagged
+            # content becomes the empty string (``agents.security``), which
+            # differs from the input so the rebuild branch is
+            # deterministically taken, and sends the memory query down the
+            # empty-query recency-ranking branch — which still surfaces the
+            # restricted episode to the §D gate.
+            return SanitizedInput(
+                content="", source=source, flagged=True, flags=("t",),
+            )
+
+        monkeypatch.setattr(ingest, "sanitize", _quarantine)
+        agent = await _make_agent(
+            _send_reply(f"Big news everyone: {_PROTECTED_SUMMARY}!"),
+        )
+        try:
+            await agent._episodic_memory.store_episode(
+                summary=_PROTECTED_SUMMARY,
+                context={},
+                importance=0.9,
+                protection_level="restricted",
+                source_channel_id="group:leadership",
+            )
+            event = _event("internal", "sunset next quarter")
+            executor, publisher = _executor()
+            with caplog.at_level(logging.INFO):
+                await process_inbound_channel_event(
+                    agent=agent,
+                    executor=executor,
+                    event=event,
+                    max_cascade_depth=4,
+                )
+            # The rebuild branch really ran: the inbound content reached the
+            # stub, whose differing return forces the event rebuild.
+            assert "sunset next quarter" in sanitized_calls
+            publisher.publish.assert_awaited_once()
+            assert len(_audit_records(caplog)) == 1
         finally:
             await agent.close_memory()

@@ -197,6 +197,43 @@ class TestStampTurnWatch:
         assert TRIPWIRE_WATCH_METADATA_KEY not in event.metadata
 
 
+class TestSanitizeRebuildSharesMetadata:
+    """PR #788 review finding 2: ``sanitize_inbound_event``'s rebuild
+    branch returns a NEW event.  If its metadata were copied, the §G
+    stamp written during the turn would land on the inner rebuilt event
+    while the outer event — the one ``DispatchContext`` lifts from —
+    stayed unwatched, on exactly the sanitize-flagged traffic the
+    tripwire most needs to observe.  The dict must be shared."""
+
+    def test_stamp_on_rebuilt_event_is_visible_on_the_original(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import agents.persona_runtime.channel_ingest as ingest
+        from agents.security import SanitizedInput
+
+        def _quarantine(content: str, *, source: str) -> SanitizedInput:
+            return SanitizedInput(
+                content="[cleared]", source=source, flagged=True, flags=("t",),
+            )
+
+        monkeypatch.setattr(ingest, "sanitize", _quarantine)
+        event = AgentEvent(
+            event_type=EventType.CHANNEL_MESSAGE,
+            payload={"content": "raw suspicious content"},
+            channel_id="group:planning",
+            sender_id="alice",
+            metadata={"channel_classification": "internal"},
+        )
+        rebuilt = ingest.sanitize_inbound_event(event)
+        assert rebuilt is not event
+        assert rebuilt.payload["content"] == "[cleared]"
+        assert rebuilt.metadata is event.metadata
+        # The production shape: the turn stamps the REBUILT event; the
+        # dispatch side lifts from the ORIGINAL.
+        stamp_turn_tripwire_watch(rebuilt, _gate_with_withholds())
+        assert TRIPWIRE_WATCH_METADATA_KEY in event.metadata
+
+
 class TestTripwireMetric:
     @pytest.fixture
     def metric_reader(self) -> Iterator[InMemoryMetricReader]:
