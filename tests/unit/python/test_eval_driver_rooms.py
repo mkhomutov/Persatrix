@@ -132,6 +132,9 @@ class _FakeAgent:
         self.events.append(event)
         return []
 
+    async def drain_pending_summaries(self) -> None:
+        pass
+
 
 async def test_room_binds_session_metadata_per_interaction(tmp_path: Path) -> None:
     """Roomed interactions carry their room as ``persatrix_session``; the
