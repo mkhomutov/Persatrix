@@ -146,9 +146,8 @@ class _Instruments:
             description="Input and output tokens billed by the LLM provider.",
         )
         # RFC 0033 Phase 3: the ``persatrix.llm.alias.raw_id_usage`` gate
-        # counter is retired — with the raw-ID pass-through and ``_infer_provider``
-        # both removed and ``resolve`` rejecting any non-alias reference, there
-        # is nothing left to count.
+        # counter is retired — with the raw-ID paths removed and ``resolve``
+        # rejecting non-alias references, there is nothing left to count.
         self.event_dispatched: Counter = meter.create_counter(
             name="agent.event.dispatched",
             unit="{event}",
@@ -198,6 +197,7 @@ class _Instruments:
             ),
         )
 
+        from . import _metrics_confidentiality as _mc
         from . import _metrics_conversation_window as _mcw
         from . import _metrics_facts as _mf
         from . import _metrics_interactions as _mi
@@ -205,7 +205,7 @@ class _Instruments:
         from . import _metrics_salience as _msal
         from . import _metrics_temporal as _mt
         from . import _metrics_wakes as _mw
-        for mod in (_mi, _mf, _mp, _mw, _mt, _msal, _mcw):  # registered under the file-size cap
+        for mod in (_mi, _mf, _mp, _mw, _mt, _msal, _mcw, _mc):  # size-cap splits
             mod.register(self, meter)
 
         # ─── Shared memory pools (RFC 0008 PR plan PR 4) ─────────────

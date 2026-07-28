@@ -15,11 +15,16 @@ This module reconciles the wire and event shapes at the single
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from .cascade_depth_defaults import DEFAULT_MAX_CASCADE_DEPTH
 from .channel_event_classification import seed_channel_classification
+from .confidentiality_tripwire import tripwire_watch_from_event
 from .generated import task_pb2
 from .persona_types import AgentEvent
+
+if TYPE_CHECKING:
+    from .confidentiality_tripwire import TripwireWatch
 
 # Byte bound on the lifted ``interaction_id``, the receive-side counterpart to
 # the Go publish boundary's ``interactionIDMaxBytes`` (internal/channels/
@@ -405,6 +410,13 @@ class DispatchContext:
     origin_channel_id: str = ""
     origin_interaction_id: str = ""
     origin_synthesis_turn: bool = False
+    # RFC 0037 §G (PR 7): the turn's tripwire watch — §D-withheld entries'
+    # span fingerprints, stamped by ``_inject_memory_context`` and lifted
+    # structurally by :meth:`for_event` (same rationale as the origin pair:
+    # a per-site kwarg would make "unwatched" the silent fallback).  ``None``
+    # (the common case — nothing withheld, or an origin-less context) means
+    # the executor's §G check no-ops.
+    origin_tripwire_watch: TripwireWatch | None = None
 
     @classmethod
     def for_event(cls, event: AgentEvent, *, cascade_depth: int) -> DispatchContext:
@@ -420,6 +432,7 @@ class DispatchContext:
             origin_channel_id=event.channel_id or "",
             origin_interaction_id=wire_interaction_id(event),
             origin_synthesis_turn=(event.payload or {}).get("synthesis_turn") is True,
+            origin_tripwire_watch=tripwire_watch_from_event(event),
         )
 
     def same_channel_claim(
