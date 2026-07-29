@@ -1,7 +1,9 @@
 <script>
   import { loadBootstrap } from "./lib/api.js";
+  import { onUnauthorized } from "./lib/auth.js";
   import { selectPanels, deriveUserId } from "./lib/bootstrap.js";
   import ChannelTimeline from "./panels/ChannelTimeline.svelte";
+  import LoginPanel from "./panels/LoginPanel.svelte";
 
   // Known panel name → its Svelte component. selectPanels already filters to
   // panels the client knows and the server reports enabled && available, so an
@@ -53,6 +55,18 @@
   // no version chip rather than a placeholder.
   let version = $state("");
   let activeName = $state(hashPanelName());
+  // RFC 0039 (enabled mode): flipped by the first console call that
+  // answers 401 — the api.js error chokepoint reports through the
+  // auth.js listener seam. The shell then swaps its content region for
+  // the minimal login form (amendment §A4); a successful cookie login
+  // reboots the shell, whose /ui/context now carries the verified
+  // principal (and the acting-as override disappears — `authenticated`).
+  let authRequired = $state(false);
+
+  $effect(() => {
+    onUnauthorized(() => (authRequired = true));
+    return () => onUnauthorized(null);
+  });
 
   // The active panel is chosen by the hash route (e.g. #/channels) so a deep
   // link / reload lands on the right panel; falls back to the first rendered
@@ -285,7 +299,16 @@
      and ready branches below do: every shell branch keeps its content inside a
      landmark region, so nothing renders orphaned outside one. The error keeps
      role=alert so it is still announced. -->
-{#if status === "loading"}
+{#if authRequired}
+  <!-- Login replaces the content region only — the topbar (brand, build
+       version) stays, per "the console's existing panel chrome". The
+       reload on success is a full reboot: every panel refetches under
+       the new cookie session and /ui/context reports the verified
+       principal. -->
+  <main class="content">
+    <LoginPanel onsuccess={() => window.location.reload()} />
+  </main>
+{:else if status === "loading"}
   <main class="content">
     <p class="boot">Loading the console…</p>
   </main>

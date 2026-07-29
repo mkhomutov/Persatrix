@@ -78,6 +78,11 @@ func warnAuthPosture(logger *zap.Logger, cfg *server.AuthConfig, httpBind string
 			zap.String("http_bind", httpBind),
 		)
 	}
+	if cfg.Mode == server.AuthModeEnabled && !loopback {
+		logger.Warn("auth: the agent-attributable REST ingress (agent register/deregister, channel list/history/publish, convene) stays UNGATED under enabled — the persona fleet holds no accounts (RFC 0039 §Non-Goals); its authorization story is RFC 0009 agent tokens. Keep that surface network-restricted to the agent fleet",
+			zap.String("http_bind", httpBind),
+		)
+	}
 }
 
 // bindIsLoopback reports whether a bind address string names a loopback

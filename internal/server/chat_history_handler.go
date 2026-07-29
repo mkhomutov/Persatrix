@@ -50,8 +50,23 @@ func (s *Server) handleGetChatHistory(w http.ResponseWriter, r *http.Request) {
 	// defaults an omitted user to the shared "local" fallback), a read endpoint
 	// has no turn to attribute, so an absent principal is a client error rather
 	// than a silent fallback that would leak the shared-local history.
+	//
+	// RFC 0039 §F (Phase 2): under `enabled` the lookup key must BE the
+	// verified claim — this read is the impersonation hole's other half
+	// (the v0.2 TODO above). An omitted user_id defaults to the claim; a
+	// user_id naming someone else is refused loudly (403) rather than
+	// silently answering with the caller's own history — the coarse
+	// role gate has no cross-user read story until Phase 3+.
 	userID := r.URL.Query().Get("user_id")
-	if userID == "" {
+	if s.authEnforced() {
+		claim := identityFrom(r.Context()).ParticipantID
+		if userID == "" {
+			userID = claim
+		} else if userID != claim {
+			writeError(w, "FORBIDDEN", "user_id does not match the authenticated participant", http.StatusForbidden)
+			return
+		}
+	} else if userID == "" {
 		writeError(w, "BAD_REQUEST", "user_id is required", http.StatusBadRequest)
 		return
 	}

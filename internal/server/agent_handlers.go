@@ -328,17 +328,26 @@ func (s *Server) handleUnquarantineAgent(w http.ResponseWriter, r *http.Request)
 		writeError(w, "UNAVAILABLE", "circuit breaker not configured", http.StatusServiceUnavailable)
 		return
 	}
-	// PR #244 H-02: optional shared-secret gate. Only enforced when the
-	// operator has opted in via SECURITY_UNQUARANTINE_TOKEN; an empty
-	// configured token leaves the endpoint unauthenticated (matches the
-	// pre-PR baseline + the documented reverse-proxy posture).
-	if s.unquarantineToken != "" {
+	// PR #244 H-02: optional shared-secret gate, SUPERSEDED under
+	// `auth.mode: enabled` (RFC 0039 §H): there the middleware has
+	// already enforced the operator role, the env token is IGNORED —
+	// the Authorization header now carries a session token, not the
+	// shared secret — and no deployment loses protection in either
+	// mode. Under `disabled` the opt-in env-token check still applies
+	// (an empty configured token leaves the endpoint unauthenticated,
+	// the pre-PR baseline + documented reverse-proxy posture).
+	if s.unquarantineToken != "" && !s.authEnforced() {
 		if !validBearerToken(r.Header.Get("Authorization"), s.unquarantineToken) {
 			writeError(w, "UNAUTHORIZED", "invalid or missing unquarantine token", http.StatusUnauthorized)
 			return
 		}
 	}
 	actor := r.Header.Get(security.AgentIDHeader)
+	if ident := identityFrom(r.Context()); ident.Authenticated {
+		// The verified participant beats the self-reported header —
+		// the audit trail names who actually flipped the breaker.
+		actor = ident.ParticipantID
+	}
 	if actor == "" {
 		actor = "operator"
 	}

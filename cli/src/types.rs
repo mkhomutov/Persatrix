@@ -144,9 +144,24 @@ pub(crate) fn colorize_status(status: &str) -> colored::ColoredString {
 
 pub(crate) async fn api_error_message(resp: reqwest::Response) -> String {
     let status = resp.status();
-    match resp.json::<ApiError>().await {
+    let base = match resp.json::<ApiError>().await {
         Ok(e) => format!("{}: {}", status, e.error),
         Err(_) => format!("HTTP {status}"),
+    };
+    // RFC 0039 Phase 2 (§J): a 401 means the orchestrator enforces auth
+    // and this invocation carried no (or a dead) session — say what to
+    // do about it rather than leaving a bare status.
+    with_login_hint(base, status)
+}
+
+// with_login_hint appends the login hint to 401 messages. Split from
+// [api_error_message] so the hint logic is unit-testable without a live
+// `reqwest::Response`.
+pub(crate) fn with_login_hint(message: String, status: reqwest::StatusCode) -> String {
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+        format!("{message}\n  hint: run 'persatrix login' to authenticate")
+    } else {
+        message
     }
 }
 
