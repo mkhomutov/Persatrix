@@ -398,3 +398,25 @@ fn agent_response_tabled_renders_empty_vec_as_dash() {
         "expected em-dash (\\u2014) for empty capabilities; got:\n{output}"
     );
 }
+
+#[test]
+fn with_login_hint_appends_only_on_401() {
+    // RFC 0039 Phase 2 (§J): a 401 carries the login hint; every other
+    // status passes through untouched.
+    let hinted = with_login_hint(
+        "401: unauthorized".into(),
+        reqwest::StatusCode::UNAUTHORIZED,
+    );
+    assert!(
+        hinted.contains("persatrix login"),
+        "401 must carry the login hint; got: {hinted}"
+    );
+
+    let forbidden = with_login_hint("403: forbidden".into(), reqwest::StatusCode::FORBIDDEN);
+    assert_eq!(
+        forbidden, "403: forbidden",
+        "a 403 is a ROLE problem — logging in again would not help"
+    );
+    let not_found = with_login_hint("404: nope".into(), reqwest::StatusCode::NOT_FOUND);
+    assert_eq!(not_found, "404: nope");
+}

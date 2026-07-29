@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -63,6 +64,16 @@ func TestWarnAuthPosture(t *testing.T) {
 
 	enabled := server.DefaultAuthConfig()
 	enabled.Mode = server.AuthModeEnabled
-	assert.Len(t, warns(enabled, "0.0.0.0"), 1, "§B3: enabled + non-loopback + no trusted_proxies WARNs")
-	assert.Empty(t, warns(enabled, "127.0.0.1"), "loopback + enabled needs no proxy config")
+	assert.Len(t, warns(enabled, "0.0.0.0"), 2,
+		"enabled + non-loopback WARNs twice: §B3 no trusted_proxies + the PR 5 agent-ingress residual")
+	assert.Empty(t, warns(enabled, "127.0.0.1"), "loopback + enabled needs no WARN")
+
+	proxied := server.DefaultAuthConfig()
+	proxied.Mode = server.AuthModeEnabled
+	_, cidr, err := net.ParseCIDR("10.0.0.0/8")
+	require.NoError(t, err)
+	proxied.TrustedProxies = []*net.IPNet{cidr}
+	got := warns(proxied, "0.0.0.0")
+	require.Len(t, got, 1, "with trusted_proxies configured only the agent-ingress residual WARNs")
+	assert.Contains(t, got[0], "agent-attributable")
 }
