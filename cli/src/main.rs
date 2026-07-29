@@ -1,5 +1,6 @@
 mod active_session;
 mod commands;
+mod credentials;
 mod epoch_resolve;
 mod session_resolve;
 mod types;
@@ -10,6 +11,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use colored::Colorize;
 
 use commands::agent::{cmd_agent_info, cmd_agent_list, cmd_agent_reload, cmd_test};
+use commands::auth::{cmd_login, cmd_logout, cmd_whoami};
 use commands::channel_dispatch::{dispatch as dispatch_channel, ChannelCommands};
 use commands::chat::cmd_chat;
 use commands::interactions::cmd_agent_interactions;
@@ -159,6 +161,17 @@ enum Commands {
         #[arg(long, default_value = "agent")]
         group_by: String,
     },
+    /// Log in to the orchestrator and store the session token (RFC 0039 §J)
+    Login {
+        /// Account username (prompted when omitted; the password is
+        /// always prompted — never passed on the command line)
+        #[arg(long)]
+        username: Option<String>,
+    },
+    /// Revoke the current session server-side and clear the stored token
+    Logout,
+    /// Show the identity the orchestrator resolves for this client
+    Whoami,
     /// Manage persona-memory sessions (RFC 0031 §E)
     #[command(subcommand)]
     Session(SessionCommands),
@@ -425,6 +438,9 @@ async fn main() {
             println!("{}", "Command 'state' not yet implemented".yellow());
             Ok(())
         }
+        Commands::Login { username } => cmd_login(&client, server, username.as_deref()).await,
+        Commands::Logout => cmd_logout(&client, server).await,
+        Commands::Whoami => cmd_whoami(&client, server).await,
         Commands::Channel(cmd) => dispatch_channel(&client, server, cmd, default_user_id).await,
         Commands::Session(cmd) => dispatch_session(&client, server, cmd).await,
         Commands::Node(_) => {

@@ -89,6 +89,20 @@ type NewAccount struct {
 // account UUID, and inserts the row. The username is case-folded before
 // the write; the returned Account carries the stored (folded) form.
 func (s *Store) CreateAccount(ctx context.Context, in NewAccount) (*Account, error) {
+	a, err := buildAccount(in)
+	if err != nil {
+		return nil, err
+	}
+	if err := insertAccount(ctx, s.db, a); err != nil {
+		return nil, err
+	}
+	return a, nil
+}
+
+// buildAccount runs the §B write-boundary validation and constructs the
+// row. Shared by [Store.CreateAccount] and [Store.BootstrapFirstAccount]
+// so the bootstrap path cannot drift from the ordinary create path.
+func buildAccount(in NewAccount) (*Account, error) {
 	if in.AuthMethod == "" {
 		in.AuthMethod = AuthMethodPassword
 	}
@@ -119,7 +133,7 @@ func (s *Store) CreateAccount(ctx context.Context, in NewAccount) (*Account, err
 	}
 
 	now := time.Now().UTC().Truncate(time.Second)
-	a := &Account{
+	return &Account{
 		ID:            uuid.NewString(),
 		Username:      folded,
 		AuthMethod:    in.AuthMethod,
@@ -129,16 +143,25 @@ func (s *Store) CreateAccount(ctx context.Context, in NewAccount) (*Account, err
 		Status:        StatusActive,
 		CreatedAt:     now,
 		UpdatedAt:     now,
-	}
-	_, err := s.db.ExecContext(ctx, `
+	}, nil
+}
+
+// execer covers *sql.DB and *sql.Tx so insertAccount serves both the
+// plain create and the bootstrap transaction.
+type execer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+func insertAccount(ctx context.Context, db execer, a *Account) error {
+	_, err := db.ExecContext(ctx, `
 		INSERT INTO accounts (id, username, auth_method, password_hash, role, participant_id, status, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.ID, a.Username, a.AuthMethod, nullableString(a.PasswordHash), a.Role,
 		a.ParticipantID, a.Status, a.CreatedAt.Unix(), a.UpdatedAt.Unix())
 	if err != nil {
-		return nil, mapUniqueViolation(err)
+		return mapUniqueViolation(err)
 	}
-	return a, nil
+	return nil
 }
 
 // GetAccount fetches one account by UUID.

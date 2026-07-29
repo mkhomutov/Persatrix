@@ -1,4 +1,5 @@
 pub(crate) mod agent;
+pub(crate) mod auth;
 pub(crate) mod channel;
 pub(crate) mod channel_config;
 pub(crate) mod channel_config_autonomous;

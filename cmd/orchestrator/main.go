@@ -48,11 +48,8 @@ var (
 	port      = flag.Int("port", 9090, "gRPC server port")
 	httpPort  = flag.Int("http-port", 8080, "HTTP/REST + SSE server port")
 	httpBind  = flag.String("http-bind", "127.0.0.1", "HTTP server bind address")
-	// PR #173 review (Must-Fix #2): the gRPC LogService listener previously
-	// bound on `:%d` (all interfaces) while --http-bind defaulted to
-	// loopback, silently broadening the orchestrator's public attack
-	// surface (auth is deferred to RFC 0009).  Mirror --http-bind so the
-	// security posture is consistent across both server-side surfaces.
+	// PR #173 review (Must-Fix #2): mirror --http-bind's loopback default
+	// so the security posture is consistent across both server surfaces.
 	grpcBind     = flag.String("grpc-bind", "127.0.0.1", "gRPC server bind address (LogService); set to 0.0.0.0 for container deployments where shippers connect across the network")
 	workflowsDir = flag.String("workflows-dir", "workflows/", "Path to workflow YAML directory")
 	env          = flag.String("env", "development", "Environment: development|staging|production")
@@ -60,6 +57,11 @@ var (
 )
 
 func main() {
+	// RFC 0039 §G — `account bootstrap` runs instead of the server
+	// (bootstrap.go); server argv falls through to the ordinary boot.
+	if code, ok := runSubcommand(os.Args[1:]); ok {
+		os.Exit(code)
+	}
 	flag.Parse()
 
 	// PR #84 F-01: Resolve --deadline-mode default from --env when not
@@ -176,9 +178,7 @@ func main() {
 		"env", *env,
 	)
 
-	// TODO: Initialize components in order:
-	// 1. Load and validate configuration
-	// 3. Initialize state store
+	// 3. Initialize state store (config load/validate TODO precedes)
 	store := state.NewInMemoryStore(logger)
 	logger.Info("state store initialized", zap.String("type", "in-memory"))
 
