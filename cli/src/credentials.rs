@@ -17,6 +17,7 @@
 
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -80,13 +81,28 @@ fn read_all_at(path: &Path) -> Result<BTreeMap<String, CredentialEntry>, String>
 }
 
 /// Write the map back at mode `0600`, creating the parent directory.
+/// The file is CREATED at `0600` (write-then-chmod would leave the token
+/// world-readable in the gap, permanently if the process died there);
+/// the chmod after only tightens a pre-existing looser file, since the
+/// creation mode does not apply to a file that already exists.
 fn write_all_at(path: &Path, all: &BTreeMap<String, CredentialEntry>) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|e| format!("could not create {}: {e}", parent.display()))?;
     }
     let body = serde_json::to_string_pretty(all).map_err(|e| e.to_string())?;
-    fs::write(path, body + "\n").map_err(|e| format!("could not write {}: {e}", path.display()))?;
+    let mut opts = fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let mut f = opts
+        .open(path)
+        .map_err(|e| format!("could not write {}: {e}", path.display()))?;
+    f.write_all((body + "\n").as_bytes())
+        .map_err(|e| format!("could not write {}: {e}", path.display()))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -266,6 +282,22 @@ mod tests {
         store_at(&p, "http://a", entry("tok")).unwrap();
         let mode = fs::metadata(&p).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600, "the token is a live credential (§J)");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn preexisting_loose_file_is_tightened_on_write() {
+        // The creation mode only applies to files the write itself
+        // creates; a file that already exists with looser permissions
+        // must be re-chmodded to 0600 by the next write.
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::new().unwrap();
+        let p = dir.path().join("credentials");
+        fs::write(&p, "{}\n").unwrap();
+        fs::set_permissions(&p, fs::Permissions::from_mode(0o644)).unwrap();
+        store_at(&p, "http://a", entry("tok")).unwrap();
+        let mode = fs::metadata(&p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
     }
 
     #[test]
