@@ -1,7 +1,7 @@
 # RFC 0039 Amendment — Enabled-Mode Exposure: the Browser Session Surface & Login Throttling
 
 **Type**: amendment to [RFC 0039](0039-user-accounts-authentication.md) — Non-Goal *"A web or GUI login"*, §D (session presentation), §E (the policy matrix), §K (REST surface summary), the Security Considerations bullets *"CSRF / XSS"* and *"Brute force"*, and the Phase 1/2 step lists
-**Status**: 📋 Proposed — authored at the [v0.3.12](../v0.3.12-plan.md) plan opening (2026-07-25) out of the review of the [0039 PR plan](0039-pr-plan.md)
+**Status**: 🚧 Implementing — ratified 2026-07-29 by the maintainer call at the [0039 PR plan](0039-pr-plan.md) PR 3 gate (all three [open questions](#open-questions) resolved — see their §Resolution notes); authored at the [v0.3.12](../v0.3.12-plan.md) plan opening (2026-07-25) out of the review of the [0039 PR plan](0039-pr-plan.md); the ✅ flip is PR 6's closeout
 **Author**: Maksim Khomutov
 **Date**: 2026-07-25
 **Target**: v0.3.12, inside RFC 0039 Phases 1–2 — this is a correction to the shipping scope, not a new train; it lands in the [0039 PR plan](0039-pr-plan.md) PRs 3/5/6
@@ -306,14 +306,30 @@ No new PRs. Folded into the [0039 PR plan](0039-pr-plan.md):
 
 ## Open questions
 
+*All three resolved by the 2026-07-29 maintainer call at the
+[0039 PR plan](0039-pr-plan.md) PR 3 gate.*
+
 1. **A minimum password length at `account bootstrap`?** A length floor in PR 4
    is cheap and closes the worst case of the residual above. Recommend yes; the
    full policy stays Phase 3.
+   *Resolution (2026-07-29): **yes — a 12-character floor**, enforced at
+   `persatrix-server account bootstrap` in PR 4. The full strength policy stays
+   Phase 3.*
 2. **Cookie session TTL — same as bearer, or shorter?** A browser session is
    likelier to be left open on an unattended screen. Recommend a separate,
    shorter default.
+   *Resolution (2026-07-29): **separate, shorter default** — a new
+   `auth.cookie_session_ttl` defaulting to `8h` (a workday), while the bearer
+   `auth.session_ttl` keeps its `24h` default. Both independently configurable;
+   lands in PR 3.*
 3. **Cap sizing for the two login limiters** — a concrete number is a PR 3
    decision informed by the existing agent-limiter budget.
+   *Resolution (2026-07-29): **per-source 10 attempts / 60 s, per-username 5
+   attempts / 60 s**, each on its own `RateLimitConfig` instance with its own
+   1000-key LRU (matching the agent limiter's cardinality default, never its
+   instance — §B2). Bounds Argon2id amplification to ~10 verifications/min per
+   source while leaving room for an operator's fat-fingered retries; lands in
+   PR 3.*
 
 ## Related documentation
 

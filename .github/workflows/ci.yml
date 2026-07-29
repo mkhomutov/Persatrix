@@ -77,6 +77,13 @@ jobs:
       # `ui` reinstalls and builds. The second `npm ci` is the cost of `ui`
       # being a real release-build command; it is served fast by the setup-node
       # npm cache configured above.
+      # RFC 0039 enabled-mode exposure amendment §A3 — the console renders
+      # LLM-authored content and the session is a cookie, so {@html} is a
+      # session-riding XSS vector. The no-{@html} convention is enforced, not
+      # advisory. Stdlib-only script; the runner's system python3 suffices.
+      - name: Check no {@html} directive under web/src
+        run: make ui-html-check
+
       - name: Run web console unit tests
         run: make ui-test
 

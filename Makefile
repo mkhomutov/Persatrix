@@ -1,4 +1,4 @@
-.PHONY: all build build-orchestrator build-orchestrator-ui ui ui-test build-cli build-agents proto proto-go proto-python proto-python-check proto-orphans-check proto-check clean reset test lint run run-ui validate dockerignore-check help demo-autonomous demo-offline demo-ollama generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues issues-check rfcs rfcs-check imports-check eval-replay eval-record eval-record-offline eval-drift
+.PHONY: all build build-orchestrator build-orchestrator-ui ui ui-test ui-html-check build-cli build-agents proto proto-go proto-python proto-python-check proto-orphans-check proto-check clean reset test lint run run-ui validate dockerignore-check help demo-autonomous demo-offline demo-ollama generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues issues-check rfcs rfcs-check imports-check eval-replay eval-record eval-record-offline eval-drift
 
 # ─── Config ─────────────────────────────────────────────
 GO_MODULE     := github.com/mkhomutov/persatrix
@@ -109,6 +109,9 @@ ui: ## Build the embedded web console (RFC 0048) into internal/ui/assets/
 
 ui-test: ## Run the web console's unit tests (Vitest)
 	cd $(WEB_DIR) && $(NPM) ci && $(NPM) test
+
+ui-html-check: ## Fail if a {@html} directive appears under web/src (RFC 0039 amendment §A3 XSS gate, CI)
+	$(PYTHON) scripts/checks/ui_html_directive.py
 
 build-orchestrator-ui: ui build-orchestrator ## Build the orchestrator with the real console bundle embedded (release/asset lane)
 
