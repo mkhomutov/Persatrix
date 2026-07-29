@@ -26,8 +26,14 @@ Both stamped tiers are covered: the Phase-1 closing-row insert
 ``dispatch_facts_from_response``'s pass-through of the interaction's
 capture.
 
-Everything here remains DARK substrate — the columns are stamped and read
-by nothing until the PR 4 gate.
+Stamped dark at PR 3; read live since the PR 4 §D gate armed.
+
+The catch-up replay leg (v0.3.12 review item 8, landed at the PR 8
+closeout) pins the same seam from the OTHER producer: events built by the
+real ``channel_catchup._build_replay_event`` from a ``secret``-classified
+channel-list object stamp their episode ``secret`` — the restart path must
+label exactly like the live path, or every reboot silently downgrades a
+sensitive channel's history to ``internal``.
 
 Shared persona config / mock LLM client / clock-aware agent factory /
 episode probe live in :mod:`_interaction_multi_turn_helpers`.
@@ -40,6 +46,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agents.channel_catchup import _build_replay_event
 from agents.clock import FrozenClock
 from agents.llm_client import LLMClient, LLMResponse, StopReason, Usage
 from agents.memory.interactions import scope_for_group
@@ -157,6 +164,87 @@ class TestEpisodeStampedFromTheWire:
         # The provenance half must still land: without it this case is
         # indistinguishable from "the capture was never wired at all",
         # since both stamp ``internal``.
+        assert episode["source_channel_id"] == GROUP_CHANNEL
+
+
+# ─── The catch-up replay leg (v0.3.12 review item 8) ────────
+
+
+def _replay_event(
+    msg: dict, *, channel: dict, channel_id: str = GROUP_CHANNEL,
+) -> object:
+    """A catch-up event built by the REAL builder, not a hand-shaped
+    fixture: ``_build_replay_event`` is where the REST channel-list
+    object's ``classification`` is seeded onto the event, so a fixture
+    that wrote the metadata key itself would keep this suite green while
+    the boot path stamped nothing."""
+    return _build_replay_event(msg, channel_id, "all", channel)
+
+
+@pytest.mark.asyncio
+class TestCatchupReplayStampsTheEpisode:
+    """Review item 8: catch-up replay stamps replayed ``secret``-channel
+    episodes correctly. The live-wire tests above prove the capture; these
+    prove the RESTART path feeds it the same value — the two-path ingress
+    contract of ``test_channel_event_classification`` carried through to
+    the stored column."""
+
+    async def test_replayed_secret_episodes_stamp_secret(self):
+        agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
+        secret_channel = {"channel_type": "group", "classification": "secret"}
+        await agent._store_event_episode(
+            _replay_event(
+                {
+                    "id": "m-1", "sender_id": "alex",
+                    "content": "the codename is zephyr",
+                    "metadata": {"interaction_id": "wire-A"},
+                },
+                channel=secret_channel,
+            ),
+            [],
+        )
+        # A second replayed row on a rotated wire id closes wire-A — the
+        # replayed-rotation close the catch-up docstring promises runs at
+        # boot ("those conversations genuinely closed").
+        await agent._store_event_episode(
+            _replay_event(
+                {
+                    "id": "m-2", "sender_id": "alex",
+                    "content": "new topic",
+                    "metadata": {"interaction_id": "wire-B"},
+                },
+                channel=secret_channel,
+            ),
+            [],
+        )
+        episode = await _closed_episode(agent)
+        assert episode["protection_level"] == "secret"
+        assert episode["source_channel_id"] == GROUP_CHANNEL
+
+    async def test_pre_v0312_orchestrator_replays_stamp_internal(self):
+        # A pre-v0.3.12 orchestrator's channel-list JSON has no
+        # ``classification`` key: the builder seeds nothing and the stamp
+        # site's rule-(a) default applies — ``internal``, never a crash,
+        # never ``public``.
+        agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
+        legacy_channel = {"channel_type": "group"}
+        for msg_id, wire, content in (
+            ("m-1", "wire-A", "legacy history"),
+            ("m-2", "wire-B", "new topic"),
+        ):
+            await agent._store_event_episode(
+                _replay_event(
+                    {
+                        "id": msg_id, "sender_id": "alex",
+                        "content": content,
+                        "metadata": {"interaction_id": wire},
+                    },
+                    channel=legacy_channel,
+                ),
+                [],
+            )
+        episode = await _closed_episode(agent)
+        assert episode["protection_level"] == DEFAULT_CLASSIFICATION
         assert episode["source_channel_id"] == GROUP_CHANNEL
 
 

@@ -3,7 +3,7 @@ id: RFC-0037
 title: Memory Confidentiality & Channel Classification
 summary: Add an ordered confidentiality classification to every channel and a protection level to every channel-derived persona memory entry, with a deterministic hard gate in the memory-injection layer that withholds verbatim protected memory from any prompt assembled for a lower-classified channel — so a persona can learn from a confidential channel without leaking it.
 type: feature
-status: implementing
+status: implemented
 author: Maksim Khomutov
 created: 2026-05-16
 target: v0.3.12 (cross-channel persona experience; pulled forward from the v0.4.0 on-ramp per 2026-07-15)
@@ -15,7 +15,7 @@ depends_on:
 # RFC 0037 — Memory Confidentiality & Channel Classification
 
 **Type**: feature
-**Status**: 🚧 Implementing — the v0.3.12 keystone (plan opened 2026-07-25; [PR plan](0037-pr-plan.md), [v0.3.12 plan](../v0.3.12-plan.md)); all three phases in scope, Phases 2–3 cuttable
+**Status**: ✅ **Implemented** — v0.3.12, all three phases (the keystone; [PR plan](0037-pr-plan.md) PRs 1–8: lattice + channel classification → wire → memory substrate → the §D hard gate + notes leg + tick floor + §B guard → the §F recall filter ══ the RFC 0049 merge gate → §E projections → the §G tripwire → this closeout, which also decided the two [ISSUE-0115](../issues/ISSUE-0115-rfc0037-section-c-stamping-residuals.md) §C residuals in-place). Live acceptance [MT-PERSONA-CONFIDENTIALITY-001](../manual-tests/MT-PERSONA-CONFIDENTIALITY-001.md) runs at v0.3.12 release-prep; the deterministic backbone is CI-pinned (the confidentiality integration suites + the `EVAL-MEMORY-004` golden).
 **Author**: Maksim Khomutov
 **Date**: 2026-05-16
 **Target**: v0.3.12 (cross-channel persona experience). **Pulled forward** from the v0.4.0 on-ramp per the 2026-07-15 planning decision — this restores the RFC's own original intent (its Motivation §"Why this is a v0.3.x RFC" argues confidentiality is local and v0.3.x-shippable; the [2026-06-04 amendment](../v0.3.x-sequencing.md#amendment-2026-06-04--re-sequence-the-v03x-tail-for-conversation-realism--usefulness-ahead-of-v040) had deferred it to make room for conversation-realism work, now shipped).
@@ -378,23 +378,51 @@ Where each tier gets its protection level:
   The numeric trust score is unclassified; the episodic detail behind it
   is an episode and is protected as one.
 
-**Migration backfill.** Pre-existing memory has no protection level. The
-migration backfills each entry from its recorded source channel's
-classification where resolvable (episodes carry the RFC 0020 scope
-column; **facts carry only `source_interaction_id`**, so the facts
-backfill joins through the episode's interaction where possible and
-otherwise takes the `internal` default), and to the `internal` default
-otherwise. Because every
-channel also backfills to `internal` (§B), the common pre-existing case
-resolves consistently to `internal` — neither silently `public` (a
+**Migration backfill.** *(Revised 2026-07-29 — PR 8 closeout,
+[ISSUE-0115](../issues/ISSUE-0115-rfc0037-section-c-stamping-residuals.md)
+residual (b). The draft specified backfilling each entry from its
+recorded source channel's classification where resolvable, with the
+facts leg joining through the episode's interaction; **the shipped v16
+migration performs no such join** — it applies a blanket `internal`
+column DEFAULT. The two are provably equivalent, and the shipped form is
+better argued: channel classification lives in the orchestrator's
+channel store, which the persona-memory database cannot reach, and
+channel-store migration v11 backfills every pre-existing channel to
+`internal` — so the join would have resolved `internal` for every row it
+could resolve at all.)* Pre-existing memory has no protection level; the
+migration backfills every row to the `internal` default. That resolves
+the pre-existing case consistently — neither silently `public` (a
 disclosure) nor silently `secret` (which would withhold a persona's
 entire history from itself). **Notes are the honest exception** *(item
 8)*: notes carry no channel provenance at all today, so *every*
 pre-existing note backfills to `internal` — including notes authored in
 `restricted`/`secret` turns. That residual under-protection is an
 **accepted, documented risk** (superseded as notes are rewritten under
-the gate); operators with sensitive histories may use a one-time flag to
-backfill all pre-migration notes at a chosen level instead.
+the gate); operators with sensitive histories may use the one-time
+`PERSATRIX_NOTES_BACKFILL_PROTECTION_LEVEL` flag (shipped with the PR 4
+notes leg — honoured only at the migration moment, vocabulary-validated,
+inert afterwards) to backfill all pre-migration notes at a chosen level
+instead.
+
+**Upward reclassification across an open interaction.** *(Decided
+2026-07-29 — PR 8 closeout,
+[ISSUE-0115](../issues/ISSUE-0115-rfc0037-section-c-stamping-residuals.md)
+residual (c).)* The frozen-at-open capture means an interaction open
+across an **upward** reclassification consolidates its post-raise turns
+into rows stamped at the *pre-raise* level — a live case the
+retroactive-reclassification Non-Goal (rows written *before* the raise)
+does not cover. **v0.3.12 accepts and documents this posture**: the
+stamp is the level the participants were *promised when the conversation
+began*, the window is bounded by the interaction-close triggers (idle
+gap, turn cap, vote/rotation close), operators raising a level
+mid-conversation can close the open interaction first (an idle gap or
+any bridge turn), and the §G tripwire audit trail is the detection path
+for the residue. The alternative that makes the stamp truthful —
+**close-on-reclassify**, splitting the interaction at the boundary via
+the RFC 0030 wire-rotation seam so each half stamps at its own level —
+is recorded here as the upgrade path if operational evidence (tripwire
+hits attributable to this window) ever justifies the machinery; it is
+deliberately not built speculatively.
 
 **Synthesized (multi-source) entries.** *(Added 2026-07-19 — v0.3.12
 review decision item 3.)* The mechanics above are single-interaction; the

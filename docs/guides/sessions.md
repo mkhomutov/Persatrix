@@ -200,7 +200,9 @@ before injection — a fact learned in a `restricted` room never surfaces in an
 `internal` one. What stays absolute: the **epoch** (run/test) and **principal**
 (tenant) walls; cross-room recall ranges over rooms, never across those.
 [MT-MEMORY-CROSSROOM-001](../manual-tests/MT-MEMORY-CROSSROOM-001.md) is the
-live acceptance arc.
+live acceptance arc for the carry half;
+[MT-PERSONA-CONFIDENTIALITY-001](../manual-tests/MT-PERSONA-CONFIDENTIALITY-001.md)
+for the withhold half.
 
 An *operator* recall verb across sessions remains unbuilt
 ([ISSUE-0086](../issues/ISSUE-0086-operator-all-sessions-recall-verb.md) —

@@ -164,6 +164,54 @@ table. RFC 0011 §H labels the all-`participant` pattern "Always-respond /
 incident"; this guide uses **Incident** consistently to name the role rather
 than the implementation.
 
+### Confidentiality classification (RFC 0037) — v0.3.12
+
+Every channel carries a level from the fixed lattice
+**`public` < `internal` < `restricted` < `secret`**
+([RFC 0037 §A](../rfcs/0037-memory-confidentiality-channel-classification.md#a-the-classification-lattice)).
+Declare it per group channel; absent means `internal` — a channel nobody
+classified is confidential-by-default, never public:
+
+```yaml
+channels:
+  - name: warroom
+    description: "Leadership — restricted"
+    classification: restricted
+    members:
+      - id: ember-owl
+        respond: addressed
+```
+
+DMs open on demand and are stamped from the fleet-wide
+`dm_default_classification` knob (default `internal`) at creation. To
+**reclassify** an existing channel, change the declared value and re-apply
+config: the reconcile path adopts the declaration onto the store row and
+refreshes the router's dispatch-time cache, no restart required (RFC 0037 §B
+— config is authoritative for declared group channels; undeclared store
+channels are left untouched). Raising a level mid-conversation stamps only
+*subsequently opened* interactions at the new level — an interaction open
+across the raise keeps its open-time capture
+([RFC 0037 §C](../rfcs/0037-memory-confidentiality-channel-classification.md#c-memory-provenance-and-protection-level)).
+
+What the level *does*: every memory entry a persona derives from the channel
+(episodes, facts, notes) is stamped with the channel's classification as its
+**protection level**, and four enforcement points act on the stamp — the
+[§D hard gate](../rfcs/0037-memory-confidentiality-channel-classification.md#d-the-hard-gate-at-memory-injection)
+withholds an above-level entry from any prompt assembled for a
+lower-classified channel; [§E projections](../rfcs/0037-memory-confidentiality-channel-classification.md#e-declassification-projections)
+let a protected interaction leave behind one-line lower-level summaries so
+the withhold degrades to "informed by, doesn't disclose";
+the [§F recall filter](../rfcs/0037-memory-confidentiality-channel-classification.md#f-recall-classification-filter)
+applies the same rank check to verbatim message recall; and the
+[§G tripwire](../rfcs/0037-memory-confidentiality-channel-classification.md#g-the-leak-tripwire)
+logs an audit record if a withheld entry's verbatim text ever appears in an
+outbound message. Classification is orthogonal to *rooms* (memory sessions):
+cross-room recall travels freely at-or-below the acting channel's level and
+is gate-stopped above it — see the
+[sessions guide §7](sessions.md#7-cross-room-recall--the-v0312-posture).
+Live acceptance:
+[MT-PERSONA-CONFIDENTIALITY-001](../manual-tests/MT-PERSONA-CONFIDENTIALITY-001.md).
+
 ---
 
 ## 3. Joining and posting as a human user
@@ -734,6 +782,12 @@ The persona-runtime memory injector then feeds channel history into
 Per-channel recall scoping uses a tag filter on the shared
 `recall_with_scope_filter` helper, so an agent in many channels does not pull
 unrelated history into its prompt for a single-channel turn.
+
+Since v0.3.12 every row written from a channel turn also carries the
+channel's confidentiality classification as its `protection_level`
+(frozen at interaction open — RFC 0037 §C), and every injection candidate
+passes the §D gate against the acting channel's level; see
+[§2 Confidentiality classification](#confidentiality-classification-rfc-0037--v0312).
 
 ---
 
