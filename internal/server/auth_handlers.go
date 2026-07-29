@@ -99,7 +99,7 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		s.writeLoginThrottled(w, s.auth.cfg.LoginPerSource.WindowSeconds)
 		return
 	}
-	if !s.auth.perUsername.Allow(r.Context(), accounts.FoldUsername(req.Username)) {
+	if !s.auth.perUsername.Allow(r.Context(), usernameThrottleKey(req.Username)) {
 		s.writeLoginThrottled(w, s.auth.cfg.LoginPerUsername.WindowSeconds)
 		return
 	}
@@ -146,6 +146,21 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		http.SetCookie(w, sessionCookie(token, int(ttl.Seconds())))
 	}
 	writeJSON(w, resp, http.StatusOK)
+}
+
+// usernameThrottleKey resolves the §B per-username limiter key. An
+// empty (or all-whitespace) username folds to "", which the limiter
+// would resolve to its shared "anonymous" bucket — a bucket that emits
+// the agent-surface `rate_limit.unauthenticated_caller` security-class
+// (fsync'd) audit event on EVERY call, unthrottled. The sentinel keeps
+// empty-username probes in an ordinary tracked bucket instead. It can
+// never collide with a real account: validateUsername rejects
+// whitespace, so no stored username contains a space.
+func usernameThrottleKey(username string) string {
+	if folded := accounts.FoldUsername(username); folded != "" {
+		return folded
+	}
+	return "(empty username)"
 }
 
 // writeLoginThrottled answers a limiter denial. The 429 is IDENTICAL

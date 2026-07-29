@@ -71,9 +71,13 @@ func TestLoadSecurityConfigRejectsBadValues(t *testing.T) {
 		"zero limiter":      "auth:\n  login_throttle:\n    per_source:\n      calls_per_window: 0\n",
 		"negative window":   "auth:\n  login_throttle:\n    per_username:\n      window_seconds: -5\n",
 		"zero argon memory": "auth:\n  password:\n    argon2_memory_kib: 0\n",
-		"bad trusted proxy": "auth:\n  trusted_proxies: [not-an-ip]\n",
-		"non-mapping block": "auth: enabled\n",
-		"unknown top-level": "authz:\n  mode: enabled\n",
+		// The schema's 8 MiB floor is mirrored by the loader — the
+		// semantic authority — so bypassing `make validate` cannot boot
+		// a KDF weak enough to defeat its purpose (review follow-up).
+		"sub-floor argon memory": "auth:\n  password:\n    argon2_memory_kib: 4096\n",
+		"bad trusted proxy":      "auth:\n  trusted_proxies: [not-an-ip]\n",
+		"non-mapping block":      "auth: enabled\n",
+		"unknown top-level":      "authz:\n  mode: enabled\n",
 	}
 	for name, yaml := range cases {
 		t.Run(name, func(t *testing.T) {

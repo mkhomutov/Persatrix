@@ -11,9 +11,12 @@ CI gate so the discipline survives a contributor who has not read
 those comments.
 
 Matched form: ``{@html`` followed by whitespace — the directive always
-carries an expression (``{@html expr}``). A bare ``{@html}`` in a
-comment (prose *about* the directive, which is exactly what the two
-existing files contain) does not trip.
+carries an expression (``{@html expr}``), and Svelte accepts a newline
+as that whitespace, so the scan runs over each file's full text rather
+than line by line (a per-line scan would miss the directive split
+across lines). A bare ``{@html}`` in a comment (prose *about* the
+directive, which is exactly what the two existing files contain) does
+not trip.
 
 Usage::
 
@@ -38,7 +41,9 @@ from scripts.checks import ensure_utf8_stdout  # noqa: E402
 WEB_SRC = REPO_ROOT / "web" / "src"
 
 # The directive form: `{@html` + whitespace + an expression. Svelte
-# requires the whitespace, so this cannot false-negative a real use.
+# requires the whitespace, so this cannot false-negative a real use —
+# searched against the FULL file text so `\s` also matches the newline
+# of a directive split across lines.
 _DIRECTIVE = re.compile(r"\{@html\s")
 
 # Source extensions the Svelte compiler (or a template string feeding
@@ -64,9 +69,11 @@ def find_html_directives(root: Path = WEB_SRC) -> list[Finding]:
             text = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             continue
-        for line_no, line in enumerate(text.splitlines(), start=1):
-            if _DIRECTIVE.search(line):
-                findings.append(Finding(path, line_no, line.strip()))
+        lines = text.splitlines()
+        for match in _DIRECTIVE.finditer(text):
+            line_no = text.count("\n", 0, match.start()) + 1
+            line = lines[line_no - 1].strip() if line_no <= len(lines) else ""
+            findings.append(Finding(path, line_no, line))
     return findings
 
 

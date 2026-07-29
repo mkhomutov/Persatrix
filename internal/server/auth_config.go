@@ -24,6 +24,14 @@ const (
 	AuthModeEnabled  = "enabled"
 )
 
+// minArgonMemoryKiB is the 8 MiB Argon2id memory floor, kept equal to
+// schemas/security.schema.json's `argon2_memory_kib` minimum: this
+// loader is the semantic authority, so a hand-deployed file that never
+// ran `make validate` must hit the same floor. It is enforced here at
+// the config boundary rather than in [accounts.Params.Validate] because
+// cheap sub-floor params are the test suites' deliberate KDF-cost lever.
+const minArgonMemoryKiB = 8192
+
 // AuthLimiterConfig sizes one of the two §B login limiters (the
 // enabled-mode exposure amendment). Each limiter gets its OWN
 // [security.RateLimitConfig] instance and its own key LRU — never the
@@ -175,6 +183,10 @@ func resolveAuthConfig(b *authFileBlock) (*AuthConfig, error) {
 	}
 	if err := cfg.Argon.Validate(); err != nil {
 		return nil, fmt.Errorf("auth.password: %w", err)
+	}
+	if cfg.Argon.MemoryKiB < minArgonMemoryKiB {
+		return nil, fmt.Errorf("auth.password.argon2_memory_kib must be at least %d (8 MiB) — lower defeats the KDF's purpose (got %d)",
+			minArgonMemoryKiB, cfg.Argon.MemoryKiB)
 	}
 	if t := b.LoginThrottle; t != nil {
 		if cfg.LoginPerSource, err = resolveLimiter("auth.login_throttle.per_source", t.PerSource, cfg.LoginPerSource); err != nil {

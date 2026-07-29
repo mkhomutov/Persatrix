@@ -60,6 +60,18 @@ def test_unknown_keys_are_rejected(tmp_path: Path) -> None:
     assert _validate_content(tmp_path, typo_limiter)
 
 
+def test_argon_memory_floor_matches_loader(tmp_path: Path) -> None:
+    """The schema's 8 MiB Argon2id floor — mirrored by the Go loader's
+    ``minArgonMemoryKiB`` so the authoring gate and the semantic
+    authority can never disagree on it (review follow-up)."""
+    assert _validate_content(
+        tmp_path, "auth:\n  password:\n    argon2_memory_kib: 4096\n"
+    )
+    assert not _validate_content(
+        tmp_path, "auth:\n  password:\n    argon2_memory_kib: 8192\n"
+    )
+
+
 def test_limiter_and_ttl_bounds(tmp_path: Path) -> None:
     """Limiter integers have a floor of 1; TTLs must be Go durations."""
     assert _validate_content(

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/mkhomutov/persatrix/internal/accounts"
 	"github.com/mkhomutov/persatrix/internal/planner"
 	"github.com/mkhomutov/persatrix/internal/registry"
+	"github.com/mkhomutov/persatrix/internal/security"
 	"github.com/mkhomutov/persatrix/internal/state"
 )
 
@@ -32,7 +34,7 @@ var authTestParams = accounts.Params{MemoryKiB: 1024, Iterations: 1, Parallelism
 // given mode, one active account (alice / s3cret, participant
 // alice-participant, role operator), and generous limiter caps unless
 // the caller overrides cfg.
-func newAuthServer(t *testing.T, cfg *AuthConfig) (*Server, *accounts.Store) {
+func newAuthServer(t *testing.T, cfg *AuthConfig, opts ...ServerOption) (*Server, *accounts.Store) {
 	t.Helper()
 	if cfg == nil {
 		cfg = DefaultAuthConfig()
@@ -63,9 +65,12 @@ func newAuthServer(t *testing.T, cfg *AuthConfig) (*Server, *accounts.Store) {
 	require.NoError(t, err)
 
 	logger := zap.NewNop()
+	srvOpts := append([]ServerOption{
+		WithAuth(store, accounts.NewPasswordAuthenticator(store, authTestParams), cfg),
+	}, opts...)
 	srv, err := New("127.0.0.1:0", t.TempDir(), state.NewInMemoryStore(logger),
 		registry.NewInMemoryRegistry(logger), planner.NewYAMLPlanner(logger), logger,
-		WithAuth(store, accounts.NewPasswordAuthenticator(store, authTestParams), cfg))
+		srvOpts...)
 	require.NoError(t, err)
 	return srv, store
 }
@@ -311,6 +316,76 @@ func TestLoginThrottleLiveUnderDisabledMode(t *testing.T) {
 		"login functions under auth.mode: disabled — Phase 1 ships the mechanism inert, not absent")
 	assert.Equal(t, http.StatusTooManyRequests,
 		postLogin(t, h, `{"username":"alice","password":"s3cret"}`, nil).Code)
+}
+
+// recordingAuditor captures emitted audit events for assertions.
+type recordingAuditor struct {
+	mu     sync.Mutex
+	events []security.AuditEvent
+}
+
+func (a *recordingAuditor) Emit(_ context.Context, ev security.AuditEvent) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.events = append(a.events, ev)
+	return nil
+}
+func (a *recordingAuditor) Flush() error { return nil }
+func (a *recordingAuditor) Close() error { return nil }
+func (a *recordingAuditor) Path() string { return "" }
+
+func (a *recordingAuditor) all() []security.AuditEvent {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]security.AuditEvent(nil), a.events...)
+}
+
+func TestUsernameThrottleKey(t *testing.T) {
+	assert.Equal(t, "alice", usernameThrottleKey("Alice"))
+	assert.Equal(t, "(empty username)", usernameThrottleKey(""))
+	assert.Equal(t, "(empty username)", usernameThrottleKey("  \t"))
+}
+
+func TestEmptyUsernameThrottlesUnderSentinelNotAnonymousBucket(t *testing.T) {
+	// Review follow-up: an empty username folds to "", which the limiter
+	// resolves to its shared "anonymous" bucket — and that bucket emits
+	// the agent-surface `rate_limit.unauthenticated_caller`
+	// security-class event on EVERY call, unthrottled. The sentinel key
+	// keeps empty-username probes in an ordinary tracked bucket.
+	auditor := &recordingAuditor{}
+	cfg := DefaultAuthConfig()
+	cfg.Mode = AuthModeEnabled
+	cfg.LoginPerSource = AuthLimiterConfig{CallsPerWindow: 1000, WindowSeconds: 60, MaxTracked: 100}
+	cfg.LoginPerUsername = AuthLimiterConfig{CallsPerWindow: 2, WindowSeconds: 60, MaxTracked: 10}
+	srv, _ := newAuthServer(t, cfg, WithAuditLogger(auditor))
+	h := srv.Handler()
+
+	// Empty and all-whitespace usernames answer the uniform 401 and
+	// share one sentinel bucket (both fold to "")...
+	require.Equal(t, http.StatusUnauthorized,
+		postLogin(t, h, `{"username":"","password":"nope"}`, nil).Code)
+	require.Equal(t, http.StatusUnauthorized,
+		postLogin(t, h, `{"username":"   ","password":"nope"}`, nil).Code)
+	// ...which throttles like any other username key.
+	require.Equal(t, http.StatusTooManyRequests,
+		postLogin(t, h, `{"username":"","password":"nope"}`, nil).Code)
+
+	// The sentinel bucket is its own key, not a global drain: a real
+	// username still has full budget.
+	assert.Equal(t, http.StatusUnauthorized,
+		postLogin(t, h, `{"username":"alice","password":"nope"}`, nil).Code)
+
+	// The load-bearing pins: no anonymous-bucket event was ever
+	// emitted, and the one violation is keyed by the sentinel.
+	var violatedKeys []string
+	for _, ev := range auditor.all() {
+		require.NotEqual(t, security.AuditRateLimitUnauthenticatedCall, ev.EventType,
+			"an empty username must never reach the limiter's anonymous bucket")
+		if ev.EventType == security.AuditRateLimitViolated {
+			violatedKeys = append(violatedKeys, ev.AgentID)
+		}
+	}
+	assert.Equal(t, []string{"(empty username)"}, violatedKeys)
 }
 
 func TestAuthRoutesAbsentWhenUnwired(t *testing.T) {
