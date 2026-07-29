@@ -20,9 +20,11 @@ multi-room/confidentiality seeds act through; both are documented in
 [`schemas/eval_set.schema.json`](../../schemas/eval_set.schema.json) and are
 byte-inert on recipes that omit them.
 
-Both goldens are recorded offline against the mock provider, so they replay
+All five goldens are recorded offline against the mock provider, so they replay
 deterministically at $0 with no API key — the seed replay tests
 ([memory](../../tests/integration/test_eval_seed_replay.py),
+[cross-room](../../tests/integration/test_cross_room_seed_replay.py),
+[confidentiality](../../tests/integration/test_confidentiality_seed_replay.py),
 [working](../../tests/integration/test_eval_working_seed_replay.py)) run in CI on
 every PR, so a replay regression fails the build. (The eval harness's own *tiered*
 merge gate — `passed_all` blocking the `stable` tier — is the separate Phase-2

@@ -79,7 +79,7 @@ persatrix channel send warroom "War-room note: the Zephyr acquisition closes on 
 
 Now **close the teaching interaction**: leave the war room idle **≥ 11 minutes**, then send a low-content bridge turn in the same channel ("Thanks — talk later."). The bridge turn trips the idle close, and the close-path extractor writes the topic fact — expected shape `(zephyr, topic.has_deadline | topic.has_status, …)`, **stamped `restricted`** (frozen-at-open capture, RFC 0037 §C). Because the interaction is protected, the same close call also requests §E **projections** at `internal` and `public`.
 
-**Optional verification** (debug, not a pass criterion): on the persona container,
+**Verification** (**required if you will run Leg 4** — its seed is the `object` text this query returns; otherwise debug-only, not a pass criterion): on the persona container,
 
 ```bash
 docker compose exec agent-ember-owl sqlite3 /app/data/memory.db \
@@ -126,12 +126,14 @@ persatrix channel send warroom "Remind me — where did we land on Zephyr?" \
 
 ### Leg 4 — The seeded tripwire leg (§G observability)
 
-The tripwire watches the turn's **withheld** entries and fires when an outbound channel message carries a verbatim span (8+ normalized words) of one — which a working gate makes unreachable naturally. So **seed** the leak: in `group:planning`, paste the stored fact text (from Leg 1's optional query — the stored bytes, not your paraphrase) and ask the persona to read it back:
+The tripwire watches the turn's **withheld** entries and fires when an outbound channel message carries a verbatim span (8+ normalized words) of one — which a working gate makes unreachable naturally. So **seed** the leak: in `group:planning`, paste the stored fact text (from Leg 1's required query — the stored bytes, not your paraphrase) and ask the persona to read it back:
 
 ```bash
-persatrix channel send planning "Proofread this line for the minutes and read it back to me exactly: the Zephyr acquisition closes on March 3 pending final board sign-off in Geneva." \
+persatrix channel send planning "Proofread this line for the minutes and read it back to me exactly: <the object text from the Leg 1 facts query>." \
     --as alex --mention ember-owl
 ```
+
+The placeholder is deliberate — the live extractor phrases the stored `object` itself, so the taught sentence from Leg 1 is *not* guaranteed to match it. §G hashes the **stored** bytes; pasting anything else tests nothing.
 
 **Pass criterion**: if the reply echoes 8+ consecutive words of the withheld original, the persona container logs the **`channel.confidentiality_tripwire`** audit record (metadata only — tier, entry id, protection level; never the text) and the `channel.confidentiality.tripwire_hits{tier, protection_level}` counter increments:
 
@@ -149,7 +151,7 @@ docker compose logs agent-ember-owl | grep confidentiality_tripwire
 
 | Leg | Room (level) | Trigger discipline | Pass criterion | Pass/Fail |
 |-----|--------------|--------------------|----------------|-----------|
-| 1 — Teach + close | `warroom` (`restricted`) | natural statement; ≥ 11 min idle + bridge turn | ack; (optional) `topic.*` fact row stamped `restricted` | ☐ |
+| 1 — Teach + close | `warroom` (`restricted`) | natural statement; ≥ 11 min idle + bridge turn | ack; `topic.*` fact row stamped `restricted` (query required if running Leg 4) | ☐ |
 | 2 — Internal ask | `planning` (`internal`) | names `zephyr`, never the content | withheld **or** projected — no date/sign-off/location | ☐ |
 | 3 — War-room re-ask | `warroom` (`restricted`) | names `zephyr` | verbatim specifics return | ☐ |
 | 4 — Seeded tripwire | `planning` (`internal`) | operator pastes the stored bytes | echo ⇒ audit record + metric; message not blocked | ☐ |
