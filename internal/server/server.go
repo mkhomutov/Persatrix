@@ -107,6 +107,11 @@ type Server struct {
 	// reported by /api/v1/ui/config; nil → the Slice-1 defaults. The companion
 	// `available` flag is runtime-derived (Server.panelAvailable), not stored.
 	uiConfig *UIConfig
+
+	// auth bundles the RFC 0039 accounts/auth subsystem (optional,
+	// nil-safe — see WithAuth in auth_middleware.go). Nil → no auth
+	// route registers and every request resolves anonymous.
+	auth *authRuntime
 }
 
 // ServerOption configures optional Server dependencies.
@@ -274,17 +279,19 @@ func New(addr, workflowsDir string, store state.Store, reg registry.Registry, pl
 		opt(s)
 	}
 
-	// RFC 0031 Phase 3 PR 4: the boot-default session id (PERSATRIX_SESSION_ID,
-	// via WithChannelSessionID) rides the same gRPC `persatrix-session` metadata
-	// header as a per-request `--session` override, so it must satisfy the same
-	// wire-legality (printable ASCII). A control / non-ASCII byte here would make
-	// *every* channel dispatch fail at gRPC send time — worse than the graceful
-	// legacy fallback, and not surfaced until the first message silently drops.
-	// Fail loud at construction instead, reusing the override charset check. An
-	// empty id passes (the store applies its own `legacy` default).
+	// RFC 0031 Phase 3 PR 4: the boot-default session id (PERSATRIX_SESSION_ID)
+	// rides the gRPC `persatrix-session` metadata header, so it must be
+	// wire-legal (printable ASCII) — a bad byte would fail EVERY channel
+	// dispatch at send time. Fail loud at construction instead, reusing the
+	// override charset check; empty passes (store applies its `legacy` default).
 	if !sessionOverrideValid(s.channelSessionID) {
 		return nil, fmt.Errorf(
 			"channel session id (PERSATRIX_SESSION_ID) must be printable ASCII (no control or non-ASCII characters)")
+	}
+
+	// RFC 0039 §B login limiters — after the option loop (logger/auditor settled).
+	if err := s.initAuthLimiters(); err != nil {
+		return nil, err
 	}
 
 	s.registerRoutes()
@@ -293,7 +300,6 @@ func New(addr, workflowsDir string, store state.Store, reg registry.Registry, pl
 
 // registerRoutes sets up all HTTP routes on the server's mux.
 func (s *Server) registerRoutes() {
-	// TODO(security): no auth in v0.1
 	// TODO(v0.2): rename /api/v1/workflows to /api/v1/workflows/runs when definition endpoints are added
 	// TODO(spec-sync): update ai-agents-orchestration-spec.md §8.3 to include GET /api/v1/workflows and DELETE /api/v1/workflows/{id}
 
@@ -350,7 +356,8 @@ func (s *Server) registerRoutes() {
 // Execution order (outermost first):
 //
 //	handlerWrapper (optional, e.g. otelhttp) → recovery → requestID →
-//	logging → routeMux → (rate-limit + circuit-breaker for /api/v1/*) → mux
+//	logging → auth identity (RFC 0039, non-enforcing) → routeMux →
+//	(rate-limit + circuit-breaker for /api/v1/*) → mux
 //
 // requestID must run before logging so the request ID is present in r.Context()
 // when the logging middleware reads it after next.ServeHTTP returns.
@@ -392,10 +399,12 @@ func (s *Server) Handler() http.Handler {
 	}
 	root := http.NewServeMux()
 	root.HandleFunc("GET /healthz", s.handleHealthz)
-	s.registerUIRoutes(root) // RFC 0048 console: bypass limiter+breaker like /healthz (no-op when WithUI unwired)
+	s.registerUIRoutes(root)   // RFC 0048 console: bypass limiter+breaker like /healthz (no-op when WithUI unwired)
+	s.registerAuthRoutes(root) // RFC 0039 auth: same bypass — its own §B limiters gate login (see auth_handlers.go)
 	root.Handle("/", apiH)
 
 	var h http.Handler = root
+	h = s.authMiddleware(h) // RFC 0039 §E identity resolution (non-enforcing until Phase 2)
 	h = loggingMiddleware(s.logger, h)
 	h = requestIDMiddleware(h)
 	h = recoveryMiddleware(s.logger, h)

@@ -1,0 +1,61 @@
+# Security configuration (RFC 0039 — User Accounts & Authentication).
+#
+# The `auth:` block governs the REST/console authentication surface.
+# Validated against schemas/security.schema.json (`make validate`).
+# An ABSENT file (or an absent `auth:` block) is the zero-config
+# default: everything below at its default value, auth disabled.
+# A present-but-malformed file fails orchestrator startup LOUDLY —
+# a typo in `mode: enabled` must not silently boot an unauthenticated
+# deployment.
+
+auth:
+  # The rollout switch (RFC 0039 §H).
+  #   disabled (default) — every request resolves to the anonymous
+  #     `local` identity; no route is enforced; behaviour is identical
+  #     to pre-RFC-0039. `persatrix chat` on localhost needs no login.
+  #   enabled — identity resolution is live (Phase 1); the §E
+  #     401/403 policy matrix enforces once Phase 2 (PR 5) lands.
+  # Any networked deployment MUST set `enabled` — the orchestrator
+  # WARNs at startup on a non-loopback --http-bind while disabled.
+  mode: disabled
+
+  # Bearer-transport session lifetime (§D/§H) — the CLI and
+  # programmatic callers. Go duration syntax.
+  session_ttl: 24h
+
+  # Cookie-transport session lifetime (enabled-mode exposure amendment
+  # §A1, OQ #2 resolved 2026-07-29): deliberately shorter than the
+  # bearer TTL — a browser session is likelier left open on an
+  # unattended screen.
+  cookie_session_ttl: 8h
+
+  # Argon2id cost for password hashing (§C). Stored hashes verify
+  # under their own embedded parameters and are re-hashed to this cost
+  # on the next successful login (verify-then-rehash).
+  password:
+    argon2_memory_kib: 65536
+    argon2_iterations: 3
+    argon2_parallelism: 4
+
+  # Login throttling (amendment §B — ships with the endpoint, live
+  # under BOTH modes; caps ratified 2026-07-29). Two limiters, two
+  # keys: per-source bounds the Argon2id-amplification DoS (the
+  # load-bearing flood defence); per-username bounds targeted guessing
+  # across rotating source addresses. Each gets its own tracked-key
+  # LRU — never shared with the per-agent REST limiter.
+  login_throttle:
+    per_source:
+      calls_per_window: 10
+      window_seconds: 60
+      max_tracked: 1000
+    per_username:
+      calls_per_window: 5
+      window_seconds: 60
+      max_tracked: 1000
+
+  # Reverse proxies whose X-Forwarded-For is believed when resolving
+  # the per-source key (amendment §B3). CIDRs or bare addresses. Empty
+  # (default): the TCP peer is always the source — correct for a
+  # direct bind; behind a proxy the per-source limiter degrades to a
+  # global one and the orchestrator WARNs at startup under `enabled`.
+  trusted_proxies: []
