@@ -47,9 +47,10 @@ This live MT confirms the *operator-observable* behaviour on a real provider; th
 1. The compose stack is up against a **real provider** (`make demo-anthropic` or equivalent — *not* the mock provider; capture quality and natural-phrasing recall need real replies).
 2. A **clean store** (`make reset`, or a fresh `PERSATRIX_EPOCH` for the whole arc) so prior facts do not steer the run.
 3. `agent-ember-owl` is up and is a member of `group:planning` (the bundled roster has it at `respond: addressed` — the Leg 2 trigger @-mentions it).
-4. `persatrix` CLI on `PATH` pointed at the running orchestrator.
-5. Defaults unchanged: `memory.facts.cross_room` and `memory.episodic.cross_room` both resolve `live` (the shipped default — verify no overlay pins `shadow`/`off`), DMs stamp `internal` (`dm_default_classification` absent), `group:planning` is `internal` (the bundled declaration).
-6. Optional but recommended: `PERSATRIX_MEMORY_PROVENANCE=1` on the persona container, so a leg fail can be split into a **recall miss** (fact absent from the admitted `facts` slice) vs. a **reasoning miss** (admitted but ignored) — the MQ-11 discipline [MT-MEMORY-005 §Telemetry](MT-MEMORY-005-dementia-test.md#telemetry-required-for-diagnosis) established.
+4. **The operator identity is a member of `group:planning`** — the publish path refuses a non-member sender (`403 sender is not a member of the channel`); the DM legs need nothing (a DM materialises its own membership). Join at runtime (`persatrix channel join planning --as alex`) — and tear the stack down (`make reset`) rather than restarting the orchestrator afterwards: a config-declared channel with runtime-divergent membership fails the strict reconcile at the next boot.
+5. `persatrix` CLI on `PATH` pointed at the running orchestrator.
+6. Defaults unchanged: `memory.facts.cross_room` and `memory.episodic.cross_room` both resolve `live` (the shipped default — verify no overlay pins `shadow`/`off`), DMs stamp `internal` (`dm_default_classification` absent), `group:planning` is `internal` (the bundled declaration).
+7. Optional but recommended: `PERSATRIX_MEMORY_PROVENANCE=1` on the persona container, so a leg fail can be split into a **recall miss** (fact absent from the admitted `facts` slice) vs. a **reasoning miss** (admitted but ignored) — the MQ-11 discipline [MT-MEMORY-005 §Telemetry](MT-MEMORY-005-dementia-test.md#telemetry-required-for-diagnosis) established.
 
 ---
 
@@ -78,9 +79,14 @@ The bridge turn trips the idle close of the teaching interaction (close runs bef
 **Optional verification** (debug, not a pass criterion): on the persona container,
 
 ```bash
-docker compose exec agent-ember-owl sqlite3 /app/data/memory.db \
-  "SELECT subject, predicate, object, protection_level, session_id FROM facts WHERE predicate LIKE 'topic.%';"
+docker compose exec -T agent-ember-owl python3 -c "
+import sqlite3
+for r in sqlite3.connect('/app/data/memory.db').execute(
+        \"SELECT subject, predicate, object, protection_level, session_id FROM facts WHERE predicate LIKE 'topic.%'\"):
+    print(' | '.join(str(x) for x in r))"
 ```
+
+(The agent image ships no `sqlite3` CLI — the runtime's `python3` with the stdlib `sqlite3` module is the query surface.)
 
 → at least one `atlas` row with a `topic.*` predicate, `protection_level = internal`, and the **DM room's** session id.
 
@@ -109,14 +115,15 @@ Back in the original DM:
 
 ### Leg 4 — The wall that stays: a fresh epoch inherits nothing
 
-Repeat the Leg 2 ask under a **fresh epoch** (run isolation — the axis that stays a hard wall, with `principal`):
+Repeat the Leg 2 ask under a **fresh epoch** (run isolation — the axis that stays a hard wall, with `principal`) — but **not in `group:planning`**: Leg 2's reply put the Friday date into that channel's transcript, and the RFC 0034 conversation window is recent-N channel history, epoch-agnostic by design (the transcript is room-visible content, not memory) — so an in-channel probe can never observe absence. Probe on a **fresh channel** with an empty transcript instead (still a different room from the DM, so the recall is still structurally cross-room):
 
 ```bash
-persatrix channel send planning "What's the latest on Atlas?" \
+persatrix channel create epoch-probe --member ember-owl:addressed --member alex:addressed
+persatrix channel send epoch-probe "What's the latest on Atlas?" \
     --as alex --mention ember-owl --epoch mt-crossroom-fresh
 ```
 
-**Pass criterion**: **no** reference to Friday or the exec demo — absence is the promise. Cross-room widening ranges over *rooms*, never across epochs or tenants; a recall here reproduces the F-3 class of leak and is release-blocking.
+**Pass criterion**: **no** reference to Friday or the exec demo — absence is the promise. Cross-room widening ranges over *rooms*, never across epochs or tenants; a recall here reproduces the F-3 class of leak and is release-blocking. Diagnose a fail with provenance before filing: zero `tier_admitted` emissions on the failing turn means the *injection-path* wall held and the recall arrived through an agent-initiated **memory-tool call** — the executor-task scope gap tracked as [ISSUE-0118](../issues/ISSUE-0118-tool-recall-bypasses-epoch-session-scopes.md) (found by this leg's first live run, 2026-07-30), not a widening regression.
 
 ---
 

@@ -7,6 +7,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/mkhomutov/persatrix/internal/channels"
+	"github.com/mkhomutov/persatrix/internal/security"
 )
 
 // handleGetChatHistory handles GET /api/v1/agents/{id}/chat/history?user_id=&limit=&before=
@@ -59,10 +60,27 @@ func (s *Server) handleGetChatHistory(w http.ResponseWriter, r *http.Request) {
 	// role gate has no cross-user read story until Phase 3+.
 	userID := r.URL.Query().Get("user_id")
 	if s.authEnforced() {
-		claim := identityFrom(r.Context()).ParticipantID
+		ident := identityFrom(r.Context())
 		if userID == "" {
-			userID = claim
-		} else if userID != claim {
+			userID = ident.ParticipantID
+		} else if userID != ident.ParticipantID {
+			// An authenticated principal refused at an authorization
+			// boundary gets the same security-class record as the §E
+			// role gate — and unlike that gate this refusal is reachable
+			// with only the bootstrap account, so it is a live
+			// deployment's first observable `authz.denied`.
+			s.emitAudit(r.Context(), security.AuditEvent{
+				EventType: security.AuditAuthzDenied,
+				Action:    "authorize",
+				Resource:  r.URL.Path,
+				Detail: map[string]any{
+					"method":   r.Method,
+					"username": ident.Username,
+					"role":     ident.Role,
+					"required": "claim-match",
+					"source":   clientIP(r, s.auth.cfg.TrustedProxies),
+				},
+			})
 			writeError(w, "FORBIDDEN", "user_id does not match the authenticated participant", http.StatusForbidden)
 			return
 		}

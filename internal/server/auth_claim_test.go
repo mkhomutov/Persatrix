@@ -11,6 +11,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/mkhomutov/persatrix/internal/accounts"
+	"github.com/mkhomutov/persatrix/internal/security"
 )
 
 // RFC 0039 PR 5 — the §F verified `participant_id` claim and the §H
@@ -62,6 +65,35 @@ func TestChatHistoryHonoursClaim(t *testing.T) {
 	// claim closes).
 	rec = request(h, http.MethodGet, "/api/v1/agents/ember-owl/chat/history?user_id=mallory", bob)
 	assert.Equal(t, http.StatusForbidden, rec.Code)
+}
+
+func TestChatHistoryCrossUserMismatchEmitsAuthzDenied(t *testing.T) {
+	// The §F cross-user refusal is an AUTHORIZATION failure by an
+	// authenticated principal — it gets the same security-class
+	// `authz.denied` record as the §E role gate (the only other 403 in
+	// the matrix). Unlike the role gate, this refusal is reachable with
+	// nothing but the Phase-1 bootstrap account, so it is the live
+	// deployment's first observable authz.denied (MT-AUTH-001 Leg 3).
+	auditor := &recordingAuditor{}
+	h5 := newEnforcedServer(t, nil, WithAuditLogger(auditor))
+	h := h5.srv.Handler()
+	bob := bearerFor(t, h, "bob")
+
+	// The claim-matching read is clean — no audit record.
+	rec := request(h, http.MethodGet, "/api/v1/agents/ember-owl/chat/history?user_id=bob-participant", bob)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Empty(t, eventsOfType(auditor.all(), security.AuditAuthzDenied))
+
+	rec = request(h, http.MethodGet, "/api/v1/agents/ember-owl/chat/history?user_id=mallory", bob)
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	denied := eventsOfType(auditor.all(), security.AuditAuthzDenied)
+	require.Len(t, denied, 1)
+	ev := denied[0]
+	assert.Equal(t, "/api/v1/agents/ember-owl/chat/history", ev.Resource)
+	assert.Equal(t, "bob", ev.Detail["username"])
+	assert.Equal(t, accounts.RoleUser, ev.Detail["role"])
+	assert.Equal(t, "claim-match", ev.Detail["required"])
+	assert.Equal(t, http.MethodGet, ev.Detail["method"])
 }
 
 func TestUnquarantineEnvTokenSupersededUnderEnabled(t *testing.T) {
