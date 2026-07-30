@@ -186,10 +186,14 @@ make demo-offline                 # (or `make run-ui` for the local, non-Docker 
 ```
 
 It is served same-origin from the Go binary (no separate web server), behind
-`--enable-ui` (**default off**). The console makes the *unauthenticated* REST
-surface browser-discoverable, so it binds `127.0.0.1` and **must not be exposed
-beyond localhost** without an authenticating reverse proxy until accounts/auth
-ship. Full walkthrough + security note: the
+`--enable-ui` (**default off**). Under the default `auth.mode: disabled` the
+console makes the *unauthenticated* REST surface browser-discoverable, so it
+binds `127.0.0.1` and **must not be exposed beyond localhost** without an
+authenticating reverse proxy. Since v0.3.12, setting `auth.mode: enabled`
+(accounts + password login + role gate, RFC 0039) makes the console and REST
+surface safe beyond localhost **over HTTPS** — see the
+[auth guide](docs/guides/auth.md) (including what stays open: the
+agent-ingress carve-out). Full walkthrough + security note: the
 [web console guide](docs/guides/web-console.md).
 
 ### Run a real local model — Ollama (no API key, no cloud cost) 🦙
@@ -352,6 +356,8 @@ LLM's reply landing back. Diagrams in
   Anthropic / OpenAI / Ollama / offline, the one-line provider swap
 - [Channels guide](docs/guides/channels.md) — shared channels, DMs,
   response policies
+- [Accounts & auth guide](docs/guides/auth.md) — `auth.mode: enabled`,
+  first-operator bootstrap, roles, the console login (v0.3.12)
 - [v0.3.0 demo walkthrough](docs/guides/v0.3.0-demo.md) — three pre-defined
   personas + one channel, plain-English step-by-step
 - [Architecture diagrams](docs/diagrams/README.md) — system overview,

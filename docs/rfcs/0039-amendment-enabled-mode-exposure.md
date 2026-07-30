@@ -1,7 +1,7 @@
 # RFC 0039 Amendment — Enabled-Mode Exposure: the Browser Session Surface & Login Throttling
 
 **Type**: amendment to [RFC 0039](0039-user-accounts-authentication.md) — Non-Goal *"A web or GUI login"*, §D (session presentation), §E (the policy matrix), §K (REST surface summary), the Security Considerations bullets *"CSRF / XSS"* and *"Brute force"*, and the Phase 1/2 step lists
-**Status**: 🚧 Implementing — ratified 2026-07-29 by the maintainer call at the [0039 PR plan](0039-pr-plan.md) PR 3 gate (all three [open questions](#open-questions) resolved — see their §Resolution notes); authored at the [v0.3.12](../v0.3.12-plan.md) plan opening (2026-07-25) out of the review of the [0039 PR plan](0039-pr-plan.md); the ✅ flip is PR 6's closeout
+**Status**: ✅ Implemented — §A transports/cookie/same-origin-assertion/headers + the `{@html}` CI gate and §B throttling landed in PR 3 ([#790](https://github.com/mkhomutov/Persatrix/pull/790)); the §A4 console login form + cookie session under live enforcement landed in PR 5 ([#793](https://github.com/mkhomutov/Persatrix/pull/793)). Ratified 2026-07-29 by the maintainer call at the [0039 PR plan](0039-pr-plan.md) PR 3 gate (all three [open questions](#open-questions) resolved — see their §Resolution notes); authored at the [v0.3.12](../v0.3.12-plan.md) plan opening (2026-07-25); flipped at the PR 6 closeout (the [0050-amendment precedent](0050-amendment-interaction-budget-enforcement.md))
 **Author**: Maksim Khomutov
 **Date**: 2026-07-25
 **Target**: v0.3.12, inside RFC 0039 Phases 1–2 — this is a correction to the shipping scope, not a new train; it lands in the [0039 PR plan](0039-pr-plan.md) PRs 3/5/6
