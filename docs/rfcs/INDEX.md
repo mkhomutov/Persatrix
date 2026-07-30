@@ -8,7 +8,6 @@ See [README.md](README.md) for RFC process, format, and lifecycle. Reserved RFC 
 | ID | Status | Type | Target | Created | Title |
 |----|--------|------|--------|---------|-------|
 | [RFC-0030](0030-multi-agent-conversation-governance.md) | 🚧 Implementing | architecture | v0.3.6 (Layer 2.5 — shipped); v0.3.7–v0.3.9 (Phase 1 — relevance gate + deterministic layers); v0.4.0 (Phase 2 — moderator); v0.5.0+ (Phase 3) | 2026-05-11 | Multi-Agent Conversation Governance |
-| [RFC-0039](0039-user-accounts-authentication.md) | 🚧 Implementing | architecture | v0.3.12 (Phases 1–2) + v0.4.0 (Phase 3) | 2026-05-16 | User Accounts & Authentication |
 | [RFC-0044](0044-eval-set-golden-traces.md) | 🚧 Implementing | process | v0.3.11 (Phase 1 format + replay) + v0.4.0+ (typed-event goldens) | 2026-05-20 | Eval-Set Shape with Golden Traces |
 | [RFC-0045](0045-open-core-extraction-policy.md) | 🚧 Implementing | process | v0.3.10 (policy + dependency-direction CI gate) + v0.4.0+ (per-extraction RFCs) | 2026-05-24 | Open-Core Library Extraction Policy |
 | [RFC-0007](0007-conditional-looped-workflow-control-flow.md) | 📋 Proposed | feature | v0.4.0 | 2026-04-15 | Conditional and Looped Workflow Control Flow |
@@ -31,6 +30,7 @@ See [README.md](README.md) for RFC process, format, and lifecycle. Reserved RFC 
 | [RFC-0024](0024-event-driven-scheduling.md) | ⚠️ Partially Implemented | architecture | v0.3.3 (Phases 1–4) + v0.4.0 (Phase 5) + v0.5+ (Phase 6) | 2026-05-09 | Event-Driven Agent Scheduling |
 | [RFC-0029](0029-personal-society-storage-split.md) | ⚠️ Partially Implemented | architecture | Phase 1 v0.3.2 (facade + tier rename); Phases 2–6 v0.4.0 — see docs/v0.3.2-plan.md and docs/rfcs/0029-pr-plan.md | 2026-05-10 | Personal/Society Storage Split |
 | [RFC-0038](0038-concurrent-context-awareness-relay.md) | ⚠️ Partially Implemented | architecture | v0.3.12 (§B single-channel-turn enforcement only, carved forward per RFC 0037 Decision #3) + v0.4.0 (§C–§E) | 2026-05-16 | Persona Concurrent-Context Awareness & Cross-Channel Relay |
+| [RFC-0039](0039-user-accounts-authentication.md) | ⚠️ Partially Implemented | architecture | v0.3.12 (Phases 1–2) + v0.4.0 (Phase 3) | 2026-05-16 | User Accounts & Authentication |
 | [RFC-0048](0048-operator-tester-web-console.md) | ⚠️ Partially Implemented | feature | v0.3.6 (Phase 1 / Slice 1) + v0.4.0+ (Phases 2–5) | 2026-06-01 | Operator & Tester Web Console (Vertical-Slice, Feature-Toggled UI) |
 | [RFC-0049](0049-memory-consolidation-gradient.md) | ⚠️ Partially Implemented | architecture | v0.3.12 (Phases 0–1) + v0.4.0 (Phases 2–4); design ratified v0.3.7 | 2026-06-06 | Memory Consolidation Gradient & Scope Reconciliation |
 | [RFC-0001](0001-core-orchestration-pipeline.md) | ✅ Implemented | architecture | v0.1 (MVP) | 2026-04-08 | Core Orchestration Pipeline (Planner + State + Registry) |

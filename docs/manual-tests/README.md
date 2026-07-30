@@ -79,6 +79,12 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 | [MT-CONSOLE-001](MT-CONSOLE-001.md) | Web Console fresh-stack Interactions slice (`--enable-ui` → chat + channel timeline) | Active |
 | [MT-CONSOLE-002](MT-CONSOLE-002.md) | Web Console `@`-mention compose & fan-out (typeahead → `mentions` → highlight) | Active |
 
+## Accounts & Auth (RFC 0039)
+
+| ID | Title | Status |
+|----|-------|--------|
+| [MT-AUTH-001](MT-AUTH-001.md) | Accounts & auth end-to-end — first-operator bootstrap, the §E 401/403/200 matrix under `enabled` (incl. the open agent ingress), the §F verified claim, the browser cookie session (token never in JS, cross-site write 403), logout, and the `disabled`-mode no-delta (RFC 0039 Phases 1–2) | Active (live execution = v0.3.12 release-prep) |
+
 ## Session
 
 | ID | Title | Status |
