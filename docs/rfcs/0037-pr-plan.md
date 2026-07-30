@@ -139,7 +139,7 @@ PR 1 (lattice helpers + channel classification: config/schema + store v11 + DM s
 | 5 | 5 — §F recall filter + acting-channel param + ISSUE-0106(b) ══ merge gate | `feature/v0312-rfc0037-recall-filter` | ✅ Merged | [#778](https://github.com/mkhomutov/Persatrix/pull/778) | 2026-07-26 |
 | 6 | Phase 2 — declassification projections (cuttable) | `feature/v0312-rfc0037-projections` | ✅ Merged | [#787](https://github.com/mkhomutov/Persatrix/pull/787) | 2026-07-28 |
 | 7 | Phase 3 — §G leak tripwire (cuttable) | `feature/v0312-rfc0037-tripwire` | ✅ Merged | [#788](https://github.com/mkhomutov/Persatrix/pull/788) | 2026-07-28 |
-| 8 | closeout — docs/diagrams + MT + golden recipe + RFC flips | `feature/v0312-rfc0037-closeout` | 🔀 PR open | [#789](https://github.com/mkhomutov/Persatrix/pull/789) | — |
+| 8 | closeout — docs/diagrams + MT + golden recipe + RFC flips | `feature/v0312-rfc0037-closeout` | ✅ Merged | [#789](https://github.com/mkhomutov/Persatrix/pull/789) | 2026-07-29 |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged
 
