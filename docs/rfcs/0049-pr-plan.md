@@ -32,7 +32,7 @@ This plan covers Phase 1 across **5 PRs**:
 | 2 | L2 fact widening, SHADOW (0031 fact-scope amendment) | `feature/v0312-rfc0049-post-gate-l2-widening` | ✅ Merged | [#782](https://github.com/mkhomutov/Persatrix/pull/782) | 2026-07-27 |
 | 3 | L1 room-first ranking, SHADOW (L1 amendment) | `feature/v0312-rfc0049-post-gate-l1-ranking` | ✅ Merged | [#783](https://github.com/mkhomutov/Persatrix/pull/783) | 2026-07-27 |
 | 4 | measurement gate → live flip (verdict GREEN — both widenings LIVE) | `feature/v0312-rfc0049-post-gate-promotion` | ✅ Merged | [#784](https://github.com/mkhomutov/Persatrix/pull/784) | 2026-07-28 |
-| 5 | closeout: MT + docs + ISSUE-0084 close + RFC flip | `feature/v0312-rfc0049-closeout` | 🔀 PR open | [#785](https://github.com/mkhomutov/Persatrix/pull/785) | — |
+| 5 | closeout: MT + docs + ISSUE-0084 close + RFC flip | `feature/v0312-rfc0049-closeout` | ✅ Merged | [#785](https://github.com/mkhomutov/Persatrix/pull/785) | 2026-07-28 |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged
 
