@@ -77,13 +77,16 @@ curl -s -o /dev/null -w '%{http_code}\n' localhost:8080/healthz                #
 curl -s -o /dev/null -w '%{http_code}\n' localhost:8080/api/v1/channels        # 200 (agent ingress — OPEN BY DESIGN)
 ```
 
-**Pass criterion**: exactly the codes above. The last probe is the deliberate carve-out — anonymous channel reads stay open (RFC 0039 §Non-Goals; [auth guide](../guides/auth.md#what-stays-open-under-enabled--the-agent-ingress)) — and the startup log carries the agent-ingress WARN when the bind is non-loopback. Also trip the login throttle once: 11 rapid failed logins from one source → the 11th answers `429` + `Retry-After`.
+**Pass criterion**: exactly the codes above. The last probe is the deliberate carve-out — anonymous channel reads stay open (RFC 0039 §Non-Goals; [auth guide](../guides/auth.md#what-stays-open-under-enabled--the-agent-ingress)). Also trip the login throttle once: 11 rapid failed logins from one source → the 11th answers `429` + `Retry-After`.
+
+**Optional — the residual WARNs.** They never fire on the loopback bind the rest of this MT uses, so to observe them: restart once with `--http-bind 0.0.0.0` and confirm the startup log carries the agent-ingress WARN (and, with `auth.trusted_proxies` unset, the per-source-limiter degradation WARN), then return to the loopback bind before Leg 3.
 
 ### Leg 3 — CLI login, the role gate, and the §F claim
 
 ```bash
 persatrix login          # bootstrap credentials; token → ~/.persatrix/credentials (verify mode 0600)
 persatrix whoami         # the account, role operator, bound participant
+TOKEN=$(jq -r '."http://localhost:8080".token' ~/.persatrix/credentials)   # JSON, keyed by orchestrator URL
 curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $TOKEN" localhost:8080/api/v1/agents  # 200
 ```
 
@@ -138,7 +141,7 @@ persatrix chat <agent>                       # works with no login, as pre-v0.3.
 | Leg | Surface | Pass criterion | Pass/Fail |
 |-----|---------|----------------|-----------|
 | 1 — Bootstrap | subcommand | floor + confirm enforced; second bootstrap refused durably | ☐ |
-| 2 — §E matrix | anonymous REST | 401/401/401/200/200 exactly; ingress WARN; one 429 | ☐ |
+| 2 — §E matrix | anonymous REST | 401/401/401/200/200 exactly; one 429 (optional: the non-loopback WARNs) | ☐ |
 | 3 — Role gate + §F | CLI + bearer | 0600 credential file; reads 200; cross-user history 403 + `authz.denied` | ☐ |
 | 4 — Browser | console | cookie login; `document.cookie` empty; foreign-`Origin` write 403; logout clears | ☐ |
 | 5 — CLI logout | CLI | server-side revocation; whoami 401 + hint | ☐ |

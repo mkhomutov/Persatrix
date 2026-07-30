@@ -83,7 +83,7 @@ persatrix logout        # revokes server-side first, then clears the file
 ```
 
 Bootstrap prompts for the password twice without echo (12-character minimum;
-piped stdin works for provisioning: `printf 'pw\npw\n' | …`) and **refuses to
+piped stdin works for provisioning: `printf '%s\n%s\n' "$PW" "$PW" | …`) and **refuses to
 run once any account exists** — it can never add a second operator or take
 over an existing install. Additional accounts are Phase 3 (v0.4.0) territory;
 until then a deployment is single-account or operator-provisioned at bootstrap
