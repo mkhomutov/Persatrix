@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/mkhomutov/persatrix/internal/accounts"
+	"github.com/mkhomutov/persatrix/internal/security"
 )
 
 // Auth endpoints (RFC 0039 §K Phase 1 + the enabled-mode exposure
@@ -95,7 +96,8 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 
 	// Per-source first and short-circuiting: a flooding source burns its
 	// own budget without poisoning the username key it happens to spray.
-	if !s.auth.perSource.Allow(r.Context(), clientIP(r, s.auth.cfg.TrustedProxies)) {
+	source := clientIP(r, s.auth.cfg.TrustedProxies)
+	if !s.auth.perSource.Allow(r.Context(), source) {
 		s.writeLoginThrottled(w, s.auth.cfg.LoginPerSource.WindowSeconds)
 		return
 	}
@@ -112,7 +114,22 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		// Invalid credential and disabled account answer identically —
 		// a disabled-account distinction would confirm both existence
 		// and password correctness to whoever holds the password (§C).
+		// The AUDIT record keeps the true reason: it is operator-side,
+		// and a disabled account being probed is a signal (step 10).
 		if errors.Is(err, accounts.ErrInvalidCredentials) || errors.Is(err, accounts.ErrAccountDisabled) {
+			reason := "invalid_credentials"
+			if errors.Is(err, accounts.ErrAccountDisabled) {
+				reason = "account_disabled"
+			}
+			s.emitAudit(r.Context(), security.AuditEvent{
+				EventType: security.AuditAuthLoginFailed,
+				Action:    "login",
+				Detail: map[string]any{
+					"username": accounts.FoldUsername(req.Username),
+					"source":   source,
+					"reason":   reason,
+				},
+			})
 			writeError(w, "UNAUTHORIZED", "invalid credentials", http.StatusUnauthorized)
 			return
 		}
@@ -134,6 +151,17 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "INTERNAL", "login failed", http.StatusInternalServerError)
 		return
 	}
+	s.emitAudit(r.Context(), security.AuditEvent{
+		EventType: security.AuditAuthLoginSucceeded,
+		Action:    "login",
+		Resource:  acct.ID,
+		Detail: map[string]any{
+			"username":  acct.Username,
+			"role":      acct.Role,
+			"transport": transport,
+			"source":    source,
+		},
+	})
 
 	resp := loginResponse{
 		ExpiresAt:     sess.ExpiresAt.Format(time.RFC3339),
@@ -201,12 +229,32 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "UNAUTHORIZED", "no session presented", http.StatusUnauthorized)
 		return
 	}
+	// Resolve BEFORE revoking, purely to name the account in the audit
+	// record — revocation itself never depends on this succeeding (an
+	// expired session must still be revocable, and still audits).
+	var acct *accounts.Account
+	if _, resolved, err := s.auth.store.ResolveSession(r.Context(), token); err == nil {
+		acct = resolved
+	}
 	if err := s.auth.store.RevokeSession(r.Context(), token); err != nil {
 		// Unknown/pruned tokens answer the same 401 as no token — no
 		// probe may distinguish why a token died (§D).
 		writeError(w, "UNAUTHORIZED", "no session presented", http.StatusUnauthorized)
 		return
 	}
+	ev := security.AuditEvent{
+		EventType: security.AuditAuthLogout,
+		Action:    "logout",
+		Detail: map[string]any{
+			"transport": transport,
+			"source":    clientIP(r, s.auth.cfg.TrustedProxies),
+		},
+	}
+	if acct != nil {
+		ev.Resource = acct.ID
+		ev.Detail["username"] = acct.Username
+	}
+	s.emitAudit(r.Context(), ev)
 	if transport == transportCookie {
 		http.SetCookie(w, sessionCookie("", 0))
 	}
