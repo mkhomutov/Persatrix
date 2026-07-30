@@ -404,7 +404,7 @@ func (s *Server) Handler() http.Handler {
 	root.Handle("/", apiH)
 
 	var h http.Handler = root
-	h = s.authMiddleware(h) // RFC 0039 §E identity resolution (non-enforcing until Phase 2)
+	h = s.authMiddleware(h) // RFC 0039 §E identity resolution + policy enforcement (enforcing under `auth.mode: enabled`)
 	h = loggingMiddleware(s.logger, h)
 	h = requestIDMiddleware(h)
 	h = recoveryMiddleware(s.logger, h)
