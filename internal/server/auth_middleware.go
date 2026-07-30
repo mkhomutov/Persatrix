@@ -114,23 +114,22 @@ func (s *Server) initAuthLimiters() error {
 	return err
 }
 
-// authMiddleware is the §E identity-resolution layer, composed inside
-// logging and around the root mux so every route — API, console, and
-// /healthz alike — carries a resolved identity.
+// authMiddleware is the §E identity-resolution and enforcement layer,
+// composed inside logging and around the root mux so every route —
+// API, console, and /healthz alike — carries a resolved identity.
 //
-// Phase 1 (this PR) resolves identity but enforces no policy: under the
-// default `auth.mode: disabled` every request is the anonymous `local`
-// identity with zero DB cost, and under `enabled` an invalid or absent
-// credential still resolves anonymous rather than 401 — the §E
-// 401/403 matrix is Phase 2 (PR 5). The one live rejection is the §A2
-// same-origin assertion: a cookie-RESOLVED identity on a write must
-// prove same-origin provenance or the request is 403'd. That check is
-// not policy — it is CSRF defence, and it ships with the cookie
-// transport it defends.
+// Under the default `auth.mode: disabled` every request is the
+// anonymous `local` identity with zero DB cost and NO policy is
+// evaluated (§H: byte-for-byte pre-RFC behaviour). Under `enabled`,
+// Phase 2 enforces the §E 401/403 matrix against the auth_policy.go
+// table. The §A2 same-origin assertion is unchanged from Phase 1 —
+// CSRF defence on cookie-resolved writes, not policy, checked before
+// the policy gate so a cross-site write dies 403 even on a route the
+// policy would admit.
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ident := anonymousIdentity
-		if s.auth != nil && s.auth.cfg.Mode == AuthModeEnabled {
+		if s.authEnforced() {
 			if resolved, ok := s.auth.resolveRequest(r); ok {
 				if resolved.Transport == transportCookie && !isReadMethod(r.Method) && !sameOriginAllowed(r) {
 					writeError(w, "FORBIDDEN", "cross-origin cookie-authenticated request rejected", http.StatusForbidden)
@@ -138,10 +137,45 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 				}
 				ident = resolved
 			}
+			if !s.enforcePolicy(w, r, ident) {
+				return
+			}
 		}
 		ctx := context.WithValue(r.Context(), authIdentityKey, ident)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// enforcePolicy applies the §E matrix to one request, answering false
+// after writing the refusal. 401 for a missing identity on any gated
+// route; 403 (+ the `authz.denied` security-class audit record) for a
+// known identity below the requirement — an unknown role holds no
+// privilege, so it 403s on operator routes like any non-operator.
+func (s *Server) enforcePolicy(w http.ResponseWriter, r *http.Request, ident authIdentity) bool {
+	required := policyForRequest(r)
+	switch {
+	case required == policyPublic:
+		return true
+	case !ident.Authenticated:
+		writeError(w, "UNAUTHORIZED", "authentication required", http.StatusUnauthorized)
+		return false
+	case required == policyAuthenticated || ident.Role == accounts.RoleOperator:
+		return true
+	}
+	s.emitAudit(r.Context(), security.AuditEvent{
+		EventType: security.AuditAuthzDenied,
+		Action:    "authorize",
+		Resource:  r.URL.Path,
+		Detail: map[string]any{
+			"method":   r.Method,
+			"username": ident.Username,
+			"role":     ident.Role,
+			"required": string(required),
+			"source":   clientIP(r, s.auth.cfg.TrustedProxies),
+		},
+	})
+	writeError(w, "FORBIDDEN", "operator role required", http.StatusForbidden)
+	return false
 }
 
 // resolveRequest maps a presented credential to an identity. Resolution
@@ -256,7 +290,8 @@ func ipTrusted(ip net.IP, trusted []*net.IPNet) bool {
 }
 
 // routePolicy is the §E per-route access level. The policies form a
-// total order: operator ⊃ authenticated ⊃ public.
+// total order: operator ⊃ authenticated ⊃ public. The per-route
+// assignment lives in auth_policy.go (Phase 2 — policyForRequest).
 type routePolicy string
 
 const (
@@ -264,24 +299,3 @@ const (
 	policyAuthenticated routePolicy = "authenticated"
 	policyOperator      routePolicy = "operator"
 )
-
-// policyFor is the §E per-route policy map — PRESENT from this PR so
-// the fail-closed default ships with the middleware, CONSULTED for
-// enforcement only in Phase 2 (PR 5), which also assigns the full
-// authenticated-vs-operator split across the pre-existing routes. A
-// route absent from the map is `operator`, the most restrictive level,
-// so a newly added handler is never accidentally world-open.
-func policyFor(path string) routePolicy {
-	switch {
-	case path == "/healthz",
-		path == "/api/v1/auth/login",
-		path == "/ui", strings.HasPrefix(path, "/ui/"),
-		// The console boot endpoints stay public: the SPA calls them
-		// before any login form could have run (RFC 0048).
-		path == "/api/v1/ui/config", path == "/api/v1/ui/context":
-		return policyPublic
-	case path == "/api/v1/auth/logout", path == "/api/v1/auth/whoami":
-		return policyAuthenticated
-	}
-	return policyOperator
-}

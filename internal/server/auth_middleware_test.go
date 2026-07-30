@@ -13,9 +13,13 @@ import (
 
 // RFC 0039 PR 3 — §E identity resolution, §A1 transport precedence,
 // §A2 same-origin assertion internals, §B3 client-IP resolution, and
-// the §E policy map (present, unenforced until Phase 2).
+// the §E policy table (enforced since Phase 2 — PR 5; whoami is
+// `authenticated`, so several PR 3 pins flipped from anonymous-200 to
+// 401 and now assert the SAME no-fall-through invariants via 401).
 
-func whoami(t *testing.T, h http.Handler, mutate func(*http.Request)) whoamiResponse {
+// whoamiRec issues GET /auth/whoami and returns the raw recorder — the
+// §E matrix makes the status itself load-bearing.
+func whoamiRec(t *testing.T, h http.Handler, mutate func(*http.Request)) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/whoami", nil)
 	if mutate != nil {
@@ -23,6 +27,12 @@ func whoami(t *testing.T, h http.Handler, mutate func(*http.Request)) whoamiResp
 	}
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
+	return rec
+}
+
+func whoami(t *testing.T, h http.Handler, mutate func(*http.Request)) whoamiResponse {
+	t.Helper()
+	rec := whoamiRec(t, h, mutate)
 	require.Equal(t, http.StatusOK, rec.Code)
 	var who whoamiResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &who))
@@ -49,37 +59,52 @@ func TestDisabledModeResolvesEverythingAnonymous(t *testing.T) {
 }
 
 func TestAnonymousIdentityIsLocal(t *testing.T) {
-	srv, _ := newAuthServer(t, nil) // enabled
+	// Under `disabled` the anonymous local identity is reportable via
+	// whoami; under `enabled` an anonymous whoami is 401 (§E matrix —
+	// see auth_enforcement_test).
+	cfg := DefaultAuthConfig() // mode: disabled
+	srv, _ := newAuthServer(t, cfg)
 	who := whoami(t, srv.Handler(), nil)
 	assert.False(t, who.Authenticated)
 	assert.Equal(t, "local", who.ParticipantID)
 }
 
 func TestInvalidTokenResolvesAnonymousNotRejected(t *testing.T) {
-	// Phase 1 is non-enforcing: a dead token means "no identity", never
-	// a 401 — the §E matrix lands in Phase 2 (PR 5).
-	srv, _ := newAuthServer(t, nil)
-	who := whoami(t, srv.Handler(), func(r *http.Request) {
+	// A dead token means "no identity", not a transport error: on a
+	// PUBLIC route it passes anonymously (no 401), while the same
+	// request on a gated route 401s via the §E matrix — resolution
+	// failure and policy rejection stay separate layers.
+	srv, _ := newAuthServer(t, nil) // enabled
+	h := srv.Handler()
+
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req.Header.Set("Authorization", "Bearer not-a-real-token")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusOK, rec.Code, "a dead token on a public route is anonymous, not rejected")
+
+	assert.Equal(t, http.StatusUnauthorized, whoamiRec(t, h, func(r *http.Request) {
 		r.Header.Set("Authorization", "Bearer not-a-real-token")
-	})
-	assert.False(t, who.Authenticated)
+	}).Code, "the same dead token on a gated route 401s (§E)")
 }
 
 func TestBearerTakesPrecedenceOverCookie(t *testing.T) {
 	// §A1: presenting both uses the bearer token and IGNORES the cookie
 	// — here the bearer is dead and the cookie live, so resolution must
-	// fail rather than fall through to the cookie.
+	// fail (401 on the gated whoami) rather than fall through to the
+	// live cookie and answer authenticated.
 	srv, _ := newAuthServer(t, nil)
 	h := srv.Handler()
 	loginRec := postLogin(t, h, `{"username":"alice","password":"s3cret","session_transport":"cookie"}`, nil)
 	require.Equal(t, http.StatusOK, loginRec.Code)
 	session := loginRec.Result().Cookies()[0]
 
-	who := whoami(t, h, func(r *http.Request) {
+	rec := whoamiRec(t, h, func(r *http.Request) {
 		r.Header.Set("Authorization", "Bearer dead-token")
 		r.AddCookie(session)
 	})
-	assert.False(t, who.Authenticated, "dead bearer must not fall through to the live cookie")
+	assert.Equal(t, http.StatusUnauthorized, rec.Code,
+		"dead bearer must not fall through to the live cookie")
 
 	// Cookie alone resolves (read method — no §A2 assertion).
 	whoCookie := whoami(t, h, func(r *http.Request) { r.AddCookie(session) })
@@ -92,11 +117,12 @@ func TestMalformedAuthorizationNeverFallsThrough(t *testing.T) {
 	loginRec := postLogin(t, h, `{"username":"alice","password":"s3cret","session_transport":"cookie"}`, nil)
 	session := loginRec.Result().Cookies()[0]
 
-	who := whoami(t, h, func(r *http.Request) {
+	rec := whoamiRec(t, h, func(r *http.Request) {
 		r.Header.Set("Authorization", "Basic dXNlcjpwdw==")
 		r.AddCookie(session)
 	})
-	assert.False(t, who.Authenticated)
+	assert.Equal(t, http.StatusUnauthorized, rec.Code,
+		"a malformed Authorization must not fall through to the live cookie")
 }
 
 func TestSameOriginAllowed(t *testing.T) {
@@ -160,16 +186,25 @@ func TestClientIPResolution(t *testing.T) {
 }
 
 func TestPolicyMapPresentAndFailClosed(t *testing.T) {
-	// §E: the map ships with the middleware; enforcement is Phase 2. A
-	// route absent from the map is `operator` — fail closed.
-	assert.Equal(t, policyPublic, policyFor("/healthz"))
-	assert.Equal(t, policyPublic, policyFor("/api/v1/auth/login"))
-	assert.Equal(t, policyPublic, policyFor("/ui/"))
-	assert.Equal(t, policyPublic, policyFor("/ui/index.html"))
-	assert.Equal(t, policyPublic, policyFor("/api/v1/ui/config"))
-	assert.Equal(t, policyPublic, policyFor("/api/v1/ui/context"))
-	assert.Equal(t, policyAuthenticated, policyFor("/api/v1/auth/logout"))
-	assert.Equal(t, policyAuthenticated, policyFor("/api/v1/auth/whoami"))
-	assert.Equal(t, policyOperator, policyFor("/api/v1/agents"), "unmapped → operator")
-	assert.Equal(t, policyOperator, policyFor("/api/v1/brand-new-route"), "unknown → operator (fail closed)")
+	// §E: the policy table (auth_policy.go, Phase 2) resolved through
+	// the same ServeMux semantics as routing. Unregistered → operator —
+	// fail closed. Full matrix coverage lives in auth_enforcement_test.
+	at := func(method, path string) routePolicy {
+		return policyForRequest(httptest.NewRequest(method, path, nil))
+	}
+	assert.Equal(t, policyPublic, at(http.MethodGet, "/healthz"))
+	assert.Equal(t, policyPublic, at(http.MethodPost, "/api/v1/auth/login"))
+	assert.Equal(t, policyPublic, at(http.MethodGet, "/ui/"))
+	assert.Equal(t, policyPublic, at(http.MethodGet, "/ui/index.html"))
+	assert.Equal(t, policyPublic, at(http.MethodGet, "/api/v1/ui/config"))
+	assert.Equal(t, policyPublic, at(http.MethodGet, "/api/v1/ui/context"))
+	assert.Equal(t, policyAuthenticated, at(http.MethodPost, "/api/v1/auth/logout"))
+	assert.Equal(t, policyAuthenticated, at(http.MethodGet, "/api/v1/auth/whoami"))
+	assert.Equal(t, policyAuthenticated, at(http.MethodGet, "/api/v1/agents"))
+	assert.Equal(t, policyOperator, at(http.MethodPost, "/api/v1/brand-new-route"), "unknown → operator (fail closed)")
+	assert.Equal(t, policyOperator, at(http.MethodPatch, "/healthz"), "method mismatch → operator (fail closed)")
+	// The agent-ingress carve-out (§Non-Goals): the persona fleet's REST
+	// seams stay public under enabled — see auth_policy.go.
+	assert.Equal(t, policyPublic, at(http.MethodPost, "/api/v1/agents/register"))
+	assert.Equal(t, policyPublic, at(http.MethodPost, "/api/v1/channels/group:x/messages"))
 }

@@ -314,11 +314,37 @@ async fn main() {
         std::process::exit(1);
     }
 
-    let client = reqwest::Client::builder()
+    // RFC 0039 Phase 2 (§J): every command attaches the stored bearer
+    // token for THIS orchestrator as a default header, so the whole
+    // surface authenticates without per-command plumbing (login/logout/
+    // whoami included — logout revokes the presented token, and login
+    // simply ignores a stale header). No stored token → no header →
+    // behaviour exactly as before; under `auth.mode: disabled` the
+    // server ignores the header entirely.
+    let mut builder = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(10))
-        .timeout(std::time::Duration::from_secs(60))
-        .build()
-        .expect("failed to create HTTP client");
+        .timeout(std::time::Duration::from_secs(60));
+    if let Some(token) = credentials::token(server) {
+        let mut headers = reqwest::header::HeaderMap::new();
+        match reqwest::header::HeaderValue::from_str(&format!("Bearer {token}")) {
+            Ok(mut value) => {
+                // Mark sensitive so debug-logging middleware never
+                // prints the credential.
+                value.set_sensitive(true);
+                headers.insert(reqwest::header::AUTHORIZATION, value);
+                builder = builder.default_headers(headers);
+            }
+            Err(_) => {
+                // A token with header-invalid bytes can only be a
+                // corrupted credential file — warn, act logged-out.
+                eprintln!(
+                    "{} stored credential for {server} is malformed; run 'persatrix login'",
+                    "warning:".yellow().bold()
+                );
+            }
+        }
+    }
+    let client = builder.build().expect("failed to create HTTP client");
 
     // Exhaustive match — adding a Commands variant produces a compile error
     // until its handler is added.

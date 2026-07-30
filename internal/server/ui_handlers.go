@@ -82,15 +82,19 @@ func (s *Server) handleUIConfig(w http.ResponseWriter, _ *http.Request) {
 	}, http.StatusOK)
 }
 
-// handleUIContext serves the console's identity (RFC 0048 §F). Constant today;
-// the shape is fixed now so PR 4 and the eventual RFC 0039 auth layer slot in
-// without a client change.
-func (s *Server) handleUIContext(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, uiContextResponse{
-		Principal:     "local",
-		Tenant:        "local",
-		Authenticated: false,
-	}, http.StatusOK)
+// handleUIContext serves the console's identity (RFC 0048 §F). With a
+// middleware-resolved identity (RFC 0039 Phase 2, cookie login) the
+// principal is the VERIFIED participant and `authenticated` flips true
+// — the SPA then hides the acting-as override (amendment §E). Anonymous
+// (or `auth.mode: disabled`) keeps the degenerate local identity; the
+// route stays public because the SPA boots off it before any login.
+func (s *Server) handleUIContext(w http.ResponseWriter, r *http.Request) {
+	resp := uiContextResponse{Principal: "local", Tenant: "local"}
+	if ident := identityFrom(r.Context()); ident.Authenticated {
+		resp.Principal = ident.ParticipantID
+		resp.Authenticated = true
+	}
+	writeJSON(w, resp, http.StatusOK)
 }
 
 // panelAvailable reports whether a panel's backing subsystem is wired — the

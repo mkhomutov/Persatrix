@@ -150,7 +150,15 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	// Phase 4 auth — see TODO(security) above. Until then we log a
 	// per-request warning so the cross-talk hazard is visible in logs.
 	userID := req.UserID
-	if userID == "" {
+	if s.authEnforced() {
+		// RFC 0039 §F: under `enabled` the VERIFIED claim replaces any
+		// body user_id — the middleware guarantees this route is only
+		// reachable authenticated, so the resolved participant is the
+		// caller's proven identity and impersonation-by-body-field
+		// (RFC 0016 Security #2) is closed. The body field is ignored,
+		// per §F, not rejected — existing clients keep working.
+		userID = identityFrom(r.Context()).ParticipantID
+	} else if userID == "" {
 		userID = "local"
 		chatLocalFallbackWarnOnce.Do(func() {
 			s.logger.Warn("chat: empty user_id; using shared 'local' fallback (cross-talk hazard, RFC 0009 Phase 4)",

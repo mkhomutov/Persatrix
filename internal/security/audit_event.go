@@ -106,6 +106,11 @@ const (
 	AuditAuthLoginSucceeded AuditEventType = "auth.login_succeeded"
 	AuditAuthLoginFailed    AuditEventType = "auth.login_failed"
 	AuditAuthLogout         AuditEventType = "auth.logout"
+	// AuditAuthzDenied is the §E role-gate refusal (RFC 0039 Phase 2):
+	// an AUTHENTICATED caller below the route's required policy. 401s
+	// emit nothing — anonymous pokes are unbounded noise; this records
+	// a known account probing above its privilege.
+	AuditAuthzDenied AuditEventType = "authz.denied"
 
 	// Audit-log lifecycle (chain-recovery — PR #232 review SF-3)
 	AuditChainBootstrap AuditEventType = "chain.bootstrap"
@@ -148,6 +153,7 @@ func AllAuditEventTypes() []AuditEventType {
 		AuditAuthLoginSucceeded,
 		AuditAuthLoginFailed,
 		AuditAuthLogout,
+		AuditAuthzDenied,
 		AuditChainBootstrap,
 		AuditChainRestart,
 		AuditChainRecovered,
@@ -195,6 +201,7 @@ var securityEvents = map[AuditEventType]struct{}{
 	AuditAuthLoginSucceeded: {},
 	AuditAuthLoginFailed:    {},
 	AuditAuthLogout:         {},
+	AuditAuthzDenied:        {},
 	AuditChainBootstrap:     {},
 	AuditChainRestart:       {},
 	AuditChainRecovered:     {},
