@@ -111,3 +111,12 @@ ISSUE-0109 defaults PR):
 > caps must be ≤ it (raising one channel above the fleet default means raising
 > the backstop too) — revisitable in the fold-in PR with the alternatives
 > above. Droppable to v0.3.13 without touching either v0.3.12 workstream.
+
+> 2026-07-31 — **CUT from v0.3.12 → v0.3.13** (maintainer call, exercised at
+> [release-prep PR 2](../v0.3.12-release-prep-plan.md#pr-2--docs--release-checklist)
+> per the master plan's "closed (or explicitly cut)" acceptance wording): the
+> fold-in was never implemented during the v0.3.12 window and neither
+> workstream depends on it. Listed in the
+> [v0.3.12 release checklist Known Gaps](../v0.3.12-release-checklist.md#6-known-gaps-to-document-in-release-notes);
+> the design fork in step 4 (default: option (c)) is unchanged and still the
+> first decision the implementing PR must take.

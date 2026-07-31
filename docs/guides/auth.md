@@ -62,7 +62,11 @@ unauthenticated deployment.
 
 Accounts and auth sessions live in their own orchestrator-side store
 (`data/accounts.db`, `--accounts-db` to relocate) — never in any persona's
-`memory.db`.
+`memory.db`. The bundled compose stack relocates it to
+`/var/lib/persatrix/accounts.db` on the `orchestrator-data` volume (the
+cwd-relative default is not writable in the container) — containerized
+`bootstrap` runs must pass the same `--accounts-db` or they write a store
+the server never reads.
 
 ## Quick start
 
@@ -230,8 +234,11 @@ limiter degrades to a global one — WARN'd at startup under `enabled`.
   `persatrix logout` (or the console's logout) revokes server-side first and
   clears local state only once the orchestrator confirms.
 - **No password reset until Phase 3.** The pragmatic single-operator
-  recovery: stop the orchestrator, remove `data/accounts.db` (accounts and
+  recovery: stop the orchestrator, remove the accounts store (accounts and
   auth sessions only — no persona memory, no channels), and bootstrap again.
+  The store is `data/accounts.db` on host runs,
+  `/var/lib/persatrix/accounts.db` on the orchestrator-data volume under
+  the compose stack.
 - **The CLI hints on 401**: any command answered `401` prints a
   `persatrix login` hint. A `403` is a *role* problem, not a login problem —
   no hint.
