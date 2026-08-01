@@ -66,7 +66,8 @@ Accounts and auth sessions live in their own orchestrator-side store
 `/var/lib/persatrix/accounts.db` on the `orchestrator-data` volume (the
 cwd-relative default is not writable in the container) — containerized
 `bootstrap` runs must pass the same `--accounts-db` or they write a store
-the server never reads.
+the server never reads; the compose form is under [Operational
+notes](#operational-notes).
 
 ## Quick start
 
@@ -236,9 +237,22 @@ limiter degrades to a global one — WARN'd at startup under `enabled`.
 - **No password reset until Phase 3.** The pragmatic single-operator
   recovery: stop the orchestrator, remove the accounts store (accounts and
   auth sessions only — no persona memory, no channels), and bootstrap again.
-  The store is `data/accounts.db` on host runs,
-  `/var/lib/persatrix/accounts.db` on the orchestrator-data volume under
-  the compose stack.
+  On host runs that is `rm data/accounts.db` followed by the [quick
+  start](#quick-start)'s `account bootstrap`. Under the compose stack the
+  store lives at `/var/lib/persatrix/accounts.db` **inside** the
+  `orchestrator-data` volume, which also carries `channels.db`, the log
+  buffer, and `audit.jsonl` — so remove the one file, never the volume
+  (`docker volume rm orchestrator-data` takes your channels with it):
+
+  ```bash
+  docker compose down
+  docker compose run --rm --no-deps --entrypoint sh orchestrator \
+    -c 'rm -f /var/lib/persatrix/accounts.db'
+  docker compose run --rm --no-deps orchestrator \
+    account bootstrap --username <name> \
+    --accounts-db /var/lib/persatrix/accounts.db
+  docker compose up -d
+  ```
 - **The CLI hints on 401**: any command answered `401` prints a
   `persatrix login` hint. A `403` is a *role* problem, not a login problem —
   no hint.
