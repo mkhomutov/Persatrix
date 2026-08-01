@@ -1,15 +1,17 @@
 ---
 id: ISSUE-0120
 summary: "Personas that ran group channels before the ISSUE-0119 fix hold a human's relationship state on TWO rows — the correct user-typed row from DMs and an agent-typed row accumulated from group traffic. New writes land correctly now, but the pre-fix group-room trust, notes, and identity stay orphaned on the agent-typed row and never merge. A backfill needs both a human-id oracle the persona's memory.db does not have and a merge semantic for trust/interaction counts."
-status: open
+status: resolved
 severity: low
 area: agents/memory
 created: 2026-08-01
+closed: 2026-08-01
 refs:
   - docs/issues/ISSUE-0119-channel-publish-drops-human-participant-type.md
   - docs/issues/ISSUE-0093-person-identity-cross-room-tier.md
   - agents/memory/relationship_mutations.py
   - agents/memory/relationship_queries.py
+  - agents/memory/_migration_split_participant.py
 ---
 
 ## Summary
@@ -54,14 +56,47 @@ as a one-time gap in an otherwise continuous relationship rather than an
 ongoing fault. Deployments that never ran a human in a group channel before
 the fix have nothing to migrate.
 
-## Proposed fix / investigation path
+## Resolution — memory migration v17
 
-Decide the two questions above, then a migration in `agents/memory/` that,
-per `(principal, epoch)`, folds each `(id, "agent")` row into `(id, "user")`
-where both exist — identity via `merge_identity`, the rest per the chosen
-semantic — and drops the emptied agent-typed row. Worth an operator-visible
-report of what merged: a silent rewrite of person records is the wrong shape
-for this even when the heuristic is right.
+Both questions were decided by the maintainer and are encoded in
+[`_migration_split_participant.py`](../../agents/memory/_migration_split_participant.py):
+
+- **Oracle**: the heuristic above, narrowed to its safest form — the fold
+  selects only ids holding **both** a user-typed and an agent-typed row for
+  the same `(agent, principal, epoch)`, expressed as a self-join, so a row
+  with no twin is never returned and a genuine agent peer is never rewritten.
+  The blast radius is exactly the bug's own footprint.
+- **Merge semantics**: `interaction_count` **sums**; `last_interaction_at`
+  takes the **max**; `trust_score` is the **interaction-weighted average**,
+  because trust *is* an aggregate over interactions — a 2-interaction group
+  row cannot outvote a 40-interaction DM row, and with no interactions on
+  either side the user row's value stands; `identity` merges
+  **older-into-newer** by `last_interaction_at` so the live write-through's
+  last-writer-wins scalar rule survives; `notes` takes the **newer** row's
+  value rather than a concatenation, because the column holds the latest
+  *trust-change reason* and joining two would manufacture one that never
+  existed. `principal_id` / `epoch_id` are match axes, never merged across.
+- **Delivery**: an automatic migration (the v14 backfill precedent) rather
+  than an operator command, so no deployment stays split through not knowing
+  it should run something — with one INFO line per fold plus a total, since a
+  rewrite of person records nobody can see afterwards is the wrong shape even
+  when the heuristic is right.
+- **Idempotency** comes from deleting the agent-typed row as part of each
+  fold: a re-run finds no pair, so a crash-replay between the handler and the
+  `schema_version` record cannot double the summed count.
+
+Verified end-to-end against the real post-chain schema (the live write paths
+produce the split, v17 folds it, the identity/count/trust land merged and the
+agent-typed row is gone) on top of the unit suite in
+[`test_split_participant_migration.py`](../../tests/unit/python/test_split_participant_migration.py).
+
+Registry note: adding v17 pushed `agents/memory/migrations.py` past the
+500-line code cap, so the `MIGRATIONS` list moved to
+`agents/memory/_migration_registry.py` and is re-exported — reference data
+whose length scales with migration history, split from logic for the same
+reason `scripts/checks/file_size_allowlist.py` and `_migration_handlers.py`
+already were. Every `from .migrations import MIGRATIONS` call site is
+unchanged.
 
 ## Notes
 
