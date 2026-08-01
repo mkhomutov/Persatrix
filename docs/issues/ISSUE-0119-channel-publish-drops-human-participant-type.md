@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0119
 summary: "A human publishing into a group channel is delivered to personas with no `participant_type`, so the sender resolves to the `agent` default: cross-room person identity (RFC 0031 F-7) is queried on the agent-typed relationship row and misses everything learned in DMs — the persona greets a stranger — while the close path writes group-room trust/identity onto that same second row, permanently splitting one human across two participant records. ISSUE-0068 fixed exactly this for the REST chat surface; the group-channel publish path was never given the same stamp."
-status: open
+status: resolved
 severity: high
 area: memory
 created: 2026-08-01
+closed: 2026-08-01
+closed_pr: 799
 refs:
   - docs/issues/ISSUE-0068-chat-peer-recorded-as-agent-participant-type.md
   - docs/issues/ISSUE-0093-person-identity-cross-room-tier.md
@@ -107,6 +109,41 @@ covers the cross-room leg with a hand-built event carrying
 `metadata={"sender_participant_type": "user"}` — metadata the real
 group-channel path never supplies. The harness stamps what production
 drops, so the test asserts the design and not the wire.
+
+## Resolution (PR #799)
+
+Items 1, 2 and 4 below landed; item 3 (the pre-fix split rows) split off to
+[ISSUE-0120](ISSUE-0120-backfill-split-participant-type-relationship-rows.md).
+
+- `handlePublishMessage` resolves the sender's peer type from the **agent
+  registry** and stamps it before `PublishAsync`
+  ([`channel_participant_type.go`](../../internal/server/channel_participant_type.go)):
+  a registered id is an `agent`, an unregistered one is a `user`. Humans are
+  never registered — the chat path already leans on this (ISSUE-0034) — and
+  agents publish through this same endpoint (`agents/channel_publisher.py`),
+  so one lookup at the shared door types both sides. That makes it a
+  server-side fix at the single production choke point (item 2): the two
+  publish entry points are now both stamped at the source, so the CLI, the
+  console, and any future bridge inherit it without a client change.
+- **Precedence**: the registry is authoritative when it knows the sender; a
+  caller claim only fills what it cannot see. Overriding a *registered*
+  sender's claim also closes half of the reply-budget self-exemption hole
+  flagged in [`reply_budget.go`](../../internal/channels/reply_budget.go)'s
+  SECURITY note (which is updated to describe the remaining unregistered
+  case). An unresolvable registry read stamps **nothing** rather than
+  guessing "user" — guessing would type a genuine agent peer as human and
+  invert this very corruption; staying silent degrades to the pre-fix
+  behaviour instead.
+- **Regression pin at the wire** (item 4):
+  `TestChannelPublish_HumanSenderTypedOnTheWire` drives REST → router →
+  dispatcher → a real gRPC receiver and reads the type off the delivered
+  proto event, with **no** participant_type anywhere in the request body —
+  deliberately not asserting on a hand-made request, which is the mistake
+  that let the Python harness certify a wire it never exercised.
+- The key literal and the `{agent,user}` vocabulary now live at one site
+  (`channels.StampParticipantType` / `ParticipantType*`), closing the
+  cross-package "both producers write the same literal" coupling that this
+  bug lived inside.
 
 ## Proposed fix / investigation path
 

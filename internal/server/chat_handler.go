@@ -341,9 +341,11 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	// passes through unchanged here.
 	participantType := req.ParticipantType
 	if participantType == "" {
-		participantType = "user"
+		participantType = channels.ParticipantTypeUser
 	}
-	metadata["participant_type"] = participantType
+	// ISSUE-0119: stamped through the channels-package helper rather than the
+	// key literal, so both REST producers share one definition of the key.
+	metadata = channels.StampParticipantType(metadata, participantType)
 
 	inbound := channels.ChannelMessage{
 		ID:        uuid.NewString(),

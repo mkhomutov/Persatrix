@@ -22,9 +22,17 @@ const participantTypeMetadataKey = "participant_type"
 // out-of-vocabulary value is rejected loudly rather than silently
 // degraded.
 var validParticipantTypes = map[string]struct{}{
-	"agent": {},
-	"user":  {},
+	ParticipantTypeAgent: {},
+	ParticipantTypeUser:  {},
 }
+
+// The peer-type vocabulary as named constants, so producers stamp a symbol
+// rather than a bare literal (ISSUE-0119 — the same one-definition argument
+// as [participantTypeMetadataKey]).
+const (
+	ParticipantTypeAgent = "agent"
+	ParticipantTypeUser  = "user"
+)
 
 // IsValidParticipantType reports whether t is a recognised peer type
 // ("agent" | "user"). The REST chat handler uses it to reject an explicit
@@ -35,6 +43,37 @@ var validParticipantTypes = map[string]struct{}{
 func IsValidParticipantType(t string) bool {
 	_, ok := validParticipantTypes[t]
 	return ok
+}
+
+// ReadParticipantType is the exported reader for the publish-side
+// participant_type claim. Producers in `internal/server` need it to tell an
+// explicit caller claim from an absent one *before* they stamp a resolved
+// default (ISSUE-0119); the unexported [readParticipantType] stays the
+// dispatch-side reader so this package's own call sites are unchanged.
+func ReadParticipantType(metadata map[string]any) string {
+	return readParticipantType(metadata)
+}
+
+// StampParticipantType writes t onto a publish metadata bag under the
+// canonical key, allocating the map when the caller had none, and returns
+// the (possibly new) map for assignment onto [ChannelMessage.Metadata].
+//
+// Both REST producers stamp through here (ISSUE-0119) so the key literal
+// lives at exactly one site — the "producer side writes this key with the
+// same literal" coupling this file's [participantTypeMetadataKey] doc warns
+// about was, until now, held together by nothing but agreement across
+// packages. An empty t is a no-op: "unresolved" must stay absent on the wire
+// rather than ride as an empty string, because the agent-side read path
+// distinguishes only present-and-valid from absent.
+func StampParticipantType(metadata map[string]any, t string) map[string]any {
+	if t == "" {
+		return metadata
+	}
+	if metadata == nil {
+		metadata = make(map[string]any, 1)
+	}
+	metadata[participantTypeMetadataKey] = t
+	return metadata
 }
 
 // readParticipantType extracts the inbound participant_type from a
