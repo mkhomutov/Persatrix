@@ -234,6 +234,18 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # verification) folds in a detailed evidence row, so it sits at the 3 000-word
     # prose cap. The ISSUE-0099 PR-2 row tipped it over. Trim only if a row is dropped.
     "docs/manual-tests/MT-CHANNEL-GOV-004.md",
+    # docs/manual-tests/MT-MEMORY-CROSSROOM-001.md — the live cross-room memory
+    # acceptance gate (RFC 0049 scenario 2), same class as the two above. It
+    # accumulates by *tier* rather than by results row: v1.1 added the person-
+    # identity legs (1b/2b) after ISSUE-0119 reached a release candidate on a
+    # green v1.0 run, because a facts-tier leg names a topic and structurally
+    # cannot observe an identity-tier break. Each further memory tier that
+    # ships lands the same way. The v1.1 edit sat at exactly 3 000/3 000 after
+    # three prose trims — the point at which shaving load-bearing procedure to
+    # fit the cap costs more than the cap saves, in a doc whose job is to be
+    # followed step-by-step under live timing pressure. Trim only if a leg is
+    # dropped.
+    "docs/manual-tests/MT-MEMORY-CROSSROOM-001.md",
     # docs/v0.3.4-release-prep-plan.md is the v0.3.4 release-prep sequencer —
     # same release-cycle-accumulator pattern as the v0.3.0 / v0.3.1 plans and
     # the v0.3.3 checklist above. It crossed the 3 000-word prose cap when PR 1

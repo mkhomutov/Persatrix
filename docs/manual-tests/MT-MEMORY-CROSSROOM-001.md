@@ -206,11 +206,11 @@ persatrix channel send epoch-probe "What's the latest on Atlas?" \
 
 **Expected Behavior**: the extractor has not run yet, so the group-channel ask recall-misses. Test invalid — redo the Leg 1 idle + bridge, confirm the close in the logs, re-ask.
 
-### Edge Case 3: the persona never recorded the introduction
+### Edge Case 3: no identity row keyed on your sender id
 
-**Scenario**: Leg 2b fails, but Leg 1b's verification query returns **no** identity row at all — neither `user`- nor `agent`-typed.
+**Scenario**: Leg 2b fails and Leg 1b's query shows no identity row for `alex` — nothing at all, or a row keyed on a name (`contact:maksim`).
 
-**Expected Behavior**: not a wiring failure and not a Leg 2b fail — the capture never happened. Identity lands only if the persona *elects* to call `store_note(contact:<id>)`: model behaviour, unlike the deterministic close-path fact pass. This is the honest limit of the person legs — they prove recall, not capture. Re-run Leg 1b with a fuller introduction (a name **and** a role parse better) and confirm the row before reading anything into Leg 2b. If it never appears, file against the capture path, not cross-room recall.
+**Expected Behavior**: not a wiring failure and not a Leg 2b fail — the capture missed. Identity lands only if the persona *elects* to call `store_note(contact:<id>)`, and lands on the id that topic names: the key is the *topic*, only the type is the sender's, so a name-keyed note is invisible to Leg 2b. Model behaviour, unlike the deterministic close-path fact pass — the person legs prove recall, not capture. Re-run Leg 1b with a fuller introduction (a name **and** a role parse better) and confirm the row before reading anything into Leg 2b. If it never lands on `alex`, file against the capture path, not cross-room recall.
 
 ### Edge Case 4: rollback lever
 
