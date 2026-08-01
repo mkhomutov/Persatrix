@@ -6,7 +6,7 @@
 **Created**: 2026-07-28
 **Last Updated**: 2026-08-01
 **Status**: Active — authored at RFC 0049 PR 5. **Legs 1–4 (the facts half) executed live 2026-07-30** at v0.3.12 release-prep: ✅ pass, Leg 4 Accepted-with-known-gap ([ISSUE-0118](../issues/ISSUE-0118-tool-recall-bypasses-epoch-session-scopes.md)) — see the [execution report](v0.3.12-execution-report.md#mt-memory-crossroom-001--memory-that-travels-live-anthropic).
-**⬜ Legs 1b/2b (the person half) have never been run.** Added at v1.1 after [ISSUE-0119](../issues/ISSUE-0119-channel-publish-drops-human-participant-type.md) reached a release candidate on that green run; v0.3.12 shipped on the v1.0 bar by maintainer call ([#801](https://github.com/mkhomutov/Persatrix/pull/801) — the wiring half is CI-pinned, so what these add is the qualitative half). **They are the standing deliverable for the next memory-touching release: run the whole arc, and record 1b/2b explicitly.**
+**⬜ Legs 1b/2b (the person half) have never been run.** Added at v1.1 after [ISSUE-0119](../issues/ISSUE-0119-channel-publish-drops-human-participant-type.md) reached a release candidate on that green run; v0.3.12 shipped on the v1.0 bar by maintainer call ([#801](https://github.com/mkhomutov/Persatrix/pull/801) — the wiring half is CI-pinned, so what these add is the qualitative half). **They are the standing deliverable for the next memory-touching release: run the whole arc, and record 1b/2b explicitly** — tracked as [ISSUE-0121](../issues/ISSUE-0121-crossroom-person-identity-legs-never-run-live.md).
 
 ---
 
