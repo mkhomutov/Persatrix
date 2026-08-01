@@ -21,6 +21,8 @@ What the suite pins, in the order the risk runs:
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
+from typing import Any
 
 import aiosqlite
 import pytest
@@ -64,7 +66,7 @@ CREATE TABLE relationships (
 async def _row(
     db: aiosqlite.Connection, other_id: str, other_type: str,
     *, principal: str = "local", epoch: str = "live",
-) -> tuple | None:
+) -> Sequence[Any] | None:
     cursor = await db.execute(
         """
         SELECT trust_score, interaction_count, last_interaction_at,
