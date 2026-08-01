@@ -329,14 +329,11 @@ def test_escalation_chair_id_accepts_member_style_ids(chair_id: str):
 # The enum is the fixed §A lattice; the Go loader mirrors the rejection via
 # `ErrInvalidClassification` (config_validate.go).
 #
-# NOTE — schema-valid is deliberately WIDER than loadable during v0.3.12. This
-# enum is the post-Phase-1 contract and accepts all four levels, but the Go
-# loader additionally rejects `restricted`/`secret` (the item-8 dark-window
-# ceiling, `ErrClassificationAboveDarkWindow`) until the §D gate arms at RFC
-# 0037 PR 4. Tightening the enum instead would mean churning it back at PR 4
-# and would make `make validate` disagree with itself across the window, so the
-# temporary ceiling lives on the Go side only. The tests below therefore pin
-# the enum, not the current startup behaviour.
+# NOTE — schema-valid and loadable coincide since RFC 0037 PR 4 armed the §D
+# gate: the item-8 dark-window ceiling (`ErrClassificationAboveDarkWindow`)
+# that made the Go loader temporarily stricter than this enum was deleted
+# there, so all four levels are both schema-valid and loadable. The tests
+# below pin the enum (the fixed §A vocabulary), not loader behaviour.
 
 #: The §A lattice in rank order, DERIVED from the runtime module rather than
 #: re-typed as a literal. This is what makes the schema↔runtime link real: the

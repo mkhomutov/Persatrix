@@ -67,3 +67,18 @@ the request scopes around the executor's action-processing task at spawn.
   injection came back empty — exactly the fresh-epoch shape, so `--epoch`
   run isolation (and `--session` room pinning) cannot be relied on for
   personas with memory tools until fixed.
+
+## Notes
+
+> 2026-07-31 — the maintainer call flagged in the
+> [#796 execution report](../manual-tests/v0.3.12-execution-report.md)
+> resolved at
+> [release-prep PR 2](../v0.3.12-release-prep-plan.md#pr-2--docs--release-checklist):
+> **does not gate the v0.3.12 tag.** Pre-existing (not a regression of
+> either workstream), the injection-path wall the release ships is proven
+> live three independent ways, and the classification axis is unaffected.
+> Rides the release as a Known Gap — the release notes must carry the
+> caveat that `--epoch`/`--session` isolation cannot be relied on for
+> personas with memory tools until fixed. Fix slated **v0.3.13** (thread
+> the scopes across the executor hop the classification way:
+> `event.metadata` → `DispatchContext`).
