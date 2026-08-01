@@ -76,7 +76,7 @@ persatrix chat ember-owl --user alex
 
 **Expected**: a natural acknowledgement; no memory call-out required.
 
-Now **close the teaching interaction**: leave the DM idle **≥ 11 minutes**, then send a low-content bridge turn in the same DM:
+Now **close the teaching interaction** — **send [Leg 1b](#leg-1b--introduce-yourself-in-the-same-dm-no-close-required)'s turn first**, then leave the DM idle **≥ 11 minutes** and send a low-content bridge turn in the same DM:
 
 > "Thanks — talk later."
 
@@ -104,7 +104,7 @@ for r in sqlite3.connect('/app/data/memory.db').execute(
 
 **Expected**: a natural acknowledgement.
 
-**No idle window is needed** — a property, not a shortcut: identity does not wait for interaction close the way facts do. The write-through fires at the `store_note(contact:<id>)` tool boundary *during* the turn (the F-7 immediacy criterion), so it is readable the moment the persona records it.
+**No idle window is needed** — a property, not a shortcut: identity does not wait for interaction close the way facts do. The write-through fires at the `store_note(contact:<id>)` tool boundary *during* the turn (the F-7 immediacy criterion).
 
 **Optional verification** (debug, not a pass criterion): on the persona container,
 
@@ -116,7 +116,7 @@ for r in sqlite3.connect('/app/data/memory.db').execute(
     print(' | '.join(str(x) for x in r))"
 ```
 
-→ an `alex` row typed **`user`** with a JSON identity carrying the name. A row typed `agent` is the ISSUE-0119 shape and means Leg 2b will fail — see its diagnosis note.
+→ an `alex` row typed **`user`** with a JSON identity carrying the name. A row typed `agent` *here* is an [ISSUE-0068](../issues/ISSUE-0068-chat-peer-recorded-as-agent-participant-type.md) regression of the **DM** stamp (ISSUE-0119 is the channel path, Leg 2b's) and means Leg 2b will fail.
 
 ### Leg 2 — Ask in the standup (the headline: cross-room recall)
 
