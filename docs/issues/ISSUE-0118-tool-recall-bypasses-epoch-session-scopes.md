@@ -82,3 +82,12 @@ the request scopes around the executor's action-processing task at spawn.
 > personas with memory tools until fixed. Fix slated **v0.3.13** (thread
 > the scopes across the executor hop the classification way:
 > `event.metadata` → `DispatchContext`).
+
+> 2026-08-02 — **v0.3.12 is released** with this as a documented Known Gap
+> ([v0.3.12 — Memory that travels](https://github.com/mkhomutov/Persatrix/releases/tag/v0.3.12)).
+> The caveat landed in **both** required places: the curated `[0.3.12]`
+> Upgrade Notes (the `--epoch` / `--session` row) and the Known Gaps section
+> of the published release body. Nothing about the shipped behaviour changed
+> at the tag — this note only records that the maintainer's "does not gate"
+> call was exercised and the disclosure obligation met. Fix remains slated
+> **v0.3.13**.
