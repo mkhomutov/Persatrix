@@ -52,7 +52,7 @@ _SCHEMA_URL = "https://persatrix.dev/schemas/observability/1.0.0"
 
 _DEFAULT_SERVICE_NAME = "persatrix-agent"
 _DEFAULT_OTLP_ENDPOINT = "http://localhost:4318"
-_DEFAULT_SERVICE_VERSION = "0.3.11"
+_DEFAULT_SERVICE_VERSION = "0.3.12"
 _DEFAULT_EXPORT_INTERVAL_MS = 60_000
 _DEFAULT_EXPORT_TIMEOUT_MS = 10_000
 
