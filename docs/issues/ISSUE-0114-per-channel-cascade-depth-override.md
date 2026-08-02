@@ -120,3 +120,13 @@ ISSUE-0109 defaults PR):
 > [v0.3.12 release checklist Known Gaps](../v0.3.12-release-checklist.md#6-known-gaps-to-document-in-release-notes);
 > the design fork in step 4 (default: option (c)) is unchanged and still the
 > first decision the implementing PR must take.
+
+> 2026-08-02 — **v0.3.12 shipped without it, as the cut anticipated**
+> ([v0.3.12 — Memory that travels](https://github.com/mkhomutov/Persatrix/releases/tag/v0.3.12),
+> tagged on `c833da34`). The cut is confirmed by the release rather than
+> merely planned: the fleet-wide `max_cascade_depth` remains the de facto
+> discussion-length knob in the shipped binary, and the issue carries to
+> **v0.3.13** as the first of that line's three deferred calls (with
+> [ISSUE-0118](ISSUE-0118-tool-recall-bypasses-epoch-session-scopes.md) and
+> [ISSUE-0121](ISSUE-0121-crossroom-person-identity-legs-never-run-live.md)).
+> Documented in the published release body's Known Gaps section.

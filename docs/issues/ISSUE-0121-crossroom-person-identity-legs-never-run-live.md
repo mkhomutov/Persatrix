@@ -98,3 +98,10 @@ already has one — rather than more MT legs.
 > the moment it is created rather than discovered later. Deferral is a
 > maintainer call, not an oversight; this issue exists to keep the call
 > visible after the v0.3.12 tag ships.
+
+> 2026-08-02 — **v0.3.12 is released** on the MT v1.0 bar as the deferral
+> intended ([v0.3.12 — Memory that travels](https://github.com/mkhomutov/Persatrix/releases/tag/v0.3.12));
+> the legs remain unrun. Listed in the published release body's Known Gaps.
+> Carried to the **next memory-touching release** — whichever of v0.3.13 /
+> v0.4.0 first moves the cross-room or identity surfaces is the one that
+> must run legs 1b/2b before its own sign-off.
