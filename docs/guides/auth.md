@@ -22,6 +22,22 @@ becomes a verified claim instead of a body field.
 > channel)` memory continuity, unrelated to login sessions despite the shared
 > word. Logging in does not switch rooms; switching rooms does not touch auth.
 
+> **Known limitation — logging in does not partition persona memory.** What a
+> persona remembers is bounded by room membership and
+> [RFC 0037](../rfcs/0037-memory-confidentiality-channel-classification.md)
+> classification, **never by which account is speaking**. The per-room half of
+> the isolation rail is live (the orchestrator binds a session per `(agent,
+> channel)`), but it emits no per-request *principal*, so every caller —
+> authenticated or not — collapses to the single `local` tenant
+> ([ISSUE-0081](../issues/ISSUE-0081-session-id-process-global-not-task-local.md)
+> / [ISSUE-0082](../issues/ISSUE-0082-orchestrator-per-request-session-principal-emission.md)
+> Part 2, targeted **v0.3.14** per the [sequencing Amendment
+> 2026-08-02](../v0.3.x-sequencing.md#amendment-2026-08-02--v0313--v0314-the-two-release-tail-to-v040)).
+> So two accounts in one room share that room's memory session by design, and
+> the deliberately cross-room tiers (travelling facts, person identity) carry
+> across accounts too. Until then, give users who must not share a persona's
+> memory separate rooms — and classify those rooms.
+
 ---
 
 ## Table of Contents
