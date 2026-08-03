@@ -308,12 +308,17 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
         # cascade_depth=1 is correct because SendChatMessage is always a
         # top-level call (not invoked from within a nested dispatch).  If
         # this changes in the future, derive depth from the dispatch context.
-        # (PR 6 review fix: PR 3 finding #3.)  Origin-less by design: the
-        # chat surface has no channel-dispatched event to echo as the RFC
-        # 0052 no-reopen claim.
+        # (PR 6 review fix: PR 3 finding #3.)  Origin-less by design (no
+        # channel-dispatched event to echo as the RFC 0052 no-reopen claim)
+        # — but the per-request epoch/session axes DO thread (ISSUE-0118):
+        # the executor runs after ``on_event``'s scope binding exits, so
+        # without them its action processing would resolve construction
+        # snapshots, not this request's world (``request_scopes``).
         try:
             await self._dispatcher.executor.execute(
-                agent_id, actions, context=DispatchContext(cascade_depth=1),
+                agent_id, actions, context=DispatchContext(
+                    cascade_depth=1, origin_epoch_id=request_epoch or "",
+                    origin_session_id=request_session or ""),
             )
         except Exception:
             logger.warning(

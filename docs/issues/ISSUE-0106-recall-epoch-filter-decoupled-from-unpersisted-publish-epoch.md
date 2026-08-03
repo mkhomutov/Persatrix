@@ -135,3 +135,16 @@ handler/types/test comments were already corrected in `9ce3a26`.
 > the axis (a tombstone comment marks it); the stale "recall and publish
 > agree on the epoch axis" claim in `0036-pr-plan.md` and RFC 0036 §OQ-6
 > were both amended.
+
+> 2026-08-03 — **Direction (b)'s premise met its edge case live**
+> ([ISSUE-0118](ISSUE-0118-tool-recall-bypasses-epoch-session-scopes.md), the
+> v0.3.12 MT fresh-epoch leg): physical isolation covers *separate runs*,
+> but a **per-request** `--epoch` probe against one live stack shares the
+> single-epoch channel store by construction, so the persona recall tool
+> read the live world's verbatim history from a fresh-epoch turn. Resolved
+> tool-side in v0.3.13 PR 1 without reopening this decision: the endpoint
+> still refuses epoch overrides and the store stays single-epoch;
+> `recall_channel_messages` now declines (ordinary empty result) when the
+> bound per-request epoch differs from the process's world epoch. The (b)
+> record above is unchanged — this note only documents where its premise
+> stops and which guard covers the remainder.

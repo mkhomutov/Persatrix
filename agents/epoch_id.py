@@ -167,19 +167,37 @@ def epoch_scope(epoch_id: str | None) -> Iterator[str]:
         _ACTIVE_EPOCH_ID.reset(token)
 
 
+def epoch_id_from_metadata(metadata: Mapping[str, object]) -> str | None:
+    """Read the per-request epoch off event metadata, or ``None``.
+
+    The ONE validation seam behind both consumers of
+    :data:`EVENT_EPOCH_METADATA_KEY`: the handler-side scope binder
+    (:func:`epoch_scope_from_metadata`) and the executor-hop structural
+    lift (``DispatchContext.for_event`` — ISSUE-0118).  A present,
+    non-empty string is the epoch; anything else (missing key, blank,
+    tick event, non-string) reads as ``None`` so both consumers agree on
+    what "no per-request epoch" looks like and cannot drift on the key
+    name or the validation rule.
+    """
+    eid = metadata.get(EVENT_EPOCH_METADATA_KEY)
+    if isinstance(eid, str) and eid:
+        return eid
+    return None
+
+
 def epoch_scope_from_metadata(
     metadata: Mapping[str, object],
 ) -> AbstractContextManager[str | None]:
     """Return the per-request :func:`epoch_scope` for an event's metadata.
 
-    Reads :data:`EVENT_EPOCH_METADATA_KEY` off ``metadata``.  A present,
-    non-empty string binds a scope; anything else (missing key, blank,
-    tick event, non-string) yields a :func:`~contextlib.nullcontext` so
+    Reads :data:`EVENT_EPOCH_METADATA_KEY` via :func:`epoch_id_from_metadata`.
+    A present, non-empty string binds a scope; anything else (missing key,
+    blank, tick event, non-string) yields a :func:`~contextlib.nullcontext` so
     call-time resolution falls back to the construction snapshot — leaving
     single-world / CLI / tick paths unchanged.  Sibling of
     :func:`agents.principal_id.principal_scope_from_metadata`.
     """
-    eid = metadata.get(EVENT_EPOCH_METADATA_KEY)
-    if isinstance(eid, str) and eid:
+    eid = epoch_id_from_metadata(metadata)
+    if eid is not None:
         return epoch_scope(eid)
     return nullcontext()

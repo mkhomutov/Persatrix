@@ -22,7 +22,8 @@ from .channel_publisher import (
 )
 from .channel_wire_metadata import DispatchContext
 from .confidentiality_tripwire import run_channel_message_tripwire
-from .end_vote_action import publish_end_interaction_vote
+from .end_vote_action import notify_end_vote_outcome, publish_end_interaction_vote
+from .epoch_id import EVENT_EPOCH_METADATA_KEY
 from .observability.spans import SUBAGENT_SPAWN_SPAN
 from .persona_types import (
     ActionType,
@@ -30,6 +31,7 @@ from .persona_types import (
     AgentEvent,
     EventType,
 )
+from .session_id import EVENT_SESSION_METADATA_KEY
 
 if TYPE_CHECKING:
     from .dispatch import EventDispatcher
@@ -135,11 +137,25 @@ class ActionExecutor:
           minted fresh and REOPENED the closed discussion). The resolver
           stays authoritative (IP2); an origin-less context stamps nothing
           (IP8 re-convene).
+        * ``origin_epoch_id`` / ``origin_session_id`` (ISSUE-0118): the
+          per-request run-isolation epoch and room-continuity session,
+          re-entered as task-local scopes around the whole action loop via
+          :meth:`DispatchContext.request_scopes`.  ``on_event`` binds these
+          scopes only for its own lifetime; this method runs on the
+          DISPATCHING task — across the queued ``EventLoop`` hop the
+          handler's ContextVars never reach here — so before this seam
+          every executor-side memory read/write (the end-vote close
+          discharge persisting the voter's interaction, a child cascade's
+          recall) resolved the tiers' construction snapshots (boot epoch
+          ``live`` / legacy session): the F-3 fallback ISSUE-0118 pins.
+          Empty fields enter nothing, keeping the event-less / tick /
+          pre-rail postures unchanged.
         """
         results: list[dict[str, Any]] = []
-        for action in actions:
-            result = await self._execute_one(agent_id, action, context=context)
-            results.append(result)
+        with context.request_scopes():
+            for action in actions:
+                result = await self._execute_one(agent_id, action, context=context)
+                results.append(result)
         return results
 
     async def _execute_one(
@@ -228,8 +244,10 @@ class ActionExecutor:
                     self._channel_publisher, agent_id, action, context=context)
                 # PR 607 review finding 5: tell the voter how its publish
                 # went so the parked local close is discharged — close on
-                # "published", drop on any failure status.
-                await self._notify_end_vote_outcome(agent_id, result)
+                # "published", drop on any failure status.  (Carved into
+                # end_vote_action.py with its publish sibling for the
+                # 500-line cap — ISSUE-0118 pushed this module over.)
+                await notify_end_vote_outcome(self._dispatcher, agent_id, result)
                 return result
             case _:
                 # Defensive catch-all: Python match is not exhaustive at the
@@ -240,62 +258,6 @@ class ActionExecutor:
                     agent_id, action.action_type.value,
                 )
                 return {"action_type": action.action_type.value, "status": "unhandled"}
-
-    async def _notify_end_vote_outcome(
-        self, agent_id: str, result: dict[str, Any],
-    ) -> None:
-        """Discharge the voter's parked local close with the publish outcome
-        (PR 607 review finding 5).
-
-        The decide-time path parks the END_INTERACTION_VOTE's local
-        interaction close instead of executing it (the vote has not been
-        published yet — see ``agents/persona_runtime/vote_close.py``); this
-        callback reports how the publish went so the park is closed
-        (``status == "published"``) or dropped (any failure status, so a
-        vote that never reached the orchestrator leaves no early "ended"
-        record).  Best-effort: no dispatcher / unknown agent / an agent
-        without the vote-close seam / missing ``channel_id`` (the
-        ``no_channel_id`` drop) simply leaves the park to the staleness
-        guards, and a callback error must not fail the action whose
-        publish already succeeded.
-        """
-        if self._dispatcher is None:
-            return
-        agent = self._dispatcher.get_agent(agent_id)
-        if agent is None:
-            return
-        channel_id = str(result.get("channel_id", "") or "")
-        if not channel_id:
-            return
-        # The dispatcher registry is typed for persona agents but not
-        # enforced; an agent without the seam has no parked closes to
-        # discharge — skip, keeping the except's WARNING for discharges
-        # that actually fail (PR 607 third-pass review).
-        resolve = getattr(agent, "resolve_end_vote_publish", None)
-        if resolve is None:
-            return
-        try:
-            await resolve(
-                channel_id,
-                published=result.get("status") == "published",
-                # The park's correlation handle (PR 607 second-pass
-                # review), echoed by end_vote_action off the action
-                # payload — "" for a vote the park never stamped, which
-                # the discharge treats as not-mine.
-                token=str(result.get("vote_close_token", "") or ""),
-                # PR #718 review (OQ #6): a published vote that rode the
-                # ``synthesis_reply`` echo IS claimable as the §D closing
-                # artifact — the discharge marks the chair's record for the
-                # metered close summary. Strict ``is True``: only the
-                # "published" result carries the key, so a failure status
-                # reads unmarked.
-                synthesis_reply=result.get("synthesis_reply") is True,
-            )
-        except Exception:
-            logger.warning(
-                "End-vote publish-outcome callback failed for agent %s "
-                "(channel %s)", agent_id, channel_id, exc_info=True,
-            )
 
     async def _handle_send_channel_message(
         self,
@@ -460,6 +422,27 @@ class ActionExecutor:
                 # mentioned, so set ``respond_policy=when_mentioned`` and forward
                 # the mention list. Without these the gate fails closed under
                 # the unknown-policy branch (RFC 0011 PR 4b, #252).
+                #
+                # ISSUE-0118: forward the origin epoch/session onto the child
+                # event so the child's ``on_event`` binds the SAME request
+                # world.  The scopes re-entered around this loop
+                # (``execute``'s ``request_scopes``) cover only the direct
+                # same-task branch; a child routed through the target's
+                # queued ``EventLoop`` runs on the supervisor task, where
+                # ambient ContextVars cannot follow — the metadata keys are
+                # the rail that crosses that hop.  Only non-empty values are
+                # seeded (key-absence is the binders' nullcontext contract).
+                child_metadata: dict[str, Any] = {
+                    "cascade_depth": context.cascade_depth,
+                }
+                if context.origin_session_id:
+                    child_metadata[EVENT_SESSION_METADATA_KEY] = (
+                        context.origin_session_id
+                    )
+                if context.origin_epoch_id:
+                    child_metadata[EVENT_EPOCH_METADATA_KEY] = (
+                        context.origin_epoch_id
+                    )
                 event = AgentEvent(
                     event_type=EventType.CHANNEL_MESSAGE,
                     payload={
@@ -470,7 +453,7 @@ class ActionExecutor:
                     },
                     channel_id=target_channel,
                     sender_id=sender_id,
-                    metadata={"cascade_depth": context.cascade_depth},
+                    metadata=child_metadata,
                 )
                 await asyncio.wait_for(
                     self._dispatcher.dispatch(target_id, event),

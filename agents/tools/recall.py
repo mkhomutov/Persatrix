@@ -42,6 +42,7 @@ from urllib.parse import quote
 import aiohttp
 
 from ..acting_classification import current_acting_classification
+from ..epoch_id import current_epoch_id, resolve_epoch_id_silent
 from ..prompt_safety import escape_prompt_delimiters
 from .permissions import PermissionGate
 from .registry import ToolDefinition, ToolResult, get_tool, tool
@@ -222,6 +223,16 @@ def create_recall_tool(
     because the closure-bound ``agent_id`` makes it per-agent state the
     single-slot global registry cannot hold.
     """
+    # ISSUE-0118: the process's own epoch — the single world every row in
+    # the channel store belongs to.  Since ISSUE-0106 direction (b) the
+    # store is deliberately single-epoch (separate runs never share a
+    # channel-store DB; the endpoint 400s an ``epoch_id`` override), so a
+    # request delivered under a DIFFERENT per-request epoch cannot be
+    # scoped server-side: the tool must decline instead — see the guard in
+    # the body.  Captured at wiring time with no scope active (the same
+    # construction-snapshot semantics the memory tiers use), so it is the
+    # env-var world (``live`` in production, the job epoch in CI).
+    world_epoch = resolve_epoch_id_silent()
 
     @tool(
         name="recall_channel_messages",
@@ -244,6 +255,29 @@ def create_recall_tool(
             return ToolResult(
                 success=False, error="Permission denied: channels:recall",
             )
+
+        # ISSUE-0118: the foreign-epoch wall.  The memory tiers honour a
+        # per-request ``epoch_scope`` with strict equality, but the channel
+        # store is single-epoch by the ISSUE-0106(b) decision (every
+        # persisted row is the process's world; the recall endpoint rejects
+        # epoch overrides), so a turn delivered under a different epoch —
+        # the ``--epoch`` fresh-run shape that leaked live on 2026-07-30 —
+        # cannot be scoped server-side.  Decline with an EMPTY result
+        # rather than an error: a fresh epoch must see *nothing*, and that
+        # includes not learning that withheld history exists.  No scope, or
+        # a scope equal to the world (production ``live`` == ``live``, a CI
+        # job's stack under one epoch), recalls normally — the additive
+        # contract.  Session deliberately does NOT gate here: its axis is
+        # room-continuity with a carve-out by design (never strict
+        # isolation), and verbatim recall's access rule is membership, with
+        # ``channel_id`` as the narrowing lever.
+        active_epoch = current_epoch_id()
+        if active_epoch is not None and active_epoch != world_epoch:
+            logger.debug(
+                "channels: recall %s declined (foreign epoch %r != world %r)",
+                agent_id, active_epoch, world_epoch,
+            )
+            return ToolResult(success=True, data=[])
 
         # RFC 0037 §F: bind the ACTING channel's classification from the
         # turn's task-local scope (:mod:`agents.acting_classification` — set

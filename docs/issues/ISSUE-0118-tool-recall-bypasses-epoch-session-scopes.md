@@ -9,9 +9,12 @@ refs:
   - docs/manual-tests/MT-MEMORY-CROSSROOM-001.md
   - docs/manual-tests/v0.3.12-execution-report.md
   - agents/tools/memory_tools.py
+  - agents/tools/recall.py
   - agents/memory/_epoch_filter.py
   - agents/persona_runtime/__init__.py
   - agents/confidentiality_tripwire.py
+  - agents/dispatch_context.py
+  - internal/channels/recall.go
 ---
 
 ## Summary
@@ -102,3 +105,47 @@ the request scopes around the executor's action-processing task at spawn.
 > [ISSUE-0121](ISSUE-0121-crossroom-person-identity-legs-never-run-live.md)'s
 > legs 1b/2b; the v0.3.12 `--epoch`/`--session` caveat retires in the
 > v0.3.13 release notes.
+
+> 2026-08-03 — **Fix PR opened** (`feature/v0313-issue0118-tool-recall-scopes`,
+> v0.3.13 PR 1) with a **diagnosis refinement** from deterministic
+> reproduction. Probing all three dispatch shapes (direct `on_event`,
+> `dispatch()` → queued `EventLoop` with handle, `enqueue_inbound` →
+> `on_inbound`) shows the **in-loop tool round** — `_execute_tools` inside
+> `_on_event_inner` — already inherits the handler's ContextVar binding on
+> every path: the multi-turn memory-tool round was *not* the ContextVar
+> gap. Two real holes remain, and the PR closes both:
+>
+> 1. **The executor hop** (the summary's mechanism, relocated): everything
+>    the `ActionExecutor` runs AFTER `on_event` returns — the end-vote
+>    close discharge persisting the voter's interaction, the legacy
+>    cascade's child dispatches — executes on the dispatching task, where
+>    the handler's scopes never reach; memory seams there resolved
+>    construction snapshots. Fixed the classification way (the fix
+>    direction above): epoch/session lift structurally in
+>    `DispatchContext.for_event` (via the same leaf readers the `on_event`
+>    binders consume — the drift guard), re-entered around action
+>    processing by `DispatchContext.request_scopes`; the chat surface's
+>    post-reply execute threads them explicitly, and the legacy cascade's
+>    child events carry the keys on the metadata rail.
+> 2. **The reachable live-leak mechanism — the verbatim channel recall.**
+>    `recall_channel_messages` hits the channel store, which is
+>    single-epoch by the [ISSUE-0106](ISSUE-0106-recall-epoch-filter-decoupled-from-unpersisted-publish-epoch.md)
+>    direction-(b) decision (physical isolation; the endpoint 400s epoch
+>    overrides since #778) — so a fresh-epoch turn's recall read the live
+>    world's verbatim history *regardless* of ContextVars. This fits the
+>    live evidence exactly (injection admitted zero; the two-call tool
+>    round surfaced the fact verbatim). The tool now declines with an
+>    ordinary empty result when the bound per-request epoch differs from
+>    the process's world epoch — a fresh epoch sees nothing, and does not
+>    learn that withheld history exists. Session deliberately does not
+>    gate the tool (room-continuity has a carve-out by design; membership
+>    is the recall access rule).
+>
+> Deterministic CI pins all of it: the executor-hop re-entry (red without
+> the threading), the tool-recall-on-the-executor-leg shape, the legacy
+> cascade seeding, the chat-surface threading, the foreign-epoch wall, and
+> — new — the in-loop injection/tool parity that held all along, so a
+> future refactor moving tool execution off the handler task flips a test
+> instead of shipping the leak silently. Closure (status → resolved) waits
+> on the Phase 3 live proof: the MT fresh-epoch leg green **with a tool
+> round evidenced in provenance** (the plan's acceptance criterion).
