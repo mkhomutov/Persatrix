@@ -275,7 +275,13 @@ def create_recall_tool(
         # ``channel_id`` as the narrowing lever.
         active_epoch = current_epoch_id()
         if active_epoch is not None and active_epoch != world_epoch:
-            logger.debug(
+            # INFO, not DEBUG (PR #809 review finding 3): expected on a
+            # fresh-epoch probe, but if production orchestrator and agent
+            # server ever disagree on PERSATRIX_EPOCH, EVERY recall
+            # silently empties and this line is the only operator signal.
+            # Server-side only — the model still sees an ordinary empty
+            # result, so the non-disclosure posture is untouched.
+            logger.info(
                 "channels: recall %s declined (foreign epoch %r != world %r)",
                 agent_id, active_epoch, world_epoch,
             )

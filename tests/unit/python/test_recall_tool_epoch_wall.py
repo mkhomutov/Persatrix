@@ -17,6 +17,7 @@ its own minimal fakes rather than importing from a sibling test module.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import pytest
@@ -94,6 +95,28 @@ class TestRecallToolForeignEpochWall:
         result = await td.func(query="atlas")
         assert result.success is True
         assert len(client.calls) == 1
+
+    async def test_foreign_epoch_decline_logs_at_info(
+        self, caplog: pytest.LogCaptureFixture,
+    ):
+        """The decline is the ONLY operator signal when production
+        orchestrator and agent server disagree on ``PERSATRIX_EPOCH``
+        (every recall silently empties), so it must be visible at default
+        log levels — INFO, not DEBUG (PR #809 review finding 3).
+        Server-side only: the model still sees an ordinary empty result,
+        so quieting this back down must be a conscious trade."""
+        client = _FakeRecallClient([_row("x")])
+        td = create_recall_tool(client, _gate_recall(), agent_id="ember-owl")
+        assert td.func is not None
+        with caplog.at_level(logging.INFO, logger="agents.tools.recall"):
+            with epoch_scope("mt-crossroom-fresh"):
+                result = await td.func(query="x")
+        assert result.success is True
+        assert result.data == []
+        assert any(
+            record.levelno == logging.INFO and "declined" in record.getMessage()
+            for record in caplog.records
+        )
 
     async def test_wiring_under_a_scope_does_not_poison_world_snapshot(self):
         """The world snapshot is env-only (PR #809 review finding 2): a
