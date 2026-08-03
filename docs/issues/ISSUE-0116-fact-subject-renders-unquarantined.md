@@ -91,3 +91,11 @@ surface ever proves reachable in practice.
 > the principled home but belongs with the future predicate registry, and
 > direction 1 buys little at any grammar strictness this issue would
 > accept. Revisitable in the fold-in PR.
+
+> 2026-08-03 (later) — **the in/out call locked at the
+> [v0.3.13 plan opening](../v0.3.13-plan.md): IN**, as the release's only
+> fold-in, cuttable (`feature/v0313-issue0116-subject-header`). Direction 2
+> (bounded header template — header-only truncation, the canonical form
+> stays on the row and in recall matching) is the plan-opening default,
+> revisitable in the fold-in PR; the topic amendment's write-boundary
+> invariants are asserted unchanged.

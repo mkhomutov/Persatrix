@@ -116,3 +116,12 @@ already has one — rather than more MT legs.
 > executor-hop fix lands, so one live run verifies both the threading fix
 > and legs 1b/2b. A red leg becomes in-release fix work, not a further
 > deferral (the amendment's risk table says this explicitly).
+
+> 2026-08-03 — **v0.3.13 plan opened**
+> ([v0.3.13-plan.md](../v0.3.13-plan.md)): this issue is scoped as the
+> release-prep live deliverable, not an implementation PR — the whole
+> `MT-MEMORY-CROSSROOM-001` v1.1 arc runs at release-prep **after** the
+> [ISSUE-0118](ISSUE-0118-tool-recall-bypasses-epoch-session-scopes.md)
+> fix merges, with legs 1b/2b recorded explicitly in the execution report
+> per the MT's run contract (Leg 1b row keyed on the sender id, typed
+> `user`; wiring-vs-reasoning triage before filing).
