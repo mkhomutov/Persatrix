@@ -105,3 +105,14 @@ already has one — rather than more MT legs.
 > Carried to the **next memory-touching release** — whichever of v0.3.13 /
 > v0.4.0 first moves the cross-room or identity surfaces is the one that
 > must run legs 1b/2b before its own sign-off.
+
+> 2026-08-02 (later) — the
+> [sequencing Amendment 2026-08-02](../v0.3.x-sequencing.md#amendment-2026-08-02--v0313--v0314-the-two-release-tail-to-v040)
+> resolves the "whichever release first" clause above: **v0.3.13
+> (Deferred calls closed) is that release**, and this issue is one of its
+> three named scope items. Sequencing inside the release per the
+> amendment's dependency chain: run the whole arc **after** the
+> [ISSUE-0118](ISSUE-0118-tool-recall-bypasses-epoch-session-scopes.md)
+> executor-hop fix lands, so one live run verifies both the threading fix
+> and legs 1b/2b. A red leg becomes in-release fix work, not a further
+> deferral (the amendment's risk table says this explicitly).
