@@ -78,7 +78,12 @@ func clampCascadeDepth(inbound, max int) int {
 //     missing data point on the dashboard is preferable to a
 //     fabricated zero that conflates with "every recipient was
 //     filtered upstream".
-func (r *ChannelRouter) recordCascadeCap(ctx context.Context, msg ChannelMessage, ct ChannelType, depth int) {
+//
+// `depthCap` is the effective cap the caller already resolved for this
+// publish (ISSUE-0114: publishCommit resolves once and enforces one number),
+// so the log reports exactly the bound that fired — not a re-read a
+// concurrent RFC 0050 apply could have changed in between.
+func (r *ChannelRouter) recordCascadeCap(ctx context.Context, msg ChannelMessage, ct ChannelType, depth, depthCap int) {
 	// RFC 0030 §B composition: the cascade cap is Layer 0. Attribute it on the
 	// shared governance_drop{layer=depth} counter + the trace span (governance.go)
 	// so every layer's drops land on one dashboard / trace query — one increment
@@ -102,7 +107,7 @@ func (r *ChannelRouter) recordCascadeCap(ctx context.Context, msg ChannelMessage
 			zap.String("channel_id", msg.ChannelID),
 			zap.String("sender_id", msg.SenderID),
 			zap.Int("depth", depth),
-			zap.Int("max_cascade_depth", r.maxCascadeDepthFor(msg.ChannelID)),
+			zap.Int("max_cascade_depth", depthCap),
 			zap.NamedError("recipient_lookup_error", err),
 		)
 		return
@@ -122,7 +127,7 @@ func (r *ChannelRouter) recordCascadeCap(ctx context.Context, msg ChannelMessage
 		zap.String("channel_id", msg.ChannelID),
 		zap.String("sender_id", msg.SenderID),
 		zap.Int("depth", depth),
-		zap.Int("max_cascade_depth", r.maxCascadeDepthFor(msg.ChannelID)),
+		zap.Int("max_cascade_depth", depthCap),
 		zap.Int("suppressed_recipients", suppressed),
 	)
 	if r.metrics != nil && r.metrics.MessagesCascadeCapped != nil && suppressed > 0 {
@@ -236,6 +241,15 @@ func (r *ChannelRouter) MaxCascadeDepthFor(channelID string) (depth int, set boo
 // [ChannelRouter.ReconcileConfig] and after [ChannelRouter.SetMaxCascadeDepth]
 // (the setter's above-fleet warning compares against the fleet cap);
 // idempotent.
+//
+// Unlike the interaction-budget resolver (which stamps
+// [ChannelConfig.ResolveInteractionBudgetTokens]'s resolved value), this seeds
+// the RAW declared value, never [ChannelConfig.ResolveMaxCascadeDepth]'s
+// resolution: resolving here would give every declared channel an explicit map
+// entry, so [ChannelRouter.MaxCascadeDepthFor]'s set flag would read true for
+// fleet-inheriting channels and the conditional freeze captures keyed on it
+// (adopt + ISSUE-0103 first-edit baseline) would pin them to a moment's fleet
+// cap.
 func (r *ChannelRouter) ResolveChannelCascadeCaps(_ context.Context, cfg *Config) error {
 	if cfg == nil {
 		return nil

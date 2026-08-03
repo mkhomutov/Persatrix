@@ -351,7 +351,7 @@ func (r *ChannelRouter) publishCommit(ctx context.Context, msg ChannelMessage, d
 	// — a per-process GLOBAL backstop, which is why per-channel caps are
 	// validated <= the fleet value it is aligned with (option (c)).
 	if clampedDepth >= depthCap {
-		r.recordCascadeCap(ctx, msg, derivedType, clampedDepth)
+		r.recordCascadeCap(ctx, msg, derivedType, clampedDepth, depthCap)
 		// Notify-then-suppress — the latch branch's posture, same starvation
 		// (ISSUE-0110): an at-cap reply from the current floor speaker IS the
 		// persisted reply the round's waiter is parked on; skipping Notify

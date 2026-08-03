@@ -337,11 +337,11 @@ func (c ChannelConfig) ResolveInteractionBudgetTokens(fleetDefault int64) int64 
 }
 
 // ResolveMaxCascadeDepth returns the effective RFC 0030 Layer 0 cascade-depth
-// cap for this channel (ISSUE-0114): the channel's own `max_cascade_depth`
-// when set (non-zero), otherwise the resolved fleet cap the caller passes
-// ([Config.ResolvedMaxCascadeDepth]). The single source of truth for the
-// precedence — the startup resolver stamps the resolved value onto the
-// router's per-channel map so the publish path enforces one number.
+// cap for this channel (ISSUE-0114): the channel's own `max_cascade_depth` when
+// set (non-zero), else the resolved fleet cap the caller passes
+// ([Config.ResolvedMaxCascadeDepth]). The config-layer precedence contract; the
+// runtime read is [ChannelRouter.maxCascadeDepthFor] — the startup resolver
+// seeds RAW declared values, not this resolution (see the resolver's doc).
 func (c ChannelConfig) ResolveMaxCascadeDepth(fleet int) int {
 	if c.MaxCascadeDepth > 0 {
 		return c.MaxCascadeDepth
