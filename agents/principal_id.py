@@ -151,20 +151,40 @@ def principal_scope(principal_id: str | None) -> Iterator[str]:
         _ACTIVE_PRINCIPAL_ID.reset(token)
 
 
+def principal_id_from_metadata(metadata: Mapping[str, object]) -> str | None:
+    """Read the per-request principal off event metadata, or ``None``.
+
+    The ONE validation seam behind both consumers of
+    :data:`EVENT_PRINCIPAL_METADATA_KEY`: the handler-side scope binder
+    (:func:`principal_scope_from_metadata`) and the executor-hop
+    structural lift (``DispatchContext.for_event`` — ISSUE-0118 / PR #809
+    review finding 4).  A present, non-empty string is the principal;
+    anything else (missing key, blank, tick event, non-string) reads as
+    ``None`` so both consumers agree on what "no per-request principal"
+    looks like and cannot drift on the key name or the validation rule.
+    Sibling of :func:`agents.epoch_id.epoch_id_from_metadata` /
+    :func:`agents.session_id.session_id_from_metadata`.
+    """
+    pid = metadata.get(EVENT_PRINCIPAL_METADATA_KEY)
+    if isinstance(pid, str) and pid:
+        return pid
+    return None
+
+
 def principal_scope_from_metadata(
     metadata: Mapping[str, object],
 ) -> AbstractContextManager[str | None]:
     """Return the per-request :func:`principal_scope` for an event's metadata.
 
-    Reads :data:`EVENT_PRINCIPAL_METADATA_KEY` off ``metadata``.  A
-    present, non-empty string binds a scope; anything else (missing key,
-    blank, tick event, non-string) yields a
-    :func:`~contextlib.nullcontext` so call-time resolution falls back to
-    the construction snapshot — leaving single-tenant / CLI / tick paths
-    unchanged.  Sibling of
+    Reads :data:`EVENT_PRINCIPAL_METADATA_KEY` via
+    :func:`principal_id_from_metadata`.  A present, non-empty string binds
+    a scope; anything else (missing key, blank, tick event, non-string)
+    yields a :func:`~contextlib.nullcontext` so call-time resolution falls
+    back to the construction snapshot — leaving single-tenant / CLI / tick
+    paths unchanged.  Sibling of
     :func:`agents.session_id.session_scope_from_metadata`.
     """
-    pid = metadata.get(EVENT_PRINCIPAL_METADATA_KEY)
-    if isinstance(pid, str) and pid:
+    pid = principal_id_from_metadata(metadata)
+    if pid is not None:
         return principal_scope(pid)
     return nullcontext()

@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING
 from .cascade_depth_defaults import DEFAULT_MAX_CASCADE_DEPTH
 from .confidentiality_tripwire import tripwire_watch_from_event
 from .epoch_id import epoch_id_from_metadata, epoch_scope
+from .principal_id import principal_id_from_metadata, principal_scope
 from .session_id import session_id_from_metadata, session_scope
 
 if TYPE_CHECKING:
@@ -124,6 +125,14 @@ class DispatchContext:
     tick, a pre-rail producer) means :meth:`request_scopes` re-enters
     nothing and executor-side resolution keeps its construction-snapshot
     fallback — the additive contract every scope axis ships with.
+
+    ``origin_principal_id`` (PR #809 review finding 4) rides the same
+    rail.  It is DORMANT today — no producer emits principals until the
+    ISSUE-0082 Part 2 orchestrator emission (v0.3.14) — but threading it
+    now, with the same leaf reader / re-entry / cascade seeding, means
+    the activation inherits no executor-hop gap: without this, the leak
+    class ISSUE-0118 closed for epoch would resurface on the tenant axis
+    the day the rail lights up.
     """
 
     cascade_depth: int = DEFAULT_MAX_CASCADE_DEPTH
@@ -139,9 +148,11 @@ class DispatchContext:
     origin_tripwire_watch: TripwireWatch | None = None
     # ISSUE-0118: the per-request epoch/session axes — see the class
     # docstring.  Threaded structurally, not per-site, for the same
-    # silent-fallback reason as every other field here.
+    # silent-fallback reason as every other field here.  Principal (PR
+    # #809 review finding 4) is the dormant third axis on the same rail.
     origin_epoch_id: str = ""
     origin_session_id: str = ""
+    origin_principal_id: str = ""
 
     @classmethod
     def for_event(cls, event: AgentEvent, *, cascade_depth: int) -> DispatchContext:
@@ -151,10 +162,11 @@ class DispatchContext:
         the channel without the interaction id (or vice versa). The synthesis
         marker rides the same derivation (strict ``is True``, matching the
         gate's admission read) so the reply-echo contract cannot be
-        half-threaded either.  The epoch/session axes (ISSUE-0118) ride the
-        same derivation through the leaf readers the ``on_event`` binders
+        half-threaded either.  The epoch/session/principal axes
+        (ISSUE-0118; principal per PR #809 review finding 4) ride the same
+        derivation through the leaf readers the ``on_event`` binders
         consume, so the handler-side scopes and the executor-side re-entry
-        always agree on the request's ``(epoch, session)``."""
+        always agree on the request's ``(epoch, session, principal)``."""
         return cls(
             cascade_depth=cascade_depth,
             origin_channel_id=event.channel_id or "",
@@ -163,11 +175,13 @@ class DispatchContext:
             origin_tripwire_watch=tripwire_watch_from_event(event),
             origin_epoch_id=epoch_id_from_metadata(event.metadata) or "",
             origin_session_id=session_id_from_metadata(event.metadata) or "",
+            origin_principal_id=principal_id_from_metadata(event.metadata) or "",
         )
 
     def request_scopes(self) -> AbstractContextManager[None]:
-        """Re-enter the per-request epoch/session scopes for the executor's
-        action processing (ISSUE-0118).
+        """Re-enter the per-request epoch/session/principal scopes for the
+        executor's action processing (ISSUE-0118; principal per PR #809
+        review finding 4 — dormant until the rail's v0.3.14 producer).
 
         The ``on_event`` handler binds these scopes task-locally for its own
         lifetime, but the executor runs on the DISPATCHING task — across the
@@ -181,21 +195,28 @@ class DispatchContext:
         see the request's world instead.
 
         Empty fields enter nothing (a shared :func:`~contextlib.nullcontext`
-        when both are empty), so event-less contexts, ticks, and
+        when all are empty), so event-less contexts, ticks, and
         pre-rail producers keep the construction-snapshot fallback — the
         same additive contract as the handler-side binders.
         """
-        if not self.origin_epoch_id and not self.origin_session_id:
+        if not (
+            self.origin_epoch_id
+            or self.origin_session_id
+            or self.origin_principal_id
+        ):
             return nullcontext()
         return self._enter_request_scopes()
 
     @contextmanager
     def _enter_request_scopes(self) -> Iterator[None]:
-        """Body behind :meth:`request_scopes` — session first, then epoch,
-        matching ``request_scope_from_metadata``'s binder order."""
+        """Body behind :meth:`request_scopes` — session, then principal,
+        then epoch, matching ``request_scope_from_metadata``'s binder
+        order."""
         with ExitStack() as stack:
             if self.origin_session_id:
                 stack.enter_context(session_scope(self.origin_session_id))
+            if self.origin_principal_id:
+                stack.enter_context(principal_scope(self.origin_principal_id))
             if self.origin_epoch_id:
                 stack.enter_context(epoch_scope(self.origin_epoch_id))
             yield

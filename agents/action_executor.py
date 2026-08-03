@@ -31,6 +31,7 @@ from .persona_types import (
     AgentEvent,
     EventType,
 )
+from .principal_id import EVENT_PRINCIPAL_METADATA_KEY
 from .session_id import EVENT_SESSION_METADATA_KEY
 
 if TYPE_CHECKING:
@@ -137,8 +138,9 @@ class ActionExecutor:
           minted fresh and REOPENED the closed discussion). The resolver
           stays authoritative (IP2); an origin-less context stamps nothing
           (IP8 re-convene).
-        * ``origin_epoch_id`` / ``origin_session_id`` (ISSUE-0118): the
-          per-request run-isolation epoch and room-continuity session,
+        * ``origin_epoch_id`` / ``origin_session_id`` / the dormant
+          ``origin_principal_id`` (ISSUE-0118; PR #809 review finding 4):
+          the per-request scope axes,
           re-entered as task-local scopes around the whole action loop via
           :meth:`DispatchContext.request_scopes`.  ``on_event`` binds these
           scopes only for its own lifetime; this method runs on the
@@ -442,6 +444,10 @@ class ActionExecutor:
                 if context.origin_epoch_id:
                     child_metadata[EVENT_EPOCH_METADATA_KEY] = (
                         context.origin_epoch_id
+                    )
+                if context.origin_principal_id:
+                    child_metadata[EVENT_PRINCIPAL_METADATA_KEY] = (
+                        context.origin_principal_id
                     )
                 event = AgentEvent(
                     event_type=EventType.CHANNEL_MESSAGE,

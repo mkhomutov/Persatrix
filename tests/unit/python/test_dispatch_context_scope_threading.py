@@ -18,6 +18,12 @@ binding through the shared leaf readers, so the two consumers of each
 metadata key cannot diverge again — the exact drift that let the epoch
 axis skip the executor hop while the classification axis (threaded for
 the tripwire in #788) did not.
+
+The principal axis rides the same rail (PR #809 review finding 4) —
+dormant until its ISSUE-0082 Part 2 producer (v0.3.14), threaded and
+pinned here so the activation inherits no executor-hop gap.  The
+in-loop tool-round parity pin lives in
+:mod:`test_scope_threading_in_loop_parity` (500-line code cap).
 """
 
 from __future__ import annotations
@@ -37,13 +43,15 @@ from agents.epoch_id import (
     EVENT_EPOCH_METADATA_KEY,
     current_epoch_id,
     epoch_scope,
-    resolve_epoch_id_silent,
 )
 from agents.generated import task_pb2
-from agents.llm_client import LLMResponse, LLMToolResult, StopReason, ToolCall, Usage
 from agents.memory.episodic import EpisodicMemory
-from agents.persona import create_persona_agent
 from agents.persona_types import ActionType, AgentAction, AgentEvent, EventType
+from agents.principal_id import (
+    EVENT_PRINCIPAL_METADATA_KEY,
+    PRINCIPAL_METADATA_GRPC_KEY,
+    current_principal_id,
+)
 from agents.request_scope import request_scope_from_metadata
 from agents.server_servicers import AgentServiceServicer
 from agents.session_id import (
@@ -54,8 +62,6 @@ from agents.session_id import (
 from agents.tools.builtin import create_memory_tools
 from agents.tools.permissions import PermissionGate
 from agents.tools.registry import clear_registry
-
-from ._persona_test_helpers import _PERSONA_CONFIG, _make_client
 
 # ─── Harness ────────────────────────────────────────────────
 
@@ -82,6 +88,7 @@ def _scoped_metadata() -> dict[str, object]:
     return {
         EVENT_EPOCH_METADATA_KEY: "mt-crossroom-fresh",
         EVENT_SESSION_METADATA_KEY: "conv-x",
+        EVENT_PRINCIPAL_METADATA_KEY: "person:alice",
     }
 
 
@@ -112,19 +119,26 @@ class TestForEventLiftsScopes:
         ctx = DispatchContext.for_event(_event(_scoped_metadata()), cascade_depth=1)
         assert ctx.origin_epoch_id == "mt-crossroom-fresh"
         assert ctx.origin_session_id == "conv-x"
+        assert ctx.origin_principal_id == "person:alice"
 
     def test_absent_keys_lift_empty(self) -> None:
         ctx = DispatchContext.for_event(_event(), cascade_depth=1)
         assert ctx.origin_epoch_id == ""
         assert ctx.origin_session_id == ""
+        assert ctx.origin_principal_id == ""
 
     def test_non_string_and_blank_values_lift_empty(self) -> None:
         ctx = DispatchContext.for_event(
-            _event({EVENT_EPOCH_METADATA_KEY: 7, EVENT_SESSION_METADATA_KEY: ""}),
+            _event({
+                EVENT_EPOCH_METADATA_KEY: 7,
+                EVENT_SESSION_METADATA_KEY: "",
+                EVENT_PRINCIPAL_METADATA_KEY: b"person:alice",
+            }),
             cascade_depth=1,
         )
         assert ctx.origin_epoch_id == ""
         assert ctx.origin_session_id == ""
+        assert ctx.origin_principal_id == ""
 
     def test_drift_guard_lift_agrees_with_handler_binders(self) -> None:
         """The executor-side lift and the handler-side scope binding read
@@ -137,10 +151,12 @@ class TestForEventLiftsScopes:
         with request_scope_from_metadata(metadata):
             assert current_epoch_id() == ctx.origin_epoch_id
             assert current_session_id() == ctx.origin_session_id
+            assert current_principal_id() == ctx.origin_principal_id
 
     def test_event_less_context_defaults_empty(self) -> None:
         assert DispatchContext().origin_epoch_id == ""
         assert DispatchContext().origin_session_id == ""
+        assert DispatchContext().origin_principal_id == ""
 
     def test_reexport_from_channel_wire_metadata_is_same_class(self) -> None:
         """The move to ``dispatch_context.py`` (500-line cap) keeps the
@@ -154,21 +170,25 @@ class TestForEventLiftsScopes:
 
 
 class TestRequestScopesReentry:
-    def test_reenters_both_axes(self) -> None:
+    def test_reenters_all_axes(self) -> None:
         ctx = DispatchContext(
             origin_epoch_id="mt-crossroom-fresh", origin_session_id="conv-x",
+            origin_principal_id="person:alice",
         )
         assert current_epoch_id() is None
         with ctx.request_scopes():
             assert current_epoch_id() == "mt-crossroom-fresh"
             assert current_session_id() == "conv-x"
+            assert current_principal_id() == "person:alice"
         assert current_epoch_id() is None
         assert current_session_id() is None
+        assert current_principal_id() is None
 
     def test_empty_fields_enter_nothing(self) -> None:
         with DispatchContext().request_scopes():
             assert current_epoch_id() is None
             assert current_session_id() is None
+            assert current_principal_id() is None
 
     def test_one_sided_entry(self) -> None:
         with DispatchContext(origin_epoch_id="e-only").request_scopes():
@@ -177,14 +197,21 @@ class TestRequestScopesReentry:
         with DispatchContext(origin_session_id="s-only").request_scopes():
             assert current_epoch_id() is None
             assert current_session_id() == "s-only"
+        with DispatchContext(origin_principal_id="p-only").request_scopes():
+            assert current_principal_id() == "p-only"
+            assert current_epoch_id() is None
 
     def test_restores_on_exception(self) -> None:
-        ctx = DispatchContext(origin_epoch_id="e1", origin_session_id="s1")
+        ctx = DispatchContext(
+            origin_epoch_id="e1", origin_session_id="s1",
+            origin_principal_id="p1",
+        )
         with pytest.raises(RuntimeError):
             with ctx.request_scopes():
                 raise RuntimeError("boom")
         assert current_epoch_id() is None
         assert current_session_id() is None
+        assert current_principal_id() is None
 
 
 # ─── The executor hop ───────────────────────────────────────
@@ -197,10 +224,12 @@ class TestExecutorReentersScopes:
         were ``None`` here and every memory seam below it fell back to
         construction snapshots (the red state this test pinned)."""
         executor = ActionExecutor()
-        seen: list[tuple[str | None, str | None]] = []
+        seen: list[tuple[str | None, str | None, str | None]] = []
 
         async def _spy(agent_id: str, action: AgentAction, *, context: DispatchContext):
-            seen.append((current_epoch_id(), current_session_id()))
+            seen.append((
+                current_epoch_id(), current_session_id(), current_principal_id(),
+            ))
             return {"action_type": "do_nothing", "status": "ok"}
 
         executor._execute_one = AsyncMock(side_effect=_spy)  # type: ignore[method-assign]
@@ -208,18 +237,21 @@ class TestExecutorReentersScopes:
             "ember-owl", [AgentAction(ActionType.DO_NOTHING, {})],
             context=DispatchContext(
                 origin_epoch_id="mt-crossroom-fresh", origin_session_id="conv-x",
+                origin_principal_id="person:alice",
             ),
         )
-        assert seen == [("mt-crossroom-fresh", "conv-x")]
+        assert seen == [("mt-crossroom-fresh", "conv-x", "person:alice")]
 
     async def test_scope_less_context_keeps_snapshot_fallback(self) -> None:
         """An event-less / tick / pre-rail context threads nothing — the
         construction-snapshot fallback every scope axis ships with."""
         executor = ActionExecutor()
-        seen: list[tuple[str | None, str | None]] = []
+        seen: list[tuple[str | None, str | None, str | None]] = []
 
         async def _spy(agent_id: str, action: AgentAction, *, context: DispatchContext):
-            seen.append((current_epoch_id(), current_session_id()))
+            seen.append((
+                current_epoch_id(), current_session_id(), current_principal_id(),
+            ))
             return {"action_type": "do_nothing", "status": "ok"}
 
         executor._execute_one = AsyncMock(side_effect=_spy)  # type: ignore[method-assign]
@@ -227,7 +259,7 @@ class TestExecutorReentersScopes:
             "ember-owl", [AgentAction(ActionType.DO_NOTHING, {})],
             context=DispatchContext(),
         )
-        assert seen == [(None, None)]
+        assert seen == [(None, None, None)]
 
     async def test_tool_recall_on_executor_leg_resolves_request_epoch(self) -> None:
         """The issue's namesake shape, deterministic: a memory-tool recall
@@ -280,7 +312,7 @@ class TestExecutorReentersScopes:
 
 class TestLegacyCascadeChildCarriesScopes:
     """The legacy in-process cascade's synthesized child event must carry
-    the origin epoch/session on the metadata rail: a child routed through
+    the origin epoch/session/principal on the metadata rail: a child routed through
     the target's queued ``EventLoop`` runs on the supervisor task, where
     the scopes re-entered around ``execute()`` cannot follow — the
     metadata keys are what crosses that hop (the child's own ``on_event``
@@ -307,12 +339,14 @@ class TestLegacyCascadeChildCarriesScopes:
             context=DispatchContext(
                 cascade_depth=1,
                 origin_epoch_id="mt-crossroom-fresh", origin_session_id="conv-x",
+                origin_principal_id="person:alice",
             ),
         )
         assert len(dispatched) == 1
         md = dispatched[0].metadata
         assert md[EVENT_EPOCH_METADATA_KEY] == "mt-crossroom-fresh"
         assert md[EVENT_SESSION_METADATA_KEY] == "conv-x"
+        assert md[EVENT_PRINCIPAL_METADATA_KEY] == "person:alice"
 
     async def test_scope_less_context_seeds_no_keys(self) -> None:
         """Key-ABSENCE is the binders' nullcontext contract — an unscoped
@@ -327,6 +361,7 @@ class TestLegacyCascadeChildCarriesScopes:
         md = dispatched[0].metadata
         assert EVENT_EPOCH_METADATA_KEY not in md
         assert EVENT_SESSION_METADATA_KEY not in md
+        assert EVENT_PRINCIPAL_METADATA_KEY not in md
 
 
 # ─── The chat surface's post-reply executor leg ─────────────
@@ -341,7 +376,7 @@ class TestSendChatMessageThreadsScopes:
     """``SendChatMessage`` executes side-effect actions AFTER extracting
     the reply — on the servicer task, after ``on_event``'s binding exited
     — so its origin-less context must still carry the request's
-    epoch/session for the executor's re-entry."""
+    epoch/session/principal for the executor's re-entry."""
 
     @staticmethod
     def _servicer() -> tuple[AgentServiceServicer, MagicMock]:
@@ -368,11 +403,13 @@ class TestSendChatMessageThreadsScopes:
             self._context([
                 (EPOCH_METADATA_GRPC_KEY, "mt-crossroom-fresh"),
                 (SESSION_METADATA_GRPC_KEY, "conv-x"),
+                (PRINCIPAL_METADATA_GRPC_KEY, "person:alice"),
             ]),
         )
         ctx = dispatcher.executor.execute.call_args.kwargs["context"]
         assert ctx.origin_epoch_id == "mt-crossroom-fresh"
         assert ctx.origin_session_id == "conv-x"
+        assert ctx.origin_principal_id == "person:alice"
         # Origin-less by design — the claim posture is unchanged.
         assert ctx.origin_channel_id == ""
         assert ctx.origin_interaction_id == ""
@@ -386,100 +423,5 @@ class TestSendChatMessageThreadsScopes:
         ctx = dispatcher.executor.execute.call_args.kwargs["context"]
         assert ctx.origin_epoch_id == ""
         assert ctx.origin_session_id == ""
+        assert ctx.origin_principal_id == ""
 
-
-# ─── The in-loop tool round stays correctly scoped ──────────
-
-
-class TestInLoopToolRoundParity:
-    """Regression pin for the surface ISSUE-0118 named: a tool recall
-    inside ``_on_event_inner``'s multi-turn loop inherits the handler's
-    scope binding — the injection path and the tool path agree on the
-    request's epoch.  Driven through the REAL machinery (``on_event``
-    binds ``request_scope_from_metadata``; ``asyncio.wait_for``'s child
-    task copies the ContextVars; ``_execute_tools`` runs the recall)
-    with a scripted LLM electing the tool call, so a refactor moving
-    tool execution off the handler task flips this red instead of
-    shipping the leak silently.  (PR #809 review finding 1: the earlier
-    direct-call shape asserted only the memory tiers' scope filtering —
-    already covered by the executor-leg test above — and never touched
-    the loop it claimed to pin.)"""
-
-    async def test_tool_round_inside_on_event_resolves_request_epoch(self) -> None:
-        """Two notes exist — one in the construction world, one in a
-        fresh epoch.  An event delivered under the fresh epoch whose
-        scripted turn elects ``recall_notes`` must feed the model ONLY
-        the fresh note; a binding lost across a future refactor would
-        surface the construction-world note instead (the live 2026-07-30
-        leak's mechanism class, in-loop edition)."""
-        responses = [
-            LLMResponse(
-                text=None,
-                tool_calls=[ToolCall(
-                    id="tc1", name="recall_notes", input={"query": "atlas"},
-                )],
-                stop_reason=StopReason.TOOL_USE,
-                usage=Usage(100, 50),
-            ),
-            LLMResponse(
-                text="Nothing notable on atlas.",
-                stop_reason=StopReason.END_TURN,
-                usage=Usage(200, 100),
-            ),
-        ]
-        client = _make_client(responses)
-        # Observe the ACTUAL in-loop results at the append seam — the one
-        # place they cross the client boundary — rather than stubbing any
-        # part of the loop under test.
-        tool_rounds: list[list[LLMToolResult]] = []
-
-        def _capture(
-            msgs: list, _resp: LLMResponse, results: list[LLMToolResult],
-        ) -> list:
-            tool_rounds.append(list(results))
-            return [*msgs, {"role": "assistant", "content": "tool round"},
-                    {"role": "user", "content": "tool results"}]
-
-        client._provider.append_tool_round = MagicMock(  # type: ignore[method-assign]
-            side_effect=_capture,
-        )
-
-        agent = create_persona_agent(
-            agent_id="ember-owl", config={**_PERSONA_CONFIG}, llm_client=client,
-        )
-        await agent.initialize_memory()
-        try:
-            store_note = _tool_func(agent._memory_tools, "store_note")
-            with _acting_internal():
-                await store_note(topic="atlas", content="Atlas ships Friday")
-                with epoch_scope("mt-crossroom-fresh"):
-                    await store_note(
-                        topic="atlas", content="fresh world is empty-ish",
-                    )
-            # Vacuous-pass guard: the construction world must actually
-            # differ from the probe epoch.
-            assert resolve_epoch_id_silent() != "mt-crossroom-fresh"
-
-            actions = await agent.on_event(AgentEvent(
-                event_type=EventType.CHANNEL_MESSAGE,
-                # ``respond_policy=always`` with no mentions is the
-                # open-floor admit; the channel is ungoverned, so the
-                # Tier B salience bid stays out of the turn.
-                payload={"content": "any news on atlas?",
-                         "respond_policy": "always"},
-                channel_id="group:general",
-                sender_id="iron-fox",
-                metadata={
-                    **_scoped_metadata(),
-                    CHANNEL_CLASSIFICATION_METADATA_KEY: "internal",
-                },
-            ))
-
-            assert actions, "scripted END_TURN must still parse into actions"
-            assert len(tool_rounds) == 1
-            [result] = tool_rounds[0]
-            assert result.is_error is False
-            assert "fresh world is empty-ish" in result.content
-            assert "Atlas ships Friday" not in result.content
-        finally:
-            await agent.close_memory()
