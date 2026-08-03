@@ -40,7 +40,9 @@ from agents.epoch_id import (
     resolve_epoch_id_silent,
 )
 from agents.generated import task_pb2
+from agents.llm_client import LLMResponse, LLMToolResult, StopReason, ToolCall, Usage
 from agents.memory.episodic import EpisodicMemory
+from agents.persona import create_persona_agent
 from agents.persona_types import ActionType, AgentAction, AgentEvent, EventType
 from agents.request_scope import request_scope_from_metadata
 from agents.server_servicers import AgentServiceServicer
@@ -52,6 +54,8 @@ from agents.session_id import (
 from agents.tools.builtin import create_memory_tools
 from agents.tools.permissions import PermissionGate
 from agents.tools.registry import clear_registry
+
+from ._persona_test_helpers import _PERSONA_CONFIG, _make_client
 
 # ─── Harness ────────────────────────────────────────────────
 
@@ -388,31 +392,94 @@ class TestSendChatMessageThreadsScopes:
 
 
 class TestInLoopToolRoundParity:
-    """Regression pin for the surface ISSUE-0118 named: a tool recall on
-    the ``on_event`` path (inside ``_on_event_inner``'s multi-turn loop)
-    already inherits the handler's scope binding — the injection path and
-    the tool path agree on the request's epoch.  Nothing pinned this
-    before; a refactor moving tool execution off the handler task would
-    now flip this red instead of shipping the leak silently."""
+    """Regression pin for the surface ISSUE-0118 named: a tool recall
+    inside ``_on_event_inner``'s multi-turn loop inherits the handler's
+    scope binding — the injection path and the tool path agree on the
+    request's epoch.  Driven through the REAL machinery (``on_event``
+    binds ``request_scope_from_metadata``; ``asyncio.wait_for``'s child
+    task copies the ContextVars; ``_execute_tools`` runs the recall)
+    with a scripted LLM electing the tool call, so a refactor moving
+    tool execution off the handler task flips this red instead of
+    shipping the leak silently.  (PR #809 review finding 1: the earlier
+    direct-call shape asserted only the memory tiers' scope filtering —
+    already covered by the executor-leg test above — and never touched
+    the loop it claimed to pin.)"""
 
-    async def test_recall_notes_under_scope_sees_only_that_epoch(self) -> None:
-        memory = EpisodicMemory(agent_id="ember-owl", db_path=":memory:")
-        await memory.initialize()
+    async def test_tool_round_inside_on_event_resolves_request_epoch(self) -> None:
+        """Two notes exist — one in the construction world, one in a
+        fresh epoch.  An event delivered under the fresh epoch whose
+        scripted turn elects ``recall_notes`` must feed the model ONLY
+        the fresh note; a binding lost across a future refactor would
+        surface the construction-world note instead (the live 2026-07-30
+        leak's mechanism class, in-loop edition)."""
+        responses = [
+            LLMResponse(
+                text=None,
+                tool_calls=[ToolCall(
+                    id="tc1", name="recall_notes", input={"query": "atlas"},
+                )],
+                stop_reason=StopReason.TOOL_USE,
+                usage=Usage(100, 50),
+            ),
+            LLMResponse(
+                text="Nothing notable on atlas.",
+                stop_reason=StopReason.END_TURN,
+                usage=Usage(200, 100),
+            ),
+        ]
+        client = _make_client(responses)
+        # Observe the ACTUAL in-loop results at the append seam — the one
+        # place they cross the client boundary — rather than stubbing any
+        # part of the loop under test.
+        tool_rounds: list[list[LLMToolResult]] = []
+
+        def _capture(
+            msgs: list, _resp: LLMResponse, results: list[LLMToolResult],
+        ) -> list:
+            tool_rounds.append(list(results))
+            return [*msgs, {"role": "assistant", "content": "tool round"},
+                    {"role": "user", "content": "tool results"}]
+
+        client._provider.append_tool_round = MagicMock(  # type: ignore[method-assign]
+            side_effect=_capture,
+        )
+
+        agent = create_persona_agent(
+            agent_id="ember-owl", config={**_PERSONA_CONFIG}, llm_client=client,
+        )
+        await agent.initialize_memory()
         try:
-            gate = PermissionGate({"memory": {"read": True, "write": True}})
-            tools = create_memory_tools(memory, gate)
-            recall_notes = _tool_func(tools, "recall_notes")
-            store_note = _tool_func(tools, "store_note")
-
+            store_note = _tool_func(agent._memory_tools, "store_note")
             with _acting_internal():
                 await store_note(topic="atlas", content="Atlas ships Friday")
                 with epoch_scope("mt-crossroom-fresh"):
-                    fresh = await recall_notes(query="atlas")
-                assert fresh.success is True
-                assert fresh.data == []
+                    await store_note(
+                        topic="atlas", content="fresh world is empty-ish",
+                    )
+            # Vacuous-pass guard: the construction world must actually
+            # differ from the probe epoch.
+            assert resolve_epoch_id_silent() != "mt-crossroom-fresh"
 
-                world = await recall_notes(query="atlas")
-                assert [r["content"] for r in world.data] == ["Atlas ships Friday"]
-                assert resolve_epoch_id_silent() != "mt-crossroom-fresh"
+            actions = await agent.on_event(AgentEvent(
+                event_type=EventType.CHANNEL_MESSAGE,
+                # ``respond_policy=always`` with no mentions is the
+                # open-floor admit; the channel is ungoverned, so the
+                # Tier B salience bid stays out of the turn.
+                payload={"content": "any news on atlas?",
+                         "respond_policy": "always"},
+                channel_id="group:general",
+                sender_id="iron-fox",
+                metadata={
+                    **_scoped_metadata(),
+                    CHANNEL_CLASSIFICATION_METADATA_KEY: "internal",
+                },
+            ))
+
+            assert actions, "scripted END_TURN must still parse into actions"
+            assert len(tool_rounds) == 1
+            [result] = tool_rounds[0]
+            assert result.is_error is False
+            assert "fresh world is empty-ish" in result.content
+            assert "Atlas ships Friday" not in result.content
         finally:
-            await memory.close()
+            await agent.close_memory()
