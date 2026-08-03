@@ -77,7 +77,7 @@ surface ever proves reachable in practice.
 
 ## Notes
 
-> 2026-08-02 — **Slotted into v0.3.13 as the cuttable fold-in** by the
+> 2026-08-03 — **Slotted into v0.3.13 as the cuttable fold-in** by the
 > [sequencing Amendment 2026-08-02](../v0.3.x-sequencing.md#amendment-2026-08-02--v0313--v0314-the-two-release-tail-to-v040)
 > — the only fold-in on that release, alongside its three named deferred
 > calls ([ISSUE-0114](ISSUE-0114-per-channel-cascade-depth-override.md),
