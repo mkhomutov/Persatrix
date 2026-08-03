@@ -138,3 +138,53 @@ ISSUE-0109 defaults PR):
 > Python per-process backstop — is reconfirmed as the plan-opening posture
 > and remains the first decision of the implementing PR, revisitable there;
 > the RFC 0050 PATCH-vs-config-as-code call is made in that PR too.
+
+> 2026-08-03 — **Implemented** (`feature/v0313-issue0114-cascade-depth`,
+> v0.3.13 PR 2). The five steps landed as scoped, with the two in-PR
+> decisions taken as follows:
+>
+> - **Step 4 (Go/Python alignment): option (c), as defaulted** — the Python
+>   dispatcher cap stays a per-process global backstop
+>   (`agents/cascade_depth_defaults.py` now says so explicitly), and the
+>   ≤-fleet requirement is enforced where each write path can honor it:
+>   the **YAML loader rejects** a per-channel cap above the resolved fleet
+>   cap (`Config.Validate` — config-as-code can always be fixed before
+>   boot), while a **live RFC 0050 edit warns and applies**
+>   (`SetChannelMaxCascadeDepth`, mirroring the `SetEndVoteParams` k>w
+>   posture: the fleet cap is startup-only, so a reject would force a
+>   restart into a live edit loop; the warning also covers boot replay of
+>   a store written before a fleet lowering, since it lives in the setter
+>   both callers funnel through). The failure mode above the fleet cap is
+>   degraded-not-runaway (the backstop suppresses first; stall/idle/cost
+>   still terminate), which is what makes warn-don't-reject safe live.
+> - **Step 3 (RFC 0050 surface): PATCHable.** `max_cascade_depth` is the
+>   ninth flat knob on `ChannelConfigOverrides` — merge case, apply-path
+>   stamp, GET provenance, web-console row (the knob registry moved to
+>   `web/src/lib/channelKnobs.js` at the panel's 500-line cap). Two
+>   capture seams are **conditional** (the chair precedent, not the
+>   unconditional flat knobs): the adopt freeze (`toConfigOverrides`)
+>   captures only a declared knob — both so adopted channels keep
+>   tracking the fleet cap and so pre-v0.3.13 store rows keep hashing
+>   identically to their re-resolved YAML (no spurious equal-revision
+>   drift warning at the first post-upgrade boot) — and the ISSUE-0103
+>   first-edit baseline freezes only an explicit router entry, keying on
+>   `MaxCascadeDepthFor`'s set flag.
+>
+> Mechanics: `channelCascadeCaps` (own `cascadeMu`, the
+> `endVoteThresholds` map pattern) read at the publish clamp + fanout
+> suppression (`publishCommit` resolves once per publish), the
+> continuation's terminal-bound check, and `closeOnCascadeBound`'s log;
+> `ResolveChannelCascadeCaps` seeds declared channels at startup (the
+> `ResolveEndVotes` no-store-enumeration posture — everyone else falls
+> back to the fleet cap at read time, so DMs/threads are unchanged).
+> Deterministic CI pins the precedence, both loader rejections, the
+> above-fleet warn, the per-channel clamp/suppression binding beside an
+> untouched sibling channel, the **autonomous structural close at the
+> per-channel cap with the fleet cap untouched** (the headline shape),
+> the apply/inherit round-trip, the REST PATCH surface (including the
+> 400-mapping for `ErrInvalidMaxCascadeDepth`, which the new tests
+> caught missing), both conditional captures, and the schema (Go + the
+> Python `make validate` suite). Closure (status → resolved) rides the
+> Phase 3 release-prep arc per the plan: a per-channel cascade-depth arc
+> on a live autonomous roster verifies the knob binds where the fleet
+> value used to.

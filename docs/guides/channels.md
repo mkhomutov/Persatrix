@@ -367,10 +367,11 @@ enables.
 
 ```yaml
 # config/channels.yaml
-max_cascade_depth: 5          # default; matches agents/dispatch.py
+max_cascade_depth: 5          # fleet cap; matches agents/dispatch.py
 max_channels: 50
 channels:
   - name: planning
+    max_cascade_depth: 3      # optional per-channel override (ISSUE-0114, v0.3.13)
     members:
       - {id: alex, respond: participant}
       - {id: jordan, respond: participant}
@@ -378,6 +379,20 @@ channels:
 
 A zero or negative `max_cascade_depth:` row is ignored — the backstop
 cannot be silently disabled from config.
+
+**Per-channel override (v0.3.13,
+[ISSUE-0114](../issues/ISSUE-0114-per-channel-cascade-depth-override.md)).**
+A channel may declare its own `max_cascade_depth`; zero/absent inherits the
+fleet cap. Because the Python dispatcher's defense-in-depth cap is a
+per-process global aligned with the *fleet* value, a per-channel cap **must
+not exceed the fleet cap** — the loader rejects it (raising one channel past
+the fleet default means raising the fleet cap and the aligned
+`agents/dispatch.py` value first), and a live RFC 0050 edit above the fleet
+cap applies with a loud server-side warning instead (the fleet cap is
+startup-only, so a live edit is never bricked). The knob is runtime-editable
+per RFC 0050: it rides `ChannelConfigOverrides`
+(`PATCH /api/v1/channels/{id}/config`, the web console's Channel settings
+panel) like the other governance knobs.
 
 ### Conversation governance (RFC 0030 Layers 1/2/4) — v0.3.8
 
@@ -1000,8 +1015,6 @@ deferrals, not implementation oversights:
 - **Token auth** on the REST surface → RFC 0009 Phase 4 (v0.4.0).
 - **Watermark + per-tick catch-up** → v0.3.x once usage data justifies; see
   [OQ #8](../rfcs/0011-channels-bridges.md#open-questions).
-- **Per-channel `cascade_depth` overrides** → v0.3.x; see
-  [OQ #11](../rfcs/0011-channels-bridges.md#open-questions).
 - **Persona name discovery / dynamic membership** → v0.4.0 (RFC 0011 OQ #1).
 - **The Layer 5 moderator** (the `chair`'s *active* half — a persona that reads
   the transcript and decides to wrap up / terminate) → v0.4.0. v0.3.8 ships the
@@ -1159,9 +1172,15 @@ taught about the knobs:
   reply's cascade depth *together*, so a `max_rounds` above the depth cap (5)
   can never fire on that chain — every productive soak arc closed on the depth
   bound. `max_rounds` (default now **8**, down from 12) is the net for
-  *stall-driven* arcs, where convener cadence turns reset depth. To lengthen
-  discussions, raise the top-level `max_cascade_depth` — keeping it aligned
-  with the Python dispatcher's equal pin (`agents/dispatch.py`).
+  *stall-driven* arcs, where convener cadence turns reset depth. The knob is
+  **per-channel** since v0.3.13
+  ([ISSUE-0114](../issues/ISSUE-0114-per-channel-cascade-depth-override.md)):
+  to shorten one channel's discussions (a cheap triage room), set that
+  channel's `max_cascade_depth` below the fleet cap — in `channels.yaml` or
+  live via the RFC 0050 config surface; to lengthen discussions *past the
+  fleet default*, raise the top-level `max_cascade_depth` (keeping it aligned
+  with the Python dispatcher's equal pin, `agents/dispatch.py`) and then
+  per-channel caps up to it.
 - **Co-tune `end_vote_threshold` with discussion length**: at the K=2 default,
   2 votes closed a 3-seat roster in 4 of 7 arcs — sometimes as ~20 s
   confirmation stubs — and an end-vote close arms **no** chair synthesis. The

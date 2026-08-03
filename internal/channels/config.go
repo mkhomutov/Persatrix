@@ -8,6 +8,8 @@ import (
 	"os"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/mkhomutov/persatrix/internal/defaults"
 )
 
 // Config is the parsed shape of `config/channels.yaml` (RFC 0011 §A).
@@ -208,6 +210,22 @@ type ChannelConfig struct {
 	// `ChannelMessageEvent.salience_max_channel_members` wire field; the router
 	// stamps it onto the dispatch envelope at fanout time.
 	SalienceMaxChannelMembers int `yaml:"salience_max_channel_members"`
+	// MaxCascadeDepth is this channel's RFC 0030 Layer 0 cascade-depth cap —
+	// post-ISSUE-0109 the de facto length knob for a productive autonomous
+	// discussion (ISSUE-0114: the continuation advances round tally and reply
+	// depth together, so this cap binds before `max_rounds` on every
+	// productive chain). Opt-in — zero or absent inherits the fleet
+	// [Config.MaxCascadeDepth] (itself zero = [defaults.DefaultMaxCascadeDepth])
+	// via [ChannelConfig.ResolveMaxCascadeDepth]; like the fleet knob, zero can
+	// never config-disable the cap. Negative is rejected, and so is a value
+	// ABOVE the resolved fleet cap ([Config.Validate]): the Python
+	// `EventDispatcher.max_cascade_depth` defense-in-depth cap is a per-process
+	// GLOBAL aligned by convention with the fleet value (the ISSUE-0114
+	// alignment decision, option (c)), so a per-channel cap above it would be
+	// silently unreachable — the backstop would suppress dispatches below the
+	// raised cap. Raising one channel past the fleet default therefore means
+	// raising the fleet cap (and the aligned Python backstop) first.
+	MaxCascadeDepth int `yaml:"max_cascade_depth"`
 	// InteractionBudgetTokens is the RFC 0030 Layer 1 (v0.3.8) per-interaction
 	// cost ceiling for this channel: once the running token total for an
 	// interaction on this channel would cross it, the wallet denies further
@@ -316,6 +334,31 @@ func (c ChannelConfig) ResolveInteractionBudgetTokens(fleetDefault int64) int64 
 		return c.InteractionBudgetTokens
 	}
 	return fleetDefault
+}
+
+// ResolveMaxCascadeDepth returns the effective RFC 0030 Layer 0 cascade-depth
+// cap for this channel (ISSUE-0114): the channel's own `max_cascade_depth`
+// when set (non-zero), otherwise the resolved fleet cap the caller passes
+// ([Config.ResolvedMaxCascadeDepth]). The single source of truth for the
+// precedence — the startup resolver stamps the resolved value onto the
+// router's per-channel map so the publish path enforces one number.
+func (c ChannelConfig) ResolveMaxCascadeDepth(fleet int) int {
+	if c.MaxCascadeDepth > 0 {
+		return c.MaxCascadeDepth
+	}
+	return fleet
+}
+
+// ResolvedMaxCascadeDepth returns the fleet-wide Layer 0 cascade-depth cap
+// this config resolves to: the top-level `max_cascade_depth` when set, else
+// [defaults.DefaultMaxCascadeDepth] — mirroring how the router treats the
+// zero sentinel ([ChannelRouter.SetMaxCascadeDepth] ignores non-positive).
+// The value per-channel caps are validated against (option (c)).
+func (c *Config) ResolvedMaxCascadeDepth() int {
+	if c.MaxCascadeDepth > 0 {
+		return c.MaxCascadeDepth
+	}
+	return defaults.DefaultMaxCascadeDepth
 }
 
 // ResolveInteractionIdleTimeoutSeconds returns the effective interaction idle

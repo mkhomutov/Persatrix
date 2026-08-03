@@ -241,6 +241,7 @@ type channelConfigResponse struct {
 	Revision                               int64                    `json:"revision"`
 	FloorControl                           configFieldResponse      `json:"floor_control"`
 	SalienceMaxChannelMembers              configFieldResponse      `json:"salience_max_channel_members"`
+	MaxCascadeDepth                        configFieldResponse      `json:"max_cascade_depth"`
 	MaxRepliesPerParticipantPerInteraction configFieldResponse      `json:"max_replies_per_participant_per_interaction"`
 	EndVoteThreshold                       configFieldResponse      `json:"end_vote_threshold"`
 	EndVoteWindow                          configFieldResponse      `json:"end_vote_window"`

@@ -3,7 +3,7 @@
   // RFC 0051 PR 5 added the nested reasoning block). Nested in ChannelTimeline
   // beside ChannelMembers and gated identically (a capability + a watched non-DM
   // channel). On channel select it reads GET /api/v1/channels/{id}/config and
-  // renders the governance knobs (eight flat + the four nested reasoning.* sub-
+  // renders the governance knobs (nine flat + the four nested reasoning.* sub-
   // knobs), each with its effective value, a provenance badge derived from
   // `source` (overridden-here vs inherited fleet default), and an inherit/override
   // control. Save collects ONLY the knobs the operator actually touched into a
@@ -21,6 +21,7 @@
   // onChanged  — async () => …; called after a successful save to refresh siblings.
   import { getChannelConfig, patchChannelConfig, ApiError } from "../lib/api.js";
   import AutonomousSettings from "./AutonomousSettings.svelte";
+  import { KNOBS } from "../lib/channelKnobs.js";
   import {
     AUTONOMOUS_KNOBS,
     agendaToText,
@@ -29,77 +30,10 @@
 
   let { channelId, members = [], agentsById = {}, onChanged } = $props();
 
-  // The governance knobs, in render order, each typed so the control and the
-  // patch coercion are driven by one source of truth. `int` knobs are
-  // non-negative integers (mirrored as input bounds; the server stays the
-  // authority). `chair` is a member-constrained persona picker; `bool` is
-  // floor_control. `enum` (RFC 0051 reasoning.{mode,model,depth}) is a generic
-  // string select over a fixed `options` set — `depth` lists only `shallow`
-  // because `deep` is RFC 0051 Phase 4 (validate-rejected), so the panel offers
-  // the accepted value rather than a lone dead `deep` entry.
-  //
-  // The `reasoning.*` keys are DOTTED: the reasoning block is the first NESTED
-  // knob, so it reads back at resp.reasoning.<sub> and patches as
-  // {reasoning: {<sub>: …}}. `fieldFor`/`setBody` resolve the dotted path; every
-  // other (flat) knob is untouched by that.
-  const KNOBS = [
-    { key: "floor_control", label: "Floor control", type: "bool" },
-    {
-      key: "salience_max_channel_members",
-      label: "Salience max channel members",
-      type: "int",
-    },
-    {
-      key: "max_replies_per_participant_per_interaction",
-      label: "Max replies per participant per interaction",
-      type: "int",
-    },
-    { key: "end_vote_threshold", label: "End-vote threshold", type: "int" },
-    { key: "end_vote_window", label: "End-vote window (seconds)", type: "int" },
-    {
-      key: "interaction_idle_timeout_seconds",
-      label: "Interaction idle timeout (seconds)",
-      type: "int",
-    },
-    {
-      key: "interaction_budget_tokens",
-      label: "Interaction budget (tokens)",
-      type: "int",
-    },
-    { key: "escalation_chair_id", label: "Escalation chair", type: "chair" },
-    {
-      key: "reasoning.mode",
-      label: "Reasoning mode",
-      type: "enum",
-      options: ["off", "bid", "plan"],
-    },
-    {
-      key: "reasoning.model",
-      label: "Reasoning model",
-      type: "enum",
-      options: ["fast", "quality"],
-    },
-    {
-      key: "reasoning.depth",
-      label: "Reasoning depth",
-      type: "enum",
-      options: ["shallow"],
-    },
-    {
-      key: "reasoning.revise",
-      label: "Reasoning revise rounds",
-      type: "int",
-      // No client-side upper bound, unlike depth offering only `shallow`. The
-      // server gates revise: it must be 0..2 and `>= 1` requires mode: plan (the
-      // reflexion critic re-reads the draft against the plan, RFC 0051 Phase 5).
-      // A `<select>` can only OFFER its options whereas a number `max` triggers
-      // form constraint validation: an out-of-range value would make
-      // `<form onsubmit>` invalid and silently block the WHOLE save. The
-      // revise↔mode rule cannot be a static `max` at all. So revise defers to the
-      // server's 400, which at least surfaces a reason — the server stays the
-      // authority.
-    },
-  ];
+  // The flat + nested-reasoning knob registry (order, labels, control types)
+  // lives in lib/channelKnobs.js — carved out with the ISSUE-0114 cascade-depth
+  // knob addition (v0.3.13) so this panel stays under the 500-line cap, the
+  // autonomousKnobs.js precedent.
 
   // The flat + reasoning knobs render inline; the RFC 0052 `autonomous` block
   // renders in the AutonomousSettings child (this panel is at the file-size cap).

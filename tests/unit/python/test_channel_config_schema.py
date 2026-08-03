@@ -119,6 +119,68 @@ def test_max_cascade_depth_is_optional():
     _validate({"max_channels": 50})
 
 
+# ─── per-channel max_cascade_depth (ISSUE-0114, v0.3.13) ─────────────────
+
+
+def _channel_with_cascade_depth(depth: object) -> dict:
+    return {
+        "max_channels": 50,
+        "max_cascade_depth": 5,
+        "channels": [
+            {
+                "name": "planning",
+                "max_cascade_depth": depth,
+                "members": [{"id": "alice"}],
+            }
+        ],
+    }
+
+
+@pytest.mark.parametrize("depth", [3, 5])
+def test_per_channel_max_cascade_depth_positive_is_accepted(depth: int):
+    """A per-channel cap at or below the fleet value validates.
+
+    ISSUE-0114: the per-channel override is the documented operator path for
+    tuning one channel's productive-discussion length. The channel object is
+    closed (``additionalProperties: false``), so without the schema key the
+    documented config would trip ``make validate`` — the exact M1 failure
+    mode this file exists to pin, now at the channel level.
+    """
+    _validate(_channel_with_cascade_depth(depth))
+
+
+def test_per_channel_max_cascade_depth_zero_is_accepted_as_inherit_sentinel():
+    """``max_cascade_depth: 0`` on a channel validates — the inherit sentinel.
+
+    Mirrors the root knob's zero contract: the Go loader treats zero/absent
+    as "inherit the fleet cap" (``ChannelConfig.ResolveMaxCascadeDepth``), so
+    the schema admits it and the Go layer stays the sole authority on
+    non-positive handling.
+    """
+    _validate(_channel_with_cascade_depth(0))
+
+
+def test_per_channel_max_cascade_depth_negative_is_rejected():
+    """A negative per-channel cap is wire-illegal, like the root knob's."""
+    with pytest.raises(jsonschema.ValidationError):
+        _validate(_channel_with_cascade_depth(-1))
+
+
+def test_per_channel_max_cascade_depth_above_fleet_passes_schema():
+    """The option (c) above-fleet rule is deliberately Go-loader-only.
+
+    A per-channel cap above the resolved fleet cap is a cross-field invariant
+    (it depends on the ROOT ``max_cascade_depth``), which JSON Schema cannot
+    express — the same split as the member-threshold cross-field rule pinned
+    above. Such a config stays schema-valid and the Go loader is the sole
+    enforcement point (``Config.Validate`` → ``ErrInvalidMaxCascadeDepth``;
+    companion ``TestLoadConfig_PerChannelMaxCascadeDepth_RejectsAboveFleet``).
+    Pinned so a future edit neither assumes the schema guards it nor
+    tightens the schema in a way that makes the loader's check unreachable.
+    """
+    _validate(_channel_with_cascade_depth(9))
+
+
 def _channel_with_member(respond: object = None, *, extra: dict | None = None) -> dict:
     """Build a minimal valid channel config carrying one member.
 
