@@ -100,3 +100,42 @@ mechanism.
 > verified principal source exists the orchestrator emits nothing on the
 > `persatrix-principal` rail and the storage layer correctly collapses to
 > the single-tenant `'local'` principal.
+>
+> 2026-08-03 — **Part 2 must also thread the executor hop (scope note
+> from the ISSUE-0118 closeout).** v0.3.13 PR 1
+> ([#809](https://github.com/mkhomutov/Persatrix/pull/809)) threaded the
+> per-request epoch/session axes across the executor hop —
+> `DispatchContext` (`agents/dispatch_context.py`) gained
+> `origin_epoch_id` / `origin_session_id`, lifted structurally in
+> `for_event` through the same leaf readers the `on_event` binders
+> consume (`epoch_id_from_metadata` / `session_id_from_metadata`) and
+> re-entered around action processing via
+> `DispatchContext.request_scopes()` — and deliberately left the
+> **principal** axis out: its rail has no live producer, so there is no
+> per-request value to thread. Part 2 creates the producer, and the
+> moment it emits, everything the executor runs AFTER `on_event` returns
+> — the end-vote close discharge, legacy in-process cascade children,
+> `SendChatMessage`'s post-reply execute — resolves the *construction*
+> principal instead of the request's: the exact leak class ISSUE-0118
+> closed for epoch, resurfacing on the strict-equality tenant axis. The
+> activation must therefore ship the executor-hop threading alongside
+> the emission: (1) extend `DispatchContext` with
+> `origin_principal_id`, lifted in `for_event` via a shared leaf reader
+> in `agents/principal_id.py` — the leaf today inlines the metadata
+> read in `principal_scope_from_metadata`, so first factor out a
+> `principal_id_from_metadata` value reader (the
+> `session_id_from_metadata` / `epoch_id_from_metadata` shape) so the
+> handler-side binder and the executor-side lift share one validation
+> seam; (2) re-enter it in `request_scopes()` — the both-empty
+> `nullcontext` guard grows a third field, and `_enter_request_scopes`
+> slots it session → principal → epoch to match
+> `request_scope_from_metadata`'s binder order; (3) seed it onto
+> legacy-cascade child metadata in `agents/action_executor.py`, beside
+> the existing `EVENT_SESSION_METADATA_KEY` /
+> `EVENT_EPOCH_METADATA_KEY` seeding; (4) thread it in
+> `SendChatMessage` (`agents/server_servicers.py`), where
+> `request_principal` is already lifted for the event envelope
+> (`_principal_from_context`) and just needs to ride the post-reply
+> `DispatchContext(...)` construction like the epoch/session pair. No
+> v0.3.14 plan doc exists yet; when it opens, carry this into the
+> ISSUE-0082 Part 2 scope section.
