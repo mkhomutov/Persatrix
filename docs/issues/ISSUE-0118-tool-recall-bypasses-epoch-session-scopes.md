@@ -91,3 +91,14 @@ the request scopes around the executor's action-processing task at spawn.
 > at the tag — this note only records that the maintainer's "does not gate"
 > call was exercised and the disclosure obligation met. Fix remains slated
 > **v0.3.13**.
+
+> 2026-08-03 — **v0.3.13 plan opened**
+> ([v0.3.13-plan.md](../v0.3.13-plan.md)): this fix is the release's first
+> implementation PR (`feature/v0313-issue0118-tool-recall-scopes`) and gates
+> the live MT arc. The fix shape above — thread the scopes the classification
+> way, `event.metadata` → `DispatchContext`, re-entered around tool
+> execution — is confirmed as the plan-opening scope lock. One live arc at
+> release-prep verifies both this fix (Leg 4 with a tool round) and
+> [ISSUE-0121](ISSUE-0121-crossroom-person-identity-legs-never-run-live.md)'s
+> legs 1b/2b; the v0.3.12 `--epoch`/`--session` caveat retires in the
+> v0.3.13 release notes.

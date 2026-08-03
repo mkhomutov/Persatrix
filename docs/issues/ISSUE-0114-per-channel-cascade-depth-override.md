@@ -130,3 +130,11 @@ ISSUE-0109 defaults PR):
 > [ISSUE-0118](ISSUE-0118-tool-recall-bypasses-epoch-session-scopes.md) and
 > [ISSUE-0121](ISSUE-0121-crossroom-person-identity-legs-never-run-live.md)).
 > Documented in the published release body's Known Gaps section.
+
+> 2026-08-03 — **v0.3.13 plan opened**
+> ([v0.3.13-plan.md](../v0.3.13-plan.md)): rides as a named scope item
+> (`feature/v0313-issue0114-cascade-depth`, parallel to the ISSUE-0118 fix).
+> The step-4 default — **option (c)**, per-channel caps validated ≤ the
+> Python per-process backstop — is reconfirmed as the plan-opening posture
+> and remains the first decision of the implementing PR, revisitable there;
+> the RFC 0050 PATCH-vs-config-as-code call is made in that PR too.
