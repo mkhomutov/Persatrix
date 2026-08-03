@@ -118,19 +118,33 @@ def current_epoch_id() -> str | None:
     return _ACTIVE_EPOCH_ID.get()
 
 
+def resolve_world_epoch_id() -> str:
+    """Return the PROCESS's world epoch — env var → default, NEVER the
+    task-local scope.
+
+    The one resolver for "which single world does this process's
+    persistent state belong to" (ISSUE-0118: the recall tool's
+    foreign-epoch wall compares the per-request scope against this).
+    :func:`resolve_epoch_id_silent` layers the scope on top; a caller
+    snapshotting the world must NOT use that form — an ambient
+    :func:`epoch_scope` active at snapshot time (a lazily wired tool, a
+    scoped test fixture) would poison the snapshot with one request's
+    epoch and invert every later comparison against it (PR #809 review
+    finding 2).  An empty / unset / whitespace-only env →
+    :data:`DEFAULT_EPOCH_ID`.
+    """
+    return os.environ.get(EPOCH_ID_ENV_VAR, "").strip() or DEFAULT_EPOCH_ID
+
+
 def resolve_epoch_id_silent() -> str:
     """Return the resolved active epoch with no log output.
 
-    Precedence: **task-local scope → env var → default epoch**.  An
-    empty / unset / whitespace-only env → :data:`DEFAULT_EPOCH_ID`.  Tier
+    Precedence: **task-local scope → world**
+    (:func:`resolve_world_epoch_id`: env var → default epoch).  Tier
     constructors call this with no scope active, so their cached snapshot
     resolves from the env var.
     """
-    return (
-        current_epoch_id()
-        or os.environ.get(EPOCH_ID_ENV_VAR, "").strip()
-        or DEFAULT_EPOCH_ID
-    )
+    return current_epoch_id() or resolve_world_epoch_id()
 
 
 def normalize_epoch_id(value: str | None) -> str:

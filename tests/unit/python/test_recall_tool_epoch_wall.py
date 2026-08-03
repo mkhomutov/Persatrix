@@ -21,7 +21,7 @@ from typing import Any
 
 import pytest
 
-from agents.epoch_id import epoch_scope, resolve_epoch_id_silent
+from agents.epoch_id import epoch_scope, resolve_epoch_id_silent, resolve_world_epoch_id
 from agents.session_id import session_scope
 from agents.tools.permissions import PermissionGate
 from agents.tools.recall import create_recall_tool
@@ -94,6 +94,29 @@ class TestRecallToolForeignEpochWall:
         result = await td.func(query="atlas")
         assert result.success is True
         assert len(client.calls) == 1
+
+    async def test_wiring_under_a_scope_does_not_poison_world_snapshot(self):
+        """The world snapshot is env-only (PR #809 review finding 2): a
+        tool wired while some ``epoch_scope`` is active — a lazily wired
+        persona, a scoped fixture — must still treat the process's env
+        world as the world.  With the scope-first resolver this captured
+        the wiring-time scope instead, declining the world's own recalls
+        and admitting the wiring epoch's."""
+        client = _FakeRecallClient([_row("Atlas ships Friday")])
+        with epoch_scope("wiring-time-scope"):
+            td = create_recall_tool(client, _gate_recall(), agent_id="ember-owl")
+        assert td.func is not None
+        with epoch_scope(resolve_world_epoch_id()):
+            result = await td.func(query="atlas")
+        assert result.success is True
+        assert len(client.calls) == 1
+        # …and the wiring-time scope stays genuinely foreign.
+        client.calls.clear()
+        with epoch_scope("wiring-time-scope"):
+            walled = await td.func(query="atlas")
+        assert walled.success is True
+        assert walled.data == []
+        assert client.calls == []
 
     async def test_session_scope_does_not_gate(self):
         """Session is room-continuity (carve-out by design, never strict

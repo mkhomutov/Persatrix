@@ -42,7 +42,7 @@ from urllib.parse import quote
 import aiohttp
 
 from ..acting_classification import current_acting_classification
-from ..epoch_id import current_epoch_id, resolve_epoch_id_silent
+from ..epoch_id import current_epoch_id, resolve_world_epoch_id
 from ..prompt_safety import escape_prompt_delimiters
 from .permissions import PermissionGate
 from .registry import ToolDefinition, ToolResult, get_tool, tool
@@ -229,10 +229,12 @@ def create_recall_tool(
     # channel-store DB; the endpoint 400s an ``epoch_id`` override), so a
     # request delivered under a DIFFERENT per-request epoch cannot be
     # scoped server-side: the tool must decline instead — see the guard in
-    # the body.  Captured at wiring time with no scope active (the same
-    # construction-snapshot semantics the memory tiers use), so it is the
-    # env-var world (``live`` in production, the job epoch in CI).
-    world_epoch = resolve_epoch_id_silent()
+    # the body.  Resolved env-only (``live`` in production, the job epoch
+    # in CI): the scope-first ``resolve_epoch_id_silent`` would let an
+    # ``epoch_scope`` active at wiring time — a lazily wired tool, a
+    # scoped fixture — poison this snapshot with one request's epoch and
+    # invert every later wall comparison (PR #809 review finding 2).
+    world_epoch = resolve_world_epoch_id()
 
     @tool(
         name="recall_channel_messages",

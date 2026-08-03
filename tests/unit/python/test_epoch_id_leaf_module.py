@@ -45,6 +45,7 @@ def test_leaf_exports_required_symbols() -> None:
         epoch_scope_from_metadata,
         normalize_epoch_id,
         resolve_epoch_id_silent,
+        resolve_world_epoch_id,
     )
 
     assert EPOCH_ID_ENV_VAR == "PERSATRIX_EPOCH"
@@ -60,6 +61,7 @@ def test_leaf_exports_required_symbols() -> None:
     assert EVENT_EPOCH_METADATA_KEY == "persatrix_epoch"
     assert callable(current_epoch_id)
     assert callable(resolve_epoch_id_silent)
+    assert callable(resolve_world_epoch_id)
     assert callable(normalize_epoch_id)
     assert callable(epoch_scope)
     assert callable(epoch_scope_from_metadata)
@@ -154,6 +156,24 @@ def test_resolve_precedence_scope_over_env(
     with epoch_scope("scope-epoch"):
         assert resolve_epoch_id_silent() == "scope-epoch"
     assert resolve_epoch_id_silent() == "env-epoch"
+
+
+def test_world_resolver_ignores_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``resolve_world_epoch_id`` is env-only — a task-local scope active
+    at call time must NOT leak into a world snapshot (ISSUE-0118 recall
+    wall; PR #809 review finding 2: the scope-first resolver would let a
+    wiring-time ``epoch_scope`` poison the snapshot and invert every
+    later comparison against it)."""
+    from agents.epoch_id import DEFAULT_EPOCH_ID, epoch_scope, resolve_world_epoch_id
+
+    monkeypatch.setenv("PERSATRIX_EPOCH", "env-epoch")
+    with epoch_scope("scope-epoch"):
+        assert resolve_world_epoch_id() == "env-epoch"
+    monkeypatch.delenv("PERSATRIX_EPOCH")
+    with epoch_scope("scope-epoch"):
+        assert resolve_world_epoch_id() == DEFAULT_EPOCH_ID
 
 
 def test_scope_is_task_local_isolated() -> None:
