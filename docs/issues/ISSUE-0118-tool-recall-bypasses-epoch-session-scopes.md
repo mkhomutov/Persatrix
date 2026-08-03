@@ -149,3 +149,40 @@ the request scopes around the executor's action-processing task at spawn.
 > instead of shipping the leak silently. Closure (status → resolved) waits
 > on the Phase 3 live proof: the MT fresh-epoch leg green **with a tool
 > round evidenced in provenance** (the plan's acceptance criterion).
+
+> 2026-08-03 — **PR #809 review follow-up: the other channel-store read
+> paths, audited.** The foreign-epoch wall covers the *tool* door
+> (`recall_channel_messages`); the two non-tool readers of the same
+> single-epoch store were checked for the same
+> reachable-under-a-foreign-epoch shape:
+>
+> 1. **Boot-time catch-up** (`agents/channel_catchup.py`) — **not a
+>    door.** It replays last-N channel history through `on_event` at
+>    persona-runtime boot only (the module's sole trigger), where no
+>    per-request scope exists and the replay events carry no epoch
+>    metadata: ingestion lands under the process's world epoch, and a
+>    later foreign-epoch turn's recalls of what it ingested are already
+>    walled by the memory tiers' strict epoch equality.
+> 2. **The per-turn conversation window** (RFC 0034 —
+>    `persona_runtime/conversation_seed.py` →
+>    `agents/channel_history_fetcher.py`) — **reachable, and
+>    deliberately not walled.** Every persona turn reconstructs the LLM
+>    `messages` seed from the current channel's recent transcript with
+>    no epoch check, so a foreign-epoch turn's prompt does include the
+>    live window of the channel it was delivered into. The asymmetry
+>    against the wall (which declines even same-channel recall under a
+>    foreign epoch) is accepted because the two reads differ in reach:
+>    the seed is bounded to the recent, delivery-visible transcript of
+>    the one room the probe was sent into — content that room already
+>    displays to its members — while the tool reaches arbitrary
+>    historical content on demand (`query` / `limit` / any member
+>    channel), which is what leaked live on 2026-07-30. The live
+>    evidence is consistent with the boundary: the taught fact lived
+>    outside the probe channel, injection admitted zero, and only the
+>    tool round crossed. Recorded here so the boundary is explicit
+>    rather than silent: if the epoch posture ever tightens to "a
+>    fresh-epoch turn's prompt carries no live transcript at all", the
+>    window seed (`_build_seed_messages`) is the seam to gate — a scope
+>    decision for a future release, not v0.3.13 fix work, and it does
+>    not gate the Phase 3 live proof (the MT's taught fact sits outside
+>    the probe channel's window by construction).
