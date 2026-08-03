@@ -275,6 +275,11 @@ func TestChannelConfig_FirstEditFreezesDefaultsAsChannel(t *testing.T) {
 	// none is seeded here, so it stays inherited rather than freezing.
 	assert.Equal(t, "default", fields["escalation_chair_id"].Source,
 		"no chair was seeded, so the conditional capture leaves it inherited")
+	// The ISSUE-0114 cascade-depth cap is conditional too (only an explicit
+	// router entry freezes — see resolvedConfigBaseline): a fleet-inheriting
+	// channel must keep tracking the fleet cap after its first edit.
+	assert.Equal(t, "default", fields["max_cascade_depth"].Source,
+		"no per-channel cap was resolved, so the conditional capture leaves it inherited")
 }
 
 // TestChannelConfig_FirstEditFloorOffWithYAMLChairRejected is the beneficial

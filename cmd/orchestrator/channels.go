@@ -290,6 +290,16 @@ func initChannels(
 			zap.Error(vErr))
 	}
 
+	// ISSUE-0114 (v0.3.13): resolve the per-channel Layer 0 cascade-depth
+	// override for every config-declared channel — the end-vote posture:
+	// store-resident channels fall back to the fleet cap at read time, so
+	// there is no store enumeration to fail. Runs after SetMaxCascadeDepth
+	// above so the setter's above-fleet warning compares the right fleet cap.
+	if ccErr := router.ResolveChannelCascadeCaps(context.Background(), chanCfg); ccErr != nil {
+		logger.Warn("channels: per-channel cascade-cap resolution incomplete; channels fall back to the fleet cap until next restart",
+			zap.Error(ccErr))
+	}
+
 	// RFC 0030 interaction-id producer (IP3): resolve the per-channel idle
 	// window for every config-declared channel — store-resident channels fall
 	// back to the (fleet or 600s) default at read time, the end-vote posture,

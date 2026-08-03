@@ -144,8 +144,13 @@ type ChannelRouter struct {
 	closedInteractions map[string]struct{}
 
 	// maxCascadeDepth — see cascade_depth.go; defaultSessionID — see router_session.go (RFC 0031 Phase 1).
-	maxCascadeDepth  int
-	defaultSessionID string
+	// cascadeMu guards channelCascadeCaps — the ISSUE-0114 per-channel Layer 0
+	// cascade-depth overrides (absent falls back to the fleet maxCascadeDepth);
+	// methods + the full contract live in cascade_depth.go.
+	maxCascadeDepth    int
+	cascadeMu          sync.Mutex
+	channelCascadeCaps map[string]int
+	defaultSessionID   string
 
 	// spend is the RFC 0052 (v0.3.11) bounded-close soft-budget read — the wallet's
 	// per-interaction running total ([interactionSpender]; wired via
@@ -301,6 +306,7 @@ func NewChannelRouter(store ChannelStore, dispatcher MessageDispatcher, logger *
 		endVotes:                      make(map[string]*interactionEndVotes),
 		closedInteractions:            make(map[string]struct{}),
 		maxCascadeDepth:               defaults.DefaultMaxCascadeDepth,
+		channelCascadeCaps:            make(map[string]int),
 		maxInFlightFanout:             defaultMaxInFlightFanout,
 		channelActivity:               make(map[string]map[string]time.Time),
 		activityNow:                   time.Now,

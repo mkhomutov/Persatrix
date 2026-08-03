@@ -56,7 +56,7 @@ func (r *ChannelRouter) maybeContinueDiscussion(ctx context.Context, ct ChannelT
 		return
 	}
 	reply := *outcome.lastReply
-	if readCascadeDepth(reply.Metadata) >= r.maxCascadeDepth {
+	if readCascadeDepth(reply.Metadata) >= r.maxCascadeDepthFor(reply.ChannelID) {
 		// Layer-0 terminal bound: continuing would bypass the cascade cap
 		// (§Risk forbids it), and stopping silently would wedge the
 		// interaction open forever. Close with the artifact instead.
@@ -119,7 +119,7 @@ func (r *ChannelRouter) closeOnCascadeBound(ctx context.Context, msg ChannelMess
 	r.logger.Info("channels: autonomous discussion reached the cascade-depth cap; running the structural close",
 		zap.String("channel_id", msg.ChannelID),
 		zap.String("interaction_id", stampedID),
-		zap.Int("max_cascade_depth", r.maxCascadeDepth))
+		zap.Int("max_cascade_depth", r.maxCascadeDepthFor(msg.ChannelID)))
 	notify := closeNotify{}
 	switch r.maybeArmSynthesisClose(ctx, msg, ct, members, len(members), stampedID, structuralTrigger, notify, fresh) {
 	case synthesisArmed, synthesisAlreadyArmed:

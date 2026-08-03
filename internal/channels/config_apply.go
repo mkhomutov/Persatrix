@@ -20,9 +20,10 @@ import (
 // router together, and at boot the router is overlaid from the store for any
 // channel an operator has edited.
 //
-// All eight governance knobs are router-held and made live here: floor control,
-// the Tier B salience cap, the Layer 1 interaction budget, the Layer 2 reply
-// budget, the Layer 4 end-vote K/W, the escalation chair, the interaction idle
+// All nine governance knobs are router-held and made live here: floor control,
+// the Tier B salience cap, the ISSUE-0114 per-channel Layer 0 cascade-depth
+// cap (v0.3.13), the Layer 1 interaction budget, the Layer 2 reply budget, the
+// Layer 4 end-vote K/W, the escalation chair, the interaction idle
 // window, and the RFC 0051 reasoning block. The interaction budget (RFC 0030
 // Layer 1) became router-held in
 // the RFC 0050 amendment (interaction-budget enforcement): it now has a
@@ -32,84 +33,14 @@ import (
 // the amendment's PR 2 (wallet-side resolution); this PR resolves and surfaces
 // the value but does not yet act on it.
 
-// Validate enforces the per-channel field-range invariants on a sparse override
-// patch — the single-channel subset of [Config.Validate], applied to the knobs
-// an operator can edit at runtime. It mirrors the belt-and-suspenders negative
-// rejections in config_validate.go (the cross-field rules the JSON Schema cannot
-// express), restated against the pointer/tri-state override fields: a nil knob
-// is "inherit" and is never an error; only an explicitly-set out-of-range value
-// is rejected. The escalation-chair member rule is cross-field (it needs the
-// channel's membership) and so lives in [ChannelRouter.ApplyChannelConfig], not
-// here.
-//
-// Kept aligned with the matching checks in [Config.Validate] by convention —
-// the same mirror-with-a-comment discipline config_validate.go keeps against
-// `schemas/channel.schema.json`.
-func (o ChannelConfigOverrides) Validate() error {
-	// Tier B channel-size cap (RFC 0030): reject anything below 1, mirroring the
-	// loader's schema `minimum: 1` (config_validate.go). Unlike the reply/idle
-	// budgets, zero is NOT a meaningful value here: SetSalienceMaxChannelMembers
-	// coerces any non-positive cap to [DefaultSalienceMaxChannelMembers], so a
-	// persisted explicit 0 reads back as a non-nil knob that nonetheless applies
-	// the default — behaviourally indistinguishable from nil (inherit) and a
-	// value the operator did not intend. The loader never sees a YAML 0 (LoadConfig
-	// normalizes it before Validate); the override path has no such pre-pass, so
-	// the rejection has to happen here or the apply path would persist a value it
-	// silently swallows.
-	if o.SalienceMaxChannelMembers != nil && *o.SalienceMaxChannelMembers < 1 {
-		return fmt.Errorf("%w: %d (must be >= 1)",
-			ErrInvalidSalienceMaxChannelMembers, *o.SalienceMaxChannelMembers)
-	}
-	// Layer 1 per-interaction cost ceiling: zero is meaningful (uncapped);
-	// negative is rejected.
-	if o.InteractionBudgetTokens != nil && *o.InteractionBudgetTokens < 0 {
-		return fmt.Errorf("%w: %d (must be >= 0)",
-			ErrInvalidInteractionBudgetTokens, *o.InteractionBudgetTokens)
-	}
-	// Layer 2 per-participant reply budget: zero is meaningful (uncapped);
-	// negative is rejected.
-	if o.MaxRepliesPerParticipantPerInteraction != nil && *o.MaxRepliesPerParticipantPerInteraction < 0 {
-		return fmt.Errorf("%w: %d (must be >= 0)",
-			ErrInvalidMaxRepliesPerParticipant, *o.MaxRepliesPerParticipantPerInteraction)
-	}
-	// Layer 4 end-vote quorum (K) / recency window (W): a zero is not a
-	// meaningful value here (the router normalizes it to the K=2/W=3 default),
-	// but only a negative is an error — symmetric with the YAML loader.
-	if o.EndVoteThreshold != nil && *o.EndVoteThreshold < 0 {
-		return fmt.Errorf("%w: %d (must be >= 1)", ErrInvalidEndVoteThreshold, *o.EndVoteThreshold)
-	}
-	if o.EndVoteWindow != nil && *o.EndVoteWindow < 0 {
-		return fmt.Errorf("%w: %d (must be >= 1)", ErrInvalidEndVoteWindow, *o.EndVoteWindow)
-	}
-	// Interaction idle window (IP3): an explicit 0 is valid (idle rotation off);
-	// negative is rejected.
-	if o.InteractionIdleTimeoutSeconds != nil && *o.InteractionIdleTimeoutSeconds < 0 {
-		return fmt.Errorf("%w: %d (must be >= 0)",
-			ErrInvalidInteractionIdleTimeout, *o.InteractionIdleTimeoutSeconds)
-	}
-	// RFC 0051 reasoning block: per-field enum + capability gate (deep / revise≥1
-	// rejected as unbacked). The mode↔governance cross-field rule needs the
-	// channel's membership and so lives in [ChannelRouter.validateReasoningGoverned]
-	// (alongside the escalation-chair rule), not in this pure per-field Validate.
-	if o.Reasoning != nil {
-		if err := o.Reasoning.validate(); err != nil {
-			return err
-		}
-	}
-	// RFC 0052 autonomous block: per-field ranges + the cross-field rules
-	// computable without the live roster (the mandatory cost cap, and the convener
-	// being non-empty + distinct from the chair). The convener-IS-a-member rule
-	// needs the store and lives in [ChannelRouter.validateAutonomousConvener],
-	// alongside the escalation-chair membership rule.
-	if err := o.validateAutonomous(); err != nil {
-		return err
-	}
-	return nil
-}
+// [ChannelConfigOverrides.Validate] — the per-field range invariants on a
+// sparse override patch — lives in config_override_validate.go (split out when
+// the ISSUE-0114 per-channel cascade-depth knob pushed this file past the
+// 500-line review cap).
 
 // ApplyChannelConfig is the RFC 0050 single validated apply path: it validates a
 // sparse override patch, persists it to the store (bumping the per-channel
-// revision under the PR-1 optimistic-concurrency primitive), and stamps the eight
+// revision under the PR-1 optimistic-concurrency primitive), and stamps the nine
 // router-held knobs onto the live router so the change takes effect WITHOUT a
 // restart.
 //
@@ -117,7 +48,7 @@ func (o ChannelConfigOverrides) Validate() error {
 // [ChannelStore.PutChannelConfig] replaces the `config_overrides_json` blob
 // wholesale, so a knob absent from `patch` becomes "inherit" — the merge/`null`-
 // means-unset semantics belong to the REST layer (PR 4), above this method.
-// Consequently the router is re-seeded across all eight knobs from the resulting
+// Consequently the router is re-seeded across all nine knobs from the resulting
 // stored state (present → value, absent → inherited default), not just the knobs
 // `patch` happened to mention — otherwise the router would drift from the
 // canonical store (e.g. a prior `floor_control:false` would linger after a patch
@@ -327,7 +258,7 @@ func (r *ChannelRouter) validateReasoningGoverned(ctx context.Context, channelID
 		channelID, ErrInvalidReasoningMode, mode)
 }
 
-// applyOverridesToRouter stamps the eight router-held knobs for `channelID` onto
+// applyOverridesToRouter stamps the nine router-held knobs for `channelID` onto
 // the live router from a (canonical) override set: present → the override value,
 // absent → the inherited default. It is the shared seam used by both the runtime
 // apply path ([ChannelRouter.ApplyChannelConfig]) and the boot repoint
@@ -341,6 +272,8 @@ func (r *ChannelRouter) validateReasoningGoverned(ctx context.Context, channelID
 //     not part of the override set, so the current resolved timeout is preserved.
 //   - salience cap: absent → SetSalienceMaxChannelMembers(_, 0), which the setter
 //     normalizes to [DefaultSalienceMaxChannelMembers].
+//   - cascade-depth cap (ISSUE-0114): absent → SetChannelMaxCascadeDepth(_, 0),
+//     whose inherit sentinel deletes the entry so the channel reads the fleet cap.
 //   - reply budget: absent → ApplyDefaultReplyBudget, which stamps the captured
 //     fleet default (zero is a meaningful "uncapped" value, so it cannot inherit
 //     via Set(_, 0)).
@@ -374,6 +307,16 @@ func (r *ChannelRouter) applyOverridesToRouter(channelID string, o ChannelConfig
 		r.SetSalienceMaxChannelMembers(channelID, *o.SalienceMaxChannelMembers)
 	} else {
 		r.SetSalienceMaxChannelMembers(channelID, 0) // → DefaultSalienceMaxChannelMembers
+	}
+
+	// ISSUE-0114 Layer 0 per-channel cascade-depth cap. A nil knob passes 0,
+	// the inherit sentinel that deletes the entry so the channel reads the
+	// fleet cap; an above-fleet value applies with the setter's loud warning
+	// (the SetEndVoteParams warn-don't-reject posture — see the setter's doc).
+	if o.MaxCascadeDepth != nil {
+		r.SetChannelMaxCascadeDepth(channelID, *o.MaxCascadeDepth)
+	} else {
+		r.SetChannelMaxCascadeDepth(channelID, 0)
 	}
 
 	// Layer 2 reply budget.
@@ -444,7 +387,7 @@ func (r *ChannelRouter) applyOverridesToRouter(channelID string, o ChannelConfig
 // seeding stands and the channel is skipped entirely — a fleet that has never
 // used the live-edit path boots byte-identically to before this PR ("empty
 // overrides → identical to today"). A channel at revision > 0 is store-canonical:
-// [ChannelRouter.applyOverridesToRouter] re-stamps all eight router-held knobs from
+// [ChannelRouter.applyOverridesToRouter] re-stamps all nine router-held knobs from
 // its persisted overrides, so an un-edited knob on an edited channel falls back
 // to the package/fleet default rather than its old YAML value — the
 // shadow-the-whole-block semantics the revision gate turns on (and that PR 3's

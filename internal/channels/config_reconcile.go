@@ -70,10 +70,18 @@ var ErrInvalidConfigRevision = errors.New("channels: invalid revision")
 // stable: both sides of an
 // equal-revision comparison are computed the same canonical way.
 //
-// Three knobs are captured CONDITIONALLY rather than as a flat explicit value:
+// Four knobs are captured CONDITIONALLY rather than as a flat explicit value:
 //   - the escalation chair: an absent chair stays nil (no escalation — the opt-in
 //     default), distinct from an explicit empty string, so an un-configured channel
 //     does not hash differently from one that explicitly cleared the chair.
+//   - the ISSUE-0114 per-channel cascade-depth cap (v0.3.13): an undeclared knob
+//     stays nil (inherit — the channel keeps tracking the fleet cap after
+//     adoption, the reasoning-default posture) rather than freezing the resolved
+//     fleet value. Conditionality is ALSO the upgrade-compatibility guarantee:
+//     store rows adopted before v0.3.13 lack the key, and an unconditional
+//     capture would make every re-resolved YAML snapshot hash differently from
+//     its stored row — a spurious equal-revision drift warning on every adopted
+//     channel at first post-upgrade boot.
 //   - the RFC 0051 reasoning block ([ReasoningConfig.FreezeOverrides]): a default-off
 //     rung stays nil (inherit, responsive to the PR 6 flip) and a non-default rung is
 //     snapshotted per-sub-knob, so only the committed sub-knobs survive into the row.
@@ -118,6 +126,15 @@ func (c ChannelConfig) toConfigOverrides(cfg *Config) ChannelConfigOverrides {
 	if c.EscalationChairID != "" {
 		chair := c.EscalationChairID
 		o.EscalationChairID = &chair
+	}
+	// ISSUE-0114 per-channel cascade-depth cap: conditional like the chair —
+	// only an explicitly declared (non-zero) knob is captured, so an
+	// undeclared channel keeps inheriting the fleet cap after adoption AND
+	// pre-v0.3.13 store rows keep hashing identically to their re-resolved
+	// YAML (see the "Four knobs" note above).
+	if c.MaxCascadeDepth > 0 {
+		depth := c.MaxCascadeDepth
+		o.MaxCascadeDepth = &depth
 	}
 	// RFC 0051 reasoning block: capture the committed rung the same conditional way
 	// as the chair — a default rung stays nil (inherit), a non-default rung is
