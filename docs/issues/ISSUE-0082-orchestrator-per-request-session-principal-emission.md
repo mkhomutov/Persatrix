@@ -100,3 +100,36 @@ mechanism.
 > verified principal source exists the orchestrator emits nothing on the
 > `persatrix-principal` rail and the storage layer correctly collapses to
 > the single-tenant `'local'` principal.
+>
+> 2026-08-03 — **Part 2 inherits the executor-hop principal threading
+> (ISSUE-0118 closeout).** v0.3.13 PR 1
+> ([#809](https://github.com/mkhomutov/Persatrix/pull/809)) threaded the
+> per-request epoch/session axes across the executor hop
+> (`DispatchContext.for_event` lift + `request_scopes()` re-entry) and
+> initially left the **principal** axis out — its rail has no live
+> producer, and without the threading, the moment Part 2's producer
+> emitted, everything the executor runs AFTER `on_event` returns (the
+> end-vote close discharge, legacy in-process cascade children,
+> `SendChatMessage`'s post-reply execute) would have resolved the
+> *construction* principal instead of the request's: the exact leak
+> class ISSUE-0118 closed for epoch, resurfacing on the strict-equality
+> tenant axis. **The same PR closed that gap** (review finding 4) rather
+> than deferring it here: `agents/principal_id.py` gained the
+> `principal_id_from_metadata` leaf reader (the handler binder now reads
+> through it — one validation seam), `DispatchContext` carries
+> `origin_principal_id` (lifted in `for_event`, re-entered by
+> `request_scopes()` in the binder order session → principal → epoch),
+> the legacy cascade's child events seed
+> `EVENT_PRINCIPAL_METADATA_KEY` beside the epoch/session keys, and
+> `SendChatMessage` threads `request_principal` onto its post-reply
+> context. The rail is DORMANT — nothing emits principals yet, so
+> behaviour is unchanged everywhere — and the threading is pinned by
+> `tests/unit/python/test_dispatch_context_scope_threading.py`. What
+> remains for Part 2 is the **emission itself**: the orchestrator's
+> per-request principal producer feeding the `persatrix-principal` rail
+> (gated on [RFC 0039](../rfcs/0039-user-accounts-authentication.md)'s
+> verified claim), plus live verification that an emitted principal
+> reaches both the handler binding and the executor re-entry. No
+> v0.3.14 plan doc exists yet; when it opens, carry the emission +
+> live-verification scope (not the threading — it already shipped) into
+> the ISSUE-0082 Part 2 scope section.

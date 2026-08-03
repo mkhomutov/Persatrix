@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### 🐛 Fixes
+
+- **Per-request `--epoch`/`--session` isolation now holds at the memory-tool surface** ([ISSUE-0118](docs/issues/ISSUE-0118-tool-recall-bypasses-epoch-session-scopes.md), the v0.3.12 Known Gap — the F-3 leak class through the tool side door, found live at the fresh-epoch MT leg): the per-request epoch/session scopes now thread across the **executor hop** the same way acting classification does (RFC 0037 PR 7) — lifted structurally by `DispatchContext.for_event` off the same metadata keys the `on_event` binders read, re-entered around action processing (`request_scopes`) so executor-side memory seams (the end-vote close discharge, legacy cascade children, the chat surface's post-reply side-effects) resolve the request's world instead of construction snapshots — and the verbatim channel recall gains a **foreign-epoch wall**: the channel store is single-epoch by the ISSUE-0106(b) decision, so `recall_channel_messages` on a turn delivered under a different per-request epoch declines with an ordinary empty result (a fresh epoch sees nothing, and does not learn that withheld history exists). Deterministic CI pins the threading, the wall, the legacy-cascade seeding, and the injection/tool parity of the in-loop round; the live proof (the MT fresh-epoch leg with a tool round evidenced in provenance) lands at release-prep. `DispatchContext` + `wire_interaction_id` moved to `agents/dispatch_context.py` at the 500-line cap (re-exported — imports unchanged). Review hardening on the same rail: the recall wall's world epoch is captured env-only (`resolve_world_epoch_id` — an ambient scope at wiring time cannot poison the snapshot), the foreign-epoch decline logs at INFO (the only operator signal under an epoch misconfiguration; server-side only, the model still sees an ordinary empty result), and the **dormant principal axis threads through the same executor hop** (field + lift + re-entry + cascade seeding + chat-surface threading) so the v0.3.14 session-principal activation ([ISSUE-0082](docs/issues/ISSUE-0082-orchestrator-per-request-session-principal-emission.md) Part 2) inherits no executor-hop gap the day the rail lights up.
+
 ## [0.3.12] - 2026-08-02
 
 > **Codename:** Memory that travels
