@@ -74,3 +74,20 @@ RFC 0026 PR 2 — not a new privilege boundary.
 
 Direction 3 is the principled home; 2 is the cheap mitigation if the
 surface ever proves reachable in practice.
+
+## Notes
+
+> 2026-08-03 — **Slotted into v0.3.13 as the cuttable fold-in** by the
+> [sequencing Amendment 2026-08-02](../v0.3.x-sequencing.md#amendment-2026-08-02--v0313--v0314-the-two-release-tail-to-v040)
+> — the only fold-in on that release, alongside its three named deferred
+> calls ([ISSUE-0114](ISSUE-0114-per-channel-cascade-depth-override.md),
+> [ISSUE-0118](ISSUE-0118-tool-recall-bypasses-epoch-session-scopes.md),
+> [ISSUE-0121](ISSUE-0121-crossroom-person-identity-legs-never-run-live.md)).
+> The in/out call locks at the `v0.3.13-plan.md` opening (the amendment's
+> next-steps item 2). Plan-opening default among the candidate directions,
+> mirroring the ISSUE-0114 step-4 pattern: **direction 2** (render the
+> header from a bounded template) as the release-sized mitigation —
+> direction 3 (subject namespaces with per-namespace validation) remains
+> the principled home but belongs with the future predicate registry, and
+> direction 1 buys little at any grammar strictness this issue would
+> accept. Revisitable in the fold-in PR.
