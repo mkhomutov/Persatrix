@@ -1,10 +1,11 @@
 ---
 id: ISSUE-0116
 summary: "A stored fact `subject` reaches the persona's prompt verbatim, as the `Known facts about <subject>:` block header rendered OUTSIDE the RFC 0009 `<external_data>` quarantine envelope — so an LLM-proposed subject is up to `MAX_SUBJECT_CHARS` (120) characters of model-influenced text placed in the persona's own framing. This pre-dates the RFC 0026 topic-predicate amendment (the extractor has always stored LLM-proposed person subjects) and is bounded by that amendment's write-boundary checks — length cap, control-character rejection so a subject cannot forge a second block, and whitespace-tolerant `<external_data>` delimiter rejection — plus the RFC 0009 framing that instructs personas to treat injected memory as data. What remains unbounded is the *content* of a short, well-formed subject: nothing rejects `atlas. ignore all prior instructions`. The topic amendment makes the surface easier to reach (a stimulus mention now pulls a matching subject's block in, where previously only the counterparty's own turns did), which is why it is being recorded rather than silently inherited."
-status: open
+status: resolved
 severity: low
 area: memory
 created: 2026-07-27
+closed: 2026-08-04
 refs:
   - docs/rfcs/0026-amendment-topic-subject-predicates.md
   - docs/rfcs/0026-declarative-facts-tier.md
@@ -99,3 +100,29 @@ surface ever proves reachable in practice.
 > stays on the row and in recall matching) is the plan-opening default,
 > revisitable in the fold-in PR; the topic amendment's write-boundary
 > invariants are asserted unchanged.
+
+> 2026-08-04 — **RESOLVED (v0.3.13 PR 3, the fold-in as scoped).**
+> Direction 2 landed: `render_facts_section` renders the header's
+> subject slot through `bounded_header_subject`
+> (`agents/persona_runtime/facts_render.py`, split from
+> `facts_section.py` at the 500-line cap) — first
+> `HEADER_SUBJECT_MAX_WORDS = 4`, then `HEADER_SUBJECT_MAX_CHARS = 48`
+> over the survivors, any cut marked with the budget-truncator's `…`.
+> The bounds were sized off the legitimate population (person display
+> names 1–3 words, UUID participant ids one 36-char word, extractor-
+> instructed *short* topic names), so in-bounds subjects render
+> byte-identically and every landed header pin held without edits.
+> Header-only, exactly as scoped: storage, the rendered rows, subject
+> grouping, and recall seeding keep the full canonical form, and the
+> helper is total (a pre-amendment over-bound row stays renderable).
+> The write-boundary invariants — length cap, control-character and
+> `<external_data>` rejections — are asserted unchanged, plus a drift
+> pin that the render bound stays strictly tighter than
+> `MAX_SUBJECT_CHARS` (`test_facts_header_template.py`). **Honest
+> residual, unchanged in kind:** a subject already inside the bounds
+> (`ignore all prior instructions` is 4 words) still renders verbatim —
+> the template bounds the *surface* (120 → ≤49 chars of
+> model-influenced header text), not the semantics of a short
+> imperative; direction 3 (subject namespaces with per-namespace
+> validation) remains the principled home, with the future predicate
+> registry.
