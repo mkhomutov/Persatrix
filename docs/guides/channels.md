@@ -392,7 +392,12 @@ cap applies with a loud server-side warning instead (the fleet cap is
 startup-only, so a live edit is never bricked). The knob is runtime-editable
 per RFC 0050: it rides `ChannelConfigOverrides`
 (`PATCH /api/v1/channels/{id}/config`, the web console's Channel settings
-panel) like the other governance knobs.
+panel) like the other governance knobs, and from the CLI:
+
+```bash
+persatrix channel config set planning max_cascade_depth=3
+persatrix channel config get planning        # renders the row with its source
+```
 
 ### Conversation governance (RFC 0030 Layers 1/2/4) — v0.3.8
 
@@ -546,7 +551,8 @@ persatrix channel config get planning --json
 # Override one or more knobs (space-separated key=value). Knob names match the
 # YAML fields above (floor_control, end_vote_threshold, end_vote_window,
 # escalation_chair_id, interaction_idle_timeout_seconds, interaction_budget_tokens,
-# max_replies_per_participant_per_interaction, salience_max_channel_members).
+# max_replies_per_participant_per_interaction, salience_max_channel_members,
+# max_cascade_depth).
 persatrix channel config set planning floor_control=true end_vote_window=4
 
 # Clear one or more knobs back to inherit.
