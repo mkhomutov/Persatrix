@@ -322,6 +322,15 @@ jobs:
       - name: Clippy
         run: cd cli && cargo clippy -- -D warnings
 
+      # The Rust suite carries the CLI↔server lockstep guards (the config-knob
+      # set and its wire types are parsed out of the Go sources), so leaving it
+      # to the manual pre-tag sweep meant a knob could ship with no CLI surface
+      # and a red guard for a whole cycle — which is exactly what ISSUE-0114 did
+      # (v0.3.13 release-prep PR 1 finding). The job name is left unchanged so an
+      # existing required-status-check rule keeps matching.
+      - name: Test
+        run: cd cli && cargo test
+
   validate:
     name: Validate configs
     runs-on: ubuntu-latest
