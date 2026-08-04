@@ -6,7 +6,7 @@
 **Created**: 2026-07-28
 **Last Updated**: 2026-08-01
 **Status**: Active — authored at RFC 0049 PR 5. **Legs 1–4 (the facts half) executed live 2026-07-30** at v0.3.12 release-prep: ✅ pass, Leg 4 Accepted-with-known-gap ([ISSUE-0118](../issues/ISSUE-0118-tool-recall-bypasses-epoch-session-scopes.md)) — see the [execution report](v0.3.12-execution-report.md#mt-memory-crossroom-001--memory-that-travels-live-anthropic).
-**⬜ Legs 1b/2b (the person half) have never been run.** Added at v1.1 after [ISSUE-0119](../issues/ISSUE-0119-channel-publish-drops-human-participant-type.md) reached a release candidate on that green run; v0.3.12 shipped on the v1.0 bar by maintainer call ([#801](https://github.com/mkhomutov/Persatrix/pull/801) — the wiring half is CI-pinned, so what these add is the qualitative half). **They are the standing deliverable for the next memory-touching release: run the whole arc, and record 1b/2b explicitly** — tracked as [ISSUE-0121](../issues/ISSUE-0121-crossroom-person-identity-legs-never-run-live.md).
+**✅ Legs 1b/2b (the person half) ran live for the first time 2026-08-04** at v0.3.13 release-prep — both pass; ISSUE-0121 is resolved on their recorded results, and Leg 2b gained a run rule (an untainted room) plus a corrected diagnosis note off that run. The history below is kept because it is why the legs exist. Added at v1.1 after [ISSUE-0119](../issues/ISSUE-0119-channel-publish-drops-human-participant-type.md) reached a release candidate on that green run; v0.3.12 shipped on the v1.0 bar by maintainer call ([#801](https://github.com/mkhomutov/Persatrix/pull/801) — the wiring half is CI-pinned, so what these add is the qualitative half). **They are the standing deliverable for the next memory-touching release: run the whole arc, and record 1b/2b explicitly** — tracked as [ISSUE-0121](../issues/ISSUE-0121-crossroom-person-identity-legs-never-run-live.md).
 
 ---
 
@@ -149,10 +149,20 @@ persatrix channel send planning "Morning — anything here that needs me specifi
 
 > **The trigger must name neither you nor the content** — the identity twin of Leg 2's discipline. Identity seeds from the **sender**, not the text, so a trigger naming nothing still exercises it. That is why this leg catches what Leg 2 cannot.
 
+> **Run it on a channel whose transcript has never named you** — the identity twin of Leg 4's fresh-channel rule, and the same trap in a different tier. Leg 2 is *supposed* to answer as the persona would, and a real reply routinely addresses the asker by name ("Maksim, release notes are on you") — that reply is now in `group:planning`'s RFC 0034 conversation window, which is recent-N room-visible content, not memory. Asking Leg 2b in that same room afterwards therefore cannot distinguish **recognition from memory** from **reading the name off the transcript**, and the leg silently proves nothing. Either ask Leg 2b **before** Leg 2, or — the cleaner script, since it also keeps Leg 2's reply natural — create a **fresh group channel** with only you and the persona and ask there: an empty transcript leaves memory as the only possible source. (First observed live 2026-08-04, v0.3.13 release-prep; the confounded in-room run and the clean-room re-run are both recorded in the [v0.3.13 execution report](v0.3.13-execution-report.md).)
+>
+> ```bash
+> persatrix channel create recognition-probe --member ember-owl:addressed --member alex:addressed
+> persatrix channel send recognition-probe "Morning — anything here that needs me specifically?" \
+>     --as alex --mention ember-owl
+> ```
+
 **Diagnosis on fail** — two modes, different places:
 
 1. **Wrong participant type (the ISSUE-0119 class).** The persona read an agent-typed row and found nothing. Check the delivered event's `sender_participant_type` (must be `user`) and Leg 1b's row type. A **release-blocking regression** of the [#799](https://github.com/mkhomutov/Persatrix/pull/799) fix, not a quality miss.
-2. **Reasoning miss.** With `PERSATRIX_MEMORY_PROVENANCE=1` the identity line is present in the injected `relationship_context` and the model ignored it. A quality finding.
+2. **Reasoning miss.** The identity line reached the prompt in `relationship_context` and the model ignored it. A quality finding.
+
+> **Provenance does not see this leg.** Unlike Legs 2/3, `PERSATRIX_MEMORY_PROVENANCE=1` emits **nothing** for the identity read: the `relationship` tier is a declared member of `KNOWN_TIERS` but does not call `MemoryBudget.record_admission` (`agents/persona_runtime/memory_budget.py` says so in as many words), so a `persatrix.memory.tier_admitted` line for it never exists. **Zero admissions on a Leg 2b turn is therefore the expected reading, not evidence of a recall miss** — do not triage this leg the way the MQ-11 discipline triages the facts tier. Split wiring from reasoning with the two direct reads instead: Leg 1b's `relationships` query (is there an `alex` row typed `user` carrying the identity JSON?) and the delivered event's `sender_participant_type`. Corrected 2026-08-04 after the v0.3.13 run read the silence as a miss.
 
 Two `alex` rows in Leg 1b's query means a store predating ISSUE-0120's migration v17 — re-run on a `make reset` stack before filing.
 
@@ -225,7 +235,8 @@ persatrix channel send epoch-probe "What's the latest on Atlas?" \
 
 | Date | Tester | OS | Provider | Result | Notes |
 |------|--------|----|----------|--------|-------|
-| — | — | — | — | — | Live execution scheduled for v0.3.12 release-prep ([v0.3.12-plan §Acceptance](../v0.3.12-plan.md#acceptance-for-v0312)). |
+| 2026-07-30 | Claude (Fable 5) | macOS 26.5.2 (`arm64`) | Anthropic | ⚠️ Pass w/ known gap — **v1.0 scope (Legs 1–4)** | v0.3.12 release-prep ([report](v0.3.12-execution-report.md#mt-memory-crossroom-001--memory-that-travels-live-anthropic)). Leg 4 `Accepted-with-known-gap` — the run that found [ISSUE-0118](../issues/ISSUE-0118-tool-recall-bypasses-epoch-session-scopes.md). Legs 1b/2b not run. |
+| 2026-08-04 | Claude (Opus 5) | macOS 26.5.2 (`arm64`) | Anthropic `claude-sonnet-4-6` | ✅ **Pass — all six legs, full v1.1 scope** | v0.3.13 release-prep ([report](v0.3.13-execution-report.md)). **Legs 1b/2b ran for the first time** — both pass ([ISSUE-0121](../issues/ISSUE-0121-crossroom-person-identity-legs-never-run-live.md) closed); 2b re-run clean after the in-room confound. **Leg 4 green with the memory-tool round evidenced in provenance** — the recall declined by the foreign-epoch wall ([ISSUE-0118](../issues/ISSUE-0118-tool-recall-bypasses-epoch-session-scopes.md) closed). Arc cost $0.30 / 25 leases. |
 
 ---
 

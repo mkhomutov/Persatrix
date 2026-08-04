@@ -1,10 +1,11 @@
 ---
 id: ISSUE-0118
 summary: "Agent-initiated memory-tool recalls bypass the per-request epoch (and session) scopes: the action executor runs tool calls in a different asyncio task than `on_event`, so the ContextVar scopes `request_scope_from_metadata` binds for the handler never reach the tool execution — `resolve_active_epoch`/`resolve_session_id` fall back to the construction snapshot (boot epoch `live` / legacy session), and a tool recall returns rows the strict-equality run-isolation filter would exclude. Found live at the v0.3.12 MT-MEMORY-CROSSROOM-001 fresh-epoch leg: with the injection path correctly returning zero admissions under `--epoch mt-crossroom-fresh`, the model reached for its recall tool and surfaced the live-epoch fact anyway (the F-3 leak class, via the tool side door). The RFC 0037 classification axis does NOT share the hole — the tripwire/§D work threads acting classification through event.metadata + DispatchContext precisely because of this task hop; epoch and session need the same treatment."
-status: open
+status: resolved
 severity: medium
 area: agents
 created: 2026-07-30
+closed: 2026-08-04
 refs:
   - docs/manual-tests/MT-MEMORY-CROSSROOM-001.md
   - docs/manual-tests/v0.3.12-execution-report.md
@@ -186,3 +187,22 @@ the request scopes around the executor's action-processing task at spawn.
 >    decision for a future release, not v0.3.13 fix work, and it does
 >    not gate the Phase 3 live proof (the MT's taught fact sits outside
 >    the probe channel's window by construction).
+
+> 2026-08-04 — **RESOLVED on the live arc.** The fix merged at
+> [#809](https://github.com/mkhomutov/Persatrix/pull/809) (`a6aeab86`) and the
+> live proof landed at v0.3.13 release-prep PR 1: `MT-MEMORY-CROSSROOM-001`
+> Leg 4 on a fresh channel under `--epoch mt-crossroom-fresh` with a
+> tool-bearing persona, green **with the model-elected memory-tool round
+> evidenced in provenance** — the acceptance bar the plan's review addition
+> (`f5b30aac`) set, precisely because a round-free green leg proves only the
+> injection wall. A round occurred on the first probe, so no re-probe was
+> needed. Evidence chain: the reply carried no Friday/exec-demo; **zero**
+> `tier_admitted` emissions against a live-epoch control of 2 facts; and the
+> tool side door that leaked on 2026-07-30 was reached and declined —
+> `channels: recall ember-owl declined (foreign epoch 'mt-crossroom-fresh' !=
+> world 'live')` — returning an ordinary empty result, so the persona read as
+> genuinely ignorant rather than refusing (a fresh epoch does not learn that
+> withheld history exists). Full record in the
+> [v0.3.13 execution report](../manual-tests/v0.3.13-execution-report.md#leg-4--the-issue-0118-proof-provenance-recorded-verbatim).
+> The v0.3.12 `--epoch`/`--session` Known-Gap caveat retires in the v0.3.13
+> release notes.

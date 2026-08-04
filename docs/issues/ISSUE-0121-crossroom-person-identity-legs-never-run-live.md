@@ -1,10 +1,11 @@
 ---
 id: ISSUE-0121
 summary: "MT-MEMORY-CROSSROOM-001 Legs 1b/2b (the person-identity half of the headline promise) have never been executed live. They were added at MT v1.1 after ISSUE-0119 — every human publishing into a group channel arriving untyped — reached the v0.3.12 release candidate on a green run of the v1.0 legs, which all name a topic and so structurally cannot observe an identity-tier break. v0.3.12 shipped on the v1.0 bar by maintainer call (#801): the wiring half is pinned deterministically in CI (the #799 wire test drives REST → router → dispatcher → a real gRPC receiver; #800 folds split rows at migration v17), so what stays unverified is the qualitative half — whether a real persona records an introduction via store_note(contact:<id>) at all, and then uses the identity in a room where it was never told. That capture step is model-elected and has no deterministic CI analogue. Standing deliverable for the next memory-touching release."
-status: open
+status: resolved
 severity: medium
 area: memory
 created: 2026-08-01
+closed: 2026-08-04
 refs:
   - docs/manual-tests/MT-MEMORY-CROSSROOM-001.md
   - docs/manual-tests/v0.3.12-execution-report.md
@@ -125,3 +126,23 @@ already has one — rather than more MT legs.
 > fix merges, with legs 1b/2b recorded explicitly in the execution report
 > per the MT's run contract (Leg 1b row keyed on the sender id, typed
 > `user`; wiring-vs-reasoning triage before filing).
+
+> 2026-08-04 — **RESOLVED: legs 1b/2b ran live for the first time** at
+> v0.3.13 release-prep PR 1, and both passed. **Leg 1b** — the introduction
+> mid-turn in the DM wrote exactly one `alex` relationship row typed **`user`**
+> carrying `{"name": "Maksim", "role": "Runs releases"}`, with no idle window
+> needed (the F-7 immediacy criterion), no [ISSUE-0068](ISSUE-0068-chat-peer-recorded-as-agent-participant-type.md)
+> DM-stamp regression and no pre-v17 split row. **Leg 2b** — the persona
+> addressed the operator by the name *and* the role given in the DM, off a
+> trigger naming neither. The in-room run was **confounded** (Leg 2's own
+> reply had already put "Maksim" into `group:planning`'s RFC 0034 conversation
+> window, which is room-visible content rather than memory), so it was re-run
+> on a **fresh channel with an empty transcript**, where memory is the only
+> possible source — and the persona still opened "Morning, Maksim… channel's
+> been quiet". That is the unconfounded qualitative half this issue was filed
+> to obtain. The confound is now written into the MT as a run rule, together
+> with a correction to its diagnosis note: the `relationship` tier does not
+> call `record_admission`, so `PERSATRIX_MEMORY_PROVENANCE=1` emits nothing
+> for the identity read and zero admissions on a 2b turn is the expected
+> reading, not a recall miss. Full record in the
+> [v0.3.13 execution report](../manual-tests/v0.3.13-execution-report.md#leg-2b--the-clean-room-re-run-the-unconfounded-result).

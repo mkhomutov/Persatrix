@@ -1,10 +1,11 @@
 ---
 id: ISSUE-0114
 summary: "No per-channel cascade-depth override: the ISSUE-0109 calibration documented the fleet-wide `max_cascade_depth` (default 5) as the DE FACTO discussion-length knob on a productive autonomous roster (the ISSUE-0110 continuation advances round tally and reply depth together, so the depth cap binds before max_rounds on every productive chain), yet the cap is a single top-level channels.yaml value on an unsynchronised router-global field — lengthening or shortening ONE channel's productive chain means retuning the whole fleet. A per-channel override is a real feature, not a default: per-channel config + schema + validation, a synchronized hot-path read, an RFC 0050 runtime-override decision, and the Go/Python depth-cap alignment (the Python EventDispatcher defense-in-depth cap is per-process and must not fire below a legitimately raised channel cap). Deliberately scoped OUT of the ISSUE-0109 tuning PR (#769); filed for explicit slotting."
-status: open
+status: resolved
 severity: low
 area: channels
 created: 2026-07-25
+closed: 2026-08-04
 refs:
   - docs/issues/ISSUE-0109-rfc0052-autonomous-defaults-calibration.md
   - docs/rfcs/0011-amendment-cascade-depth-wire-propagation.md
@@ -188,3 +189,30 @@ ISSUE-0109 defaults PR):
 > Phase 3 release-prep arc per the plan: a per-channel cascade-depth arc
 > on a live autonomous roster verifies the knob binds where the fleet
 > value used to.
+
+> 2026-08-04 — **RESOLVED on the live arc.** The implementation merged at
+> [#810](https://github.com/mkhomutov/Persatrix/pull/810) (`19f8e98d`); the live
+> verification ran at v0.3.13 release-prep PR 1 and all four claims hold.
+> **Resolution**: `group:cascade-probe` overridden to 2 reads
+> `{"value": 2, "source": "channel"}` while `group:planning` reads
+> `{"value": 5, "source": "default"}`. **Option (c) above-fleet posture**: a live
+> `PATCH` to 9 (> fleet 5) returned **200** and applied, with the loud WARN
+> carrying `fleet_max_cascade_depth=5` and a `remedy` field — warned, never
+> bricked, exactly the `SetEndVoteParams` shape. **Runtime binding**: with the
+> channel capped at 1, three live persona replies each had their fanout
+> terminated — `channels: cascade limit reached … max_cascade_depth=1 depth=1
+> suppressed_recipients=3` — the bound that fired being the channel's own value,
+> while `group:planning` emitted no cascade WARN at all across the entire run.
+> One behavioural note worth carrying: at cap 2 the discussion converged before
+> the bound was reached (the salience bid ended the round, not the depth cap),
+> so on a well-posed discussion this knob is a backstop that never trips.
+>
+> **Found while verifying**: the knob shipped with **no CLI surface** — server
+> merge switch and web console only, so `persatrix channel config set …
+> max_cascade_depth=N` failed with `unknown config knob` and `config get` omitted
+> the row. The CLI↔server lockstep guard that exists to catch exactly that had
+> been silently blinded by this issue's own 500-line-cap file split (the guard
+> parsed zero flat knobs, while its non-empty assert stayed satisfied on the
+> nested knobs), and CI never ran the Rust suite at all. All three fixed at
+> release-prep PR 1 — see the
+> [execution report findings](../manual-tests/v0.3.13-execution-report.md#findings--follow-ups).
