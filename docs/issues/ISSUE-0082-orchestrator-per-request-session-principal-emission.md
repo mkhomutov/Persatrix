@@ -156,3 +156,26 @@ mechanism.
 > end-to-end gate `tests/integration/test_principal_emission_isolation.py`
 > + `MT-MEMORY-MULTIUSER-001`, run live at release-prep). This issue
 > closes with PR 2's live verification.
+>
+> Two further locks came out of the planning review, both folded into the
+> plan. **Origin set = enumerated, not sampled**: a missed dispatch
+> origin fails *open* — no error, no red test, just a silent collapse to
+> `'local'` where two people's rows co-mingle — and the audit already
+> found a third origin beyond `handlePublishMessage` and the chat
+> handler, `handleConveneChannel`
+> (`internal/server/channel_convene_handlers.go` calls
+> `channelRouter.ConveneChannel(r.Context(), …)` directly, so it descends
+> from no publish and the propagation lock does not cover it).
+> `workflows/run` and the `handleRecallMessages` read surface are
+> classified in PR 2 rather than assumed, and a route-table test pins the
+> classification so a later route cannot leak by omission.
+> **Activation day**: migration v11 backfilled every pre-existing row to
+> `'local'` and the principal predicate is strict equality with
+> deliberately no `legacy`-style carve-out, so a deployment that has run
+> `auth.mode: enabled` since v0.3.12 finds each persona's accumulated
+> memory unreachable the day emission lands. The session axis absorbed
+> its equivalent via the §D carve-out; the principal axis cannot, since
+> an always-visible principal *is* the cross-tenant bridge the boundary
+> forbids. The reset is therefore accepted and made visible — an MT leg
+> observes it, and the release notes + Known Gaps state it with the
+> operator remedy.
