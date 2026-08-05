@@ -242,3 +242,20 @@ final PR.
 > cross-tenant boundary remains dormant pending the verified-principal
 > source in [RFC 0039](../rfcs/0039-user-accounts-authentication.md) —
 > tracked as ISSUE-0082 Part 2.
+>
+> 2026-08-05 — **The residuals are scoped: the [v0.3.14 plan](../v0.3.14-plan.md)
+> is open** and carries ISSUE-0082 Part 2 (the principal emission this
+> umbrella waits on), so this issue closes with that release. The
+> deferred residuals named in the PR 3 note above are **split by class**
+> at the plan opening: `delete_by_subject`
+> (`agents/memory/_facts_erasure.py`) is **in scope** — both DELETEs are
+> `agent_id`-scoped only, so the day emission ships, one person's
+> erasure would delete another person's facts about the same subject; a
+> privacy boundary that breaks on the same day, fixed by two predicates
+> and the PR-4-idiom gate (*a foreign principal can neither count nor
+> delete another principal's rows*). The **agent-global capacity sweeps**
+> (episode TTL + size-cap eviction, procedural decay, superseded-fact
+> prune, note prune) are **cut to v0.4.0** and ship as a named Known Gap:
+> they are capacity/retention policy rather than read-confidentiality
+> (recall stays principal-filtered either way), and per-principal quota
+> semantics is a design question, not a predicate.

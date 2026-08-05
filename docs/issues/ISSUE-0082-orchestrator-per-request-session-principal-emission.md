@@ -133,3 +133,49 @@ mechanism.
 > v0.3.14 plan doc exists yet; when it opens, carry the emission +
 > live-verification scope (not the threading — it already shipped) into
 > the ISSUE-0082 Part 2 scope section.
+>
+> 2026-08-05 — **Part 2 scoped: the [v0.3.14 plan](../v0.3.14-plan.md) is
+> open** (the hand-off the note above asks for). Locks taken at the plan
+> opening: **derivation source** = the RFC 0039 §F verified
+> `participant_id` off `authIdentity` (not the account id — RFC 0039 §A
+> binds them 1:1, and §F already stamps this same value as the chat
+> surface's verified claim, so memory and conversation name one
+> identity); **surface** = a new `grpcmeta.MDPrincipal`
+> (`persatrix-principal`, byte-matched to
+> `agents.principal_id.PRINCIPAL_METADATA_GRPC_KEY` by a lockstep guard)
+> injected at the same `GRPCMessageDispatcher.Dispatch` chokepoint that
+> emits session + epoch, fed by a request-ctx carrier the REST handlers
+> set from `identityFrom(r.Context())` (the `WithSessionOverride`
+> precedent); **`auth.mode: enabled`-only** — under `disabled`, or for
+> any unauthenticated caller, nothing is emitted and the persona keeps
+> resolving `'local'` byte-identically; **propagation** = the principal
+> rides orchestrator-authored hops descending from a principal-bearing
+> publish (parity with the Python legacy-cascade seeding v0.3.13 PR 1
+> landed), while agent/autonomous-origin turns emit nothing. Split
+> across plan PR 1 (the dormant rail) and PR 2 (the producer + the
+> end-to-end gate `tests/integration/test_principal_emission_isolation.py`
+> + `MT-MEMORY-MULTIUSER-001`, run live at release-prep). This issue
+> closes with PR 2's live verification.
+>
+> Two further locks came out of the planning review, both folded into the
+> plan. **Origin set = enumerated, not sampled**: a missed dispatch
+> origin fails *open* — no error, no red test, just a silent collapse to
+> `'local'` where two people's rows co-mingle — and the audit already
+> found a third origin beyond `handlePublishMessage` and the chat
+> handler, `handleConveneChannel`
+> (`internal/server/channel_convene_handlers.go` calls
+> `channelRouter.ConveneChannel(r.Context(), …)` directly, so it descends
+> from no publish and the propagation lock does not cover it).
+> `workflows/run` and the `handleRecallMessages` read surface are
+> classified in PR 2 rather than assumed, and a route-table test pins the
+> classification so a later route cannot leak by omission.
+> **Activation day**: migration v11 backfilled every pre-existing row to
+> `'local'` and the principal predicate is strict equality with
+> deliberately no `legacy`-style carve-out, so a deployment that has run
+> `auth.mode: enabled` since v0.3.12 finds each persona's accumulated
+> memory unreachable the day emission lands. The session axis absorbed
+> its equivalent via the §D carve-out; the principal axis cannot, since
+> an always-visible principal *is* the cross-tenant bridge the boundary
+> forbids. The reset is therefore accepted and made visible — an MT leg
+> observes it, and the release notes + Known Gaps state it with the
+> operator remedy.

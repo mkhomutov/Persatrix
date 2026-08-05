@@ -98,6 +98,21 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # planning review had already reached the point of deleting contract rather
     # than prose. Remove once v0.3.12 ships and the plan is archived.
     "docs/v0.3.12-plan.md",
+    # docs/v0.3.14-plan.md — v0.3.14 master plan; same release-cycle
+    # accumulator pattern as the v0.3.0–v0.3.12 plans above. It opened at
+    # 2 964 words and crossed the cap during its own planning review, when
+    # two findings folded in as scope locks: the dispatch-origin enumeration
+    # (a missed REST origin fails *open* — it collapses silently to the
+    # 'local' principal, which is the defect the release exists to close)
+    # and the activation-day reset (migration v11 backfilled every
+    # pre-existing row to 'local' and the principal predicate is strict
+    # equality with no carve-out, so an authenticated caller cannot reach
+    # its pre-upgrade memory). Both are release-level contract: the
+    # acceptance criteria, an MT leg, and the release-notes obligations key
+    # off them. A trim pass reclaimed ~370 words of narrative first — what
+    # remains is contract, and the doc still has Phases 1–4 status flips to
+    # absorb. Remove once v0.3.14 ships and the plan is archived.
+    "docs/v0.3.14-plan.md",
     # docs/v0.3.x-sequencing.md orchestrates the v0.3.1 / v0.3.2 / v0.3.3
     # patch sequence and accumulates amendments as new v0.3.x-targeted
     # RFCs file (the 2026-05-12 amendment captured the RFC 0030 + RFC
