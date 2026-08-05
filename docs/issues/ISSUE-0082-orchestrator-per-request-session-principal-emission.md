@@ -133,3 +133,26 @@ mechanism.
 > v0.3.14 plan doc exists yet; when it opens, carry the emission +
 > live-verification scope (not the threading — it already shipped) into
 > the ISSUE-0082 Part 2 scope section.
+>
+> 2026-08-05 — **Part 2 scoped: the [v0.3.14 plan](../v0.3.14-plan.md) is
+> open** (the hand-off the note above asks for). Locks taken at the plan
+> opening: **derivation source** = the RFC 0039 §F verified
+> `participant_id` off `authIdentity` (not the account id — RFC 0039 §A
+> binds them 1:1, and §F already stamps this same value as the chat
+> surface's verified claim, so memory and conversation name one
+> identity); **surface** = a new `grpcmeta.MDPrincipal`
+> (`persatrix-principal`, byte-matched to
+> `agents.principal_id.PRINCIPAL_METADATA_GRPC_KEY` by a lockstep guard)
+> injected at the same `GRPCMessageDispatcher.Dispatch` chokepoint that
+> emits session + epoch, fed by a request-ctx carrier the REST handlers
+> set from `identityFrom(r.Context())` (the `WithSessionOverride`
+> precedent); **`auth.mode: enabled`-only** — under `disabled`, or for
+> any unauthenticated caller, nothing is emitted and the persona keeps
+> resolving `'local'` byte-identically; **propagation** = the principal
+> rides orchestrator-authored hops descending from a principal-bearing
+> publish (parity with the Python legacy-cascade seeding v0.3.13 PR 1
+> landed), while agent/autonomous-origin turns emit nothing. Split
+> across plan PR 1 (the dormant rail) and PR 2 (the producer + the
+> end-to-end gate `tests/integration/test_principal_emission_isolation.py`
+> + `MT-MEMORY-MULTIUSER-001`, run live at release-prep). This issue
+> closes with PR 2's live verification.
