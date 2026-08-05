@@ -146,3 +146,12 @@ already has one — rather than more MT legs.
 > for the identity read and zero admissions on a 2b turn is the expected
 > reading, not a recall miss. Full record in the
 > [v0.3.13 execution report](../manual-tests/v0.3.13-execution-report.md#leg-2b--the-clean-room-re-run-the-unconfounded-result).
+>
+> **Post-release note (2026-08-05, v0.3.13 follow-up).** The correction above
+> documents the provenance blind spot rather than removing it, and this issue
+> closing would have left it without a home — so it is now tracked on its own as
+> [ISSUE-0122](ISSUE-0122-relationship-tier-emits-no-provenance.md): the
+> `relationship` tier is the only memory tier that charges the RFC 0017 budget
+> (`try_add`) without recording an admission, while `episodic`/`notes`/`facts`/
+> `channel_history` all pair the two. Carry-forward, not a regression — the
+> behaviour predates v0.3.13 and no change this cycle touched it.
