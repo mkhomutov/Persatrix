@@ -179,3 +179,14 @@ mechanism.
 > forbids. The reset is therefore accepted and made visible — an MT leg
 > observes it, and the release notes + Known Gaps state it with the
 > operator remedy.
+>
+> 2026-08-05 — **v0.3.14 PR 1 (the dormant rail) is open**:
+> `grpcmeta.MDPrincipal` + `InjectPrincipal` (empty → no-op),
+> `channels.WithPrincipal`/`PrincipalFromContext` (pinned to survive the
+> fanout's `context.WithoutCancel` hop — the propagation property), the
+> `Dispatch` injection with the `principal.id` span attribute, and the
+> Go-side lockstep guard asserting the bare literal
+> `"persatrix-principal"` (completing the cross-language pair with
+> `test_principal_id_leaf_module.py`). Dormancy is pinned, not assumed:
+> absence tests assert no header and no span attribute ride a dispatch
+> whose ctx carries no principal. The producer is PR 2.
