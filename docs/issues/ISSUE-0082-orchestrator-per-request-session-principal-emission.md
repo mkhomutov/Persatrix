@@ -179,3 +179,33 @@ mechanism.
 > forbids. The reset is therefore accepted and made visible — an MT leg
 > observes it, and the release notes + Known Gaps state it with the
 > operator remedy.
+>
+> 2026-08-05 — **v0.3.14 PR 1 (the dormant rail) is open**:
+> `grpcmeta.MDPrincipal` + `InjectPrincipal` (empty → no-op),
+> `channels.WithPrincipal`/`PrincipalFromContext` (pinned to survive the
+> fanout's `context.WithoutCancel` hop — the propagation property), the
+> `Dispatch` injection with the `principal.id` span attribute, and the
+> Go-side lockstep guard asserting the bare literal
+> `"persatrix-principal"` (completing the cross-language pair with
+> `test_principal_id_leaf_module.py`). Dormancy is pinned, not assumed:
+> absence tests assert no header and no span attribute ride a dispatch
+> whose ctx carries no principal. The producer is PR 2.
+>
+> 2026-08-06 — **PR 1 review: the propagation lock covers descent, not
+> every orchestrator-authored dispatch.** The wording was corrected in
+> the carrier's doc comment, the plan's propagation-posture bullet and
+> the changelog entry. A path that builds a *fresh* context reaches
+> `Dispatch` with no principal on it, and the origin audit's
+> `handleConveneChannel` is not the only one: the synthesis-close
+> timeout (`ChannelRouter.onSynthesisTimeout`,
+> `internal/channels/synthesis_close.go`) hands `context.Background()`
+> to `boundedClose`, so the close-notification fan it drives descends
+> from no request. Principal is the **only** axis a ctx reset exposes —
+> session re-resolves through the SessionResolver, epoch falls back to
+> the boot value, neither reads a ctx value — so under PR 2 a
+> close-notification turn descending from an authenticated publish would
+> be ingested persona-side under the shared `'local'` principal: one
+> person's turn written into the shared tenant. Both origins are PR 2's
+> to close (the cleanest shape for the timeout is stamping the detached
+> ctx onto the pending-synthesis record at arm time rather than
+> constructing `Background()` at fire time).

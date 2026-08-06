@@ -195,3 +195,54 @@ func TestInjectEpoch_CoexistsWithSessionAndIDs(t *testing.T) {
 	require.Equal(t, []string{"sess-018f"}, md.Get(MDSession))
 	require.Equal(t, []string{"run-42"}, md.Get(MDEpoch))
 }
+
+// TestMDPrincipalMatchesCrossLanguageContract is the wire-key lockstep guard
+// the v0.3.14 plan requires for the principal rail (ISSUE-0082 Part 2 PR 1).
+// The orchestrator emits this exact wire form; the persona side lifts it via
+// `agents.principal_id.PRINCIPAL_METADATA_GRPC_KEY` (whose own literal is
+// pinned by tests/unit/python/test_principal_id_leaf_module.py — the two
+// bare-literal assertions together are the cross-language contract). A drift
+// here is worse than the session/epoch equivalents: the header is emitted but
+// never matched, every request silently resolves the shared 'local'
+// principal, and TENANT ISOLATION IS OFF while everything else stays green.
+func TestMDPrincipalMatchesCrossLanguageContract(t *testing.T) {
+	require.Equal(t, "persatrix-principal", MDPrincipal,
+		"MDPrincipal must byte-match agents.principal_id.PRINCIPAL_METADATA_GRPC_KEY; "+
+			"a drift silently disables tenant isolation persona-side")
+}
+
+func TestInjectPrincipal_RoundTrip(t *testing.T) {
+	ctx := InjectPrincipal(context.Background(), "user-alice")
+
+	md, ok := metadata.FromOutgoingContext(ctx)
+	require.True(t, ok, "outgoing metadata should be present")
+	require.Equal(t, []string{"user-alice"}, md.Get(MDPrincipal))
+}
+
+func TestInjectPrincipal_EmptyIsNoOp(t *testing.T) {
+	// Unlike session/epoch, the empty case is the NORMAL path here, not a
+	// defensive edge: under `auth.mode: disabled`, for unauthenticated
+	// callers, and on agent/autonomous-origin turns nothing is emitted and
+	// the persona resolves its 'local' default — the ISSUE-0082 Part 2
+	// disabled-mode no-delta contract. No header may ride the wire.
+	ctx := InjectPrincipal(context.Background(), "")
+	_, ok := metadata.FromOutgoingContext(ctx)
+	require.False(t, ok, "empty principal must not create outgoing metadata")
+}
+
+func TestInjectPrincipal_CoexistsWithSessionEpochAndIDs(t *testing.T) {
+	// All four independent axes (correlation IDs, session, epoch, principal)
+	// must survive on one ctx without clobbering each other — the dispatch
+	// chokepoint stacks them on the same ctx before dialing.
+	ctx := InjectIDs(context.Background(), IDs{AgentID: "ember-owl"})
+	ctx = InjectSession(ctx, "sess-018f")
+	ctx = InjectEpoch(ctx, "run-42")
+	ctx = InjectPrincipal(ctx, "user-alice")
+
+	md, ok := metadata.FromOutgoingContext(ctx)
+	require.True(t, ok)
+	require.Equal(t, []string{"ember-owl"}, md.Get(MDAgentID))
+	require.Equal(t, []string{"sess-018f"}, md.Get(MDSession))
+	require.Equal(t, []string{"run-42"}, md.Get(MDEpoch))
+	require.Equal(t, []string{"user-alice"}, md.Get(MDPrincipal))
+}

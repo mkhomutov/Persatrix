@@ -326,6 +326,26 @@ func (d *GRPCMessageDispatcher) Dispatch(ctx context.Context, env DispatchEnvelo
 		span.SetAttributes(attribute.String("epoch.id", d.epoch))
 	}
 
+	// ISSUE-0082 Part 2 PR 1 (v0.3.14): emit the per-request verified
+	// principal — the tenant axis beside session and epoch — as the
+	// `persatrix-principal` header, feeding the strict-equality principal
+	// rail persona-side. Unlike the two axes above there is no resolver and
+	// no boot default: the request context is the only source
+	// ([WithPrincipal], stamped by the REST handlers under
+	// `auth.mode: enabled` once PR 2 lands the producer). Absent a value
+	// nothing is emitted and the persona resolves its 'local' default —
+	// the normal path for `disabled` mode, unauthenticated callers, and
+	// every agent/autonomous-origin turn, byte-identical to pre-activation
+	// behaviour. Dormant in this PR: no production code stamps the ctx yet.
+	if principal := PrincipalFromContext(ctx); principal != "" {
+		ctx = grpcmeta.InjectPrincipal(ctx, principal)
+		// Low-cardinality-on-span, never a metric label (RFC 0031 OQ #7),
+		// matching the session/epoch posture: pin the principal so a trace
+		// can be pivoted to the authenticated person it served — the
+		// provenance signal the v0.3.14 live MT reads.
+		span.SetAttributes(attribute.String("principal.id", principal))
+	}
+
 	conn, err := d.dial(agent.Address, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		span.RecordError(err)
