@@ -336,6 +336,18 @@ mechanism.
 > speaker to aggregate and no agent-to-agent cascade. Both would need a
 > multi-agent group-channel MT to be observed live.
 >
+> 2026-08-06 — **both residuals are now designed in their own files**:
+> [ISSUE-0123](ISSUE-0123-per-speaker-interaction-scope.md) (R-1) and
+> [ISSUE-0124](ISSUE-0124-orchestrator-hop-drops-tenant-on-agent-cascade.md)
+> (R-2). Two conclusions carry back. R-1 binds the record's own frozen
+> principal at close, **retiring** the asymmetry above rather than
+> resolving it. And the two **must ship together**: R-1 alone leaves a
+> systematic `'local'` record holding every agent turn in every room;
+> R-2 alone leaves the aggregate. The group-channel MT asked for above
+> is
+> [MT-MEMORY-GROUP-TENANT-001](../manual-tests/MT-MEMORY-GROUP-TENANT-001.md),
+> runnable both ways. Nothing is implemented — both fixes are v0.4.0.
+>
 > 2026-08-18 — **R-1 and R-2 re-slotted v0.4.0 → v0.3.15**, so interaction
 > functionality is complete before v0.4.0 organizations build on it. Designs
 > (`ISSUE-0123` / `ISSUE-0124`) sit in draft
