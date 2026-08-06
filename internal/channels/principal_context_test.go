@@ -46,9 +46,12 @@ func TestPrincipal_LastWriteWins(t *testing.T) {
 func TestPrincipal_SurvivesWithoutCancel(t *testing.T) {
 	// The load-bearing property for the plan's propagation lock: the router
 	// detaches fanout from the HTTP request lifetime via
-	// context.WithoutCancel, and every orchestrator-authored hop descending
-	// from the publish dispatches on that detached ctx. The principal must
-	// survive the hop or no descendant dispatch would ever carry it.
+	// context.WithoutCancel, and the orchestrator-authored hops that descend
+	// from that detached ctx dispatch on it. The principal must survive the
+	// hop or no descendant dispatch would ever carry it. Descent is the
+	// limit of the lock — a path that builds a fresh context carries no
+	// principal at all (see the carrier's doc comment for the two known
+	// ones, both PR 2's to close).
 	ctx := WithPrincipal(context.Background(), "user-alice")
 	detached := context.WithoutCancel(ctx)
 	assert.Equal(t, "user-alice", PrincipalFromContext(detached),

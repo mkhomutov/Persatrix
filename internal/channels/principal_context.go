@@ -25,10 +25,22 @@ package channels
 // reason: it must survive the [context.WithoutCancel] hop the router makes
 // when it detaches fanout from the HTTP request lifetime (see
 // [ChannelRouter.fanout]) — context values are preserved across that
-// boundary, the request itself is not. That is also what implements the
-// plan's propagation lock: every orchestrator-authored hop that descends
-// from a principal-bearing publish shares the detached ctx and so carries
-// the principal to its dispatches.
+// boundary, the request itself is not. That is what implements the plan's
+// propagation lock for the hops that descend from the detached request ctx:
+// they share it and so carry the principal to their dispatches.
+//
+// The lock covers descent, NOT every orchestrator-authored dispatch — a path
+// that builds a FRESH context reaches [GRPCMessageDispatcher.Dispatch] with
+// no principal on it. Two are known: the synthesis-close timeout
+// ([ChannelRouter.onSynthesisTimeout] hands `context.Background()` to the
+// bounded close, so the close-notification fan it drives descends from no
+// request) and `handleConveneChannel`, which calls `ConveneChannel` on the
+// raw request ctx without descending from a publish at all. Principal is the
+// only axis exposed by such a reset: session re-resolves through the
+// SessionResolver and epoch falls back to the boot value, neither of which
+// reads a ctx value, while a principal that is not on the ctx is simply not
+// emitted — the turn collapses to `'local'`. PR 2 owns closing both (the
+// plan's origin-set enumeration); this PR only carries the mechanism.
 
 import "context"
 
