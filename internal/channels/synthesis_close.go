@@ -137,6 +137,20 @@ type pendingSynthesisClose struct {
 	// withholds), `undelivered` the members that round MISSED (see
 	// [liveDeliveryFailures]), downgraded to sole delivery by the fan.
 	stimulusNotify closeNotify
+	// principal is the arming request's verified principal, stashed because
+	// the timeout net runs on a TIMER goroutine with no request context and
+	// would otherwise reach [ChannelRouter.boundedClose] on a bare
+	// `context.Background()` (ISSUE-0082 Part 2, v0.3.14 PR 2). Principal is
+	// the ONLY axis such a reset exposes — session re-resolves through the
+	// SessionResolver, epoch falls back to the boot value — so left unfixed an
+	// authenticated person's close-notification fan (the members' FINAL turn,
+	// which the RFC 0020 metered summary is built from) lands in the shared
+	// `'local'` tenant while every other turn in the interaction is
+	// partitioned. The STRING, not the detached ctx the plan names: it is the
+	// entire delta a fresh context loses, and holding a ctx for the ~2-minute
+	// timeout window would pin its values and span for no benefit. Empty on
+	// every agent/autonomous origin — the declared collapse to `'local'`.
+	principal string
 	// consumed flips when the arm's close is DECIDED — the reply claim or the
 	// timeout fire won the identity CAS — but the teardown has not yet reached
 	// [ChannelRouter.markInteractionClosed]. The pointer deliberately STAYS on
@@ -247,6 +261,10 @@ func (r *ChannelRouter) maybeArmSynthesisClose(
 		ct:             ct,
 		stimulus:       msg,
 		stimulusNotify: stimulusNotify,
+		// Arm time, not fire time: this ctx descends from the publish that
+		// crossed the bound (fanout's `context.WithoutCancel`), so it still
+		// carries the publisher's principal. See the field's doc.
+		principal: PrincipalFromContext(ctx),
 	}
 	// Arm under interactionMu — the CAS half: two sibling bound-crossing
 	// fanouts can both pass the tally advance before either arms; exactly one
@@ -452,7 +470,12 @@ func (r *ChannelRouter) onSynthesisTimeout(pending *pendingSynthesisClose) {
 	// calibrated below activityTTL.
 	r.clearActivity(pending.stimulus.ChannelID, pending.chairID)
 
-	ctx := context.Background()
+	// Background, then re-stamped with the arming request's principal: the
+	// timer goroutine owns no request, but the close-notification fan below
+	// must land in the same tenant as the rest of the interaction. A no-op
+	// when the arm had no principal (agent/autonomous origin, or `auth.mode:
+	// disabled`), which keeps that path byte-identical to a bare Background.
+	ctx := WithPrincipal(context.Background(), pending.principal)
 	r.logger.Warn("channels: synthesis reply timed out; closing without the synthesis artifact",
 		zap.String("channel_id", pending.stimulus.ChannelID),
 		zap.String("interaction_id", pending.interactionID),

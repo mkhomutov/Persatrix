@@ -209,3 +209,55 @@ mechanism.
 > to close (the cleanest shape for the timeout is stamping the detached
 > ctx onto the pending-synthesis record at arm time rather than
 > constructing `Background()` at fire time).
+>
+> 2026-08-06 — **v0.3.14 PR 2 (the producer) is open — the rail is fed.**
+> The RFC 0039 §F verified `participant_id` is threaded onto the request
+> context and emitted at the dispatch chokepoint, so under
+> `auth.mode: enabled` persona memory partitions by authenticated person.
+> Three notes on how it landed, each a deviation or a finding rather than
+> a restatement of the plan:
+>
+> 1. **Threaded in `authMiddleware`, not per handler.** The plan's lock
+>    said "the REST handlers thread the resolved identity"; the top-ranked
+>    risk was a *missed* origin, which fails open into the shared `'local'`
+>    tenant with no error and no red test. Threading at the one place
+>    identity is resolved — the middleware wrapping the root mux — makes
+>    exhaustiveness a property of the composition instead of a
+>    hand-maintained list. The predicate is `authIdentity.Authenticated`,
+>    not `authEnforced()`: under `enabled` an unauthenticated caller on a
+>    public route resolves `anonymousIdentity`, whose participant is the
+>    literal `"local"`, and stamping that would put a header on the wire
+>    where there is none today for no change in resolved value. The
+>    enumeration survives as `dispatchOriginClassification` +
+>    `principal_route_table_test.go`, which parses the package's own
+>    registrations and fails on an unclassified route — documentation kept
+>    honest by a test, not a gate.
+> 2. **The origin set is three routes**, all confirmed rather than
+>    assumed: channel publish, chat, and `handleConveneChannel`. The two
+>    the plan left open are both **non-dispatching**: `workflows/run`
+>    schedules through the executor's `ExecuteTask` RPC, which has no
+>    persona-memory principal consumer at all (the Python servicer lifts
+>    `persatrix-principal` in `SendChatMessage` and
+>    `ReceiveChannelMessage` only), and `handleRecallMessages` reads the
+>    **channel** store — membership-scoped verbatim messages, a table with
+>    no `principal_id` column — never principal-partitioned persona memory.
+> 3. **The synthesis-close reset is fixed as directed** (the principal
+>    string is stashed at arm time, not the whole detached ctx — that
+>    string is the entire delta a fresh context loses, and retaining a
+>    context on a record that lives for the ~2-minute timeout window would
+>    pin its values and span for no benefit). It was also the **only**
+>    fresh-context dispatch path in `internal/channels`: every other
+>    detachment is `context.WithoutCancel`, which preserves values.
+>
+> Live proof is `MT-MEMORY-MULTIUSER-001`, authored here and executed at
+> release-prep. Authoring it surfaced a scaffolding constraint worth
+> recording: **RFC 0039 Phase 3 (account administration) is v0.4.0, so
+> `account bootstrap` — which refuses once any account exists — is the
+> only shipped account-creation verb.** The MT therefore rotates the
+> second principal by deleting `accounts.db` and re-bootstrapping (the
+> persona's `memory.db` is a separate store, so the corpus survives),
+> which makes the two accounts sequential rather than concurrent. The
+> concurrent case is pinned deterministically instead
+> (`tests/integration/test_principal_emission_isolation.py`: one process,
+> two scopes, one shared room). This is a live-testing ergonomics gap, not
+> a product gap, and it closes with Phase 3.
