@@ -22,6 +22,7 @@ Every axis before this one isolated *rooms* (session) or *runs* (epoch). Neither
 - **Per-principal capacity sweeps / quota** — episode TTL, size-cap eviction, procedural decay and note prune stay agent-global (a named Known Gap, v0.4.0). Recall stays principal-filtered either way, so this MT's absence bars are unaffected.
 - **The auth substrate itself** — [MT-AUTH-001](MT-AUTH-001.md) owns bootstrap, the §E matrix, the browser session; it re-runs beside this MT as the substrate regression.
 - **Concurrent sessions for two accounts** — see the two-account note below.
+- **The two stated residuals** ([ISSUE-0082](../issues/ISSUE-0082-orchestrator-per-request-session-principal-emission.md) R-1 / R-2), neither of which this MT can reach: it drives `persatrix chat` against a **single** persona, so there is no second speaker for the close-time summary to aggregate (R-1) and no agent-to-agent cascade across the orchestrator hop (R-2). Both need a multi-agent group-channel MT; that is a v0.4.0 deliverable, not a gap in this arc. Do not read a green run here as evidence about either.
 
 ---
 

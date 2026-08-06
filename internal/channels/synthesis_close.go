@@ -141,15 +141,15 @@ type pendingSynthesisClose struct {
 	// the timeout net runs on a TIMER goroutine with no request context and
 	// would otherwise reach [ChannelRouter.boundedClose] on a bare
 	// `context.Background()` (ISSUE-0082 Part 2, v0.3.14 PR 2). Principal is
-	// the ONLY axis such a reset exposes — session re-resolves through the
-	// SessionResolver, epoch falls back to the boot value — so left unfixed an
-	// authenticated person's close-notification fan (the members' FINAL turn,
-	// which the RFC 0020 metered summary is built from) lands in the shared
-	// `'local'` tenant while every other turn in the interaction is
-	// partitioned. The STRING, not the detached ctx the plan names: it is the
-	// entire delta a fresh context loses, and holding a ctx for the ~2-minute
-	// timeout window would pin its values and span for no benefit. Empty on
-	// every agent/autonomous origin — the declared collapse to `'local'`.
+	// the ONLY axis such a reset exposes — session re-resolves, epoch falls
+	// back to the boot value — so left unfixed the close fan lands in
+	// `'local'` while the arming person's own turns are partitioned. The
+	// STRING, not the detached ctx: it is the entire delta a fresh context
+	// loses, and holding one for the ~2-minute window would pin it for
+	// nothing. Empty on every agent origin. Deliberately NOT mirrored on the
+	// reply / end-vote closes (they descend from the chair's unauthenticated
+	// publish): ISSUE-0082 R-1 — the close summary aggregates every speaker,
+	// so no one principal is right for it until tracker scope is per-speaker.
 	principal string
 	// consumed flips when the arm's close is DECIDED — the reply claim or the
 	// timeout fire won the identity CAS — but the teardown has not yet reached

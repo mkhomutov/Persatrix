@@ -35,6 +35,16 @@ package server
 // §Non-Goals public REST seams (see auth_policy.go). So agents emit nothing
 // and collapse to `'local'`, which is the declared agent-origin contract.
 //
+// Read that contract at its real scope (ISSUE-0082 residual R-2): a persona's
+// reply re-enters here as a fresh unauthenticated publish, so every fanout
+// descending from it dispatches under `'local'` even when it is relaying what
+// an authenticated person just said. In a multi-agent room the relayed
+// content therefore lands in the shared tenant. The fix is NOT to let the
+// persona send a principal back — the persona binds `principal_scope` from
+// that header and recall is strict equality on it, so trusting an
+// agent-supplied claim would hand an unauthenticated caller a cross-tenant
+// READ primitive. Closing it needs server-side causal tracking; deferred.
+//
 // # The enumeration
 //
 // Structural threading removes the *fail-open* hazard but not the reviewer's
