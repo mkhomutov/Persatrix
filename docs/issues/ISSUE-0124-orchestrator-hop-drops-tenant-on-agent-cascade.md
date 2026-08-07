@@ -172,6 +172,42 @@ in every room. Together the relayed turn carries the causal principal
 > still open.
 >
 > Live observation is
-> [MT-MEMORY-GROUP-TENANT-001](../manual-tests/MT-MEMORY-GROUP-TENANT-001.md),
-> whose Leg 2 reads the residual off storage today so the defect is
-> evidenced rather than inferred.
+> [MT-MEMORY-GROUP-TENANT-001](../manual-tests/MT-MEMORY-GROUP-TENANT-001.md).
+>
+> 2026-08-07 — **CONFIRMED LIVE, with a magnitude.** Ran on Anthropic
+> under `auth.mode: enabled` (`alice` → `alice-person`, operator) in
+> `group:planning` with three personas. Read off the `channel.dispatch`
+> spans — the `principal.id` attribute v0.3.14 PR 1 added for exactly
+> this:
+>
+> | message | origin | dispatches | `principal.id` |
+> |---|---|---|---|
+> | `457a4612`, `03630550` | alice, authenticated | 6 | **`alice-person`** on all |
+> | `a80b582b`, `acd79138`, `aa77ece4` | persona replies | 9 | **absent on all** |
+>
+> **9 of 15 dispatches in one interaction descending from an
+> authenticated publish carried no tenant** — 60%. `a80b582b` is
+> iron-fox's *"Nova Sparrow — you've just been looped in by Alice…"*,
+> a persona relaying Alice's context to two other personas with the
+> tenant stripped. That is the residual, exactly as described.
+>
+> **Correction to the note above: the residual is NOT readable off
+> storage, and R-1 is why.** Every stored row in that run — 9 episodes
+> and 28 facts across the three personas — read `principal_id =
+> 'alice-person'`. **Zero `local` rows**, despite 9 tenant-less
+> dispatches. Nothing is written per turn; the only write is at close,
+> and the close-time aggregate takes one principal for the whole record
+> ([ISSUE-0123](ISSUE-0123-per-speaker-interaction-scope.md)). So R-1
+> *masks* R-2 in storage: the relayed turns are ingested with no tenant,
+> then silently re-attributed to whoever the close bound. Any Leg that
+> tries to detect R-2 by grouping `principal_id` will read clean and
+> conclude wrongly. **The wire is the only instrument.** The MT's Leg 2
+> is corrected accordingly.
+>
+> Two preconditions the run discovered, both now in the MT: agent
+> replies must take the **concurrent re-fanout** path (`floor_control:
+> false`) — under floor control `ChannelRouter.Publish`'s deferred-fanout
+> skip suppresses a floor-turn reply's re-fanout, so agent publishes
+> never reach `Dispatch` and the arc shows zero tenant-less hops; and the
+> collector's tail sampling is **1% probabilistic**, so the dispatch
+> spans are dropped unless it is raised for the measurement.

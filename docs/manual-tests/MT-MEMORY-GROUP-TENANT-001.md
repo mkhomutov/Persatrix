@@ -69,6 +69,19 @@ itself (MT-MEMORY-MULTIUSER-001), the auth substrate
 > script; an idle pause mid-arc expires the window and silently changes
 > which close trigger fires, which is the variable Legs 4 and 5 turn on.
 
+> ⚠️ **Every orchestrator restart empties the agent registry — restart the
+> personas after it.** The registry is in-memory, and agents register once
+> at their own startup; they do **not** re-register when the orchestrator
+> comes back. So the `account bootstrap` → restart step leaves a healthy,
+> green-looking stack in which *every* dispatch is dropped with
+> `channels: dispatch target not registered`, no persona ever replies, and
+> the arc produces no cascade and no rows. Verified 2026-08-07 — it cost a
+> full arc before it was spotted. After any orchestrator restart:
+> `docker compose restart agent-<each>`, then confirm
+> `GET /api/v1/agents` lists every persona `healthy` **before** publishing.
+> This applies to [MT-MEMORY-MULTIUSER-001](MT-MEMORY-MULTIUSER-001.md)
+> too, which carries the same restart instruction.
+
 > **One account at a time.** Same constraint as MT-MEMORY-MULTIUSER-001:
 > `account bootstrap` refuses once an account exists, so rotating to a
 > second principal means deleting `data/accounts.db`, bootstrapping
@@ -111,19 +124,42 @@ Alice).
 ### Leg 2 — R-2: the relayed write
 
 Every turn in this interaction descends causally from one authenticated
-publish, so under a correct tenant boundary every row it produced would
-carry `alice-person`. Rows tagged `'local'` are the hops that crossed the
-orchestrator and lost the tenant.
+publish, so under a correct boundary every dispatch it produced would
+carry the tenant.
 
-```sql
-SELECT principal_id, turn_count, substr(summary,1,80)
-FROM episodes WHERE created_at >= <Leg-1 start> ORDER BY created_at;
+> **Read the wire, NOT storage — storage cannot see this.** Verified
+> 2026-08-07: a run with **9 tenant-less dispatches** stored **zero**
+> `local` rows. Nothing is written per turn; the only write is at close,
+> and the close-time aggregate takes one principal for the whole record,
+> so R-1 silently re-attributes the relayed turns to whoever closed. A
+> `principal_id` group-by reads clean and concludes wrongly. This leg was
+> originally written against storage and was corrected.
+
+**Two preconditions**, or the leg passes vacuously:
+
+1. **`floor_control: false` on the channel.** Under floor control,
+   `ChannelRouter.Publish`'s deferred-fanout skip recognises a floor-turn
+   reply and suppresses its re-fanout, so agent publishes never reach
+   `Dispatch` and you will see zero tenant-less hops. (Clearing it needs
+   `escalation_chair_id` cleared in the *same* PATCH — the chair requires
+   floor control.)
+2. **Raise the collector's tail sampling.** `config/observability/otel-collector.yaml`
+   samples healthy traces at **1%**; the dispatch spans are dropped
+   otherwise. Set `sampling_percentage: 100` for the run and revert after.
+
+Then read the `principal.id` attribute off `channel.dispatch` spans:
+
+```bash
+curl -s "http://localhost:16686/api/traces?service=persatrix-server&operation=channel.dispatch&limit=300&lookback=20m"
+# for each span: recipient.agent_id, channel.message_id, principal.id (absent == tenant lost)
 ```
 
 | | Expected |
 |---|---|
-| **v0.3.14** | **≥ 1 `local` row** on a persona that was reached by a cascade hop — the residual, evidenced. |
-| **after R-1+R-2** | **Zero `local` rows** from this interaction. Attribution rides the causal chain, bounded by `cascade_depth`. |
+| **v0.3.14** | Dispatches from **alice's** publishes carry `principal.id=alice-person`; dispatches from **persona** publishes carry **none**. Reference run: 6 with, **9 without**, in one interaction. |
+| **after R-1+R-2** | **Zero** tenant-less dispatches in the causal chain. Attribution rides it, bounded by `cascade_depth`. |
+
+- [ ] The per-dispatch table (time, recipient, message id, principal) is pasted into the execution report — a bare count is not enough; the *grouping by originating message* is the finding.
 
 - [ ] Row counts recorded per persona, per `principal_id`, into the execution report.
 
