@@ -54,6 +54,8 @@ Every axis before this one isolated *rooms* (session) or *runs* (epoch). Neither
 4. **No `data/accounts.db`** — Leg 1 bootstraps it.
 5. `config/security.yaml` with `auth.mode: enabled` for Legs 1–5; Leg 6 flips it back.
 
+> ⚠️ **Every orchestrator restart empties the agent registry — restart the personas after it, before publishing.** The registry is in-memory and agents register once at their *own* startup; they do **not** re-register when the orchestrator comes back. Both the Leg 1 and Leg 3 restarts below therefore leave a healthy-looking stack in which every dispatch is dropped with `channels: dispatch target not registered` — the persona never replies, and the leg produces no rows to read. Nothing in the output says the run was void. After **any** orchestrator restart, restart the persona containers (`docker compose restart agent-<id>` for each) and confirm `GET /api/v1/agents` lists every persona `healthy` **before** sending the leg's message. Verified 2026-08-07 on a live arc, where it silently consumed the whole run before it was noticed.
+
 > **Two accounts, one bootstrap verb.** RFC 0039 Phase 3 (account administration) is v0.4.0, so the only shipped account-creation verb is `account bootstrap`, and it refuses to run once any account exists. To get a second *authenticated principal* on shipped verbs, **delete `data/accounts.db` and bootstrap again under the other participant** between legs. `accounts.db` and the persona's `memory.db` are separate stores, so this rotates *who is speaking* while leaving the memory corpus untouched — which is exactly the variable under test. The cost is that the two accounts are sequential rather than concurrent; the *concurrent* case is pinned deterministically in `test_principal_emission_isolation.py` (one process, two scopes, one shared room). When Phase 3 lands, this dance collapses to one `account create`.
 
 > **`--user` stops mattering under `enabled`.** The §F claim replaces any body `user_id` with the caller's verified participant, so the CLI's `--user` no longer selects the peer — the logged-in account does. Passing it is harmless; do not read it as the identity.
@@ -68,6 +70,7 @@ Every axis before this one isolated *rooms* (session) or *runs* (epoch). Neither
 rm -f data/accounts.db
 ./bin/persatrix-server account bootstrap --username alice --participant alice-person
 # restart the orchestrator so it opens the new accounts.db
+# then restart the personas too — the restart emptied the agent registry (see the warning above)
 persatrix login          # as alice
 echo "My daughter Mira turns seven next month." | ./bin/persatrix chat ember-owl
 ```
@@ -92,7 +95,7 @@ echo "What would be a good present for a kid that age?" | ./bin/persatrix chat e
 ```bash
 rm -f data/accounts.db
 ./bin/persatrix-server account bootstrap --username bob --participant bob-person
-# restart the orchestrator
+# restart the orchestrator, then restart the personas (registry emptied — see the warning above)
 persatrix login          # as bob
 echo "What would be a good present for a kid that age?" | ./bin/persatrix chat ember-owl
 ```
