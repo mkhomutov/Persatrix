@@ -1,7 +1,7 @@
 # ISSUE-0082 — PR Implementation Plan (Residuals R-1 / R-2 — the derived and relayed tenant writes)
 
 **Issues**: [ISSUE-0123](ISSUE-0123-per-speaker-interaction-scope.md) (R-1) · [ISSUE-0124](ISSUE-0124-orchestrator-hop-drops-tenant-on-agent-cascade.md) (R-2)
-**Status**: 📋 Draft — **opens after the v0.3.14 tag**, as a workstream inside the v0.4.0 master plan
+**Status**: 📋 Draft — Phase 0 resolved; **opens after the v0.3.14 tag**, as a workstream inside the v0.4.0 master plan
 **Created**: 2026-08-07
 **Branch prefix**: `feature/v040-issue0123-` / `feature/v040-issue0124-` (per residual)
 **Target**: `main`
@@ -39,11 +39,38 @@ Together the relayed turn carries the causal principal *and* lands in that princ
 
 ---
 
-## Phase 0 — the design gate (no PR)
+## Phase 0 — the design gate ✅ RESOLVED 2026-08-07: **Option A**
 
-**R-1's shape is deliberately NOT locked by this plan.** [ISSUE-0123](ISSUE-0123-per-speaker-interaction-scope.md) proposes per-speaker records; that is one of three answers, and the choice turns on evidence nobody has yet.
+> **Ran, and it decided.** The gate below is kept as the record of *how* the
+> call was made. The measurement came back positive on **both** halves of the
+> decision rule, so Option B is out and PRs 3–4 stand as written.
+>
+> Live on Anthropic, `group:planning`, three personas + one human, real close
+> (`close_reason: idle_gap`). The `turn_count=2` summary on both iron-fox and
+> nova-sparrow reads: *"Alice requested coverage … **due to her daughter Mira's
+> surgery**. **Ember-owl proposed** three options: delegating to Iron Fox
+> (strong on production reliability) …"* — one aggregate, one principal, a
+> named human's personal disclosure plus an attributed second speaker's
+> contribution. Not generic; the episode is a real leak vector.
+>
+> The facts tier is worse than ISSUE-0123 assumed: all three personas
+> extracted `alice / has_child_named / Mira` (cross-room by default, RFC 0049
+> Phase 1), and nova-sparrow extracted `iron fox / self.has_attribute / strong
+> on production reliability` — **which iron-fox never said**; Ember-owl did.
+> A single close writes third-party attributes derived from a second party's
+> turn. Per-principal extraction over a shared record would not bound that;
+> splitting the record does.
+>
+> **Caveat**: the run had `auth.mode: disabled`, so every row reads
+> `principal_id='local'` and the principal-partitioning half is unevidenced.
+> It does not need to be for this call — the tracker keys on the room scope
+> regardless of principal, so the content aggregation measured here is
+> auth-independent. The principal half stays MT Leg 4 under `enabled`, a
+> release-prep deliverable.
 
-**Action**: run [MT-MEMORY-GROUP-TENANT-001](../manual-tests/MT-MEMORY-GROUP-TENANT-001.md) Legs 1–4 against the v0.3.14 tag and read *where the leak concentrates*.
+**R-1's shape was deliberately NOT locked at plan authoring.** [ISSUE-0123](ISSUE-0123-per-speaker-interaction-scope.md) proposes per-speaker records; that was one of three answers, and the choice turned on evidence nobody had.
+
+**Action**: run [MT-MEMORY-GROUP-TENANT-001](../manual-tests/MT-MEMORY-GROUP-TENANT-001.md) Legs 1–4 and read *where the leak concentrates*.
 
 | Option | Shape | Cost | Residual |
 |---|---|---|---|
@@ -204,7 +231,7 @@ Run [MT-MEMORY-GROUP-TENANT-001](../manual-tests/MT-MEMORY-GROUP-TENANT-001.md) 
 
 | # | Title | Branch | Status | GitHub PR | Merged |
 |---|-------|--------|--------|-----------|--------|
-| 0 | Design gate — MT Legs 1–4, lock R-1's shape | — | ⬜ Not started | — | — |
+| 0 | Design gate — MT Legs 1–4, lock R-1's shape | — | ✅ Resolved 2026-08-07 → **Option A** | — | — |
 | 1 | R-2 causal attribution store, dormant | `feature/v040-issue0124-attribution-store` | ⬜ Not started | — | — |
 | 2 | R-2 re-stamp + end-to-end gate | `feature/v040-issue0124-restamp` | ⬜ Not started | — | — |
 | 3 | R-1 per-speaker scope + RFC 0020 §G amendment | `feature/v040-issue0123-scope-key` | ⬜ Not started | — | — |

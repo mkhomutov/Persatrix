@@ -184,5 +184,41 @@ the correct shape.
 > That MT's Edge Case 2 currently reads "two authenticated people in one
 > *group channel* also get per-speaker persona memory — neither turn
 > recalls the other's disclosures". True for per-turn writes, **not**
-> for the close-derived aggregate this issue describes. Narrow that
-> wording when this lands, or sooner.
+> for the close-derived aggregate this issue describes. Narrowed on
+> `main` 2026-08-07 ([#821](https://github.com/mkhomutov/Persatrix/pull/821)).
+>
+> 2026-08-07 — **SCOPE LOCK: Option A (per-speaker records). Measured,
+> not argued.** The [residuals PR plan](ISSUE-0082-residuals-pr-plan.md)
+> Phase 0 gate ran the MT's content measurement live on Anthropic —
+> `group:planning`, three personas, one human (alice), a real close
+> (`close_reason: idle_gap`). The gate's rule was: *if the close-derived
+> summary materially carries another speaker's disclosure, the record
+> must split; if the leak sits only in `facts` while the summary stays
+> generic, per-principal extraction (Option B) suffices.* **Both halves
+> came back positive, so Option B is out.**
+>
+> The summary is not generic. iron-fox and nova-sparrow each closed a
+> `turn_count=2` record reading: *"Alice requested coverage for a release
+> review during the week of the 14th due to her daughter Mira's surgery.
+> Ember-owl proposed three options: delegating to Iron Fox (strong on
+> production reliability), covering it directly at VP level, or
+> conducting a pre-review by EOD the 13th."* One aggregate, one
+> principal, carrying a named human's personal disclosure **and** an
+> attributed second speaker's contribution.
+>
+> The facts tier is worse than the issue assumed. All three personas
+> extracted `alice / has_child_named / Mira` — cross-room by default per
+> RFC 0049 Phase 1. And nova-sparrow extracted `iron fox /
+> self.has_attribute / strong on production reliability`, which **iron-fox
+> never said** — Ember-owl did. So a single close writes third-party
+> attributes derived from a second party's turn, under one principal.
+> Splitting the record is what bounds that; per-principal extraction over
+> a shared record would not.
+>
+> **Caveat on scope.** The run had `auth.mode: disabled`, so every row
+> reads `principal_id='local'` and the run does **not** evidence the
+> principal-partitioning half. It does not need to: the tracker keys on
+> the room scope regardless of principal, so the content aggregation this
+> gate measured is auth-independent. The principal half is Leg 4 of the
+> MT under `enabled`, and stays a v0.4.0 release-prep deliverable.
+> Evidence transcript + per-persona dumps captured with the run.
