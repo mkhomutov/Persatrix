@@ -142,6 +142,17 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			}
 		}
 		ctx := context.WithValue(r.Context(), authIdentityKey, ident)
+		// ISSUE-0082 Part 2 (v0.3.14 PR 2): thread the resolved §F
+		// participant as the request PRINCIPAL, so every dispatch
+		// descending from this request emits `persatrix-principal` and
+		// the persona partitions its memory by the authenticated human
+		// rather than the shared `'local'` tenant. Stamped here — the
+		// one place identity is resolved — so no dispatch origin can
+		// leak by omission; a no-op for every unauthenticated caller
+		// (the whole persona fleet) and under `auth.mode: disabled`.
+		// See principal.go for why the predicate is Authenticated
+		// rather than the mode, and for the origin enumeration.
+		ctx = withRequestPrincipal(ctx, ident)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

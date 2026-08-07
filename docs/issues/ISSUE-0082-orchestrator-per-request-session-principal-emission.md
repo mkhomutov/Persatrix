@@ -209,3 +209,128 @@ mechanism.
 > to close (the cleanest shape for the timeout is stamping the detached
 > ctx onto the pending-synthesis record at arm time rather than
 > constructing `Background()` at fire time).
+>
+> 2026-08-06 — **v0.3.14 PR 2 (the producer) is open — the rail is fed.**
+> The RFC 0039 §F verified `participant_id` is threaded onto the request
+> context and emitted at the dispatch chokepoint, so under
+> `auth.mode: enabled` persona memory partitions by authenticated person.
+> Three notes on how it landed, each a deviation or a finding rather than
+> a restatement of the plan:
+>
+> 1. **Threaded in `authMiddleware`, not per handler.** The plan's lock
+>    said "the REST handlers thread the resolved identity"; the top-ranked
+>    risk was a *missed* origin, which fails open into the shared `'local'`
+>    tenant with no error and no red test. Threading at the one place
+>    identity is resolved — the middleware wrapping the root mux — makes
+>    exhaustiveness a property of the composition instead of a
+>    hand-maintained list. The predicate is `authIdentity.Authenticated`,
+>    not `authEnforced()`: under `enabled` an unauthenticated caller on a
+>    public route resolves `anonymousIdentity`, whose participant is the
+>    literal `"local"`, and stamping that would put a header on the wire
+>    where there is none today for no change in resolved value. The
+>    enumeration survives as `dispatchOriginClassification` +
+>    `principal_route_table_test.go`, which parses the package's own
+>    registrations and fails on an unclassified route — documentation kept
+>    honest by a test, not a gate.
+> 2. **The origin set is three routes**, all confirmed rather than
+>    assumed: channel publish, chat, and `handleConveneChannel`. The two
+>    the plan left open are both **non-dispatching**: `workflows/run`
+>    schedules through the executor's `ExecuteTask` RPC, which has no
+>    persona-memory principal consumer at all (the Python servicer lifts
+>    `persatrix-principal` in `SendChatMessage` and
+>    `ReceiveChannelMessage` only), and `handleRecallMessages` reads the
+>    **channel** store — membership-scoped verbatim messages, a table with
+>    no `principal_id` column — never principal-partitioned persona memory.
+> 3. **The synthesis-close reset is fixed as directed** (the principal
+>    string is stashed at arm time, not the whole detached ctx — that
+>    string is the entire delta a fresh context loses, and retaining a
+>    context on a record that lives for the ~2-minute timeout window would
+>    pin its values and span for no benefit). It was also the **only**
+>    fresh-context dispatch path in `internal/channels`: every other
+>    detachment is `context.WithoutCancel`, which preserves values.
+>
+> Live proof is `MT-MEMORY-MULTIUSER-001`, authored here and executed at
+> release-prep. Authoring it surfaced a scaffolding constraint worth
+> recording: **RFC 0039 Phase 3 (account administration) is v0.4.0, so
+> `account bootstrap` — which refuses once any account exists — is the
+> only shipped account-creation verb.** The MT therefore rotates the
+> second principal by deleting `accounts.db` and re-bootstrapping (the
+> persona's `memory.db` is a separate store, so the corpus survives),
+> which makes the two accounts sequential rather than concurrent. The
+> concurrent case is pinned deterministically instead
+> (`tests/integration/test_principal_emission_isolation.py`: one process,
+> two scopes, one shared room). This is a live-testing ergonomics gap, not
+> a product gap, and it closes with Phase 3.
+>
+> 2026-08-06 — **two residuals surfaced at PR 2 review; accepted and
+> stated, not fixed.** Both are cases where the per-turn boundary this PR
+> lands holds, but a *derived* or *relayed* write does not inherit it.
+> Neither is closed by v0.3.14; both are recorded here so the release
+> note's claim can be read at the right scope.
+>
+> **R-1 — the interaction close writes a single-tenant aggregate of
+> multi-speaker content.** The persona's RFC 0020 interaction scope is the
+> ROOM, not the speaker: `scope_for_channel_event`
+> (`agents/memory/scopes.py`) keys on `channel_id` / `thread_id` /
+> `sender_id`, never on the principal, so in a group channel every
+> speaker's turns accumulate into ONE `InteractionTracker` record. At
+> close, that whole record is summarised **and facts are extracted from
+> it** (`agents/persona_runtime/summarize_close.py`), inside the closing
+> turn's principal binding — `_on_event_inner` runs under
+> `request_scope_from_metadata` (`agents/persona_runtime/__init__.py`),
+> and the close-notification handler runs on the gate-suppress path within
+> it. So the summary and its extracted facts land under whichever
+> principal the CLOSING turn carried, while their content spans everyone
+> who spoke in the interaction. Facts are cross-room by default (RFC 0049
+> Phase 1), so in a shared room a fact derived from B's disclosure can be
+> written under A's principal and recalled by A in a different room.
+>
+> This is not the timeout stash's doing — the ordinary bounded close
+> already descends from the publish that crossed the bound, so it is on
+> the main path. It is also why the close-path asymmetry the review
+> flagged is left as-is rather than papered over: the synthesis-REPLY and
+> end-vote closes descend from the chair persona's own unauthenticated
+> publish and so carry no principal, while the bound-crossing and timeout
+> closes carry the triggering/arming person's. Making those consistent by
+> extending the stash would make the single-tenant aggregate write
+> *systematic* on every close path; making them consistent the other way
+> (aggregates always `'local'`) would put a person's own interaction
+> summaries and close-extracted facts out of reach of their own
+> authenticated turns, which is a regression for the single-user
+> deployment. Neither is right while the aggregate is multi-speaker. The
+> real fix is **per-speaker interaction scope** — keying the tracker scope
+> by principal so each speaker gets their own record, summary and
+> extraction in a shared room — which is an RFC 0020 §G scope-routing
+> change and belongs to the v0.4.0 line, not to this release. Until then
+> the asymmetry stands, documented as a symptom.
+>
+> **R-2 — the orchestrator hop drops the tenant on agent cascades.** A
+> persona's reply re-enters through `HTTPChannelPublisher`
+> (`agents/channel_publisher.py`) as a fresh, unauthenticated REST
+> publish, so every fanout descending from it dispatches with no
+> principal and the receiving personas write under `'local'` — even
+> inside an interaction an authenticated person started. In a multi-agent
+> room, agent B's restatement of A's disclosure is therefore written to
+> the shared tenant, which every agent-origin and autonomous turn can
+> recall and speak into any room it is a member of. Note the two cascade
+> routes now differ: the IN-PROCESS `EventDispatcher` cascade *does*
+> forward the axis (`origin_principal_id`, `agents/action_executor.py`);
+> only the orchestrator-mediated hop loses it.
+>
+> The obvious fix is not available. Having the persona send the principal
+> back on its outbound publish would require the orchestrator to trust an
+> agent-supplied identity claim — and because the persona binds
+> `principal_scope` from that header and recall is strict equality on it,
+> that hands an unauthenticated caller a cross-tenant **read** primitive,
+> which is strictly worse than the leak it closes. The only safe shape is
+> server-side causal tracking (the orchestrator holding, per channel and
+> agent, the principal of the human publish that dispatched to it, and
+> re-stamping the reply from that server-held state) — new machinery with
+> real edge cases (several people dispatching to one agent, interleaving,
+> TTL, a reply landing after someone else spoke). Deferred, not designed
+> here.
+>
+> **Neither residual is covered by `MT-MEMORY-MULTIUSER-001`**, which
+> drives `persatrix chat` against a single persona: a DM has no second
+> speaker to aggregate and no agent-to-agent cascade. Both would need a
+> multi-agent group-channel MT to be observed live.
