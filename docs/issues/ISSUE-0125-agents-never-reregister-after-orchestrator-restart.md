@@ -1,6 +1,6 @@
 ---
 id: ISSUE-0125
-summary: "The orchestrator's agent registry is an in-memory map (`internal/registry/registry.go` `InMemoryRegistry`) and agents call `_self_register()` exactly once, in their own startup path (`agents/server.py`) — there is no heartbeat, no retry and no re-registration trigger. So an orchestrator restart empties the registry and the fleet never comes back: every dispatch is dropped with `channels: dispatch target not registered`, personas fall silent, and nothing self-heals until each agent process is restarted by hand. The failure is near-silent — /healthz is green, containers are up, publishes return 201, and the only signal is one WARN per dropped dispatch. Found 2026-08-07 when it voided a live MT arc on a paid provider."
+summary: "The orchestrator's agent registry is an in-memory map (`internal/registry/registry.go` `InMemoryRegistry`) and agents call `_self_register()` exactly once, in their own startup path (`agents/server.py`) — there is no heartbeat, no retry and no re-registration trigger. So an orchestrator restart empties the registry and the fleet never comes back: every dispatch is dropped with `channels: dispatch target not registered`, personas fall silent, and nothing self-heals until each agent process is restarted by hand. The failure is near-silent — /healthz is green, containers are up, publishes return 201, and the only signal is one WARN per dropped dispatch. Recorded as an operational quirk since the v0.3.0 execution report and as F-6 (severity low) in v0.3.2; filed 2026-08-07 when the group-channel path, where the same condition is silent rather than loud, voided a live MT arc on a paid provider."
 status: open
 severity: medium
 area: internal/registry
@@ -60,6 +60,25 @@ step that
 [MT-MEMORY-MULTIUSER-001](../manual-tests/MT-MEMORY-MULTIUSER-001.md)
 prescribes silently voided the whole run.
 
+**Not a new behaviour — this is its fourth recorded sighting, and the
+first as an issue.** The 2026-08-07 arc is what forced the filing, not
+what discovered the defect:
+
+| Where | What it said |
+|-------|--------------|
+| [v0.3.0 execution report](../manual-tests/v0.3.0-execution-report.md) | "agents register at startup only"; after the MT-LOGS-001 restart, `docker compose restart agent-…` was needed to repopulate `/api/v1/agents`. Filed as an **operational pattern**, described there as carried over from v0.2.x, "no regression". |
+| [v0.3.1 execution report](../manual-tests/v0.3.1-execution-report.md) | An environment note: the in-memory registry "is wiped on an orchestrator restart — agents must be restarted to re-register." |
+| [v0.3.2 execution report](../manual-tests/v0.3.2-execution-report.md) | **F-6**, severity **low**: "mildly painful for repeatable manual-test runs; not a v0.3.2 regression but worth a note in the operator playbook." |
+
+Two things follow. First, the finding aged from *operator inconvenience*
+into *voids a paid live run* without the behaviour changing at all —
+what changed is that the fleet grew a group-channel path where the same
+condition is silent rather than loud. That progression is the severity
+argument, not a footnote to it. Second, F-6's own ask — a note in the
+operator playbook — went unwritten for three releases until
+[#823](https://github.com/mkhomutov/Persatrix/pull/823); that gap is
+tracked separately as ISSUE-0126.
+
 ## Impact
 
 After any orchestrator restart, every
@@ -90,11 +109,24 @@ MT run on a paid provider before anyone noticed
 ([MT-MEMORY-MULTIUSER-001](../manual-tests/MT-MEMORY-MULTIUSER-001.md)
 carries the same restart instruction and now carries a warning).
 
+One compounding detail from the v0.3.2 record, since it shapes the
+remedy: the RFC 0009 rate-limiter bucket is **not** flushed on an
+orchestrator restart, so a turn issued right after the operator has
+restarted everything can still draw `429` for up to ~60 s. An operator
+who reads that second symptom as "the restart did not take" will restart
+again and lose another turn.
+
 Severity is **medium**, not high: no data is lost or leaked, catch-up
 restores the missed transcript once agents return, and the workaround is a
-restart. It rises as deployments get longer-lived — and v0.4.0
-organizations ([RFC 0012](../rfcs/0012-protocols-organizations.md)) assume
-a fleet that stays reachable.
+restart. It is deliberately a step above the **low** the v0.3.2 report
+assigned it — the behaviour has not changed, but its blast radius has:
+`low` was correct when the only known symptom was a loud `404` on a
+manual-test rerun, and the group-channel path found in 2026-08-07 makes
+the same condition silent, which is what converts a burnt turn into a
+vacuously-passing arc. It rises further as deployments get longer-lived —
+and v0.4.0 organizations
+([RFC 0012](../rfcs/0012-protocols-organizations.md)) assume a fleet that
+stays reachable.
 
 ## Proposed fix / investigation path
 
@@ -210,3 +242,13 @@ the condition is visible without reading dispatch WARNs.
 > now links back here from its restart warning, closing the other half of
 > the reference [#823](https://github.com/mkhomutov/Persatrix/pull/823)
 > opened.
+
+> 2026-08-10 — review fold-in (PR #824): prior sightings. The file read as
+> a fresh 2026-08-07 discovery; it is the fourth recorded sighting (v0.3.0
+> execution report, v0.3.1 environment note, v0.3.2 F-6 at severity low),
+> now tabled in Context. Three consequences were folded into Impact: the
+> `medium` rating is an explicit re-assessment of v0.3.2's `low` and says
+> what changed (blast radius, not behaviour); the un-flushed RFC 0009
+> rate-limiter bucket compounds the remedy with a `429` an operator can
+> misread as a failed restart; and the front-matter summary no longer
+> claims 2026-08-07 as the discovery date.
