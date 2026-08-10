@@ -195,3 +195,18 @@ the condition is visible without reading dispatch WARNs.
 > signal. (d) Hoisted the constraint all shapes inherit: `Register` is not
 > an upsert, it `409`s, so a re-register is a no-op against a populated
 > registry and a boot seed blocks the real registration.
+
+> 2026-08-10 — review fold-in (PR #824): backlinks, so the ask is not
+> invisible from the documents it is aimed at. This issue had no inbound
+> reference outside `INDEX.md`, which meant an implementer building
+> [RFC 0040](../rfcs/0040-agent-orchestrator-transport-unification.md)
+> Phase 2 from the RFC would have landed the unary `RegisterAgent` and
+> closed the phase without ever seeing it — the exact outcome the fix
+> section argues against. RFC 0040 now carries the amendment ask in two
+> places: a §C design note on the unary sketch, and Open Question 6
+> (connection-scoped/streaming `RegisterAgent`), to be resolved before the
+> proto lands since the shape is non-additive once it ships.
+> [MT-MEMORY-MULTIUSER-001](../manual-tests/MT-MEMORY-MULTIUSER-001.md)
+> now links back here from its restart warning, closing the other half of
+> the reference [#823](https://github.com/mkhomutov/Persatrix/pull/823)
+> opened.
