@@ -22,9 +22,10 @@ written.
 
 ## Context
 
-The underlying behaviour is **ISSUE-0125** (the registry is in-memory,
-agents `_self_register()` once at their own startup, nothing re-registers
-on orchestrator reconnect). That issue owns the *fix*. This one owns the
+The underlying behaviour is
+**[ISSUE-0125](ISSUE-0125-agents-never-reregister-after-orchestrator-restart.md)**
+(the registry is in-memory, agents `_self_register()` once at their own
+startup, nothing re-registers on orchestrator reconnect). That issue owns the *fix*. This one owns the
 **operator-facing gap that exists until the fix ships** — and the cleanup
 after it does.
 
@@ -101,9 +102,13 @@ diagnosed twice and both times filed somewhere nobody reads before a run.
 
 ## Proposed fix / investigation path
 
-Order matters — check ISSUE-0125's status first.
+Order matters — check
+[ISSUE-0125](ISSUE-0125-agents-never-reregister-after-orchestrator-restart.md)'s
+status first.
 
-1. **If ISSUE-0125 lands re-registration**, do *not* write eight notes.
+1. **If
+   [ISSUE-0125](ISSUE-0125-agents-never-reregister-after-orchestrator-restart.md)
+   lands re-registration**, do *not* write eight notes.
    Delete the PR #823 warning from MT-MEMORY-MULTIUSER-001, confirm the
    restart steps are safe as written, and close this issue citing the
    commit. This is the preferred outcome.
@@ -122,9 +127,17 @@ Order matters — check ISSUE-0125's status first.
 ## Notes
 
 > 2026-08-08 — captured during the PR #823 review. Deliberately filed
-> separately from that PR, which is scoped to one file. ISSUE-0125 is not
-> on `main` yet (it sits on `fix/v03x-issue0125-agent-reregistration`), so
-> it is referenced here by id only — no link, per the doc-links gate.
+> separately from that PR, which is scoped to one file. ISSUE-0125 was
+> not on `main` when this was written (it sat on
+> `fix/v03x-issue0125-agent-reregistration`), so it was referenced by id
+> only to keep the doc-links gate green.
+
+> 2026-08-10 — ISSUE-0125 landed on `main` in
+> [#824](https://github.com/mkhomutov/Persatrix/pull/824), so the by-id
+> references above are now real links. Its fix section is the one to read
+> before acting on option 1 here: the recommended shape is registration
+> scoped to a live connection, which #824 filed as an amendment ask
+> against RFC 0040 §C rather than a phase to wait on.
 
 > 2026-08-10 — review fold-in (PR #825): the enumeration was one MT short.
 > [MT-AUTH-001](../manual-tests/MT-AUTH-001.md) Leg 6 restores
