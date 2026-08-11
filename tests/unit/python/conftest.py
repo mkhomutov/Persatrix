@@ -89,6 +89,34 @@ def _isolate_session_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _isolate_principal_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure ``PERSATRIX_PRINCIPAL_ID`` does not leak across tests.
+
+    The tenant-axis sibling of ``_isolate_session_env`` above, and the
+    same failure mode: ISSUE-0081 PR 3 makes every persona-memory tier
+    read ``PERSATRIX_PRINCIPAL_ID`` once at construction into
+    ``_active_principal_id`` (``resolve_principal_id_silent``), which
+    ``resolve_active_principal`` falls back to whenever no per-request
+    ``principal_scope`` is active.
+
+    So any test that writes a row with *no* scope and then asserts a
+    named tenant cannot reach it — the `'local'` baseline partition —
+    silently inverts when the developer (or a CI job) happens to have
+    ``PERSATRIX_PRINCIPAL_ID`` exported: the baseline row is tagged with
+    the exported value, and a scoped erase/recall for that same tenant
+    legitimately reaches it.  Reproduced across
+    ``test_facts_erasure_principal_scope`` (v0.3.14 PR 3 review F-1),
+    ``test_principal_legacy_carveout`` and ``test_principal_scope``.
+
+    Tests that *want* the env-read path call
+    ``monkeypatch.setenv("PERSATRIX_PRINCIPAL_ID", ...)`` themselves
+    (``test_principal_id_leaf_module``), which overrides this delete for
+    the test's scope.
+    """
+    monkeypatch.delenv("PERSATRIX_PRINCIPAL_ID", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _resolvable_summarization_model(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep the summarisation model resolvable for the close-path unit tests.
 

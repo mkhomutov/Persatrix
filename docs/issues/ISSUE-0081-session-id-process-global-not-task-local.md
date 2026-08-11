@@ -259,3 +259,27 @@ final PR.
 > they are capacity/retention policy rather than read-confidentiality
 > (recall stays principal-filtered either way), and per-principal quota
 > semantics is a design question, not a predicate.
+>
+> 2026-08-11 — **The erasure residual is closed (v0.3.14 PR 3).** Both
+> DELETEs in `agents/memory/_facts_erasure.py` now carry
+> `AND principal_id = ?`, resolved through the same
+> `resolve_active_principal` seam the recall and write paths use, so a
+> caller can erase exactly the rows it could read. The gate is
+> `tests/unit/python/test_facts_erasure_principal_scope.py` in the PR 4
+> idiom — *a foreign principal's erasure call can neither count nor
+> delete another principal's rows* — on **both** traversal columns, plus
+> the count half (the return map is RFC 0013's audited `records_deleted`,
+> so a foreign row in the tally discloses that another tenant holds facts
+> about the subject even when the DELETE is correctly scoped). The
+> `session_id` / `epoch_id` axes are deliberately **not** scoped and are
+> pinned that way: a right-to-erasure traversal must reach every row the
+> principal ever wrote, so narrowing it to the caller's active room / run
+> would be a silent GDPR miss. The **caller audit** found no in-tree
+> caller at all — the primitive still waits on RFC 0013's
+> `SubjectErasure` (v0.5.0) — so the operator-erasure question is filed
+> rather than answered here:
+> [ISSUE-0127](ISSUE-0127-cross-principal-erasure-verb.md) (an
+> operator traversal has no principal of its own, and the predicate has
+> no `"*"`; write-side sibling of ISSUE-0086), slotted v0.5.0 with the
+> RFC that owns the decision. This umbrella still stays open until the
+> live arc verifies the emission at v0.3.14 release-prep.
