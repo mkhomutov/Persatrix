@@ -485,10 +485,16 @@ class FactStore:
         """Erase every fact tied to ``subject_id`` — RFC 0013 §C / RFC 0026 §H.
 
         Delegates to :func:`agents.memory._facts_erasure.delete_by_subject`
-        for the SQL body; see that helper for the disjoint-bucket
-        return-shape contract and the ``source_interaction_id``
-        reverse-edge traversal rationale.
+        for the SQL body, and resolves the active principal through the
+        same :func:`resolve_active_principal` seam the recall and write
+        paths use, so a caller erases exactly the rows it could read
+        (ISSUE-0081 residual).  See that helper for the disjoint-bucket
+        return shape, the ``source_interaction_id`` reverse edge, and why
+        the tenant axis is scoped while session / epoch are not.
         """
         return await _delete_by_subject(
-            self._ensure_db(), self._agent_id, subject_id,
+            self._ensure_db(),
+            self._agent_id,
+            subject_id,
+            principal_id=resolve_active_principal(self._active_principal_id),
         )

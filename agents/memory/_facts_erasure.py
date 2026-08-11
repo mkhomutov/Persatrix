@@ -31,6 +31,8 @@ async def delete_by_subject(
     db: aiosqlite.Connection,
     agent_id: str,
     subject_id: str,
+    *,
+    principal_id: str,
 ) -> dict[str, int]:
     """Erase every fact tied to ``subject_id`` — RFC 0013 §C / RFC 0026 §H.
 
@@ -54,6 +56,36 @@ async def delete_by_subject(
     so an erasure call from agent A cannot touch agent B's facts even
     when both stores share the same SQLite connection.
 
+    Per-tenant ACL — ISSUE-0081 residual (v0.3.14 PR 3).  Both DELETEs
+    additionally require ``principal_id = ?`` with the same strict
+    equality (no ``"*"``, no carve-out) the recall predicate uses; the
+    caller resolves it through
+    :func:`agents.memory._principal_filter.resolve_active_principal`, so
+    the row a principal can erase is exactly the row it could have read.
+    Left ``agent_id``-only this would be the *write*-side mirror of the
+    cross-tenant read RFC 0031 §C forbids: once the orchestrator emits a
+    verified principal (ISSUE-0082 Part 2), one person's erasure would
+    delete another person's facts about the same subject.  The counts are
+    scoped with it — they are the value RFC 0013's ``SubjectErasure``
+    audits as ``records_deleted``, so a foreign row in the tally would
+    disclose that another tenant holds facts about this subject even if
+    the DELETE itself were correctly scoped.
+
+    Deliberately **not** scoped: ``session_id`` and ``epoch_id``.  Erasure
+    is a right-to-erasure traversal, not a recall — it must reach every
+    row this principal ever wrote, including rows from an earlier room or
+    an earlier run.  Narrowing it to the caller's active room / run would
+    be a *silent* GDPR miss, which is exactly the failure RFC 0026 §H
+    ships this primitive to prevent.  Pinned by
+    :class:`tests.unit.python.test_facts_erasure_principal_scope.TestErasureSpansTheOtherAxes`.
+
+    No in-tree caller resolves a principal for an *operator*-initiated
+    erasure yet: RFC 0013's ``SubjectErasure`` (target v0.5.0) is the
+    first, and whether the right to be forgotten spans tenants is that
+    RFC's decision — see
+    `ISSUE-0127 <../../docs/issues/ISSUE-0127-cross-principal-erasure-verb.md>`_
+    for the cross-principal verb this predicate now makes necessary.
+
     Subject canonicalisation (PR #346 review M-1): the ``subject``
     traversal canonicalises so a mixed-case erasure hits the
     canonical rows :meth:`FactStore.store` persists;
@@ -62,14 +94,16 @@ async def delete_by_subject(
     via :func:`canonicalize_subject`'s value check.
     """
     cursor = await db.execute(
-        "DELETE FROM facts WHERE agent_id = ? AND subject = ?",
-        (agent_id, canonicalize_subject(subject_id)),
+        "DELETE FROM facts WHERE agent_id = ? AND subject = ? "
+        "AND principal_id = ?",
+        (agent_id, canonicalize_subject(subject_id), principal_id),
     )
     by_subject = cursor.rowcount
     cursor = await db.execute(
         "DELETE FROM facts WHERE agent_id = ? "
-        "AND source_interaction_id = ?",
-        (agent_id, subject_id),
+        "AND source_interaction_id = ? "
+        "AND principal_id = ?",
+        (agent_id, subject_id, principal_id),
     )
     by_source = cursor.rowcount
     await db.commit()
