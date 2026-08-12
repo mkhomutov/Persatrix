@@ -92,6 +92,60 @@ first worked example, **Gemini the second and watsonx.ai the third**
 > boot, not defer to the first request (`url` defaults, so it never blocks). See
 > [MT-PROVIDER-WATSONX-001](../manual-tests/MT-PROVIDER-WATSONX-001.md).
 
+> **Persatrix meters inference — and nothing else.** The `Cost` column above is
+> the **inference** price. It is the only cost the alias table meters, and the
+> only one a cost cap — the RFC 0023 per-agent wallet, or an autonomous
+> channel's mandatory cap — can enforce. Any charge your provider raises that is
+> *not* per-token (a subscription, a reserved-capacity or provisioned-throughput
+> commitment, a per-instance platform fee) sits outside that accounting
+> entirely: Persatrix never sees it, so it cannot reach cost telemetry and no
+> cap can bound it. **Your provider's own bill is the authority on your spend;
+> Persatrix's cost table is not.**
+>
+> This is worth stating beside watsonx because watsonx is the provider in this
+> table whose platform layer — watsonx.ai Runtime — is provisioned as its own
+> billable service on a plan you pick, separately from the tokens you spend. So
+> the plan choice, not just the model choice, decides your floor. **As of August
+> 2026** IBM's published plan documentation describes three tiers; check the
+> [current plan page](https://www.ibm.com/docs/en/watsonx/saas?topic=cloud-watsonxai-runtime-plans)
+> before you provision, because plans, limits, and prices are IBM's to change
+> and this guide is not the authority on them:
+>
+> - **Lite** — free, and where to evaluate. Published limits are 20 CUH and
+>   300 000 tokens a month at 2 requests/second, which is enough to exercise
+>   this provider. Mind the rate limit: the demo society is **six agents** that
+>   can call concurrently, so a busy channel can meet it — throttling on Lite is
+>   the plan working as documented, not a broken integration.
+> - **Essentials** — pay as you go, no fixed fee, billed per Resource Unit
+>   (1 RU = 1 000 tokens). That is the same per-token shape the alias table
+>   already meters, so a cost cap does track it.
+> - **Standard** (and the enterprise tiers) — carries a **flat monthly instance
+>   fee** for the provisioned instance, independent of what you run through it.
+>   That fee is the kind of charge the paragraph above describes: real spend,
+>   invisible to every cap Persatrix has.
+>
+> One operator's data point rather than a general claim: on a short evaluation
+> of this integration, the instance fee on the bill was three orders of
+> magnitude larger than the inference charged over the same period. Whether that
+> shape applies to you depends on the plan you provision.
+>
+> If you do provision a fee-bearing plan:
+>
+> - **The instance meters, not the stack.** The fee accrues while the Runtime
+>   instance exists, whether or not any agent ever calls it — `docker compose
+>   down` does not stop it, deleting the instance does. Moving back down a tier
+>   is not an in-place edit either: you delete the instance and provision a new
+>   one.
+> - **Set a spending notification first.** IBM Cloud's spending controls are
+>   notification-only — they alert, they do not stop usage — and they are not on
+>   by default (Billing and usage → Spending notifications).
+> - **A trial credit can absorb the early fees.** If your account carries one,
+>   the running total stays near $0 until it is consumed, so the first invoice —
+>   not the console — is the first complete signal.
+>
+> None of this applies to `make demo-offline` or `make demo-ollama`, which cost
+> nothing by construction.
+
 ---
 
 ## Swapping providers is one line per role
