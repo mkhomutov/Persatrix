@@ -29,6 +29,7 @@ runtime validation.
 
 from __future__ import annotations
 
+import json
 import logging
 
 import aiohttp
@@ -36,6 +37,7 @@ import jsonschema  # type: ignore[import-untyped]
 import pytest
 from aiohttp import web
 
+import agents.channel_payload_contract as contract
 from agents.channel_payload_contract import (
     channel_payload_schema,
     subschema,
@@ -138,13 +140,20 @@ class TestPublishRequestShape:
         with pytest.raises(jsonschema.ValidationError):
             _validate({**_MINIMAL_PUBLISH, "sender_id": ""}, "publishMessageRequest")
 
-    def test_empty_content_is_permitted(self):
-        """Emptiness policy belongs to the orchestrator, not the contract.
+    def test_empty_content_is_rejected(self):
+        """`content` is REQUIRED and non-empty, exactly like `sender_id`.
 
-        Pinned as an explicit allowance so a later tightening is a
-        deliberate edit here rather than an incidental one.
+        `handlePublishMessage` (internal/server/channel_handlers.go)
+        rejects an empty body with a 400 on the line after the identical
+        `sender_id` check. This is the publish shape the agent is most
+        likely to produce by accident — `ActionExecutor` reads it as
+        `action.payload.get("content", "")`, so a model that omits the
+        key composes exactly this payload — which is why a contract that
+        accepted it would be silent on the most reachable wire
+        rejection there is.
         """
-        _validate({**_MINIMAL_PUBLISH, "content": ""}, "publishMessageRequest")
+        with pytest.raises(jsonschema.ValidationError):
+            _validate({**_MINIMAL_PUBLISH, "content": ""}, "publishMessageRequest")
 
     def test_negative_cascade_depth_is_rejected(self):
         """Inherited from `messageMetadata` via `$ref` — proves the
@@ -194,6 +203,44 @@ class TestHistoryResponseShape:
             "messages": [
                 {**_HISTORY_ENVELOPE["messages"][0], "edited_at": "2026-08-15T10:00:00Z"},
             ],
+            "classification": "internal",
+        }
+        with pytest.raises(jsonschema.ValidationError):
+            _validate(envelope, "channelHistoryResponse")
+
+    @pytest.mark.parametrize("stamp", [
+        "2026-08-15T10:00:00Z",              # UTC, the common case
+        "2026-08-15T10:00:00.123456789Z",    # Go's RFC3339Nano fractional seconds
+        "2026-08-15T10:00:00+02:00",         # numeric offset
+        "0001-01-01T00:00:00Z",              # the Go zero time, which does serialise
+    ])
+    def test_real_timestamp_encodings_validate(self, stamp):
+        """Everything `time.Time` marshalling actually emits."""
+        envelope = {
+            "messages": [{**_HISTORY_ENVELOPE["messages"][0], "timestamp": stamp}],
+            "classification": "internal",
+        }
+        _validate(envelope, "channelHistoryResponse")
+
+    @pytest.mark.parametrize("stamp", [
+        "not-a-time",
+        "1755252000",              # Unix epoch as a string
+        "2026-08-15 10:00:00Z",    # space instead of `T`
+        "2026-08-15T10:00:00",     # no zone
+    ])
+    def test_malformed_timestamp_is_rejected(self, stamp):
+        """The encoding is pinned by `pattern`, not by `format`.
+
+        Draft-07 `format` is an annotation unless a `format_checker` is
+        supplied, and jsonschema's `date-time` check is itself a no-op
+        without the optional `rfc3339-validator` package — which is not
+        in the agent's install closure. So `format` alone would leave
+        `{"timestamp": "not-a-time"}` validating clean and the RFC 3339
+        claim in the schema unbacked. These are the values a switch away
+        from `time.Time` marshalling would plausibly produce.
+        """
+        envelope = {
+            "messages": [{**_HISTORY_ENVELOPE["messages"][0], "timestamp": stamp}],
             "classification": "internal",
         }
         with pytest.raises(jsonschema.ValidationError):
@@ -300,3 +347,101 @@ class TestFailOpenContract:
         """Guards the whole fail-open design: if this ever returns None
         in-repo, every runtime validation has silently become a no-op."""
         assert channel_payload_schema() is not None
+
+
+@pytest.fixture
+def broken_schema(tmp_path, monkeypatch):
+    """Point the module at a schema whose `$ref` target is missing.
+
+    `publishMessageRequest.metadata` still points at
+    `#/definitions/messageMetadata`, which is gone — the realistic shape
+    of this fault, since a definition moving to its own file is an
+    ordinary schema refactor. `iter_errors` *raises* on that rather than
+    reporting it, and only while walking a payload that reaches the
+    broken subschema, so it is invisible to every payload without
+    `metadata`.
+
+    The load cache and the fault latch are process-global, so they are
+    cleared on the way in AND on the way out: a poisoned entry left
+    behind would silently disable validation for every later test in the
+    session, which is the exact failure this module exists to catch.
+    """
+    doc = json.loads(contract.CHANNEL_SCHEMA_PATH.read_text(encoding="utf-8"))
+    doc["definitions"].pop("messageMetadata")
+    path = tmp_path / "channel.schema.json"
+    path.write_text(json.dumps(doc), encoding="utf-8")
+
+    monkeypatch.setattr(contract, "CHANNEL_SCHEMA_PATH", path)
+    monkeypatch.setattr(contract, "_faulted", False)
+    contract.channel_payload_schema.cache_clear()
+    contract._validator.cache_clear()
+    yield path
+    contract.channel_payload_schema.cache_clear()
+    contract._validator.cache_clear()
+
+
+_PUBLISH_WITH_METADATA = {**_MINIMAL_PUBLISH, "metadata": {"interaction_id": "01J0"}}
+
+
+class TestFailOpenOnValidatorFault:
+    """An unusable *schema* must not break publishing either.
+
+    Distinct from :class:`TestFailOpenContract`, which pins the payload
+    -violation path. A violation is reported; a validator fault is
+    *raised* out of `iter_errors` — uncaught it would escape into
+    `HTTPChannelPublisher.publish`, whose `except Exception` re-raises,
+    and the executor would record `status="failed"`. Every publish
+    carrying `metadata` would be dropped, which is every same-channel
+    reply (`DispatchContext.same_channel_claim` stamps `interaction_id`
+    on all of them). A schema-shape mistake must not become a publish
+    outage.
+    """
+
+    def test_unusable_schema_does_not_raise(self, broken_schema, caplog):
+        with caplog.at_level(logging.WARNING):
+            assert validate_publish_payload(dict(_PUBLISH_WITH_METADATA)) == []
+        assert any(
+            "validation disabled" in rec.getMessage() for rec in caplog.records
+        ), "a validator fault must be logged, not swallowed silently"
+
+    def test_fault_latches_off_after_one_warning(self, broken_schema, caplog):
+        """One WARN per process, not one per publish.
+
+        The fault repeats on every message (it is a property of the
+        schema, not of the payload), so an unlatched warning would bury
+        the signal it carries under the traffic it describes.
+        """
+        with caplog.at_level(logging.WARNING):
+            validate_publish_payload(dict(_PUBLISH_WITH_METADATA))
+            after_first = len(caplog.records)
+            for _ in range(3):
+                assert validate_publish_payload(dict(_PUBLISH_WITH_METADATA)) == []
+        assert after_first == 1, "the first fault must warn exactly once"
+        assert len(caplog.records) == after_first, (
+            "the fault latch must silence repeats — got "
+            f"{len(caplog.records)} warnings across 4 publishes"
+        )
+
+    async def test_publish_still_delivers_on_a_faulting_validator(
+        self, captured_server, broken_schema,
+    ):
+        """The assertion that actually matters: the message goes out.
+
+        Drives the real producer, so it fails if the guard is removed
+        from either `validate_publish_payload` or the publish path.
+        """
+        base_url, captured = captured_server
+        async with aiohttp.ClientSession() as session:
+            pub = HTTPChannelPublisher(orchestrator_url=base_url, session=session)
+            await pub.publish(
+                channel_id="group:planning",
+                sender_id="agent-a",
+                content="hello",
+                mentions=[],
+                cascade_depth=1,
+                metadata={"interaction_id": "01J0"},
+            )
+        assert len(captured) == 1, (
+            "an unusable schema dropped the publish — fail-open is broken"
+        )
+        assert captured[0]["content"] == "hello"

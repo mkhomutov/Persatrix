@@ -310,7 +310,8 @@
         },
         "content": {
           "type": "string",
-          "description": "Message body. Empty string is permitted at the schema layer: the orchestrator, not the contract, owns any emptiness policy, and pinning a `minLength` here would encode a rule the Go side does not enforce."
+          "minLength": 1,
+          "description": "REQUIRED message body, non-empty. `handlePublishMessage` (internal/server/channel_handlers.go) rejects an empty `content` with a 400 `BAD_REQUEST` on the line after the identical `sender_id` check, so the schema pins the same floor on both — a contract that accepted `\"\"` would stay silent on the publish shape most likely to be rejected on the wire. Note the agent-side reachability: `ActionExecutor` reads the body as `action.payload.get(\"content\", \"\")` with no emptiness guard, so a model that omits the key produces exactly this payload; the send-side WARN is what names it before the 400 does."
         },
         "thread_id": {
           "type": "string",
@@ -352,7 +353,8 @@
         "timestamp": {
           "type": "string",
           "format": "date-time",
-          "description": "Server-assigned instant, RFC 3339 (Go `time.Time` marshalling). Always present — the field carries no `omitempty`, and the zero time would serialise rather than vanish."
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$",
+          "description": "Server-assigned instant, RFC 3339 (Go `time.Time` marshalling — date, `T`, time, optional fractional seconds, then `Z` or a numeric offset). Always present — the field carries no `omitempty`, and the zero time would serialise rather than vanish. `pattern`, not `format`, is what actually bites: draft-07 `format` is an annotation unless the validator is handed a `format_checker`, and even then jsonschema's `date-time` check is a no-op unless the optional `rfc3339-validator` package is installed — which the agent image does not ship. Enforcing the shape through a dependency that may silently be absent would rebuild the inert pin this replaces, so the regex carries the assertion and `format` is kept for its documentation/codegen value only."
         },
         "thread_id": { "type": "string", "description": "Parent-message anchor for a threaded reply; omitted on a channel-level message." },
         "mentions": {
