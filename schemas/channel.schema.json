@@ -296,6 +296,95 @@
           "description": "The trigger that retired `previous_interaction_id` — `idle` (lazy idle rotation) or `end_votes` (Layer 4 quorum close), the §L instrument vocabulary. Set iff `previous_interaction_id` is set (the pair travels and validates as a unit; a lone trigger attributes nothing). Stamped and stripped exactly like its sibling; the agent-side rotation close maps `idle` → the `idle_gap` close reason and everything else (including absent) → the legacy `structural` label, so an unrecognised value degrades rather than failing the dispatch. Mirrors the typed `string previous_interaction_close_trigger = 21` field on `ChannelMessageEvent` (proto/task.proto)."
         }
       }
+    },
+    "publishMessageRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sender_id", "content"],
+      "description": "RFC 0040 Phase 1 (v0.3.14): the request body of POST /api/v1/channels/{id}/messages — the agent→orchestrator channel-publish contract, pinned over today's REST path BEFORE the dual-surface window opens (RFC 0040 Motivation 1, drift risk). Mirrors `publishMessageRequest` (internal/server/channel_types.go) field-for-field; the Python producer is `HttpChannelPublisher.publish` (agents/channel_publisher.py). Phase 2 adds a SEPARATE protobuf contract for the agent→orchestrator hop — it does not retire this schema, because the REST publish endpoint is never removed (it is the client edge, RFC 0040 §Migration). `additionalProperties: false` is deliberate and is the drift trip-wire: a field added to the Go struct without a matching entry here fails the cross-language pin (tests/unit/python/test_channel_payload_contract.py) rather than reaching the wire unreviewed.",
+      "properties": {
+        "sender_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "REQUIRED publishing identity. The orchestrator does not infer sender identity over REST — the agent-side ActionExecutor populates it from its registered ID, and human clients (CLI, curl) supply it explicitly. Non-empty: an empty sender is rejected at the handler, so the schema pins the same floor rather than letting a blank value round-trip. NOT the RFC 0040 §D `sender_id` scope question (that bears on the Phase 2 proto and is an Open Question against the Accepted flip) — this entry only records today's REST behaviour."
+        },
+        "content": {
+          "type": "string",
+          "minLength": 1,
+          "description": "REQUIRED message body, non-empty. `handlePublishMessage` (internal/server/channel_handlers.go) rejects an empty `content` with a 400 `BAD_REQUEST` on the line after the identical `sender_id` check, so the schema pins the same floor on both — a contract that accepted `\"\"` would stay silent on the publish shape most likely to be rejected on the wire. Note the agent-side reachability: `ActionExecutor` reads the body as `action.payload.get(\"content\", \"\")` with no emptiness guard, so a model that omits the key produces exactly this payload; the send-side WARN is what names it before the 400 does."
+        },
+        "thread_id": {
+          "type": "string",
+          "description": "Optional parent-message anchor. Present makes the publish a threaded reply; absent is a channel-level post. Threads are implicit (never declared in channels.yaml), so this is the only place the anchor travels."
+        },
+        "mentions": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Optional explicit @-mention list, consumed by the `addressed` respond-policy path. Omitted entirely when empty — the Python producer only sets the key on a truthy list, so `\"mentions\": []` is not a shape this producer emits."
+        },
+        "channel_type": {
+          "type": "string",
+          "description": "Optional cross-check against the channel's derived `<channel_type>:<name>` address (RFC 0011 §C). Advisory: the orchestrator resolves the channel from the path segment and uses this only to detect a caller-side mismatch."
+        },
+        "metadata": {
+          "$ref": "#/definitions/messageMetadata",
+          "description": "Optional cross-cutting wire fields. Note the producer's shape rule (agents/channel_publisher.py): the key is omitted entirely unless the bag is non-empty, so a routine publish carries no `\"metadata\": {}`. Router-authoritative keys inside it (`interaction_id`, `previous_interaction_id`, `previous_interaction_close_trigger`) are stamped or stripped on commit regardless of what a publisher claims."
+        },
+        "session_id": {
+          "type": "string",
+          "description": "Optional RFC 0031 Phase 3 `--session` override: replaces the orchestrator's boot-default session for this one publish, both as the persisted row's `session_id` and as the emitted `persatrix-session` header. Absent leaves the boot default / ISSUE-0082 auto-binding standing. NOT in the RFC 0040 Phase 1 field list (which predates it) — see the schema's own drift note: the RFC enumerated four fields in 2026-07 and two identity-axis fields have landed since."
+        },
+        "epoch_id": {
+          "type": "string",
+          "description": "Optional ISSUE-0085 PR 5 `--epoch` override: replaces the boot-resolved process epoch as the emitted `persatrix-epoch` header (the run/test-isolation axis, orthogonal to `session_id`'s room-continuity axis). Unlike `session_id` it is NOT stamped on the persisted row. Absent leaves the boot epoch standing."
+        }
+      }
+    },
+    "channelMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "channel_id", "sender_id", "content", "timestamp", "mentions"],
+      "description": "RFC 0040 Phase 1 (v0.3.14): one message as returned by the publish, history, and thread endpoints. Mirrors `channelMessageResponse` (internal/server/channel_types.go). The Python consumer is `HttpChannelHistoryFetcher.fetch` (agents/channel_history_fetcher.py), which returns the raw `messages` list to the on-startup catch-up replay and the RFC 0034 conversation window.",
+      "properties": {
+        "id": { "type": "string", "description": "Server-assigned message id." },
+        "channel_id": { "type": "string", "description": "Canonical channel address the message belongs to." },
+        "sender_id": { "type": "string", "description": "Publishing identity, echoed from the publish request." },
+        "content": { "type": "string", "description": "Message body." },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$",
+          "description": "Server-assigned instant, RFC 3339 (Go `time.Time` marshalling — date, `T`, time, optional fractional seconds, then `Z` or a numeric offset). Always present — the field carries no `omitempty`, and the zero time would serialise rather than vanish. `pattern`, not `format`, is what actually bites: draft-07 `format` is an annotation unless the validator is handed a `format_checker`, and even then jsonschema's `date-time` check is a no-op unless the optional `rfc3339-validator` package is installed — which the agent image does not ship. Enforcing the shape through a dependency that may silently be absent would rebuild the inert pin this replaces, so the regex carries the assertion and `format` is kept for its documentation/codegen value only."
+        },
+        "thread_id": { "type": "string", "description": "Parent-message anchor for a threaded reply; omitted on a channel-level message." },
+        "mentions": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Explicit @-mention list. REQUIRED and never `null`: the field carries no `omitempty`, so a nil Go slice would marshal as `null` — the response builder therefore normalises nil to `[]` (internal/server/channel_response_builders.go). That normalisation is load-bearing for every client that iterates the list without a null guard; this entry is what fails if it is removed."
+        },
+        "metadata": {
+          "$ref": "#/definitions/messageMetadata",
+          "description": "Cross-cutting wire fields persisted with the message; omitted when empty."
+        }
+      }
+    },
+    "channelHistoryResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["messages", "classification"],
+      "description": "RFC 0040 Phase 1 (v0.3.14): the envelope returned by GET /api/v1/channels/{id}/messages and the thread endpoint. Mirrors `historyResponse` (internal/server/channel_types.go). Consumed by `HttpChannelHistoryFetcher.fetch`, whose contract degrades a non-object body or an unusable `messages` field to `[]` rather than raising — so a schema violation here is a silently-empty window, exactly the failure mode this pin exists to catch.",
+      "properties": {
+        "messages": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/channelMessage" },
+          "description": "Ordered message list, oldest first. Present even when empty."
+        },
+        "classification": {
+          "type": "string",
+          "enum": ["", "public", "internal", "restricted", "secret"],
+          "description": "RFC 0037 §A channel-level confidentiality — one value per envelope, never per message (a message's classification IS its channel's, §H). Carries no `omitempty`, so the key is always present; the empty string is an accepted value and resolves to the `public` acting floor receiver-side (§A rule (b)), which is why `\"\"` is in the enum rather than being rejected as a malformed level."
+        }
+      }
     }
   }
 }
