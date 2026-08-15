@@ -17,6 +17,7 @@ from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
 from .cascade_depth_defaults import DEFAULT_MAX_CASCADE_DEPTH
+from .channel_payload_contract import validate_publish_payload
 from .observability.spans import CHANNEL_PUBLISH_SPAN
 
 logger = logging.getLogger(__name__)
@@ -293,6 +294,16 @@ class HTTPChannelPublisher:
                     wire_metadata["cascade_depth"] = cascade_depth
                 if wire_metadata:
                     payload["metadata"] = wire_metadata
+
+                # RFC 0040 Phase 1: validate the assembled body against
+                # the shared contract (schemas/channel.schema.json,
+                # definition ``publishMessageRequest``) at the last point
+                # before it goes on the wire, so the check sees exactly
+                # what the orchestrator will decode. Fail-open by design
+                # — a violation logs WARN and the publish proceeds; the
+                # enforcement teeth are the contract test, not production
+                # traffic (RFC 0040's "no flag day" guarantee).
+                validate_publish_payload(payload)
 
                 async with self._session.post(
                     url,
