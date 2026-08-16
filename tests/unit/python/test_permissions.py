@@ -87,6 +87,27 @@ class TestIsCommandAllowed:
         })
         assert gate.is_command_allowed(["git", "diff"]) is False
 
+    def test_denied_absolute_path_for_bare_name_entry(self):
+        """A bare-name entry does NOT admit an absolute path to that name.
+
+        Matching is exact-token (`args[:n] == pattern_parts`), so
+        `"python"` admits `python` and nothing else. This is the
+        security-relevant half of the rule: if it ever loosened to
+        basename matching, an allowlist granting `python` would also
+        grant `/tmp/attacker/python`, and the allowlist would stop
+        bounding *which* binary runs.
+
+        It is also the reason ISSUE-0129's fix had to touch the fixture
+        and not just the call sites — `sys.executable` is an absolute
+        path, so allowlisting `"python"` beside it would deny it.
+        """
+        gate = PermissionGate({
+            "shell": {"allowed_commands": ["python"]}
+        })
+        assert gate.is_command_allowed(["/usr/local/bin/python", "-c", "x"]) is False
+        assert gate.is_command_allowed(["/tmp/attacker/python"]) is False
+        assert gate.is_command_allowed(["python"]) is True
+
     def test_multiple_patterns_first_match_wins(self):
         gate = PermissionGate({
             "shell": {"allowed_commands": ["python", "pytest", "ruff", "git diff"]}

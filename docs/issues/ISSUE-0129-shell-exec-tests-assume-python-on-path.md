@@ -1,12 +1,15 @@
 ---
 id: ISSUE-0129
-summary: "The five `TestShellExec` tests that actually spawn a process hard-code the bare `python` binary, which macOS has not shipped since it dropped Python 2 — only `python3` exists. They fail locally with `Command not found: python` while CI stays green, because `actions/setup-python` puts a `python` shim on PATH. The failure is permanent, unrelated to whatever a developer is working on, and has already been waved through in PR descriptions as an authoring-sandbox artifact — a mischaracterisation that is itself the danger, since the five tests are the whole non-allowlist half of `shell_exec` coverage (success path, exit code, timeout kill, output truncation)."
-status: open
+summary: "The five `TestShellExec` tests that actually spawn a process hard-code the bare `python` binary, which macOS has not shipped since it dropped Python 2 — only `python3` exists. They fail locally with `Command not found: python` while CI stays green, because `actions/setup-python` puts a `python` shim on PATH. The failure is permanent, unrelated to whatever a developer is working on, and had already been waved through in PR descriptions as an authoring-sandbox artifact — a mischaracterisation that is itself the danger, since the five tests are the whole non-allowlist half of `shell_exec` coverage (success path, exit code, timeout kill, output truncation). RESOLVED: the call sites and the fixture allowlist both moved to `sys.executable` (both were required — an absolute path does not match a bare-name allowlist entry), and the exact-token matching rule that makes that so is now pinned in its own test, since loosening it to basename matching would let an allowlist granting `python` also grant `/tmp/attacker/python`."
+status: resolved
 severity: low
 area: tests
-created: 2026-08-15
+created: 2026-08-16
+closed: 2026-08-16
+closed_pr: 830
 refs:
   - tests/unit/python/test_builtin_tools_filesystem_shell.py
+  - tests/unit/python/test_permissions.py
   - agents/tools/builtin.py
   - agents/tools/permissions.py
   - .github/workflows/ci.yml
@@ -105,9 +108,32 @@ the environment rather than the behaviour.
 
 ## Notes
 
-> 2026-08-15 — captured during PR #829 review. The failures were
+> 2026-08-16 — captured during PR #829 review. The failures were
 > reproduced on clean `main` with the branch stashed, so they predate
 > RFC 0040 Phase 1. Root cause corrected here: earlier PR descriptions
 > attributed them to a restricted shell in the authoring sandbox; the
 > actual error is `Command not found: python`, i.e. a missing binary,
 > and the allowlist grants the command fine.
+
+> 2026-08-16 — RESOLVED in #830, which grew from the filing PR into the
+> fix. Both halves were needed, and the second was verified rather than
+> assumed: with the call sites on `sys.executable` but the fixture
+> allowlist left at `"python"`, the same five tests fail again as
+> `PermissionError: Command not in allowlist:
+> /…/.venv/bin/python` — the prefix-matching trap this file predicted,
+> reproduced. `TestShellExec` is 26/26 and the whole unit suite is green
+> for the first time on this machine.
+>
+> The `is_command_allowed` behaviour that causes the trap is now pinned
+> directly (`TestIsCommandAllowed.test_denied_absolute_path_for_bare_name_entry`).
+> It was untested, and it is not merely a convenience: exact-token
+> matching is what makes the allowlist bound *which binary* runs, so a
+> future "helpful" loosening to basename comparison would silently admit
+> any `python` on any path. The fix's inconvenience and that guarantee
+> are the same property, which is the argument for pinning it rather
+> than working around it.
+>
+> Not taken: the CI portability guard the section above floats (a job
+> step removing the `python` shim). With the tests no longer depending
+> on PATH lookup there is nothing left for it to catch here, and it
+> would be a matrix entry defending a property no test now relies on.
