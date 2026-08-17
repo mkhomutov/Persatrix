@@ -141,13 +141,14 @@ first worked example, **Gemini the second and watsonx.ai the third**
 >   by default (Billing and usage → Spending notifications). Asked directly
 >   during a billing query on this integration, IBM Cloud Support stated that no
 >   notification is sent before charges apply and that tracking usage is the
->   account holder's responsibility. Treat the alert you configure as the only
->   pre-invoice signal you will get.
+>   account holder's responsibility. Absent a trial credit, treat the alert you
+>   configure as the only pre-invoice signal you will get.
 > - **A trial credit can absorb the early fees.** If your account carries one,
 >   the running total stays near $0 until it is consumed, so the first invoice —
->   not the console — is the first complete signal. Do not wait on a
->   trial-ended email either: in the case above, one arrived *after* the first
->   invoice rather than when the credit ran out.
+>   not the console — is the first complete signal. Do not assume the alert
+>   above will fire in the meantime: it watches that same total. And do not wait
+>   on a trial-ended email either — in the case above, one arrived *after* the
+>   first invoice rather than when the credit ran out.
 >
 > None of this applies to `make demo-offline` or `make demo-ollama`, which cost
 > nothing by construction.
