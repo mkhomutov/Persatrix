@@ -334,3 +334,20 @@ mechanism.
 > drives `persatrix chat` against a single persona: a DM has no second
 > speaker to aggregate and no agent-to-agent cascade. Both would need a
 > multi-agent group-channel MT to be observed live.
+>
+> 2026-08-18 — **R-1 and R-2 re-slotted v0.4.0 → v0.3.15**, so interaction
+> functionality is complete before v0.4.0 organizations build on it. Their
+> designs (`ISSUE-0123` / `ISSUE-0124`) sit in draft
+> [#822](https://github.com/mkhomutov/Persatrix/pull/822), whose Phase 0 gate
+> measures against the **v0.3.14 tag** — so it starts after this release.
+>
+> **R-3 — the catch-up replay re-derives memory under the default
+> principal**, filed as
+> [ISSUE-0130](ISSUE-0130-catchup-replay-rederives-memory-under-default-principal.md)
+> from the release-prep PR 1 live arc, which carries the evidence and the fix
+> shapes. Unlike R-1/R-2 it is not blocked by the agent-supplied-claim trust
+> problem, and is fixed **inside v0.3.14**.
+>
+> **This issue stays `open` through release-prep PR 1** — a recorded
+> deviation from the [plan](../v0.3.14-release-prep-plan.md). It closes when
+> the ISSUE-0130 leak-stopper lands.

@@ -1,10 +1,11 @@
 ---
 id: ISSUE-0081
 summary: "`PERSATRIX_SESSION_ID` is resolved once per process from a global env var and cached at tier construction (`agents/session_id.py:52`, `episodic.py:111` et al.). The persona runtime hosts many personas in one process (`dispatch.py:71`) and a single `agent_id` can field multiple concurrent conversations, all sharing one process-global session id — so once recall filtering is live (RFC 0031 Phase 2), conversation/user A's writes bleed into conversation/user B's recall under the same `(agent_id, session_id)`. Separately, the storage scope key has no tenant dimension and the `legacy` carve-out is readable/writable from every session, which is a cross-tenant leak the moment multi-user ships. Both gaps are out of scope of RFC 0031 as written (the RFC models session = one process run, set by the Go orchestrator at boot)."
-status: open
+status: resolved
 severity: high
 area: agents/memory
 created: 2026-05-29
+closed: 2026-08-18
 refs:
   - docs/rfcs/0031-per-session-namespacing-channels.md
   - docs/rfcs/0031-phase2-pr-plan.md
@@ -283,3 +284,26 @@ final PR.
 > no `"*"`; write-side sibling of ISSUE-0086), slotted v0.5.0 with the
 > RFC that owns the decision. This umbrella still stays open until the
 > live arc verifies the emission at v0.3.14 release-prep.
+
+> **2026-08-18 — RESOLVED.** The live arc ran at v0.3.14 release-prep PR 1
+> ([execution report](../manual-tests/v0.3.14-execution-report.md)) and the
+> umbrella condition above — "stays open until the live arc verifies the
+> emission at v0.3.14 release-prep" — is met. `MT-MEMORY-MULTIUSER-001`
+> executed on a real provider under `auth.mode: enabled` with two
+> bootstrapped accounts against one persona in one process, and the two
+> emitted principals were read off storage and recorded verbatim:
+> `episodes [('alice-person', 2), ('bob-person', 1), ('local', 2)]`, with
+> `alice-person` and `bob-person` likewise distinct on `facts` and
+> `relationships`. Alice's disclosure landed under her own principal (never
+> `local`), Bob's turn surfaced none of it, and Alice's arc still read back
+> after his. The process-global half shipped 2026-05-29; the tenant half is
+> now fed and verified live.
+>
+> Scope of the closure: this is the **per-turn** boundary on the live
+> dispatch. Three residuals on the emission half remain open and are owned
+> by [ISSUE-0082](ISSUE-0082-orchestrator-per-request-session-principal-emission.md)
+> — R-1 and R-2 (v0.3.15), and R-3
+> ([ISSUE-0130](ISSUE-0130-catchup-replay-rederives-memory-under-default-principal.md),
+> the catch-up replay re-deriving under the default principal), whose
+> leak-stopper lands inside v0.3.14.
+
