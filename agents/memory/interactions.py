@@ -223,6 +223,7 @@ class InteractionTracker:
         session_id: str | None = None,
         classification: str | None = None,
         source_channel_id: str | None = None,
+        replayed: bool = False,
     ) -> Interaction:
         """Open a new interaction in ``scope``.
 
@@ -253,6 +254,7 @@ class InteractionTracker:
             scope=scope,
             started_at=ts,
             session_id=session_id or LEGACY_SESSION_ID,
+            replayed=replayed,
             classification=classification,
             source_channel_id=source_channel_id,
         )
@@ -269,6 +271,7 @@ class InteractionTracker:
         session_id: str | None = None,
         classification: str | None = None,
         source_channel_id: str | None = None,
+        replayed: bool = False,
     ) -> Interaction:
         """Append a turn, opening an interaction in ``scope`` if needed.
 
@@ -297,6 +300,7 @@ class InteractionTracker:
                 scope, now=ts, session_id=session_id,
                 classification=classification,
                 source_channel_id=source_channel_id,
+                replayed=replayed,
             )
         interaction.turns.append(Turn(at=ts, payload=payload or {}))
         if (

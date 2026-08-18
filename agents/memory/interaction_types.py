@@ -89,6 +89,16 @@ class Interaction:
     # at flush time.  Defaults to the ``legacy`` carve-out so a pre-PR-2
     # construction site (or a turn opened with no scope) stays visible.
     session_id: str = LEGACY_SESSION_ID
+    # ISSUE-0130: True when this interaction was OPENED by an on-startup
+    # catch-up replay turn, captured under the same only-on-open rule as
+    # ``session_id`` above.  A replayed turn carries no principal — the
+    # orchestrator's ``messages`` table has no principal column, so
+    # ``_build_replay_event`` has nothing to seed and the persona binds its
+    # default (``local``).  Deriving a summary and RFC 0026 facts from such
+    # a span therefore writes one person's content into the shared tenant;
+    # the close path skips derivation when this is set.  See
+    # :func:`~agents.persona_runtime.close_path.persist_closed_interaction`.
+    replayed: bool = False
     # RFC 0037 §C (v0.3.12 PR 3): the acting channel's wire classification
     # captured when the interaction *opened*, frozen for its lifetime — the
     # single point of truth the episodic and facts tiers inherit their

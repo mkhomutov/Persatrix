@@ -48,6 +48,37 @@ async def persist_closed_interaction(
     """
     if interaction.turn_count == 0:
         return  # idle no-turn scope — nothing to persist.
+    if interaction.replayed:
+        # ISSUE-0130 — the leak-stopper.  This interaction was OPENED by an
+        # on-startup catch-up replay, whose turns carry no principal: the
+        # orchestrator's ``messages`` table has no principal column, so
+        # ``_build_replay_event`` has nothing to seed and the persona binds
+        # its default (``local``).  Summarising and extracting facts from
+        # such a span writes one authenticated person's content into the
+        # shared tenant, where every unauthenticated caller resolves —
+        # unbounded, because catch-up has no watermark and re-ingests the
+        # window on every boot (RFC 0011 OQ #8).
+        #
+        # Skipping loses only the narrow case of an interaction that opened
+        # AND closed entirely while the agent was down.  Replayed turns that
+        # merge into the next live interaction are unaffected: that span is
+        # not flagged (frozen-at-open) and still closes under the live
+        # turn's principal, deriving normally.
+        #
+        # This is the v0.3.14 leak-stopper, not the whole fix: it cannot
+        # tell "no principal because the deployment is single-tenant"
+        # (where ``local`` is CORRECT) from "no principal because replay
+        # lost it".  v0.3.15 persists the principal on the message row and
+        # seeds it here, at which point this skip narrows to genuinely
+        # unattributable spans.
+        logger.debug(
+            "ISSUE-0130: skipping close-path derivation for replayed "
+            "interaction (agent=%s scope=%s interaction_id=%s turns=%d) — "
+            "a replayed span has no principal to attribute memory to",
+            agent_id, interaction.scope, interaction.interaction_id,
+            interaction.turn_count,
+        )
+        return
     # PR-4 review #25 (slice 7): dead ``or llm_client is None`` clause removed;
     # the mixin annotation is now ``LLMClient`` (non-optional).
     if interaction.interaction_id is None:

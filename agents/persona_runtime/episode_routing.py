@@ -260,28 +260,27 @@ class _EpisodeRoutingMixin:
                 session_id=structural_close.session_id,
             )
         except Exception:
-            # PR 6 slice 4 #6 + slice 5 #13: this try guards the
-            # CURRENT event's processing — multi-turn handling,
-            # single-turn ``add_turn``/``close``, and the legacy
-            # fallback's ``store_episode``.  The cross-scope idle
-            # flush above is intentionally outside this block so a
-            # stale-scope failure logs the failed scope's identity
-            # rather than the in-flight ``event_type`` (slice 5 #13).
-            # Two operator-visible failure modes remain in scope:
+            # PR 6 slice 4 #6 + slice 5 #13: this try guards the CURRENT
+            # event's processing — multi-turn handling, single-turn
+            # ``add_turn``/``close``, and the legacy fallback's
+            # ``store_episode``.  The cross-scope idle flush above is
+            # intentionally outside it so a stale-scope failure logs the
+            # failed scope's identity rather than the in-flight
+            # ``event_type`` (slice 5 #13).  Two operator-visible failure
+            # modes remain in scope:
             #
             # 1. The single-turn path's :meth:`store_episode` raising
-            #    *after* ``close`` already popped the scope and fired
-            #    the ``interactions.closed.by_structural`` counter —
-            #    the common case.  ``event_type`` in the warning lets
-            #    operators correlate the metric increment to the
-            #    missing row.
+            #    *after* ``close`` popped the scope and fired the
+            #    ``interactions.closed.by_structural`` counter — the common
+            #    case.  ``event_type`` in the warning lets operators
+            #    correlate the metric increment to the missing row.
             # 2. Tracker programming errors from ``add_turn`` / ``close``
-            #    or :meth:`_handle_multi_turn_event` raising past its
-            #    own inner try (rare; pinned by the explicit guard
-            #    further down and PR 6 review #21 precedent).
+            #    or :meth:`_handle_multi_turn_event` raising past its own
+            #    inner try (rare; pinned by the explicit guard further down
+            #    and PR 6 review #21 precedent).
             #
-            # Log-and-continue per the pre-RFC contract: a single
-            # failed episode must not crash the event loop.
+            # Log-and-continue per the pre-RFC contract: a single failed
+            # episode must not crash the event loop.
             logger.warning(
                 "Failed to store episode for agent %s (event_type=%s)",
                 self.agent_id,
@@ -345,13 +344,12 @@ class _EpisodeRoutingMixin:
                 summary=summary, context=ctx,
                 session_id=self._active_write_session_id)
             return
-        # ISSUE-0054 — RFC 0026's facts extractor needs the real
-        # message body: the combined summarise + extract LLM call at
-        # interaction close extracts zero facts when fed only the
-        # deterministic action envelope.  The body rides the in-memory
-        # turn under ``text`` and is stripped before persistence by
-        # ``_persist_closed_interaction`` so ``context_json`` stays
-        # body-free per RFC 0020 §D.
+        # ISSUE-0054 — RFC 0026's facts extractor needs the real message
+        # body: the combined summarise + extract LLM call at interaction
+        # close extracts zero facts when fed only the deterministic action
+        # envelope.  The body rides the in-memory turn under ``text`` and is
+        # stripped before persistence by ``_persist_closed_interaction`` so
+        # ``context_json`` stays body-free per RFC 0020 §D.
         # PR-3 review #18: ``ctx`` above is annotated ``dict[str, Any]``;
         # match it here so a future caller stashing a nested ``Any``
         # value does not need a cast at this site.
@@ -378,11 +376,10 @@ class _EpisodeRoutingMixin:
         # (producer plan OQ 5).  Full rationale on the two predicates.
         #
         # Thread scopes are wire-UNTRACKED (PR 607 review finding 1): a
-        # threaded reply carries the parent FLOOR's id (the resolver keys
-        # on ``msg.ChannelID``), so that id rotating says nothing about
-        # the thread — the resolver's IP3 rule ("the thread IS the
-        # interaction"): thread-scoped locals keep idle / session-end
-        # closes only.
+        # threaded reply carries the parent FLOOR's id (the resolver keys on
+        # ``msg.ChannelID``), so that id rotating says nothing about the
+        # thread — the resolver's IP3 rule ("the thread IS the interaction");
+        # thread-scoped locals keep idle / session-end closes only.
         # PR #716 review: the shared drift-pinned reader, not an inline copy —
         # this read and the wallet-lease read must resolve the SAME id or
         # spend bills under an id the rotation boundary never keys.
@@ -404,6 +401,9 @@ class _EpisodeRoutingMixin:
             # interaction (frozen-at-open, the ``session_id`` rule).
             classification=wire_channel_classification(event),
             source_channel_id=event.channel_id or None,
+            # ISSUE-0130: frozen-at-open like the pair above; the close path
+            # skips derivation for a replayed span (no principal to attribute).
+            replayed=event.metadata.get("replay_mode") is True,
         )
         # Stamp the wire id the interaction was opened under (first turn
         # that carries one wins) plus its known predecessor — the
