@@ -22,11 +22,19 @@ The bar these tests hold:
 
 1. an interaction opened by a replayed turn is flagged, and its close
    derives nothing;
-2. an interaction opened by a LIVE turn is not flagged even when a
-   replayed turn is later appended to it — that span still closes under
-   the live principal and must derive normally (the frozen-at-open rule
-   the ``session_id`` sibling-mislabel guard already uses);
-3. the flag rides the same only-on-open contract as ``session_id``.
+2. the flag rides the same only-on-open contract as ``session_id`` — it
+   is frozen in both directions;
+3. **a live turn never lands in a flagged span.**  Replay opens tracker
+   scopes and never closes them on its own, so without a boundary the
+   next live CHANNEL_MESSAGE would append to the catch-up interaction
+   (``channel_catchup``'s "catch-up → live" contract) and the skip would
+   eat a fully attributable conversation.  Two closes hold that line:
+   the sweep at the end of the catch-up pass
+   (:func:`~agents.persona_runtime.close_path.close_replayed_scopes`)
+   and, for a live turn that arrives while the pass is still running —
+   the gRPC dispatch surface is already serving by then — the ingest-time
+   split (:func:`~agents.persona_runtime.interaction_boundary
+   .stale_close_reason`).
 """
 
 from __future__ import annotations
@@ -35,9 +43,20 @@ import asyncio
 
 import pytest
 
-from agents.memory.boundary_detectors import REASON_STRUCTURAL
+from agents.memory.boundary_detectors import (
+    REASON_CATCHUP_COMPLETE,
+    REASON_STRUCTURAL,
+)
 from agents.memory.interactions import InteractionTracker
-from agents.persona_runtime.close_path import persist_closed_interaction
+from agents.persona import create_persona_agent
+from agents.persona_runtime.close_path import (
+    close_replayed_scopes,
+    persist_closed_interaction,
+)
+from agents.persona_runtime.interaction_boundary import stale_close_reason
+from agents.persona_types import AgentEvent, EventType
+
+from ._persona_test_helpers import _PERSONA_CONFIG, _make_client
 
 # ─── The tracker contract: frozen at open ──────────────────────────────
 
@@ -55,13 +74,8 @@ def test_live_turn_leaves_the_interaction_unflagged() -> None:
 
 
 def test_replay_appended_to_a_live_interaction_does_not_flag_it() -> None:
-    """The load-bearing case for not over-suppressing.
-
-    A replayed turn that lands in an already-open LIVE interaction must
-    not mark the span: that interaction still closes under the live
-    turn's principal, so its derivation is correctly attributed and must
-    happen.  Frozen-at-open, exactly like ``session_id``.
-    """
+    """Frozen-at-open, exactly like ``session_id``: a later replayed turn
+    cannot relabel a span a live turn opened."""
     tracker = InteractionTracker()
     live = tracker.add_turn("dm:alice")
     same = tracker.add_turn("dm:alice", replayed=True)
@@ -171,3 +185,158 @@ async def test_live_interaction_still_derives__positive_control() -> None:
         "the identical span must reach storage when it is NOT replayed — "
         "otherwise the absence assertion above is vacuous"
     )
+
+
+# ─── The catch-up → live boundary ──────────────────────────────────────
+
+
+def _event(*, replay: bool, wire_id: str = "wire-1") -> AgentEvent:
+    return AgentEvent(
+        event_type=EventType.CHANNEL_MESSAGE,
+        payload={"content": "hello", "channel_type": "group"},
+        channel_id="group:planning",
+        sender_id="alex",
+        metadata=(
+            {"interaction_id": wire_id, "replay_mode": True}
+            if replay
+            else {"interaction_id": wire_id}
+        ),
+    )
+
+
+def test_live_turn_splits_a_replay_opened_scope() -> None:
+    """The regression this whole boundary exists for.
+
+    Catch-up opens the scope at boot and never closes it, so a live turn
+    arriving before the pass-end sweep would otherwise append to a span
+    that derives nothing — silently losing the memory of the first
+    conversation after every restart.  Note the wire id is UNCHANGED:
+    a mid-conversation restart resumes the same channel interaction, so
+    the rotation boundary cannot see this one.
+    """
+    tracker = InteractionTracker()
+    replayed = tracker.add_turn("group:planning", replayed=True)
+    reason = stale_close_reason(
+        tracker.get("group:planning"), _event(replay=False), wire_id="wire-1",
+    )
+    assert reason == REASON_CATCHUP_COMPLETE
+    assert replayed.replayed is True
+
+
+def test_replayed_turn_does_not_split_a_replay_opened_scope() -> None:
+    """Replay→replay is one unattributable span, segmented only by the
+    wire rotation like any other — splitting per replayed turn would
+    shred the catch-up window into one interaction per message."""
+    tracker = InteractionTracker()
+    tracker.add_turn("group:planning", replayed=True)
+    assert stale_close_reason(
+        tracker.get("group:planning"), _event(replay=True), wire_id="wire-1",
+    ) is None
+
+
+def test_live_turn_does_not_split_a_live_scope() -> None:
+    """The guard against over-splitting: an unflagged span keeps the
+    pre-ISSUE-0130 rotation-only behaviour."""
+    tracker = InteractionTracker()
+    tracker.add_turn("group:planning")
+    assert stale_close_reason(
+        tracker.get("group:planning"), _event(replay=False), wire_id="wire-1",
+    ) is None
+
+
+def test_wire_rotation_still_closes_a_live_scope() -> None:
+    """...and the rotation boundary it shares the seam with is intact."""
+    tracker = InteractionTracker()
+    live = tracker.add_turn("group:planning")
+    live.wire_interaction_id = "wire-1"
+    assert stale_close_reason(
+        tracker.get("group:planning"), _event(replay=False, wire_id="wire-2"),
+        wire_id="wire-2",
+    ) == REASON_STRUCTURAL
+
+
+@pytest.mark.asyncio
+async def test_catchup_sweep_closes_only_replayed_scopes() -> None:
+    """The pass-end sweep: every scope catch-up opened is popped, so no
+    later live turn can land in one.  Scopes opened by live traffic
+    (a dispatch that raced the boot pass) are left alone."""
+    tracker = InteractionTracker()
+    tracker.add_turn("group:planning", replayed=True)
+    tracker.add_turn("dm:alice", replayed=True)
+    live = tracker.add_turn("group:launch")
+    persisted: list[str] = []
+
+    async def _persist(interaction) -> None:  # type: ignore[no-untyped-def]
+        persisted.append(interaction.scope)
+
+    closed = await close_replayed_scopes(tracker, _persist)
+
+    assert closed == 2
+    assert sorted(persisted) == ["dm:alice", "group:planning"]
+    assert tracker.open_scopes() == ["group:launch"]
+    assert tracker.get("group:launch") is live
+
+
+@pytest.mark.asyncio
+async def test_catchup_sweep_pops_the_scope_even_if_persist_fails() -> None:
+    """Best-effort by contract — the sweep runs on the boot path.  The
+    scope must be popped regardless, because that is the part live
+    traffic depends on, and the sweep must not raise into startup."""
+    tracker = InteractionTracker()
+    tracker.add_turn("group:planning", replayed=True)
+
+    async def _boom(interaction) -> None:  # type: ignore[no-untyped-def]
+        raise RuntimeError("episodic DB down at boot")
+
+    assert await close_replayed_scopes(tracker, _boom) == 1
+    assert tracker.open_scopes() == []
+
+
+# ─── End to end: the conversation a restart interrupts ─────────────────
+
+
+async def _episodes(agent) -> list[dict]:  # type: ignore[no-untyped-def]
+    db = agent._episodic_memory._ensure_db()
+    async with db.execute(
+        "SELECT summary, turn_count, scope FROM episodes "
+        "WHERE agent_id = ? ORDER BY created_at",
+        (agent.agent_id,),
+    ) as cursor:
+        rows = await cursor.fetchall()
+    return [{"summary": r[0], "turn_count": r[1], "scope": r[2]} for r in rows]
+
+
+@pytest.mark.asyncio
+async def test_conversation_resumed_after_a_restart_still_derives() -> None:
+    """The full path, in the shape a real restart produces.
+
+    Boot replays the tail of an in-flight channel conversation, then the
+    same conversation continues live under the SAME wire interaction id
+    (the orchestrator did not restart, so nothing rotated).  Exactly one
+    episode must be written, covering the two LIVE turns and not the
+    replayed one: the replayed span is dropped for want of a principal,
+    the live span derives under its own.
+    """
+    cfg = {**_PERSONA_CONFIG}
+    agent = create_persona_agent(
+        agent_id=cfg["id"], config=cfg, llm_client=_make_client(),
+    )
+    await agent.initialize_memory()
+
+    await agent._store_event_episode(_event(replay=True), [])
+    await agent._store_event_episode(_event(replay=False), [])
+    closing = _event(replay=False)
+    closing.metadata["chat_end"] = True
+    await agent._store_event_episode(closing, [])
+    await agent.drain_pending_summaries()
+
+    rows = await _episodes(agent)
+    assert len(rows) == 1, (
+        "the live half of a restart-interrupted conversation must still be "
+        f"recorded — got {rows}"
+    )
+    assert rows[0]["turn_count"] == 2, (
+        "the episode must cover the two live turns only; the replayed turn "
+        "belongs to the span that was dropped"
+    )
+    await agent.close_memory()

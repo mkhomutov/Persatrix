@@ -64,6 +64,15 @@ REASON_SHUTDOWN: Literal["shutdown"] = "shutdown"
 # :meth:`InteractionTracker.close` with this reason so the interaction
 # is summarised (RFC 0020 close path) rather than merely stopping fanout.
 REASON_COST: Literal["cost"] = "cost"
+# ISSUE-0130 (v0.3.14): the on-startup catch-up replay finished (or a live
+# turn arrived on a scope the replay had opened).  Replay events open
+# tracker scopes but carry no session-end signal of their own, so without
+# this close the next live turn appends to the replay-opened span — which
+# is flagged ``Interaction.replayed`` and therefore skips derivation at
+# close, silently losing memory for a fully attributable live
+# conversation.  Closing on the replay→live boundary keeps the two spans
+# apart: the replayed one is dropped, the live one derives normally.
+REASON_CATCHUP_COMPLETE: Literal["catchup_complete"] = "catchup_complete"
 
 # Closed value set for :meth:`InteractionTracker.close`'s ``reason``
 # kwarg.  Lives next to the constants so the Protocol below can
@@ -76,6 +85,7 @@ CloseReason = Literal[
     "topic_shift",
     "shutdown",
     "cost",
+    "catchup_complete",
 ]
 
 
@@ -278,6 +288,7 @@ __all__ = [
     "DEFAULT_MAX_INTERACTION_TURNS",
     "IdleGapDetector",
     "MaxTurnsDetector",
+    "REASON_CATCHUP_COMPLETE",
     "REASON_COST",
     "REASON_IDLE_GAP",
     "REASON_MAX_TURNS",

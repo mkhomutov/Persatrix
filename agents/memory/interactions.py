@@ -43,6 +43,7 @@ from ..observability.metrics import current_agent_id, try_get_instruments
 from ..session_id import LEGACY_SESSION_ID
 from .boundary_detectors import (
     DEFAULT_IDLE_TIMEOUT_SEC,
+    REASON_CATCHUP_COMPLETE,
     REASON_COST,
     REASON_IDLE_GAP,
     REASON_MAX_TURNS,
@@ -408,6 +409,7 @@ _REASON_COUNTER_ATTR: dict[CloseReason, str] = {
     REASON_TOPIC_SHIFT: "interactions_closed_by_topic_shift",
     REASON_SHUTDOWN: "interactions_closed_by_shutdown",
     REASON_COST: "interactions_closed_by_cost",
+    REASON_CATCHUP_COMPLETE: "interactions_closed_by_catchup_complete",
 }
 
 

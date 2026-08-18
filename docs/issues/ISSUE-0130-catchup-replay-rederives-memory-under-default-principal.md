@@ -157,21 +157,41 @@ server-authoritative and never agent-supplied.
 span — no episode, so no RFC 0026 extraction, so nothing lands in the
 shared tenant.
 
-Reading the path closely narrowed the blast radius from the diagnosis
-above: replay events **open** tracker scopes but never close them, so a
-replayed turn appended to an already-open live interaction leaves the
-span unflagged and it still closes under the live principal, deriving
-normally. Only a **replayed rotation close** — an interaction that opened
-*and* closed entirely while the agent was down — was ever derived under a
-defaulted principal. That is the case now skipped, and it is the case the
-live arc caught.
+**The marker alone was not enough**, because replay events *open*
+tracker scopes and never close them (RFC 0011 OQ #8, PR-265 review L6's
+deferred "lifecycle bleed"): the next live message in the same scope
+appends to the catch-up interaction, so the flag would have eaten the
+first conversation after **every** restart — the common mid-conversation
+case, where the wire interaction id has not rotated and nothing else
+splits the span (and the only case for thread scopes, which are
+wire-untracked). Verified against the pre-fix behaviour: replay turn +
+two live turns + `chat_end` persisted one episode before the marker and
+none with the marker alone.
+
+So the marker ships with the boundary the bleed always needed, closing
+with the new `REASON_CATCHUP_COMPLETE`:
+
+* **at pass end** — `close_replayed_scopes` pops every replay-opened
+  scope when the agent's catch-up pass finishes, in a `finally` so a
+  budget overrun closes them too;
+* **at ingest** — a LIVE turn arriving on a replay-opened scope splits
+  there (`stale_close_reason`, the seam that already owned the wire
+  rotation). Needed because the gRPC dispatch surface is already serving
+  while catch-up runs, so a live turn can beat the sweep. Replay→replay
+  is *not* a split: those turns share one unattributable span, segmented
+  by rotation as before.
+
+A conversation interrupted by a restart therefore loses the replayed
+span (unattributable) and keeps the live one, derived under its own
+principal.
 
 **Two costs, both accepted and stated:**
 
-1. An interaction that closed entirely during downtime is no longer
-   summarised at boot. That path was already unreliable — catch-up has no
-   watermark and re-ingests the window every boot (RFC 0011 OQ #8), and
-   `Interaction.started_at` is boot time, not the wire timestamp.
+1. An interaction that opened *and* closed entirely while the agent was
+   down is no longer summarised at boot. That path was already
+   unreliable — catch-up has no watermark and re-ingests the window every
+   boot (RFC 0011 OQ #8), and `Interaction.started_at` is boot time, not
+   the wire timestamp.
 2. It cannot distinguish *"no principal because the deployment is
    single-tenant"* — where `local` is **correct** — from *"no principal
    because replay lost it"*. Auth mode is not exposed to agents on any
@@ -182,6 +202,10 @@ live arc caught.
 rotation close stamped its episode with the channel classification. There
 is no longer a row to stamp, and those tests now pin the skip instead.
 Live-path classification capture is untouched.
+
+**Observability:** `agent.interactions.closed.by_catchup_complete` counts
+the spans dropped this way — the rate at which restart-window history is
+discarded, which is what shape (b) below buys back.
 
 ## (b) — required in v0.3.15
 
