@@ -1,10 +1,11 @@
 ---
 id: ISSUE-0082
 summary: "The per-request session/principal rail built by ISSUE-0081 (PR 2 `persatrix-session`, PR 3 `persatrix-principal`) is armed but never fed: the Go orchestrator resolves ONE session id per process at boot (`cmd/orchestrator/startup.go::resolveSessionID`) and emits no per-request gRPC headers, so every inbound request falls back to the persona-runtime construction snapshot. The cross-conversation memory bleed and cross-tenant leak that ISSUE-0081's Python vertical fixes therefore stay DORMANT until the orchestrator derives a per-request session id (unit = `(agent, channel, user)`, orchestrator-authoritative + persisted) and emits it — and, once auth lands, a per-request principal. Storage + transport + binding are all ready Python-side; this issue is the activation half."
-status: open
+status: resolved
 severity: high
 area: cmd/orchestrator
 created: 2026-05-29
+closed: 2026-08-18
 refs:
   - docs/issues/ISSUE-0081-session-id-process-global-not-task-local.md
   - docs/issues/ISSUE-0082-part1-session-emission-pr-plan.md
@@ -336,18 +337,15 @@ mechanism.
 > multi-agent group-channel MT to be observed live.
 >
 > 2026-08-18 — **R-1 and R-2 re-slotted v0.4.0 → v0.3.15**, so interaction
-> functionality is complete before v0.4.0 organizations build on it. Their
-> designs (`ISSUE-0123` / `ISSUE-0124`) sit in draft
-> [#822](https://github.com/mkhomutov/Persatrix/pull/822), whose Phase 0 gate
-> measures against the **v0.3.14 tag** — so it starts after this release.
+> functionality is complete before v0.4.0 organizations build on it. Designs
+> (`ISSUE-0123` / `ISSUE-0124`) sit in draft
+> [#822](https://github.com/mkhomutov/Persatrix/pull/822); its Phase 0 gate
+> measures against the v0.3.14 tag, so it starts after this release.
 >
-> **R-3 — the catch-up replay re-derives memory under the default
-> principal**, filed as
+> 2026-08-18 — **RESOLVED.** The recorded two-principal run landed at PR 1
+> ([execution report](../manual-tests/v0.3.14-execution-report.md)) and the
 > [ISSUE-0130](ISSUE-0130-catchup-replay-rederives-memory-under-default-principal.md)
-> from the release-prep PR 1 live arc, which carries the evidence and the fix
-> shapes. Unlike R-1/R-2 it is not blocked by the agent-supplied-claim trust
-> problem, and is fixed **inside v0.3.14**.
->
-> **This issue stays `open` through release-prep PR 1** — a recorded
-> deviation from the [plan](../v0.3.14-release-prep-plan.md). It closes when
-> the ISSUE-0130 leak-stopper lands.
+> leak-stopper at PR 1a, so no unattributable memory reaches the shared
+> tenant. The Part 2 promise is met at the scope it claims: the per-turn
+> boundary on the live dispatch. Open by design beyond it — R-1, R-2, and
+> ISSUE-0130's **(b)** — all v0.3.15, so `messages` is migrated once.

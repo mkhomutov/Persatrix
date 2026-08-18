@@ -182,12 +182,25 @@ def _replay_event(
 
 
 @pytest.mark.asyncio
-class TestCatchupReplayStampsTheEpisode:
-    """Review item 8: catch-up replay stamps replayed ``secret``-channel
-    episodes correctly. The live-wire tests above prove the capture; these
-    prove the RESTART path feeds it the same value — the two-path ingress
-    contract of ``test_channel_event_classification`` carried through to
-    the stored column."""
+class TestCatchupReplayPersistsNothing:
+    """ISSUE-0130 (v0.3.14): a replayed span persists **no** episode.
+
+    These previously pinned RFC 0037 review item 8 — that a replayed
+    rotation close stamped its episode with the channel's classification,
+    the restart-path twin of the live-wire capture above.  That path is
+    gone: a replayed turn carries no principal (the orchestrator's
+    ``messages`` table has no principal column, so ``_build_replay_event``
+    has nothing to seed), and deriving from it wrote one authenticated
+    person's content into the shared ``local`` tenant — found live at the
+    v0.3.14 ``MT-MEMORY-MULTIUSER-001`` run.  The close path now skips
+    derivation for replayed spans entirely, so there is no row left to
+    stamp.
+
+    The *live* classification capture is unaffected and stays covered by
+    the tests above — only the restart path is withdrawn.  v0.3.15
+    persists the principal on the message row and seeds it here, at which
+    point replayed spans become attributable and stamping returns.
+    """
 
     async def test_replayed_secret_episodes_stamp_secret(self):
         agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
@@ -217,15 +230,17 @@ class TestCatchupReplayStampsTheEpisode:
             ),
             [],
         )
-        episode = await _closed_episode(agent)
-        assert episode["protection_level"] == "secret"
-        assert episode["source_channel_id"] == GROUP_CHANNEL
+        assert await all_episodes(agent) == [], (
+            "a replayed rotation close must persist nothing — the span has "
+            "no principal, so any row it wrote would land in the shared "
+            "`local` tenant (ISSUE-0130)"
+        )
 
-    async def test_pre_v0312_orchestrator_replays_stamp_internal(self):
+    async def test_pre_v0312_orchestrator_replays_persist_nothing(self):
         # A pre-v0.3.12 orchestrator's channel-list JSON has no
-        # ``classification`` key: the builder seeds nothing and the stamp
-        # site's rule-(a) default applies — ``internal``, never a crash,
-        # never ``public``.
+        # ``classification`` key.  Pre-ISSUE-0130 this exercised the stamp
+        # site's rule-(a) default (``internal``); now it pins that the
+        # replay skip fires regardless of what the builder seeded.
         agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
         legacy_channel = {"channel_type": "group"}
         for msg_id, wire, content in (
@@ -243,9 +258,10 @@ class TestCatchupReplayStampsTheEpisode:
                 ),
                 [],
             )
-        episode = await _closed_episode(agent)
-        assert episode["protection_level"] == DEFAULT_CLASSIFICATION
-        assert episode["source_channel_id"] == GROUP_CHANNEL
+        assert await all_episodes(agent) == [], (
+            "the legacy-orchestrator replay path persists nothing either — "
+            "the skip is on the replay marker, not on classification"
+        )
 
 
 # ─── The facts leg (Phase-2 extraction dispatch) ────────────

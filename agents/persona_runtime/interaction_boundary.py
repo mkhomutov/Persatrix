@@ -14,6 +14,10 @@ real:
   ``END_INTERACTION_VOTE`` for the event's channel (RFC 0030 Layer 4):
   the persona judged its contribution complete, so the vote-close park
   (:mod:`.vote_close`) covers exactly these actions.
+* :func:`stale_close_reason` — the caller's single question ("must the
+  scope's open interaction close before this turn is appended?"), which
+  folds the rotation below together with the ISSUE-0130 catch-up
+  boundary: a LIVE turn never joins a span the startup replay opened.
 * :func:`wire_rotation_closes` — the orchestrator-minted channel
   ``interaction_id`` on the inbound event differs from the one the open
   local interaction was opened under: the channel conversation ended
@@ -31,7 +35,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ..channel_wire_metadata import WIRE_CLOSE_TRIGGER_IDLE
-from ..memory.boundary_detectors import REASON_IDLE_GAP, REASON_STRUCTURAL
+from ..memory.boundary_detectors import (
+    REASON_CATCHUP_COMPLETE,
+    REASON_IDLE_GAP,
+    REASON_STRUCTURAL,
+)
 from ..persona_types import ActionType
 
 if TYPE_CHECKING:
@@ -250,9 +258,48 @@ def wire_rotation_close_reason(
     return REASON_STRUCTURAL
 
 
+def stale_close_reason(
+    open_interaction: Interaction | None,
+    event: AgentEvent,
+    *,
+    wire_id: str,
+) -> CloseReason | None:
+    """The reason the scope's open interaction must close *before* this
+    event's turn is appended — ``None`` when the turn belongs to it.
+
+    Two boundaries, checked in this order:
+
+    1. **The catch-up boundary (ISSUE-0130).**  A LIVE turn arriving on a
+       scope that the on-startup replay opened splits there.  The replayed
+       span carries no principal, so :func:`~agents.persona_runtime
+       .close_path.persist_closed_interaction` derives nothing from it;
+       letting the live turn join it would drop the live conversation's
+       memory too.  Checked first because it holds regardless of what the
+       wire ids say — the replay-opened record must not absorb live turns
+       even when the conversation genuinely continues under the same wire
+       interaction id, which is the common mid-conversation-restart case
+       (and the only case for thread scopes, whose ``wire_id`` is always
+       empty).  Replay→replay is NOT a split: those turns share the same
+       unattributable span, segmented by rotation like any other.
+    2. **The wire rotation** — see :func:`wire_rotation_closes` /
+       :func:`wire_rotation_close_reason`.
+    """
+    if open_interaction is None or not open_interaction.is_open:
+        return None
+    if (
+        open_interaction.replayed
+        and event.metadata.get("replay_mode") is not True
+    ):
+        return REASON_CATCHUP_COMPLETE
+    if wire_rotation_closes(open_interaction, wire_id):
+        return wire_rotation_close_reason(open_interaction, event.metadata)
+    return None
+
+
 __all__ = [
     "is_session_end_event",
     "matching_end_votes",
+    "stale_close_reason",
     "wire_rotation_close_reason",
     "wire_rotation_closes",
 ]

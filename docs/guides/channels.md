@@ -820,10 +820,17 @@ ships **on-startup catch-up fetch** (RFC 0011 [OQ #8](../rfcs/0011-channels-brid
 - After startup + self-registration, each persona agent fetches the last 50
   messages per channel it is a member of via REST.
 - Fetched messages flow through the same ingest path (`_store_event_episode`)
-  so they land in memory with the correct interaction shape — but the agent
-  runs in **replay mode** for those events: outbound `SEND_CHANNEL_MESSAGE`
-  actions are suppressed so the agent does not blast everyone with stale
-  responses on restart.
+  so they land in the interaction tracker with the correct shape — but the
+  agent runs in **replay mode** for those events: outbound
+  `SEND_CHANNEL_MESSAGE` actions are suppressed so the agent does not blast
+  everyone with stale responses on restart.
+- **Replayed spans derive no memory** (ISSUE-0130, v0.3.14). A replayed row
+  carries no principal — the `messages` table has no principal column — so
+  summarising it would write one authenticated person's content into the
+  shared `local` tenant. The span is closed at pass end (or split when a
+  live turn arrives) with `catchup_complete` and dropped; the live
+  conversation that resumes after the restart is unaffected and derives
+  normally. `agent.interactions.closed.by_catchup_complete` counts the drops.
 - The `channel.messages.replayed{channel_id=…}` counter pins the contract.
 
 Watermark-based catch-up (`?since=<message_id>` per-channel, per-subscriber)

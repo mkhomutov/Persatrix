@@ -67,6 +67,16 @@ def register(inst: _Instruments, meter: Meter) -> None:
             "cost ceiling (interaction_budget_tokens exhausted)."
         ),
     )
+    inst.interactions_closed_by_catchup_complete = meter.create_counter(
+        name="agent.interactions.closed.by_catchup_complete", unit="{interaction}",
+        description=(
+            "Interactions closed on the ISSUE-0130 catch-up boundary — the "
+            "on-startup replay finished, or a live turn arrived on a scope "
+            "the replay had opened.  A replay-opened span derives no memory "
+            "(it has no principal), so this counter is also the rate at "
+            "which restart-window history is dropped."
+        ),
+    )
     inst.interactions_summary_failed = meter.create_counter(
         name="agent.interactions.summary.failed", unit="{interaction}",
         description="Interactions whose close-time summary call failed (RFC 0020 §C).",

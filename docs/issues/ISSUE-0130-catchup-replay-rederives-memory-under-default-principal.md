@@ -1,10 +1,11 @@
 ---
 id: ISSUE-0130
 summary: "On agent startup the RFC 0011 channel catch-up replay re-derives episodes and facts from replayed channel history under the persona's **default** scope (`principal_id='local'`, `session_id='legacy'`), because `_build_replay_event` has no principal to seed — the orchestrator's `messages` table has no principal column, so the emitting tenant is not persisted with the message and exists only on the live gRPC dispatch. The result is that one authenticated person's private content is silently copied into the shared `local` tenant on **every** restart, unbounded, where any unauthenticated caller (the whole persona fleet, and every caller under `auth.mode: disabled`) resolves. The person↔person boundary v0.3.14 promises still holds — a second authenticated principal cannot read it — but the person→anonymous boundary does not. Third ISSUE-0082 residual (R-3); found live at the v0.3.14 MT-MEMORY-MULTIUSER-001 execution run."
-status: open
+status: resolved
 severity: high
 area: memory
 created: 2026-08-18
+closed: 2026-08-18
 refs:
   - agents/channel_catchup.py
   - agents/persona_runtime/__init__.py
@@ -147,17 +148,79 @@ orchestrator already knows the verified principal at publish time —
 `authMiddleware` puts it in the request context — so the value is
 server-authoritative and never agent-supplied.
 
-## Recommendation
+## Resolution — (a) shipped in v0.3.14; (b) is v0.3.15
 
-Take **(a)** inside v0.3.14, in the PR after the execution report: it is
-small, it is the leak-stopper, and it needs no migration on a cycle whose
-plan locked migrations out.
+**Shape (a) landed** as the leak-stopper. `Interaction` gained a
+`replayed` marker, captured under the same **frozen-at-open** rule as
+`session_id` (the sibling-mislabel guard), and
+`persist_closed_interaction` skips derivation entirely for a replayed
+span — no episode, so no RFC 0026 extraction, so nothing lands in the
+shared tenant.
 
-Take **(b)** on the v0.3.15 interaction/tenant train, co-designed with
-`ISSUE-0124` — R-2's chosen shape (server-side causal attribution,
-`ChannelRouter.Publish` re-stamping an agent publish from server-held
-state) needs a column on this same table, and the two should not migrate
-`messages` twice.
+**The marker alone was not enough**, because replay events *open*
+tracker scopes and never close them (RFC 0011 OQ #8, PR-265 review L6's
+deferred "lifecycle bleed"): the next live message in the same scope
+appends to the catch-up interaction, so the flag would have eaten the
+first conversation after **every** restart — the common mid-conversation
+case, where the wire interaction id has not rotated and nothing else
+splits the span (and the only case for thread scopes, which are
+wire-untracked). Verified against the pre-fix behaviour: replay turn +
+two live turns + `chat_end` persisted one episode before the marker and
+none with the marker alone.
+
+So the marker ships with the boundary the bleed always needed, closing
+with the new `REASON_CATCHUP_COMPLETE`:
+
+* **at pass end** — `close_replayed_scopes` pops every replay-opened
+  scope when the agent's catch-up pass finishes, in a `finally` so a
+  budget overrun closes them too;
+* **at ingest** — a LIVE turn arriving on a replay-opened scope splits
+  there (`stale_close_reason`, the seam that already owned the wire
+  rotation). Needed because the gRPC dispatch surface is already serving
+  while catch-up runs, so a live turn can beat the sweep. Replay→replay
+  is *not* a split: those turns share one unattributable span, segmented
+  by rotation as before.
+
+A conversation interrupted by a restart therefore loses the replayed
+span (unattributable) and keeps the live one, derived under its own
+principal.
+
+**Two costs, both accepted and stated:**
+
+1. An interaction that opened *and* closed entirely while the agent was
+   down is no longer summarised at boot. That path was already
+   unreliable — catch-up has no watermark and re-ingests the window every
+   boot (RFC 0011 OQ #8), and `Interaction.started_at` is boot time, not
+   the wire timestamp.
+2. It cannot distinguish *"no principal because the deployment is
+   single-tenant"* — where `local` is **correct** — from *"no principal
+   because replay lost it"*. Auth mode is not exposed to agents on any
+   endpoint. So under `auth.mode: disabled` the skip also fires, where the
+   derivation would have been correctly attributed.
+
+**Withdrawn behaviour:** RFC 0037 review item 8 pinned that a replayed
+rotation close stamped its episode with the channel classification. There
+is no longer a row to stamp, and those tests now pin the skip instead.
+Live-path classification capture is untouched.
+
+**Observability:** `agent.interactions.closed.by_catchup_complete` counts
+the spans dropped this way — the rate at which restart-window history is
+discarded, which is what shape (b) below buys back.
+
+## (b) — required in v0.3.15
+
+Cost 2 above is what **(b)** removes, and it is scheduled, not optional:
+persist `principal_id` on `messages` (channel store `v11 → v12`), stamp it
+server-side at publish from the authenticated request context, surface it
+on `channelMessageResponse`, and seed it in `_build_replay_event`. The
+skip then narrows to genuinely unattributable spans, single-tenant
+derivation is restored, and RFC 0037's replay stamping returns.
+
+It is co-designed with `ISSUE-0124` (R-2), whose chosen shape —
+server-side causal attribution, `ChannelRouter.Publish` re-stamping an
+agent publish from server-held state — needs a column on this same table.
+The two must not migrate `messages` twice. Both ride the v0.3.15
+interaction/tenant train alongside `ISSUE-0123` (R-1).
 
 ## Related
 

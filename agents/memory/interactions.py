@@ -43,6 +43,7 @@ from ..observability.metrics import current_agent_id, try_get_instruments
 from ..session_id import LEGACY_SESSION_ID
 from .boundary_detectors import (
     DEFAULT_IDLE_TIMEOUT_SEC,
+    REASON_CATCHUP_COMPLETE,
     REASON_COST,
     REASON_IDLE_GAP,
     REASON_MAX_TURNS,
@@ -223,6 +224,7 @@ class InteractionTracker:
         session_id: str | None = None,
         classification: str | None = None,
         source_channel_id: str | None = None,
+        replayed: bool = False,
     ) -> Interaction:
         """Open a new interaction in ``scope``.
 
@@ -253,6 +255,7 @@ class InteractionTracker:
             scope=scope,
             started_at=ts,
             session_id=session_id or LEGACY_SESSION_ID,
+            replayed=replayed,
             classification=classification,
             source_channel_id=source_channel_id,
         )
@@ -269,6 +272,7 @@ class InteractionTracker:
         session_id: str | None = None,
         classification: str | None = None,
         source_channel_id: str | None = None,
+        replayed: bool = False,
     ) -> Interaction:
         """Append a turn, opening an interaction in ``scope`` if needed.
 
@@ -297,6 +301,7 @@ class InteractionTracker:
                 scope, now=ts, session_id=session_id,
                 classification=classification,
                 source_channel_id=source_channel_id,
+                replayed=replayed,
             )
         interaction.turns.append(Turn(at=ts, payload=payload or {}))
         if (
@@ -404,6 +409,7 @@ _REASON_COUNTER_ATTR: dict[CloseReason, str] = {
     REASON_TOPIC_SHIFT: "interactions_closed_by_topic_shift",
     REASON_SHUTDOWN: "interactions_closed_by_shutdown",
     REASON_COST: "interactions_closed_by_cost",
+    REASON_CATCHUP_COMPLETE: "interactions_closed_by_catchup_complete",
 }
 
 

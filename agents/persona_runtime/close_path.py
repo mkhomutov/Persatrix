@@ -14,8 +14,13 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
+from ..memory.boundary_detectors import REASON_CATCHUP_COMPLETE
 from ..memory.episodic import EpisodicMemory
-from ..memory.interactions import SUMMARY_PENDING_TEXT, Interaction
+from ..memory.interactions import (
+    SUMMARY_PENDING_TEXT,
+    Interaction,
+    InteractionTracker,
+)
 from .classification import normalize_for_stamp
 from .finalize_close import finalize_closed_interaction
 
@@ -25,7 +30,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["persist_closed_interaction"]
+__all__ = ["close_replayed_scopes", "persist_closed_interaction"]
 
 
 async def persist_closed_interaction(
@@ -48,6 +53,41 @@ async def persist_closed_interaction(
     """
     if interaction.turn_count == 0:
         return  # idle no-turn scope — nothing to persist.
+    if interaction.replayed:
+        # ISSUE-0130 — the leak-stopper.  This interaction was OPENED by an
+        # on-startup catch-up replay, whose turns carry no principal: the
+        # orchestrator's ``messages`` table has no principal column, so
+        # ``_build_replay_event`` has nothing to seed and the persona binds
+        # its default (``local``).  Summarising and extracting facts from
+        # such a span writes one authenticated person's content into the
+        # shared tenant, where every unauthenticated caller resolves —
+        # unbounded, because catch-up has no watermark and re-ingests the
+        # window on every boot (RFC 0011 OQ #8).
+        #
+        # Skipping is bounded to spans that are ENTIRELY replay: the
+        # catch-up boundary (:func:`close_replayed_scopes` at pass end, and
+        # the replay→live split in ``_handle_multi_turn_event``) closes a
+        # replay-opened scope before any live turn can join it, so a live
+        # conversation resumed after a restart opens its own unflagged
+        # interaction and derives normally under its own principal.  Without
+        # that boundary this flag would eat the first post-restart
+        # conversation in every replayed scope — catch-up opens scopes and
+        # never closes them on its own (RFC 0011 OQ #8).
+        #
+        # This is the v0.3.14 leak-stopper, not the whole fix: it cannot
+        # tell "no principal because the deployment is single-tenant"
+        # (where ``local`` is CORRECT) from "no principal because replay
+        # lost it".  v0.3.15 persists the principal on the message row and
+        # seeds it here, at which point this skip narrows to genuinely
+        # unattributable spans.
+        logger.debug(
+            "ISSUE-0130: skipping close-path derivation for replayed "
+            "interaction (agent=%s scope=%s interaction_id=%s turns=%d) — "
+            "a replayed span has no principal to attribute memory to",
+            agent_id, interaction.scope, interaction.interaction_id,
+            interaction.turn_count,
+        )
+        return
     # PR-4 review #25 (slice 7): dead ``or llm_client is None`` clause removed;
     # the mixin annotation is now ``LLMClient`` (non-optional).
     if interaction.interaction_id is None:
@@ -127,3 +167,56 @@ async def persist_closed_interaction(
     )
     pending_tasks.add(task)
     task.add_done_callback(pending_tasks.discard)
+
+
+async def close_replayed_scopes(
+    tracker: InteractionTracker,
+    persist: Callable[[Interaction], Awaitable[None]],
+) -> int:
+    """Close every scope the on-startup catch-up replay opened (ISSUE-0130).
+
+    Replay events open :class:`InteractionTracker` scopes but carry no
+    session-end signal, and catch-up has no synthetic completion event of
+    its own (RFC 0011 OQ #8 "lifecycle bleed"), so the scope stayed open
+    until the idle timer and the next live turn appended to it.  That was
+    harmless while the merged span still derived; it is not harmless now
+    that :func:`persist_closed_interaction` skips derivation for a
+    replay-opened span, because the live half of the merge would be
+    dropped with it.
+
+    Called at the end of the catch-up pass
+    (:func:`agents.channel_catchup.replay_for_persona_agents`).  Returns
+    the number of scopes closed.  Best-effort by contract — it runs on the
+    boot path, so a per-scope failure is logged and the sweep continues
+    rather than propagating; the caller may treat it as non-raising.  Note
+    the scope is popped before the persist call, so even a failing persist
+    leaves the tracker in the state live traffic depends on.
+
+    Deliberately runs WITHOUT the agent lock: a persona holds ``_lock`` for
+    a whole event (LLM calls included), so grabbing it here would stall boot
+    behind an in-flight turn.  Safe unlocked because ``replayed`` is frozen
+    at open, both this sweep and the ingest-time split tolerate a ``close``
+    that returns ``None`` (the other got there first), and a live turn can
+    never be inside a flagged span — the split guarantees it opens its own.
+    """
+    closed = 0
+    for scope in list(tracker.open_scopes()):
+        interaction = tracker.get(scope)
+        if interaction is None or not interaction.replayed:
+            continue
+        try:
+            popped = tracker.close(scope, reason=REASON_CATCHUP_COMPLETE)
+            if popped is None:
+                continue
+            closed += 1
+            # ``persist`` is a no-op for these spans today (it skips on the
+            # same flag); calling it keeps ONE close→persist contract, so a
+            # revision that makes replayed spans attributable needs no new
+            # wiring here.
+            await persist(popped)
+        except Exception:
+            logger.warning(
+                "Catch-up close failed for replayed scope %s",
+                scope, exc_info=True,
+            )
+    return closed
