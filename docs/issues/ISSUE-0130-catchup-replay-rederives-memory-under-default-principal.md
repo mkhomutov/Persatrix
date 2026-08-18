@@ -108,11 +108,13 @@ structural rather than a missing line in the replay builder.
   `auth.mode: disabled`. Alice's private disclosure is sitting in that
   tenant.
 - **It compounds.** Every restart replays the window again and derives
-  again. Across the execution arc `local` episodes grew
-  `0 → 2 → 5 → 13 → 18 → 29 → 37` and `local` facts `0 → 2 → 4 → 8 → 10 →
-  14 → 16`. (That arc carried extra restarts from operator retries, so the
-  per-restart rate is not a clean measurement — the unbounded *shape* is
-  the finding, not the constant.)
+  again: `local` episodes grew `0 → 2 → 5 → 13 → 18` across the arc's first
+  four restarts (`local` facts `0 → 2 → 4 → 8 → 10`). The raw series
+  continues to 37 and 16, but those later steps are **excluded as evidence**
+  — the Leg 5 retag deliberately moved 5 episodes and 2 facts from
+  `alice-person` into `local`, and the arc carried extra operator-retry
+  restarts. The unbounded *shape* is the finding; no per-restart rate is
+  claimed.
 - Not observed: an anonymous caller actually being *served* this content.
   The Leg 6 `disabled`-mode turn answered generically. The rows are
   present and in-scope for such a caller; whether recall surfaces them is
