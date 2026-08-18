@@ -520,17 +520,23 @@ recall endpoint authenticates against.
 > `principal_id` storage dimension with a strict-equality recall filter and
 > a `persatrix-principal` gRPC header bound task-locally per request
 > ([RFC 0031 §C amendment](0031-per-session-namespacing-channels.md#c-storage-model);
-> [`agents/principal_id.py`](../../agents/principal_id.py)) — but it is
-> **armed and unfed**: nothing emits a principal, so every request resolves
+> [`agents/principal_id.py`](../../agents/principal_id.py)) — but it was
+> **armed and unfed**: nothing emitted a principal, so every request resolved
 > to the single-tenant `'local'` default. The verified `participant_id`
-> claim defined here is that missing **source**: once `auth.mode: enabled`,
-> the orchestrator emits the session's verified principal on the
-> `persatrix-principal` header at the same dispatch chokepoint it emits
-> `persatrix-session` (ISSUE-0082 Part 1, a self-contained Go follow-up that
-> does not wait on this RFC). This does **not** change this RFC's
-> multi-tenancy / per-user-memory-isolation Non-Goals — it records that the
-> principal rail's activation is *gated on this RFC's verified claim*, and
-> that the storage layer correctly collapses to `'local'` until then.
+> claim defined here is that missing **source**, and it was supplied in
+> **v0.3.14**: under `auth.mode: enabled` the orchestrator emits the
+> caller's verified principal on the `persatrix-principal` header, stamped
+> once in `authMiddleware` (a missed dispatch origin would fail *open* into
+> the shared `'local'` tenant, so the threading is structural rather than
+> per-handler). Proven live at that release's
+> [MT-MEMORY-MULTIUSER-001 run](../manual-tests/v0.3.14-execution-report.md),
+> with two distinct principals read off storage. This does **not** change
+> this RFC's multi-tenancy / per-user-memory-isolation Non-Goals — the
+> boundary is **per-turn**, and two residuals of the same shape are stated
+> rather than closed: a group room's close-derived aggregate and a persona's
+> relayed cascade turn do not inherit the principal (ISSUE-0082 R-1 / R-2,
+> v0.3.15). Under `disabled`, and for every unauthenticated caller, the
+> storage layer still correctly collapses to `'local'`.
 
 ### G. Bootstrapping the first operator
 
