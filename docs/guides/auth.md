@@ -22,21 +22,53 @@ becomes a verified claim instead of a body field.
 > channel)` memory continuity, unrelated to login sessions despite the shared
 > word. Logging in does not switch rooms; switching rooms does not touch auth.
 
-> **Known limitation — logging in does not partition persona memory.** What a
-> persona remembers is bounded by room membership and
+> **Logging in partitions persona memory — as of v0.3.14, and only under
+> `enabled`.** The orchestrator now emits a per-request **principal** derived
+> from the verified `participant_id` claim below, so what a persona remembers
+> is bounded by *which authenticated person is speaking* in addition to room
+> membership and
 > [RFC 0037](../rfcs/0037-memory-confidentiality-channel-classification.md)
-> classification, **never by which account is speaking**. The per-room half of
-> the isolation rail is live (the orchestrator binds a session per `(agent,
-> channel)`), but it emits no per-request *principal*, so every caller —
-> authenticated or not — collapses to the single `local` tenant
-> ([ISSUE-0081](../issues/ISSUE-0081-session-id-process-global-not-task-local.md)
-> / [ISSUE-0082](../issues/ISSUE-0082-orchestrator-per-request-session-principal-emission.md)
-> Part 2, targeted **v0.3.14** per the [sequencing Amendment
-> 2026-08-02](../v0.3.x-sequencing.md#amendment-2026-08-02--v0313--v0314-the-two-release-tail-to-v040)).
-> So two accounts in one room share that room's memory session by design, and
-> the deliberately cross-room tiers (travelling facts, person identity) carry
-> across accounts too. Until then, give users who must not share a persona's
-> memory separate rooms — and classify those rooms.
+> classification
+> ([ISSUE-0082](../issues/ISSUE-0082-orchestrator-per-request-session-principal-emission.md)
+> Part 2 over the
+> [ISSUE-0081](../issues/ISSUE-0081-session-id-process-global-not-task-local.md)
+> storage rail). Two accounts in one room get per-speaker memory: neither
+> person's turn recalls the other's disclosures, including through the
+> deliberately cross-room tiers (travelling facts, person identity). Room
+> continuity is unaffected — **the transcript and verbatim history are not
+> principal-scoped**, so both people still see the same conversation.
+>
+> Four bounds worth reading before you rely on it:
+>
+> - **`auth.mode: disabled` is byte-identical.** No header is emitted and every
+>   caller resolves the single `local` tenant, exactly as before v0.3.14. The
+>   same holds for every *unauthenticated* caller under `enabled` — which is
+>   the entire persona fleet, since agents hold no accounts. Expect `local`
+>   rows from autonomous and agent-authored traffic.
+> - **The upgrade is not transparent if you already run `enabled`.** Migration
+>   v11 backfilled every pre-existing row to `local` and the recall predicate
+>   is strict equality with no carve-out, so accumulated memory becomes
+>   unreachable for authenticated callers the day emission lands. It is a
+>   **partition, not a deletion** — the corpus is still there under `local`,
+>   reachable by running single-tenant or by re-tagging. Bridging it
+>   automatically would *be* the cross-tenant bridge this boundary exists to
+>   forbid. See [Upgrade notes](#operational-notes).
+> - **The boundary is per-*turn*.** A write *derived* from a turn does not
+>   always inherit it: a group room's close-time summary and extracted facts
+>   land under whichever principal closed the interaction (R-1), and a
+>   persona's relayed reply re-enters as an unauthenticated publish and
+>   dispatches under `local` (R-2). Both are stated residuals of ISSUE-0082,
+>   slated **v0.3.15**.
+> - **Memory re-derived from a replayed transcript is unattributed.** On
+>   restart the persona replays recent channel history, which carries no
+>   principal; v0.3.14 stops it deriving memory from that span rather than
+>   filing it under `local`
+>   ([ISSUE-0130](../issues/ISSUE-0130-catchup-replay-rederives-memory-under-default-principal.md)).
+>   The completion that *persists and seeds* the principal rides v0.3.15, so
+>   until then a replayed span contributes nothing to memory at all.
+>
+> If you need a harder guarantee than per-turn today, keep giving users who
+> must not share a persona's memory separate rooms — and classify those rooms.
 
 ---
 
@@ -253,17 +285,24 @@ limiter degrades to a global one — WARN'd at startup under `enabled`.
 - **No password reset until Phase 3.** The pragmatic single-operator
   recovery: stop the orchestrator, remove the accounts store (accounts and
   auth sessions only — no persona memory, no channels), and bootstrap again.
-  On host runs that is `rm data/accounts.db` followed by the [quick
-  start](#quick-start)'s `account bootstrap`. Under the compose stack the
+  On host runs that is `rm -f data/accounts.db data/accounts.db-wal
+  data/accounts.db-shm` followed by the [quick start](#quick-start)'s
+  `account bootstrap`. **Remove the two WAL sidecars, not just the database**
+  — the store runs in WAL mode, so deleting `accounts.db` alone leaves a
+  `-wal`/`-shm` pair beside a fresh empty file and the next bootstrap fails
+  with `accounts: read user_version: disk I/O error (522)` rather than
+  anything that names the cause (found live at the v0.3.14
+  [MT run](../manual-tests/v0.3.14-execution-report.md#findings--follow-ups)).
+  Under the compose stack the
   store lives at `/var/lib/persatrix/accounts.db` **inside** the
   `orchestrator-data` volume, which also carries `channels.db`, the log
-  buffer, and `audit.jsonl` — so remove the one file, never the volume
+  buffer, and `audit.jsonl` — so remove the one store, never the volume
   (`docker volume rm orchestrator-data` takes your channels with it):
 
   ```bash
   docker compose down
   docker compose run --rm --no-deps --entrypoint sh orchestrator \
-    -c 'rm -f /var/lib/persatrix/accounts.db'
+    -c 'rm -f /var/lib/persatrix/accounts.db /var/lib/persatrix/accounts.db-wal /var/lib/persatrix/accounts.db-shm'
   docker compose run --rm --no-deps orchestrator \
     account bootstrap --username <name> \
     --accounts-db /var/lib/persatrix/accounts.db
@@ -272,6 +311,31 @@ limiter degrades to a global one — WARN'd at startup under `enabled`.
 - **The CLI hints on 401**: any command answered `401` prints a
   `persatrix login` hint. A `403` is a *role* problem, not a login problem —
   no hint.
+- **Upgrading to v0.3.14 on a deployment already running `enabled` — the
+  activation-day reset.** The first boot after the upgrade partitions persona
+  memory by principal, and every row written before it reads `local`, so each
+  person's accumulated memory goes quiet at once. Nothing was deleted. The
+  remedies, in order of preference: **accept it** (the corpus ages out and
+  each person rebuilds under their own principal, which is the intended end
+  state); **run single-tenant** (`auth.mode: disabled`, where every caller
+  resolves `local` and the old corpus is reachable again); or, if one
+  account's history genuinely owns the pre-upgrade corpus, **re-tag it
+  deliberately** with the stack down —
+  `UPDATE episodes SET principal_id='<participant>' WHERE principal_id='local'`,
+  and likewise on `facts`, `notes` and `interactions`. **`relationships` is
+  the exception**: `principal_id` is part of that tier's *primary key*, so the
+  same `UPDATE` aborts with `UNIQUE constraint failed` as soon as a
+  `<participant>` row for the participant tuple already exists — which it
+  will, on any deployment that has taken a turn since activation. Pick which
+  row survives — keep the post-activation one (`DELETE FROM relationships
+  WHERE principal_id='local'`) or keep the pre-upgrade one (`UPDATE OR
+  REPLACE`, which re-tags it and *deletes* the colliding post-activation row).
+  Neither merges the two: `trust_score` and `interaction_count` come from
+  whichever row you keep. Re-tag only when a single person really was the sole
+  speaker; on a shared deployment it hands one account everyone else's
+  disclosures — and note that agent-origin traffic writes `local` **by
+  design** (above), so a blanket re-tag also hands over the persona's own
+  autonomous history. There is **no** automatic bridge by design.
 
 ## Troubleshooting
 

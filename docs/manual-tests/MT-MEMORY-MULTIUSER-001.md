@@ -2,10 +2,10 @@
 
 **Test ID**: `MT-MEMORY-MULTIUSER-001`
 **Feature Area**: Memory scope axes (the tenant/principal axis — ISSUE-0081 storage + ISSUE-0082 Part 2 emission)
-**Version**: 1.0
+**Version**: 1.1
 **Created**: 2026-08-06
-**Last Updated**: 2026-08-06
-**Status**: Active — **authored at v0.3.14 PR 2; live execution is a v0.3.14 release-prep deliverable** (Phase 3 of [the plan](../v0.3.14-plan.md#phase-3--release-prep-execution)).
+**Last Updated**: 2026-08-18
+**Status**: Active — **executed live at v0.3.14 release-prep PR 1** ([execution report](v0.3.14-execution-report.md)); v1.1 folds in that run's F-3 (the fresh-room rule below) and F-4 (the operator notes) so a re-run does not repeat them.
 
 ---
 
@@ -56,16 +56,21 @@ Every axis before this one isolated *rooms* (session) or *runs* (epoch). Neither
 
 > ⚠️ **Every orchestrator restart empties the agent registry — re-register the personas before the next turn.** The registry is in-memory and agents register once at their *own* startup; they do **not** re-register when the orchestrator comes back. **Four** restarts below leave it empty: Legs 1, 3 and 4 (each re-bootstrap needs one) and Leg 6. Leg 5 takes the whole stack down and up, so it re-registers on its own.
 >
-> - **What you will see here.** `persatrix chat` resolves the agent against the registry *before* it publishes, so an empty registry answers `404` and the CLI prints `error: 404 Not Found: agent not found`. The leg fails **loudly** — the cost is a burnt turn on a paid provider plus a redone `accounts.db` rotation, not a false PASS. Do not go looking for a silent void run on this MT.
-> - **Why the warning is stronger than that symptom.** On the channel-publish seam the same condition *is* silent: the publish returns `201`, the dispatch is dropped with `channels: dispatch target not registered`, and the persona simply never replies. That is how this was found (the sibling group-channel arc, 2026-08-07, which it consumed whole). It is not this MT's path, but it is one config change away.
-> - **Remedy.** Wait for the orchestrator to answer `/healthz`, **then** restart each persona container (`docker compose restart agent-<id>`, or `docker restart persatrix-agent-<id>-1`). Registration is best-effort and never retried, so a persona restarted against a still-booting orchestrator lands in the same empty state with no new symptom.
-> - **Verify before sending the leg's message.** `GET $PERSATRIX_SERVER/api/v1/agents` must list every persona `healthy`. The route is `authenticated`, so under `enabled` (Legs 1–5) run it **after** `persatrix login` and carry the credential (`-H "Authorization: Bearer $TOKEN"`) — an un-credentialled call answers `401`, which is not an empty registry. Under Leg 6's `disabled`, a bare call works. See [MT-AUTH-001](MT-AUTH-001.md).
-> - **Long-standing, not new.** Recorded in the [v0.3.0](v0.3.0-execution-report.md) and [v0.3.2](v0.3.2-execution-report.md) (F-6) execution reports. The same restarts leave the RFC 0009 rate-limiter bucket un-flushed, so a post-restart turn can additionally draw `429` for up to ~60 s.
-> - **The underlying defect** is filed as [ISSUE-0125](../issues/ISSUE-0125-agents-never-reregister-after-orchestrator-restart.md), which carries the diagnosis and weighs five fix shapes. Everything above is the operator procedure that stands until one of them lands.
+> - **What you will see here.** `persatrix chat` resolves the agent against the registry *before* it publishes, so an empty registry answers `404 agent not found`. The leg fails **loudly** — a burnt turn, not a false PASS. On the channel-publish seam the same condition *is* silent (publish returns `201`, dispatch dropped with `channels: dispatch target not registered`, persona never replies) — not this MT's path, but one config change away.
+> - **Remedy.** Wait for the orchestrator to answer `/healthz`, **then** restart each persona container (`docker compose restart agent-<id>`). Registration is best-effort and never retried, so a persona restarted against a still-booting orchestrator lands in the same empty state.
+> - **Verify before sending the leg's message.** `GET $PERSATRIX_SERVER/api/v1/agents` must list every persona `healthy`. The route is `authenticated`, so under `enabled` (Legs 1–5) run it **after** `persatrix login` with the credential — an un-credentialled call answers `401`, which is not an empty registry.
+> - **Long-standing, not new** ([ISSUE-0125](../issues/ISSUE-0125-agents-never-reregister-after-orchestrator-restart.md); recorded since [v0.3.0](v0.3.0-execution-report.md)). The same restarts leave the RFC 0009 rate-limiter bucket un-flushed, so a post-restart turn can draw `429` for ~60 s.
 
 > **Two accounts, one bootstrap verb.** RFC 0039 Phase 3 (account administration) is v0.4.0, so the only shipped account-creation verb is `account bootstrap`, and it refuses to run once any account exists. To get a second *authenticated principal* on shipped verbs, **delete `data/accounts.db` and bootstrap again under the other participant** between legs. `accounts.db` and the persona's `memory.db` are separate stores, so this rotates *who is speaking* while leaving the memory corpus untouched — which is exactly the variable under test. The cost is that the two accounts are sequential rather than concurrent; the *concurrent* case is pinned deterministically in `test_principal_emission_isolation.py` (one process, two scopes, one shared room). When Phase 3 lands, this dance collapses to one `account create`.
 
 > **`--user` stops mattering under `enabled`.** The §F claim replaces any body `user_id` with the caller's verified participant, so the CLI's `--user` no longer selects the peer — the logged-in account does. Passing it is harmless; do not read it as the identity.
+
+> ⚠️ **The fresh-room rule — a recall leg must be re-asked in an empty-transcript room** (v1.1, from the [PR 1 run's F-3](v0.3.14-execution-report.md#findings--follow-ups)). **Legs 4 and 5 are not valid inside Alice's populated DM.** The RFC 0034 conversation window is rebuilt from *channel history* at catch-up and is **not** principal-scoped, so the room transcript can answer the trigger whether or not memory did. The first live run made this unmistakable: at Leg 5, with **zero** rows readable by `alice-person`, the persona still named Mira — off the transcript. This is the tenant-axis twin of the trap [MT-MEMORY-CROSSROOM-001](MT-MEMORY-CROSSROOM-001.md) hit at its Leg 2b.
+>
+> - **Leg 3 is exempt and stays the release-critical bar.** Bob's DM is a *distinct* channel with an empty transcript **and** a distinct principal, so its absence result is unconfounded by construction. The rule applies only to the legs that assert **recall** (4) or **non-recall of one's own prior corpus** (5).
+> - **`--user` is not a route to a fresh room.** It was tried (`--user alice-cleanroom`) and correctly ignored: under `enabled` the §F claim pins the DM to the verified participant, so the re-ask landed in the same room with the same transcript. Do not reach for it.
+> - **The route that works — delete the DM channel between the write leg and the recall leg.** `DELETE /api/v1/channels/{id}` (`operator` role; the bootstrapped account has it) drops the channel and its transcript; the next `persatrix chat` re-creates it empty via `GetOrCreateDM`, under the **same** account and therefore the same principal. Crucially, **`channels.db` and the persona's `memory.db` are separate stores**, so this clears the room without touching the memory corpus under test — the same separation argument the two-account `accounts.db` rotation rides on. Resolve the id first (`GET /api/v1/channels`; the DM is `dm:<participant>:<agent>`), and restart the persona afterwards so its conversation window is rebuilt from the now-empty history rather than from its in-process cache.
+> - **What the leg proves once the room is empty.** The persona's own memory is then the only possible source of the answer — which is the property Legs 4 and 5 exist to assert, and the reason a populated-room pass cannot be recorded as one.
 
 ---
 
@@ -120,27 +125,48 @@ echo "What would be a good present for a kid that age?" | ./bin/persatrix chat e
 
 ### Leg 4 — Alice returns, unchanged
 
-Re-bootstrap as alice (`--participant alice-person`) — the same `rm` → `bootstrap` → orchestrator restart → **persona restart** dance as Leg 3 — then repeat the Leg 2 trigger.
+Re-bootstrap as alice (`--participant alice-person`) — the same `rm` → `bootstrap` → orchestrator restart → **persona restart** dance as Leg 3 — **then apply the fresh-room rule**: delete Alice's DM channel so the re-ask cannot be served off the transcript, and let the next chat re-create it empty.
+
+```bash
+# resolve and drop Alice's DM (operator role; the bootstrapped account has it)
+curl -s -H "Authorization: Bearer $TOKEN" $PERSATRIX_SERVER/api/v1/channels | grep -o 'dm:alice-person:[a-z-]*'
+curl -s -X DELETE -H "Authorization: Bearer $TOKEN" $PERSATRIX_SERVER/api/v1/channels/dm:alice-person:ember-owl
+# restart the persona so its conversation window rebuilds from the now-empty history
+docker compose restart agent-ember-owl
+```
+
+Then repeat the Leg 2 trigger in the re-created room.
 
 **Verification**:
-- [ ] Mira surfaces again. Bob's intervening turn neither erased nor polluted Alice's tenant.
+- [ ] The room is empty before the trigger — `GET /api/v1/channels/<dm>/messages` returns no prior turns. Without this the leg is confounded and **must not** be recorded as a pass (see the fresh-room rule).
+- [ ] Mira surfaces again **from memory alone**. Bob's intervening turn neither erased nor polluted Alice's tenant.
 
 ### Leg 5 — The activation-day reset (accepted, and stated)
 
 Migration v11 backfilled every pre-existing row to `'local'` and the predicate is strict equality with **no** carve-out, so a deployment that ran `auth.mode: enabled` before this release finds its accumulated memory unreachable the day emission lands. Bridging it would *be* the cross-tenant bridge the boundary forbids, so it is observed rather than fixed.
 
-**Action**: with the stack down, tag one distinctive episode as pre-activation in the persona's `memory.db`:
+**Action**: with the stack down, tag the pre-activation corpus in the persona's `memory.db`. **Scope the retag on `principal_id`, across every tier** — not on content, and not on `episodes` alone (the single-table `LIKE '%Mira%'` SQL this MT shipped at v1.0 is not sufficient; the PR 1 run had to widen it live). A content predicate misses rows holding the disclosure under another subject — the PR 1 corpus had `subject='mira' predicate='has_age'` — and the bar below is a **count** bar, so one missed row fails the leg. Migration v11 put `principal_id` on all five tiers; `notes` carries the `contact:` identity row:
 
 ```sql
-UPDATE episodes SET principal_id='local' WHERE summary LIKE '%Mira%';
+UPDATE episodes     SET principal_id='local' WHERE principal_id='alice-person';
+UPDATE facts        SET principal_id='local' WHERE principal_id='alice-person';
+UPDATE notes        SET principal_id='local' WHERE principal_id='alice-person';
+UPDATE interactions SET principal_id='local' WHERE principal_id='alice-person';
+-- relationships: `principal_id` is IN this tier's PRIMARY KEY, so the flip
+-- collides whenever a `local` twin of the participant tuple already exists
+-- (the config-seeded row). DELETE the alice-person row instead of retagging
+-- it. Same end state for this leg: nothing readable.
+DELETE FROM relationships WHERE principal_id='alice-person';
 ```
 
-Bring the stack up, log in as alice, repeat the Leg 2 trigger.
+Bring the stack up, log in as alice, and **apply the fresh-room rule** (delete the DM, restart the persona) before repeating the Leg 2 trigger — otherwise the transcript answers and the leg proves nothing about the reset.
 
 **Verification**:
-- [ ] The persona no longer surfaces Mira — the `local` row is invisible to `alice-person`.
-- [ ] The row is still **present** in storage (`SELECT principal_id FROM episodes …`) — a partition, not a deletion. This is the operator remedy: the corpus is reachable by running single-tenant, or by re-tagging.
-- [ ] The release notes and Known Gaps carry this statement before the tag.
+- [ ] The room is empty before the trigger. **This leg is why the rule exists**: the first live run skipped it and the persona named Mira with zero readable rows, off the transcript alone.
+- [ ] Readable-by-`alice-person` counts are **zero on every retagged tier** — record the three the report tabulates (`episodes 0 · facts 0 · relationships 0`), and check `notes`: a row left on the identity-capture surface answers the trigger from memory.
+- [ ] The rows are still **present** under `local` (`SELECT principal_id, count(*) FROM episodes GROUP BY 1 …`) — a partition, not a deletion. This is the operator remedy: the corpus is reachable by running single-tenant, or by re-tagging.
+- [ ] The persona no longer surfaces Mira in the empty room — the `local` rows are invisible to `alice-person`.
+- [ ] The release notes and Known Gaps carry this statement before the tag — **at the right scope**: the reset partitions *memory*, and a live room's transcript keeps serving recent content, so "the persona forgot everything" overstates it.
 
 ### Leg 6 — `auth.mode: disabled` is byte-identical
 
@@ -172,6 +198,13 @@ Set `auth.mode: disabled`, restart the orchestrator **and then the personas** (s
 2. **Shared-room semantics — and the bound on them.** Two authenticated people in one *group channel* get per-speaker persona memory **for each turn's own write**: neither turn recalls the other's disclosures. That is the promise applied inside a room, not a regression; room continuity is unaffected (transcript and verbatim history are not principal-scoped). It does **not** extend to the close-derived aggregate or to a persona's relayed reply — the two residuals listed under Out of Scope above ([ISSUE-0082](../issues/ISSUE-0082-orchestrator-per-request-session-principal-emission.md) R-1 / R-2), neither of which this MT can reach. The release notes must state the promise at **that** scope, not the wider one.
 3. **Agent-origin turns stay `local`.** The persona fleet holds no accounts and drives the publish/convene REST seams anonymously (RFC 0039 §Non-Goals), so a persona's own reply emits no principal by design. Expect `local` rows from autonomous and agent-authored traffic even under `enabled`.
 4. **Provenance.** `PERSATRIX_MEMORY_PROVENANCE=1` is a weaker instrument here than the storage read: per [ISSUE-0122](../issues/ISSUE-0122-relationship-tier-emits-no-provenance.md) the `relationship` tier charges the budget without calling `record_admission`, so provenance is silent for exactly the cross-room identity read Leg 3 cares about. Read `principal_id` off the tables.
+5. **Rotating `accounts.db` — remove all three files, not just the database** (v1.1, [F-4](v0.3.14-execution-report.md#findings--follow-ups)). `rm data/accounts.db` alone leaves `accounts.db-wal` and `accounts.db-shm` beside a fresh empty database, and the next bootstrap fails with `accounts: read user_version: disk I/O error (522)` — a confusing failure for an operator mid-rotation. Use `rm -f data/accounts.db data/accounts.db-wal data/accounts.db-shm` at every rotation point (Legs 1, 3 and 4).
+6. **Run the SQLite work in-container, with the stack up** (v1.1, F-4). `docker cp` against a **stopped** container fails in this stack on the read-only config mount, so the Leg 5 retag cannot be staged that way. Exec into the running persona instead — and note the image ships **no `sqlite3` CLI**, so the queries ride the agent runtime's `python3`:
+   ```bash
+   docker exec persatrix-agent-ember-owl-1 python3 -c \
+     "import sqlite3;d=sqlite3.connect('/data/memory.db');print(d.execute('SELECT principal_id,count(*) FROM episodes GROUP BY 1').fetchall())"
+   ```
+7. **A dispatch span attribute is not a log line, and a missing span is not evidence** (v1.1, from the PR 1 Leg 6 run). `principal.id` is set **only** as an OTEL span attribute and is never written to orchestrator stdout, so grepping `docker logs` for it returns zero under `enabled` too — a check that cannot fail is not a check. The collector compounds this: its `tail_sampling` policies keep errors, slow (≥ 5 s) and workflow traces and sample the healthy remainder at **1 %**, so an absent span is more likely a sampling artifact than a result. Run Leg 6 with `sampling_percentage` temporarily at **100** and execute **both arms back to back**, so the `disabled` and `enabled` spans are directly comparable and the absence is an observation about the header rather than about the sampler.
 
 ---
 
@@ -179,4 +212,6 @@ Set `auth.mode: disabled`, restart the orchestrator **and then the personas** (s
 
 - [ ] All six legs pass on a live provider.
 - [ ] The `principal_id` group-by output for all three tiers is pasted into the execution report.
+- [ ] **Legs 4 and 5 were re-asked in an empty-transcript room** (the fresh-room rule), and the leg records the room was empty before the trigger.
+- [ ] Leg 6 was run against a positive control at 100 % sampling — both arms, not an unmatched absence.
 - [ ] [MT-AUTH-001](MT-AUTH-001.md) re-run green as the auth-substrate regression.
