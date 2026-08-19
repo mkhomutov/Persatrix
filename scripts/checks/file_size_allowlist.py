@@ -111,7 +111,22 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # acceptance criteria, an MT leg, and the release-notes obligations key
     # off them. A trim pass reclaimed ~370 words of narrative first — what
     # remains is contract, and the doc still has Phases 1–4 status flips to
-    # absorb. Remove once v0.3.14 ships and the plan is archived.
+    # absorb.
+    #
+    # 2026-08-19, v0.3.14 post-release follow-up: removal was ATTEMPTED per the
+    # plan's own Phase 4 instruction and is BLOCKED. The archived plan measures
+    # 4 112 words against a 3 000 cap, so dropping the entry turns the CI
+    # `file_size.py --strict` gate red; the only ways to land it are to delete
+    # ~1 112 words of ratified contract (scope locks, the three recorded
+    # deviation notes, acceptance criteria) out of a historical record, or to
+    # pattern-exclude master plans -- which file_size.py's own
+    # _EXTRA_EXCLUDES comment considered and deliberately rejected, because
+    # plans are edited *during* their cycle and the cap does useful work then.
+    # That rationale expires on archival, but nothing implements archival: there
+    # is no docs/archive/, and all NINE plan entries here (v0.3.0 onward) carry
+    # the same never-executed exit condition. Left in place deliberately, with
+    # the blocker recorded, rather than carrying a promise that cannot be kept.
+    # Retiring these needs an archival mechanism, not another per-release note.
     "docs/v0.3.14-plan.md",
     # docs/v0.3.x-sequencing.md orchestrates the v0.3.1 / v0.3.2 / v0.3.3
     # patch sequence and accumulates amendments as new v0.3.x-targeted
