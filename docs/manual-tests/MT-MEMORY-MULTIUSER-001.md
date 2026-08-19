@@ -145,14 +145,17 @@ Then repeat the Leg 2 trigger in the re-created room.
 
 Migration v11 backfilled every pre-existing row to `'local'` and the predicate is strict equality with **no** carve-out, so a deployment that ran `auth.mode: enabled` before this release finds its accumulated memory unreachable the day emission lands. Bridging it would *be* the cross-tenant bridge the boundary forbids, so it is observed rather than fixed.
 
-**Action**: with the stack down, tag the pre-activation corpus in the persona's `memory.db`. **Retag all three tiers, not just `episodes`** — the `facts` tier carries the disclosure independently and will serve it regardless of the episode flip (the illustrative single-table SQL this MT shipped at v1.0 is not sufficient; the PR 1 run had to widen it live):
+**Action**: with the stack down, tag the pre-activation corpus in the persona's `memory.db`. **Scope the retag on `principal_id`, across every tier** — not on content, and not on `episodes` alone (the single-table `LIKE '%Mira%'` SQL this MT shipped at v1.0 is not sufficient; the PR 1 run had to widen it live). A content predicate misses rows holding the disclosure under another subject — the PR 1 corpus had `subject='mira' predicate='has_age'` — and the bar below is a **count** bar, so one missed row fails the leg. Migration v11 put `principal_id` on all five tiers; `notes` carries the `contact:` identity row:
 
 ```sql
-UPDATE episodes SET principal_id='local' WHERE summary LIKE '%Mira%';
-UPDATE facts    SET principal_id='local' WHERE subject='alice-person' OR object LIKE '%Mira%';
--- relationships: the flip collides with the tier's unique key when a `local`
--- twin already exists (the config-seeded row), so DELETE the alice-person row
--- instead of retagging it. Same end state for this leg: nothing readable.
+UPDATE episodes     SET principal_id='local' WHERE principal_id='alice-person';
+UPDATE facts        SET principal_id='local' WHERE principal_id='alice-person';
+UPDATE notes        SET principal_id='local' WHERE principal_id='alice-person';
+UPDATE interactions SET principal_id='local' WHERE principal_id='alice-person';
+-- relationships: `principal_id` is IN this tier's PRIMARY KEY, so the flip
+-- collides whenever a `local` twin of the participant tuple already exists
+-- (the config-seeded row). DELETE the alice-person row instead of retagging
+-- it. Same end state for this leg: nothing readable.
 DELETE FROM relationships WHERE principal_id='alice-person';
 ```
 
@@ -160,7 +163,7 @@ Bring the stack up, log in as alice, and **apply the fresh-room rule** (delete t
 
 **Verification**:
 - [ ] The room is empty before the trigger. **This leg is why the rule exists**: the first live run skipped it and the persona named Mira with zero readable rows, off the transcript alone.
-- [ ] Readable-by-`alice-person` counts are **zero on all three tiers** — record them (`episodes 0 · facts 0 · relationships 0`).
+- [ ] Readable-by-`alice-person` counts are **zero on every retagged tier** — record the three the report tabulates (`episodes 0 · facts 0 · relationships 0`), and check `notes`: a row left on the identity-capture surface answers the trigger from memory.
 - [ ] The rows are still **present** under `local` (`SELECT principal_id, count(*) FROM episodes GROUP BY 1 …`) — a partition, not a deletion. This is the operator remedy: the corpus is reachable by running single-tenant, or by re-tagging.
 - [ ] The persona no longer surfaces Mira in the empty room — the `local` rows are invisible to `alice-person`.
 - [ ] The release notes and Known Gaps carry this statement before the tag — **at the right scope**: the reset partitions *memory*, and a live room's transcript keeps serving recent content, so "the persona forgot everything" overstates it.

@@ -322,11 +322,20 @@ limiter degrades to a global one — WARN'd at startup under `enabled`.
   account's history genuinely owns the pre-upgrade corpus, **re-tag it
   deliberately** with the stack down —
   `UPDATE episodes SET principal_id='<participant>' WHERE principal_id='local'`,
-  and likewise on `facts`, `notes`, `interactions` and `relationships`. Re-tag
-  only when a single person really was the sole speaker; on a shared
-  deployment it hands one account everyone else's disclosures, which is the
-  boundary this release exists to draw. There is **no** automatic bridge by
-  design.
+  and likewise on `facts`, `notes` and `interactions`. **`relationships` is
+  the exception**: `principal_id` is part of that tier's *primary key*, so the
+  same `UPDATE` aborts with `UNIQUE constraint failed` as soon as a
+  `<participant>` row for the participant tuple already exists — which it
+  will, on any deployment that has taken a turn since activation. Pick which
+  row survives — keep the post-activation one (`DELETE FROM relationships
+  WHERE principal_id='local'`) or keep the pre-upgrade one (`UPDATE OR
+  REPLACE`, which re-tags it and *deletes* the colliding post-activation row).
+  Neither merges the two: `trust_score` and `interaction_count` come from
+  whichever row you keep. Re-tag only when a single person really was the sole
+  speaker; on a shared deployment it hands one account everyone else's
+  disclosures — and note that agent-origin traffic writes `local` **by
+  design** (above), so a blanket re-tag also hands over the persona's own
+  autonomous history. There is **no** automatic bridge by design.
 
 ## Troubleshooting
 
