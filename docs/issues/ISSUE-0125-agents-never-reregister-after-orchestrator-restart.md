@@ -252,3 +252,13 @@ the condition is visible without reading dispatch WARNs.
 > rate-limiter bucket compounds the remedy with a `429` an operator can
 > misread as a failed restart; and the front-matter summary no longer
 > claims 2026-08-07 as the discovery date.
+
+> 2026-08-19 — **slotted v0.3.15** (cuttable) by the [sequencing Amendment 2026-08-19](../v0.3.x-sequencing.md#amendment-2026-08-19--v0315--v0316-attribution-and-audience-before-the-v040-train): every release
+> in that doc is gated on a live MT and this failure voids one, so it is
+> fixed before the v0.4.0 train multiplies dispatch targets. Cuttable if the
+> bounded "re-register on dispatch failure + heartbeat" shape grows into a
+> registry-persistence redesign. Landing it takes
+> [ISSUE-0126](ISSUE-0126-mt-orchestrator-restart-registry-note-missing.md)
+> option 1 — delete the one warning PR #823 wrote into
+> [MT-MEMORY-MULTIUSER-001](../manual-tests/MT-MEMORY-MULTIUSER-001.md) and
+> confirm the eight unguarded restart steps are safe as written.

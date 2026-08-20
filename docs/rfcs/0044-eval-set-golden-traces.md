@@ -6,7 +6,7 @@ type: process
 status: implementing
 author: Maksim Khomutov
 created: 2026-05-20
-target: v0.3.11 (Phase 1 format + replay) + v0.4.0+ (typed-event goldens)
+target: v0.3.11 (Phase 1 format + replay) + v0.3.16 (Phase 2 CI gate, cuttable) + v0.4.0+ (typed-event goldens, gated on RFC 0041 Phase 1)
 depends_on:
   - RFC-0008
   - RFC-0020
