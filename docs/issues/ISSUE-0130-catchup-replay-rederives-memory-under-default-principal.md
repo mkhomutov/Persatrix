@@ -233,3 +233,13 @@ interaction/tenant train alongside `ISSUE-0123` (R-1).
 - [MT-MEMORY-MULTIUSER-001](../manual-tests/MT-MEMORY-MULTIUSER-001.md) —
   does not currently cover this; the MT's restarts *cause* it, and no leg
   reads the `local` partition to check for duplicated content.
+
+## Notes
+
+> 2026-08-19 — shape **(b)** **slotted v0.3.15** by the [sequencing Amendment 2026-08-19](../v0.3.x-sequencing.md#amendment-2026-08-19--v0315--v0316-attribution-and-audience-before-the-v040-train). It carries the
+> channel-store migration on its own: `principal_id` on `messages` is
+> `internal/channels/sqlite_schema.go` v11 → v12 (Go). The sibling speaker
+> axis ([ISSUE-0131](ISSUE-0131-derived-memory-has-no-speaker-attribution.md))
+> does **not** ride it — that lands in the Python persona-memory store
+> (migration 17 → 18), a disjoint database. The two are bound by the #822
+> Phase 0 **record-shape** decision, not by a shared schema.

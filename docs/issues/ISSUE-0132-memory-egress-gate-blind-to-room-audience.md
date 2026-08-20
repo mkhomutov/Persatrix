@@ -1,6 +1,6 @@
 ---
 id: ISSUE-0132
-summary: "The RFC 0037 §D memory-injection egress gate decides admissibility from the acting CHANNEL's classification alone (`agents/persona_runtime/injection_gate.py` ranks each entry's `protection_level` against the acting level); who is actually in the room at injection time is not an input. Since RFC 0049 Phase 1 made facts cross-room by default and the §A stamping default is `internal` for both a DM and an ordinary group channel, a fact the persona learned from Alice in a DM is admissible in any equally-classified room — including one where Bob is present. The control that exists is real but coarse and manual: an operator can classify Alice's DM `restricted`/`secret`, which withholds it everywhere lower. There is no per-person dimension, so the persona cannot distinguish 'this room' from 'this room WITH BOB IN IT', and the natural human→persona→human expectation — the persona does not repeat what I told it in front of someone I did not tell — has no mechanism behind it."
+summary: "The RFC 0037 §D memory-injection egress gate decides admissibility from the acting CHANNEL's classification alone (`agents/persona_runtime/injection_gate.py` ranks each entry's `protection_level` against the acting level); who is actually in the room at injection time is not an input. Since RFC 0049 Phase 1 made facts cross-room by default and the §A stamping default is `internal` for both a DM and an ordinary group channel, a fact the persona learned from Alice in a DM is admissible in any equally-classified room — including one where Bob is present. The control that exists is coarser than it looks: there is no per-DM classification lever, only the fleet-wide creation-time `dm_default_classification` — raising it raises EVERY DM the fleet opens, an already-open DM keeps its creation-time stamp, and `SetChannelClassification` reclassifies config-declared GROUP channels only (its second caller, the audited reclassification surface, is unbuilt). There is no per-person dimension, so the persona cannot distinguish 'this room' from 'this room WITH BOB IN IT', and the natural human→persona→human expectation — the persona does not repeat what I told it in front of someone I did not tell — has no mechanism behind it."
 status: open
 severity: medium
 area: memory
@@ -35,22 +35,36 @@ since RFC 0049 Phase 1 facts are cross-room by design — that is the
 shipped v0.3.12 headline, "a project fact taught in a DM is known in the
 standup".
 
-The coarse control is available and works: classify the DM `restricted`
-and its content is withheld from every `internal` room. What it cannot
-express is an audience — the same room is more or less safe depending on
-who is in it, and the ledger that could answer this already exists
-(RFC 0035 `membership_intervals`).
+The control that does exist is coarser than "classify Alice's DM". There
+is **no per-DM classification lever at all**. DMs open on demand as
+`dm:<a>:<b>` with no per-channel config block, so their only declaration
+point is `dm_default_classification` (`schemas/channel.schema.json`) —
+which is **fleet-wide** and stamped **at creation**. Raising it raises
+every DM in the fleet, and only for DMs opened afterwards: an existing
+DM keeps its creation-time stamp. `SetChannelClassification`
+(`internal/channels/store.go`) has, in its own words, "two callers by
+design" — the startup reconcile's adoption step for config-declared
+**group** channels (`router_reconcile.go`), and "the future audited
+reclassification surface", which is not built. So an already-open DM
+with Alice cannot be reclassified through any shipped surface.
+
+What no control here can express is an audience — the same room is more
+or less safe depending on who is in it, and the ledger that could answer
+this already exists (RFC 0035 `membership_intervals`).
 
 ## Impact
 
 - **The human→persona→human case has no boundary.** Two people share a
   persona; A discloses something in a DM; the persona volunteers it in a
   room A never invited B into. Nothing in the gate objects.
-- **The workaround costs the feature.** The only way to prevent it today
-  is to raise the DM's classification, which withholds the content from
-  every lower room — including rooms where it would have been welcome.
-  Confidentiality and usefulness trade off at channel granularity when
-  the real distinction is per-person.
+- **There is no workaround at DM granularity, and the one that exists
+  costs more than the feature.** For a DM already open with Alice,
+  nothing shipped can reclassify it. For future DMs the only lever is
+  the fleet-wide `dm_default_classification`, which raises *every* DM
+  the fleet opens and withholds their content from every lower room —
+  including the many rooms where it would have been welcome.
+  Confidentiality and usefulness therefore trade off at **fleet**
+  granularity when the real distinction is per-person.
 - **It compounds with ISSUE-0131.** Without a speaker axis the persona
   cannot even ask "did the person in front of me tell me this?", so the
   audience check has nothing to check against.
@@ -62,9 +76,20 @@ who is in it, and the ledger that could answer this already exists
 
 An RFC 0037 amendment adding audience as an additional AND-condition on
 the existing §D decision, not a new lattice: resolve the acting channel's
-current membership (RFC 0035 interval ledger), and withhold an entry
-whose provenance is a room/person disjoint from that audience unless the
-entry is marked shareable. Shadow-first with a measured admit/withhold
+membership, and withhold an entry whose provenance is a room/person
+disjoint from that audience unless the entry is marked shareable.
+
+Membership resolution should reuse what the turn already does, not open
+a second path. `agents/persona_runtime/channel_roster.py`
+(`HttpChannelRosterFetcher`) already fetches channel membership from
+`GET /api/v1/channels/{id}` and is wired into the *same* injection path
+the §D gate runs on — `memory_context.py` calls `inject_channel_roster`
+inside the budgeted context build. Building a separate fetch would add a
+second per-turn round trip alongside it, the N+1 that module was written
+to avoid. (Whether the audience should be that live roster or the
+RFC 0035 `membership_intervals` ledger's assertion-time snapshot is the
+open question below, and it is a question about *which* membership, not
+about how to reach it.) Shadow-first with a measured admit/withhold
 delta, the pattern RFC 0049 Phase 1 already used, so the quality cost of
 the tighter gate is observed before it is enforced.
 

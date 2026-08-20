@@ -80,3 +80,13 @@ regression: the behaviour predates the release and no v0.3.13 change touched
 it. [ISSUE-0121](ISSUE-0121-crossroom-person-identity-legs-never-run-live.md)
 closed on the recorded legs 1b/2b results; this is the observability residual
 that running them surfaced.
+
+## Notes
+
+> 2026-08-19 — **slotted v0.3.16** by the [sequencing Amendment 2026-08-19](../v0.3.x-sequencing.md#amendment-2026-08-19--v0315--v0316-attribution-and-audience-before-the-v040-train), paired with
+> [ISSUE-0108](ISSUE-0108-reasoning-reason-note-no-operator-egress.md) as the
+> operator-observability half of that release: the v0.3.16 audience gate
+> ([ISSUE-0132](ISSUE-0132-memory-egress-gate-blind-to-room-audience.md)) adds
+> a new withhold reason, and an operator cannot read why the persona decided
+> what it decided while the identity tier still charges the RFC 0017 budget
+> without recording an admission.
