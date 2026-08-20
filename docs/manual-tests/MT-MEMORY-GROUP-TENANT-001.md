@@ -191,7 +191,9 @@ SELECT principal_id, subject, predicate, object FROM facts ORDER BY asserted_at 
 | | Expected |
 |---|---|
 | **v0.3.14** | One record per persona per room, `principal_id='local'`, whose summary narrates **Alice's** disclosure — her content written into the shared tenant, and simultaneously **out of her own reach** (strict equality: `alice-person` cannot read `local`). Facts about Mira carry `principal_id='local'`. |
-| **after R-1+R-2** | Alice's turns form their **own** record under `alice-person`; agent-origin turns that are not causally hers form a separate `local` record. No record mixes the two. |
+| **after R-1+R-2** | Alice's turns form their **own** record under `alice-person`. Agent-origin turns that are not causally hers form separate `local` records — **one per agent speaker**, not one shared agent record (Phase 0b: the tracker keys `(principal, speaker, scope)`). No record mixes two speakers or two principals. |
+
+- [ ] With three personas in the room, Leg 4 yields **three** `local` `turn_count > 1` rows, not one. A single merged `local` row means the speaker dimension of the key did not land — the exact defect `ISSUE-0131` names, and the one plain Option A would have shipped.
 
 - [ ] The summary text and the `principal_id` of every `turn_count > 1` row are pasted into the execution report. *The pairing is the finding — either value alone proves nothing.*
 
@@ -237,12 +239,13 @@ rm -f data/accounts.db
 - [ ] On the **v0.3.14** run, record the outcome either way: a reference here is R-1/R-2 reaching a *second human*, and is the strongest single piece of evidence the report can carry.
 - [ ] `SELECT principal_id, COUNT(*) FROM episodes GROUP BY principal_id;` shows `alice-person`, `bob-person` and `local` coexisting — isolation is a recall filter, not a delete.
 
-### Leg 8 — `auth.mode: disabled` is byte-identical
+### Leg 8 — `auth.mode: disabled` — unchanged on the principal axis, **not** on the speaker axis
 
 Set `auth.mode: disabled`, restart, repeat Leg 1 with no credential.
 
 - [ ] Every new row is `principal_id='local'`.
 - [ ] No `principal.id` span attribute on any dispatch — the header is absent, not empty.
+- [ ] **Record count is NOT unchanged from v0.3.14.** Phase 0b splits on speaker regardless of auth mode, so a room of N personas now closes N records where v0.3.14 closed one. This leg was originally titled "byte-identical"; that claim held for Option A alone and does not survive Phase 0b. The two checks above still hold — the *principal* axis is genuinely unchanged under `disabled` — but the row count is not, and this is the deployment where the reserve multiplier bites hardest, since every speaker shares the one `local` principal.
 
 ---
 
@@ -253,11 +256,11 @@ Set `auth.mode: disabled`, restart, repeat Leg 1 with no credential.
 | 1 | Emission reaches the room | `alice-person` rows present | same |
 | 2 | R-2 — relayed write | ≥1 `local` row in the causal chain | zero |
 | 3 | Close trigger is persona-origin | `end_votes` / `synthesis_reply` | same |
-| 4 | R-1 — derived write | aggregate under `local`, narrates Alice | per-principal records |
+| 4 | R-1 — derived write | aggregate under `local`, narrates Alice | per-principal **and per-speaker** records |
 | 5 | Travel | Alice's content spoken in `roundtable` | no reference |
 | 6 | Asymmetry | aggregate under `alice-person`, narrates personas | same as Leg 4 |
 | 7 | Second human | reference = the leak, recorded | no reference |
-| 8 | `disabled` no-delta | `local`, no header | same |
+| 8 | `disabled` | `local`, no header, one record | `local`, no header, **N records** (speaker split is auth-independent) |
 
 ---
 

@@ -1,9 +1,9 @@
 # ISSUE-0082 — PR Implementation Plan (Residuals R-1 / R-2 — the derived and relayed tenant writes)
 
-**Issues**: [ISSUE-0123](ISSUE-0123-per-speaker-interaction-scope.md) (R-1) · [ISSUE-0124](ISSUE-0124-orchestrator-hop-drops-tenant-on-agent-cascade.md) (R-2)
-**Status**: 📋 Draft — Phase 0 resolved; **opens after the v0.3.14 tag**, as a workstream inside the v0.4.0 master plan
+**Issues**: [ISSUE-0123](ISSUE-0123-per-speaker-interaction-scope.md) (R-1) · [ISSUE-0124](ISSUE-0124-orchestrator-hop-drops-tenant-on-agent-cascade.md) (R-2) · `ISSUE-0131` (the speaker axis — file lands with [#839](https://github.com/mkhomutov/Persatrix/pull/839), referenced by id here to keep the doc-links gate green)
+**Status**: 📋 Draft — Phase 0 resolved (principal axis); **opens after the v0.3.14 tag**, as a workstream inside the **v0.3.15** *Who said what* milestone
 **Created**: 2026-08-07
-**Branch prefix**: `feature/v040-issue0123-` / `feature/v040-issue0124-` (per residual)
+**Branch prefix**: `feature/v0315-issue0123-` / `feature/v0315-issue0124-` (per residual)
 **Target**: `main`
 **Merge strategy**: Squash merge per [BRANCHING.md](../BRANCHING.md)
 **Spawned from**: [ISSUE-0082](ISSUE-0082-orchestrator-per-request-session-principal-emission.md) Part 2 review ([#820](https://github.com/mkhomutov/Persatrix/pull/820))
@@ -17,6 +17,7 @@ v0.3.14 made the caller's verified principal a per-request axis: the orchestrato
 
 * **R-1 — the *derived* write.** The RFC 0020 interaction scope is the ROOM, not the speaker, so a group channel accumulates every speaker's turns into one `InteractionTracker` record. At close, that record is summarised and RFC 0026 facts are extracted from it under whichever principal closed the interaction.
 * **R-2 — the *relayed* write.** A persona's reply re-enters through `HTTPChannelPublisher` as a fresh unauthenticated REST publish, so every fanout below it loses the tenant even inside an authenticated person's interaction. **Confirmed live 2026-08-07**: 9 of 15 `channel.dispatch` spans in one interaction descending from an authenticated publish carried no `principal.id`. Note it is invisible in storage — R-1 re-attributes the relayed turns at close — so the wire is the only instrument ([ISSUE-0124](ISSUE-0124-orchestrator-hop-drops-tenant-on-agent-cascade.md)).
+* **The speaker axis (`ISSUE-0131`).** The two above are *tenant* problems, and the principal is a tenant identifier: only authenticated humans have one. A room full of personas resolves to the single shared `local` principal, so partitioning by principal alone leaves every agent speaker in one bucket — and the Phase 0 evidence below is exactly that case. Folded into this workstream at the v0.3.15 re-point (§Phase 0b), because it shares the record-shape decision rather than because it shares a migration: `principal_id` on `messages` is a Go channel-store change that belongs to ISSUE-0130 shape (b), while the speaker axis lands in the Python persona-memory store.
 
 **This plan ships both.** It adds no new transport, no new storage column, and no new binding mechanism — `principal_id` has been in the storage key since migration v11 and the emission rail shipped in v0.3.14. What it adds is *attribution*: which principal a derived or relayed write belongs to.
 
@@ -39,62 +40,32 @@ Together the relayed turn carries the causal principal *and* lands in that princ
 
 ---
 
-## Phase 0 — the design gate ✅ RESOLVED 2026-08-07: **Option A**
+## Phase 0 — the design gate ✅ RESOLVED (both axes)
 
-> **Ran, and it decided.** The gate below is kept as the record of *how* the
-> call was made. The measurement came back positive on **both** halves of the
-> decision rule, so Option B is out and PRs 3–4 stand as written.
->
-> Live on Anthropic, `group:planning`, three personas + one human, real close
-> (`close_reason: idle_gap`). The `turn_count=2` summary on both iron-fox and
-> nova-sparrow reads: *"Alice requested coverage … **due to her daughter Mira's
-> surgery**. **Ember-owl proposed** three options: delegating to Iron Fox
-> (strong on production reliability) …"* — one aggregate, one principal, a
-> named human's personal disclosure plus an attributed second speaker's
-> contribution. Not generic; the episode is a real leak vector.
->
-> The facts tier is worse than ISSUE-0123 assumed: all three personas
-> extracted `alice / has_child_named / Mira` (cross-room by default, RFC 0049
-> Phase 1), and nova-sparrow extracted `iron fox / self.has_attribute / strong
-> on production reliability` — **which iron-fox never said**; Ember-owl did.
-> A single close writes third-party attributes derived from a second party's
-> turn. Per-principal extraction over a shared record would not bound that;
-> splitting the record does.
->
-> **Caveat**: the run had `auth.mode: disabled`, so every row reads
-> `principal_id='local'` and the principal-partitioning half is unevidenced.
-> It does not need to be for this call — the tracker keys on the room scope
-> regardless of principal, so the content aggregation measured here is
-> auth-independent. The principal half stays MT Leg 4 under `enabled`, a
-> release-prep deliverable.
+The gate ran and decided. Its full evidence record — the live run, the option
+tables, the decision rule, and the cost each answer carries — lives in
+[ISSUE-0082 residuals — the Phase 0 design gate](ISSUE-0082-residuals-phase0-gate.md).
 
-**R-1's shape was deliberately NOT locked at plan authoring.** [ISSUE-0123](ISSUE-0123-per-speaker-interaction-scope.md) proposes per-speaker records; that was one of three answers, and the choice turned on evidence nobody had.
-
-**Action**: run [MT-MEMORY-GROUP-TENANT-001](../manual-tests/MT-MEMORY-GROUP-TENANT-001.md) Legs 1–4 and read *where the leak concentrates*.
-
-| Option | Shape | Cost | Residual |
+| Axis | Question | Answer | Date |
 |---|---|---|---|
-| **A — per-speaker records** | Tracker keyed `(principal, scope)`; N records, N summaries, N extractions | `1 + (personas × principals)` close summaries | Persona's memory of a group discussion becomes N partial views |
-| **B — room record, per-principal extraction** | One room `Interaction` and one summary; RFC 0026 extraction runs once per principal over that principal's turn subset | One summary + N extractions | The episode summary still narrates everyone under one principal |
-| **C — B + episode to `'local'`** | As B, with the group episode written to the shared tenant | Same as B | A person's own group-room episode summaries are unreachable from their authenticated turns |
+| Principal | one record per room, or per tenant? | **Option A** — tracker keyed `(principal, scope)` | 2026-08-07 |
+| Speaker (`ISSUE-0131`) | …and per speaker within it? | **key-side** — `(principal, speaker, scope)` | 2026-08-21 |
 
-**Decision rule.** Read the Leg 4 `turn_count > 1` episode summary alongside the extracted facts:
-
-* If the **summary text** materially carries another speaker's disclosure — not just "the team discussed scheduling" — the episode is a real leak vector and **Option A** is required.
-* If the leak is concentrated in `facts` while the summary stays generic, **Option B** closes the actual cross-room vector (facts are cross-room by default per [RFC 0049](../rfcs/0049-memory-consolidation-gradient.md) Phase 1) at a fraction of the cost, and the episode residual is stated rather than paid for.
-* **Option C** only if B's episode residual is judged unacceptable *and* the recall loss is judged cheaper than A's cost.
-
-Do **not** attribute facts to speakers by asking the model. Per-turn membership is structural; LLM-elected attribution is not a boundary, and this repo does not ship model-elected boundaries.
-
-**Output**: a dated scope-lock note appended to ISSUE-0123, naming the option and the evidence. PRs 3–4 below are written for Option A and are re-scoped if the gate selects B or C.
+Net: the tracker key is `(principal, speaker, scope)`. PRs 3–4 below are
+written for that answer. Two consequences carried forward — the close reserve
+becomes `1 + (personas × principals × speakers)` (PR 4 sizes it), and a
+persona's close-derived memory of a group discussion fragments per speaker
+per tenant (PR 4's release note states it).
 
 ---
 
 ## Dependency Graph
 
 ```
-Phase 0 gate (MT Legs 1–4) ──────────────┐
-                                          │ (locks R-1 shape only)
+Phase 0  gate (MT Legs 1–4) ─────────────┐
+   └─→ Phase 0b (same evidence,           │ (locks the record shape:
+        speaker axis / ISSUE-0131)        │  principal AND speaker)
+                                          │
 PR 1 (R-2 store, dormant)                 │
    └─→ PR 2 (R-2 re-stamp + gate)         │
           └─→ PR 3 (R-1 scope key) ←──────┘
@@ -102,13 +73,13 @@ PR 1 (R-2 store, dormant)                 │
                         └─→ PR 5 (live MT + closeout)
 ```
 
-PR 1 is unblocked by the gate and can start immediately after the tag. PR 3 must not start before the gate resolves.
+PR 1 is unblocked by the gate and can start immediately after the tag. PR 3 must not start before the gate resolves — both halves of it: Phase 0 fixes the principal dimension, Phase 0b the speaker dimension, and PR 3 installs the key that carries both.
 
 ---
 
 ## PR Sequence
 
-### PR 1: `feature/v040-issue0124-attribution-store` — Causal attribution, dormant
+### PR 1: `feature/v0315-issue0124-attribution-store` — Causal attribution, dormant
 
 #### Scope
 
@@ -132,7 +103,7 @@ Two principals → ambiguous; same principal → refreshed, not ambiguous; TTL e
 
 ---
 
-### PR 2: `feature/v040-issue0124-restamp` — The re-stamp, and the gate
+### PR 2: `feature/v0315-issue0124-restamp` — The re-stamp, and the gate
 
 #### Scope
 
@@ -156,32 +127,36 @@ Integration: an authenticated publish → persona reply → the second-hop perso
 
 ---
 
-### PR 3: `feature/v040-issue0123-scope-key` — Per-speaker scope (Option A)
+### PR 3: `feature/v0315-issue0123-scope-key` — Per-speaker scope (Option A + Phase 0b)
 
-> Re-scoped if Phase 0 selects Option B or C.
+> Written for Phase 0's Option A **and** Phase 0b's key-side speaker answer. Re-scoped only if either gate is re-opened.
 
 #### Scope
 
-RFC 0020 §G amendment (the per-channel scoping table gains the principal dimension) + `Interaction.principal_id` frozen at open + `InteractionTracker._open` keyed `(principal, scope)` + room-wide close fan.
+RFC 0020 §G amendment (the per-channel scoping table gains a principal dimension **and** a speaker dimension) + `Interaction.principal_id` and `Interaction.speaker_id` frozen at open + `InteractionTracker._open` keyed `(principal, speaker, scope)` + room-wide close fan + the persona-memory migration that adds the column.
 
 #### Key implementation details
 
 * `principal_id: str = DEFAULT_PRINCIPAL_ID` on `Interaction`, resolved from the ambient scope at open, never re-read — the footing `session_id` already sits on.
-* **Tuple key, not an encoded scope string.** `scope` is persisted to `episodes.scope`, prefix-matched by `is_group_scope` / `is_thread_scope`, and is the `idx_episodes_scope` surface; principal has its own column.
-* **Room-wide close is inseparable from the keying** and must land in this PR: a structural close, an end-vote quorum or the close-notification turn is a *room* event, and without the fan a room close closes one principal's record and leaks the rest open until idle.
+* `speaker_id: str` on `Interaction`, resolved from the triggering event's `sender_id` at open and frozen the same way. This is the `ISSUE-0131` column, and it is a **projection of the key** — recall renders attribution off it, so a fact can distinguish testimony from hearsay without any model-elected attribution.
+* **Persona-memory migration 17 → 18** carries `interactions.speaker_id` (and the derived-row stamp). This is the Python store, distinct from the Go channel-store change `principal_id`-on-`messages` (ISSUE-0130 shape (b)) — two stores, two migrations, sequenced independently.
+* **Tuple key, not an encoded scope string.** `scope` is persisted to `episodes.scope`, prefix-matched by `is_group_scope` / `is_thread_scope`, and is the `idx_episodes_scope` surface; principal and speaker each have their own column.
+* **DM scope already answers this for one topology.** `scope_for_channel_event` routes a DM to `scope_for_dm(local_agent_id, sender_id)`, so a DM is keyed per-speaker today. The change makes group and thread scopes consistent with the DM case rather than introducing a new idea.
+* **Room-wide close is inseparable from the keying** and must land in this PR: a structural close, an end-vote quorum or the close-notification turn is a *room* event, and without the fan a room close closes one `(principal, speaker)` record and leaks the rest open until idle.
 
 #### Tests
 
-One tracker, two principals, one room scope → two records. A room-wide close closes both. The close-notification turn lands as the final turn of each.
+One tracker, two principals, one room scope → two records. One tracker, one `local` principal, **three agent speakers**, one room scope → three records (the Phase 0b case: this is the test that fails under plain Option A). A room-wide close closes all of them. The close-notification turn lands as the final turn of each.
 
 #### PR checklist
 
-- [ ] RFC 0020 §G amendment merged in the same PR
+- [ ] RFC 0020 §G amendment merged in the same PR, covering both dimensions
 - [ ] `open_scopes()` and every "one scope, one record" caller audited
+- [ ] Migration 17 → 18 lands before its consumer, and does not touch the channel store
 
 ---
 
-### PR 4: `feature/v040-issue0123-close-path` — The close binding and its consequences
+### PR 4: `feature/v0315-issue0123-close-path` — The close binding and its consequences
 
 #### Scope
 
@@ -191,21 +166,21 @@ Bind `principal_scope(interaction.principal_id)` around the close pipeline (`sum
 
 * **This is the part that holds on request-less paths.** `idle_check` runs from the janitor with no scope active; the close-notification path runs under the closing turn's principal. Both must write under the record's own frozen value.
 * **The asymmetry is retired, not resolved.** Once the record names its principal, the trigger's principal no longer selects a tenant, so the four close paths in `internal/channels/synthesis_close.go` need not agree. Audit whether `pendingSynthesisClose.principal` becomes dead and drop it if so.
-* **Reserve re-size**: the RFC 0052 PR 4a `1 + N` close-path reserve assumes one summary per persona. Under-sizing turns extra summaries into `budget_denied` → `SUMMARY_UNAVAILABLE_TEXT`, and the janitor never retries a committed unavailable row — a *silent* quality regression. File the calibration as its own issue in the [ISSUE-0109](ISSUE-0109-rfc0052-autonomous-defaults-calibration.md) idiom rather than guessing a constant.
+* **Reserve re-size**: the RFC 0052 PR 4a `1 + N` close-path reserve assumes one summary per persona. With Phase 0b the multiplier is `1 + (personas × principals × speakers)` — the largest single cost in this workstream. Under-sizing turns extra summaries into a denied lease → `SUMMARY_UNAVAILABLE_TEXT`, and the janitor never retries a committed unavailable row — a *silent* quality regression. File the calibration as its own issue in the [ISSUE-0109](ISSUE-0109-rfc0052-autonomous-defaults-calibration.md) idiom rather than guessing a constant.
 * `agent.interactions.closed.by_<reason>` now fires once per record: a metric-shape change dashboards must be told about.
 
 #### PR checklist
 
 - [ ] Metric-shape change called out in the changelog
-- [ ] Release note states the coherence trade: a persona's close-derived memory of a group discussion is per-person; room continuity is unaffected (transcript and RFC 0036 verbatim history are not principal-scoped)
+- [ ] Release note states the coherence trade: a persona's close-derived memory of a group discussion is per-person **and per-speaker**; room continuity is unaffected (transcript and RFC 0036 verbatim history are scoped by neither)
 
 ---
 
-### PR 5: `feature/v040-issue0082-residuals-close` — Live verification + closeout
+### PR 5: `feature/v0315-issue0082-residuals-close` — Live verification + closeout
 
 #### Scope
 
-Run [MT-MEMORY-GROUP-TENANT-001](../manual-tests/MT-MEMORY-GROUP-TENANT-001.md) end to end on the post-fix column, execution report, issue closures (ISSUE-0123, ISSUE-0124, and ISSUE-0082 itself), and the MT-MEMORY-MULTIUSER-001 Edge Case 2 wording widened back to the now-true claim.
+Run [MT-MEMORY-GROUP-TENANT-001](../manual-tests/MT-MEMORY-GROUP-TENANT-001.md) end to end on the post-fix column, execution report, issue closures (ISSUE-0123, ISSUE-0124, `ISSUE-0131`, and ISSUE-0082 itself), and the MT-MEMORY-MULTIUSER-001 Edge Case 2 wording widened back to the now-true claim.
 
 #### PR checklist
 
@@ -219,7 +194,8 @@ Run [MT-MEMORY-GROUP-TENANT-001](../manual-tests/MT-MEMORY-GROUP-TENANT-001.md) 
 
 | Risk | Mitigation |
 |------|------------|
-| Phase 0 selects Option A and the cost multiplier bites a large roster. | The reserve re-size is in PR 4's scope, not a follow-up, and its calibration is a tracked issue. A room with one authenticated speaker is unchanged — the multiplier is in principals, not personas. |
+| The Phase 0 + 0b cost multiplier bites a large roster. | The reserve re-size is in PR 4's scope, not a follow-up, and its calibration is a tracked issue. **Phase 0b makes this materially worse than the principal axis alone**: the multiplier is now `personas × principals × speakers`, and an all-agent room — one `local` principal, N speakers — multiplies where plain Option A did not. A one-human DM is still unchanged. |
+| Phase 0b is read as re-opening a resolved gate. | It resolves a second axis on the *same* 2026-08-07 evidence, using the *same* decision rule, and does not disturb Option A. What changed is that `ISSUE-0131` named a dimension the original three options did not enumerate — the gate's rule always implied it, since its decisive leak was agent-to-agent. |
 | R-2's attribution mis-fires under load and stamps the wrong tenant. | Every ambiguity and every expiry fails closed to `'local'` — today's behaviour. A wrong attribution requires two dispatches under the *same* principal, which is not ambiguous because it is not wrong. |
 | The re-stamp is read as "agents can now claim identities". | It is server-held state keyed on facts the orchestrator knows; nothing is accepted from the request. Stated in the PR body and pinned by the only-one-re-stamp-site test. |
 | R-1 lands without R-2 (or vice versa) because one slips. | They are one release, not one PR. If one slips, **both** hold — the release note claim is unsafe with either half missing. |
@@ -232,11 +208,11 @@ Run [MT-MEMORY-GROUP-TENANT-001](../manual-tests/MT-MEMORY-GROUP-TENANT-001.md) 
 | # | Title | Branch | Status | GitHub PR | Merged |
 |---|-------|--------|--------|-----------|--------|
 | 0 | Design gate — MT Legs 1–4, lock R-1's shape | — | ✅ Resolved 2026-08-07 → **Option A** | — | — |
-| 1 | R-2 causal attribution store, dormant | `feature/v040-issue0124-attribution-store` | ⬜ Not started | — | — |
-| 2 | R-2 re-stamp + end-to-end gate | `feature/v040-issue0124-restamp` | ⬜ Not started | — | — |
-| 3 | R-1 per-speaker scope + RFC 0020 §G amendment | `feature/v040-issue0123-scope-key` | ⬜ Not started | — | — |
-| 4 | R-1 close binding, reserve re-size, asymmetry cleanup | `feature/v040-issue0123-close-path` | ⬜ Not started | — | — |
-| 5 | Live MT + closeout | `feature/v040-issue0082-residuals-close` | ⬜ Not started | — | — |
+| 1 | R-2 causal attribution store, dormant | `feature/v0315-issue0124-attribution-store` | ⬜ Not started | — | — |
+| 2 | R-2 re-stamp + end-to-end gate | `feature/v0315-issue0124-restamp` | ⬜ Not started | — | — |
+| 3 | R-1 + `ISSUE-0131` scope key `(principal, speaker, scope)` + RFC 0020 §G amendment | `feature/v0315-issue0123-scope-key` | ⬜ Not started | — | — |
+| 4 | R-1 close binding, reserve re-size (now × speakers), asymmetry cleanup | `feature/v0315-issue0123-close-path` | ⬜ Not started | — | — |
+| 5 | Live MT + closeout | `feature/v0315-issue0082-residuals-close` | ⬜ Not started | — | — |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ⏭ Deferred
 
@@ -245,6 +221,7 @@ Run [MT-MEMORY-GROUP-TENANT-001](../manual-tests/MT-MEMORY-GROUP-TENANT-001.md) 
 ## Related Documentation
 
 - [ISSUE-0082](ISSUE-0082-orchestrator-per-request-session-principal-emission.md) — the parent; its Part 2 note states both residuals.
+- [ISSUE-0082 residuals — the Phase 0 design gate](ISSUE-0082-residuals-phase0-gate.md) — the evidence record for the record-shape decision, both axes. Split out of this plan on 2026-08-21 when the `ISSUE-0131` fold-in pushed the combined doc past the 3 000-word cap.
 - [ISSUE-0082 Part 1 PR plan](ISSUE-0082-part1-session-emission-pr-plan.md) — the session axis, the shape this plan mirrors.
 - [RFC 0020 §G](../rfcs/0020-interaction-lifecycle.md#g-per-channel-scoping) · [RFC 0049](../rfcs/0049-memory-consolidation-gradient.md) Phase 1 · [RFC 0011](../rfcs/0011-channels-bridges.md) · [RFC 0039 §F](../rfcs/0039-user-accounts-authentication.md)
 - [MT-MEMORY-GROUP-TENANT-001](../manual-tests/MT-MEMORY-GROUP-TENANT-001.md) — the gate; [MT-MEMORY-MULTIUSER-001](../manual-tests/MT-MEMORY-MULTIUSER-001.md) — the per-turn boundary it bounds.

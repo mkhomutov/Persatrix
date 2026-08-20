@@ -211,3 +211,12 @@ in every room. Together the relayed turn carries the causal principal
 > never reach `Dispatch` and the arc shows zero tenant-less hops; and the
 > collector's tail sampling is **1% probabilistic**, so the dispatch
 > spans are dropped unless it is raised for the measurement.
+
+> 2026-08-21 — **re-slotted v0.4.0 → v0.3.15** by the
+> sequencing Amendment 2026-08-19 ([v0.3.x-sequencing.md](../v0.3.x-sequencing.md), landing with [#839](https://github.com/mkhomutov/Persatrix/pull/839));
+> branch prefixes move `v040-` → `v0315-`. R-2 still ships first in the
+> workstream — it is self-contained Go with no schema, and it removes the
+> `local` pollution that R-1's keying would otherwise systematize. Unchanged
+> by the `ISSUE-0131` fold-in: the speaker axis is a persona-memory record
+> shape, while this issue is a wire-attribution fix, and the two meet only at
+> the close.

@@ -162,7 +162,7 @@ every agent-origin and autonomous turn in every room.
 [ISSUE-0124](ISSUE-0124-orchestrator-hop-drops-tenant-on-agent-cascade.md)
 (R-2) is what gives those turns the causal principal so they join the
 right record. R-1 alone narrows the leak; R-2 alone leaves the
-close-time aggregate. Planned as one v0.4.0 workstream they compose into
+close-time aggregate. Planned as one v0.3.15 workstream they compose into
 the correct shape.
 
 ## Notes
@@ -222,3 +222,16 @@ the correct shape.
 > gate measured is auth-independent. The principal half is Leg 4 of the
 > MT under `enabled`, and stays a v0.4.0 release-prep deliverable.
 > Evidence transcript + per-persona dumps captured with the run.
+
+> 2026-08-21 — **re-slotted v0.4.0 → v0.3.15** and the record shape completed.
+> The sequencing Amendment 2026-08-19 ([v0.3.x-sequencing.md](../v0.3.x-sequencing.md), landing with [#839](https://github.com/mkhomutov/Persatrix/pull/839))
+> puts R-1 in **v0.3.15** *Who said what*; branch prefixes move `v040-` →
+> `v0315-`. More substantially, `ISSUE-0131` (the speaker axis) folded into
+> this workstream's gate as **Phase 0b**, resolved off the *same* 2026-08-07
+> evidence: the misattribution that decided Phase 0 — nova-sparrow writing
+> `iron fox / self.has_attribute / …` from **Ember-owl's** turn — is
+> agent-to-agent, and both agents share the `local` principal, so the
+> `(principal, scope)` key this issue proposed does **not** bound it. The key
+> is now `(principal, speaker, scope)`; see the
+> [Phase 0 gate record](ISSUE-0082-residuals-phase0-gate.md). The proposal in
+> this issue was right in direction and one dimension short.
