@@ -239,6 +239,56 @@ class TestInstallerTargetsSharedHooksDir:
             "installer wrote beside the worktree's .git file instead of the common dir"
         )
 
+    def test_unresolvable_hooks_dir_fails_cleanly(self, tmp_path: Path) -> None:
+        """No git means a clean exit 1, not a traceback.
+
+        The tempting fallback — ``REPO_ROOT / ".git" / "hooks"`` — is wrong in
+        precisely this situation: from a linked worktree ``.git`` is a file, so
+        creating ``hooks`` beneath it raises ``NotADirectoryError``. Resolving
+        to ``None`` and reporting it keeps the failure legible.
+        """
+        _, worktree = _init_repo_with_worktree(tmp_path)
+        empty_bin = tmp_path / "empty-bin"
+        empty_bin.mkdir()
+
+        proc = subprocess.run(
+            [sys.executable, str(worktree / "scripts" / "install_hooks.py"), "--force"],
+            cwd=worktree,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PATH": str(empty_bin)},
+        )
+        assert proc.returncode == 1, f"expected a clean failure, got:\n{proc.stdout}"
+        assert "Traceback" not in proc.stderr, f"crashed instead of reporting:\n{proc.stderr}"
+        assert "NotADirectoryError" not in proc.stderr
+        assert "could not resolve" in proc.stderr.lower()
+
+    def test_ignores_an_inherited_git_dir(self, tmp_path: Path) -> None:
+        """``GIT_DIR`` in the environment must not redirect the install.
+
+        git honours the variable over ``cwd``, and every process spawned from
+        inside a hook, ``git rebase -x`` or ``git bisect run`` inherits it — so
+        without sanitising, the installer writes into whichever repository git
+        was already operating on.
+        """
+        main, _ = _init_repo_with_worktree(tmp_path)
+        other = tmp_path / "other"
+        other.mkdir()
+        _git("init", "-q", cwd=other)
+
+        proc = subprocess.run(
+            [sys.executable, str(main / "scripts" / "install_hooks.py"), "--force"],
+            cwd=main,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "GIT_DIR": str(other / ".git")},
+        )
+        assert proc.returncode == 0, f"installer failed:\n{proc.stdout}\n{proc.stderr}"
+        assert (main / ".git" / "hooks" / "pre-commit").is_file()
+        assert not (other / ".git" / "hooks" / "pre-commit").exists(), (
+            "inherited GIT_DIR redirected the install into an unrelated repository"
+        )
+
     def test_honours_core_hooks_path(self, tmp_path: Path) -> None:
         """``core.hooksPath`` redirects hook lookup, so the installer must follow.
 
@@ -259,3 +309,54 @@ class TestInstallerTargetsSharedHooksDir:
         assert proc.returncode == 0, f"installer failed:\n{proc.stdout}\n{proc.stderr}"
         assert (custom / "pre-commit").is_file(), "installer ignored core.hooksPath"
         assert not (main / ".git" / "hooks" / "pre-commit").exists()
+
+
+@requires_git
+@requires_bash
+class TestHookToleratesBranchesWithoutTheCheckScript:
+    """The hook is shared across worktrees; the script it runs is not."""
+
+    def test_commit_succeeds_on_a_branch_without_pre_commit_py(self, tmp_path: Path) -> None:
+        """A branch with no ``scripts/pre_commit.py`` must still be committable.
+
+        The hook lives in the shared common dir and therefore runs for every
+        worktree, but it delegates to tracked content that varies per branch.
+        Without the guard the commit is rejected by a bare interpreter error
+        naming a file the author never expected to need.
+        """
+        main, _ = _init_repo_with_worktree(tmp_path)
+        default_branch = _git("rev-parse", "--abbrev-ref", "HEAD", cwd=main)
+
+        _git("checkout", "-q", "--orphan", "docs-only", cwd=main)
+        _git("rm", "-r", "-f", "-q", ".", cwd=main)
+        (main / "README.md").write_text("docs\n", encoding="utf-8")
+        _git("add", "-A", cwd=main)
+        _git("commit", "-qm", "docs-only branch", "--no-verify", cwd=main)
+        _git("checkout", "-q", default_branch, cwd=main)
+
+        docs_tree = tmp_path / "docs-wt"
+        _git("worktree", "add", "-q", str(docs_tree), "docs-only", cwd=main)
+        assert not (docs_tree / "scripts").exists()
+
+        hook = main / ".git" / "hooks" / "pre-commit"
+        hook.parent.mkdir(parents=True, exist_ok=True)
+        with hook.open("w", encoding="utf-8", newline="\n") as fh:
+            fh.write(install_hooks.HOOK_CONTENT)
+        hook.chmod(0o755)
+
+        env = {**os.environ, "PYTHON": sys.executable}
+        for var in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+            env.pop(var, None)
+
+        (docs_tree / "README.md").write_text("docs\nmore\n", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=docs_tree, check=True, env=env)
+        proc = subprocess.run(
+            ["git", "commit", "-m", "edit from the docs-only worktree"],
+            cwd=docs_tree,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        assert proc.returncode == 0, f"commit was rejected:\n{proc.stdout}\n{proc.stderr}"
+        assert "skipping checks" in proc.stderr
+        assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=docs_tree) == "docs-only"

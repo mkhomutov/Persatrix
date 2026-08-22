@@ -29,9 +29,23 @@ if str(REPO_ROOT) not in sys.path:
 
 from scripts.checks import ensure_utf8_streams  # noqa: E402
 
+# Variables through which git inherits *which repository* it is operating on.
+# They must not leak into the resolution below: git honours them over ``cwd``,
+# so an installer run from inside another hook, `git rebase -x`, or
+# `git bisect run` would otherwise resolve — and install into — whichever
+# repository git was already working on. Deliberately narrow: config- and
+# transport-level GIT_* variables are left alone, because `core.hooksPath` may
+# legitimately arrive through `GIT_CONFIG_GLOBAL`.
+_GIT_REPO_LOCATION_VARS = (
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_COMMON_DIR",
+    "GIT_INDEX_FILE",
+)
 
-def _hooks_dir() -> Path:
-    """Return the directory git actually reads hooks from.
+
+def _hooks_dir() -> Path | None:
+    """Return the directory git actually reads hooks from, or ``None``.
 
     Not ``REPO_ROOT / ".git" / "hooks"``: inside a linked worktree
     ``<worktree>/.git`` is a *file* (a gitdir pointer), so that form both
@@ -43,7 +57,15 @@ def _hooks_dir() -> Path:
     honours a ``core.hooksPath`` override. The path is relative to the repo
     root when git is run there, so relative results are anchored to
     :data:`REPO_ROOT`.
+
+    ``None`` means git could not answer — not installed, not a repository, or
+    refusing it (``detected dubious ownership`` is the common one). There is
+    deliberately no filesystem fallback: the obvious guess is wrong in exactly
+    the case this function exists for, since in a linked worktree
+    ``REPO_ROOT / ".git"`` is a *file* and creating ``hooks`` beneath it raises
+    ``NotADirectoryError``. Callers report the failure instead of guessing.
     """
+    env = {k: v for k, v in os.environ.items() if k not in _GIT_REPO_LOCATION_VARS}
     try:
         out = subprocess.run(
             ["git", "rev-parse", "--git-path", "hooks"],
@@ -51,16 +73,15 @@ def _hooks_dir() -> Path:
             capture_output=True,
             text=True,
             check=True,
+            env=env,
         ).stdout.strip()
     except (OSError, subprocess.SubprocessError):
-        return REPO_ROOT / ".git" / "hooks"
+        return None
     if not out:
-        return REPO_ROOT / ".git" / "hooks"
+        return None
     hooks = Path(out)
     return hooks if hooks.is_absolute() else REPO_ROOT / hooks
 
-
-HOOK_PATH = _hooks_dir() / "pre-commit"
 
 HOOK_CONTENT = """\
 #!/usr/bin/env bash
@@ -85,6 +106,16 @@ if [ -z "$REPO_ROOT" ]; then
 fi
 cd "$REPO_ROOT" || exit 1
 
+# The hook is shared across every worktree, but the script it delegates to is
+# tracked content and so varies per branch. A worktree checked out on a branch
+# that predates scripts/pre_commit.py (or an orphan/docs-only branch) has no
+# copy to run — skip rather than reject the commit with a bare interpreter
+# error naming a file the author never expected to need.
+if [ ! -f scripts/pre_commit.py ]; then
+    echo "pre-commit: no scripts/pre_commit.py on this branch — skipping checks." >&2
+    exit 0
+fi
+
 if [ -z "${PYTHON:-}" ]; then
     if command -v python3 >/dev/null 2>&1; then
         PYTHON=python3
@@ -106,18 +137,26 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--force", action="store_true", help="Overwrite an existing hook.")
     args = parser.parse_args(argv)
 
-    # A linked worktree's ``.git`` is a file, so test for the repository
-    # rather than for a ``.git`` *directory* — the installer is expected to
-    # run from any worktree, and hooks land in the shared common dir either
-    # way.
-    if not (REPO_ROOT / ".git").exists():
-        print("Error: not a git repository. Run this from the repo root.", file=sys.stderr)
+    # git's own answer is the repository check: it resolves the hooks
+    # directory from any worktree, main or linked, and a failure to resolve is
+    # exactly the not-a-repository case. A separate ``.git`` probe would be a
+    # second, weaker mechanism that disagrees with this one — it passes on a
+    # linked worktree's ``.git`` *file* and would send the writes below into a
+    # path git never reads.
+    hooks_dir = _hooks_dir()
+    if hooks_dir is None:
+        print(
+            "Error: could not resolve this repository's hooks directory. "
+            "Is git installed, and is this a git repository?",
+            file=sys.stderr,
+        )
         return 1
 
-    HOOK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    hook_path = hooks_dir / "pre-commit"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
 
-    if HOOK_PATH.exists() and not args.force:
-        print(f"Hook already exists at: {HOOK_PATH}")
+    if hook_path.exists() and not args.force:
+        print(f"Hook already exists at: {hook_path}")
         print("Use --force to overwrite.")
         return 1
 
@@ -125,14 +164,14 @@ def main(argv: list[str] | None = None) -> int:
     # hook under Git for Windows' bash). Path.open() rather than
     # Path.write_text(newline=...) so this installer runs under a 3.9 `python3`
     # too — the kwarg form is 3.10+.
-    with HOOK_PATH.open("w", encoding="utf-8", newline="\n") as fh:
+    with hook_path.open("w", encoding="utf-8", newline="\n") as fh:
         fh.write(HOOK_CONTENT)
 
     if os.name != "nt":
-        st = HOOK_PATH.stat()
-        HOOK_PATH.chmod(st.st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        st = hook_path.stat()
+        hook_path.chmod(st.st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
-    print(f"✓ Pre-commit hook installed at: {HOOK_PATH}")
+    print(f"✓ Pre-commit hook installed at: {hook_path}")
     return 0
 
 
