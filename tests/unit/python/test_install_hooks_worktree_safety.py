@@ -32,6 +32,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -92,6 +93,30 @@ def _init_repo_with_worktree(tmp_path: Path) -> tuple[Path, Path]:
     # unwritable and a path git never reads.
     assert (worktree / ".git").is_file()
     return main, worktree
+
+
+def _stale_hook_warning_in(repo: Path) -> str | None:
+    """Evaluate ``pre_commit._stale_hook_warning()`` inside ``repo``.
+
+    Out of process on purpose: both the warning and the hook path it compares
+    against are anchored to the *importing* tree's ``REPO_ROOT``, so asking
+    the question about a temp repo means asking from inside it.
+    """
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; sys.path.insert(0, '.'); "
+            "from scripts.pre_commit import _stale_hook_warning; "
+            "w = _stale_hook_warning(); "
+            "print(w if w is not None else '', end='')",
+        ],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    return proc.stdout or None
 
 
 def _hook_code() -> str:
@@ -360,3 +385,95 @@ class TestHookToleratesBranchesWithoutTheCheckScript:
         assert proc.returncode == 0, f"commit was rejected:\n{proc.stdout}\n{proc.stderr}"
         assert "skipping checks" in proc.stderr
         assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=docs_tree) == "docs-only"
+
+
+@requires_git
+class TestStaleHookDetection:
+    """A hook that drifts from the installer must be reported.
+
+    The hook is generated into ``.git/`` and is not version-controlled, so
+    pulling a fix to ``scripts/install_hooks.py`` leaves the old one running.
+    ``scripts/pre_commit.py`` is the only version-controlled thing that runs
+    on every commit, so it is where the drift can be noticed.
+    """
+
+    def test_reports_a_hook_that_differs_from_the_installer(self, tmp_path: Path) -> None:
+        main, _ = _init_repo_with_worktree(tmp_path)
+        hook = main / ".git" / "hooks" / "pre-commit"
+        hook.parent.mkdir(parents=True, exist_ok=True)
+        hook.write_text("#!/usr/bin/env bash\n# an older generation\n", encoding="utf-8")
+
+        warning = _stale_hook_warning_in(main)
+        assert warning is not None, "drifted hook was not reported"
+        assert "install_hooks.py --force" in warning
+
+    def test_silent_when_the_hook_is_current(self, tmp_path: Path) -> None:
+        main, _ = _init_repo_with_worktree(tmp_path)
+        proc = subprocess.run(
+            [sys.executable, str(main / "scripts" / "install_hooks.py"), "--force"],
+            cwd=main,
+            capture_output=True,
+            text=True,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert _stale_hook_warning_in(main) is None
+
+    def test_silent_when_no_hook_is_installed(self, tmp_path: Path) -> None:
+        """Running the checks by hand in a checkout without the hook is normal."""
+        main, _ = _init_repo_with_worktree(tmp_path)
+        assert not (main / ".git" / "hooks" / "pre-commit").exists()
+        assert _stale_hook_warning_in(main) is None
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX shell shim")
+class TestGitCallIsBounded:
+    """A wedged git must not hang the caller indefinitely."""
+
+    def test_hanging_git_times_out_and_reports_no_hooks_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``subprocess.TimeoutExpired`` is a ``SubprocessError``, so a wedged
+        git lands in the same "could not resolve" path as a missing one.
+        """
+        shim = tmp_path / "bin"
+        shim.mkdir()
+        fake_git = shim / "git"
+        # Python shebang, not `#!/bin/sh` + `sleep`: PATH is replaced below, so
+        # a shell shim cannot resolve its own commands and would exit 127
+        # instantly — passing this test for entirely the wrong reason.
+        fake_git.write_text(
+            f"#!{sys.executable}\nimport time\n\ntime.sleep(30)\n", encoding="utf-8"
+        )
+        fake_git.chmod(0o755)
+
+        monkeypatch.setenv("PATH", str(shim))
+        monkeypatch.setattr(install_hooks, "_GIT_TIMEOUT_S", 0.5)
+
+        started = time.monotonic()
+        assert install_hooks._hooks_dir() is None
+        elapsed = time.monotonic() - started
+        assert elapsed < 10, f"did not honour the timeout (took {elapsed:.1f}s)"
+        # Guard against the shim failing fast and passing this vacuously.
+        assert elapsed >= 0.5, f"git shim exited in {elapsed:.2f}s — it never blocked"
+
+    def test_undecodable_git_output_does_not_escape_the_handler(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Bytes that are not valid UTF-8 must not crash the caller.
+
+        ``text=True`` decodes with the locale encoding and raises
+        ``UnicodeDecodeError`` — a ``ValueError``, so neither arm of the
+        ``(OSError, SubprocessError)`` handler catches it.
+        """
+        shim = tmp_path / "bin"
+        shim.mkdir()
+        fake_git = shim / "git"
+        fake_git.write_text(
+            f"#!{sys.executable}\nimport sys\n\nsys.stdout.buffer.write(b'\\xff\\xfe/hooks\\n')\n",
+            encoding="utf-8",
+        )
+        fake_git.chmod(0o755)
+        monkeypatch.setenv("PATH", str(shim))
+
+        # The assertion is simply that this returns rather than raising.
+        assert install_hooks._hooks_dir() is not None

@@ -37,9 +37,17 @@ make validate # config validation
 Install the git pre-commit hook to run fast checks automatically:
 
 ```bash
-python scripts/install_hooks.py            # installs .git/hooks/pre-commit
+python scripts/install_hooks.py            # prints where the hook was installed
 python scripts/pre_commit.py               # run manually (same checks the hook runs)
 ```
+
+The hook goes wherever git reads hooks from, which is not always
+`.git/hooks/`: linked worktrees share the main checkout's hooks directory,
+and `core.hooksPath` overrides it entirely. Run the installer from any
+worktree and it resolves the right one. Because the hook lives outside
+version control, pulling a change to `scripts/install_hooks.py` does not
+update it — re-run with `--force`. The pre-commit run warns when the
+installed hook has drifted.
 
 ---
 

@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
-"""Install the pre-commit hook into ``.git/hooks/pre-commit``.
+"""Install the pre-commit hook where git actually reads hooks from.
 
 Creates (or overwrites with ``--force``) a hook script that delegates to
 ``python scripts/pre_commit.py``.  The generated hook works on Windows
 (Git for Windows), macOS, and Linux.
+
+The destination is resolved per invocation rather than assumed to be
+``.git/hooks/``: every linked worktree shares the main checkout's hooks
+directory, and ``core.hooksPath`` overrides it outright.  Run this from any
+worktree — the path it reports is the one git will read.
 
 Usage::
 
@@ -43,6 +48,10 @@ _GIT_REPO_LOCATION_VARS = (
     "GIT_INDEX_FILE",
 )
 
+# Generous: this is a local metadata read, so anything approaching it means
+# git is wedged rather than slow, and the caller wants an answer either way.
+_GIT_TIMEOUT_S = 10
+
 
 def _hooks_dir() -> Path | None:
     """Return the directory git actually reads hooks from, or ``None``.
@@ -71,8 +80,17 @@ def _hooks_dir() -> Path | None:
             ["git", "rev-parse", "--git-path", "hooks"],
             cwd=REPO_ROOT,
             capture_output=True,
-            text=True,
+            # Explicit codec rather than ``text=True``: that decodes with the
+            # locale encoding and raises UnicodeDecodeError, which derives from
+            # ValueError and so escapes the except clause below entirely.
+            encoding="utf-8",
+            errors="replace",
             check=True,
+            # A hung git (index.lock contention, a network-backed checkout, a
+            # credential helper prompting on stdin) must not block forever.
+            # TimeoutExpired is a SubprocessError, so it lands in the same
+            # fallback as any other failure.
+            timeout=_GIT_TIMEOUT_S,
             env=env,
         ).stdout.strip()
     except (OSError, subprocess.SubprocessError):
@@ -81,6 +99,17 @@ def _hooks_dir() -> Path | None:
         return None
     hooks = Path(out)
     return hooks if hooks.is_absolute() else REPO_ROOT / hooks
+
+
+def installed_hook_path() -> Path | None:
+    """Return the path git reads the pre-commit hook from, or ``None``.
+
+    The public counterpart to :func:`_hooks_dir`, for callers that need to
+    inspect the *installed* hook — notably ``scripts/pre_commit.py``, which
+    compares it against :data:`HOOK_CONTENT` to spot a stale install.
+    """
+    hooks = _hooks_dir()
+    return None if hooks is None else hooks / "pre-commit"
 
 
 HOOK_CONTENT = """\
