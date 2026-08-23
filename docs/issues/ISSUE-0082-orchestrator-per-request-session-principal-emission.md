@@ -102,166 +102,11 @@ mechanism.
 > `persatrix-principal` rail and the storage layer correctly collapses to
 > the single-tenant `'local'` principal.
 >
-> 2026-08-03 — **Part 2 inherits the executor-hop principal threading
-> (ISSUE-0118 closeout).** v0.3.13 PR 1
-> ([#809](https://github.com/mkhomutov/Persatrix/pull/809)) threaded the
-> per-request epoch/session axes across the executor hop
-> (`DispatchContext.for_event` lift + `request_scopes()` re-entry) and
-> initially left the **principal** axis out — its rail has no live
-> producer, and without the threading, the moment Part 2's producer
-> emitted, everything the executor runs AFTER `on_event` returns (the
-> end-vote close discharge, legacy in-process cascade children,
-> `SendChatMessage`'s post-reply execute) would have resolved the
-> *construction* principal instead of the request's: the exact leak
-> class ISSUE-0118 closed for epoch, resurfacing on the strict-equality
-> tenant axis. **The same PR closed that gap** (review finding 4) rather
-> than deferring it here: `agents/principal_id.py` gained the
-> `principal_id_from_metadata` leaf reader (the handler binder now reads
-> through it — one validation seam), `DispatchContext` carries
-> `origin_principal_id` (lifted in `for_event`, re-entered by
-> `request_scopes()` in the binder order session → principal → epoch),
-> the legacy cascade's child events seed
-> `EVENT_PRINCIPAL_METADATA_KEY` beside the epoch/session keys, and
-> `SendChatMessage` threads `request_principal` onto its post-reply
-> context. The rail is DORMANT — nothing emits principals yet, so
-> behaviour is unchanged everywhere — and the threading is pinned by
-> `tests/unit/python/test_dispatch_context_scope_threading.py`. What
-> remains for Part 2 is the **emission itself**: the orchestrator's
-> per-request principal producer feeding the `persatrix-principal` rail
-> (gated on [RFC 0039](../rfcs/0039-user-accounts-authentication.md)'s
-> verified claim), plus live verification that an emitted principal
-> reaches both the handler binding and the executor re-entry. No
-> v0.3.14 plan doc exists yet; when it opens, carry the emission +
-> live-verification scope (not the threading — it already shipped) into
-> the ISSUE-0082 Part 2 scope section.
->
-> 2026-08-05 — **Part 2 scoped: the [v0.3.14 plan](../v0.3.14-plan.md) is
-> open** (the hand-off the note above asks for). Locks taken at the plan
-> opening: **derivation source** = the RFC 0039 §F verified
-> `participant_id` off `authIdentity` (not the account id — RFC 0039 §A
-> binds them 1:1, and §F already stamps this same value as the chat
-> surface's verified claim, so memory and conversation name one
-> identity); **surface** = a new `grpcmeta.MDPrincipal`
-> (`persatrix-principal`, byte-matched to
-> `agents.principal_id.PRINCIPAL_METADATA_GRPC_KEY` by a lockstep guard)
-> injected at the same `GRPCMessageDispatcher.Dispatch` chokepoint that
-> emits session + epoch, fed by a request-ctx carrier the REST handlers
-> set from `identityFrom(r.Context())` (the `WithSessionOverride`
-> precedent); **`auth.mode: enabled`-only** — under `disabled`, or for
-> any unauthenticated caller, nothing is emitted and the persona keeps
-> resolving `'local'` byte-identically; **propagation** = the principal
-> rides orchestrator-authored hops descending from a principal-bearing
-> publish (parity with the Python legacy-cascade seeding v0.3.13 PR 1
-> landed), while agent/autonomous-origin turns emit nothing. Split
-> across plan PR 1 (the dormant rail) and PR 2 (the producer + the
-> end-to-end gate `tests/integration/test_principal_emission_isolation.py`
-> + `MT-MEMORY-MULTIUSER-001`, run live at release-prep). This issue
-> closes with PR 2's live verification.
->
-> Two further locks came out of the planning review, both folded into the
-> plan. **Origin set = enumerated, not sampled**: a missed dispatch
-> origin fails *open* — no error, no red test, just a silent collapse to
-> `'local'` where two people's rows co-mingle — and the audit already
-> found a third origin beyond `handlePublishMessage` and the chat
-> handler, `handleConveneChannel`
-> (`internal/server/channel_convene_handlers.go` calls
-> `channelRouter.ConveneChannel(r.Context(), …)` directly, so it descends
-> from no publish and the propagation lock does not cover it).
-> `workflows/run` and the `handleRecallMessages` read surface are
-> classified in PR 2 rather than assumed, and a route-table test pins the
-> classification so a later route cannot leak by omission.
-> **Activation day**: migration v11 backfilled every pre-existing row to
-> `'local'` and the principal predicate is strict equality with
-> deliberately no `legacy`-style carve-out, so a deployment that has run
-> `auth.mode: enabled` since v0.3.12 finds each persona's accumulated
-> memory unreachable the day emission lands. The session axis absorbed
-> its equivalent via the §D carve-out; the principal axis cannot, since
-> an always-visible principal *is* the cross-tenant bridge the boundary
-> forbids. The reset is therefore accepted and made visible — an MT leg
-> observes it, and the release notes + Known Gaps state it with the
-> operator remedy.
->
-> 2026-08-05 — **v0.3.14 PR 1 (the dormant rail) is open**:
-> `grpcmeta.MDPrincipal` + `InjectPrincipal` (empty → no-op),
-> `channels.WithPrincipal`/`PrincipalFromContext` (pinned to survive the
-> fanout's `context.WithoutCancel` hop — the propagation property), the
-> `Dispatch` injection with the `principal.id` span attribute, and the
-> Go-side lockstep guard asserting the bare literal
-> `"persatrix-principal"` (completing the cross-language pair with
-> `test_principal_id_leaf_module.py`). Dormancy is pinned, not assumed:
-> absence tests assert no header and no span attribute ride a dispatch
-> whose ctx carries no principal. The producer is PR 2.
->
-> 2026-08-06 — **PR 1 review: the propagation lock covers descent, not
-> every orchestrator-authored dispatch.** The wording was corrected in
-> the carrier's doc comment, the plan's propagation-posture bullet and
-> the changelog entry. A path that builds a *fresh* context reaches
-> `Dispatch` with no principal on it, and the origin audit's
-> `handleConveneChannel` is not the only one: the synthesis-close
-> timeout (`ChannelRouter.onSynthesisTimeout`,
-> `internal/channels/synthesis_close.go`) hands `context.Background()`
-> to `boundedClose`, so the close-notification fan it drives descends
-> from no request. Principal is the **only** axis a ctx reset exposes —
-> session re-resolves through the SessionResolver, epoch falls back to
-> the boot value, neither reads a ctx value — so under PR 2 a
-> close-notification turn descending from an authenticated publish would
-> be ingested persona-side under the shared `'local'` principal: one
-> person's turn written into the shared tenant. Both origins are PR 2's
-> to close (the cleanest shape for the timeout is stamping the detached
-> ctx onto the pending-synthesis record at arm time rather than
-> constructing `Background()` at fire time).
->
-> 2026-08-06 — **v0.3.14 PR 2 (the producer) is open — the rail is fed.**
-> The RFC 0039 §F verified `participant_id` is threaded onto the request
-> context and emitted at the dispatch chokepoint, so under
-> `auth.mode: enabled` persona memory partitions by authenticated person.
-> Three notes on how it landed, each a deviation or a finding rather than
-> a restatement of the plan:
->
-> 1. **Threaded in `authMiddleware`, not per handler.** The plan's lock
->    said "the REST handlers thread the resolved identity"; the top-ranked
->    risk was a *missed* origin, which fails open into the shared `'local'`
->    tenant with no error and no red test. Threading at the one place
->    identity is resolved — the middleware wrapping the root mux — makes
->    exhaustiveness a property of the composition instead of a
->    hand-maintained list. The predicate is `authIdentity.Authenticated`,
->    not `authEnforced()`: under `enabled` an unauthenticated caller on a
->    public route resolves `anonymousIdentity`, whose participant is the
->    literal `"local"`, and stamping that would put a header on the wire
->    where there is none today for no change in resolved value. The
->    enumeration survives as `dispatchOriginClassification` +
->    `principal_route_table_test.go`, which parses the package's own
->    registrations and fails on an unclassified route — documentation kept
->    honest by a test, not a gate.
-> 2. **The origin set is three routes**, all confirmed rather than
->    assumed: channel publish, chat, and `handleConveneChannel`. The two
->    the plan left open are both **non-dispatching**: `workflows/run`
->    schedules through the executor's `ExecuteTask` RPC, which has no
->    persona-memory principal consumer at all (the Python servicer lifts
->    `persatrix-principal` in `SendChatMessage` and
->    `ReceiveChannelMessage` only), and `handleRecallMessages` reads the
->    **channel** store — membership-scoped verbatim messages, a table with
->    no `principal_id` column — never principal-partitioned persona memory.
-> 3. **The synthesis-close reset is fixed as directed** (the principal
->    string is stashed at arm time, not the whole detached ctx — that
->    string is the entire delta a fresh context loses, and retaining a
->    context on a record that lives for the ~2-minute timeout window would
->    pin its values and span for no benefit). It was also the **only**
->    fresh-context dispatch path in `internal/channels`: every other
->    detachment is `context.WithoutCancel`, which preserves values.
->
-> Live proof is `MT-MEMORY-MULTIUSER-001`, authored here and executed at
-> release-prep. Authoring it surfaced a scaffolding constraint worth
-> recording: **RFC 0039 Phase 3 (account administration) is v0.4.0, so
-> `account bootstrap` — which refuses once any account exists — is the
-> only shipped account-creation verb.** The MT therefore rotates the
-> second principal by deleting `accounts.db` and re-bootstrapping (the
-> persona's `memory.db` is a separate store, so the corpus survives),
-> which makes the two accounts sequential rather than concurrent. The
-> concurrent case is pinned deterministically instead
-> (`tests/integration/test_principal_emission_isolation.py`: one process,
-> two scopes, one shared room). This is a live-testing ergonomics gap, not
-> a product gap, and it closes with Phase 3.
+> 2026-08-03 → 2026-08-06 — **the Part 2 build log lives in its own
+> companion**: [ISSUE-0082 Part 2 — the v0.3.14 build log](ISSUE-0082-part2-v0314-build-log.md)
+> (scoping, the dormant rail, the propagation-lock review finding, the
+> producer PR). Split out 2026-08-23 at the 3 000-word prose cap; no
+> decision moved with it.
 >
 > 2026-08-06 — **two residuals surfaced at PR 2 review; accepted and
 > stated, not fixed.** Both are cases where the per-turn boundary this PR
@@ -336,9 +181,21 @@ mechanism.
 > speaker to aggregate and no agent-to-agent cascade. Both would need a
 > multi-agent group-channel MT to be observed live.
 >
+> 2026-08-06 — **both residuals are now designed in their own files**:
+> [ISSUE-0123](ISSUE-0123-per-speaker-interaction-scope.md) (R-1) and
+> [ISSUE-0124](ISSUE-0124-orchestrator-hop-drops-tenant-on-agent-cascade.md)
+> (R-2). Two conclusions carry back. R-1 binds the record's own frozen
+> principal at close, **retiring** the asymmetry above rather than
+> resolving it. And the two **must ship together**: R-1 alone leaves a
+> systematic `'local'` record holding every agent turn in every room;
+> R-2 alone leaves the aggregate. The group-channel MT asked for above
+> is
+> [MT-MEMORY-GROUP-TENANT-001](../manual-tests/MT-MEMORY-GROUP-TENANT-001.md),
+> runnable both ways. Nothing is implemented — both fixes are v0.4.0.
+>
 > 2026-08-18 — **R-1 and R-2 re-slotted v0.4.0 → v0.3.15**, so interaction
 > functionality is complete before v0.4.0 organizations build on it. Designs
-> (`ISSUE-0123` / `ISSUE-0124`) sit in draft
+> ([ISSUE-0123](ISSUE-0123-per-speaker-interaction-scope.md) / [ISSUE-0124](ISSUE-0124-orchestrator-hop-drops-tenant-on-agent-cascade.md)) sit in draft
 > [#822](https://github.com/mkhomutov/Persatrix/pull/822); its Phase 0 gate
 > measures against the v0.3.14 tag, so it starts after this release.
 >
@@ -348,4 +205,4 @@ mechanism.
 > leak-stopper at PR 1a, so no unattributable memory reaches the shared
 > tenant. The Part 2 promise is met at the scope it claims: the per-turn
 > boundary on the live dispatch. Open by design beyond it — R-1, R-2, and
-> ISSUE-0130's **(b)** — all v0.3.15, so `messages` is migrated once.
+> ISSUE-0130's **(b)** — all v0.3.15.

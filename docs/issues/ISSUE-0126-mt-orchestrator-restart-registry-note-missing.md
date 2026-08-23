@@ -160,3 +160,16 @@ status first.
 > restart rather than prescribing one. The membership rule the table
 > follows: **an orchestrator-only restart (not a full-stack bounce) with a
 > persona-dependent assertion after it.**
+
+> 2026-08-23 — **the count moves to ten MTs and TWO warnings.** The
+> group-channel MT this workstream adds
+> ([MT-MEMORY-GROUP-TENANT-001](../manual-tests/MT-MEMORY-GROUP-TENANT-001.md))
+> prescribes an orchestrator restart at Leg 0 and again at Leg 7, and it
+> carries its own precondition warning — written for the same reason PR
+> #823 wrote MT-MEMORY-MULTIUSER-001's, and after the trap had already
+> cost a live arc on 2026-08-07. So the enumeration is now ten MTs, of
+> which **two** are guarded and eight are not. Option 1 is unchanged in
+> shape and one item longer: when [ISSUE-0125](ISSUE-0125-agents-never-reregister-after-orchestrator-restart.md)
+> lands re-registration, delete **both** warnings and confirm the eight
+> unguarded restart steps are safe as written.
+
