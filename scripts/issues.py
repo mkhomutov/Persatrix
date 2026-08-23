@@ -58,7 +58,7 @@ ISSUE_FILE_PATTERN = re.compile(r"^ISSUE-\d{4}-[a-z0-9-]+\.md$")
 #: implementation plan) rather than the issue itself. Companions live
 #: alongside the issue but carry no front-matter and are excluded from
 #: INDEX.md — mirrors ``COMPANION_SUFFIXES`` in ``scripts/rfcs.py``.
-COMPANION_SUFFIXES = ("-pr-plan", "-phase0-gate", "-build-log")
+COMPANION_SUFFIXES = ("-pr-plan", "-phase0-gate", "-build-log", "-reserve-sizing")
 
 ALLOWED_STATUS = {"open", "in_progress", "resolved"}
 ALLOWED_SEVERITY = {"low", "medium", "high", "critical"}

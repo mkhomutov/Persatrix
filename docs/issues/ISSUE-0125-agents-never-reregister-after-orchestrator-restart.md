@@ -267,8 +267,7 @@ the condition is visible without reading dispatch WARNs.
 > (Phase 0). The [sequencing Amendment 2026-08-19](../v0.3.x-sequencing.md#amendment-2026-08-19--v0315--v0316-attribution-and-audience-before-the-v040-train)
 > boarded this issue as *cuttable*; the plan takes **shape (4)** from
 > §Proposed fix above — agent-side re-registration driven by the existing
-> orchestrator channel's gRPC connectivity state, so a
-> `READY → TRANSIENT_FAILURE → READY` cycle is the trigger — together with the
+> orchestrator channel's gRPC connectivity state — together with the
 > `InMemoryRegistry.Register` **upsert** precondition and the
 > zero-registered-agents signal this issue asks for on its own merit. Not the
 > amendment's "heartbeat" wording: a fleet-wide periodic re-register is the
@@ -277,6 +276,27 @@ the condition is visible without reading dispatch WARNs.
 > Shape (5) and its RFC 0040 §C amendment stay the destination and stay
 > v0.4.0. Recorded as a deliberate deviation from the amendment's wording,
 > taken on this issue's own more specific analysis; reversible at review.
+>
+> **The trigger is any `READY` departure and return — not the literal
+> `READY → TRANSIENT_FAILURE → READY` cycle** that §Proposed fix (4) and the
+> plan's first draft both named. `TRANSIENT_FAILURE` is entered only when a
+> connection *attempt* fails. `_orchestrator_channel` is a `grpc.aio.Channel`
+> shared by the log shipper and `WalletClient`; on a clean orchestrator restart
+> the shipper's stream EOFs without an exception and then backs off
+> (1.0–30.0 s) with no RPC pending, and `WalletClient` issues unary calls only
+> during LLM turns — so the channel is usually idle when the transport drops,
+> and an idle channel goes to `IDLE`, not `TRANSIENT_FAILURE`.
+> `wait_for_state_change` also coalesces, so even a real failure hop can be
+> missed. A watcher written to the literal cycle passes a unit test that
+> injects `TRANSIENT_FAILURE` and never fires in production — the precise
+> failure this issue exists to remove. Pin the test on an `IDLE` cycle.
+> Two further notes for the implementer: the watched channel is
+> `orchestrator_grpc` while `_self_register()` posts over aiohttp to
+> `orchestrator_url`, two different addresses; and the **upsert does not fix
+> the restart case** — `InMemoryRegistry` has no load path, so after a restart
+> the map is empty and a re-register already succeeds without a `409`. The
+> upsert is for the blip and stale-address cases. Pin them separately, or a
+> green upsert test will stand in as evidence for a watcher that never runs.
 >
 > **Two orderings ride with it.** First, it lands **before** the workstreams it
 > serves rather than beside them: every restart-bearing leg of the v0.3.15 live
@@ -289,9 +309,16 @@ the condition is visible without reading dispatch WARNs.
 > re-running the startup tail on reconnect would re-ingest the catch-up window
 > on every orchestrator blip — and catch-up has no watermark (RFC 0011 OQ #8),
 > which makes that unbounded re-derivation: the path ISSUE-0130 shape (a) just
-> bounded, re-opened through a different door. Pinned by a test.
+> bounded, re-opened through a different door. Pinned by a test. Note this
+> corollary guards a door *this* issue creates; the plan's lock 4 covers the
+> restart door, which is open today and is B2's to close.
 >
 > [ISSUE-0126](ISSUE-0126-mt-orchestrator-restart-registry-note-missing.md)
-> retires in the same PR by its own option 1 — **delete** the one warning PR
-> #823 wrote, with the other eight restart steps confirmed safe as written. If
-> this issue cuts, that deletion does not land alone.
+> retires in the same PR by its own option 1 **as corrected 2026-08-23** —
+> **delete both** warnings, #823's on MT-MEMORY-MULTIUSER-001 *and* the one
+> [MT-MEMORY-GROUP-TENANT-001](../manual-tests/MT-MEMORY-GROUP-TENANT-001.md)
+> carries, with the eight unguarded restart steps confirmed safe as written.
+> The earlier "one warning" wording here predates that correction and is
+> superseded; the group MT is this release's own live gate, so leaving its
+> warning standing would retire ISSUE-0126 on a half-executed option 1. If
+> this issue cuts, neither deletion lands.
