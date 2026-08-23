@@ -262,3 +262,36 @@ the condition is visible without reading dispatch WARNs.
 > option 1 — delete the one warning PR #823 wrote into
 > [MT-MEMORY-MULTIUSER-001](../manual-tests/MT-MEMORY-MULTIUSER-001.md) and
 > confirm the eight unguarded restart steps are safe as written.
+>
+> 2026-08-23 — **Scoped into v0.3.15 and shaped**, by the [v0.3.15 plan](../v0.3.15-plan.md)
+> (Phase 0). The [sequencing Amendment 2026-08-19](../v0.3.x-sequencing.md#amendment-2026-08-19--v0315--v0316-attribution-and-audience-before-the-v040-train)
+> boarded this issue as *cuttable*; the plan takes **shape (4)** from
+> §Proposed fix above — agent-side re-registration driven by the existing
+> orchestrator channel's gRPC connectivity state, so a
+> `READY → TRANSIENT_FAILURE → READY` cycle is the trigger — together with the
+> `InMemoryRegistry.Register` **upsert** precondition and the
+> zero-registered-agents signal this issue asks for on its own merit. Not the
+> amendment's "heartbeat" wording: a fleet-wide periodic re-register is the
+> polling shape RFC 0024 removed, and re-registration *on dispatch failure* has
+> no orchestrator-side implementation — that side holds no address to dial.
+> Shape (5) and its RFC 0040 §C amendment stay the destination and stay
+> v0.4.0. Recorded as a deliberate deviation from the amendment's wording,
+> taken on this issue's own more specific analysis; reversible at review.
+>
+> **Two orderings ride with it.** First, it lands **before** the workstreams it
+> serves rather than beside them: every restart-bearing leg of the v0.3.15 live
+> gate — the [ISSUE-0130](ISSUE-0130-catchup-replay-rederives-memory-under-default-principal.md)
+> shape (b) replay verification most of all — is today a leg that leaves the
+> fleet permanently mute. Second, a constraint the plan-opening audit forced:
+> **the reconnect path must re-register only, never re-run catch-up.**
+> `_self_register()` and `replay_for_persona_agents()` sit adjacent in
+> `AgentServer.start()` ([`agents/server.py`](../../agents/server.py)), so
+> re-running the startup tail on reconnect would re-ingest the catch-up window
+> on every orchestrator blip — and catch-up has no watermark (RFC 0011 OQ #8),
+> which makes that unbounded re-derivation: the path ISSUE-0130 shape (a) just
+> bounded, re-opened through a different door. Pinned by a test.
+>
+> [ISSUE-0126](ISSUE-0126-mt-orchestrator-restart-registry-note-missing.md)
+> retires in the same PR by its own option 1 — **delete** the one warning PR
+> #823 wrote, with the other eight restart steps confirmed safe as written. If
+> this issue cuts, that deletion does not land alone.

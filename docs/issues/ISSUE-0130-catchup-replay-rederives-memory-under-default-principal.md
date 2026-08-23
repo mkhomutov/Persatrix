@@ -256,3 +256,28 @@ alongside [ISSUE-0123](ISSUE-0123-per-speaker-interaction-scope.md) (R-1).
 > does **not** ride it — that lands in the Python persona-memory store
 > (migration 17 → 18), a disjoint database. The two are bound by the #822
 > Phase 0 **record-shape** decision, not by a shared schema.
+>
+> 2026-08-23 — **(b) has its PR slots.** The [v0.3.15 plan](../v0.3.15-plan.md)
+> is open and owns this workstream, as the §Related note above anticipated
+> ("no PR slot in [the residuals plan] and is owned by the v0.3.15 milestone
+> plan"). It lands as two PRs on the dormant-rail-then-consumer split v0.3.14
+> PR 1 / PR 2 established: **B1** carries the channel-store migration
+> `v11 → v12` plus the server-side stamp at publish and the
+> `channelMessageResponse` field, with no persona-side reader; **B2** seeds
+> `_build_replay_event` from it, narrows the shape-(a) derivation skip to
+> genuinely unattributable spans, and restores the RFC 0037 replayed-rotation
+> classification stamping withdrawn in
+> [#834](https://github.com/mkhomutov/Persatrix/pull/834).
+> `REASON_CATCHUP_COMPLETE` and the replay-opened-scope boundary are untouched
+> — they were never about attribution.
+>
+> The 2026-08-23 correction above (this migration is (b)'s alone, and (b) is
+> not gated on R-2) is carried into the plan as a scope lock, so B1/B2 run in
+> parallel with the residuals rather than queueing behind them.
+>
+> **The live check this issue names as missing gets written.** B2 authors a
+> restart leg on [MT-MEMORY-GROUP-TENANT-001](../manual-tests/MT-MEMORY-GROUP-TENANT-001.md)
+> — the release's single live gate — that reads the `local` partition after an
+> orchestrator restart. No second MT is authored: that arc already sets the
+> restart up, and [ISSUE-0125](ISSUE-0125-agents-never-reregister-after-orchestrator-restart.md),
+> landing first, is what makes it survivable.

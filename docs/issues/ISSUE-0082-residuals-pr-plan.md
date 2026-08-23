@@ -1,7 +1,7 @@
 # ISSUE-0082 — PR Implementation Plan (Residuals R-1 / R-2 — the derived and relayed tenant writes)
 
 **Issues**: [ISSUE-0123](ISSUE-0123-per-speaker-interaction-scope.md) (R-1) · [ISSUE-0124](ISSUE-0124-orchestrator-hop-drops-tenant-on-agent-cascade.md) (R-2) · [ISSUE-0131](ISSUE-0131-derived-memory-has-no-speaker-attribution.md) (the speaker axis)
-**Status**: 📋 Draft — Phase 0 resolved (principal axis); **opens after the v0.3.14 tag**, as a workstream inside the **v0.3.15** *Who said what* milestone
+**Status**: 📋 Draft — Phase 0 resolved (both axes); the v0.3.14 tag has landed and the [v0.3.15 plan](../v0.3.15-plan.md) is open, so this is workstream **A** of the **v0.3.15** *Who said what* milestone
 **Created**: 2026-08-07
 **Branch prefix**: `feature/v0315-issue0123-` / `feature/v0315-issue0124-` (per residual)
 **Target**: `main`
@@ -220,6 +220,7 @@ Run [MT-MEMORY-GROUP-TENANT-001](../manual-tests/MT-MEMORY-GROUP-TENANT-001.md) 
 
 ## Related Documentation
 
+- [v0.3.15 plan](../v0.3.15-plan.md) — the milestone this workstream rides (workstream A). It delegates PRs 1–5 below whole, and owns the two workstreams this plan does not: ISSUE-0130 shape (b) and ISSUE-0125.
 - [ISSUE-0082](ISSUE-0082-orchestrator-per-request-session-principal-emission.md) — the parent; its Part 2 note states both residuals.
 - [ISSUE-0082 residuals — the Phase 0 design gate](ISSUE-0082-residuals-phase0-gate.md) — the evidence record for the record-shape decision, both axes. Split out of this plan on 2026-08-21 when the [ISSUE-0131](ISSUE-0131-derived-memory-has-no-speaker-attribution.md) fold-in pushed the combined doc past the 3 000-word cap.
 - [ISSUE-0082 Part 1 PR plan](ISSUE-0082-part1-session-emission-pr-plan.md) — the session axis, the shape this plan mirrors.
