@@ -141,6 +141,42 @@ def _update_filemap() -> bool:
         return False
 
 
+def _stale_hook_warning() -> str | None:
+    """Return a warning if the installed hook is not what we would install.
+
+    The hook lives in ``.git/`` and is not version-controlled, so pulling a
+    fix to ``scripts/install_hooks.py`` does not update it — someone has to
+    re-run the installer, and nothing used to notice if they did not. That is
+    how a hook known to corrupt ``FILEMAP.md`` from a linked worktree went on
+    running in checkouts that already had the fix on disk.
+
+    This file *is* version-controlled and runs on every commit, so it is the
+    one place that can see the drift. Advisory only: a stale hook still works
+    for the common case, and blocking the commit over it would be worse than
+    the drift.
+    """
+    try:
+        from scripts.install_hooks import HOOK_CONTENT, installed_hook_path
+    except ImportError:
+        return None
+
+    hook = installed_hook_path()
+    if hook is None:
+        return None
+    try:
+        installed = hook.read_text(encoding="utf-8")
+    except OSError:
+        # No hook, or unreadable. Someone running this script directly is not
+        # who this warning is for.
+        return None
+    if installed == HOOK_CONTENT:
+        return None
+    return (
+        f"Installed pre-commit hook differs from scripts/install_hooks.py ({hook}).\n"
+        "  Re-run:  python scripts/install_hooks.py --force"
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     ensure_utf8_streams()
 
@@ -209,6 +245,12 @@ def main(argv: list[str] | None = None) -> int:
 
     print("\n" + "=" * 60)
     print(f"Results: {len(results) - len(failed)}/{len(results)} passed  ({total_time:.1f}s)")
+
+    # After the results line so it is the last thing on screen on success, and
+    # is not mistaken for one of the checks.
+    stale = _stale_hook_warning()
+    if stale:
+        print(f"\n⚠ {stale}")
 
     if failed:
         print("\nFailed checks:")
