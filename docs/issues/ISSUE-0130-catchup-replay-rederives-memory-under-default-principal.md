@@ -141,7 +141,7 @@ server-side at publish from the authenticated request context, surface it
 on `channelMessageResponse`, and seed it in `_build_replay_event`.
 
 Note this is **not** blocked by the trust problem that blocks R-2
-(`ISSUE-0124`, designed in [#822](https://github.com/mkhomutov/Persatrix/pull/822)).
+([ISSUE-0124](ISSUE-0124-orchestrator-hop-drops-tenant-on-agent-cascade.md), designed in [#822](https://github.com/mkhomutov/Persatrix/pull/822)).
 There the principal would have to come from the agent, handing an
 unauthenticated caller a cross-tenant *read* primitive. Here the
 orchestrator already knows the verified principal at publish time —
@@ -216,20 +216,33 @@ on `channelMessageResponse`, and seed it in `_build_replay_event`. The
 skip then narrows to genuinely unattributable spans, single-tenant
 derivation is restored, and RFC 0037's replay stamping returns.
 
-It is co-designed with `ISSUE-0124` (R-2), whose chosen shape —
-server-side causal attribution, `ChannelRouter.Publish` re-stamping an
-agent publish from server-held state — needs a column on this same table.
-The two must not migrate `messages` twice. Both ride the v0.3.15
-interaction/tenant train alongside `ISSUE-0123` (R-1).
+**Correction (2026-08-23): this migration is (b)'s alone, and (b) is not
+gated on R-2.** The text here previously read that
+[ISSUE-0124](ISSUE-0124-orchestrator-hop-drops-tenant-on-agent-cascade.md)
+(R-2) "needs a column on this same table", so `messages` had to migrate
+once for both. R-2's design says otherwise: its chosen shape — server-side
+causal attribution, `ChannelRouter.Publish` re-stamping an agent publish
+from a per-`(channel, agent)` table — is **in-memory only** and deliberately
+so, since a stale attribution is a *mis*-attribution and losing it on
+restart is the safer failure. R-2 is self-contained Go with no schema. So
+`v11 → v12` carries `principal_id` and nothing else, and (b) can run in
+parallel with the R-1/R-2 PRs rather than queueing behind them. The two
+still meet at the wire — after R-2 re-stamps, an agent publish reaches the
+stamp site with a causal principal on the ctx, so a relayed row persists
+that value instead of `local` — but that is a sequencing preference, not a
+schema dependency. All three ride the v0.3.15 interaction/tenant train
+alongside [ISSUE-0123](ISSUE-0123-per-speaker-interaction-scope.md) (R-1).
 
 ## Related
 
 - [ISSUE-0082](ISSUE-0082-orchestrator-per-request-session-principal-emission.md)
   — the emission half; R-1 and R-2 are its first two residuals, this is R-3.
-- `ISSUE-0123` (R-1) and `ISSUE-0124` (R-2) — designed in draft
-  [#822](https://github.com/mkhomutov/Persatrix/pull/822), not yet on `main`;
-  both re-slotted to v0.3.15 so interaction functionality is complete before
-  v0.4.0 organizations.
+- [ISSUE-0123](ISSUE-0123-per-speaker-interaction-scope.md) (R-1) and [ISSUE-0124](ISSUE-0124-orchestrator-hop-drops-tenant-on-agent-cascade.md) (R-2) — designed in
+  [#822](https://github.com/mkhomutov/Persatrix/pull/822); both re-slotted to
+  v0.3.15 so interaction functionality is complete before v0.4.0
+  organizations. Their workstream plan is the
+  [residuals PR plan](ISSUE-0082-residuals-pr-plan.md); this issue's (b) has
+  no PR slot in it and is owned by the v0.3.15 milestone plan.
 - [MT-MEMORY-MULTIUSER-001](../manual-tests/MT-MEMORY-MULTIUSER-001.md) —
   does not currently cover this; the MT's restarts *cause* it, and no leg
   reads the `local` partition to check for duplicated content.

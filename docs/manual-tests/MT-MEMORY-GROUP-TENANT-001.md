@@ -2,10 +2,10 @@
 
 **Test ID**: `MT-MEMORY-GROUP-TENANT-001`
 **Feature Area**: Memory scope axes — the tenant/principal axis across the *aggregate* and *relayed* writes ([ISSUE-0082](../issues/ISSUE-0082-orchestrator-per-request-session-principal-emission.md) residuals R-1 / R-2)
-**Version**: 1.0
+**Version**: 1.1
 **Created**: 2026-08-06
-**Last Updated**: 2026-08-06
-**Status**: Active — **authored with the R-1/R-2 designs. Runnable in both directions**: run it against v0.3.14 to *evidence* the residuals, and re-run it after [ISSUE-0123](../issues/ISSUE-0123-per-speaker-interaction-scope.md) + [ISSUE-0124](../issues/ISSUE-0124-orchestrator-hop-drops-tenant-on-agent-cascade.md) land as the v0.4.0 gate.
+**Last Updated**: 2026-08-23
+**Status**: Active — **authored with the R-1/R-2 designs. Runnable in both directions**: run it against v0.3.14 to *evidence* the residuals, and re-run it after [ISSUE-0123](../issues/ISSUE-0123-per-speaker-interaction-scope.md) + [ISSUE-0124](../issues/ISSUE-0124-orchestrator-hop-drops-tenant-on-agent-cascade.md) land as the **v0.3.15** gate.
 
 ---
 
@@ -193,7 +193,7 @@ SELECT principal_id, subject, predicate, object FROM facts ORDER BY asserted_at 
 | **v0.3.14** | One record per persona per room, `principal_id='local'`, whose summary narrates **Alice's** disclosure — her content written into the shared tenant, and simultaneously **out of her own reach** (strict equality: `alice-person` cannot read `local`). Facts about Mira carry `principal_id='local'`. |
 | **after R-1+R-2** | Alice's turns form their **own** record under `alice-person`. Agent-origin turns that are not causally hers form separate `local` records — **one per agent speaker**, not one shared agent record (Phase 0b: the tracker keys `(principal, speaker, scope)`). No record mixes two speakers or two principals. |
 
-- [ ] With three personas in the room, Leg 4 yields **three** `local` `turn_count > 1` rows, not one. A single merged `local` row means the speaker dimension of the key did not land — the exact defect `ISSUE-0131` names, and the one plain Option A would have shipped.
+- [ ] With three personas in the room, Leg 4 yields **three** `local` `turn_count > 1` rows, not one. A single merged `local` row means the speaker dimension of the key did not land — the exact defect [ISSUE-0131](../issues/ISSUE-0131-derived-memory-has-no-speaker-attribution.md) names, and the one plain Option A would have shipped.
 
 - [ ] The summary text and the `principal_id` of every `turn_count > 1` row are pasted into the execution report. *The pairing is the finding — either value alone proves nothing.*
 
@@ -290,6 +290,6 @@ Set `auth.mode: disabled`, restart, repeat Leg 1 with no credential.
 ## Sign-off
 
 - [ ] All eight legs run on a live provider, with the expected column used (`v0.3.14` or post-fix) stated in the report.
-- [ ] Leg 2 row counts and Leg 4 `(principal_id, summary)` pairs pasted verbatim.
+- [ ] Leg 2's per-dispatch `principal.id` table — **the** Leg 2 finding, since storage cannot see R-2 — and Leg 4 `(principal_id, summary)` pairs pasted verbatim.
 - [ ] The two-human aggregate — unreachable on shipped verbs — is pinned deterministically by the R-1 unit gate (one tracker, two principals, one room scope, two records) rather than asserted from this arc.
 - [ ] MT-MEMORY-MULTIUSER-001 re-run green as the per-turn regression.

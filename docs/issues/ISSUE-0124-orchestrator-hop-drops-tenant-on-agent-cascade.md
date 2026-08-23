@@ -217,6 +217,6 @@ in every room. Together the relayed turn carries the causal principal
 > branch prefixes move `v040-` → `v0315-`. R-2 still ships first in the
 > workstream — it is self-contained Go with no schema, and it removes the
 > `local` pollution that R-1's keying would otherwise systematize. Unchanged
-> by the `ISSUE-0131` fold-in: the speaker axis is a persona-memory record
+> by the [ISSUE-0131](ISSUE-0131-derived-memory-has-no-speaker-attribution.md) fold-in: the speaker axis is a persona-memory record
 > shape, while this issue is a wire-attribution fix, and the two meet only at
 > the close.

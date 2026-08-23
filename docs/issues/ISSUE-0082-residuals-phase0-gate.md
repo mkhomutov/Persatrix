@@ -1,16 +1,15 @@
 # ISSUE-0082 residuals — the Phase 0 design gate (record)
 
 **Companion to**: [ISSUE-0082 residuals PR plan](ISSUE-0082-residuals-pr-plan.md)
-**Issues**: [ISSUE-0123](ISSUE-0123-per-speaker-interaction-scope.md) (R-1) · `ISSUE-0131` (the speaker axis)
+**Issues**: [ISSUE-0123](ISSUE-0123-per-speaker-interaction-scope.md) (R-1) · [ISSUE-0131](ISSUE-0131-derived-memory-has-no-speaker-attribution.md) (the speaker axis)
 **Status**: ✅ Both axes resolved — Phase 0 on 2026-08-07, Phase 0b on 2026-08-21
 
 This is the *evidence record* for the record-shape decision the residuals
 workstream turns on: how the call was made, on what measurement, and what it
 cost. It is split out of the PR plan so the plan stays a plan — and so the
 gate can be cited on its own, which the sequencing Amendment 2026-08-19
-does ([v0.3.x-sequencing.md](../v0.3.x-sequencing.md) — that amendment lands
-with [#839](https://github.com/mkhomutov/Persatrix/pull/839), so this link is
-file-level until it is on `main`).
+does ([Amendment 2026-08-19](../v0.3.x-sequencing.md#amendment-2026-08-19--v0315--v0316-attribution-and-audience-before-the-v040-train),
+merged as [#839](https://github.com/mkhomutov/Persatrix/pull/839)).
 
 **The answer, in one line**: the `InteractionTracker` is keyed
 `(principal, speaker, scope)` — Phase 0 fixed the principal dimension,
@@ -72,7 +71,7 @@ Do **not** attribute facts to speakers by asking the model. Per-turn membership 
 ## Phase 0b — the speaker axis ✅ RESOLVED 2026-08-21: **speaker joins the key**
 
 > **Same gate, second axis, no new measurement.** Phase 0 locked the shape on the
-> *principal* axis. `ISSUE-0131` asks whether the SPEAKER is a second key
+> *principal* axis. [ISSUE-0131](ISSUE-0131-derived-memory-has-no-speaker-attribution.md) asks whether the SPEAKER is a second key
 > dimension or a column on the derived rows — and the evidence above already
 > answers it, because that run's decisive leak was agent-to-agent.
 
