@@ -1,11 +1,10 @@
 ---
 id: ISSUE-0130
-summary: "On agent startup the RFC 0011 channel catch-up replay re-derives episodes and facts from replayed channel history under the persona's **default** scope (`principal_id='local'`, `session_id='legacy'`), because `_build_replay_event` has no principal to seed — the orchestrator's `messages` table has no principal column, so the emitting tenant is not persisted with the message and exists only on the live gRPC dispatch. The result is that one authenticated person's private content is silently copied into the shared `local` tenant on **every** restart, unbounded, where any unauthenticated caller (the whole persona fleet, and every caller under `auth.mode: disabled`) resolves. The person↔person boundary v0.3.14 promises still holds — a second authenticated principal cannot read it — but the person→anonymous boundary does not. Third ISSUE-0082 residual (R-3); found live at the v0.3.14 MT-MEMORY-MULTIUSER-001 execution run."
-status: resolved
+summary: "On agent startup the RFC 0011 channel catch-up replay re-derives episodes and facts from replayed channel history under the persona's **default** scope (`principal_id='local'`, `session_id='legacy'`), because `_build_replay_event` has no principal to seed — the orchestrator's `messages` table has no principal column, so the emitting tenant is not persisted with the message and exists only on the live gRPC dispatch. The result is that one authenticated person's private content is silently copied into the shared `local` tenant on **every** restart, unbounded, where any unauthenticated caller (the whole persona fleet, and every caller under `auth.mode: disabled`) resolves. The person↔person boundary v0.3.14 promises still holds — a second authenticated principal cannot read it — but the person→anonymous boundary does not. Third ISSUE-0082 residual (R-3); found live at the v0.3.14 MT-MEMORY-MULTIUSER-001 execution run. Shape (a) — the leak-stopper that skips derivation for replayed spans — shipped in v0.3.14; shape (b), persisting the principal on `messages` and seeding it at replay, is scheduled v0.3.15 as workstream B, which is why this issue is open."
+status: open
 severity: high
 area: memory
 created: 2026-08-18
-closed: 2026-08-18
 refs:
   - agents/channel_catchup.py
   - agents/persona_runtime/__init__.py
@@ -256,3 +255,54 @@ alongside [ISSUE-0123](ISSUE-0123-per-speaker-interaction-scope.md) (R-1).
 > does **not** ride it — that lands in the Python persona-memory store
 > (migration 17 → 18), a disjoint database. The two are bound by the #822
 > Phase 0 **record-shape** decision, not by a shared schema.
+>
+> 2026-08-23 — **(b) has its PR slots.** The [v0.3.15 plan](../v0.3.15-plan.md)
+> is open and owns this workstream, as the §Related note above anticipated
+> ("no PR slot in [the residuals plan] and is owned by the v0.3.15 milestone
+> plan"). It lands as two PRs on the dormant-rail-then-consumer split v0.3.14
+> PR 1 / PR 2 established: **B1** carries the channel-store migration
+> `v11 → v12` plus the server-side stamp at publish and the
+> `channelMessageResponse` field, with no persona-side reader; **B2** seeds
+> `_build_replay_event` from it, narrows the shape-(a) derivation skip to
+> genuinely unattributable spans, and restores the RFC 0037 replayed-rotation
+> classification stamping withdrawn in
+> [#834](https://github.com/mkhomutov/Persatrix/pull/834).
+> `REASON_CATCHUP_COMPLETE` and the replay-opened-scope boundary are untouched
+> — they were never about attribution.
+>
+> The 2026-08-23 correction above (this migration is (b)'s alone, and (b) is
+> not gated on R-2) is carried into the plan as a scope lock, so B1/B2 run in
+> parallel with the residuals rather than queueing behind them.
+>
+> **The live check this issue names as missing gets written.** B2 authors a
+> restart leg on [MT-MEMORY-GROUP-TENANT-001](../manual-tests/MT-MEMORY-GROUP-TENANT-001.md)
+> — the release's single live gate. No second MT is authored: that arc already
+> sets the restart up, and [ISSUE-0125](ISSUE-0125-agents-never-reregister-after-orchestrator-restart.md),
+> landing first, is what makes it survivable. **The leg reads both partitions,
+> not `local` alone.** This issue framed the missing check as a `local` read
+> because shape (a) sent every replayed derivation there; once (b) lands, an
+> attributed span derives under its *own* principal, so duplicates appear in
+> the attributed partition and a `local`-only assertion passes at exactly the
+> moment the regression below is worst.
+>
+> 2026-08-23 — **narrowing the skip requires an idempotence half, and (b) must
+> carry it.** Recorded as scope lock 4 of the [v0.3.15 plan](../v0.3.15-plan.md),
+> re-aimed at this issue after the plan-opening audit found the original lock
+> guarding only the reconnect path. Shape (a) bounded the unbounded
+> re-derivation measured above (`local` episodes `0 → 2 → 5 → 13 → 18` across
+> four restarts) by skipping derivation for **every** replayed span. It did not
+> make replay idempotent — [`channel_catchup.py`](../../agents/channel_catchup.py)
+> still documents "**No watermark, no dedup** … `InteractionTracker.add_turn`
+> does **not** deduplicate by `message_id` — it appends every turn. K
+> consecutive restarts within the catch-up window produce `K × N` turns", and
+> `store_episode` is a plain insert with no conflict clause. B2's job is
+> precisely to narrow that skip, which hands the growth curve straight back,
+> relocated from `local` to the correct principal. The doors are the ones in
+> daily use — the MT's restarts at Legs 0, 7 and 8, the #823 manual
+> `docker compose restart agent-<each>` procedure the plan keeps as ISSUE-0125's
+> cut fallback, and every operator restart — not the reconnect path, which does
+> not exist until ISSUE-0125 lands and is *cuttable*. **So B2 ships a dedup or
+> watermark check alongside the narrowed skip** (dedup by `message_id` at
+> ingest, or gating the narrowed skip on "this span was not already derived";
+> the OQ #8(b) `?since=` watermark remains the deeper fix and stays out of
+> scope). The unit bar is that a span replayed twice derives once.

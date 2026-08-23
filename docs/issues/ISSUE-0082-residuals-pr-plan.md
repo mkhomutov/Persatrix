@@ -1,7 +1,7 @@
 # ISSUE-0082 — PR Implementation Plan (Residuals R-1 / R-2 — the derived and relayed tenant writes)
 
 **Issues**: [ISSUE-0123](ISSUE-0123-per-speaker-interaction-scope.md) (R-1) · [ISSUE-0124](ISSUE-0124-orchestrator-hop-drops-tenant-on-agent-cascade.md) (R-2) · [ISSUE-0131](ISSUE-0131-derived-memory-has-no-speaker-attribution.md) (the speaker axis)
-**Status**: 📋 Draft — Phase 0 resolved (principal axis); **opens after the v0.3.14 tag**, as a workstream inside the **v0.3.15** *Who said what* milestone
+**Status**: 📋 Draft — Phase 0 resolved (both axes); the v0.3.14 tag has landed and the [v0.3.15 plan](../v0.3.15-plan.md) is open, so this is workstream **A** of the **v0.3.15** *Who said what* milestone
 **Created**: 2026-08-07
 **Branch prefix**: `feature/v0315-issue0123-` / `feature/v0315-issue0124-` (per residual)
 **Target**: `main`
@@ -166,7 +166,7 @@ Bind `principal_scope(interaction.principal_id)` around the close pipeline (`sum
 
 * **This is the part that holds on request-less paths.** `idle_check` runs from the janitor with no scope active; the close-notification path runs under the closing turn's principal. Both must write under the record's own frozen value.
 * **The asymmetry is retired, not resolved.** Once the record names its principal, the trigger's principal no longer selects a tenant, so the four close paths in `internal/channels/synthesis_close.go` need not agree. Audit whether `pendingSynthesisClose.principal` becomes dead and drop it if so.
-* **Reserve re-size**: the RFC 0052 PR 4a `1 + N` close-path reserve assumes one summary per persona. With Phase 0b the multiplier is `1 + (personas × principals × speakers)` — the largest single cost in this workstream. Under-sizing turns extra summaries into a denied lease → `SUMMARY_UNAVAILABLE_TEXT`, and the janitor never retries a committed unavailable row — a *silent* quality regression. File the calibration as its own issue in the [ISSUE-0109](ISSUE-0109-rfc0052-autonomous-defaults-calibration.md) idiom rather than guessing a constant — **and that issue must cover the half-cap clamp, not just the multiplier.** [`internal/wallet/synthesis_reserve.go`](../../internal/wallet/synthesis_reserve.go) already carries it as a KNOWN GAP: the clamp on `SynthesisReserveTokens` guarantees the discussion a positive working budget, so on a modest cap with a full roster it holds back *less* than even the raw `1 + N` sizing calls for, and the personas whose summary lease is then denied fall through to the placeholder. A third dimension makes the clamp bite in the normal case rather than the edge case — an all-agent room under `auth.mode: disabled` (MT Leg 8) is exactly that shape. KNOWN GAP #2 is additive: the `1` under-sizes the chair turn, whose input scales with the discussion.
+* **Reserve re-size**: `1 + N` becomes `1 + (personas × principals × speakers)` — the largest single cost in this workstream, and under-sizing degrades *silently* into `SUMMARY_UNAVAILABLE_TEXT`. The sizing analysis, the half-cap clamp the calibration issue must cover, and the two obligations the milestone attaches (ship the **signal** with the re-size; the **threshold basis** is Go and does not ride this PR) are the [reserve-sizing record](ISSUE-0082-residuals-reserve-sizing.md). File the calibration as its own issue in the [ISSUE-0109](ISSUE-0109-rfc0052-autonomous-defaults-calibration.md) idiom rather than guessing a constant.
 * `agent.interactions.closed.by_<reason>` now fires once per record: a metric-shape change dashboards must be told about.
 
 #### PR checklist
@@ -182,11 +182,13 @@ Bind `principal_scope(interaction.principal_id)` around the close pipeline (`sum
 
 Run [MT-MEMORY-GROUP-TENANT-001](../manual-tests/MT-MEMORY-GROUP-TENANT-001.md) end to end on the post-fix column, execution report, issue closures (ISSUE-0123, ISSUE-0124, [ISSUE-0131](ISSUE-0131-derived-memory-has-no-speaker-attribution.md), and ISSUE-0082 itself), and the MT-MEMORY-MULTIUSER-001 Edge Case 2 wording widened back to the now-true claim.
 
+**Amended 2026-08-23 by the [v0.3.15 plan](../v0.3.15-plan.md)**: this is the *extended* MT and runs **once**, at Phase 3, after **PR B2** — which authors the ISSUE-0130(b) restart leg and widens Leg 4. Running earlier burns the paid arc on a column that cannot observe either.
+
 #### PR checklist
 
-- [ ] All eight legs green on a live provider, with the post-fix column stated
-- [ ] Leg 2's per-dispatch `principal.id` table (storage cannot see R-2) and Leg 4 `(principal_id, summary)` pairs pasted verbatim
-- [ ] ISSUE-0082 closed — its Part 2 residuals note updated. The doc-cap problem this checklist anticipated arrived early and is **already handled**: the file hit 3079/3000 on this branch's rebase and the v0.3.14 build log was split into [ISSUE-0082 Part 2 — the v0.3.14 build log](ISSUE-0082-part2-v0314-build-log.md), leaving 1639/3000. Measure with `scripts/checks/file_size.py`, not `wc -w` — the counter strips front-matter and fenced blocks
+- [ ] All **nine** legs (0–8) plus the restart leg green on a live provider, with the post-fix column stated
+- [ ] Leg 2's per-dispatch `principal.id` table (storage cannot see R-2) and Leg 4 `(principal_id, speaker_id, summary)` **triples** pasted verbatim
+- [ ] ISSUE-0082 closed — its Part 2 residuals note updated. The doc-cap problem this checklist anticipated is **already handled**: the v0.3.14 build log was split into [Part 2](ISSUE-0082-part2-v0314-build-log.md), leaving 1639/3000. Measure with `scripts/checks/file_size.py`, not `wc -w`
 
 ---
 
@@ -220,8 +222,10 @@ Run [MT-MEMORY-GROUP-TENANT-001](../manual-tests/MT-MEMORY-GROUP-TENANT-001.md) 
 
 ## Related Documentation
 
+- [v0.3.15 plan](../v0.3.15-plan.md) — the milestone this workstream rides (workstream A). It delegates PRs 1–5 below whole, and owns the two workstreams this plan does not: ISSUE-0130 shape (b) and ISSUE-0125.
 - [ISSUE-0082](ISSUE-0082-orchestrator-per-request-session-principal-emission.md) — the parent; its Part 2 note states both residuals.
 - [ISSUE-0082 residuals — the Phase 0 design gate](ISSUE-0082-residuals-phase0-gate.md) — the evidence record for the record-shape decision, both axes. Split out of this plan on 2026-08-21 when the [ISSUE-0131](ISSUE-0131-derived-memory-has-no-speaker-attribution.md) fold-in pushed the combined doc past the 3 000-word cap.
+- [ISSUE-0082 residuals — the close-path reserve re-size](ISSUE-0082-residuals-reserve-sizing.md) — PR 4's sizing analysis, the half-cap clamp, and the signal / threshold-basis obligations. Split out 2026-08-23 for the same reason.
 - [ISSUE-0082 Part 1 PR plan](ISSUE-0082-part1-session-emission-pr-plan.md) — the session axis, the shape this plan mirrors.
 - [RFC 0020 §G](../rfcs/0020-interaction-lifecycle.md#g-per-channel-scoping) · [RFC 0049](../rfcs/0049-memory-consolidation-gradient.md) Phase 1 · [RFC 0011](../rfcs/0011-channels-bridges.md) · [RFC 0039 §F](../rfcs/0039-user-accounts-authentication.md)
 - [MT-MEMORY-GROUP-TENANT-001](../manual-tests/MT-MEMORY-GROUP-TENANT-001.md) — the gate; [MT-MEMORY-MULTIUSER-001](../manual-tests/MT-MEMORY-MULTIUSER-001.md) — the per-turn boundary it bounds.

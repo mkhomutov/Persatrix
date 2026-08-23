@@ -107,3 +107,30 @@ rather than failing loudly.
 > rather than re-opening it later. It carries its own memory-store
 > migration (17 → 18); the `messages` v11 → v12 change belongs to
 > ISSUE-0130 shape (b) alone, in the other store.
+>
+> 2026-08-23 — **Boarded v0.3.15**, by the [v0.3.15 plan](../v0.3.15-plan.md)
+> (Phase 0). The speaker axis is not re-designed at the plan opening: the
+> [Phase 0 gate](ISSUE-0082-residuals-phase0-gate.md) resolved it 2026-08-21
+> **key-side** — the `InteractionTracker` is keyed `(principal, speaker,
+> scope)` — on the same 2026-08-07 live evidence that fixed the principal
+> dimension, and the plan records that answer rather than re-deriving it. The
+> work ships inside the [residuals PR plan](ISSUE-0082-residuals-pr-plan.md)
+> (PR 3 installs the key and persona-memory migration 17 → 18; PR 4 binds the
+> close path and re-sizes the reserve), which the milestone plan delegates to
+> whole.
+>
+> Two obligations the milestone attaches. The reserve calibration filed at
+> PR 4 must cover the **half-cap clamp** in
+> [`internal/wallet/synthesis_reserve.go`](../../internal/wallet/synthesis_reserve.go),
+> not only the `personas × principals × speakers` multiplier — a third
+> dimension makes that clamp bite in the normal case rather than the edge case,
+> and under-sizing degrades silently into `SUMMARY_UNAVAILABLE_TEXT`. And the
+> release gate is the *extended* [MT-MEMORY-GROUP-TENANT-001](../manual-tests/MT-MEMORY-GROUP-TENANT-001.md),
+> so residuals PR 5 does not run its arc before the
+> [ISSUE-0130](ISSUE-0130-catchup-replay-rederives-memory-under-default-principal.md)(b)
+> restart leg lands.
+>
+> Restated as a milestone scope lock, since it is the standing temptation
+> here: **model-elected attribution stays forbidden.** The speaker column is a
+> projection of the record key; it is sound only once the record is already
+> single-speaker.
