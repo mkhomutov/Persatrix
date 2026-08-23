@@ -142,11 +142,13 @@ func (s *Server) handleRegisterAgent(w http.ResponseWriter, r *http.Request) {
 		Status:       registry.StatusHealthy, // reachable until first health check fails
 	}
 
+	// ISSUE-0125: Register is an upsert, so a re-registration is accepted and
+	// overwrites the stored row rather than answering 409 CONFLICT. That 409 was
+	// the reason a returning agent could never correct a stale advertised
+	// address. The status code stays 201 for both the first registration and a
+	// re-registration — "registration accepted" — so no client has to branch on
+	// insert-vs-update (RFC 0002 §Agents amended 2026-08-23).
 	if err := s.registry.Register(r.Context(), info); err != nil {
-		if errors.Is(err, registry.ErrAgentAlreadyRegistered) {
-			writeError(w, "CONFLICT", "agent already registered", http.StatusConflict)
-			return
-		}
 		s.logger.Error("failed to register agent", zap.Error(err), zap.String("agent_id", req.ID))
 		writeError(w, "INTERNAL", "failed to register agent", http.StatusInternalServerError)
 		return

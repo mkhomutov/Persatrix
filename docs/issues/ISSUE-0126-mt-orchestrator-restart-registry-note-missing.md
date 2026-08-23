@@ -1,12 +1,13 @@
 ---
 id: ISSUE-0126
-summary: "Eight manual tests prescribe an orchestrator restart mid-arc, and none of them warns that the restart empties the in-memory agent registry. The v0.3.2 execution report (F-6) asked for exactly this note in an operator playbook and it was never written, so the same trap has re-cost live runs across three releases. PR #823 fixed one instance (MT-MEMORY-MULTIUSER-001); the other eight are unguarded. Subordinate to ISSUE-0125 — if re-registration lands, the correct action is to REMOVE these notes rather than write eight more."
+summary: "Eight manual tests prescribe an orchestrator restart mid-arc, and none of them warns that the restart empties the in-memory agent registry. The v0.3.2 execution report (F-6) asked for exactly this note in an operator playbook and it was never written, so the same trap has re-cost live runs across three releases. PR #823 fixed one instance (MT-MEMORY-MULTIUSER-001) and the group-channel MT later carried a second, leaving eight unguarded. Subordinate to ISSUE-0125 — if re-registration lands, the correct action is to REMOVE these notes rather than write eight more. **Option 1 executed in v0.3.15 PR C1**: re-registration landed and both warnings were deleted. Open until the release verifies the fix live at Phase 3."
 status: open
 severity: low
 area: docs/manual-tests
 created: 2026-08-08
 refs:
   - docs/manual-tests/MT-MEMORY-MULTIUSER-001.md
+  - docs/manual-tests/MT-MEMORY-GROUP-TENANT-001.md
   - docs/manual-tests/v0.3.0-execution-report.md
   - docs/manual-tests/v0.3.2-execution-report.md
   - internal/registry/registry.go
@@ -173,3 +174,39 @@ status first.
 > lands re-registration, delete **both** warnings and confirm the eight
 > unguarded restart steps are safe as written.
 
+> 2026-08-23 — **option 1 executed** (v0.3.15 PR C1), in the same PR that landed
+> the fix, as this issue asked.
+> [ISSUE-0125](ISSUE-0125-agents-never-reregister-after-orchestrator-restart.md)
+> shipped agent-side re-registration, so an orchestrator restart no longer leaves
+> the registry empty and there is nothing left for eight notes to warn about.
+> **Both** warnings are gone — the [#823](https://github.com/mkhomutov/Persatrix/pull/823)
+> precondition block on [MT-MEMORY-MULTIUSER-001](../manual-tests/MT-MEMORY-MULTIUSER-001.md)
+> and the one [MT-MEMORY-GROUP-TENANT-001](../manual-tests/MT-MEMORY-GROUP-TENANT-001.md)
+> carried — and the eight unguarded restart steps in the table above are safe as
+> written, none of them needing a persona restart any more.
+>
+> **Three things were deliberately kept rather than deleted with them**, because
+> re-registration does not fix any of them:
+>
+> - **F-6's second half** (item 3 of §Proposed fix): the RFC 0009 rate-limiter
+>   bucket is still not flushed by an orchestrator restart, so a turn issued
+>   straight after one can draw `429` for ~60 s. Both MTs now carry that alone,
+>   which is the note F-6 actually asked for once the registry half is gone.
+> - **Wait for `/healthz`.** The personas re-register when the connection
+>   returns, not before it does.
+> - **`GET /api/v1/agents` as the check** when a leg goes quiet — now backed by
+>   an orchestrator-side ERROR when zero agents are registered while channels
+>   have members, so the condition is visible without reading dispatch WARNs.
+>
+> One consequential edit fell out of the deletion and is worth flagging to the
+> next reader of MT-MEMORY-MULTIUSER-001: its Leg 2 note explained that "the
+> persona restart at the top of Leg 3" discarded any interaction still open.
+> There is no persona restart there any more, so an interaction left open at the
+> end of Leg 2 now survives into Bob's leg and can close under *his* principal —
+> the [ISSUE-0082](ISSUE-0082-orchestrator-per-request-session-principal-emission.md)
+> R-1 aggregate-close residual, not a new defect. The note says so, and the
+> instruction to let the interaction close first is unchanged.
+>
+> Closes with ISSUE-0125 at v0.3.15 Phase 4, after the live gate exercises a real
+> restart at Phase 3. If ISSUE-0125 had been cut, neither deletion would have
+> landed; it was not.

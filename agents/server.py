@@ -35,6 +35,7 @@ from .server_persona import (
     wire_wallet_client,
 )
 from .server_persona_timers import wire_convene_clients
+from .server_reregister import ReregistrationWatcher
 from .server_servicers import (  # noqa: F401
     AgentServiceServicer,
     _extract_chat_reply,
@@ -93,6 +94,9 @@ class AgentServer:
         # channel). Owned here; opened in start(), closed in stop().
         self._orchestrator_channel: grpc.aio.Channel | None = None
         self._wallet_client: WalletClient | None = None
+        # ISSUE-0125 — re-registers this agent when the orchestrator comes back
+        # from a restart. Armed at the end of start(), stopped first in stop().
+        self._reregister_watcher: ReregistrationWatcher | None = None
 
     def register_agent(self, agent: BaseAgent) -> None:
         """Register an agent instance with the server."""
@@ -242,6 +246,26 @@ class AgentServer:
             orchestrator_url=self.orchestrator_url,
             session=self._session,
         )
+        # ISSUE-0125 — arm re-registration LAST, once the startup tail is
+        # complete. The orchestrator's registry is in-memory, so its restart
+        # empties it and nothing would otherwise tell it we are here; every
+        # dispatch is then dropped and the persona goes silently mute.
+        self._start_reregistration_watcher()
+
+    def _start_reregistration_watcher(self) -> None:
+        """Watch the orchestrator channel and re-register when it reconnects.
+
+        Deliberately re-runs ONLY ``_self_register`` — never the catch-up replay
+        immediately above it in ``start()``. Catch-up has no watermark (RFC 0011
+        OQ #8), so replaying it on every orchestrator blip would re-ingest the
+        same window without bound.
+        """
+        if self._orchestrator_channel is None:
+            return
+        self._reregister_watcher = ReregistrationWatcher(
+            self._orchestrator_channel, self._self_register,
+        )
+        self._reregister_watcher.start()
 
     async def _self_register(self) -> None:
         """Register all hosted agents with the orchestrator (best-effort).
@@ -283,8 +307,11 @@ class AgentServer:
                             self.orchestrator_url,
                         )
                     elif resp.status == 409:
-                        # Agent already registered (CONFLICT) — not an error,
-                        # may happen on restart.
+                        # Vestigial since ISSUE-0125: the orchestrator's
+                        # Register is an upsert and no longer answers 409, so a
+                        # re-registration returns 201. Kept because this call is
+                        # best-effort by contract and an agent may be talking to
+                        # an older orchestrator mid-rollout.
                         logger.info(
                             "Agent %s already registered with orchestrator",
                             agent_id,
@@ -339,6 +366,12 @@ class AgentServer:
     async def stop(self) -> None:
         """Gracefully stop the server."""
         logger.info("Shutting down agent server...")
+        # ISSUE-0125 — disarm re-registration before anything else: the channel
+        # flaps on the way down, and a watcher still armed would re-register an
+        # agent that is in the middle of de-registering.
+        if self._reregister_watcher is not None:
+            await self._reregister_watcher.stop()
+            self._reregister_watcher = None
         # Stop tick schedulers first (before stopping gRPC)
         for agent_id, scheduler in self._tick_schedulers.items():
             try:

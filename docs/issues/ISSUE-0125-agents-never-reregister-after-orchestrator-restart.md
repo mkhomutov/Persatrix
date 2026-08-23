@@ -1,6 +1,6 @@
 ---
 id: ISSUE-0125
-summary: "The orchestrator's agent registry is an in-memory map (`internal/registry/registry.go` `InMemoryRegistry`) and agents call `_self_register()` exactly once, in their own startup path (`agents/server.py`) — there is no heartbeat, no retry and no re-registration trigger. So an orchestrator restart empties the registry and the fleet never comes back: every dispatch is dropped with `channels: dispatch target not registered`, personas fall silent, and nothing self-heals until each agent process is restarted by hand. The failure is near-silent — /healthz is green, containers are up, publishes return 201, and the only signal is one WARN per dropped dispatch. Recorded as an operational quirk since the v0.3.0 execution report and as F-6 (severity low) in v0.3.2; filed 2026-08-07 when the group-channel path, where the same condition is silent rather than loud, voided a live MT arc on a paid provider."
+summary: "The orchestrator's agent registry is an in-memory map (`internal/registry/registry.go` `InMemoryRegistry`) and agents call `_self_register()` exactly once, in their own startup path (`agents/server.py`) — there is no heartbeat, no retry and no re-registration trigger. So an orchestrator restart empties the registry and the fleet never comes back: every dispatch is dropped with `channels: dispatch target not registered`, personas fall silent, and nothing self-heals until each agent process is restarted by hand. The failure is near-silent — /healthz is green, containers are up, publishes return 201, and the only signal is one WARN per dropped dispatch. Recorded as an operational quirk since the v0.3.0 execution report and as F-6 (severity low) in v0.3.2; filed 2026-08-07 when the group-channel path, where the same condition is silent rather than loud, voided a live MT arc on a paid provider. **Fixed in v0.3.15 PR C1** by shape (4): each agent watches its own orchestrator gRPC channel and re-registers on any return to `READY`, `Register` becomes an upsert, and zero registered agents is raised at ERROR. Open until the release's live gate exercises a real restart."
 status: open
 severity: medium
 area: internal/registry
@@ -10,6 +10,7 @@ refs:
   - internal/channels/grpc_dispatcher.go
   - internal/server/agent_handlers.go
   - agents/server.py
+  - agents/server_reregister.py
   - agents/channel_catchup.py
   - docs/rfcs/0040-agent-orchestrator-transport-unification.md
   - docs/manual-tests/MT-MEMORY-MULTIUSER-001.md
@@ -107,7 +108,9 @@ indistinguishable from a persona that correctly recalled nothing, so any
 absence-bar assertion **passes vacuously**. That is how it voided a live
 MT run on a paid provider before anyone noticed
 ([MT-MEMORY-MULTIUSER-001](../manual-tests/MT-MEMORY-MULTIUSER-001.md)
-carries the same restart instruction and now carries a warning).
+carries the same restart instruction; it carried a precondition warning from
+[#823](https://github.com/mkhomutov/Persatrix/pull/823) until the fix landed —
+see the 2026-08-23 note).
 
 One compounding detail from the v0.3.2 record, since it shapes the
 remedy: the RFC 0009 rate-limiter bucket is **not** flushed on an
@@ -322,3 +325,31 @@ the condition is visible without reading dispatch WARNs.
 > superseded; the group MT is this release's own live gate, so leaving its
 > warning standing would retire ISSUE-0126 on a half-executed option 1. If
 > this issue cuts, neither deletion lands.
+
+> 2026-08-23 — **shape (4) landed** (v0.3.15 PR C1). Three pieces, each pinned by
+> its own test, as the note above requires:
+>
+> - **The trigger.** [`agents/server_reregister.py`](../../agents/server_reregister.py)
+>   watches `AgentServer._orchestrator_channel` and re-runs `_self_register()` on
+>   any departure from `READY` and return. The unit bar is an
+>   **`IDLE`** cycle; `TRANSIENT_FAILURE` is one departure state among several,
+>   not *the* trigger. A first `READY` is boot, and does not fire.
+> - **The precondition.** `Register` is an upsert; `ErrAgentAlreadyRegistered`
+>   and the REST `409` are gone (`201` now means "registration accepted" —
+>   RFC 0001 and RFC 0002 amended). As noted above, this covers the blip and the
+>   stale address, not the restart.
+> - **The observability this issue asks for separately.** Zero registered
+>   agents while a channel still has members is now an **ERROR** from the
+>   dispatch-miss path — once per outage, re-armed as soon as anything registers
+>   again. The per-recipient WARN stays at warn; the point is that it could not
+>   tell the benign case from this one.
+>
+> **The no-replay corollary holds by construction** — the watcher takes one
+> callback and calls it, and a test pins that a reconnect fetches no history.
+>
+> **Not closed yet.** The live proof is
+> [MT-MEMORY-GROUP-TENANT-001](../manual-tests/MT-MEMORY-GROUP-TENANT-001.md)'s
+> restart legs, which run once, at Phase 3. This issue and
+> [ISSUE-0126](ISSUE-0126-mt-orchestrator-restart-registry-note-missing.md) close
+> together at Phase 4, which also re-files shape (5) so closing this does not
+> orphan RFC 0040 §C and OQ 6.
