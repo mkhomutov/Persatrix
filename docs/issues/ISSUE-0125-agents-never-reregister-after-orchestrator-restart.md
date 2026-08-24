@@ -327,25 +327,26 @@ the condition is visible without reading dispatch WARNs.
 > this issue cuts, neither deletion lands.
 
 > 2026-08-23 — **shape (4) landed** (v0.3.15 PR C1). Three pieces, each pinned by
-> its own test, as the note above requires:
+> its own test:
 >
 > - **The trigger.** [`agents/server_reregister.py`](../../agents/server_reregister.py)
 >   watches `AgentServer._orchestrator_channel` and re-runs `_self_register()` on
 >   any departure from `READY` and return. The unit bar is an
 >   **`IDLE`** cycle; `TRANSIENT_FAILURE` is one departure state among several,
->   not *the* trigger. A first `READY` is boot, and does not fire.
+>   not *the* trigger. A first `READY` is boot, and does not fire. A reconnect
+>   **retries**, and the loop is **supervised**: neither a lost POST nor a
+>   stray channel error may leave a mute agent.
 > - **The precondition.** `Register` is an upsert; `ErrAgentAlreadyRegistered`
 >   and the REST `409` are gone (`201` now means "registration accepted" —
->   RFC 0001 and RFC 0002 amended). As noted above, this covers the blip and the
->   stale address, not the restart.
+>   RFC 0001 and RFC 0002 amended). This covers the blip and the stale address,
+>   not the restart.
 > - **The observability this issue asks for separately.** Zero registered
 >   agents while a channel still has members is now an **ERROR** from the
->   dispatch-miss path — once per outage, re-armed as soon as anything registers
->   again. The per-recipient WARN stays at warn; the point is that it could not
->   tell the benign case from this one.
+>   dispatch-miss path — once per outage, re-armed by any dispatch that
+>   **resolves** (a clean recovery leaves no miss). The per-recipient WARN
+>   stays at warn; it could not tell the benign case from this one.
 >
-> **The no-replay corollary holds by construction** — the watcher takes one
-> callback and calls it, and a test pins that a reconnect fetches no history.
+> **The no-replay corollary holds**, pinned by a test.
 >
 > **Not closed yet.** The live proof is
 > [MT-MEMORY-GROUP-TENANT-001](../manual-tests/MT-MEMORY-GROUP-TENANT-001.md)'s

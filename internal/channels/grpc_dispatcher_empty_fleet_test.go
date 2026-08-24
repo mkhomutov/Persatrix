@@ -99,6 +99,44 @@ func TestDispatch_FleetLossSignalReArmsAfterRecovery(t *testing.T) {
 		"a second outage is a second signal")
 }
 
+// The re-arm must survive a recovery that produces NO dispatch miss, which is
+// what a healthy deployment looks like: every channel member is a registered
+// agent, so nothing ever reaches the resolver-miss branch. Clearing the flag
+// only inside probeFleetLoss made the ERROR once-per-process in exactly that
+// case — the sibling test above passes only because "ghost" is never registered
+// and therefore carries a miss on every dispatch.
+func TestDispatch_FleetLossSignalReArmsWithoutAMiss(t *testing.T) {
+	core, recorded := observer.New(zapcore.ErrorLevel)
+	resolver := &listingResolver{stubResolver: stubResolver{agents: map[string]*registry.AgentInfo{}}}
+	d := NewGRPCMessageDispatcher(resolver, zap.New(core))
+
+	dispatchTo := func(participantID string) {
+		t.Helper()
+		_ = d.Dispatch(context.Background(), DispatchEnvelope{
+			Recipient: Member{ParticipantID: participantID, RespondPolicy: RespondAlways},
+		}, ChannelMessage{ID: "m-1", ChannelID: "group:planning", SenderID: "alice"})
+	}
+
+	// Outage 1: the restart emptied the registry.
+	dispatchTo("agent-b")
+	require.Len(t, recorded.FilterMessageSnippet("zero registered agents").All(), 1)
+
+	// Full recovery: agent-b is registered, so the resolve SUCCEEDS and the
+	// miss branch — the only place the old code re-armed — never runs. (The
+	// dial that follows fails; what matters is that the lookup did not.)
+	resolver.agents["agent-b"] = &registry.AgentInfo{
+		ID: "agent-b", Address: "127.0.0.1:1", Status: registry.StatusHealthy,
+	}
+	dispatchTo("agent-b")
+
+	// Outage 2: a second orchestrator restart empties it again.
+	delete(resolver.agents, "agent-b")
+	dispatchTo("agent-b")
+
+	assert.Len(t, recorded.FilterMessageSnippet("zero registered agents").All(), 2,
+		"a second outage is a second signal even when the recovery produced no miss")
+}
+
 // A resolver that cannot answer List (or does not implement it at all) must
 // not turn a delivery miss into a fleet-loss claim.
 func TestDispatch_ListFailureSuppressesFleetLossClaim(t *testing.T) {

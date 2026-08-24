@@ -35,6 +35,7 @@ from unittest.mock import AsyncMock, patch
 import grpc
 import pytest
 
+from agents import server_reregister
 from agents.base import BaseAgent, TaskInput, TaskOutput, TaskStatus
 from agents.server import AgentServer
 from agents.server_reregister import ReregistrationWatcher
@@ -67,13 +68,27 @@ class _ScriptedChannel:
         await asyncio.Event().wait()  # park forever; the script is exhausted
 
 
+def _landed() -> AsyncMock:
+    """A re-register callback that reports success, as ``_self_register`` does."""
+    return AsyncMock(return_value=True)
+
+
 async def _drive(states: list[grpc.ChannelConnectivity]) -> AsyncMock:
     """Run a watcher over ``states`` to completion; return the re-register mock."""
-    reregister = AsyncMock()
+    reregister = _landed()
     watcher = ReregistrationWatcher(_ScriptedChannel(states), reregister)
     watcher.start()
     await _finished(watcher)
     return reregister
+
+
+@pytest.fixture
+def _no_backoff(monkeypatch):
+    """Collapse the retry waits so a retry test costs no wall time."""
+    monkeypatch.setattr(server_reregister, "REREGISTER_BACKOFF_INITIAL_SEC", 0)
+    monkeypatch.setattr(server_reregister, "REREGISTER_BACKOFF_CAP_SEC", 0)
+    monkeypatch.setattr(server_reregister, "WATCH_RETRY_INITIAL_SEC", 0)
+    monkeypatch.setattr(server_reregister, "WATCH_RETRY_CAP_SEC", 0)
 
 
 async def _finished(watcher: ReregistrationWatcher) -> None:
@@ -126,31 +141,143 @@ class TestTrigger:
         await _finished(watcher)
 
 
-class TestResilience:
-    async def test_reregister_failure_does_not_kill_the_watcher(self):
-        """A blip during a re-register must not disarm the next reconnect.
+class TestRetry:
+    """One reconnect gets several tries, because one POST is not enough.
 
-        The orchestrator is by definition flaky at exactly this moment; a watcher
-        that dies on the first failed POST leaves the fleet mute for good, which
-        is the defect it was built to remove.
-        """
-        reregister = AsyncMock(side_effect=[RuntimeError("orchestrator still booting"), None])
-        watcher = ReregistrationWatcher(
-            _ScriptedChannel([READY, IDLE, READY, IDLE, CONNECTING, READY]), reregister
-        )
+    The watcher wakes on the orchestrator's *gRPC* port, but registration is a
+    REST POST to a different port that may still be binding — and
+    ``_self_register`` reports that as a plain ``False``, never an exception,
+    because it is best-effort by contract. A single attempt that lands in that
+    window would leave the agent unregistered until a next reconnect that may
+    never come: the mute fleet, reached by a new road.
+    """
+
+    async def test_a_failed_attempt_is_retried_until_it_lands(self, _no_backoff):
+        reregister = AsyncMock(side_effect=[False, False, True])
+        watcher = ReregistrationWatcher(_ScriptedChannel([READY, IDLE, READY]), reregister)
+        watcher.start()
+        await _finished(watcher)
+        assert reregister.await_count == 3
+
+    async def test_a_raising_attempt_is_retried_too(self, _no_backoff):
+        """A refused connection raises; a 429 returns False. Both get another go."""
+        reregister = AsyncMock(side_effect=[ConnectionRefusedError(), True])
+        watcher = ReregistrationWatcher(_ScriptedChannel([READY, IDLE, READY]), reregister)
         watcher.start()
         await _finished(watcher)
         assert reregister.await_count == 2
 
-    async def test_stop_cancels_a_watcher_parked_on_the_channel(self):
-        """Shutdown does not hang waiting for a state change that never comes."""
-        watcher = ReregistrationWatcher(_ScriptedChannel([READY]), AsyncMock())
+    async def test_success_does_not_spend_the_rest_of_the_budget(self, _no_backoff):
+        reregister = await _drive([READY, IDLE, READY])
+        reregister.assert_awaited_once()
+
+    async def test_giving_up_is_loud_and_bounded(self, _no_backoff, caplog):
+        """Out of tries, the agent is unreachable — that must not be a whisper."""
+        reregister = AsyncMock(return_value=False)
+        watcher = ReregistrationWatcher(_ScriptedChannel([READY, IDLE, READY]), reregister)
+        with caplog.at_level("ERROR", logger="Persatrix.agent.server_reregister"):
+            watcher.start()
+            await _finished(watcher)
+        assert reregister.await_count == server_reregister.REREGISTER_ATTEMPTS
+        assert any(r.levelname == "ERROR" for r in caplog.records)
+
+    async def test_a_spent_budget_does_not_disarm_the_next_reconnect(self, _no_backoff):
+        """Giving up on THIS reconnect must not give up on the watcher."""
+        reregister = AsyncMock(return_value=False)
+        watcher = ReregistrationWatcher(
+            _ScriptedChannel([READY, IDLE, READY, IDLE, READY]), reregister
+        )
         watcher.start()
+        await _finished(watcher)
+        assert reregister.await_count == 2 * server_reregister.REREGISTER_ATTEMPTS
+
+
+class _ParkedChannel:
+    """READY and never changing again — a live, healthy channel."""
+
+    def get_state(self, try_to_connect: bool = False) -> grpc.ChannelConnectivity:
+        return READY
+
+    async def wait_for_state_change(self, last_observed_state) -> None:
+        await asyncio.Event().wait()
+
+
+class _ExplodingChannel:
+    """A channel that raises from ``wait_for_state_change`` a fixed number of
+    times, the way a closed ``grpc.aio`` channel does, then shuts down."""
+
+    def __init__(self, failures: int):
+        self._failures = failures
+
+    def get_state(self, try_to_connect: bool = False) -> grpc.ChannelConnectivity:
+        return READY if self._failures else SHUTDOWN
+
+    async def wait_for_state_change(self, last_observed_state) -> None:
+        if self._failures:
+            self._failures -= 1
+            raise grpc.aio.UsageError("Channel is closed.")
+
+
+class TestResilience:
+    async def test_a_channel_error_does_not_disarm_the_watcher(self, _no_backoff):
+        """The loop is supervised: an unexpected channel error is retried.
+
+        An unguarded loop is one stray exception away from ending re-registration
+        for the life of the process, with nothing in the log to say so — the mute
+        fleet again, reached from the inside.
+        """
+        watcher = ReregistrationWatcher(_ExplodingChannel(failures=3), _landed())
+        watcher.start()
+        await _finished(watcher)
+        task = watcher.task
+        assert task is not None and task.exception() is None
+
+    async def test_stop_swallows_a_task_that_ended_in_failure(self):
+        """Shutdown must not inherit the watcher's failure.
+
+        ``stop()`` is the FIRST step of ``AgentServer.stop()``, and awaiting a
+        task re-raises whatever it ended with — so letting that through would
+        skip de-registration, the memory flush and the log-shipper drain, losing
+        the very logs that would explain the failure. The supervised loop above
+        makes this hard to reach on purpose; the guard is the backstop for when
+        it is reached anyway, so it is pinned directly.
+        """
+        watcher = ReregistrationWatcher(_ParkedChannel(), _landed())
+
+        async def _ended_badly() -> None:
+            raise grpc.aio.UsageError("Channel is closed.")
+
+        watcher._task = asyncio.create_task(_ended_badly())
+        await asyncio.sleep(0)  # let it fail
+
         await asyncio.wait_for(watcher.stop(), timeout=5)
         assert watcher.task is None
 
+    async def test_stop_cancels_a_watcher_parked_on_the_channel(self):
+        """Shutdown does not hang waiting for a state change that never comes.
+
+        ``_ParkedChannel`` blocks inside ``wait_for_state_change`` forever, which
+        is what a live, healthy channel does — so this is a watcher genuinely
+        parked, not one that was about to exit anyway.
+        """
+        watcher = ReregistrationWatcher(_ParkedChannel(), _landed())
+        watcher.start()
+        await asyncio.sleep(0)  # let the loop reach the park
+        await asyncio.wait_for(watcher.stop(), timeout=5)
+        assert watcher.task is None
+
+    async def test_start_re_arms_a_loop_that_already_finished(self):
+        """A completed task must not hold the door shut against a fresh one."""
+        watcher = ReregistrationWatcher(_ScriptedChannel([READY]), _landed())
+        watcher.start()
+        first = watcher.task
+        await _finished(watcher)
+        watcher.start()
+        assert watcher.task is not first
+        await watcher.stop()
+
     async def test_stop_before_start_is_a_noop(self):
-        await ReregistrationWatcher(_ScriptedChannel([READY]), AsyncMock()).stop()
+        await ReregistrationWatcher(_ScriptedChannel([READY]), _landed()).stop()
 
 
 class _StubAgent(BaseAgent):
@@ -194,6 +321,27 @@ class TestAgentServerWiring:
         server = self._server()
         server._orchestrator_channel = None
         server._start_reregistration_watcher()
+        assert server._reregister_watcher is None
+
+    async def test_stop_finishes_its_teardown_even_if_disarming_fails(self):
+        """A watcher that cannot be disarmed must not abort the whole shutdown.
+
+        Disarming is the FIRST step of ``AgentServer.stop()`` and was the only
+        one not isolated, so an exception escaping it would skip everything
+        after: de-registration, the persona memory flush, the shared session
+        close and the log-shipper drain.
+        """
+        server = self._server()
+        watcher = ReregistrationWatcher(_ParkedChannel(), _landed())
+        server._reregister_watcher = watcher
+
+        with (
+            patch.object(watcher, "stop", new=AsyncMock(side_effect=RuntimeError("wedged"))),
+            patch.object(server, "_self_deregister", new=AsyncMock()) as deregister,
+        ):
+            await server.stop()
+
+        deregister.assert_awaited_once()
         assert server._reregister_watcher is None
 
 

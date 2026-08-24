@@ -267,15 +267,23 @@ class AgentServer:
         )
         self._reregister_watcher.start()
 
-    async def _self_register(self) -> None:
+    async def _self_register(self) -> bool:
         """Register all hosted agents with the orchestrator (best-effort).
 
         POST /api/v1/agents/register with id, name, type, role, address, capabilities.
         Status is NOT sent — the orchestrator sets ``healthy`` on registration
         (review-fix P1).
+
+        Returns True when every hosted agent is registered, False when any one of
+        them is not. It still never raises — an unreachable orchestrator must not
+        stop the agent from serving — but ISSUE-0125 needs the *caller* to be able
+        to tell the difference: a re-registration that quietly did not land leaves
+        the agent invisible to every dispatch, which is the whole defect. Startup
+        ignores the answer and carries on; ``ReregistrationWatcher`` retries on it.
         """
         if self._session is None:
-            return
+            return False
+        registered = True
         for agent_id, agent in self.agents.items():
             address = self.advertise_address
             payload = {
@@ -317,6 +325,7 @@ class AgentServer:
                             agent_id,
                         )
                     else:
+                        registered = False
                         body = await resp.text()
                         logger.warning(
                             "Failed to register agent %s: HTTP %d — %s",
@@ -327,11 +336,13 @@ class AgentServer:
             except Exception:
                 # Best-effort: log and continue serving even if orchestrator
                 # is unreachable.
+                registered = False
                 logger.warning(
                     "Could not reach orchestrator at %s for agent %s registration",
                     self.orchestrator_url,
                     agent_id,
                 )
+        return registered
 
     async def _self_deregister(self) -> None:
         """De-register all hosted agents from the orchestrator (best-effort).
@@ -368,9 +379,14 @@ class AgentServer:
         logger.info("Shutting down agent server...")
         # ISSUE-0125 — disarm re-registration before anything else: the channel
         # flaps on the way down, and a watcher still armed would re-register an
-        # agent that is in the middle of de-registering.
+        # agent that is in the middle of de-registering. Isolated like every
+        # other teardown step below: this one runs FIRST, so letting it throw
+        # would skip de-registration, the memory flush and the shipper drain.
         if self._reregister_watcher is not None:
-            await self._reregister_watcher.stop()
+            try:
+                await self._reregister_watcher.stop()
+            except Exception:
+                logger.exception("Error stopping the re-registration watcher")
             self._reregister_watcher = None
         # Stop tick schedulers first (before stopping gRPC)
         for agent_id, scheduler in self._tick_schedulers.items():

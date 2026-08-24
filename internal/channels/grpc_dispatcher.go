@@ -147,9 +147,9 @@ type GRPCMessageDispatcher struct {
 	epoch string
 	// fleetLossReported de-duplicates the ISSUE-0125 zero-registered-agents
 	// ERROR to once per OUTAGE (not once per process, and emphatically not
-	// once per dropped message). Cleared again the moment the registry is seen
-	// non-empty, so a fleet that is lost, recovers, and is lost again reports
-	// twice.
+	// once per dropped message). Re-armed by [GRPCMessageDispatcher.noteFleetAlive]
+	// on any evidence the registry is populated again, so a fleet that is
+	// lost, recovers, and is lost again reports twice.
 	fleetLossReported atomic.Bool
 }
 
@@ -234,7 +234,7 @@ func (d *GRPCMessageDispatcher) probeFleetLoss(ctx context.Context, channelID st
 		return
 	}
 	if len(agents) > 0 {
-		d.fleetLossReported.Store(false) // re-arm: this outage (if any) is over
+		d.noteFleetAlive() // this outage (if any) is over
 		return
 	}
 	if d.fleetLossReported.Swap(true) {
@@ -243,6 +243,25 @@ func (d *GRPCMessageDispatcher) probeFleetLoss(ctx context.Context, channelID st
 	d.logger.Error("channels: orchestrator has zero registered agents while channels have members — the whole fleet is unreachable and every dispatch is being dropped (agents register at their own startup; see ISSUE-0125)",
 		zap.String("channel_id", channelID),
 	)
+}
+
+// noteFleetAlive re-arms the fleet-loss ERROR, so the NEXT outage is reported
+// as its own event rather than deduplicated away against the last one.
+//
+// It must be called from somewhere a healthy deployment actually reaches.
+// Clearing the flag only inside probeFleetLoss is not enough: that runs on the
+// resolver-miss path, so a recovery in which every channel member registers
+// again produces no miss, never clears the flag, and silently downgrades the
+// signal to once per process — the exact thing the field's contract disclaims.
+// A resolve that SUCCEEDED is the proof a healthy deployment does produce, and
+// it is the one this dispatcher already has in hand.
+//
+// The Load guard keeps the steady state a read: without it every delivery would
+// write a shared cache line for a flag that is almost always already false.
+func (d *GRPCMessageDispatcher) noteFleetAlive() {
+	if d.fleetLossReported.Load() {
+		d.fleetLossReported.Store(false)
+	}
 }
 
 // Dispatch implements [MessageDispatcher].
@@ -297,6 +316,10 @@ func (d *GRPCMessageDispatcher) Dispatch(ctx context.Context, env DispatchEnvelo
 		span.SetStatus(otelcodes.Error, err.Error())
 		return fmt.Errorf("registry lookup for %s: %w", participantID, err)
 	}
+	// ISSUE-0125: a resolve that succeeded proves the registry is populated, so
+	// whatever outage the fleet-loss ERROR last reported is over. This is the
+	// re-arm that a healthy recovery actually reaches — see noteFleetAlive.
+	d.noteFleetAlive()
 	if agent.Status != registry.StatusHealthy {
 		err := fmt.Errorf("%w: %s status=%s", ErrAgentNotReady, participantID, agent.Status)
 		span.RecordError(err)
