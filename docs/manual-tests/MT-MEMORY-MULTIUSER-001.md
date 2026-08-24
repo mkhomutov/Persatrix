@@ -54,12 +54,9 @@ Every axis before this one isolated *rooms* (session) or *runs* (epoch). Neither
 4. **No `data/accounts.db`** — Leg 1 bootstraps it.
 5. `config/security.yaml` with `auth.mode: enabled` for Legs 1–5; Leg 6 flips it back.
 
-> ⚠️ **Every orchestrator restart empties the agent registry — re-register the personas before the next turn.** The registry is in-memory and agents register once at their *own* startup; they do **not** re-register when the orchestrator comes back. **Four** restarts below leave it empty: Legs 1, 3 and 4 (each re-bootstrap needs one) and Leg 6. Leg 5 takes the whole stack down and up, so it re-registers on its own.
+> **A restart still leaves the rate-limiter bucket full.** The RFC 0009 bucket is not flushed when the orchestrator restarts, so the first turn after one can draw `429` for up to ~60 s. Read that as "wait", not as "the restart did not take" — restarting again only burns another turn.
 >
-> - **What you will see here.** `persatrix chat` resolves the agent against the registry *before* it publishes, so an empty registry answers `404 agent not found`. The leg fails **loudly** — a burnt turn, not a false PASS. On the channel-publish seam the same condition *is* silent (publish returns `201`, dispatch dropped with `channels: dispatch target not registered`, persona never replies) — not this MT's path, but one config change away.
-> - **Remedy.** Wait for the orchestrator to answer `/healthz`, **then** restart each persona container (`docker compose restart agent-<id>`). Registration is best-effort and never retried, so a persona restarted against a still-booting orchestrator lands in the same empty state.
-> - **Verify before sending the leg's message.** `GET $PERSATRIX_SERVER/api/v1/agents` must list every persona `healthy`. The route is `authenticated`, so under `enabled` (Legs 1–5) run it **after** `persatrix login` with the credential — an un-credentialled call answers `401`, which is not an empty registry.
-> - **Long-standing, not new** ([ISSUE-0125](../issues/ISSUE-0125-agents-never-reregister-after-orchestrator-restart.md); recorded since [v0.3.0](v0.3.0-execution-report.md)). The same restarts leave the RFC 0009 rate-limiter bucket un-flushed, so a post-restart turn can draw `429` for ~60 s.
+> *(The registry warning that stood here through v0.3.14 is gone: since v0.3.15 the personas re-register themselves when the orchestrator comes back — [ISSUE-0125](../issues/ISSUE-0125-agents-never-reregister-after-orchestrator-restart.md). The restart steps below are safe as written, with no persona restart needed. If a leg ever does go quiet after a restart, `GET $PERSATRIX_SERVER/api/v1/agents` is still the check — and an orchestrator holding **zero** registered agents now says so at ERROR in its own log.)*
 
 > **Two accounts, one bootstrap verb.** RFC 0039 Phase 3 (account administration) is v0.4.0, so the only shipped account-creation verb is `account bootstrap`, and it refuses to run once any account exists. To get a second *authenticated principal* on shipped verbs, **delete `data/accounts.db` and bootstrap again under the other participant** between legs. `accounts.db` and the persona's `memory.db` are separate stores, so this rotates *who is speaking* while leaving the memory corpus untouched — which is exactly the variable under test. The cost is that the two accounts are sequential rather than concurrent; the *concurrent* case is pinned deterministically in `test_principal_emission_isolation.py` (one process, two scopes, one shared room). When Phase 3 lands, this dance collapses to one `account create`.
 
@@ -82,9 +79,9 @@ Every axis before this one isolated *rooms* (session) or *runs* (epoch). Neither
 rm -f data/accounts.db
 ./bin/persatrix-server account bootstrap --username alice --participant alice-person
 # restart the orchestrator so it opens the new accounts.db
-# then, once /healthz answers, restart the personas — the restart emptied the agent registry (see above)
+# wait for /healthz before the next turn — the personas re-register themselves
 persatrix login          # as alice
-# confirm every persona is back: GET /api/v1/agents with the login token
+# sanity check: GET /api/v1/agents with the login token lists every persona healthy
 echo "My daughter Mira turns seven next month." | ./bin/persatrix chat ember-owl
 ```
 
@@ -100,7 +97,7 @@ Let the interaction close (the RFC 0020 idle window, or a lowered `interaction_i
 echo "What would be a good present for a kid that age?" | ./bin/persatrix chat ember-owl
 ```
 
-Let this interaction close too, before moving on. RFC 0020 §C holds open interactions **in memory only**, so the persona restart at the top of Leg 3 discards one that is still open — Leg 4 still reads back off Leg 1's rows, but this leg's episode would never be written.
+Let this interaction close too, before moving on — and note this **changed in v0.3.15**. RFC 0020 §C holds open interactions **in memory only**, and the personas used to be restarted at the top of Leg 3, which discarded any that were still open. They re-register themselves now ([ISSUE-0125](../issues/ISSUE-0125-agents-never-reregister-after-orchestrator-restart.md)) and are no longer restarted, so an interaction left open here **survives into Bob's leg** and can close under *his* principal — the aggregate-close residual ([ISSUE-0082](../issues/ISSUE-0082-orchestrator-per-request-session-principal-emission.md) R-1), not a new defect. Closing it here keeps that variable out of Leg 3.
 
 **Verification**:
 - [ ] The reply references **Mira** / "your daughter" by recall — the trigger shares no keyword with Leg 1. Strictness must not narrow recall *within* a tenant.
@@ -110,9 +107,9 @@ Let this interaction close too, before moving on. RFC 0020 §C holds open intera
 ```bash
 rm -f data/accounts.db
 ./bin/persatrix-server account bootstrap --username bob --participant bob-person
-# restart the orchestrator, then (once /healthz answers) the personas — registry emptied, see above
+# restart the orchestrator; wait for /healthz before the next turn
 persatrix login          # as bob
-# confirm every persona is back: GET /api/v1/agents with the login token
+# sanity check: GET /api/v1/agents with the login token lists every persona healthy
 echo "What would be a good present for a kid that age?" | ./bin/persatrix chat ember-owl
 ```
 
@@ -125,7 +122,7 @@ echo "What would be a good present for a kid that age?" | ./bin/persatrix chat e
 
 ### Leg 4 — Alice returns, unchanged
 
-Re-bootstrap as alice (`--participant alice-person`) — the same `rm` → `bootstrap` → orchestrator restart → **persona restart** dance as Leg 3 — **then apply the fresh-room rule**: delete Alice's DM channel so the re-ask cannot be served off the transcript, and let the next chat re-create it empty.
+Re-bootstrap as alice (`--participant alice-person`) — the same `rm` → `bootstrap` → orchestrator restart dance as Leg 3 — **then apply the fresh-room rule**: delete Alice's DM channel so the re-ask cannot be served off the transcript, and let the next chat re-create it empty.
 
 ```bash
 # resolve and drop Alice's DM (operator role; the bootstrapped account has it)
@@ -170,7 +167,7 @@ Bring the stack up, log in as alice, and **apply the fresh-room rule** (delete t
 
 ### Leg 6 — `auth.mode: disabled` is byte-identical
 
-Set `auth.mode: disabled`, restart the orchestrator **and then the personas** (see the warning above), and chat with no credential.
+Set `auth.mode: disabled`, restart the orchestrator, and chat with no credential.
 
 **Verification**:
 - [ ] The turn succeeds with no login.

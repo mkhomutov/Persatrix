@@ -69,18 +69,21 @@ itself (MT-MEMORY-MULTIUSER-001), the auth substrate
 > script; an idle pause mid-arc expires the window and silently changes
 > which close trigger fires, which is the variable Legs 4 and 5 turn on.
 
-> ⚠️ **Every orchestrator restart empties the agent registry — restart the
-> personas after it.** The registry is in-memory, and agents register once
-> at their own startup; they do **not** re-register when the orchestrator
-> comes back. So the `account bootstrap` → restart step leaves a healthy,
-> green-looking stack in which *every* dispatch is dropped with
-> `channels: dispatch target not registered`, no persona ever replies, and
-> the arc produces no cascade and no rows. Verified 2026-08-07 — it cost a
-> full arc before it was spotted. After any orchestrator restart:
-> `docker compose restart agent-<each>`, then confirm
-> `GET /api/v1/agents` lists every persona `healthy` **before** publishing.
-> This applies to [MT-MEMORY-MULTIUSER-001](MT-MEMORY-MULTIUSER-001.md)
-> too, which carries the same restart instruction.
+> **The personas re-register themselves — but give them the moment.** Through
+> v0.3.14 an orchestrator restart emptied the in-memory registry for good, and
+> this arc's `account bootstrap` → restart step left a healthy, green-looking
+> stack in which every dispatch was dropped, no persona ever replied, and the
+> run produced no cascade and no rows. It cost a full live arc on 2026-08-07
+> before it was spotted. Since v0.3.15 each agent watches its own orchestrator
+> connection and re-registers when it returns
+> ([ISSUE-0125](../issues/ISSUE-0125-agents-never-reregister-after-orchestrator-restart.md)),
+> so no `docker compose restart agent-<each>` is needed. What still applies:
+> **wait for the orchestrator to answer `/healthz` before publishing**, and if a
+> leg does go quiet, `GET /api/v1/agents` remains the check — an orchestrator
+> holding **zero** registered agents now says so at ERROR in its own log rather
+> than only in one dispatch WARN per dropped message. The RFC 0009 rate-limiter
+> bucket is *not* flushed by a restart either, so the first turn after one can
+> still draw `429` for ~60 s.
 
 > **One account at a time.** Same constraint as MT-MEMORY-MULTIUSER-001:
 > `account bootstrap` refuses once an account exists, so rotating to a

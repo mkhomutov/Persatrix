@@ -35,6 +35,7 @@ from .server_persona import (
     wire_wallet_client,
 )
 from .server_persona_timers import wire_convene_clients
+from .server_reregister import ReregistrationWatcher
 from .server_servicers import (  # noqa: F401
     AgentServiceServicer,
     _extract_chat_reply,
@@ -93,6 +94,9 @@ class AgentServer:
         # channel). Owned here; opened in start(), closed in stop().
         self._orchestrator_channel: grpc.aio.Channel | None = None
         self._wallet_client: WalletClient | None = None
+        # ISSUE-0125 — re-registers this agent when the orchestrator comes back
+        # from a restart. Armed at the end of start(), stopped first in stop().
+        self._reregister_watcher: ReregistrationWatcher | None = None
 
     def register_agent(self, agent: BaseAgent) -> None:
         """Register an agent instance with the server."""
@@ -242,16 +246,44 @@ class AgentServer:
             orchestrator_url=self.orchestrator_url,
             session=self._session,
         )
+        # ISSUE-0125 — arm re-registration LAST, once the startup tail is
+        # complete. The orchestrator's registry is in-memory, so its restart
+        # empties it and nothing would otherwise tell it we are here; every
+        # dispatch is then dropped and the persona goes silently mute.
+        self._start_reregistration_watcher()
 
-    async def _self_register(self) -> None:
+    def _start_reregistration_watcher(self) -> None:
+        """Watch the orchestrator channel and re-register when it reconnects.
+
+        Deliberately re-runs ONLY ``_self_register`` — never the catch-up replay
+        immediately above it in ``start()``. Catch-up has no watermark (RFC 0011
+        OQ #8), so replaying it on every orchestrator blip would re-ingest the
+        same window without bound.
+        """
+        if self._orchestrator_channel is None:
+            return
+        self._reregister_watcher = ReregistrationWatcher(
+            self._orchestrator_channel, self._self_register,
+        )
+        self._reregister_watcher.start()
+
+    async def _self_register(self) -> bool:
         """Register all hosted agents with the orchestrator (best-effort).
 
         POST /api/v1/agents/register with id, name, type, role, address, capabilities.
         Status is NOT sent — the orchestrator sets ``healthy`` on registration
         (review-fix P1).
+
+        Returns True when every hosted agent is registered, False when any one of
+        them is not. It still never raises — an unreachable orchestrator must not
+        stop the agent from serving — but ISSUE-0125 needs the *caller* to be able
+        to tell the difference: a re-registration that quietly did not land leaves
+        the agent invisible to every dispatch, which is the whole defect. Startup
+        ignores the answer and carries on; ``ReregistrationWatcher`` retries on it.
         """
         if self._session is None:
-            return
+            return False
+        registered = True
         for agent_id, agent in self.agents.items():
             address = self.advertise_address
             payload = {
@@ -283,13 +315,17 @@ class AgentServer:
                             self.orchestrator_url,
                         )
                     elif resp.status == 409:
-                        # Agent already registered (CONFLICT) — not an error,
-                        # may happen on restart.
+                        # Vestigial since ISSUE-0125: the orchestrator's
+                        # Register is an upsert and no longer answers 409, so a
+                        # re-registration returns 201. Kept because this call is
+                        # best-effort by contract and an agent may be talking to
+                        # an older orchestrator mid-rollout.
                         logger.info(
                             "Agent %s already registered with orchestrator",
                             agent_id,
                         )
                     else:
+                        registered = False
                         body = await resp.text()
                         logger.warning(
                             "Failed to register agent %s: HTTP %d — %s",
@@ -300,11 +336,13 @@ class AgentServer:
             except Exception:
                 # Best-effort: log and continue serving even if orchestrator
                 # is unreachable.
+                registered = False
                 logger.warning(
                     "Could not reach orchestrator at %s for agent %s registration",
                     self.orchestrator_url,
                     agent_id,
                 )
+        return registered
 
     async def _self_deregister(self) -> None:
         """De-register all hosted agents from the orchestrator (best-effort).
@@ -339,6 +377,17 @@ class AgentServer:
     async def stop(self) -> None:
         """Gracefully stop the server."""
         logger.info("Shutting down agent server...")
+        # ISSUE-0125 — disarm re-registration before anything else: the channel
+        # flaps on the way down, and a watcher still armed would re-register an
+        # agent that is in the middle of de-registering. Isolated like every
+        # other teardown step below: this one runs FIRST, so letting it throw
+        # would skip de-registration, the memory flush and the shipper drain.
+        if self._reregister_watcher is not None:
+            try:
+                await self._reregister_watcher.stop()
+            except Exception:
+                logger.exception("Error stopping the re-registration watcher")
+            self._reregister_watcher = None
         # Stop tick schedulers first (before stopping gRPC)
         for agent_id, scheduler in self._tick_schedulers.items():
             try:

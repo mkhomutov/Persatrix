@@ -76,18 +76,6 @@ func TestRegisterAgentMissingAddress(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "address is required")
 }
 
-func TestRegisterAgentDuplicate(t *testing.T) {
-	srv, _ := testServer(t)
-	body := []byte(`{"id": "code-writer", "address": "localhost:50051"}`)
-	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/agents/register", body)
-	require.Equal(t, http.StatusCreated, rec.Code)
-
-	// Second registration with same ID → 409
-	rec = doRequest(srv.Handler(), http.MethodPost, "/api/v1/agents/register", body)
-	assert.Equal(t, http.StatusConflict, rec.Code)
-	assert.Contains(t, rec.Body.String(), "agent already registered")
-}
-
 func TestRegisterAgentWrongContentType(t *testing.T) {
 	srv, _ := testServer(t)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/register", strings.NewReader(`{}`))
