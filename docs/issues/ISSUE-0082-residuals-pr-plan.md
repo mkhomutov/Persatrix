@@ -1,7 +1,7 @@
 # ISSUE-0082 — PR Implementation Plan (Residuals R-1 / R-2 — the derived and relayed tenant writes)
 
 **Issues**: [ISSUE-0123](ISSUE-0123-per-speaker-interaction-scope.md) (R-1) · [ISSUE-0124](ISSUE-0124-orchestrator-hop-drops-tenant-on-agent-cascade.md) (R-2) · [ISSUE-0131](ISSUE-0131-derived-memory-has-no-speaker-attribution.md) (the speaker axis)
-**Status**: 📋 Draft — Phase 0 resolved (both axes); the v0.3.14 tag has landed and the [v0.3.15 plan](../v0.3.15-plan.md) is open, so this is workstream **A** of the **v0.3.15** *Who said what* milestone
+**Status**: 🔄 In progress — Phase 0 resolved (both axes); workstream **A** of the **v0.3.15** *Who said what* milestone, open at PR 1
 **Created**: 2026-08-07
 **Branch prefix**: `feature/v0315-issue0123-` / `feature/v0315-issue0124-` (per residual)
 **Target**: `main`
@@ -210,7 +210,7 @@ Run [MT-MEMORY-GROUP-TENANT-001](../manual-tests/MT-MEMORY-GROUP-TENANT-001.md) 
 | # | Title | Branch | Status | GitHub PR | Merged |
 |---|-------|--------|--------|-----------|--------|
 | 0 | Design gate — MT Legs 1–4, lock the record shape (both axes) | — | ✅ Resolved → **`(principal, speaker, scope)`**: Phase 0 (principal) 2026-08-07, Phase 0b (speaker) 2026-08-21 | — | — |
-| 1 | R-2 causal attribution store, dormant | `feature/v0315-issue0124-attribution-store` | ⬜ Not started | — | — |
+| 1 | R-2 causal attribution store, dormant | `feature/v0315-issue0124-attribution-store` | 🔀 PR open | [#843](https://github.com/mkhomutov/Persatrix/pull/843) | — |
 | 2 | R-2 re-stamp + end-to-end gate | `feature/v0315-issue0124-restamp` | ⬜ Not started | — | — |
 | 3 | R-1 + [ISSUE-0131](ISSUE-0131-derived-memory-has-no-speaker-attribution.md) scope key `(principal, speaker, scope)` + RFC 0020 §G amendment | `feature/v0315-issue0123-scope-key` | ⬜ Not started | — | — |
 | 4 | R-1 close binding, reserve re-size (now × speakers), asymmetry cleanup | `feature/v0315-issue0123-close-path` | ⬜ Not started | — | — |

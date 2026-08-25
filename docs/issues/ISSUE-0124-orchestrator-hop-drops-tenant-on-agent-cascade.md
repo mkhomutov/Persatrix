@@ -212,6 +212,50 @@ in every room. Together the relayed turn carries the causal principal
 > collector's tail sampling is **1% probabilistic**, so the dispatch
 > spans are dropped unless it is raised for the measurement.
 
+> 2026-08-25 — **PR 1 of the fix is open** (`feature/v0315-issue0124-attribution-store`,
+> the [residuals PR plan](ISSUE-0082-residuals-pr-plan.md) PR 1): the
+> attribution table itself —
+> [`internal/channels/principal_attribution.go`](../../internal/channels/principal_attribution.go)
+> — plus the write at the dispatch chokepoint and the wiring that hands the
+> instance to the dispatcher. **Nothing reads it**; the re-stamp in
+> `ChannelRouter.Publish` is PR 2, so behaviour is unchanged and the wire is
+> byte-identical either way (pinned, not assumed). The design above is
+> implemented as written, with **two refinements the implementation forced**,
+> both narrowing rather than widening what gets attributed:
+>
+> - **The write is on the DELIVERED path, not the attempt.** The design says
+>   "record when `PrincipalFromContext(ctx)` is non-empty"; the record is
+>   placed after the receiver's ack instead. An entry means *this agent holds
+>   this stimulus*, and a dispatch that was dropped (unregistered recipient),
+>   refused (the servicer's queue-full / pre-ingest ack with `success=false`)
+>   or never dialled leaves the agent holding nothing — while the entry would
+>   stay live for a full turn budget and be inherited by whatever that agent
+>   published next, e.g. an autonomous tick. That is a mis-attribution of
+>   content nobody caused, which is the one failure mode this design is
+>   otherwise free of.
+> - **Ambiguity is sticky for the life of the entry, and every write refreshes
+>   the stamp.** The design fixes the two-principals case but not what a THIRD
+>   dispatch does. A later dispatch — even from the first principal — cannot
+>   establish which of the two live stimuli the pending reply is answering, so
+>   it does not clear the flag. Because the stamp is refreshed, a room in
+>   continuous two-person conversation stays ambiguous while it lasts: more
+>   conservative than strictly necessary, and in the safe direction.
+>   Ambiguity dies with the entry, so once both stimuli age out the next
+>   dispatch is a fresh unambiguous fact and a busy room never latches itself
+>   into permanent `'local'`.
+>
+> The TTL is its own constant (`principalAttributionTTL`, 120s) rather than an
+> alias of `defaultSynthesisReplyTimeout`: they answer to the same reasoning
+> today, but re-tuning how long a chair may take to synthesize must not
+> silently re-tune how long a person stays answerable for what an agent says.
+> The periodic sweep is interval-gated on the write path rather than a
+> goroutine — a background sweeper would need a lifetime, a stop signal and a
+> place in the shutdown ordering to reclaim a map bounded by
+> `channels × members`. Both single-orchestrator and in-memory-only remain as
+> designed, and are stated in the file rather than assumed. Gates:
+> `internal/channels/principal_attribution_test.go`,
+> `internal/channels/grpc_dispatcher_attribution_test.go`.
+
 > 2026-08-21 — **re-slotted v0.4.0 → v0.3.15** by the
 > sequencing Amendment 2026-08-19 ([v0.3.x-sequencing.md](../v0.3.x-sequencing.md), landing with [#839](https://github.com/mkhomutov/Persatrix/pull/839));
 > branch prefixes move `v040-` → `v0315-`. R-2 still ships first in the

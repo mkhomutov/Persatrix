@@ -41,17 +41,6 @@ type AgentResolver interface {
 	Get(ctx context.Context, agentID string) (*registry.AgentInfo, error)
 }
 
-// fleetLister is the OPTIONAL second half of [AgentResolver], satisfied by the
-// production *registry.InMemoryRegistry and used for one thing only: telling
-// "this member is not registered" apart from "nothing at all is registered".
-//
-// Kept as a type assertion rather than a required method on [AgentResolver] so
-// a resolver that cannot enumerate itself (a stub, a scoped view) still works —
-// it simply gets no fleet-loss signal. See [GRPCMessageDispatcher.probeFleetLoss].
-type fleetLister interface {
-	List(ctx context.Context) ([]registry.AgentInfo, error)
-}
-
 // SessionBinder resolves (and on first sight mints + persists) the
 // per-request session id for the `(agent, channel)` unit — room continuity,
 // per the RFC 0031 §A scope-axes amendment (ISSUE-0083 dropped the sender
@@ -151,6 +140,14 @@ type GRPCMessageDispatcher struct {
 	// on any evidence the registry is populated again, so a fleet that is
 	// lost, recovers, and is lost again reports twice.
 	fleetLossReported atomic.Bool
+	// attribution records which principal each delivered dispatch was made
+	// under, so a persona's REPLY — which re-enters as a fresh unauthenticated
+	// publish and would otherwise lose the tenant — can be re-stamped with the
+	// principal that caused it (ISSUE-0124 / ISSUE-0082 residual R-2). Nil
+	// unless wired with [WithPrincipalAttribution], and nil-safe: the table's
+	// methods accept a nil receiver. DORMANT in this PR — written here, read
+	// by nothing until PR 2 lands the re-stamp in [ChannelRouter.Publish].
+	attribution *PrincipalAttributionTable
 }
 
 // DispatcherOption configures a [GRPCMessageDispatcher] at construction.
@@ -171,6 +168,20 @@ func WithSessionResolver(b SessionBinder) DispatcherOption {
 // pre-ISSUE-0085 behaviour.
 func WithEpoch(epoch string) DispatcherOption {
 	return func(d *GRPCMessageDispatcher) { d.epoch = epoch }
+}
+
+// WithPrincipalAttribution wires the ISSUE-0124 causal-attribution table the
+// dispatcher writes on every DELIVERED dispatch made under a principal.
+// Omitting it leaves the dispatcher recording nothing, which is also what a
+// deployment under `auth.mode: disabled` sees with it wired — no request ever
+// carries a principal, so nothing is ever recorded.
+//
+// The table is passed IN rather than owned by the dispatcher because its
+// reader is the router: PR 2 hands the same instance to
+// [ChannelRouter.Publish], and a dispatcher-owned table would have to be
+// reached back through the [MessageDispatcher] interface to get there.
+func WithPrincipalAttribution(t *PrincipalAttributionTable) DispatcherOption {
+	return func(d *GRPCMessageDispatcher) { d.attribution = t }
 }
 
 // ErrAgentNotReady is returned (wrapped) when the registry reports a
@@ -204,64 +215,6 @@ func NewGRPCMessageDispatcher(resolver AgentResolver, logger *zap.Logger, opts .
 		opt(d)
 	}
 	return d
-}
-
-// probeFleetLoss reports, at ERROR and once per outage, that the orchestrator
-// holds ZERO registered agents while a channel still has members to deliver to.
-//
-// This is the signal ISSUE-0125 asks for on its own merit. The per-recipient
-// "dispatch target not registered" WARN above sits at warn deliberately — one
-// unregistered member is the normal cost of a standing human participant or a
-// mistyped channels.yaml membership, and reddening the logs for that would make
-// the level useless. But the SAME line is all an operator gets when an
-// orchestrator restart has emptied the registry and every single dispatch in the
-// deployment is being dropped: /healthz is green, containers are up, publishes
-// return 201, and the personas are simply mute. The two cases are distinguished
-// here by the only thing that separates them — whether anything at all is
-// registered.
-//
-// Runs on the miss path only, which is already the slow, rare branch, so the
-// whole-directory List costs nothing on the delivery path.
-func (d *GRPCMessageDispatcher) probeFleetLoss(ctx context.Context, channelID string) {
-	lister, ok := d.resolver.(fleetLister)
-	if !ok {
-		return
-	}
-	agents, err := lister.List(ctx)
-	if err != nil {
-		// Never upgrade a delivery miss into a fleet-loss claim on a failed
-		// probe — the claim is the whole value of the line.
-		return
-	}
-	if len(agents) > 0 {
-		d.noteFleetAlive() // this outage (if any) is over
-		return
-	}
-	if d.fleetLossReported.Swap(true) {
-		return // already reported for this outage
-	}
-	d.logger.Error("channels: orchestrator has zero registered agents while channels have members — the whole fleet is unreachable and every dispatch is being dropped (agents register at their own startup; see ISSUE-0125)",
-		zap.String("channel_id", channelID),
-	)
-}
-
-// noteFleetAlive re-arms the fleet-loss ERROR, so the NEXT outage is reported
-// as its own event rather than deduplicated away against the last one.
-//
-// It must be called from somewhere a healthy deployment actually reaches.
-// Clearing the flag only inside probeFleetLoss is not enough: that runs on the
-// resolver-miss path, so a recovery in which every channel member registers
-// again produces no miss, never clears the flag, and silently downgrades the
-// signal to once per process — the exact thing the field's contract disclaims.
-// A resolve that SUCCEEDED is the proof a healthy deployment does produce, and
-// it is the one this dispatcher already has in hand.
-//
-// The Load guard keeps the steady state a read: without it every delivery would
-// write a shared cache line for a flag that is almost always already false.
-func (d *GRPCMessageDispatcher) noteFleetAlive() {
-	if d.fleetLossReported.Load() {
-		d.fleetLossReported.Store(false)
-	}
 }
 
 // Dispatch implements [MessageDispatcher].
@@ -479,5 +432,25 @@ func (d *GRPCMessageDispatcher) Dispatch(ctx context.Context, env DispatchEnvelo
 		span.SetStatus(otelcodes.Error, ackErr.Error())
 		return ackErr
 	}
+
+	// ISSUE-0124 (ISSUE-0082 residual R-2) PR 1: record that this agent was
+	// handed this stimulus under this principal, so its REPLY — which
+	// re-enters as a fresh unauthenticated publish and today loses the tenant
+	// for the whole cascade below it — can be re-stamped by PR 2. Server-held
+	// state built from what the orchestrator already knows; nothing is ever
+	// accepted from the agent, because any correlation key the agent supplies
+	// resolves to a principal the agent chose (principal_attribution.go).
+	//
+	// Written HERE, after the ack, rather than beside the header injection
+	// above: the entry means "this agent holds this stimulus", and a dispatch
+	// that was dropped, refused or never dialled leaves the agent holding
+	// nothing. An entry left behind by an undelivered stimulus would be live
+	// for a full turn budget and inherited by whatever that agent published
+	// next — an autonomous tick, say — attributing content nobody caused to a
+	// real person. The miss paths above all return before this point.
+	//
+	// Dormant: no reader until PR 2, and the wire is byte-identical either way
+	// (grpc_dispatcher_attribution_test.go).
+	d.attribution.Record(msg.ChannelID, participantID, PrincipalFromContext(ctx))
 	return nil
 }
