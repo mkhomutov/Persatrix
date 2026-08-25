@@ -173,6 +173,25 @@ type DispatchEnvelope struct {
 	// `floor_mentions_resolved` wire flag rather than letting receivers
 	// infer producer support from emptiness.
 	FloorMentions []string
+
+	// ExpectsReply (ISSUE-0124 / ISSUE-0082 residual R-2) reports whether the
+	// router ELECTED this recipient to take a turn, as opposed to delivering
+	// the message to it for ingestion only. True for the members
+	// [orderResponders] returns as responders, for the floor round's granted
+	// speaker, and for the four orchestrator-authored FORCED turns (chair
+	// escalation, its resynthesize refinement, convene, synthesis); false for
+	// the ingestion-only recipients [ChannelRouter.dispatchConcurrent] also
+	// delivers to and for the close-notification fan.
+	//
+	// SERVER-SIDE ONLY — deliberately not rendered onto the wire by
+	// [GRPCMessageDispatcher.channelMessageToProto]. The receiver already
+	// decides whether to answer, from `respond_policy` + `floor_mentions` +
+	// its own salience bid; this is the ORCHESTRATOR's view of the same
+	// question, and it exists so the causal-attribution write records only
+	// stimuli that can actually produce a reply (principal_attribution.go).
+	// Shipping it would invite a receiver to defer to it and make the two
+	// answers drift.
+	ExpectsReply bool
 }
 
 // MessageDispatcher is the gRPC seam through which the [ChannelRouter]

@@ -35,8 +35,10 @@ func (r *refusingAgentServer) ReceiveChannelMessage(context.Context, *taskpb.Cha
 }
 
 // dispatchWithAttribution runs one dispatch through a bufconn server with an
-// attribution table wired, and returns the table.
-func dispatchWithAttribution(t *testing.T, ctx context.Context, srv taskpb.AgentServiceServer) (*PrincipalAttributionTable, error) {
+// attribution table wired, and returns the table. `expectsReply` is the
+// router's responder election ([DispatchEnvelope.ExpectsReply]) — true for a
+// turn the orchestrator asked for, false for an ingestion-only delivery.
+func dispatchWithAttribution(t *testing.T, ctx context.Context, srv taskpb.AgentServiceServer, expectsReply bool) (*PrincipalAttributionTable, error) {
 	t.Helper()
 	dial, cleanup := startBufconnServer(t, srv)
 	t.Cleanup(cleanup)
@@ -49,7 +51,8 @@ func dispatchWithAttribution(t *testing.T, ctx context.Context, srv taskpb.Agent
 	d.dial = dial
 
 	err := d.Dispatch(ctx, DispatchEnvelope{
-		Recipient: Member{ParticipantID: "iron-fox", RespondPolicy: RespondAlways},
+		Recipient:    Member{ParticipantID: "iron-fox", RespondPolicy: RespondAlways},
+		ExpectsReply: expectsReply,
 	}, ChannelMessage{ID: "m-1", ChannelID: "group:planning", SenderID: "alice", Timestamp: time.Now().UTC()})
 	return table, err
 }
@@ -60,7 +63,7 @@ func dispatchWithAttribution(t *testing.T, ctx context.Context, srv taskpb.Agent
 // the reply PR 2 will re-stamp comes back from the recipient.
 func TestDispatch_RecordsCausalAttribution(t *testing.T) {
 	ctx := WithPrincipal(context.Background(), "alice-person")
-	table, err := dispatchWithAttribution(t, ctx, &recordingAgentServer{})
+	table, err := dispatchWithAttribution(t, ctx, &recordingAgentServer{}, true)
 	require.NoError(t, err)
 
 	got, ok := table.Lookup("group:planning", "iron-fox")
@@ -76,7 +79,7 @@ func TestDispatch_RecordsCausalAttribution(t *testing.T) {
 // with no principal on the context there is no true statement to record, and
 // an entry keyed on "" would hand PR 2's re-stamp a hit that means nothing.
 func TestDispatch_NoPrincipalRecordsNothing(t *testing.T) {
-	table, err := dispatchWithAttribution(t, context.Background(), &recordingAgentServer{})
+	table, err := dispatchWithAttribution(t, context.Background(), &recordingAgentServer{}, true)
 	require.NoError(t, err)
 
 	assert.Equal(t, 0, table.len(), "an unauthenticated dispatch must record nothing")
@@ -88,7 +91,7 @@ func TestDispatch_NoPrincipalRecordsNothing(t *testing.T) {
 // agent's next UNRELATED publish (an autonomous tick, say) would inherit.
 func TestDispatch_RefusedDeliveryRecordsNothing(t *testing.T) {
 	ctx := WithPrincipal(context.Background(), "alice-person")
-	table, err := dispatchWithAttribution(t, ctx, &refusingAgentServer{})
+	table, err := dispatchWithAttribution(t, ctx, &refusingAgentServer{}, true)
 	require.Error(t, err, "a refused ack is not a delivery")
 	assert.True(t, errors.Is(err, ErrDeliveryRefused))
 
@@ -109,7 +112,8 @@ func TestDispatch_UnregisteredRecipientRecordsNothing(t *testing.T) {
 
 	ctx := WithPrincipal(context.Background(), "alice-person")
 	err := d.Dispatch(ctx, DispatchEnvelope{
-		Recipient: Member{ParticipantID: "ghost-agent", RespondPolicy: RespondAlways},
+		Recipient:    Member{ParticipantID: "ghost-agent", RespondPolicy: RespondAlways},
+		ExpectsReply: true,
 	}, ChannelMessage{ID: "m-1", ChannelID: "group:planning", SenderID: "alice", Timestamp: time.Now().UTC()})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, registry.ErrAgentNotFound))
@@ -133,7 +137,8 @@ func TestDispatch_WithoutAttributionTableIsSafe(t *testing.T) {
 
 	ctx := WithPrincipal(context.Background(), "alice-person")
 	require.NoError(t, d.Dispatch(ctx, DispatchEnvelope{
-		Recipient: Member{ParticipantID: "iron-fox", RespondPolicy: RespondAlways},
+		Recipient:    Member{ParticipantID: "iron-fox", RespondPolicy: RespondAlways},
+		ExpectsReply: true,
 	}, ChannelMessage{ID: "m-1", ChannelID: "group:planning", SenderID: "alice", Timestamp: time.Now().UTC()}))
 }
 
@@ -167,7 +172,8 @@ func TestDispatch_AttributionIsDormantOnTheWire(t *testing.T) {
 
 		ctx := WithPrincipal(context.Background(), "alice-person")
 		require.NoError(t, d.Dispatch(ctx, DispatchEnvelope{
-			Recipient: Member{ParticipantID: "iron-fox", RespondPolicy: RespondAlways},
+			Recipient:    Member{ParticipantID: "iron-fox", RespondPolicy: RespondAlways},
+			ExpectsReply: true,
 		}, ChannelMessage{ID: "m-1", ChannelID: "group:planning", SenderID: "alice", Timestamp: sentAt}))
 		return srv
 	}
@@ -186,4 +192,21 @@ func TestDispatch_AttributionIsDormantOnTheWire(t *testing.T) {
 		"a populated attribution table must not change one byte of the outbound metadata")
 	assert.Equal(t, withoutTable.gotEvent.String(), withTable.gotEvent.String(),
 		"nor one byte of the event payload")
+}
+
+// TestDispatch_IngestionOnlyDeliveryRecordsNothing pins the rule that delivery
+// alone is not causation. The ack is PRE-INGEST — `ReceiveChannelMessage`
+// returns as soon as the wake is accepted and the response gate runs later,
+// inside the event loop — and the router deliberately delivers to members that
+// gate will silence, so they ingest the room rather than going amnesiac. Such
+// a member holds the stimulus and never answers it, so an entry for it would
+// be inherited by its next, unrelated publish: an autonomous tick attributed
+// to a person who never caused it.
+func TestDispatch_IngestionOnlyDeliveryRecordsNothing(t *testing.T) {
+	ctx := WithPrincipal(context.Background(), "alice-person")
+	table, err := dispatchWithAttribution(t, ctx, &recordingAgentServer{}, false)
+	require.NoError(t, err, "an ingestion-only delivery is still a delivery")
+
+	assert.Equal(t, 0, table.len(),
+		"a stimulus the router never asked a turn for must not be attributed to anyone")
 }

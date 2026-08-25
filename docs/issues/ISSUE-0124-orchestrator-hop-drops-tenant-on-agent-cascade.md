@@ -220,29 +220,50 @@ in every room. Together the relayed turn carries the causal principal
 > instance to the dispatcher. **Nothing reads it**; the re-stamp in
 > `ChannelRouter.Publish` is PR 2, so behaviour is unchanged and the wire is
 > byte-identical either way (pinned, not assumed). The design above is
-> implemented as written, with **two refinements the implementation forced**,
-> both narrowing rather than widening what gets attributed:
+> implemented as written, with **three refinements the implementation forced**,
+> all narrowing rather than widening what gets attributed:
 >
-> - **The write is on the DELIVERED path, not the attempt.** The design says
->   "record when `PrincipalFromContext(ctx)` is non-empty"; the record is
->   placed after the receiver's ack instead. An entry means *this agent holds
->   this stimulus*, and a dispatch that was dropped (unregistered recipient),
->   refused (the servicer's queue-full / pre-ingest ack with `success=false`)
->   or never dialled leaves the agent holding nothing — while the entry would
->   stay live for a full turn budget and be inherited by whatever that agent
->   published next, e.g. an autonomous tick. That is a mis-attribution of
->   content nobody caused, which is the one failure mode this design is
->   otherwise free of.
-> - **Ambiguity is sticky for the life of the entry, and every write refreshes
->   the stamp.** The design fixes the two-principals case but not what a THIRD
->   dispatch does. A later dispatch — even from the first principal — cannot
->   establish which of the two live stimuli the pending reply is answering, so
->   it does not clear the flag. Because the stamp is refreshed, a room in
->   continuous two-person conversation stays ambiguous while it lasts: more
->   conservative than strictly necessary, and in the safe direction.
->   Ambiguity dies with the entry, so once both stimuli age out the next
->   dispatch is a fresh unambiguous fact and a busy room never latches itself
->   into permanent `'local'`.
+> - **The write is on the DELIVERED path, and only for a stimulus the
+>   orchestrator asked a turn for.** The design says "record when
+>   `PrincipalFromContext(ctx)` is non-empty"; the record is placed after the
+>   receiver's ack instead, because a dispatch that was dropped (unregistered
+>   recipient), refused (the servicer's queue-full / pre-ingest ack with
+>   `success=false`) or never dialled leaves the agent holding nothing.
+>   Delivery is not the whole test, though: that ack is **pre-ingest** — the
+>   servicer returns as soon as the wake is accepted and the response gate runs
+>   later, inside the event loop — and the fanout deliberately delivers to
+>   members the gate will silence (an unmentioned `when_mentioned` member, a
+>   directed-elsewhere `always` member) so they ingest the room rather than
+>   going amnesiac. Those hold the stimulus and never answer it, so an entry
+>   for one would stay live for a full turn budget and be inherited by whatever
+>   that agent published next, e.g. an autonomous tick — a mis-attribution of
+>   content nobody caused, the one failure mode this design is otherwise free
+>   of. The write therefore follows `orderResponders`, the orchestrator's own
+>   superset of the gate's respond-true set, carried to the chokepoint as
+>   `DispatchEnvelope.ExpectsReply`. **Residual, stated**: that election is a
+>   superset, so an elected member whose RFC 0030 salience bid lands below
+>   threshold still leaves an entry — an LLM-side judgement the orchestrator
+>   cannot predict, bounded only by the TTL.
+> - **An entry holds the LIVE STIMULI and derives its answer**, rather than
+>   storing a principal beside an `ambiguous` flag. A pair resolves only when
+>   exactly one stimulus is outstanding and it has a principal. The design
+>   fixes the two-principals case but not what a THIRD dispatch does, and the
+>   first shape answered that by latching the flag and refreshing its stamp on
+>   every later write — which pinned a room in continuous conversation to
+>   `'local'` for as long as the conversation lasted, since a cascade keeps
+>   itself busy by construction. Deriving it instead makes ambiguity expire
+>   with the stimuli that caused it: one message from a second speaker stops
+>   mattering one turn budget later, and a busy room recovers on its own.
+> - **An unauthenticated dispatch POISONS a live entry.** The design's
+>   empty-principal write gate skipped those dispatches entirely, which left a
+>   live authenticated entry to answer for a turn nobody authenticated caused —
+>   the fresh-context origins `principal_context.go` enumerates
+>   (`handleConveneChannel`, the synthesis-close timeout), every agent-origin
+>   and autonomous turn. Such a dispatch is a real competing stimulus that
+>   simply cannot name anyone, so it is recorded under the anonymous key: it
+>   can make a pair ambiguous, never resolve one. It does **not create** a row,
+>   so `auth.mode: disabled` still holds an empty table for the life of the
+>   process.
 >
 > The TTL is its own constant (`principalAttributionTTL`, 120s) rather than an
 > alias of `defaultSynthesisReplyTimeout`: they answer to the same reasoning
@@ -254,7 +275,8 @@ in every room. Together the relayed turn carries the causal principal
 > `channels × members`. Both single-orchestrator and in-memory-only remain as
 > designed, and are stated in the file rather than assumed. Gates:
 > `internal/channels/principal_attribution_test.go`,
-> `internal/channels/grpc_dispatcher_attribution_test.go`.
+> `internal/channels/grpc_dispatcher_attribution_test.go`,
+> `internal/channels/dispatch_expects_reply_test.go`.
 
 > 2026-08-21 — **re-slotted v0.4.0 → v0.3.15** by the
 > sequencing Amendment 2026-08-19 ([v0.3.x-sequencing.md](../v0.3.x-sequencing.md), landing with [#839](https://github.com/mkhomutov/Persatrix/pull/839));

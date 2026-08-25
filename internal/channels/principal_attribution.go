@@ -34,6 +34,20 @@ package channels
 // [ChannelRouter.Publish] to re-stamp an agent's reply with the principal that
 // caused it.
 //
+// WHAT AN ENTRY HOLDS, AND WHY IT IS A SET. The table does not store an
+// answer; it stores the STIMULI that are still live, and derives the answer.
+// A pair resolves only when exactly one stimulus is outstanding and that
+// stimulus has a principal. Two live principals resolve nothing (the agent's
+// reply may be answering either), and so does one live principal racing an
+// unauthenticated stimulus — an agent-origin turn, an autonomous tick, a
+// convene, `auth.mode: disabled` — because that turn is equally able to be
+// the one the agent is answering, and it has no principal to name. Deriving
+// this rather than latching a flag is what lets a room RECOVER: a second
+// speaker who says one thing stops mattering one turn budget later, even
+// while the room stays busy. A stored flag refreshed by every subsequent
+// write would instead pin an active room to `'local'` for as long as the
+// conversation lasted — and a cascade keeps itself busy by construction.
+//
 // DORMANT IN THIS PR. Nothing reads the table yet, so behaviour is unchanged
 // everywhere; the wire-level no-delta is pinned rather than asserted (see
 // grpc_dispatcher_attribution_test.go). This mirrors the dormant-rail split
@@ -73,6 +87,14 @@ import (
 // a session lifetime.
 const principalAttributionTTL = 120 * time.Second
 
+// anonymousStimulus is the map key a dispatch that carried no principal is
+// recorded under. It is a real stimulus — the agent holds it and may be
+// answering it — that simply cannot name anyone, so it can make a pair
+// ambiguous but can never be an answer. Empty string rather than a sentinel
+// id because that is what [PrincipalFromContext] already returns and no
+// authenticated principal can collide with it.
+const anonymousStimulus = ""
+
 // principalAttributionKey identifies one dispatch relationship: the room the
 // stimulus was published into, and the agent it was handed to. A struct key
 // rather than a joined string so no separator can ever be forged into an id
@@ -84,13 +106,15 @@ type principalAttributionKey struct {
 }
 
 // principalAttributionEntry is what the orchestrator knows about one such
-// relationship. `ambiguous` records that two DIFFERENT principals had live
-// stimuli out to this agent at once, which makes the agent's next reply
-// unattributable rather than attributable to the more recent of them.
+// relationship: every principal with a stimulus still outstanding to this
+// agent in this room, stamped with its most recent dispatch. The
+// [anonymousStimulus] key holds the unauthenticated dispatches.
+//
+// A set rather than a resolved principal plus an `ambiguous` flag, because
+// ambiguity is not a fact about the pair — it is a fact about which stimuli
+// are still live, and it must therefore expire the way they do.
 type principalAttributionEntry struct {
-	principal    string
-	dispatchedAt time.Time
-	ambiguous    bool
+	stimuli map[string]time.Time
 }
 
 // PrincipalAttributionTable holds the per-`(channel, agent)` causal
@@ -130,31 +154,33 @@ func NewPrincipalAttributionTable() *PrincipalAttributionTable {
 }
 
 // Record notes that the orchestrator handed `agentID` a stimulus in
-// `channelID` under `principal`. Called from the dispatch chokepoint on
-// DELIVERED dispatches only — a stimulus the agent never ingested cannot cause
-// a reply, and an entry left behind by an undelivered one would be inherited
-// by that agent's next unrelated publish.
+// `channelID` under `principal`, which is empty for a dispatch that carried
+// none. Called from the dispatch chokepoint for DELIVERED dispatches the
+// router elected a reply from (see [DispatchEnvelope.ExpectsReply]) — a
+// stimulus the agent never ingested cannot cause a reply, and neither can one
+// the agent's response gate will suppress.
 //
-// An empty component writes nothing. The empty PRINCIPAL is the load-bearing
-// case: it is what `auth.mode: disabled`, every unauthenticated caller and
-// every agent/autonomous-origin turn resolve, so recording it would key the
-// table on a value that means "no tenant at all" and hand the read side a hit
-// that says nothing.
+// An empty channel or agent writes nothing: those are structural, and a
+// blank one means a caller lost the id rather than that anything is unknown.
 //
-// The ambiguity rule, and its one deliberate imprecision: a repeat dispatch
-// under the SAME principal refreshes the entry (it restates the same true
-// fact), while one under a DIFFERENT principal marks it ambiguous — two people
-// spoke to this agent inside one turn budget, so its next reply may be
-// answering either. Ambiguity is then STICKY for the life of the entry: a
-// third dispatch, even from the first principal, cannot establish that the
-// pending reply is answering that principal. Because every write refreshes the
-// stamp, a room in continuous two-person conversation stays ambiguous while it
-// lasts — measurably conservative, and in the safe direction. Ambiguity dies
-// with the entry, so once both stimuli age out the next dispatch starts a
-// fresh unambiguous fact and a busy room never latches itself into permanent
-// `'local'`.
+// THE EMPTY PRINCIPAL IS NOT AN EMPTY WRITE. It is recorded as the
+// [anonymousStimulus] against an EXISTING row, because an unauthenticated
+// turn — `auth.mode: disabled`, an unauthenticated caller, every
+// agent/autonomous-origin turn, the fresh-context origins principal_context.go
+// enumerates — is a live stimulus competing with the authenticated one, and
+// the agent's next reply may be answering it. Ignoring it is what would let a
+// live authenticated entry answer for a turn nobody authenticated caused,
+// which is a MIS-attribution rather than a missed one.
+//
+// It never CREATES a row, though: with no authenticated stimulus outstanding
+// there is nothing it could be mistaken for, and creating one would fill the
+// table for the life of a process under `auth.mode: disabled` with facts no
+// read can ever use.
+//
+// A repeat dispatch under the SAME principal simply refreshes that principal's
+// stamp — it restates the same true fact.
 func (t *PrincipalAttributionTable) Record(channelID, agentID, principal string) {
-	if t == nil || channelID == "" || agentID == "" || principal == "" {
+	if t == nil || channelID == "" || agentID == "" {
 		return
 	}
 	now := t.now()
@@ -164,23 +190,36 @@ func (t *PrincipalAttributionTable) Record(channelID, agentID, principal string)
 	t.sweepLocked(now)
 
 	key := principalAttributionKey{channelID: channelID, agentID: agentID}
-	next := principalAttributionEntry{principal: principal, dispatchedAt: now}
-	if prev, ok := t.entries[key]; ok && !t.expiredLocked(prev, now) {
-		if prev.ambiguous || prev.principal != principal {
-			next = principalAttributionEntry{dispatchedAt: now, ambiguous: true}
+	entry, live := t.entries[key]
+	if live {
+		// Prune before deciding: a row whose every stimulus has aged out is
+		// indistinguishable from no row at all, including for the
+		// anonymous-creates-nothing rule below.
+		t.pruneLocked(entry, now)
+		if len(entry.stimuli) == 0 {
+			delete(t.entries, key)
+			live = false
 		}
 	}
-	t.entries[key] = next
+	if !live {
+		if principal == anonymousStimulus {
+			return
+		}
+		entry = principalAttributionEntry{stimuli: make(map[string]time.Time, 2)}
+		t.entries[key] = entry
+	}
+	entry.stimuli[principal] = now
 }
 
 // Lookup returns the principal a live, unambiguous dispatch to `agentID` in
 // `channelID` was made under. The second return is false when there is no
-// entry, when the entry has aged past the TTL, or when it is ambiguous — the
-// three ways this fails closed, all of which leave the caller at `'local'`.
+// entry, when every stimulus has aged past the TTL, when more than one
+// stimulus is still live, or when the single live one is unauthenticated —
+// the four ways this fails closed, all of which leave the caller at `'local'`.
 //
 // Expiry is enforced here rather than only by the sweep, so a read can never
-// resolve a stale attribution however long the sweep interval is; the expired
-// row is dropped on the way out.
+// resolve a stale attribution however long the sweep interval is; a row left
+// with nothing live is dropped on the way out.
 //
 // No production caller in this PR — PR 2 adds the one at
 // [ChannelRouter.Publish], which is pinned as the only re-stamp site.
@@ -198,24 +237,41 @@ func (t *PrincipalAttributionTable) Lookup(channelID, agentID string) (string, b
 	if !ok {
 		return "", false
 	}
-	if t.expiredLocked(entry, now) {
+	t.pruneLocked(entry, now)
+	if len(entry.stimuli) == 0 {
 		delete(t.entries, key)
 		return "", false
 	}
-	if entry.ambiguous {
-		return "", false
+	if len(entry.stimuli) > 1 {
+		return "", false // two live stimuli: the reply may be answering either
 	}
-	return entry.principal, true
+	for principal := range entry.stimuli {
+		if principal == anonymousStimulus {
+			return "", false // live, but it cannot name anyone
+		}
+		return principal, true
+	}
+	return "", false
 }
 
-// expiredLocked reports whether an entry has reached its TTL. At exactly the
-// TTL it is already gone: the budget is how long a stimulus can still explain
-// a reply, so the boundary belongs to the safe side. Caller holds mu.
-func (t *PrincipalAttributionTable) expiredLocked(e principalAttributionEntry, now time.Time) bool {
-	return now.Sub(e.dispatchedAt) >= t.ttl
+// pruneLocked drops the stimuli that have reached the TTL. At exactly the TTL
+// a stimulus is already gone: the budget is how long one can still explain a
+// reply, so the boundary belongs to the safe side.
+//
+// The entry is taken by value and mutated through its map header, which is
+// shared with the copy in `t.entries` — so callers do not write the row back,
+// but a caller that empties one MUST delete it (an entry holding an empty set
+// would otherwise read as a live row forever). Caller holds mu.
+func (t *PrincipalAttributionTable) pruneLocked(e principalAttributionEntry, now time.Time) {
+	for principal, at := range e.stimuli {
+		if now.Sub(at) >= t.ttl {
+			delete(e.stimuli, principal)
+		}
+	}
 }
 
-// sweepLocked drops every expired entry, at most once per TTL. Caller holds mu.
+// sweepLocked drops every row with nothing live left in it, at most once per
+// TTL. Caller holds mu.
 //
 // Lazy expiry on read is what keeps the table CORRECT; this is what keeps it
 // SMALL, and it is not redundant: the read side only ever looks up agents that
@@ -231,16 +287,17 @@ func (t *PrincipalAttributionTable) sweepLocked(now time.Time) {
 	}
 	t.lastSweep = now
 	for key, entry := range t.entries {
-		if t.expiredLocked(entry, now) {
+		t.pruneLocked(entry, now)
+		if len(entry.stimuli) == 0 {
 			delete(t.entries, key)
 		}
 	}
 }
 
-// len reports the number of rows held, expired ones included. Test-only: it is
-// how the dormancy and sweep pins observe that nothing was written, which an
-// absence-only assertion on [Lookup] cannot distinguish from a row that was
-// written and then correctly refused.
+// len reports the number of rows held, ones with nothing live left included.
+// Test-only: it is how the dormancy and sweep pins observe that nothing was
+// written, which an absence-only assertion on [Lookup] cannot distinguish from
+// a row that was written and then correctly refused.
 func (t *PrincipalAttributionTable) len() int {
 	if t == nil {
 		return 0

@@ -449,8 +449,29 @@ func (d *GRPCMessageDispatcher) Dispatch(ctx context.Context, env DispatchEnvelo
 	// next — an autonomous tick, say — attributing content nobody caused to a
 	// real person. The miss paths above all return before this point.
 	//
+	// DELIVERY IS NOT THE WHOLE TEST, though, because the ack is pre-ingest:
+	// `ReceiveChannelMessage` returns as soon as the wake is accepted
+	// (agents/server_servicers.py), and the receiver's response gate runs
+	// afterwards, inside the event loop. The router deliberately delivers to
+	// members that gate will silence — an unmentioned `when_mentioned` member,
+	// a directed-elsewhere `always` member — so they ingest the room rather
+	// than going amnesiac (fanout.go). Those hold the stimulus and never
+	// answer it, so an entry for one would be inherited by their next,
+	// unrelated publish: the same mis-attribution the delivered-path rule
+	// above exists to prevent. [DispatchEnvelope.ExpectsReply] is the
+	// orchestrator's own election ([orderResponders], the set the RFC 0048
+	// presence signal already trusts for "expecting a reply from"), so the
+	// write follows it rather than re-deriving the receiver's gate in Go.
+	//
+	// RESIDUAL, stated: the election is a SUPERSET of the gate's respond-true
+	// set, so an elected member whose RFC 0030 salience bid comes in below
+	// threshold still leaves an entry. That bid is an LLM-side judgement the
+	// orchestrator cannot predict; the TTL is its only bound.
+	//
 	// Dormant: no reader until PR 2, and the wire is byte-identical either way
 	// (grpc_dispatcher_attribution_test.go).
-	d.attribution.Record(msg.ChannelID, participantID, PrincipalFromContext(ctx))
+	if env.ExpectsReply {
+		d.attribution.Record(msg.ChannelID, participantID, PrincipalFromContext(ctx))
+	}
 	return nil
 }
