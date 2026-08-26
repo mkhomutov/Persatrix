@@ -138,6 +138,40 @@ const principalAttributionTTL = 120 * time.Second
 // authenticated principal can collide with it.
 const anonymousStimulus = ""
 
+// maxNamedStimuliPerPair bounds how many DISTINCT authenticated principals one
+// `(channel, agent)` row stores under their own key. A new distinct principal
+// past it folds into the [anonymousStimulus] instead of taking a fresh key (see
+// [PrincipalAttributionTable.Record]), so a row's size is a constant
+// (`maxNamedStimuliPerPair` named keys plus the one anonymous key) however many
+// people speak.
+//
+// WHY A CAP IS SAFE. The verdict reads a principal's IDENTITY only when the row
+// holds exactly one stimulus ([resolveLocked]); at two or more the row is
+// ambiguous and resolves nothing, so no identity is read. A genuinely single
+// stimulus is always stored under its own key, because the fold triggers only
+// once the row already holds `maxNamedStimuliPerPair` named principals — i.e. is
+// already ambiguous. So folding can never turn a resolvable row unresolvable,
+// never manufacture a spurious single-stimulus row, and never name the wrong
+// person: a folded principal is verdict-equivalent to the anonymous competitor
+// it becomes — an unnameable live stimulus the agent's reply may be answering.
+//
+// WHY IT DOES NOT REOPEN THE CROSSOVER. Folding ADDS or refreshes the anonymous
+// stimulus; it never removes one (evicting a named key would be the silent
+// removal the crossover rule forbids — an agent may still be mid-turn on it).
+// Every named principal already in the row keeps its key and its blocking role
+// until the agent's own reply retires the whole row, and the refreshed anonymous
+// stamp keeps the row warm exactly as a distinct fresh key would, so the cold
+// sweep still reclaims only a row nobody has dispatched to for 2×TTL.
+//
+// WHY IT IS NEEDED (PR 2 review). Without it, a row's named set grew by one key
+// per distinct authenticated principal ever dispatched to that agent while the
+// row stayed warm. An agent repeatedly ELECTED to receive stimuli but rarely
+// PUBLISHING (its RFC 0030 salience bid below threshold) never triggers the
+// consuming read that clears the row, so in a busy multi-account room the named
+// set grew toward the room's whole membership — the retirement was whole-row
+// only, and expiry deliberately never removes a key (the crossover rule).
+const maxNamedStimuliPerPair = 2
+
 // principalAttributionKey identifies one dispatch relationship: the room the
 // stimulus was published into, and the agent it was handed to. A struct key
 // rather than a joined string so no separator can ever be forged into an id
@@ -157,6 +191,11 @@ type principalAttributionKey struct {
 // ambiguity is not a fact about the pair — it is a fact about which stimuli
 // the agent still holds, and it must therefore be retired the way they are:
 // by the agent's own reply, not by a clock.
+//
+// The set is bounded: distinct authenticated principals past
+// [maxNamedStimuliPerPair] fold into the [anonymousStimulus] rather than each
+// taking a key, so the map never grows past `maxNamedStimuliPerPair`+1 entries
+// however many people speak (see that constant and [PrincipalAttributionTable.Record]).
 type principalAttributionEntry struct {
 	stimuli map[string]time.Time
 }
@@ -264,7 +303,27 @@ func (t *PrincipalAttributionTable) Record(channelID, agentID, principal string)
 		entry = principalAttributionEntry{stimuli: make(map[string]time.Time, 2)}
 		t.entries[key] = entry
 	}
-	entry.stimuli[principal] = now
+
+	// Bound the row (see [maxNamedStimuliPerPair]). A NEW distinct authenticated
+	// principal beyond the cap folds into the anonymous stimulus rather than
+	// taking its own key. The fold only ever fires once the row is already
+	// ambiguous, so it changes no verdict — it just stops the named set growing
+	// by one key per distinct speaker in a room whose agent rarely publishes. A
+	// known principal (a restatement) and the anonymous stimulus itself always
+	// refresh their own stamp; only genuinely new names past the cap fold.
+	stimulus := principal
+	if principal != anonymousStimulus {
+		if _, known := entry.stimuli[principal]; !known {
+			named := len(entry.stimuli)
+			if _, hasAnon := entry.stimuli[anonymousStimulus]; hasAnon {
+				named--
+			}
+			if named >= maxNamedStimuliPerPair {
+				stimulus = anonymousStimulus
+			}
+		}
+	}
+	entry.stimuli[stimulus] = now
 }
 
 // Lookup returns the principal a live, unambiguous dispatch to `agentID` in

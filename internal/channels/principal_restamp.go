@@ -95,6 +95,27 @@ package channels
 // persona gets is "put chosen content in the tenant of someone it is already
 // talking to", not "read that tenant".
 //
+// WHO HOLDS THAT PRIMITIVE IS WIDER THAN "A COMPROMISED PERSONA", AND THE
+// WIDENING IS THIS PR'S. The re-stamp keys on `msg.SenderID`, and the publish
+// ingress (`POST /api/v1/channels/{id}/messages`) is `policyPublic` — it takes
+// no credential even under `auth.mode: enabled`, by the deliberate design that
+// agents hold no accounts (RFC 0009 agent tokens are the fix and have not
+// shipped; `cmd/orchestrator/auth.go` WARNs that the surface "stays UNGATED").
+// The only gate is store-side channel membership, which every dispatched-to
+// agent satisfies, and rooms plus their membership are enumerable through the
+// equally-public GET routes. So anyone who can reach the ingress can, within
+// the TTL of a real authenticated turn, publish with `sender_id` set to a
+// member agent's id and attacker-chosen content, and this re-stamp lands that
+// content in the causing person's tenant (and consumes the row, so the genuine
+// reply degrades to `'local'`). Before this PR the same spoofed publish landed
+// in the shared `'local'` bucket; this PR turns it into a write into a NAMED
+// person's partition. That is a real escalation of a pre-existing spoof
+// primitive, not merely "trust already extended". The operative mitigation is
+// the one the startup WARN already states — network-restrict the ingress to
+// the agent fleet — until sender authentication (RFC 0009) closes it at the
+// REST seam; the table key is proof the orchestrator DISPATCHED to a registered
+// agent, not proof the caller IS that agent.
+//
 // KNOWN GAP: single-orchestrator. The table is in-memory, so a reply routed to
 // a different orchestrator than its stimulus finds no entry and degrades to
 // `'local'` — a miss, not a wrong answer. Stated on the table itself

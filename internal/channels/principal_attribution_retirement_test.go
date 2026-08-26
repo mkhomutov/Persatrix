@@ -1,12 +1,22 @@
 package channels
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// stimuliCount is the per-row observer the growth pins need: table.len() counts
+// ROWS, but the growth ISSUE-0124 PR 2 review flagged was the number of stimulus
+// KEYS inside one row. Same-package test-only, locks like len() does.
+func (t *PrincipalAttributionTable) stimuliCount(channelID, agentID string) int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return len(t.entries[principalAttributionKey{channelID: channelID, agentID: agentID}].stimuli)
+}
 
 // principal_attribution_retirement_test.go — ISSUE-0124 (R-2): how stimuli
 // LEAVE the table. Split from principal_attribution_test.go when the PR 2
@@ -369,4 +379,68 @@ func TestPrincipalAttribution_CadenceRoomRecoversWhenTheAgentSpeaks(t *testing.T
 		"a cadence room must recover once the agent has answered what it was holding")
 	assert.Equal(t, "alice-person", got)
 	assert.Equal(t, 0, table.len(), "and the row does not outlive the reply it explained")
+}
+
+// TestPrincipalAttribution_RowSizeIsBoundedByTheNamedCap is the regression gate
+// for the per-row growth the PR 2 review flagged. Retirement is whole-row only
+// (the consuming read, or the cold sweep) and expiry deliberately never removes
+// a key (the crossover rule), so before the cap a (channel, agent) row for an
+// agent that is dispatched to but rarely publishes grew one stimulus key per
+// distinct authenticated principal ever seen while the row stayed warm — toward
+// the whole membership of a busy room. The cap folds every distinct principal
+// past [maxNamedStimuliPerPair] into the anonymous stimulus, so the row size is
+// a constant however many people speak.
+func TestPrincipalAttribution_RowSizeIsBoundedByTheNamedCap(t *testing.T) {
+	table, clock := newTestAttributionTable()
+
+	// Many distinct authenticated principals dispatch to one agent that never
+	// publishes, each well inside the turn budget so nothing ages into the cold
+	// sweep and only the cap can bound the row.
+	for i := range 200 {
+		clock.advance(time.Second)
+		table.Record("group:townhall", "iron-fox", fmt.Sprintf("person-%d", i))
+	}
+
+	require.Equal(t, 1, table.len(), "the pair is still one row")
+	assert.LessOrEqual(t, table.stimuliCount("group:townhall", "iron-fox"), maxNamedStimuliPerPair+1,
+		"the named set must not grow one key per distinct principal — overflow folds into the anonymous stimulus")
+
+	// And that bounded row is correctly ambiguous the whole time: many
+	// competing stimuli, the reply may answer any of them, so it resolves
+	// nothing — the cap bounds size without ever inventing an answer.
+	_, ok := table.TakeAttribution("group:townhall", "iron-fox")
+	assert.False(t, ok, "a row holding many competing stimuli must resolve nothing")
+}
+
+// TestPrincipalAttribution_FoldedPrincipalStaysCrossoverSafe pins that the cap
+// is verdict- and crossover-transparent. It must (a) never let a folded row
+// resolve to a survivor when a stale competitor might still be what the agent is
+// answering — the fold ADDS to the anonymous stimulus, it never evicts a named
+// key — and (b) never disturb the single-stimulus verdict, since a genuinely
+// lone principal is always stored under its own key (the fold fires only once
+// the row is already ambiguous).
+func TestPrincipalAttribution_FoldedPrincipalStaysCrossoverSafe(t *testing.T) {
+	table, clock := newTestAttributionTable()
+
+	// Fill the named cap, then a further distinct principal folds into "".
+	table.Record("group:planning", "iron-fox", "alice-person")
+	table.Record("group:planning", "iron-fox", "bob-person")   // named set now full
+	table.Record("group:planning", "iron-fox", "carol-person") // folds into the anonymous stimulus
+	require.LessOrEqual(t, table.stimuliCount("group:planning", "iron-fox"), maxNamedStimuliPerPair+1)
+
+	// The named stimuli age out; a later folded dispatch keeps the anonymous
+	// competitor live. An eviction-based cap would by now have dropped a named
+	// key and could cede the pair to a survivor — the fold must keep it blocked.
+	clock.advance(principalAttributionTTL)
+	table.Record("group:planning", "iron-fox", "dave-person") // folds; refreshes ""
+	_, ok := table.Lookup("group:planning", "iron-fox")
+	assert.False(t, ok, "a folded competitor must keep the row blocked, never cede it to a survivor")
+
+	// The reply retires the whole row; a single fresh principal then resolves,
+	// proving the cap never disturbs the len==1 verdict.
+	_, _ = table.TakeAttribution("group:planning", "iron-fox")
+	table.Record("group:planning", "iron-fox", "erin-person")
+	got, ok := table.Lookup("group:planning", "iron-fox")
+	require.True(t, ok, "a single stimulus is always stored under its own key and resolves")
+	assert.Equal(t, "erin-person", got)
 }

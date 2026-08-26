@@ -341,6 +341,15 @@ func TestRestamp_HumanSenderCannotConsumeAnAgentsAttribution(t *testing.T) {
 //
 // A third site of either kind turns this red, which is the inversion
 // ISSUE-0124 asks for: a second re-stamp must not be addable by omission.
+//
+// SCOPE CAVEAT: this scans only THIS package's non-test sources. [WithPrincipal]
+// is exported and is already called from another package (internal/server's auth
+// middleware, which stamps a VERIFIED account principal, not a wire value), so a
+// future re-stamp added in internal/server or cmd/orchestrator from an
+// insufficiently-verified source would be invisible to this pin. The guarantee
+// here is therefore "no second inferring site inside internal/channels", not the
+// repo-wide "addable by omission" the name suggests; a module-wide scan (only two
+// non-test WithPrincipal callers exist) would be needed to close that gap.
 func TestRestamp_IsTheOnlyPrincipalStampInThisPackage(t *testing.T) {
 	sites := map[string][]string{"WithPrincipal": nil, "TakeAttribution": nil}
 

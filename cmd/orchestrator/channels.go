@@ -174,15 +174,19 @@ func initChannels(
 	// ISSUE-0124 PR 1: the causal-attribution table — which principal each
 	// delivered dispatch was made under. Born here rather than inside the
 	// dispatcher because its reader is the ROUTER: PR 2 hands this same
-	// instance to the re-stamp in `ChannelRouter.Publish`, which is what lets
-	// a persona's reply (a fresh unauthenticated publish) keep the tenant of
-	// the person who caused it. Unconditional and cheap: an unauthenticated
-	// dispatch is recorded too (it is a competing stimulus, and skipping it is
-	// what let a later authenticated one resolve a reply it never caused), so
-	// under `auth.mode: disabled` this holds one anonymous-only row per
-	// dispatched-to `(channel, agent)` pair — the map's stated
-	// `channels × members` bound, resolving nothing, reclaimed by the sweep one
-	// turn budget after the traffic stops.
+	// instance to the re-stamp at the head of `ChannelRouter.publishCommit`
+	// (the commit path both publish entry points share — NOT `Publish`, which
+	// the REST seam a persona's reply takes no longer goes through), which is
+	// what lets a persona's reply (a fresh unauthenticated publish) keep the
+	// tenant of the person who caused it. Unconditional and cheap: an
+	// unauthenticated dispatch is recorded too (it is a competing stimulus, and
+	// skipping it is what let a later authenticated one resolve a reply it never
+	// caused), so under `auth.mode: disabled` this holds one anonymous-only row
+	// per dispatched-to `(channel, agent)` pair — the map's stated
+	// `channels × members` bound, resolving nothing, reclaimed by the sweep two
+	// turn budgets after the traffic stops (the cold-row horizon: PR 2 made
+	// expiry disqualify a stimulus without removing it, so a row is reclaimed
+	// only once every stimulus in it is 2×TTL old).
 	principalAttribution := channels.NewPrincipalAttributionTable()
 	dispatcher := selectChannelDispatcher(reg, sessionResolver, epochID, principalAttribution, logger)
 	router := channels.NewChannelRouter(chanStore, dispatcher, logger, routerMetrics)

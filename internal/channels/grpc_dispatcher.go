@@ -468,7 +468,13 @@ func (d *GRPCMessageDispatcher) Dispatch(ctx context.Context, env DispatchEnvelo
 	// RESIDUAL, stated: the election is a SUPERSET of the gate's respond-true
 	// set, so an elected member whose RFC 0030 salience bid comes in below
 	// threshold still leaves an entry. That bid is an LLM-side judgement the
-	// orchestrator cannot predict; the TTL is its only bound.
+	// orchestrator cannot predict. Since PR 2 the TTL does NOT bound that entry:
+	// expiry only DISQUALIFIES a stimulus from resolving, it does not remove it
+	// (the crossover rule in principal_attribution.go), so such an entry outlives
+	// the TTL and — while it does — blocks a fresh authenticated stimulus from
+	// resolving, until the agent's own publish retires the row or the whole row
+	// goes cold at 2×TTL. So the residual costs more misses than "bounded by the
+	// TTL" would imply, and its true bound is the consuming read or the cold sweep.
 	//
 	// Dormant: no reader until PR 2, and the wire is byte-identical either way
 	// (grpc_dispatcher_attribution_test.go).
