@@ -1,7 +1,7 @@
 # ISSUE-0082 — PR Implementation Plan (Residuals R-1 / R-2 — the derived and relayed tenant writes)
 
 **Issues**: [ISSUE-0123](ISSUE-0123-per-speaker-interaction-scope.md) (R-1) · [ISSUE-0124](ISSUE-0124-orchestrator-hop-drops-tenant-on-agent-cascade.md) (R-2) · [ISSUE-0131](ISSUE-0131-derived-memory-has-no-speaker-attribution.md) (the speaker axis)
-**Status**: 🔄 In progress — Phase 0 resolved (both axes); workstream **A** of the **v0.3.15** *Who said what* milestone, open at PR 1
+**Status**: 🔄 In progress — Phase 0 resolved (both axes); workstream **A** of the **v0.3.15** *Who said what* milestone, open at PR 2 (PR 1 merged)
 **Created**: 2026-08-07
 **Branch prefix**: `feature/v0315-issue0123-` / `feature/v0315-issue0124-` (per residual)
 **Target**: `main`
@@ -103,11 +103,11 @@ PR 1 is unblocked by the gate and can start immediately after the tag. PR 3 must
 
 #### Scope
 
-Read the table in `ChannelRouter.Publish`, before fanout, **iff** the ctx carries no principal and the sender is a registered agent. On a live unambiguous hit, `ctx = WithPrincipal(ctx, p)`. This is where R-2's behaviour changes.
+Read the table on the publish path, before the commit and the fanout, **iff** the ctx carries no principal and the sender is a registered agent. On a live unambiguous hit, `ctx = WithPrincipal(ctx, p)`. This is where R-2's behaviour changes.
 
 #### Key implementation details
 
-* Read in `Publish`, not `handlePublishMessage`, so in-process callers are covered.
+* Read in the router, not `handlePublishMessage`, so in-process callers are covered — and specifically in **`publishCommit`**, not `Publish`: the REST seam a persona's reply actually takes has gone through `PublishAsync` since the RFC 0048 latency fix, so reading in `Publish` would have covered the chat façade and missed R-2's own path. Both entry points share the commit path and fan out on the context it returns.
 * Read with **`TakeAttribution`, never `Lookup`**: the consuming read retires what the reply answered. `Lookup` leaves those stimuli live, so a room whose forced turns outpace the TTL (the RFC 0052 convener cadence) stays ambiguous forever and R-2 is inert where it is most needed.
 * `msg.SenderID` is safe as a key: the executor supplies the agent's registered id and never an LLM-supplied value (RFC 0011 §"DM gate-bypass").
 * **Never** accept a principal, or any correlation key, from the agent's request — including the stimulus message id: an agent sees other members' ids in channel history, so a chosen id resolves to a chosen principal, the cross-tenant read primitive one indirection along.
@@ -208,8 +208,8 @@ Run [MT-MEMORY-GROUP-TENANT-001](../manual-tests/MT-MEMORY-GROUP-TENANT-001.md) 
 | # | Title | Branch | Status | GitHub PR | Merged |
 |---|-------|--------|--------|-----------|--------|
 | 0 | Design gate — MT Legs 1–4, lock the record shape (both axes) | — | ✅ Resolved → **`(principal, speaker, scope)`**: Phase 0 (principal) 2026-08-07, Phase 0b (speaker) 2026-08-21 | — | — |
-| 1 | R-2 causal attribution store, dormant | `feature/v0315-issue0124-attribution-store` | 🔀 PR open | [#844](https://github.com/mkhomutov/Persatrix/pull/844) | — |
-| 2 | R-2 re-stamp + end-to-end gate | `feature/v0315-issue0124-restamp` | ⬜ Not started | — | — |
+| 1 | R-2 causal attribution store, dormant | `feature/v0315-issue0124-attribution-store` | ✅ Merged | [#844](https://github.com/mkhomutov/Persatrix/pull/844) | `5b740f84` |
+| 2 | R-2 re-stamp + end-to-end gate | `feature/v0315-issue0124-restamp` | 🔀 PR open | [#845](https://github.com/mkhomutov/Persatrix/pull/845) | — |
 | 3 | R-1 + [ISSUE-0131](ISSUE-0131-derived-memory-has-no-speaker-attribution.md) scope key `(principal, speaker, scope)` + RFC 0020 §G amendment | `feature/v0315-issue0123-scope-key` | ⬜ Not started | — | — |
 | 4 | R-1 close binding, reserve re-size (now × speakers), asymmetry cleanup | `feature/v0315-issue0123-close-path` | ⬜ Not started | — | — |
 | 5 | Live MT + closeout | `feature/v0315-issue0082-residuals-close` | ⬜ Not started | — | — |

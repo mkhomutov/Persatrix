@@ -217,8 +217,12 @@ func (s *Server) handleGetChannel(w http.ResponseWriter, r *http.Request) {
 
 // handlePublishMessage handles POST /api/v1/channels/{id}/messages.
 //
-// Routes through [ChannelRouter.Publish] when a router was injected, so
-// channel_type cross-validation and fanout fire. Falls back to a direct
+// Routes through [ChannelRouter.PublishAsync] when a router was injected, so
+// channel_type cross-validation and fanout fire — NOT `Publish`, which the
+// RFC 0048 latency fix left to the chat façade and in-process callers. Worth
+// naming precisely: this is the seam a persona's reply re-enters on, so a
+// publish-path change written against `Publish` misses every agent turn
+// (ISSUE-0124 R-2 took that shape). Falls back to a direct
 // store write when the router is unset (test fixtures only — production
 // always wires the router). The fallback path emits a once-per-process
 // Warn ([channelFallbackWarnOnce]) so a forgotten WithChannels(store,

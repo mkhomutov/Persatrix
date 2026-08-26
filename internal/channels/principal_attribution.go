@@ -31,9 +31,11 @@ package channels
 // is the single chokepoint that knows both halves of one true statement — the
 // orchestrator handed THIS agent THIS stimulus under THIS principal — so it
 // records `(channel, agent) → principal` here, and PR 2 reads it with
-// [PrincipalAttributionTable.TakeAttribution] in
-// [ChannelRouter.Publish] to re-stamp an agent's reply with the principal that
-// caused it.
+// [PrincipalAttributionTable.TakeAttribution] at the head of
+// [ChannelRouter.publishCommit] — the commit path both publish entry points
+// share, which is what covers the [ChannelRouter.PublishAsync] seam a
+// persona's reply actually re-enters on — to re-stamp an agent's reply with
+// the principal that caused it.
 //
 // WHAT AN ENTRY HOLDS, AND WHY IT IS A SET. The table does not store an
 // answer; it stores the STIMULI that are still live, and derives the answer.
@@ -44,25 +46,38 @@ package channels
 // convene, `auth.mode: disabled` — because that turn is equally able to be
 // the one the agent is answering, and it has no principal to name. Deriving
 // this rather than latching a flag is what lets a room RECOVER: a second
-// speaker who says one thing stops mattering one turn budget later, even
-// while the room stays busy. A stored flag refreshed by every subsequent
-// write would instead pin an active room to `'local'` for as long as the
-// conversation lasted — and a cascade keeps itself busy by construction.
+// speaker who says one thing stops mattering as soon as the agent next
+// replies, because the reply retires every stimulus the agent was holding. A
+// stored flag refreshed by every subsequent write would instead pin an active
+// room to `'local'` for as long as the conversation lasted — and a cascade
+// keeps itself busy by construction.
 //
-// RECOVERY HAS TWO MECHANISMS, AND EXPIRY ALONE IS NOT ENOUGH. Ageing out
-// recovers a pair only when the competing stimulus stops being restated. That
-// holds for a second human speaker; it does NOT hold for the orchestrator's
-// own principal-less forced turns — the RFC 0052 convener cadence, a
-// synthesis-close timeout, a chair escalation descending from either — which
-// recur on a cadence shorter than the turn budget and so keep an anonymous
-// stimulus permanently live. A pair in such a room would never resolve, and
-// its row would never be reclaimable, because something is always live in it.
-// The second mechanism is [PrincipalAttributionTable.TakeAttribution]: an
-// agent that PUBLISHES has answered whatever it was holding, so the read that
-// re-stamps its reply also retires those stimuli. That is the only evidence
-// the orchestrator ever gets that a stimulus is spent rather than merely
-// young, and it is what keeps the table useful in exactly the busy autonomous
-// rooms the cascade defect lives in.
+// RETIREMENT IS THE CONSUMING READ'S JOB — EXPIRY DISQUALIFIES, NEVER
+// DELETES. [PrincipalAttributionTable.TakeAttribution] is the one mechanism
+// that retires a stimulus: an agent that PUBLISHES has answered whatever it
+// was holding, so the read that re-stamps its reply also retires those
+// stimuli. That is the only evidence the orchestrator ever gets that a
+// stimulus is spent rather than merely young, and it is what keeps the table
+// useful in exactly the busy autonomous rooms the cascade defect lives in —
+// the RFC 0052 convener cadence, a synthesis-close timeout, a chair
+// escalation descending from either all keep restating an anonymous
+// stimulus, and only the agent's own reply clears the accumulation.
+//
+// The TTL is deliberately NOT a second retirement mechanism (PR 2 review,
+// finding 1 — the expiry-crossover). The delivery ack is pre-ingest, so an
+// agent can still be mid-turn on a stimulus that has aged past the budget:
+// queue backlog and LLM retries sit outside what the TTL was sized on. An
+// earlier shape pruned expired stimuli at every read and write, and that
+// silent removal was a wrong-answer hole — Alice's stimulus expires while
+// the agent grinds, Bob's lands just inside the window, and the late reply,
+// actually answering Alice, resolved to the sole survivor, Bob. So an
+// expired stimulus is merely DISQUALIFIED from being the answer; until the
+// agent speaks it stays in the row and keeps blocking resolution, turning
+// the crossover's wrong answer into a missed one. The pair recovers at the
+// agent's next publish, which retires everything at once — and in any room
+// where the agent replies inside the turn budget (every room the TTL was
+// sized for), this rule costs nothing, because the consuming read clears the
+// row before anything can expire in it.
 //
 // What remains irreducible: a stimulus dispatched to an agent that the agent
 // has not yet answered is genuinely a candidate for its next reply, so an
@@ -107,7 +122,12 @@ import (
 // `'local'`, today's behaviour); the cost of too LONG is that a genuinely
 // unrelated later publish by the same agent inherits a stale principal. The
 // second is the one worth avoiding, which is why this is a turn budget and not
-// a session lifetime.
+// a session lifetime. Too short can ONLY miss: expiry disqualifies a stimulus
+// from resolving but never removes it from the row, so a stimulus the agent
+// may still be answering keeps blocking a fresher one instead of silently
+// ceding the pair to it (the crossover rule in the file header). Rows nobody
+// answers are reclaimed by the sweep one further turn budget after everything
+// in them expired.
 const principalAttributionTTL = 120 * time.Second
 
 // anonymousStimulus is the map key a dispatch that carried no principal is
@@ -117,6 +137,40 @@ const principalAttributionTTL = 120 * time.Second
 // id because that is what [PrincipalFromContext] already returns and no
 // authenticated principal can collide with it.
 const anonymousStimulus = ""
+
+// maxNamedStimuliPerPair bounds how many DISTINCT authenticated principals one
+// `(channel, agent)` row stores under their own key. A new distinct principal
+// past it folds into the [anonymousStimulus] instead of taking a fresh key (see
+// [PrincipalAttributionTable.Record]), so a row's size is a constant
+// (`maxNamedStimuliPerPair` named keys plus the one anonymous key) however many
+// people speak.
+//
+// WHY A CAP IS SAFE. The verdict reads a principal's IDENTITY only when the row
+// holds exactly one stimulus ([resolveLocked]); at two or more the row is
+// ambiguous and resolves nothing, so no identity is read. A genuinely single
+// stimulus is always stored under its own key, because the fold triggers only
+// once the row already holds `maxNamedStimuliPerPair` named principals — i.e. is
+// already ambiguous. So folding can never turn a resolvable row unresolvable,
+// never manufacture a spurious single-stimulus row, and never name the wrong
+// person: a folded principal is verdict-equivalent to the anonymous competitor
+// it becomes — an unnameable live stimulus the agent's reply may be answering.
+//
+// WHY IT DOES NOT REOPEN THE CROSSOVER. Folding ADDS or refreshes the anonymous
+// stimulus; it never removes one (evicting a named key would be the silent
+// removal the crossover rule forbids — an agent may still be mid-turn on it).
+// Every named principal already in the row keeps its key and its blocking role
+// until the agent's own reply retires the whole row, and the refreshed anonymous
+// stamp keeps the row warm exactly as a distinct fresh key would, so the cold
+// sweep still reclaims only a row nobody has dispatched to for 2×TTL.
+//
+// WHY IT IS NEEDED (PR 2 review). Without it, a row's named set grew by one key
+// per distinct authenticated principal ever dispatched to that agent while the
+// row stayed warm. An agent repeatedly ELECTED to receive stimuli but rarely
+// PUBLISHING (its RFC 0030 salience bid below threshold) never triggers the
+// consuming read that clears the row, so in a busy multi-account room the named
+// set grew toward the room's whole membership — the retirement was whole-row
+// only, and expiry deliberately never removes a key (the crossover rule).
+const maxNamedStimuliPerPair = 2
 
 // principalAttributionKey identifies one dispatch relationship: the room the
 // stimulus was published into, and the agent it was handed to. A struct key
@@ -135,7 +189,13 @@ type principalAttributionKey struct {
 //
 // A set rather than a resolved principal plus an `ambiguous` flag, because
 // ambiguity is not a fact about the pair — it is a fact about which stimuli
-// are still live, and it must therefore expire the way they do.
+// the agent still holds, and it must therefore be retired the way they are:
+// by the agent's own reply, not by a clock.
+//
+// The set is bounded: distinct authenticated principals past
+// [maxNamedStimuliPerPair] fold into the [anonymousStimulus] rather than each
+// taking a key, so the map never grows past `maxNamedStimuliPerPair`+1 entries
+// however many people speak (see that constant and [PrincipalAttributionTable.Record]).
 type principalAttributionEntry struct {
 	stimuli map[string]time.Time
 }
@@ -212,9 +272,9 @@ func NewPrincipalAttributionTable() *PrincipalAttributionTable {
 // The cost is that a deployment with no authenticated traffic at all now holds
 // one anonymous-only row per `(channel, agent)` pair it dispatches to, rather
 // than an empty table. That is the table's already-stated `channels × members`
-// bound, it resolves nothing, and the sweep reclaims it one turn budget after
-// the traffic stops — a bounded, self-clearing cost for closing a wrong-answer
-// hole. (A deployment that wants the empty table back should decline to wire
+// bound, it resolves nothing, and the sweep reclaims it two turn budgets
+// after the traffic stops (the cold-row horizon) — a bounded, self-clearing
+// cost for closing a wrong-answer hole. (A deployment that wants the empty table back should decline to wire
 // the table at all; the dispatcher records nothing without one.)
 //
 // A repeat dispatch under the SAME principal simply refreshes that principal's
@@ -229,34 +289,55 @@ func (t *PrincipalAttributionTable) Record(channelID, agentID, principal string)
 	defer t.mu.Unlock()
 	t.sweepLocked(now)
 
+	// A fresh write JOINS whatever the row already holds — expired stimuli
+	// included. A row whose every stimulus has aged out is NOT the same as no
+	// row: the agent may still be mid-turn on what it holds (the delivery ack
+	// is pre-ingest), and restarting the row clean handed the late reply to
+	// the new stimulus alone — the write-path half of the expiry-crossover the
+	// file header describes. Ghosts leave when the agent speaks
+	// ([PrincipalAttributionTable.TakeAttribution]) or when the whole row goes
+	// cold (see [PrincipalAttributionTable.sweepLocked]).
 	key := principalAttributionKey{channelID: channelID, agentID: agentID}
 	entry, live := t.entries[key]
-	if live {
-		// Prune before writing: a row whose every stimulus has aged out is
-		// indistinguishable from no row at all, so the write below starts it
-		// fresh rather than joining stimuli that can no longer explain a reply.
-		t.pruneLocked(entry, now)
-		if len(entry.stimuli) == 0 {
-			delete(t.entries, key)
-			live = false
-		}
-	}
 	if !live {
 		entry = principalAttributionEntry{stimuli: make(map[string]time.Time, 2)}
 		t.entries[key] = entry
 	}
-	entry.stimuli[principal] = now
+
+	// Bound the row (see [maxNamedStimuliPerPair]). A NEW distinct authenticated
+	// principal beyond the cap folds into the anonymous stimulus rather than
+	// taking its own key. The fold only ever fires once the row is already
+	// ambiguous, so it changes no verdict — it just stops the named set growing
+	// by one key per distinct speaker in a room whose agent rarely publishes. A
+	// known principal (a restatement) and the anonymous stimulus itself always
+	// refresh their own stamp; only genuinely new names past the cap fold.
+	stimulus := principal
+	if principal != anonymousStimulus {
+		if _, known := entry.stimuli[principal]; !known {
+			named := len(entry.stimuli)
+			if _, hasAnon := entry.stimuli[anonymousStimulus]; hasAnon {
+				named--
+			}
+			if named >= maxNamedStimuliPerPair {
+				stimulus = anonymousStimulus
+			}
+		}
+	}
+	entry.stimuli[stimulus] = now
 }
 
 // Lookup returns the principal a live, unambiguous dispatch to `agentID` in
 // `channelID` was made under. The second return is false when there is no
-// entry, when every stimulus has aged past the TTL, when more than one
-// stimulus is still live, or when the single live one is unauthenticated —
-// the four ways this fails closed, all of which leave the caller at `'local'`.
+// entry, when the agent holds more than one stimulus (expired ones still
+// count — the crossover rule in the file header), when its single stimulus
+// has aged past the TTL, or when that stimulus is unauthenticated — the four
+// ways this fails closed, all of which leave the caller at `'local'`.
 //
-// Expiry is enforced here rather than only by the sweep, so a read can never
-// resolve a stale attribution however long the sweep interval is; a row left
-// with nothing live is dropped on the way out.
+// Expiry is enforced at the verdict — a stale stimulus can never resolve,
+// however long the sweep interval is — but this read removes nothing: it is
+// pure, so asking what the table holds cannot change the answer the next
+// reply gets, and an expired-but-unanswered stimulus keeps doing its
+// blocking work.
 //
 // This is the NON-CONSUMING read, for tests and observability. The production
 // re-stamp must use [PrincipalAttributionTable.TakeAttribution] instead, which
@@ -277,17 +358,17 @@ func (t *PrincipalAttributionTable) Lookup(channelID, agentID string) (string, b
 // is reading BECAUSE THE AGENT HAS SPOKEN: it resolves the pending reply's
 // principal and, either way, retires every stimulus that reply answers.
 //
-// This is the table's only source of information about which stimuli are
-// SPENT, and without it the TTL is the only thing that ever retires one — a
-// 120s proxy for "answered" that is wrong in both directions. It is wrong in
-// the direction that matters here: an agent in a room with recurring
-// principal-less forced turns (the RFC 0052 convener cadence, a synthesis-close
-// timeout, a chair escalation descending from either) accumulates anonymous
-// stimuli faster than they age out, so an authenticated stimulus arriving
+// This is the table's ONLY retirement mechanism — expiry disqualifies a
+// stimulus from resolving but deliberately never removes it (the crossover
+// rule in the file header) — so without this read nothing ever retires one.
+// The rooms that shows in first are exactly R-2's: an agent in a room with
+// recurring principal-less forced turns (the RFC 0052 convener cadence, a
+// synthesis-close timeout, a chair escalation descending from either)
+// accumulates anonymous stimuli, so an authenticated stimulus arriving
 // alongside them is ambiguous, and stays ambiguous for as long as the cadence
-// runs. The pair never resolves, and because a stimulus is always live the row
-// is never reclaimable by the sweep either. Retiring what the agent has
-// answered is what lets the next authenticated stimulus stand alone.
+// runs. The pair never resolves, and the row never goes cold enough for the
+// sweep to reclaim. Retiring what the agent has answered is what lets the
+// next authenticated stimulus stand alone.
 //
 // It is deliberately NOT folded into Lookup. A read that mutates is a bad
 // default, and the two callers want different things: a test or an operator
@@ -311,64 +392,54 @@ func (t *PrincipalAttributionTable) TakeAttribution(channelID, agentID string) (
 	return t.resolveLocked(principalAttributionKey{channelID: channelID, agentID: agentID}, now, true)
 }
 
-// resolveLocked derives the verdict for one pair, dropping the row when it has
-// nothing live left or when `spoke` says the agent has answered whatever it
-// held. Caller holds mu.
+// resolveLocked derives the verdict for one pair, dropping the row only when
+// `spoke` says the agent has answered whatever it held. Caller holds mu.
 //
-// The verdict is the file header's one rule: resolve iff exactly one stimulus
-// is still live and it can name someone. Everything else — no row, nothing
-// live, two live stimuli, or a single live one that is anonymous — resolves
-// nothing and leaves the caller at `'local'`.
+// The verdict is the file header's one rule: resolve iff the agent holds
+// exactly one stimulus, it is still inside the turn budget, and it can name
+// someone. Everything else — no row, two stimuli (expired ones included: an
+// unanswered stimulus is disqualified by age, never removed by it — the
+// crossover rule), or a single one that is expired or anonymous — resolves
+// nothing and leaves the caller at `'local'`. At exactly the TTL a stimulus
+// is already disqualified: the budget is how long one can still explain a
+// reply, so the boundary belongs to the safe side.
 func (t *PrincipalAttributionTable) resolveLocked(key principalAttributionKey, now time.Time, spoke bool) (string, bool) {
 	entry, ok := t.entries[key]
 	if !ok {
 		return "", false
 	}
-	// Expiry is enforced here rather than only by the sweep, so a read can
-	// never resolve a stale attribution however long the sweep interval is.
-	t.pruneLocked(entry, now)
-
 	principal, resolved := "", false
 	if len(entry.stimuli) == 1 {
-		for p := range entry.stimuli {
-			if p != anonymousStimulus {
+		for p, at := range entry.stimuli {
+			if p != anonymousStimulus && now.Sub(at) < t.ttl {
 				principal, resolved = p, true
 			}
 		}
 	}
-	// A row with nothing live left reads as no row at all, so it must not be
-	// left behind; and once the agent has spoken, everything it held is spent.
-	if spoke || len(entry.stimuli) == 0 {
+	// Once the agent has spoken, everything it held is spent.
+	if spoke {
 		delete(t.entries, key)
 	}
 	return principal, resolved
 }
 
-// pruneLocked drops the stimuli that have reached the TTL. At exactly the TTL
-// a stimulus is already gone: the budget is how long one can still explain a
-// reply, so the boundary belongs to the safe side.
-//
-// The entry is taken by value and mutated through its map header, which is
-// shared with the copy in `t.entries` — so callers do not write the row back,
-// but a caller that empties one MUST delete it (an entry holding an empty set
-// would otherwise read as a live row forever). Caller holds mu.
-func (t *PrincipalAttributionTable) pruneLocked(e principalAttributionEntry, now time.Time) {
-	for principal, at := range e.stimuli {
-		if now.Sub(at) >= t.ttl {
-			delete(e.stimuli, principal)
-		}
-	}
-}
-
-// sweepLocked drops every row with nothing live left in it, at most once per
+// sweepLocked reclaims every COLD row — one whose every stimulus is at least
+// a full turn budget past its own expiry (age >= 2×ttl) — at most once per
 // TTL. Caller holds mu.
 //
-// Lazy expiry on read is what keeps the table CORRECT; this is what keeps it
-// SMALL, and it is not redundant: the read side only ever looks up agents that
-// publish, so an agent dispatched to in a room it never speaks in would hold
-// its row for the life of the process. Piggybacked on the write path rather
-// than run from a goroutine — a background sweeper would need a lifetime, a
-// stop signal and a place in the shutdown ordering, all to reclaim a map whose
+// The consuming read is what keeps the table CORRECT; this is what keeps it
+// SMALL, and it is not redundant: the read side only ever looks up agents
+// that publish, so an agent dispatched to in a room it never speaks in would
+// hold its row for the life of the process. The reclaim horizon is
+// deliberately WIDER than the resolve TTL: within one budget a stimulus can
+// be the answer, within a second it can no longer be vouched for but the
+// agent may still be mid-turn on it — so it must stay and block (the
+// crossover rule in the file header) — and only past both, with the agent
+// silent throughout, is the row cold enough that reclaiming it protects
+// nothing. Rows are dropped whole or not at all; retiring individual stimuli
+// is the consuming read's job. Piggybacked on the write path rather than run
+// from a goroutine — a background sweeper would need a lifetime, a stop
+// signal and a place in the shutdown ordering, all to reclaim a map whose
 // bound is `channels × members`. Interval-gated, so the amortized cost on the
 // dispatch path is a clock comparison.
 func (t *PrincipalAttributionTable) sweepLocked(now time.Time) {
@@ -377,8 +448,14 @@ func (t *PrincipalAttributionTable) sweepLocked(now time.Time) {
 	}
 	t.lastSweep = now
 	for key, entry := range t.entries {
-		t.pruneLocked(entry, now)
-		if len(entry.stimuli) == 0 {
+		cold := true
+		for _, at := range entry.stimuli {
+			if now.Sub(at) < 2*t.ttl {
+				cold = false
+				break
+			}
+		}
+		if cold {
 			delete(t.entries, key)
 		}
 	}

@@ -17,8 +17,10 @@ import (
 // no-regression rather than a wrong answer.
 //
 // The rules are all one rule seen from different sides: a pair resolves when
-// exactly one stimulus to that agent is still live and it has a principal.
-// Everything else — nothing live, two principals live, a principal racing an
+// the agent holds exactly one stimulus, it is still inside the turn budget,
+// and it has a principal. Everything else — nothing held, two stimuli held
+// (expired ones included: age disqualifies a stimulus but only the agent's
+// own reply removes one — the crossover rule), a principal racing an
 // unauthenticated turn — resolves nothing.
 //
 // The clock is injected on every table so expiry is asserted deterministically
@@ -97,9 +99,10 @@ func TestPrincipalAttribution_SecondPrincipalAmbiguates(t *testing.T) {
 // next reply Alice's — it may still be answering Bob.
 //
 // "Sticky" is a consequence here, not a mechanism: nothing is latched, Bob's
-// stimulus is simply still live. Once it ages out the pair resolves again —
-// see [TestPrincipalAttribution_AmbiguityDecaysWithTheSecondStimulus], which
-// is the half a stored-and-refreshed flag got wrong.
+// stimulus is simply still held. It stops mattering when the agent next
+// replies — see [TestPrincipalAttribution_SecondStimulusBlocksUntilTheAgentSpeaks]
+// — never by ageing out, because expiry disqualifies a stimulus without
+// removing it (the crossover rule).
 func TestPrincipalAttribution_AmbiguityIsStickyWhileLive(t *testing.T) {
 	table, clock := newTestAttributionTable()
 
@@ -110,36 +113,6 @@ func TestPrincipalAttribution_AmbiguityIsStickyWhileLive(t *testing.T) {
 
 	_, ok := table.Lookup("group:planning", "iron-fox")
 	assert.False(t, ok, "a live ambiguous entry can never be disambiguated by a later dispatch")
-}
-
-// TestPrincipalAttribution_ExpiredEntryIsAMiss pins the TTL: past the
-// persona's worst realistic turn the stimulus can no longer have caused the
-// reply in hand, so the entry is gone and the reply degrades to `'local'`.
-func TestPrincipalAttribution_ExpiredEntryIsAMiss(t *testing.T) {
-	table, clock := newTestAttributionTable()
-
-	table.Record("group:planning", "iron-fox", "alice-person")
-	clock.advance(principalAttributionTTL)
-
-	_, ok := table.Lookup("group:planning", "iron-fox")
-	assert.False(t, ok, "an entry at or past the TTL must not resolve")
-}
-
-// TestPrincipalAttribution_ExpiredAmbiguityStartsFresh pins the other half of
-// the stickiness rule: ambiguity dies with the stimuli that made it. Once both
-// have aged out, the next dispatch is a fresh unambiguous fact — so a busy
-// room does not latch itself into permanent `'local'`.
-func TestPrincipalAttribution_ExpiredAmbiguityStartsFresh(t *testing.T) {
-	table, clock := newTestAttributionTable()
-
-	table.Record("group:planning", "iron-fox", "alice-person")
-	table.Record("group:planning", "iron-fox", "bob-person")
-	clock.advance(principalAttributionTTL)
-	table.Record("group:planning", "iron-fox", "alice-person")
-
-	got, ok := table.Lookup("group:planning", "iron-fox")
-	require.True(t, ok, "ambiguity must not outlive the entry that carried it")
-	assert.Equal(t, "alice-person", got)
 }
 
 // TestPrincipalAttribution_EmptyIdentifiersAreNotRecorded pins the STRUCTURAL
@@ -162,42 +135,6 @@ func TestPrincipalAttribution_EmptyIdentifiersAreNotRecorded(t *testing.T) {
 	assert.False(t, ok, "a dispatch whose ids were lost resolves nothing")
 }
 
-// TestPrincipalAttribution_LookupEvictsTheExpiredEntry pins the lazy half of
-// the expiry story: a read that misses on age also drops the row, so a table
-// that is read at all does not need the sweep to stay bounded.
-func TestPrincipalAttribution_LookupEvictsTheExpiredEntry(t *testing.T) {
-	table, clock := newTestAttributionTable()
-
-	table.Record("group:planning", "iron-fox", "alice-person")
-	require.Equal(t, 1, table.len())
-
-	clock.advance(principalAttributionTTL)
-	_, ok := table.Lookup("group:planning", "iron-fox")
-	require.False(t, ok)
-
-	assert.Equal(t, 0, table.len(), "an expired entry must be evicted by the read that missed on it")
-}
-
-// TestPrincipalAttribution_SweepDropsUnreadExpiredEntries pins the eager half.
-// Lazy expiry only reclaims pairs somebody looks up, and the re-stamp only
-// looks up agents that publish — an agent dispatched to in a room it never
-// speaks in would otherwise hold its row for the life of the process.
-func TestPrincipalAttribution_SweepDropsUnreadExpiredEntries(t *testing.T) {
-	table, clock := newTestAttributionTable()
-
-	table.Record("group:quiet", "silent-heron", "alice-person")
-	require.Equal(t, 1, table.len())
-
-	// Age the entry out, then give the table a write it can piggyback the
-	// sweep on. The swept row is never read.
-	clock.advance(principalAttributionTTL)
-	table.Record("group:planning", "iron-fox", "alice-person")
-
-	assert.Equal(t, 1, table.len(), "the sweep must drop the expired row it was never asked about")
-	_, ok := table.Lookup("group:planning", "iron-fox")
-	assert.True(t, ok, "the sweep must not touch a live entry")
-}
-
 // TestPrincipalAttribution_NilTableIsInert pins the nil receiver. The table is
 // optional wiring (a channels-disabled deployment has no dispatcher to hold
 // one), so both methods must be safe on a nil handle rather than making every
@@ -209,33 +146,6 @@ func TestPrincipalAttribution_NilTableIsInert(t *testing.T) {
 
 	_, ok := table.Lookup("group:planning", "iron-fox")
 	assert.False(t, ok, "a nil table resolves nothing")
-}
-
-// TestPrincipalAttribution_AmbiguityDecaysWithTheSecondStimulus pins that
-// ambiguity is a property of the stimuli that are LIVE, not a flag a room
-// carries once it has been earned. Bob speaks once; Alice keeps the room
-// busy past Bob's turn budget. The pair must resolve to Alice again — the
-// earlier sticky-flag shape refreshed its own stamp on every write, so one
-// message from Bob pinned an active room to `'local'` for as long as the
-// conversation lasted (and a cascade keeps itself busy by construction).
-func TestPrincipalAttribution_AmbiguityDecaysWithTheSecondStimulus(t *testing.T) {
-	table, clock := newTestAttributionTable()
-
-	table.Record("group:planning", "iron-fox", "alice-person")
-	table.Record("group:planning", "iron-fox", "bob-person")
-	_, ok := table.Lookup("group:planning", "iron-fox")
-	require.False(t, ok, "both stimuli live — the reply may be answering either")
-
-	// Alice keeps dispatching, more often than the TTL, right past the point
-	// where Bob's single stimulus can still explain anything.
-	for range 5 {
-		clock.advance(principalAttributionTTL / 2)
-		table.Record("group:planning", "iron-fox", "alice-person")
-	}
-
-	got, ok := table.Lookup("group:planning", "iron-fox")
-	require.True(t, ok, "a busy room must recover once the second speaker's stimulus ages out")
-	assert.Equal(t, "alice-person", got)
 }
 
 // TestPrincipalAttribution_UnauthenticatedStimulusAmbiguates pins the other
@@ -314,155 +224,19 @@ func TestPrincipalAttribution_AnonymousStimulusAmbiguatesALaterPrincipal(t *test
 	_, ok = reverse.Lookup("group:planning", "iron-fox")
 	assert.False(t, ok, "the reverse order must resolve nothing either")
 
-	// And the ambiguity still expires with the stimulus that caused it: once
-	// the anonymous one ages out, Alice's — refreshed meanwhile — resolves.
-	clock.advance(principalAttributionTTL - time.Second)
-	table.Record("group:planning", "iron-fox", "alice-person")
-	clock.advance(2 * time.Second)
-
-	got, ok := table.Lookup("group:planning", "iron-fox")
-	require.True(t, ok, "the anonymous stimulus must age out like any other")
-	assert.Equal(t, "alice-person", got)
-}
-
-// TestPrincipalAttribution_UnauthenticatedStimulusExpires pins that the
-// anonymous stimulus is bound by the same turn budget as any other: once the
-// unattributable turn it stood for can no longer be the one in hand, the
-// authenticated stimulus that outlived it resolves again.
-func TestPrincipalAttribution_UnauthenticatedStimulusExpires(t *testing.T) {
-	table, clock := newTestAttributionTable()
-
-	table.Record("group:planning", "iron-fox", "alice-person")
-	table.Record("group:planning", "iron-fox", "")
-	_, ok := table.Lookup("group:planning", "iron-fox")
-	require.False(t, ok)
-
-	// Keep Alice's stimulus alive across the anonymous one's expiry.
-	clock.advance(principalAttributionTTL - time.Second)
-	table.Record("group:planning", "iron-fox", "alice-person")
-	clock.advance(2 * time.Second)
-
-	got, ok := table.Lookup("group:planning", "iron-fox")
-	require.True(t, ok, "the anonymous stimulus must age out like any other")
-	assert.Equal(t, "alice-person", got)
-}
-
-// TestPrincipalAttribution_UnauthenticatedDispatchStillSweeps pins a property
-// the anonymous-stimulus rule carries with it. The eager sweep is piggybacked
-// on the write path, so it only runs from a call that gets that far — and
-// while an empty principal was an early return, a deployment whose
-// authenticated traffic stopped (agent-origin and autonomous turns continuing
-// alone) would never sweep again, exactly when nothing else reclaims the rows.
-func TestPrincipalAttribution_UnauthenticatedDispatchStillSweeps(t *testing.T) {
-	table, clock := newTestAttributionTable()
-
-	table.Record("group:quiet", "silent-heron", "alice-person")
-	require.Equal(t, 1, table.len())
-
-	// Authenticated traffic stops here; only agent-origin turns continue.
+	// The anonymous ghost does not age out of candidacy — the forced turn may
+	// be exactly what the slow agent is answering (the crossover rule) — so
+	// the pair stays blocked past its budget. It recovers when the agent
+	// speaks: the reply retires both, and Alice's next stimulus stands alone.
 	clock.advance(principalAttributionTTL)
-	table.Record("group:planning", "iron-fox", "")
-
-	// The expired row is reclaimed; what remains is the anonymous dispatch's
-	// own row, which resolves nothing.
-	assert.Equal(t, 1, table.len(),
-		"an unauthenticated dispatch must still reclaim the rows that aged out")
-	_, ok := table.Lookup("group:quiet", "silent-heron")
-	assert.False(t, ok, "the expired authenticated row is gone, not merely unreadable")
+	table.Record("group:planning", "iron-fox", "alice-person")
 	_, ok = table.Lookup("group:planning", "iron-fox")
-	assert.False(t, ok, "and the row it left behind can never be an answer")
-}
+	assert.False(t, ok, "an expired forced turn still blocks until the agent answers")
 
-// TestPrincipalAttribution_TakeAttributionRetiresTheStimuliItAnswered pins the
-// consuming read. An agent that publishes has answered whatever it was
-// holding, so the read that re-stamps its reply must retire those stimuli
-// rather than leave them to compete with the NEXT one.
-func TestPrincipalAttribution_TakeAttributionRetiresTheStimuliItAnswered(t *testing.T) {
-	table, _ := newTestAttributionTable()
-
+	_, _ = table.TakeAttribution("group:planning", "iron-fox")
 	table.Record("group:planning", "iron-fox", "alice-person")
 
-	got, ok := table.TakeAttribution("group:planning", "iron-fox")
-	require.True(t, ok, "a live unambiguous entry must resolve for the re-stamp")
+	got, ok := table.Lookup("group:planning", "iron-fox")
+	require.True(t, ok, "the reply retires the forced turn; Alice's next stimulus stands alone")
 	assert.Equal(t, "alice-person", got)
-
-	assert.Equal(t, 0, table.len(), "the stimuli the reply answered must be retired")
-	_, ok = table.TakeAttribution("group:planning", "iron-fox")
-	assert.False(t, ok, "a second reply answers nothing the orchestrator can name")
-}
-
-// TestPrincipalAttribution_TakeAttributionRetiresAnAmbiguousRow pins that the
-// retirement is unconditional. The agent spoke, so its stimuli are spent
-// whether or not the orchestrator could name who caused them — leaving an
-// ambiguous row behind is what would let it go on ambiguating later replies.
-func TestPrincipalAttribution_TakeAttributionRetiresAnAmbiguousRow(t *testing.T) {
-	table, _ := newTestAttributionTable()
-
-	table.Record("group:planning", "iron-fox", "alice-person")
-	table.Record("group:planning", "iron-fox", "bob-person")
-
-	_, ok := table.TakeAttribution("group:planning", "iron-fox")
-	require.False(t, ok, "two live principals resolve nothing")
-	assert.Equal(t, 0, table.len(), "an ambiguous row is still answered and still retired")
-}
-
-// TestPrincipalAttribution_LookupDoesNotRetire pins the other half: the
-// non-consuming read is safe for tests and observability, so asking what the
-// table holds cannot change the answer the next reply gets.
-func TestPrincipalAttribution_LookupDoesNotRetire(t *testing.T) {
-	table, _ := newTestAttributionTable()
-
-	table.Record("group:planning", "iron-fox", "alice-person")
-
-	for range 3 {
-		got, ok := table.Lookup("group:planning", "iron-fox")
-		require.True(t, ok, "a plain read must not consume the entry")
-		assert.Equal(t, "alice-person", got)
-	}
-	assert.Equal(t, 1, table.len(), "a plain read leaves the row in place")
-}
-
-// TestPrincipalAttribution_CadenceRoomRecoversWhenTheAgentSpeaks is the
-// regression gate for the permanent-ambiguity hole.
-//
-// A room on the RFC 0052 convener cadence dispatches principal-less forced
-// turns to the same agent faster than the turn budget retires them, so under
-// expiry alone an authenticated stimulus is ambiguous on arrival and STAYS
-// ambiguous for as long as the cadence runs — the pair never resolves and the
-// row is never reclaimable, because something is always live in it. The agent
-// answering its stimuli is what breaks the accumulation.
-func TestPrincipalAttribution_CadenceRoomRecoversWhenTheAgentSpeaks(t *testing.T) {
-	table, clock := newTestAttributionTable()
-
-	// The cadence ticks well inside the turn budget, so the anonymous stimulus
-	// is restated before it can ever age out.
-	tick := principalAttributionTTL / 2
-
-	clock.advance(tick)
-	table.Record("group:planning", "iron-fox", "")
-	clock.advance(tick)
-	table.Record("group:planning", "iron-fox", "")
-
-	// Alice speaks into the running cadence. Correctly ambiguous: the agent is
-	// holding her message AND an unanswered forced turn.
-	clock.advance(time.Second)
-	table.Record("group:planning", "iron-fox", "alice-person")
-	_, ok := table.TakeAttribution("group:planning", "iron-fox")
-	require.False(t, ok, "an unanswered forced turn racing Alice's message is ambiguous")
-
-	// That reply retired both. The cadence ticks on, the agent answers it, and
-	// Alice speaks again — now hers is the only stimulus outstanding.
-	clock.advance(tick)
-	table.Record("group:planning", "iron-fox", "")
-	_, ok = table.TakeAttribution("group:planning", "iron-fox")
-	require.False(t, ok, "the forced turn alone can never be an answer")
-
-	clock.advance(time.Second)
-	table.Record("group:planning", "iron-fox", "alice-person")
-
-	got, ok := table.TakeAttribution("group:planning", "iron-fox")
-	require.True(t, ok,
-		"a cadence room must recover once the agent has answered what it was holding")
-	assert.Equal(t, "alice-person", got)
-	assert.Equal(t, 0, table.len(), "and the row does not outlive the reply it explained")
 }

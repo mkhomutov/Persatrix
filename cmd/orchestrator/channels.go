@@ -174,18 +174,29 @@ func initChannels(
 	// ISSUE-0124 PR 1: the causal-attribution table — which principal each
 	// delivered dispatch was made under. Born here rather than inside the
 	// dispatcher because its reader is the ROUTER: PR 2 hands this same
-	// instance to the re-stamp in `ChannelRouter.Publish`, which is what lets
-	// a persona's reply (a fresh unauthenticated publish) keep the tenant of
-	// the person who caused it. Unconditional and cheap: an unauthenticated
-	// dispatch is recorded too (it is a competing stimulus, and skipping it is
-	// what let a later authenticated one resolve a reply it never caused), so
-	// under `auth.mode: disabled` this holds one anonymous-only row per
-	// dispatched-to `(channel, agent)` pair — the map's stated
-	// `channels × members` bound, resolving nothing, reclaimed by the sweep one
-	// turn budget after the traffic stops.
+	// instance to the re-stamp at the head of `ChannelRouter.publishCommit`
+	// (the commit path both publish entry points share — NOT `Publish`, which
+	// the REST seam a persona's reply takes no longer goes through), which is
+	// what lets a persona's reply (a fresh unauthenticated publish) keep the
+	// tenant of the person who caused it. Unconditional and cheap: an
+	// unauthenticated dispatch is recorded too (it is a competing stimulus, and
+	// skipping it is what let a later authenticated one resolve a reply it never
+	// caused), so under `auth.mode: disabled` this holds one anonymous-only row
+	// per dispatched-to `(channel, agent)` pair — the map's stated
+	// `channels × members` bound, resolving nothing, reclaimed by the sweep two
+	// turn budgets after the traffic stops (the cold-row horizon: PR 2 made
+	// expiry disqualify a stimulus without removing it, so a row is reclaimed
+	// only once every stimulus in it is 2×TTL old).
 	principalAttribution := channels.NewPrincipalAttributionTable()
 	dispatcher := selectChannelDispatcher(reg, sessionResolver, epochID, principalAttribution, logger)
 	router := channels.NewChannelRouter(chanStore, dispatcher, logger, routerMetrics)
+	// ISSUE-0124 PR 2: the same instance on the READ side. The dispatcher
+	// writes the table, the router consumes it at the head of every publish —
+	// two instances would leave the re-stamp permanently empty, which is why
+	// the table is born above rather than inside either collaborator. This is
+	// the line that makes R-2 behavioural: from here a persona's reply carries
+	// the principal of the person who caused it.
+	router.SetPrincipalAttribution(principalAttribution)
 	// RFC 0050 amendment (interaction-budget enforcement): make the channel
 	// router the authority for the wallet's per-interaction cost ceiling. The
 	// wallet was constructed before this point (it has no channels dependency),
