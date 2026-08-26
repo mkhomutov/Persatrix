@@ -171,10 +171,12 @@ func WithEpoch(epoch string) DispatcherOption {
 }
 
 // WithPrincipalAttribution wires the ISSUE-0124 causal-attribution table the
-// dispatcher writes on every DELIVERED dispatch made under a principal.
-// Omitting it leaves the dispatcher recording nothing, which is also what a
-// deployment under `auth.mode: disabled` sees with it wired — no request ever
-// carries a principal, so nothing is ever recorded.
+// dispatcher writes on every DELIVERED dispatch it asked a turn for. Omitting
+// it leaves the dispatcher recording nothing — the way to opt a deployment out
+// entirely. With it wired, a dispatch carrying NO principal is recorded too,
+// as the anonymous stimulus: it competes for the reply and can only make a
+// pair ambiguous, never resolve one. So under `auth.mode: disabled` the table
+// holds anonymous-only rows that answer nothing, rather than staying empty.
 //
 // The table is passed IN rather than owned by the dispatcher because its
 // reader is the router: PR 2 hands the same instance to

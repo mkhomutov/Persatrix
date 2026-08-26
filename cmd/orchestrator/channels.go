@@ -176,9 +176,13 @@ func initChannels(
 	// dispatcher because its reader is the ROUTER: PR 2 hands this same
 	// instance to the re-stamp in `ChannelRouter.Publish`, which is what lets
 	// a persona's reply (a fresh unauthenticated publish) keep the tenant of
-	// the person who caused it. Unconditional and cheap: the write is gated on
-	// the request carrying a principal, so under `auth.mode: disabled` this
-	// stays an empty map for the life of the process.
+	// the person who caused it. Unconditional and cheap: an unauthenticated
+	// dispatch is recorded too (it is a competing stimulus, and skipping it is
+	// what let a later authenticated one resolve a reply it never caused), so
+	// under `auth.mode: disabled` this holds one anonymous-only row per
+	// dispatched-to `(channel, agent)` pair — the map's stated
+	// `channels × members` bound, resolving nothing, reclaimed by the sweep one
+	// turn budget after the traffic stops.
 	principalAttribution := channels.NewPrincipalAttributionTable()
 	dispatcher := selectChannelDispatcher(reg, sessionResolver, epochID, principalAttribution, logger)
 	router := channels.NewChannelRouter(chanStore, dispatcher, logger, routerMetrics)
@@ -454,8 +458,9 @@ func initChannels(
 //     delivered dispatch was made under (ISSUE-0124 PR 1), so a persona's
 //     reply can later be re-stamped with the principal that caused it. Nil
 //     records nothing. Writing it changes no behaviour on its own — nothing
-//     reads the table until PR 2 — and under `auth.mode: disabled` no request
-//     carries a principal, so nothing is recorded even when it is wired.
+//     reads the table until PR 2 — and a dispatch carrying no principal is
+//     recorded as the anonymous stimulus, which can only ever make a pair
+//     ambiguous, never resolve one.
 func selectChannelDispatcher(reg registry.Registry, sessionResolver channels.SessionBinder, epochID string, attribution *channels.PrincipalAttributionTable, logger *zap.Logger) channels.MessageDispatcher {
 	if reg == nil {
 		logger.Info("channels: registry not available; cross-process dispatch disabled (NoopDispatcher in use)")

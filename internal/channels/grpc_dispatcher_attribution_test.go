@@ -74,15 +74,22 @@ func TestDispatch_RecordsCausalAttribution(t *testing.T) {
 	assert.False(t, ok, "the table is keyed on the recipient, never the sender")
 }
 
-// TestDispatch_NoPrincipalRecordsNothing pins the gate that makes
-// `auth.mode: disabled` and every agent/autonomous-origin turn a no-op here:
-// with no principal on the context there is no true statement to record, and
-// an entry keyed on "" would hand PR 2's re-stamp a hit that means nothing.
-func TestDispatch_NoPrincipalRecordsNothing(t *testing.T) {
+// TestDispatch_NoPrincipalRecordsAnAnonymousStimulus pins what an
+// unauthenticated dispatch — `auth.mode: disabled`, any unauthenticated
+// caller, every agent/autonomous-origin turn — actually leaves behind: a real
+// stimulus the agent holds, recorded under the anonymous key. It resolves
+// nothing on its own, and it ambiguates any authenticated stimulus live at the
+// same time. Recording it rather than skipping it is what keeps that rule
+// independent of arrival order (see the ordering gate in
+// principal_attribution_test.go).
+func TestDispatch_NoPrincipalRecordsAnAnonymousStimulus(t *testing.T) {
 	table, err := dispatchWithAttribution(t, context.Background(), &recordingAgentServer{}, true)
 	require.NoError(t, err)
 
-	assert.Equal(t, 0, table.len(), "an unauthenticated dispatch must record nothing")
+	assert.Equal(t, 1, table.len(), "an unauthenticated dispatch is still a stimulus the agent holds")
+
+	_, ok := table.Lookup("group:planning", "iron-fox")
+	assert.False(t, ok, "a dispatch that could not name anyone must never resolve to a principal")
 }
 
 // TestDispatch_RefusedDeliveryRecordsNothing pins that the record follows the

@@ -133,9 +133,26 @@ pins.
   reply inherits it — consistent with the other two dispatch origins in
   `dispatchOriginClassification`
   ([`internal/server/principal.go`](../../internal/server/principal.go)).
-- **`auth.mode: disabled`.** No principal ever reaches a ctx, the table
-  is never written, and the no-delta acceptance criterion holds at the
-  byte level.
+- **`auth.mode: disabled`.** No principal ever reaches a ctx, so every
+  dispatch records the anonymous stimulus and **nothing the table holds
+  can ever resolve**. The no-delta acceptance criterion holds at the byte
+  level; the residual cost is one anonymous-only row per dispatched-to
+  pair, inside the bound below and reclaimed by the sweep once traffic
+  stops. A deployment that wants no table at all declines to wire one.
+- **Expiry is not the only retirement.** Ageing out recovers a pair only
+  when the competing stimulus stops being restated. That holds for a
+  second human speaker, but not for the orchestrator's own principal-less
+  forced turns — the RFC 0052 convener cadence, a synthesis-close
+  timeout, a chair escalation descending from either — which recur faster
+  than the turn budget, keep an anonymous stimulus permanently live, and
+  would leave such a room forever ambiguous with a row the sweep can
+  never reclaim. So the re-stamp read (`TakeAttribution`) also **retires
+  the stimuli the reply answered**: an agent that publishes has answered
+  what it was holding, the only evidence the orchestrator gets that a
+  stimulus is *spent* rather than merely young. Irreducible remainder,
+  stated: an authenticated stimulus racing an **unanswered** anonymous
+  one is genuinely ambiguous and must stay so — ranking them needs a
+  correlation key from the agent, which is disqualified above.
 - **Bound and lifetime.** Size is `channels × members`, with lazy
   expiry on read plus a periodic sweep. Keep it **in memory only**: the
   session binding is persisted for continuity, but a *stale* attribution
@@ -261,9 +278,16 @@ in every room. Together the relayed turn carries the causal principal
 >   (`handleConveneChannel`, the synthesis-close timeout), every agent-origin
 >   and autonomous turn. Such a dispatch is a real competing stimulus that
 >   simply cannot name anyone, so it is recorded under the anonymous key: it
->   can make a pair ambiguous, never resolve one. It does **not create** a row,
->   so `auth.mode: disabled` still holds an empty table for the life of the
->   process.
+>   can make a pair ambiguous, never resolve one. It **creates a row like any
+>   other stimulus**. An earlier shape recorded it only against an *existing*
+>   row — reasoning that with nothing authenticated outstanding there was
+>   nothing to be mistaken for — but that holds only at the instant of the
+>   write: it ignored the authenticated stimulus arriving **next**, while the
+>   anonymous one was still live, which left the pair resolving a principal the
+>   agent may never have been answering. Recording it unconditionally makes the
+>   rule order-independent. The cost is that `auth.mode: disabled` now holds one
+>   anonymous-only row per dispatched-to pair — the same `channels × members`
+>   bound, resolving nothing, reclaimed one turn budget after traffic stops.
 >
 > The TTL is its own constant (`principalAttributionTTL`, 120s) rather than an
 > alias of `defaultSynthesisReplyTimeout`: they answer to the same reasoning
