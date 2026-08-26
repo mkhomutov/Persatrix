@@ -83,13 +83,14 @@ PR 1 is unblocked by the gate and can start immediately after the tag. PR 3 must
 
 #### Scope
 
-`internal/channels/principal_attribution.go`: a per-`(channel, agent)` table recording the principal a dispatch was made under. Written from `Dispatch` when `PrincipalFromContext(ctx)` is non-empty. **No read site** — nothing re-stamps yet, so behaviour is unchanged everywhere. Mirrors the v0.3.14 PR 1 / PR 2 dormant-rail-then-producer split.
+`internal/channels/principal_attribution.go`: a per-`(channel, agent)` table recording the principal a dispatch was made under. Written from `Dispatch` for every delivered dispatch the router elected a reply from. **No read site** — nothing re-stamps yet, so behaviour is unchanged everywhere. Mirrors the v0.3.14 PR 1 / PR 2 dormant-rail-then-producer split.
 
 #### Key implementation details
 
-* Key `(msg.ChannelID, env.Recipient.ParticipantID)`, value `{principal, dispatchedAt}`.
-* **Ambiguity**: a second dispatch under a *different* principal marks the entry ambiguous. Same-principal re-dispatch refreshes rather than ambiguates.
+* Key `(msg.ChannelID, env.Recipient.ParticipantID)`, value `map[principal]time.Time` — the stimuli still live, from which the verdict is *derived*.
+* **Ambiguity**: resolve iff exactly one stimulus is live and it names someone. A dispatch carrying no principal is recorded under the anonymous key, in either arrival order. Same-principal re-dispatch refreshes rather than ambiguates.
 * **TTL** sized on the persona's worst realistic turn — the same budget `defaultSynthesisReplyTimeout` (120s) is sized against.
+* **Retirement**: `TakeAttribution` resolves *and* drops the stimuli the reply answered, because expiry alone never recovers a room whose forced turns outpace the TTL.
 * In-memory only, lazy expiry on read plus a periodic sweep. Bound is `channels × members`.
 
 #### Tests
@@ -112,6 +113,7 @@ Read the table in `ChannelRouter.Publish`, before fanout, **iff** the ctx carrie
 #### Key implementation details
 
 * Read in `Publish`, not `handlePublishMessage`, so in-process callers are covered.
+* Read with **`TakeAttribution`, never `Lookup`**. The consuming read retires the stimuli the reply answered; `Lookup` leaves them live, so a room whose principal-less forced turns recur faster than the TTL (the RFC 0052 convener cadence) stays ambiguous forever and R-2 is inert exactly where it is needed.
 * `msg.SenderID` is safe as a key: the executor supplies the agent's framework-known registered id and never forwards an LLM-supplied value (the RFC 0011 §"DM gate-bypass" invariant).
 * **Never** accept a principal, or any correlation key, from the agent's request — including the stimulus message id. An agent sees other members' ids in channel history, so echoing a chosen id resolves to a chosen principal: the same cross-tenant read primitive one indirection along.
 * Deeper cascades inherit transitively (PR 1's write fires again with the principal now on ctx), bounded by `cascade_depth`.
@@ -122,6 +124,7 @@ Integration: an authenticated publish → persona reply → the second-hop perso
 
 #### PR checklist
 
+- [ ] The re-stamp calls `TakeAttribution`, not `Lookup`, pinned by a test that a second reply resolves nothing
 - [ ] Accepted-risk statement in the PR body: this grants an agent a bounded **write** into the causally-implicated principal's tenant — never a read
 - [ ] Known Gap: single-orchestrator only
 
