@@ -312,48 +312,51 @@ in every room. Together the relayed turn carries the causal principal
 > the close.
 
 > 2026-08-26 — **PR 2 (`feature/v0315-issue0124-restamp`): the re-stamp is
-> live.** The table stops being dormant — a persona's reply now carries the
-> principal of the person who caused it, and so does every dispatch descending
-> from it. Three departures from the design above, recorded not taken silently:
+> live.** The table stops being dormant — a persona's reply, and the cascade
+> below it, now carries the principal of the person who caused it. Departures
+> from the design above, recorded not taken silently:
 >
-> **The read site is `publishCommit`, not `Publish` — and that correction is
-> load-bearing, not tidiness.** This design says "read in `ChannelRouter.Publish`,
-> before fanout". Since the RFC 0048 console publish-latency fix, the REST
-> publish seam — the exact hop this issue is about, `HTTPChannelPublisher` →
-> `POST /channels/{id}/messages` → `handlePublishMessage` — goes through
-> `PublishAsync`, and `Publish` is reached only by the chat-as-DM façade
-> (`PublishAndAwait`) and in-process callers. A literal implementation would
-> therefore have re-stamped nothing on the one path R-2 lives on, and the
-> defect would have survived a green test suite. The read sits at the head of
-> `publishCommit`, the commit path both entry points share, so both inherit it
-> and it can be consumed at most once per publish; each entry point fans out on
-> the returned context rather than the one it passed in.
+> **The read site is `publishCommit`, not `Publish` — load-bearing, not
+> tidiness.** Since the RFC 0048 latency fix, the REST seam this issue is
+> about (`HTTPChannelPublisher` → `handlePublishMessage`) goes through
+> `PublishAsync`; `Publish` serves only the chat-as-DM façade and in-process
+> callers, so a literal implementation would have re-stamped nothing on R-2's
+> own path and shipped green. The read sits at the head of `publishCommit`,
+> the commit path both entry points share (consumed once per publish), and
+> each entry point fans out on the returned context.
 >
-> **It runs before the store commit, not merely before fanout.**
-> [ISSUE-0130](ISSUE-0130-catchup-replay-rederives-memory-under-default-principal.md)
-> shape (b) stamps `messages.principal_id` server-side from the publish
-> context; resolving the causal principal ahead of the commit is what lets a
-> *replayed* relayed turn be attributed at catch-up — B1 gains it for free
-> rather than having to unpick this ordering.
+> **It runs before the store commit**, so [ISSUE-0130](ISSUE-0130-catchup-replay-rederives-memory-under-default-principal.md)
+> shape (b) can stamp `messages.principal_id` from a context that already
+> carries the causal principal — B1 gains replay attribution for free.
 >
-> **"The sender is a registered agent" is enforced by the table key, not a
-> second check.** An entry exists only where `Dispatch` resolved the recipient
-> through the registry, found it healthy and got a delivery ack, so a hit *is*
-> that proof — and a human's id can never be in the table. The alternative,
-> `msg.Metadata`'s `participant_type`, is registry-authoritative only on a
-> HIT: on a miss or a read failure it is the caller's own claim, so gating on
-> it would either trust a wire value or silently disable the re-stamp for the
-> length of a registry hiccup.
+> **"The sender is a registered agent" is enforced by the table key.** An
+> entry exists only where `Dispatch` resolved the recipient through the
+> registry and got a delivery ack, so a hit *is* that proof — a human's id can
+> never be in the table. The alternative, `msg.Metadata`'s `participant_type`,
+> is registry-authoritative only on a hit: gating on it would trust a wire
+> value or disable the re-stamp for the length of a registry hiccup.
 >
 > Two smaller things. The consuming read fires even when the publish is later
-> REJECTED (membership, cascade clamp, reply budget): the agent answered, and
-> leaving its stimuli live would let its next unrelated publish inherit them.
-> And the
-> route-table pin this issue asks for turned up a *pre-existing* second
-> `WithPrincipal` site — `synthesis_close.go` re-applying the arm-time
-> principal onto the timer goroutine's background context — so the pin is a
-> two-entry reviewed allowlist that distinguishes INFERRING a principal (one
-> site, this design's surface) from RE-APPLYING one a request already
-> presented (which can name nobody new). Gates:
-> `internal/channels/principal_restamp_test.go` — ten tests, one per rule
-> above plus the `auth.mode: disabled` no-delta and the stamp-site pin.
+> rejected: the agent answered, and stimuli left live would be inherited by
+> its next unrelated publish. And the stamp-site pin is a two-entry reviewed
+> allowlist: `synthesis_close.go` already RE-APPLIES an arm-time principal
+> (it can name nobody new); this design's one site INFERS one.
+>
+> **Review follow-up (finding 1) — expiry disqualifies, never retires.** The
+> design treats ageing out as a recovery mechanism; it cannot be. The
+> delivery ack is pre-ingest, so an agent can still be mid-turn on a
+> stimulus aged past the budget, and silently pruning it handed the pair to
+> the fresher stimulus that survived alone: Alice's expires while the agent
+> grinds, Bob's lands just inside the window, and the late reply — answering
+> Alice — resolved to *Bob*. Demonstrated red
+> (`TestRestamp_ExpiredCrossoverStaysLocal`); now a fail-closed miss. An
+> expired, unanswered stimulus stays in its row and keeps blocking until the
+> consuming read — the only retirement — clears it, and the sweep reclaims
+> only *cold* rows, every stimulus two turn budgets old. A room whose agent
+> replies inside the budget pays nothing — the reply clears the row first.
+>
+> Gates: `internal/channels/principal_restamp_test.go` — twelve tests: the
+> rules above, the `auth.mode: disabled` no-delta, the stamp-site pin, the
+> crossover gate, and the `PublishAsync` seam pin
+> (`TestRestamp_AsyncSeamCarriesTheCausalPrincipal`), red if a refactor
+> detaches the fanout from the caller's context instead of the returned one.

@@ -50,14 +50,16 @@ package channels
 // WHY THE READ CONSUMES. [PrincipalAttributionTable.TakeAttribution], never
 // [PrincipalAttributionTable.Lookup]: an agent that publishes has answered
 // whatever it was holding, and this read is the only evidence the orchestrator
-// ever gets that a stimulus is SPENT rather than merely young. Without it the
-// 120s TTL is the sole retirement mechanism, and in exactly the rooms R-2 hurts
+// ever gets that a stimulus is SPENT rather than merely young. It is also the
+// table's ONLY retirement mechanism — expiry disqualifies a stimulus from
+// resolving but deliberately never removes it (the crossover rule in
+// principal_attribution.go) — so without it, in exactly the rooms R-2 hurts
 // most — a busy autonomous cascade, where the RFC 0052 convener cadence, a
 // synthesis-close timeout or a chair escalation keeps re-dispatching
-// principal-less forced turns — anonymous stimuli accumulate faster than they
-// age out, every authenticated stimulus lands ambiguous, and the pair never
-// resolves again. Retiring on the reply is what lets the next authenticated
-// stimulus stand alone.
+// principal-less forced turns — anonymous stimuli accumulate, every
+// authenticated stimulus lands ambiguous, and the pair never resolves again.
+// Retiring on the reply is what lets the next authenticated stimulus stand
+// alone.
 //
 // IT CONSUMES EVEN WHEN THE PUBLISH IS REJECTED, and that is the fail-closed
 // direction. This runs at the head of [ChannelRouter.publishCommit], before

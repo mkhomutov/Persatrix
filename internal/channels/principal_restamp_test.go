@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -379,4 +380,57 @@ func TestRestamp_IsTheOnlyPrincipalStampInThisPackage(t *testing.T) {
 	assert.Equal(t, []string{"principal_restamp.go"}, sites["TakeAttribution"],
 		"the consuming read must happen once per publish — a second caller would retire "+
 			"stimuli that no reply answered")
+}
+
+// TestRestamp_ExpiredCrossoverStaysLocal is the wire-level regression gate for
+// the expiry-crossover mis-attribution (PR 2 review, finding 1): the one
+// sequence that could make the re-stamp name the WRONG person, which is the
+// failure mode every other negative in this file only has to miss on.
+//
+// Alice's stimulus ages past the turn budget while the agent is still working
+// (the delivery ack is pre-ingest, so a long turn is real); Bob's lands just
+// inside it. The late reply may be answering Alice, so it must dispatch with
+// no principal at all — never with Bob's.
+func TestRestamp_ExpiredCrossoverStaysLocal(t *testing.T) {
+	router, disp, table, clock, id := newRestampRouter(t)
+
+	table.Record(id, "iron-fox", "alice-person")
+	clock.advance(principalAttributionTTL - time.Second)
+	table.Record(id, "iron-fox", "bob-person")
+	clock.advance(5 * time.Second)
+
+	publishUnder(t, router, context.Background(), id, "iron-fox")
+
+	got, ok := disp.principalTo("nova-sparrow")
+	require.True(t, ok, "the late reply must still fan out")
+	assert.Empty(t, got,
+		"a reply that may answer an expired stimulus must not inherit the surviving one's principal")
+}
+
+// TestRestamp_AsyncSeamCarriesTheCausalPrincipal drives the whole R-2 arc
+// through [ChannelRouter.PublishAsync] — the seam a persona's reply actually
+// re-enters on (the REST handler routes there, not through `Publish`, since
+// the RFC 0048 latency fix) — and asserts the re-stamped principal survives
+// the [context.WithoutCancel] detach onto the fanout goroutine.
+//
+// The other tests in this file publish through the synchronous `Publish`;
+// both entry points share `publishCommit`, but the detached-context threading
+// is PublishAsync's own plumbing, and this pin is what turns red if a
+// refactor detaches from the caller's context instead of the returned one.
+func TestRestamp_AsyncSeamCarriesTheCausalPrincipal(t *testing.T) {
+	router, disp, _, _, id := newRestampRouter(t)
+
+	require.NoError(t, router.PublishAsync(WithPrincipal(context.Background(), "alice-person"),
+		ChannelMessage{ID: uuid.NewString(), ChannelID: id, SenderID: "alice", Content: "…"}, ""))
+	router.WaitForPendingFanout()
+
+	disp.reset()
+	require.NoError(t, router.PublishAsync(context.Background(),
+		ChannelMessage{ID: uuid.NewString(), ChannelID: id, SenderID: "iron-fox", Content: "…"}, ""))
+	router.WaitForPendingFanout()
+
+	got, ok := disp.principalTo("nova-sparrow")
+	require.True(t, ok, "the relayed reply must fan out on the detached goroutine")
+	assert.Equal(t, "alice-person", got,
+		"the re-stamped principal must ride the detached fanout context on the async seam")
 }
