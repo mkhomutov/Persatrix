@@ -85,7 +85,7 @@ PR 1 is unblocked by the gate and can start immediately after the tag. PR 3 must
 
 `internal/channels/principal_attribution.go`: a per-`(channel, agent)` table recording which principal each dispatch was made under, written from `Dispatch` for every delivered dispatch the router elected a reply from. **No read site** — nothing re-stamps yet. Mirrors the v0.3.14 dormant-rail-then-producer split. Rationale, rules, gates and the two review rounds: the file header and [#844](https://github.com/mkhomutov/Persatrix/pull/844).
 
-#### The contract PR 2 depends on
+#### Key implementation details
 
 * Key `(msg.ChannelID, env.Recipient.ParticipantID)`, value `map[principal]time.Time` — the live stimuli, from which the verdict is *derived*: resolve iff exactly one is live and names someone.
 * A principal-less dispatch is recorded under the anonymous key **in either arrival order**; same-principal re-dispatch refreshes rather than ambiguates.
