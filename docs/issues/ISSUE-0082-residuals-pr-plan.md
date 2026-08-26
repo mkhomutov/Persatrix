@@ -83,24 +83,14 @@ PR 1 is unblocked by the gate and can start immediately after the tag. PR 3 must
 
 #### Scope
 
-`internal/channels/principal_attribution.go`: a per-`(channel, agent)` table recording the principal a dispatch was made under. Written from `Dispatch` for every delivered dispatch the router elected a reply from. **No read site** — nothing re-stamps yet, so behaviour is unchanged everywhere. Mirrors the v0.3.14 PR 1 / PR 2 dormant-rail-then-producer split.
+`internal/channels/principal_attribution.go`: a per-`(channel, agent)` table recording which principal each dispatch was made under, written from `Dispatch` for every delivered dispatch the router elected a reply from. **No read site** — nothing re-stamps yet. Mirrors the v0.3.14 dormant-rail-then-producer split. Rationale, rules, gates and the two review rounds: the file header and [#844](https://github.com/mkhomutov/Persatrix/pull/844).
 
-#### Key implementation details
+#### The contract PR 2 depends on
 
-* Key `(msg.ChannelID, env.Recipient.ParticipantID)`, value `map[principal]time.Time` — the stimuli still live, from which the verdict is *derived*.
-* **Ambiguity**: resolve iff exactly one stimulus is live and it names someone. A dispatch carrying no principal is recorded under the anonymous key, in either arrival order. Same-principal re-dispatch refreshes rather than ambiguates.
-* **TTL** sized on the persona's worst realistic turn — the same budget `defaultSynthesisReplyTimeout` (120s) is sized against.
-* **Retirement**: `TakeAttribution` resolves *and* drops the stimuli the reply answered, because expiry alone never recovers a room whose forced turns outpace the TTL.
-* In-memory only, lazy expiry on read plus a periodic sweep. Bound is `channels × members`.
-
-#### Tests
-
-Two principals → ambiguous; same principal → refreshed, not ambiguous; TTL expiry → miss; empty ctx principal → no write. Dormancy pinned, not assumed: a dispatch with the table populated emits the same header bytes as one without.
-
-#### PR checklist
-
-- [ ] `go test ./...` green (note: CI runs `go test` since v0.3.13 #813)
-- [ ] No behaviour delta — the table has no reader
+* Key `(msg.ChannelID, env.Recipient.ParticipantID)`, value `map[principal]time.Time` — the live stimuli, from which the verdict is *derived*: resolve iff exactly one is live and names someone.
+* A principal-less dispatch is recorded under the anonymous key **in either arrival order**; same-principal re-dispatch refreshes rather than ambiguates.
+* `TakeAttribution` resolves *and* retires what the reply answered; expiry alone never recovers a room whose forced turns outpace the 120s TTL.
+* In-memory, single-orchestrator; lazy expiry on read plus a periodic sweep; bound `channels × members`.
 
 ---
 
@@ -113,14 +103,14 @@ Read the table in `ChannelRouter.Publish`, before fanout, **iff** the ctx carrie
 #### Key implementation details
 
 * Read in `Publish`, not `handlePublishMessage`, so in-process callers are covered.
-* Read with **`TakeAttribution`, never `Lookup`**. The consuming read retires the stimuli the reply answered; `Lookup` leaves them live, so a room whose principal-less forced turns recur faster than the TTL (the RFC 0052 convener cadence) stays ambiguous forever and R-2 is inert exactly where it is needed.
-* `msg.SenderID` is safe as a key: the executor supplies the agent's framework-known registered id and never forwards an LLM-supplied value (the RFC 0011 §"DM gate-bypass" invariant).
-* **Never** accept a principal, or any correlation key, from the agent's request — including the stimulus message id. An agent sees other members' ids in channel history, so echoing a chosen id resolves to a chosen principal: the same cross-tenant read primitive one indirection along.
+* Read with **`TakeAttribution`, never `Lookup`**: the consuming read retires what the reply answered. `Lookup` leaves those stimuli live, so a room whose forced turns outpace the TTL (the RFC 0052 convener cadence) stays ambiguous forever and R-2 is inert where it is most needed.
+* `msg.SenderID` is safe as a key: the executor supplies the agent's registered id and never an LLM-supplied value (RFC 0011 §"DM gate-bypass").
+* **Never** accept a principal, or any correlation key, from the agent's request — including the stimulus message id: an agent sees other members' ids in channel history, so a chosen id resolves to a chosen principal, the cross-tenant read primitive one indirection along.
 * Deeper cascades inherit transitively (PR 1's write fires again with the principal now on ctx), bounded by `cascade_depth`.
 
 #### Tests
 
-Integration: an authenticated publish → persona reply → the second-hop persona's rows carry the human's principal, not `'local'`. Negative: autonomous/tick publishes stay `'local'`; ambiguous and expired entries degrade to `'local'`; `auth.mode: disabled` is byte-identical. A route-table-style pin that `Publish` is the **only** re-stamp site.
+Integration: authenticated publish → persona reply → the second-hop persona's rows carry the human's principal, not `'local'`. Negative: autonomous/tick publishes stay `'local'`; ambiguous and expired entries degrade to `'local'`; `auth.mode: disabled` is byte-identical. A route-table-style pin that `Publish` is the **only** re-stamp site.
 
 #### PR checklist
 
