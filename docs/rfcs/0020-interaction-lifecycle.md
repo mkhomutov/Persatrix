@@ -139,7 +139,7 @@ The mental model: structural triggers are immediate and free; idle-gap is the wo
 
 | State | Meaning | Storage |
 |-------|---------|---------|
-| `open` | Active interaction; turns are accumulating in working memory. Idle timer is armed. | In-memory `InteractionTracker` per agent, keyed by scope (§G). Not persisted as `open` rows. |
+| `open` | Active interaction; turns are accumulating in working memory. Idle timer is armed. | In-memory `InteractionTracker` per agent, keyed per §G — since the 2026-08-26 amendment `(principal, speaker, scope)`. Not persisted as `open` rows. |
 | `closing` | Boundary tripped; summary call is enqueued or in flight. Working-memory turns are frozen for this interaction. | A `closing` row is written to `episodes` with `closed_at` set but `summary` empty, so a restart can reconcile. |
 | `closed` / `summarized` | Summary persisted; row is now eligible for episodic recall. | Final `episodes` row with non-empty `summary`. |
 
@@ -233,6 +233,19 @@ For non-channel events:
 | Tool-only invocations (no inbound message) | Single-turn interaction. | Same as TICK. |
 
 The unifying rule: the interaction scope is the smallest natural conversational unit for the source, and `tick`/single-turn events degenerate gracefully into single-turn interactions whose summary is the existing per-event summary text. **No event type loses its current behavior**; multi-turn behavior is added on top.
+
+#### Amendment 2026-08-26 — the record key gains a principal and a speaker dimension (v0.3.15, ISSUE-0123 / ISSUE-0131)
+
+The tables above define the **scope**; this amendment changes what one scope *holds*. The `InteractionTracker` keys open records by the tuple **`(principal_id, speaker_id, scope)`** (`agents/memory/interaction_tracker.py`), recording the decision the [ISSUE-0082 residuals Phase 0 gate](../issues/ISSUE-0082-residuals-phase0-gate.md) made on live evidence (principal 2026-08-07, speaker 2026-08-21) — it does not re-derive it:
+
+- **`scope` is unchanged.** It stays the §D-prefixed string persisted to `episodes.scope`, matched by `is_group_scope` / `is_thread_scope`, and indexed by `idx_episodes_scope`. The two new axes are **not** encoded into it — each is its own column (`principal_id` since persona-memory migration v11; `speaker_id` via migration v18 on `episodes` and `facts`, the two tiers a group close writes).
+- **`principal_id`** (ISSUE-0123, R-1) is the tenant of the request the turn ran under, resolved from the ambient `principal_scope` at each turn. A group channel no longer accumulates every authenticated person's turns into one record whose close-derived summary and facts land under whichever principal closed it; the close path binds the record's own frozen principal (residuals PR 4).
+- **`speaker_id`** (ISSUE-0131) is the event's `sender_id` (`""` = no speaker: ticks and senderless single-turn scopes). The principal is a *tenant* axis and only authenticated humans carry one, so a room of personas shares `local`; the speaker half is what keeps one agent's turns out of the record another agent's restatement is derived from. The persisted column is a **projection of the key** — attribution is sound only because each record is single-speaker by construction, never model-elected.
+- **Both halves are frozen at open** on the `Interaction` (the `session_id` footing) — being key components, a turn under a different pair opens a different record rather than relabelling this one.
+- **Room-wide closes fan.** A structural close, an end-vote quorum, the RFC 0052 bounded/cost close, and the close-notification turn are *room* events; each closes **every** record open in the scope (`close_scope`), and the close-notification message lands as the final turn of each. Idle remains per-record — a speaker who went quiet idles out on their own timer. Consequence: `agent.interactions.closed` and its per-reason subtotals fire once per **record**, so a room close increments by N.
+- **The DM row above was the precedent**: `scope_for_dm` has always keyed on the sender, so a DM record was per-speaker from the start; the tuple key makes group and thread scopes consistent with it. A single-tenant deployment's senderless scopes collapse to one key per scope — the pre-amendment shape.
+
+The coherence trade is deliberate and stated: a persona's close-derived memory of a group discussion fragments per speaker per tenant (N partial views, not one narrative); room continuity is unaffected because the transcript and RFC 0036 verbatim history are scoped by neither axis.
 
 ### H. Reflection Nudges and Counters
 
@@ -361,7 +374,7 @@ No proto changes. No Go orchestrator changes (interaction lifecycle is agent-loc
 ## Open Questions
 
 1. **Default `idle_timeout_sec` value.** Proposed 600s (10 min). Too short and a slow-reply human gets split across episodes; too long and the agent waits forever to "remember" what just happened. Calibrate against early dogfood usage.
-2. **Group-channel scoping (single rolling interaction vs. per-sender-pair).** §G commits to one rolling interaction per group channel per agent for v0.3.0. The alternative — per-sender-pair sub-interactions — is more accurate but materially harder. Revisit if Phase 3 dogfood produces noisy summaries.
+2. **Group-channel scoping (single rolling interaction vs. per-sender-pair).** §G commits to one rolling interaction per group channel per agent for v0.3.0. The alternative — per-sender-pair sub-interactions — is more accurate but materially harder. Revisit if Phase 3 dogfood produces noisy summaries. **RESOLVED 2026-08-26 by the §G amendment** — the revisit happened on tenancy grounds, not noise: one rolling record per room aggregates every speaker into a close-derived write under one principal (ISSUE-0123) with no speaker attribution (ISSUE-0131). The tracker now keys `(principal, speaker, scope)`; the scope string itself is unchanged.
 3. **Explicit `END_INTERACTION` action.** Should agents be able to deliberately close an interaction (e.g., a planner that says "we've decided X, closing")? Pro: cleaner semantics, agent-driven. Con: adds an action type and a new failure mode (agent forgets to close). Lean toward yes in Phase 2.
 4. **Surfacing `interaction_id` in the agent's context.** Should the agent see "this is interaction X, your fifth turn"? Could enable richer in-prompt reasoning ("we've been at this for a while"). Could also be noise. Default off; revisit after Phase 2.
 5. **Reopen window on race conditions.** §C commits to "do not reopen during `closing`". This is the simpler choice but may produce visible artifacts (a slow human gets split). If artifacts are common in practice, revisit with a bounded reopen window (e.g., reopen if a turn arrives within `closing_grace_sec / 4` of close).

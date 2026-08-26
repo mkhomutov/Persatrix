@@ -93,7 +93,7 @@ class TestTrackerClockSeam:
             sender_id=peer,
         ))
         scope = scope_for_dm(agent.agent_id, peer)
-        interaction = agent._interaction_tracker.get(scope)
+        interaction = agent._interaction_tracker.get(scope, speaker_id=peer)
         assert interaction is not None
         # The turn's timestamp is read from the tracker's clock; pinning
         # this to the FrozenClock value proves the seam is wired.
@@ -126,7 +126,7 @@ class TestTrackerClockSeam:
             sender_id=peer,
         ))
         scope = scope_for_dm(agent.agent_id, peer)
-        interaction = agent._interaction_tracker.get(scope)
+        interaction = agent._interaction_tracker.get(scope, speaker_id=peer)
         assert interaction is not None
         assert interaction.last_turn_at == 1_120.0
 
@@ -162,7 +162,7 @@ class TestCrossScopeIdleFlushViaOnEvent:
             payload={"content": "hello A"},
             sender_id=peer_a,
         ))
-        first_a = agent._interaction_tracker.get(scope_a)
+        first_a = agent._interaction_tracker.get(scope_a, speaker_id=peer_a)
         assert first_a is not None
         first_a_id = first_a.interaction_id
 
@@ -206,12 +206,12 @@ class TestCrossScopeIdleFlushViaOnEvent:
         assert ep["summary"] != SUMMARY_UNAVAILABLE_TEXT
 
         # Scope B opens independently — fresh interaction, one turn.
-        open_b = agent._interaction_tracker.get(scope_b)
+        open_b = agent._interaction_tracker.get(scope_b, speaker_id=peer_b)
         assert open_b is not None
         assert open_b.interaction_id != first_a_id
         assert open_b.turn_count == 1
         # Scope A is not in the tracker any more (closed-and-popped).
-        assert agent._interaction_tracker.get(scope_a) is None
+        assert agent._interaction_tracker.get(scope_a, speaker_id=peer_a) is None
 
 
 # ─── PR-3 review #13: Idle-flush failure logs the failed scope ──
@@ -250,7 +250,7 @@ class TestIdleFlushFailureLogsCorrectScope:
             payload={"content": "hello A"},
             sender_id=peer_a,
         ))
-        a_id = agent._interaction_tracker.get(scope_a).interaction_id
+        a_id = agent._interaction_tracker.get(scope_a, speaker_id=peer_a).interaction_id
 
         # Advance past idle window so the next event triggers the flush.
         clock.advance(_TEST_IDLE_TIMEOUT_SEC + 1.0)
@@ -332,6 +332,6 @@ class TestIdleFlushFailureLogsCorrectScope:
             sender_id=peer_b,
         ))
         # Scope B opened normally despite the flush failure.
-        open_b = agent._interaction_tracker.get(scope_b)
+        open_b = agent._interaction_tracker.get(scope_b, speaker_id=peer_b)
         assert open_b is not None
         assert open_b.turn_count == 1

@@ -236,12 +236,21 @@ async def discharge_end_vote_publish(
                 agent.agent_id, channel_id, pending.scope,
             )
             return
-        open_record = agent._interaction_tracker.get(pending.scope)
-        if (
-            open_record is None
-            or not open_record.is_open
-            or open_record.interaction_id != pending.interaction_id
-        ):
+        # Since the ``(principal, speaker, scope)`` re-key (v0.3.15
+        # residuals PR 3) the scope holds N records; the staleness guard
+        # anchors on the PARKED record — the one the vote's own turn
+        # landed in — found by identity among the scope's open records.
+        open_record = next(
+            (
+                record
+                for record in agent._interaction_tracker.records_for_scope(
+                    pending.scope,
+                )
+                if record.interaction_id == pending.interaction_id
+            ),
+            None,
+        )
+        if open_record is None or not open_record.is_open:
             # The scope moved on between decide and publish (max-turns
             # inline close, idle flush, wire rotation) — that close already
             # told the truth; do not close its successor.
@@ -256,10 +265,18 @@ async def discharge_end_vote_publish(
             # N "ended" local records.  The record stays open, like the
             # wire's, and closes on the eventual rotation or idle gap.
             return
-        closed = agent._interaction_tracker.close(
+        # The vote judged the CONVERSATION complete, and an end-vote
+        # quorum is a room event (ISSUE-0123 part 3) — fan the close
+        # over every ``(principal, speaker)`` record in the scope.  The
+        # voter is excluded from Go's ordinary quorum fan precisely
+        # because this local close already happened, so a record left
+        # open here would never receive the notification-driven close
+        # and would drift to the idle bury.
+        closed_records = agent._interaction_tracker.close_scope(
             pending.scope, reason=REASON_STRUCTURAL,
         )
-        if closed is not None:
+        if closed_records:
             if wire_id:
                 agent._vote_closed_wire_ids[pending.scope] = wire_id
-            await agent._persist_closed_interaction(closed)
+            for closed in closed_records:
+                await agent._persist_closed_interaction(closed)

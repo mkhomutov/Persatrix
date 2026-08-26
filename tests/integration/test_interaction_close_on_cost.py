@@ -265,12 +265,18 @@ async def test_interaction_budget_denial_closes_and_summarises() -> None:
         # summarised episode row carrying the LLM summary.
         await agent.drain_pending_summaries()
         rows = await _episode_rows(agent)
-        assert len(rows) == 1, f"expected one closed episode, got {len(rows)}"
-        summary, closed_at, turn_count, scope = rows[0]
-        assert summary == LLM_SUMMARY_TEXT
-        assert closed_at is not None
-        assert turn_count == 2
-        assert scope == "group:room-7"
+        # v0.3.15 residuals PR 3 (ISSUE-0123/0131): the tracker keys
+        # ``(principal, speaker, scope)``, so the two speakers' turns form
+        # TWO records, and the cost close is a ROOM event that fans over
+        # both — one closed, summarised episode per speaker.
+        assert len(rows) == 2, (
+            f"expected one closed episode per speaker, got {len(rows)}"
+        )
+        for summary, closed_at, turn_count, scope in rows:
+            assert summary == LLM_SUMMARY_TEXT
+            assert closed_at is not None
+            assert turn_count == 1
+            assert scope == "group:room-7"
     finally:
         await agent.close_memory()
         await agen.aclose()
@@ -301,12 +307,15 @@ async def test_per_agent_denial_leaves_interaction_open() -> None:
         # empty-episodes check alone is too weak: an empty table is also
         # consistent with a wrongly-closed interaction whose no-turn /
         # failed persist simply wrote nothing.
-        open_interaction = agent._interaction_tracker.get("group:room-7")
-        assert open_interaction is not None, (
+        open_records = agent._interaction_tracker.records_for_scope(
+            "group:room-7",
+        )
+        # One record per speaker since the v0.3.15 re-key; both stay open.
+        assert len(open_records) == 2, (
             "per-agent denial must not close the interaction"
         )
-        assert open_interaction.is_open
-        assert open_interaction.turn_count == 2
+        assert all(r.is_open for r in open_records)
+        assert [r.turn_count for r in open_records] == [1, 1]
 
         # And no episode row is written (the close path never ran).
         await agent.drain_pending_summaries()

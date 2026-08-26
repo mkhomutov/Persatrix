@@ -47,6 +47,7 @@ from ..session_id import current_session_id
 from .close_path import close_replayed_scopes, persist_closed_interaction
 from .finalize_close import drain_pending_summary_tasks
 from .interaction_boundary import is_session_end_event, stale_close_reason
+from .turn_payload import build_turn_payload
 from .vote_close import PendingVoteClose, park_end_vote_close
 
 logger = logging.getLogger(__name__)
@@ -206,29 +207,35 @@ class _EpisodeRoutingMixin:
             # ``payload=None`` per PR-215 review (Should-Fix #4): the
             # open/close pair runs in one call, so the summariser never
             # reads a single-turn payload — the dict was dead bytes.
-            self._interaction_tracker.add_turn(
+            # ISSUE-0131: the sender is the speaker half of the tracker
+            # key (``None`` → the no-speaker key for tick / senderless
+            # events); the principal half resolves ambient in the tracker.
+            single_turn = self._interaction_tracker.add_turn(
                 scope, payload=None,
                 session_id=self._active_write_session_id,
+                speaker_id=event.sender_id,
             )
             # Distinct local name from the ``for closed in idle_check()``
             # loop above so mypy sees a single binding type for each name.
-            structural_close = self._interaction_tracker.close(
-                scope, reason=REASON_STRUCTURAL,
+            # ``close_record`` (not the keyed ``close``) so the open and
+            # close halves address ONE object — re-deriving the key here
+            # could diverge from the one ``add_turn`` resolved.
+            structural_close = self._interaction_tracker.close_record(
+                single_turn, reason=REASON_STRUCTURAL,
             )
             if structural_close is None:
                 # PR 6 review #7: replace the prior ``... or interaction``
                 # fallback that silently masked an invariant violation.
-                # ``add_turn`` just opened ``scope`` under the agent's
-                # ``asyncio.Lock``, so ``close`` MUST return that interaction.
-                # A future contract change (e.g. ``close`` returning ``None``
-                # for already-closed scopes) would have produced NULL
+                # ``add_turn`` just opened this record under the agent's
+                # ``asyncio.Lock``, so ``close_record`` MUST return it.
+                # A future contract change would have produced NULL
                 # interaction columns under the old fallback; raise instead so
                 # the regression surfaces.  Explicit guard, not ``assert``
                 # (stripped under ``python -O``, PR 6 review #21 precedent).
                 raise RuntimeError(
-                    f"InteractionTracker.close({scope!r}) returned None "
-                    "for an interaction that was just opened in the same "
-                    "call — tracker invariant violated.",
+                    f"InteractionTracker.close_record({scope!r}) returned "
+                    "None for an interaction that was just opened in the "
+                    "same call — tracker invariant violated.",
                 )
             await self._episodic_memory.store_episode(
                 # Carry the close trigger in the context blob so the read
@@ -336,31 +343,11 @@ class _EpisodeRoutingMixin:
                 summary=summary, context=ctx,
                 session_id=self._active_write_session_id)
             return
-        # ISSUE-0054 — RFC 0026's facts extractor needs the real message
-        # body: the combined summarise + extract LLM call at interaction
-        # close extracts zero facts when fed only the deterministic action
-        # envelope.  The body rides the in-memory turn under ``text`` and is
-        # stripped before persistence by ``_persist_closed_interaction`` so
-        # ``context_json`` stays body-free per RFC 0020 §D.
-        # PR-3 review #18: ``ctx`` above is annotated ``dict[str, Any]``;
-        # match it here so a future caller stashing a nested ``Any``
-        # value does not need a cast at this site.
-        payload: dict[str, Any] = {
-            "summary": summary,
-            "event_type": event.event_type.value,
-            "sender": event.sender_id,
-            "channel_id": event.channel_id,
-            "timestamp": event.timestamp,
-            # RFC 0020 PR 4: stash sender's participant_type so the
-            # close-path ``record_interaction`` can carry the correct
-            # ``other_participant_type`` (defaults "agent" downstream).
-            "participant_type": event.metadata.get(
-                "sender_participant_type", "agent",
-            ),
-        }
-        message_text = (event.payload or {}).get("content")
-        if isinstance(message_text, str) and message_text.strip():
-            payload["text"] = message_text
+        # The turn payload construction lives in :mod:`.turn_payload`
+        # (v0.3.15 residuals PR 3) — shared with the close-notification
+        # room fan, which must land the closing message on every open
+        # record, not just the sender's.
+        payload = build_turn_payload(event, summary)
         # RFC 0030 interaction-id producer: the channel conversation's
         # wire id rotating means the previous conversation ended (vote
         # quorum or idle) — close the stale local interaction so the new
@@ -379,11 +366,17 @@ class _EpisodeRoutingMixin:
         # ISSUE-0130: the predicate also owns the catch-up boundary — a LIVE
         # turn landing on a replay-opened scope splits there, or the live
         # conversation would inherit the replayed span's no-derivation flag.
-        stale_reason = stale_close_reason(
-            self._interaction_tracker.get(scope), event, wire_id=wire_id,
-        )
-        if stale_reason is not None:
-            split = self._interaction_tracker.close(scope, reason=stale_reason)
+        # ISSUE-0123 part 3: both boundaries are ROOM events and a re-keyed
+        # room holds N records, so the check FANS — evaluated per record
+        # because the inputs are per record (wire id, predecessor, replay
+        # flag), closing every stale record, not just the current sender's.
+        for record in self._interaction_tracker.records_for_scope(scope):
+            stale_reason = stale_close_reason(record, event, wire_id=wire_id)
+            if stale_reason is None:
+                continue
+            split = self._interaction_tracker.close_record(
+                record, reason=stale_reason,
+            )
             if split is not None:
                 await self._persist_closed_interaction(split)
         interaction = self._interaction_tracker.add_turn(
@@ -398,6 +391,10 @@ class _EpisodeRoutingMixin:
             # ISSUE-0130: frozen-at-open like the pair above; the close path
             # skips derivation for a replayed span (no principal to attribute).
             replayed=event.metadata.get("replay_mode") is True,
+            # ISSUE-0131: the speaker half of the key — the turn lands in
+            # ITS sender's record; the principal half resolves ambient
+            # (the ``on_event`` request scope) inside the tracker.
+            speaker_id=event.sender_id,
         )
         # Stamp the wire id the interaction was opened under (first turn
         # that carries one wins) plus its known predecessor — the
@@ -418,10 +415,13 @@ class _EpisodeRoutingMixin:
             await self._persist_closed_interaction(interaction)
             return
         if is_session_end_event(event):
-            closed = self._interaction_tracker.close(
+            # A session end is a ROOM event (ISSUE-0123 part 3): fan the
+            # structural close over every ``(principal, speaker)`` record
+            # open in the scope, not just this sender's, or the siblings
+            # leak open until idle relabels the ended conversation.
+            for closed in self._interaction_tracker.close_scope(
                 scope, reason=REASON_STRUCTURAL,
-            )
-            if closed is not None:
+            ):
                 await self._persist_closed_interaction(closed)
         else:
             # PR 607 finding 5: a vote close is PARKED for the executor's

@@ -178,8 +178,14 @@ class TestRedeliverySkipsTheIngest:
 
         await close_interaction_on_notification(agent, _notification_event())
 
-        assert len(agent.ingested) == 1
-        assert agent.persisted[0].turn_count == 2
+        assert agent.persisted[0].turn_count == 2, (
+            "the closing message landed as the record's final turn (the "
+            "v0.3.15 room fan ingests via a direct per-record append, so "
+            "the turn itself — not a ``_store_event_episode`` call — is "
+            "the ingest evidence)"
+        )
+        assert agent.persisted[0].turns[-1].payload["sender"] == "iron-fox"
+
 
     async def test_redelivery_without_bounded_trigger_still_ingests(self):
         """PR #718 review — the redelivery ingest-skip is co-gated on
@@ -204,11 +210,11 @@ class TestRedeliverySkipsTheIngest:
         )
 
         assert tracker.get("group:planning") is None, "the close still fires"
-        assert len(agent.ingested) == 1, (
+        assert agent.persisted[0].turn_count == 2, (
             "redelivery without a bounded trigger is a sole delivery — the "
             "closing turn must still be ingested, not silently dropped"
         )
-        assert agent.persisted[0].turn_count == 2
+        assert agent.persisted[0].turns[-1].payload["sender"] == "iron-fox"
 
     async def test_redelivery_marker_is_strictly_boolean(self):
         """A truthy non-bool on the cleartext port must not suppress the
@@ -226,8 +232,10 @@ class TestRedeliverySkipsTheIngest:
             agent, _notification_event(redelivery="true"),
         )
 
-        assert len(agent.ingested) == 1, "impostor marker: ingest stands"
-        assert agent.persisted[0].turn_count == 2
+        assert agent.persisted[0].turn_count == 2, (
+            "impostor marker: ingest stands"
+        )
+        assert agent.persisted[0].turns[-1].payload["sender"] == "iron-fox"
 
 
 class TestTruthfulCloseCause:
@@ -404,48 +412,42 @@ class TestBoundedCloseMetersTheSummary:
         assert [i.close_reason for i in agent.persisted] == [REASON_COST]
         assert agent.persisted[0].meter_close_summary is True
 
-    async def test_ingest_max_turns_inline_close_is_still_metered(self):
-        """PR #718 review, the identity-guard metering gap: when the
-        notification's own ingest is the max-turns cap-crossing turn,
-        ``_store_event_episode`` inline-closes AND persists the
-        interaction, and the function returns at the identity guard —
-        BEFORE the post-close mark. The summary of that persisted record
-        must still be metered (the bounded close is autonomous; its
-        summary is one of the ``1 + N`` reserve calls), so the metering
-        mark has to ride the record from before the ingest, not only
-        after ``close()``. Without the fix the flag stayed False and the
-        summary drew no lease — a silent per-persona cap evasion."""
-        from agents.memory.boundary_detectors import REASON_MAX_TURNS
+    async def test_cap_crossing_final_turn_is_still_metered(self):
+        """PR #718 review's metering concern, restated for the v0.3.15
+        room fan: the metering mark must ride the record whichever way
+        the close falls. The old shape — the ingest inline-closing at
+        the max-turns cap past the post-close mark — retired with the
+        ``_store_event_episode`` ingest path (the direct per-record
+        append deliberately does not enforce the cap; the record closes
+        in the same step with the truthful trigger). What must survive:
+        a cap-crossing final turn yields exactly ONE persisted record,
+        with the truthful cost cause, and it IS marked for the metered
+        summary — the mark is set on the live record before the append,
+        so no path can persist an unmetered bounded close."""
+        from agents.memory.boundary_detectors import (
+            MaxTurnsDetector,
+            default_detectors,
+        )
         from agents.persona_runtime.close_notification import (
             close_interaction_on_notification,
         )
-        from agents.persona_types import AgentAction
 
-        class _CappingIngestAgent(_CloseNotificationAgent):
-            async def _store_event_episode(
-                self, event: AgentEvent, actions: list[AgentAction],
-            ) -> None:
-                self.ingested.append(event)
-                self._interaction_tracker.add_turn("group:planning")
-                capped = self._interaction_tracker.close(
-                    "group:planning", reason=REASON_MAX_TURNS,
-                )
-                assert capped is not None
-                await self._persist_closed_interaction(capped)
-
-        tracker = InteractionTracker()
+        tracker = InteractionTracker(
+            detectors=(
+                *default_detectors(),
+                MaxTurnsDetector(max_turns=2),
+            ),
+        )
         tracker.add_turn("group:planning", now=time.time())
-        agent = _CappingIngestAgent(tracker)  # non-sender recipient
+        agent = _CloseNotificationAgent(tracker)  # non-sender recipient
 
         await close_interaction_on_notification(
             agent, _notification_event(close_trigger="cost"),
         )
 
-        # The cap's own close still stands (reason unchanged — the finding
-        # is metering-only), exactly one persisted record, but it IS
-        # marked for the metered summary.
-        assert [i.close_reason for i in agent.persisted] == [REASON_MAX_TURNS]
+        assert [i.close_reason for i in agent.persisted] == [REASON_COST]
+        assert agent.persisted[0].turn_count == 2
         assert agent.persisted[0].meter_close_summary is True, (
             "the bounded-close summary must draw a lease even when the "
-            "ingest inline-closes the record past the post-close mark"
+            "closing turn is the cap-crossing turn"
         )

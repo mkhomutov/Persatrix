@@ -16,49 +16,49 @@ converged discussion as "went idle" an idle window later.
 
 This dispatch owns the WHOLE receiver arc — including the final-turn
 ingest (PR #614 review finding 3). The ingest must come after the
-open-scope check, not before it in the caller: ``_store_event_episode``
-opens a fresh interaction when none is open, so an unconditional
+open-records check, not before it in the caller: an unconditional
 ingest-then-close would fabricate a 1-turn "ended" record (plus a
 summariser LLM call) for a scope that already closed — exactly the
 record the no-open-interaction no-op contract promises never to
-invent. Sequence:
+invent. Since the v0.3.15 ``(principal, speaker, scope)`` re-key
+(ISSUE-0123 part 3) the notified scope holds one record per speaker
+per tenant, and the notification is a ROOM event, so the arc FANS:
+the closing message lands as the final turn of EVERY record it may
+close, and every one of them closes with the truthful cause. Sequence:
 
 1. strict marker / event-type / scope checks — an impostor or
    unroutable event touches nothing, not even the staleness pass;
 2. the same idle flush every ingest runs (the agent's own boundary
    rules outrank the late signal — see the conservative-choice note
    below);
-3. no interaction left open → done: the close stands recorded
+3. no records left open → done: the close stands recorded
    orchestrator-side; nothing here invents a record to mirror it. The
    notification is deliberately NOT ingested in this case — there is
    no open window to land the final turn in, and ingesting would
    either fabricate the record above or leave a 1-turn successor
    dangling toward its own "went idle" burial;
-4. otherwise ingest (the closing message lands as the record's final
-   turn) and close — with :data:`REASON_STRUCTURAL`, or the truthful
+4. otherwise ingest (the closing message lands as the final turn of
+   each record the wire-id conjunct admits — a direct per-record
+   append through the shared :mod:`.turn_payload` builder, never the
+   per-event path, which would route the turn to the closing sender's
+   key alone or fabricate a record where the sender has none) and
+   close each — with :data:`REASON_STRUCTURAL`, or the truthful
    :data:`REASON_COST` when the notification carries the RFC 0052
    bounded close's ``cost`` trigger (PR 4b-ii; the same typed field's
-   presence marks the record for the OQ #6 metered summary). SKIP the
-   ingest for a marked RE-delivery (PR 4b-ii — the floor-path bounded
-   close's closing message already reached every member live inside its
-   round; re-ingesting it duplicated the final turn) and for
+   presence marks each closed record for the OQ #6 metered summary).
+   SKIP the ingest for a marked RE-delivery (PR 4b-ii — the floor-path
+   bounded close's closing message already reached every member live
+   inside its round; re-ingesting it duplicated the final turn) and for
    a self-echo (the RFC 0052 bounded close fans to the round-
    triggering sender, so the convener/chair receives its own message;
    ingesting it would write a ``sender == agent_id`` turn and inflate
    ``turn_count``, the self-echo the gate keeps out of memory), closing
-   the scope without it so the sender still authors its summary. The
-   ingest is guarded by identity: if the ingest itself closed or rotated
-   the interaction (max-turns cap, wire-id rotation), that close's own
-   cause stands
-   and no second close is layered on a different interaction than the
-   one the notification found open. A rotation's fresh successor —
-   opened by the ingest, holding only the notification — is
-   deliberately left open for its own boundaries (idle, the next
-   rotation): closing it structurally would mint exactly the 1-turn
-   "ended" record step 3 refuses to invent. By CP2 construction the
-   notification carries the retired record's own wire id, so the
-   rotation corner should not fire in practice; the guard pins the
-   contract against a producer change.
+   the records without it so the sender still authors its summaries.
+   The direct append cannot close, rotate, or replace a record, so the
+   old post-ingest identity re-check retired with the per-event ingest
+   path that needed it; the wire-id conjunct (step 4's admission rule)
+   is what keeps a pre-rotation straggler from closing a successor
+   record.
 
 Conservative choice, deliberately: an interaction whose idle window
 expired BEFORE the notification landed closes by the idle rule (step
@@ -85,10 +85,11 @@ from ..channel_wire_metadata import (
     wire_interaction_id,
 )
 from ..memory.boundary_detectors import REASON_COST, REASON_STRUCTURAL
+from .turn_payload import build_turn_payload
 
 if TYPE_CHECKING:
     from ..memory.interactions import Interaction, InteractionTracker
-    from ..persona_types import AgentAction, AgentEvent, EventType
+    from ..persona_types import AgentEvent, EventType
 
     class _CloseNotificationAgent(Protocol):
         """The composed-agent surface
@@ -101,9 +102,6 @@ if TYPE_CHECKING:
         def _scope_for_multi_turn_event(self, event: AgentEvent) -> str | None: ...
         async def _persist_closed_interaction(
             self, interaction: Interaction,
-        ) -> None: ...
-        async def _store_event_episode(
-            self, event: AgentEvent, actions: list[AgentAction],
         ) -> None: ...
 
 
@@ -157,43 +155,64 @@ async def close_interaction_on_notification(
                 expired.scope, expired.interaction_id,
                 exc_info=True,
             )
-    open_interaction = agent._interaction_tracker.get(scope)
-    if open_interaction is None:
+    records = agent._interaction_tracker.records_for_scope(scope)
+    if not records:
         # Already idled out (or never tracked): the close stands
         # recorded orchestrator-side; invent nothing locally.
         return
-    # Wire-id conjunct (PR #718 review): the notification's metadata bag is
-    # cloned verbatim off the closing message, so it carries the CLOSED
-    # interaction's id; this handler is otherwise scope-keyed and would apply
-    # the close — and, below, the OQ #6 metering mark — to WHATEVER record is
-    # open in the scope. The identity guard inside the ingest branch only
-    # catches rotations the ingest itself causes; a rotation that landed
-    # BEFORE this notification (Go's fan is fire-and-forget with no
-    # cross-publish per-recipient ordering, so a successor interaction's
-    # first publish can overtake it) leaves a successor record here under a
-    # DIFFERENT wire id — closing it would mislabel a live discussion's
-    # record, and the metered summary would bill the successor's id against
-    # a reserve carved for the predecessor. When both ids are known and
-    # disagree, this is the no-open case one reorder later: the notified
-    # close stands recorded orchestrator-side; invent nothing locally. A
-    # blank on either side (an unstamped fresh record, an old producer)
-    # keeps the scope-keyed behaviour — the tolerant-wire-reader posture.
+    # Wire-id conjunct (PR #718 review) — per RECORD since the
+    # ``(principal, speaker, scope)`` re-key (v0.3.15 residuals PR 3):
+    # the notification's metadata bag is cloned verbatim off the closing
+    # message, so it carries the CLOSED interaction's id; this handler is
+    # otherwise scope-keyed and would apply the close — and, below, the
+    # OQ #6 metering mark — to WHATEVER records are open in the scope. A
+    # rotation that landed BEFORE this notification (Go's fan is
+    # fire-and-forget with no cross-publish per-recipient ordering, so a
+    # successor interaction's first publish can overtake it) leaves
+    # successor records here under a DIFFERENT wire id — closing one
+    # would mislabel a live discussion's record, and the metered summary
+    # would bill the successor's id against a reserve carved for the
+    # predecessor. A record whose known id disagrees is the no-open case
+    # one reorder later and is skipped; a blank on either side (an
+    # unstamped fresh record, an old producer) keeps the scope-keyed
+    # behaviour — the tolerant-wire-reader posture. Mixed scopes close
+    # the matching records and leave the successors to their own
+    # boundaries.
     notified_wire_id = wire_interaction_id(event)
-    if (
-        notified_wire_id
-        and open_interaction.wire_interaction_id
-        and notified_wire_id != open_interaction.wire_interaction_id
-    ):
-        logger.info(
-            "Agent %s: close notification for interaction %s found %s open "
-            "on scope %s; stale straggler, closing nothing",
-            agent.agent_id, notified_wire_id,
-            open_interaction.wire_interaction_id, scope,
-        )
+    to_close: list[Interaction] = []
+    for record in records:
+        if (
+            notified_wire_id
+            and record.wire_interaction_id
+            and notified_wire_id != record.wire_interaction_id
+        ):
+            logger.info(
+                "Agent %s: close notification for interaction %s found %s "
+                "open on scope %s; stale straggler, leaving that record",
+                agent.agent_id, notified_wire_id,
+                record.wire_interaction_id, scope,
+            )
+            continue
+        to_close.append(record)
+    if not to_close:
         return
-    # The closing message lands as the closed record's final turn — ingest
-    # BEFORE close (closing first would strand the message in a successor
-    # interaction).
+    # The closing message lands as the FINAL TURN OF EACH record to
+    # close, then every one of them closes with the truthful cause —
+    # the room fan (ISSUE-0123 part 3): since the ``(principal,
+    # speaker, scope)`` re-key a room holds N records, and a close
+    # notification is a room event.  The ingest is a DIRECT per-record
+    # append (``append_turn`` + the shared :func:`build_turn_payload`),
+    # not a ``_store_event_episode`` pass: the per-event path would
+    # deliver the turn to the closing sender's key alone — or fabricate
+    # a fresh record where the sender has none, exactly the record the
+    # no-open contract above refuses to invent.  Ingest before close,
+    # as ever (closing first would strand the message in a successor
+    # interaction); the direct append cannot rotate or replace a
+    # record, so the old post-ingest identity re-check is gone with the
+    # path that needed it.  The max-turns cap is deliberately not
+    # enforced on this one append — the record closes in the same step,
+    # and the notification's truthful trigger outranks the cap label
+    # (``append_turn``'s contract).
     #
     # EXCEPT a SELF-echo (RFC 0052 bounded-close fix): the bounded close fans
     # the notification to the round-triggering sender too
@@ -242,17 +261,16 @@ async def close_interaction_on_notification(
         # OQ #6 (PR 4b-ii; PR #718 review): a bounded close is autonomous by
         # construction (the trigger field is stamped by nothing else), so its
         # per-persona RFC 0020 summary must draw a lease against the mandatory
-        # cap the PR 4a ``1 + N`` reserve was carved from — ``summarize_close.py``
-        # threads that lease off ``meter_close_summary``. Mark the record HERE,
-        # on the still-open interaction the notification found, BEFORE the
-        # ingest: when the ingest's own final turn is the max-turns cap-crossing
-        # turn (or a wire-id rotation), ``_store_event_episode`` inline-closes
-        # AND persists THIS interaction and the identity guard below returns
-        # past the post-close mark — so a mark set only after ``close()`` would
-        # miss it and the summary would run UNLEASED, silently evading the cap.
-        # Setting it on the live record covers both paths; the post-close mark
-        # below is then idempotent on the ordinary path (same object).
-        open_interaction.meter_close_summary = True
+        # cap the PR 4a reserve was carved from — ``summarize_close.py``
+        # threads that lease off ``meter_close_summary``.  Marked on every
+        # record the fan will close: each ``(principal, speaker)`` record
+        # authors its own summary, and each of those draws its own lease
+        # (the reserve multiplier residuals PR 4 re-sizes).  The
+        # pre-ingest/post-close double-mark the per-event ingest needed is
+        # gone with it — the direct append below cannot close a record, so
+        # one mark on the live records covers the only path left.
+        for record in to_close:
+            record.meter_close_summary = True
     redelivery = payload.get("close_notification_redelivery") is True
     # Co-gate the redelivery ingest-skip on ``bounded`` (PR #718 review): the
     # skip is safe ONLY for a recognized bounded close, whose closing message
@@ -265,23 +283,16 @@ async def close_interaction_on_notification(
     # in the same tolerant-wire-reader posture as the trigger allowlist above,
     # never a change to the live path.
     if event.sender_id != agent.agent_id and not (redelivery and bounded):
-        await agent._store_event_episode(event, [])
-        if agent._interaction_tracker.get(scope) is not open_interaction:
-            # The ingest itself closed or replaced the interaction (the
-            # max-turns inline close, a wire-id rotation): that close's own
-            # cause stands; never layer a structural close on a different
-            # interaction than the one the notification found open. A
-            # rotation's 1-turn successor stays open for its own boundaries
-            # — closing it here would be the fabrication the no-open branch
-            # above refuses (module docstring, step 4). The metered-summary
-            # mark already rode the closed record (set above), so its summary
-            # still draws its lease.
-            return
-    closed = agent._interaction_tracker.close(scope, reason=reason)
-    if closed is not None:
-        # The ordinary path: the notification's ingest did not close the
-        # interaction, so close it now with the truthful cause. The metering
-        # mark is idempotent with the pre-ingest set above (same record).
-        if bounded:
-            closed.meter_close_summary = True
-        await agent._persist_closed_interaction(closed)
+        # The same envelope shape the per-event path builds — one
+        # builder, two consumers (:mod:`.turn_payload`).  ``[]`` actions:
+        # the notification is control, never stimulus, so no action loop
+        # ran for it.
+        turn = build_turn_payload(
+            event, f"Event: {event.event_type.value} → Actions: []",
+        )
+        for record in to_close:
+            agent._interaction_tracker.append_turn(record, turn)
+    for record in to_close:
+        closed = agent._interaction_tracker.close_record(record, reason=reason)
+        if closed is not None:
+            await agent._persist_closed_interaction(closed)

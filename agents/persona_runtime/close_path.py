@@ -186,7 +186,9 @@ async def close_replayed_scopes(
 
     Called at the end of the catch-up pass
     (:func:`agents.channel_catchup.replay_for_persona_agents`).  Returns
-    the number of scopes closed.  Best-effort by contract — it runs on the
+    the number of records closed (since the v0.3.15 ``(principal,
+    speaker, scope)`` re-key one scope may hold several replay-opened
+    records — one per replayed sender).  Best-effort by contract — it runs on the
     boot path, so a per-scope failure is logged and the sweep continues
     rather than propagating; the caller may treat it as non-raising.  Note
     the scope is popped before the persist call, so even a failing persist
@@ -200,12 +202,17 @@ async def close_replayed_scopes(
     never be inside a flagged span — the split guarantees it opens its own.
     """
     closed = 0
-    for scope in list(tracker.open_scopes()):
-        interaction = tracker.get(scope)
-        if interaction is None or not interaction.replayed:
+    # Per RECORD since the ``(principal, speaker, scope)`` re-key
+    # (v0.3.15 residuals PR 3): replay can open several records in one
+    # scope — one per replayed sender — and every one of them carries
+    # the ``replayed`` flag, so the sweep walks records, not scopes.
+    for interaction in list(tracker.open_records()):
+        if not interaction.replayed:
             continue
         try:
-            popped = tracker.close(scope, reason=REASON_CATCHUP_COMPLETE)
+            popped = tracker.close_record(
+                interaction, reason=REASON_CATCHUP_COMPLETE,
+            )
             if popped is None:
                 continue
             closed += 1
@@ -217,6 +224,6 @@ async def close_replayed_scopes(
         except Exception:
             logger.warning(
                 "Catch-up close failed for replayed scope %s",
-                scope, exc_info=True,
+                interaction.scope, exc_info=True,
             )
     return closed

@@ -74,8 +74,14 @@ async def close_interaction_on_cost(
     scope = _scope_for_cost_close(agent, event)
     if scope is None:
         return
-    closed = agent._interaction_tracker.close(scope, reason=REASON_COST)
-    if closed is not None:
+    # ISSUE-0123 part 3: the interaction budget is the shared
+    # conversation's, so its exhaustion is a ROOM event — fan the close
+    # over every ``(principal, speaker)`` record open in the scope, or
+    # the siblings leak open until idle buries the terminated
+    # conversation without a summary trigger of their own.
+    for closed in agent._interaction_tracker.close_scope(
+        scope, reason=REASON_COST,
+    ):
         # OQ #6 metering interaction (deep-review follow-up): this LOCAL Layer-1
         # cost close does NOT set ``meter_close_summary``, so the summary it
         # triggers runs UNLEASED — unlike the orchestrator's bounded cost close,

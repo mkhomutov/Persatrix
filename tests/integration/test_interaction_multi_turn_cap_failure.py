@@ -117,7 +117,7 @@ class TestMaxTurnsCapMultiTurnPath:
         assert episodes[0]["turn_count"] == 3
         # Scope popped — a subsequent event would open a fresh
         # interaction (RFC 0020 §C "do not reopen").
-        assert agent._interaction_tracker.get(scope) is None
+        assert agent._interaction_tracker.get(scope, speaker_id=peer) is None
 
 
 # ─── Repeated cap cycles across a long conversation ─────────────
@@ -184,7 +184,7 @@ class TestMaxTurnsCapFiresRepeatedly:
         assert len(set(ids)) == cycles, f"interaction_ids not distinct: {ids}"
         # The ninth event's add_turn fired the third cap and popped the
         # scope — a tenth event would open cycle four.
-        assert agent._interaction_tracker.get(scope) is None
+        assert agent._interaction_tracker.get(scope, speaker_id=peer) is None
 
 
 # ─── PR-3 review #15: multi-turn close-path failure swallow ─────
@@ -269,6 +269,6 @@ class TestMultiTurnCloseFailureIsSwallowedAndLogged:
             payload={"content": "again"},
             sender_id=peer,
         ))
-        next_open = agent._interaction_tracker.get(scope)
+        next_open = agent._interaction_tracker.get(scope, speaker_id=peer)
         assert next_open is not None
         assert next_open.turn_count == 1

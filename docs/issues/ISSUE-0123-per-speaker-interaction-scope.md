@@ -235,3 +235,28 @@ the correct shape.
 > is now `(principal, speaker, scope)`; see the
 > [Phase 0 gate record](ISSUE-0082-residuals-phase0-gate.md). The proposal in
 > this issue was right in direction and one dimension short.
+
+> 2026-08-26 — **the key landed** (v0.3.15 residuals **PR 3**, this PR). Parts 1
+> and 3 of the proposed fix ship here; part 2 (binding the record's own frozen
+> principal around the close pipeline) and part 4 (the reserve re-size) are
+> PR 4's, as planned. What landed: `Interaction.principal_id` /
+> `Interaction.speaker_id` frozen at open on the `session_id` footing, the
+> tracker keyed by the tuple `(principal, speaker, scope)` — one dimension more
+> than this issue proposed, per Phase 0b — and the room-wide close fan over
+> every `(principal, speaker)` record for the four room events (structural /
+> session-end, end-vote quorum, the RFC 0052 bounded and cost closes, and the
+> close-notification turn, which now lands as the final turn of **each**
+> record). Idle deliberately stays per record: it is a property of a record's
+> own last turn, so a speaker who goes quiet idles out while the room talks on.
+> The [RFC 0020 §G](../rfcs/0020-interaction-lifecycle.md#g-per-channel-scoping)
+> amendment lands in the same PR and closes that RFC's Open Question 2.
+>
+> The part-3 audit this issue asked for ran: `open_scopes()` is now a
+> deduplicated PROJECTION (one entry per scope however many records it holds)
+> and every "one scope, one record" caller was rewritten — the vote-close
+> discharge anchors its staleness guard on the PARKED record by identity rather
+> than by scope lookup, the catch-up sweep walks records (replay can open one
+> per replayed sender), and the close-notification wire-id conjunct is now
+> evaluated per record so a pre-rotation straggler skips the successors instead
+> of closing one. The metric-shape change part 3 predicted is real and is in the
+> changelog: `agent.interactions.closed[.by_<reason>]` fires once per record.

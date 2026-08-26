@@ -92,7 +92,7 @@ class TestVoteParkIdentity:
         await agent.resolve_end_vote_publish(
             CHANNEL, published=True, token=token,
         )
-        assert agent._interaction_tracker.get(SCOPE) is None
+        assert agent._interaction_tracker.get(SCOPE, speaker_id="alex") is None
         episodes = await all_episodes(agent)
         assert _close_reasons(episodes) == [REASON_STRUCTURAL]
 
@@ -114,7 +114,7 @@ class TestVoteParkIdentity:
         await agent.resolve_end_vote_publish(
             CHANNEL, published=True, token=token,
         )
-        open_interaction = agent._interaction_tracker.get(SCOPE)
+        open_interaction = agent._interaction_tracker.get(SCOPE, speaker_id="alex")
         assert open_interaction is not None
         assert open_interaction.is_open
         assert await all_episodes(agent) == []
@@ -139,7 +139,7 @@ class TestVoteParkIdentity:
         )
         assert VOTE_CLOSE_TOKEN_KEY not in thread_vote.payload
         await agent.resolve_end_vote_publish(CHANNEL, published=True, token="")
-        floor = agent._interaction_tracker.get(SCOPE)
+        floor = agent._interaction_tracker.get(SCOPE, speaker_id="alex")
         assert floor is not None
         assert floor.is_open
         assert await all_episodes(agent) == []
@@ -163,7 +163,7 @@ class TestVoteParkIdentity:
         await agent._store_event_episode(
             channel_event("still going", wire_id="wire-A"), [],
         )
-        reopened = agent._interaction_tracker.get(SCOPE)
+        reopened = agent._interaction_tracker.get(SCOPE, speaker_id="alex")
         assert reopened is not None
         assert reopened.wire_interaction_id == "wire-A"
         second = vote()
@@ -176,7 +176,7 @@ class TestVoteParkIdentity:
         # Still exactly one "ended" record; the reopened scope stays
         # open, mirroring Go (interaction A never closed).
         assert len(await all_episodes(agent)) == 1
-        still_open = agent._interaction_tracker.get(SCOPE)
+        still_open = agent._interaction_tracker.get(SCOPE, speaker_id="alex")
         assert still_open is not None
         assert still_open.is_open
 
@@ -233,7 +233,7 @@ class TestLateDeliveryDefence:
         await agent._store_event_episode(
             channel_event("late straggler from A", wire_id="wire-A"), [],
         )
-        open_interaction = agent._interaction_tracker.get(SCOPE)
+        open_interaction = agent._interaction_tracker.get(SCOPE, speaker_id="alex")
         assert open_interaction is not None
         assert open_interaction.is_open
         assert open_interaction.wire_interaction_id == "wire-B"
@@ -244,7 +244,7 @@ class TestLateDeliveryDefence:
             channel_event("more new topic", wire_id="wire-B"), [],
         )
         assert len(await all_episodes(agent)) == 1
-        survivor = agent._interaction_tracker.get(SCOPE)
+        survivor = agent._interaction_tracker.get(SCOPE, speaker_id="alex")
         assert survivor is not None
         assert survivor.turn_count == 3
 
@@ -269,6 +269,6 @@ class TestLateDeliveryDefence:
             [],
         )
         assert len(await all_episodes(agent)) == 1
-        fresh = agent._interaction_tracker.get(SCOPE)
+        fresh = agent._interaction_tracker.get(SCOPE, speaker_id="alex")
         assert fresh is not None
         assert fresh.wire_interaction_id == "wire-C"

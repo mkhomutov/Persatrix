@@ -325,4 +325,22 @@ MIGRATIONS: list[tuple[int, str, str]] = [
         "the user-typed row",
         "",  # handled by _apply_migration_17()
     ),
+    # Migration 18 (ISSUE-0131, v0.3.15 residuals PR 3) adds a nullable
+    # ``speaker_id`` column to the two close-derived tiers —
+    # ``episodes`` and ``facts`` — the projection surface for the
+    # speaker half of the ``(principal, speaker, scope)`` tracker key.
+    # Lands DORMANT (residuals PR 4 is the writer), NULL for every
+    # pre-v18 row: a pre-split aggregate's speaker is unknowable without
+    # the model-elected attribution the Phase 0b scope lock forbids, so
+    # unlike v11's ``DEFAULT 'local'`` there is no correct backfill.
+    # Same callable-handler rationale as v7/v13 — ``ALTER TABLE ... ADD
+    # COLUMN`` is not idempotent before SQLite 3.35.  Lives in
+    # :mod:`agents.memory._migration_speaker`.  See
+    # docs/issues/ISSUE-0131-derived-memory-has-no-speaker-attribution.md.
+    (
+        18,
+        "ISSUE-0131: speaker_id on episodes + facts (dormant until the "
+        "close-path binding writes it)",
+        "",  # handled by _apply_migration_18()
+    ),
 ]

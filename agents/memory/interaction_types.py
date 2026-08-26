@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from ..principal_id import DEFAULT_PRINCIPAL_ID
 from ..session_id import LEGACY_SESSION_ID
 
 
@@ -89,6 +90,26 @@ class Interaction:
     # at flush time.  Defaults to the ``legacy`` carve-out so a pre-PR-2
     # construction site (or a turn opened with no scope) stays visible.
     session_id: str = LEGACY_SESSION_ID
+    # ISSUE-0123 (R-1) / ISSUE-0131 — the two halves of the tracker key
+    # beside ``scope`` (v0.3.15 residuals PR 3).  Both sit on the
+    # ``session_id`` footing above: resolved when the interaction OPENS,
+    # frozen for its lifetime, and — being key components — never
+    # re-read from a later turn.  ``principal_id`` is the tenant the
+    # opening turn ran under (the ambient ``principal_scope``, else the
+    # single-tenant default); the close path (residuals PR 4) binds THIS
+    # value around the derivation pipeline so an idle flush or a
+    # close-notification turn cannot write the record under whichever
+    # principal happened to trigger the close.  ``speaker_id`` is the
+    # opening event's ``sender_id`` (``""`` = no speaker: tick /
+    # single-turn scopes whose event carries none) — the ISSUE-0131 axis
+    # that keeps a room of personas, who all share the ``local``
+    # principal, from collapsing into one record.  The persisted
+    # ``episodes.speaker_id`` / ``facts.speaker_id`` columns (migration
+    # 17 → 18) are a PROJECTION of this key half — attribution is sound
+    # only because the record is single-speaker by construction, never
+    # model-elected (Phase 0b scope lock).
+    principal_id: str = DEFAULT_PRINCIPAL_ID
+    speaker_id: str = ""
     # ISSUE-0130: True when this interaction was OPENED by an on-startup
     # catch-up replay turn, captured under the same only-on-open rule as
     # ``session_id`` above.  A replayed turn carries no principal — the
