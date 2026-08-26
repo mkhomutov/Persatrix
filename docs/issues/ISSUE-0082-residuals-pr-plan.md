@@ -1,7 +1,7 @@
 # ISSUE-0082 — PR Implementation Plan (Residuals R-1 / R-2 — the derived and relayed tenant writes)
 
 **Issues**: [ISSUE-0123](ISSUE-0123-per-speaker-interaction-scope.md) (R-1) · [ISSUE-0124](ISSUE-0124-orchestrator-hop-drops-tenant-on-agent-cascade.md) (R-2) · [ISSUE-0131](ISSUE-0131-derived-memory-has-no-speaker-attribution.md) (the speaker axis)
-**Status**: 📋 Draft — Phase 0 resolved (both axes); the v0.3.14 tag has landed and the [v0.3.15 plan](../v0.3.15-plan.md) is open, so this is workstream **A** of the **v0.3.15** *Who said what* milestone
+**Status**: 🔄 In progress — Phase 0 resolved (both axes); workstream **A** of the **v0.3.15** *Who said what* milestone, open at PR 1
 **Created**: 2026-08-07
 **Branch prefix**: `feature/v0315-issue0123-` / `feature/v0315-issue0124-` (per residual)
 **Target**: `main`
@@ -83,18 +83,14 @@ PR 1 is unblocked by the gate and can start immediately after the tag. PR 3 must
 
 #### Scope
 
-`internal/channels/principal_attribution.go`: a per-`(channel, agent)` table recording the principal a dispatch was made under. Written from `Dispatch` when `PrincipalFromContext(ctx)` is non-empty. **No read site** — nothing re-stamps yet, so behaviour is unchanged everywhere. Mirrors the v0.3.14 PR 1 / PR 2 dormant-rail-then-producer split.
+`internal/channels/principal_attribution.go`: a per-`(channel, agent)` table recording which principal each dispatch was made under, written from `Dispatch` for every delivered dispatch the router elected a reply from. **No read site** — nothing re-stamps yet. Mirrors the v0.3.14 dormant-rail-then-producer split. Rationale, rules, gates and the two review rounds: the file header and [#844](https://github.com/mkhomutov/Persatrix/pull/844).
 
 #### Key implementation details
 
-* Key `(msg.ChannelID, env.Recipient.ParticipantID)`, value `{principal, dispatchedAt}`.
-* **Ambiguity**: a second dispatch under a *different* principal marks the entry ambiguous. Same-principal re-dispatch refreshes rather than ambiguates.
-* **TTL** sized on the persona's worst realistic turn — the same budget `defaultSynthesisReplyTimeout` (120s) is sized against.
-* In-memory only, lazy expiry on read plus a periodic sweep. Bound is `channels × members`.
-
-#### Tests
-
-Two principals → ambiguous; same principal → refreshed, not ambiguous; TTL expiry → miss; empty ctx principal → no write. Dormancy pinned, not assumed: a dispatch with the table populated emits the same header bytes as one without.
+* Key `(msg.ChannelID, env.Recipient.ParticipantID)`, value `map[principal]time.Time` — the live stimuli, from which the verdict is *derived*: resolve iff exactly one is live and names someone.
+* A principal-less dispatch is recorded under the anonymous key **in either arrival order**; same-principal re-dispatch refreshes rather than ambiguates.
+* `TakeAttribution` resolves *and* retires what the reply answered; expiry alone never recovers a room whose forced turns outpace the 120s TTL.
+* In-memory, single-orchestrator; lazy expiry on read plus a periodic sweep; bound `channels × members`.
 
 #### PR checklist
 
@@ -112,16 +108,18 @@ Read the table in `ChannelRouter.Publish`, before fanout, **iff** the ctx carrie
 #### Key implementation details
 
 * Read in `Publish`, not `handlePublishMessage`, so in-process callers are covered.
-* `msg.SenderID` is safe as a key: the executor supplies the agent's framework-known registered id and never forwards an LLM-supplied value (the RFC 0011 §"DM gate-bypass" invariant).
-* **Never** accept a principal, or any correlation key, from the agent's request — including the stimulus message id. An agent sees other members' ids in channel history, so echoing a chosen id resolves to a chosen principal: the same cross-tenant read primitive one indirection along.
+* Read with **`TakeAttribution`, never `Lookup`**: the consuming read retires what the reply answered. `Lookup` leaves those stimuli live, so a room whose forced turns outpace the TTL (the RFC 0052 convener cadence) stays ambiguous forever and R-2 is inert where it is most needed.
+* `msg.SenderID` is safe as a key: the executor supplies the agent's registered id and never an LLM-supplied value (RFC 0011 §"DM gate-bypass").
+* **Never** accept a principal, or any correlation key, from the agent's request — including the stimulus message id: an agent sees other members' ids in channel history, so a chosen id resolves to a chosen principal, the cross-tenant read primitive one indirection along.
 * Deeper cascades inherit transitively (PR 1's write fires again with the principal now on ctx), bounded by `cascade_depth`.
 
 #### Tests
 
-Integration: an authenticated publish → persona reply → the second-hop persona's rows carry the human's principal, not `'local'`. Negative: autonomous/tick publishes stay `'local'`; ambiguous and expired entries degrade to `'local'`; `auth.mode: disabled` is byte-identical. A route-table-style pin that `Publish` is the **only** re-stamp site.
+Integration: authenticated publish → persona reply → the second-hop persona's rows carry the human's principal, not `'local'`. Negative: autonomous/tick publishes stay `'local'`; ambiguous and expired entries degrade to `'local'`; `auth.mode: disabled` is byte-identical. A route-table-style pin that `Publish` is the **only** re-stamp site.
 
 #### PR checklist
 
+- [ ] The re-stamp calls `TakeAttribution`, not `Lookup`, pinned by a test that a second reply resolves nothing
 - [ ] Accepted-risk statement in the PR body: this grants an agent a bounded **write** into the causally-implicated principal's tenant — never a read
 - [ ] Known Gap: single-orchestrator only
 
@@ -210,7 +208,7 @@ Run [MT-MEMORY-GROUP-TENANT-001](../manual-tests/MT-MEMORY-GROUP-TENANT-001.md) 
 | # | Title | Branch | Status | GitHub PR | Merged |
 |---|-------|--------|--------|-----------|--------|
 | 0 | Design gate — MT Legs 1–4, lock the record shape (both axes) | — | ✅ Resolved → **`(principal, speaker, scope)`**: Phase 0 (principal) 2026-08-07, Phase 0b (speaker) 2026-08-21 | — | — |
-| 1 | R-2 causal attribution store, dormant | `feature/v0315-issue0124-attribution-store` | ⬜ Not started | — | — |
+| 1 | R-2 causal attribution store, dormant | `feature/v0315-issue0124-attribution-store` | 🔀 PR open | [#844](https://github.com/mkhomutov/Persatrix/pull/844) | — |
 | 2 | R-2 re-stamp + end-to-end gate | `feature/v0315-issue0124-restamp` | ⬜ Not started | — | — |
 | 3 | R-1 + [ISSUE-0131](ISSUE-0131-derived-memory-has-no-speaker-attribution.md) scope key `(principal, speaker, scope)` + RFC 0020 §G amendment | `feature/v0315-issue0123-scope-key` | ⬜ Not started | — | — |
 | 4 | R-1 close binding, reserve re-size (now × speakers), asymmetry cleanup | `feature/v0315-issue0123-close-path` | ⬜ Not started | — | — |

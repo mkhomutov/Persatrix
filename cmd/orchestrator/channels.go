@@ -171,7 +171,20 @@ func initChannels(
 			zap.Error(srErr))
 		sessionResolver = nil
 	}
-	dispatcher := selectChannelDispatcher(reg, sessionResolver, epochID, logger)
+	// ISSUE-0124 PR 1: the causal-attribution table — which principal each
+	// delivered dispatch was made under. Born here rather than inside the
+	// dispatcher because its reader is the ROUTER: PR 2 hands this same
+	// instance to the re-stamp in `ChannelRouter.Publish`, which is what lets
+	// a persona's reply (a fresh unauthenticated publish) keep the tenant of
+	// the person who caused it. Unconditional and cheap: an unauthenticated
+	// dispatch is recorded too (it is a competing stimulus, and skipping it is
+	// what let a later authenticated one resolve a reply it never caused), so
+	// under `auth.mode: disabled` this holds one anonymous-only row per
+	// dispatched-to `(channel, agent)` pair — the map's stated
+	// `channels × members` bound, resolving nothing, reclaimed by the sweep one
+	// turn budget after the traffic stops.
+	principalAttribution := channels.NewPrincipalAttributionTable()
+	dispatcher := selectChannelDispatcher(reg, sessionResolver, epochID, principalAttribution, logger)
 	router := channels.NewChannelRouter(chanStore, dispatcher, logger, routerMetrics)
 	// RFC 0050 amendment (interaction-budget enforcement): make the channel
 	// router the authority for the wallet's per-interaction cost ceiling. The
@@ -441,7 +454,14 @@ func initChannels(
 //     (`live` in production, a per-job id in CI); empty disables epoch
 //     emission (personas fall back to their construction-time "live"
 //     snapshot, byte-identical to the pre-epoch dispatch).
-func selectChannelDispatcher(reg registry.Registry, sessionResolver channels.SessionBinder, epochID string, logger *zap.Logger) channels.MessageDispatcher {
+//   - attribution != nil → the dispatcher records which principal each
+//     delivered dispatch was made under (ISSUE-0124 PR 1), so a persona's
+//     reply can later be re-stamped with the principal that caused it. Nil
+//     records nothing. Writing it changes no behaviour on its own — nothing
+//     reads the table until PR 2 — and a dispatch carrying no principal is
+//     recorded as the anonymous stimulus, which can only ever make a pair
+//     ambiguous, never resolve one.
+func selectChannelDispatcher(reg registry.Registry, sessionResolver channels.SessionBinder, epochID string, attribution *channels.PrincipalAttributionTable, logger *zap.Logger) channels.MessageDispatcher {
 	if reg == nil {
 		logger.Info("channels: registry not available; cross-process dispatch disabled (NoopDispatcher in use)")
 		return channels.NoopDispatcher{}
@@ -452,6 +472,9 @@ func selectChannelDispatcher(reg registry.Registry, sessionResolver channels.Ses
 	}
 	if epochID != "" {
 		opts = append(opts, channels.WithEpoch(epochID))
+	}
+	if attribution != nil {
+		opts = append(opts, channels.WithPrincipalAttribution(attribution))
 	}
 	return channels.NewGRPCMessageDispatcher(reg, logger, opts...)
 }

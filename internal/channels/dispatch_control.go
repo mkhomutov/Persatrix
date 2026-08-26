@@ -72,6 +72,42 @@ type dispatchControl struct {
 	// via ordinary fanout (the floor-path bounded close), so the receiver
 	// skips the duplicate final-turn ingest.
 	closeRedelivery bool
+	// respondersTurn marks an ORDINARY ([markerNone]) dispatch to a recipient
+	// [orderResponders] elected to answer — the concurrent fanout's responder
+	// subset and the floor round's granted speaker. Meaningless under a
+	// control marker, which answers the question by itself (see
+	// [dispatchControl.expectsReply]), and false by default so a new call
+	// site is ingestion-only until it says otherwise: the write it gates
+	// fails closed, so silence must mean "do not attribute".
+	respondersTurn bool
+}
+
+// expectsReply reports whether the orchestrator asked this recipient for a
+// turn, which is what [DispatchEnvelope.ExpectsReply] carries to the dispatch
+// chokepoint. The distinction is NOT "did the message arrive": the fanout
+// delivers to members whose reply the receiver gate suppresses so they still
+// ingest the room (fanout.go's "un-addressed participants amnesiac" note), and
+// a stimulus nobody will answer must not leave a causal-attribution entry
+// behind for that agent's next, unrelated publish to inherit.
+//
+// The control markers answer for themselves — the four FORCED turns exist to
+// draw a reply, and the close notification is told rather than asked — so only
+// the ordinary lane consults `respondersTurn`. Written as an exhaustive switch
+// on the marker rather than a boolean expression so the next marker added to
+// the enum has to state which lane it is in.
+func (c dispatchControl) expectsReply() bool {
+	switch c.marker {
+	case markerNone:
+		return c.respondersTurn
+	case markerCloseNotification:
+		return false
+	case markerChairEscalation, markerChairEscalationResynthesize, markerConvene, markerSynthesisTurn:
+		return true
+	default:
+		// Unreachable while the enum is exhaustive above. Fail closed: an
+		// unrecognised marker attributes nothing rather than guessing.
+		return false
+	}
 }
 
 // closeNotificationWireFields returns the two typed close-notification wire

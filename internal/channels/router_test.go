@@ -41,6 +41,10 @@ type dispatchCall struct {
 	// PR 2) so the wire tests can assert the channel's §A level reaches
 	// every dispatch path's envelope.
 	classification string
+	// expectsReply mirrors the envelope's ISSUE-0124 responder election so
+	// the fanout tests can tell a turn the router asked for from an
+	// ingestion-only delivery (dispatch_expects_reply_test.go).
+	expectsReply bool
 }
 
 func (d *recordingDispatcher) Dispatch(_ context.Context, env DispatchEnvelope, msg ChannelMessage) error {
@@ -55,6 +59,7 @@ func (d *recordingDispatcher) Dispatch(_ context.Context, env DispatchEnvelope, 
 		cascadeDepth:         asInt(msg.Metadata["cascade_depth"]),
 		closeNotification:    env.InteractionCloseNotification,
 		classification:       env.Classification,
+		expectsReply:         env.ExpectsReply,
 	})
 	return d.err
 }

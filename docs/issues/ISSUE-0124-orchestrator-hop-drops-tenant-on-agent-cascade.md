@@ -133,9 +133,26 @@ pins.
   reply inherits it — consistent with the other two dispatch origins in
   `dispatchOriginClassification`
   ([`internal/server/principal.go`](../../internal/server/principal.go)).
-- **`auth.mode: disabled`.** No principal ever reaches a ctx, the table
-  is never written, and the no-delta acceptance criterion holds at the
-  byte level.
+- **`auth.mode: disabled`.** No principal ever reaches a ctx, so every
+  dispatch records the anonymous stimulus and **nothing the table holds
+  can ever resolve**. The no-delta acceptance criterion holds at the byte
+  level; the residual cost is one anonymous-only row per dispatched-to
+  pair, inside the bound below and reclaimed by the sweep once traffic
+  stops. A deployment that wants no table at all declines to wire one.
+- **Expiry is not the only retirement.** Ageing out recovers a pair only
+  when the competing stimulus stops being restated. That holds for a
+  second human speaker, but not for the orchestrator's own principal-less
+  forced turns — the RFC 0052 convener cadence, a synthesis-close
+  timeout, a chair escalation descending from either — which recur faster
+  than the turn budget, keep an anonymous stimulus permanently live, and
+  would leave such a room forever ambiguous with a row the sweep can
+  never reclaim. So the re-stamp read (`TakeAttribution`) also **retires
+  the stimuli the reply answered**: an agent that publishes has answered
+  what it was holding, the only evidence the orchestrator gets that a
+  stimulus is *spent* rather than merely young. Irreducible remainder,
+  stated: an authenticated stimulus racing an **unanswered** anonymous
+  one is genuinely ambiguous and must stay so — ranking them needs a
+  correlation key from the agent, which is disqualified above.
 - **Bound and lifetime.** Size is `channels × members`, with lazy
   expiry on read plus a periodic sweep. Keep it **in memory only**: the
   session binding is persisted for continuity, but a *stale* attribution
@@ -211,6 +228,79 @@ in every room. Together the relayed turn carries the causal principal
 > never reach `Dispatch` and the arc shows zero tenant-less hops; and the
 > collector's tail sampling is **1% probabilistic**, so the dispatch
 > spans are dropped unless it is raised for the measurement.
+
+> 2026-08-25 — **PR 1 of the fix is open** (`feature/v0315-issue0124-attribution-store`,
+> the [residuals PR plan](ISSUE-0082-residuals-pr-plan.md) PR 1): the
+> attribution table itself —
+> [`internal/channels/principal_attribution.go`](../../internal/channels/principal_attribution.go)
+> — plus the write at the dispatch chokepoint and the wiring that hands the
+> instance to the dispatcher. **Nothing reads it**; the re-stamp in
+> `ChannelRouter.Publish` is PR 2, so behaviour is unchanged and the wire is
+> byte-identical either way (pinned, not assumed). The design above is
+> implemented as written, with **three refinements the implementation forced**,
+> all narrowing rather than widening what gets attributed:
+>
+> - **The write is on the DELIVERED path, and only for a stimulus the
+>   orchestrator asked a turn for.** The design says "record when
+>   `PrincipalFromContext(ctx)` is non-empty"; the record is placed after the
+>   receiver's ack instead, because a dispatch that was dropped (unregistered
+>   recipient), refused (the servicer's queue-full / pre-ingest ack with
+>   `success=false`) or never dialled leaves the agent holding nothing.
+>   Delivery is not the whole test, though: that ack is **pre-ingest** — the
+>   servicer returns as soon as the wake is accepted and the response gate runs
+>   later, inside the event loop — and the fanout deliberately delivers to
+>   members the gate will silence (an unmentioned `when_mentioned` member, a
+>   directed-elsewhere `always` member) so they ingest the room rather than
+>   going amnesiac. Those hold the stimulus and never answer it, so an entry
+>   for one would stay live for a full turn budget and be inherited by whatever
+>   that agent published next, e.g. an autonomous tick — a mis-attribution of
+>   content nobody caused, the one failure mode this design is otherwise free
+>   of. The write therefore follows `orderResponders`, the orchestrator's own
+>   superset of the gate's respond-true set, carried to the chokepoint as
+>   `DispatchEnvelope.ExpectsReply`. **Residual, stated**: that election is a
+>   superset, so an elected member whose RFC 0030 salience bid lands below
+>   threshold still leaves an entry — an LLM-side judgement the orchestrator
+>   cannot predict, bounded only by the TTL.
+> - **An entry holds the LIVE STIMULI and derives its answer**, rather than
+>   storing a principal beside an `ambiguous` flag. A pair resolves only when
+>   exactly one stimulus is outstanding and it has a principal. The design
+>   fixes the two-principals case but not what a THIRD dispatch does, and the
+>   first shape answered that by latching the flag and refreshing its stamp on
+>   every later write — which pinned a room in continuous conversation to
+>   `'local'` for as long as the conversation lasted, since a cascade keeps
+>   itself busy by construction. Deriving it instead makes ambiguity expire
+>   with the stimuli that caused it: one message from a second speaker stops
+>   mattering one turn budget later, and a busy room recovers on its own.
+> - **An unauthenticated dispatch POISONS a live entry.** The design's
+>   empty-principal write gate skipped those dispatches entirely, which left a
+>   live authenticated entry to answer for a turn nobody authenticated caused —
+>   the fresh-context origins `principal_context.go` enumerates
+>   (`handleConveneChannel`, the synthesis-close timeout), every agent-origin
+>   and autonomous turn. Such a dispatch is a real competing stimulus that
+>   simply cannot name anyone, so it is recorded under the anonymous key: it
+>   can make a pair ambiguous, never resolve one. It **creates a row like any
+>   other stimulus**. An earlier shape recorded it only against an *existing*
+>   row — reasoning that with nothing authenticated outstanding there was
+>   nothing to be mistaken for — but that holds only at the instant of the
+>   write: it ignored the authenticated stimulus arriving **next**, while the
+>   anonymous one was still live, which left the pair resolving a principal the
+>   agent may never have been answering. Recording it unconditionally makes the
+>   rule order-independent. The cost is that `auth.mode: disabled` now holds one
+>   anonymous-only row per dispatched-to pair — the same `channels × members`
+>   bound, resolving nothing, reclaimed one turn budget after traffic stops.
+>
+> The TTL is its own constant (`principalAttributionTTL`, 120s) rather than an
+> alias of `defaultSynthesisReplyTimeout`: they answer to the same reasoning
+> today, but re-tuning how long a chair may take to synthesize must not
+> silently re-tune how long a person stays answerable for what an agent says.
+> The periodic sweep is interval-gated on the write path rather than a
+> goroutine — a background sweeper would need a lifetime, a stop signal and a
+> place in the shutdown ordering to reclaim a map bounded by
+> `channels × members`. Both single-orchestrator and in-memory-only remain as
+> designed, and are stated in the file rather than assumed. Gates:
+> `internal/channels/principal_attribution_test.go`,
+> `internal/channels/grpc_dispatcher_attribution_test.go`,
+> `internal/channels/dispatch_expects_reply_test.go`.
 
 > 2026-08-21 — **re-slotted v0.4.0 → v0.3.15** by the
 > sequencing Amendment 2026-08-19 ([v0.3.x-sequencing.md](../v0.3.x-sequencing.md), landing with [#839](https://github.com/mkhomutov/Persatrix/pull/839));
