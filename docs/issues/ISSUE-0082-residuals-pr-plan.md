@@ -92,6 +92,11 @@ PR 1 is unblocked by the gate and can start immediately after the tag. PR 3 must
 * `TakeAttribution` resolves *and* retires what the reply answered; expiry alone never recovers a room whose forced turns outpace the 120s TTL.
 * In-memory, single-orchestrator; lazy expiry on read plus a periodic sweep; bound `channels × members`.
 
+#### PR checklist
+
+- [ ] `go test ./...` green (note: CI runs `go test` since v0.3.13 #813)
+- [ ] No behaviour delta — the table has no reader
+
 ---
 
 ### PR 2: `feature/v0315-issue0124-restamp` — The re-stamp, and the gate
