@@ -310,3 +310,50 @@ in every room. Together the relayed turn carries the causal principal
 > by the [ISSUE-0131](ISSUE-0131-derived-memory-has-no-speaker-attribution.md) fold-in: the speaker axis is a persona-memory record
 > shape, while this issue is a wire-attribution fix, and the two meet only at
 > the close.
+
+> 2026-08-26 — **PR 2 (`feature/v0315-issue0124-restamp`): the re-stamp is
+> live.** The table stops being dormant — a persona's reply now carries the
+> principal of the person who caused it, and so does every dispatch descending
+> from it. Three departures from the design above, recorded not taken silently:
+>
+> **The read site is `publishCommit`, not `Publish` — and that correction is
+> load-bearing, not tidiness.** This design says "read in `ChannelRouter.Publish`,
+> before fanout". Since the RFC 0048 console publish-latency fix, the REST
+> publish seam — the exact hop this issue is about, `HTTPChannelPublisher` →
+> `POST /channels/{id}/messages` → `handlePublishMessage` — goes through
+> `PublishAsync`, and `Publish` is reached only by the chat-as-DM façade
+> (`PublishAndAwait`) and in-process callers. A literal implementation would
+> therefore have re-stamped nothing on the one path R-2 lives on, and the
+> defect would have survived a green test suite. The read sits at the head of
+> `publishCommit`, the commit path both entry points share, so both inherit it
+> and it can be consumed at most once per publish; each entry point fans out on
+> the returned context rather than the one it passed in.
+>
+> **It runs before the store commit, not merely before fanout.**
+> [ISSUE-0130](ISSUE-0130-catchup-replay-rederives-memory-under-default-principal.md)
+> shape (b) stamps `messages.principal_id` server-side from the publish
+> context; resolving the causal principal ahead of the commit is what lets a
+> *replayed* relayed turn be attributed at catch-up — B1 gains it for free
+> rather than having to unpick this ordering.
+>
+> **"The sender is a registered agent" is enforced by the table key, not a
+> second check.** An entry exists only where `Dispatch` resolved the recipient
+> through the registry, found it healthy and got a delivery ack, so a hit *is*
+> that proof — and a human's id can never be in the table. The alternative,
+> `msg.Metadata`'s `participant_type`, is registry-authoritative only on a
+> HIT: on a miss or a read failure it is the caller's own claim, so gating on
+> it would either trust a wire value or silently disable the re-stamp for the
+> length of a registry hiccup.
+>
+> Two smaller things. The consuming read fires even when the publish is later
+> REJECTED (membership, cascade clamp, reply budget): the agent answered, and
+> leaving its stimuli live would let its next unrelated publish inherit them.
+> And the
+> route-table pin this issue asks for turned up a *pre-existing* second
+> `WithPrincipal` site — `synthesis_close.go` re-applying the arm-time
+> principal onto the timer goroutine's background context — so the pin is a
+> two-entry reviewed allowlist that distinguishes INFERRING a principal (one
+> site, this design's surface) from RE-APPLYING one a request already
+> presented (which can name nobody new). Gates:
+> `internal/channels/principal_restamp_test.go` — ten tests, one per rule
+> above plus the `auth.mode: disabled` no-delta and the stamp-site pin.

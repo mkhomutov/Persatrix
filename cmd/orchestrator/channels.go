@@ -186,6 +186,13 @@ func initChannels(
 	principalAttribution := channels.NewPrincipalAttributionTable()
 	dispatcher := selectChannelDispatcher(reg, sessionResolver, epochID, principalAttribution, logger)
 	router := channels.NewChannelRouter(chanStore, dispatcher, logger, routerMetrics)
+	// ISSUE-0124 PR 2: the same instance on the READ side. The dispatcher
+	// writes the table, the router consumes it at the head of every publish —
+	// two instances would leave the re-stamp permanently empty, which is why
+	// the table is born above rather than inside either collaborator. This is
+	// the line that makes R-2 behavioural: from here a persona's reply carries
+	// the principal of the person who caused it.
+	router.SetPrincipalAttribution(principalAttribution)
 	// RFC 0050 amendment (interaction-budget enforcement): make the channel
 	// router the authority for the wallet's per-interaction cost ceiling. The
 	// wallet was constructed before this point (it has no channels dependency),

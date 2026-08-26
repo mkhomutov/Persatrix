@@ -59,10 +59,14 @@ const defaultMaxInFlightFanout = 512
 // shutdown relies on the HTTP server's own in-flight-request drain, not the
 // fanout drain, to bound that round. Only reachable under pathological traffic.
 func (r *ChannelRouter) PublishAsync(ctx context.Context, msg ChannelMessage, declaredType string) error {
-	plan, err := r.publishCommit(ctx, msg, declaredType)
+	ctx, plan, err := r.publishCommit(ctx, msg, declaredType)
 	if err != nil || plan == nil {
 		return err
 	}
+	// Detach from the RE-STAMPED context (ISSUE-0124 R-2): WithoutCancel keeps
+	// context values, so the principal publishCommit resolved rides the
+	// detached fanout to every dispatch descending from this reply — the whole
+	// point of resolving it, since this is the path a persona's reply takes.
 	detached := context.WithoutCancel(ctx)
 
 	// Backpressure valve: at the in-flight ceiling, run fanout inline rather
@@ -149,16 +153,32 @@ type fanoutPlan struct {
 // depth, persists under the reply budget, accounts the end-vote, notifies
 // in-process waiters, and decides whether fanout should run.
 //
-// Returns (plan, nil) when fanout should run with the returned params;
-// (nil, nil) when the publish committed but fanout is suppressed; (nil, err)
-// when the publish was rejected (nothing persisted / budget released).
-func (r *ChannelRouter) publishCommit(ctx context.Context, msg ChannelMessage, declaredType string) (*fanoutPlan, error) {
+// Returns (ctx, plan, nil) when fanout should run with the returned params;
+// (ctx, nil, nil) when the publish committed but fanout is suppressed;
+// (ctx, nil, err) when the publish was rejected (nothing persisted / budget
+// released).
+//
+// The returned CONTEXT is the caller's, possibly re-stamped with the principal
+// that caused this publish (ISSUE-0124 R-2 — see principal_restamp.go). Both
+// entry points must fan out on it rather than on the one they passed in, or an
+// agent's relayed turn dispatches with no tenant again; returning it rather
+// than mutating in place is what makes that visible at the call site.
+func (r *ChannelRouter) publishCommit(ctx context.Context, msg ChannelMessage, declaredType string) (context.Context, *fanoutPlan, error) {
+	// ISSUE-0124 (ISSUE-0082 residual R-2) PR 2: the re-stamp, at the head of
+	// the shared commit path so BOTH publish entry points inherit it and the
+	// consuming read happens exactly once per publish. A no-op for an
+	// authenticated caller, for a human sender, and for every publish the table
+	// cannot unambiguously explain — all of which keep resolving `'local'`.
+	// Ahead of the store commit deliberately: ISSUE-0130(b)'s `principal_id`
+	// column is stamped from this context.
+	ctx = r.restampCausalPrincipal(ctx, msg)
+
 	derivedType, err := channelTypeFromID(msg.ChannelID)
 	if err != nil {
-		return nil, err
+		return ctx, nil, err
 	}
 	if declaredType != "" && ChannelType(declaredType) != derivedType {
-		return nil, fmt.Errorf("%w: channel_type=%q disagrees with channel_id prefix (%s)",
+		return ctx, nil, fmt.Errorf("%w: channel_type=%q disagrees with channel_id prefix (%s)",
 			ErrInvalidChannelType, declaredType, derivedType)
 	}
 
@@ -241,7 +261,7 @@ func (r *ChannelRouter) publishCommit(ctx context.Context, msg ChannelMessage, d
 	// Additive: a no-op when uncapped, untracked, or an exempt human.
 	if err := r.publishWithReplyBudget(ctx, msg, derivedType); err != nil {
 		settleInteraction(false)
-		return nil, err
+		return ctx, nil, err
 	}
 	settleInteraction(true)
 
@@ -294,7 +314,7 @@ func (r *ChannelRouter) publishCommit(ctx context.Context, msg ChannelMessage, d
 	if latched {
 		r.waiter.Notify(msg)
 		r.dropPostCloseTraffic(ctx, derivedType, resolvedInteractionID)
-		return nil, nil
+		return ctx, nil, nil
 	}
 
 	// RFC 0052 §D close-on-reply, the COMMIT-path claim (PR #718 review —
@@ -330,7 +350,7 @@ func (r *ChannelRouter) publishCommit(ctx context.Context, msg ChannelMessage, d
 		// and releases the count only after the close's fanoutWG.Adds — the
 		// drain-ordering contract (see both functions' docs).
 		r.closeOnSynthesisReply(context.WithoutCancel(ctx), msg, derivedType, pendingSynth)
-		return nil, nil
+		return ctx, nil, nil
 	}
 
 	// RFC 0030 Layer 4 (v0.3.8) end-of-interaction signal: accumulate this
@@ -341,7 +361,7 @@ func (r *ChannelRouter) publishCommit(ctx context.Context, msg ChannelMessage, d
 	// orthogonal to cascade_depth. Inert when untracked (no interaction_id) or
 	// when no producer emits the vote, so it is additive over v0.3.7.
 	if r.processEndVote(ctx, msg, derivedType) {
-		return nil, nil
+		return ctx, nil, nil
 	}
 
 	// Primary cascade-depth enforcement: drop fanout when at/over the
@@ -368,7 +388,7 @@ func (r *ChannelRouter) publishCommit(ctx context.Context, msg ChannelMessage, d
 		if !inRoundReply {
 			r.closeOnCascadeBound(ctx, msg, derivedType)
 		}
-		return nil, nil
+		return ctx, nil, nil
 	}
 
 	// RFC 0011 PR 4b: pre-resolve `thread_parent_sender_id` once per
@@ -412,10 +432,10 @@ func (r *ChannelRouter) publishCommit(ctx context.Context, msg ChannelMessage, d
 	// enforced above). `inRoundReply` is the pre-Notify capture: a read here,
 	// after Notify, races the loop's deferred clearFloorSpeakers (see above).
 	if inRoundReply {
-		return nil, nil
+		return ctx, nil, nil
 	}
 
-	return &fanoutPlan{
+	return ctx, &fanoutPlan{
 		msg:                  msg,
 		derivedType:          derivedType,
 		threadParentSenderID: threadParentSenderID,
