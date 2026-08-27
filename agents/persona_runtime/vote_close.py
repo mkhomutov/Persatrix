@@ -104,14 +104,18 @@ __all__ = [
 class PendingVoteClose(NamedTuple):
     """One parked vote close: the scope the voter's record lives under,
     the open interaction's id at decide time (the staleness guard), the
-    correlation token stamped onto the covered vote actions, and how
-    many of them are still in flight (failures decrement; the first
-    success — or the last failure — consumes the park)."""
+    correlation token stamped onto the covered vote actions, how many of
+    them are still in flight (failures decrement; the first success — or
+    the last failure — consumes the park), and the wire id of the
+    conversation the vote judged complete (PR #846 review: the
+    discharge's per-record admission anchor; ``""`` when the parked
+    record was unstamped at decide time)."""
 
     scope: str
     interaction_id: str
     token: str
     in_flight: int
+    wire_id: str = ""
 
 
 def park_end_vote_close(
@@ -148,6 +152,7 @@ def park_end_vote_close(
         interaction_id=interaction.interaction_id,
         token=token,
         in_flight=len(votes),
+        wire_id=interaction.wire_interaction_id,
     )
 
 
@@ -238,10 +243,15 @@ async def discharge_end_vote_publish(
             )
             return
         # Since the ``(principal, speaker, scope)`` re-key (v0.3.15
-        # residuals PR 3) the scope holds N records; the staleness guard
-        # anchors on the PARKED record — the one the vote's own turn
-        # landed in — found by identity among the scope's open records.
-        open_record = next(
+        # residuals PR 3) the scope holds N records.  The close anchors on
+        # the WIRE CONVERSATION the vote judged complete (PR #846 review):
+        # the id frozen at park time, upgraded by the parked record's later
+        # stamp — its first wire-carrying turn can land between decide and
+        # publish.  The parked record is found by identity; its own fate no
+        # longer gates the fan, because its speaker's inline cap close or
+        # idle flush says nothing about the siblings, which Go's quorum fan
+        # will never close for this voter.
+        parked = next(
             (
                 record
                 for record in agent._interaction_tracker.records_for_scope(
@@ -251,34 +261,48 @@ async def discharge_end_vote_publish(
             ),
             None,
         )
-        if open_record is None or not open_record.is_open:
-            # The scope moved on between decide and publish (max-turns
-            # inline close, idle flush, wire rotation) — that close already
-            # told the truth; do not close its successor.
-            return
-        wire_id = open_record.wire_interaction_id
-        if wire_id and agent._vote_closed_wire_ids.get(pending.scope) == wire_id:
+        anchor = pending.wire_id or (
+            parked.wire_interaction_id if parked is not None else ""
+        )
+        if anchor and agent._vote_closed_wire_ids.get(pending.scope) == anchor:
             # Re-vote on a wire interaction this voter already vote-closed
             # (the scope reopened on continued traffic under the SAME id —
             # no quorum formed).  Go deduped the vote but the suppressed
             # duplicate still committed (2xx → "published"); mirror the
             # dedup here so one channel interaction never fragments into
-            # N "ended" local records.  The record stays open, like the
-            # wire's, and closes on the eventual rotation or idle gap.
+            # N "ended" local records.  The records stay open, like the
+            # wire's, and close on the eventual rotation or idle gap.
+            return
+        if not anchor and parked is None:
+            # No wire anchor and the parked record is gone (max-turns
+            # inline close, idle flush, wire rotation): nothing ties the
+            # remaining records to the conversation this vote judged —
+            # that close already told the truth; do not close a successor.
             return
         # The vote judged the CONVERSATION complete, and an end-vote
-        # quorum is a room event (ISSUE-0123 part 3) — fan the close
-        # over every ``(principal, speaker)`` record in the scope.  The
-        # voter is excluded from Go's ordinary quorum fan precisely
-        # because this local close already happened, so a record left
-        # open here would never receive the notification-driven close
-        # and would drift to the idle bury.
-        closed_records = agent._interaction_tracker.close_scope(
-            pending.scope, reason=REASON_STRUCTURAL,
-        )
+        # quorum is a room event (ISSUE-0123 part 3) — fan the close over
+        # every record of THAT conversation.  Per-record admission
+        # (PR #846 review, the close_notification conjunct): skip records
+        # positively stamped with a DIFFERENT wire id — a successor opened
+        # after a rotation the park predates — so a stale vote never
+        # mislabels a live discussion "ended".  A blank anchor admits only
+        # blank-stamped records for the same reason.  One room event, one
+        # instant: a single clock read stamps every close.
+        now = agent._interaction_tracker.now()
+        closed_records: list[Interaction] = []
+        for record in agent._interaction_tracker.records_for_scope(
+            pending.scope,
+        ):
+            if record.wire_interaction_id and record.wire_interaction_id != anchor:
+                continue
+            closed = agent._interaction_tracker.close_record(
+                record, reason=REASON_STRUCTURAL, now=now,
+            )
+            if closed is not None:
+                closed_records.append(closed)
         if closed_records:
-            if wire_id:
-                agent._vote_closed_wire_ids[pending.scope] = wire_id
+            if anchor:
+                agent._vote_closed_wire_ids[pending.scope] = anchor
             # Guarded per record (v0.3.15 PR 3 review fix): the fan
             # popped every record before the first persist ran — one
             # failure must not discard the siblings.

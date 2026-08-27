@@ -181,6 +181,22 @@ class TestRoomWideClose:
         assert tracker.close_record(first, reason=REASON_STRUCTURAL) is None
         assert successor.is_open
 
+    def test_close_scope_stamps_one_instant(self):
+        """One room event, one timestamp (PR #846 review): ``close_scope``
+        reads the clock ONCE, so every sibling's ``closed_at`` matches —
+        whichever fan caller forgot to pre-read ``now``."""
+        ticks = iter(range(1_000, 2_000))
+        tracker = InteractionTracker(clock=lambda: float(next(ticks)))
+        for speaker in ("iron-fox", "nova-sparrow", "ember-owl"):
+            tracker.add_turn(_SCOPE, speaker_id=speaker)
+
+        closed = tracker.close_scope(_SCOPE, reason=REASON_STRUCTURAL)
+
+        assert len(closed) == 3
+        assert len({r.closed_at for r in closed}) == 1, (
+            "one room event, one close instant"
+        )
+
     def test_idle_check_closes_per_record_not_per_room(self):
         """Idle is the one close that is NOT a room event: a speaker who
         went quiet idles out on their own last-turn timer while an

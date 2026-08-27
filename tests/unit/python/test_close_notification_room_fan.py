@@ -147,3 +147,48 @@ class TestCloseNotificationRoomFan:
         )
         assert record.is_open
         assert record.turn_count == 1, "the straggler's turn is not ingested"
+
+    async def test_replayed_record_is_left_to_the_catchup_sweep(self):
+        """PR #846 review: a replay-opened record belongs to the pass-end
+        ``REASON_CATCHUP_COMPLETE`` sweep — a live notification arriving
+        mid catch-up must neither land its turn in the flagged span
+        (derivation skips it wholesale, silently discarding the turn) nor
+        relabel the close.  The live sibling still closes normally."""
+        tracker = InteractionTracker()
+        live = tracker.add_turn(
+            "group:planning", speaker_id="nova-sparrow", now=time.time(),
+        )
+        replayed = tracker.add_turn(
+            "group:planning", speaker_id="iron-fox", replayed=True,
+            now=time.time(),
+        )
+        agent = _CloseNotificationAgent(tracker)
+
+        await close_interaction_on_notification(agent, _notification_event())
+
+        assert replayed.is_open, (
+            "the replay-opened record is the catch-up sweep's to close"
+        )
+        assert replayed.turn_count == 1, (
+            "the live closing turn must not land inside a flagged span"
+        )
+        assert [i.speaker_id for i in agent.persisted] == ["nova-sparrow"]
+        assert live.close_reason == REASON_STRUCTURAL
+
+    async def test_blank_stamped_record_is_backfilled_with_notified_id(self):
+        """PR #846 review: a blank-stamped record the tolerant conjunct
+        admitted closes AS the notified conversation — stamp it, so the
+        metered summary leases against the id (``summarize_close`` skips
+        the lease on a blank one) and the persisted episode keeps the
+        governance cross-reference the retired ingest path used to
+        backfill."""
+        tracker = InteractionTracker()
+        record = tracker.add_turn("group:planning", now=time.time())
+        agent = _CloseNotificationAgent(tracker)
+
+        event = _notification_event()
+        event.metadata["interaction_id"] = "wire-NOTIFIED"
+        await close_interaction_on_notification(agent, event)
+
+        assert agent.persisted == [record]
+        assert record.wire_interaction_id == "wire-NOTIFIED"

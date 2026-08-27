@@ -323,3 +323,41 @@ async def test_per_agent_denial_leaves_interaction_open() -> None:
     finally:
         await agent.close_memory()
         await agen.aclose()
+
+
+async def test_cost_fan_skips_record_stamped_with_other_wire() -> None:
+    """PR #846 review: the exhausted budget belongs to the EVENT's wire
+    interaction — a sibling record positively stamped with a DIFFERENT id
+    (a successor conversation with a fresh budget) survives the cost fan
+    instead of being buried under ``REASON_COST``."""
+    agen = _wallet_admitting(
+        admit=2,
+        deny_reason=walletpb.LeaseDeniedReason.LEASE_DENIED_REASON_INTERACTION_BUDGET_EXHAUSTED,
+    )
+    wallet = await agen.__anext__()
+    agent = _make_agent(wallet)
+    await agent.initialize_memory()
+    try:
+        for i in range(2):
+            ev = _channel_event(i=i)
+            ev.metadata["interaction_id"] = "wire-A"
+            await agent.on_event(ev)
+        successor = agent._interaction_tracker.add_turn(
+            "group:room-7", speaker_id="peer-9",
+        )
+        successor.wire_interaction_id = "wire-B"
+
+        denied = _channel_event(i=2)
+        denied.metadata["interaction_id"] = "wire-A"
+        with pytest.raises(BudgetExceededError):
+            await agent.on_event(denied)
+
+        open_records = agent._interaction_tracker.records_for_scope(
+            "group:room-7",
+        )
+        assert [r.wire_interaction_id for r in open_records] == ["wire-B"], (
+            "the successor conversation's record must survive the cost fan"
+        )
+    finally:
+        await agent.close_memory()
+        await agen.aclose()

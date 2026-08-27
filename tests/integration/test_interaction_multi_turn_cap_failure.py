@@ -302,3 +302,57 @@ class TestMultiTurnCloseFailureIsSwallowedAndLogged:
         next_open = agent._interaction_tracker.get(scope, speaker_id=peer)
         assert next_open is not None
         assert next_open.turn_count == 1
+
+
+# ─── PR #846 review: session-end fan guards ─────────────────────
+
+
+@pytest.mark.asyncio
+class TestSessionEndFanGuards:
+    """Two PR #846 review pins on the session-end room fan: a chat_end
+    from a sender with no open record must not fabricate a 1-turn
+    "ended" record, and a failing cap-close persist must not skip the
+    fan (the chat_end signal never recurs — an aborted fan leaks every
+    sibling to an idle relabel)."""
+
+    async def test_session_end_from_recordless_sender_mints_no_record(self):
+        agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
+        scope = scope_for_group(GROUP_CHANNEL)
+        await agent._store_event_episode(channel_event("hi", sender="alex"), [])
+        await agent._store_event_episode(channel_event("hey", sender="robin"), [])
+        end = channel_event("ending this", sender="carol")
+        end.metadata["chat_end"] = True
+        await agent._store_event_episode(end, [])
+
+        assert agent._interaction_tracker.records_for_scope(scope) == []
+        episodes = await all_episodes(agent)
+        assert len(episodes) == 2, (
+            "one episode per existing speaker — no fabricated record for "
+            "the recordless closer's terminator"
+        )
+        assert sorted(close_reasons(episodes)) == [
+            REASON_STRUCTURAL, REASON_STRUCTURAL,
+        ]
+
+    async def test_cap_close_persist_failure_still_fans_session_end(
+        self, monkeypatch,
+    ):
+        agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
+        agent._interaction_tracker._max_turns = 2
+        scope = scope_for_group(GROUP_CHANNEL)
+        await agent._store_event_episode(channel_event("hi", sender="alex"), [])
+        await agent._store_event_episode(channel_event("hey", sender="robin"), [])
+
+        async def _boom(interaction):
+            raise RuntimeError("simulated phase-1 failure")
+
+        monkeypatch.setattr(agent, "_persist_closed_interaction", _boom)
+        # alex's SECOND turn is the cap-th turn AND carries the session end.
+        end = channel_event("done here", sender="alex")
+        end.metadata["chat_end"] = True
+        await agent._store_event_episode(end, [])
+
+        assert agent._interaction_tracker.records_for_scope(scope) == [], (
+            "a raising cap-close persist must not abort the session-end "
+            "fan — the siblings still close structurally"
+        )

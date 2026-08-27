@@ -81,10 +81,8 @@ __all__ = ["Clock", "InteractionTracker"]
 # clock once it lands; one-line import + alias change.
 
 
-# Not ``@runtime_checkable``: the Protocol is a single-method callable
-# shape, ``time.time`` (and any zero-arg callable) would satisfy a
-# bare ``isinstance`` check trivially, and no call site uses one
-# (PR-216 review, Nice-to-have #1).
+# Not ``@runtime_checkable``: any zero-arg callable would satisfy a bare
+# ``isinstance`` trivially, and no call site uses one (PR-216 review).
 class Clock(Protocol):
     """Zero-arg callable returning a wall-clock float (seconds).
 
@@ -156,9 +154,8 @@ class InteractionTracker:
             if detectors is not None
             else default_detectors(idle_timeout_sec=idle_timeout_sec)
         )
-        # Clock seam (PR 3): tests inject a deterministic clock once at
-        # construction time instead of threading ``now=`` through every
-        # call.
+        # Clock seam (PR 3): tests inject a deterministic clock once here
+        # instead of threading ``now=`` through every call.
         self._clock: Clock = clock if clock is not None else _DEFAULT_CLOCK
         # PR-3 review #12: cache the cap from whichever
         # :class:`MaxTurnsDetector` is in the chain so :meth:`add_turn`
@@ -457,11 +454,14 @@ class InteractionTracker:
         pair.  Returns the closed records in insertion order (empty if
         none were open).  Each close emits its own
         ``agent.interactions.closed`` increment — the stated
-        metric-shape change (see :mod:`.interaction_metrics`).
+        metric-shape change (see :mod:`.interaction_metrics`).  One room
+        event, one instant (PR #846 review): the clock is read ONCE and
+        every sibling's ``closed_at`` carries the same value.
         """
+        ts = now if now is not None else self._clock()
         closed: list[Interaction] = []
         for interaction in self.records_for_scope(scope):
-            finished = self.close_record(interaction, reason=reason, now=now)
+            finished = self.close_record(interaction, reason=reason, now=ts)
             if finished is not None:
                 closed.append(finished)
         return closed

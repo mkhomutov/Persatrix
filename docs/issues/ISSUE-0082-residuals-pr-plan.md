@@ -211,7 +211,7 @@ Run [MT-MEMORY-GROUP-TENANT-001](../manual-tests/MT-MEMORY-GROUP-TENANT-001.md) 
 | 1 | R-2 causal attribution store, dormant | `feature/v0315-issue0124-attribution-store` | ✅ Merged | [#844](https://github.com/mkhomutov/Persatrix/pull/844) | `5b740f84` |
 | 2 | R-2 re-stamp + end-to-end gate | `feature/v0315-issue0124-restamp` | ✅ Merged | [#845](https://github.com/mkhomutov/Persatrix/pull/845) | `48b4a558` |
 | 3 | R-1 + [ISSUE-0131](ISSUE-0131-derived-memory-has-no-speaker-attribution.md) scope key `(principal, speaker, scope)` + RFC 0020 §G amendment | `feature/v0315-issue0123-scope-key` | 🔀 PR open | [#846](https://github.com/mkhomutov/Persatrix/pull/846) | — |
-| 4 | R-1 close binding, reserve re-size (now × speakers), asymmetry cleanup | `feature/v0315-issue0123-close-path` | ⬜ Not started | — | — |
+| 4 | R-1 close binding (MUST exclude/tag the fanned closing turn from speaker projection + fact extraction — RFC 0020 §G stated exception), reserve re-size (now × speakers; until it lands a cost-trigger room fan over-commits the `1 + N` reserve), asymmetry cleanup | `feature/v0315-issue0123-close-path` | ⬜ Not started | — | — |
 | 5 | Live MT + closeout | `feature/v0315-issue0082-residuals-close` | ⬜ Not started | — | — |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ⏭ Deferred

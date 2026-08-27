@@ -182,6 +182,14 @@ async def close_interaction_on_notification(
     notified_wire_id = wire_interaction_id(event)
     to_close: list[Interaction] = []
     for record in records:
+        if record.replayed:
+            # PR #846 review: a replay-opened record belongs to the
+            # catch-up pass — its close is the pass-end
+            # ``REASON_CATCHUP_COMPLETE`` sweep, and a live closing turn
+            # must never land inside a flagged span (derivation is skipped
+            # for it wholesale, so the turn would be silently discarded
+            # and the close mislabelled).  Leave it to its own sweep.
+            continue
         if (
             notified_wire_id
             and record.wire_interaction_id
@@ -197,6 +205,17 @@ async def close_interaction_on_notification(
         to_close.append(record)
     if not to_close:
         return
+    if notified_wire_id:
+        # PR #846 review: restore the retired ingest path's wire-id
+        # backfill (the ``episode_routing`` stamp the direct append no
+        # longer routes through) — a blank-stamped record the tolerant
+        # conjunct admitted is being closed AS the notified conversation,
+        # so stamp it: the metered summary leases against this id
+        # (``summarize_close`` skips the lease on a blank id) and the
+        # persisted episode keeps the governance cross-reference.
+        for record in to_close:
+            if not record.wire_interaction_id:
+                record.wire_interaction_id = notified_wire_id
     # The closing message lands as the FINAL TURN OF EACH record to
     # close, then every one of them closes with the truthful cause —
     # the room fan (ISSUE-0123 part 3): since the ``(principal,
@@ -266,7 +285,12 @@ async def close_interaction_on_notification(
         # threads that lease off ``meter_close_summary``.  Marked on every
         # record the fan will close: each ``(principal, speaker)`` record
         # authors its own summary, and each of those draws its own lease
-        # (the reserve multiplier residuals PR 4 re-sizes).  The
+        # (the reserve multiplier residuals PR 4 re-sizes).  Interim
+        # consequence, stated (PR #846 review): on the COST trigger the
+        # residual hard-cap headroom is at most the old ``1 + N`` reserve
+        # by construction, so a multi-speaker room's ~N×S leases can
+        # over-commit it and late summaries degrade to the unavailable
+        # placeholder until the PR 4 re-size lands.  The
         # pre-ingest/post-close double-mark the per-event ingest needed is
         # gone with it — the direct append below cannot close a record, so
         # one mark on the live records covers the only path left.

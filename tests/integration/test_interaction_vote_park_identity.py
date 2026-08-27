@@ -41,6 +41,7 @@ from ._interaction_multi_turn_helpers import (
     GROUP_CHANNEL,
     all_episodes,
     channel_event,
+    discharge_vote,
     make_agent_with_clock,
 )
 from ._interaction_multi_turn_helpers import (
@@ -272,3 +273,87 @@ class TestLateDeliveryDefence:
         fresh = agent._interaction_tracker.get(SCOPE, speaker_id="alex")
         assert fresh is not None
         assert fresh.wire_interaction_id == "wire-C"
+
+    async def test_recordless_straggler_gets_no_retired_stamp(self):
+        """PR #846 review: a late wire-A straggler from a speaker with NO
+        open record must not mint a record stamped with the RETIRED id —
+        the next wire-B message would close it as a phantom 1-turn
+        "ended" episode (plus a summariser call).  The fresh record stays
+        blank-stamped (tolerant) and lives by the room's own boundaries."""
+        agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
+        await agent._store_event_episode(
+            channel_event(
+                "topic B", wire_id="wire-B",
+                prev_id="wire-A", prev_trigger="end_votes",
+            ),
+            [],
+        )
+        # Straggler from robin, who never spoke under wire-B.
+        await agent._store_event_episode(
+            channel_event("late from A", wire_id="wire-A", sender="robin"), [],
+        )
+        straggler = agent._interaction_tracker.get(SCOPE, speaker_id="robin")
+        assert straggler is not None
+        assert straggler.wire_interaction_id == "", (
+            "a sibling names wire-A as its predecessor — the retired id "
+            "must not be stamped onto the fresh record"
+        )
+        await agent._store_event_episode(
+            channel_event("more B", wire_id="wire-B", prev_id="wire-A"), [],
+        )
+        assert await all_episodes(agent) == [], "no phantom episode row"
+        survivor = agent._interaction_tracker.get(SCOPE, speaker_id="robin")
+        assert survivor is not None
+        assert survivor.is_open
+
+
+@pytest.mark.asyncio
+class TestDischargeFanAdmission:
+    """PR #846 review — the end-vote discharge fan admits per record by
+    wire id, anchored on the conversation the vote judged complete (the
+    id frozen at park time): a sibling stamped with a successor id
+    survives, and the parked record's own inline close no longer aborts
+    the fan Go's quorum will never run for this voter."""
+
+    async def test_discharge_skips_sibling_stamped_with_other_wire(self):
+        agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
+        await agent._store_event_episode(
+            channel_event("topic A", wire_id="wire-A"), [],
+        )
+        await agent._store_event_episode(
+            channel_event("wrap it up?", wire_id="wire-A"), [vote()],
+        )
+        # A successor conversation's record from another speaker — the
+        # mixed state a straggler-parked vote can meet at discharge time.
+        successor = agent._interaction_tracker.add_turn(SCOPE, speaker_id="robin")
+        successor.wire_interaction_id = "wire-B"
+        await discharge_vote(agent)
+        assert agent._interaction_tracker.get(SCOPE, speaker_id="alex") is None
+        survivor = agent._interaction_tracker.get(SCOPE, speaker_id="robin")
+        assert survivor is not None and survivor.is_open, (
+            "a sibling stamped with a successor wire id must survive the fan"
+        )
+        assert _close_reasons(await all_episodes(agent)) == [REASON_STRUCTURAL]
+
+    async def test_discharge_fans_siblings_when_parked_record_closed(self):
+        agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
+        await agent._store_event_episode(
+            channel_event("robin's point", wire_id="wire-A", sender="robin"), [],
+        )
+        await agent._store_event_episode(
+            channel_event("wrap it up?", wire_id="wire-A"), [vote()],
+        )
+        parked = agent._interaction_tracker.get(SCOPE, speaker_id="alex")
+        assert parked is not None
+        # The parked record closes inline (cap / idle) between decide and
+        # publish — its fate says nothing about the siblings.
+        agent._interaction_tracker.close_record(
+            parked, reason=REASON_STRUCTURAL,
+        )
+        await discharge_vote(agent)
+        assert agent._interaction_tracker.records_for_scope(SCOPE) == [], (
+            "the fan must still close the siblings — Go's quorum fan "
+            "excludes this voter, so nothing else ever would"
+        )
+        episodes = await all_episodes(agent)
+        assert _close_reasons(episodes) == [REASON_STRUCTURAL]
