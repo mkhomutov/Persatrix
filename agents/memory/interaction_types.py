@@ -150,6 +150,19 @@ class Interaction:
     # other close path (human channels, end-vote, idle, cost ceiling)
     # byte-for-byte on the unleased pre-4b-ii summariser call.
     meter_close_summary: bool = False
+    # PR #846 review — the ``meter_close_summary`` pattern for the two
+    # CONVERSATION-level close effects: the RFC 0020 §H auto-reflect tick
+    # and the DM relationship bump (``record_closed_interaction``).  Since
+    # the ``(principal, speaker, scope)`` re-key a room close fans over N
+    # records, and both effects firing per RECORD inflated their unit from
+    # conversations to records (a 6-member room ticked the reflect counter
+    # 5× per close; a principal-split DM bumped the same peer twice).
+    # ``persist_fanned_closes`` clears this on every record after the
+    # first, and ``finalize_closed_interaction`` gates both effects on it,
+    # so one close event carries them exactly once.  Per-record closes
+    # (idle, the inline cap) keep the default — each is its own event.
+    # In-memory only, never persisted.
+    conversation_lead: bool = True
 
     @property
     def turn_count(self) -> int:

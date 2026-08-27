@@ -34,6 +34,7 @@ from agents.memory.interactions import (
 )
 from agents.persona_runtime.summarize_close import SUMMARIZATION_MAX_OUTPUT_TOKENS
 from agents.persona_types import AgentEvent, EventType
+from agents.principal_id import principal_scope
 from agents.tools.registry import clear_registry
 
 from ._summarize_close_helpers import (
@@ -305,3 +306,82 @@ def test_extract_peer_self_dm_returns_none():
     peer, peer_type = extract_peer_from_interaction("agent", interaction)
     assert peer is None
     assert peer_type == "agent"
+
+
+@pytest.mark.asyncio
+class TestConversationLevelEffectsFirePerCloseEvent:
+    """PR #846 review — the finalize's two conversation-level effects
+    (the RFC 0020 §H auto-reflect tick, the DM relationship bump) fire
+    once per CLOSE EVENT: a room-close fan of N records designates one
+    ``conversation_lead``, so neither effect inflates by room size."""
+
+    async def test_room_close_ticks_reflect_counter_once(self):
+        agent = await make_agent()
+        for speaker in ("alice", "bob", "cara"):
+            await agent._store_event_episode(AgentEvent(
+                event_type=EventType.CHANNEL_MESSAGE,
+                payload={"content": f"hi from {speaker}",
+                         "channel_type": "group"},
+                channel_id="group:planning",
+                sender_id=speaker,
+            ), [])
+
+        ticks = 0
+        real_increment = agent._episodic_memory.increment_interaction_count
+
+        async def counting_increment():
+            nonlocal ticks
+            ticks += 1
+            await real_increment()
+
+        agent._episodic_memory.increment_interaction_count = counting_increment
+        end = AgentEvent(
+            event_type=EventType.CHANNEL_MESSAGE,
+            payload={"content": "wrapping up", "channel_type": "group"},
+            channel_id="group:planning",
+            sender_id="alice",
+            metadata={"chat_end": True},
+        )
+        await agent._store_event_episode(end, [])
+        await drain(agent)
+
+        assert ticks == 1, (
+            "one room close is one conversation — the reflect counter "
+            "must not tick once per (principal, speaker) record"
+        )
+
+    async def test_principal_split_dm_close_bumps_relationship_once(self):
+        agent = await make_agent()
+        peer = "human-pal"
+        # The same DM peer under two tenants → two records, one scope
+        # (the ISSUE-0123 principal axis).
+        for principal in ("alice-person", "bob-person"):
+            with principal_scope(principal):
+                await agent._store_event_episode(AgentEvent(
+                    event_type=EventType.CHANNEL_MESSAGE,
+                    payload={"content": f"hello as {principal}"},
+                    sender_id=peer,
+                ), [])
+
+        bumps: list[dict] = []
+        real_record = agent._memory_ns.relationship.record_interaction
+
+        async def counting_record(**kwargs):
+            bumps.append(kwargs)
+            return await real_record(**kwargs)
+
+        agent._memory_ns.relationship.record_interaction = counting_record
+        end = AgentEvent(
+            event_type=EventType.CHANNEL_MESSAGE,
+            payload={"content": "bye"},
+            sender_id=peer,
+            metadata={"chat_end": True},
+        )
+        await agent._store_event_episode(end, [])
+        await drain(agent)
+
+        assert len(bumps) == 1, (
+            "one DM conversation ending must bump the peer relationship "
+            "once, however many principals split its records"
+        )
+        assert bumps[0]["other_id"] == peer

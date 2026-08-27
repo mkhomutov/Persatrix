@@ -54,8 +54,17 @@ async def persist_fanned_closes(
     record gets its own ``try`` so a failure is logged with the
     identity of the record that owned it and the fan keeps persisting
     the siblings.
+
+    The fan also designates the FIRST record the close event's
+    ``conversation_lead`` (PR #846 review): one room close is ONE
+    conversation ending, so the RFC 0020 §H auto-reflect tick and the
+    DM relationship bump — both gated on the flag in
+    ``finalize_closed_interaction`` — fire once per event, not once per
+    ``(principal, speaker)`` record.
     """
-    for interaction in closed_records:
+    for index, interaction in enumerate(closed_records):
+        if index:
+            interaction.conversation_lead = False
         try:
             await persist(interaction)
         except Exception:

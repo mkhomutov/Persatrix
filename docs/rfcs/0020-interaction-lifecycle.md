@@ -253,6 +253,8 @@ The coherence trade is deliberate and stated: a persona's close-derived memory o
 
 This is a behavioral improvement: today, an agent in a busy channel hits the reflection threshold from raw message volume rather than from genuinely new contexts. After this RFC, the threshold tracks distinct conversational arcs.
 
+**Amendment 2026-08-28 (the §G re-key's unit, PR #846 review):** since a room now holds one record per `(principal, speaker)`, a room-wide close fans over N records — but the reflect counter (and the DM relationship bump, `record_closed_interaction`) stays **per close event**, not per record: the fan designates one `conversation_lead` record to carry both, so the §H threshold keeps tracking conversational arcs rather than inflating by room size. Per-record closes (idle, the inline max-turns cap) each count as their own event, as before.
+
 ### I. Backfill and Migration
 
 **Existing rows.** Episodes already in production agent databases stay untouched. The four new columns are NULL for them. They are recallable via FTS5 and vector search (RFC 0008) at the same priority they have today.

@@ -146,11 +146,19 @@ async def finalize_closed_interaction(
                     "(interaction_id=%s)",
                     agent_id, interaction.interaction_id, exc_info=True,
                 )
-        await record_closed_interaction(
-            memory_ns, agent_id, interaction, summary, summary_failed,
-            session_id=session_id,
-        )
-        await on_finalized()
+        # PR #846 review: the relationship bump and the auto-reflect tick
+        # are CONVERSATION-level effects — a room-close fan runs this
+        # finalize once per ``(principal, speaker)`` record, so only the
+        # close event's designated lead record carries them (the flag is
+        # cleared on followers by ``persist_fanned_closes``); per-record
+        # closes (idle, the inline cap) keep the default and count as
+        # their own events.
+        if interaction.conversation_lead:
+            await record_closed_interaction(
+                memory_ns, agent_id, interaction, summary, summary_failed,
+                session_id=session_id,
+            )
+            await on_finalized()
     except Exception:
         logger.warning(
             "Background summary finalisation failed for agent %s "
