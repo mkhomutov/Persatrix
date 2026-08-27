@@ -284,13 +284,14 @@ async def close_interaction_on_notification(
         # cap the PR 4a reserve was carved from — ``summarize_close.py``
         # threads that lease off ``meter_close_summary``.  Marked on every
         # record the fan will close: each ``(principal, speaker)`` record
-        # authors its own summary, and each of those draws its own lease
-        # (the reserve multiplier residuals PR 4 re-sizes).  Interim
-        # consequence, stated (PR #846 review): on the COST trigger the
-        # residual hard-cap headroom is at most the old ``1 + N`` reserve
-        # by construction, so a multi-speaker room's ~N×S leases can
-        # over-commit it and late summaries degrade to the unavailable
-        # placeholder until the PR 4 re-size lands.  The
+        # authors its own summary, and each draws its own lease against
+        # the reserve — re-sized ``1 + N`` → ``1 + N×max(1, N−1)`` for
+        # exactly this fan (``synthesis_reserve.go``, pulled forward from
+        # residuals PR 4 at the PR #846 review), so the soft trigger holds
+        # back per-record headroom.  Stated residuals: a human speaker
+        # split across principals adds records past the roster bound, and
+        # the half-cap clamp still trades close funding for discussion
+        # survival when it bites.  The
         # pre-ingest/post-close double-mark the per-event ingest needed is
         # gone with it — the direct append below cannot close a record, so
         # one mark on the live records covers the only path left.

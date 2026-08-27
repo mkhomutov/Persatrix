@@ -417,10 +417,12 @@ func TestAutonomousAcceptance_NoRunawayUnderAdversarialRoster(t *testing.T) {
 // fail-closed wallet would otherwise cause: without the reserve, the close
 // artifacts would be the calls the cap swallows.
 func TestAutonomousAcceptance_CloseByBudgetHonoursRosterScaledReserve(t *testing.T) {
-	const cap = int64(40_000)
-	// channelSize 3 → reserve (1+3)×3500 = 14 000 (unclamped), soft = 26 000.
+	const cap = int64(60_000)
+	// channelSize 3 → reserve (1 + 3×2)×3500 = 24 500 (unclamped; the v0.3.15
+	// re-key sizing — each member closes one record per speaker it heard, so
+	// the fan draws up to N×(N−1) metered summaries), soft = 35 500.
 	soft := wallet.SynthesisSoftBudgetTokens(cap, len(acceptanceRoster))
-	require.Equal(t, int64(26_000), soft, "the leg's arithmetic rides the published reserve sizing")
+	require.Equal(t, int64(35_500), soft, "the leg's arithmetic rides the published reserve sizing")
 	router, w, disp, _, ch, reader := acceptanceHarness(t, 100 /* out of reach */, cap)
 
 	// Convene + opening turn (uncapped, §B), minting the capped interaction.
@@ -470,11 +472,16 @@ func TestAutonomousAcceptance_CloseByBudgetHonoursRosterScaledReserve(t *testing
 			"the truthful cost cause rides the notification — the OQ #6 metering key")
 	}
 
-	// …then one metered RFC 0020 summary per persona (the N of `1 + N`) — the
-	// exact calls a reserve sized "for two" would have denied on this roster.
+	// …then the re-key's full summary fan — each member closes one record per
+	// speaker it heard (N−1 = 2 in this roster), and EVERY record's metered
+	// summary leases: N×(N−1) = 6 calls the pre-re-key `1 + N` reserve could
+	// not have funded at this cap.
 	for _, member := range acceptanceRoster {
-		require.NotNilf(t, acquireLease(t, w, member, openID, 2_000, 1_024).GetGrant(),
-			"persona %s's close summary must survive the budget-exhausted close", member)
+		for record := 0; record < len(acceptanceRoster)-1; record++ {
+			require.NotNilf(t, acquireLease(t, w, member, openID, 2_000, 1_024).GetGrant(),
+				"persona %s's close summary for record %d must survive the "+
+					"budget-exhausted close", member, record)
+		}
 	}
 
 	spend := w.InteractionSpend(openID)

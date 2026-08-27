@@ -239,7 +239,11 @@ the correct shape.
 > 2026-08-26 — **the key landed** (v0.3.15 residuals **PR 3**, this PR). Parts 1
 > and 3 of the proposed fix ship here; part 2 (binding the record's own frozen
 > principal around the close pipeline) and part 4 (the reserve re-size) are
-> PR 4's, as planned. What landed: `Interaction.principal_id` /
+> PR 4's, as planned. *Amended 2026-08-28*: part 4's reserve re-size was
+> **pulled forward into this PR** at review — `1 + N` → `1 + N×max(1, N−1)`
+> in `synthesis_reserve.go`, since the fan's per-record metered leases made
+> the linear reserve arithmetically over-committed on the cost trigger for
+> rosters ≥ ~4; PR 4 keeps the close binding and asymmetry cleanup. What landed: `Interaction.principal_id` /
 > `Interaction.speaker_id` frozen at open on the `session_id` footing, the
 > tracker keyed by the tuple `(principal, speaker, scope)` — one dimension more
 > than this issue proposed, per Phase 0b — and the room-wide close fan over
