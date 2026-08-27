@@ -45,13 +45,16 @@ import logging
 import pytest
 
 from agents.clock import FrozenClock
-from agents.memory.boundary_detectors import REASON_MAX_TURNS
-from agents.memory.interactions import scope_for_dm
+from agents.memory.boundary_detectors import REASON_MAX_TURNS, REASON_STRUCTURAL
+from agents.memory.interactions import scope_for_dm, scope_for_group
 from agents.persona_types import AgentEvent, EventType
 from agents.tools.registry import clear_registry
 
 from ._interaction_multi_turn_helpers import (
+    GROUP_CHANNEL,
     all_episodes,
+    channel_event,
+    close_reasons,
     make_agent_with_clock,
 )
 
@@ -118,6 +121,33 @@ class TestMaxTurnsCapMultiTurnPath:
         # Scope popped — a subsequent event would open a fresh
         # interaction (RFC 0020 §C "do not reopen").
         assert agent._interaction_tracker.get(scope, speaker_id=peer) is None
+
+    async def test_cap_close_on_session_end_still_fans_siblings(self):
+        """v0.3.15 PR 3 review fix: the cap-th turn and a ``chat_end``
+        flag can ride the SAME event.  The inline cap close used to
+        early-return past the session-end room fan, leaving every
+        sibling ``(principal, speaker)`` record open to be relabelled
+        ``idle_gap`` an idle window later.  The cap's own close stands
+        for the sender's record (truthful ``max_turns``); the fan still
+        closes the siblings structurally in the same step."""
+        agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
+        agent._interaction_tracker._max_turns = 2
+        scope = scope_for_group(GROUP_CHANNEL)
+        await agent._store_event_episode(channel_event("hi", sender="alex"), [])
+        await agent._store_event_episode(channel_event("hey", sender="robin"), [])
+        # alex's SECOND turn is the cap-th turn AND carries the session end.
+        end = channel_event("done here", sender="alex")
+        end.metadata["chat_end"] = True
+        await agent._store_event_episode(end, [])
+
+        assert agent._interaction_tracker.records_for_scope(scope) == [], (
+            "the session-end fan must close the sibling records the cap "
+            "close never touched"
+        )
+        episodes = await all_episodes(agent)
+        assert sorted(close_reasons(episodes)) == sorted(
+            [REASON_MAX_TURNS, REASON_STRUCTURAL],
+        ), "alex closes by the cap, robin by the room's structural fan"
 
 
 # ─── Repeated cap cycles across a long conversation ─────────────

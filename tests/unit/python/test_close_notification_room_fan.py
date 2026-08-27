@@ -66,6 +66,28 @@ class TestCloseNotificationRoomFan:
             )
             assert record.turn_count == 2
 
+    async def test_room_fan_stamps_one_instant_across_records(self):
+        """One room event, one timestamp (v0.3.15 PR 3 review fix): the
+        fan reads the clock seam ONCE and hands every ``append_turn`` /
+        ``close_record`` the same instant — per-call reads gave the one
+        closing message N different ``Turn.at`` values (and N different
+        ``closed_at``) across sibling records."""
+        ticks = iter(range(1_000, 2_000))
+        tracker = InteractionTracker(clock=lambda: float(next(ticks)))
+        for speaker in ("iron-fox", "nova-sparrow", "ember-persona"):
+            tracker.add_turn("group:planning", speaker_id=speaker)
+        agent = _CloseNotificationAgent(tracker)
+
+        await close_interaction_on_notification(agent, _notification_event())
+
+        assert len(agent.persisted) == 3
+        assert len({i.turns[-1].at for i in agent.persisted}) == 1, (
+            "the one closing message must carry ONE timestamp on every record"
+        )
+        assert len({i.closed_at for i in agent.persisted}) == 1, (
+            "one room event, one close instant"
+        )
+
     async def test_cap_crossing_final_turn_closes_once_with_truthful_cause(self):
         """The cap corner under the room fan: the notification's final
         turn lands via a DIRECT per-record append (``append_turn``),

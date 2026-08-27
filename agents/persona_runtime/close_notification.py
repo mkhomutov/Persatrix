@@ -85,6 +85,7 @@ from ..channel_wire_metadata import (
     wire_interaction_id,
 )
 from ..memory.boundary_detectors import REASON_COST, REASON_STRUCTURAL
+from .close_path import persist_fanned_closes
 from .turn_payload import build_turn_payload
 
 if TYPE_CHECKING:
@@ -282,6 +283,12 @@ async def close_interaction_on_notification(
     # ``redelivery`` alongside a bounded trigger, so this is producer-hardening
     # in the same tolerant-wire-reader posture as the trigger allowlist above,
     # never a change to the live path.
+    # One room event, one instant (v0.3.15 PR 3 review fix): read the
+    # tracker's clock seam ONCE and hand every appended final turn and
+    # every ``closed_at`` below the same timestamp — per-call reads gave
+    # the one closing message N different ``Turn.at`` values across the
+    # sibling records.
+    now = agent._interaction_tracker.now()
     if event.sender_id != agent.agent_id and not (redelivery and bounded):
         # The same envelope shape the per-event path builds — one
         # builder, two consumers (:mod:`.turn_payload`).  ``[]`` actions:
@@ -291,8 +298,18 @@ async def close_interaction_on_notification(
             event, f"Event: {event.event_type.value} → Actions: []",
         )
         for record in to_close:
-            agent._interaction_tracker.append_turn(record, turn)
+            agent._interaction_tracker.append_turn(record, turn, now=now)
+    # Close every admitted record first, then persist each behind its
+    # own guard (``persist_fanned_closes``, the same review fix): the
+    # closes pop the records from the open map, so one persist failure
+    # must not discard the siblings.
+    closed_records: list[Interaction] = []
     for record in to_close:
-        closed = agent._interaction_tracker.close_record(record, reason=reason)
+        closed = agent._interaction_tracker.close_record(
+            record, reason=reason, now=now,
+        )
         if closed is not None:
-            await agent._persist_closed_interaction(closed)
+            closed_records.append(closed)
+    await persist_fanned_closes(
+        closed_records, agent._persist_closed_interaction,
+    )

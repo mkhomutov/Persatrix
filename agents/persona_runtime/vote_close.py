@@ -84,6 +84,7 @@ from uuid import uuid4
 from ..memory.boundary_detectors import REASON_STRUCTURAL
 from ..memory.scopes import is_group_scope
 from ..persona_types import VOTE_CLOSE_TOKEN_KEY
+from .close_path import persist_fanned_closes
 from .interaction_boundary import matching_end_votes
 
 if TYPE_CHECKING:
@@ -278,5 +279,9 @@ async def discharge_end_vote_publish(
         if closed_records:
             if wire_id:
                 agent._vote_closed_wire_ids[pending.scope] = wire_id
-            for closed in closed_records:
-                await agent._persist_closed_interaction(closed)
+            # Guarded per record (v0.3.15 PR 3 review fix): the fan
+            # popped every record before the first persist ran — one
+            # failure must not discard the siblings.
+            await persist_fanned_closes(
+                closed_records, agent._persist_closed_interaction,
+            )

@@ -44,7 +44,7 @@ from ..memory.interactions import (
 )
 from ..persona_types import EventType
 from ..session_id import current_session_id
-from .close_path import close_replayed_scopes, persist_closed_interaction
+from .close_path import close_replayed_scopes, persist_closed_interaction, persist_fanned_closes
 from .finalize_close import drain_pending_summary_tasks
 from .interaction_boundary import is_session_end_event, stale_close_reason
 from .turn_payload import build_turn_payload
@@ -404,26 +404,26 @@ class _EpisodeRoutingMixin:
             interaction.predecessor_wire_id = str(
                 event.metadata.get("previous_interaction_id", "") or "",
             )
-        # PR-3 review #12: ``add_turn`` now closes inline when the MaxTurns
-        # cap fires.  The returned interaction is the cap-closed one (with
-        # ``close_reason == REASON_MAX_TURNS``); persist it immediately so the
-        # closed-interaction episode row exists before the next event arrives.
-        # A subsequent session-end on the same scope would no-op (scope
-        # already popped), which is the correct contract — the cap closure
-        # takes precedence over a same-event structural close.
+        # PR-3 review #12: ``add_turn`` closes inline when the MaxTurns cap
+        # fires; persist the cap-closed record immediately.  The cap takes
+        # precedence over a same-event structural close for THIS record only
+        # (``close_scope`` below no-ops on it — already popped): a session
+        # end riding the cap-th turn still fans over the re-key's sibling
+        # records, or they leak open to an ``idle_gap`` relabel (v0.3.15
+        # PR 3 review fix).  A cap-closed record parks no vote close.
         if not interaction.is_open:
             await self._persist_closed_interaction(interaction)
-            return
         if is_session_end_event(event):
             # A session end is a ROOM event (ISSUE-0123 part 3): fan the
             # structural close over every ``(principal, speaker)`` record
-            # open in the scope, not just this sender's, or the siblings
-            # leak open until idle relabels the ended conversation.
-            for closed in self._interaction_tracker.close_scope(
-                scope, reason=REASON_STRUCTURAL,
-            ):
-                await self._persist_closed_interaction(closed)
-        else:
+            # open in the scope, or the siblings leak open until idle
+            # relabels the ended conversation.  Guarded per record — the
+            # fan pops ALL its records before the first persist runs.
+            await persist_fanned_closes(
+                self._interaction_tracker.close_scope(scope, reason=REASON_STRUCTURAL),
+                self._persist_closed_interaction,
+            )
+        elif interaction.is_open:
             # PR 607 finding 5: a vote close is PARKED for the executor's
             # publish-outcome callback (:mod:`.vote_close` owns the gates).
             park_end_vote_close(

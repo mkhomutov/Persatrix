@@ -202,6 +202,11 @@ class InteractionTracker:
 
     # ── Read-only accessors (tests + janitor wiring) ──
 
+    def now(self) -> float:
+        """One clock-seam read — a room fan stamps its N appends and
+        closes with a SINGLE instant (one room event, one timestamp)."""
+        return self._clock()
+
     def open_scopes(self) -> list[str]:
         """Distinct scopes with at least one open record, insertion order.
 
@@ -209,10 +214,7 @@ class InteractionTracker:
         several records; callers that need the records use
         :meth:`records_for_scope` / :meth:`open_records`.
         """
-        seen: dict[str, None] = {}
-        for interaction in self._open.values():
-            seen.setdefault(interaction.scope, None)
-        return list(seen)
+        return list(dict.fromkeys(i.scope for i in self._open.values()))
 
     def open_records(self) -> list[Interaction]:
         """Every open record, insertion order (all scopes, all keys)."""

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from typing import TYPE_CHECKING, Any
 
 from ..memory.boundary_detectors import REASON_CATCHUP_COMPLETE
@@ -30,7 +30,41 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["close_replayed_scopes", "persist_closed_interaction"]
+__all__ = [
+    "close_replayed_scopes",
+    "persist_closed_interaction",
+    "persist_fanned_closes",
+]
+
+
+async def persist_fanned_closes(
+    closed_records: Iterable[Interaction],
+    persist: Callable[[Interaction], Awaitable[None]],
+) -> None:
+    """Persist every record a room-wide close fan just closed — one
+    guard per record (v0.3.15 PR 3 review fix).
+
+    The ISSUE-0123 part 3 fans (``close_scope`` at the session-end,
+    cost, end-vote and close-notification sites) pop ALL their records
+    from the tracker before the first persist runs, so an exception
+    escaping one record's persist would silently discard the rest —
+    closed, gone from the open map, and with no idle sweep left to find
+    them.  Mirror of the per-iteration guard on the idle-flush loops
+    (``episode_routing._store_event_episode``, PR-3 review #13): each
+    record gets its own ``try`` so a failure is logged with the
+    identity of the record that owned it and the fan keeps persisting
+    the siblings.
+    """
+    for interaction in closed_records:
+        try:
+            await persist(interaction)
+        except Exception:
+            logger.warning(
+                "Failed to persist fanned close (scope=%s, "
+                "interaction_id=%s, close_reason=%s)",
+                interaction.scope, interaction.interaction_id,
+                interaction.close_reason, exc_info=True,
+            )
 
 
 async def persist_closed_interaction(
