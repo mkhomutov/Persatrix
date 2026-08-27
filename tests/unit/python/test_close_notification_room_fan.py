@@ -22,7 +22,6 @@ import time
 
 from agents.memory.boundary_detectors import (
     REASON_STRUCTURAL,
-    MaxTurnsDetector,
     default_detectors,
 )
 from agents.memory.interactions import InteractionTracker
@@ -98,12 +97,12 @@ class TestCloseNotificationRoomFan:
         pre-fan pin exercised, is no longer driven by this path). What
         that pin actually protected still holds and is asserted:
         exactly ONE persisted record, no second close layered on it."""
-        tracker = InteractionTracker(
-            detectors=(
-                *default_detectors(),
-                MaxTurnsDetector(max_turns=2),
-            ),
-        )
+        # ``default_detectors(max_turns=2)`` — never an APPENDED second
+        # ``MaxTurnsDetector``: the constructor caches the FIRST one, so
+        # the appended shape left the default cap bound and this pin
+        # vacuous (PR #846 review).
+        tracker = InteractionTracker(detectors=default_detectors(max_turns=2))
+        assert tracker._max_turns == 2, "the low cap actually bound"
         tracker.add_turn("group:planning", now=time.time())
         agent = _CloseNotificationAgent(tracker)
 

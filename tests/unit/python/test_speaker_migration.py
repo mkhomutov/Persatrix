@@ -97,14 +97,25 @@ class TestFreshSchemaMigration:
 class TestUpgradeFromV17Baseline:
     async def test_pre_existing_rows_stay_null(self):
         """The no-backfill contract: rows derived before the speaker
-        axis existed read NULL — never a guessed speaker."""
+        axis existed read NULL — never a guessed speaker.
+
+        The v17 baseline is built by applying the REAL migrations capped
+        at v17 (the retention suite's MIGRATIONS-patching precedent) —
+        not by ``DROP COLUMN``, a SQLite ≥ 3.35 feature the migration
+        itself deliberately does not require (PR #846 review): the old
+        shape made this contract unverifiable exactly on the platforms
+        the guard skeleton exists for."""
         db = await aiosqlite.connect(":memory:")
         try:
-            # A v17-shaped baseline: apply everything, drop the column
-            # by rebuilding a minimal pre-v18 pair of tiers.
-            await _apply_migrations(db)
-            await db.execute("ALTER TABLE episodes DROP COLUMN speaker_id")
-            await db.execute("ALTER TABLE facts DROP COLUMN speaker_id")
+            original = list(MIGRATIONS)
+            MIGRATIONS[:] = [m for m in MIGRATIONS if m[0] <= 17]
+            try:
+                await _apply_migrations(db)
+            finally:
+                MIGRATIONS[:] = original
+            assert "speaker_id" not in await _columns(db, "episodes"), (
+                "the capped apply must yield a genuine pre-v18 baseline"
+            )
             await db.execute(
                 "INSERT INTO episodes (id, agent_id, summary, created_at) "
                 "VALUES ('ep-1', 'a1', 'pre-v18 row', 1000.0)",

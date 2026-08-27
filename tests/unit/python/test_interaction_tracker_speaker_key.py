@@ -27,7 +27,6 @@ from __future__ import annotations
 
 from agents.memory.boundary_detectors import (
     REASON_STRUCTURAL,
-    MaxTurnsDetector,
     default_detectors,
 )
 from agents.memory.interactions import InteractionTracker
@@ -232,10 +231,14 @@ class TestAppendTurnAndProjections:
     def test_append_turn_does_not_enforce_the_cap(self):
         """The one deliberate cap exemption: the only caller closes the
         record in the same step, and the room close's truthful trigger
-        outranks the cap label (``append_turn``'s contract)."""
-        tracker = InteractionTracker(
-            detectors=(*default_detectors(), MaxTurnsDetector(max_turns=2)),
-        )
+        outranks the cap label (``append_turn``'s contract).
+
+        ``default_detectors(max_turns=2)`` — never an APPENDED second
+        ``MaxTurnsDetector``: the constructor caches the FIRST one in the
+        chain, so the appended shape left the default cap bound and this
+        pin vacuous (PR #846 review)."""
+        tracker = InteractionTracker(detectors=default_detectors(max_turns=2))
+        assert tracker._max_turns == 2, "the low cap actually bound"
         record = tracker.add_turn(_SCOPE, speaker_id="iron-fox")
         tracker.append_turn(record, {"summary": "final"})
         assert record.turn_count == 2

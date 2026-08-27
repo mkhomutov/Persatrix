@@ -42,8 +42,10 @@ scope/session/principal, so an index would be dead weight (the v13
 later, its PR adds the index it needs.
 
 Idempotency / partial-restore safety: identical skeleton to v7/v13 —
-``ALTER TABLE ... ADD COLUMN`` predates ``IF NOT EXISTS`` in
-SQLite < 3.35, so a ``sqlite_master`` existence check short-circuits a
+``ALTER TABLE ... ADD COLUMN`` has no ``IF NOT EXISTS`` form in ANY
+SQLite version (3.35 added ``DROP COLUMN``, not that — PR #846 review
+corrected this file's earlier claim), so the guard is load-bearing
+everywhere: a ``sqlite_master`` existence check short-circuits a
 partial-restore baseline missing a table, and a ``PRAGMA table_info``
 column check makes a crash-replay a clean no-op.
 """

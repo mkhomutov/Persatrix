@@ -424,20 +424,17 @@ class TestBoundedCloseMetersTheSummary:
         with the truthful cost cause, and it IS marked for the metered
         summary — the mark is set on the live record before the append,
         so no path can persist an unmetered bounded close."""
-        from agents.memory.boundary_detectors import (
-            MaxTurnsDetector,
-            default_detectors,
-        )
+        from agents.memory.boundary_detectors import default_detectors
         from agents.persona_runtime.close_notification import (
             close_interaction_on_notification,
         )
 
-        tracker = InteractionTracker(
-            detectors=(
-                *default_detectors(),
-                MaxTurnsDetector(max_turns=2),
-            ),
-        )
+        # ``default_detectors(max_turns=2)`` — never an APPENDED second
+        # ``MaxTurnsDetector``: the constructor caches the FIRST one, so
+        # the appended shape left the default cap bound and this pin
+        # vacuous (PR #846 review).
+        tracker = InteractionTracker(detectors=default_detectors(max_turns=2))
+        assert tracker._max_turns == 2, "the low cap actually bound"
         tracker.add_turn("group:planning", now=time.time())
         agent = _CloseNotificationAgent(tracker)  # non-sender recipient
 

@@ -334,7 +334,8 @@ MIGRATIONS: list[tuple[int, str, str]] = [
     # the model-elected attribution the Phase 0b scope lock forbids, so
     # unlike v11's ``DEFAULT 'local'`` there is no correct backfill.
     # Same callable-handler rationale as v7/v13 — ``ALTER TABLE ... ADD
-    # COLUMN`` is not idempotent before SQLite 3.35.  Lives in
+    # COLUMN`` has no ``IF NOT EXISTS`` form in any SQLite version, so
+    # re-running it needs the handler's guard.  Lives in
     # :mod:`agents.memory._migration_speaker`.  See
     # docs/issues/ISSUE-0131-derived-memory-has-no-speaker-attribution.md.
     (
