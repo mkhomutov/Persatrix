@@ -85,7 +85,9 @@ from ..channel_wire_metadata import (
     wire_interaction_id,
 )
 from ..memory.boundary_detectors import REASON_COST, REASON_STRUCTURAL
+from ..memory.scopes import is_thread_scope
 from .close_path import persist_fanned_closes
+from .interaction_boundary import wire_admits_record
 from .turn_payload import build_turn_payload
 
 if TYPE_CHECKING:
@@ -103,7 +105,7 @@ if TYPE_CHECKING:
         def _scope_for_multi_turn_event(self, event: AgentEvent) -> str | None: ...
         async def _persist_closed_interaction(
             self, interaction: Interaction,
-        ) -> None: ...
+        ) -> bool | None: ...
 
 
 logger = logging.getLogger(__name__)
@@ -146,16 +148,16 @@ async def close_interaction_on_notification(
     # flush would then close it as idle mid-arc, and the close at the
     # bottom would pop the fresh 1-turn successor — the fabrication
     # this function exists to prevent, one branch over.
+    # Grouped per scope like the ingest-path flush (PR #846 re-review):
+    # one conversation going quiet is one ``conversation_lead``, and each
+    # persist is guarded with the failing record's identity.
+    expired_by_scope: dict[str, list[Interaction]] = {}
     for expired in agent._interaction_tracker.idle_check():
-        try:
-            await agent._persist_closed_interaction(expired)
-        except Exception:
-            logger.warning(
-                "Failed to flush idle interaction before close "
-                "notification (scope=%s, interaction_id=%s)",
-                expired.scope, expired.interaction_id,
-                exc_info=True,
-            )
+        expired_by_scope.setdefault(expired.scope, []).append(expired)
+    for expired_records in expired_by_scope.values():
+        await persist_fanned_closes(
+            expired_records, agent._persist_closed_interaction,
+        )
     records = agent._interaction_tracker.records_for_scope(scope)
     if not records:
         # Already idled out (or never tracked): the close stands
@@ -190,11 +192,7 @@ async def close_interaction_on_notification(
             # for it wholesale, so the turn would be silently discarded
             # and the close mislabelled).  Leave it to its own sweep.
             continue
-        if (
-            notified_wire_id
-            and record.wire_interaction_id
-            and notified_wire_id != record.wire_interaction_id
-        ):
+        if not wire_admits_record(record, notified_wire_id):
             logger.info(
                 "Agent %s: close notification for interaction %s found %s "
                 "open on scope %s; stale straggler, leaving that record",
@@ -205,14 +203,17 @@ async def close_interaction_on_notification(
         to_close.append(record)
     if not to_close:
         return
-    if notified_wire_id:
+    if notified_wire_id and not is_thread_scope(scope):
         # PR #846 review: restore the retired ingest path's wire-id
         # backfill (the ``episode_routing`` stamp the direct append no
         # longer routes through) — a blank-stamped record the tolerant
         # conjunct admitted is being closed AS the notified conversation,
         # so stamp it: the metered summary leases against this id
         # (``summarize_close`` skips the lease on a blank id) and the
-        # persisted episode keeps the governance cross-reference.
+        # persisted episode keeps the governance cross-reference.  Thread
+        # scopes are wire-UNTRACKED (PR 607 review finding 1) — a threaded
+        # notification carries the parent FLOOR's id, which must not become
+        # the thread episode's governance cross-reference (re-review).
         for record in to_close:
             if not record.wire_interaction_id:
                 record.wire_interaction_id = notified_wire_id

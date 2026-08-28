@@ -315,24 +315,53 @@ class TestSessionEndFanGuards:
     fan (the chat_end signal never recurs — an aborted fan leaks every
     sibling to an idle relabel)."""
 
-    async def test_session_end_from_recordless_sender_mints_no_record(self):
+    async def test_session_end_from_recordless_sender_lands_in_own_record(self):
+        """PR #846 re-review: the terminator is a REAL turn of a real
+        speaker — a recordless closer's chat_end opens their record like
+        any other turn (the earlier no-mint branch silently DISCARDED
+        the closing message's content on a principal mismatch)."""
         agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
         scope = scope_for_group(GROUP_CHANNEL)
         await agent._store_event_episode(channel_event("hi", sender="alex"), [])
         await agent._store_event_episode(channel_event("hey", sender="robin"), [])
-        end = channel_event("ending this", sender="carol")
+        end = channel_event("ship the Tuesday plan", sender="carol")
         end.metadata["chat_end"] = True
         await agent._store_event_episode(end, [])
 
         assert agent._interaction_tracker.records_for_scope(scope) == []
         episodes = await all_episodes(agent)
-        assert len(episodes) == 2, (
-            "one episode per existing speaker — no fabricated record for "
-            "the recordless closer's terminator"
+        assert len(episodes) == 3, (
+            "one episode per speaker INCLUDING the closer's terminator "
+            "fragment — its content must survive"
         )
         assert sorted(close_reasons(episodes)) == [
-            REASON_STRUCTURAL, REASON_STRUCTURAL,
+            REASON_STRUCTURAL, REASON_STRUCTURAL, REASON_STRUCTURAL,
         ]
+
+    async def test_session_end_straggler_spares_the_live_conversation(self):
+        """PR #846 re-review: the session-end fan is wire-anchored — a
+        retired conversation's straggler terminator ends only ITS OWN
+        records, never the live successor's."""
+        agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
+        scope = scope_for_group(GROUP_CHANNEL)
+        await agent._store_event_episode(
+            channel_event(
+                "topic B", sender="alex", wire_id="wire-B",
+                prev_id="wire-A", prev_trigger="end_votes",
+            ),
+            [],
+        )
+        # A wire-A straggler carrying the retired conversation's chat_end.
+        end = channel_event("wrapping A up", sender="robin", wire_id="wire-A")
+        end.metadata["chat_end"] = True
+        await agent._store_event_episode(end, [])
+
+        survivor = agent._interaction_tracker.get(scope, speaker_id="alex")
+        assert survivor is not None and survivor.is_open, (
+            "the live wire-B record must survive a wire-A terminator"
+        )
+        episodes = await all_episodes(agent)
+        assert len(episodes) == 1, "only robin's wire-A fragment closed"
 
     async def test_cap_close_persist_failure_still_fans_session_end(
         self, monkeypatch,
@@ -343,7 +372,13 @@ class TestSessionEndFanGuards:
         await agent._store_event_episode(channel_event("hi", sender="alex"), [])
         await agent._store_event_episode(channel_event("hey", sender="robin"), [])
 
+        # PR #846 re-review (F12): a RECORDING spy — the scope-empty assert
+        # alone could not tell "closed and persisted" from "closed and
+        # silently discarded".
+        attempts: list = []
+
         async def _boom(interaction):
+            attempts.append(interaction)
             raise RuntimeError("simulated phase-1 failure")
 
         monkeypatch.setattr(agent, "_persist_closed_interaction", _boom)
@@ -356,3 +391,9 @@ class TestSessionEndFanGuards:
             "a raising cap-close persist must not abort the session-end "
             "fan — the siblings still close structurally"
         )
+        assert [
+            (i.speaker_id, i.close_reason) for i in attempts
+        ] == [
+            ("alex", REASON_MAX_TURNS),
+            ("robin", REASON_STRUCTURAL),
+        ], "every close reached the persist seam, cap first, then the fan"

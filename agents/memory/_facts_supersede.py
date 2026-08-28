@@ -46,12 +46,15 @@ cannot reach across to another non-legacy session.  Two cases:
 Equal-timestamp ties break in favour of the later arrival (the row
 being inserted), matching the PR 5a deferred-item resolution from
 :doc:`docs/rfcs/0026-pr-plan.md <../../docs/rfcs/0026-pr-plan>`.
-The choice is deterministic at the storage layer — the production
-extractor (PR 2) uses ``interaction.closed_at`` which is monotonic
-per-agent, so equal timestamps are unreachable in the production
-write path; the rule exists for fixtures, the OQ #9 operator-seeded
-path, and the future RFC 0013 erasure backfill where the precondition
-may not hold.
+The choice is deterministic at the storage layer.  Since the v0.3.15
+``(principal, speaker, scope)`` re-key (PR #846), equal timestamps ARE
+reachable in the production write path: a room-wide close stamps every
+sibling record with ONE ``closed_at`` instant, so two siblings
+asserting the same ``(subject, predicate)`` tie here and the later
+Phase-2 arrival wins — an ordering the RFC 0020 §G amendment states,
+and which the residuals PR 4 speaker binding is expected to
+disambiguate properly.  The rule also still covers fixtures, the OQ #9
+operator-seeded path, and the future RFC 0013 erasure backfill.
 """
 
 from __future__ import annotations

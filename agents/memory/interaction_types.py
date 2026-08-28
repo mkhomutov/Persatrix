@@ -107,7 +107,12 @@ class Interaction:
     # ``episodes.speaker_id`` / ``facts.speaker_id`` columns (migration
     # 17 → 18) are a PROJECTION of this key half — attribution is sound
     # only because the record is single-speaker by construction, never
-    # model-elected (Phase 0b scope lock).
+    # model-elected (Phase 0b scope lock) — with ONE stated exception
+    # (RFC 0020 §G amendment, PR #846): the room-close fan lands the
+    # closing message as the final turn of every sibling record, a
+    # foreign-speaker turn discriminable by its payload ``sender`` ≠ this
+    # ``speaker_id``, which the residuals PR 4 binding MUST exclude or
+    # tag before projecting the column or extracting facts.
     principal_id: str = DEFAULT_PRINCIPAL_ID
     speaker_id: str = ""
     # ISSUE-0130: True when this interaction was OPENED by an on-startup
@@ -150,18 +155,17 @@ class Interaction:
     # other close path (human channels, end-vote, idle, cost ceiling)
     # byte-for-byte on the unleased pre-4b-ii summariser call.
     meter_close_summary: bool = False
-    # PR #846 review — the ``meter_close_summary`` pattern for the two
-    # CONVERSATION-level close effects: the RFC 0020 §H auto-reflect tick
-    # and the DM relationship bump (``record_closed_interaction``).  Since
-    # the ``(principal, speaker, scope)`` re-key a room close fans over N
-    # records, and both effects firing per RECORD inflated their unit from
-    # conversations to records (a 6-member room ticked the reflect counter
-    # 5× per close; a principal-split DM bumped the same peer twice).
-    # ``persist_fanned_closes`` clears this on every record after the
-    # first, and ``finalize_closed_interaction`` gates both effects on it,
-    # so one close event carries them exactly once.  Per-record closes
-    # (idle, the inline cap) keep the default — each is its own event.
-    # In-memory only, never persisted.
+    # PR #846 — the ``meter_close_summary`` pattern for the two
+    # CONVERSATION-level close effects (the RFC 0020 §H auto-reflect tick
+    # and the DM relationship bump), which the re-key would otherwise fire
+    # once per RECORD instead of once per close event.  Designated by
+    # ``close_path.persist_fanned_closes``: the lead is the first record of
+    # a close event's fan whose Phase-1 persist actually scheduled Phase 2
+    # (re-review — a positional first-record rule forfeited the effects
+    # whenever the first persist bailed); every fan routes through it,
+    # including the idle sweep (grouped per scope) and the stale-rotation
+    # splits (grouped per retired wire id).  ``finalize_closed_interaction``
+    # gates both effects on the flag.  In-memory only, never persisted.
     conversation_lead: bool = True
 
     @property

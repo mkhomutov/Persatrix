@@ -84,7 +84,7 @@ from uuid import uuid4
 from ..memory.boundary_detectors import REASON_STRUCTURAL
 from ..memory.scopes import is_group_scope
 from ..persona_types import VOTE_CLOSE_TOKEN_KEY
-from .close_path import persist_fanned_closes
+from .close_path import fan_close_scope
 from .interaction_boundary import matching_end_votes
 
 if TYPE_CHECKING:
@@ -280,32 +280,20 @@ async def discharge_end_vote_publish(
             # that close already told the truth; do not close a successor.
             return
         # The vote judged the CONVERSATION complete, and an end-vote
-        # quorum is a room event (ISSUE-0123 part 3) — fan the close over
-        # every record of THAT conversation.  Per-record admission
-        # (PR #846 review, the close_notification conjunct): skip records
-        # positively stamped with a DIFFERENT wire id — a successor opened
-        # after a rotation the park predates — so a stale vote never
-        # mislabels a live discussion "ended".  A blank anchor admits only
-        # blank-stamped records for the same reason.  One room event, one
-        # instant: a single clock read stamps every close.
-        now = agent._interaction_tracker.now()
-        closed_records: list[Interaction] = []
-        for record in agent._interaction_tracker.records_for_scope(
-            pending.scope,
-        ):
-            if record.wire_interaction_id and record.wire_interaction_id != anchor:
-                continue
-            closed = agent._interaction_tracker.close_record(
-                record, reason=REASON_STRUCTURAL, now=now,
-            )
-            if closed is not None:
-                closed_records.append(closed)
-        if closed_records:
-            if anchor:
-                agent._vote_closed_wire_ids[pending.scope] = anchor
-            # Guarded per record (v0.3.15 PR 3 review fix): the fan
-            # popped every record before the first persist ran — one
-            # failure must not discard the siblings.
-            await persist_fanned_closes(
-                closed_records, agent._persist_closed_interaction,
-            )
+        # quorum is a room event (ISSUE-0123 part 3) — closed by the owned
+        # fan (``close_path.fan_close_scope``, PR #846 re-review): replay
+        # skip, one instant, guarded persists, ``conversation_lead``.
+        # Per-record admission skips records positively stamped with a
+        # DIFFERENT wire id — a successor opened after a rotation the park
+        # predates — so a stale vote never mislabels a live discussion
+        # "ended"; ``blank_anchor_admits=False`` is the vote-only strict
+        # half: an unanchored park must not bury positively-identified
+        # conversations either.
+        closed_records = await fan_close_scope(
+            agent._interaction_tracker, pending.scope,
+            reason=REASON_STRUCTURAL,
+            persist=agent._persist_closed_interaction,
+            wire_anchor=anchor, blank_anchor_admits=False,
+        )
+        if closed_records and anchor:
+            agent._vote_closed_wire_ids[pending.scope] = anchor

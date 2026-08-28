@@ -9,7 +9,10 @@ under the project's 500-line review-friendly cap (see
 WHO said it — the ISSUE-0131 defect.  The v0.3.15 residuals PR 3 keys
 the :class:`~agents.memory.interaction_tracker.InteractionTracker`
 ``(principal, speaker, scope)``, so every close-derived record is
-single-speaker by construction; this migration adds the column that
+single-speaker by construction — with the ONE stated exception of the
+room-fan's closing turn (RFC 0020 §G amendment: its payload ``sender``
+≠ the record's ``speaker_id``, and residuals PR 4 MUST exclude or tag
+it before projecting this column); this migration adds the column that
 key half is PROJECTED onto at close.  Only the two tiers a group close
 writes gain it (``store_episode`` → ``store_extracted_facts``) — the
 ``interactions`` TABLE is the relationship-tier log, written only by

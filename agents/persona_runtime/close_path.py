@@ -23,15 +23,18 @@ from ..memory.interactions import (
 )
 from .classification import normalize_for_stamp
 from .finalize_close import finalize_closed_interaction
+from .interaction_boundary import wire_admits_record
 
 if TYPE_CHECKING:
     from ..llm_client import LLMClient
+    from ..memory.boundary_detectors import CloseReason
     from . import MemoryNamespace
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "close_replayed_scopes",
+    "fan_close_scope",
     "persist_closed_interaction",
     "persist_fanned_closes",
 ]
@@ -39,41 +42,99 @@ __all__ = [
 
 async def persist_fanned_closes(
     closed_records: Iterable[Interaction],
-    persist: Callable[[Interaction], Awaitable[None]],
-) -> None:
-    """Persist every record a room-wide close fan just closed — one
-    guard per record (v0.3.15 PR 3 review fix).
+    persist: Callable[[Interaction], Awaitable[bool | None]],
+    *,
+    designate_lead: bool = True,
+) -> bool:
+    """Persist every record a close fan just closed — one guard per
+    record (v0.3.15 PR 3 review fix), and designate the close event's
+    ``conversation_lead``.
 
-    The ISSUE-0123 part 3 fans (``close_scope`` at the session-end,
-    cost, end-vote and close-notification sites) pop ALL their records
-    from the tracker before the first persist runs, so an exception
-    escaping one record's persist would silently discard the rest —
-    closed, gone from the open map, and with no idle sweep left to find
-    them.  Mirror of the per-iteration guard on the idle-flush loops
-    (``episode_routing._store_event_episode``, PR-3 review #13): each
-    record gets its own ``try`` so a failure is logged with the
-    identity of the record that owned it and the fan keeps persisting
-    the siblings.
+    The fans pop ALL their records from the tracker before the first
+    persist runs, so an exception escaping one record's persist would
+    silently discard the rest — each record gets its own ``try`` so a
+    failure is logged with the failing record's identity and the fan
+    keeps persisting the siblings.
 
-    The fan also designates the FIRST record the close event's
-    ``conversation_lead`` (PR #846 review): one room close is ONE
-    conversation ending, so the RFC 0020 §H auto-reflect tick and the
-    DM relationship bump — both gated on the flag in
-    ``finalize_closed_interaction`` — fire once per event, not once per
-    ``(principal, speaker)`` record.
+    Lead designation (PR #846 re-review — replaces the positional
+    first-record rule, which forfeited the event's effects whenever the
+    first persist bailed): the lead is the first record whose persist
+    ACTUALLY SCHEDULED Phase 2 (``persist_closed_interaction`` returns
+    ``False`` from its early exits; a spy returning ``None`` counts as
+    scheduled).  One room close is one conversation ending, so the
+    RFC 0020 §H auto-reflect tick and the DM relationship bump — both
+    gated on the flag in ``finalize_closed_interaction`` — fire once
+    per close event.  ``designate_lead=False`` marks every record a
+    follower (the caller's same-event earlier fan already carries the
+    lead).  Returns whether a lead was designated.  Stated residual:
+    the lead's own Phase-2 finalize failing past scheduling forfeits
+    the event's effects — the same failure surface as its summary.
     """
-    for index, interaction in enumerate(closed_records):
-        if index:
-            interaction.conversation_lead = False
+    lead_pending = designate_lead
+    designated = False
+    for interaction in closed_records:
+        interaction.conversation_lead = lead_pending
         try:
-            await persist(interaction)
+            scheduled = await persist(interaction)
         except Exception:
+            interaction.conversation_lead = False
             logger.warning(
                 "Failed to persist fanned close (scope=%s, "
                 "interaction_id=%s, close_reason=%s)",
                 interaction.scope, interaction.interaction_id,
                 interaction.close_reason, exc_info=True,
             )
+            continue
+        if scheduled is False:
+            interaction.conversation_lead = False
+            continue
+        if lead_pending:
+            lead_pending = False
+            designated = True
+    return designated
+
+
+async def fan_close_scope(
+    tracker: InteractionTracker,
+    scope: str,
+    *,
+    reason: CloseReason,
+    persist: Callable[[Interaction], Awaitable[bool | None]],
+    wire_anchor: str = "",
+    blank_anchor_admits: bool = True,
+    designate_lead: bool = True,
+) -> list[Interaction]:
+    """THE room-close fan — one owner for every room event's close
+    (PR #846 re-review: four sites had drifted into four spellings,
+    with each review round patching a subset).  In one place:
+
+    * replay-opened records are left to the catch-up sweep
+      (``REASON_CATCHUP_COMPLETE``), never closed by a room event;
+    * per-record wire-id admission
+      (:func:`.interaction_boundary.wire_admits_record`) — a record
+      positively stamped with a different conversation's id survives;
+    * one room event, one instant — a single clock read stamps every
+      ``closed_at``;
+    * guarded persists with lead designation
+      (:func:`persist_fanned_closes`).
+
+    Returns the closed records in insertion order (empty when nothing
+    was admitted).
+    """
+    now = tracker.now()
+    closed: list[Interaction] = []
+    for record in tracker.records_for_scope(scope):
+        if record.replayed:
+            continue
+        if not wire_admits_record(
+            record, wire_anchor, blank_anchor_admits=blank_anchor_admits,
+        ):
+            continue
+        finished = tracker.close_record(record, reason=reason, now=now)
+        if finished is not None:
+            closed.append(finished)
+    await persist_fanned_closes(closed, persist, designate_lead=designate_lead)
+    return closed
 
 
 async def persist_closed_interaction(
@@ -85,8 +146,13 @@ async def persist_closed_interaction(
     interaction: Interaction,
     pending_tasks: set[asyncio.Task[None]],
     on_finalized: Callable[[], Awaitable[None]],
-) -> None:
+) -> bool:
     """RFC 0020 PR 4 close-path orchestrator (two-phase write).
+
+    Returns ``True`` iff the Phase-2 finalize task was scheduled — the
+    signal :func:`persist_fanned_closes` uses to let the close event's
+    ``conversation_lead`` fall to a sibling when this record cannot
+    carry it (PR #846 re-review).
 
     Phase 1 (sync, the caller holds ``_lock``): INSERT a ``closing`` row with
     :data:`SUMMARY_PENDING_TEXT` so the row exists before any LLM call and the
@@ -95,7 +161,7 @@ async def persist_closed_interaction(
     lock.  See PR #229 deep-review Must-Fix #1 + Should-Fix #1.
     """
     if interaction.turn_count == 0:
-        return  # idle no-turn scope — nothing to persist.
+        return False  # idle no-turn scope — nothing to persist.
     if interaction.replayed:
         # ISSUE-0130 — the leak-stopper.  This interaction was OPENED by an
         # on-startup catch-up replay, whose turns carry no principal: the
@@ -130,7 +196,7 @@ async def persist_closed_interaction(
             agent_id, interaction.scope, interaction.interaction_id,
             interaction.turn_count,
         )
-        return
+        return False
     # PR-4 review #25 (slice 7): dead ``or llm_client is None`` clause removed;
     # the mixin annotation is now ``LLMClient`` (non-optional).
     if interaction.interaction_id is None:
@@ -139,7 +205,7 @@ async def persist_closed_interaction(
             "(scope=%s); skipping persistence",
             agent_id, interaction.scope,
         )
-        return
+        return False
     ctx: dict[str, Any] = {
         "scope": interaction.scope,
         "close_reason": interaction.close_reason,
@@ -193,7 +259,7 @@ async def persist_closed_interaction(
             "Failed to persist closed interaction for agent %s (scope=%s)",
             agent_id, interaction.scope, exc_info=True,
         )
-        return
+        return False
     # Phase 2: background summarise + finalise.  add_done_callback auto-cleans
     # the tracking set so references don't accumulate.
     task: asyncio.Task[None] = asyncio.create_task(
@@ -210,11 +276,12 @@ async def persist_closed_interaction(
     )
     pending_tasks.add(task)
     task.add_done_callback(pending_tasks.discard)
+    return True
 
 
 async def close_replayed_scopes(
     tracker: InteractionTracker,
-    persist: Callable[[Interaction], Awaitable[None]],
+    persist: Callable[[Interaction], Awaitable[bool | None]],
 ) -> int:
     """Close every scope the on-startup catch-up replay opened (ISSUE-0130).
 
