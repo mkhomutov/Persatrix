@@ -274,13 +274,12 @@ class TestLateDeliveryDefence:
         assert fresh is not None
         assert fresh.wire_interaction_id == "wire-C"
 
-    async def test_recordless_straggler_becomes_its_own_retired_fragment(self):
-        """PR #846 re-review: a late wire-A straggler from a speaker with
-        NO open record takes the HONEST retired stamp and is closed by
-        the next current-wire event as its own late fragment of
-        conversation A — content preserved and attributed to the right
-        conversation.  (Suppressing the stamp left an unclosable blank
-        record that later fans swept into the WRONG conversation.)"""
+    async def test_recordless_straggler_gets_no_retired_stamp(self):
+        """PR #846 review: a late wire-A straggler from a speaker with NO
+        open record must not mint a record stamped with the RETIRED id —
+        the next wire-B message would close it as a phantom 1-turn
+        "ended" episode (plus a summariser call).  The fresh record stays
+        blank-stamped (tolerant) and lives by the room's own boundaries."""
         agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
         await agent._store_event_episode(
             channel_event(
@@ -295,20 +294,15 @@ class TestLateDeliveryDefence:
         )
         straggler = agent._interaction_tracker.get(SCOPE, speaker_id="robin")
         assert straggler is not None
-        assert straggler.wire_interaction_id == "wire-A", (
-            "the fragment carries its own conversation's id — honest "
-            "attribution, never a blank the fans cannot address"
+        assert straggler.wire_interaction_id == "", (
+            "a sibling names wire-A as its predecessor — the retired id "
+            "must not be stamped onto the fresh record"
         )
         await agent._store_event_episode(
             channel_event("more B", wire_id="wire-B", prev_id="wire-A"), [],
         )
-        episodes = await all_episodes(agent)
-        assert len(episodes) == 1, (
-            "the straggler closes as its own 1-turn fragment of wire-A"
-        )
-        assert agent._interaction_tracker.get(SCOPE, speaker_id="robin") is None
-        # The live wire-B record is untouched by the fragment's close.
-        survivor = agent._interaction_tracker.get(SCOPE, speaker_id="alex")
+        assert await all_episodes(agent) == [], "no phantom episode row"
+        survivor = agent._interaction_tracker.get(SCOPE, speaker_id="robin")
         assert survivor is not None
         assert survivor.is_open
 
@@ -340,49 +334,6 @@ class TestDischargeFanAdmission:
             "a sibling stamped with a successor wire id must survive the fan"
         )
         assert _close_reasons(await all_episodes(agent)) == [REASON_STRUCTURAL]
-
-    async def test_blank_anchor_stale_park_closes_nothing(self):
-        """PR #846 re-review pin: an UNANCHORED park (the vote's record
-        was never wire-stamped) whose parked record then closed inline
-        must abort the discharge — nothing ties the remaining records to
-        the conversation the vote judged, and a blank-anchor fan must
-        never bury positively-identified conversations."""
-        agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
-        # No wire id anywhere: the park's anchor is blank.
-        await agent._store_event_episode(
-            channel_event("robin's point", sender="robin"), [],
-        )
-        await agent._store_event_episode(
-            channel_event("wrap it up?"), [vote()],
-        )
-        parked = agent._interaction_tracker.get(SCOPE, speaker_id="alex")
-        assert parked is not None
-        agent._interaction_tracker.close_record(
-            parked, reason=REASON_STRUCTURAL,
-        )
-        await discharge_vote(agent)
-        survivor = agent._interaction_tracker.get(SCOPE, speaker_id="robin")
-        assert survivor is not None and survivor.is_open, (
-            "blank anchor + parked record gone: the discharge must close "
-            "nothing"
-        )
-
-    async def test_blank_anchor_never_buries_stamped_records(self):
-        """PR #846 re-review pin: even with the parked record still open,
-        a blank-anchor discharge admits only blank-stamped records — a
-        positively-identified (stamped) sibling survives."""
-        agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
-        await agent._store_event_episode(
-            channel_event("wrap it up?"), [vote()],  # alex, unstamped
-        )
-        stamped = agent._interaction_tracker.add_turn(SCOPE, speaker_id="robin")
-        stamped.wire_interaction_id = "wire-B"
-        await discharge_vote(agent)
-        assert agent._interaction_tracker.get(SCOPE, speaker_id="alex") is None
-        survivor = agent._interaction_tracker.get(SCOPE, speaker_id="robin")
-        assert survivor is not None and survivor.is_open, (
-            "a stamped record must survive an unanchored vote's fan"
-        )
 
     async def test_discharge_fans_siblings_when_parked_record_closed(self):
         agent = await make_agent_with_clock(FrozenClock(at=1_000.0))

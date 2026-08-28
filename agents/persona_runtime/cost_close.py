@@ -20,7 +20,7 @@ from ..channel_wire_metadata import wire_interaction_id
 from ..memory.boundary_detectors import REASON_COST
 from ..memory.interactions import SCOPE_TICK, is_thread_scope
 from ..persona_types import EventType
-from .close_path import fan_close_scope
+from .close_path import persist_fanned_closes
 
 if TYPE_CHECKING:
     from ..memory.interactions import Interaction, InteractionTracker
@@ -35,7 +35,7 @@ if TYPE_CHECKING:
         def _scope_for_multi_turn_event(self, event: AgentEvent) -> str | None: ...
         async def _persist_closed_interaction(
             self, interaction: Interaction,
-        ) -> bool | None: ...
+        ) -> None: ...
 
 
 __all__ = ["close_interaction_on_cost"]
@@ -85,34 +85,47 @@ async def close_interaction_on_cost(
     # review fix): the fan pops ALL its records before the first persist
     # runs, so one failure must not discard the siblings.
     #
-    # Closed by the owned fan (``close_path.fan_close_scope`` — PR #846
-    # re-review): per-record wire-id admission anchored on the EVENT's
-    # wire id (the budget that was exhausted; this close fires from the
-    # LLM-error path, before the stale fan has reconciled the scope), the
-    # replay skip, one instant, guarded persists and the
-    # ``conversation_lead`` designation, all in one place.  A blank on
+    # Per-record wire-id admission (PR #846 review, the close_notification
+    # conjunct): the exhausted budget is the EVENT's wire interaction's —
+    # this close fires from the LLM-error path, before the stale fan has
+    # reconciled the scope against this event — so a record positively
+    # stamped with a DIFFERENT id (a successor conversation with a fresh
+    # budget) is skipped, not buried under ``REASON_COST``.  A blank on
     # either side keeps the scope-keyed behaviour (thread scopes are
-    # wire-untracked; ticks and legacy traffic carry no id).
+    # wire-untracked; ticks and legacy traffic carry no id).  One room
+    # event, one instant: a single clock read stamps every close.
     anchor = "" if is_thread_scope(scope) else wire_interaction_id(event)
-    await fan_close_scope(
-        agent._interaction_tracker, scope, reason=REASON_COST,
-        persist=agent._persist_closed_interaction, wire_anchor=anchor,
-    )
+    now = agent._interaction_tracker.now()
+    closed_records: list[Interaction] = []
+    for record in agent._interaction_tracker.records_for_scope(scope):
+        if (
+            anchor
+            and record.wire_interaction_id
+            and record.wire_interaction_id != anchor
+        ):
+            continue
+        closed = agent._interaction_tracker.close_record(
+            record, reason=REASON_COST, now=now,
+        )
+        if closed is not None:
+            closed_records.append(closed)
     # OQ #6 metering interaction (deep-review follow-up): this LOCAL Layer-1
     # cost close does NOT set ``meter_close_summary``, so the summaries it
     # triggers run UNLEASED — unlike the orchestrator's bounded cost close,
     # whose close notification marks the records (close_notification.py). The
     # two race: a member whose own compose lease is denied
     # (``interaction_budget_exhausted``) self-closes here before the
-    # orchestrator notification lands, and its summaries escape the cap — up
-    # to one per speaker-record since the re-key (PR #846 re-review: the
-    # pre-re-key wording said "by one"), on the very close-by-budget path
-    # OQ #6 targets. This is DELIBERATELY not metered here yet: the wallet
-    # reserve is still dark (AcquireLease enforces only the hard cap —
-    # synthesis_reserve.go), so metering these summaries against the
-    # already-exhausted cap would DENY them and degrade real artifacts to
+    # orchestrator notification lands, and its summary escapes the cap, so the
+    # RFC 0052 ``1 + N`` accounting can undercount by one on the very
+    # close-by-budget path OQ #6 targets. This is DELIBERATELY not metered
+    # here yet: the wallet reserve is still dark (AcquireLease enforces only
+    # the hard cap — synthesis_reserve.go), so metering this summary against
+    # the already-exhausted cap would DENY it and degrade a real artifact to
     # the ``[interaction summary unavailable]`` placeholder — strictly worse
-    # than unleased-but-real summaries while spend-counting gates nothing.
+    # than an unleased-but-real summary while spend-counting gates nothing.
     # The under-count is only load-bearing once reserve enforcement lands; the
     # RFC 0052 PR-plan "Deep-review follow-ups" tracks metering this path
     # together with that enforcement.
+    await persist_fanned_closes(
+        closed_records, agent._persist_closed_interaction,
+    )

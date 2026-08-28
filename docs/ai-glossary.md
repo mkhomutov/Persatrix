@@ -825,28 +825,6 @@ Terms from [RFC 0020](rfcs/0020-interaction-lifecycle.md) PR 4.
   summary-unavailable sentinel. Invoked from `on_tick` at most once
   per `JANITOR_INTERVAL_SEC` (default 300 s).
 
-### Room-close fan
-- **Aliases:** "room-wide close", "the fan".
-- **Disallowed:** "broadcast close".
-- **Definition:** The close of **every** admitted record open in a
-  scope on one room event (`close_path.fan_close_scope`, the single
-  owner since PR #846): replay-opened records are skipped, per-record
-  wire-id admission spares other conversations' records, one clock
-  read stamps every `closed_at`, and each persist is guarded. Room
-  events: session end, end-vote quorum, the RFC 0052 bounded/cost
-  close, the close notification. Idle stays per record.
-
-### Conversation lead
-- **Aliases:** "`conversation_lead`", "lead record".
-- **Disallowed:** "primary record".
-- **Definition:** The one record of a close event's fan that carries
-  the conversation-level effects — the RFC 0020 §H auto-reflect tick
-  and the DM relationship bump. Designated by
-  `close_path.persist_fanned_closes` as the first record whose
-  Phase-1 persist actually scheduled Phase 2; gated in
-  `finalize_closed_interaction`. See the RFC 0020 §H amendment
-  (2026-08-28).
-
 ## RFC 0052 — Autonomous Channels (PR 4b-i)
 
 Terms from [RFC 0052](rfcs/0052-autonomous-agent-channels.md) PR 4b-i,

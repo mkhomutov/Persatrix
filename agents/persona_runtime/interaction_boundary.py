@@ -296,35 +296,10 @@ def stale_close_reason(
     return None
 
 
-def wire_admits_record(
-    record: Interaction, anchor: str, *, blank_anchor_admits: bool = True,
-) -> bool:
-    """Per-record wire-id admission for the room-close fans (PR #846
-    re-review: ONE predicate, previously three divergent copies).
-
-    A record POSITIVELY stamped with a different id than a non-blank
-    ``anchor`` is never admitted — a successor (or predecessor)
-    conversation's record must not be closed by this event.  A blank
-    record admits under any anchor (the tolerant-wire-reader posture:
-    legacy producers and senderless traffic never stamp).  A blank
-    ``anchor`` admits everything when ``blank_anchor_admits`` (the
-    notification / cost / session-end posture — no id to compare keeps
-    the scope-keyed behaviour) and only blank records when not (the
-    vote-discharge posture: an unanchored stale park must never bury a
-    positively-identified conversation).
-    """
-    if not record.wire_interaction_id:
-        return True
-    if not anchor:
-        return blank_anchor_admits
-    return record.wire_interaction_id == anchor
-
-
 __all__ = [
     "is_session_end_event",
     "matching_end_votes",
     "stale_close_reason",
-    "wire_admits_record",
     "wire_rotation_close_reason",
     "wire_rotation_closes",
 ]

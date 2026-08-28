@@ -44,12 +44,7 @@ from ..memory.interactions import (
 )
 from ..persona_types import EventType
 from ..session_id import current_session_id
-from .close_path import (
-    close_replayed_scopes,
-    fan_close_scope,
-    persist_closed_interaction,
-    persist_fanned_closes,
-)
+from .close_path import close_replayed_scopes, persist_closed_interaction, persist_fanned_closes
 from .finalize_close import drain_pending_summary_tasks
 from .interaction_boundary import is_session_end_event, stale_close_reason
 from .turn_payload import build_turn_payload
@@ -164,19 +159,18 @@ class _EpisodeRoutingMixin:
         # the cross-scope janitor without waiting for PR 4.
         #
         # PR-3 review #13: the loop sits OUTSIDE the outer try below, with a
-        # per-record guard (``persist_fanned_closes`` logs the failing
-        # record's identity), so a flush failure never swallows the current
-        # event's processing.  Grouped per SCOPE (PR #846 re-review): the
-        # sweep uses one instant, so same-scope records idling out together
-        # are one conversation going quiet — one ``conversation_lead``, not
-        # one reflect tick / relationship bump per record.
-        idle_by_scope: dict[str, list[Interaction]] = {}
+        # per-iteration guard, so a flush failure logs the stale scope's own
+        # identity and never swallows the current event's processing.
         for closed in self._interaction_tracker.idle_check():
-            idle_by_scope.setdefault(closed.scope, []).append(closed)
-        for idle_records in idle_by_scope.values():
-            await persist_fanned_closes(
-                idle_records, self._persist_closed_interaction,
-            )
+            try:
+                await self._persist_closed_interaction(closed)
+            except Exception:
+                logger.warning(
+                    "Failed to flush idle interaction for agent %s "
+                    "(scope=%s, interaction_id=%s)",
+                    self.agent_id, closed.scope, closed.interaction_id,
+                    exc_info=True,
+                )
         try:
             if event.event_type in self._MULTI_TURN_EVENT_TYPES:
                 await self._handle_multi_turn_event(event, summary, ctx, actions)
@@ -335,12 +329,10 @@ class _EpisodeRoutingMixin:
         # ISSUE-0123 part 3: both boundaries are ROOM events and a re-keyed
         # room holds N records, so the check FANS — evaluated per record
         # because the inputs are per record (wire id, predecessor, replay
-        # flag).  Persists guarded per record (PR #846 review: a bare await
-        # raising here aborted the remaining splits AND the ingest), grouped
-        # per RETIRED CONVERSATION (the stamped wire id) for the
-        # ``conversation_lead`` — one event's sweep can retire records of
-        # several distinct conversations (re-review).
-        stale_by_wire: dict[str, list[Interaction]] = {}
+        # flag), closing every stale record, not just the current sender's.
+        # Persists guarded per record (PR #846 review): a bare await raising
+        # here aborted the remaining splits AND the current event's ingest.
+        stale_splits: list[Interaction] = []
         for record in self._interaction_tracker.records_for_scope(scope):
             stale_reason = stale_close_reason(record, event, wire_id=wire_id)
             if stale_reason is None:
@@ -349,11 +341,28 @@ class _EpisodeRoutingMixin:
                 record, reason=stale_reason,
             )
             if split is not None:
-                stale_by_wire.setdefault(
-                    split.wire_interaction_id, [],
-                ).append(split)
-        for splits in stale_by_wire.values():
-            await persist_fanned_closes(splits, self._persist_closed_interaction)
+                stale_splits.append(split)
+        await persist_fanned_closes(stale_splits, self._persist_closed_interaction)
+        # PR #846 review: a session end from a sender with NO open record in
+        # an ACTIVE scope must not mint a 1-turn record for the terminator —
+        # the fabricated "ended" row the close-notification no-open branch
+        # refuses to invent.  Fan the structural close over the existing
+        # records; the terminator goes unrecorded, like a notification on a
+        # scope its sender never spoke in.  An EMPTY scope keeps the
+        # pre-re-key shape (the terminator opens and closes its own
+        # single-turn record below).
+        if (
+            is_session_end_event(event)
+            and self._interaction_tracker.get(
+                scope, speaker_id=event.sender_id,
+            ) is None
+            and self._interaction_tracker.records_for_scope(scope)
+        ):
+            await persist_fanned_closes(
+                self._interaction_tracker.close_scope(scope, reason=REASON_STRUCTURAL),
+                self._persist_closed_interaction,
+            )
+            return
         interaction = self._interaction_tracker.add_turn(
             scope, payload=payload,
             session_id=self._active_write_session_id,
@@ -374,42 +383,43 @@ class _EpisodeRoutingMixin:
         # Stamp the wire id the interaction was opened under (first turn
         # that carries one wins) plus its known predecessor — the
         # late-delivery defence ``wire_rotation_closes`` compares against.
-        # A recordless straggler's fresh record takes its event's RETIRED
-        # id and is closed by the next current-wire event as its own late
-        # fragment of THAT conversation — the honest per-speaker outcome
-        # (PR #846 re-review: suppressing this stamp left an unclosable
-        # blank record that later fans swept into the WRONG conversation).
         if wire_id and interaction.is_open and not interaction.wire_interaction_id:
-            interaction.wire_interaction_id = wire_id
-            interaction.predecessor_wire_id = str(
-                event.metadata.get("previous_interaction_id", "") or "",
+            # PR #846 review: never stamp an id the scope has already
+            # rotated past — a sibling stamped with a successor names this
+            # id as its predecessor, so stamping would mark a
+            # straggler-opened record for the next rotation close (a
+            # phantom 1-turn episode).  Left blank, the record is tolerant
+            # and closes by the room's own boundaries instead.
+            superseded = any(
+                r.predecessor_wire_id == wire_id
+                for r in self._interaction_tracker.records_for_scope(scope)
+                if r is not interaction and r.wire_interaction_id
             )
+            if not superseded:
+                interaction.wire_interaction_id = wire_id
+                interaction.predecessor_wire_id = str(
+                    event.metadata.get("previous_interaction_id", "") or "",
+                )
         # PR-3 review #12: ``add_turn`` closes inline at the MaxTurns cap;
-        # persist immediately (guarded — a raise must not skip the fan
-        # below).  A cap-closed record parks no vote.  The cap close and a
-        # same-event session end are ONE close event: the fan designates a
-        # new ``conversation_lead`` only when the cap's persist carried
-        # none (PR #846 re-review — two calls minted two reflect ticks).
-        cap_lead = False
+        # persist immediately.  The cap outranks a same-event structural
+        # close for THIS record only (``close_scope`` no-ops on it): a
+        # session end riding the cap-th turn still fans the siblings
+        # (v0.3.15 PR 3 review fix).  A cap-closed record parks no vote.
         if not interaction.is_open:
-            cap_lead = await persist_fanned_closes(
+            # Guarded (PR #846 review): a raise here would skip the
+            # session-end fan below and leak siblings to an idle relabel.
+            await persist_fanned_closes(
                 (interaction,), self._persist_closed_interaction,
             )
         if is_session_end_event(event):
-            # A session end is a ROOM event (ISSUE-0123 part 3) — closed by
-            # the owned fan (replay skip, per-record wire admission, one
-            # instant, guarded persists).  Anchored on THIS event's wire id
-            # so a retired conversation's straggler terminator ends only
-            # ITS OWN records, never a live successor's (re-review).  The
-            # terminator itself already landed in its sender's record via
-            # ``add_turn`` — minted if absent: it is a real turn of a real
-            # speaker, the honest per-speaker fragment (re-review: the
-            # earlier no-mint branch silently DISCARDED its content on a
-            # principal mismatch).
-            await fan_close_scope(
-                self._interaction_tracker, scope, reason=REASON_STRUCTURAL,
-                persist=self._persist_closed_interaction,
-                wire_anchor=wire_id, designate_lead=not cap_lead,
+            # A session end is a ROOM event (ISSUE-0123 part 3): fan the
+            # structural close over every ``(principal, speaker)`` record
+            # open in the scope, or the siblings leak open until idle
+            # relabels the ended conversation.  Guarded per record — the
+            # fan pops ALL its records before the first persist runs.
+            await persist_fanned_closes(
+                self._interaction_tracker.close_scope(scope, reason=REASON_STRUCTURAL),
+                self._persist_closed_interaction,
             )
         elif interaction.is_open:
             # PR 607 finding 5: a vote close is PARKED for the executor's
@@ -419,18 +429,14 @@ class _EpisodeRoutingMixin:
                 actions=actions,
             )
 
-    async def _persist_closed_interaction(
-        self, interaction: Interaction,
-    ) -> bool | None:
+    async def _persist_closed_interaction(self, interaction: Interaction) -> None:
         """RFC 0020 PR 4 close-path orchestrator — see
         :func:`agents.persona_runtime.close_path.persist_closed_interaction`.
 
         Thin seam over the extracted two-phase write so this module stays
         under the file-size cap; tests patch / call this method directly.
-        Returns whether Phase 2 was scheduled (the lead-designation
-        signal — see :func:`close_path.persist_fanned_closes`).
         """
-        return await persist_closed_interaction(
+        await persist_closed_interaction(
             episodic=self._episodic_memory,
             llm_client=self._llm_client,
             memory_ns=self._memory_ns,
