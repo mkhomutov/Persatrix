@@ -37,10 +37,9 @@ makes group and thread scopes consistent with it.
 Room-wide closes (ISSUE-0123 part 3): a structural close, an end-vote
 quorum, the bounded/cost close and the close-notification turn are
 ROOM events, and a room now holds N records — :meth:`close_scope` is
-the fan that closes every open record in the scope, and
+the fan (see its docstring for the admission rules), and
 :meth:`append_turn` lands a room event's closing turn on each record
-before it.  Without the fan a room close would close one record and
-leak the rest open until idle.  Consequence, stated not discovered:
+before it.  Consequence, stated not discovered:
 the ``agent.interactions.closed[.by_<reason>]`` counters fire once per
 RECORD, so a room close increments them by N (see
 :mod:`.interaction_metrics`).
@@ -66,7 +65,7 @@ from .interaction_metrics import _emit_closed, _emit_opened
 from .interaction_types import Interaction, Turn
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
 
 __all__ = ["Clock", "InteractionTracker"]
 
@@ -84,10 +83,8 @@ class Clock(Protocol):
     """Zero-arg callable returning a wall-clock float (seconds).
 
     Naming collision: :class:`agents.clock.Clock` (RFC 0021 P1) is a
-    *different* Protocol on the same name (``now()`` / ``now_iso()``
-    methods, not a bare ``__call__``); a misimport is mypy-clean and
-    only fails at the call site — see :mod:`agents.clock` for the
-    aliasing plan.
+    DIFFERENT Protocol on the same name; a misimport is mypy-clean and
+    fails only at the call site — see :mod:`agents.clock`.
     """
 
     def __call__(self) -> float: ...
@@ -114,17 +111,11 @@ class InteractionTracker:
     interaction they append a turn and reset the idle timer (the timer
     state lives on the turn timestamp, not on a separate field).
 
-    Key resolution (uniform across :meth:`start` / :meth:`add_turn` /
-    :meth:`get` / :meth:`close`): ``principal_id=None`` resolves the
-    AMBIENT principal — the task-local
-    :func:`~agents.principal_id.principal_scope`, else the env
-    snapshot, else ``local`` — so every caller inside ``on_event``'s
-    request scope keys by the verified per-request principal without
-    threading it; an explicit value is normalised at the same boundary
-    the storage layer uses.  ``speaker_id=None`` / blank coerces to
-    ``""`` (no speaker).  Single-tenant deployments with senderless
-    scopes therefore collapse to one key per scope — exactly the
-    pre-v0.3.15 shape.
+    Key resolution is uniform across :meth:`start` / :meth:`add_turn` /
+    :meth:`get` / :meth:`close` and spelled out on :meth:`_key`:
+    ``principal_id=None`` is AMBIENT, ``speaker_id=None`` / blank is
+    ``""``.  Single-tenant deployments with senderless scopes collapse
+    to one key per scope — exactly the pre-v0.3.15 shape.
 
     Closing is invoked explicitly per record (:meth:`close` /
     :meth:`close_record`), room-wide (:meth:`close_scope` — the
@@ -391,11 +382,9 @@ class InteractionTracker:
         pair, and closing one of them leaks the rest open until idle
         (ISSUE-0123 part 3).
 
-        ``reason`` is keyword-required by design (PR-214 review fix)
-        and typed as :data:`CloseReason` (RFC 0020 PR 6 slice 2 #2) so
-        a typo is caught by mypy instead of silently mislabelling the
-        per-reason counter; callers must spell one of the ``REASON_*``
-        constants from :mod:`.boundary_detectors`.
+        ``reason`` is keyword-required and typed :data:`CloseReason`
+        so a typo is caught by mypy rather than mislabelling the
+        per-reason counter (PR-214 review fix).
         """
         interaction = self._open.get(self._key(scope, principal_id, speaker_id))
         if interaction is None:
@@ -436,6 +425,7 @@ class InteractionTracker:
         *,
         reason: CloseReason,
         now: float | None = None,
+        admit: Callable[[Interaction], bool] | None = None,
     ) -> list[Interaction]:
         """Close EVERY open record in ``scope`` — the room-wide fan.
 
@@ -450,16 +440,26 @@ class InteractionTracker:
         ``closed_at`` carries the same value.
 
         REPLAY-opened records are SKIPPED: a replayed span belongs to
-        the catch-up pass and its own ``REASON_CATCHUP_COMPLETE`` sweep,
-        so retiring it under a live room cause would both mislabel the
-        counter and steal it from :func:`close_replayed_scopes`.  The
-        exclusion lives here rather than in :meth:`close_record` —
-        that is the method the sweep closes them with.
+        the catch-up pass and its ``REASON_CATCHUP_COMPLETE`` sweep, so
+        a live room cause would mislabel the counter and steal it from
+        :func:`close_replayed_scopes`.  The exclusion lives here, not in
+        :meth:`close_record` — that is what the sweep closes them with.
+
+        ``admit`` is the caller's extra per-record rule (PR #846
+        review): the fans that close only PART of a scope — the
+        end-vote quorum and the bounded/cost close, which must not bury
+        a successor conversation — pass the shared
+        ``interaction_boundary.wire_admits_record`` conjunct here
+        rather than hand-rolling the read/filter/close loop, so the
+        ordering obligations have ONE owner.  ``None`` admits every
+        live record: a session-end close takes the whole room.
         """
         ts = now if now is not None else self._clock()
         closed: list[Interaction] = []
         for interaction in self.records_for_scope(scope):
             if interaction.replayed:
+                continue
+            if admit is not None and not admit(interaction):
                 continue
             finished = self.close_record(interaction, reason=reason, now=ts)
             if finished is not None:

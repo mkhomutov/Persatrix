@@ -86,6 +86,7 @@ from ..channel_wire_metadata import (
 )
 from ..memory.boundary_detectors import REASON_COST, REASON_STRUCTURAL
 from .close_path import persist_fanned_closes
+from .interaction_boundary import wire_admits_record
 from .turn_payload import build_turn_payload
 
 if TYPE_CHECKING:
@@ -190,11 +191,13 @@ async def close_interaction_on_notification(
             # for it wholesale, so the turn would be silently discarded
             # and the close mislabelled).  Leave it to its own sweep.
             continue
-        if (
-            notified_wire_id
-            and record.wire_interaction_id
-            and notified_wire_id != record.wire_interaction_id
-        ):
+        # The shared conjunct (PR #846 review) — tolerant on a blank
+        # anchor, this fan's long-standing posture; the end-vote fan is
+        # the strict caller.  This dispatch keeps its own loop rather
+        # than ``close_scope``'s ``admit``: it needs the admitted set
+        # BEFORE any close, to mark metering, backfill the wire id and
+        # land the closing turn on each record.
+        if not wire_admits_record(record, notified_wire_id):
             logger.info(
                 "Agent %s: close notification for interaction %s found %s "
                 "open on scope %s; stale straggler, leaving that record",

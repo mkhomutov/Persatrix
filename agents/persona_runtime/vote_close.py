@@ -85,7 +85,7 @@ from ..memory.boundary_detectors import REASON_STRUCTURAL
 from ..memory.scopes import is_group_scope
 from ..persona_types import VOTE_CLOSE_TOKEN_KEY
 from .close_path import persist_fanned_closes
-from .interaction_boundary import matching_end_votes
+from .interaction_boundary import matching_end_votes, wire_admits_record
 
 if TYPE_CHECKING:
     from ..memory.interactions import Interaction
@@ -303,15 +303,7 @@ async def discharge_end_vote_publish(
         # mislabels a live discussion "ended".  A blank anchor admits only
         # blank-stamped records for the same reason.  One room event, one
         # instant: a single clock read stamps every close.
-        now = agent._interaction_tracker.now()
-        closed_records: list[Interaction] = []
-        for record in agent._interaction_tracker.records_for_scope(
-            pending.scope,
-        ):
-            if record.replayed:
-                # As the cost fan (PR #846 review): a replayed span
-                # closes on the catch-up sweep, never a live room cause.
-                continue
+        def _vote_admits(record: Interaction) -> bool:
             if pending.sibling_ids and record.interaction_id not in (
                 pending.sibling_ids
             ):
@@ -323,14 +315,22 @@ async def discharge_end_vote_publish(
                 # This is the surviving half of the identity guard the
                 # fan replaced: that guard returned outright when the
                 # parked record was gone, which spared the siblings too.
-                continue
-            if record.wire_interaction_id and record.wire_interaction_id != anchor:
-                continue
-            closed = agent._interaction_tracker.close_record(
-                record, reason=REASON_STRUCTURAL, now=now,
+                return False
+            # ``tolerate_blank_anchor=False`` — the one place the shared
+            # conjunct is STRICT: a vote parked on an unstamped record
+            # judged an unstamped conversation, so it must not reach
+            # across and close records that DO name one.  The other two
+            # fans are tolerant; the divergence is deliberate and now
+            # lives in the signature rather than in three loop bodies.
+            return wire_admits_record(
+                record, anchor, tolerate_blank_anchor=False,
             )
-            if closed is not None:
-                closed_records.append(closed)
+
+        # ``close_scope`` owns the replay exclusion, the single close
+        # instant, and the per-record close.
+        closed_records = agent._interaction_tracker.close_scope(
+            pending.scope, reason=REASON_STRUCTURAL, admit=_vote_admits,
+        )
         if closed_records:
             if anchor:
                 agent._vote_closed_wire_ids[pending.scope] = anchor

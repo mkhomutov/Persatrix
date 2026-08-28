@@ -21,6 +21,7 @@ from ..memory.boundary_detectors import REASON_COST
 from ..memory.interactions import SCOPE_TICK, is_thread_scope
 from ..persona_types import EventType
 from .close_path import persist_fanned_closes
+from .interaction_boundary import wire_admits_record
 
 if TYPE_CHECKING:
     from ..memory.interactions import Interaction, InteractionTracker
@@ -85,38 +86,22 @@ async def close_interaction_on_cost(
     # review fix): the fan pops ALL its records before the first persist
     # runs, so one failure must not discard the siblings.
     #
-    # Per-record wire-id admission (PR #846 review, the close_notification
-    # conjunct): the exhausted budget is the EVENT's wire interaction's —
-    # this close fires from the LLM-error path, before the stale fan has
-    # reconciled the scope against this event — so a record positively
-    # stamped with a DIFFERENT id (a successor conversation with a fresh
-    # budget) is skipped, not buried under ``REASON_COST``.  A blank on
-    # either side keeps the scope-keyed behaviour (thread scopes are
-    # wire-untracked; ticks and legacy traffic carry no id).  One room
-    # event, one instant: a single clock read stamps every close.
+    # Per-record wire-id admission (PR #846 review): the exhausted budget
+    # is the EVENT's wire interaction's — this close fires from the
+    # LLM-error path, before the stale fan has reconciled the scope
+    # against this event — so a record positively stamped with a DIFFERENT
+    # id (a successor conversation with a fresh budget) is skipped, not
+    # buried under ``REASON_COST``.  A blank anchor keeps the scope-keyed
+    # behaviour (thread scopes are wire-untracked; ticks and legacy
+    # traffic carry no id), which is ``wire_admits_record``'s tolerant
+    # default.  ``close_scope`` owns the rest of the fan contract: the
+    # replay exclusion, the single close instant, and the per-record
+    # close.
     anchor = "" if is_thread_scope(scope) else wire_interaction_id(event)
-    now = agent._interaction_tracker.now()
-    closed_records: list[Interaction] = []
-    for record in agent._interaction_tracker.records_for_scope(scope):
-        if record.replayed:
-            # PR #846 review: a replay-opened record belongs to the
-            # catch-up pass and its ``REASON_CATCHUP_COMPLETE`` sweep —
-            # never retire it under a live cause.  ``close_notification``
-            # carried this guard; this fan and the vote fan did not, so a
-            # denial landing before ``close_replayed_scopes`` buried the
-            # replayed span as ``cost`` and the sweep then found nothing.
-            continue
-        if (
-            anchor
-            and record.wire_interaction_id
-            and record.wire_interaction_id != anchor
-        ):
-            continue
-        closed = agent._interaction_tracker.close_record(
-            record, reason=REASON_COST, now=now,
-        )
-        if closed is not None:
-            closed_records.append(closed)
+    closed_records = agent._interaction_tracker.close_scope(
+        scope, reason=REASON_COST,
+        admit=lambda record: wire_admits_record(record, anchor),
+    )
     # OQ #6 metering interaction (deep-review follow-up): this LOCAL Layer-1
     # cost close does NOT set ``meter_close_summary``, so the summaries it
     # triggers run UNLEASED — unlike the orchestrator's bounded cost close,
