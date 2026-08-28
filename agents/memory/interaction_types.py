@@ -107,7 +107,12 @@ class Interaction:
     # ``episodes.speaker_id`` / ``facts.speaker_id`` columns (migration
     # 17 → 18) are a PROJECTION of this key half — attribution is sound
     # only because the record is single-speaker by construction, never
-    # model-elected (Phase 0b scope lock).
+    # model-elected (Phase 0b scope lock) — with ONE stated exception
+    # (RFC 0020 §G amendment, PR #846): the room-close fan lands the
+    # closing message as the final turn of every sibling record, a
+    # foreign-speaker turn discriminable by its payload ``sender`` ≠ this
+    # ``speaker_id``, which the residuals PR 4 binding MUST exclude or
+    # tag before projecting the column or extracting facts.
     principal_id: str = DEFAULT_PRINCIPAL_ID
     speaker_id: str = ""
     # ISSUE-0130: True when this interaction was OPENED by an on-startup
