@@ -155,7 +155,7 @@ class TestRedeliverySkipsTheIngest:
         )
 
         assert tracker.get("group:planning") is None, "the close still fires"
-        assert agent.ingested == [], (
+        assert "event_type" not in agent.persisted[0].turns[-1].payload, (
             "the bounding stimulus was already ingested live inside its "
             "floor round — the notification must not append it again"
         )

@@ -31,7 +31,7 @@ from agents.memory.boundary_detectors import (
     REASON_STRUCTURAL,
 )
 from agents.memory.interactions import Interaction, InteractionTracker
-from agents.persona_types import AgentAction, AgentEvent, EventType
+from agents.persona_types import AgentEvent, EventType
 from agents.response_gate import (
     POLICY_ALWAYS,
     POLICY_NEVER,
@@ -73,9 +73,16 @@ def _notification_event(
 
 class _CloseNotificationAgent:
     """The ``_CostCloseAgent`` harness: a real tracker, a persistence spy,
-    the scope surface the close dispatch resolves through, and (since the
-    PR #614 review fix) the ingest seam the dispatch drives — modelled as
-    the ``add_turn`` it amounts to, so the final-turn append is real."""
+    and the scope surface the close dispatch resolves through.
+
+    PR #846 review: the ``_store_event_episode`` ingest seam is GONE.
+    The dispatch stopped routing the closing turn through the per-event
+    path (it would reach the closing sender's key alone, or fabricate a
+    record where the sender has none) and appends per record directly —
+    so the seam was dead, and four ``ingested == []`` assertions had
+    become vacuously true.  Assert on the record instead: ``turn_count``,
+    or ``turns[-1].payload``, where ``build_turn_payload``'s
+    ``event_type`` marks a landed notification turn."""
 
     _MULTI_TURN_EVENT_TYPES: frozenset[EventType] = frozenset(
         {EventType.CHANNEL_MESSAGE},
@@ -89,20 +96,12 @@ class _CloseNotificationAgent:
         self.agent_id = agent_id
         self._interaction_tracker = tracker
         self.persisted: list[Interaction] = []
-        self.ingested: list[AgentEvent] = []
 
     def _scope_for_multi_turn_event(self, event: AgentEvent) -> str | None:
         return event.channel_id
 
     async def _persist_closed_interaction(self, interaction: Interaction) -> None:
         self.persisted.append(interaction)
-
-    async def _store_event_episode(
-        self, event: AgentEvent, actions: list[AgentAction],
-    ) -> None:
-        self.ingested.append(event)
-        if event.channel_id is not None:
-            self._interaction_tracker.add_turn(event.channel_id)
 
 
 class TestCloseNotificationWireLift:
@@ -315,7 +314,13 @@ class TestCloseNotificationClosesTracker:
         await close_interaction_on_notification(agent, _notification_event())
 
         assert tracker.get("group:planning") is None, "self-echo still closes scope"
-        assert agent.ingested == [], "the sender's own echo is NOT ingested"
+        # PR #846 review: assert on the RECORD, not on a harness ingest
+        # seam the dispatch no longer drives.  ``build_turn_payload``
+        # always stamps ``event_type``, so its absence from the final
+        # turn proves no notification turn was landed.
+        assert "event_type" not in agent.persisted[0].turns[-1].payload, (
+            "the sender's own echo is NOT landed as a turn"
+        )
         assert len(agent.persisted) == 1
         assert agent.persisted[0].close_reason == REASON_STRUCTURAL
         assert agent.persisted[0].turn_count == 1, "turn_count not inflated by the echo"
@@ -371,8 +376,9 @@ class TestCloseNotificationClosesTracker:
 
         await close_interaction_on_notification(agent, _notification_event())
 
-        assert agent.ingested == [], (
-            "no open interaction — nothing to land the final turn in"
+        assert tracker.open_records() == [], (
+            "no open interaction — the dispatch invents no record to land "
+            "the final turn in"
         )
         assert tracker.get("group:planning") is None, (
             "the dispatch must not open a scope just to close it"
@@ -398,7 +404,10 @@ class TestCloseNotificationClosesTracker:
         assert [i.close_reason for i in agent.persisted] == [REASON_IDLE_GAP], (
             "the expired window closes by the agent's own idle rule only"
         )
-        assert agent.ingested == []
+        assert agent.persisted[0].turn_count == 1, (
+            "the expired record closed on its own single turn — the late "
+            "notification landed nothing in it"
+        )
         assert tracker.get("group:planning") is None
 
     async def test_payloadless_event_is_a_noop_not_a_crash(self):
