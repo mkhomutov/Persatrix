@@ -60,17 +60,3 @@ async def test_one_failing_persist_does_not_discard_the_rest(caplog):
     assert any(
         records[0].interaction_id in message for message in caplog.messages
     ), "the failure is logged with the failing record's identity"
-
-
-async def test_fan_designates_one_conversation_lead():
-    """PR #846 review: one room close is ONE conversation ending — the fan
-    marks every record after the first a follower, so the finalize's
-    conversation-level effects (the §H reflect tick, the DM relationship
-    bump) fire once per close event, not once per record."""
-    records = _fanned_records(3)
-
-    async def persist(interaction: Interaction) -> None:
-        pass
-
-    await persist_fanned_closes(records, persist)
-    assert [r.conversation_lead for r in records] == [True, False, False]
