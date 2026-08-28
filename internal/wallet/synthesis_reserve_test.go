@@ -20,27 +20,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestSynthesisReserveTokens_ScalesWithRoster is the headline sizing invariant —
-// `1 + N×max(1, N−1)` since the v0.3.15 re-key (ISSUE-0123/0131, PR #846): one
-// chair synthesis turn plus one summary per member per speaker-record, so a
-// larger roster holds back quadratically more. The pre-re-key `1 + N` (and the
-// fixed-two framing before it) would deny the per-record summaries the fan now
-// draws on close.
+// TestSynthesisReserveTokens_ScalesWithRoster is the headline 1+N invariant: the
+// reserve is sized for one chair synthesis turn plus one summary per persona, so a
+// larger roster holds back proportionally more. A fixed-two reserve (the framing
+// PR 4 explicitly rejects) would deny all but one persona's summary on close.
 func TestSynthesisReserveTokens_ScalesWithRoster(t *testing.T) {
 	// A budget far larger than any reserve so the half-cap clamp never bites and
-	// the raw sizing is what is under test.
+	// the raw (1+N) sizing is what is under test.
 	const budget = int64(10_000_000)
 	unit := DefaultSynthesisCallReserveTokens
 
 	// N=0 (lone roster) reserves only the chair turn: 1 call.
 	assert.Equal(t, unit, SynthesisReserveTokens(budget, 0))
-	// N=1 keeps the pre-re-key floor (a lone member can still hold one
-	// senderless record): chair + 1×max(1, 0) = 2 calls.
+	// N=1 reserves chair + 1 summary: 2 calls.
 	assert.Equal(t, 2*unit, SynthesisReserveTokens(budget, 1))
-	// N=3: chair + 3 members × 2 speaker-records each = 7 calls.
-	assert.Equal(t, 7*unit, SynthesisReserveTokens(budget, 3))
-	// N=4: chair + 4×3 = 13 calls — the re-key's quadratic fan.
-	assert.Equal(t, 13*unit, SynthesisReserveTokens(budget, 4))
+	// N=3 reserves chair + 3 summaries: 4 calls.
+	assert.Equal(t, 4*unit, SynthesisReserveTokens(budget, 3))
 
 	// Monotonic non-decreasing in roster size.
 	prev := int64(-1)
@@ -67,9 +62,8 @@ func TestSynthesisReserveTokens_UncappedIsZero(t *testing.T) {
 // always retains a positive working budget — a small cap cannot starve the
 // conversation to nothing to fund the close path. The soft threshold stays > 0.
 func TestSynthesisReserveTokens_ClampedSoDiscussionSurvives(t *testing.T) {
-	// Pick a budget smaller than the raw reserve for a roster-3 close path
-	// (1 + 3×2 = 7 calls since the re-key).
-	raw := 7 * DefaultSynthesisCallReserveTokens
+	// Pick a budget smaller than the raw reserve for a 4-call close path.
+	raw := 4 * DefaultSynthesisCallReserveTokens
 	budget := raw - 1 // raw reserve would exceed the cap
 
 	reserve := SynthesisReserveTokens(budget, 3)
@@ -96,16 +90,13 @@ func TestSynthesisReserveTokens_ClampCanUnderfundClose(t *testing.T) {
 	const fullRoster = 20
 	const modestBudget = int64(100_000)
 
-	// What the post-re-key sizing calls for: 1 + N×(N−1) close-path calls.
-	raw := int64(1+fullRoster*(fullRoster-1)) * DefaultSynthesisCallReserveTokens
+	raw := int64(1+fullRoster) * DefaultSynthesisCallReserveTokens // what 1+N calls for
 	reserve := SynthesisReserveTokens(modestBudget, fullRoster)
 
 	require.Greater(t, raw, modestBudget/2, "fixture must actually exercise the clamp")
 	assert.Less(t, reserve, raw,
-		"a full roster against a modest cap clamps the reserve below the sized "+
-			"close path — the close path, not just a tiny/degenerate cap, can be "+
-			"under-funded (and the re-key's quadratic sizing reaches this clamp "+
-			"at smaller rosters than 1+N did)")
+		"a full roster against a modest cap clamps the reserve below the 1+N sizing — "+
+			"the close path, not just a tiny/degenerate cap, can be under-funded")
 }
 
 // TestSynthesisSoftBudgetTokens_IsCapMinusReserve pins the soft threshold as the

@@ -26,15 +26,12 @@ package wallet
 // reserve GUARANTEES the trigger fires early, not that the held-back tokens
 // survive to the close — that stronger property needs a discussion-cause soft-cap
 // check in the wallet (the reserve-preservation gap noted in the package doc).
-// The reserve is sized for `1 + N×max(1, N−1)` close-path
-// calls: the chair synthesis turn PLUS one RFC 0020 summary per member per
-// speaker-record. OQ #6 meters those summaries so they count toward the cap, and
-// since the v0.3.15 `(principal, speaker, scope)` re-key (ISSUE-0123/0131,
-// PR #846) each member closes one record per speaker it heard — at most N−1 in an
-// N-member room — and each record's summary draws its own metered lease, so an
-// N-persona roster issues up to N×(N−1) metered summary calls on the shared
-// per-interaction budget. (History: `1 + N` before the re-key; a fixed two before
-// that — each rejected when the call count it assumed stopped being true.)
+// The reserve is sized for `1 + N` close-path calls: the chair
+// synthesis turn PLUS one RFC 0020 summary per participating persona. OQ #6 meters
+// that summary so it counts toward the cap, and the close summary is authored
+// per-agent (close_path.py spawns one finalize_closed_interaction per agent_id),
+// so an N-persona roster issues N metered summary calls on the shared per-
+// interaction budget — hence `1 + N`, not the fixed two an earlier framing assumed.
 //
 // KNOWN GAP (tracked, not fixed here): the half-cap clamp on [SynthesisReserveTokens]
 // guarantees the DISCUSSION a positive working budget, but on a small cap with a
@@ -122,27 +119,14 @@ const (
 )
 
 // SynthesisReserveTokens returns the tokens held back from a per-interaction cost
-// cap for the bounded close path: the chair synthesis turn + the RFC 0020 close
-// summaries = `1 + N×max(1, N−1)` close-path LLM calls (RFC 0052 OQ #6 — the
-// close summary is authored per-agent, per RECORD). `rosterSize` is N, the count
-// of participating personas; a negative value is clamped to zero (the chair-only
+// cap for the bounded close path: the chair synthesis turn + one RFC 0020 summary
+// per participating persona = `1 + rosterSize` close-path LLM calls (RFC 0052
+// OQ #6 — the close summary is authored per-agent). `rosterSize` is N, the count of
+// participating personas; a negative value is clamped to zero (the chair-only
 // reserve). An uncapped interaction (`budgetTokens <= 0`) has no ceiling to carve
 // and reserves nothing. The reserve is clamped to at most half the cap
 // ([maxSynthesisReserve*]) so the soft threshold ([SynthesisSoftBudgetTokens]) is
 // always positive.
-//
-// Re-sized `1 + N` → `1 + N×max(1, N−1)` for the v0.3.15 ISSUE-0123/0131 re-key
-// (PR #846, pulled forward from residuals PR 4 at review): the agent-side
-// tracker now keys records `(principal, speaker, scope)`, a bounded close fans
-// over every record, and EACH record's summary draws its own metered lease — so
-// a member's close cost is one summary per speaker it heard, at most N−1 in a
-// room of N (a member does not ingest its own turns; `max(1, …)` keeps the
-// pre-re-key floor for degenerate rosters, whose lone member can still hold a
-// record from senderless traffic). Residual under-counts, stated: a human
-// speaker split across principals adds records beyond the roster bound, and the
-// quadratic raw sizing reaches the half-cap clamp at smaller rosters than the
-// linear one did — when the clamp bites, the close path is the side left
-// under-funded (the package doc's KNOWN GAP, unchanged in kind).
 func SynthesisReserveTokens(budgetTokens int64, rosterSize int) int64 {
 	if budgetTokens <= 0 {
 		return 0
@@ -150,12 +134,7 @@ func SynthesisReserveTokens(budgetTokens int64, rosterSize int) int64 {
 	if rosterSize < 0 {
 		rosterSize = 0
 	}
-	perMemberRecords := int64(rosterSize - 1)
-	if perMemberRecords < 1 {
-		perMemberRecords = 1
-	}
-	// 1 chair synthesis turn + one summary per (member × speaker-record).
-	closePathCalls := int64(1) + int64(rosterSize)*perMemberRecords
+	closePathCalls := int64(1 + rosterSize) // 1 chair synthesis turn + N summaries.
 	raw := closePathCalls * DefaultSynthesisCallReserveTokens
 	if ceiling := budgetTokens * maxSynthesisReserveNumerator / maxSynthesisReserveDenominator; raw > ceiling {
 		return ceiling
