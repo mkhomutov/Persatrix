@@ -98,6 +98,14 @@ async def close_interaction_on_cost(
     now = agent._interaction_tracker.now()
     closed_records: list[Interaction] = []
     for record in agent._interaction_tracker.records_for_scope(scope):
+        if record.replayed:
+            # PR #846 review: a replay-opened record belongs to the
+            # catch-up pass and its ``REASON_CATCHUP_COMPLETE`` sweep —
+            # never retire it under a live cause.  ``close_notification``
+            # carried this guard; this fan and the vote fan did not, so a
+            # denial landing before ``close_replayed_scopes`` buried the
+            # replayed span as ``cost`` and the sweep then found nothing.
+            continue
         if (
             anchor
             and record.wire_interaction_id

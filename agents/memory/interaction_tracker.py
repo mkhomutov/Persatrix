@@ -74,11 +74,8 @@ __all__ = ["Clock", "InteractionTracker"]
 # ─── Clock seam (RFC 0020 PR 3) ────────────────────────────
 
 # A single ``InteractionTracker(clock=...)`` injection point covers
-# every default-now codepath.  This is the seam RFC 0021 P1 swaps when
-# its ``Clock`` lands.  Until then the default clock is ``time.time``.
-#
-# TODO(rfc-0021-p1): replace ``Clock`` with the RFC 0021 P1 canonical
-# clock once it lands; one-line import + alias change.
+# every default-now codepath, and is the seam RFC 0021 P1 swaps when its
+# ``Clock`` lands.  TODO(rfc-0021-p1): one-line import + alias change.
 
 
 # Not ``@runtime_checkable``: any zero-arg callable would satisfy a bare
@@ -157,17 +154,13 @@ class InteractionTracker:
         # Clock seam (PR 3): tests inject a deterministic clock once here
         # instead of threading ``now=`` through every call.
         self._clock: Clock = clock if clock is not None else _DEFAULT_CLOCK
-        # PR-3 review #12: cache the cap from whichever
-        # :class:`MaxTurnsDetector` is in the chain so :meth:`add_turn`
-        # can enforce it inline (rather than waiting for the next
-        # ``idle_check`` sweep, which let a structural close in between
-        # mislabel the closure as ``REASON_STRUCTURAL`` and surface the
-        # RFC 0020 §Security amplification window).
-        #
-        # Cache invariant (PR-3 review #300/N2): this lookup runs once
-        # at construction.  Safe today because ``_detectors`` is a tuple
-        # and :class:`MaxTurnsDetector` is ``frozen=True``; a refactor
-        # that mutates the chain must refresh this cache.
+        # PR-3 review #12: cache the cap so :meth:`add_turn` enforces it
+        # inline, not on the next ``idle_check`` sweep (which let a
+        # structural close in between mislabel the closure and surface
+        # the RFC 0020 §Security amplification window).  Cache invariant
+        # (review #300/N2): this runs ONCE at construction — safe while
+        # ``_detectors`` is a tuple and ``MaxTurnsDetector`` is frozen; a
+        # refactor that mutates the chain must refresh it.
         self._max_turns: int | None = next(
             (d.max_turns for d in self._detectors if isinstance(d, MaxTurnsDetector)),
             None,
@@ -186,9 +179,8 @@ class InteractionTracker:
         same precedence the storage tiers resolve writes under, so the
         record a turn lands in and the tenant its close-derived rows
         bind (residuals PR 4) cannot disagree.  An explicit value goes
-        through :func:`~agents.principal_id.normalize_principal_id`,
-        the storage-boundary rule, so ``""`` cannot mint a key no
-        recall predicate matches.
+        through :func:`~agents.principal_id.normalize_principal_id` so
+        ``""`` cannot mint a key no recall predicate matches.
         """
         principal = (
             normalize_principal_id(principal_id)
@@ -207,9 +199,8 @@ class InteractionTracker:
     def open_scopes(self) -> list[str]:
         """Distinct scopes with at least one open record, insertion order.
 
-        Since the re-key this is a PROJECTION — one scope may hold
-        several records; callers that need the records use
-        :meth:`records_for_scope` / :meth:`open_records`.
+        Since the re-key this is a PROJECTION — one scope may hold several
+        records; callers needing them use :meth:`records_for_scope`.
         """
         return list(dict.fromkeys(i.scope for i in self._open.values()))
 
@@ -455,12 +446,21 @@ class InteractionTracker:
         none were open).  Each close emits its own
         ``agent.interactions.closed`` increment — the stated
         metric-shape change (see :mod:`.interaction_metrics`).  One room
-        event, one instant (PR #846 review): the clock is read ONCE and
-        every sibling's ``closed_at`` carries the same value.
+        event, one instant: the clock is read ONCE and every sibling's
+        ``closed_at`` carries the same value.
+
+        REPLAY-opened records are SKIPPED: a replayed span belongs to
+        the catch-up pass and its own ``REASON_CATCHUP_COMPLETE`` sweep,
+        so retiring it under a live room cause would both mislabel the
+        counter and steal it from :func:`close_replayed_scopes`.  The
+        exclusion lives here rather than in :meth:`close_record` —
+        that is the method the sweep closes them with.
         """
         ts = now if now is not None else self._clock()
         closed: list[Interaction] = []
         for interaction in self.records_for_scope(scope):
+            if interaction.replayed:
+                continue
             finished = self.close_record(interaction, reason=reason, now=ts)
             if finished is not None:
                 closed.append(finished)

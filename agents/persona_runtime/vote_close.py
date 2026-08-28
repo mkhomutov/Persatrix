@@ -106,16 +106,27 @@ class PendingVoteClose(NamedTuple):
     the open interaction's id at decide time (the staleness guard), the
     correlation token stamped onto the covered vote actions, how many of
     them are still in flight (failures decrement; the first success — or
-    the last failure — consumes the park), and the wire id of the
+    the last failure — consumes the park), the wire id of the
     conversation the vote judged complete (PR #846 review: the
     discharge's per-record admission anchor; ``""`` when the parked
-    record was unstamped at decide time)."""
+    record was unstamped at decide time), and the identities of the
+    records the vote actually judged (see ``sibling_ids``)."""
 
     scope: str
     interaction_id: str
     token: str
     in_flight: int
     wire_id: str = ""
+    # PR #846 review: the ids open in the scope at DECIDE time.  The
+    # discharge fans over the scope's records, so it must tell a SIBLING
+    # (open before the vote, and one Go's quorum fan will never close
+    # for this voter) from a SUCCESSOR opened after it — including a
+    # fresh record of the parked speaker's OWN, which reuses the still
+    # unrotated wire id and so passes the anchor test.  Identity, not a
+    # timestamp: ``started_at`` ties under a coarse or frozen clock, and
+    # a tie here silently buries a live record.  Empty = an old park
+    # with no capture; the guard stays inert.
+    sibling_ids: frozenset[str] = frozenset()
 
 
 def park_end_vote_close(
@@ -153,6 +164,10 @@ def park_end_vote_close(
         token=token,
         in_flight=len(votes),
         wire_id=interaction.wire_interaction_id,
+        sibling_ids=frozenset(
+            record.interaction_id
+            for record in agent._interaction_tracker.records_for_scope(scope)
+        ),
     )
 
 
@@ -293,6 +308,22 @@ async def discharge_end_vote_publish(
         for record in agent._interaction_tracker.records_for_scope(
             pending.scope,
         ):
+            if record.replayed:
+                # As the cost fan (PR #846 review): a replayed span
+                # closes on the catch-up sweep, never a live room cause.
+                continue
+            if pending.sibling_ids and record.interaction_id not in (
+                pending.sibling_ids
+            ):
+                # PR #846 review: opened AFTER the vote was parked, so
+                # the vote never judged it.  Without this the fan buried
+                # the parked speaker's OWN successor — same scope, same
+                # unrotated wire id, so the anchor test admits it — as a
+                # phantom 1-turn "ended" record plus a summariser call.
+                # This is the surviving half of the identity guard the
+                # fan replaced: that guard returned outright when the
+                # parked record was gone, which spared the siblings too.
+                continue
             if record.wire_interaction_id and record.wire_interaction_id != anchor:
                 continue
             closed = agent._interaction_tracker.close_record(

@@ -384,22 +384,22 @@ class _EpisodeRoutingMixin:
         # that carries one wins) plus its known predecessor — the
         # late-delivery defence ``wire_rotation_closes`` compares against.
         if wire_id and interaction.is_open and not interaction.wire_interaction_id:
-            # PR #846 review: never stamp an id the scope has already
-            # rotated past — a sibling stamped with a successor names this
-            # id as its predecessor, so stamping would mark a
-            # straggler-opened record for the next rotation close (a
-            # phantom 1-turn episode).  Left blank, the record is tolerant
-            # and closes by the room's own boundaries instead.
-            superseded = any(
-                r.predecessor_wire_id == wire_id
-                for r in self._interaction_tracker.records_for_scope(scope)
-                if r is not interaction and r.wire_interaction_id
+            # Stamp the record with the id its opening turn actually
+            # carried, even when a sibling has already rotated past it.
+            # PR #846 review reversed the earlier suppression here: a
+            # straggler record left BLANK is not neutral, because blank
+            # is the universally-admitted state in all three close fans
+            # and in the close-notification wire-id backfill — so the
+            # retired conversation's turn was closed as, cross-referenced
+            # to, and (on a bounded close) billed to the SUCCESSOR.  An
+            # honest retired stamp makes every one of those conjuncts
+            # skip it correctly.  The cost is the straggler fragmentation
+            # the PR already accepts and documents: the record closes as
+            # its own 1-turn fragment on the next rotation.
+            interaction.wire_interaction_id = wire_id
+            interaction.predecessor_wire_id = str(
+                event.metadata.get("previous_interaction_id", "") or "",
             )
-            if not superseded:
-                interaction.wire_interaction_id = wire_id
-                interaction.predecessor_wire_id = str(
-                    event.metadata.get("previous_interaction_id", "") or "",
-                )
         # PR-3 review #12: ``add_turn`` closes inline at the MaxTurns cap;
         # persist immediately.  The cap outranks a same-event structural
         # close for THIS record only (``close_scope`` no-ops on it): a

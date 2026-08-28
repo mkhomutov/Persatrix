@@ -33,7 +33,11 @@ from __future__ import annotations
 import pytest
 
 from agents.clock import FrozenClock
-from agents.memory.interactions import REASON_STRUCTURAL, scope_for_group
+from agents.memory.interactions import (
+    REASON_CATCHUP_COMPLETE,
+    REASON_STRUCTURAL,
+    scope_for_group,
+)
 from agents.persona_types import VOTE_CLOSE_TOKEN_KEY
 from agents.tools.registry import clear_registry
 
@@ -274,12 +278,87 @@ class TestLateDeliveryDefence:
         assert fresh is not None
         assert fresh.wire_interaction_id == "wire-C"
 
-    async def test_recordless_straggler_gets_no_retired_stamp(self):
-        """PR #846 review: a late wire-A straggler from a speaker with NO
-        open record must not mint a record stamped with the RETIRED id —
-        the next wire-B message would close it as a phantom 1-turn
-        "ended" episode (plus a summariser call).  The fresh record stays
-        blank-stamped (tolerant) and lives by the room's own boundaries."""
+    async def test_discharge_spares_a_successor_opened_after_the_park(self):
+        """PR #846 re-review: the fan must not bury a record opened AFTER
+        the vote was parked.
+
+        The parked record closes inline between decide and publish and
+        its speaker resumes on the still-unrotated wire id, so the fresh
+        record carries the anchor and sailed through the wire-id test —
+        buried as a phantom 1-turn "ended" episode.  The old identity
+        guard refused this, but refused the true siblings with it; the
+        decide-time id capture keeps both halves."""
+        agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
+        await agent._store_event_episode(
+            channel_event("robin's point", wire_id="wire-A", sender="robin"), [],
+        )
+        await agent._store_event_episode(
+            channel_event("wrap it up?", wire_id="wire-A"), [vote()],
+        )
+        parked = agent._interaction_tracker.get(SCOPE, speaker_id="alex")
+        assert parked is not None
+        agent._interaction_tracker.close_record(
+            parked, reason=REASON_STRUCTURAL,
+        )
+        # alex resumes on the SAME (unrotated) wire id before publish.
+        await agent._store_event_episode(
+            channel_event("actually, one more thing", wire_id="wire-A"), [],
+        )
+        successor = agent._interaction_tracker.get(SCOPE, speaker_id="alex")
+        assert successor is not None and successor is not parked
+
+        await discharge_vote(agent)
+
+        assert successor.is_open, (
+            "a record opened after the park was never judged by that vote"
+        )
+        assert agent._interaction_tracker.get(SCOPE, speaker_id="robin") is None, (
+            "the true sibling still closes — Go's fan excludes this voter"
+        )
+        assert _close_reasons(await all_episodes(agent)) == [REASON_STRUCTURAL]
+
+    async def test_vote_quorum_never_relabels_a_replayed_span(self):
+        """PR #846 re-review: a quorum reached mid catch-up must not
+        retire a replay-opened span under a live structural cause.
+
+        The vote fan carries the same ``replayed`` guard as the cost and
+        notification fans, but on THIS path it is defence in depth: the
+        live vote turn trips the ISSUE-0130 replay->live split first, so
+        the record is already closed as ``REASON_CATCHUP_COMPLETE`` by
+        the time the discharge fans.  Pinned from that side, since that
+        is the behaviour the system actually produces.  (The cost fan's
+        guard IS load-bearing — it fires from the LLM-error path, before
+        the stale fan reconciles the scope: see
+        ``test_cost_fan_leaves_replayed_records_to_the_catchup_sweep``.)"""
+        agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
+        replay_event = channel_event(
+            "replayed backlog", wire_id="wire-A", sender="robin",
+        )
+        replay_event.metadata["replay_mode"] = True
+        await agent._store_event_episode(replay_event, [])
+        replayed = agent._interaction_tracker.get(SCOPE, speaker_id="robin")
+        assert replayed is not None and replayed.replayed
+        await agent._store_event_episode(
+            channel_event("wrap it up?", wire_id="wire-A"), [vote()],
+        )
+
+        await discharge_vote(agent)
+
+        assert replayed.close_reason == REASON_CATCHUP_COMPLETE, (
+            "the ISSUE-0130 replay->live split owns this record; the vote "
+            "quorum must never relabel a replayed span as structural"
+        )
+
+    async def test_recordless_straggler_keeps_its_retired_stamp(self):
+        """PR #846 re-review: a late wire-A straggler from a speaker with
+        NO open record keeps the HONEST retired stamp.
+
+        The earlier suppression left such a record blank, but blank is
+        the universally-admitted state in all three close fans and in
+        the close-notification wire-id backfill — so the retired
+        conversation's turn was closed as, cross-referenced to, and (on
+        a bounded close) billed to the SUCCESSOR conversation.  The
+        honest stamp is what makes those conjuncts skip it."""
         agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
         await agent._store_event_episode(
             channel_event(
@@ -294,17 +373,10 @@ class TestLateDeliveryDefence:
         )
         straggler = agent._interaction_tracker.get(SCOPE, speaker_id="robin")
         assert straggler is not None
-        assert straggler.wire_interaction_id == "", (
-            "a sibling names wire-A as its predecessor — the retired id "
-            "must not be stamped onto the fresh record"
+        assert straggler.wire_interaction_id == "wire-A", (
+            "the record's opening turn carried wire-A; stamping it is "
+            "what lets the wire-id conjuncts tell it from a successor"
         )
-        await agent._store_event_episode(
-            channel_event("more B", wire_id="wire-B", prev_id="wire-A"), [],
-        )
-        assert await all_episodes(agent) == [], "no phantom episode row"
-        survivor = agent._interaction_tracker.get(SCOPE, speaker_id="robin")
-        assert survivor is not None
-        assert survivor.is_open
 
 
 @pytest.mark.asyncio
