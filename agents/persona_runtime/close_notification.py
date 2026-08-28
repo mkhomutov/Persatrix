@@ -181,22 +181,25 @@ async def close_interaction_on_notification(
     # the matching records and leave the successors to their own
     # boundaries.
     notified_wire_id = wire_interaction_id(event)
-    to_close: list[Interaction] = []
+    # ``admitted_records`` is the fan's eligibility seam (PR #846
+    # review): it owns the replay exclusion — a replay-opened record
+    # belongs to the pass-end ``REASON_CATCHUP_COMPLETE`` sweep, and a
+    # live closing turn must never land inside a flagged span, where
+    # derivation is skipped wholesale and the turn would be silently
+    # discarded — and applies the shared wire conjunct, tolerant on a
+    # blank anchor as this fan has always been (the end-vote fan is the
+    # strict caller).  This dispatch calls the seam directly rather than
+    # ``close_scope``: it needs the admitted set BEFORE any close, to
+    # mark metering, backfill the wire id and land the closing turn on
+    # each record.
+    to_close = agent._interaction_tracker.admitted_records(
+        scope,
+        admit=lambda record: wire_admits_record(record, notified_wire_id),
+    )
     for record in records:
-        if record.replayed:
-            # PR #846 review: a replay-opened record belongs to the
-            # catch-up pass — its close is the pass-end
-            # ``REASON_CATCHUP_COMPLETE`` sweep, and a live closing turn
-            # must never land inside a flagged span (derivation is skipped
-            # for it wholesale, so the turn would be silently discarded
-            # and the close mislabelled).  Leave it to its own sweep.
-            continue
-        # The shared conjunct (PR #846 review) — tolerant on a blank
-        # anchor, this fan's long-standing posture; the end-vote fan is
-        # the strict caller.  This dispatch keeps its own loop rather
-        # than ``close_scope``'s ``admit``: it needs the admitted set
-        # BEFORE any close, to mark metering, backfill the wire id and
-        # land the closing turn on each record.
+        # A positively-stamped record that disagrees is a stale
+        # straggler: say so, since the notified close then applies to
+        # nothing this agent holds.
         if not wire_admits_record(record, notified_wire_id):
             logger.info(
                 "Agent %s: close notification for interaction %s found %s "
@@ -204,8 +207,6 @@ async def close_interaction_on_notification(
                 agent.agent_id, notified_wire_id,
                 record.wire_interaction_id, scope,
             )
-            continue
-        to_close.append(record)
     if not to_close:
         return
     if notified_wire_id:

@@ -192,6 +192,8 @@ class InteractionTracker:
 
         Since the re-key this is a PROJECTION — one scope may hold several
         records; callers needing them use :meth:`records_for_scope`.
+        Test-observability only: no production caller reads it, and a
+        room-wide operation must go through the record-level surface.
         """
         return list(dict.fromkeys(i.scope for i in self._open.values()))
 
@@ -364,32 +366,11 @@ class InteractionTracker:
         ts = now if now is not None else self._clock()
         interaction.turns.append(Turn(at=ts, payload=payload or {}))
 
-    def close(
-        self,
-        scope: str,
-        *,
-        reason: CloseReason,
-        now: float | None = None,
-        principal_id: str | None = None,
-        speaker_id: str | None = None,
-    ) -> Interaction | None:
-        """Close the interaction under the resolved key (no-op if none).
-
-        ONE record — the key resolution matches :meth:`get`.  A room
-        event (structural close, end-vote quorum, bounded/cost close,
-        close notification) must use :meth:`close_scope` instead: since
-        the re-key a scope holds one record per ``(principal, speaker)``
-        pair, and closing one of them leaks the rest open until idle
-        (ISSUE-0123 part 3).
-
-        ``reason`` is keyword-required and typed :data:`CloseReason`
-        so a typo is caught by mypy rather than mislabelling the
-        per-reason counter (PR-214 review fix).
-        """
-        interaction = self._open.get(self._key(scope, principal_id, speaker_id))
-        if interaction is None:
-            return None
-        return self.close_record(interaction, reason=reason, now=now)
+    # NOTE (PR #846 review): there is deliberately NO scope-keyed
+    # ``close(scope, ...)``.  Post-re-key it resolved the AMBIENT
+    # principal and EMPTY speaker — closing nothing, or a record the
+    # caller never meant, while reading like the obvious way to close a
+    # scope.  Use :meth:`close_record` (one) or :meth:`close_scope`.
 
     def close_record(
         self,
@@ -419,6 +400,37 @@ class InteractionTracker:
         _emit_closed(reason)
         return interaction
 
+    def admitted_records(
+        self,
+        scope: str,
+        *,
+        admit: Callable[[Interaction], bool] | None = None,
+    ) -> list[Interaction]:
+        """The records in ``scope`` a ROOM-wide close may act on.
+
+        One owner for the fan's eligibility rule (PR #846 review).
+        REPLAY-opened records are excluded unconditionally: a replayed
+        span belongs to the catch-up pass and its
+        ``REASON_CATCHUP_COMPLETE`` sweep, so a live room cause would
+        mislabel the counter and steal it from
+        :func:`close_replayed_scopes`.  The rule lives here, not in
+        :meth:`close_record` — that is what the sweep closes them with.
+
+        ``admit`` is the caller's extra per-record rule (the shared
+        ``interaction_boundary.wire_admits_record`` conjunct at the
+        fan sites that close only PART of a scope).  :meth:`close_scope`
+        is this plus the close; a caller needing the set BEFORE any
+        close — the close notification, which marks metering, backfills
+        the wire id and lands the closing turn first — calls this
+        directly instead of re-deriving the rule.
+        """
+        return [
+            i for i in self._open.values()
+            if i.scope == scope
+            and not i.replayed
+            and (admit is None or admit(i))
+        ]
+
     def close_scope(
         self,
         scope: str,
@@ -427,40 +439,28 @@ class InteractionTracker:
         now: float | None = None,
         admit: Callable[[Interaction], bool] | None = None,
     ) -> list[Interaction]:
-        """Close EVERY open record in ``scope`` — the room-wide fan.
+        """Close every ADMITTED record in ``scope`` — the room-wide fan.
 
         ISSUE-0123 part 3: a structural close, an end-vote quorum, the
         bounded/cost close and the close-notification turn are room
         events, and a room holds one record per ``(principal, speaker)``
-        pair.  Returns the closed records in insertion order (empty if
-        none were open).  Each close emits its own
+        pair.  :meth:`admitted_records` decides WHICH records (replay
+        exclusion + the caller's ``admit`` conjunct); this adds the
+        close, so the fans that close only PART of a scope route
+        through here instead of hand-rolling read/filter/close and the
+        ordering obligations have ONE owner.  ``admit=None`` takes the
+        whole room, which is the session-end close.
+
+        Returns the closed records in insertion order (empty if none
+        were admitted).  Each close emits its own
         ``agent.interactions.closed`` increment — the stated
         metric-shape change (see :mod:`.interaction_metrics`).  One room
         event, one instant: the clock is read ONCE and every sibling's
         ``closed_at`` carries the same value.
-
-        REPLAY-opened records are SKIPPED: a replayed span belongs to
-        the catch-up pass and its ``REASON_CATCHUP_COMPLETE`` sweep, so
-        a live room cause would mislabel the counter and steal it from
-        :func:`close_replayed_scopes`.  The exclusion lives here, not in
-        :meth:`close_record` — that is what the sweep closes them with.
-
-        ``admit`` is the caller's extra per-record rule (PR #846
-        review): the fans that close only PART of a scope — the
-        end-vote quorum and the bounded/cost close, which must not bury
-        a successor conversation — pass the shared
-        ``interaction_boundary.wire_admits_record`` conjunct here
-        rather than hand-rolling the read/filter/close loop, so the
-        ordering obligations have ONE owner.  ``None`` admits every
-        live record: a session-end close takes the whole room.
         """
         ts = now if now is not None else self._clock()
         closed: list[Interaction] = []
-        for interaction in self.records_for_scope(scope):
-            if interaction.replayed:
-                continue
-            if admit is not None and not admit(interaction):
-                continue
+        for interaction in self.admitted_records(scope, admit=admit):
             finished = self.close_record(interaction, reason=reason, now=ts)
             if finished is not None:
                 closed.append(finished)

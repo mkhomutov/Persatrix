@@ -157,12 +157,10 @@ class TestRoomWideClose:
         """The keyed ``close`` stays a ONE-record close — the fan is a
         separate, deliberate call (room events must opt in)."""
         tracker = InteractionTracker()
-        tracker.add_turn(_SCOPE, speaker_id="iron-fox")
+        iron_fox = tracker.add_turn(_SCOPE, speaker_id="iron-fox")
         tracker.add_turn(_SCOPE, speaker_id="ember-owl")
 
-        closed = tracker.close(
-            _SCOPE, reason=REASON_STRUCTURAL, speaker_id="iron-fox",
-        )
+        closed = tracker.close_record(iron_fox, reason=REASON_STRUCTURAL)
 
         assert closed is not None and closed.speaker_id == "iron-fox"
         survivors = tracker.records_for_scope(_SCOPE)
@@ -261,3 +259,58 @@ class TestAppendTurnAndProjections:
 
         assert tracker.open_scopes() == [_SCOPE, "group:standup"]
         assert len(tracker.open_records()) == 3
+
+
+class TestAdmittedRecords:
+    """``admitted_records`` — the fan's eligibility seam (PR #846 review).
+
+    The replay exclusion used to be spelled once in ``close_scope`` and
+    again in ``close_notification``, which cannot use ``close_scope``
+    because it needs the admitted set BEFORE any close.  Both now read
+    the rule from here, so these pins cover both fans.
+    """
+
+    def test_replay_opened_records_are_excluded(self):
+        """A replayed span belongs to the pass-end
+        ``REASON_CATCHUP_COMPLETE`` sweep, never a live room cause."""
+        tracker = InteractionTracker()
+        live = tracker.add_turn(_SCOPE, speaker_id="iron-fox")
+        tracker.add_turn(_SCOPE, speaker_id="ember-owl", replayed=True)
+
+        assert tracker.admitted_records(_SCOPE) == [live]
+        assert len(tracker.records_for_scope(_SCOPE)) == 2, (
+            "the replayed record is still OPEN — excluded from the fan, "
+            "not closed by it"
+        )
+
+    def test_admit_predicate_narrows_further(self):
+        tracker = InteractionTracker()
+        iron_fox = tracker.add_turn(_SCOPE, speaker_id="iron-fox")
+        tracker.add_turn(_SCOPE, speaker_id="ember-owl")
+
+        admitted = tracker.admitted_records(
+            _SCOPE, admit=lambda r: r.speaker_id == "iron-fox",
+        )
+        assert admitted == [iron_fox]
+
+    def test_other_scopes_are_never_admitted(self):
+        tracker = InteractionTracker()
+        here = tracker.add_turn(_SCOPE, speaker_id="iron-fox")
+        tracker.add_turn("group:standup", speaker_id="iron-fox")
+
+        assert tracker.admitted_records(_SCOPE) == [here]
+
+    def test_close_scope_is_admitted_records_plus_the_close(self):
+        """The delegation that keeps the rule single-owner: whatever
+        ``admitted_records`` returns is exactly what the fan closes."""
+        tracker = InteractionTracker()
+        tracker.add_turn(_SCOPE, speaker_id="iron-fox")
+        replayed = tracker.add_turn(
+            _SCOPE, speaker_id="ember-owl", replayed=True,
+        )
+        expected = tracker.admitted_records(_SCOPE)
+
+        closed = tracker.close_scope(_SCOPE, reason=REASON_STRUCTURAL)
+
+        assert closed == expected
+        assert replayed.is_open
