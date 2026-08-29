@@ -31,6 +31,14 @@ re-exporting every name so existing imports keep working):
   ``(principal, speaker, scope)`` re-key pushed the combined module
   past the 500-line cap enforced by
   ``scripts/checks/file_size.py --strict``).
+* :mod:`agents.memory.interaction_key` — the record key itself: the
+  three axes and the resolution rules the tracker's entry points share
+  (PR #846 review, when the tracker returned to the cap).  Like
+  :mod:`~agents.memory.interaction_metrics` and unlike the modules
+  above it, this one is NOT re-exported here: its names never were
+  importable from this façade, so re-exporting would widen the public
+  surface rather than preserve it, and a caller reaching for the key
+  wants the module that documents it.
 
 The ``REASON_*`` constants and :data:`CloseReason` are re-exported from
 :mod:`agents.memory.boundary_detectors` for the same reason — several

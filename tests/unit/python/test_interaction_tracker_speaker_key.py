@@ -29,8 +29,9 @@ from agents.memory.boundary_detectors import (
     REASON_STRUCTURAL,
     default_detectors,
 )
+from agents.memory.interaction_key import record_key, resolve_record_key
 from agents.memory.interactions import InteractionTracker
-from agents.principal_id import principal_scope
+from agents.principal_id import DEFAULT_PRINCIPAL_ID, principal_scope
 
 _SCOPE = "group:planning"
 
@@ -314,3 +315,54 @@ class TestAdmittedRecords:
 
         assert closed == expected
         assert replayed.is_open
+
+
+class TestKeyResolutionContract:
+    """The rules :mod:`agents.memory.interaction_key` owns since the
+    PR #846 review split, exercised at the seam rather than only
+    through the tracker's behaviour."""
+
+    def test_a_records_own_fields_reproduce_the_key_it_is_filed_under(self):
+        """The two build directions must agree, or ``close_record``'s
+        identity guard looks under a key the map never used and silently
+        no-ops — the record then leaks open with no sweep left to find
+        it.  ``resolve_record_key`` builds from a CALL, ``record_key``
+        from the RECORD; this is the only test that pins them together."""
+        tracker = InteractionTracker()
+        record = tracker.add_turn(
+            _SCOPE, principal_id="acme", speaker_id="iron-fox",
+        )
+
+        assert record_key(record) == resolve_record_key(
+            _SCOPE, "acme", "iron-fox",
+        )
+        assert tracker.close_record(record, reason=REASON_STRUCTURAL) is record
+
+    def test_resolution_is_idempotent(self):
+        """``add_turn`` resolves the key and then hands the halves to
+        ``start``, which resolves AGAIN — so a normalisation step that is
+        not idempotent (a prefix, a case fold, a tenant-alias lookup)
+        would make the lookup key and the storage key diverge.  Every
+        turn would then open a fresh record while still returning one to
+        the caller, so nothing else in the suite would fail."""
+        key = resolve_record_key(_SCOPE, "  acme  ", "  iron-fox  ")
+
+        assert resolve_record_key(_SCOPE, key[0], key[1]) == key
+
+    def test_blank_axes_collapse_to_the_pre_re_key_shape(self):
+        """``None``/blank speaker is the no-speaker CONVENTION, not a
+        missing value, and a blank principal cannot mint a key no recall
+        predicate would match."""
+        assert resolve_record_key(_SCOPE, None, None)[1] == ""
+        assert resolve_record_key(_SCOPE, None, "   ")[1] == ""
+        assert resolve_record_key(_SCOPE, "   ", None)[0] == DEFAULT_PRINCIPAL_ID
+
+    def test_omitted_principal_is_ambient_not_the_default(self):
+        """AMBIENT, never "default": the task-local scope wins, so the
+        record a turn lands in and the tenant its close-derived rows bind
+        cannot disagree."""
+        with principal_scope("acme"):
+            assert resolve_record_key(_SCOPE, None, "iron-fox")[0] == "acme"
+        assert resolve_record_key(_SCOPE, None, "iron-fox")[0] == (
+            DEFAULT_PRINCIPAL_ID
+        )
