@@ -128,7 +128,7 @@ class Interaction:
     # foreign-speaker turn, carrying :data:`ROOM_CLOSE_TURN_KEY` so the
     # close path excludes it on a RECORDED fact rather than re-deriving
     # ``sender`` ≠ this ``speaker_id``.  It is dropped from the
-    # derivation input (``summarize_close._interaction_to_entries``), so
+    # derivation input (``close_entries.interaction_to_entries``), so
     # neither the projected column nor an extracted fact can come from
     # another speaker's words.
     principal_id: str = DEFAULT_PRINCIPAL_ID

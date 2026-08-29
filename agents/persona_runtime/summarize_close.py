@@ -29,9 +29,8 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from ..generated import wallet_pb2 as walletpb
-from ..memory.interaction_types import ROOM_CLOSE_TURN_KEY
 from ..memory.interactions import SUMMARY_UNAVAILABLE_TEXT
-from ..memory.store import CompressedView, MemoryEntry, MemoryStore
+from ..memory.store import CompressedView, MemoryStore
 from ..model_aliases import resolve as resolve_model
 from ..observability.metrics import current_agent_id, try_get_instruments
 from ..optimization import summarization_model
@@ -43,6 +42,10 @@ from .classification import (
     levels_below_stamp,
     normalize_for_stamp,
     rank_for_stamp,
+)
+from .close_entries import (
+    interaction_to_entries,
+    is_foreign_room_close_turn,
 )
 from .fact_envelope import extract_projections
 from .fact_extractor import (
@@ -157,7 +160,20 @@ async def summarize_closed_interaction(
         # single turn keeps the cheap deterministic placeholder — its
         # extractor input would carry no message body, so an LLM call
         # could only ever (correctly) extract nothing.
-        if single and not has_message_text:
+        #
+        # ISSUE-0131 — and the turn has to be this record's OWN.  This
+        # fast path reads ``turns[0]`` directly, ahead of the exclusion
+        # in ``close_entries``, so without the same §G guard a
+        # lone foreign room-close turn would mint a placeholder from the
+        # CLOSER's turn that ``close_path`` then stamps with this
+        # record's ``speaker_id`` — the misattribution the projection
+        # exists to prevent.  Falling through instead lands it on the
+        # all-excluded branch below, which is the honest answer.
+        if (
+            single
+            and not has_message_text
+            and not is_foreign_room_close_turn(payload, interaction.speaker_id)
+        ):
             # Single-turn placeholder; no facts extracted (the
             # deterministic per-turn shape is not LLM-routed).
             return (
@@ -169,7 +185,7 @@ async def summarize_closed_interaction(
                 {},
             )
 
-    entries = _interaction_to_entries(interaction)
+    entries = interaction_to_entries(interaction)
     if not entries:
         # Every turn was a FOREIGN room-close turn: nothing of this
         # record's own speaker to derive, so take the placeholder rather
@@ -363,72 +379,6 @@ async def summarize_closed_interaction(
         extract_projections(text, levels=requested) if requested else {}
     )
     return (summary, False, facts_raw, projections)
-
-
-def _is_foreign_room_close_turn(
-    payload: dict[str, object], speaker_id: str,
-) -> bool:
-    """The RFC 0020 §G exception: a room-close turn someone ELSE spoke.
-
-    The close-notification fan lands one closing message as the final
-    turn of EVERY record it closes, so on all but one that turn's sender
-    is not the record's speaker.  ISSUE-0131 projects
-    ``interaction.speaker_id`` onto the episode row and every extracted
-    fact, which is sound only because a record is single-speaker by
-    construction — this turn is the sole breach, so it is dropped from
-    the derivation input (the RFC's "exclude or tag", discharged as
-    exclude).  Without it a fact from the closer's words is attributed to
-    the record's own speaker: the Phase 0b defect itself.
-
-    Keyed off the producer's recorded stamp, not a guess.  The sender
-    comparison decides only WHOSE record this is — on the closer's own
-    record the turn is native, so it stays.
-    """
-    if payload.get(ROOM_CLOSE_TURN_KEY) is not True:
-        return False
-    return str(payload.get("sender", "")).strip() != speaker_id
-
-
-def _interaction_to_entries(interaction: Interaction) -> list[MemoryEntry]:
-    """Project per-turn payloads into ``MemoryEntry`` shape for compress().
-
-    Each turn becomes one entry; importance equals the turn ordinal
-    normalised into ``(0, 1]`` so later turns weigh slightly more
-    than openers when the compressor has to drop entries.
-
-    A foreign room-close turn is SKIPPED (:func:`_is_foreign_room_close_turn`).
-    Ordinals still come from the record's real turn positions, so a drop
-    does not renumber its siblings or shift their weights.
-    """
-    total = max(interaction.turn_count, 1)
-    entries: list[MemoryEntry] = []
-    for idx, turn in enumerate(interaction.turns, start=1):
-        payload = turn.payload or {}
-        if _is_foreign_room_close_turn(payload, interaction.speaker_id):
-            continue
-        content_parts: list[str] = []
-        # ISSUE-0054 — ``text`` (inbound message body) is the load-bearing
-        # input for RFC 0026 extraction; ``summary`` is the action envelope.
-        for key in ("text", "summary"):
-            value = str(payload.get(key, "")).strip()
-            if value:
-                content_parts.append(value)
-        sender = str(payload.get("sender", "")).strip()
-        if sender:
-            content_parts.append(f"sender={sender}")
-        if not content_parts:
-            content_parts.append(
-                f"event_type={payload.get('event_type', 'unknown')}",
-            )
-        entries.append(MemoryEntry(
-            id=f"turn-{idx}",
-            content=" | ".join(content_parts),
-            importance=idx / total,
-            tags=(),
-            created_at=turn.at,
-            score=0.0,
-        ))
-    return entries
 
 
 def _build_summarization_prompt(

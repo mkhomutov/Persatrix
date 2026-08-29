@@ -28,7 +28,7 @@ line); the projection now writes it.  ``close_path`` stamps
 onto every tuple that close extracts, both ``or None`` so a speakerless
 scope records NULL rather than an empty attribution.  The §G exception
 above is discharged as EXCLUDE, upstream in
-``summarize_close._interaction_to_entries``: a room-close turn whose
+``close_entries.interaction_to_entries``: a room-close turn whose
 sender is not the record's speaker never reaches the combined
 summarise+extract call, so no fact can be derived from another
 speaker's words and then stamped with this record's.

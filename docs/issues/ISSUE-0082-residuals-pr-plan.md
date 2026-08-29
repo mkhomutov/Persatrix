@@ -138,7 +138,7 @@ Write the migration-18 column: project the record key's speaker half onto the tw
 
 * **A projection, never a judgement.** `close_path` stamps `interaction.speaker_id` on the episode row, `fact_extractor` on every tuple that close extracts, the single-turn path on its own row — all `or None`, so a speakerless scope records NULL rather than an attribution to a speaker named nothing. Sound only because `(principal, speaker, scope)` makes each record single-speaker by construction.
 * **The §G breach is discharged as EXCLUDE, not tag.** The close-notification fan lands the room-close turn on every sibling record. `summarize_close._interaction_to_entries` drops it where its `sender` is not that record's speaker — upstream of the combined summarise+extract call, the one point where a single decision covers both outputs — keyed off the producer's recorded `room_close` stamp, not a reconstruction. The turn stays on the closer's OWN record, where it is native.
-* **Two 500-line splits were preconditions, not cleanup**: `interaction_tracker.py` → `interaction_key.py`, `facts.py` → `_facts_write.py`. Both sat exactly at the cap, so the parameter could not be added at all.
+* **Three 500-line splits were preconditions, not cleanup**: `interaction_tracker.py` → `interaction_key.py`, `facts.py` → `_facts_write.py`, and (at review) `summarize_close.py` → `close_entries.py`. Each sat exactly at the cap, so the change could not be added at all.
 
 #### PR checklist
 

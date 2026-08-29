@@ -195,7 +195,7 @@ async def store_extracted_facts(
     a counterparty fact differs in the two.  The RFC 0020 §G room-close
     turn is the one turn that would break the single-speaker premise, and
     it is dropped from the extractor's input upstream
-    (``summarize_close._interaction_to_entries``) rather than corrected
+    (``close_entries.interaction_to_entries``) rather than corrected
     here — no fact reaching this function can have come from it.
 
     ``protection_level`` / ``source_channel_id`` (RFC 0037 §C, PR 3) are

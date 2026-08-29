@@ -35,13 +35,13 @@ from agents.memory.facts import FactStore
 from agents.memory.interaction_tracker import InteractionTracker
 from agents.memory.interaction_types import ROOM_CLOSE_TURN_KEY, Interaction, Turn
 from agents.persona_runtime import close_path
+from agents.persona_runtime.close_entries import interaction_to_entries
 from agents.persona_runtime.episode_routing import _EpisodeRoutingMixin
 from agents.persona_runtime.fact_extractor import (
     dispatch_facts_from_response,
     store_extracted_facts,
 )
 from agents.persona_runtime.summarize_close import (
-    _interaction_to_entries,
     summarize_closed_interaction,
 )
 from agents.persona_types import AgentEvent, EventType
@@ -82,7 +82,7 @@ class TestTheSGExclusion:
             _room_close_turn("iron-fox"),
         ])
 
-        contents = [e.content for e in _interaction_to_entries(record)]
+        contents = [e.content for e in interaction_to_entries(record)]
 
         assert len(contents) == 1
         assert "mine" in contents[0]
@@ -101,7 +101,7 @@ class TestTheSGExclusion:
             _room_close_turn("iron-fox"),
         ])
 
-        contents = [e.content for e in _interaction_to_entries(record)]
+        contents = [e.content for e in interaction_to_entries(record)]
 
         assert len(contents) == 2
         assert any("Postgres" in c for c in contents)
@@ -114,7 +114,7 @@ class TestTheSGExclusion:
             Turn(at=1_000.0, payload={"sender": "someone-else", "text": "kept"}),
         ])
 
-        assert len(_interaction_to_entries(record)) == 1
+        assert len(interaction_to_entries(record)) == 1
 
     def test_ordinals_do_not_renumber_around_a_dropped_turn(self):
         """Importance is the turn's real position, so excluding one does
@@ -125,7 +125,7 @@ class TestTheSGExclusion:
             Turn(at=1_099.0, payload={"sender": "amber-lynx", "text": "third"}),
         ])
 
-        entries = _interaction_to_entries(record)
+        entries = interaction_to_entries(record)
 
         assert [e.id for e in entries] == ["turn-1", "turn-3"]
 
@@ -250,6 +250,33 @@ class TestAllExcludedDegradesCheaply:
         assert failed is False
         assert facts_raw is None and projections == {}
         assert "no content attributable" in summary
+        llm.complete.assert_not_called()
+
+    async def test_a_lone_foreign_turn_skips_the_single_turn_fast_path(self):
+        """The ``turn_count == 1`` fast path reads ``turns[0]`` before the
+        exclusion runs, so it needs the same §G guard.
+
+        The turn that reaches it is the dangerous shape: an action
+        envelope (``summary``) with no message body (``text``), which is
+        the only combination that fast path accepts.  Without the guard
+        this record's episode would be summarised from **iron-fox**'s
+        closing turn and then stamped ``speaker_id='amber-lynx'`` by
+        ``close_path`` — the Phase 0b misattribution, reintroduced by the
+        one path the exclusion did not cover."""
+        record = _record("amber-lynx", [Turn(at=1_090.0, payload={
+            "sender": "iron-fox",
+            "summary": "Event: chat_end → Actions: []",
+            ROOM_CLOSE_TURN_KEY: True,
+        })])
+        llm = MagicMock()
+
+        summary, failed, facts_raw, _ = await summarize_closed_interaction(
+            llm_client=llm, interaction=record, agent_id="test-agent",
+        )
+
+        assert "no content attributable" in summary
+        assert "iron-fox" not in summary and "chat_end" not in summary
+        assert failed is False and facts_raw is None
         llm.complete.assert_not_called()
 
 

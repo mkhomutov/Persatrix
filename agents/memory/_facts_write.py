@@ -72,7 +72,7 @@ async def insert_fact(
     who said it, and a counterparty fact differs in the two.  Sound only
     because a record is single-speaker by construction — the RFC 0020 §G
     room-close turn, the sole exception, is dropped from the extractor's
-    input upstream (``summarize_close._interaction_to_entries``), so no
+    input upstream (``close_entries.interaction_to_entries``), so no
     tuple reaching here can have come from another speaker's words.
 
     ``protection_level`` / ``source_channel_id`` (RFC 0037 §C — v16,
