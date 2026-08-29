@@ -25,19 +25,26 @@ speaker's words and then stamped with this record's.
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock
 
 import pytest
 
 from agents.memory.boundary_detectors import REASON_STRUCTURAL
 from agents.memory.facts import FactStore
+from agents.memory.interaction_tracker import InteractionTracker
 from agents.memory.interaction_types import ROOM_CLOSE_TURN_KEY, Interaction, Turn
 from agents.persona_runtime import close_path
-from agents.persona_runtime.fact_extractor import store_extracted_facts
+from agents.persona_runtime.episode_routing import _EpisodeRoutingMixin
+from agents.persona_runtime.fact_extractor import (
+    dispatch_facts_from_response,
+    store_extracted_facts,
+)
 from agents.persona_runtime.summarize_close import (
     _interaction_to_entries,
     summarize_closed_interaction,
 )
+from agents.persona_types import AgentEvent, EventType
 
 _SCOPE = "group:planning"
 
@@ -244,3 +251,104 @@ class TestAllExcludedDegradesCheaply:
         assert facts_raw is None and projections == {}
         assert "no content attributable" in summary
         llm.complete.assert_not_called()
+
+
+class TestTheFactDispatchCarriesItThrough:
+    """The Phase-2 seam, not just the leaf.
+
+    ``TestFactProjection`` above calls ``store_extracted_facts`` with an
+    explicit speaker, so it pins the WRITE but not the WIRING: delete
+    ``dispatch_facts_from_response``'s ``speaker_id=`` argument and every
+    close-extracted fact silently reverts to NULL with that class still
+    green.  This is the same standard
+    ``test_interaction_classification_capture`` sets for the RFC 0037 §C
+    capture, whose docstring calls the dispatch pass-through "the only
+    coverage" of that seam — the speaker projection rides the same
+    function and needs the same pin.
+    """
+
+    async def test_the_records_speaker_reaches_the_stored_tuples(
+        self, fact_store,
+    ):
+        await dispatch_facts_from_response(
+            fact_store=fact_store,
+            facts_raw=json.dumps([
+                {"subject": "alice", "predicate": "prefers", "object": "tea"},
+                {"subject": "alice", "predicate": "works_at", "object": "acme"},
+            ]),
+            interaction=_record("amber-lynx"),
+            agent_id="test-agent",
+            session_id="legacy",
+        )
+
+        assert await _fact_speakers(fact_store) == {"amber-lynx"}
+
+    async def test_a_speakerless_record_dispatches_null(self, fact_store):
+        await dispatch_facts_from_response(
+            fact_store=fact_store,
+            facts_raw=json.dumps([
+                {"subject": "alice", "predicate": "prefers", "object": "tea"},
+            ]),
+            interaction=_record(""),
+            agent_id="test-agent",
+            session_id="legacy",
+        )
+
+        assert await _fact_speakers(fact_store) == {None}
+
+
+class _SingleTurnHarness(_EpisodeRoutingMixin):
+    """The mixin's single-turn routing over a real tracker + real store.
+
+    Only the attributes ``_store_event_episode`` touches on the
+    single-turn path; the idle sweep runs first and is empty on a fresh
+    tracker, so ``_persist_closed_interaction`` is never reached.
+    """
+
+    def __init__(self, episodic) -> None:
+        self.agent_id = "test-agent"
+        self._episodic_memory = episodic
+        self._interaction_tracker = InteractionTracker()
+        self._session_id = "legacy"
+
+
+class TestSingleTurnProjection:
+    """The third write site.  A single-turn scope opens and closes inside
+    one call, so it never reaches ``persist_closed_interaction`` — it
+    stamps its own row and needs its own pin."""
+
+    async def test_a_single_turn_event_stamps_its_sender(self, memory):
+        harness = _SingleTurnHarness(memory)
+
+        await harness._store_event_episode(
+            AgentEvent(
+                event_type=EventType.TASK_ASSIGNED, sender_id="amber-lynx",
+            ),
+            [],
+        )
+
+        assert await _episode_speaker_by_scope(
+            memory, EventType.TASK_ASSIGNED.value,
+        ) == "amber-lynx"
+
+    async def test_a_tick_has_no_speaker_and_stamps_null(self, memory):
+        """A tick genuinely has no sender — NULL, not an empty string."""
+        harness = _SingleTurnHarness(memory)
+
+        await harness._store_event_episode(
+            AgentEvent(event_type=EventType.TICK), [],
+        )
+
+        assert await _episode_speaker_by_scope(
+            memory, EventType.TICK.value,
+        ) is None
+
+
+async def _episode_speaker_by_scope(memory, scope: str) -> str | None:
+    db = memory._ensure_db()
+    async with db.execute(
+        "SELECT speaker_id FROM episodes WHERE scope = ?", (scope,),
+    ) as cursor:
+        row = await cursor.fetchone()
+    assert row is not None, f"no episode written for scope {scope!r}"
+    return row[0]

@@ -237,10 +237,14 @@ async def persist_closed_interaction(
     # unattributable record cannot bind a tenant it does not have.
     #
     # This closes the principal half of the ISSUE-0123 boundary.  The
-    # SPEAKER half is still dormant: migration 18's ``speaker_id`` column
-    # has no writer, because attribution also has to exclude or tag the
-    # RFC 0020 §G room-close turn (``ROOM_CLOSE_TURN_KEY``) before a
-    # record's turns can be projected onto it.
+    # SPEAKER half is projected below (``speaker_id=``): migration 18's
+    # column is written from the record key, not judged per turn.  That
+    # is sound only because the RFC 0020 §G room-close turn
+    # (``ROOM_CLOSE_TURN_KEY``) — the one foreign turn a record can
+    # hold — is dropped from the derivation input upstream, in
+    # ``summarize_close._interaction_to_entries``, so neither the summary
+    # nor its facts can come from a speaker this record is not filed
+    # under.
     with principal_scope(interaction.principal_id):
         try:
             await episodic.store_episode(
