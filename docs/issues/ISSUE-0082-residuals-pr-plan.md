@@ -55,7 +55,7 @@ Net: the tracker key is `(principal, speaker, scope)`. PRs 3–4 below are
 written for that answer. Two consequences carried forward — the close reserve
 becomes `1 + (personas × principals × speakers)` (PR 4 sizes it), and a
 persona's close-derived memory of a group discussion fragments per speaker
-per tenant (PR 4's release note states it).
+per tenant (stated in PR 3's release note).
 
 ---
 
@@ -154,23 +154,24 @@ One tracker, two principals, one room scope → two records. One tracker, one `l
 
 ---
 
-### PR 4: `feature/v0315-issue0123-close-path` — The close binding and its consequences
+### PR 4: `feature/v0315-issue0123-close-path` — Reserve re-size and cleanup
 
 #### Scope
 
-Bind `principal_scope(interaction.principal_id)` around the close pipeline (`summarize_closed_interaction` → `update_episode_summary` → `store_extracted_facts` → `record_closed_interaction`), re-size the wallet reserve, and clean up the Go-side asymmetry.
+Re-size the wallet reserve and clean up the Go-side asymmetry.
+
+**Deviation, 2026-08-29.** Two deliverables landed early, found by PR 3's review as defects. The **principal binding** shipped in PR 3 (`3e633571`), across both write phases. The **`speaker_id` projection** is branched here unmerged (`42551a91`, `31a7d551`), CI-green on PR 3's branch. **Open no PR here until [#846](https://github.com/mkhomutov/Persatrix/pull/846) merges** — this branch is stacked on PR 3's head; rebase onto `main` after the squash-merge.
 
 #### Key implementation details
 
-* **This is the part that holds on request-less paths.** `idle_check` runs from the janitor with no scope active; the close-notification path runs under the closing turn's principal. Both must write under the record's own frozen value.
 * **The asymmetry is retired, not resolved.** Once the record names its principal, the trigger's principal no longer selects a tenant, so the four close paths in `internal/channels/synthesis_close.go` need not agree. Audit whether `pendingSynthesisClose.principal` becomes dead and drop it if so.
 * **Reserve re-size**: `1 + N` becomes `1 + (personas × principals × speakers)` — the largest single cost in this workstream, and under-sizing degrades *silently* into `SUMMARY_UNAVAILABLE_TEXT`. The sizing analysis, the half-cap clamp the calibration issue must cover, and the two obligations the milestone attaches (ship the **signal** with the re-size; the **threshold basis** is Go and does not ride this PR) are the [reserve-sizing record](ISSUE-0082-residuals-reserve-sizing.md). File the calibration as its own issue in the [ISSUE-0109](ISSUE-0109-rfc0052-autonomous-defaults-calibration.md) idiom rather than guessing a constant.
-* `agent.interactions.closed.by_<reason>` now fires once per record: a metric-shape change dashboards must be told about.
 
 #### PR checklist
 
-- [ ] Metric-shape change called out in the changelog
-- [ ] Release note states the coherence trade: a persona's close-derived memory of a group discussion is per-person **and per-speaker**; room continuity is unaffected (transcript and RFC 0036 verbatim history are scoped by neither)
+- [ ] Rebased onto `main` after PR 3's squash-merge, then opened
+- [x] Metric shape (`agent.interactions.closed.by_<reason>` fires once per **record**) in the changelog — with PR 3
+- [x] Release note states the coherence trade: close-derived memory of a group room is per-person **and per-speaker**; room continuity unaffected — with PR 3
 
 ---
 
@@ -211,7 +212,7 @@ Run [MT-MEMORY-GROUP-TENANT-001](../manual-tests/MT-MEMORY-GROUP-TENANT-001.md) 
 | 1 | R-2 causal attribution store, dormant | `feature/v0315-issue0124-attribution-store` | ✅ Merged | [#844](https://github.com/mkhomutov/Persatrix/pull/844) | `5b740f84` |
 | 2 | R-2 re-stamp + end-to-end gate | `feature/v0315-issue0124-restamp` | ✅ Merged | [#845](https://github.com/mkhomutov/Persatrix/pull/845) | `48b4a558` |
 | 3 | R-1 + [ISSUE-0131](ISSUE-0131-derived-memory-has-no-speaker-attribution.md) scope key `(principal, speaker, scope)` + RFC 0020 §G amendment | `feature/v0315-issue0123-scope-key` | 🔀 PR open | [#846](https://github.com/mkhomutov/Persatrix/pull/846) | — |
-| 4 | R-1 close binding (MUST exclude/tag the fanned closing turn from speaker projection + fact extraction — RFC 0020 §G stated exception), reserve re-size (now × speakers; until it lands a cost-trigger room fan over-commits the `1 + N` reserve), asymmetry cleanup | `feature/v0315-issue0123-close-path` | ⬜ Not started | — | — |
+| 4 | Reserve re-size (× speakers; until it lands a cost-trigger room fan over-commits `1 + N`), asymmetry cleanup — the close binding and the speaker projection landed early, see below | `feature/v0315-issue0123-close-path` | 🔄 Branched, **held** for PR 3's merge | — | — |
 | 5 | Live MT + closeout | `feature/v0315-issue0082-residuals-close` | ⬜ Not started | — | — |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ⏭ Deferred
