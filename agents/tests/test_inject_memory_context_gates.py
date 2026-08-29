@@ -9,79 +9,18 @@ Extracted from test_inject_memory_context.py when that file exceeded the
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock
-
 import pytest
 
-from agents.clock import WallClock
-from agents.persona_runtime.memory_context import (
-    MemoryInjectionResult,
-    _MemoryContextMixin,
+from agents.persona_runtime.memory_context import MemoryInjectionResult
+
+# Doubles shared with test_inject_memory_context.py; this file previously
+# kept its own near-copy of the same three dataclasses.
+from agents.tests._memory_context_helpers import (
+    FakeEpisode as _FakeEpisode,
 )
-
-# ─── Helpers (mirrors test_inject_memory_context.py) ──────────────────────────
-
-
-@dataclass
-class _FakeEpisode:
-    summary: str
-    id: str = "ep-0001"
-    # RFC 0021 PR 2: temporal fields accessed by recency rendering.
-    created_at: float = 0.0
-    closed_at: float | None = None
-    started_at: float | None = None
-    turn_count: int | None = None
-
-
-@dataclass
-class _FakeNote:
-    topic: str
-    content: str
-
-
-def _make_mixin(
-    *,
-    episodes: list[_FakeEpisode] | None = None,
-    notes: list[_FakeNote] | None = None,
-    sender_id: str | None = None,
-    event_type: str = "CHANNEL_MESSAGE",
-) -> tuple[_ConcreteMemoryMixin, Any]:
-    """Return a wired _MemoryContextMixin instance and a matching fake event."""
-    from agents.memory.working import WorkingMemory
-    from agents.persona_types import EventType
-
-    mixin = _ConcreteMemoryMixin()
-    mixin.agent_id = "test-agent"
-    mixin._working_memory = WorkingMemory(max_tokens=8192)
-    # RFC 0021 PR 2: temporal seam required by _MemoryContextMixin._inject_memory_context.
-    mixin._clock = WallClock()
-    mixin._timezone = "UTC"
-
-    mixin._episodic_memory = AsyncMock()
-    mixin._episodic_memory.recall.return_value = episodes or []
-    mixin._episodic_memory.recall_notes.return_value = notes or []
-
-    mixin._relationship_memory = AsyncMock()
-    mixin._relationship_memory.get_relationship_summary.return_value = None
-
-    et = getattr(EventType, event_type)
-    event = MagicMock()
-    event.event_type = et
-    event.sender_id = sender_id
-    event.metadata = {}
-    event.payload = {"content": "hello"}
-
-    return mixin, event
-
-
-class _ConcreteMemoryMixin(_MemoryContextMixin):
-    """Minimal concrete subclass for testing _MemoryContextMixin."""
-
-    def _format_event(self, event: Any) -> str:  # type: ignore[override]
-        return str(event.payload.get("content", ""))
-
+from agents.tests._memory_context_helpers import (
+    make_mixin as _make_mixin,
+)
 
 # ─── RFC 0017 PR 4: TICK skip removed; min_score wired; fallback deleted ──────
 
