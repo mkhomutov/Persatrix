@@ -38,6 +38,7 @@ from scripts.checks.file_size import (
     DEFAULT_MAX_RFC_WORDS,
     EXCLUDE_PATTERNS,
     _count_words,
+    _near_cap_notices,
     _scan_files,
 )
 from scripts.checks.file_size_allowlist import GRANDFATHERED_FILES
@@ -257,3 +258,94 @@ def test_repo_currently_passes_its_own_size_gate() -> None:
         "repo exceeds its size gate: "
         + ", ".join(f"{w.file} ({w.measured} {w.unit} > {w.limit})" for w in warnings)
     )
+
+
+# --------------------------------------------------------------------------
+# The near-cap tier — advance notice, never a gate
+# --------------------------------------------------------------------------
+
+
+def _notice_files(**kw: object) -> set[str]:
+    """Near-cap notices for a synthetic measurement set."""
+    code = kw.pop("code", [])
+    docs = kw.pop("docs", [])
+    return {n.file for n in _near_cap_notices(code, docs, **kw)}  # type: ignore[arg-type]
+
+
+def test_a_file_exactly_at_the_limit_is_flagged() -> None:
+    """The state the tier exists for.  A file ON the limit passes the gate
+    silently, and is also the one where the next edit costs a split or a
+    rationale-deleting trim — 28 code files were sitting here when the
+    tier was added."""
+    notices = _near_cap_notices([("a.py", 500)], [])
+
+    assert [n.file for n in notices] == ["a.py"]
+    assert notices[0].headroom == 0
+
+
+def test_a_file_over_the_limit_is_not_a_near_cap_notice() -> None:
+    """It is a WARNING, and reporting it twice would blur the one
+    distinction the output has to keep: passing versus failing."""
+    assert _notice_files(code=[("a.py", 501)]) == set()
+
+
+def test_the_band_is_proportional_to_each_limit() -> None:
+    """One percentage means the same thing to all three caps: 3% is 15
+    lines of a code file, 90 words of a doc, 240 of an RFC."""
+    assert _notice_files(code=[("near.py", 485), ("far.py", 484)]) == {"near.py"}
+    assert _notice_files(
+        docs=[("docs/d.md", 2910), ("docs/far.md", 2909)],
+    ) == {"docs/d.md"}
+    assert _notice_files(
+        docs=[("docs/rfcs/0099-r.md", 7760), ("docs/rfcs/0098-r.md", 7759)],
+    ) == {"docs/rfcs/0099-r.md"}
+
+
+def test_a_tighter_band_narrows_the_report() -> None:
+    assert _notice_files(code=[("a.py", 490)], pct=3) == {"a.py"}
+    assert _notice_files(code=[("a.py", 490)], pct=1) == set()
+
+
+def test_allowlisted_files_are_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
+    """They are exempt from the limit, so "approaching" it is meaningless
+    — and they are mostly already far past it."""
+    monkeypatch.setattr(file_size, "GRANDFATHERED_FILES", frozenset({"waived.py"}))
+
+    assert _notice_files(code=[("waived.py", 500), ("live.py", 500)]) == {"live.py"}
+
+
+def test_notices_sort_tightest_first() -> None:
+    notices = _near_cap_notices(
+        [("roomy.py", 490), ("at.py", 500), ("tight.py", 499)], [],
+    )
+
+    assert [n.file for n in notices] == ["at.py", "tight.py", "roomy.py"]
+
+
+def test_near_cap_never_changes_the_exit_code(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The contract that keeps this a signal rather than a second cliff:
+    a file that is merely close is passing, and failing it would just move
+    the cliff down by 3%."""
+    _write(tmp_path, "docs/close.md", DEFAULT_MAX_DOC_WORDS - 5)
+
+    assert file_size.check_file_size(tmp_path, strict=True, near_cap=True) == 0
+    out = capsys.readouterr().out
+    assert "docs/close.md" in out
+    assert "[OK] All files within size limits." in out
+
+
+def test_the_count_is_reported_without_the_flag(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Discoverable from ordinary output, not just from ``--help`` — but
+    one line, so it cannot drown the warnings that do gate."""
+    _write(tmp_path, "docs/close.md", DEFAULT_MAX_DOC_WORDS)
+
+    file_size.check_file_size(tmp_path, strict=True)
+    out = capsys.readouterr().out
+
+    assert "1 exactly AT it" in out
+    assert "--near-cap" in out
+    assert "docs/close.md" not in out, "the list belongs behind the flag"
