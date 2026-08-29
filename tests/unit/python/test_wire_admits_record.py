@@ -11,6 +11,10 @@ callers' semantics in one place.
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
+
 from agents.memory.interactions import Interaction
 from agents.persona_runtime.interaction_boundary import wire_admits_record
 
@@ -89,3 +93,44 @@ def test_replay_flag_is_not_this_predicate_s_business():
     replayed = _record("wire-A")
     replayed.replayed = True
     assert wire_admits_record(replayed, "wire-A") is True
+
+
+# The three room-close fans, which must take the SCOPE's anchor rather
+# than reading the wire id raw.
+_FAN_MODULES = (
+    Path("agents/persona_runtime/episode_routing.py"),
+    Path("agents/persona_runtime/cost_close.py"),
+    Path("agents/persona_runtime/close_notification.py"),
+)
+
+
+@pytest.mark.parametrize("py_path", _FAN_MODULES, ids=lambda p: p.stem)
+def test_room_close_fans_delegate_to_the_shared_anchor(py_path: Path) -> None:
+    """PR #846 review: ``scope_wire_anchor`` computes this predicate's
+    second argument, and the two must not drift apart again.
+
+    The derivation — the raw wire-id read with the thread carve-out
+    applied, since a threaded reply carries the parent FLOOR's id and
+    that id says nothing about the thread (RFC 0030 IP3) — was spelled
+    inline at all three fan sites, and the close-notification copy had
+    silently dropped the carve-out.  That stamped the floor's id onto
+    thread records through the fan's wire-id backfill, wrote it as the
+    thread episode's ``governance_interaction_id`` (contradicting the
+    close path's own DM/thread/non-channel → NULL contract) and billed
+    the OQ #6 metered close summary against the floor's conversation.
+
+    Structural rather than behavioural on purpose: a fourth fan, or a
+    revert of one of the three, reintroduces the bug by *omission*, which
+    no per-call assertion catches.
+    """
+    source = py_path.read_text(encoding="utf-8")
+    assert "scope_wire_anchor(scope, event)" in source, (
+        f"{py_path} must take its wire anchor from "
+        f"`scope_wire_anchor(scope, event)`"
+    )
+    assert "wire_interaction_id(event)" not in source, (
+        f"{py_path} reads the wire interaction id RAW. A room-close fan "
+        f"must take `scope_wire_anchor(scope, event)` — reading raw drops "
+        f"the thread carve-out, stamping a thread record with the parent "
+        f"floor's id and billing its metered close summary to the floor."
+    )

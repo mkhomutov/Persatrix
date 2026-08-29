@@ -655,7 +655,7 @@ CLI `channel config get` reads back. See the
 Governance makes a brainstorm *converge and terminate*; the **summary surface**
 turns "terminated" into "here's the result". When an interaction closes — by an
 end-vote (Layer 4), by the cost ceiling (Layer 1), or by going idle — the persona
-persists a one-per-interaction summary to its `episodes` row
+persists a summary to its `episodes` row
 ([RFC 0020 §C/§D](../rfcs/0020-interaction-lifecycle.md#c-interaction-lifecycle-states)),
 and v0.3.8 **surfaces that already-persisted summary** so a converged
 conversation hands back something a human can read. The summariser itself is
@@ -682,6 +682,21 @@ unchanged — this is a read surface, not a new synthesis step.
   Both surfaces read `GET /api/v1/agents/{id}/interactions/closed` — the summary
   is **per-agent** (each participating persona persists its own row), so the web
   surface merges across the channel's participants and shows one affordance.
+
+> **One row per speaker since v0.3.15 (ISSUE-0123 / ISSUE-0131).** A persona's
+> interaction records are keyed `(principal, speaker, scope)`, so a *group* room
+> holds one open record per distinct `sender_id` per tenant and a room-wide close
+> writes **one closed-interaction row per speaker heard**, not one per
+> conversation. Expect `N` rows per agent where you used to see one, each
+> summarising that speaker's own turns and naming that speaker (plus, on the
+> close-notification path, whoever closed the room) in `participants`. This is
+> also the routine cause of one governance interaction id mapping to several
+> episode ids — see the ISSUE-0102 note below for the other one. The `agent
+> interactions` CLI lists every row; the web affordance shows the newest, so on a
+> multi-speaker room read the CLI for the whole picture. It reaches the RFC 0020
+> §H **auto-reflect nudge** and the DM relationship tier's `interaction_count`
+> the same way: both now count records, so `auto_reflect_after` fires sooner in
+> a busy room and may want raising.
 
 > **Two interaction-id namespaces (ISSUE-0102).** The `interaction_id` on a
 > closed-interaction row is the persona's **agent-side** RFC 0020 memory-episode

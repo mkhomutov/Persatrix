@@ -82,11 +82,10 @@ from typing import TYPE_CHECKING, Protocol
 from ..channel_wire_metadata import (
     WIRE_BOUNDED_CLOSE_TRIGGERS,
     WIRE_CLOSE_TRIGGER_COST,
-    wire_interaction_id,
 )
 from ..memory.boundary_detectors import REASON_COST, REASON_STRUCTURAL
 from .close_path import persist_fanned_closes
-from .interaction_boundary import wire_admits_record
+from .interaction_boundary import scope_wire_anchor, wire_admits_record
 from .turn_payload import build_turn_payload
 
 if TYPE_CHECKING:
@@ -180,7 +179,17 @@ async def close_interaction_on_notification(
     # behaviour — the tolerant-wire-reader posture. Mixed scopes close
     # the matching records and leave the successors to their own
     # boundaries.
-    notified_wire_id = wire_interaction_id(event)
+    # PR #846 review: the SHARED anchor derivation, not a raw read.  A
+    # threaded reply carries the parent FLOOR's interaction id (the
+    # resolver keys on ``msg.ChannelID``), and the notification is a
+    # verbatim clone of the closing message — so reading it raw stamped
+    # the floor's id onto thread records through the backfill below,
+    # wrote it as the thread episode's ``governance_interaction_id``
+    # (contradicting ``close_path``'s own DM/thread/non-channel → NULL
+    # contract) and billed the OQ #6 metered lease to the floor's
+    # conversation.  ``scope_wire_anchor`` forces the blank the other two
+    # fans have always used, which is the tolerant scope-keyed posture.
+    notified_wire_id = scope_wire_anchor(scope, event)
     # ``admitted_records`` is the fan's eligibility seam (PR #846
     # review): it owns the replay exclusion — a replay-opened record
     # belongs to the pass-end ``REASON_CATCHUP_COMPLETE`` sweep, and a
@@ -196,17 +205,36 @@ async def close_interaction_on_notification(
         scope,
         admit=lambda record: wire_admits_record(record, notified_wire_id),
     )
+    # Report what the fan LEFT, against the fan's own set (PR #846
+    # review).  This loop used to re-derive its verdict from the wire
+    # conjunct alone, so it disagreed with ``admitted_records`` in both
+    # directions: a replay-opened record was announced as a "stale
+    # straggler" — the wrong cause, since replay exclusion is what
+    # actually spared it — while an UNSTAMPED replay record, which the
+    # tolerant conjunct admits, was dropped from the fan with no line at
+    # all.  ``Interaction`` is an unfrozen dataclass and therefore
+    # unhashable; identity is what "this record object" means here.
+    admitted = {id(record) for record in to_close}
     for record in records:
+        if id(record) in admitted:
+            continue
+        if record.replayed:
+            logger.info(
+                "Agent %s: close notification for interaction %s found a "
+                "replay-opened record on scope %s; left to the catch-up "
+                "sweep's own close",
+                agent.agent_id, notified_wire_id, scope,
+            )
+            continue
         # A positively-stamped record that disagrees is a stale
         # straggler: say so, since the notified close then applies to
         # nothing this agent holds.
-        if not wire_admits_record(record, notified_wire_id):
-            logger.info(
-                "Agent %s: close notification for interaction %s found %s "
-                "open on scope %s; stale straggler, leaving that record",
-                agent.agent_id, notified_wire_id,
-                record.wire_interaction_id, scope,
-            )
+        logger.info(
+            "Agent %s: close notification for interaction %s found %s "
+            "open on scope %s; stale straggler, leaving that record",
+            agent.agent_id, notified_wire_id,
+            record.wire_interaction_id, scope,
+        )
     if not to_close:
         return
     if notified_wire_id:
@@ -324,9 +352,22 @@ async def close_interaction_on_notification(
         # ran for it.
         turn = build_turn_payload(
             event, f"Event: {event.event_type.value} → Actions: []",
+            # PR #846 review: stamp the RFC 0020 §G exception at the
+            # producer.  This turn's ``sender`` is not the record's
+            # ``speaker_id`` on any sibling, and three consumers need to
+            # know it — the ``participants`` read surface (which was
+            # naming the closer as a participant of every record it never
+            # spoke in), and the residuals PR 4 ``speaker_id`` projection
+            # and fact binding, which the docs oblige to exclude or tag it.
+            room_close=True,
         )
         for record in to_close:
-            agent._interaction_tracker.append_turn(record, turn, now=now)
+            # A COPY per record (PR #846 review): ``append_turn`` stores
+            # the payload by reference, so one dict shared across N
+            # sibling turns means a later in-place edit — exactly the
+            # shape the PR 4 "exclude or tag" obligation invites — writes
+            # through every sibling at once.
+            agent._interaction_tracker.append_turn(record, dict(turn), now=now)
     # Close every admitted record first, then persist each behind its
     # own guard (``persist_fanned_closes``, the same review fix): the
     # closes pop the records from the open map, so one persist failure

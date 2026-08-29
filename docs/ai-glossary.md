@@ -825,6 +825,60 @@ Terms from [RFC 0020](rfcs/0020-interaction-lifecycle.md) PR 4.
   summary-unavailable sentinel. Invoked from `on_tick` at most once
   per `JANITOR_INTERVAL_SEC` (default 300 s).
 
+## ISSUE-0123 / ISSUE-0131 — Per-speaker interaction records (v0.3.15)
+
+Terms from the [RFC 0020 §G](rfcs/0020-interaction-lifecycle.md#g-per-channel-scoping)
+amendment: the `InteractionTracker` key is
+`(principal_id, speaker_id, scope)`, so a room holds one record per
+speaker per tenant.
+
+### Record key
+- **Aliases:** "tracker key".
+- **Disallowed:** "interaction scope" for the key as a whole — **scope**
+  is one of its three components and is still, alone, the persisted
+  `episodes.scope` string and the recall prefix-predicate surface.
+- **Definition:** The tuple `(principal_id, speaker_id, scope)` an open
+  interaction is held under. All three are frozen when the interaction
+  opens (the `session_id` footing), so a turn under a different tenant
+  or from a different speaker lands in a different record.
+
+### Speaker
+- **Aliases:** "speaker id", `speaker_id`.
+- **Disallowed:** "participant" (a room has many; a record has one),
+  "author", "principal" (a *tenant* axis — only authenticated humans
+  have one, so a room of personas shares `local`).
+- **Definition:** The event's `sender_id`, frozen as the second half of
+  the **record key**; `""` = no speaker (tick / single-turn scopes whose
+  event carries none). Projected onto the `episodes.speaker_id` /
+  `facts.speaker_id` columns (migration 18) at close — sound only
+  because a record is single-speaker by construction, never
+  model-elected.
+
+### Room-close fan
+- **Aliases:** "the fan", "fanned close".
+- **Disallowed:** "broadcast close", "bulk close".
+- **Definition:** A close whose cause is a ROOM event — session end,
+  end-vote quorum, bounded/cost close, close notification — applied to
+  every **admitted** record in the scope rather than to one speaker's.
+  Reads the clock once, so all siblings share a `closed_at`; each close
+  emits its own counter increment, so `agent.interactions.closed` moves
+  by N.
+
+### Admitted record
+- **Disallowed:** "eligible scope", "matching interaction".
+- **Definition:** `InteractionTracker.admitted_records` — the fan's one
+  eligibility seam: replay-opened records excluded unconditionally
+  (they belong to the catch-up sweep), plus the caller's per-record
+  conjunct, normally the wire-id one (`wire_admits_record`).
+
+### Room-close turn
+- **Disallowed:** "terminator turn", "foreign turn".
+- **Definition:** The close notification's closing message, landed as
+  the final turn of every record its fan closes and stamped
+  `room_close` in the turn payload — the one stated exception to
+  single-speaker construction, since its `sender` is not the record's
+  **speaker**.
+
 ## RFC 0052 — Autonomous Channels (PR 4b-i)
 
 Terms from [RFC 0052](rfcs/0052-autonomous-agent-channels.md) PR 4b-i,

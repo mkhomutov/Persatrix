@@ -49,7 +49,9 @@ Re-vote dedup mirror (PR 607 second-pass review): Go's vote gate counts
 a participant once per interaction — an in-window re-vote is suppressed
 but still commits, so its publish reports ``published``.  The discharge
 mirrors that idempotency with a per-scope memory of the wire id it last
-vote-closed: a re-vote on the SAME wire interaction (the scope reopened
+cast a COUNTED vote on — written when the discharge confirms the publish,
+not when its fan happens to close a record (PR #846 review): a re-vote on
+the SAME wire interaction (the scope reopened
 on continued traffic, stamped with the unrotated id) closes nothing —
 the record stays open exactly like Go's interaction — instead of
 minting a second "ended" record per re-vote.  A record with no wire id
@@ -244,19 +246,6 @@ async def discharge_end_vote_publish(
             )
             return
         agent._pending_vote_closes.pop(channel_id, None)
-        if synthesis_reply:
-            # Docstring: the echo is not an acceptance signal, so the close
-            # and its OQ #6 metering belong to the close-notification
-            # self-echo, which arrives iff Go closed on this reply. Leave
-            # the record open: if the arm was consumed or abandoned the
-            # discussion is still live and Go demoted this vote to an
-            # ordinary one — the record keeps ingesting its turns.
-            logger.info(
-                "Agent %s: synthesis-reply vote to %s published; the local "
-                "close defers to the close-notification self-echo (scope=%s)",
-                agent.agent_id, channel_id, pending.scope,
-            )
-            return
         # Since the ``(principal, speaker, scope)`` re-key (v0.3.15
         # residuals PR 3) the scope holds N records.  The close anchors on
         # the WIRE CONVERSATION the vote judged complete (PR #846 review):
@@ -279,7 +268,38 @@ async def discharge_end_vote_publish(
         anchor = pending.wire_id or (
             parked.wire_interaction_id if parked is not None else ""
         )
-        if anchor and agent._vote_closed_wire_ids.get(pending.scope) == anchor:
+        revote = bool(anchor) and (
+            agent._vote_closed_wire_ids.get(pending.scope) == anchor
+        )
+        if anchor:
+            # Memo the wire conversation this voter has now cast a COUNTED
+            # vote on.  Written here, not after the fan (PR #846 review):
+            # what Go counted is decided by the PUBLISH, so gating the memo
+            # on ``closed_records`` left it blank whenever the fan admitted
+            # nothing — the parked record gone to an inline cap close or an
+            # idle flush, every remaining record opened after the park, or
+            # the synthesis leg below returning early — and the NEXT
+            # in-window vote, which Go dedups but still commits 2xx →
+            # "published", then passed this guard and closed a live record
+            # as "ended" plus a summariser call.  Idempotent: the same
+            # anchor re-written is the same value, and ``revote`` above is
+            # read first so a re-vote still recognises itself.
+            agent._vote_closed_wire_ids[pending.scope] = anchor
+        if synthesis_reply:
+            # Docstring: the echo is not an acceptance signal, so the close
+            # and its OQ #6 metering belong to the close-notification
+            # self-echo, which arrives iff Go closed on this reply. Leave
+            # the record open: if the arm was consumed or abandoned the
+            # discussion is still live and Go demoted this vote to an
+            # ordinary one — the record keeps ingesting its turns.  The
+            # memo above still stands: demoted or not, the vote counted.
+            logger.info(
+                "Agent %s: synthesis-reply vote to %s published; the local "
+                "close defers to the close-notification self-echo (scope=%s)",
+                agent.agent_id, channel_id, pending.scope,
+            )
+            return
+        if revote:
             # Re-vote on a wire interaction this voter already vote-closed
             # (the scope reopened on continued traffic under the SAME id —
             # no quorum formed).  Go deduped the vote but the suppressed
@@ -332,8 +352,6 @@ async def discharge_end_vote_publish(
             pending.scope, reason=REASON_STRUCTURAL, admit=_vote_admits,
         )
         if closed_records:
-            if anchor:
-                agent._vote_closed_wire_ids[pending.scope] = anchor
             # Guarded per record (v0.3.15 PR 3 review fix): the fan
             # popped every record before the first persist ran — one
             # failure must not discard the siblings.

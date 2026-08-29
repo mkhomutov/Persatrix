@@ -309,30 +309,92 @@ class TestMultiTurnCloseFailureIsSwallowedAndLogged:
 
 @pytest.mark.asyncio
 class TestSessionEndFanGuards:
-    """Two PR #846 review pins on the session-end room fan: a chat_end
-    from a sender with no open record must not fabricate a 1-turn
-    "ended" record, and a failing cap-close persist must not skip the
+    """Three PR #846 review pins on the session-end room fan: a chat_end
+    from a sender with no open record is still a real turn and must be
+    recorded, the fan must not close a record belonging to a DIFFERENT
+    wire conversation, and a failing cap-close persist must not skip the
     fan (the chat_end signal never recurs — an aborted fan leaks every
     sibling to an idle relabel)."""
 
-    async def test_session_end_from_recordless_sender_mints_no_record(self):
+    async def test_session_end_from_recordless_sender_records_its_turn(self):
+        """PR #846 review: a short-circuit here used to skip the ingest
+        when the terminator held no record of its own, so its message was
+        dropped from memory outright — no turn, no episode, and nothing
+        for the summariser or the RFC 0026 extractor to read (the
+        in-memory turn is the only place the body lives; persistence
+        strips ``text``).  A session end is a channel MESSAGE with a body,
+        not the contentless control event the close-notification no-open
+        branch declines to mirror, so it lands in its own sender's
+        record — minted if absent — and the fan closes that too."""
         agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
         scope = scope_for_group(GROUP_CHANNEL)
         await agent._store_event_episode(channel_event("hi", sender="alex"), [])
         await agent._store_event_episode(channel_event("hey", sender="robin"), [])
-        end = channel_event("ending this", sender="carol")
+        end = channel_event("DECISION: ship on Friday", sender="carol")
         end.metadata["chat_end"] = True
         await agent._store_event_episode(end, [])
 
         assert agent._interaction_tracker.records_for_scope(scope) == []
         episodes = await all_episodes(agent)
-        assert len(episodes) == 2, (
-            "one episode per existing speaker — no fabricated record for "
-            "the recordless closer's terminator"
+        assert len(episodes) == 3, (
+            "one episode per speaker — including the terminator, whose "
+            "closing message is a turn like any other"
         )
-        assert sorted(close_reasons(episodes)) == [
-            REASON_STRUCTURAL, REASON_STRUCTURAL,
-        ]
+        assert close_reasons(episodes) == [REASON_STRUCTURAL] * 3
+        senders = {
+            turn["payload"]["sender"]
+            for ep in episodes
+            for turn in json.loads(ep["context_json"] or "{}").get("turns", [])
+        }
+        assert senders == {"alex", "robin", "carol"}, (
+            "the terminator's turn must reach the persisted record, not be "
+            "discarded with its message"
+        )
+
+    async def test_session_end_leaves_a_successor_conversation_open(self):
+        """PR #846 review: the session-end fan was the ONE room fan with
+        no wire-id admission conjunct, so a straggler ``chat_end`` of a
+        RETIRED conversation buried the live successor's records as
+        "ended".  The stale-split loop cannot pre-clear them —
+        ``wire_rotation_closes`` spares a successor precisely when the
+        straggler's id is its known ``predecessor_wire_id`` — so the
+        guard has to be on the fan itself."""
+        agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
+        scope = scope_for_group(GROUP_CHANNEL)
+        # alex speaks in W1; robin's turn opens the successor under W2,
+        # naming W1 as the retired predecessor.
+        await agent._store_event_episode(
+            channel_event("hi", sender="alex", wire_id="W1"), [],
+        )
+        await agent._store_event_episode(
+            channel_event("new topic", sender="robin", wire_id="W2",
+                          prev_id="W1"), [],
+        )
+        # A straggler chat_end of the RETIRED W1 conversation.
+        end = channel_event("ending this", sender="alex", wire_id="W1")
+        end.metadata["chat_end"] = True
+        await agent._store_event_episode(end, [])
+
+        survivors = agent._interaction_tracker.records_for_scope(scope)
+        assert [r.wire_interaction_id for r in survivors] == ["W2"], (
+            "the live successor conversation must survive a retired "
+            "conversation's straggler terminator"
+        )
+        # Two W1 episodes: alex's original record, rotation-closed when
+        # robin's W2 turn arrived, plus the straggler's own fragment —
+        # the fragmentation this PR accepts and documents.  What must NOT
+        # be there is robin's live turn.
+        episodes = await all_episodes(agent)
+        assert close_reasons(episodes) == [REASON_STRUCTURAL] * 2
+        persisted_senders = {
+            turn["payload"]["sender"]
+            for ep in episodes
+            for turn in json.loads(ep["context_json"] or "{}").get("turns", [])
+        }
+        assert persisted_senders == {"alex"}, (
+            "robin's turn belongs to the live W2 conversation and must not "
+            "be persisted by the retired conversation's session end"
+        )
 
     async def test_cap_close_persist_failure_still_fans_session_end(
         self, monkeypatch,

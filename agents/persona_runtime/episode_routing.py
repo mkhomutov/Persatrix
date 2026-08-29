@@ -28,7 +28,6 @@ if TYPE_CHECKING:
     from . import MemoryNamespace
 
 from ..channel_event_classification import wire_channel_classification
-from ..channel_wire_metadata import wire_interaction_id
 from ..memory.boundary_detectors import (
     DEFAULT_CLOSING_GRACE_SEC,
     REASON_STRUCTURAL,
@@ -39,14 +38,22 @@ from ..memory.interactions import (
     Interaction,
     InteractionTracker,
     cleanup_closing_interactions,
-    is_thread_scope,
     scope_for_channel_event,
 )
 from ..persona_types import EventType
 from ..session_id import current_session_id
-from .close_path import close_replayed_scopes, persist_closed_interaction, persist_fanned_closes
+from .close_path import (
+    close_replayed_scopes,
+    close_stale_records,
+    persist_closed_interaction,
+    persist_fanned_closes,
+)
 from .finalize_close import drain_pending_summary_tasks
-from .interaction_boundary import is_session_end_event, stale_close_reason
+from .interaction_boundary import (
+    is_session_end_event,
+    scope_wire_anchor,
+    wire_admits_record,
+)
 from .turn_payload import build_turn_payload
 from .vote_close import PendingVoteClose, park_end_vote_close
 
@@ -312,57 +319,34 @@ class _EpisodeRoutingMixin:
         # room fan, which must land the closing message on every open
         # record, not just the sender's.
         payload = build_turn_payload(event, summary)
-        # RFC 0030 interaction-id producer: a rotated wire id means the
-        # previous conversation ended — close the stale local records so
-        # the new turn opens fresh, labelled by the wire-carried cause
-        # (producer plan OQ 5; full rationale on the two predicates).
-        # Thread scopes are wire-UNTRACKED (PR 607 review finding 1): a
-        # threaded reply carries the parent FLOOR's id, so its rotation
-        # says nothing about the thread; idle / session-end closes only.
-        # PR #716 review: the shared drift-pinned reader, not an inline
-        # copy — this read and the wallet-lease read must resolve the
-        # SAME id.
-        wire_id = "" if is_thread_scope(scope) else wire_interaction_id(event)
-        # ISSUE-0130: the predicate also owns the catch-up boundary — a LIVE
-        # turn landing on a replay-opened scope splits there, or the live
-        # conversation would inherit the replayed span's no-derivation flag.
-        # ISSUE-0123 part 3: both boundaries are ROOM events and a re-keyed
-        # room holds N records, so the check FANS — evaluated per record
-        # because the inputs are per record (wire id, predecessor, replay
-        # flag), closing every stale record, not just the current sender's.
-        # Persists guarded per record (PR #846 review): a bare await raising
-        # here aborted the remaining splits AND the current event's ingest.
-        stale_splits: list[Interaction] = []
-        for record in self._interaction_tracker.records_for_scope(scope):
-            stale_reason = stale_close_reason(record, event, wire_id=wire_id)
-            if stale_reason is None:
-                continue
-            split = self._interaction_tracker.close_record(
-                record, reason=stale_reason,
-            )
-            if split is not None:
-                stale_splits.append(split)
-        await persist_fanned_closes(stale_splits, self._persist_closed_interaction)
-        # PR #846 review: a session end from a sender with NO open record in
-        # an ACTIVE scope must not mint a 1-turn record for the terminator —
-        # the fabricated "ended" row the close-notification no-open branch
-        # refuses to invent.  Fan the structural close over the existing
-        # records; the terminator goes unrecorded, like a notification on a
-        # scope its sender never spoke in.  An EMPTY scope keeps the
-        # pre-re-key shape (the terminator opens and closes its own
-        # single-turn record below).
-        if (
-            is_session_end_event(event)
-            and self._interaction_tracker.get(
-                scope, speaker_id=event.sender_id,
-            ) is None
-            and self._interaction_tracker.records_for_scope(scope)
-        ):
-            await persist_fanned_closes(
-                self._interaction_tracker.close_scope(scope, reason=REASON_STRUCTURAL),
-                self._persist_closed_interaction,
-            )
-            return
+        # The wire anchor this scope answers to: the rotation boundary
+        # below, the admission conjunct on the session-end fan, and the
+        # wallet-lease read must all resolve the SAME id (PR #716 review),
+        # and thread scopes must resolve blank (PR 607 finding 1) — both
+        # rules live in ``scope_wire_anchor`` since PR #846 review, which
+        # found the carve-out inline at three sites and dropped at one.
+        wire_id = scope_wire_anchor(scope, event)
+        # The ingest-time boundary fan (wire rotation + the ISSUE-0130
+        # catch-up split) lives in :func:`close_path.close_stale_records`
+        # — a close+guarded-persist fan, per record since the re-key.
+        await close_stale_records(
+            self._interaction_tracker, scope, event, wire_id=wire_id,
+            persist=self._persist_closed_interaction,
+        )
+        # PR #846 review REMOVED a recordless-session-end short circuit
+        # here.  It skipped this ingest when the terminator held no record
+        # of its own, to avoid "fabricating" a 1-turn ended record — but a
+        # session end is a channel MESSAGE with a body, not the
+        # contentless control event the close-notification no-open branch
+        # declines to mirror, and the in-memory turn is the only place
+        # that body lives (persistence strips ``text``).  So it dropped a
+        # real message from memory entirely, and inconsistently: a
+        # terminator WITH a record kept its turn, an EMPTY scope minted
+        # the very record it called fabricated, and its ambient-principal
+        # ``get`` beside a principal-blind sibling check lost a speaker's
+        # own closing message on a tenant change.  The terminator's turn
+        # lands in the terminator's record — minted if absent, like every
+        # other multi-turn event — and the fan below closes it too.
         interaction = self._interaction_tracker.add_turn(
             scope, payload=payload,
             session_id=self._active_write_session_id,
@@ -417,8 +401,20 @@ class _EpisodeRoutingMixin:
             # open in the scope, or the siblings leak open until idle
             # relabels the ended conversation.  Guarded per record — the
             # fan pops ALL its records before the first persist runs.
+            #
+            # Per-record wire-id admission (PR #846 review) — the
+            # conjunct the other three fans already applied.  This was the
+            # un-anchored one, so a straggler ``chat_end`` of a RETIRED
+            # conversation buried the live successor's records as "ended";
+            # the stale loop above cannot pre-clear them, since
+            # ``wire_rotation_closes`` spares a successor precisely when
+            # the straggler's id is its ``predecessor_wire_id``.  A blank
+            # anchor keeps the tolerant scope-keyed behaviour.
             await persist_fanned_closes(
-                self._interaction_tracker.close_scope(scope, reason=REASON_STRUCTURAL),
+                self._interaction_tracker.close_scope(
+                    scope, reason=REASON_STRUCTURAL,
+                    admit=lambda record: wire_admits_record(record, wire_id),
+                ),
                 self._persist_closed_interaction,
             )
         elif interaction.is_open:

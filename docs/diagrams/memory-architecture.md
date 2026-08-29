@@ -171,7 +171,10 @@ read path through the facade is a deferred follow-up.
 ## Per-channel scoping (RFC 0020 P3 + RFC 0011 P3)
 
 `InteractionTracker.add_turn` accepts a `scope` (e.g. `dm:alice:ember-owl`,
-`group:planning`, or a per-workflow id). On interaction close,
+`group:planning`, or a per-workflow id) — one component of the v0.3.15 record
+key `(principal, speaker, scope)`, so a group room holds one record per speaker
+per tenant while `scope` stays the persisted column and recall predicate. On
+interaction close,
 `summarize_close.py` writes the resulting episodic entry tagged with that
 scope. On the read side, `recall_with_scope_filter` applies the scope as
 an AND filter on top of the BM25 / LIKE / recency ranking, so a recall

@@ -185,6 +185,53 @@ class TestVoteParkIdentity:
         assert still_open is not None
         assert still_open.is_open
 
+    async def test_synthesis_deferral_still_memos_the_counted_vote(self):
+        """PR #846 review: the re-vote memo records what GO COUNTED, so it
+        must be written when the discharge confirms the publish — not
+        gated on the fan happening to close a record.
+
+        The synthesis-reply leg is the concurrency-free route into the
+        gap: it pops the park and closes nothing, deferring to the
+        close-notification self-echo.  When Go DEMOTED that vote (the arm
+        was consumed, or an operator raised ``max_rounds``) no
+        notification arrives and the wire id never rotates — so the next
+        in-window vote, which Go dedups but still commits 2xx →
+        "published", used to find an empty memo, pass the anchor test and
+        bury the live record as "ended" plus a summariser call.  That is
+        the record PR #718's carve-out exists to keep open."""
+        agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
+        first = vote()
+        await agent._store_event_episode(
+            channel_event("synthesis + vote", wire_id="wire-A"), [first],
+        )
+        await agent.resolve_end_vote_publish(
+            CHANNEL, published=True,
+            token=first.payload[VOTE_CLOSE_TOKEN_KEY],
+            synthesis_reply=True,
+        )
+        deferred = agent._interaction_tracker.get(SCOPE, speaker_id="alex")
+        assert deferred is not None and deferred.is_open, (
+            "the synthesis deferral leaves the record open for the self-echo"
+        )
+        assert await all_episodes(agent) == []
+        # Go demoted the vote: no self-echo, no rotation, discussion live.
+        await agent._store_event_episode(
+            channel_event("still going", wire_id="wire-A"), [],
+        )
+        second = vote()
+        await agent._store_event_episode(
+            channel_event("vote 2", wire_id="wire-A"), [second],
+        )
+        await agent.resolve_end_vote_publish(
+            CHANNEL, published=True,
+            token=second.payload[VOTE_CLOSE_TOKEN_KEY],
+        )
+        still_open = agent._interaction_tracker.get(SCOPE, speaker_id="alex")
+        assert still_open is not None and still_open.is_open, (
+            "Go deduped the re-vote on wire-A; the live record must stay open"
+        )
+        assert await all_episodes(agent) == []
+
     async def test_vote_after_real_rotation_closes_normally(self):
         # The re-vote memory must not over-suppress: once the channel
         # genuinely rotates, a vote on the successor closes it.

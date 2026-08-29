@@ -169,9 +169,9 @@ class InteractionTracker:
         task-local scope wins, then the env var, then ``local`` — the
         same precedence the storage tiers resolve writes under, so the
         record a turn lands in and the tenant its close-derived rows
-        bind (residuals PR 4) cannot disagree.  An explicit value goes
-        through :func:`~agents.principal_id.normalize_principal_id` so
-        ``""`` cannot mint a key no recall predicate matches.
+        bind (the close path binds it) cannot disagree.  An explicit
+        value goes through :func:`~agents.principal_id
+        .normalize_principal_id` so ``""`` cannot mint an unmatched key.
         """
         principal = (
             normalize_principal_id(principal_id)

@@ -22,7 +22,7 @@ migration at all (the two nearby wrong targets the residuals plan
 names explicitly).
 
 **Dormant-rail note (the v0.3.14 PR 1 / PR 2 split).**  This migration
-lands with NO writer: residuals PR 4 — the close-path binding — is the
+lands with NO writer: residuals PR 4 — the speaker projection — is the
 consumer that stamps ``interaction.speaker_id`` onto the rows, so the
 column ships ahead of the code reading it (the v0.3.15 plan's
 "no migration lands after its consumer" acceptance line).  Until then

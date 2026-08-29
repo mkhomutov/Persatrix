@@ -16,12 +16,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
-from ..channel_wire_metadata import wire_interaction_id
 from ..memory.boundary_detectors import REASON_COST
-from ..memory.interactions import SCOPE_TICK, is_thread_scope
+from ..memory.interactions import SCOPE_TICK
 from ..persona_types import EventType
 from .close_path import persist_fanned_closes
-from .interaction_boundary import wire_admits_record
+from .interaction_boundary import scope_wire_anchor, wire_admits_record
 
 if TYPE_CHECKING:
     from ..memory.interactions import Interaction, InteractionTracker
@@ -96,8 +95,10 @@ async def close_interaction_on_cost(
     # traffic carry no id), which is ``wire_admits_record``'s tolerant
     # default.  ``close_scope`` owns the rest of the fan contract: the
     # replay exclusion, the single close instant, and the per-record
-    # close.
-    anchor = "" if is_thread_scope(scope) else wire_interaction_id(event)
+    # close.  The anchor derivation is the SHARED one (PR #846 review):
+    # it was spelled inline at three fan sites and the third copy had
+    # dropped the thread carve-out.
+    anchor = scope_wire_anchor(scope, event)
     closed_records = agent._interaction_tracker.close_scope(
         scope, reason=REASON_COST,
         admit=lambda record: wire_admits_record(record, anchor),

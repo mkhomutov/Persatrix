@@ -14,13 +14,17 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from ..memory.interaction_types import ROOM_CLOSE_TURN_KEY
+
 if TYPE_CHECKING:
     from ..persona_types import AgentEvent
 
 __all__ = ["build_turn_payload"]
 
 
-def build_turn_payload(event: AgentEvent, summary: str) -> dict[str, Any]:
+def build_turn_payload(
+    event: AgentEvent, summary: str, *, room_close: bool = False,
+) -> dict[str, Any]:
     """The in-memory turn payload for a multi-turn ``event``.
 
     The per-turn ``summary`` / envelope ride the turn so the RFC 0020
@@ -32,6 +36,12 @@ def build_turn_payload(event: AgentEvent, summary: str) -> dict[str, Any]:
     envelope.  The body rides the in-memory turn under ``text`` and is
     stripped before persistence by ``persist_closed_interaction`` so
     ``context_json`` stays body-free per RFC 0020 §D.
+
+    ``room_close`` stamps :data:`ROOM_CLOSE_TURN_KEY` — set by the
+    close-notification room fan, whose one closing message becomes the
+    final turn of EVERY sibling record and is therefore the RFC 0020 §G
+    exception to single-speaker construction.  The per-event ingest
+    leaves it unset: that turn belongs to its own sender's record.
     """
     payload: dict[str, Any] = {
         "summary": summary,
@@ -49,4 +59,6 @@ def build_turn_payload(event: AgentEvent, summary: str) -> dict[str, Any]:
     message_text = (event.payload or {}).get("content")
     if isinstance(message_text, str) and message_text.strip():
         payload["text"] = message_text
+    if room_close:
+        payload[ROOM_CLOSE_TURN_KEY] = True
     return payload

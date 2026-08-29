@@ -24,6 +24,7 @@ from agents.memory.boundary_detectors import (
     REASON_STRUCTURAL,
     default_detectors,
 )
+from agents.memory.interaction_types import ROOM_CLOSE_TURN_KEY
 from agents.memory.interactions import InteractionTracker
 from agents.persona_runtime.close_notification import (
     close_interaction_on_notification,
@@ -33,6 +34,57 @@ from .test_interaction_close_notification import (
     _CloseNotificationAgent,
     _notification_event,
 )
+
+
+class TestCloseNotificationWireAnchor:
+    """PR #846 review: the fan's wire anchor is ``scope_wire_anchor``,
+    which blanks the id on a THREAD scope.
+
+    A threaded reply carries the parent FLOOR's interaction id (the
+    resolver keys on ``msg.ChannelID`` — RFC 0030 IP3, "the thread IS the
+    interaction"), and the notification's metadata bag is a verbatim
+    clone of the closing message's, so it carries that floor id.  Reading
+    it raw — as this one site did, while ``episode_routing`` and
+    ``cost_close`` both carved it out — stamped the floor's id onto the
+    thread's records through the backfill below, which then rode into the
+    persisted episode's ``governance_interaction_id`` (contradicting the
+    close path's own DM/thread/non-channel → NULL contract) and, on a
+    bounded close, billed the OQ #6 metered summary to the floor's
+    conversation."""
+
+    async def test_thread_scope_record_is_not_stamped_with_the_floor_id(self):
+        tracker = InteractionTracker()
+        tracker.add_turn(
+            "thread:design-review", speaker_id="nova-sparrow", now=time.time(),
+        )
+        agent = _CloseNotificationAgent(tracker)
+        event = _notification_event(channel_id="thread:design-review")
+        # The floor's id, riding the cloned metadata bag.
+        event.metadata["interaction_id"] = "wire-FLOOR-A"
+
+        await close_interaction_on_notification(agent, event)
+
+        assert len(agent.persisted) == 1, "the thread record still closes"
+        assert agent.persisted[0].wire_interaction_id == "", (
+            "a thread record must stay wire-unstamped — the notified id is "
+            "the parent FLOOR's, not this thread's"
+        )
+
+    async def test_group_scope_record_still_takes_the_backfill(self):
+        """The carve-out is scope-kind only: a GROUP record admitted
+        blank is still stamped, so its metered summary leases against the
+        notified id and the episode keeps the cross-reference."""
+        tracker = InteractionTracker()
+        tracker.add_turn(
+            "group:planning", speaker_id="nova-sparrow", now=time.time(),
+        )
+        agent = _CloseNotificationAgent(tracker)
+        event = _notification_event()
+        event.metadata["interaction_id"] = "wire-A"
+
+        await close_interaction_on_notification(agent, event)
+
+        assert agent.persisted[0].wire_interaction_id == "wire-A"
 
 
 class TestCloseNotificationRoomFan:
@@ -191,3 +243,49 @@ class TestCloseNotificationRoomFan:
 
         assert agent.persisted == [record]
         assert record.wire_interaction_id == "wire-NOTIFIED"
+
+
+class TestCloseNotificationFannedTurn:
+    """PR #846 review: the one turn RFC 0020 §G exempts from
+    single-speaker construction is stamped and not shared."""
+
+    async def test_fanned_turn_is_marked_room_close(self):
+        """The closing message's ``sender`` is not the record's speaker on
+        any sibling.  Stamping it at the producer means the ``participants``
+        read surface and the residuals PR 4 ``speaker_id`` projection
+        discriminate it on a RECORDED fact, instead of each re-deriving
+        ``sender`` != ``speaker_id`` — a guess, since the tracker key
+        strips ``speaker_id`` while the payload ``sender`` is verbatim."""
+        tracker = InteractionTracker()
+        for speaker in ("nova-sparrow", "ember-persona"):
+            tracker.add_turn(
+                "group:planning", speaker_id=speaker, now=time.time(),
+            )
+        agent = _CloseNotificationAgent(tracker)
+
+        await close_interaction_on_notification(agent, _notification_event())
+
+        for record in agent.persisted:
+            assert record.turns[-1].payload[ROOM_CLOSE_TURN_KEY] is True
+            assert ROOM_CLOSE_TURN_KEY not in record.turns[0].payload, (
+                "the speaker's own opening turn is not a room-close turn"
+            )
+
+    async def test_each_record_gets_its_own_payload_object(self):
+        """``append_turn`` stores the payload BY REFERENCE, so one dict
+        handed to N records aliased N sibling turns — and the very turn
+        residuals PR 4 is obliged to "exclude or tag" is this one, so an
+        in-place tag would have written through every sibling at once."""
+        tracker = InteractionTracker()
+        for speaker in ("nova-sparrow", "ember-persona"):
+            tracker.add_turn(
+                "group:planning", speaker_id=speaker, now=time.time(),
+            )
+        agent = _CloseNotificationAgent(tracker)
+
+        await close_interaction_on_notification(agent, _notification_event())
+
+        first, second = (r.turns[-1].payload for r in agent.persisted)
+        assert first is not second
+        first["speaker_excluded"] = True
+        assert "speaker_excluded" not in second

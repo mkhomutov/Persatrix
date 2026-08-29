@@ -329,7 +329,7 @@ MIGRATIONS: list[tuple[int, str, str]] = [
     # ``speaker_id`` column to the two close-derived tiers —
     # ``episodes`` and ``facts`` — the projection surface for the
     # speaker half of the ``(principal, speaker, scope)`` tracker key.
-    # Lands DORMANT (residuals PR 4 is the writer), NULL for every
+    # Lands DORMANT (the residuals PR 4 projection is the writer), NULL for every
     # pre-v18 row: a pre-split aggregate's speaker is unknowable without
     # the model-elected attribution the Phase 0b scope lock forbids, so
     # unlike v11's ``DEFAULT 'local'`` there is no correct backfill.

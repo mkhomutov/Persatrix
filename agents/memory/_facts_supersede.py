@@ -46,12 +46,25 @@ cannot reach across to another non-legacy session.  Two cases:
 Equal-timestamp ties break in favour of the later arrival (the row
 being inserted), matching the PR 5a deferred-item resolution from
 :doc:`docs/rfcs/0026-pr-plan.md <../../docs/rfcs/0026-pr-plan>`.
-The choice is deterministic at the storage layer — the production
-extractor (PR 2) uses ``interaction.closed_at`` which is monotonic
-per-agent, so equal timestamps are unreachable in the production
-write path; the rule exists for fixtures, the OQ #9 operator-seeded
-path, and the future RFC 0013 erasure backfill where the precondition
-may not hold.
+The choice is deterministic at the storage layer, and since the v0.3.15
+``(principal, speaker, scope)`` re-key it is LOAD-BEARING in production,
+not merely a fixture rule (PR #846 review).  The production extractor
+(PR 2) uses ``interaction.closed_at``, which used to be monotonic
+per-agent — but a room-wide close now fans over N sibling records and
+reads the clock ONCE (``InteractionTracker.close_scope``,
+``close_notification``: one room event, one instant), so every sibling
+carries an IDENTICAL ``closed_at``.  Two siblings can extract the same
+``(subject, predicate)`` — the RFC 0020 §G room-close turn is the one
+piece of content they share — and every other chain-key column
+(``agent_id`` / ``session_id`` / the ambiently-resolved ``principal_id``
+and ``epoch_id``) is identical by construction, so the tie is real: with
+each record's Phase 2 an independent background task, the row that
+survives is decided by task-completion order rather than by recency.
+That is accepted, not corrected — a single instant is the truthful
+timestamp for a single room event, and the alternative (skewing
+``closed_at`` per sibling) would lie about when the conversation ended.
+The rule also still covers fixtures, the OQ #9 operator-seeded path, and
+the future RFC 0013 erasure backfill.
 """
 
 from __future__ import annotations

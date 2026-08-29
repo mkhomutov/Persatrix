@@ -34,12 +34,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ..channel_wire_metadata import WIRE_CLOSE_TRIGGER_IDLE
+from ..channel_wire_metadata import WIRE_CLOSE_TRIGGER_IDLE, wire_interaction_id
 from ..memory.boundary_detectors import (
     REASON_CATCHUP_COMPLETE,
     REASON_IDLE_GAP,
     REASON_STRUCTURAL,
 )
+from ..memory.scopes import is_thread_scope
 from ..persona_types import ActionType
 
 if TYPE_CHECKING:
@@ -296,6 +297,26 @@ def stale_close_reason(
     return None
 
 
+def scope_wire_anchor(scope: str, event: AgentEvent) -> str:
+    """The wire interaction id a room-wide close on ``scope`` answers to.
+
+    THE spelling of :func:`wire_admits_record`'s second argument (PR #846
+    review).  It was written inline at three fan sites and the third copy
+    had silently dropped the thread carve-out, so a threaded close stamped
+    and billed against the parent floor's conversation; computing the
+    anchor beside the predicate that consumes it is what stops the two
+    from drifting apart again.
+
+    Thread scopes are wire-UNTRACKED (PR 607 review finding 1): the
+    resolver keys on ``msg.ChannelID``, so a threaded reply carries the
+    parent FLOOR's id and that id says nothing about the thread — the
+    IP3 rule, "the thread IS the interaction".  Forcing ``""`` here keeps
+    a thread record on the pre-wire scope-keyed behaviour, which is the
+    tolerant default of every fan that reads a blank anchor.
+    """
+    return "" if is_thread_scope(scope) else wire_interaction_id(event)
+
+
 def wire_admits_record(
     record: Interaction,
     anchor: str,
@@ -344,6 +365,7 @@ def wire_admits_record(
 __all__ = [
     "is_session_end_event",
     "matching_end_votes",
+    "scope_wire_anchor",
     "stale_close_reason",
     "wire_admits_record",
     "wire_rotation_close_reason",
