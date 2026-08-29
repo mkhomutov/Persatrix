@@ -135,6 +135,21 @@ class NearCapNotice(NamedTuple):
     unit: str
     headroom: int
 
+    @property
+    def headroom_fraction(self) -> float:
+        """Headroom as a fraction of this file's own limit.
+
+        The report mixes three units against three caps, so raw headroom
+        does not rank them against each other: 15 lines left is 3% of a
+        code file's cap — the loosest a notice can be — while 15 words
+        left is 0.5% of a doc's, which is nearly out of room.  Sorting on
+        the fraction is the same choice the *band* already makes, and for
+        the same reason (see :data:`DEFAULT_NEAR_CAP_PCT`); ranking on the
+        raw number instead put every code file above every doc that was
+        proportionally tighter.
+        """
+        return self.headroom / self.limit if self.limit else 0.0
+
 
 def _count_words(text: str) -> int:
     """Count words in *text*, stripping fenced code blocks and YAML front-matter.
@@ -225,10 +240,12 @@ def _near_cap_notices(
     silently converts "add a guard" into "delete the comment explaining
     the last guard".
 
-    This is measured, not theorised.  A sweep on 2026-08-29 found **28**
-    non-waived code files at exactly 500 lines, against a mean of 3.7 per
-    line-count bucket over the surrounding 480-499 range — 7.6x the local
-    density, with a cliff to zero at 501.  File sizes do not naturally
+    This is measured, not theorised.  A sweep on 2026-08-29 found **29**
+    non-waived code files at exactly 500 lines, against a mean of 3.55 per
+    line-count bucket over the surrounding 480-499 range (71 files over 20
+    buckets) — 8.2x the local density, with a cliff to zero at 501.  The
+    mean is carried to two decimals so the ratio re-derives: 29/3.5 would
+    give 8.3, not the 8.2 measured.  File sizes do not naturally
     pile up on a round number; that shape is what trimming-to-fit leaves
     behind.  Warning before the cliff turns the surprise into notice, and
     changes nothing about what blocks CI: these are notices, never
@@ -259,7 +276,7 @@ def _near_cap_notices(
             notices.append(NearCapNotice(
                 rel, "doc", measured, cap, "words", headroom,
             ))
-    notices.sort(key=lambda n: (n.headroom, n.file))
+    notices.sort(key=lambda n: (n.headroom_fraction, n.file))
     return notices
 
 
@@ -291,6 +308,10 @@ def check_file_size(
     of only from ``--help``.  Neither affects the exit code — a file that
     is merely close is passing, and making it fail would just move the
     cliff.
+
+    Both print on every run, the failing ``--strict`` ones included: CI
+    runs ``--strict``, so returning early on a warning would have hidden
+    the tier from the one audience already reading size output.
     """
     warnings, code_results, doc_results = _scan_files(repo_root, max_code_lines, max_doc_words)
 
@@ -310,9 +331,6 @@ def check_file_size(
         print(f"\n[WARN] {len(warnings)} file(s) exceed size limits:")
         for w in warnings:
             print(f"  {w.file}: {w.measured} {w.unit} (limit: {w.limit})")
-
-        if strict:
-            return 1
     else:
         print("[OK] All files within size limits.")
 
@@ -321,7 +339,12 @@ def check_file_size(
         max_code_lines=max_code_lines, max_doc_words=max_doc_words,
         pct=near_cap_pct,
     )
-    if notices and near_cap:
+    if near_cap and not notices:
+        # An explicit request always gets an answer.  Silence on the success
+        # path is indistinguishable from a mistyped flag or one that did
+        # nothing, which would make the good news unreadable as good news.
+        print(f"\n[NEAR] No files within {near_cap_pct:g}% of their limit.")
+    elif near_cap:
         print(
             f"\n[NEAR] {len(notices)} file(s) within {near_cap_pct:g}% of "
             f"their limit — the next edit to one of these is a split or a "
@@ -331,13 +354,19 @@ def check_file_size(
             room = "AT THE LIMIT" if n.headroom == 0 else f"{n.headroom} {n.unit} left"
             print(f"  {n.file}: {n.measured}/{n.limit} {n.unit} — {room}")
     elif notices:
+        # Deliberately asymmetric: unasked-for, this line is pure
+        # discoverability, so it earns its place only when there is
+        # something to discover.  A clean run says [OK] and stops.
         at_limit = sum(1 for n in notices if n.headroom == 0)
         print(
             f"[NEAR] {len(notices)} file(s) within {near_cap_pct:g}% of their "
             f"limit ({at_limit} exactly AT it) — run with --near-cap to list.",
         )
 
-    return 0
+    # Decided last, so the tier above prints on every run — including the
+    # failing ``--strict`` runs, which is when someone is already reading
+    # this output.  Only an over-cap file can fail the gate.
+    return 1 if warnings and strict else 0
 
 
 def main(argv: list[str] | None = None) -> int:

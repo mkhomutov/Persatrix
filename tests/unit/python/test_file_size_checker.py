@@ -275,7 +275,7 @@ def _notice_files(**kw: object) -> set[str]:
 def test_a_file_exactly_at_the_limit_is_flagged() -> None:
     """The state the tier exists for.  A file ON the limit passes the gate
     silently, and is also the one where the next edit costs a split or a
-    rationale-deleting trim — 28 code files were sitting here when the
+    rationale-deleting trim — 29 code files were sitting here when the
     tier was added."""
     notices = _near_cap_notices([("a.py", 500)], [])
 
@@ -322,6 +322,26 @@ def test_notices_sort_tightest_first() -> None:
     assert [n.file for n in notices] == ["at.py", "tight.py", "roomy.py"]
 
 
+def test_tightest_first_holds_across_units() -> None:
+    """Raw headroom cannot rank lines against words.
+
+    Every file here has *more* absolute headroom than the one after it and
+    *less* room proportionally, so a sort on ``headroom`` returns this list
+    exactly reversed.  That was the old behaviour: an RFC 2.5% from its cap
+    printed below a code file with the full 3% still free, because 200 > 14.
+    """
+    notices = _near_cap_notices(
+        [("alpha.py", 486)],                        # 14 lines  = 2.8%
+        [("docs/beta.md", 2980),                    # 20 words  = 0.667%
+         ("docs/rfcs/0099-r.md", 7800)],            # 200 words = 2.5%
+    )
+
+    assert [n.file for n in notices] == [
+        "docs/beta.md", "docs/rfcs/0099-r.md", "alpha.py",
+    ]
+    assert [n.headroom for n in notices] == [20, 200, 14], "absolute order differs"
+
+
 def test_near_cap_never_changes_the_exit_code(
     tmp_path: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -334,6 +354,58 @@ def test_near_cap_never_changes_the_exit_code(
     out = capsys.readouterr().out
     assert "docs/close.md" in out
     assert "[OK] All files within size limits." in out
+
+
+def test_the_tier_survives_a_failing_strict_run(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A failing ``--strict`` run is when someone is already reading size
+    output, so it is the worst moment to hide the tier.  CI runs
+    ``--strict`` with no ``--near-cap``, which makes the one-line count the
+    path that matters most here; the full list must survive too.  Both used
+    to be lost to an early ``return 1``."""
+    _write(tmp_path, "docs/over.md", DEFAULT_MAX_DOC_WORDS + 100)
+    _write(tmp_path, "docs/close.md", DEFAULT_MAX_DOC_WORDS - 5)
+
+    assert file_size.check_file_size(tmp_path, strict=True) == 1
+    counted = capsys.readouterr().out
+    assert "docs/over.md" in counted, "the over-cap file still fails the gate"
+    assert "run with --near-cap to list" in counted
+
+    assert file_size.check_file_size(tmp_path, strict=True, near_cap=True) == 1
+    listed = capsys.readouterr().out
+    assert "docs/close.md" in listed, "the notice survives the failure"
+
+
+def test_the_flag_answers_even_when_nothing_is_near_its_cap(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An explicit ``--near-cap`` always gets an answer.
+
+    This is the tier's success path, and it used to print nothing at all —
+    leaving it indistinguishable from a mistyped flag, or from one that ran
+    and quietly did nothing."""
+    _write(tmp_path, "docs/small.md", 10)
+
+    assert file_size.check_file_size(tmp_path, near_cap=True) == 0
+    out = capsys.readouterr().out
+
+    assert "[NEAR] No files within 3% of their limit." in out
+
+
+def test_the_count_line_stays_quiet_with_nothing_to_discover(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The asymmetry is deliberate, so pin it.
+
+    Unasked-for, the count line is pure discoverability; with an empty band
+    there is nothing to discover and ``[OK]`` has already said so.  Only the
+    explicit flag reports an empty band."""
+    _write(tmp_path, "docs/small.md", 10)
+
+    assert file_size.check_file_size(tmp_path) == 0
+
+    assert "[NEAR]" not in capsys.readouterr().out
 
 
 def test_the_count_is_reported_without_the_flag(
