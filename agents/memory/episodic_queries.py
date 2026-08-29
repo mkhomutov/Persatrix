@@ -403,9 +403,8 @@ async def insert_episode(
     for every pre-v18 row, whose speaker is genuinely unknowable — the
     aggregate it came from spanned the whole room, which is the defect
     the key exists to fix.  Sound only because a record is single-speaker
-    by construction; the ONE exception, the RFC 0020 §G room-close turn,
-    is excluded upstream from the derivation input rather than corrected
-    here.
+    by construction; the one §G breach is excluded upstream
+    (``close_entries`` states the argument).
 
     The INSERT is plain DML — stepped to completion inside ``execute()``
     with no VDBE left active — so a concurrent ``COMMIT`` on the shared

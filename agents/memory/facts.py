@@ -176,6 +176,12 @@ class FactStore:
         :func:`resolve_active_epoch` seams the recall path uses — so a
         row is always readable by the principal that wrote it, and the
         supersede chain keys on the same tuple recall filters on.
+
+        One stated precedence change vs the pre-split body (PR #849
+        review): the connection and the ambient axes resolve WITH the
+        argument list, so an uninitialised store raises its
+        ``RuntimeError`` before ``insert_fact`` can reject a bad subject
+        or certainty — the more fundamental error now surfaces first.
         """
         return await insert_fact(
             self._ensure_db(),

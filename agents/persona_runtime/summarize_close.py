@@ -205,7 +205,7 @@ async def summarize_closed_interaction(
         entries,
         target_tokens=SUMMARIZATION_TARGET_TOKENS,
     )
-    prompt = _build_summarization_prompt(interaction, view)
+    prompt = _build_summarization_prompt(interaction, view, shown_turns=len(entries))
     # Summarisation picks its model on a surface separate from
     # create_provider; resolve it here too (RFC 0033 §D) so the alias name
     # never reaches the vendor API. The config field references the
@@ -382,9 +382,17 @@ async def summarize_closed_interaction(
 
 
 def _build_summarization_prompt(
-    interaction: Interaction, view: CompressedView,
+    interaction: Interaction, view: CompressedView, *, shown_turns: int,
 ) -> str:
     """Render the combined summarise + extract prompt body.
+
+    ``shown_turns`` (PR #849 review) is the post-§G-exclusion entry
+    count — what the ``Compressed turns`` block actually holds.
+    ``interaction.turn_count`` would over-report on a fanned close (the
+    record's real count includes the excluded room-close turn) and
+    invite the model to narrate a turn it is never shown; the header is
+    byte-identical whenever nothing was excluded, which is what keeps
+    the RFC 0044 goldens stable.
 
     RFC 0026 PR 2 appends the combined-prompt suffix from
     :func:`agents.persona_runtime.fact_extractor.build_combined_prompt_suffix`
@@ -401,7 +409,7 @@ def _build_summarization_prompt(
     prompt = (
         load_snippet("interaction-summarizer") + "\n\n"
         f"Scope: {interaction.scope}\n"
-        f"Turns: {interaction.turn_count}\n"
+        f"Turns: {shown_turns}\n"
         f"Close reason: {interaction.close_reason}\n"
         f"Tokens (before compression / after): "
         f"{view.tokens_before} / {view.tokens_after}\n"

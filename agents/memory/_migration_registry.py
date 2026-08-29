@@ -341,8 +341,13 @@ MIGRATIONS: list[tuple[int, str, str]] = [
     # docs/issues/ISSUE-0131-derived-memory-has-no-speaker-attribution.md.
     (
         18,
-        "ISSUE-0131: speaker_id on episodes + facts (the close path "
-        "projects the record key's speaker half onto both)",
+        # Frozen as SHIPPED in #846 (PR #849 review): ``schema_version``
+        # records this string at apply time only and is never
+        # reconciled, so editing it would fork fresh stores' audit rows
+        # from already-migrated ones at the same version.  The current
+        # state lives in the comment above.
+        "ISSUE-0131: speaker_id on episodes + facts (dormant until the "
+        "close-path binding writes it)",
         "",  # handled by _apply_migration_18()
     ),
 ]

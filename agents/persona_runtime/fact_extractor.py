@@ -192,11 +192,9 @@ async def store_extracted_facts(
     every tuple's.  Do not confuse it with ``sender_id`` just above,
     which is a subject-canonicalization input and not persisted: the
     speaker is who SAID the content, the subject is who it is ABOUT, and
-    a counterparty fact differs in the two.  The RFC 0020 §G room-close
-    turn is the one turn that would break the single-speaker premise, and
-    it is dropped from the extractor's input upstream
-    (``close_entries.interaction_to_entries``) rather than corrected
-    here — no fact reaching this function can have come from it.
+    a counterparty fact differs in the two.  The one §G breach of the
+    single-speaker premise is excluded upstream — ``close_entries``
+    states the argument.
 
     ``protection_level`` / ``source_channel_id`` (RFC 0037 §C, PR 3) are
     the source interaction's frozen-at-open capture, stamped identically
@@ -430,7 +428,13 @@ async def dispatch_facts_from_response(
     """
     if interaction.interaction_id is None:
         return
-    sender_id = _interaction_sender(interaction)
+    # PR #849 review: since the ``(principal, speaker, scope)`` re-key a
+    # record is single-speaker, so the counterparty-canonicalisation
+    # input below and the persisted ``speaker_id`` column share ONE
+    # source — the key's frozen speaker half.  Re-deriving it from
+    # ``turns[0]`` (the pre-re-key idiom) could drift from the key on
+    # whitespace or fixture shape with no failing test.
+    sender_id = interaction.speaker_id or None
     asserted_at = interaction.closed_at or interaction.started_at
     try:
         facts = parse_facts_payload(facts_raw)
@@ -466,19 +470,3 @@ async def dispatch_facts_from_response(
             "(interaction_id=%s)",
             agent_id, interaction.interaction_id, exc_info=True,
         )
-
-
-def _interaction_sender(interaction: Interaction) -> str | None:
-    """Return the first turn's sender id, or ``None`` for tick scopes.
-
-    Used so counterparty facts land on the canonical ``sender_id``
-    (the same key the relationship row uses) instead of the LLM's
-    display-name spelling — see :func:`store_extracted_facts`.
-    """
-    if not interaction.turns:
-        return None
-    payload = interaction.turns[0].payload or {}
-    sender = payload.get("sender")
-    if isinstance(sender, str) and sender.strip():
-        return sender
-    return None

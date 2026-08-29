@@ -214,24 +214,24 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
     ) -> str:
         """Store a new episode. Returns the generated episode ID.
 
-        The keyword-only ``interaction_id`` / ``started_at`` / ``closed_at`` /
-        ``turn_count`` / ``scope`` populate the RFC 0020 §D columns (v5), and
-        ``governance_interaction_id`` the RFC 0030 governance id the episode
-        opened under (ISSUE-0102 PR 2 — v15).  Pre-RFC callers omit them and the
-        row keeps ``NULL`` — recall treats those as legacy single-turn episodes
+        The keyword-only ``interaction_id`` / ``started_at`` / ``closed_at`` / ``turn_count`` /
+        ``scope`` populate the RFC 0020 §D columns (v5), and ``governance_interaction_id`` the
+        RFC 0030 governance id the episode opened under (ISSUE-0102 PR 2 — v15).  Pre-RFC callers
+        omit them and the row keeps ``NULL`` — recall treats those as legacy single-turn episodes
         per RFC 0020 §I.
 
-        ``session_id`` (RFC 0031 Phase 1 — migration v7) tags the row with the
-        operator-namespace active at write time; default ``"legacy"`` matches
-        ``channels.DefaultSessionID``.  Phase 1 ships no recall-side filtering.
+        ``session_id`` (RFC 0031 Phase 1 — migration v7) tags the row with the operator-namespace
+        active at write time; default ``"legacy"`` matches ``channels.DefaultSessionID``.  Phase 1
+        ships no recall-side filtering.  ``surface`` (PR 4 F2) tags ``sessions.writes`` only —
+        not persisted.
 
-        ``surface`` (PR 4 F2) tags ``sessions.writes`` only — not persisted.
+        ``protection_level`` / ``source_channel_id`` (RFC 0037 §C — v16, PR 3) persist VERBATIM:
+        rule-(a) normalization is owned by the persona-side stamp sites (``normalize_for_stamp``),
+        which memory must not import.  Omitted → the ``internal`` default; a mislabeled row fails
+        closed at read time (§A rule (c): unknown entry levels are withheld).
 
-        ``protection_level`` / ``source_channel_id`` (RFC 0037 §C — v16, PR 3)
-        persist VERBATIM: rule-(a) normalization is owned by the persona-side
-        stamp sites (``normalize_for_stamp``), which memory must not import.
-        Omitted → the ``internal`` default; a mislabeled row fails closed at
-        read time (§A rule (c): unknown entry levels are withheld).
+        ``speaker_id`` (ISSUE-0131 — v18): the record key's speaker half, projected at close;
+        ``None`` = no speaker.  Full contract: :func:`.episodic_queries.insert_episode`.
         """
         with _tracer.start_as_current_span(
             EPISODIC_REMEMBER_SPAN,

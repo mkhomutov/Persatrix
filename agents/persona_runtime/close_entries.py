@@ -21,10 +21,14 @@ rather than tag: the turn never reaches the combined summarise+extract
 call, so no summary and no fact can be derived from one speaker's words
 and then attributed to another's.
 
-Two callers, and both must apply it or the exclusion has a hole:
-:func:`interaction_to_entries` (the ordinary multi-turn path) and the
+Three callers, and each must apply it or the exclusion has a hole:
+:func:`interaction_to_entries` (the ordinary multi-turn path); the
 ``turn_count == 1`` fast path in ``summarize_close``, which reads
-``turns[0]`` directly and therefore has to ask the same question itself.
+``turns[0]`` directly and therefore has to ask the same question
+itself; and ``close_path.persist_closed_interaction``, which applies it
+to the turns it persists into ``context_json`` — the FTS-indexed column
+recall searches, where the closer's sender must not surface on a row
+stamped with another speaker (PR #849 review).
 """
 
 from __future__ import annotations

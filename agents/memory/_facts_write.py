@@ -70,10 +70,10 @@ async def insert_fact(
     attribution the Phase 0b scope lock forbids.  Not to be confused with
     ``subject``: the subject is who a fact is ABOUT and the speaker is
     who said it, and a counterparty fact differs in the two.  Sound only
-    because a record is single-speaker by construction — the RFC 0020 §G
-    room-close turn, the sole exception, is dropped from the extractor's
-    input upstream (``close_entries.interaction_to_entries``), so no
-    tuple reaching here can have come from another speaker's words.
+    because a record is single-speaker by construction; the one §G
+    breach is excluded upstream (``close_entries`` states the
+    argument), so no tuple reaching here can come from another
+    speaker's words.
 
     ``protection_level`` / ``source_channel_id`` (RFC 0037 §C — v16,
     PR 3) persist VERBATIM — rule-(a) normalization is owned by the

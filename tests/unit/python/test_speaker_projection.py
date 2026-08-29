@@ -26,10 +26,11 @@ speaker's words and then stamped with this record's.
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agents.llm_client import LLMResponse, StopReason, Usage
 from agents.memory.boundary_detectors import REASON_STRUCTURAL
 from agents.memory.facts import FactStore
 from agents.memory.interaction_tracker import InteractionTracker
@@ -44,6 +45,7 @@ from agents.persona_runtime.fact_extractor import (
 from agents.persona_runtime.summarize_close import (
     summarize_closed_interaction,
 )
+from agents.persona_runtime.turn_payload import build_turn_payload
 from agents.persona_types import AgentEvent, EventType
 
 _SCOPE = "group:planning"
@@ -129,6 +131,32 @@ class TestTheSGExclusion:
 
         assert [e.id for e in entries] == ["turn-1", "turn-3"]
 
+    def test_the_fans_real_payload_is_what_gets_excluded(self):
+        """The predicate is a conjunction over two fields the
+        close-notification fan writes (``build_turn_payload(...,
+        room_close=True)``).  The other pins hand-build that payload, so
+        only this one fails if the producer stops writing ``sender``
+        verbatim or moves the stamp — the seam where the fan and the
+        exclusion could drift apart with every other test green."""
+        event = AgentEvent(
+            event_type=EventType.CHANNEL_MESSAGE,
+            payload={"content": "we are dropping Postgres for the ledger"},
+            channel_id="group:planning",
+            sender_id="iron-fox",
+        )
+        fanned = build_turn_payload(
+            event, "Event: channel_message → Actions: []", room_close=True,
+        )
+        record = _record("amber-lynx", [
+            Turn(at=1_000.0, payload={"sender": "amber-lynx", "text": "mine"}),
+            Turn(at=1_090.0, payload=fanned),
+        ])
+
+        contents = [e.content for e in interaction_to_entries(record)]
+
+        assert len(contents) == 1
+        assert not any("Postgres" in c for c in contents)
+
 
 class TestEpisodeProjection:
     async def test_the_row_carries_the_records_speaker(self, memory, monkeypatch):
@@ -159,6 +187,55 @@ class TestEpisodeProjection:
         )
 
         assert await _episode_speaker(memory, "i-none") is None
+
+
+class TestPersistedContextAppliesTheExclusion:
+    """The §G drop covers persistence too, not just the derivation
+    input (PR #849 review): ``context_json`` is an FTS-indexed column
+    recall searches, so a foreign room-close turn's sender and envelope
+    must not ride it on a row stamped with another speaker."""
+
+    async def test_a_foreign_close_turn_is_not_persisted(
+        self, memory, monkeypatch,
+    ):
+        monkeypatch.setattr(
+            close_path, "finalize_closed_interaction", _skip_finalize,
+        )
+        await close_path.persist_closed_interaction(
+            episodic=memory, llm_client=MagicMock(), memory_ns=MagicMock(),
+            agent_id="test-agent",
+            interaction=_record("amber-lynx", [
+                Turn(at=1_000.0, payload={"sender": "amber-lynx"}),
+                _room_close_turn("iron-fox"),
+            ]),
+            pending_tasks=set(), on_finalized=_noop,
+        )
+
+        assert await _persisted_turn_senders(
+            memory, "i-amber-lynx",
+        ) == ["amber-lynx"]
+
+    async def test_the_closers_own_record_persists_it(
+        self, memory, monkeypatch,
+    ):
+        """Same rule as the derivation drop: the turn is native on the
+        closer's own record, so its persisted context keeps it."""
+        monkeypatch.setattr(
+            close_path, "finalize_closed_interaction", _skip_finalize,
+        )
+        await close_path.persist_closed_interaction(
+            episodic=memory, llm_client=MagicMock(), memory_ns=MagicMock(),
+            agent_id="test-agent",
+            interaction=_record("iron-fox", [
+                Turn(at=1_000.0, payload={"sender": "iron-fox"}),
+                _room_close_turn("iron-fox"),
+            ]),
+            pending_tasks=set(), on_finalized=_noop,
+        )
+
+        assert await _persisted_turn_senders(
+            memory, "i-iron-fox",
+        ) == ["iron-fox", "iron-fox"]
 
 
 class TestFactProjection:
@@ -205,6 +282,21 @@ class TestFactProjection:
 
 async def _noop() -> None:
     return None
+
+
+async def _skip_finalize(**kwargs: object) -> None:
+    return None
+
+
+async def _persisted_turn_senders(memory, interaction_id: str) -> list[str]:
+    db = memory._ensure_db()
+    async with db.execute(
+        "SELECT context_json FROM episodes WHERE interaction_id = ?",
+        (interaction_id,),
+    ) as cursor:
+        row = await cursor.fetchone()
+    assert row is not None, "the close path wrote no episode"
+    return [t["payload"].get("sender") for t in json.loads(row[0])["turns"]]
 
 
 async def _episode_speaker(memory, interaction_id: str) -> str | None:
@@ -278,6 +370,33 @@ class TestAllExcludedDegradesCheaply:
         assert "iron-fox" not in summary and "chat_end" not in summary
         assert failed is False and facts_raw is None
         llm.complete.assert_not_called()
+
+
+class TestThePromptCountsWhatItShows:
+    """PR #849 review: ``Turns:`` reported ``interaction.turn_count`` —
+    2 here — while the §G exclusion left one entry in the ``Compressed
+    turns`` block, inviting the model to narrate a turn it is never
+    shown, in the one call whose output ``close_path`` then stamps with
+    this record's ``speaker_id``.  The header must count what the
+    prompt actually holds."""
+
+    async def test_turns_header_matches_the_derivation_input(self):
+        record = _record("amber-lynx", [
+            Turn(at=1_000.0, payload={"sender": "amber-lynx", "text": "mine"}),
+            _room_close_turn("iron-fox"),
+        ])
+        llm = MagicMock()
+        llm.create_message = AsyncMock(return_value=LLMResponse(
+            text=json.dumps({"summary": "s", "facts": []}),
+            stop_reason=StopReason.END_TURN,
+            usage=Usage(10, 5),
+        ))
+
+        await summarize_closed_interaction(llm, "test-agent", record)
+
+        prompt = llm.create_message.call_args.kwargs["messages"][0]["content"]
+        assert "Turns: 1\n" in prompt
+        assert "iron-fox" not in prompt
 
 
 class TestTheFactDispatchCarriesItThrough:
