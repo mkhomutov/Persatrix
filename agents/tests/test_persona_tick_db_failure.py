@@ -3,8 +3,6 @@
 Split from ``test_persona_tick_shortcircuit.py`` when that file reached the
 500-line review-friendly cap.  Shared helpers live in
 ``_persona_tick_helpers.py`` so neither half re-declares them.
-
-The test body below is unchanged from the file it came out of.
 """
 
 from __future__ import annotations
@@ -22,11 +20,11 @@ class TestDBFailurePath:
     """All memory-tier lookups raise → admitted=0 → tick suppressed.
 
     This class closes the coverage gap flagged in the PR #149 deep review
-    (Nice-to-have #1).  The short-circuit tests in the sibling file patch
-    ``_inject_memory_context`` directly to return a zero-token result,
-    which proves the *guard* fires on a zero result but does not prove
-    the *upstream swallowing path* actually produces a zero result when
-    every tier lookup raises.
+    (Nice-to-have #1).  The short-circuit tests in the sibling
+    ``test_persona_tick_shortcircuit.py`` patch ``_inject_memory_context``
+    directly to return a zero-token result, which proves the *guard* fires
+    on a zero result but does not prove the *upstream swallowing path*
+    actually produces a zero result when every tier lookup raises.
 
     RFC 0017 §F documents — and ``_on_event_inner`` explicitly comments
     on — the design decision that DB failure is intentionally indistinguishable
@@ -48,11 +46,24 @@ class TestDBFailurePath:
         ``memory_context.py``).  Patching the two tiers that *are* exercised
         on a TICK is sufficient to drive ``memory_admitted_tokens`` to zero
         through the swallowing path.
+
+        The episodic tier has TWO entry points and the branch is chosen by
+        config: under ``cross_room: live`` — the promoted RFC 0049 PR 4
+        default — it calls ``recall_room_ranked`` and never touches
+        ``EpisodicMemory.recall``.  Patching only ``recall`` left the live
+        branch succeeding against the real store, so the episodic tier never
+        failed and this test asserted its two-warning contract against one
+        warning.  Patch BOTH entry points so the contract is pinned whichever
+        branch the default selects.
         """
         client = make_client()
         agent = await make_agent(client=client)
 
         with (
+            patch(
+                "agents.persona_runtime.memory_context.recall_room_ranked",
+                side_effect=OSError("DB unavailable"),
+            ),
             patch.object(
                 agent._episodic_memory,
                 "recall",

@@ -23,8 +23,19 @@ from agents.tests._memory_context_helpers import (
     FakeRelSummary as _FakeRelSummary,
 )
 from agents.tests._memory_context_helpers import (
+    episodic_tier,
+)
+from agents.tests._memory_context_helpers import (
     make_mixin as _make_mixin,
 )
+
+# ``episodic_tier`` is autouse: having it in THIS module's namespace is what
+# activates it for these tests.  Re-exporting marks it deliberately imported
+# — a bare import reads as unused and gets stripped by ``ruff --fix``, which
+# silently returns every test here to the empty-episodic-tier state the
+# fixture exists to prevent.
+__all__ = ["episodic_tier"]
+
 
 # ─── _inject_memory_context allocate-loop (RFC 0017 PR 2) ─────────────────────
 

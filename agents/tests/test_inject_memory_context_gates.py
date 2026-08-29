@@ -11,16 +11,25 @@ from __future__ import annotations
 
 import pytest
 
+from agents.persona_runtime.classification import CLASSIFICATION_PUBLIC
 from agents.persona_runtime.memory_context import MemoryInjectionResult
 
 # Doubles shared with test_inject_memory_context.py; this file previously
-# kept its own near-copy of the same three dataclasses.
+# kept its own copy, and both copies drifted from production identically.
 from agents.tests._memory_context_helpers import (
     FakeEpisode as _FakeEpisode,
 )
 from agents.tests._memory_context_helpers import (
+    episodic_tier,
+)
+from agents.tests._memory_context_helpers import (
     make_mixin as _make_mixin,
 )
+
+# ``episodic_tier`` is autouse; see test_inject_memory_context.py for why the
+# re-export is load-bearing rather than cosmetic.
+__all__ = ["episodic_tier"]
+
 
 # ─── RFC 0017 PR 4: TICK skip removed; min_score wired; fallback deleted ──────
 
@@ -73,8 +82,20 @@ class TestInjectMemoryContextTickBehavior:
         (The mock returns the episode unconditionally; real DB would filter
         low-signal TICK content via min_score.  This test verifies the path
         from received episodes to admitted tokens is intact for TICK events.)
+
+        The episode is pinned ``public`` deliberately.  A TICK is a
+        floor-class event: ``acting_classification_for_event`` resolves it
+        to ``None`` unconditionally, which is the RFC 0037 §D rule-(b)
+        ``public`` floor, so an ``internal`` row — the fixture default —
+        is correctly withheld by the gate and could never reach the prompt.
+        ``public`` is the only level a TICK can admit.
         """
-        episodes = [_FakeEpisode(summary="high relevance autonomous goal context")]
+        episodes = [
+            _FakeEpisode(
+                summary="high relevance autonomous goal context",
+                protection_level=CLASSIFICATION_PUBLIC,
+            ),
+        ]
         mixin, event = _make_mixin(episodes=episodes, event_type="TICK")
         result = await mixin._inject_memory_context(event)
 

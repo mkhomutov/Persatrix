@@ -45,6 +45,10 @@ from agents.memory._salience import (
 from agents.observability import metrics as pmetrics
 from agents.persona_types import ActionType, AgentAction, AgentEvent
 
+#: agents/tests/<file> → parents[2] is the repo root (mirrors the
+#: ``_REPO_ROOT`` idiom in tests/unit/python/).
+_AGENT_SCHEMA = Path(__file__).resolve().parents[2] / "schemas" / "agent.schema.json"
+
 # Threshold default ships in the schema; the EventLoop class-level default
 # mirrors it.  The two constants must stay in sync — see
 # :mod:`agents.event_loop`'s :attr:`EventLoop.DEFAULT_SALIENCE_THRESHOLD`.
@@ -146,8 +150,12 @@ class TestSchemaDefaultMatchesCode:
 
     @staticmethod
     def _autonomy_props() -> dict[str, Any]:
+        # Anchor on the file, not the process CWD: a bare relative path
+        # resolves only when pytest is invoked from the repo root, so this
+        # pair failed outright under any ``cd agents`` invocation (which is
+        # exactly how the Makefile drove this tree).
         schema = json.loads(
-            Path("schemas/agent.schema.json").read_text(encoding="utf-8"),
+            _AGENT_SCHEMA.read_text(encoding="utf-8"),
         )
         # ``json.loads`` is typed ``Any``; pin the return through a typed
         # local so mypy's ``no-any-return`` (whole-package check) is satisfied.

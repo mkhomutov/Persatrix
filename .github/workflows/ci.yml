@@ -223,6 +223,26 @@ jobs:
       - name: Run unit tests
         run: python -m pytest tests/unit/python/ -v --tb=short
 
+      # The agents/tests/ tree (422 tests) was executed by NO job:
+      # the two pytest steps around this one cover tests/unit/python/ and
+      # tests/integration/, and the only Makefile target that named it was
+      # broken on an unregistered `--agent` flag, so it exited before
+      # collection. `cd agents && ruff check .` / `mypy .` did cover the tree,
+      # so it stayed lint- and type-clean while drifting out of behavioural
+      # agreement with production unnoticed, through 52 commits in 180 days.
+      #
+      # It is not redundant with the unit tree: it holds the ONLY executable
+      # coverage of observability/tracing.py, observability/grpc_logging.py
+      # and memory/scheduled_wakes.py, whose function bodies tests/unit/python/
+      # never enters (those modules are import-only there), plus the bulk of
+      # log_shipper.py and event_loop_lifecycle.py.
+      #
+      # Runs from the repo root with the agents config (mirrors the
+      # integration step): rootdir must be the repo root so the schema-pinning
+      # tests resolve schemas/. Mirrors `make test-agents`.
+      - name: Run agents unit tests
+        run: python -m pytest agents/tests/ -v --tb=short -c agents/pyproject.toml
+
       # ISSUE-0076: CI ran only the unit suite + the single bored-persona cost
       # gate (the cost-regression-gate job below), so the rest of
       # tests/integration/ was never gated by any CI job. The v0.3.4
