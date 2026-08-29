@@ -126,9 +126,11 @@ class Interaction:
     # (RFC 0020 §G amendment, PR #846): the room-close fan lands the
     # closing message as the final turn of every sibling record — a
     # foreign-speaker turn, carrying :data:`ROOM_CLOSE_TURN_KEY` so the
-    # residuals PR 4 binding can exclude or tag it on a RECORDED fact
-    # rather than re-deriving ``sender`` ≠ this ``speaker_id``, before
-    # projecting the column or extracting facts.
+    # close path excludes it on a RECORDED fact rather than re-deriving
+    # ``sender`` ≠ this ``speaker_id``.  It is dropped from the
+    # derivation input (``summarize_close._interaction_to_entries``), so
+    # neither the projected column nor an extracted fact can come from
+    # another speaker's words.
     principal_id: str = DEFAULT_PRINCIPAL_ID
     speaker_id: str = ""
     # ISSUE-0130: True when this interaction was OPENED by an on-startup

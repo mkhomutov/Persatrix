@@ -210,6 +210,7 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
         surface: str = "episode",
         protection_level: str = PROTECTION_LEVEL_DEFAULT,
         source_channel_id: str | None = None,
+        speaker_id: str | None = None,
     ) -> str:
         """Store a new episode. Returns the generated episode ID.
 
@@ -266,6 +267,7 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
                     principal_id=principal_id, epoch_id=epoch_id,
                     protection_level=protection_level,
                     source_channel_id=source_channel_id,
+                    speaker_id=speaker_id,
                 )
             except Exception as exc:
                 span.record_exception(exc)

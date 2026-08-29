@@ -234,6 +234,9 @@ class _EpisodeRoutingMixin:
                 summary=summary,
                 context={**ctx, "close_reason": structural_close.close_reason},
                 interaction_id=structural_close.interaction_id,
+                # ISSUE-0131: the speaker half of the key this record was
+                # opened under — ``""`` (a tick) → NULL.
+                speaker_id=structural_close.speaker_id or None,
                 started_at=structural_close.started_at,
                 closed_at=structural_close.closed_at,
                 turn_count=structural_close.turn_count,

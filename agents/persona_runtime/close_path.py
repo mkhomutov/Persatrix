@@ -262,7 +262,16 @@ async def persist_closed_interaction(
                 # rule-(a) owner (absent/unknown → ``internal``, never
                 # ``public``).  Dark until the PR 4 §D gate reads it.
                 protection_level=normalize_for_stamp(interaction.classification),
-                source_channel_id=interaction.source_channel_id)
+                source_channel_id=interaction.source_channel_id,
+                # ISSUE-0131 (migration 18): the speaker half of the
+                # record key, projected onto the row.  Sound because the
+                # record is single-speaker by construction — the RFC 0020
+                # §G room-close turn, its one foreign turn, is dropped
+                # from the derivation input by ``_interaction_to_entries``
+                # so neither this summary nor its facts can come from it.
+                # ``""`` (tick / single-turn scope) → NULL, the honest
+                # "no speaker" rather than an empty attribution.
+                speaker_id=interaction.speaker_id or None)
         except Exception:
             logger.warning(
                 "Failed to persist closed interaction for agent %s "

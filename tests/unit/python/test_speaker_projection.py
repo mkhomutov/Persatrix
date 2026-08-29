@@ -1,0 +1,246 @@
+"""ISSUE-0131 — the ``speaker_id`` projection: derived memory records WHO.
+
+Migration 18 landed the column dormant; this is its writer.  Derived
+memory recorded WHAT was said and WHERE, never WHO — so a persona's own
+restatement of a group discussion could attribute one speaker's
+disclosure to another, which the v0.3.15 design gate reproduced live on
+2026-08-21 (Phase 0b: one persona extracted an attribute of *iron-fox*
+from a turn **ember-owl** spoke).
+
+The fix is not to make attribution smarter — the Phase 0b scope lock
+forbids model-elected attribution.  It is that the
+``(principal, speaker, scope)`` record key makes every close-derived
+record single-speaker BY CONSTRUCTION, so the column is a projection of
+a key half rather than a judgement: ``interaction.speaker_id`` onto
+``episodes.speaker_id`` and onto every fact the record's close extracts.
+
+The premise has exactly one breach, and these pins are mostly about it.
+The RFC 0020 §G room-close fan lands ONE closing message as the final
+turn of EVERY record it closes, so on all but one of them that turn's
+sender is not the record's speaker.  The RFC obliges this PR to
+"exclude or tag" it; it is discharged as EXCLUDE, upstream of the
+combined summarise+extract call, so no fact can be derived from another
+speaker's words and then stamped with this record's.
+"""
+
+from __future__ import annotations
+
+from unittest.mock import MagicMock
+
+import pytest
+
+from agents.memory.boundary_detectors import REASON_STRUCTURAL
+from agents.memory.facts import FactStore
+from agents.memory.interaction_types import ROOM_CLOSE_TURN_KEY, Interaction, Turn
+from agents.persona_runtime import close_path
+from agents.persona_runtime.fact_extractor import store_extracted_facts
+from agents.persona_runtime.summarize_close import (
+    _interaction_to_entries,
+    summarize_closed_interaction,
+)
+
+_SCOPE = "group:planning"
+
+
+def _record(speaker: str, turns: list[Turn] | None = None) -> Interaction:
+    return Interaction(
+        interaction_id=f"i-{speaker or 'none'}",
+        scope=_SCOPE,
+        started_at=1_000.0,
+        closed_at=1_100.0,
+        close_reason=REASON_STRUCTURAL,
+        speaker_id=speaker,
+        turns=turns if turns is not None else [
+            Turn(at=1_000.0, payload={"sender": speaker, "text": "my own words"}),
+        ],
+    )
+
+
+def _room_close_turn(sender: str) -> Turn:
+    """The turn the close-notification fan lands on every record."""
+    return Turn(at=1_090.0, payload={
+        "sender": sender,
+        "text": "we are dropping Postgres for the ledger",
+        ROOM_CLOSE_TURN_KEY: True,
+    })
+
+
+class TestTheSGExclusion:
+    """The premise-preserving half: a foreign room-close turn never
+    reaches the derivation input."""
+
+    def test_a_foreign_room_close_turn_is_dropped(self):
+        record = _record("amber-lynx", [
+            Turn(at=1_000.0, payload={"sender": "amber-lynx", "text": "mine"}),
+            _room_close_turn("iron-fox"),
+        ])
+
+        contents = [e.content for e in _interaction_to_entries(record)]
+
+        assert len(contents) == 1
+        assert "mine" in contents[0]
+        assert not any("Postgres" in c for c in contents), (
+            "a fact from the closer's words would be stamped with THIS "
+            "record's speaker — the misattribution the key exists to prevent"
+        )
+
+    def test_the_closers_own_record_keeps_it(self):
+        """The turn is foreign only where the sender is not the record's
+        speaker.  On the closer's own record it is native — iron-fox
+        really did say it into the conversation that record holds — so
+        the content survives wherever it is attributable."""
+        record = _record("iron-fox", [
+            Turn(at=1_000.0, payload={"sender": "iron-fox", "text": "mine"}),
+            _room_close_turn("iron-fox"),
+        ])
+
+        contents = [e.content for e in _interaction_to_entries(record)]
+
+        assert len(contents) == 2
+        assert any("Postgres" in c for c in contents)
+
+    def test_an_ordinary_turn_from_another_sender_is_kept(self):
+        """Only the STAMPED turn is excluded.  A record whose turns carry
+        a different sender for any other reason is not silently emptied —
+        the stamp is the discriminator, not the sender comparison alone."""
+        record = _record("amber-lynx", [
+            Turn(at=1_000.0, payload={"sender": "someone-else", "text": "kept"}),
+        ])
+
+        assert len(_interaction_to_entries(record)) == 1
+
+    def test_ordinals_do_not_renumber_around_a_dropped_turn(self):
+        """Importance is the turn's real position, so excluding one does
+        not re-weight its siblings."""
+        record = _record("amber-lynx", [
+            Turn(at=1_000.0, payload={"sender": "amber-lynx", "text": "first"}),
+            _room_close_turn("iron-fox"),
+            Turn(at=1_099.0, payload={"sender": "amber-lynx", "text": "third"}),
+        ])
+
+        entries = _interaction_to_entries(record)
+
+        assert [e.id for e in entries] == ["turn-1", "turn-3"]
+
+
+class TestEpisodeProjection:
+    async def test_the_row_carries_the_records_speaker(self, memory, monkeypatch):
+        async def _skip(**kwargs: object) -> None:
+            return None
+
+        monkeypatch.setattr(close_path, "finalize_closed_interaction", _skip)
+        await close_path.persist_closed_interaction(
+            episodic=memory, llm_client=MagicMock(), memory_ns=MagicMock(),
+            agent_id="test-agent", interaction=_record("amber-lynx"),
+            pending_tasks=set(), on_finalized=_noop,
+        )
+
+        assert await _episode_speaker(memory, "i-amber-lynx") == "amber-lynx"
+
+    async def test_a_speakerless_scope_is_null_not_empty(self, memory, monkeypatch):
+        """``""`` is the no-speaker convention (tick / single-turn scope).
+        NULL is the honest column value; an empty string would read as an
+        attribution to a speaker named nothing."""
+        async def _skip(**kwargs: object) -> None:
+            return None
+
+        monkeypatch.setattr(close_path, "finalize_closed_interaction", _skip)
+        await close_path.persist_closed_interaction(
+            episodic=memory, llm_client=MagicMock(), memory_ns=MagicMock(),
+            agent_id="test-agent", interaction=_record(""),
+            pending_tasks=set(), on_finalized=_noop,
+        )
+
+        assert await _episode_speaker(memory, "i-none") is None
+
+
+class TestFactProjection:
+    async def test_every_tuple_in_the_batch_carries_the_speaker(self, fact_store):
+        stored = await store_extracted_facts(
+            fact_store,
+            facts=[
+                {"subject": "alice", "predicate": "prefers", "object": "tea"},
+                {"subject": "alice", "predicate": "works_at", "object": "acme"},
+            ],
+            source_interaction_id="i-1", asserted_at=1_100.0,
+            session_id="legacy", speaker_id="amber-lynx",
+        )
+
+        assert stored == 2
+        assert await _fact_speakers(fact_store) == {"amber-lynx"}
+
+    async def test_a_speakerless_source_is_null(self, fact_store):
+        await store_extracted_facts(
+            fact_store,
+            facts=[{"subject": "alice", "predicate": "prefers", "object": "tea"}],
+            source_interaction_id="i-1", asserted_at=1_100.0,
+            session_id="legacy", speaker_id=None,
+        )
+
+        assert await _fact_speakers(fact_store) == {None}
+
+    async def test_speaker_is_not_the_subject(self, fact_store):
+        """The two columns answer different questions — who SAID it
+        versus who it is ABOUT — and a counterparty fact differs in
+        both."""
+        await store_extracted_facts(
+            fact_store,
+            facts=[{"subject": "alice", "predicate": "prefers", "object": "tea"}],
+            source_interaction_id="i-1", asserted_at=1_100.0,
+            session_id="legacy", speaker_id="amber-lynx",
+        )
+
+        db = fact_store._ensure_db()
+        async with db.execute("SELECT subject, speaker_id FROM facts") as cur:
+            rows = await cur.fetchall()
+        assert [tuple(r) for r in rows] == [("alice", "amber-lynx")]
+
+
+async def _noop() -> None:
+    return None
+
+
+async def _episode_speaker(memory, interaction_id: str) -> str | None:
+    db = memory._ensure_db()
+    async with db.execute(
+        "SELECT speaker_id FROM episodes WHERE interaction_id = ?",
+        (interaction_id,),
+    ) as cursor:
+        row = await cursor.fetchone()
+    assert row is not None, "the close path wrote no episode"
+    return row[0]
+
+
+async def _fact_speakers(fact_store: FactStore) -> set[str | None]:
+    db = fact_store._ensure_db()
+    async with db.execute("SELECT speaker_id FROM facts") as cursor:
+        return {row[0] for row in await cursor.fetchall()}
+
+
+@pytest.fixture
+async def fact_store():
+    store = FactStore(agent_id="test-agent", db_path=":memory:")
+    await store.initialize()
+    yield store
+    await store.close()
+
+
+class TestAllExcludedDegradesCheaply:
+    async def test_a_record_of_only_foreign_turns_takes_the_placeholder(self):
+        """Unreachable today — a record opens by taking a turn of its own,
+        and the fan only appends to records already open — so this guards
+        the exclusion's blast radius: a future ingest that lands a fan
+        turn on an empty record must not send an empty prompt to the LLM."""
+        record = _record("amber-lynx", [_room_close_turn("iron-fox")])
+        llm = MagicMock()
+
+        summary, failed, facts_raw, projections = (
+            await summarize_closed_interaction(
+                llm_client=llm, interaction=record, agent_id="test-agent",
+            )
+        )
+
+        assert failed is False
+        assert facts_raw is None and projections == {}
+        assert "no content attributable" in summary
+        llm.complete.assert_not_called()

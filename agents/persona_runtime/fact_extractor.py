@@ -174,6 +174,7 @@ async def store_extracted_facts(
     sender_id: str | None = None,
     protection_level: str | None = None,
     source_channel_id: str | None = None,
+    speaker_id: str | None = None,
 ) -> int:
     """Persist each parsed fact via :meth:`FactStore.store`.
 
@@ -182,6 +183,20 @@ async def store_extracted_facts(
     subject canonicalization rejection) are caught here and increment
     ``agent.facts.extraction_failed`` — one bad tuple does not drop
     the rest of the batch.
+
+    ``speaker_id`` (ISSUE-0131 — migration 18) is the source
+    interaction's frozen speaker, stamped identically onto every tuple
+    for the same reason the two below are: a fact is extracted from
+    exactly one interaction, and since the v0.3.15 re-key that
+    interaction is single-speaker by construction, so its speaker IS
+    every tuple's.  Do not confuse it with ``sender_id`` just above,
+    which is a subject-canonicalization input and not persisted: the
+    speaker is who SAID the content, the subject is who it is ABOUT, and
+    a counterparty fact differs in the two.  The RFC 0020 §G room-close
+    turn is the one turn that would break the single-speaker premise, and
+    it is dropped from the extractor's input upstream
+    (``summarize_close._interaction_to_entries``) rather than corrected
+    here — no fact reaching this function can have come from it.
 
     ``protection_level`` / ``source_channel_id`` (RFC 0037 §C, PR 3) are
     the source interaction's frozen-at-open capture, stamped identically
@@ -260,6 +275,7 @@ async def store_extracted_facts(
                 session_id=session_id,
                 protection_level=stamped_level,
                 source_channel_id=source_channel_id,
+                speaker_id=speaker_id,
             )
         except ValueError as exc:
             failures += 1
@@ -438,6 +454,11 @@ async def dispatch_facts_from_response(
             # frozen-at-open capture, like the Phase-1 episode row.
             protection_level=interaction.classification,
             source_channel_id=interaction.source_channel_id,
+            # ISSUE-0131 (migration 18): the speaker half of the record
+            # key, projected onto every tuple.  ``""`` is a speakerless
+            # scope (tick / single-turn), which the column records as
+            # NULL rather than as an empty attribution.
+            speaker_id=interaction.speaker_id or None,
         )
     except Exception:
         logger.warning(

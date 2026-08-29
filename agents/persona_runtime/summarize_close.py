@@ -29,6 +29,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from ..generated import wallet_pb2 as walletpb
+from ..memory.interaction_types import ROOM_CLOSE_TURN_KEY
 from ..memory.interactions import SUMMARY_UNAVAILABLE_TEXT
 from ..memory.store import CompressedView, MemoryEntry, MemoryStore
 from ..model_aliases import resolve as resolve_model
@@ -169,6 +170,21 @@ async def summarize_closed_interaction(
             )
 
     entries = _interaction_to_entries(interaction)
+    if not entries:
+        # Every turn was a FOREIGN room-close turn: nothing of this
+        # record's own speaker to derive, so take the placeholder rather
+        # than pay an LLM round trip to summarise nothing — the trade the
+        # content-less single-turn branch above already makes.
+        # Unreachable today (the fan appends only to records already
+        # open, and a record opens by taking a turn of its own): this
+        # bounds the exclusion's blast radius, it does not serve traffic.
+        return (
+            f"Multi-turn interaction (scope={interaction.scope}, "
+            f"turns={interaction.turn_count}, "
+            f"reason={interaction.close_reason}): no content attributable "
+            f"to this record's speaker",
+            False, None, {},
+        )
     view: CompressedView = MemoryStore.compress(
         entries,
         target_tokens=SUMMARIZATION_TARGET_TOKENS,
@@ -349,17 +365,47 @@ async def summarize_closed_interaction(
     return (summary, False, facts_raw, projections)
 
 
+def _is_foreign_room_close_turn(
+    payload: dict[str, object], speaker_id: str,
+) -> bool:
+    """The RFC 0020 §G exception: a room-close turn someone ELSE spoke.
+
+    The close-notification fan lands one closing message as the final
+    turn of EVERY record it closes, so on all but one that turn's sender
+    is not the record's speaker.  ISSUE-0131 projects
+    ``interaction.speaker_id`` onto the episode row and every extracted
+    fact, which is sound only because a record is single-speaker by
+    construction — this turn is the sole breach, so it is dropped from
+    the derivation input (the RFC's "exclude or tag", discharged as
+    exclude).  Without it a fact from the closer's words is attributed to
+    the record's own speaker: the Phase 0b defect itself.
+
+    Keyed off the producer's recorded stamp, not a guess.  The sender
+    comparison decides only WHOSE record this is — on the closer's own
+    record the turn is native, so it stays.
+    """
+    if payload.get(ROOM_CLOSE_TURN_KEY) is not True:
+        return False
+    return str(payload.get("sender", "")).strip() != speaker_id
+
+
 def _interaction_to_entries(interaction: Interaction) -> list[MemoryEntry]:
     """Project per-turn payloads into ``MemoryEntry`` shape for compress().
 
     Each turn becomes one entry; importance equals the turn ordinal
     normalised into ``(0, 1]`` so later turns weigh slightly more
     than openers when the compressor has to drop entries.
+
+    A foreign room-close turn is SKIPPED (:func:`_is_foreign_room_close_turn`).
+    Ordinals still come from the record's real turn positions, so a drop
+    does not renumber its siblings or shift their weights.
     """
     total = max(interaction.turn_count, 1)
     entries: list[MemoryEntry] = []
     for idx, turn in enumerate(interaction.turns, start=1):
         payload = turn.payload or {}
+        if _is_foreign_room_close_turn(payload, interaction.speaker_id):
+            continue
         content_parts: list[str] = []
         # ISSUE-0054 — ``text`` (inbound message body) is the load-bearing
         # input for RFC 0026 extraction; ``summary`` is the action envelope.
