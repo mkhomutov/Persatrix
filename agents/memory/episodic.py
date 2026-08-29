@@ -45,15 +45,10 @@ from .episodic_notes_api import _EpisodicNotesAPIMixin
 from .episodic_queries import (
     MAX_RECALL_LIMIT,
     Episode,
-    get_interaction_count,
-    increment_interaction_count,
     insert_episode,
-    load_agent_state,
-    persist_agent_state,
     recall_fts5,
     recall_like,
     recall_recency,
-    reset_interaction_count,
     row_to_episode,
 )
 from .episodic_queries import (
@@ -65,6 +60,7 @@ from .episodic_retention import (
 from .episodic_retention import (
     summarize_old_episodes as _summarize_old_episodes,
 )
+from .episodic_state_api import _EpisodicStateAPIMixin
 from .interactions import SUMMARY_PENDING_TEXT
 from .migrations import (
     _FTS5_DDL,
@@ -95,14 +91,17 @@ DEFAULT_NOTES_MIN_SCORE: float = 0.20
 # ─── EpisodicMemory ────────────────────────────────────────
 
 
-class EpisodicMemory(_EpisodicNotesAPIMixin):
+class EpisodicMemory(_EpisodicNotesAPIMixin, _EpisodicStateAPIMixin):
     """Long-term memory store using SQLite with FTS5 search.
 
     The notes-tier delegation methods (``store_note`` / ``recall_notes`` /
     ``update_note`` / ``delete_note`` / ``count_notes``) live in
-    :class:`agents.memory.episodic_notes_api._EpisodicNotesAPIMixin` to
-    keep this file under the 500-line repo cap; the public surface is
-    unchanged.
+    :class:`agents.memory.episodic_notes_api._EpisodicNotesAPIMixin`, and
+    the ``agent_state``-table ones (the interaction counter plus
+    ``persist_agent_state`` / ``load_agent_state``) in
+    :class:`agents.memory.episodic_state_api._EpisodicStateAPIMixin` —
+    both to keep this file under the 500-line repo cap; the public
+    surface is unchanged.
     """
 
     def __init__(self, agent_id: str, db_path: str = "data/memory.db") -> None:
@@ -461,40 +460,6 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
     # ─── Notes ─────────────────────────────────────────────
     # ``store_note`` / ``recall_notes`` / … — see :class:`_EpisodicNotesAPIMixin`.
 
-    # ─── Interaction counter ─────────────────────────────────
-
-    async def get_interaction_count(self) -> int:
-        """Get the current interaction count for this agent."""
-        return await get_interaction_count(self._ensure_db(), self._agent_id)
-
-    async def increment_interaction_count(self) -> int:
-        """Increment and return the new interaction count (upsert).
-
-        Uses RETURNING to get the post-upsert count in a single round-trip,
-        eliminating a read-after-write race.  Requires SQLite >= 3.35
-        (Python 3.11+ ships >= 3.39).
-        """
-        return await increment_interaction_count(self._ensure_db(), self._agent_id)
-
-    async def reset_interaction_count(self) -> None:
-        """Reset the interaction counter to zero."""
-        await reset_interaction_count(self._ensure_db(), self._agent_id)
-
-    # ─── Persona state persistence ──────────────────────────
-
-    async def persist_agent_state(
-        self, agent_id: str, state_json: str,
-    ) -> None:
-        """Persist opaque agent state JSON to the agent_state table (upsert).
-
-        Preserves interaction_count: only persona_state_json and updated_at
-        are overwritten by the upsert, so call-count tracking is not reset.
-        """
-        await persist_agent_state(self._ensure_db(), agent_id, state_json)
-
-    async def load_agent_state(self, agent_id: str) -> str | None:
-        """Load opaque agent state JSON from the agent_state table.
-
-        Returns ``None`` if no state has been persisted for this agent.
-        """
-        return await load_agent_state(self._ensure_db(), agent_id)
+    # ─── Interaction counter & persona state ───────────────
+    # ``get_interaction_count`` / ``persist_agent_state`` / … — see
+    # :class:`_EpisodicStateAPIMixin`.
