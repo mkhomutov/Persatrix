@@ -202,7 +202,7 @@ Run [MT-MEMORY-GROUP-TENANT-001](../manual-tests/MT-MEMORY-GROUP-TENANT-001.md) 
 | 0 | Design gate — MT Legs 1–4, lock the record shape (both axes) | — | ✅ Resolved → **`(principal, speaker, scope)`**: Phase 0 (principal) 2026-08-07, Phase 0b (speaker) 2026-08-21 | — | — |
 | 1 | R-2 causal attribution store, dormant | `feature/v0315-issue0124-attribution-store` | ✅ Merged | [#844](https://github.com/mkhomutov/Persatrix/pull/844) | `5b740f84` |
 | 2 | R-2 re-stamp + end-to-end gate | `feature/v0315-issue0124-restamp` | ✅ Merged | [#845](https://github.com/mkhomutov/Persatrix/pull/845) | `48b4a558` |
-| 3 | R-1 + [ISSUE-0131](ISSUE-0131-derived-memory-has-no-speaker-attribution.md) scope key `(principal, speaker, scope)` + RFC 0020 §G amendment | `feature/v0315-issue0123-scope-key` | 🔀 PR open | [#846](https://github.com/mkhomutov/Persatrix/pull/846) | — |
+| 3 | R-1 + [ISSUE-0131](ISSUE-0131-derived-memory-has-no-speaker-attribution.md) scope key `(principal, speaker, scope)` + RFC 0020 §G amendment | `feature/v0315-issue0123-scope-key` | ✅ Merged | [#846](https://github.com/mkhomutov/Persatrix/pull/846) | `5e23246c` |
 | 4 | [ISSUE-0131](ISSUE-0131-derived-memory-has-no-speaker-attribution.md) `speaker_id` projection onto the close-derived rows + the RFC 0020 §G room-close exclusion | `feature/v0315-issue0123-close-path` | 🔀 PR open | [#849](https://github.com/mkhomutov/Persatrix/pull/849) | — |
 | 4b | Reserve re-size (until it lands, a cost-trigger room fan over-commits `1 + N`) + Go-side asymmetry cleanup — split out of PR 4 | — | ⬜ Not started | — | — |
 | 5 | Live MT + closeout | `feature/v0315-issue0082-residuals-close` | ⬜ Not started | — | — |
