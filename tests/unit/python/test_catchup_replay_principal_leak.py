@@ -113,11 +113,14 @@ class _RecordingEpisodic:
 async def test_replayed_interaction_derives_nothing_on_close() -> None:
     """The leak-stopper: no episode row, so no facts extracted from it."""
     tracker = InteractionTracker()
-    tracker.add_turn(
+    opened = tracker.add_turn(
         "dm:alice", payload={"text": "My daughter Mira turns seven next month."},
         replayed=True,
     )
-    closed = tracker.close("dm:alice", reason=REASON_STRUCTURAL)
+    # ``close_record``, not ``close_scope``: the room fan deliberately
+    # excludes replay-opened records (PR #846 review), and this test is
+    # about what the close PATH does with one.
+    closed = tracker.close_record(opened, reason=REASON_STRUCTURAL)
     assert closed is not None
     assert closed.turn_count == 1, "the span must be non-empty, or the test is vacuous"
 
@@ -158,10 +161,10 @@ async def test_live_interaction_still_derives__positive_control() -> None:
     ``replayed`` flipped — this one MUST write.
     """
     tracker = InteractionTracker()
-    tracker.add_turn(
+    opened = tracker.add_turn(
         "dm:alice", payload={"text": "My daughter Mira turns seven next month."},
     )
-    closed = tracker.close("dm:alice", reason=REASON_STRUCTURAL)
+    closed = tracker.close_record(opened, reason=REASON_STRUCTURAL)
     assert closed is not None
     assert closed.replayed is False
 

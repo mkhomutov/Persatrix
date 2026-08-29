@@ -24,6 +24,7 @@ import grpc.aio
 from .base import BaseAgent
 from .generated import task_pb2
 from .memory.episodic_closed import closed_interactions
+from .memory.interaction_types import ROOM_CLOSE_TURN_KEY
 
 __all__ = ["handle_get_closed_interactions", "DEFAULT_CLOSED_INTERACTION_LIMIT"]
 
@@ -50,6 +51,17 @@ def _participants_from_context(ctx: object) -> list[str]:
     Empty / missing / non-string senders are skipped, so a legacy row that
     predates turn capture (or an autonomous TICK with no sender) yields an
     empty list rather than a ``[""]`` artefact.
+
+    The RFC 0020 §G room-close turn is skipped (PR #846 review).  Since
+    the v0.3.15 ``(principal, speaker, scope)`` re-key a record holds one
+    speaker's turns, and the single exception is the close-notification
+    fan's closing message, which lands on EVERY sibling record — so
+    without this every closed record in a room named its own speaker plus
+    the closer, a participant of that record's conversation only in the
+    sense that it ended it.  Keyed off the producer's
+    :data:`~agents.memory.interaction_types.ROOM_CLOSE_TURN_KEY`
+    stamp, which survives persistence, rather than re-deriving
+    ``sender`` ≠ the record's speaker here.
     """
     if not isinstance(ctx, dict):
         return []
@@ -64,6 +76,8 @@ def _participants_from_context(ctx: object) -> list[str]:
         for turn in turns:
             payload = turn.get("payload") if isinstance(turn, dict) else None
             if isinstance(payload, dict):
+                if payload.get(ROOM_CLOSE_TURN_KEY) is True:
+                    continue  # the §G room-close turn — not a participant
                 _add(payload.get("sender"))
     else:
         _add(ctx.get("sender"))

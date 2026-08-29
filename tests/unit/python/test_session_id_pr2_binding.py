@@ -279,11 +279,11 @@ class TestClosedInteractionUsesCapturedSession:
         await agent.initialize_memory()
         try:
             tracker = agent._interaction_tracker
-            tracker.add_turn(
+            opened = tracker.add_turn(
                 "dm:user-b", payload={"summary": "from conv-b"},
                 session_id="conv-b",
             )
-            closed = tracker.close("dm:user-b", reason=REASON_STRUCTURAL)
+            closed = tracker.close_record(opened, reason=REASON_STRUCTURAL)
             assert closed is not None
             assert closed.session_id == "conv-b"
 

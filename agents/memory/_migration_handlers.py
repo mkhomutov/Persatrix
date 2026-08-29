@@ -53,6 +53,7 @@ from ._migration_interactions_session import _apply_migration_10
 from ._migration_notes_session import _apply_migration_9
 from ._migration_principal import _apply_migration_11
 from ._migration_protection import _apply_migration_16
+from ._migration_speaker import _apply_migration_18
 from ._migration_split_participant import _apply_migration_17
 
 
@@ -477,4 +478,5 @@ _MIGRATION_HANDLERS: dict[int, Callable[[aiosqlite.Connection], Awaitable[None]]
     15: _apply_migration_15,
     16: _apply_migration_16,
     17: _apply_migration_17,
+    18: _apply_migration_18,
 }

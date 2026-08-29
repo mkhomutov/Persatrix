@@ -12,7 +12,23 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from ..principal_id import DEFAULT_PRINCIPAL_ID
 from ..session_id import LEGACY_SESSION_ID
+
+# The one key RFC 0020 §G exempts from single-speaker construction: the
+# room-close fan lands the closing message as the final turn of EVERY
+# sibling record, so on all but one of them this turn's ``sender`` is not
+# the record's ``speaker_id`` (PR #846 review).  Stamped by the producer
+# (:func:`~agents.persona_runtime.turn_payload.build_turn_payload`) rather
+# than reconstructed per consumer from ``sender`` ≠ ``speaker_id``: that
+# reconstruction is a guess — the tracker key strips ``speaker_id`` while
+# the payload ``sender`` is verbatim, so whitespace alone defeats it — and
+# every consumer would have to make it independently.  It lives here, not
+# beside the builder, because it is part of the ``Turn.payload`` contract
+# and the read surface (``closed_interactions_read``) must not grow an
+# import into the persona subpackage to honour it.  Survives persistence:
+# ``persist_closed_interaction`` strips only ``text``.
+ROOM_CLOSE_TURN_KEY = "room_close"
 
 
 @dataclass
@@ -89,6 +105,32 @@ class Interaction:
     # at flush time.  Defaults to the ``legacy`` carve-out so a pre-PR-2
     # construction site (or a turn opened with no scope) stays visible.
     session_id: str = LEGACY_SESSION_ID
+    # ISSUE-0123 (R-1) / ISSUE-0131 — the two halves of the tracker key
+    # beside ``scope`` (v0.3.15 residuals PR 3).  Both sit on the
+    # ``session_id`` footing above: resolved when the interaction OPENS,
+    # frozen for its lifetime, and — being key components — never
+    # re-read from a later turn.  ``principal_id`` is the tenant the
+    # opening turn ran under (the ambient ``principal_scope``, else the
+    # single-tenant default); ``persist_closed_interaction`` binds THIS
+    # value around the derivation pipeline — both phases — so an idle
+    # flush or a room-close fan cannot write the record under whichever
+    # principal happened to trigger the close (PR #846 review).  ``speaker_id`` is the
+    # opening event's ``sender_id`` (``""`` = no speaker: tick /
+    # single-turn scopes whose event carries none) — the ISSUE-0131 axis
+    # that keeps a room of personas, who all share the ``local``
+    # principal, from collapsing into one record.  The persisted
+    # ``episodes.speaker_id`` / ``facts.speaker_id`` columns (migration
+    # 17 → 18) are a PROJECTION of this key half — attribution is sound
+    # only because the record is single-speaker by construction, never
+    # model-elected (Phase 0b scope lock) — with ONE stated exception
+    # (RFC 0020 §G amendment, PR #846): the room-close fan lands the
+    # closing message as the final turn of every sibling record — a
+    # foreign-speaker turn, carrying :data:`ROOM_CLOSE_TURN_KEY` so the
+    # residuals PR 4 binding can exclude or tag it on a RECORDED fact
+    # rather than re-deriving ``sender`` ≠ this ``speaker_id``, before
+    # projecting the column or extracting facts.
+    principal_id: str = DEFAULT_PRINCIPAL_ID
+    speaker_id: str = ""
     # ISSUE-0130: True when this interaction was OPENED by an on-startup
     # catch-up replay turn, captured under the same only-on-open rule as
     # ``session_id`` above.  A replayed turn carries no principal — the
@@ -145,4 +187,4 @@ class Interaction:
         return self.closed_at is None
 
 
-__all__ = ["Interaction", "Turn"]
+__all__ = ["ROOM_CLOSE_TURN_KEY", "Interaction", "Turn"]

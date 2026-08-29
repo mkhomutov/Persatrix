@@ -134,3 +134,19 @@ rather than failing loudly.
 > here: **model-elected attribution stays forbidden.** The speaker column is a
 > projection of the record key; it is sound only once the record is already
 > single-speaker.
+
+> 2026-08-26 — **the axis landed** (v0.3.15 residuals **PR 3**, this PR), in the
+> key-side shape Phase 0b decided. `Interaction.speaker_id` is resolved from the
+> triggering event's `sender_id` and frozen at open, and it is half the tracker
+> key — so the Phase 0b regression case (one `local` principal, three agent
+> speakers, one room scope) now yields **three** records rather than the single
+> aggregate plain Option A would have shipped; that case is pinned as a test.
+> Persona-memory migration **17 → 18** adds a nullable `speaker_id` to
+> `episodes` and `facts` — the two tiers a group close writes, and not the two
+> nearby wrong targets this issue's proposal warned about. It lands **dormant**:
+> the close-path binding that stamps it is PR 4, so the column ships ahead of
+> its consumer (the v0.3.15 "no migration lands after its consumer" acceptance
+> line) and pre-existing rows stay NULL. No backfill and no guess — a pre-split
+> aggregate's speaker is unknowable without exactly the model-elected
+> attribution the scope lock forbids, which is also why the column is only sound
+> now that the record it projects from is single-speaker by construction.

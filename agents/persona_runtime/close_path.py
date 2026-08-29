@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from typing import TYPE_CHECKING, Any
 
 from ..memory.boundary_detectors import REASON_CATCHUP_COMPLETE
@@ -21,16 +21,93 @@ from ..memory.interactions import (
     Interaction,
     InteractionTracker,
 )
+from ..principal_id import principal_scope
 from .classification import normalize_for_stamp
 from .finalize_close import finalize_closed_interaction
+from .interaction_boundary import stale_close_reason
 
 if TYPE_CHECKING:
     from ..llm_client import LLMClient
+    from ..persona_types import AgentEvent
     from . import MemoryNamespace
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["close_replayed_scopes", "persist_closed_interaction"]
+__all__ = [
+    "close_replayed_scopes",
+    "close_stale_records",
+    "persist_closed_interaction",
+    "persist_fanned_closes",
+]
+
+
+async def persist_fanned_closes(
+    closed_records: Iterable[Interaction],
+    persist: Callable[[Interaction], Awaitable[None]],
+) -> None:
+    """Persist every record a room-wide close fan just closed — one
+    guard per record (v0.3.15 PR 3 review fix).
+
+    The ISSUE-0123 part 3 fans (``close_scope`` at the session-end,
+    cost, end-vote and close-notification sites) pop ALL their records
+    from the tracker before the first persist runs, so an exception
+    escaping one record's persist would silently discard the rest —
+    closed, gone from the open map, and with no idle sweep left to find
+    them.  Mirror of the per-iteration guard on the idle-flush loops
+    (``episode_routing._store_event_episode``, PR-3 review #13): each
+    record gets its own ``try`` so a failure is logged with the
+    identity of the record that owned it and the fan keeps persisting
+    the siblings.
+    """
+    for interaction in closed_records:
+        try:
+            await persist(interaction)
+        except Exception:
+            logger.warning(
+                "Failed to persist fanned close (scope=%s, "
+                "interaction_id=%s, close_reason=%s)",
+                interaction.scope, interaction.interaction_id,
+                interaction.close_reason, exc_info=True,
+            )
+
+
+async def close_stale_records(
+    tracker: InteractionTracker,
+    scope: str,
+    event: AgentEvent,
+    *,
+    wire_id: str,
+    persist: Callable[[Interaction], Awaitable[None]],
+) -> None:
+    """Close every record in ``scope`` this event makes stale, then persist.
+
+    The ingest-time boundary fan, extracted from
+    ``_EpisodeRoutingMixin._handle_multi_turn_event`` (PR #846 review —
+    that module is at the 500-line cap, and this is a close+guarded-persist
+    fan, which is this module's subject).
+
+    :func:`~agents.persona_runtime.interaction_boundary.stale_close_reason`
+    owns WHICH boundary fired: the RFC 0030 wire-id rotation (the previous
+    channel conversation ended, so the new turn must open fresh under the
+    wire-carried cause — producer plan OQ 5) and the ISSUE-0130 catch-up
+    boundary (a LIVE turn landing on a replay-opened record splits there,
+    or the live conversation inherits the replayed span's no-derivation
+    flag).  ISSUE-0123 part 3: both are ROOM events and a re-keyed room
+    holds N records, so this FANS — per record, because every input is per
+    record (wire id, predecessor, replay flag), closing every stale record
+    rather than only the current sender's.  Persists behind
+    :func:`persist_fanned_closes`, so one failure neither aborts the
+    remaining splits nor the caller's own ingest.
+    """
+    stale_splits: list[Interaction] = []
+    for record in tracker.records_for_scope(scope):
+        stale_reason = stale_close_reason(record, event, wire_id=wire_id)
+        if stale_reason is None:
+            continue
+        split = tracker.close_record(record, reason=stale_reason)
+        if split is not None:
+            stale_splits.append(split)
+    await persist_fanned_closes(stale_splits, persist)
 
 
 async def persist_closed_interaction(
@@ -124,47 +201,91 @@ async def persist_closed_interaction(
             for t in interaction.turns
         ],
     }
-    try:
-        await episodic.store_episode(
-            summary=SUMMARY_PENDING_TEXT, context=ctx,
-            interaction_id=interaction.interaction_id,
-            # ISSUE-0102 PR 2: the queryable governance-id column (v15). Empty
-            # ``wire_interaction_id`` (DM / thread / non-channel) → NULL.
-            governance_interaction_id=interaction.wire_interaction_id or None,
-            started_at=interaction.started_at,
-            closed_at=interaction.closed_at,
-            turn_count=interaction.turn_count, scope=interaction.scope,
-            # ISSUE-0081 PR 2 sibling-mislabel guard: tag with the session the
-            # interaction was *born* under, not the scope bound now —
-            # ``idle_check`` may be flushing a sibling conversation's stale
-            # interaction while a different conversation's event holds the scope.
-            session_id=interaction.session_id,
-            # RFC 0037 §C (PR 3): the episode inherits the interaction's
-            # frozen-at-open capture — ``normalize_for_stamp`` is the §A
-            # rule-(a) owner (absent/unknown → ``internal``, never
-            # ``public``).  Dark until the PR 4 §D gate reads it.
-            protection_level=normalize_for_stamp(interaction.classification),
-            source_channel_id=interaction.source_channel_id)
-    except Exception:
-        logger.warning(
-            "Failed to persist closed interaction for agent %s (scope=%s)",
-            agent_id, interaction.scope, exc_info=True,
+    # ISSUE-0123 R-1 (PR #846 review): bind the record's OWN frozen
+    # principal for the whole derivation, the tenant twin of the
+    # ``session_id`` guard below.
+    #
+    # Every storage tier resolves its tenant from the AMBIENT
+    # ``principal_scope`` (``resolve_active_principal`` in ``episodic`` /
+    # ``facts`` / ``relationship``), which the persona binds per EVENT.
+    # That was right while a scope held one record, because the record
+    # and the event were the same tenant's.  Since the re-key a room
+    # holds one record per ``(principal, speaker)``, and both the
+    # room-wide fans and ``idle_check`` close OTHER tenants' records
+    # inside whichever tenant's request scope happened to trigger them —
+    # so without this the closer's principal was stamped on every row the
+    # close derived.  With strict-equality recall and no carve-out
+    # (``_principal_filter``) that inverts the boundary the re-key exists
+    # to draw: the speaker's own conversation becomes invisible to the
+    # speaker and readable by whoever closed the room.  Idle is the worse
+    # half — it fires on each record's own timer from the per-event hot
+    # path, so a foreign-tenant write was ordinary room behaviour, not
+    # just a close-time event.
+    #
+    # Spans BOTH phases deliberately.  ``asyncio.create_task`` snapshots
+    # the context at creation, so opening the block around the task
+    # construction puts Phase 2's facts and relationship writes under the
+    # same tenant as the Phase-1 episode; binding Phase 1 alone would
+    # leave a row whose derived facts live in a different tenant — worse
+    # than the bug, since RFC 0049 Phase 1 facts are cross-room.
+    #
+    # Single-tenant deployments are unaffected: the frozen value was
+    # resolved through the same precedence the tiers use (task-local
+    # scope → ``PERSATRIX_PRINCIPAL_ID`` → ``local``), so it equals what
+    # the ambient read would have produced.  A replayed span never
+    # reaches here — the ISSUE-0130 skip returns above, so an
+    # unattributable record cannot bind a tenant it does not have.
+    #
+    # This closes the principal half of the ISSUE-0123 boundary.  The
+    # SPEAKER half is still dormant: migration 18's ``speaker_id`` column
+    # has no writer, because attribution also has to exclude or tag the
+    # RFC 0020 §G room-close turn (``ROOM_CLOSE_TURN_KEY``) before a
+    # record's turns can be projected onto it.
+    with principal_scope(interaction.principal_id):
+        try:
+            await episodic.store_episode(
+                summary=SUMMARY_PENDING_TEXT, context=ctx,
+                interaction_id=interaction.interaction_id,
+                # ISSUE-0102 PR 2: the queryable governance-id column (v15).
+                # Empty ``wire_interaction_id`` (DM / thread) → NULL.
+                governance_interaction_id=interaction.wire_interaction_id or None,
+                started_at=interaction.started_at,
+                closed_at=interaction.closed_at,
+                turn_count=interaction.turn_count, scope=interaction.scope,
+                # ISSUE-0081 PR 2 sibling-mislabel guard: tag with the session
+                # the interaction was *born* under, not the scope bound now —
+                # ``idle_check`` may be flushing a sibling conversation's stale
+                # interaction while another conversation's event holds the scope.
+                session_id=interaction.session_id,
+                # RFC 0037 §C (PR 3): the episode inherits the interaction's
+                # frozen-at-open capture — ``normalize_for_stamp`` is the §A
+                # rule-(a) owner (absent/unknown → ``internal``, never
+                # ``public``).  Dark until the PR 4 §D gate reads it.
+                protection_level=normalize_for_stamp(interaction.classification),
+                source_channel_id=interaction.source_channel_id)
+        except Exception:
+            logger.warning(
+                "Failed to persist closed interaction for agent %s "
+                "(scope=%s, principal=%s)",
+                agent_id, interaction.scope, interaction.principal_id,
+                exc_info=True,
+            )
+            return
+        # Phase 2: background summarise + finalise.  add_done_callback
+        # auto-cleans the tracking set so references don't accumulate.
+        task: asyncio.Task[None] = asyncio.create_task(
+            finalize_closed_interaction(
+                llm_client=llm_client, memory_ns=memory_ns,
+                episodic=episodic, agent_id=agent_id,
+                interaction=interaction,
+                on_finalized=on_finalized,
+                # Phase-2 facts + relationship writes must match the Phase-1
+                # row's session (sibling-mislabel guard) — the interaction's
+                # frozen session, not the bound scope.  Its principal twin
+                # rides the context this block binds.
+                session_id=interaction.session_id,
+            ),
         )
-        return
-    # Phase 2: background summarise + finalise.  add_done_callback auto-cleans
-    # the tracking set so references don't accumulate.
-    task: asyncio.Task[None] = asyncio.create_task(
-        finalize_closed_interaction(
-            llm_client=llm_client, memory_ns=memory_ns,
-            episodic=episodic, agent_id=agent_id,
-            interaction=interaction,
-            on_finalized=on_finalized,
-            # Phase-2 facts + relationship writes must match the Phase-1 row's
-            # session (sibling-mislabel guard) — use the interaction's frozen
-            # session, not the bound scope.
-            session_id=interaction.session_id,
-        ),
-    )
     pending_tasks.add(task)
     task.add_done_callback(pending_tasks.discard)
 
@@ -186,7 +307,9 @@ async def close_replayed_scopes(
 
     Called at the end of the catch-up pass
     (:func:`agents.channel_catchup.replay_for_persona_agents`).  Returns
-    the number of scopes closed.  Best-effort by contract — it runs on the
+    the number of records closed (since the v0.3.15 ``(principal,
+    speaker, scope)`` re-key one scope may hold several replay-opened
+    records — one per replayed sender).  Best-effort by contract — it runs on the
     boot path, so a per-scope failure is logged and the sweep continues
     rather than propagating; the caller may treat it as non-raising.  Note
     the scope is popped before the persist call, so even a failing persist
@@ -200,12 +323,17 @@ async def close_replayed_scopes(
     never be inside a flagged span — the split guarantees it opens its own.
     """
     closed = 0
-    for scope in list(tracker.open_scopes()):
-        interaction = tracker.get(scope)
-        if interaction is None or not interaction.replayed:
+    # Per RECORD since the ``(principal, speaker, scope)`` re-key
+    # (v0.3.15 residuals PR 3): replay can open several records in one
+    # scope — one per replayed sender — and every one of them carries
+    # the ``replayed`` flag, so the sweep walks records, not scopes.
+    for interaction in list(tracker.open_records()):
+        if not interaction.replayed:
             continue
         try:
-            popped = tracker.close(scope, reason=REASON_CATCHUP_COMPLETE)
+            popped = tracker.close_record(
+                interaction, reason=REASON_CATCHUP_COMPLETE,
+            )
             if popped is None:
                 continue
             closed += 1
@@ -217,6 +345,6 @@ async def close_replayed_scopes(
         except Exception:
             logger.warning(
                 "Catch-up close failed for replayed scope %s",
-                scope, exc_info=True,
+                interaction.scope, exc_info=True,
             )
     return closed
