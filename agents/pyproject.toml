@@ -192,8 +192,20 @@ warn_unused_configs = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 # testpaths is not set here because test paths are specified explicitly
-# in the Makefile targets. Python tests live at tests/unit/python/ (repo root),
-# not under agents/tests/.
+# in the Makefile targets.
+#
+# Python unit tests live in TWO trees, both CI-gated:
+#   * tests/unit/python/ (repo root) — the bulk of the suite, run by
+#     `make test-python`.
+#   * agents/tests/      — run by `make test-agents`, from the repo root with
+#     this config (`-c agents/pyproject.toml`).
+# This comment previously asserted that tests live at tests/unit/python/ "not
+# under agents/tests/". That was scaffold boilerplate: the note and
+# agents/tests/ were added in the same commit (fb76bb80, "scaffold initial
+# project structure"), so it never described a migration anyone performed —
+# agents/tests/ grew to 422 tests underneath it. Because the note read as a
+# deliberate convention while no job actually ran the tree, drift there stayed
+# invisible. Add new tests to either tree; both run in CI.
 markers = [
     "requires_compose: integration tests that require the docker-compose observability stack to be running (otel-collector, jaeger, prometheus, loki). Opt-in: run with `pytest -m requires_compose`.",
     "requires_orchestrator: integration tests that spawn the built `bin/persatrix-server` and `cli/target/release/persatrix` binaries. Opt-in: run with `pytest -m requires_orchestrator` after `make build-orchestrator build-cli`.",

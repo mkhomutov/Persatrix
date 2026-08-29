@@ -166,7 +166,7 @@ generate-sanitizer-patterns-check: ## Fail if agents/security_patterns.py or age
 	@echo "✓ agents/security_patterns.py + agents/security_enums.py are in sync"
 
 # ─── Test ───────────────────────────────────────────────
-test: test-go test-python test-integration ## Run all tests
+test: test-go test-python test-agents test-integration ## Run all tests
 
 test-go: ## Run Go unit tests
 	go test ./internal/... -v -race -cover
@@ -177,8 +177,16 @@ test-python: ## Run Python agent tests
 test-integration: ## Run integration tests
 	PYTHONPATH="agents/generated" $(PYTHON) -m pytest tests/integration/ -v --tb=short -c agents/pyproject.toml
 
-test-persona: ## Run persona consistency tests (AGENT=ember-owl)
-	cd agents && $(PYTHON) -m pytest tests/ -v -k "persona" --agent $(AGENT)
+# Replaces the former `test-persona`, which was broken and unrun: it passed
+# `--agent $(AGENT)`, an option no conftest ever registered, so pytest exited
+# on "unrecognized arguments: --agent" before collecting a single test. Its
+# `-k persona` filter also never selected persona-consistency tests — it
+# matched only the tick short-circuit cases. The whole tree is the real
+# unit, so run it as one. Invoked from the repo root (not `cd agents`) with
+# the agents config, mirroring test-integration: rootdir must be the repo
+# root for the schema-pinning tests to resolve their fixtures.
+test-agents: ## Run the agents/ unit test tree
+	$(PYTHON) -m pytest agents/tests/ -v --tb=short -c agents/pyproject.toml
 
 # ─── Eval (RFC 0044 golden-trace harness) ───────────────
 # Phase 1 (v0.3.11) ships the runner; the seed recipes + `.golden.yaml`
