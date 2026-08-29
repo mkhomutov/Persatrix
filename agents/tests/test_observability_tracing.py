@@ -105,13 +105,39 @@ class TestInitTracing:
     def test_resource_instance_id_omitted_when_no_env(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """service.instance.id is absent when PERSATRIX_AGENT_ID is unset."""
-        monkeypatch.delenv("PERSATRIX_AGENT_ID", raising=False)
-        exporter = _exporter()
-        init_tracing(exporter=exporter)
+        """init_tracing stamps no service.instance.id of its own when
+        PERSATRIX_AGENT_ID is unset.
 
+        Absence is NOT the observable, and asserting it pins the wrong
+        thing.  ``Resource.create`` merges the SDK's own default resource,
+        and newer opentelemetry-sdk releases auto-populate
+        ``service.instance.id`` with a generated UUID — so a bare
+        ``not in`` assertion tests the SDK's defaults rather than our
+        contribution, and fails on any environment that resolves a newer
+        SDK than the author's.  The dependency deliberately floats
+        (``opentelemetry-sdk>=1.28.0,<2``), so that is every environment
+        eventually: this passed on 1.42.1 locally and failed on 1.44.0 in
+        CI, with a UUID nothing in this repo wrote.
+
+        Pin the contract that actually belongs to us — the env value is
+        stamped when set, and nothing of ours is stamped when it is not —
+        by driving both arms of the same branch with a sentinel.
+        """
+        monkeypatch.setenv("PERSATRIX_AGENT_ID", "sentinel-agent")
+        init_tracing(exporter=_exporter())
         assert _tracing_module._provider is not None
-        assert "service.instance.id" not in _tracing_module._provider.resource.attributes
+        assert (
+            _tracing_module._provider.resource.attributes.get("service.instance.id")
+            == "sentinel-agent"
+        )
+
+        monkeypatch.delenv("PERSATRIX_AGENT_ID", raising=False)
+        init_tracing(exporter=_exporter())
+        assert _tracing_module._provider is not None
+        assert (
+            _tracing_module._provider.resource.attributes.get("service.instance.id")
+            != "sentinel-agent"
+        )
 
     def test_missing_env_vars_use_defaults(
         self, monkeypatch: pytest.MonkeyPatch
