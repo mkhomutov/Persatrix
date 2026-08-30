@@ -306,3 +306,76 @@ alongside [ISSUE-0123](ISSUE-0123-per-speaker-interaction-scope.md) (R-1).
 > ingest, or gating the narrowed skip on "this span was not already derived";
 > the OQ #8(b) `?since=` watermark remains the deeper fix and stays out of
 > scope). The unit bar is that a span replayed twice derives once.
+>
+> 2026-08-30 — **B1 open for review: the column exists and is written;
+> nothing reads it.** Channel store `v11 → v12` adds `principal_id TEXT NOT
+> NULL DEFAULT 'local'` to `messages`
+> ([`sqlite_principal_migration.go`](../../internal/channels/sqlite_principal_migration.go)),
+> stamped inside `sqliteStore.PublishMessage` from `PrincipalFromContext(ctx)`
+> and surfaced on `channelMessageResponse`. Four things worth carrying into
+> B2:
+>
+> * **The stamp OVERWRITES rather than defaults.** `PublishMessage` assigns
+>   from the context unconditionally instead of filling an empty field, so a
+>   caller-set `ChannelMessage.PrincipalID` is discarded. This is the
+>   diagnosis above turned into a boundary: the value is the orchestrator's
+>   own verification, and the REST body has no field to carry one (the
+>   request struct has no counterpart and `decodeJSON` disallows unknown
+>   keys, so a claim is a 400). That closes the DIRECT door: no caller can
+>   name a principal.
+> * **The INDIRECT door is open, and B2 must budget for it.** The R-2
+>   re-stamp keys on `msg.SenderID`, and the publish ingress is
+>   `policyPublic` — it takes no credential even under `auth.mode: enabled`.
+>   As [`principal_restamp.go`](../../internal/channels/principal_restamp.go)
+>   already states, a table hit proves the orchestrator DISPATCHED to a
+>   registered agent, not that the caller IS that agent. Both the room list
+>   and its membership are public GETs, so anyone who can reach the ingress
+>   can publish with `sender_id` set to a member agent, inside the TTL of a
+>   real authenticated turn, and the re-stamp lands attacker-chosen content
+>   on a row stamped with the causing human. **B1 is what makes that
+>   durable.** Before v12 the mis-attribution expired with the cascade's
+>   dispatch metadata; it is now a permanent `messages.principal_id` value,
+>   and B2 re-reads it on every replay. So the seed is exactly as
+>   trustworthy as sender authentication at the publish seam — which is
+>   RFC 0009's to supply. Until it does, the mitigation is the network
+>   restriction `cmd/orchestrator/auth.go` already WARNs about, and B2
+>   should treat a seeded principal as attribution evidence of the same
+>   grade as the publish that produced it, not as a verified tenant.
+> * **A relayed row already carries the causal tenant.** The R-2 re-stamp
+>   ([ISSUE-0124](ISSUE-0124-orchestrator-hop-drops-tenant-on-agent-cascade.md),
+>   merged) runs at the head of `publishCommit`, *ahead of* the store commit,
+>   so a persona's reply persists the principal of the person who caused it
+>   rather than `local`. The wire-side R-2 tests cannot see that ordering —
+>   swapping the two leaves them all green — so it is pinned separately by
+>   `TestPublishMessage_PersistsTheRestampedCausalPrincipal`. The sequencing
+>   preference the 2026-08-23 correction described is now a fact on the rows
+>   B2 will read.
+> * **The backfill asserts nothing.** Unlike the persona store's v11 — whose
+>   `local` backfill hid rows that *did* have an owner — a pre-v12 `messages`
+>   row never held a tenant, so `local` is the truth for it and not a
+>   partition. There is no activation-day hazard here and no operator action.
+> * **The READ side is open, and that is an accepted exposure rather than an
+>   oversight.** `GET /api/v1/channels/{id}/messages` is `policyPublic` and
+>   has to stay that way — catch-up replay is the consumer this column exists
+>   for and the persona fleet holds no accounts — so every value is readable
+>   with no credential. Combined with the R-2 re-stamp above, that means an
+>   unauthenticated reader can attribute each *agent* utterance to the named
+>   human who provoked it; before v12 that link lived only in orchestrator
+>   memory. Message content was already public on the same route, so the
+>   marginal disclosure is the causal link, not the words. Withholding the
+>   field from unauthenticated callers was considered and rejected — it
+>   blinds B2. The operative mitigation stays the one
+>   `cmd/orchestrator/auth.go` already WARNs about (network-restrict the
+>   ingress to the agent fleet); RFC 0009 agent tokens are what would let
+>   these routes stop being public at all. **B2 must not widen this**: seeding
+>   `principal_scope` from the column is a write-side attribution, and any
+>   future recall predicate that keys on `principal_id` would turn a public
+>   read into a tenant-selectable one.
+>
+> Still open, and B2's: `_build_replay_event` seeds nothing from the field,
+> the shape-(a) skip is unchanged (every replayed span still derives
+> nothing), RFC 0037's replayed-rotation stamping is still withdrawn, and the
+> idempotence half above is unwritten. Nothing filters on the column — recall
+> stays membership-and-epoch scoped, deliberately: `messages` is the room's
+> shared transcript, and who was in the room is a different question from
+> which tenant a derived write belongs to.

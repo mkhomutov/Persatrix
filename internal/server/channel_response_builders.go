@@ -51,14 +51,15 @@ func channelToResponse(ch channels.Channel, members []channels.Member) channelRe
 
 func messageToResponse(m channels.ChannelMessage) channelMessageResponse {
 	out := channelMessageResponse{
-		ID:        m.ID,
-		ChannelID: m.ChannelID,
-		SenderID:  m.SenderID,
-		Content:   m.Content,
-		Timestamp: m.Timestamp,
-		ThreadID:  m.ThreadID,
-		Mentions:  m.Mentions,
-		Metadata:  m.Metadata,
+		ID:          m.ID,
+		ChannelID:   m.ChannelID,
+		SenderID:    m.SenderID,
+		Content:     m.Content,
+		Timestamp:   m.Timestamp,
+		ThreadID:    m.ThreadID,
+		Mentions:    m.Mentions,
+		Metadata:    m.Metadata,
+		PrincipalID: m.PrincipalID,
 	}
 	if out.Mentions == nil {
 		out.Mentions = []string{}

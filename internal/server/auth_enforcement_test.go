@@ -271,6 +271,7 @@ func TestUIContextReflectsVerifiedIdentity(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &ctx))
 	assert.False(t, ctx.Authenticated)
 	assert.Equal(t, "local", ctx.Principal)
+	assert.Equal(t, "local", ctx.Tenant, "anonymous boot is the degenerate single-tenant case")
 
 	// A cookie login upgrades the reported principal to the verified
 	// participant — the App's `authenticated` gate then hides the
@@ -286,4 +287,11 @@ func TestUIContextReflectsVerifiedIdentity(t *testing.T) {
 	require.NoError(t, json.Unmarshal(out.Body.Bytes(), &ctx))
 	assert.True(t, ctx.Authenticated)
 	assert.Equal(t, "alice-participant", ctx.Principal)
+	// ISSUE-0130 shape (b): principal and tenant are ONE axis. The channel
+	// store stamps this same participant as `messages.principal_id` for
+	// Alice's publishes and the persona tiers partition on it, so a `local`
+	// tenant here would report her into the shared bucket her own writes do
+	// not live in.
+	assert.Equal(t, "alice-participant", ctx.Tenant,
+		"a resolved account is its own tenant, not the shared `local` one")
 }

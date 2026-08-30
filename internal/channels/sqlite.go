@@ -39,6 +39,52 @@ const DefaultSessionID = "legacy"
 // the Python leaf.
 const DefaultEpochID = "live"
 
+// DefaultPrincipalID is the shared single-tenant principal a `messages` row
+// carries when the publish resolved no tenant at all (ISSUE-0130 shape (b) —
+// channel-store schema v12). It is the *absence* of a tenant, not a tenant.
+//
+// WHICH PUBLISHES ACTUALLY RESOLVE IT, stated precisely because the obvious
+// reading is now wrong. Agents hold no accounts (RFC 0039 §Non-Goals), so an
+// agent publish presents no credential — but presenting none is not the same
+// as resolving `local`. Since ISSUE-0124 R-2 shipped, `publishCommit` may
+// re-stamp an unauthenticated agent publish with the principal of the person
+// who causally provoked it (principal_restamp.go), and [sqliteStore.PublishMessage]
+// reads that re-stamped context. So a persona's relayed reply inside a live
+// cascade persists the CAUSING HUMAN, not this constant — which is the whole
+// point of TestPublishMessage_PersistsTheRestampedCausalPrincipal. What still
+// resolves `local` is the publish with no tenant anywhere in reach: every
+// caller under `auth.mode: disabled`, and an unauthenticated publish the
+// attribution table cannot explain — no entry, ambiguous, or expired.
+//
+// That second case is what an autonomous room mostly produces, and it is
+// worth naming precisely because the orchestrator's own forced turns are NOT
+// publishes: the RFC 0052 convener cadence, a chair escalation and a
+// synthesis directive each build a synthetic [ChannelMessage] for
+// `dispatchTo` and never reach this store, so none of them writes a row at
+// all. What they do is dispatch from a context that descends from no request,
+// which records no principal in the attribution table — so it is the AGENT
+// REPLY answering such a turn that finds nothing to be attributed to, and
+// that reply's row is the one carrying this constant.
+//
+// Cross-language contract: mirrors `agents.principal_id.DEFAULT_PRINCIPAL_ID`
+// — the `'local'` literal the persona-memory migration v11 backfills onto its
+// tiers, and the value a persona resolves when no `persatrix-principal`
+// header arrives. The two stores are disjoint (nothing in `agents/` queries
+// `messages`); they meet at the wire, where B2 seeds the replayed event from
+// the column this constant defaults. A rename here is a conscious break that
+// must move in lock-step with the Python leaf.
+//
+// That contract is PINNED, not merely asserted:
+// tests/unit/python/test_cross_language_principal_default_drift.py parses this
+// declaration out of the Go source and compares it to the Python constant and
+// to the frozen `'local'` literal in migrateV11ToV12's `DEFAULT` — the same
+// source-parsing shape the respond-policy and cascade-depth drift pins use.
+// The migration SQL still spells the literal out rather than interpolating
+// this constant, because migration SQL is frozen history: a future rename must
+// not silently rewrite what v12 backfilled. The drift pin is what makes that
+// divergence a red build instead of a silent one.
+const DefaultPrincipalID = "local"
+
 // SessionMetrics is the subset of orchestrator OTEL handles the channel
 // store needs for the RFC 0031 `sessions.writes` counter. Defined locally
 // so the channels package does not take a dependency on the orchestrator-

@@ -66,7 +66,14 @@ type principalHarness struct {
 	dispatcher *recordingPrincipalDispatcher
 }
 
-func newPrincipalHarness(t *testing.T, cfg *AuthConfig) principalHarness {
+// The optional `wrapREST` decorators wrap the store the REST layer sees while
+// the router keeps the real one — both still address the same database. Only
+// the degraded-echo test needs it (channel_principal_column_test.go), to make
+// the post-publish `GetMessage` fail without disturbing the publish itself.
+func newPrincipalHarness(
+	t *testing.T, cfg *AuthConfig,
+	wrapREST ...func(channels.ChannelStore) channels.ChannelStore,
+) principalHarness {
 	t.Helper()
 	logger := zap.NewNop()
 	store, err := channels.NewSQLiteStore(filepath.Join(t.TempDir(), "principal-channels.db"),
@@ -76,9 +83,13 @@ func newPrincipalHarness(t *testing.T, cfg *AuthConfig) principalHarness {
 
 	dispatcher := &recordingPrincipalDispatcher{}
 	router := channels.NewChannelRouter(store, dispatcher, logger, nil)
+	var restStore channels.ChannelStore = store
+	for _, wrap := range wrapREST {
+		restStore = wrap(restStore)
+	}
 	// WithChannels is last-wins on the two Server fields, so passing it as an
 	// extra option replaces the harness's Noop-backed pair wholesale.
-	h := newEnforcedServer(t, cfg, WithChannels(store, router))
+	h := newEnforcedServer(t, cfg, WithChannels(restStore, router))
 	return principalHarness{handler: h.srv.Handler(), router: router, dispatcher: dispatcher}
 }
 
