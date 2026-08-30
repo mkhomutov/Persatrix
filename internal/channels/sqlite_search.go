@@ -62,8 +62,16 @@ var fts5SanitizeRecall = regexp.MustCompile(`[^\p{L}\p{N}\s]+`)
 
 // recallMessageColumns is the `messages` projection, m-aliased and in the column
 // order [scanMessage] expects, so recall reuses [scanMessageRows] verbatim.
+// The unaliased twin is [messageColumns]; the two are pinned identical modulo
+// the `m.` prefix.
+//
+// Selecting `m.principal_id` (v12) does NOT make recall tenant-scoped: the
+// column rides the scan because the projection feeds one shared scanner, while
+// the access rule stays the §F membership interval AND the epoch. Channel
+// history is the room's shared transcript — who was in the room decides who
+// may read it, not which account happened to trigger the message.
 const recallMessageColumns = `m.id, m.channel_id, m.sender_id, m.content, m.timestamp, ` +
-	`m.thread_id, m.mentions, m.metadata, m.session_id`
+	`m.thread_id, m.mentions, m.metadata, m.session_id, m.principal_id`
 
 // membershipEpochScope returns the RFC 0035 §F membership predicate as a
 // correlated `EXISTS`, AND the non-optional `epoch_id` equality (§OQ-6), as one

@@ -5,9 +5,11 @@ package channels
 // baseline, and the applySchema runner) to stay under the repo's
 // 500-line file-size cap. Each future PR adds one migrateV(N-1)ToVN
 // function (here, or — now this file is near the same cap — in a dedicated
-// sibling file: v8→v9 lives in sqlite_membership_intervals_migration.go and
-// v9→v10 in sqlite_messages_fts_migration.go), a `case N:` arm in
-// applyMigration, and bumps channelStoreSchemaVersion.
+// sibling file: v8→v9 lives in sqlite_membership_intervals_migration.go,
+// v9→v10 in sqlite_messages_fts_migration.go, v10→v11 in
+// sqlite_classification_migration.go and v11→v12 in
+// sqlite_principal_migration.go), a `case N:` arm in applyMigration, and
+// bumps channelStoreSchemaVersion.
 
 import (
 	"database/sql"
@@ -54,6 +56,8 @@ func applyMigration(db *sql.DB, target int) error {
 		return migrateV9ToV10(db)
 	case 11:
 		return migrateV10ToV11(db)
+	case 12:
+		return migrateV11ToV12(db)
 	default:
 		return fmt.Errorf("no migration registered for v%d", target)
 	}

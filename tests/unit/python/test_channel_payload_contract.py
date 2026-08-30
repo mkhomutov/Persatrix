@@ -44,6 +44,7 @@ from agents.channel_payload_contract import (
     validate_publish_payload,
 )
 from agents.channel_publisher import HTTPChannelPublisher
+from agents.principal_id import DEFAULT_PRINCIPAL_ID
 
 
 def _validate(instance: object, definition: str) -> None:
@@ -82,6 +83,18 @@ _FULL_PUBLISH = {
 
 _MINIMAL_PUBLISH = {"sender_id": "agent-a", "content": "hello"}
 
+# ISSUE-0130 shape (b): `principal_id` is REQUIRED on every message and the
+# two samples carry its two real values — an authenticated person's verified
+# participant, and the shared default an unattributable publish resolves. Both
+# spellings appear because the replay consumer (PR B2) branches on exactly
+# that distinction; a sample set that only ever showed one would let the
+# schema call the default optional without anything noticing.
+#
+# The default rides in as :data:`DEFAULT_PRINCIPAL_ID` rather than a literal
+# `"local"`: this sample is what the read side is checked against, so hardcoding
+# it would leave the sample agreeing with a stale spelling after a rename. The
+# equality with the Go side is pinned separately, by
+# tests/unit/python/test_cross_language_principal_default_drift.py.
 _HISTORY_ENVELOPE = {
     "messages": [
         {
@@ -91,6 +104,7 @@ _HISTORY_ENVELOPE = {
             "content": "hello",
             "timestamp": "2026-08-15T10:00:00Z",
             "mentions": [],
+            "principal_id": DEFAULT_PRINCIPAL_ID,
         },
         {
             "id": "m-2",
@@ -101,6 +115,7 @@ _HISTORY_ENVELOPE = {
             "thread_id": "m-1",
             "mentions": ["agent-a"],
             "metadata": {"cascade_depth": 1},
+            "principal_id": "alice-person",
         },
     ],
     "classification": "internal",

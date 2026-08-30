@@ -839,13 +839,34 @@ ships **on-startup catch-up fetch** (RFC 0011 [OQ #8](../rfcs/0011-channels-brid
   agent runs in **replay mode** for those events: outbound
   `SEND_CHANNEL_MESSAGE` actions are suppressed so the agent does not blast
   everyone with stale responses on restart.
-- **Replayed spans derive no memory** (ISSUE-0130, v0.3.14). A replayed row
-  carries no principal — the `messages` table has no principal column — so
-  summarising it would write one authenticated person's content into the
-  shared `local` tenant. The span is closed at pass end (or split when a
-  live turn arrives) with `catchup_complete` and dropped; the live
-  conversation that resumes after the restart is unaffected and derives
-  normally. `agent.interactions.closed.by_catchup_complete` counts the drops.
+- **Replayed spans derive no memory** (ISSUE-0130, v0.3.14). Nothing binds a
+  tenant to a replayed turn, so summarising it would write one authenticated
+  person's content into the shared `local` tenant. The span is closed at pass
+  end (or split when a live turn arrives) with `catchup_complete` and dropped;
+  the live conversation that resumes after the restart is unaffected and
+  derives normally. `agent.interactions.closed.by_catchup_complete` counts the
+  drops.
+- **Since v0.3.15 the row itself carries the tenant.** Channel-store schema
+  **v12** adds `principal_id` to `messages`, stamped server-side at publish
+  from the authenticated request (`local` when no account resolved), and
+  surfaced on every message the REST API returns — so the value the replay
+  needs is already on the history payload the agent fetches. What is still
+  missing is the *binding*: the replay event seeds no principal from it,
+  nothing filters history or recall by it, and the skip above still drops
+  every replayed span. Doing that binding — so a restart re-derives under the
+  tenant that actually spoke instead of dropping the span — is the remaining
+  half of ISSUE-0130.
+- **`principal_id` is readable without a credential.** The history GET and
+  the publish response are public by design (the agent fleet holds no
+  accounts), and the field is not withheld from anonymous callers — doing so
+  would blind the one consumer it exists for. (The thread GET carries it too,
+  but that route is authenticated.) Because a persona's relayed reply persists the principal of the
+  person who *caused* it, that means anyone who can reach the orchestrator's
+  API can attribute each agent utterance to a named person. Message content
+  was already public on the same route; the new part is the causal link.
+  Restrict the ingress to the agent fleet at the network layer — the same
+  mitigation the startup WARN about the ungated publish surface already
+  names — until RFC 0009 agent tokens let these routes stop being public.
 - The `channel.messages.replayed{channel_id=…}` counter pins the contract.
 
 Watermark-based catch-up (`?since=<message_id>` per-channel, per-subscriber)

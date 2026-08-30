@@ -114,7 +114,25 @@ import (
 //	    the additive-column precedent (v3/v6): the lattice helpers
 //	    (classification.go) own the vocabulary, and the §A rule-(c) read
 //	    posture (unknown label ⇒ withheld) is the corruption net.
-const channelStoreSchemaVersion = 11
+//	v12 — ISSUE-0130 shape (b) (v0.3.15 PR B1, this PR): adds
+//	    `principal_id TEXT NOT NULL DEFAULT 'local'` to `messages` — the
+//	    tenant that caused the row, stamped SERVER-SIDE at publish from the
+//	    request context ([PrincipalFromContext]) and never from the request
+//	    body. Closes the structural half of ISSUE-0130: the emitting tenant
+//	    used to exist only as `persatrix-principal` metadata on the live
+//	    gRPC dispatch and was discarded at publish, so the catch-up replay
+//	    had nothing to seed and re-derived every restart's memory into the
+//	    shared `local` bucket. The `'local'` backfill is "no verified
+//	    tenant" — for a pre-v12 row that is the truth, not a downgrade
+//	    (contrast the persona store's v11, which had owners to lose).
+//	    Unlike v11 this column has a WRITER from day one, but still no
+//	    reader: nothing filters on it and verbatim recall stays
+//	    membership-and-epoch scoped, so a v0.3.14 database behaves
+//	    byte-identically apart from the new column's value. The consumer is
+//	    PR B2, which seeds the replayed event from it. A pure addition: no
+//	    existing table, row, or index is touched, and `messages_fts` (v10)
+//	    indexes `content` only, so no rebuild is required.
+const channelStoreSchemaVersion = 12
 
 // schemaV1SQL is the original schema shipped in PR #231. Applied verbatim
 // when opening a fresh database; the v1→v2 migration below uses
