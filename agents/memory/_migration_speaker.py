@@ -11,8 +11,8 @@ the :class:`~agents.memory.interaction_tracker.InteractionTracker`
 ``(principal, speaker, scope)``, so every close-derived record is
 single-speaker by construction — with the ONE stated exception of the
 room-fan's closing turn (RFC 0020 §G amendment: its payload ``sender``
-≠ the record's ``speaker_id``, and residuals PR 4 MUST exclude or tag
-it before projecting this column); this migration adds the column that
+≠ the record's ``speaker_id``, excluded from the derivation input —
+see below); this migration adds the column that
 key half is PROJECTED onto at close.  Only the two tiers a group close
 writes gain it (``store_episode`` → ``store_extracted_facts``) — the
 ``interactions`` TABLE is the relationship-tier log, written only by
@@ -21,12 +21,18 @@ scope, and the in-memory :class:`Interaction` dataclass needs no
 migration at all (the two nearby wrong targets the residuals plan
 names explicitly).
 
-**Dormant-rail note (the v0.3.14 PR 1 / PR 2 split).**  This migration
-lands with NO writer: residuals PR 4 — the speaker projection — is the
-consumer that stamps ``interaction.speaker_id`` onto the rows, so the
-column ships ahead of the code reading it (the v0.3.15 plan's
-"no migration lands after its consumer" acceptance line).  Until then
-every row's ``speaker_id`` is NULL.
+**The writer.**  The column shipped one commit ahead of its consumer
+(the v0.3.15 plan's "no migration lands after its consumer" acceptance
+line); the projection now writes it.  ``close_path`` stamps
+``interaction.speaker_id`` onto the episode row and ``fact_extractor``
+onto every tuple that close extracts, both ``or None`` so a speakerless
+scope records NULL rather than an empty attribution.  The §G exception
+above is discharged as EXCLUDE, at the chokepoint every close-pipeline
+consumer reads the record's turns through
+(``close_entries.own_turn_items``): a room-close turn whose sender is
+not the record's speaker reaches neither the combined summarise+extract
+call nor the persisted turn context, so no fact can be derived from
+another speaker's words and then stamped with this record's.
 
 **Why nullable, no backfill.**  A pre-v18 row's speaker is genuinely
 unknowable — the aggregate it was derived from spanned every speaker in

@@ -329,10 +329,11 @@ MIGRATIONS: list[tuple[int, str, str]] = [
     # ``speaker_id`` column to the two close-derived tiers —
     # ``episodes`` and ``facts`` — the projection surface for the
     # speaker half of the ``(principal, speaker, scope)`` tracker key.
-    # Lands DORMANT (the residuals PR 4 projection is the writer), NULL for every
-    # pre-v18 row: a pre-split aggregate's speaker is unknowable without
-    # the model-elected attribution the Phase 0b scope lock forbids, so
-    # unlike v11's ``DEFAULT 'local'`` there is no correct backfill.
+    # NULL for every pre-v18 row: a pre-split aggregate's speaker is
+    # unknowable without the model-elected attribution the Phase 0b scope
+    # lock forbids, so unlike v11's ``DEFAULT 'local'`` there is no
+    # correct backfill.  The writer is the close path (``close_path`` for
+    # the episode row, ``fact_extractor`` for the tuples).
     # Same callable-handler rationale as v7/v13 — ``ALTER TABLE ... ADD
     # COLUMN`` has no ``IF NOT EXISTS`` form in any SQLite version, so
     # re-running it needs the handler's guard.  Lives in
@@ -340,6 +341,11 @@ MIGRATIONS: list[tuple[int, str, str]] = [
     # docs/issues/ISSUE-0131-derived-memory-has-no-speaker-attribution.md.
     (
         18,
+        # Frozen as SHIPPED in #846 (PR #849 review): ``schema_version``
+        # records this string at apply time only and is never
+        # reconciled, so editing it would fork fresh stores' audit rows
+        # from already-migrated ones at the same version.  The current
+        # state lives in the comment above.
         "ISSUE-0131: speaker_id on episodes + facts (dormant until the "
         "close-path binding writes it)",
         "",  # handled by _apply_migration_18()

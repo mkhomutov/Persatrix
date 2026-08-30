@@ -31,9 +31,9 @@ from _otel_test_helpers import counter_total
 
 from agents.llm_client import LLMClient, LLMResponse, StopReason, Usage
 from agents.memory.interactions import SUMMARY_UNAVAILABLE_TEXT, Interaction, Turn
+from agents.persona_runtime.close_entries import interaction_to_entries
 from agents.persona_runtime.finalize_close import JANITOR_INTERVAL_SEC, maybe_run_janitor
 from agents.persona_runtime.summarize_close import (
-    _interaction_to_entries,
     summarize_closed_interaction,
 )
 
@@ -301,7 +301,7 @@ class TestEmptySummaryFieldFallsBack:
 
 
 class TestInteractionToEntriesCarriesMessageText:
-    """ISSUE-0054 root cause — :func:`_interaction_to_entries` must
+    """ISSUE-0054 root cause — :func:`interaction_to_entries` must
     project the inbound message body (``payload["text"]``) into the
     entry content fed to the combined summarise + extract LLM call.
 
@@ -337,7 +337,7 @@ class TestInteractionToEntriesCarriesMessageText:
                 }),
             ],
         )
-        joined = " ".join(e.content for e in _interaction_to_entries(interaction))
+        joined = " ".join(e.content for e in interaction_to_entries(interaction))
         assert "daughter Mira" in joined
         assert "dislikes loud phone calls" in joined
 
@@ -360,7 +360,7 @@ class TestInteractionToEntriesCarriesMessageText:
                 }),
             ],
         )
-        entries = _interaction_to_entries(interaction)
+        entries = interaction_to_entries(interaction)
         assert len(entries) == 1
         assert entries[0].content.strip()
 

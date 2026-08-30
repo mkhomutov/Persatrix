@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..generated import wallet_pb2 as walletpb
 from ..memory.interactions import SUMMARY_UNAVAILABLE_TEXT
-from ..memory.store import CompressedView, MemoryEntry, MemoryStore
+from ..memory.store import CompressedView, MemoryStore
 from ..model_aliases import resolve as resolve_model
 from ..observability.metrics import current_agent_id, try_get_instruments
 from ..optimization import summarization_model
@@ -42,6 +42,10 @@ from .classification import (
     levels_below_stamp,
     normalize_for_stamp,
     rank_for_stamp,
+)
+from .close_entries import (
+    interaction_to_entries,
+    own_turn_items,
 )
 from .fact_envelope import extract_projections
 from .fact_extractor import (
@@ -156,7 +160,17 @@ async def summarize_closed_interaction(
         # single turn keeps the cheap deterministic placeholder — its
         # extractor input would carry no message body, so an LLM call
         # could only ever (correctly) extract nothing.
-        if single and not has_message_text:
+        #
+        # ISSUE-0131 — and the turn has to be this record's OWN.  This
+        # fast path reads ``turns[0]`` directly, so it asks the §G
+        # chokepoint (``own_turn_items`` — non-empty means the lone turn
+        # is native) before minting a placeholder: without that, a lone
+        # foreign room-close turn would mint one from the CLOSER's turn
+        # that ``close_path`` then stamps with this record's
+        # ``speaker_id`` — the misattribution the projection exists to
+        # prevent.  Falling through instead lands it on the all-excluded
+        # branch below, which is the honest answer.
+        if single and not has_message_text and own_turn_items(interaction):
             # Single-turn placeholder; no facts extracted (the
             # deterministic per-turn shape is not LLM-routed).
             return (
@@ -168,12 +182,27 @@ async def summarize_closed_interaction(
                 {},
             )
 
-    entries = _interaction_to_entries(interaction)
+    entries = interaction_to_entries(interaction)
+    if not entries:
+        # Every turn was a FOREIGN room-close turn: nothing of this
+        # record's own speaker to derive, so take the placeholder rather
+        # than pay an LLM round trip to summarise nothing — the trade the
+        # content-less single-turn branch above already makes.
+        # Unreachable today (the fan appends only to records already
+        # open, and a record opens by taking a turn of its own): this
+        # bounds the exclusion's blast radius, it does not serve traffic.
+        return (
+            f"Multi-turn interaction (scope={interaction.scope}, "
+            f"turns={interaction.turn_count}, "
+            f"reason={interaction.close_reason}): no content attributable "
+            f"to this record's speaker",
+            False, None, {},
+        )
     view: CompressedView = MemoryStore.compress(
         entries,
         target_tokens=SUMMARIZATION_TARGET_TOKENS,
     )
-    prompt = _build_summarization_prompt(interaction, view)
+    prompt = _build_summarization_prompt(interaction, view, shown_turns=len(entries))
     # Summarisation picks its model on a surface separate from
     # create_provider; resolve it here too (RFC 0033 §D) so the alias name
     # never reaches the vendor API. The config field references the
@@ -349,46 +378,18 @@ async def summarize_closed_interaction(
     return (summary, False, facts_raw, projections)
 
 
-def _interaction_to_entries(interaction: Interaction) -> list[MemoryEntry]:
-    """Project per-turn payloads into ``MemoryEntry`` shape for compress().
-
-    Each turn becomes one entry; importance equals the turn ordinal
-    normalised into ``(0, 1]`` so later turns weigh slightly more
-    than openers when the compressor has to drop entries.
-    """
-    total = max(interaction.turn_count, 1)
-    entries: list[MemoryEntry] = []
-    for idx, turn in enumerate(interaction.turns, start=1):
-        payload = turn.payload or {}
-        content_parts: list[str] = []
-        # ISSUE-0054 — ``text`` (inbound message body) is the load-bearing
-        # input for RFC 0026 extraction; ``summary`` is the action envelope.
-        for key in ("text", "summary"):
-            value = str(payload.get(key, "")).strip()
-            if value:
-                content_parts.append(value)
-        sender = str(payload.get("sender", "")).strip()
-        if sender:
-            content_parts.append(f"sender={sender}")
-        if not content_parts:
-            content_parts.append(
-                f"event_type={payload.get('event_type', 'unknown')}",
-            )
-        entries.append(MemoryEntry(
-            id=f"turn-{idx}",
-            content=" | ".join(content_parts),
-            importance=idx / total,
-            tags=(),
-            created_at=turn.at,
-            score=0.0,
-        ))
-    return entries
-
-
 def _build_summarization_prompt(
-    interaction: Interaction, view: CompressedView,
+    interaction: Interaction, view: CompressedView, *, shown_turns: int,
 ) -> str:
     """Render the combined summarise + extract prompt body.
+
+    ``shown_turns`` (PR #849 review) is the post-§G-exclusion entry
+    count — what the ``Compressed turns`` block actually holds.
+    ``interaction.turn_count`` would over-report on a fanned close (the
+    record's real count includes the excluded room-close turn) and
+    invite the model to narrate a turn it is never shown; the header is
+    byte-identical whenever nothing was excluded, which is what keeps
+    the RFC 0044 goldens stable.
 
     RFC 0026 PR 2 appends the combined-prompt suffix from
     :func:`agents.persona_runtime.fact_extractor.build_combined_prompt_suffix`
@@ -405,7 +406,7 @@ def _build_summarization_prompt(
     prompt = (
         load_snippet("interaction-summarizer") + "\n\n"
         f"Scope: {interaction.scope}\n"
-        f"Turns: {interaction.turn_count}\n"
+        f"Turns: {shown_turns}\n"
         f"Close reason: {interaction.close_reason}\n"
         f"Tokens (before compression / after): "
         f"{view.tokens_before} / {view.tokens_after}\n"

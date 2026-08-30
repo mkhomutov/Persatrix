@@ -10,7 +10,7 @@ no facts to extract.
 This module drives the full close path with distinctive message bodies
 and pins both halves of the fix: the bodies reach the summariser prompt
 (``_handle_multi_turn_event`` stashes them on the turn,
-``_interaction_to_entries`` projects them into the prompt), and a
+``close_entries.interaction_to_entries`` projects them into the prompt), and a
 content-aware extractor consequently populates the ``facts`` table —
 while the persisted ``context_json`` stays body-free per RFC 0020 §D.
 

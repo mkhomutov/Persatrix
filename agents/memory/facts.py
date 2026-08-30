@@ -22,33 +22,27 @@ extracted facts.
 
 from __future__ import annotations
 
-import contextlib
 import logging
-import uuid
 from collections.abc import Callable, Collection, Iterable
 
 import aiosqlite
 
 from ..epoch_id import resolve_epoch_id_silent
-from ..observability.metrics import try_get_instruments
 from ..principal_id import resolve_principal_id_silent
 from ..session_id import normalize_session_id, resolve_session_id_silent
 from ._epoch_filter import epoch_eq_clause, resolve_active_epoch
-from ._facts_audit import emit_audit as _emit_audit
 from ._facts_erasure import delete_by_subject as _delete_by_subject
 from ._facts_reinforce import mark_recalled_for_agent as _mark_recalled_for_agent
-from ._facts_supersede import apply_supersession as _apply_supersession
 from ._facts_supersede import retract_fact as _retract_fact
 from ._facts_topics import predicate_in_clause
 from ._facts_topics import topic_subjects_for_agent as _topic_subjects_for_agent
+from ._facts_write import insert_fact
 from ._migration_protection import PROTECTION_LEVEL_DEFAULT
 from ._principal_filter import principal_eq_clause, resolve_active_principal
 from ._session_filter import _resolve_session_list, session_in_clause
 from .fact_predicates import (
     canonicalize_subject,
-    validate_object,
     validate_predicate,
-    validate_subject,
 )
 from .fact_types import _FACT_COLS, _FACT_SELECT, Fact, row_to_fact
 from .migrations import _apply_migrations
@@ -164,152 +158,52 @@ class FactStore:
         session_id: str = "legacy",
         protection_level: str = PROTECTION_LEVEL_DEFAULT,
         source_channel_id: str | None = None,
+        speaker_id: str | None = None,
     ) -> str:
         """Persist a new fact tuple.  Returns the generated ``fact_id``.
 
-        ``protection_level`` / ``source_channel_id`` (RFC 0037 §C — v16,
-        PR 3) persist VERBATIM — rule-(a) normalization is owned by the
-        persona-side stamp site (the close-consolidation extractor via
-        ``normalize_for_stamp``), which memory must not import.  Omitted
-        (direct/test/operator callers) → the ``internal`` default, so no
-        path writes a fact without a protection level; a mislabeled row
-        fails closed at read time (§A rule (c)).  Supersession restamps
-        by construction — a superseding assertion is a NEW row stamped
-        from its own source (§C item 3) — and reinforcement never
-        touches the column.
+        Delegates to :func:`agents.memory._facts_write.insert_fact` for
+        validation, the INSERT, the RFC 0026 §F supersession pass and the
+        §G audit emission — see that helper for every one of those
+        contracts, and for what ``speaker_id`` (ISSUE-0131, migration 18)
+        and ``protection_level`` / ``source_channel_id`` (RFC 0037 §C)
+        mean on the row.
 
-        Enforces RFC 0026 §F **symmetric latest-asserted-wins**: only
-        one live row per ``(agent_id, subject, predicate)`` survives,
-        and the row with the greatest ``asserted_at`` wins.  Out-of-order
-        and equal-timestamp writes resolve deterministically — see
-        :mod:`agents.memory._facts_supersede` for the chain rule and
-        :class:`tests.unit.python.test_fact_store_supersede.TestSymmetricLatestAssertedWins`
-        for the pinned cases.
+        What stays here is what only the tier knows: the three ambient
+        axes.  ``session_id`` normalises at this storage boundary
+        (RFC 0031 Phase 2 PR 4), and the active tenant and epoch resolve
+        through the same :func:`resolve_active_principal` /
+        :func:`resolve_active_epoch` seams the recall path uses — so a
+        row is always readable by the principal that wrote it, and the
+        supersede chain keys on the same tuple recall filters on.
 
-        Predicate validation runs through the injected validator
-        (PR 2 wires the enumerated allowlist).
-
-        Subject canonicalisation (PR 5c — PR #341 review L-2)
-        -----------------------------------------------------
-        The PR 2 extractor canonicalises before calling here, but
-        direct callers (fixtures, operator-seeded facts per OQ #9, the
-        future RFC 0013 erasure backfill) bypass that discipline and
-        would write rows the ``_subject_seeds → canonicalize_subject``
-        recall path can never reach — defeating the MT-MEMORY-005
-        invariant.  The storage primitive is authoritative instead:
-        every persisted row carries the canonical subject.
+        One stated precedence change vs the pre-split body (PR #849
+        review): the connection and the ambient axes resolve WITH the
+        argument list, so an uninitialised store raises its
+        ``RuntimeError`` before ``insert_fact`` can reject a bad subject
+        or certainty — the more fundamental error now surfaces first.
         """
-        # Cheap value checks first — surfacing "subject must not be
-        # empty" or a certainty-range error before the (potentially
-        # PR 2 allowlist-backed) predicate validator means a caller
-        # that violates two preconditions sees the more obviously-wrong
-        # one first.
-        if not subject or not subject.strip():
-            raise ValueError("subject must not be empty")
-        if not 0.0 <= certainty <= 1.0:
-            raise ValueError(
-                f"certainty must be in [0.0, 1.0], got {certainty}",
-            )
-        self._predicate_validator(predicate)
-        # Topic-amendment blast-radius bound: object length + RFC 0009
-        # delimiter escape, enforced at the storage boundary so every
-        # write path (extractor, operator-seeded, fixtures) is covered.
-        validate_object(object)
-        # Canonicalise after the empty-check so the ValueError text
-        # stays familiar; ``canonicalize_subject`` is idempotent so
-        # the production write path (extractor pre-canonicalises) is
-        # unaffected.  The blast-radius bound runs on the canonical
-        # form (write boundary only — see ``validate_subject``).
-        subject = canonicalize_subject(subject)
-        validate_subject(subject)
-        # Normalise session_id at the storage boundary (RFC 0031 Phase 2
-        # PR 4 — PR 1 F16 carry-forward).  Symmetric with the other three
-        # persona-memory tier write paths.
-        session_id = normalize_session_id(session_id)
-        # ISSUE-0081 PR 3: active tenant for the row tag + supersede chain key.
-        principal_id = resolve_active_principal(self._active_principal_id)
-        # ISSUE-0085 PR 3: active epoch for the row tag + supersede chain key.
-        epoch_id = resolve_active_epoch(self._active_epoch_id)
-
-        db = self._ensure_db()
-        fact_id = str(uuid.uuid4())
-
-        await db.execute(
-            """
-            INSERT INTO facts
-                (fact_id, agent_id, subject, predicate, object,
-                 certainty, source_interaction_id, asserted_at,
-                 last_recalled_at, superseded_by, session_id, principal_id,
-                 epoch_id, protection_level, source_channel_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?)
-            """,
-            (
-                fact_id,
-                self._agent_id,
-                subject,
-                predicate,
-                object,
-                certainty,
-                source_interaction_id,
-                asserted_at,
-                session_id,
-                principal_id,
-                epoch_id,
-                protection_level,
-                source_channel_id,
-            ),
-        )
-
-        result = await _apply_supersession(
-            db,
-            agent_id=self._agent_id,
+        return await insert_fact(
+            self._ensure_db(),
+            self._agent_id,
             subject=subject,
             predicate=predicate,
-            asserted_at=asserted_at,
-            new_fact_id=fact_id,
-            session_id=session_id,
-            principal_id=principal_id,
-            epoch_id=epoch_id,
-        )
-        await db.commit()
-
-        # Telemetry counters live outside the persistence path — a
-        # metrics-backend failure must not surface as a write failure
-        # (row is already persisted).  Mirrors the
-        # ``EpisodicMemory.store_episode`` ``sessions.writes`` pattern.
-        with contextlib.suppress(Exception):
-            inst = try_get_instruments()
-            if inst is not None:
-                inst.facts_stored.add(
-                    1, attributes={"agent.id": self._agent_id},
-                )
-                n_superseded = len(result.superseded_older_ids) + (
-                    1 if result.self_superseded_by else 0
-                )
-                if n_superseded:
-                    inst.facts_superseded.add(
-                        n_superseded, attributes={"agent.id": self._agent_id},
-                    )
-
-        # RFC 0026 §G audit emission — after commit so the log cannot
-        # record a write that did not happen.
-        _emit_audit(
-            "fact.store", agent_id=self._agent_id, fact_id=fact_id,
-            subject=subject, predicate=predicate, object=object,
+            object=object,
             source_interaction_id=source_interaction_id,
+            asserted_at=asserted_at,
+            certainty=certainty,
+            # RFC 0031 Phase 2 PR 4 (PR 1 F16 carry-forward) — symmetric
+            # with the other three persona-memory tier write paths.
+            session_id=normalize_session_id(session_id),
+            # ISSUE-0081 PR 3 / ISSUE-0085 PR 3: the row tag AND the
+            # supersede chain key.
+            principal_id=resolve_active_principal(self._active_principal_id),
+            epoch_id=resolve_active_epoch(self._active_epoch_id),
+            predicate_validator=self._predicate_validator,
+            protection_level=protection_level,
+            source_channel_id=source_channel_id,
+            speaker_id=speaker_id,
         )
-        for older_id in result.superseded_older_ids:
-            _emit_audit(
-                "fact.supersede", agent_id=self._agent_id,
-                superseded_fact_id=older_id, by_fact_id=fact_id,
-            )
-        if result.self_superseded_by is not None:
-            _emit_audit(
-                "fact.supersede", agent_id=self._agent_id,
-                superseded_fact_id=fact_id,
-                by_fact_id=result.self_superseded_by,
-            )
-        return fact_id
 
     # ─── Read path ─────────────────────────────────────────
 

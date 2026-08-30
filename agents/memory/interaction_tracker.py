@@ -7,32 +7,10 @@ public façade and re-exports every name here, so existing imports
 (``from agents.memory.interactions import InteractionTracker``) keep
 working without call-site churn.
 
-The tracker key (ISSUE-0123 R-1 + ISSUE-0131, Phase 0/0b — decided on
-live evidence, see ``docs/issues/ISSUE-0082-residuals-phase0-gate.md``)
-is the tuple ``(principal_id, speaker_id, scope)``:
-
-* ``scope`` — the RFC 0020 §G room/thread/DM unit, unchanged.  It stays
-  the persisted ``episodes.scope`` string and the prefix-predicate /
-  ``idx_episodes_scope`` surface; the two new axes are NOT encoded into
-  it (each has its own column since migrations v11 and 18).
-* ``principal_id`` — the tenant the turn ran under, resolved from the
-  ambient :func:`~agents.principal_id.principal_scope` (else the
-  env/default) at each call.  A group room no longer accumulates every
-  authenticated person's turns into one record that closes under
-  whichever principal happened to trigger the close.
-* ``speaker_id`` — the event's ``sender_id``.  The principal is a
-  *tenant* axis and only authenticated humans have one, so a room full
-  of personas shares the ``local`` principal; the speaker half is what
-  keeps agent A's turns out of the record B's restatement is derived
-  from (the Phase 0b misattribution).  ``""`` = no speaker (tick /
-  single-turn scopes whose event carries none).
-
-Both halves are frozen onto the :class:`Interaction` at open (the
-``session_id`` footing) — they ARE the key, so a later turn under a
-different principal or speaker lands in a different record.  The DM
-topology already answered this design: ``scope_for_dm`` keys on the
-sender, so a DM record has always been per-speaker; the tuple key
-makes group and thread scopes consistent with it.
+Records are keyed ``(principal_id, speaker_id, scope)`` (ISSUE-0123 R-1
++ ISSUE-0131).  :mod:`agents.memory.interaction_key` owns that key — the
+three axes, why each exists, and the resolution rules the entry points
+here share; this module owns the LIFECYCLE filed under it.
 
 Room-wide closes (ISSUE-0123 part 3): a structural close, an end-vote
 quorum, the bounded/cost close and the close-notification turn are
@@ -51,7 +29,6 @@ import time
 import uuid
 from typing import TYPE_CHECKING, Protocol
 
-from ..principal_id import normalize_principal_id, resolve_principal_id_silent
 from ..session_id import LEGACY_SESSION_ID
 from .boundary_detectors import (
     DEFAULT_IDLE_TIMEOUT_SEC,
@@ -61,6 +38,7 @@ from .boundary_detectors import (
     MaxTurnsDetector,
     default_detectors,
 )
+from .interaction_key import RecordKey, record_key, resolve_record_key
 from .interaction_metrics import _emit_closed, _emit_opened
 from .interaction_types import Interaction, Turn
 
@@ -93,16 +71,6 @@ class Clock(Protocol):
 _DEFAULT_CLOCK: Clock = time.time
 
 
-# The tracker key: ``(principal_id, speaker_id, scope)`` — module doc.
-_RecordKey = tuple[str, str, str]
-
-
-def _record_key(interaction: Interaction) -> _RecordKey:
-    """The key an open ``interaction`` is registered under — stable for
-    its lifetime, the three components being frozen at open."""
-    return (interaction.principal_id, interaction.speaker_id, interaction.scope)
-
-
 class InteractionTracker:
     """Per-agent, in-memory tracker keyed ``(principal, speaker, scope)``.
 
@@ -112,13 +80,14 @@ class InteractionTracker:
     state lives on the turn timestamp, not on a separate field).
 
     Key resolution is uniform across :meth:`start` / :meth:`add_turn` /
-    :meth:`get` / :meth:`close` and spelled out on :meth:`_key`:
+    :meth:`get`, and is spelled out on
+    :func:`~agents.memory.interaction_key.resolve_record_key`:
     ``principal_id=None`` is AMBIENT, ``speaker_id=None`` / blank is
     ``""``.  Single-tenant deployments with senderless scopes collapse
     to one key per scope — exactly the pre-v0.3.15 shape.
 
-    Closing is invoked explicitly per record (:meth:`close` /
-    :meth:`close_record`), room-wide (:meth:`close_scope` — the
+    Closing is invoked explicitly per record (:meth:`close_record`),
+    room-wide (:meth:`close_scope` — the
     ISSUE-0123 part 3 fan), or by the janitor via :meth:`idle_check`
     (per record: a speaker who went quiet idles out on their own
     timer).  The reopen rule from RFC 0020 §C — "do not reopen" — is
@@ -134,7 +103,7 @@ class InteractionTracker:
         idle_timeout_sec: float = DEFAULT_IDLE_TIMEOUT_SEC,
         clock: Clock | None = None,
     ) -> None:
-        self._open: dict[_RecordKey, Interaction] = {}
+        self._open: dict[RecordKey, Interaction] = {}
         # Detector chain is evaluated in order; first ``(True, reason)``
         # wins.  Default chain: structural → idle-gap → topic-shift no-op.
         self._detectors: tuple[BoundaryDetector, ...] = (
@@ -156,29 +125,6 @@ class InteractionTracker:
             (d.max_turns for d in self._detectors if isinstance(d, MaxTurnsDetector)),
             None,
         )
-
-    # ── Key resolution ──
-
-    @staticmethod
-    def _key(
-        scope: str, principal_id: str | None, speaker_id: str | None,
-    ) -> _RecordKey:
-        """Resolve the ``(principal, speaker, scope)`` key for a call.
-
-        ``principal_id=None`` means AMBIENT (never "default"): the
-        task-local scope wins, then the env var, then ``local`` — the
-        same precedence the storage tiers resolve writes under, so the
-        record a turn lands in and the tenant its close-derived rows
-        bind (the close path binds it) cannot disagree.  An explicit
-        value goes through :func:`~agents.principal_id
-        .normalize_principal_id` so ``""`` cannot mint an unmatched key.
-        """
-        principal = (
-            normalize_principal_id(principal_id)
-            if principal_id is not None
-            else resolve_principal_id_silent()
-        )
-        return (principal, (speaker_id or "").strip(), scope)
 
     # ── Read-only accessors (tests + janitor wiring) ──
 
@@ -219,7 +165,7 @@ class InteractionTracker:
         ambient/no-speaker, so a legacy ``get(scope)`` still finds the
         record a legacy ``add_turn(scope)`` opened.
         """
-        return self._open.get(self._key(scope, principal_id, speaker_id))
+        return self._open.get(resolve_record_key(scope, principal_id, speaker_id))
 
     # ── Lifecycle ──
 
@@ -259,7 +205,7 @@ class InteractionTracker:
         frozen onto the record — trivially only-on-open, since a
         different pair IS a different key.
         """
-        key = self._key(scope, principal_id, speaker_id)
+        key = resolve_record_key(scope, principal_id, speaker_id)
         existing = self._open.get(key)
         if existing is not None and existing.is_open:
             return existing
@@ -311,7 +257,7 @@ class InteractionTracker:
         being absorbed by a sibling's (the whole point of the re-key).
         """
         ts = now if now is not None else self._clock()
-        key = self._key(scope, principal_id, speaker_id)
+        key = resolve_record_key(scope, principal_id, speaker_id)
         interaction = self._open.get(key)
         if interaction is None or not interaction.is_open:
             interaction = self.start(
@@ -390,7 +336,7 @@ class InteractionTracker:
         popping a same-key successor would close a different
         interaction than the one the caller reasoned about.
         """
-        key = _record_key(interaction)
+        key = record_key(interaction)
         if self._open.get(key) is not interaction:
             return None
         del self._open[key]

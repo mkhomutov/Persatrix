@@ -85,18 +85,6 @@ PR 1 is unblocked by the gate and can start immediately after the tag. PR 3 must
 
 `internal/channels/principal_attribution.go`: a per-`(channel, agent)` table recording which principal each dispatch was made under, written from `Dispatch` for every delivered dispatch the router elected a reply from. **No read site** — nothing re-stamps yet. Mirrors the v0.3.14 dormant-rail-then-producer split. Rationale, rules, gates and the two review rounds: the file header and [#844](https://github.com/mkhomutov/Persatrix/pull/844).
 
-#### Key implementation details
-
-* Key `(msg.ChannelID, env.Recipient.ParticipantID)`, value `map[principal]time.Time` — the live stimuli, from which the verdict is *derived*: resolve iff exactly one is live and names someone.
-* A principal-less dispatch is recorded under the anonymous key **in either arrival order**; same-principal re-dispatch refreshes rather than ambiguates.
-* `TakeAttribution` resolves *and* retires what the reply answered; expiry alone never recovers a room whose forced turns outpace the 120s TTL.
-* In-memory, single-orchestrator; lazy expiry on read plus a periodic sweep; bound `channels × members`.
-
-#### PR checklist
-
-- [ ] `go test ./...` green (note: CI runs `go test` since v0.3.13 #813)
-- [ ] No behaviour delta — the table has no reader
-
 ---
 
 ### PR 2: `feature/v0315-issue0124-restamp` — The re-stamp, and the gate
@@ -112,16 +100,6 @@ Read the table on the publish path, before the commit and the fanout, **iff** th
 * `msg.SenderID` is safe as a key: the executor supplies the agent's registered id and never an LLM-supplied value (RFC 0011 §"DM gate-bypass").
 * **Never** accept a principal, or any correlation key, from the agent's request — including the stimulus message id: an agent sees other members' ids in channel history, so a chosen id resolves to a chosen principal, the cross-tenant read primitive one indirection along.
 * Deeper cascades inherit transitively (PR 1's write fires again with the principal now on ctx), bounded by `cascade_depth`.
-
-#### Tests
-
-Integration: authenticated publish → persona reply → the second-hop persona's rows carry the human's principal, not `'local'`. Negative: autonomous/tick publishes stay `'local'`; ambiguous and expired entries degrade to `'local'`; `auth.mode: disabled` is byte-identical. A route-table-style pin that `Publish` is the **only** re-stamp site.
-
-#### PR checklist
-
-- [ ] The re-stamp calls `TakeAttribution`, not `Lookup`, pinned by a test that a second reply resolves nothing
-- [ ] Accepted-risk statement in the PR body: this grants an agent a bounded **write** into the causally-implicated principal's tenant — never a read
-- [ ] Known Gap: single-orchestrator only
 
 ---
 
@@ -146,32 +124,45 @@ RFC 0020 §G amendment (the per-channel scoping table gains a principal dimensio
 
 One tracker, two principals, one room scope → two records. One tracker, one `local` principal, **three agent speakers**, one room scope → three records (the Phase 0b case: this is the test that fails under plain Option A). A room-wide close closes all of them. The close-notification turn lands as the final turn of each.
 
-#### PR checklist
-
-- [ ] RFC 0020 §G amendment merged in the same PR, covering both dimensions
-- [ ] `open_scopes()` and every "one scope, one record" caller audited
-- [ ] Migration 17 → 18 lands before its consumer, and does not touch the channel store
-
 ---
 
-### PR 4: `feature/v0315-issue0123-close-path` — Reserve re-size and cleanup
+### PR 4: `feature/v0315-issue0123-close-path` — The `speaker_id` projection
 
 #### Scope
 
-Re-size the wallet reserve and clean up the Go-side asymmetry.
+Write the migration-18 column: project the record key's speaker half onto the two close-derived tiers, and discharge the RFC 0020 §G obligation that projection depends on.
 
-**Deviation, 2026-08-29.** Two deliverables landed early, found by PR 3's review as defects. The **principal binding** shipped in PR 3 (`3e633571`), across both write phases. The **`speaker_id` projection** is branched here unmerged (`42551a91`, `31a7d551`), CI-green on PR 3's branch. **Open no PR here until [#846](https://github.com/mkhomutov/Persatrix/pull/846) merges** — this branch is stacked on PR 3's head; rebase onto `main` after the squash-merge.
+**Deviation, 2026-08-29 (revised).** Two deliverables landed early, found by PR 3's review as defects: the **principal binding** shipped in PR 3 (`3e633571`) across both write phases, and the **`speaker_id` projection** was branched here. That inverts this PR — the projection is now the whole of it, and **the reserve re-size and the Go-side asymmetry cleanup move to PR 4b**. Those carry their own sizing analysis and a Go threshold-basis question the milestone keeps off this PR; bundling them repeats what cost PR 3 five review rounds.
+
+#### Key implementation details
+
+* **A projection, never a judgement.** `close_path` stamps `interaction.speaker_id` on the episode row, `fact_extractor` on every tuple that close extracts, the single-turn path on its own row — all `or None`, so a speakerless scope records NULL rather than an attribution to a speaker named nothing. Sound only because `(principal, speaker, scope)` makes each record single-speaker by construction.
+* **The §G breach is discharged as EXCLUDE, not tag.** The close-notification fan lands the room-close turn on every sibling record. `close_entries.own_turn_items` drops it where its `sender` is not that record's speaker — the one chokepoint every close-pipeline consumer reads the turns through, so derivation, the single-turn fast path and persistence all inherit the exclusion — keyed off the producer's recorded `room_close` stamp, not a reconstruction. The turn stays on the closer's OWN record, where it is native.
+* **Three 500-line splits were preconditions, not cleanup**: `interaction_tracker.py` → `interaction_key.py`, `facts.py` → `_facts_write.py`, and (at review) `summarize_close.py` → `close_entries.py`. Each sat exactly at the cap, so the change could not be added at all.
+
+#### PR checklist
+
+- [x] Rebased onto `main` after PR 3's squash-merge, then opened
+- [x] Metric shape (`agent.interactions.closed.by_<reason>` fires once per **record**) in the changelog — with PR 3
+- [x] Release note states the coherence trade: close-derived memory of a group room is per-person **and per-speaker**; room continuity unaffected — with PR 3
+- [x] PR body states what is NOT in it — `1 + N` ships unchanged, so a multi-speaker room's leases can over-commit the metered headroom
+
+---
+
+### PR 4b: reserve re-size and Go-side asymmetry cleanup
+
+#### Scope
+
+Split out of PR 4 on 2026-08-29. Re-size the wallet reserve; retire the Go-side asymmetry.
 
 #### Key implementation details
 
 * **The asymmetry is retired, not resolved.** Once the record names its principal, the trigger's principal no longer selects a tenant, so the four close paths in `internal/channels/synthesis_close.go` need not agree. Audit whether `pendingSynthesisClose.principal` becomes dead and drop it if so.
-* **Reserve re-size**: `1 + N` becomes `1 + (personas × principals × speakers)` — the largest single cost in this workstream, and under-sizing degrades *silently* into `SUMMARY_UNAVAILABLE_TEXT`. The sizing analysis, the half-cap clamp the calibration issue must cover, and the two obligations the milestone attaches (ship the **signal** with the re-size; the **threshold basis** is Go and does not ride this PR) are the [reserve-sizing record](ISSUE-0082-residuals-reserve-sizing.md). File the calibration as its own issue in the [ISSUE-0109](ISSUE-0109-rfc0052-autonomous-defaults-calibration.md) idiom rather than guessing a constant.
+* **Reserve re-size**: `1 + N` becomes `1 + (personas × principals × speakers)` — the largest single cost here, and under-sizing degrades *silently* into `SUMMARY_UNAVAILABLE_TEXT`. The multiplier, the half-cap clamp, and the signal / threshold-basis obligations are the [reserve-sizing record](ISSUE-0082-residuals-reserve-sizing.md), split out on 2026-08-23 to hold exactly this; file the calibration in the [ISSUE-0109](ISSUE-0109-rfc0052-autonomous-defaults-calibration.md) idiom rather than guessing a constant.
 
 #### PR checklist
 
-- [ ] Rebased onto `main` after PR 3's squash-merge, then opened
-- [x] Metric shape (`agent.interactions.closed.by_<reason>` fires once per **record**) in the changelog — with PR 3
-- [x] Release note states the coherence trade: close-derived memory of a group room is per-person **and per-speaker**; room continuity unaffected — with PR 3
+- [ ] Re-size ships with its **signal**, and the calibration is filed as its own issue
 
 ---
 
@@ -195,7 +186,7 @@ Run [MT-MEMORY-GROUP-TENANT-001](../manual-tests/MT-MEMORY-GROUP-TENANT-001.md) 
 
 | Risk | Mitigation |
 |------|------------|
-| The Phase 0 + 0b cost multiplier bites a large roster. | The reserve re-size is in PR 4's scope, not a follow-up, and its calibration is a tracked issue. **Phase 0b makes this materially worse than the principal axis alone**: the multiplier is now `personas × principals × speakers`, and an all-agent room — one `local` principal, N speakers — multiplies where plain Option A did not. A one-human DM is still unchanged. |
+| The Phase 0 + 0b cost multiplier bites a large roster. | The reserve re-size is PR 4b's whole scope, and its calibration is a tracked issue. **Phase 0b makes this materially worse than the principal axis alone**: the multiplier is now `personas × principals × speakers`, and an all-agent room — one `local` principal, N speakers — multiplies where plain Option A did not. A one-human DM is still unchanged. |
 | Phase 0b is read as re-opening a resolved gate. | It resolves a second axis on the *same* 2026-08-07 evidence, using the *same* decision rule, and does not disturb Option A. What changed is that [ISSUE-0131](ISSUE-0131-derived-memory-has-no-speaker-attribution.md) named a dimension the original three options did not enumerate — the gate's rule always implied it, since its decisive leak was agent-to-agent. |
 | R-2's attribution mis-fires under load and stamps the wrong tenant. | Every ambiguity and every expiry fails closed to `'local'` — today's behaviour. A wrong attribution requires two dispatches under the *same* principal, which is not ambiguous because it is not wrong. |
 | The re-stamp is read as "agents can now claim identities". | It is server-held state keyed on facts the orchestrator knows; nothing is accepted from the request. Stated in the PR body and pinned by the only-one-re-stamp-site test. |
@@ -211,8 +202,9 @@ Run [MT-MEMORY-GROUP-TENANT-001](../manual-tests/MT-MEMORY-GROUP-TENANT-001.md) 
 | 0 | Design gate — MT Legs 1–4, lock the record shape (both axes) | — | ✅ Resolved → **`(principal, speaker, scope)`**: Phase 0 (principal) 2026-08-07, Phase 0b (speaker) 2026-08-21 | — | — |
 | 1 | R-2 causal attribution store, dormant | `feature/v0315-issue0124-attribution-store` | ✅ Merged | [#844](https://github.com/mkhomutov/Persatrix/pull/844) | `5b740f84` |
 | 2 | R-2 re-stamp + end-to-end gate | `feature/v0315-issue0124-restamp` | ✅ Merged | [#845](https://github.com/mkhomutov/Persatrix/pull/845) | `48b4a558` |
-| 3 | R-1 + [ISSUE-0131](ISSUE-0131-derived-memory-has-no-speaker-attribution.md) scope key `(principal, speaker, scope)` + RFC 0020 §G amendment | `feature/v0315-issue0123-scope-key` | 🔀 PR open | [#846](https://github.com/mkhomutov/Persatrix/pull/846) | — |
-| 4 | Reserve re-size (× speakers; until it lands a cost-trigger room fan over-commits `1 + N`), asymmetry cleanup — the close binding and the speaker projection landed early, see below | `feature/v0315-issue0123-close-path` | 🔄 Branched, **held** for PR 3's merge | — | — |
+| 3 | R-1 + [ISSUE-0131](ISSUE-0131-derived-memory-has-no-speaker-attribution.md) scope key `(principal, speaker, scope)` + RFC 0020 §G amendment | `feature/v0315-issue0123-scope-key` | ✅ Merged | [#846](https://github.com/mkhomutov/Persatrix/pull/846) | `5e23246c` |
+| 4 | [ISSUE-0131](ISSUE-0131-derived-memory-has-no-speaker-attribution.md) `speaker_id` projection onto the close-derived rows + the RFC 0020 §G room-close exclusion | `feature/v0315-issue0123-close-path` | 🔀 PR open | [#849](https://github.com/mkhomutov/Persatrix/pull/849) | — |
+| 4b | Reserve re-size (until it lands, a cost-trigger room fan over-commits `1 + N`) + Go-side asymmetry cleanup — split out of PR 4 | — | ⬜ Not started | — | — |
 | 5 | Live MT + closeout | `feature/v0315-issue0082-residuals-close` | ⬜ Not started | — | — |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ⏭ Deferred

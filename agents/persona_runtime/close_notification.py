@@ -317,12 +317,12 @@ async def close_interaction_on_notification(
         # threads that lease off ``meter_close_summary``.  Marked on every
         # record the fan will close: each ``(principal, speaker)`` record
         # authors its own summary, and each of those draws its own lease
-        # (the reserve multiplier residuals PR 4 re-sizes).  Interim
+        # (the reserve multiplier residuals PR 4b re-sizes).  Interim
         # consequence, stated (PR #846 review): on the COST trigger the
         # residual hard-cap headroom is at most the old ``1 + N`` reserve
         # by construction, so a multi-speaker room's ~N×S leases can
         # over-commit it and late summaries degrade to the unavailable
-        # placeholder until the PR 4 re-size lands.  The
+        # placeholder until the PR 4b re-size lands.  The
         # pre-ingest/post-close double-mark the per-event ingest needed is
         # gone with it — the direct append below cannot close a record, so
         # one mark on the live records covers the only path left.
@@ -354,19 +354,22 @@ async def close_interaction_on_notification(
             event, f"Event: {event.event_type.value} → Actions: []",
             # PR #846 review: stamp the RFC 0020 §G exception at the
             # producer.  This turn's ``sender`` is not the record's
-            # ``speaker_id`` on any sibling, and three consumers need to
-            # know it — the ``participants`` read surface (which was
+            # ``speaker_id`` on any sibling, and the consumers key off
+            # the stamp — the ``participants`` read surface (which was
             # naming the closer as a participant of every record it never
-            # spoke in), and the residuals PR 4 ``speaker_id`` projection
-            # and fact binding, which the docs oblige to exclude or tag it.
+            # spoke in), and the close path's ``speaker_id`` projection,
+            # which EXCLUDES the foreign turn from the derivation input
+            # and the persisted context (``close_entries.own_turn_items``,
+            # PR #849 — the "exclude or tag" obligation, discharged as
+            # exclude).
             room_close=True,
         )
         for record in to_close:
             # A COPY per record (PR #846 review): ``append_turn`` stores
             # the payload by reference, so one dict shared across N
-            # sibling turns means a later in-place edit — exactly the
-            # shape the PR 4 "exclude or tag" obligation invites — writes
-            # through every sibling at once.
+            # sibling turns means a later in-place edit — the shape a
+            # tag-style discharge of the §G obligation would have been —
+            # writes through every sibling at once.
             agent._interaction_tracker.append_turn(record, dict(turn), now=now)
     # Close every admitted record first, then persist each behind its
     # own guard (``persist_fanned_closes``, the same review fix): the
