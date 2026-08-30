@@ -856,10 +856,11 @@ ships **on-startup catch-up fetch** (RFC 0011 [OQ #8](../rfcs/0011-channels-brid
   every replayed span. Doing that binding — so a restart re-derives under the
   tenant that actually spoke instead of dropping the span — is the remaining
   half of ISSUE-0130.
-- **`principal_id` is readable without a credential.** The history GET is
-  public by design (the agent fleet holds no accounts), and the field is not
-  withheld from anonymous callers — doing so would blind the one consumer it
-  exists for. Because a persona's relayed reply persists the principal of the
+- **`principal_id` is readable without a credential.** The history GET and
+  the publish response are public by design (the agent fleet holds no
+  accounts), and the field is not withheld from anonymous callers — doing so
+  would blind the one consumer it exists for. (The thread GET carries it too,
+  but that route is authenticated.) Because a persona's relayed reply persists the principal of the
   person who *caused* it, that means anyone who can reach the orchestrator's
   API can attribute each agent utterance to a named person. Message content
   was already public on the same route; the new part is the causal link.

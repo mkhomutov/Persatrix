@@ -321,9 +321,26 @@ alongside [ISSUE-0123](ISSUE-0123-per-speaker-interaction-scope.md) (R-1).
 >   diagnosis above turned into a boundary: the value is the orchestrator's
 >   own verification, and the REST body has no field to carry one (the
 >   request struct has no counterpart and `decodeJSON` disallows unknown
->   keys, so a claim is a 400). B2 inherits a column no unauthenticated
->   caller can influence — which is what makes seeding `principal_scope`
->   from it safe.
+>   keys, so a claim is a 400). That closes the DIRECT door: no caller can
+>   name a principal.
+> * **The INDIRECT door is open, and B2 must budget for it.** The R-2
+>   re-stamp keys on `msg.SenderID`, and the publish ingress is
+>   `policyPublic` — it takes no credential even under `auth.mode: enabled`.
+>   As [`principal_restamp.go`](../../internal/channels/principal_restamp.go)
+>   already states, a table hit proves the orchestrator DISPATCHED to a
+>   registered agent, not that the caller IS that agent. Both the room list
+>   and its membership are public GETs, so anyone who can reach the ingress
+>   can publish with `sender_id` set to a member agent, inside the TTL of a
+>   real authenticated turn, and the re-stamp lands attacker-chosen content
+>   on a row stamped with the causing human. **B1 is what makes that
+>   durable.** Before v12 the mis-attribution expired with the cascade's
+>   dispatch metadata; it is now a permanent `messages.principal_id` value,
+>   and B2 re-reads it on every replay. So the seed is exactly as
+>   trustworthy as sender authentication at the publish seam — which is
+>   RFC 0009's to supply. Until it does, the mitigation is the network
+>   restriction `cmd/orchestrator/auth.go` already WARNs about, and B2
+>   should treat a seeded principal as attribution evidence of the same
+>   grade as the publish that produced it, not as a verified tenant.
 > * **A relayed row already carries the causal tenant.** The R-2 re-stamp
 >   ([ISSUE-0124](ISSUE-0124-orchestrator-hop-drops-tenant-on-agent-cascade.md),
 >   merged) runs at the head of `publishCommit`, *ahead of* the store commit,

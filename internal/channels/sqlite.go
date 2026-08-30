@@ -53,10 +53,18 @@ const DefaultEpochID = "live"
 // cascade persists the CAUSING HUMAN, not this constant — which is the whole
 // point of TestPublishMessage_PersistsTheRestampedCausalPrincipal. What still
 // resolves `local` is the publish with no tenant anywhere in reach: every
-// caller under `auth.mode: disabled`, an unauthenticated publish the
-// attribution table cannot explain (no entry, ambiguous, or expired), and an
-// orchestrator-authored turn built on a fresh context — the RFC 0052 convener
-// cadence and a chair escalation, neither of which descends from a request.
+// caller under `auth.mode: disabled`, and an unauthenticated publish the
+// attribution table cannot explain — no entry, ambiguous, or expired.
+//
+// That second case is what an autonomous room mostly produces, and it is
+// worth naming precisely because the orchestrator's own forced turns are NOT
+// publishes: the RFC 0052 convener cadence, a chair escalation and a
+// synthesis directive each build a synthetic [ChannelMessage] for
+// `dispatchTo` and never reach this store, so none of them writes a row at
+// all. What they do is dispatch from a context that descends from no request,
+// which records no principal in the attribution table — so it is the AGENT
+// REPLY answering such a turn that finds nothing to be attributed to, and
+// that reply's row is the one carrying this constant.
 //
 // Cross-language contract: mirrors `agents.principal_id.DEFAULT_PRINCIPAL_ID`
 // — the `'local'` literal the persona-memory migration v11 backfills onto its

@@ -172,13 +172,19 @@ type memberResponse struct {
 //
 // # ACCEPTED READ EXPOSURE, STATED
 //
-// The write side is closed (no caller can name a tenant). The READ side is
-// deliberately open, and that is a real disclosure rather than a non-event.
-// `GET /api/v1/channels/{id}/messages` and its `?as_participant=` variant are
-// `policyPublic` (auth_policy.go) — they must be, because the persona fleet
-// holds no accounts and catch-up replay is the consumer this column exists
-// for. So every value here is readable by any caller that can reach the
-// ingress, with no credential.
+// The write side is closed to a DIRECT claim (no caller can name a tenant;
+// the indirect sender-spoof path the R-2 re-stamp leaves open is stated on
+// ISSUE-0130). The READ side is deliberately open, and that is a real
+// disclosure rather than a non-event. `GET /api/v1/channels/{id}/messages`
+// (with its `?as_participant=` variant) and the `POST` publish response this
+// DTO is echoed on are BOTH `policyPublic` (auth_policy.go) — they must be,
+// because the persona fleet holds no accounts and catch-up replay is the
+// consumer this column exists for. So every value here is readable by any
+// caller that can reach the ingress, with no credential — and the publish
+// echo is the sharper of the two, since it answers "who caused this?" in the
+// caller's own 201 without paging history at all. The thread GET carries the
+// field as well, but that route is `policyAuthenticated`, so it is not part
+// of the anonymous surface.
 //
 // What that newly discloses is NOT the message content (already public on the
 // same route) but the CAUSAL LINK: since the ISSUE-0124 R-2 re-stamp, an
