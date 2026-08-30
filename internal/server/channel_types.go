@@ -170,13 +170,43 @@ type memberResponse struct {
 // It is response-only: [publishMessageRequest] has no counterpart, by design
 // — see [channels.ChannelMessage.PrincipalID].
 //
-// One value is empty rather than `local`: the degraded publish echo, when the
-// post-publish `GetMessage` itself fails and the handler returns the request's
-// own struct. The store stamps the row from a context the handler does not
-// hold (the R-2 re-stamp happens inside `publishCommit`), so an empty string
-// there is the honest "the committed value is unknown to this response" —
-// reconstructing a plausible one would be wrong for exactly the relayed
-// publishes the re-stamp exists for. That path already logs at ERROR.
+// # ACCEPTED READ EXPOSURE, STATED
+//
+// The write side is closed (no caller can name a tenant). The READ side is
+// deliberately open, and that is a real disclosure rather than a non-event.
+// `GET /api/v1/channels/{id}/messages` and its `?as_participant=` variant are
+// `policyPublic` (auth_policy.go) — they must be, because the persona fleet
+// holds no accounts and catch-up replay is the consumer this column exists
+// for. So every value here is readable by any caller that can reach the
+// ingress, with no credential.
+//
+// What that newly discloses is NOT the message content (already public on the
+// same route) but the CAUSAL LINK: since the ISSUE-0124 R-2 re-stamp, an
+// agent-sender row carries the §F participant id of the human whose turn
+// provoked it, so an unauthenticated reader can attribute each persona
+// utterance in each room to a named person. Before v12 that link existed only
+// in orchestrator memory. Two mitigations, neither of which is a code gate:
+// the ingress is the same surface `cmd/orchestrator/auth.go` already WARNs
+// "stays UNGATED" and that operators are told to network-restrict to the agent
+// fleet, and RFC 0009 agent tokens are what would let these routes stop being
+// public at all. Withholding the field from unauthenticated callers was
+// considered and rejected — it would blind the one consumer the column has.
+//
+// # The degraded publish echo
+//
+// No value is ever outside that vocabulary, including on the one path that
+// answers a publish WITHOUT reading the committed row back: when the
+// post-publish `GetMessage` fails, [Server.handlePublishMessage] returns the
+// request's own struct, which the store never stamped (it stamps its own
+// copy). Echoing that raw would emit `"principal_id": ""` — a THIRD value a
+// consumer branching `== "local"`, which is exactly what B2's replay
+// attribution does, reads as a real tenant. So the handler resolves the field
+// from the same request context the store read: identical to the committed row
+// for an authenticated publish and for an unattributable one, and
+// under-reporting as `local` only when `publishCommit` re-stamped an R-2
+// causal principal the handler never holds. In-vocabulary and wrong in one
+// direction beats out-of-vocabulary; that path already logs at ERROR, and
+// TestPrincipalColumn_DegradedEchoStillCarriesATenant pins it.
 type channelMessageResponse struct {
 	ID          string         `json:"id"`
 	ChannelID   string         `json:"channel_id"`

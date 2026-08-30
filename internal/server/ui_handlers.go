@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"os"
 	"runtime/debug"
+
+	"github.com/mkhomutov/persatrix/internal/channels"
 )
 
 // uiConfigResponse is the /api/v1/ui/config payload (RFC 0048 §C): which panels
@@ -89,7 +91,15 @@ func (s *Server) handleUIConfig(w http.ResponseWriter, _ *http.Request) {
 // (or `auth.mode: disabled`) keeps the degenerate local identity; the
 // route stays public because the SPA boots off it before any login.
 func (s *Server) handleUIContext(w http.ResponseWriter, r *http.Request) {
-	resp := uiContextResponse{Principal: "local", Tenant: "local"}
+	// [channels.DefaultPrincipalID], not a bare "local": this IS the tenant
+	// the channel store stamps onto a publish that resolves no account
+	// (ISSUE-0130 shape (b)), so the console's degenerate identity and the
+	// value its own messages persist under have to be one string, not two
+	// that happen to match today.
+	resp := uiContextResponse{
+		Principal: channels.DefaultPrincipalID,
+		Tenant:    channels.DefaultPrincipalID,
+	}
 	if ident := identityFrom(r.Context()); ident.Authenticated {
 		resp.Principal = ident.ParticipantID
 		resp.Authenticated = true

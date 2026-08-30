@@ -12,7 +12,9 @@ package server
 // rather than guarded.
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -20,6 +22,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/mkhomutov/persatrix/internal/channels"
 )
 
 // historyOf reads the channel's messages through the REST history endpoint —
@@ -125,4 +129,61 @@ func TestPrincipalColumn_RequestBodyCannotClaimAPrincipal(t *testing.T) {
 		"an unauthenticated caller must not be able to name a tenant")
 	assert.Empty(t, h.historyOf(t, operator).Messages,
 		"the rejected publish persisted nothing")
+}
+
+// failGetMessageStore is the real store with its post-publish lookup broken —
+// everything else delegates. It reproduces the one production path that
+// answers a publish WITHOUT reading the committed row back.
+type failGetMessageStore struct{ channels.ChannelStore }
+
+func (failGetMessageStore) GetMessage(context.Context, string) (channels.ChannelMessage, error) {
+	return channels.ChannelMessage{}, errors.New("simulated post-publish read failure")
+}
+
+// TestPrincipalColumn_DegradedEchoStillCarriesATenant covers the publish
+// response the handler builds when `GetMessage` fails after a committed
+// publish. The store stamps its own copy of the message, so the handler's
+// struct carries the zero value and a naive echo would put
+// `"principal_id": ""` on the wire — a THIRD value, outside the vocabulary
+// both [channelMessageResponse] and schemas/channel.schema.json promise, and
+// one that a consumer branching `== "local"` reads as a real tenant. The
+// handler resolves the field from the same context the store read instead.
+//
+// The remaining inaccuracy is deliberate and bounded: an R-2 re-stamped
+// relayed publish echoes `local` where the row says the causing human, because
+// `publishCommit` re-stamps a context this handler never holds. In-vocabulary
+// and under-reporting beats out-of-vocabulary, and the path already logs ERROR.
+func TestPrincipalColumn_DegradedEchoStillCarriesATenant(t *testing.T) {
+	h := newPrincipalHarness(t, nil, func(s channels.ChannelStore) channels.ChannelStore {
+		return failGetMessageStore{s}
+	})
+	operator := bearerFor(t, h.handler, "alice")
+	h.seedChannel(t, operator)
+
+	for _, tc := range []struct {
+		name   string
+		token  string
+		sender string
+		want   string
+	}{
+		{"authenticated echoes the verified participant", operator, "human", "alice-participant"},
+		{"unauthenticated echoes the shared tenant", "", "agent-alice", "local"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := h.publishAs(t, tc.token, tc.sender, "the quarterly plan")
+			require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+
+			got := decodeMessage(t, rec)
+			assert.NotEmpty(t, got.PrincipalID,
+				"the degraded echo must never emit an out-of-vocabulary empty principal")
+			assert.Equal(t, tc.want, got.PrincipalID)
+		})
+	}
+
+	// The rows themselves are unaffected — the lookup broke, not the write.
+	history := h.historyOf(t, operator)
+	require.Len(t, history.Messages, 2)
+	for _, m := range history.Messages {
+		assert.NotEmpty(t, m.PrincipalID, "every committed row carries a tenant")
+	}
 }

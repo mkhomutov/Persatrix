@@ -134,6 +134,19 @@ type ChannelStore interface {
 	// exist. On success, oldest-first pruning runs in the same transaction
 	// when the post-insert row count exceeds the cap; the message-with-
 	// thread-replies case cascades correctly through the `thread_id` FK.
+	//
+	// REQUIRED OF EVERY IMPLEMENTATION (ISSUE-0130 shape (b)): the tenant
+	// stored on the row is [PrincipalFromContext] of `ctx`, coerced to
+	// [DefaultPrincipalID] when empty — NOT `msg.PrincipalID`, which is
+	// discarded. This is a contract, not an implementation detail of the
+	// SQLite store: the publish seam is `policyPublic` by design, so an
+	// implementation that honoured the caller's field would hand an
+	// unauthenticated caller the ability to name a tenant, and B2 seeds a
+	// strict-equality `principal_scope` from this column. `msg.PrincipalID`
+	// on the way IN is meaningless; on the way OUT of the read methods it is
+	// the stored value. `SessionID` is the deliberate contrast — an operator
+	// namespace a caller may choose, so it is defaulted-when-empty rather
+	// than overwritten. See [ChannelMessage.PrincipalID].
 	PublishMessage(ctx context.Context, msg ChannelMessage) error
 
 	// GetMessage looks up a single message by primary key. Returns

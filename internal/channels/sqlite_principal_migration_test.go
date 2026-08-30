@@ -283,9 +283,24 @@ func TestMessageReadPaths_CarryPrincipal(t *testing.T) {
 // so a column added to one and not the other is a runtime arity error on
 // whichever endpoint uses the stale list — the exact drift v12 would have
 // caused across the four inline copies [messageColumns] replaced.
+//
+// It BUILDS the aliased list rather than stripping the prefix off the recall
+// one. Stripping (`strings.ReplaceAll(recall, "m.", "")`) is a no-op on an
+// entry that never carried the prefix, so it cannot see the second half of
+// what this test claims to pin: a column added to [recallMessageColumns]
+// unqualified compares equal and ships. That is not cosmetic — [recallViaFTS]
+// selects this projection over `messages_fts JOIN messages m`, and
+// `messages_fts` has a `content` column of its own, so an unqualified entry
+// raises `ambiguous column name` on the recall path alone (and only on an
+// FTS5 build — the LIKE fallback would mask it).
 func TestMessageColumns_MatchRecallProjection(t *testing.T) {
-	assert.Equal(t, messageColumns, strings.ReplaceAll(recallMessageColumns, "m.", ""),
-		"messageColumns and recallMessageColumns must name the same columns in the same order")
+	cols := strings.Split(messageColumns, ", ")
+	aliased := make([]string, 0, len(cols))
+	for _, c := range cols {
+		aliased = append(aliased, "m."+c)
+	}
+	assert.Equal(t, strings.Join(aliased, ", "), recallMessageColumns,
+		"recallMessageColumns must be messageColumns with every entry `m.`-qualified, in the same order")
 }
 
 // TestPublishMessage_PersistsTheRestampedCausalPrincipal composes v12 with

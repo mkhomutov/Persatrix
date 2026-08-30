@@ -372,6 +372,15 @@ func (s *Server) handlePublishMessage(w http.ResponseWriter, r *http.Request) {
 		// The publish committed; lookup failure is internal-only.
 		s.logger.Error("channels: post-publish lookup failed",
 			zap.String("message_id", msg.ID), zap.Error(err))
+		// ISSUE-0130 shape (b): the store stamped its own copy, so `msg`
+		// still holds the zero value and echoing it would put an
+		// out-of-vocabulary `"principal_id": ""` on the wire. Resolve from
+		// the same context the store read — see [channelMessageResponse] for
+		// the contract and the one case this under-reports.
+		msg.PrincipalID = channels.PrincipalFromContext(ctx)
+		if msg.PrincipalID == "" {
+			msg.PrincipalID = channels.DefaultPrincipalID
+		}
 		writeJSON(w, messageToResponse(msg), http.StatusCreated)
 		return
 	}

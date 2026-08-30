@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/mkhomutov/persatrix/internal/accounts"
+	"github.com/mkhomutov/persatrix/internal/channels"
 	"github.com/mkhomutov/persatrix/internal/security"
 )
 
@@ -50,7 +51,12 @@ type authIdentity struct {
 // anonymousIdentity is the RFC 0039 §H anonymous `local` identity every
 // request resolves to under `auth.mode: disabled` (and any request
 // presenting no credential under `enabled`, until Phase 2 enforcement).
-var anonymousIdentity = authIdentity{ParticipantID: "local"}
+//
+// Its participant id is [channels.DefaultPrincipalID] by construction, not by
+// coincidence: an anonymous request is exactly the request the channel store
+// stamps its default tenant onto (ISSUE-0130 shape (b)), so the two must
+// never drift into two different spellings of "nobody in particular".
+var anonymousIdentity = authIdentity{ParticipantID: channels.DefaultPrincipalID}
 
 // identityFrom returns the request's resolved identity, defaulting to
 // the anonymous identity when the middleware has not run (bare test

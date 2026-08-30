@@ -307,12 +307,12 @@ alongside [ISSUE-0123](ISSUE-0123-per-speaker-interaction-scope.md) (R-1).
 > the OQ #8(b) `?since=` watermark remains the deeper fix and stays out of
 > scope). The unit bar is that a span replayed twice derives once.
 >
-> 2026-08-30 — **B1 merged: the column exists and is written; nothing reads
-> it.** Channel store `v11 → v12` adds `principal_id TEXT NOT NULL DEFAULT
-> 'local'` to `messages`
+> 2026-08-30 — **B1 open for review: the column exists and is written;
+> nothing reads it.** Channel store `v11 → v12` adds `principal_id TEXT NOT
+> NULL DEFAULT 'local'` to `messages`
 > ([`sqlite_principal_migration.go`](../../internal/channels/sqlite_principal_migration.go)),
 > stamped inside `sqliteStore.PublishMessage` from `PrincipalFromContext(ctx)`
-> and surfaced on `channelMessageResponse`. Three things worth carrying into
+> and surfaced on `channelMessageResponse`. Four things worth carrying into
 > B2:
 >
 > * **The stamp OVERWRITES rather than defaults.** `PublishMessage` assigns
@@ -337,6 +337,23 @@ alongside [ISSUE-0123](ISSUE-0123-per-speaker-interaction-scope.md) (R-1).
 >   `local` backfill hid rows that *did* have an owner — a pre-v12 `messages`
 >   row never held a tenant, so `local` is the truth for it and not a
 >   partition. There is no activation-day hazard here and no operator action.
+> * **The READ side is open, and that is an accepted exposure rather than an
+>   oversight.** `GET /api/v1/channels/{id}/messages` is `policyPublic` and
+>   has to stay that way — catch-up replay is the consumer this column exists
+>   for and the persona fleet holds no accounts — so every value is readable
+>   with no credential. Combined with the R-2 re-stamp above, that means an
+>   unauthenticated reader can attribute each *agent* utterance to the named
+>   human who provoked it; before v12 that link lived only in orchestrator
+>   memory. Message content was already public on the same route, so the
+>   marginal disclosure is the causal link, not the words. Withholding the
+>   field from unauthenticated callers was considered and rejected — it
+>   blinds B2. The operative mitigation stays the one
+>   `cmd/orchestrator/auth.go` already WARNs about (network-restrict the
+>   ingress to the agent fleet); RFC 0009 agent tokens are what would let
+>   these routes stop being public at all. **B2 must not widen this**: seeding
+>   `principal_scope` from the column is a write-side attribution, and any
+>   future recall predicate that keys on `principal_id` would turn a public
+>   read into a tenant-selectable one.
 >
 > Still open, and B2's: `_build_replay_event` seeds nothing from the field,
 > the shape-(a) skip is unchanged (every replayed span still derives

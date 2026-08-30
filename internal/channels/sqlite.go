@@ -39,12 +39,24 @@ const DefaultSessionID = "legacy"
 // the Python leaf.
 const DefaultEpochID = "live"
 
-// DefaultPrincipalID is the shared single-tenant principal every `messages`
-// row carries when the publish resolved no authenticated identity
-// (ISSUE-0130 shape (b) — channel-store schema v12). It is the *absence* of a
-// tenant, not a tenant: the whole persona fleet resolves it (agents hold no
-// accounts, RFC 0039 §Non-Goals), every autonomous turn resolves it, and
-// every caller under `auth.mode: disabled` resolves it.
+// DefaultPrincipalID is the shared single-tenant principal a `messages` row
+// carries when the publish resolved no tenant at all (ISSUE-0130 shape (b) —
+// channel-store schema v12). It is the *absence* of a tenant, not a tenant.
+//
+// WHICH PUBLISHES ACTUALLY RESOLVE IT, stated precisely because the obvious
+// reading is now wrong. Agents hold no accounts (RFC 0039 §Non-Goals), so an
+// agent publish presents no credential — but presenting none is not the same
+// as resolving `local`. Since ISSUE-0124 R-2 shipped, `publishCommit` may
+// re-stamp an unauthenticated agent publish with the principal of the person
+// who causally provoked it (principal_restamp.go), and [sqliteStore.PublishMessage]
+// reads that re-stamped context. So a persona's relayed reply inside a live
+// cascade persists the CAUSING HUMAN, not this constant — which is the whole
+// point of TestPublishMessage_PersistsTheRestampedCausalPrincipal. What still
+// resolves `local` is the publish with no tenant anywhere in reach: every
+// caller under `auth.mode: disabled`, an unauthenticated publish the
+// attribution table cannot explain (no entry, ambiguous, or expired), and an
+// orchestrator-authored turn built on a fresh context — the RFC 0052 convener
+// cadence and a chair escalation, neither of which descends from a request.
 //
 // Cross-language contract: mirrors `agents.principal_id.DEFAULT_PRINCIPAL_ID`
 // — the `'local'` literal the persona-memory migration v11 backfills onto its
@@ -54,10 +66,15 @@ const DefaultEpochID = "live"
 // the column this constant defaults. A rename here is a conscious break that
 // must move in lock-step with the Python leaf.
 //
-// Go has no lock-step guard for it — unlike [DefaultEpochID]'s Python twin
-// there is no shared config knob to parse — so the migration SQL spells the
-// literal out (see migrateV11ToV12) and this constant is the *write-side*
-// source of truth only.
+// That contract is PINNED, not merely asserted:
+// tests/unit/python/test_cross_language_principal_default_drift.py parses this
+// declaration out of the Go source and compares it to the Python constant and
+// to the frozen `'local'` literal in migrateV11ToV12's `DEFAULT` — the same
+// source-parsing shape the respond-policy and cascade-depth drift pins use.
+// The migration SQL still spells the literal out rather than interpolating
+// this constant, because migration SQL is frozen history: a future rename must
+// not silently rewrite what v12 backfilled. The drift pin is what makes that
+// divergence a red build instead of a silent one.
 const DefaultPrincipalID = "local"
 
 // SessionMetrics is the subset of orchestrator OTEL handles the channel
