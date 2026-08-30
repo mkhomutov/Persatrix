@@ -64,14 +64,17 @@ REASON_SHUTDOWN: Literal["shutdown"] = "shutdown"
 # :meth:`InteractionTracker.close` with this reason so the interaction
 # is summarised (RFC 0020 close path) rather than merely stopping fanout.
 REASON_COST: Literal["cost"] = "cost"
-# ISSUE-0130 (v0.3.14): the on-startup catch-up replay finished (or a live
-# turn arrived on a scope the replay had opened).  Replay events open
-# tracker scopes but carry no session-end signal of their own, so without
-# this close the next live turn appends to the replay-opened span — which
-# is flagged ``Interaction.replayed`` and therefore skips derivation at
-# close, silently losing memory for a fully attributable live
-# conversation.  Closing on the replay→live boundary keeps the two spans
-# apart: the replayed one is dropped, the live one derives normally.
+# ISSUE-0130 (v0.3.14): the on-startup catch-up replay finished, or replayed
+# and live traffic met on one scope — in EITHER direction (v0.3.15 PR B2
+# review made the boundary symmetric).  Replay events open tracker scopes
+# but carry no session-end signal of their own, so without this close the
+# two kinds of turn merge into one record, and the record's frozen
+# ``replayed`` flag then governs a span it only half describes: a live
+# conversation judged by the replay rules (and, when the replay could not
+# be attributed, dropped with them), or replayed history judged by the live
+# rules — which silently bypasses the re-derivation guard, since only a
+# ``replayed`` record consults it.  Closing on the boundary keeps the two
+# spans apart, and each derives under its own rules.
 REASON_CATCHUP_COMPLETE: Literal["catchup_complete"] = "catchup_complete"
 
 # Closed value set for :meth:`InteractionTracker.close`'s ``reason``

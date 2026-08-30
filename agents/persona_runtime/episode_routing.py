@@ -439,11 +439,15 @@ class _EpisodeRoutingMixin:
             on_finalized=self._tick_auto_reflect_counter,
         )
 
-    async def close_replayed_interactions(self) -> int:
+    async def close_replayed_interactions(self, *, derive: bool = True) -> int:
         """The catch-up caller's ISSUE-0130 hook — see
-        :func:`agents.persona_runtime.close_path.close_replayed_scopes`."""
+        :func:`agents.persona_runtime.close_path.close_replayed_scopes`,
+        which states both what ``derive=False`` means (the pass did not
+        finish) and what the task set is for (bounding the boot burst).
+        """
         return await close_replayed_scopes(
             self._interaction_tracker, self._persist_closed_interaction,
+            derive=derive, pending_tasks=self._pending_summarize_tasks,
         )
 
     async def drain_pending_summaries(self) -> None:

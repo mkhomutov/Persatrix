@@ -293,6 +293,16 @@ class EpisodicMemory(_EpisodicNotesAPIMixin, _EpisodicStateAPIMixin):
         return await _update_episode_summary(
             self._ensure_db(), self._agent_id, interaction_id, summary)
 
+    def active_epoch_id(self) -> str:
+        """The epoch a write from this call site would be stamped with.
+
+        The same resolution :meth:`store_episode` applies (a per-request
+        ``epoch_scope`` wins over the construction-time snapshot), exposed
+        so the ISSUE-0130 (b) replay span identity can put it in its digest
+        and be sure it matches the row the derivation goes on to write.
+        """
+        return resolve_active_epoch(self._active_epoch_id)
+
     async def has_episode_for_interaction(self, interaction_id: str) -> bool:
         """ISSUE-0130 (b): was this interaction already turned into a row?
 

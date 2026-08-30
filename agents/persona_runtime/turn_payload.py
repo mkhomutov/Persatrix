@@ -17,7 +17,7 @@ shape both consumers feed the close-path summariser.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from ..channel_event_classification import wire_channel_classification
 from ..memory.interaction_types import ROOM_CLOSE_TURN_KEY
@@ -26,7 +26,29 @@ from ..principal_id import principal_id_from_metadata
 if TYPE_CHECKING:
     from ..persona_types import AgentEvent
 
-__all__ = ["build_turn_payload", "frozen_open_capture"]
+__all__ = ["FrozenOpenCapture", "build_turn_payload", "frozen_open_capture"]
+
+
+class FrozenOpenCapture(TypedDict):
+    """The keyword set :func:`frozen_open_capture` hands the tracker.
+
+    Declared rather than returned as ``dict[str, Any]`` because the call
+    site unpacks it (``**frozen_open_capture(event)``) into
+    :meth:`~agents.memory.interaction_tracker.InteractionTracker.add_turn`,
+    and mypy checks NEITHER key names nor value types through an ``Any``
+    splat — while every one of these five has a default on ``add_turn``,
+    so a dropped or misspelled key silently takes that default instead of
+    raising.  A typo'd ``replayed`` would make every catch-up-opened
+    record look live and disarm the ISSUE-0130 skip with a green type
+    check (v0.3.15 PR B2 review).  A ``TypedDict`` restores the checking
+    the inline keywords used to get.
+    """
+
+    classification: str | None
+    source_channel_id: str | None
+    replayed: bool
+    replay_attributed: bool
+    speaker_id: str | None
 
 
 def build_turn_payload(
@@ -78,7 +100,7 @@ def build_turn_payload(
     return payload
 
 
-def frozen_open_capture(event: AgentEvent) -> dict[str, Any]:
+def frozen_open_capture(event: AgentEvent) -> FrozenOpenCapture:
     """The record fields ``event`` freezes if its turn OPENS the record.
 
     Extracted from ``_EpisodeRoutingMixin._handle_multi_turn_event``
@@ -108,12 +130,23 @@ def frozen_open_capture(event: AgentEvent) -> dict[str, Any]:
       record.  The principal half of the key resolves ambient (the
       ``on_event`` request scope) inside the tracker.
     """
+    replayed = event.metadata.get("replay_mode") is True
     return {
         "classification": wire_channel_classification(event),
         "source_channel_id": event.channel_id or None,
-        "replayed": event.metadata.get("replay_mode") is True,
+        "replayed": replayed,
+        # Conjoined with ``replayed`` HERE rather than left to every
+        # reader.  The live gRPC ingress seeds the same principal key, so
+        # an unconditional expression marks essentially every
+        # authenticated live record ``replay_attributed=True`` — a state
+        # the field's own contract calls meaningless, and one that means
+        # "was authenticated" instead.  Any later reader that drops the
+        # conjunct (an observability attribute, a read-surface column,
+        # the v0.3.16 provenance work) would then report live records as
+        # replay-attributed.  Making the pair unrepresentable costs one
+        # ``and`` (v0.3.15 PR B2 review).
         "replay_attributed": (
-            principal_id_from_metadata(event.metadata) is not None
+            replayed and principal_id_from_metadata(event.metadata) is not None
         ),
         "speaker_id": event.sender_id,
     }

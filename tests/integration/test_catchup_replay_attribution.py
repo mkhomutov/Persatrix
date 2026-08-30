@@ -42,10 +42,12 @@ from agents.channel_replay_event import build_replay_event
 from agents.clock import FrozenClock
 from agents.memory.interactions import scope_for_group
 from agents.persona_runtime import _LLMPersonaAgent
+from agents.principal_id import seed_principal_metadata
 from agents.tools.registry import clear_registry
 
 from ._interaction_multi_turn_helpers import (
     GROUP_CHANNEL,
+    channel_event,
     make_agent_with_clock,
 )
 
@@ -209,3 +211,133 @@ class TestReplayIsIdempotentAcrossPasses:
             "would lose the memory of every message that arrived while "
             "the agent was down, which is the cost shape (b) buys back"
         )
+
+
+@pytest.mark.asyncio
+class TestReplayedAndLiveTurnsNeverShareARecord:
+    """The catch-up boundary, in BOTH directions (PR B2 review).
+
+    Dispatch is already serving while catch-up runs — ``agents.server``
+    self-registers before ``replay_for_persona_agents`` — so for any
+    ``(principal, speaker, scope)`` key it is a race which kind of turn
+    opens the record.  Only the replay-opened → live-turn direction was
+    split; the reverse merged silently, and the merged record's frozen
+    ``replayed`` is ``False``, which bypasses BOTH close-path guards.
+    """
+
+    @staticmethod
+    def _live_turn_from(principal: str) -> object:
+        """An AUTHENTICATED live turn, so it resolves the SAME record key
+        the replayed rows below do.
+
+        Without a principal the live turn keys on ``local`` and the two
+        never meet — the merge this class exists to pin needs the live
+        and replayed halves to agree on all three key axes.  Seeded
+        through the production helper so a key rename cannot leave this
+        green against a key nothing reads.
+        """
+        event = channel_event("live first", sender="alice")
+        seed_principal_metadata(event.metadata, principal)
+        return event
+
+    async def test_a_replayed_turn_does_not_join_a_live_opened_record(self):
+        agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
+        # The live turn wins the race and opens the record for this key.
+        await agent.on_event(self._live_turn_from("alice-person"))
+        # Catch-up then reaches the same channel and replays alice's
+        # history, which resolves the identical record key.
+        await agent.on_event(build_replay_event(
+            _history_row("m-1", "alice", "Mira turns seven", "alice-person"),
+            GROUP_CHANNEL, "all", CHANNEL,
+        ))
+        open_records = list(agent._interaction_tracker.open_records())
+        assert [r.replayed for r in open_records] == [True], (
+            "the live record must have closed and the replayed turn opened "
+            "its own; merging them leaves one record flagged live that "
+            "holds replayed turns, which consults neither ISSUE-0130 guard"
+        )
+
+    async def test_the_replayed_half_of_a_lost_race_is_still_guarded(self):
+        # The consequence that made the missing direction matter: without
+        # the split the replayed window is re-derived on every boot,
+        # because only a `replayed` record consults the guard.
+        agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
+        row = _history_row("m-1", "alice", "Mira turns seven", "alice-person")
+
+        await agent.on_event(self._live_turn_from("alice-person"))
+        await _replay(agent, row)
+        after_first = await _derived(agent)
+        assert any(r[0] == "alice-person" for r in after_first), (
+            "the replayed span must reach the sweep and derive under its "
+            "own tenant — without this the comparison below is vacuous, "
+            "since a merged record is not swept and derives nothing at all"
+        )
+
+        await _replay(agent, row)
+        assert await _derived(agent) == after_first, (
+            "the replayed span must be recognised on the next pass even "
+            "when a live turn opened the record first"
+        )
+
+
+@pytest.mark.asyncio
+class TestTheV12BackfillIsUnattributable:
+    async def test_an_empty_principal_derives_nothing(self):
+        """Migration v11→v12 backfills ``''``, and ``''`` is not an answer.
+
+        A row that predates the column has no evidence of who caused it.
+        The backfill says so with the empty string precisely so this case
+        stays on the shape-(a) skip: backfilling ``'local'`` instead would
+        make every pre-upgrade row read as ATTRIBUTED on the first
+        post-upgrade catch-up and derive an authenticated person's content
+        into the shared tenant — the ISSUE-0130 leak, reopened for the
+        upgrade window.
+        """
+        agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
+        await _replay(
+            agent, _history_row("m-1", "alice", "Mira turns seven", ""),
+        )
+        assert await _derived(agent) == []
+
+    async def test_a_whitespace_principal_is_not_an_answer_either(self):
+        # The record key resolves a whitespace principal back to `local`
+        # (`normalize_principal_id` strips), so seeding it verbatim would
+        # mark the span attributed while landing its content in the shared
+        # tenant.  The write end strips too, so it reads as absent.
+        agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
+        await _replay(
+            agent, _history_row("m-1", "alice", "Mira turns seven", "   "),
+        )
+        assert await _derived(agent) == []
+
+
+@pytest.mark.asyncio
+class TestAnUnfinishedPassDerivesNothing:
+    async def test_a_truncated_pass_does_not_derive_its_prefix(self):
+        """The wall-clock budget overrun (PR B2 review).
+
+        The pass-end sweep runs in ``replay_for_persona_agents``'s
+        ``finally``, so a budget overrun still closes what it ingested —
+        a PREFIX of the window.  Deriving that prefix claims an identity
+        no later boot can recompute (the digest is over the turns the
+        record holds), so the next complete boot derives the whole window
+        again on top of it.  The window never moved, so this is not the
+        documented residual.  Catch-up re-reads the window every boot
+        anyway, so declining costs one boot's derivation, not the memory.
+        """
+        agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
+        rows = [
+            _history_row("m-1", "alice", "Mira turns seven", "alice-person"),
+            _history_row("m-2", "alice", "and she loves whales", "alice-person"),
+        ]
+        # The pass is cut off after the first row.
+        await agent.on_event(build_replay_event(
+            rows[0], GROUP_CHANNEL, "all", CHANNEL,
+        ))
+        await agent.close_replayed_interactions(derive=False)
+        await agent.drain_pending_summaries()
+        assert await _derived(agent) == [], "a prefix must not be derived"
+
+        # The next boot completes the window and derives it whole, once.
+        await _replay(agent, *rows)
+        assert len(await _derived(agent)) == 1

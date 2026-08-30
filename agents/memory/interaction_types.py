@@ -27,7 +27,9 @@ from ..session_id import LEGACY_SESSION_ID
 # beside the builder, because it is part of the ``Turn.payload`` contract
 # and the read surface (``closed_interactions_read``) must not grow an
 # import into the persona subpackage to honour it.  Survives persistence:
-# ``persist_closed_interaction`` strips only ``text``.
+# ``persist_closed_interaction`` strips only the keys in its
+# ``_TRANSIENT_TURN_KEYS`` set (``text``, and ``message_id`` since
+# v0.3.15 PR B2) — this one is not among them.
 ROOM_CLOSE_TURN_KEY = "room_close"
 
 
@@ -136,13 +138,19 @@ class Interaction:
     speaker_id: str = ""
     # ISSUE-0130: True when this interaction was OPENED by an on-startup
     # catch-up replay turn, captured under the same only-on-open rule as
-    # ``session_id`` above.  A replayed turn carries no principal — the
-    # orchestrator's ``messages`` table has no principal column, so
-    # ``_build_replay_event`` has nothing to seed and the persona binds its
-    # default (``local``).  Deriving a summary and RFC 0026 facts from such
-    # a span therefore writes one person's content into the shared tenant;
-    # the close path skips derivation when this is set.  See
-    # :func:`~agents.persona_runtime.close_path.persist_closed_interaction`.
+    # ``session_id`` above.
+    #
+    # On its own this no longer decides derivation.  Since shape (b)
+    # (v0.3.15 PR B2) ``messages.principal_id`` persists the tenant at
+    # publish and ``build_replay_event`` seeds it, so a replayed span that
+    # knows its tenant DOES derive, under that tenant — see
+    # ``replay_attributed`` below, which is the half that decides, and
+    # :func:`~agents.persona_runtime.close_path.persist_closed_interaction`
+    # for both.  What this flag still governs by itself: the catch-up
+    # boundary (a replayed span never shares a record with live turns, in
+    # either direction), the room-close fan's eligibility rule
+    # (``admitted_records`` excludes replayed records unconditionally),
+    # and the re-derivation guard, which only a replayed span consults.
     replayed: bool = False
     # ISSUE-0130 shape (b) — whether the replayed turn that OPENED this
     # record carried a persisted principal (channel-store v12's

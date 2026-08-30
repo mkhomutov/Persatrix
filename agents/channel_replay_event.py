@@ -26,6 +26,8 @@ from .persona_types import AgentEvent, EventType
 from .principal_id import seed_principal_metadata
 
 __all__ = ["build_replay_event"]
+
+
 def build_replay_event(
     msg: dict,
     channel_id: str,
@@ -70,9 +72,9 @@ def build_replay_event(
     merged record opens with no wire id — the first LIVE id then reads
     as adoption-not-rotation, silently disarming the RFC 0030 close
     propagation after every restart.  Rotation still SEGMENTS the
-    replayed spans; what it no longer does is derive from them —
-    ISSUE-0130 skips the close-path summariser for every replay-opened
-    span, which has no principal to attribute a summary to.
+    replayed spans; what it no longer does is derive from them
+    unconditionally — since shape (b) below, a replay-opened span
+    derives when it can name its tenant and is skipped when it cannot.
 
     ISSUE-0130 shape (b) — the principal seed (v0.3.15 PR B2).  The row's
     ``principal_id`` (channel-store v12, stamped server-side at publish)

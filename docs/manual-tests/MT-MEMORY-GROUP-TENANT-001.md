@@ -256,17 +256,35 @@ Set `auth.mode: disabled`, restart, repeat Leg 1 with no credential.
 
 The [ISSUE-0130](../issues/ISSUE-0130-catchup-replay-rederives-memory-under-default-principal.md)
 shape-(b) leg. With Legs 1–4's traffic in the room, snapshot **both**
-partitions, restart the fleet, wait for catch-up, and snapshot again —
-sending **no new traffic** in between, or the comparison measures the
+partitions, restart the **agents**, wait for catch-up, and snapshot again
+— sending **no new traffic** in between, or the comparison measures the
 traffic instead.
+
+**Restore `auth.mode: enabled` and re-authenticate first.** Leg 8 turns
+it off and does not turn it back on, and its re-run of Leg 1 leaves the
+newest traffic — the part of the window catch-up actually re-reads —
+stamped `local`. Run this leg with `alice-person` traffic newest, or the
+partition it tells you to read first is the one nothing replays, and it
+goes flat for a reason that has nothing to do with the guard.
 
 ```sql
 SELECT principal_id, speaker_id, COUNT(*) FROM episodes GROUP BY 1, 2;
 SELECT principal_id, speaker_id, COUNT(*) FROM facts GROUP BY 1, 2;
+-- Replay-derived rows are identifiable on their own: the shape-(b) span
+-- identity is written as the interaction id, prefixed `replay-`.
+SELECT interaction_id, principal_id, speaker_id FROM episodes
+ WHERE interaction_id LIKE 'replay-%';
 ```
 
 ```bash
-docker compose restart orchestrator && sleep 20   # then wait for /healthz
+# The AGENTS, not the orchestrator: catch-up replay runs once, from
+# `AgentServer.start()`. The ISSUE-0125 re-registration watcher
+# deliberately re-runs only `_self_register`, and compose agents are
+# dependents of the orchestrator rather than the reverse — so
+# `restart orchestrator` replays nothing and this leg would pass with
+# the guard deleted.
+docker compose restart agent-ember-owl agent-iron-fox agent-nova-sparrow
+sleep 20   # then wait for each agent's /healthz
 ```
 
 | | Expected |
@@ -277,8 +295,8 @@ docker compose restart orchestrator && sleep 20   # then wait for /healthz
 - [ ] Both snapshots are pasted verbatim, per `(principal_id, speaker_id)`, and are **identical**.
 - [ ] Read `alice-person` first. This issue originally framed the missing check as a `local` read, which was right while every replayed derivation went there; once (b) lands, a re-derived duplicate appears in the **attributed** partition, so a `local`-only assertion passes at exactly the moment the regression is worst.
 - [ ] Restart **again** without traffic. The bar is that N restarts derive once, not that the second one is quiet.
-- [ ] Now send one message and restart a third time. New rows **must** appear: the guard bounds duplication, and a leg that only proves nothing was written cannot tell that apart from replay having stopped deriving at all.
-- [ ] No agent process is restarted by hand at any point ([ISSUE-0125](../issues/ISSUE-0125-agents-never-reregister-after-orchestrator-restart.md) — this leg is also that fix's live proof; `GET /api/v1/agents` non-empty after the restart is the check).
+- [ ] Now send one message and restart a third time. New rows **must** appear, and at least one **must** carry a `replay-` interaction id: the guard bounds duplication, and a leg that only proves nothing was written cannot tell that apart from replay having stopped deriving at all. Counting rows alone does not settle it — the live close writes rows too, with no replay involved, so the `replay-` prefix is what makes this check discriminating.
+- [ ] ISSUE-0125's live proof is **Leg 8's** orchestrator restart, not this one (`docker compose restart orchestrator`, then `GET /api/v1/agents` non-empty). Keep the two apart: this leg needs the agents restarted, which is exactly what that check forbids, and running them as one leg is how the shape-(b) guard ended up with no live proof at all.
 
 ---
 

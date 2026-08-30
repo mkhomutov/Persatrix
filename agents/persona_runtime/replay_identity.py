@@ -15,7 +15,12 @@ one is not a fix.
 So a replayed span gets an identity that does not change between boots,
 and the close path declines to derive one it has already derived.  The
 identity is the record's own content: its ``(principal, speaker, scope)``
-key, the agent, and the ordered wire ids of the messages it replays.
+key, the agent, the ACTIVE EPOCH the row will be stamped with, and the
+ordered wire ids of the messages it replays.  Every axis the stored row is
+partitioned by has to be in the digest, or the guard reaches across that
+partition and suppresses a derivation the asking side can never read; the
+epoch is the one such axis that is not part of the record key, so it is
+threaded in from the tier that stamps it.
 Nothing in that is clock- or boot-derived — ``interaction_id`` normally is
 (``uuid4``), and ``started_at`` is boot time, not wire time, which is
 exactly why neither can answer this.
@@ -54,35 +59,64 @@ REPLAY_INTERACTION_ID_PREFIX = "replay-"
 
 
 def replay_span_identity(
-    interaction: Interaction, agent_id: str, message_ids: list[str],
+    interaction: Interaction,
+    agent_id: str,
+    epoch_id: str,
+    message_ids: list[str],
 ) -> str | None:
     """The boot-stable id for a replayed span, or ``None``.
 
-    ``None`` means the span cannot be identified — some turn carried no
-    wire message id — and the caller should derive WITHOUT the dedup
-    guard rather than skip: the guard exists to bound duplication, and
-    trading it for silently losing a span's memory inverts the cost.
-    The production replay path always carries the id (it is
-    ``channelMessageResponse.id``, and ``validate_channel_message_dict``
-    rejects a row without one before the event is ever built), so this
-    is a defensive branch, logged at WARN because reaching it means the
-    guard is off.
+    ``message_ids`` carries ONE ENTRY PER TURN in span order, ``""``
+    where that turn had no wire id.  ``None`` means the span cannot be
+    identified — it has no turns, or ANY turn carried no wire id — and
+    the caller should derive WITHOUT the dedup guard rather than skip:
+    the guard exists to bound duplication, and trading it for silently
+    losing a span's memory inverts the cost.
+
+    Requiring EVERY turn to be identified is the whole contract, not a
+    strictness preference.  A digest over the identified subset is
+    stable across two spans that differ only in their unidentified
+    turns, so the second span matches the first and is skipped — its
+    content never summarised, never extracted, and never retried,
+    because the record is popped by then.  That is the losing direction
+    this module refuses.
+
+    The premise cannot be assumed away at the wire either:
+    ``validate_channel_message_dict`` reads ``msg.get("id", "")`` and
+    only type- and length-checks it, so a history row with a missing or
+    empty ``id`` reaches the builder.  Reaching ``None`` is therefore
+    rare rather than impossible, and is logged at WARN because it means
+    the guard is off for that span.
 
     The agent id is in the digest as well as in the lookup that consumes
     it: the id is written to ``episodes.interaction_id``, a column
     nothing constrains to one agent, and two personas replaying the same
     room legitimately derive their own episodes from the same messages.
+
+    ``epoch_id`` is in the digest for the same reason the principal is,
+    and it is the axis the first cut missed.  ``store_episode`` stamps
+    the row with the ambient epoch and every episodic recall filters it
+    with unconditional strict equality — no ``"*"`` bypass, no carve-out
+    (:mod:`agents.memory._epoch_filter`).  An epoch-free digest therefore
+    let a row written under one epoch suppress derivation under another,
+    where that row can never be read: the span's memory silently absent
+    from the epoch that asked for it, permanently, since every later boot
+    re-matches the same row.  With the epoch in the digest each epoch
+    derives and reads its own.
     """
-    if not message_ids:
+    if not message_ids or not all(message_ids):
         logger.warning(
-            "ISSUE-0130: replayed span for agent=%s scope=%s carries no wire "
-            "message ids; deriving without the re-derivation guard",
+            "ISSUE-0130: replayed span for agent=%s scope=%s has %d of %d "
+            "turns without a wire message id; deriving without the "
+            "re-derivation guard",
             agent_id, interaction.scope,
+            sum(1 for m in message_ids if not m), len(message_ids),
         )
         return None
     digest = hashlib.sha256(
         "\x1f".join([
             agent_id,
+            epoch_id,
             interaction.principal_id,
             interaction.speaker_id,
             interaction.scope,
@@ -124,21 +158,33 @@ async def replay_span_already_derived(
     duplication while skipping on a transient read error would lose the
     span's memory outright — and the close path has exactly one attempt
     at it.
+
+    A lookup that raises additionally leaves the ``uuid4`` in place
+    rather than claiming the digest.  Deriving twice is the accepted
+    residual; deriving twice UNDER ONE ID is not, because
+    ``interaction_id`` stopped being collision-free the moment it became
+    content-derived, and ``update_episode_summary`` matches
+    ``WHERE agent_id = ? AND interaction_id = ? AND summary = ?`` with no
+    ``LIMIT`` — two rows sharing a digest would have Phase 2 rewrite both
+    and mis-report ``rowcount``.  The uuid4 keeps the failed attempt in
+    its own namespace; the next boot computes the digest cleanly.
     """
-    identity = replay_span_identity(interaction, agent_id, message_ids)
+    identity = replay_span_identity(
+        interaction, agent_id, episodic.active_epoch_id(), message_ids,
+    )
     if identity is None:
         return False
-    interaction.interaction_id = identity
     try:
         already = await episodic.has_episode_for_interaction(identity)
     except Exception:
         logger.warning(
             "ISSUE-0130: re-derivation guard failed for agent=%s scope=%s "
-            "interaction_id=%s; deriving (the guard bounds duplication, it "
-            "must not cost a span its memory)",
+            "interaction_id=%s; deriving under the boot-local id (the guard "
+            "bounds duplication, it must not cost a span its memory)",
             agent_id, interaction.scope, identity, exc_info=True,
         )
         return False
+    interaction.interaction_id = identity
     if already:
         logger.info(
             "ISSUE-0130: replayed span already derived — skipping "

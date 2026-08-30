@@ -146,6 +146,12 @@ class _RecordingEpisodic:
         self.calls.append("store_closed_interaction")
         return "should-not-happen"
 
+    def active_epoch_id(self) -> str:
+        # ISSUE-0130 (b): the epoch axis of the span identity.  The real
+        # tier resolves this the same way ``store_episode`` stamps the
+        # row, so the digest and the row it guards agree.
+        return "live"
+
     async def has_episode_for_interaction(self, interaction_id: str) -> bool:
         # ISSUE-0130 (b): the re-derivation guard's lookup.  A spy that
         # lacked it would answer through the guard's own except-branch,
@@ -253,11 +259,21 @@ async def test_attributed_replayed_interaction_derives_on_close() -> None:
     """
     tracker = InteractionTracker()
     opened = tracker.add_turn(
-        "dm:alice", payload={"text": "My daughter Mira turns seven next month."},
+        # ``message_id`` is what the production replay path puts on every
+        # turn (``build_turn_payload``), and the re-derivation guard is
+        # built from it.  Without one here the guard exits through its
+        # "span carries no wire message ids" branch — leaving ``asked``
+        # empty and the id unreplaced, so this test would pass against a
+        # guard that had been stubbed out entirely (v0.3.15 PR B2 review).
+        "dm:alice", payload={
+            "text": "My daughter Mira turns seven next month.",
+            "message_id": "m-1",
+        },
         replayed=True, replay_attributed=True, principal_id="alice-person",
     )
     closed = tracker.close_record(opened, reason=REASON_STRUCTURAL)
     assert closed is not None
+    minted_at_open = closed.interaction_id
 
     episodic = _RecordingEpisodic()
     pending: set[asyncio.Task[None]] = set()
@@ -279,6 +295,15 @@ async def test_attributed_replayed_interaction_derives_on_close() -> None:
         "an attributed replayed span must derive — refusing it is the "
         "v0.3.14 cost shape (b) exists to remove"
     )
+    # The guard ran on the production path, not the no-ids branch.
+    assert episodic.asked == [closed.interaction_id], (
+        "the close path must ASK the guard, using the id it then writes"
+    )
+    assert closed.interaction_id.startswith("replay-"), (
+        "the boot-stable identity must replace the uuid4 minted at open, "
+        "or the next boot cannot recognise this span"
+    )
+    assert closed.interaction_id != minted_at_open
     for task in pending:
         task.cancel()
 

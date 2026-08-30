@@ -142,7 +142,7 @@ async def replay_channel_history(
     orchestrator_url: str,
     session: aiohttp.ClientSession,
     limit: int = DEFAULT_CATCHUP_LIMIT,
-) -> None:
+) -> bool:
     """Fetch recent channel history and replay it through the agent.
 
     See module docstring for the contract. This function never raises;
@@ -182,6 +182,7 @@ async def replay_channel_history(
             counts["events"],
             elapsed_ms,
         )
+        return True
     except TimeoutError:
         elapsed_ms = (time.monotonic() - started_at) * 1000
         logger.warning(
@@ -194,6 +195,7 @@ async def replay_channel_history(
             counts["events"],
             elapsed_ms,
         )
+        return False
 
 
 async def _replay_channel_history_inner(
@@ -400,8 +402,9 @@ async def replay_for_persona_agents(
     for agent_id, agent in agents.items():
         if not isinstance(agent, _LLMPersonaAgent):
             continue
+        complete = False
         try:
-            await replay_channel_history(
+            complete = await replay_channel_history(
                 agent=agent,
                 orchestrator_url=orchestrator_url,
                 session=session,
@@ -413,7 +416,19 @@ async def replay_for_persona_agents(
             )
         finally:
             # ISSUE-0130: pop the scopes this pass opened — in ``finally`` so a
-            # budget overrun closes them too — or the next LIVE turn joins a
-            # span that derives nothing.  Best-effort, does not raise:
+            # budget overrun closes them too, or the next LIVE turn merges
+            # into one.  Best-effort, does not raise:
             # ``close_path.close_replayed_scopes``.
-            await agent.close_replayed_interactions()
+            #
+            # ``derive`` carries whether the pass actually FINISHED (v0.3.15
+            # PR B2 review).  A pass cut short by the wall-clock budget or
+            # by an exception has ingested a PREFIX of some channel's
+            # window, and the shape-(b) span identity is computed from the
+            # turns the record holds — so deriving that prefix claims an
+            # id no later boot can ever recompute, and the next complete
+            # boot derives the whole window again on top of it.  That is
+            # not the documented "moved window" residual; the window never
+            # moved.  Closing without deriving costs this boot's
+            # derivation, which catch-up re-reads anyway (no watermark,
+            # RFC 0011 OQ #8), and keeps the identity honest.
+            await agent.close_replayed_interactions(derive=complete)

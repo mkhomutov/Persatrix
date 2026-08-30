@@ -270,26 +270,40 @@ def stale_close_reason(
 
     Two boundaries, checked in this order:
 
-    1. **The catch-up boundary (ISSUE-0130).**  A LIVE turn arriving on a
-       scope that the on-startup replay opened splits there.  The replayed
-       span carries no principal, so :func:`~agents.persona_runtime
-       .close_path.persist_closed_interaction` derives nothing from it;
-       letting the live turn join it would drop the live conversation's
-       memory too.  Checked first because it holds regardless of what the
-       wire ids say — the replay-opened record must not absorb live turns
-       even when the conversation genuinely continues under the same wire
-       interaction id, which is the common mid-conversation-restart case
-       (and the only case for thread scopes, whose ``wire_id`` is always
-       empty).  Replay→replay is NOT a split: those turns share the same
-       unattributable span, segmented by rotation like any other.
+    1. **The catch-up boundary (ISSUE-0130).**  Replayed and live turns
+       never share a record, in EITHER direction: the split fires whenever
+       the open record's ``replayed`` flag disagrees with the arriving
+       event's ``replay_mode``.  Checked first because it holds regardless
+       of what the wire ids say — the two must not merge even when the
+       conversation genuinely continues under the same wire interaction id,
+       which is the common mid-conversation-restart case (and the only case
+       for thread scopes, whose ``wire_id`` is always empty).  Replay→replay
+       and live→live are NOT splits: those turns share a span, segmented by
+       rotation like any other.
+
+       Both directions are reachable because dispatch is already serving
+       while catch-up runs (``agents.server`` self-registers before
+       ``replay_for_persona_agents``), so which one opens the record for a
+       given ``(principal, speaker, scope)`` key is a race:
+
+       * **live turn onto a replay-opened record.**  Without the split the
+         live conversation joins a span flagged ``replayed``, and is either
+         skipped as unattributable or folded into the replayed span's
+         derivation — losing a fully attributable conversation's memory.
+       * **replay turn onto a live-opened record** (v0.3.15 PR B2 review).
+         Without the split the replayed turns join a record whose frozen
+         ``replayed`` is ``False``, which bypasses BOTH close-path guards:
+         the unattributable skip never fires, and — because the record is
+         not ``replayed`` — neither does the re-derivation guard, so that
+         window is summarised again on every boot the race is lost.  The
+         live record closes and derives normally; the replay opens its own.
     2. **The wire rotation** — see :func:`wire_rotation_closes` /
        :func:`wire_rotation_close_reason`.
     """
     if open_interaction is None or not open_interaction.is_open:
         return None
-    if (
-        open_interaction.replayed
-        and event.metadata.get("replay_mode") is not True
+    if open_interaction.replayed != (
+        event.metadata.get("replay_mode") is True
     ):
         return REASON_CATCHUP_COMPLETE
     if wire_rotation_closes(open_interaction, wire_id):

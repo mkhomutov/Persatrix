@@ -79,6 +79,12 @@ PRINCIPAL_METADATA_GRPC_KEY: Final[str] = "persatrix-principal"
 #: :data:`agents.session_id.EVENT_SESSION_METADATA_KEY`.
 EVENT_PRINCIPAL_METADATA_KEY: Final[str] = "persatrix_principal"
 
+#: Byte ceiling on a principal seeded from a REST payload
+#: (:func:`seed_principal_metadata`).  Mirrors the sibling wire seeds'
+#: bounds; generous against real subject ids, and far below anything that
+#: makes an unbounded metadata value interesting.
+_SEEDED_PRINCIPAL_MAX_BYTES: Final[int] = 256
+
 #: Task-local active principal (ISSUE-0081 PR 3).  Auto-copied into each
 #: :class:`asyncio.Task`, so a per-request ``principal_scope`` set on one
 #: task cannot bleed into a sibling task — the per-tenant isolation a
@@ -206,11 +212,30 @@ def seed_principal_metadata(
     exactly as it attributes a live one.
 
     ``raw`` is accepted untyped because it comes off parsed JSON.  A
-    non-empty string seeds and returns ``True``; anything else — a
-    missing key, ``""``, a non-string — seeds nothing and returns
-    ``False``, which is the reader's rule (:func:`principal_id_from_metadata`)
-    applied at the write end so the two cannot drift on what counts as
-    "no principal".
+    string that is non-empty AFTER STRIPPING and within
+    :data:`_SEEDED_PRINCIPAL_MAX_BYTES` seeds its stripped form and
+    returns ``True``; anything else — a missing key, ``""``, whitespace,
+    an over-long value, a non-string — seeds nothing and returns
+    ``False``.
+
+    Stripping is what makes the write end agree with the value that
+    ultimately decides the tenant.  :func:`principal_id_from_metadata`
+    tests bare truthiness, but the record key runs the bound principal
+    through :func:`normalize_principal_id`, which strips and falls back
+    to :data:`DEFAULT_PRINCIPAL_ID` — so seeding ``" "`` verbatim would
+    mark the span ATTRIBUTED while landing its content in the shared
+    ``local`` tenant, which is the leak the attribution exists to stop.
+    Seeding the stripped form keeps the presence bit and the resolved
+    value telling the same story (v0.3.15 PR B2 review).
+
+    The byte bound is the same reason the sibling seeds on the adjacent
+    lines carry one (:func:`agents.channel_event_classification
+    .seed_channel_classification`, :func:`agents.channel_wire_metadata
+    .seed_replay_metadata`): this value arrives on the REST history
+    surface, which shares the cleartext gRPC port's TLS-deferred trust
+    boundary, and it is written to a strict-equality tenant column.  An
+    unbounded one is both a memory vector and a way to strand rows in a
+    tenant no real caller can name.
 
     **The boolean is the consumer's real question**, not a convenience:
     absent means *this row predates the column* (a pre-v12 orchestrator),
@@ -230,7 +255,10 @@ def seed_principal_metadata(
     ``replay_mode`` short-circuit returns before the gate and the LLM),
     so this binds nothing but where the derived rows land.
     """
-    if isinstance(raw, str) and raw:
-        metadata[EVENT_PRINCIPAL_METADATA_KEY] = raw
-        return True
-    return False
+    if not isinstance(raw, str):
+        return False
+    seeded = raw.strip()
+    if not seeded or len(seeded.encode("utf-8")) > _SEEDED_PRINCIPAL_MAX_BYTES:
+        return False
+    metadata[EVENT_PRINCIPAL_METADATA_KEY] = seeded
+    return True

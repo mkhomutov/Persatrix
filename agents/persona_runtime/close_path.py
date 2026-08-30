@@ -211,10 +211,15 @@ async def persist_closed_interaction(
     own_turns = own_turn_items(interaction)
     if interaction.replayed and await replay_span_already_derived(
         episodic=episodic, interaction=interaction, agent_id=agent_id,
+        # ONE ENTRY PER TURN, ``""`` where that turn carried no wire id.
+        # Filtering the unnamed turns out here instead would hand the
+        # identity a digest over the identified SUBSET, which cannot tell
+        # "this span" from "this span plus turns I could not name" — two
+        # different spans would share one id and the second would be
+        # skipped, losing its content outright.  ``replay_identity`` owns
+        # that rule and refuses the whole span instead.
         message_ids=[
-            str(t.payload.get("message_id") or "")
-            for _, t in own_turns
-            if t.payload.get("message_id")
+            str(t.payload.get("message_id") or "") for _, t in own_turns
         ],
     ):
         # ISSUE-0130 (b) scope lock 4: narrowing the skip above without
@@ -360,20 +365,39 @@ async def persist_closed_interaction(
     task.add_done_callback(pending_tasks.discard)
 
 
+#: Ceiling on Phase-2 summarise tasks the boot sweep leaves in flight at
+#: once.  Until v0.3.15 PR B2 the sweep derived nothing, so it spawned
+#: nothing; now every ATTRIBUTED replayed record runs the full two-phase
+#: write, and the ``(principal, speaker, scope)`` re-key makes that one
+#: record per SENDER per room — so an unbounded sweep fires K×N provider
+#: calls the instant a persona boots, unmetered (a catch-up close is not a
+#: wire-bounded close, so it draws no wallet lease) and straight into the
+#: RFC 0009 limiter that a restart does not reset.  The cap turns the burst
+#: into a bounded pipeline; it does not reduce the total work.
+_REPLAY_SUMMARIZE_MAX_IN_FLIGHT: int = 4
+
+
 async def close_replayed_scopes(
     tracker: InteractionTracker,
     persist: Callable[[Interaction], Awaitable[None]],
+    *,
+    derive: bool = True,
+    pending_tasks: set[asyncio.Task[None]] | None = None,
+    max_in_flight: int = _REPLAY_SUMMARIZE_MAX_IN_FLIGHT,
 ) -> int:
     """Close every scope the on-startup catch-up replay opened (ISSUE-0130).
 
     Replay events open :class:`InteractionTracker` scopes but carry no
     session-end signal, and catch-up has no synthetic completion event of
     its own (RFC 0011 OQ #8 "lifecycle bleed"), so the scope stayed open
-    until the idle timer and the next live turn appended to it.  That was
-    harmless while the merged span still derived; it is not harmless now
-    that :func:`persist_closed_interaction` skips derivation for a
-    replay-opened span, because the live half of the merge would be
-    dropped with it.
+    until the idle timer and the next live turn appended to it.  A merged
+    span is wrong in both of the ways the two halves differ: the live half
+    would be dropped along with an unattributable replayed one, and the
+    replayed half would escape the re-derivation guard, which only a
+    ``replayed`` record consults.  The ingest-time split
+    (:func:`~agents.persona_runtime.interaction_boundary.stale_close_reason`)
+    is the other door on the same boundary; this is the one for scopes no
+    live turn reaches.
 
     Called at the end of the catch-up pass
     (:func:`agents.channel_catchup.replay_for_persona_agents`).  Returns
@@ -391,6 +415,22 @@ async def close_replayed_scopes(
     at open, both this sweep and the ingest-time split tolerate a ``close``
     that returns ``None`` (the other got there first), and a live turn can
     never be inside a flagged span — the split guarantees it opens its own.
+
+    What ``persist`` costs here changed with v0.3.15 PR B2 and the argument
+    above no longer covers all of it.  For an ATTRIBUTED replayed span the
+    call is a real ``store_episode`` INSERT plus a background summarise /
+    extract task, so this sweep now writes and spawns rather than only
+    manipulating tracker state.  Two consequences worth naming:
+
+    * ``max_in_flight`` bounds the spawn, because one record per replayed
+      SENDER per room otherwise means an unmetered provider burst at boot.
+    * the Phase-2 tasks register into ``pending_tasks`` from OUTSIDE
+      ``_lock``, while ``close_memory`` drains that set under it — so a
+      shutdown racing this sweep could snapshot the set before a late task
+      joins.  Not reachable today (``server_cli`` starts and stops strictly
+      in sequence, so a shutdown cannot overlap catch-up); a refactor that
+      makes them concurrent must switch the drain to loop-until-empty,
+      which ``drain_pending_summaries`` already documents as its condition.
     """
     closed = 0
     # Per RECORD since the ``(principal, speaker, scope)`` re-key
@@ -407,11 +447,31 @@ async def close_replayed_scopes(
             if popped is None:
                 continue
             closed += 1
-            # ``persist`` is a no-op for these spans today (it skips on the
-            # same flag); calling it keeps ONE close→persist contract, so a
-            # revision that makes replayed spans attributable needs no new
-            # wiring here.
+            # ``persist`` is the full two-phase write for an ATTRIBUTED
+            # replayed span as of v0.3.15 PR B2 — a ``store_episode``
+            # INSERT plus a background summarise/extract task.  It is a
+            # no-op only for the unattributable ones (which still skip on
+            # ``replay_attributed``) and for a span an earlier boot
+            # already derived.  One close→persist contract either way.
+            if not derive:
+                # An unfinished pass (budget overrun / abort) ingested a
+                # PREFIX of some window.  Pop without persisting: the
+                # span identity is built from the turns the record holds,
+                # so deriving a prefix claims an id no later boot can
+                # recompute and the next complete boot re-derives the
+                # whole window on top of it.  Catch-up re-reads the same
+                # window every boot anyway (no watermark, RFC 0011 OQ #8),
+                # so this costs one boot's derivation, not the memory.
+                continue
             await persist(popped)
+            # Bound what the sweep leaves in flight.  Phase 2 is spawned
+            # inside ``persist``, so the cap is applied here, where the
+            # loop that produces them is: wait for one to land before
+            # opening another slot.
+            if pending_tasks is not None and len(pending_tasks) >= max_in_flight:
+                await asyncio.wait(
+                    set(pending_tasks), return_when=asyncio.FIRST_COMPLETED,
+                )
         except Exception:
             logger.warning(
                 "Catch-up close failed for replayed scope %s",
