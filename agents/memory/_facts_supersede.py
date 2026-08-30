@@ -54,8 +54,9 @@ per-agent — but a room-wide close now fans over N sibling records and
 reads the clock ONCE (``InteractionTracker.close_scope``,
 ``close_notification``: one room event, one instant), so every sibling
 carries an IDENTICAL ``closed_at``.  Two siblings can extract the same
-``(subject, predicate)`` — the RFC 0020 §G room-close turn is the one
-piece of content they share — and every other chain-key column
+``(subject, predicate)`` when speakers independently repeat a claim
+(the RFC 0020 §G room-close turn used to be shared content too, but
+PR #849 excludes it from extraction), and every other chain-key column
 (``agent_id`` / ``session_id`` / the ambiently-resolved ``principal_id``
 and ``epoch_id``) is identical by construction, so the tie is real: with
 each record's Phase 2 an independent background task, the row that
@@ -65,6 +66,20 @@ timestamp for a single room event, and the alternative (skewing
 ``closed_at`` per sibling) would lie about when the conversation ended.
 The rule also still covers fixtures, the OQ #9 operator-seeded path, and
 the future RFC 0013 erasure backfill.
+
+**Supersession rewrites attribution — stated, not corrected**
+(ISSUE-0131, PR #849 review).  ``speaker_id`` (migration 18) is
+deliberately NOT a chain-key column: RFC 0026 §F keeps ONE live row per
+``(agent, subject, predicate)``, so when speaker Y restates what
+speaker X asserted, Y's row supersedes X's and the only LIVE row now
+names Y as the speaker.  That is coherent with what the tier stores —
+current belief, where each assertion's speaker is the speaker of THAT
+assertion — but it means the live facts surface answers "who last said
+this", not "who ever said this": X's testimony survives only on the
+superseded row.  Keying the chain on speaker instead would keep both
+live and break the §F invariant.  If a per-speaker testimony ledger is
+ever needed, it is a read-surface question (the superseded rows retain
+their own ``speaker_id``), not a write-path change.
 """
 
 from __future__ import annotations

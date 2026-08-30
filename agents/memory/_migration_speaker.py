@@ -27,11 +27,12 @@ line); the projection now writes it.  ``close_path`` stamps
 ``interaction.speaker_id`` onto the episode row and ``fact_extractor``
 onto every tuple that close extracts, both ``or None`` so a speakerless
 scope records NULL rather than an empty attribution.  The §G exception
-above is discharged as EXCLUDE, upstream in
-``close_entries.interaction_to_entries``: a room-close turn whose
-sender is not the record's speaker never reaches the combined
-summarise+extract call, so no fact can be derived from another
-speaker's words and then stamped with this record's.
+above is discharged as EXCLUDE, at the chokepoint every close-pipeline
+consumer reads the record's turns through
+(``close_entries.own_turn_items``): a room-close turn whose sender is
+not the record's speaker reaches neither the combined summarise+extract
+call nor the persisted turn context, so no fact can be derived from
+another speaker's words and then stamped with this record's.
 
 **Why nullable, no backfill.**  A pre-v18 row's speaker is genuinely
 unknowable — the aggregate it was derived from spanned every speaker in

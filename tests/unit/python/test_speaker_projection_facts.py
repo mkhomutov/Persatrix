@@ -72,6 +72,21 @@ class TestFactProjection:
 
         assert await _fact_speakers(fact_store) == {None}
 
+    async def test_the_storage_boundary_normalizes_an_empty_speaker(
+        self, fact_store,
+    ):
+        """``"" → NULL`` is enforced in ``insert_fact`` itself (PR #849
+        review round 3), so a direct caller bypassing the projection
+        sites' ``or None`` discipline cannot mint a third speaker state
+        alongside NULL and a real id."""
+        await fact_store.store(
+            subject="alice", predicate="prefers", object="tea",
+            source_interaction_id="i-1", asserted_at=1_100.0,
+            speaker_id="",
+        )
+
+        assert await _fact_speakers(fact_store) == {None}
+
     async def test_speaker_is_not_the_subject(self, fact_store):
         """The two columns answer different questions — who SAID it
         versus who it is ABOUT — and a counterparty fact differs in

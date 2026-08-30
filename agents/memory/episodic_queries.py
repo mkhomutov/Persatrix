@@ -410,6 +410,14 @@ async def insert_episode(
     with no VDBE left active — so a concurrent ``COMMIT`` on the shared
     connection cannot race it (ISSUE-0055).
     """
+    # PR #849 review round 3: the ``"" == no speaker → NULL`` convention
+    # is enforced HERE, at the storage boundary, so a direct caller that
+    # passes the tracker's empty-string sentinel cannot mint a third
+    # speaker state (same rationale as subject canonicalisation in
+    # ``_facts_write``: call-site discipline does not cover direct
+    # writers).  The projection call sites still pass ``or None`` — that
+    # keeps their intent readable; this line makes it structural.
+    speaker_id = speaker_id or None
     episode_id = str(uuid.uuid4())
     now = time.time()
     await db.execute(

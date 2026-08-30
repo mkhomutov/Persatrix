@@ -73,7 +73,10 @@ async def insert_fact(
     because a record is single-speaker by construction; the one §G
     breach is excluded upstream (``close_entries`` states the
     argument), so no tuple reaching here can come from another
-    speaker's words.
+    speaker's words.  A superseding write carries its OWN speaker, so
+    the live row's attribution follows the latest assertion — the
+    stated consequence of keeping ``speaker_id`` out of the chain key
+    (:mod:`._facts_supersede`).
 
     ``protection_level`` / ``source_channel_id`` (RFC 0037 §C — v16,
     PR 3) persist VERBATIM — rule-(a) normalization is owned by the
@@ -111,6 +114,11 @@ async def insert_fact(
     # a certainty-range error before the (potentially PR 2
     # allowlist-backed) predicate validator means a caller that violates
     # two preconditions sees the more obviously-wrong one first.
+    # PR #849 review round 3: ``"" == no speaker → NULL`` is enforced at
+    # the storage boundary (mirrors ``insert_episode``), so a direct
+    # caller passing the tracker's empty-string sentinel cannot mint a
+    # third speaker state alongside NULL and a real id.
+    speaker_id = speaker_id or None
     if not subject or not subject.strip():
         raise ValueError("subject must not be empty")
     if not 0.0 <= certainty <= 1.0:

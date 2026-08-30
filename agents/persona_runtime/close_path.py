@@ -23,7 +23,7 @@ from ..memory.interactions import (
 )
 from ..principal_id import principal_scope
 from .classification import normalize_for_stamp
-from .close_entries import is_foreign_room_close_turn
+from .close_entries import own_turn_items
 from .finalize_close import finalize_closed_interaction
 from .interaction_boundary import stale_close_reason
 
@@ -175,10 +175,25 @@ async def persist_closed_interaction(
             agent_id, interaction.scope,
         )
         return
+    # ISSUE-0131 (PR #849 review round 3): every persisted turn field is
+    # derived from the record's OWN turns — ``own_turn_items``, the §G
+    # chokepoint in ``close_entries``.  A FOREIGN room-close turn is
+    # dropped from persistence, not just from the derivation input: its
+    # sender and envelope would otherwise ride ``context_json``, an
+    # FTS-indexed column recall searches, on a row stamped with another
+    # speaker's ``speaker_id``.  The turn survives only on the closer's
+    # own record, where it is native.  ``turn_count`` (context AND the
+    # queryable column below) counts the same post-exclusion turns the
+    # row actually holds — the record's raw count would over-report on a
+    # fanned close, admitting a single-native-turn sibling past
+    # ``min_turns`` filters and multi-turn gates, the same over-report
+    # the prompt header's ``shown_turns`` fix corrects in
+    # ``summarize_close`` (identical whenever nothing was excluded).
+    own_turns = own_turn_items(interaction)
     ctx: dict[str, Any] = {
         "scope": interaction.scope,
         "close_reason": interaction.close_reason,
-        "turn_count": interaction.turn_count,
+        "turn_count": len(own_turns),
         # ISSUE-0102: persist the RFC 0030 governance interaction id this
         # episode was opened under (``wire_interaction_id``, otherwise
         # in-memory-only) so the read surface can expose it alongside the
@@ -196,20 +211,10 @@ async def persist_closed_interaction(
         # multi-turn path stashes for the RFC 0026 extractor: Phase 2 reads it
         # off the in-memory interaction, so the persisted ``context_json``
         # stays body-free.
-        #
-        # ISSUE-0131 (PR #849 review): a FOREIGN §G room-close turn is
-        # dropped from persistence too, not just from the derivation
-        # input — its sender and envelope would otherwise ride
-        # ``context_json``, an FTS-indexed column recall searches, on a
-        # row stamped with another speaker's ``speaker_id``.  Same
-        # predicate as the derivation drop, so the turn survives only on
-        # the closer's own record, where it is native.
         "turns": [
             {"at": t.at, "payload": {
                 k: v for k, v in t.payload.items() if k != "text"}}
-            for t in interaction.turns
-            if not is_foreign_room_close_turn(
-                t.payload or {}, interaction.speaker_id)
+            for _, t in own_turns
         ],
     }
     # ISSUE-0123 R-1 (PR #846 review): bind the record's OWN frozen
@@ -251,10 +256,10 @@ async def persist_closed_interaction(
     # SPEAKER half is projected below (``speaker_id=``): migration 18's
     # column is written from the record key, not judged per turn — sound
     # because the one RFC 0020 §G room-close turn a record can hold
-    # (``ROOM_CLOSE_TURN_KEY``) is excluded from the derivation input
-    # upstream, in ``close_entries.interaction_to_entries`` (the
-    # canonical statement of the single-speaker argument), and from the
-    # persisted turn context above.
+    # (``ROOM_CLOSE_TURN_KEY``) never leaves ``close_entries.own_turn_items``
+    # (the §G chokepoint; that module states the single-speaker
+    # argument): not into the derivation input, not into the persisted
+    # turn context above.
     with principal_scope(interaction.principal_id):
         try:
             await episodic.store_episode(
@@ -265,7 +270,9 @@ async def persist_closed_interaction(
                 governance_interaction_id=interaction.wire_interaction_id or None,
                 started_at=interaction.started_at,
                 closed_at=interaction.closed_at,
-                turn_count=interaction.turn_count, scope=interaction.scope,
+                # Post-§G-exclusion count — the turns the row holds (the
+                # rationale is on ``own_turns`` above).
+                turn_count=len(own_turns), scope=interaction.scope,
                 # ISSUE-0081 PR 2 sibling-mislabel guard: tag with the session
                 # the interaction was *born* under, not the scope bound now —
                 # ``idle_check`` may be flushing a sibling conversation's stale

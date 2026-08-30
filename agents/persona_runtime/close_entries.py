@@ -21,14 +21,15 @@ rather than tag: the turn never reaches the combined summarise+extract
 call, so no summary and no fact can be derived from one speaker's words
 and then attributed to another's.
 
-Three callers, and each must apply it or the exclusion has a hole:
-:func:`interaction_to_entries` (the ordinary multi-turn path); the
-``turn_count == 1`` fast path in ``summarize_close``, which reads
-``turns[0]`` directly and therefore has to ask the same question
-itself; and ``close_path.persist_closed_interaction``, which applies it
-to the turns it persists into ``context_json`` — the FTS-indexed column
-recall searches, where the closer's sender must not surface on a row
-stamped with another speaker (PR #849 review).
+:func:`own_turn_items` is the chokepoint (PR #849 review round 3): every
+close-pipeline consumer of ``interaction.turns`` reads the record
+through it — :func:`interaction_to_entries` (the ordinary multi-turn
+path), the ``turn_count == 1`` fast path in ``summarize_close``, and
+``close_path.persist_closed_interaction`` for the turns it persists
+into ``context_json`` (the FTS-indexed column recall searches, where
+the closer's sender must not surface on a row stamped with another
+speaker) — so a new consumer that reaches for the filtered view gets
+the exclusion by construction instead of by remembering a predicate.
 """
 
 from __future__ import annotations
@@ -39,9 +40,13 @@ from ..memory.interaction_types import ROOM_CLOSE_TURN_KEY
 from ..memory.store import MemoryEntry
 
 if TYPE_CHECKING:
-    from ..memory.interactions import Interaction
+    from ..memory.interactions import Interaction, Turn
 
-__all__ = ["interaction_to_entries", "is_foreign_room_close_turn"]
+__all__ = [
+    "interaction_to_entries",
+    "is_foreign_room_close_turn",
+    "own_turn_items",
+]
 
 
 def is_foreign_room_close_turn(
@@ -62,10 +67,35 @@ def is_foreign_room_close_turn(
     Keyed off the producer's recorded stamp, not a guess.  The sender
     comparison decides only WHOSE record this is — on the closer's own
     record the turn is native, so it stays.
+
+    Deliberately NOT the same rule as the read-side skip in
+    ``closed_interactions_read._participants``, which drops EVERY
+    stamped turn: participants exclude the close event regardless of
+    nativity, and that spelling must also cover pre-#849 rows whose
+    ``context_json`` still holds the foreign turn this predicate now
+    keeps out at write time.  Change one without re-reading the other.
     """
     if payload.get(ROOM_CLOSE_TURN_KEY) is not True:
         return False
     return str(payload.get("sender", "")).strip() != speaker_id
+
+
+def own_turn_items(interaction: Interaction) -> list[tuple[int, Turn]]:
+    """The record's own turns, with their REAL ordinals — the §G chokepoint.
+
+    One filtered view for every close-pipeline consumer of
+    ``interaction.turns`` (the module header names the three), so the
+    exclusion is applied by construction rather than by each site
+    remembering :func:`is_foreign_room_close_turn`.  Ordinals are the
+    record's real turn positions: a dropped turn does not renumber its
+    siblings or shift the compressor's importance weights.
+    """
+    return [
+        (idx, turn)
+        for idx, turn in enumerate(interaction.turns, start=1)
+        if not is_foreign_room_close_turn(
+            turn.payload or {}, interaction.speaker_id)
+    ]
 
 
 def interaction_to_entries(interaction: Interaction) -> list[MemoryEntry]:
@@ -75,16 +105,14 @@ def interaction_to_entries(interaction: Interaction) -> list[MemoryEntry]:
     normalised into ``(0, 1]`` so later turns weigh slightly more
     than openers when the compressor has to drop entries.
 
-    A foreign room-close turn is SKIPPED (:func:`is_foreign_room_close_turn`).
+    A foreign room-close turn is SKIPPED (:func:`own_turn_items`).
     Ordinals still come from the record's real turn positions, so a drop
     does not renumber its siblings or shift their weights.
     """
     total = max(interaction.turn_count, 1)
     entries: list[MemoryEntry] = []
-    for idx, turn in enumerate(interaction.turns, start=1):
+    for idx, turn in own_turn_items(interaction):
         payload = turn.payload or {}
-        if is_foreign_room_close_turn(payload, interaction.speaker_id):
-            continue
         content_parts: list[str] = []
         # ISSUE-0054 — ``text`` (inbound message body) is the load-bearing
         # input for RFC 0026 extraction; ``summary`` is the action envelope.

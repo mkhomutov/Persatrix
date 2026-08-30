@@ -62,6 +62,16 @@ def _participants_from_context(ctx: object) -> list[str]:
     :data:`~agents.memory.interaction_types.ROOM_CLOSE_TURN_KEY`
     stamp, which survives persistence, rather than re-deriving
     ``sender`` ≠ the record's speaker here.
+
+    Deliberately a DIFFERENT rule from the write-side
+    :func:`agents.persona_runtime.close_entries.is_foreign_room_close_turn`
+    (PR #849 review): that predicate keeps the NATIVE close turn (the
+    closer's own record genuinely contains it), while participants drop
+    EVERY stamped turn — a close event is not a conversational
+    participation even on the closer's record — and this spelling must
+    also cover pre-#849 rows whose ``context_json`` still holds the
+    foreign turn the write side now filters out.  Do not "unify" the
+    two without re-reading both rationales.
     """
     if not isinstance(ctx, dict):
         return []

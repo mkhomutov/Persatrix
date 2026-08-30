@@ -45,7 +45,7 @@ from .classification import (
 )
 from .close_entries import (
     interaction_to_entries,
-    is_foreign_room_close_turn,
+    own_turn_items,
 )
 from .fact_envelope import extract_projections
 from .fact_extractor import (
@@ -162,18 +162,15 @@ async def summarize_closed_interaction(
         # could only ever (correctly) extract nothing.
         #
         # ISSUE-0131 — and the turn has to be this record's OWN.  This
-        # fast path reads ``turns[0]`` directly, ahead of the exclusion
-        # in ``close_entries``, so without the same §G guard a
-        # lone foreign room-close turn would mint a placeholder from the
-        # CLOSER's turn that ``close_path`` then stamps with this
-        # record's ``speaker_id`` — the misattribution the projection
-        # exists to prevent.  Falling through instead lands it on the
-        # all-excluded branch below, which is the honest answer.
-        if (
-            single
-            and not has_message_text
-            and not is_foreign_room_close_turn(payload, interaction.speaker_id)
-        ):
+        # fast path reads ``turns[0]`` directly, so it asks the §G
+        # chokepoint (``own_turn_items`` — non-empty means the lone turn
+        # is native) before minting a placeholder: without that, a lone
+        # foreign room-close turn would mint one from the CLOSER's turn
+        # that ``close_path`` then stamps with this record's
+        # ``speaker_id`` — the misattribution the projection exists to
+        # prevent.  Falling through instead lands it on the all-excluded
+        # branch below, which is the honest answer.
+        if single and not has_message_text and own_turn_items(interaction):
             # Single-turn placeholder; no facts extracted (the
             # deterministic per-turn shape is not LLM-routed).
             return (

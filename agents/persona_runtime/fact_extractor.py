@@ -459,10 +459,11 @@ async def dispatch_facts_from_response(
             protection_level=interaction.classification,
             source_channel_id=interaction.source_channel_id,
             # ISSUE-0131 (migration 18): the speaker half of the record
-            # key, projected onto every tuple.  ``""`` is a speakerless
-            # scope (tick / single-turn), which the column records as
-            # NULL rather than as an empty attribution.
-            speaker_id=interaction.speaker_id or None,
+            # key, projected onto every tuple.  The SAME local as the
+            # canonicalisation input above — passing it (rather than
+            # re-deriving the expression) is what makes the "ONE source"
+            # claim structural instead of prose (PR #849 review round 3).
+            speaker_id=sender_id,
         )
     except Exception:
         logger.warning(

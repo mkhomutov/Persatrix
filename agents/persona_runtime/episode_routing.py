@@ -196,7 +196,10 @@ class _EpisodeRoutingMixin:
                 )
                 await self._episodic_memory.store_episode(
                     summary=summary, context=ctx,
-                    session_id=self._active_write_session_id)
+                    session_id=self._active_write_session_id,
+                    # ISSUE-0131: a lone event's sender IS its speaker;
+                    # senderless stays NULL (the boundary normalizes "").
+                    speaker_id=event.sender_id)
                 return
             scope = (
                 SCOPE_TICK

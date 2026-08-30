@@ -157,15 +157,7 @@ class TestTheSGExclusion:
 
 class TestEpisodeProjection:
     async def test_the_row_carries_the_records_speaker(self, memory, monkeypatch):
-        async def _skip(**kwargs: object) -> None:
-            return None
-
-        monkeypatch.setattr(close_path, "finalize_closed_interaction", _skip)
-        await close_path.persist_closed_interaction(
-            episodic=memory, llm_client=MagicMock(), memory_ns=MagicMock(),
-            agent_id="test-agent", interaction=_record("amber-lynx"),
-            pending_tasks=set(), on_finalized=_noop,
-        )
+        await _persist(memory, _record("amber-lynx"), monkeypatch)
 
         assert await _episode_speaker(memory, "i-amber-lynx") == "amber-lynx"
 
@@ -173,15 +165,7 @@ class TestEpisodeProjection:
         """``""`` is the no-speaker convention (tick / single-turn scope).
         NULL is the honest column value; an empty string would read as an
         attribution to a speaker named nothing."""
-        async def _skip(**kwargs: object) -> None:
-            return None
-
-        monkeypatch.setattr(close_path, "finalize_closed_interaction", _skip)
-        await close_path.persist_closed_interaction(
-            episodic=memory, llm_client=MagicMock(), memory_ns=MagicMock(),
-            agent_id="test-agent", interaction=_record(""),
-            pending_tasks=set(), on_finalized=_noop,
-        )
+        await _persist(memory, _record(""), monkeypatch)
 
         assert await _episode_speaker(memory, "i-none") is None
 
@@ -195,18 +179,10 @@ class TestPersistedContextAppliesTheExclusion:
     async def test_a_foreign_close_turn_is_not_persisted(
         self, memory, monkeypatch,
     ):
-        monkeypatch.setattr(
-            close_path, "finalize_closed_interaction", _skip_finalize,
-        )
-        await close_path.persist_closed_interaction(
-            episodic=memory, llm_client=MagicMock(), memory_ns=MagicMock(),
-            agent_id="test-agent",
-            interaction=_record("amber-lynx", [
-                Turn(at=1_000.0, payload={"sender": "amber-lynx"}),
-                _room_close_turn("iron-fox"),
-            ]),
-            pending_tasks=set(), on_finalized=_noop,
-        )
+        await _persist(memory, _record("amber-lynx", [
+            Turn(at=1_000.0, payload={"sender": "amber-lynx"}),
+            _room_close_turn("iron-fox"),
+        ]), monkeypatch)
 
         assert await _persisted_turn_senders(
             memory, "i-amber-lynx",
@@ -217,22 +193,57 @@ class TestPersistedContextAppliesTheExclusion:
     ):
         """Same rule as the derivation drop: the turn is native on the
         closer's own record, so its persisted context keeps it."""
-        monkeypatch.setattr(
-            close_path, "finalize_closed_interaction", _skip_finalize,
-        )
-        await close_path.persist_closed_interaction(
-            episodic=memory, llm_client=MagicMock(), memory_ns=MagicMock(),
-            agent_id="test-agent",
-            interaction=_record("iron-fox", [
-                Turn(at=1_000.0, payload={"sender": "iron-fox"}),
-                _room_close_turn("iron-fox"),
-            ]),
-            pending_tasks=set(), on_finalized=_noop,
-        )
+        await _persist(memory, _record("iron-fox", [
+            Turn(at=1_000.0, payload={"sender": "iron-fox"}),
+            _room_close_turn("iron-fox"),
+        ]), monkeypatch)
 
         assert await _persisted_turn_senders(
             memory, "i-iron-fox",
         ) == ["iron-fox", "iron-fox"]
+
+    async def test_the_persisted_turn_count_counts_what_the_row_holds(
+        self, memory, monkeypatch,
+    ):
+        """PR #849 review round 3: the ``turn_count`` column (and the
+        context copy) count the post-§G-exclusion turns, the same rule
+        as the prompt header's ``shown_turns`` — the record's raw count
+        would admit a single-native-turn sibling past ``min_turns``
+        filters as multi-turn on the strength of a turn the row does
+        not hold."""
+        await _persist(memory, _record("amber-lynx", [
+            Turn(at=1_000.0, payload={"sender": "amber-lynx"}),
+            _room_close_turn("iron-fox"),
+        ]), monkeypatch)
+
+        db = memory._ensure_db()
+        async with db.execute(
+            "SELECT turn_count, context_json FROM episodes "
+            "WHERE interaction_id = ?", ("i-amber-lynx",),
+        ) as cursor:
+            row = await cursor.fetchone()
+        assert row is not None, "the close path wrote no episode"
+        assert row[0] == 1
+        assert json.loads(row[1])["turn_count"] == 1
+
+
+class TestTheStorageBoundaryNormalizesTheSpeaker:
+    async def test_an_empty_string_persists_as_null(self, memory):
+        """``"" == no speaker → NULL`` is enforced in ``insert_episode``
+        itself, so a direct caller bypassing the projection sites'
+        ``or None`` discipline cannot mint a third speaker state."""
+        await memory.store_episode(
+            summary="direct write", context={}, speaker_id="",
+        )
+
+        db = memory._ensure_db()
+        async with db.execute(
+            "SELECT speaker_id FROM episodes WHERE summary = ?",
+            ("direct write",),
+        ) as cursor:
+            row = await cursor.fetchone()
+        assert row is not None
+        assert row[0] is None
 
 
 async def _noop() -> None:
@@ -241,6 +252,21 @@ async def _noop() -> None:
 
 async def _skip_finalize(**kwargs: object) -> None:
     return None
+
+
+async def _persist(memory, interaction: Interaction, monkeypatch) -> None:
+    """Phase-1-only close — the sibling ``_persist`` / ``_no_phase_two``
+    idiom (``test_close_path_principal_binding``), fused because every
+    caller here stubs Phase 2.  One copy of the call shape, so a new
+    ``persist_closed_interaction`` parameter is threaded once."""
+    monkeypatch.setattr(
+        close_path, "finalize_closed_interaction", _skip_finalize,
+    )
+    await close_path.persist_closed_interaction(
+        episodic=memory, llm_client=MagicMock(), memory_ns=MagicMock(),
+        agent_id="test-agent", interaction=interaction,
+        pending_tasks=set(), on_finalized=_noop,
+    )
 
 
 async def _persisted_turn_senders(memory, interaction_id: str) -> list[str]:
