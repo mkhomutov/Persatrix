@@ -335,6 +335,8 @@ info := registry.AgentInfo{
 On `registry.ErrAgentAlreadyRegistered`: return `409 CONFLICT`.  
 Return `201 Created` with the registered agent JSON.
 
+> **Amended 2026-08-23 — the `409` is gone** ([ISSUE-0125](../issues/ISSUE-0125-agents-never-reregister-after-orchestrator-restart.md)). `registry.Register` is an upsert, so a re-registration replaces the stored row and the endpoint answers `201 Created` for both an insert and an update — "registration accepted". The conflict response was what stopped a returning agent from correcting a stale advertised address, which is a precondition of fleet re-registration. Callers do not need to distinguish the two cases; nothing in the CLI, the console or the agent runtime ever did.
+
 #### `GET /api/v1/agents`
 
 - Call `registry.List(ctx)`.
@@ -566,7 +568,7 @@ Summary: HTTP server setup, router, middleware, JSON envelope helpers, and workf
 **Dependencies:** RFC 0001 (state, registry, planner implementations). **Existing dependency:** `github.com/google/uuid` (already in `go.mod` from RFC 0001) is reused for server-generated request IDs (`uuid.NewString()` in `requestIDMiddleware`). RFC 0001 must export the following sentinel errors for `errors.Is()` comparisons in RFC 0002 handlers:
 - `state.ErrRunNotFound`
 - `state.ErrRunAlreadyExists`
-- `registry.ErrAgentAlreadyRegistered`
+- ~~`registry.ErrAgentAlreadyRegistered`~~ *(removed 2026-08-23 — see the amendment under `POST /api/v1/agents/register`)*
 - `registry.ErrAgentNotFound`
 
 If these sentinels are absent from the RFC 0001 merged implementation, RFC 0002 cannot be implemented without brittle string-matching. Track as a blocker on PR #3.

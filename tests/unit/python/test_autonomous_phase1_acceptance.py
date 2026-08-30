@@ -38,7 +38,7 @@ from agents.persona_runtime.close_notification import (
     close_interaction_on_notification,
 )
 from agents.persona_runtime.summarize_close import summarize_closed_interaction
-from agents.persona_types import AgentAction, AgentEvent
+from agents.persona_types import AgentEvent
 
 from .test_close_notification_redelivery import _notification_event
 from .test_interaction_close_notification import _CloseNotificationAgent
@@ -50,33 +50,18 @@ _SYNTHESIS = "Synthesis: adopt the monorepo; revisit tooling next quarter."
 
 
 class _PersonaAgent(_CloseNotificationAgent):
-    """The ``_CloseNotificationAgent`` harness with a REAL final-turn
-    ingest: ``_store_event_episode`` appends a PRODUCTION-SHAPED turn —
-    the deterministic action envelope under ``summary`` and the message
-    body under ``text``, exactly as ``episode_routing`` stashes it
-    (ISSUE-0054: ``text`` is the summariser's sole real-content input) —
-    so §D artifact #1, the synthesis landing in the persona's record, is
-    inspectable in the shape production would persist it."""
+    """The ``_CloseNotificationAgent`` harness on a 600 s idle window.
+
+    PR #846 review: this used to override ``_store_event_episode`` to
+    append a production-shaped turn, but nothing drove it — the fixtures
+    seed turns with ``add_turn`` directly, and the close dispatch stopped
+    calling that seam when it moved to the direct per-record append.  The
+    override was dead scaffolding and is gone; §D artifact #1 (the
+    synthesis landing in the persona's record) is asserted on the record
+    itself, which is where these tests already looked."""
 
     def __init__(self, agent_id: str) -> None:
         super().__init__(InteractionTracker(idle_timeout_sec=600.0), agent_id)
-
-    async def _store_event_episode(
-        self, event: AgentEvent, actions: list[AgentAction],
-    ) -> None:
-        self.ingested.append(event)
-        if event.channel_id is not None:
-            payload: dict[str, object] = {
-                "summary": (
-                    f"Event: {event.event_type.value} → "
-                    f"Actions: {[a.action_type.value for a in actions]}"
-                ),
-                "sender": event.sender_id,
-            }
-            content = (event.payload or {}).get("content")
-            if isinstance(content, str) and content.strip():
-                payload["text"] = content
-            self._interaction_tracker.add_turn(event.channel_id, payload)
 
 
 def _persona_mid_discussion(agent_id: str) -> _PersonaAgent:

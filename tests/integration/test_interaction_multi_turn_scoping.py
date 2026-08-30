@@ -98,7 +98,7 @@ class TestMentionAggregation:
             clock.advance(0.5)
         # No session-end yet — interaction stays open.  The contract
         # under test is per-turn aggregation, not closure.
-        open_interaction = agent._interaction_tracker.get(scope)
+        open_interaction = agent._interaction_tracker.get(scope, speaker_id=peer)
         assert open_interaction is not None
         assert open_interaction.turn_count == 3
         # No closed-interaction episode yet (no close happened).
@@ -161,8 +161,8 @@ class TestConcurrentOpenScopesIsolation:
             ))
             clock.advance(0.1)
 
-        open_a = agent._interaction_tracker.get(scope_a)
-        open_b = agent._interaction_tracker.get(scope_b)
+        open_a = agent._interaction_tracker.get(scope_a, speaker_id=peer_a)
+        open_b = agent._interaction_tracker.get(scope_b, speaker_id=peer_b)
         assert open_a is not None
         assert open_b is not None
         # Three turns to A, two to B — interleaving did not bleed turns
@@ -180,8 +180,8 @@ class TestConcurrentOpenScopesIsolation:
         ))
         await agent.drain_pending_summaries()
         # A is gone from the tracker, B is still open with the same id.
-        assert agent._interaction_tracker.get(scope_a) is None
-        still_open_b = agent._interaction_tracker.get(scope_b)
+        assert agent._interaction_tracker.get(scope_a, speaker_id=peer_a) is None
+        still_open_b = agent._interaction_tracker.get(scope_b, speaker_id=peer_b)
         assert still_open_b is not None
         assert still_open_b.interaction_id == open_b.interaction_id
         assert still_open_b.turn_count == 2
@@ -217,8 +217,8 @@ class TestChannelIdSenderIdPrecedence:
         ))
         group_scope = scope_for_group("planning")
         dm_scope = scope_for_dm(agent.agent_id, peer)
-        assert agent._interaction_tracker.get(group_scope) is not None
-        assert agent._interaction_tracker.get(dm_scope) is None
+        assert agent._interaction_tracker.get(group_scope, speaker_id=peer) is not None
+        assert agent._interaction_tracker.get(dm_scope, speaker_id=peer) is None
 
     async def test_thread_id_wins_over_channel_id_and_sender_id(self):
         # RFC 0020 §G discriminator step 1: thread_id wins outright.
@@ -235,9 +235,9 @@ class TestChannelIdSenderIdPrecedence:
         thread_scope = scope_for_thread("t-42")
         group_scope = scope_for_group("planning")
         dm_scope = scope_for_dm(agent.agent_id, peer)
-        assert agent._interaction_tracker.get(thread_scope) is not None
-        assert agent._interaction_tracker.get(group_scope) is None
-        assert agent._interaction_tracker.get(dm_scope) is None
+        assert agent._interaction_tracker.get(thread_scope, speaker_id=peer) is not None
+        assert agent._interaction_tracker.get(group_scope, speaker_id=peer) is None
+        assert agent._interaction_tracker.get(dm_scope, speaker_id=peer) is None
 
 
 # ─── PR-3 review #17d: scope=None fallback warns + legacy shape ─

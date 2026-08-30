@@ -52,7 +52,7 @@ _SCHEMA_URL = "https://persatrix.dev/schemas/observability/1.0.0"
 
 _DEFAULT_SERVICE_NAME = "persatrix-agent"
 _DEFAULT_OTLP_ENDPOINT = "http://localhost:4318"
-_DEFAULT_SERVICE_VERSION = "0.3.11"
+_DEFAULT_SERVICE_VERSION = "0.3.14"
 _DEFAULT_EXPORT_INTERVAL_MS = 60_000
 _DEFAULT_EXPORT_TIMEOUT_MS = 10_000
 
@@ -98,8 +98,7 @@ class _Instruments:
     parity test in ``test_observability_metrics.py`` asserts this.
     """
 
-    # Interaction-lifecycle + facts-tier counters are registered by the
-    # ``_metrics_interactions`` / ``_metrics_facts`` modules; annotations keep mypy happy.
+    # Counters registered by ``_metrics_interactions`` / ``_metrics_facts``; annotations for mypy.
     interactions_opened: Counter
     interactions_closed: Counter
     interactions_closed_by_idle_gap: Counter
@@ -108,6 +107,7 @@ class _Instruments:
     interactions_closed_by_topic_shift: Counter
     interactions_closed_by_shutdown: Counter
     interactions_closed_by_cost: Counter
+    interactions_closed_by_catchup_complete: Counter
     interactions_summary_failed: Counter
     interactions_summary_unleased: Counter
     interactions_janitor_failed: Counter

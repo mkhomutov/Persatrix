@@ -35,18 +35,17 @@ Behaviour:
   scope, but ``turn_count`` grows linearly with restart count.
   (PR-265 review L5: earlier "idempotent in shape" wording was
   misleading — it suggested dedup; the tracker doesn't.)
-* **Lifecycle bleed (catch-up → live).** Replay events open
-  ``InteractionTracker`` scopes but do **not** close them: replay
-  events lack ``chat_end`` / ``session_end`` metadata, and there is
-  no synthetic ``REASON_CATCHUP_COMPLETE``. The open interaction
-  stays open until the idle-gap timer fires; the next live
-  CHANNEL_MESSAGE in the same scope appends to the catch-up
-  interaction. ``Interaction.started_at`` is set to *boot time*, not
-  the oldest replayed wire timestamp — cross-checks comparing
-  ``started_at`` to the earliest turn timestamp will be off by the
-  catch-up window. Design intent for v0.3.0; closing the scope on
-  catch-up completion is deferred to a watermark-aware revision.
-  PR-265 review L6.
+* **Catch-up → live boundary.** Replay events carry no ``chat_end`` /
+  ``session_end`` metadata, so PR-265 review L6 left the scopes they
+  open bleeding into the next live turn. ISSUE-0130 closed that: a
+  replay-opened span derives no memory (no principal to attribute it
+  to), so a live turn joining it would lose its own conversation's
+  memory too. Both ends now close with ``REASON_CATCHUP_COMPLETE`` —
+  every replay-opened scope at pass end, plus any a live turn reaches
+  first (dispatch is already serving while catch-up runs), which the
+  persona splits on ingest. ``Interaction.started_at`` is still *boot*
+  time, not the oldest replayed wire timestamp, so cross-checks against
+  the earliest turn stay off by the window until the watermark revision.
 
 The module is independent of :mod:`agents.persona_runtime` so a
 non-persona task agent that opted into channel membership could call
@@ -413,6 +412,12 @@ async def replay_for_persona_agents(
             logger.exception(
                 "channels: catch-up replay aborted for agent %s", agent_id,
             )
+        finally:
+            # ISSUE-0130: pop the scopes this pass opened — in ``finally`` so a
+            # budget overrun closes them too — or the next LIVE turn joins a
+            # span that derives nothing.  Best-effort, does not raise:
+            # ``close_path.close_replayed_scopes``.
+            await agent.close_replayed_interactions()
 
 
 def _build_replay_event(
@@ -458,10 +463,10 @@ def _build_replay_event(
     and the channel's next topic merges into one local record, and the
     merged record opens with no wire id — the first LIVE id then reads
     as adoption-not-rotation, silently disarming the RFC 0030 close
-    propagation after every restart.  Replayed rotation closes do run
-    the close-path summariser at boot; those conversations genuinely
-    closed, so the records (and their one-time summary cost) are the
-    feature working, not replay overhead.
+    propagation after every restart.  Rotation still SEGMENTS the
+    replayed spans; what it no longer does is derive from them —
+    ISSUE-0130 skips the close-path summariser for every replay-opened
+    span, which has no principal to attribute a summary to.
     """
     payload: dict[str, Any] = {
         "content": msg.get("content", ""),

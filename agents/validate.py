@@ -27,6 +27,7 @@ _SCHEMA_MAP: dict[str, str] = {
     "agents.yaml": "agent.schema.json",
     "channels.yaml": "channel.schema.json",
     "optimization.yaml": "optimization.schema.json",
+    "security.yaml": "security.schema.json",
     "ui.yaml": "ui.schema.json",
 }
 

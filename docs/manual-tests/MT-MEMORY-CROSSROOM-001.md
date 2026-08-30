@@ -1,11 +1,12 @@
 # Manual Test MT-MEMORY-CROSSROOM-001: Memory that travels — a project fact taught in a DM is known in the standup
 
 **Test ID**: `MT-MEMORY-CROSSROOM-001`
-**Feature Area**: Memory (cross-room persona experience — RFC 0049 Phases 0–1 × the RFC 0037 confidentiality gate)
-**Version**: 1.0
+**Feature Area**: Memory (cross-room persona experience — RFC 0049 Phases 0–1 × the RFC 0037 confidentiality gate, plus the RFC 0031 F-7 person-identity tier)
+**Version**: 1.1
 **Created**: 2026-07-28
-**Last Updated**: 2026-07-28
-**Status**: Active — authored at RFC 0049 PR 5; **live execution is a v0.3.12 release-prep deliverable** (run against a real provider per [v0.3.12-plan §Acceptance](../v0.3.12-plan.md#acceptance-for-v0312)).
+**Last Updated**: 2026-08-01
+**Status**: Active — authored at RFC 0049 PR 5. **Legs 1–4 (the facts half) executed live 2026-07-30** at v0.3.12 release-prep: ✅ pass, Leg 4 Accepted-with-known-gap ([ISSUE-0118](../issues/ISSUE-0118-tool-recall-bypasses-epoch-session-scopes.md)) — see the [execution report](v0.3.12-execution-report.md#mt-memory-crossroom-001--memory-that-travels-live-anthropic).
+**✅ Legs 1b/2b (the person half) ran live for the first time 2026-08-04** at v0.3.13 release-prep — both pass; ISSUE-0121 is resolved on their recorded results, and Leg 2b gained a run rule (an untainted room) plus a corrected diagnosis note off that run. The history below is kept because it is why the legs exist. Added at v1.1 after [ISSUE-0119](../issues/ISSUE-0119-channel-publish-drops-human-participant-type.md) reached a release candidate on that green run; v0.3.12 shipped on the v1.0 bar by maintainer call ([#801](https://github.com/mkhomutov/Persatrix/pull/801) — the wiring half is CI-pinned, so what these add is the qualitative half). **They are the standing deliverable for the next memory-touching release: run the whole arc, and record 1b/2b explicitly** — tracked as [ISSUE-0121](../issues/ISSUE-0121-crossroom-person-identity-legs-never-run-live.md).
 
 ---
 
@@ -13,7 +14,11 @@
 
 **Purpose**: Verify the v0.3.12 headline promise live — **tell a persona something in one room and it knows it in every room it belongs to, without leaking what it learned in a confidential room**. This is [RFC 0049's worked-example scenario 2](../rfcs/0049-memory-consolidation-gradient.md#worked-example-the-two-test-scenarios), end-to-end on a real provider: a project fact taught in a DM ("Atlas ships Friday") is captured as `topic.*` knowledge at interaction close, recalled in a group channel the persona belongs to via the live L2 cross-room widening, and still recalled on the DM re-ask afterwards. A fresh-epoch leg confirms the walls that stay absolute.
 
+**The promise has two halves.** *What* the persona knows rides the facts tier (Legs 1–3); ***who*** *it is talking to* rides a different one — the RFC 0031 F-7 person identity on the relationship row (Legs 1b/2b). They fail independently: v1.0 tested only the topic half, passed live at the v0.3.12 candidate, and [ISSUE-0119](../issues/ISSUE-0119-channel-publish-drops-human-participant-type.md) rode that green run — every human publishing into a group channel arrived untyped, so the persona greeted in the standup the person it had just met in the DM.
+
 **Scope**: the three RFC 0049 Phase-1 amendments in their shipped **live** posture — [0026 topic predicates](../rfcs/0026-amendment-topic-subject-predicates.md) (the capture path), [0031 fact-scope](../rfcs/0031-amendment-fact-scope-by-consolidation-level.md) (L2 facts cross rooms, `memory.facts.cross_room: live`), [0049-L1](../rfcs/0049-amendment-l1-cross-room-availability.md) (episodic room-first ranking, `memory.episodic.cross_room: live`) — with every cross-room candidate passing the [RFC 0037 §D gate](../rfcs/0037-memory-confidentiality-channel-classification.md#d-the-hard-gate-at-memory-injection). The DM and the group channel are distinct rooms (sessions auto-mint per `(agent, channel)` — [sessions guide §3](../guides/sessions.md#3-the-per-request-auto-binding)), so the recall in Leg 2 is structurally cross-room.
+
+Legs 1b/2b add the **person** tier: the [RFC 0031 F-7 identity read](../issues/ISSUE-0093-person-identity-cross-room-tier.md), which omits the §D session filter so identity stated in one room surfaces in every room for the same `(principal, epoch)`. It keys on `(participant_id, participant_type)` — that type axis is what makes it a *different* failure mode from the facts tier, which keys on the subject string alone.
 
 **Out of Scope** — explicitly deferred, **not asserted** here:
 
@@ -29,6 +34,7 @@
 - [RFC 0049 — Memory Consolidation Gradient](../rfcs/0049-memory-consolidation-gradient.md) — the one law; scenario 2 is this MT's script.
 - The three amendments: [0026 topic predicates](../rfcs/0026-amendment-topic-subject-predicates.md) · [0031 fact-scope](../rfcs/0031-amendment-fact-scope-by-consolidation-level.md) · [0049-L1](../rfcs/0049-amendment-l1-cross-room-availability.md) (each carries its Promotion section with the recorded verdict).
 - [RFC 0037 — Memory Confidentiality](../rfcs/0037-memory-confidentiality-channel-classification.md) — the §D gate every cross-room candidate passes.
+- [ISSUE-0093](../issues/ISSUE-0093-person-identity-cross-room-tier.md) — the person-identity tier Legs 1b/2b exercise; [ISSUE-0119](../issues/ISSUE-0119-channel-publish-drops-human-participant-type.md) — the participant-type gap Leg 2b catches; [ISSUE-0120](../issues/ISSUE-0120-backfill-split-participant-type-relationship-rows.md) — the split rows its migration folds.
 - [Sessions guide](../guides/sessions.md) — session = room continuity; [epochs guide](../guides/epochs.md) — the run-isolation axis Leg 4 exercises.
 - [MT-MEMORY-005 — the dementia test](MT-MEMORY-005-dementia-test.md) — the single-room continuity gate this MT extends to the multi-room case (its V5 no-bleed leg is re-anchored to the **epoch** axis by §V6 — Leg 4 here asserts the same wall).
 
@@ -37,6 +43,7 @@
 - [`tests/integration/test_cross_room_seed_replay.py`](../../tests/integration/test_cross_room_seed_replay.py) — replays `EVAL-MEMORY-002` (shadow-pinned) + `EVAL-MEMORY-003` (live, the room-axis integration eval) and re-runs the promotion verdict on every CI run.
 - [`tests/unit/python/test_cross_room_live.py`](../../tests/unit/python/test_cross_room_live.py) — the live-default injection path: facts `sessions="*"`, episodic ranked + reinforcing, no *ungated* widening.
 - [`tests/integration/test_confidentiality_gate.py`](../../tests/integration/test_confidentiality_gate.py) — the §D gate end-to-end (learn-restricted → act-public withheld).
+- [`internal/server/channel_participant_type_test.go`](../../internal/server/channel_participant_type_test.go) — Legs 1b/2b's wiring half at the wire (REST → router → dispatcher → a real gRPC receiver): a human sender arrives typed `user`. This MT is the qualitative half — does the persona *use* what arrives.
 
 This live MT confirms the *operator-observable* behaviour on a real provider; the widening/gate invariants themselves are pinned in CI.
 
@@ -47,15 +54,16 @@ This live MT confirms the *operator-observable* behaviour on a real provider; th
 1. The compose stack is up against a **real provider** (`make demo-anthropic` or equivalent — *not* the mock provider; capture quality and natural-phrasing recall need real replies).
 2. A **clean store** (`make reset`, or a fresh `PERSATRIX_EPOCH` for the whole arc) so prior facts do not steer the run.
 3. `agent-ember-owl` is up and is a member of `group:planning` (the bundled roster has it at `respond: addressed` — the Leg 2 trigger @-mentions it).
-4. `persatrix` CLI on `PATH` pointed at the running orchestrator.
-5. Defaults unchanged: `memory.facts.cross_room` and `memory.episodic.cross_room` both resolve `live` (the shipped default — verify no overlay pins `shadow`/`off`), DMs stamp `internal` (`dm_default_classification` absent), `group:planning` is `internal` (the bundled declaration).
-6. Optional but recommended: `PERSATRIX_MEMORY_PROVENANCE=1` on the persona container, so a leg fail can be split into a **recall miss** (fact absent from the admitted `facts` slice) vs. a **reasoning miss** (admitted but ignored) — the MQ-11 discipline [MT-MEMORY-005 §Telemetry](MT-MEMORY-005-dementia-test.md#telemetry-required-for-diagnosis) established.
+4. **The operator identity is a member of `group:planning`** — the publish path refuses a non-member sender (`403 sender is not a member of the channel`); the DM legs need nothing (a DM materialises its own membership). Join at runtime (`persatrix channel join planning --as alex`) — and tear the stack down (`make reset`) rather than restarting the orchestrator afterwards: a config-declared channel with runtime-divergent membership fails the strict reconcile at the next boot.
+5. `persatrix` CLI on `PATH` pointed at the running orchestrator.
+6. Defaults unchanged: `memory.facts.cross_room` and `memory.episodic.cross_room` both resolve `live` (the shipped default — verify no overlay pins `shadow`/`off`), DMs stamp `internal` (`dm_default_classification` absent), `group:planning` is `internal` (the bundled declaration).
+7. Optional but recommended: `PERSATRIX_MEMORY_PROVENANCE=1` on the persona container, so a leg fail can be split into a **recall miss** (fact absent from the admitted `facts` slice) vs. a **reasoning miss** (admitted but ignored) — the MQ-11 discipline [MT-MEMORY-005 §Telemetry](MT-MEMORY-005-dementia-test.md#telemetry-required-for-diagnosis) established.
 
 ---
 
 ## Test Procedure
 
-The arc is **teach (DM) → close → ask (group) → re-ask (DM) → fresh-epoch wall**. Timing matters once: fact extraction runs at **interaction close** ([RFC 0020](../rfcs/0020-interaction-lifecycle.md)), and an idle DM interaction closes on the *next* event after the idle gap (default 600 s) — so Leg 1 ends with an explicit bridge turn that triggers the close before Leg 2 asks.
+The arc is **teach + introduce (DM) → close → ask + be recognised (group) → re-ask (DM) → fresh-epoch wall**. Timing matters once: fact extraction runs at **interaction close** ([RFC 0020](../rfcs/0020-interaction-lifecycle.md)), and an idle DM interaction closes on the *next* event after the idle gap (default 600 s) — so Leg 1 ends with an explicit bridge turn that triggers the close before Leg 2 asks. Legs 1b/2b ride *inside* that timing rather than extending it (identity is written mid-turn, not at close).
 
 ### Leg 1 — Teach the fact in the DM
 
@@ -69,7 +77,7 @@ persatrix chat ember-owl --user alex
 
 **Expected**: a natural acknowledgement; no memory call-out required.
 
-Now **close the teaching interaction**: leave the DM idle **≥ 11 minutes**, then send a low-content bridge turn in the same DM:
+Now **close the teaching interaction** — **send [Leg 1b](#leg-1b--introduce-yourself-in-the-same-dm-no-close-required)'s turn first**, then leave the DM idle **≥ 11 minutes** and send a low-content bridge turn in the same DM:
 
 > "Thanks — talk later."
 
@@ -78,11 +86,38 @@ The bridge turn trips the idle close of the teaching interaction (close runs bef
 **Optional verification** (debug, not a pass criterion): on the persona container,
 
 ```bash
-docker compose exec agent-ember-owl sqlite3 /app/data/memory.db \
-  "SELECT subject, predicate, object, protection_level, session_id FROM facts WHERE predicate LIKE 'topic.%';"
+docker compose exec -T agent-ember-owl python3 -c "
+import sqlite3
+for r in sqlite3.connect('/app/data/memory.db').execute(
+        \"SELECT subject, predicate, object, protection_level, session_id FROM facts WHERE predicate LIKE 'topic.%'\"):
+    print(' | '.join(str(x) for x in r))"
 ```
 
+(The agent image ships no `sqlite3` CLI — the runtime's `python3` with the stdlib `sqlite3` module is the query surface.)
+
 → at least one `atlas` row with a `topic.*` predicate, `protection_level = internal`, and the **DM room's** session id.
+
+### Leg 1b — Introduce yourself in the same DM (no close required)
+
+**Send this as Leg 1's *second* turn — right after the teach turn and *before* the idle gap.** It is numbered separately for diagnosis, not sequenced after Leg 1's close. State who you are in ordinary conversation:
+
+> "By the way, I don't think we've been introduced properly — I'm Maksim, I run releases here."
+
+**Expected**: a natural acknowledgement.
+
+**No idle window is needed** — a property, not a shortcut: identity does not wait for interaction close the way facts do. The write-through fires at the `store_note(contact:<id>)` tool boundary *during* the turn (the F-7 immediacy criterion).
+
+**Optional verification** (debug, not a pass criterion): on the persona container,
+
+```bash
+docker compose exec -T agent-ember-owl python3 -c "
+import sqlite3
+for r in sqlite3.connect('/app/data/memory.db').execute(
+        'SELECT other_participant_id, other_participant_type, identity FROM relationships WHERE identity IS NOT NULL'):
+    print(' | '.join(str(x) for x in r))"
+```
+
+→ an `alex` row typed **`user`** with a JSON identity carrying the name. A row typed `agent` *here* is an [ISSUE-0068](../issues/ISSUE-0068-chat-peer-recorded-as-agent-participant-type.md) regression of the **DM** stamp (ISSUE-0119 is the channel path, Leg 2b's) and means Leg 2b will fail.
 
 ### Leg 2 — Ask in the standup (the headline: cross-room recall)
 
@@ -99,6 +134,38 @@ persatrix channel send planning "What's the latest on Atlas — anything the tea
 
 > **The trigger must name the topic.** Topic seeding is deterministic subject matching — `atlas` (or a multi-word subject verbatim) has to appear in the trigger text. This is by design, and it is *not* the keyword-overlap foul of [MT-MEMORY-005](MT-MEMORY-005-dementia-test.md): the no-overlap rule protects the fact's **content** (the object — "ships Friday"), which the trigger here still never contains. A trigger that names neither the topic nor the counterparty exercises nothing.
 
+### Leg 2b — Be recognised in the standup (the person half)
+
+In `group:planning`, ask something whose answer requires knowing **who you are**, without stating it:
+
+```bash
+persatrix channel send planning "Morning — anything here that needs me specifically?" \
+    --as alex --mention ember-owl
+```
+
+**Pass criterion**: the reply places you as the person it met in the DM — by name, or by the role you gave ("you run releases", "as release owner"). It knows who it is talking to in a room where it was never told. The ask presupposes no prior commitment, so a persona that does not know you can only answer generically.
+
+**Fail criterion**: the persona treats you as unknown — asks who you are, answers in the abstract, or addresses you only by the bare `alex` id. **The raw sender id is a FAIL**, not a partial pass: it rides the wire regardless and proves no memory was consulted.
+
+> **The trigger must name neither you nor the content** — the identity twin of Leg 2's discipline. Identity seeds from the **sender**, not the text, so a trigger naming nothing still exercises it. That is why this leg catches what Leg 2 cannot.
+
+> **Run it on a channel whose transcript has never named you** — the identity twin of Leg 4's fresh-channel rule, and the same trap in a different tier. Leg 2 is *supposed* to answer as the persona would, and a real reply routinely addresses the asker by name ("Maksim, release notes are on you") — that reply is now in `group:planning`'s RFC 0034 conversation window, which is recent-N room-visible content, not memory. Asking Leg 2b in that same room afterwards therefore cannot distinguish **recognition from memory** from **reading the name off the transcript**, and the leg silently proves nothing. Either ask Leg 2b **before** Leg 2, or — the cleaner script, since it also keeps Leg 2's reply natural — create a **fresh group channel** with only you and the persona and ask there: an empty transcript leaves memory as the only possible source. (First observed live 2026-08-04, v0.3.13 release-prep; the confounded in-room run and the clean-room re-run are both recorded in the [v0.3.13 execution report](v0.3.13-execution-report.md).)
+>
+> ```bash
+> persatrix channel create recognition-probe --member ember-owl:addressed --member alex:addressed
+> persatrix channel send recognition-probe "Morning — anything here that needs me specifically?" \
+>     --as alex --mention ember-owl
+> ```
+
+**Diagnosis on fail** — two modes, different places:
+
+1. **Wrong participant type (the ISSUE-0119 class).** The persona read an agent-typed row and found nothing. Check the delivered event's `sender_participant_type` (must be `user`) and Leg 1b's row type. A **release-blocking regression** of the [#799](https://github.com/mkhomutov/Persatrix/pull/799) fix, not a quality miss.
+2. **Reasoning miss.** The identity line reached the prompt in `relationship_context` and the model ignored it. A quality finding.
+
+> **Provenance does not see this leg.** Unlike Legs 2/3, `PERSATRIX_MEMORY_PROVENANCE=1` emits **nothing** for the identity read: the `relationship` tier is a declared member of `KNOWN_TIERS` but does not call `MemoryBudget.record_admission` (`agents/persona_runtime/memory_budget.py` says so in as many words), so a `persatrix.memory.tier_admitted` line for it never exists. **Zero admissions on a Leg 2b turn is therefore the expected reading, not evidence of a recall miss** — do not triage this leg the way the MQ-11 discipline triages the facts tier. Split wiring from reasoning with the two direct reads instead: Leg 1b's `relationships` query (is there an `alex` row typed `user` carrying the identity JSON?) and the delivered event's `sender_participant_type`. Corrected 2026-08-04 after the v0.3.13 run read the silence as a miss.
+
+Two `alex` rows in Leg 1b's query means a store predating ISSUE-0120's migration v17 — re-run on a `make reset` stack before filing.
+
 ### Leg 3 — Re-ask in the DM
 
 Back in the original DM:
@@ -109,14 +176,15 @@ Back in the original DM:
 
 ### Leg 4 — The wall that stays: a fresh epoch inherits nothing
 
-Repeat the Leg 2 ask under a **fresh epoch** (run isolation — the axis that stays a hard wall, with `principal`):
+Repeat the Leg 2 ask under a **fresh epoch** (run isolation — the axis that stays a hard wall, with `principal`) — but **not in `group:planning`**: Leg 2's reply put the Friday date into that channel's transcript, and the RFC 0034 conversation window is recent-N channel history, epoch-agnostic by design (the transcript is room-visible content, not memory) — so an in-channel probe can never observe absence. Probe on a **fresh channel** with an empty transcript instead (still a different room from the DM, so the recall is still structurally cross-room):
 
 ```bash
-persatrix channel send planning "What's the latest on Atlas?" \
+persatrix channel create epoch-probe --member ember-owl:addressed --member alex:addressed
+persatrix channel send epoch-probe "What's the latest on Atlas?" \
     --as alex --mention ember-owl --epoch mt-crossroom-fresh
 ```
 
-**Pass criterion**: **no** reference to Friday or the exec demo — absence is the promise. Cross-room widening ranges over *rooms*, never across epochs or tenants; a recall here reproduces the F-3 class of leak and is release-blocking.
+**Pass criterion**: **no** reference to Friday or the exec demo — absence is the promise. Cross-room widening ranges over *rooms*, never across epochs or tenants; a recall here reproduces the F-3 class of leak and is release-blocking. Diagnose a fail with provenance before filing: zero `tier_admitted` emissions on the failing turn means the *injection-path* wall held and the recall arrived through an agent-initiated **memory-tool call** — the executor-task scope gap tracked as [ISSUE-0118](../issues/ISSUE-0118-tool-recall-bypasses-epoch-session-scopes.md) (found by this leg's first live run, 2026-07-30), not a widening regression.
 
 ---
 
@@ -125,11 +193,13 @@ persatrix channel send planning "What's the latest on Atlas?" \
 | Leg | Room | Trigger discipline | Pass criterion | Pass/Fail |
 |-----|------|--------------------|----------------|-----------|
 | 1 — Teach + close | DM | natural statement; ≥ 11 min idle + bridge turn | ack; (optional) `topic.*` fact row stamped `internal` with the DM session id | ☐ |
+| 1b — Introduce yourself | DM | natural statement; **no idle window needed** | ack; (optional) an `alex` relationship row typed **`user`** carrying the identity JSON | ☐ |
 | 2 — Standup ask | `group:planning` | names `atlas`, never the content | reply surfaces the Friday ship date, cross-room | ☐ |
+| 2b — Be recognised | `group:planning` | names **neither** you nor the content | reply addresses you by the name/role given in the DM; the bare `alex` id is a fail | ☐ |
 | 3 — DM re-ask | DM | names `atlas`, never the content | Friday recalled again in the original room | ☐ |
 | 4 — Fresh epoch | `group:planning`, `--epoch` override | same ask, fresh epoch | **no** recall — the epoch wall holds | ☐ |
 
-**Overall pass**: Legs 2, 3, and 4 all pass. A Leg 2/3 fail is diagnosed with provenance (recall vs. reasoning miss) before filing. A Leg 4 fail is a confidentiality/isolation regression — file immediately, release-blocking.
+**Overall pass**: Legs 2, 2b, 3, and 4 all pass. A Leg 2/3 fail is diagnosed with provenance (recall vs. reasoning miss) before filing. A Leg 2b fail is triaged **wiring vs. reasoning first** (see its diagnosis note): a wrong participant type is a release-blocking regression of the ISSUE-0119 fix, while an admitted-but-unused identity line is a quality finding. A Leg 4 fail is a confidentiality/isolation regression — file immediately, release-blocking.
 
 ---
 
@@ -147,7 +217,13 @@ persatrix channel send planning "What's the latest on Atlas?" \
 
 **Expected Behavior**: the extractor has not run yet, so the group-channel ask recall-misses. Test invalid — redo the Leg 1 idle + bridge, confirm the close in the logs, re-ask.
 
-### Edge Case 3: rollback lever
+### Edge Case 3: no identity row keyed on your sender id
+
+**Scenario**: Leg 2b fails and Leg 1b's query shows no identity row for `alex` — nothing at all, or a row keyed on a name (`contact:maksim`).
+
+**Expected Behavior**: not a wiring failure and not a Leg 2b fail — the capture missed. Identity lands only if the persona *elects* to call `store_note(contact:<id>)`, and lands on the id that topic names: the key is the *topic*, only the type is the sender's, so a name-keyed note is invisible to Leg 2b. Model behaviour, unlike the deterministic close-path fact pass — the person legs prove recall, not capture. Re-run Leg 1b with a fuller introduction (a name **and** a role parse better) and confirm the row before reading anything into Leg 2b. If it never lands on `alex`, file against the capture path, not cross-room recall.
+
+### Edge Case 4: rollback lever
 
 **Scenario**: a live-posture problem is found and the widenings need to come off the prompt path.
 
@@ -159,13 +235,15 @@ persatrix channel send planning "What's the latest on Atlas?" \
 
 | Date | Tester | OS | Provider | Result | Notes |
 |------|--------|----|----------|--------|-------|
-| — | — | — | — | — | Live execution scheduled for v0.3.12 release-prep ([v0.3.12-plan §Acceptance](../v0.3.12-plan.md#acceptance-for-v0312)). |
+| 2026-07-30 | Claude (Fable 5) | macOS 26.5.2 (`arm64`) | Anthropic | ⚠️ Pass w/ known gap — **v1.0 scope (Legs 1–4)** | v0.3.12 release-prep ([report](v0.3.12-execution-report.md#mt-memory-crossroom-001--memory-that-travels-live-anthropic)). Leg 4 `Accepted-with-known-gap` — the run that found [ISSUE-0118](../issues/ISSUE-0118-tool-recall-bypasses-epoch-session-scopes.md). Legs 1b/2b not run. |
+| 2026-08-04 | Claude (Opus 5) | macOS 26.5.2 (`arm64`) | Anthropic `claude-sonnet-4-6` | ✅ **Pass — all six legs, full v1.1 scope** | v0.3.13 release-prep ([report](v0.3.13-execution-report.md)). **Legs 1b/2b ran for the first time** — both pass ([ISSUE-0121](../issues/ISSUE-0121-crossroom-person-identity-legs-never-run-live.md) closed); 2b re-run clean after the in-room confound. **Leg 4 green with the memory-tool round evidenced in provenance** — the recall declined by the foreign-epoch wall ([ISSUE-0118](../issues/ISSUE-0118-tool-recall-bypasses-epoch-session-scopes.md) closed). Arc cost $0.30 / 25 leases. |
 
 ---
 
 ## Notes
 
 - **Why this MT exists when CI already replays the scenario**: `EVAL-MEMORY-003` drives the *runtime* through the recorded arc deterministically; this MT is the qualitative gate that a real provider, real idle-close timing, and natural operator phrasing produce the same behaviour an operator would actually see — the same recall@k-vs-dementia distinction MT-MEMORY-005 draws.
-- **Session hygiene**: no `PERSATRIX_SESSION_ID` pinning here, unlike MT-MEMORY-005 — the whole point is the per-`(agent, channel)` auto-binding minting *different* rooms for the DM and the group channel. Pinning one session across both would make Leg 2 same-room and vacuous.
+- **Session hygiene**: no `PERSATRIX_SESSION_ID` pinning here, unlike MT-MEMORY-005 — the whole point is the per-`(agent, channel)` auto-binding minting *different* rooms for the DM and the group channel. Pinning one session across both would make Legs 2/2b same-room and vacuous.
+- **Why the person half gets its own legs** rather than an extra assertion on Leg 2: different tiers, keys, and timing — facts key on the subject string and are written at close; identity keys on `(participant_id, participant_type)` and is written mid-turn. One leg cannot fail informatively for both, and empirically did not. The cost is two extra turns on an arc that already pays for the stack and the idle window.
 - **Classification posture**: both rooms sit at `internal` in this MT, so the §D gate admits silently. The gate's *withhold* half (teach in a `restricted` room, ask in an `internal` one) is `MT-PERSONA-CONFIDENTIALITY-001` territory — do not bolt it onto this arc; the two MTs are complementary halves of the headline sentence.
 - The shadow→live promotion evidence (criteria, recorded numbers, deferred decisions) lives in the [fact-scope amendment's Promotion section](../rfcs/0031-amendment-fact-scope-by-consolidation-level.md#promotion-v0312-pr-4--the-measurement-gated-flip) and the [L1 amendment's](../rfcs/0049-amendment-l1-cross-room-availability.md#promotion-v0312-pr-4--the-measurement-gated-flip).

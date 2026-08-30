@@ -1,6 +1,6 @@
 [package]
 name = "persatrix"
-version = "0.3.11"
+version = "0.3.14"
 edition = "2021"
 description = "Persatrix CLI — manage agents, workflows, and the mesh"
 license = "BUSL-1.1"
@@ -22,6 +22,10 @@ tabled = "0.20"                   # table output formatting
 # Home-directory resolution for the `~/.persatrix/active-session` pointer file
 # (RFC 0031 Phase 3 §E). The only cross-platform homedir API; std has none.
 dirs = "5"
+# No-echo password prompt for `persatrix login` (RFC 0039 §J — the
+# password is never in argv and never echoed). TTY-only; the CLI itself
+# falls back to a stdin line when stdin is not a terminal (pipes).
+rpassword = "7"
 # Async stream combinators (StreamExt::next) for the SSE follow loop.
 # Already pulled in transitively by reqwest; declared here so cli/src code can
 # `use futures_util::StreamExt` without depending on a transitive surface.

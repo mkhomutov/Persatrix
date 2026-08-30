@@ -98,6 +98,36 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # planning review had already reached the point of deleting contract rather
     # than prose. Remove once v0.3.12 ships and the plan is archived.
     "docs/v0.3.12-plan.md",
+    # docs/v0.3.14-plan.md — v0.3.14 master plan; same release-cycle
+    # accumulator pattern as the v0.3.0–v0.3.12 plans above. It opened at
+    # 2 964 words and crossed the cap during its own planning review, when
+    # two findings folded in as scope locks: the dispatch-origin enumeration
+    # (a missed REST origin fails *open* — it collapses silently to the
+    # 'local' principal, which is the defect the release exists to close)
+    # and the activation-day reset (migration v11 backfilled every
+    # pre-existing row to 'local' and the principal predicate is strict
+    # equality with no carve-out, so an authenticated caller cannot reach
+    # its pre-upgrade memory). Both are release-level contract: the
+    # acceptance criteria, an MT leg, and the release-notes obligations key
+    # off them. A trim pass reclaimed ~370 words of narrative first — what
+    # remains is contract, and the doc still has Phases 1–4 status flips to
+    # absorb.
+    #
+    # 2026-08-19, v0.3.14 post-release follow-up: removal was ATTEMPTED per the
+    # plan's own Phase 4 instruction and is BLOCKED. The archived plan measures
+    # 4 112 words against a 3 000 cap, so dropping the entry turns the CI
+    # `file_size.py --strict` gate red; the only ways to land it are to delete
+    # ~1 112 words of ratified contract (scope locks, the three recorded
+    # deviation notes, acceptance criteria) out of a historical record, or to
+    # pattern-exclude master plans -- which file_size.py's own
+    # _EXTRA_EXCLUDES comment considered and deliberately rejected, because
+    # plans are edited *during* their cycle and the cap does useful work then.
+    # That rationale expires on archival, but nothing implements archival: there
+    # is no docs/archive/, and all NINE plan entries here (v0.3.0 onward) carry
+    # the same never-executed exit condition. Left in place deliberately, with
+    # the blocker recorded, rather than carrying a promise that cannot be kept.
+    # Retiring these needs an archival mechanism, not another per-release note.
+    "docs/v0.3.14-plan.md",
     # docs/v0.3.x-sequencing.md orchestrates the v0.3.1 / v0.3.2 / v0.3.3
     # patch sequence and accumulates amendments as new v0.3.x-targeted
     # RFCs file (the 2026-05-12 amendment captured the RFC 0030 + RFC
@@ -234,6 +264,18 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # verification) folds in a detailed evidence row, so it sits at the 3 000-word
     # prose cap. The ISSUE-0099 PR-2 row tipped it over. Trim only if a row is dropped.
     "docs/manual-tests/MT-CHANNEL-GOV-004.md",
+    # docs/manual-tests/MT-MEMORY-CROSSROOM-001.md — the live cross-room memory
+    # acceptance gate (RFC 0049 scenario 2), same class as the two above. It
+    # accumulates by *tier* rather than by results row: v1.1 added the person-
+    # identity legs (1b/2b) after ISSUE-0119 reached a release candidate on a
+    # green v1.0 run, because a facts-tier leg names a topic and structurally
+    # cannot observe an identity-tier break. Each further memory tier that
+    # ships lands the same way. The v1.1 edit sat at exactly 3 000/3 000 after
+    # three prose trims — the point at which shaving load-bearing procedure to
+    # fit the cap costs more than the cap saves, in a doc whose job is to be
+    # followed step-by-step under live timing pressure. Trim only if a leg is
+    # dropped.
+    "docs/manual-tests/MT-MEMORY-CROSSROOM-001.md",
     # docs/v0.3.4-release-prep-plan.md is the v0.3.4 release-prep sequencer —
     # same release-cycle-accumulator pattern as the v0.3.0 / v0.3.1 plans and
     # the v0.3.3 checklist above. It crossed the 3 000-word prose cap when PR 1

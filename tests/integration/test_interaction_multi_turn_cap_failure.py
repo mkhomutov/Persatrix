@@ -45,13 +45,16 @@ import logging
 import pytest
 
 from agents.clock import FrozenClock
-from agents.memory.boundary_detectors import REASON_MAX_TURNS
-from agents.memory.interactions import scope_for_dm
+from agents.memory.boundary_detectors import REASON_MAX_TURNS, REASON_STRUCTURAL
+from agents.memory.interactions import scope_for_dm, scope_for_group
 from agents.persona_types import AgentEvent, EventType
 from agents.tools.registry import clear_registry
 
 from ._interaction_multi_turn_helpers import (
+    GROUP_CHANNEL,
     all_episodes,
+    channel_event,
+    close_reasons,
     make_agent_with_clock,
 )
 
@@ -117,7 +120,34 @@ class TestMaxTurnsCapMultiTurnPath:
         assert episodes[0]["turn_count"] == 3
         # Scope popped — a subsequent event would open a fresh
         # interaction (RFC 0020 §C "do not reopen").
-        assert agent._interaction_tracker.get(scope) is None
+        assert agent._interaction_tracker.get(scope, speaker_id=peer) is None
+
+    async def test_cap_close_on_session_end_still_fans_siblings(self):
+        """v0.3.15 PR 3 review fix: the cap-th turn and a ``chat_end``
+        flag can ride the SAME event.  The inline cap close used to
+        early-return past the session-end room fan, leaving every
+        sibling ``(principal, speaker)`` record open to be relabelled
+        ``idle_gap`` an idle window later.  The cap's own close stands
+        for the sender's record (truthful ``max_turns``); the fan still
+        closes the siblings structurally in the same step."""
+        agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
+        agent._interaction_tracker._max_turns = 2
+        scope = scope_for_group(GROUP_CHANNEL)
+        await agent._store_event_episode(channel_event("hi", sender="alex"), [])
+        await agent._store_event_episode(channel_event("hey", sender="robin"), [])
+        # alex's SECOND turn is the cap-th turn AND carries the session end.
+        end = channel_event("done here", sender="alex")
+        end.metadata["chat_end"] = True
+        await agent._store_event_episode(end, [])
+
+        assert agent._interaction_tracker.records_for_scope(scope) == [], (
+            "the session-end fan must close the sibling records the cap "
+            "close never touched"
+        )
+        episodes = await all_episodes(agent)
+        assert sorted(close_reasons(episodes)) == sorted(
+            [REASON_MAX_TURNS, REASON_STRUCTURAL],
+        ), "alex closes by the cap, robin by the room's structural fan"
 
 
 # ─── Repeated cap cycles across a long conversation ─────────────
@@ -184,7 +214,7 @@ class TestMaxTurnsCapFiresRepeatedly:
         assert len(set(ids)) == cycles, f"interaction_ids not distinct: {ids}"
         # The ninth event's add_turn fired the third cap and popped the
         # scope — a tenth event would open cycle four.
-        assert agent._interaction_tracker.get(scope) is None
+        assert agent._interaction_tracker.get(scope, speaker_id=peer) is None
 
 
 # ─── PR-3 review #15: multi-turn close-path failure swallow ─────
@@ -269,6 +299,122 @@ class TestMultiTurnCloseFailureIsSwallowedAndLogged:
             payload={"content": "again"},
             sender_id=peer,
         ))
-        next_open = agent._interaction_tracker.get(scope)
+        next_open = agent._interaction_tracker.get(scope, speaker_id=peer)
         assert next_open is not None
         assert next_open.turn_count == 1
+
+
+# ─── PR #846 review: session-end fan guards ─────────────────────
+
+
+@pytest.mark.asyncio
+class TestSessionEndFanGuards:
+    """Three PR #846 review pins on the session-end room fan: a chat_end
+    from a sender with no open record is still a real turn and must be
+    recorded, the fan must not close a record belonging to a DIFFERENT
+    wire conversation, and a failing cap-close persist must not skip the
+    fan (the chat_end signal never recurs — an aborted fan leaks every
+    sibling to an idle relabel)."""
+
+    async def test_session_end_from_recordless_sender_records_its_turn(self):
+        """PR #846 review: a short-circuit here used to skip the ingest
+        when the terminator held no record of its own, so its message was
+        dropped from memory outright — no turn, no episode, and nothing
+        for the summariser or the RFC 0026 extractor to read (the
+        in-memory turn is the only place the body lives; persistence
+        strips ``text``).  A session end is a channel MESSAGE with a body,
+        not the contentless control event the close-notification no-open
+        branch declines to mirror, so it lands in its own sender's
+        record — minted if absent — and the fan closes that too."""
+        agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
+        scope = scope_for_group(GROUP_CHANNEL)
+        await agent._store_event_episode(channel_event("hi", sender="alex"), [])
+        await agent._store_event_episode(channel_event("hey", sender="robin"), [])
+        end = channel_event("DECISION: ship on Friday", sender="carol")
+        end.metadata["chat_end"] = True
+        await agent._store_event_episode(end, [])
+
+        assert agent._interaction_tracker.records_for_scope(scope) == []
+        episodes = await all_episodes(agent)
+        assert len(episodes) == 3, (
+            "one episode per speaker — including the terminator, whose "
+            "closing message is a turn like any other"
+        )
+        assert close_reasons(episodes) == [REASON_STRUCTURAL] * 3
+        senders = {
+            turn["payload"]["sender"]
+            for ep in episodes
+            for turn in json.loads(ep["context_json"] or "{}").get("turns", [])
+        }
+        assert senders == {"alex", "robin", "carol"}, (
+            "the terminator's turn must reach the persisted record, not be "
+            "discarded with its message"
+        )
+
+    async def test_session_end_leaves_a_successor_conversation_open(self):
+        """PR #846 review: the session-end fan was the ONE room fan with
+        no wire-id admission conjunct, so a straggler ``chat_end`` of a
+        RETIRED conversation buried the live successor's records as
+        "ended".  The stale-split loop cannot pre-clear them —
+        ``wire_rotation_closes`` spares a successor precisely when the
+        straggler's id is its known ``predecessor_wire_id`` — so the
+        guard has to be on the fan itself."""
+        agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
+        scope = scope_for_group(GROUP_CHANNEL)
+        # alex speaks in W1; robin's turn opens the successor under W2,
+        # naming W1 as the retired predecessor.
+        await agent._store_event_episode(
+            channel_event("hi", sender="alex", wire_id="W1"), [],
+        )
+        await agent._store_event_episode(
+            channel_event("new topic", sender="robin", wire_id="W2",
+                          prev_id="W1"), [],
+        )
+        # A straggler chat_end of the RETIRED W1 conversation.
+        end = channel_event("ending this", sender="alex", wire_id="W1")
+        end.metadata["chat_end"] = True
+        await agent._store_event_episode(end, [])
+
+        survivors = agent._interaction_tracker.records_for_scope(scope)
+        assert [r.wire_interaction_id for r in survivors] == ["W2"], (
+            "the live successor conversation must survive a retired "
+            "conversation's straggler terminator"
+        )
+        # Two W1 episodes: alex's original record, rotation-closed when
+        # robin's W2 turn arrived, plus the straggler's own fragment —
+        # the fragmentation this PR accepts and documents.  What must NOT
+        # be there is robin's live turn.
+        episodes = await all_episodes(agent)
+        assert close_reasons(episodes) == [REASON_STRUCTURAL] * 2
+        persisted_senders = {
+            turn["payload"]["sender"]
+            for ep in episodes
+            for turn in json.loads(ep["context_json"] or "{}").get("turns", [])
+        }
+        assert persisted_senders == {"alex"}, (
+            "robin's turn belongs to the live W2 conversation and must not "
+            "be persisted by the retired conversation's session end"
+        )
+
+    async def test_cap_close_persist_failure_still_fans_session_end(
+        self, monkeypatch,
+    ):
+        agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
+        agent._interaction_tracker._max_turns = 2
+        scope = scope_for_group(GROUP_CHANNEL)
+        await agent._store_event_episode(channel_event("hi", sender="alex"), [])
+        await agent._store_event_episode(channel_event("hey", sender="robin"), [])
+
+        async def _boom(interaction):
+            raise RuntimeError("simulated phase-1 failure")
+
+        monkeypatch.setattr(agent, "_persist_closed_interaction", _boom)
+        # alex's SECOND turn is the cap-th turn AND carries the session end.
+        end = channel_event("done here", sender="alex")
+        end.metadata["chat_end"] = True
+        await agent._store_event_episode(end, [])
+
+        assert agent._interaction_tracker.records_for_scope(scope) == [], (
+            "a raising cap-close persist must not abort the session-end "
+            "fan — the siblings still close structurally"
+        )

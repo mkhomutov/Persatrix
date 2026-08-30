@@ -96,13 +96,13 @@ def _closed_interaction(
     classification: str | None = None,
     source_channel_id: str | None = None,
 ):
-    tracker.add_turn(
+    opened = tracker.add_turn(
         "group:grp-ops", payload={"summary": "s"},
         classification=classification, source_channel_id=source_channel_id,
     )
     from agents.memory.boundary_detectors import REASON_STRUCTURAL
 
-    closed = tracker.close("group:grp-ops", reason=REASON_STRUCTURAL)
+    closed = tracker.close_record(opened, reason=REASON_STRUCTURAL)
     assert closed is not None
     return closed
 

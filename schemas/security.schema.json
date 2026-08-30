@@ -1,0 +1,99 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://persatrix.dev/schemas/security.schema.json",
+  "title": "Persatrix Security Configuration (v0.3.12+)",
+  "description": "Internal-only schema until v1.0; `$id` may break across v0.x bumps without notice. The `auth:` block (RFC 0039 §H + the enabled-mode exposure amendment §A/§B) governs the REST/console authentication surface: the disabled/enabled rollout switch, session TTLs per transport, Argon2id cost, the two login limiters, and the trusted reverse proxies for per-source key resolution. The Go loader (internal/server/auth_config.go) is the semantic authority — this schema is the `make validate` authoring gate; a file that passes here can still fail the loader's cross-field checks.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "auth": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["disabled", "enabled"],
+          "default": "disabled",
+          "description": "The RFC 0039 §H rollout switch. `disabled` (default): every request resolves to the anonymous `local` identity, no route enforced, pre-RFC behaviour byte-for-byte. `enabled`: identity resolution live; the §E policy matrix enforces from Phase 2. Any networked deployment MUST set enabled."
+        },
+        "session_ttl": {
+          "type": "string",
+          "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
+          "default": "24h",
+          "description": "Bearer-transport session lifetime (Go duration syntax; minimum 1s). The CLI / programmatic-caller TTL."
+        },
+        "cookie_session_ttl": {
+          "type": "string",
+          "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
+          "default": "8h",
+          "description": "Cookie-transport session lifetime (amendment §A1; OQ #2 resolved 2026-07-29): deliberately shorter than the bearer TTL — a browser session is likelier left open on an unattended screen."
+        },
+        "password": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Argon2id cost (RFC 0039 §C). Stored hashes verify under their own embedded parameters and re-hash to this cost on next successful login.",
+          "properties": {
+            "argon2_memory_kib": {
+              "type": "integer",
+              "minimum": 8192,
+              "default": 65536,
+              "description": "Memory cost in KiB. The 8 MiB floor rejects configurations weak enough to defeat the KDF's purpose."
+            },
+            "argon2_iterations": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 3,
+              "description": "Time cost (passes over memory)."
+            },
+            "argon2_parallelism": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 255,
+              "default": 4,
+              "description": "Lanes. Bounded by the argon2 encoding's uint8."
+            }
+          }
+        },
+        "login_throttle": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "The amendment §B login limiters — live under BOTH auth modes, with the endpoint they defend. Two limiters because there are two keys (§B1): per_source is the Argon2id-amplification flood defence; per_username is the targeted-guessing defence. Each gets its own tracked-key LRU (§B2 — never the agent limiter's).",
+          "properties": {
+            "per_source": { "$ref": "#/definitions/limiter" },
+            "per_username": { "$ref": "#/definitions/limiter" }
+          }
+        },
+        "trusted_proxies": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Reverse proxies (CIDRs or bare IPs) whose X-Forwarded-For is believed when resolving the per-source limiter key (amendment §B3). Empty: the TCP peer is always the source; behind a proxy the per-source limiter then degrades to a global one and the orchestrator WARNs at startup under `enabled`."
+        }
+      }
+    }
+  },
+  "definitions": {
+    "limiter": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "One sliding-window login limiter (its own RateLimitConfig instance). Defaults ratified 2026-07-29: per_source 10/60s, per_username 5/60s, each with a 1000-key LRU.",
+      "properties": {
+        "calls_per_window": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum admitted login attempts per key within the rolling window."
+        },
+        "window_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Rolling window length in seconds; also the 429's Retry-After value."
+        },
+        "max_tracked": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Tracked-key LRU bound. Eviction emits the existing telemetry-class audit event — the operator's cardinality-blow-up signal (§B2)."
+        }
+      }
+    }
+  }
+}

@@ -164,6 +164,54 @@ table. RFC 0011 §H labels the all-`participant` pattern "Always-respond /
 incident"; this guide uses **Incident** consistently to name the role rather
 than the implementation.
 
+### Confidentiality classification (RFC 0037) — v0.3.12
+
+Every channel carries a level from the fixed lattice
+**`public` < `internal` < `restricted` < `secret`**
+([RFC 0037 §A](../rfcs/0037-memory-confidentiality-channel-classification.md#a-the-classification-lattice)).
+Declare it per group channel; absent means `internal` — a channel nobody
+classified is confidential-by-default, never public:
+
+```yaml
+channels:
+  - name: warroom
+    description: "Leadership — restricted"
+    classification: restricted
+    members:
+      - id: ember-owl
+        respond: addressed
+```
+
+DMs open on demand and are stamped from the fleet-wide
+`dm_default_classification` knob (default `internal`) at creation. To
+**reclassify** an existing channel, change the declared value and re-apply
+config: the reconcile path adopts the declaration onto the store row and
+refreshes the router's dispatch-time cache, no restart required (RFC 0037 §B
+— config is authoritative for declared group channels; undeclared store
+channels are left untouched). Raising a level mid-conversation stamps only
+*subsequently opened* interactions at the new level — an interaction open
+across the raise keeps its open-time capture
+([RFC 0037 §C](../rfcs/0037-memory-confidentiality-channel-classification.md#c-memory-provenance-and-protection-level)).
+
+What the level *does*: every memory entry a persona derives from the channel
+(episodes, facts, notes) is stamped with the channel's classification as its
+**protection level**, and four enforcement points act on the stamp — the
+[§D hard gate](../rfcs/0037-memory-confidentiality-channel-classification.md#d-the-hard-gate-at-memory-injection)
+withholds an above-level entry from any prompt assembled for a
+lower-classified channel; [§E projections](../rfcs/0037-memory-confidentiality-channel-classification.md#e-declassification-projections)
+let a protected interaction leave behind one-line lower-level summaries so
+the withhold degrades to "informed by, doesn't disclose";
+the [§F recall filter](../rfcs/0037-memory-confidentiality-channel-classification.md#f-recall-classification-filter)
+applies the same rank check to verbatim message recall; and the
+[§G tripwire](../rfcs/0037-memory-confidentiality-channel-classification.md#g-the-leak-tripwire)
+logs an audit record if a withheld entry's verbatim text ever appears in an
+outbound message. Classification is orthogonal to *rooms* (memory sessions):
+cross-room recall travels freely at-or-below the acting channel's level and
+is gate-stopped above it — see the
+[sessions guide §7](sessions.md#7-cross-room-recall--the-v0312-posture).
+Live acceptance:
+[MT-PERSONA-CONFIDENTIALITY-001](../manual-tests/MT-PERSONA-CONFIDENTIALITY-001.md).
+
 ---
 
 ## 3. Joining and posting as a human user
@@ -319,10 +367,11 @@ enables.
 
 ```yaml
 # config/channels.yaml
-max_cascade_depth: 5          # default; matches agents/dispatch.py
+max_cascade_depth: 5          # fleet cap; matches agents/dispatch.py
 max_channels: 50
 channels:
   - name: planning
+    max_cascade_depth: 3      # optional per-channel override (ISSUE-0114, v0.3.13)
     members:
       - {id: alex, respond: participant}
       - {id: jordan, respond: participant}
@@ -330,6 +379,25 @@ channels:
 
 A zero or negative `max_cascade_depth:` row is ignored — the backstop
 cannot be silently disabled from config.
+
+**Per-channel override (v0.3.13,
+[ISSUE-0114](../issues/ISSUE-0114-per-channel-cascade-depth-override.md)).**
+A channel may declare its own `max_cascade_depth`; zero/absent inherits the
+fleet cap. Because the Python dispatcher's defense-in-depth cap is a
+per-process global aligned with the *fleet* value, a per-channel cap **must
+not exceed the fleet cap** — the loader rejects it (raising one channel past
+the fleet default means raising the fleet cap and the aligned
+`agents/dispatch.py` value first), and a live RFC 0050 edit above the fleet
+cap applies with a loud server-side warning instead (the fleet cap is
+startup-only, so a live edit is never bricked). The knob is runtime-editable
+per RFC 0050: it rides `ChannelConfigOverrides`
+(`PATCH /api/v1/channels/{id}/config`, the web console's Channel settings
+panel) like the other governance knobs, and from the CLI:
+
+```bash
+persatrix channel config set planning max_cascade_depth=3
+persatrix channel config get planning        # renders the row with its source
+```
 
 ### Conversation governance (RFC 0030 Layers 1/2/4) — v0.3.8
 
@@ -483,7 +551,8 @@ persatrix channel config get planning --json
 # Override one or more knobs (space-separated key=value). Knob names match the
 # YAML fields above (floor_control, end_vote_threshold, end_vote_window,
 # escalation_chair_id, interaction_idle_timeout_seconds, interaction_budget_tokens,
-# max_replies_per_participant_per_interaction, salience_max_channel_members).
+# max_replies_per_participant_per_interaction, salience_max_channel_members,
+# max_cascade_depth).
 persatrix channel config set planning floor_control=true end_vote_window=4
 
 # Clear one or more knobs back to inherit.
@@ -586,7 +655,7 @@ CLI `channel config get` reads back. See the
 Governance makes a brainstorm *converge and terminate*; the **summary surface**
 turns "terminated" into "here's the result". When an interaction closes — by an
 end-vote (Layer 4), by the cost ceiling (Layer 1), or by going idle — the persona
-persists a one-per-interaction summary to its `episodes` row
+persists a summary to its `episodes` row
 ([RFC 0020 §C/§D](../rfcs/0020-interaction-lifecycle.md#c-interaction-lifecycle-states)),
 and v0.3.8 **surfaces that already-persisted summary** so a converged
 conversation hands back something a human can read. The summariser itself is
@@ -613,6 +682,21 @@ unchanged — this is a read surface, not a new synthesis step.
   Both surfaces read `GET /api/v1/agents/{id}/interactions/closed` — the summary
   is **per-agent** (each participating persona persists its own row), so the web
   surface merges across the channel's participants and shows one affordance.
+
+> **One row per speaker since v0.3.15 (ISSUE-0123 / ISSUE-0131).** A persona's
+> interaction records are keyed `(principal, speaker, scope)`, so a *group* room
+> holds one open record per distinct `sender_id` per tenant and a room-wide close
+> writes **one closed-interaction row per speaker heard**, not one per
+> conversation. Expect `N` rows per agent where you used to see one, each
+> summarising that speaker's own turns and naming that speaker (plus, on the
+> close-notification path, whoever closed the room) in `participants`. This is
+> also the routine cause of one governance interaction id mapping to several
+> episode ids — see the ISSUE-0102 note below for the other one. The `agent
+> interactions` CLI lists every row; the web affordance shows the newest, so on a
+> multi-speaker room read the CLI for the whole picture. It reaches the RFC 0020
+> §H **auto-reflect nudge** and the DM relationship tier's `interaction_count`
+> the same way: both now count records, so `auto_reflect_after` fires sooner in
+> a busy room and may want raising.
 
 > **Two interaction-id namespaces (ISSUE-0102).** The `interaction_id` on a
 > closed-interaction row is the persona's **agent-side** RFC 0020 memory-episode
@@ -735,6 +819,12 @@ Per-channel recall scoping uses a tag filter on the shared
 `recall_with_scope_filter` helper, so an agent in many channels does not pull
 unrelated history into its prompt for a single-channel turn.
 
+Since v0.3.12 every row written from a channel turn also carries the
+channel's confidentiality classification as its `protection_level`
+(frozen at interaction open — RFC 0037 §C), and every injection candidate
+passes the §D gate against the acting channel's level; see
+[§2 Confidentiality classification](#confidentiality-classification-rfc-0037--v0312).
+
 ---
 
 ## 6. Missed-message recovery
@@ -745,10 +835,17 @@ ships **on-startup catch-up fetch** (RFC 0011 [OQ #8](../rfcs/0011-channels-brid
 - After startup + self-registration, each persona agent fetches the last 50
   messages per channel it is a member of via REST.
 - Fetched messages flow through the same ingest path (`_store_event_episode`)
-  so they land in memory with the correct interaction shape — but the agent
-  runs in **replay mode** for those events: outbound `SEND_CHANNEL_MESSAGE`
-  actions are suppressed so the agent does not blast everyone with stale
-  responses on restart.
+  so they land in the interaction tracker with the correct shape — but the
+  agent runs in **replay mode** for those events: outbound
+  `SEND_CHANNEL_MESSAGE` actions are suppressed so the agent does not blast
+  everyone with stale responses on restart.
+- **Replayed spans derive no memory** (ISSUE-0130, v0.3.14). A replayed row
+  carries no principal — the `messages` table has no principal column — so
+  summarising it would write one authenticated person's content into the
+  shared `local` tenant. The span is closed at pass end (or split when a
+  live turn arrives) with `catchup_complete` and dropped; the live
+  conversation that resumes after the restart is unaffected and derives
+  normally. `agent.interactions.closed.by_catchup_complete` counts the drops.
 - The `channel.messages.replayed{channel_id=…}` counter pins the contract.
 
 Watermark-based catch-up (`?since=<message_id>` per-channel, per-subscriber)
@@ -946,8 +1043,6 @@ deferrals, not implementation oversights:
 - **Token auth** on the REST surface → RFC 0009 Phase 4 (v0.4.0).
 - **Watermark + per-tick catch-up** → v0.3.x once usage data justifies; see
   [OQ #8](../rfcs/0011-channels-bridges.md#open-questions).
-- **Per-channel `cascade_depth` overrides** → v0.3.x; see
-  [OQ #11](../rfcs/0011-channels-bridges.md#open-questions).
 - **Persona name discovery / dynamic membership** → v0.4.0 (RFC 0011 OQ #1).
 - **The Layer 5 moderator** (the `chair`'s *active* half — a persona that reads
   the transcript and decides to wrap up / terminate) → v0.4.0. v0.3.8 ships the
@@ -1105,9 +1200,15 @@ taught about the knobs:
   reply's cascade depth *together*, so a `max_rounds` above the depth cap (5)
   can never fire on that chain — every productive soak arc closed on the depth
   bound. `max_rounds` (default now **8**, down from 12) is the net for
-  *stall-driven* arcs, where convener cadence turns reset depth. To lengthen
-  discussions, raise the top-level `max_cascade_depth` — keeping it aligned
-  with the Python dispatcher's equal pin (`agents/dispatch.py`).
+  *stall-driven* arcs, where convener cadence turns reset depth. The knob is
+  **per-channel** since v0.3.13
+  ([ISSUE-0114](../issues/ISSUE-0114-per-channel-cascade-depth-override.md)):
+  to shorten one channel's discussions (a cheap triage room), set that
+  channel's `max_cascade_depth` below the fleet cap — in `channels.yaml` or
+  live via the RFC 0050 config surface; to lengthen discussions *past the
+  fleet default*, raise the top-level `max_cascade_depth` (keeping it aligned
+  with the Python dispatcher's equal pin, `agents/dispatch.py`) and then
+  per-channel caps up to it.
 - **Co-tune `end_vote_threshold` with discussion length**: at the K=2 default,
   2 votes closed a 3-seat roster in 4 of 7 arcs — sometimes as ~20 s
   confirmation stubs — and an end-vote close arms **no** chair synthesis. The

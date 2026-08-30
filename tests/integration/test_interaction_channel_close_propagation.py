@@ -95,13 +95,13 @@ class TestVoteClosesLocalInteraction:
             await agent._store_event_episode(
                 channel_event(f"turn-{i}", wire_id="wire-A"), [],
             )
-        assert agent._interaction_tracker.get(SCOPE) is not None
+        assert agent._interaction_tracker.get(SCOPE, speaker_id="alex") is not None
         await agent._store_event_episode(
             channel_event("wrap it up?", wire_id="wire-A"), [vote()],
         )
         # Decide time: parked, NOT closed — the vote has not been
         # published yet (the episode stores before the executor runs).
-        parked = agent._interaction_tracker.get(SCOPE)
+        parked = agent._interaction_tracker.get(SCOPE, speaker_id="alex")
         assert parked is not None
         assert parked.is_open
         assert await all_episodes(agent) == []
@@ -109,7 +109,7 @@ class TestVoteClosesLocalInteraction:
         # never-reopen) and the closed episode row carries the structural
         # trigger the CLI renders as "ended".
         await discharge_vote(agent)
-        assert agent._interaction_tracker.get(SCOPE) is None
+        assert agent._interaction_tracker.get(SCOPE, speaker_id="alex") is None
         episodes = await all_episodes(agent)
         assert len(episodes) == 1
         assert episodes[0]["scope"] == SCOPE
@@ -128,7 +128,7 @@ class TestVoteClosesLocalInteraction:
         )
         stamped_token = failed_vote.payload[VOTE_CLOSE_TOKEN_KEY]
         await discharge_vote(agent, published=False)
-        open_interaction = agent._interaction_tracker.get(SCOPE)
+        open_interaction = agent._interaction_tracker.get(SCOPE, speaker_id="alex")
         assert open_interaction is not None
         assert open_interaction.is_open
         assert await all_episodes(agent) == []
@@ -138,7 +138,7 @@ class TestVoteClosesLocalInteraction:
         await agent.resolve_end_vote_publish(
             CHANNEL, published=True, token=stamped_token,
         )
-        assert agent._interaction_tracker.get(SCOPE) is not None
+        assert agent._interaction_tracker.get(SCOPE, speaker_id="alex") is not None
         assert await all_episodes(agent) == []
 
     async def test_stale_park_does_not_close_successor(self):
@@ -156,7 +156,7 @@ class TestVoteClosesLocalInteraction:
         episodes = await all_episodes(agent)
         assert len(episodes) == 1  # the rotation close, not the vote's
         await discharge_vote(agent)
-        successor = agent._interaction_tracker.get(SCOPE)
+        successor = agent._interaction_tracker.get(SCOPE, speaker_id="alex")
         assert successor is not None
         assert successor.is_open
         assert len(await all_episodes(agent)) == 1
@@ -167,7 +167,7 @@ class TestVoteClosesLocalInteraction:
             channel_event("ongoing", wire_id="wire-A"), [],
         )
         await agent.resolve_end_vote_publish(CHANNEL, published=True, token="")
-        open_interaction = agent._interaction_tracker.get(SCOPE)
+        open_interaction = agent._interaction_tracker.get(SCOPE, speaker_id="alex")
         assert open_interaction is not None
         assert open_interaction.is_open
         assert await all_episodes(agent) == []
@@ -184,7 +184,7 @@ class TestVoteClosesLocalInteraction:
         assert actions[0].payload["channel_id"] == CHANNEL
         await agent._store_event_episode(event, actions)
         await discharge_vote(agent)
-        assert agent._interaction_tracker.get(SCOPE) is None
+        assert agent._interaction_tracker.get(SCOPE, speaker_id="alex") is None
         episodes = await all_episodes(agent)
         assert _close_reasons(episodes) == [REASON_STRUCTURAL]
 
@@ -198,7 +198,7 @@ class TestVoteClosesLocalInteraction:
             channel_event("closable question"), [vote(channel_id=None)],
         )
         assert agent._pending_vote_closes == {}
-        open_interaction = agent._interaction_tracker.get(SCOPE)
+        open_interaction = agent._interaction_tracker.get(SCOPE, speaker_id="alex")
         assert open_interaction is not None
         assert open_interaction.is_open
 
@@ -213,7 +213,7 @@ class TestVoteClosesLocalInteraction:
         await agent.resolve_end_vote_publish(
             "group:other", published=True, token="",
         )
-        open_interaction = agent._interaction_tracker.get(SCOPE)
+        open_interaction = agent._interaction_tracker.get(SCOPE, speaker_id="alex")
         assert open_interaction is not None
         assert open_interaction.is_open
         assert await all_episodes(agent) == []
@@ -236,7 +236,7 @@ class TestVoteClosesLocalInteraction:
         assert agent._pending_vote_closes == {}
         assert VOTE_CLOSE_TOKEN_KEY not in dm_vote.payload
         await agent.resolve_end_vote_publish(dm_channel, published=True, token="")
-        open_interaction = agent._interaction_tracker.get(dm_scope)
+        open_interaction = agent._interaction_tracker.get(dm_scope, speaker_id="alex")
         assert open_interaction is not None
         assert open_interaction.is_open
         assert await all_episodes(agent) == []
@@ -266,7 +266,7 @@ class TestWireRotationClosesLocalInteraction:
         assert episodes[0]["scope"] == SCOPE
         assert episodes[0]["turn_count"] == 2
         assert _close_reasons(episodes) == [REASON_STRUCTURAL]
-        fresh = agent._interaction_tracker.get(SCOPE)
+        fresh = agent._interaction_tracker.get(SCOPE, speaker_id="alex")
         assert fresh is not None
         assert fresh.is_open
         assert fresh.turn_count == 1
@@ -300,7 +300,7 @@ class TestWireRotationClosesLocalInteraction:
         await agent._store_event_episode(
             channel_event("hello", wire_id="wire-A"), [],
         )
-        opened = agent._interaction_tracker.get(SCOPE)
+        opened = agent._interaction_tracker.get(SCOPE, speaker_id="alex")
         assert opened is not None
         assert opened.wire_interaction_id == "wire-A"
 
@@ -312,7 +312,7 @@ class TestWireRotationClosesLocalInteraction:
             await agent._store_event_episode(
                 channel_event(f"legacy-{i}"), [],
             )
-        open_interaction = agent._interaction_tracker.get(SCOPE)
+        open_interaction = agent._interaction_tracker.get(SCOPE, speaker_id="alex")
         assert open_interaction is not None
         assert open_interaction.turn_count == 3
         assert open_interaction.wire_interaction_id == ""
@@ -327,7 +327,7 @@ class TestWireRotationClosesLocalInteraction:
         await agent._store_event_episode(
             channel_event("tagged", wire_id="wire-A"), [],
         )
-        open_interaction = agent._interaction_tracker.get(SCOPE)
+        open_interaction = agent._interaction_tracker.get(SCOPE, speaker_id="alex")
         assert open_interaction is not None
         assert open_interaction.turn_count == 2
         assert open_interaction.wire_interaction_id == "wire-A"
@@ -346,7 +346,7 @@ class TestWireRotationClosesLocalInteraction:
             channel_event("agreed: relay", wire_id="wire-A"), [vote()],
         )
         await discharge_vote(agent)
-        assert agent._interaction_tracker.get(SCOPE) is None
+        assert agent._interaction_tracker.get(SCOPE, speaker_id="alex") is None
         await agent._store_event_episode(
             channel_event("retro agenda?", wire_id="wire-B"), [],
         )
@@ -354,7 +354,7 @@ class TestWireRotationClosesLocalInteraction:
         assert len(episodes) == 1
         assert episodes[0]["turn_count"] == 2
         assert _close_reasons(episodes) == [REASON_STRUCTURAL]
-        fresh = agent._interaction_tracker.get(SCOPE)
+        fresh = agent._interaction_tracker.get(SCOPE, speaker_id="alex")
         assert fresh is not None
         assert fresh.wire_interaction_id == "wire-B"
 
@@ -400,7 +400,7 @@ class TestThreadScopesAreWireUntracked:
             ),
             [],
         )
-        open_interaction = agent._interaction_tracker.get(THREAD_SCOPE)
+        open_interaction = agent._interaction_tracker.get(THREAD_SCOPE, speaker_id="alex")
         assert open_interaction is not None
         assert open_interaction.is_open
         assert open_interaction.turn_count == 3
@@ -414,7 +414,7 @@ class TestThreadScopesAreWireUntracked:
             channel_event("threaded", wire_id="wire-A", thread_id=THREAD_ID),
             [],
         )
-        opened = agent._interaction_tracker.get(THREAD_SCOPE)
+        opened = agent._interaction_tracker.get(THREAD_SCOPE, speaker_id="alex")
         assert opened is not None
         assert opened.wire_interaction_id == ""
 
@@ -429,7 +429,7 @@ class TestThreadScopesAreWireUntracked:
             channel_event("wrap the floor up?", thread_id=THREAD_ID),
             [vote()],
         )
-        open_interaction = agent._interaction_tracker.get(THREAD_SCOPE)
+        open_interaction = agent._interaction_tracker.get(THREAD_SCOPE, speaker_id="alex")
         assert open_interaction is not None
         assert open_interaction.is_open
         assert await all_episodes(agent) == []
@@ -457,7 +457,7 @@ class TestThreadScopesAreWireUntracked:
         await agent.resolve_end_vote_publish(
             thread_channel, published=True, token="",
         )
-        record = agent._interaction_tracker.get(scope_for_thread(thread_channel))
+        record = agent._interaction_tracker.get(scope_for_thread(thread_channel), speaker_id="alex")
         assert record is not None
         assert record.is_open
         assert await all_episodes(agent) == []
@@ -482,7 +482,7 @@ class TestMentionEventVoteGate:
             channel_event("you were mentioned", event_type=EventType.MENTION),
             [vote(channel_id=None)],
         )
-        open_interaction = agent._interaction_tracker.get(SCOPE)
+        open_interaction = agent._interaction_tracker.get(SCOPE, speaker_id="alex")
         assert open_interaction is not None
         assert open_interaction.is_open
         assert await all_episodes(agent) == []
@@ -494,6 +494,6 @@ class TestMentionEventVoteGate:
             [vote()],
         )
         await discharge_vote(agent)
-        assert agent._interaction_tracker.get(SCOPE) is None
+        assert agent._interaction_tracker.get(SCOPE, speaker_id="alex") is None
         episodes = await all_episodes(agent)
         assert _close_reasons(episodes) == [REASON_STRUCTURAL]

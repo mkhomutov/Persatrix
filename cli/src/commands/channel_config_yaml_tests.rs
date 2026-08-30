@@ -15,6 +15,8 @@ fn view(revision: i64, over: &[(&str, Value)]) -> ChannelConfigView {
     let defaults = [
         ("floor_control", serde_json::json!(true)),
         ("salience_max_channel_members", serde_json::json!(20)),
+        // ISSUE-0114 (v0.3.13): the ninth flat knob — inherits the fleet cap.
+        ("max_cascade_depth", serde_json::json!(5)),
         (
             "max_replies_per_participant_per_interaction",
             serde_json::json!(0),
@@ -421,7 +423,7 @@ fn diff_rows_classifies_each_knob() {
     declared.insert("interaction_budget_tokens".into(), serde_json::json!(1000));
     let rows = diff_rows(&declared, &v);
 
-    assert_eq!(rows.len(), 8); // every knob, registry order
+    assert_eq!(rows.len(), 9); // every knob, registry order (9th = max_cascade_depth)
     assert_eq!(row(&rows, "floor_control").status, DiffStatus::InSync);
     assert_eq!(row(&rows, "end_vote_window").status, DiffStatus::Drift);
     assert_eq!(

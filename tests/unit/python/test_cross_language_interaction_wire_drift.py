@@ -42,7 +42,9 @@ _END_VOTE_ACTION_PY = Path("agents/end_vote_action.py")
 _WALLET_CAUSE_PY = Path("agents/persona_runtime/wallet_cause.py")
 _ACTION_LOOP_PY = Path("agents/persona_runtime/action_loop.py")
 _SALIENCE_GATE_PY = Path("agents/persona_runtime/salience_gate.py")
-_EPISODE_ROUTING_PY = Path("agents/persona_runtime/episode_routing.py")
+_INTERACTION_BOUNDARY_PY = Path(
+    "agents/persona_runtime/interaction_boundary.py",
+)
 _CHANNEL_WIRE_METADATA_PY = Path("agents/channel_wire_metadata.py")
 
 
@@ -91,14 +93,22 @@ def test_interaction_id_metadata_key_agrees() -> None:
     """Go's ``interactionIDMetadataKey`` and the ONE Python home of the key
     literal (``channel_wire_metadata`` — the ingress seed plus the
     ``wire_interaction_id`` / ``same_channel_claim`` pair) MUST be equal,
-    and the two former inline readers MUST delegate to the shared reader
+    and every former inline reader MUST delegate to the shared reader
     (PR #716 review, applied): ``wallet_cause``'s lease-threading read and
     ``episode_routing``'s rotation-boundary wire-id read were byte-identical
     copies sitting beside the pinned home — a semantics change applied to
     one and not the others would have wallet spend billed under an id the
     no-reopen latch and the soft-budget close trigger never see. Pinning
-    the delegation (not the literal) in those two files means the key
-    literal now lives in exactly one Python module."""
+    the delegation (not the literal) means the key literal lives in exactly
+    one Python module.
+
+    PR #846 review pins the same shape one level up: the room-close fans
+    take not the raw key but a SCOPE's anchor — the raw read with the
+    thread carve-out applied, a threaded reply carrying the parent
+    FLOOR's id. Inline at three fan sites, one had dropped the carve-out
+    and billed a thread's metered close summary to the floor; it now
+    lives once, in ``interaction_boundary.scope_wire_anchor`` (the three
+    fans' delegation to it is pinned in ``test_wire_admits_record``)."""
     go_value = _go_const(_INTERACTION_ID_GO, "interactionIDMetadataKey")
     if f'"{go_value}"' not in _CHANNEL_WIRE_METADATA_PY.read_text(encoding="utf-8"):
         _parse_miss(
@@ -106,15 +116,14 @@ def test_interaction_id_metadata_key_agrees() -> None:
             f"(Go interactionIDMetadataKey)",
             _CHANNEL_WIRE_METADATA_PY,
         )
+    # The only RAW readers: the lease seam and the scope-anchor rule.
     for py_path, pin in {
         _WALLET_CAUSE_PY: "return wire_interaction_id(event)",
-        _EPISODE_ROUTING_PY: "wire_interaction_id(event)",
+        _INTERACTION_BOUNDARY_PY:
+            'return "" if is_thread_scope(scope) else wire_interaction_id(event)',
     }.items():
         if pin not in py_path.read_text(encoding="utf-8"):
-            _parse_miss(
-                f"the shared-reader delegation `{pin}`",
-                py_path,
-            )
+            _parse_miss(f"the shared-reader delegation `{pin}`", py_path)
 
 
 # The exact kwarg-with-value literal each call site must pass. The pin

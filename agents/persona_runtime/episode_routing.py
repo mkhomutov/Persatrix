@@ -28,7 +28,6 @@ if TYPE_CHECKING:
     from . import MemoryNamespace
 
 from ..channel_event_classification import wire_channel_classification
-from ..channel_wire_metadata import wire_interaction_id
 from ..memory.boundary_detectors import (
     DEFAULT_CLOSING_GRACE_SEC,
     REASON_STRUCTURAL,
@@ -39,18 +38,23 @@ from ..memory.interactions import (
     Interaction,
     InteractionTracker,
     cleanup_closing_interactions,
-    is_thread_scope,
     scope_for_channel_event,
 )
 from ..persona_types import EventType
 from ..session_id import current_session_id
-from .close_path import persist_closed_interaction
+from .close_path import (
+    close_replayed_scopes,
+    close_stale_records,
+    persist_closed_interaction,
+    persist_fanned_closes,
+)
 from .finalize_close import drain_pending_summary_tasks
 from .interaction_boundary import (
     is_session_end_event,
-    wire_rotation_close_reason,
-    wire_rotation_closes,
+    scope_wire_anchor,
+    wire_admits_record,
 )
+from .turn_payload import build_turn_payload
 from .vote_close import PendingVoteClose, park_end_vote_close
 
 logger = logging.getLogger(__name__)
@@ -157,23 +161,13 @@ class _EpisodeRoutingMixin:
             f"Actions: {[a.action_type.value for a in actions]}"
         )
         ctx = {"event": event.payload, "sender": event.sender_id}
-        # Step 1: flush any interaction whose idle window expired since
-        # the last event.  Runs unconditionally so single-turn paths
-        # also drive the cross-scope janitor without waiting for PR 4.
+        # Step 1: flush any interaction whose idle window expired since the
+        # last event.  Runs unconditionally so single-turn paths also drive
+        # the cross-scope janitor without waiting for PR 4.
         #
-        # PR-3 review #13: the flush loop sits OUTSIDE the outer
-        # try/except below.  Each ``_persist_closed_interaction`` call
-        # carries its own inner ``try`` around ``store_episode``, but a
-        # rare programming error in ctx-construction (or an
-        # ``asyncio.CancelledError``, which ``Exception`` does not
-        # catch) could escape it.  The earlier nesting let that escape
-        # propagate into the outer handler, which logged
-        # ``event_type=<current event>`` — misattributing the failure
-        # to the in-flight event rather than the stale scope that
-        # actually owned it.  Pulling the loop out and wrapping each
-        # iteration in its own scope-aware ``try/except`` fixes the
-        # attribution and prevents a flush failure from swallowing the
-        # current event's processing entirely.
+        # PR-3 review #13: the loop sits OUTSIDE the outer try below, with a
+        # per-iteration guard, so a flush failure logs the stale scope's own
+        # identity and never swallows the current event's processing.
         for closed in self._interaction_tracker.idle_check():
             try:
                 await self._persist_closed_interaction(closed)
@@ -202,7 +196,10 @@ class _EpisodeRoutingMixin:
                 )
                 await self._episodic_memory.store_episode(
                     summary=summary, context=ctx,
-                    session_id=self._active_write_session_id)
+                    session_id=self._active_write_session_id,
+                    # ISSUE-0131: a lone event's sender IS its speaker;
+                    # senderless stays NULL (the boundary normalizes "").
+                    speaker_id=event.sender_id)
                 return
             scope = (
                 SCOPE_TICK
@@ -210,45 +207,39 @@ class _EpisodeRoutingMixin:
                 else event.event_type.value
             )
             # ``payload=None`` per PR-215 review (Should-Fix #4): the
-            # open/close pair runs in one call, so the summariser never
-            # reads a single-turn payload — the dict was dead bytes.
-            self._interaction_tracker.add_turn(
+            # open/close pair runs in one call — a single-turn payload is
+            # dead bytes.  ISSUE-0131: the sender is the speaker key half.
+            single_turn = self._interaction_tracker.add_turn(
                 scope, payload=None,
                 session_id=self._active_write_session_id,
+                speaker_id=event.sender_id,
             )
-            # Distinct local name from the ``for closed in idle_check()``
-            # loop above so mypy sees a single binding type for each name.
-            structural_close = self._interaction_tracker.close(
-                scope, reason=REASON_STRUCTURAL,
+            # Distinct name from the idle-flush loop's binding (mypy).
+            # ``close_record`` so the open and close halves address ONE
+            # object — re-deriving the key could diverge from ``add_turn``'s.
+            structural_close = self._interaction_tracker.close_record(
+                single_turn, reason=REASON_STRUCTURAL,
             )
             if structural_close is None:
-                # PR 6 review #7: replace the prior ``... or interaction``
-                # fallback that silently masked an invariant violation.
-                # ``add_turn`` just opened ``scope`` under the agent's
-                # ``asyncio.Lock``, so ``close`` MUST return that
-                # interaction.  A future contract change (e.g. ``close``
-                # returning ``None`` for already-closed scopes) would
-                # have produced NULL interaction columns under the old
-                # fallback; raise instead so the regression surfaces.
-                # Explicit guard, not ``assert`` (stripped under
-                # ``python -O`` per PR 6 review #21 precedent).
+                # PR 6 review #7: no silent fallback — ``add_turn`` just
+                # opened this record under the agent's lock, so
+                # ``close_record`` MUST return it; raise (not ``assert``,
+                # stripped under ``-O``) so a contract change surfaces.
                 raise RuntimeError(
-                    f"InteractionTracker.close({scope!r}) returned None "
-                    "for an interaction that was just opened in the same "
-                    "call — tracker invariant violated.",
+                    f"InteractionTracker.close_record({scope!r}) returned "
+                    "None for an interaction that was just opened in the "
+                    "same call — tracker invariant violated.",
                 )
             await self._episodic_memory.store_episode(
-                # Carry the close trigger in the context blob so the
-                # read surface (``GetClosedInteractions``) can report it.
-                # The two-phase multi-turn close path
-                # (:func:`close_path.persist_closed_interaction`) has
-                # always persisted ``close_reason``; the single-turn path
-                # used to drop it, so every tick/task/approval row surfaced
-                # an empty trigger (PR-583 review). Mirror the multi-turn
-                # shape here.
+                # Carry the close trigger so ``GetClosedInteractions`` can
+                # report it — mirror of the multi-turn shape (PR-583 review:
+                # the single-turn path used to drop it).
                 summary=summary,
                 context={**ctx, "close_reason": structural_close.close_reason},
                 interaction_id=structural_close.interaction_id,
+                # ISSUE-0131: the speaker half of the key this record was
+                # opened under — ``""`` (a tick) → NULL.
+                speaker_id=structural_close.speaker_id or None,
                 started_at=structural_close.started_at,
                 closed_at=structural_close.closed_at,
                 turn_count=structural_close.turn_count,
@@ -260,28 +251,14 @@ class _EpisodeRoutingMixin:
                 session_id=structural_close.session_id,
             )
         except Exception:
-            # PR 6 slice 4 #6 + slice 5 #13: this try guards the
-            # CURRENT event's processing — multi-turn handling,
-            # single-turn ``add_turn``/``close``, and the legacy
-            # fallback's ``store_episode``.  The cross-scope idle
-            # flush above is intentionally outside this block so a
-            # stale-scope failure logs the failed scope's identity
-            # rather than the in-flight ``event_type`` (slice 5 #13).
-            # Two operator-visible failure modes remain in scope:
-            #
-            # 1. The single-turn path's :meth:`store_episode` raising
-            #    *after* ``close`` already popped the scope and fired
-            #    the ``interactions.closed.by_structural`` counter —
-            #    the common case.  ``event_type`` in the warning lets
-            #    operators correlate the metric increment to the
-            #    missing row.
-            # 2. Tracker programming errors from ``add_turn`` / ``close``
-            #    or :meth:`_handle_multi_turn_event` raising past its
-            #    own inner try (rare; pinned by the explicit guard
-            #    further down and PR 6 review #21 precedent).
-            #
-            # Log-and-continue per the pre-RFC contract: a single
-            # failed episode must not crash the event loop.
+            # PR 6 slice 4 #6 + slice 5 #13: this try guards the CURRENT
+            # event's processing (the idle flush above sits outside it so a
+            # stale-scope failure logs its own identity).  In scope: the
+            # single-turn ``store_episode`` raising after ``close`` popped
+            # the scope and fired the counter (``event_type`` lets operators
+            # correlate the increment to the missing row), and tracker
+            # programming errors.  Log-and-continue per the pre-RFC
+            # contract: a single failed episode must not crash the loop.
             logger.warning(
                 "Failed to store episode for agent %s (event_type=%s)",
                 self.agent_id,
@@ -331,11 +308,9 @@ class _EpisodeRoutingMixin:
         """
         scope = self._scope_for_multi_turn_event(event)
         if scope is None:
-            # PR-216 review (Low / Should-Fix #4): an under-populated
-            # multi-turn event (no ``channel_id`` / ``sender_id``) falls
-            # back to the legacy NULL-interaction shape — warn so
-            # malformed ingress is visible; a dedicated counter stays
-            # deferred until production data warrants one.
+            # PR-216 review (Should-Fix #4): an under-populated multi-turn
+            # event falls back to the legacy NULL-interaction shape — warn
+            # so malformed ingress is visible.
             logger.warning(
                 "Agent %s: multi-turn event %s has neither channel_id nor "
                 "sender_id; storing as legacy NULL-interaction episode",
@@ -345,56 +320,39 @@ class _EpisodeRoutingMixin:
                 summary=summary, context=ctx,
                 session_id=self._active_write_session_id)
             return
-        # ISSUE-0054 — RFC 0026's facts extractor needs the real
-        # message body: the combined summarise + extract LLM call at
-        # interaction close extracts zero facts when fed only the
-        # deterministic action envelope.  The body rides the in-memory
-        # turn under ``text`` and is stripped before persistence by
-        # ``_persist_closed_interaction`` so ``context_json`` stays
-        # body-free per RFC 0020 §D.
-        # PR-3 review #18: ``ctx`` above is annotated ``dict[str, Any]``;
-        # match it here so a future caller stashing a nested ``Any``
-        # value does not need a cast at this site.
-        payload: dict[str, Any] = {
-            "summary": summary,
-            "event_type": event.event_type.value,
-            "sender": event.sender_id,
-            "channel_id": event.channel_id,
-            "timestamp": event.timestamp,
-            # RFC 0020 PR 4: stash sender's participant_type so the
-            # close-path ``record_interaction`` can carry the correct
-            # ``other_participant_type`` (defaults "agent" downstream).
-            "participant_type": event.metadata.get(
-                "sender_participant_type", "agent",
-            ),
-        }
-        message_text = (event.payload or {}).get("content")
-        if isinstance(message_text, str) and message_text.strip():
-            payload["text"] = message_text
-        # RFC 0030 interaction-id producer: the channel conversation's
-        # wire id rotating means the previous conversation ended (vote
-        # quorum or idle) — close the stale local interaction so the new
-        # turn opens a fresh one, labelled by the wire-carried close cause
-        # (producer plan OQ 5).  Full rationale on the two predicates.
-        #
-        # Thread scopes are wire-UNTRACKED (PR 607 review finding 1): a
-        # threaded reply carries the parent FLOOR's id (the resolver keys
-        # on ``msg.ChannelID``), so that id rotating says nothing about
-        # the thread — the resolver's IP3 rule ("the thread IS the
-        # interaction"): thread-scoped locals keep idle / session-end
-        # closes only.
-        # PR #716 review: the shared drift-pinned reader, not an inline copy —
-        # this read and the wallet-lease read must resolve the SAME id or
-        # spend bills under an id the rotation boundary never keys.
-        wire_id = "" if is_thread_scope(scope) else wire_interaction_id(event)
-        stale = self._interaction_tracker.get(scope)
-        # The not-None check narrows ``stale`` for the reason call.
-        if stale is not None and wire_rotation_closes(stale, wire_id):
-            rotated = self._interaction_tracker.close(
-                scope, reason=wire_rotation_close_reason(stale, event.metadata),
-            )
-            if rotated is not None:
-                await self._persist_closed_interaction(rotated)
+        # The turn payload construction lives in :mod:`.turn_payload`
+        # (v0.3.15 residuals PR 3) — shared with the close-notification
+        # room fan, which must land the closing message on every open
+        # record, not just the sender's.
+        payload = build_turn_payload(event, summary)
+        # The wire anchor this scope answers to: the rotation boundary
+        # below, the admission conjunct on the session-end fan, and the
+        # wallet-lease read must all resolve the SAME id (PR #716 review),
+        # and thread scopes must resolve blank (PR 607 finding 1) — both
+        # rules live in ``scope_wire_anchor`` since PR #846 review, which
+        # found the carve-out inline at three sites and dropped at one.
+        wire_id = scope_wire_anchor(scope, event)
+        # The ingest-time boundary fan (wire rotation + the ISSUE-0130
+        # catch-up split) lives in :func:`close_path.close_stale_records`
+        # — a close+guarded-persist fan, per record since the re-key.
+        await close_stale_records(
+            self._interaction_tracker, scope, event, wire_id=wire_id,
+            persist=self._persist_closed_interaction,
+        )
+        # PR #846 review REMOVED a recordless-session-end short circuit
+        # here.  It skipped this ingest when the terminator held no record
+        # of its own, to avoid "fabricating" a 1-turn ended record — but a
+        # session end is a channel MESSAGE with a body, not the
+        # contentless control event the close-notification no-open branch
+        # declines to mirror, and the in-memory turn is the only place
+        # that body lives (persistence strips ``text``).  So it dropped a
+        # real message from memory entirely, and inconsistently: a
+        # terminator WITH a record kept its turn, an EMPTY scope minted
+        # the very record it called fabricated, and its ambient-principal
+        # ``get`` beside a principal-blind sibling check lost a speaker's
+        # own closing message on a tenant change.  The terminator's turn
+        # lands in the terminator's record — minted if absent, like every
+        # other multi-turn event — and the fan below closes it too.
         interaction = self._interaction_tracker.add_turn(
             scope, payload=payload,
             session_id=self._active_write_session_id,
@@ -404,33 +362,68 @@ class _EpisodeRoutingMixin:
             # interaction (frozen-at-open, the ``session_id`` rule).
             classification=wire_channel_classification(event),
             source_channel_id=event.channel_id or None,
+            # ISSUE-0130: frozen-at-open like the pair above; the close path
+            # skips derivation for a replayed span (no principal to attribute).
+            replayed=event.metadata.get("replay_mode") is True,
+            # ISSUE-0131: the speaker half of the key — the turn lands in
+            # ITS sender's record; the principal half resolves ambient
+            # (the ``on_event`` request scope) inside the tracker.
+            speaker_id=event.sender_id,
         )
         # Stamp the wire id the interaction was opened under (first turn
         # that carries one wins) plus its known predecessor — the
         # late-delivery defence ``wire_rotation_closes`` compares against.
         if wire_id and interaction.is_open and not interaction.wire_interaction_id:
+            # Stamp the record with the id its opening turn actually
+            # carried, even when a sibling has already rotated past it.
+            # PR #846 review reversed the earlier suppression here: a
+            # straggler record left BLANK is not neutral, because blank
+            # is the universally-admitted state in all three close fans
+            # and in the close-notification wire-id backfill — so the
+            # retired conversation's turn was closed as, cross-referenced
+            # to, and (on a bounded close) billed to the SUCCESSOR.  An
+            # honest retired stamp makes every one of those conjuncts
+            # skip it correctly.  The cost is the straggler fragmentation
+            # the PR already accepts and documents: the record closes as
+            # its own 1-turn fragment on the next rotation.
             interaction.wire_interaction_id = wire_id
             interaction.predecessor_wire_id = str(
                 event.metadata.get("previous_interaction_id", "") or "",
             )
-        # PR-3 review #12: ``add_turn`` now closes inline when the
-        # MaxTurns cap fires.  The returned interaction is the
-        # cap-closed one (with ``close_reason == REASON_MAX_TURNS``);
-        # persist it immediately so the closed-interaction episode
-        # row exists before the next event arrives.  A subsequent
-        # session-end on the same scope would no-op (scope already
-        # popped), which is the correct contract — the cap closure
-        # takes precedence over a same-event structural close.
+        # PR-3 review #12: ``add_turn`` closes inline at the MaxTurns cap;
+        # persist immediately.  The cap outranks a same-event structural
+        # close for THIS record only (``close_scope`` no-ops on it): a
+        # session end riding the cap-th turn still fans the siblings
+        # (v0.3.15 PR 3 review fix).  A cap-closed record parks no vote.
         if not interaction.is_open:
-            await self._persist_closed_interaction(interaction)
-            return
-        if is_session_end_event(event):
-            closed = self._interaction_tracker.close(
-                scope, reason=REASON_STRUCTURAL,
+            # Guarded (PR #846 review): a raise here would skip the
+            # session-end fan below and leak siblings to an idle relabel.
+            await persist_fanned_closes(
+                (interaction,), self._persist_closed_interaction,
             )
-            if closed is not None:
-                await self._persist_closed_interaction(closed)
-        else:
+        if is_session_end_event(event):
+            # A session end is a ROOM event (ISSUE-0123 part 3): fan the
+            # structural close over every ``(principal, speaker)`` record
+            # open in the scope, or the siblings leak open until idle
+            # relabels the ended conversation.  Guarded per record — the
+            # fan pops ALL its records before the first persist runs.
+            #
+            # Per-record wire-id admission (PR #846 review) — the
+            # conjunct the other three fans already applied.  This was the
+            # un-anchored one, so a straggler ``chat_end`` of a RETIRED
+            # conversation buried the live successor's records as "ended";
+            # the stale loop above cannot pre-clear them, since
+            # ``wire_rotation_closes`` spares a successor precisely when
+            # the straggler's id is its ``predecessor_wire_id``.  A blank
+            # anchor keeps the tolerant scope-keyed behaviour.
+            await persist_fanned_closes(
+                self._interaction_tracker.close_scope(
+                    scope, reason=REASON_STRUCTURAL,
+                    admit=lambda record: wire_admits_record(record, wire_id),
+                ),
+                self._persist_closed_interaction,
+            )
+        elif interaction.is_open:
             # PR 607 finding 5: a vote close is PARKED for the executor's
             # publish-outcome callback (:mod:`.vote_close` owns the gates).
             park_end_vote_close(
@@ -453,6 +446,13 @@ class _EpisodeRoutingMixin:
             interaction=interaction,
             pending_tasks=self._pending_summarize_tasks,
             on_finalized=self._tick_auto_reflect_counter,
+        )
+
+    async def close_replayed_interactions(self) -> int:
+        """The catch-up caller's ISSUE-0130 hook — see
+        :func:`agents.persona_runtime.close_path.close_replayed_scopes`."""
+        return await close_replayed_scopes(
+            self._interaction_tracker, self._persist_closed_interaction,
         )
 
     async def drain_pending_summaries(self) -> None:

@@ -134,3 +134,25 @@ async def test_cost_close_dispatch_no_open_interaction_is_noop():
     await close_interaction_on_cost(agent, AgentEvent(event_type=EventType.TICK))
 
     assert agent.persisted == []
+
+
+async def test_cost_fan_leaves_replayed_records_to_the_catchup_sweep():
+    """PR #846 re-review: the cost fan gained the ``replayed`` guard the
+    close-notification fan already carried.
+
+    This close fires from the LLM-error path, before the stale fan has
+    reconciled the scope, so a denial landing mid catch-up closed the
+    replay-opened record under ``REASON_COST`` — mislabelling the
+    per-reason counter AND popping the record before
+    ``close_replayed_scopes`` could close it as
+    ``REASON_CATCHUP_COMPLETE``.  ``persist_closed_interaction`` returns
+    early on the flag, so the span derived nothing on the way out either.
+    """
+    tracker = InteractionTracker()
+    replayed = tracker.add_turn(SCOPE_TICK, replayed=True)
+    agent = _CostCloseAgent(tracker)
+
+    await close_interaction_on_cost(agent, AgentEvent(event_type=EventType.TICK))
+
+    assert replayed.is_open, "the replay-opened record is the sweep's to close"
+    assert agent.persisted == [], "and nothing is derived from a flagged span"

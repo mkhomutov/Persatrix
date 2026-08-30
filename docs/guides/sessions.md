@@ -27,6 +27,14 @@ hard-walling it — see §7.)
 
 ## 1. What a session is
 
+> **Not a login session.** Since v0.3.12, RFC 0039 auth also has "sessions" —
+> the revocable server-side records behind `persatrix login` and the console
+> cookie. Those are **account** artifacts (an account binds to one
+> *participant*, the chat identity); the sessions in this guide are **rooms**
+> (memory continuity). Logging in or out never changes which room a run reads
+> and writes. See the [auth guide](auth.md) for account ≠ session ≠
+> participant in full.
+
 A **session** is a named, operator-visible namespace under which channels are
 created and persona-memory rows (episodes, relationships, facts, notes) are
 tagged. Each session has:
@@ -200,7 +208,9 @@ before injection — a fact learned in a `restricted` room never surfaces in an
 `internal` one. What stays absolute: the **epoch** (run/test) and **principal**
 (tenant) walls; cross-room recall ranges over rooms, never across those.
 [MT-MEMORY-CROSSROOM-001](../manual-tests/MT-MEMORY-CROSSROOM-001.md) is the
-live acceptance arc.
+live acceptance arc for the carry half;
+[MT-PERSONA-CONFIDENTIALITY-001](../manual-tests/MT-PERSONA-CONFIDENTIALITY-001.md)
+for the withhold half.
 
 An *operator* recall verb across sessions remains unbuilt
 ([ISSUE-0086](../issues/ISSUE-0086-operator-all-sessions-recall-verb.md) —
@@ -211,7 +221,8 @@ dump verb would be neither).
 
 - **Not a permissions boundary.** A process that can read a `memory.db` can read
   every session in it. Session ids namespace; they do not isolate against an
-  in-process reader. Auth (RFC 0009) and erasure (RFC 0013) own that.
+  in-process reader. Auth ([RFC 0039](../rfcs/0039-user-accounts-authentication.md)
+  for humans, RFC 0009 for agents) and erasure (RFC 0013) own that.
 - **No secrets in labels.** Labels are operator-supplied and surface in logs and
   traces (the session id is treated as a low-cardinality, non-sensitive
   dimension). Keep credentials, tokens, and PII out of session labels.
@@ -228,5 +239,6 @@ dump verb would be neither).
 - [Memory Scope Axes](../memory-scope-axes.md) — the reframing: session = room continuity, epoch = run isolation, relationship = cross-room, principal = tenant.
 - [Channels — User Guide](channels.md) — channels are created under a session; §10 covers `make reset`.
 - [Persona Agents — User Guide](persona-agents.md) — persona memory is what sessions scope.
+- [Accounts & Auth — Operator Guide](auth.md) — RFC 0039 *login* sessions (account → participant binding); unrelated to the memory sessions here despite the shared word.
 - [ISSUE-0051](../issues/ISSUE-0051-per-session-memory-namespacing-channels.md) — the F-3 root-cause issue this surface closes.
 - [ISSUE-0085](../issues/ISSUE-0085-epoch-axis-run-isolation.md) — the epoch axis that carries run/test isolation forward.

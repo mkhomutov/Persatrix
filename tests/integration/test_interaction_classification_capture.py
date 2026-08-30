@@ -26,8 +26,14 @@ Both stamped tiers are covered: the Phase-1 closing-row insert
 ``dispatch_facts_from_response``'s pass-through of the interaction's
 capture.
 
-Everything here remains DARK substrate — the columns are stamped and read
-by nothing until the PR 4 gate.
+Stamped dark at PR 3; read live since the PR 4 §D gate armed.
+
+The catch-up replay leg (v0.3.12 review item 8, landed at the PR 8
+closeout) pins the same seam from the OTHER producer: events built by the
+real ``channel_catchup._build_replay_event`` from a ``secret``-classified
+channel-list object stamp their episode ``secret`` — the restart path must
+label exactly like the live path, or every reboot silently downgrades a
+sensitive channel's history to ``internal``.
 
 Shared persona config / mock LLM client / clock-aware agent factory /
 episode probe live in :mod:`_interaction_multi_turn_helpers`.
@@ -40,6 +46,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agents.channel_catchup import _build_replay_event
 from agents.clock import FrozenClock
 from agents.llm_client import LLMClient, LLMResponse, StopReason, Usage
 from agents.memory.interactions import scope_for_group
@@ -158,6 +165,103 @@ class TestEpisodeStampedFromTheWire:
         # indistinguishable from "the capture was never wired at all",
         # since both stamp ``internal``.
         assert episode["source_channel_id"] == GROUP_CHANNEL
+
+
+# ─── The catch-up replay leg (v0.3.12 review item 8) ────────
+
+
+def _replay_event(
+    msg: dict, *, channel: dict, channel_id: str = GROUP_CHANNEL,
+) -> object:
+    """A catch-up event built by the REAL builder, not a hand-shaped
+    fixture: ``_build_replay_event`` is where the REST channel-list
+    object's ``classification`` is seeded onto the event, so a fixture
+    that wrote the metadata key itself would keep this suite green while
+    the boot path stamped nothing."""
+    return _build_replay_event(msg, channel_id, "all", channel)
+
+
+@pytest.mark.asyncio
+class TestCatchupReplayPersistsNothing:
+    """ISSUE-0130 (v0.3.14): a replayed span persists **no** episode.
+
+    These previously pinned RFC 0037 review item 8 — that a replayed
+    rotation close stamped its episode with the channel's classification,
+    the restart-path twin of the live-wire capture above.  That path is
+    gone: a replayed turn carries no principal (the orchestrator's
+    ``messages`` table has no principal column, so ``_build_replay_event``
+    has nothing to seed), and deriving from it wrote one authenticated
+    person's content into the shared ``local`` tenant — found live at the
+    v0.3.14 ``MT-MEMORY-MULTIUSER-001`` run.  The close path now skips
+    derivation for replayed spans entirely, so there is no row left to
+    stamp.
+
+    The *live* classification capture is unaffected and stays covered by
+    the tests above — only the restart path is withdrawn.  v0.3.15
+    persists the principal on the message row and seeds it here, at which
+    point replayed spans become attributable and stamping returns.
+    """
+
+    async def test_replayed_secret_episodes_stamp_secret(self):
+        agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
+        secret_channel = {"channel_type": "group", "classification": "secret"}
+        await agent._store_event_episode(
+            _replay_event(
+                {
+                    "id": "m-1", "sender_id": "alex",
+                    "content": "the codename is zephyr",
+                    "metadata": {"interaction_id": "wire-A"},
+                },
+                channel=secret_channel,
+            ),
+            [],
+        )
+        # A second replayed row on a rotated wire id closes wire-A — the
+        # replayed-rotation close the catch-up docstring promises runs at
+        # boot ("those conversations genuinely closed").
+        await agent._store_event_episode(
+            _replay_event(
+                {
+                    "id": "m-2", "sender_id": "alex",
+                    "content": "new topic",
+                    "metadata": {"interaction_id": "wire-B"},
+                },
+                channel=secret_channel,
+            ),
+            [],
+        )
+        assert await all_episodes(agent) == [], (
+            "a replayed rotation close must persist nothing — the span has "
+            "no principal, so any row it wrote would land in the shared "
+            "`local` tenant (ISSUE-0130)"
+        )
+
+    async def test_pre_v0312_orchestrator_replays_persist_nothing(self):
+        # A pre-v0.3.12 orchestrator's channel-list JSON has no
+        # ``classification`` key.  Pre-ISSUE-0130 this exercised the stamp
+        # site's rule-(a) default (``internal``); now it pins that the
+        # replay skip fires regardless of what the builder seeded.
+        agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
+        legacy_channel = {"channel_type": "group"}
+        for msg_id, wire, content in (
+            ("m-1", "wire-A", "legacy history"),
+            ("m-2", "wire-B", "new topic"),
+        ):
+            await agent._store_event_episode(
+                _replay_event(
+                    {
+                        "id": msg_id, "sender_id": "alex",
+                        "content": content,
+                        "metadata": {"interaction_id": wire},
+                    },
+                    channel=legacy_channel,
+                ),
+                [],
+            )
+        assert await all_episodes(agent) == [], (
+            "the legacy-orchestrator replay path persists nothing either — "
+            "the skip is on the replay marker, not on classification"
+        )
 
 
 # ─── The facts leg (Phase-2 extraction dispatch) ────────────

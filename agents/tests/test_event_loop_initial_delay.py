@@ -47,6 +47,37 @@ def _build_loop(
     )
 
 
+def _spy_timer_delays(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """Record every delay the TIMER machinery arms, and nothing else.
+
+    Must be called from inside the running loop.  The spy sits on the
+    shared event loop, so asyncio's own scheduling lands here too — and
+    the filter is load-bearing rather than tidy: on Python 3.11
+    ``asyncio.wait_for`` schedules its timeout through ``call_later``,
+    so an unfiltered spy records the ``wait_for(timeout=2.0)`` below
+    *between* the initial arm and the re-arm and shifts every positional
+    assertion by one.  Python 3.12 routes ``wait_for`` through
+    ``asyncio.timeout`` → ``call_at`` instead, which is why an
+    unfiltered spy passes on 3.12 and fails on 3.11 — the version this
+    project targets and CI runs.
+
+    ``_fire`` is the callback both the first-arm and re-arm sites in
+    ``event_loop_timers.py`` pass, so filtering on it captures exactly
+    the production call sites these tests mean to observe.
+    """
+    delays: list[float] = []
+    running = asyncio.get_running_loop()
+    original = running.call_later
+
+    def _spy(delay, callback, *args, context=None):  # type: ignore[no-untyped-def]
+        if getattr(callback, "__name__", "") == "_fire":
+            delays.append(float(delay))
+        return original(delay, callback, *args, context=context)
+
+    monkeypatch.setattr(running, "call_later", _spy)
+    return delays
+
+
 class TestInitialDelay:
     async def test_initial_delay_overrides_first_fire(self, monkeypatch):
         """The first ``ScheduledWake`` fires at ``initial_delay`` regardless
@@ -62,21 +93,6 @@ class TestInitialDelay:
         """
         monkeypatch.setattr(EventLoop, "_MIN_INTERVAL", 0.001)
 
-        # Spy on the asyncio loop's call_later to capture every delay
-        # the timer registers; the first call is the initial-delay arm,
-        # subsequent calls are re-arms.
-        delays: list[float] = []
-
-        def _patch_loop() -> None:
-            running = asyncio.get_running_loop()
-            original = running.call_later
-
-            def _spy(delay, callback, *args, context=None):  # type: ignore[no-untyped-def]
-                delays.append(float(delay))
-                return original(delay, callback, *args, context=context)
-
-            monkeypatch.setattr(running, "call_later", _spy)
-
         fires = 0
         seen = asyncio.Event()
 
@@ -89,7 +105,9 @@ class TestInitialDelay:
         loop = _build_loop(on_tick=_on_tick)
         loop.start()
         try:
-            _patch_loop()
+            # Capture the delays the timer arms; first is the initial-delay
+            # arm, subsequent ones are re-arms.
+            delays = _spy_timer_delays(monkeypatch)
             loop.register_timer(
                 timer_id="restored",
                 callback_kind="memory_consolidation",
@@ -117,25 +135,13 @@ class TestInitialDelay:
         """
         monkeypatch.setattr(EventLoop, "_MIN_INTERVAL", 0.001)
 
-        delays: list[float] = []
-
-        def _patch_loop() -> None:
-            running = asyncio.get_running_loop()
-            original = running.call_later
-
-            def _spy(delay, callback, *args, context=None):  # type: ignore[no-untyped-def]
-                delays.append(float(delay))
-                return original(delay, callback, *args, context=context)
-
-            monkeypatch.setattr(running, "call_later", _spy)
-
         async def _on_tick(wake: ScheduledWake) -> None:
             pass
 
         loop = _build_loop(on_tick=_on_tick)
         loop.start()
         try:
-            _patch_loop()
+            delays = _spy_timer_delays(monkeypatch)
             loop.register_timer(
                 timer_id="fresh",
                 callback_kind="any",

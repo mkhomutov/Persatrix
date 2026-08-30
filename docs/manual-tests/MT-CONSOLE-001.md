@@ -361,5 +361,5 @@ failing the build — the Go-only-build guarantee.
 |-------|----------|
 | Default bind | The orchestrator binds `127.0.0.1` by default (`--http-bind`). |
 | Default flag | `--enable-ui` is **off** by default. |
-| Exposure rule | Exposing the console beyond localhost requires an authenticating reverse proxy until RFC 0039 — documented in [web-console.md §Security](../guides/web-console.md#security--do-not-expose-beyond-localhost). |
+| Exposure rule | Under the default `auth.mode: disabled`, exposing the console beyond localhost requires an authenticating reverse proxy; since v0.3.12, `auth.mode: enabled` over HTTPS is the first-party alternative ([MT-AUTH-001](MT-AUTH-001.md)) — documented in [web-console.md §Security](../guides/web-console.md#security--exposure-beyond-localhost). |
 | Writes | Slice 1's only writes are chat + optional channel publish; no admin/control-plane actions exist (Slice 5, gated on RFC 0039). |

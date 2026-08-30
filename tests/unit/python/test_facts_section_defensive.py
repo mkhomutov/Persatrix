@@ -139,14 +139,17 @@ class TestHeaderTruncationPreservesItemSeparator:
         # content lacks "\n- " — the item glued to the truncated
         # header with no separator.
         #
-        # Note (PR #346 review L-2): under this sizing the exit is
-        # always branch (b) — the prefix's ``try_add`` consumes the
-        # truncation remainder exactly, leaving ``remaining == 0`` so
-        # the separator's ``try_add`` fails and the block is dropped.
-        # The ``"\n- "`` assertion below therefore never executes;
-        # this test's value is the bug-shape rejection (non-None
-        # section without ``"\n- "``).  The happy-path success branch
-        # is pinned by the complementary test below.
+        # Note (PR #346 review L-2, re-noted for ISSUE-0116): under
+        # the original sizing the exit was always branch (b) — the
+        # full-subject header truncated to the exact remainder, so the
+        # separator's ``try_add`` failed and the block dropped.  Since
+        # the ISSUE-0116 bounded header template, the header for this
+        # 200-char subject costs only the bounded prefix (~30 tokens),
+        # admits whole against the ~90-token remainder, and the exit
+        # is branch (a): the ``"\n- "`` assertion below executes and
+        # passes.  The bug-shape rejection (non-None section without
+        # ``"\n- "``) remains the guard for any sizing drift that
+        # re-opens the truncation window.
         if section is not None:
             assert "\n- " in section.content, (
                 "L-1 regression: item line is not framed by a newline "

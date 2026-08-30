@@ -79,7 +79,11 @@ class TestMigrations:
         # (ISSUE-0102 PR 2: governance_interaction_id column on episodes).
         # 15 → 16 alongside migration v16 (RFC 0037 PR 3: protection
         # level + provenance on episodes/facts/notes + memory_projections).
-        assert len(rows) == 16
+        # 16 → 17 alongside migration v17 (ISSUE-0120: fold a human's split
+        # agent-typed relationship row onto the user-typed one).
+        # 17 → 18 alongside migration v18 (ISSUE-0131: speaker_id on
+        # episodes + facts — the v0.3.15 residuals PR 3 speaker axis).
+        assert len(rows) == 18
         assert rows[0][0] == 1
         assert "Initial schema" in rows[0][1]
         assert rows[1][0] == 2
@@ -136,6 +140,15 @@ class TestMigrations:
         # migration carries it).
         assert rows[15][0] == 16
         assert "protection_level" in rows[15][1].lower()
+        # v17 folds a human's split agent-typed relationship row onto the
+        # user-typed one (ISSUE-0120) — disambiguated by the ``fold`` token
+        # (no other migration carries it).
+        assert rows[16][0] == 17
+        assert "fold" in rows[16][1].lower()
+        # v18 adds the ISSUE-0131 speaker axis to the two close-derived
+        # tiers — disambiguated by the ``speaker_id`` token.
+        assert rows[17][0] == 18
+        assert "speaker_id" in rows[17][1].lower()
 
     async def test_migrations_are_idempotent(self, memory: EpisodicMemory):
         """Re-running migrations does not error or duplicate rows."""
@@ -149,9 +162,12 @@ class TestMigrations:
         # relationship identity).  14 → 15 alongside migration v15 (ISSUE-0102
         # PR 2: governance_interaction_id column on episodes).  15 → 16
         # alongside migration v16 (RFC 0037 PR 3: protection level +
-        # provenance + memory_projections).
-        # Same row-count discipline as ``test_migration_version_recorded``.
-        assert row[0] == 16
+        # provenance + memory_projections).  16 → 17 alongside migration v17
+        # (ISSUE-0120: fold split agent-typed human relationship rows).
+        # 17 → 18 alongside migration v18 (ISSUE-0131: speaker_id on
+        # episodes + facts).  Same row-count discipline as
+        # ``test_migration_version_recorded``.
+        assert row[0] == 18
 
     async def test_wal_mode_enabled(self):
         """WAL mode is set on file-based databases (not :memory:)."""

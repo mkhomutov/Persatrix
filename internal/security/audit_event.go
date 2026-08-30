@@ -100,6 +100,18 @@ const (
 	// silence. Pairs with a startup WARN log.
 	AuditUnquarantineEndpointOpen AuditEventType = "unquarantine.endpoint.open"
 
+	// Human authentication (RFC 0039 Phase 1 step 10). Metadata only:
+	// username, source, role, transport — never the password, never the
+	// raw token. `auth.login_failed` records the ATTEMPTED username.
+	AuditAuthLoginSucceeded AuditEventType = "auth.login_succeeded"
+	AuditAuthLoginFailed    AuditEventType = "auth.login_failed"
+	AuditAuthLogout         AuditEventType = "auth.logout"
+	// AuditAuthzDenied is the §E role-gate refusal (RFC 0039 Phase 2):
+	// an AUTHENTICATED caller below the route's required policy. 401s
+	// emit nothing — anonymous pokes are unbounded noise; this records
+	// a known account probing above its privilege.
+	AuditAuthzDenied AuditEventType = "authz.denied"
+
 	// Audit-log lifecycle (chain-recovery — PR #232 review SF-3)
 	AuditChainBootstrap AuditEventType = "chain.bootstrap"
 	AuditChainRestart   AuditEventType = "chain.restart"
@@ -138,6 +150,10 @@ func AllAuditEventTypes() []AuditEventType {
 		AuditAgentQuarantined,
 		AuditAgentUnquarantined,
 		AuditUnquarantineEndpointOpen,
+		AuditAuthLoginSucceeded,
+		AuditAuthLoginFailed,
+		AuditAuthLogout,
+		AuditAuthzDenied,
 		AuditChainBootstrap,
 		AuditChainRestart,
 		AuditChainRecovered,
@@ -179,9 +195,16 @@ var securityEvents = map[AuditEventType]struct{}{
 	AuditAgentQuarantined:               {},
 	AuditAgentUnquarantined:             {},
 	AuditUnquarantineEndpointOpen:       {},
-	AuditChainBootstrap:                 {},
-	AuditChainRestart:                   {},
-	AuditChainRecovered:                 {},
+	// Auth lifecycle (RFC 0039): the agent.token_issued/invalid
+	// precedent — an attacker's successful or failed login is exactly
+	// what must survive a crash, and the §B limiters bound the rate.
+	AuditAuthLoginSucceeded: {},
+	AuditAuthLoginFailed:    {},
+	AuditAuthLogout:         {},
+	AuditAuthzDenied:        {},
+	AuditChainBootstrap:     {},
+	AuditChainRestart:       {},
+	AuditChainRecovered:     {},
 }
 
 // telemetryEvents is the explicit allow-list of batched event types.

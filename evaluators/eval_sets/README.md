@@ -9,11 +9,22 @@ recorded **golden** sidecars (`<id>.golden.yaml`, OQ #1) that the runner
 | Recipe | Source | Asserts (pre-0041 subset) |
 |--------|--------|---------------------------|
 | [`EVAL-MEMORY-001`](EVAL-MEMORY-001.yaml) | [MT-MEMORY-005](../../docs/manual-tests/MT-MEMORY-005-dementia-test.md) | Dementia-test recall across five interactions — `final_transcript` + `terminal_state` |
+| [`EVAL-MEMORY-002`](EVAL-MEMORY-002.yaml) | [RFC 0049 L1 amendment](../../docs/rfcs/0049-amendment-l1-cross-room-availability.md) | Cross-room carry, SHADOW — the walled prompt + the `shadow_traces` measurement stream ([replay test](../../tests/integration/test_cross_room_seed_replay.py) re-runs the promotion verdict) |
+| [`EVAL-MEMORY-003`](EVAL-MEMORY-003.yaml) | [RFC 0049 L1 amendment](../../docs/rfcs/0049-amendment-l1-cross-room-availability.md) | Cross-room carry, LIVE — the room-axis integration eval; the shadow-pinned strip replay must miss |
+| [`EVAL-MEMORY-004`](EVAL-MEMORY-004.yaml) | [RFC 0037](../../docs/rfcs/0037-memory-confidentiality-channel-classification.md) | The §D confidentiality gate — learn `restricted` / act `internal` withheld / act `restricted` verbatim, pinned at the request-hash level in both directions ([replay test](../../tests/integration/test_confidentiality_seed_replay.py)) |
 | [`EVAL-WORKING-001`](EVAL-WORKING-001.yaml) | [RFC 0034](../../docs/rfcs/0034-persona-conversational-working-memory.md) | Working memory — the persona references its own prior in-interaction question — `final_transcript` + `terminal_state` |
 
-Both goldens are recorded offline against the mock provider, so they replay
+Per-interaction **`room:`** (RFC 0049 — session binding) and **`classification:`**
+(RFC 0037 — the §A wire stamp) are the two recipe-format extensions the
+multi-room/confidentiality seeds act through; both are documented in
+[`schemas/eval_set.schema.json`](../../schemas/eval_set.schema.json) and are
+byte-inert on recipes that omit them.
+
+All five goldens are recorded offline against the mock provider, so they replay
 deterministically at $0 with no API key — the seed replay tests
 ([memory](../../tests/integration/test_eval_seed_replay.py),
+[cross-room](../../tests/integration/test_cross_room_seed_replay.py),
+[confidentiality](../../tests/integration/test_confidentiality_seed_replay.py),
 [working](../../tests/integration/test_eval_working_seed_replay.py)) run in CI on
 every PR, so a replay regression fails the build. (The eval harness's own *tiered*
 merge gate — `passed_all` blocking the `stable` tier — is the separate Phase-2

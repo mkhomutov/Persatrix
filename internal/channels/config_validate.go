@@ -25,6 +25,10 @@ import (
 //     silent no-op — RFC 0030 Tier B)
 //   - `max_cascade_depth` is non-negative (zero is the loader-default
 //     sentinel; negative is rejected — PR #319 deep review finding 5.2)
+//   - a per-channel `max_cascade_depth` (ISSUE-0114), when set, does not
+//     exceed the resolved fleet cap — the option (c) alignment rule (the
+//     Python defense-in-depth backstop is a per-process global aligned with
+//     the fleet value, so a per-channel cap above it is unreachable)
 func (c *Config) Validate() error {
 	// MaxCascadeDepth: reject negative early so an operator typo surfaces
 	// as a loader error rather than as a silent fall-back to the default.
@@ -133,6 +137,29 @@ func (c *Config) Validate() error {
 		if ch.SalienceMaxChannelMembers < 0 {
 			return fmt.Errorf("channels[%d=%s]: %w: %d (must be >= 1)",
 				i, ch.Name, ErrInvalidSalienceMaxChannelMembers, ch.SalienceMaxChannelMembers)
+		}
+
+		// ISSUE-0114: the per-channel Layer 0 cascade-depth cap. Zero is valid
+		// (inherit the fleet cap); negative is a typo rejected loudly (the
+		// schema's `minimum: 0` catches it at `make validate`). A value ABOVE
+		// the resolved fleet cap is also rejected — the alignment rule of the
+		// ISSUE-0114 option (c) decision: the Python dispatcher's
+		// defense-in-depth cap is a per-process global aligned by convention
+		// with the fleet value, so a per-channel cap above it is silently
+		// unreachable (the backstop suppresses dispatches first). Raising one
+		// channel past the fleet default means raising `max_cascade_depth:`
+		// (and the aligned Python backstop) first. Config-as-code only — the
+		// runtime PATCH path deliberately warns instead of rejecting
+		// ([ChannelRouter.SetChannelMaxCascadeDepth]), so a live edit can
+		// never be bricked by a fleet value it cannot change without a
+		// restart; this loader check is where the requirement is enforced.
+		if ch.MaxCascadeDepth < 0 {
+			return fmt.Errorf("channels[%d=%s]: %w: %d (must be >= 0)",
+				i, ch.Name, ErrInvalidMaxCascadeDepth, ch.MaxCascadeDepth)
+		}
+		if fleet := c.ResolvedMaxCascadeDepth(); ch.MaxCascadeDepth > fleet {
+			return fmt.Errorf("channels[%d=%s]: %w: %d exceeds the fleet cap %d (per-channel caps must be <= the fleet max_cascade_depth — the Python dispatcher backstop is aligned with the fleet value, so raise that first; ISSUE-0114 option (c))",
+				i, ch.Name, ErrInvalidMaxCascadeDepth, ch.MaxCascadeDepth, fleet)
 		}
 
 		// Reject a negative per-channel RFC 0030 Layer 1 cost ceiling. Zero

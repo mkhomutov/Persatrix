@@ -24,6 +24,7 @@ from agents.closed_interactions_read import handle_get_closed_interactions
 from agents.generated import task_pb2
 from agents.memory.episodic import EpisodicMemory
 from agents.memory.episodic_closed import closed_interactions
+from agents.memory.interaction_types import ROOM_CLOSE_TURN_KEY
 from agents.memory.interactions import (
     SUMMARY_PENDING_TEXT,
     SUMMARY_UNAVAILABLE_TEXT,
@@ -360,6 +361,33 @@ async def test_handler_projects_participants_from_multi_turn_context(memory):
         agents, task_pb2.ClosedInteractionsRequest(agent_id="agent-x"), MagicMock(),
     )
     assert list(resp.interactions[0].participants) == ["alice", "bob"]
+
+
+async def test_handler_excludes_the_room_close_turn_from_participants(memory):
+    """PR #846 review: the room-close fan lands ONE closing message as the
+    final turn of EVERY sibling record, so without this every record in a
+    closed room named its own speaker plus whoever closed the room — a
+    participant of that record's conversation only in the sense that it
+    ended it.  Keyed off the producer's ``room_close`` stamp, not a
+    re-derivation of ``sender`` != the record's speaker."""
+    await memory.store_episode(
+        summary="brainstorm", interaction_id="i-1", scope="group:room-7",
+        started_at=1.0, closed_at=2.0, turn_count=2,
+        context={
+            "scope": "group:room-7", "close_reason": "structural",
+            "turns": [
+                {"at": 1.0, "payload": {"sender": "alice"}},
+                {"at": 1.9, "payload": {
+                    "sender": "iron-fox", ROOM_CLOSE_TURN_KEY: True,
+                }},
+            ],
+        },
+    )
+    agents = {"agent-x": _fake_agent(memory)}
+    resp = await handle_get_closed_interactions(
+        agents, task_pb2.ClosedInteractionsRequest(agent_id="agent-x"), MagicMock(),
+    )
+    assert list(resp.interactions[0].participants) == ["alice"]
 
 
 async def test_handler_projects_participants_from_single_turn_context(memory):

@@ -29,18 +29,25 @@ import (
 //
 // SECURITY (exemption trust boundary): the exemption decision in
 // [ChannelRouter.enforceReplyBudget] reads the sender's `participant_type` from
-// the publish metadata bag, which is caller-asserted. The REST chat handler
-// stamps/validates it for the human path (chat_handler.go), but the raw publish
-// path (`POST /channels/{id}/messages`) forwards the bag verbatim — it is NOT
-// re-derived from an authenticated identity. So a caller that self-asserts
-// `participant_type: "user"` would be treated as exempt (see the contract pinned
-// by `TestReplyBudget_HumanPrincipalExempt`). This is harmless while the layer
-// is inert (no producer writes `interaction_id`, so `enforceReplyBudget` never
+// the publish metadata bag. Both REST producers now stamp it server-side — the
+// chat handler for the human path, and the raw publish path
+// (`POST /channels/{id}/messages`) from the agent registry (ISSUE-0119) — and
+// on the publish path a REGISTERED sender's resolution OVERRIDES any claim, so
+// an agent of this deployment can no longer self-assert `participant_type:
+// "user"` to buy the human exemption (pinned by
+// `TestChannelPublish_RegisteredAgentCannotClaimUser`).
+//
+// The residual gap is the sender the registry cannot see: an UNREGISTERED id
+// keeps its caller-asserted claim (the bridge/external-agent case), so a
+// caller publishing under an unregistered sender_id can still assert `user`
+// and be treated as exempt (the contract pinned by
+// `TestReplyBudget_HumanPrincipalExempt`). This is harmless while the layer is
+// inert (no producer writes `interaction_id`, so `enforceReplyBudget` never
 // reaches the exemption check on real traffic — see interaction_id.go), but
-// BEFORE the layer becomes load-bearing (the producer lands in PR 4+), the
-// exemption must derive the principal from a trusted/authenticated source rather
-// than the untrusted bag, or an agent could opt out of the cap meant to keep it
-// from dominating. Tracked as a hardening follow-up in the RFC 0030 PR plan.
+// BEFORE the layer becomes load-bearing (the producer lands in PR 4+) that
+// remaining case must derive the principal from the authenticated identity
+// (RFC 0039 §F) rather than the bag. Tracked as a hardening follow-up in the
+// RFC 0030 PR plan.
 func exemptPrincipalParticipantType(principal string) (string, bool) {
 	if principal == "human" {
 		return "user", true

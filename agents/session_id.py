@@ -175,6 +175,24 @@ def session_scope(session_id: str | None) -> Iterator[str]:
         _ACTIVE_SESSION_ID.reset(token)
 
 
+def session_id_from_metadata(metadata: Mapping[str, object]) -> str | None:
+    """Read the per-request session off event metadata, or ``None``.
+
+    The ONE validation seam behind both consumers of
+    :data:`EVENT_SESSION_METADATA_KEY`: the handler-side scope binder
+    (:func:`session_scope_from_metadata`) and the executor-hop structural
+    lift (``DispatchContext.for_event`` — ISSUE-0118).  A present,
+    non-empty string is the session; anything else (missing key, blank,
+    or a tick event with no session, non-string) reads as ``None`` so
+    both consumers agree on what "no per-request session" looks like and
+    cannot drift on the key name or the validation rule.
+    """
+    sid = metadata.get(EVENT_SESSION_METADATA_KEY)
+    if isinstance(sid, str) and sid:
+        return sid
+    return None
+
+
 def session_scope_from_metadata(
     metadata: Mapping[str, object],
 ) -> AbstractContextManager[str | None]:
@@ -185,13 +203,14 @@ def session_scope_from_metadata(
     task-local scope so recall + write seams inside ``_on_event_inner`` resolve
     to *this* conversation even when a sibling runs concurrently in-process.
 
-    Reads :data:`EVENT_SESSION_METADATA_KEY` off ``metadata``.  A present,
-    non-empty string binds a scope; anything else (missing key, blank, or a
-    tick event with no session) yields a :func:`~contextlib.nullcontext` so
-    call-time resolution falls back to the construction snapshot — leaving the
+    Reads :data:`EVENT_SESSION_METADATA_KEY` via
+    :func:`session_id_from_metadata`.  A present, non-empty string binds a
+    scope; anything else (missing key, blank, or a tick event with no
+    session) yields a :func:`~contextlib.nullcontext` so call-time
+    resolution falls back to the construction snapshot — leaving the
     single-session / CLI / tick paths unchanged.
     """
-    sid = metadata.get(EVENT_SESSION_METADATA_KEY)
-    if isinstance(sid, str) and sid:
+    sid = session_id_from_metadata(metadata)
+    if sid is not None:
         return session_scope(sid)
     return nullcontext()

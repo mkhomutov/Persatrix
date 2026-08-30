@@ -179,6 +179,16 @@ operator-seeded, fixture — is covered:
   known residual rather than silently inherited — filed as
   [ISSUE-0116](../issues/ISSUE-0116-fact-subject-renders-unquarantined.md);
   a subject-side grammar belongs with the future predicate registry.
+  *Mitigated in v0.3.13* (the ISSUE-0116 fold-in, direction 2): the
+  header now renders the subject through a bounded template
+  (`bounded_header_subject`, 4 words / 48 chars then `…` —
+  `agents/persona_runtime/facts_render.py`), shrinking the
+  model-influenced text in the framing position from the 120-char
+  write cap to the bounded prefix. Header-only — storage, rows, and
+  recall matching keep the canonical form, and the write-boundary
+  bounds above are unchanged. A short in-bounds imperative still
+  renders verbatim, so the residual survives *in kind*; the full
+  subject grammar still belongs with the predicate registry.
 
 ## Test strategy (as landed)
 

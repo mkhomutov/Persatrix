@@ -10,7 +10,7 @@ import ChannelSettings from "./ChannelSettings.svelte";
 
 // ChannelSettings is the group-channel governance surface (RFC 0050 Phase 2 PR
 // 2): on channel select it reads GET /api/v1/channels/{id}/config and renders
-// the eight knobs, each with its effective value, a provenance badge from
+// the nine flat knobs, each with its effective value, a provenance badge from
 // `source` (overridden-here vs inherited default), and an inherit/override
 // control. Save collects ONLY the changed knobs into a sparse PATCH carrying the
 // last-read revision in If-Match. A 409 reloads (never blind-overwrites). Unlike
@@ -21,16 +21,18 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// A representative config body: revision + the eight {value, source} knobs.
+// A representative config body: revision + the nine flat {value, source} knobs.
 // floor_control and escalation_chair_id are overridden on the channel; the rest
 // inherit the fleet default. interaction_budget_tokens reads back its effective
 // value like every other knob (the RFC 0050 interaction-budget amendment made it
 // router-held; an inherited uncapped budget is 0, not the old Open-item-4 null).
+// max_cascade_depth (ISSUE-0114) reads back the fleet cap when inherited.
 function configBody(overrides = {}) {
   return {
     revision: 3,
     floor_control: { value: true, source: "channel" },
     salience_max_channel_members: { value: 8, source: "default" },
+    max_cascade_depth: { value: 5, source: "default" },
     max_replies_per_participant_per_interaction: { value: 4, source: "default" },
     end_vote_threshold: { value: 2, source: "default" },
     end_vote_window: { value: 600, source: "default" },
@@ -88,11 +90,11 @@ describe("ChannelSettings", () => {
     // The floor-control override reads back true and is flagged as overridden.
     const floor = await screen.findByLabelText("Floor control");
     expect(floor.checked).toBe(true);
-    // 18 knobs total (8 flat + 4 reasoning.* + 6 autonomous.*); two are overridden
-    // (floor_control, escalation_chair_id), so 18 - 2 = 16 inherit. The provenance
+    // 19 knobs total (9 flat + 4 reasoning.* + 6 autonomous.*); two are overridden
+    // (floor_control, escalation_chair_id), so 19 - 2 = 17 inherit. The provenance
     // vocabulary is the user-facing rendering of `source`.
     expect(screen.getAllByText("Overridden on this channel").length).toBe(2);
-    expect(screen.getAllByText("Inherited default").length).toBe(16);
+    expect(screen.getAllByText("Inherited default").length).toBe(17);
 
     // It fetched the encoded config route, not anything else.
     expect(fetchMock).toHaveBeenCalledTimes(1);

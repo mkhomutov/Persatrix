@@ -78,6 +78,11 @@ func (r *ChannelRouter) dispatchTo(ctx context.Context, msg ChannelMessage, ct C
 		// unrepresentable on the wire.
 		InteractionCloseTrigger:    closeTrigger,
 		InteractionCloseRedelivery: closeRedelivery,
+		// ISSUE-0124: the orchestrator's own view of whether it asked this
+		// recipient for a turn, resolved once from the marker + the caller's
+		// responder election. Server-side only — the dispatcher reads it to
+		// decide whether the stimulus can leave a causal-attribution entry.
+		ExpectsReply: control.expectsReply(),
 	}, msg)
 	status := "ok"
 	switch {

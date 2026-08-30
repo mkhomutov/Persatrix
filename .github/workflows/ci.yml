@@ -77,6 +77,13 @@ jobs:
       # `ui` reinstalls and builds. The second `npm ci` is the cost of `ui`
       # being a real release-build command; it is served fast by the setup-node
       # npm cache configured above.
+      # RFC 0039 enabled-mode exposure amendment §A3 — the console renders
+      # LLM-authored content and the session is a cookie, so {@html} is a
+      # session-riding XSS vector. The no-{@html} convention is enforced, not
+      # advisory. Stdlib-only script; the runner's system python3 suffices.
+      - name: Check no {@html} directive under web/src
+        run: make ui-html-check
+
       - name: Run web console unit tests
         run: make ui-test
 
@@ -216,6 +223,26 @@ jobs:
       - name: Run unit tests
         run: python -m pytest tests/unit/python/ -v --tb=short
 
+      # The agents/tests/ tree (422 tests) was executed by NO job:
+      # the two pytest steps around this one cover tests/unit/python/ and
+      # tests/integration/, and the only Makefile target that named it was
+      # broken on an unregistered `--agent` flag, so it exited before
+      # collection. `cd agents && ruff check .` / `mypy .` did cover the tree,
+      # so it stayed lint- and type-clean while drifting out of behavioural
+      # agreement with production unnoticed, through 52 commits in 180 days.
+      #
+      # It is not redundant with the unit tree: it holds the ONLY executable
+      # coverage of observability/tracing.py, observability/grpc_logging.py
+      # and memory/scheduled_wakes.py, whose function bodies tests/unit/python/
+      # never enters (those modules are import-only there), plus the bulk of
+      # log_shipper.py and event_loop_lifecycle.py.
+      #
+      # Runs from the repo root with the agents config (mirrors the
+      # integration step): rootdir must be the repo root so the schema-pinning
+      # tests resolve schemas/. Mirrors `make test-agents`.
+      - name: Run agents unit tests
+        run: python -m pytest agents/tests/ -v --tb=short -c agents/pyproject.toml
+
       # ISSUE-0076: CI ran only the unit suite + the single bored-persona cost
       # gate (the cost-regression-gate job below), so the rest of
       # tests/integration/ was never gated by any CI job. The v0.3.4
@@ -314,6 +341,15 @@ jobs:
 
       - name: Clippy
         run: cd cli && cargo clippy -- -D warnings
+
+      # The Rust suite carries the CLI↔server lockstep guards (the config-knob
+      # set and its wire types are parsed out of the Go sources), so leaving it
+      # to the manual pre-tag sweep meant a knob could ship with no CLI surface
+      # and a red guard for a whole cycle — which is exactly what ISSUE-0114 did
+      # (v0.3.13 release-prep PR 1 finding). The job name is left unchanged so an
+      # existing required-status-check rule keeps matching.
+      - name: Test
+        run: cd cli && cargo test
 
   validate:
     name: Validate configs

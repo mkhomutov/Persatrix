@@ -14,6 +14,10 @@ real:
   ``END_INTERACTION_VOTE`` for the event's channel (RFC 0030 Layer 4):
   the persona judged its contribution complete, so the vote-close park
   (:mod:`.vote_close`) covers exactly these actions.
+* :func:`stale_close_reason` — the caller's single question ("must the
+  scope's open interaction close before this turn is appended?"), which
+  folds the rotation below together with the ISSUE-0130 catch-up
+  boundary: a LIVE turn never joins a span the startup replay opened.
 * :func:`wire_rotation_closes` — the orchestrator-minted channel
   ``interaction_id`` on the inbound event differs from the one the open
   local interaction was opened under: the channel conversation ended
@@ -30,8 +34,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ..channel_wire_metadata import WIRE_CLOSE_TRIGGER_IDLE
-from ..memory.boundary_detectors import REASON_IDLE_GAP, REASON_STRUCTURAL
+from ..channel_wire_metadata import WIRE_CLOSE_TRIGGER_IDLE, wire_interaction_id
+from ..memory.boundary_detectors import (
+    REASON_CATCHUP_COMPLETE,
+    REASON_IDLE_GAP,
+    REASON_STRUCTURAL,
+)
+from ..memory.scopes import is_thread_scope
 from ..persona_types import ActionType
 
 if TYPE_CHECKING:
@@ -250,9 +259,115 @@ def wire_rotation_close_reason(
     return REASON_STRUCTURAL
 
 
+def stale_close_reason(
+    open_interaction: Interaction | None,
+    event: AgentEvent,
+    *,
+    wire_id: str,
+) -> CloseReason | None:
+    """The reason the scope's open interaction must close *before* this
+    event's turn is appended — ``None`` when the turn belongs to it.
+
+    Two boundaries, checked in this order:
+
+    1. **The catch-up boundary (ISSUE-0130).**  A LIVE turn arriving on a
+       scope that the on-startup replay opened splits there.  The replayed
+       span carries no principal, so :func:`~agents.persona_runtime
+       .close_path.persist_closed_interaction` derives nothing from it;
+       letting the live turn join it would drop the live conversation's
+       memory too.  Checked first because it holds regardless of what the
+       wire ids say — the replay-opened record must not absorb live turns
+       even when the conversation genuinely continues under the same wire
+       interaction id, which is the common mid-conversation-restart case
+       (and the only case for thread scopes, whose ``wire_id`` is always
+       empty).  Replay→replay is NOT a split: those turns share the same
+       unattributable span, segmented by rotation like any other.
+    2. **The wire rotation** — see :func:`wire_rotation_closes` /
+       :func:`wire_rotation_close_reason`.
+    """
+    if open_interaction is None or not open_interaction.is_open:
+        return None
+    if (
+        open_interaction.replayed
+        and event.metadata.get("replay_mode") is not True
+    ):
+        return REASON_CATCHUP_COMPLETE
+    if wire_rotation_closes(open_interaction, wire_id):
+        return wire_rotation_close_reason(open_interaction, event.metadata)
+    return None
+
+
+def scope_wire_anchor(scope: str, event: AgentEvent) -> str:
+    """The wire interaction id a room-wide close on ``scope`` answers to.
+
+    THE spelling of :func:`wire_admits_record`'s second argument (PR #846
+    review).  It was written inline at three fan sites and the third copy
+    had silently dropped the thread carve-out, so a threaded close stamped
+    and billed against the parent floor's conversation; computing the
+    anchor beside the predicate that consumes it is what stops the two
+    from drifting apart again.
+
+    Thread scopes are wire-UNTRACKED (PR 607 review finding 1): the
+    resolver keys on ``msg.ChannelID``, so a threaded reply carries the
+    parent FLOOR's id and that id says nothing about the thread — the
+    IP3 rule, "the thread IS the interaction".  Forcing ``""`` here keeps
+    a thread record on the pre-wire scope-keyed behaviour, which is the
+    tolerant default of every fan that reads a blank anchor.
+    """
+    return "" if is_thread_scope(scope) else wire_interaction_id(event)
+
+
+def wire_admits_record(
+    record: Interaction,
+    anchor: str,
+    *,
+    tolerate_blank_anchor: bool = True,
+) -> bool:
+    """Whether a room-wide close may admit ``record`` under ``anchor``.
+
+    THE spelling of the wire-id admission conjunct the room fans share
+    (PR #846 review).  Before this it was written three times in three
+    modules and the copies had drifted into two different behaviours,
+    with only one of them saying so — the review finding was not that
+    any single copy was wrong but that a fix to one would silently miss
+    the others.
+
+    * An **unstamped record is always admitted** — the tolerant-wire-
+      reader posture.  A fresh record, or one from a producer that
+      carries no id, must not be stranded by a rule it cannot take part
+      in.
+    * A **stamped record is admitted only on a match**, so a successor
+      conversation opened by a rotation the trigger predates is never
+      buried as "ended", and its metered summary is never billed
+      against the reserve carved for the predecessor.
+    * A **blank anchor** is the divergence, now explicit in the
+      signature instead of implicit in three loop conditions.  The
+      close notification and the cost close are tolerant: their anchor
+      is missing only for traffic the wire does not track (thread
+      scopes, ticks, an old producer), where the pre-wire scope-keyed
+      behaviour is the correct one.  The end-vote discharge passes
+      ``False`` — a vote parked on an unstamped record judged an
+      unstamped conversation, so it must not reach across and close
+      records that DO name one.
+
+    The ``replayed`` exclusion is deliberately NOT here: it is a
+    property of the record rather than of the wire, and it belongs to
+    every fan unconditionally, so ``InteractionTracker.close_scope``
+    owns it.
+    """
+    if not record.wire_interaction_id:
+        return True
+    if not anchor:
+        return tolerate_blank_anchor
+    return record.wire_interaction_id == anchor
+
+
 __all__ = [
     "is_session_end_event",
     "matching_end_votes",
+    "scope_wire_anchor",
+    "stale_close_reason",
+    "wire_admits_record",
     "wire_rotation_close_reason",
     "wire_rotation_closes",
 ]

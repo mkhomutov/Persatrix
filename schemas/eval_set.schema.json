@@ -71,6 +71,10 @@
           "minLength": 1,
           "description": "Optional RFC 0031 memory room for this interaction's turns (RFC 0049 PR 4 — the cross-room seeds). The driver binds the value as the event's `persatrix_session` metadata, mirroring production's per-(agent, channel) session binding, so memory written while it is active stamps this session and default recall walls/ranks against it. Distinct `room` values across interactions = distinct rooms. Omit it everywhere (as the single-room seeds do) and the driver stays on the construction-snapshot session path, byte-identical to the pre-extension behaviour."
         },
+        "classification": {
+          "enum": ["public", "internal", "restricted", "secret"],
+          "description": "Optional RFC 0037 §A channel classification for this interaction's turns (RFC 0037 PR 8 — the confidentiality seed). The driver seeds the value as the event's `channel_classification` metadata, mirroring the orchestrator's dispatch-time wire stamp, so the turn ACTS at this level (§D gate reads) and an interaction OPENED under it captures it for write-side stamping (§C frozen-at-open). Omit it and the driver keeps its DM default `internal`, byte-identical to the pre-extension goldens."
+        },
         "turns": {
           "type": "array",
           "minItems": 1,

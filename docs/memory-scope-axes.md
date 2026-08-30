@@ -114,7 +114,7 @@ Rejected alternative — **reusing `principal_id` for test isolation** (test = s
 
 ### Principal — tenant ownership and deletability
 
-The principal/tenant axis (RFC 0039, currently armed-but-unfed at `local`) answers *whose data this is and whether it may be deleted*. Its purpose is **separation for easy deletion** (GDPR-style erasure): tenant data is kept separable so it can be dropped on request. A refinement to record: **with tenant consent, the *experience derived* from their data may be retained in anonymized form** — decoupled from the tenant identity and folded into the persona's general experience — rather than deleted with the raw data. Raw, tenant-attributed data stays deletable; consented, anonymized learning persists. The mechanism for that split is future work (intersects RFC 0013 erasure and RFC 0039 accounts).
+The principal/tenant axis (RFC 0039, **fed as of v0.3.14** — the orchestrator emits the verified `participant_id` as the per-request principal under `auth.mode: enabled`; `local` remains the resolved value under `disabled` and for every unauthenticated caller) answers *whose data this is and whether it may be deleted*. Its purpose is **separation for easy deletion** (GDPR-style erasure): tenant data is kept separable so it can be dropped on request. A refinement to record: **with tenant consent, the *experience derived* from their data may be retained in anonymized form** — decoupled from the tenant identity and folded into the persona's general experience — rather than deleted with the raw data. Raw, tenant-attributed data stays deletable; consented, anonymized learning persists. The mechanism for that split is future work (intersects RFC 0013 erasure and RFC 0039 accounts).
 
 ## Where each memory tier rides
 

@@ -48,11 +48,8 @@ var (
 	port      = flag.Int("port", 9090, "gRPC server port")
 	httpPort  = flag.Int("http-port", 8080, "HTTP/REST + SSE server port")
 	httpBind  = flag.String("http-bind", "127.0.0.1", "HTTP server bind address")
-	// PR #173 review (Must-Fix #2): the gRPC LogService listener previously
-	// bound on `:%d` (all interfaces) while --http-bind defaulted to
-	// loopback, silently broadening the orchestrator's public attack
-	// surface (auth is deferred to RFC 0009).  Mirror --http-bind so the
-	// security posture is consistent across both server-side surfaces.
+	// PR #173 review (Must-Fix #2): mirror --http-bind's loopback default
+	// so the security posture is consistent across both server surfaces.
 	grpcBind     = flag.String("grpc-bind", "127.0.0.1", "gRPC server bind address (LogService); set to 0.0.0.0 for container deployments where shippers connect across the network")
 	workflowsDir = flag.String("workflows-dir", "workflows/", "Path to workflow YAML directory")
 	env          = flag.String("env", "development", "Environment: development|staging|production")
@@ -60,6 +57,11 @@ var (
 )
 
 func main() {
+	// RFC 0039 §G — `account bootstrap` runs instead of the server
+	// (bootstrap.go); server argv falls through to the ordinary boot.
+	if code, ok := runSubcommand(os.Args[1:]); ok {
+		os.Exit(code)
+	}
 	flag.Parse()
 
 	// PR #84 F-01: Resolve --deadline-mode default from --env when not
@@ -176,9 +178,7 @@ func main() {
 		"env", *env,
 	)
 
-	// TODO: Initialize components in order:
-	// 1. Load and validate configuration
-	// 3. Initialize state store
+	// 3. Initialize state store (config load/validate TODO precedes)
 	store := state.NewInMemoryStore(logger)
 	logger.Info("state store initialized", zap.String("type", "in-memory"))
 
@@ -295,9 +295,8 @@ func main() {
 	// TODO(post-PR-251): the chat REST handler now routes through the channels
 	// DM publish-and-await path (RFC 0011 PR 4a-ii-β-2) and no longer consults
 	// the gRPC chat executor at runtime; the wiring stays one release window so
-	// orchestrator-only upgrades don't hit a nil `WithChatExecutor`. Remove with
-	// `executor.GRPCChatExecutor` / `server.WithChatExecutor` / the gRPC
-	// `SendChatMessage` proto entry once the upgrade window closes.
+	// orchestrator-only upgrades don't hit a nil `WithChatExecutor` — remove
+	// with GRPCChatExecutor/WithChatExecutor/`SendChatMessage` once it closes.
 	chatExec := executor.NewGRPCChatExecutor(reg, logger,
 		executor.WithChatDialOptions(grpc.WithStatsHandler(otelgrpc.NewClientHandler())),
 	)
@@ -317,13 +316,9 @@ func main() {
 		schedOpts = append(schedOpts, scheduler.WithMetrics(orchMetrics))
 	}
 
-	// RFC 0018 PR 5 — wire the orchestrator-side log buffer into the
-	// HTTP server so the REST + SSE retrieval surface
-	// (handleListLogs / handleStreamLogs) can read from the same ring
-	// the BufferCore tee + LogServiceServer.StreamLogs feed.  The
-	// buffer itself is constructed earlier (just after the logger) so
-	// it can also tee orchestrator-emitted entries; here we only opt
-	// the server in.
+	// RFC 0018 PR 5 — wire the log buffer into the HTTP server so the
+	// REST + SSE retrieval surface reads the same ring the BufferCore
+	// tee + LogServiceServer.StreamLogs feed (buffer built earlier).
 	if logBuf != nil {
 		srvOpts = append(srvOpts, server.WithLogBuffer(logBuf))
 	}
@@ -336,11 +331,9 @@ func main() {
 	// quarantine. Nil-safe when SECURITY_RATE_LIMIT_ENABLED=false.
 	srvOpts = append(srvOpts, server.WithRateLimiter(rateLimiter, circuitBreaker))
 
-	// PR #244 review H-02 — optional shared-secret stop-gap.
-	// PR #244 round-2 review M-05: when token is unset, unquarantineToken
-	// emits a startup WARN + `unquarantine.endpoint.open` audit event so
-	// the open-by-default posture is recorded explicitly. The auditor is
-	// passed in for that purpose; nil is safe (audit becomes a no-op).
+	// PR #244 H-02 — optional shared-secret stop-gap. When unset,
+	// unquarantineToken emits a startup WARN + `unquarantine.endpoint.open`
+	// audit event so the open posture is recorded (M-05); nil auditor safe.
 	if tok := unquarantineToken(logger, auditor); tok != "" {
 		srvOpts = append(srvOpts, server.WithUnquarantineToken(tok))
 	}
@@ -357,6 +350,14 @@ func main() {
 	}
 	defer chanCleanup()
 	srvOpts = append(append(srvOpts, chanOpts...), initUI(*enableUI, *configDir, logger)...) // RFC 0048: +off-by-default web console
+
+	// RFC 0039 PR 3 — accounts/auth, inert under the default mode (auth.go).
+	authOpts, authCleanup, authErr := initAuth(*configDir, *accountsDB, *httpBind, logger)
+	if authErr != nil {
+		logger.Fatal("auth: init failed", zap.Error(authErr))
+	}
+	defer authCleanup()
+	srvOpts = append(srvOpts, authOpts...)
 
 	// 8c. Initialize scheduler (workflow run polling + execution)
 	sched := scheduler.NewWorkflowScheduler(store, reg, plan, exec, logger, absWorkflowsDir, schedOpts...)

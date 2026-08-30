@@ -142,11 +142,13 @@ func (s *Server) handleRegisterAgent(w http.ResponseWriter, r *http.Request) {
 		Status:       registry.StatusHealthy, // reachable until first health check fails
 	}
 
+	// ISSUE-0125: Register is an upsert, so a re-registration is accepted and
+	// overwrites the stored row rather than answering 409 CONFLICT. That 409 was
+	// the reason a returning agent could never correct a stale advertised
+	// address. The status code stays 201 for both the first registration and a
+	// re-registration — "registration accepted" — so no client has to branch on
+	// insert-vs-update (RFC 0002 §Agents amended 2026-08-23).
 	if err := s.registry.Register(r.Context(), info); err != nil {
-		if errors.Is(err, registry.ErrAgentAlreadyRegistered) {
-			writeError(w, "CONFLICT", "agent already registered", http.StatusConflict)
-			return
-		}
 		s.logger.Error("failed to register agent", zap.Error(err), zap.String("agent_id", req.ID))
 		writeError(w, "INTERNAL", "failed to register agent", http.StatusInternalServerError)
 		return
@@ -328,17 +330,26 @@ func (s *Server) handleUnquarantineAgent(w http.ResponseWriter, r *http.Request)
 		writeError(w, "UNAVAILABLE", "circuit breaker not configured", http.StatusServiceUnavailable)
 		return
 	}
-	// PR #244 H-02: optional shared-secret gate. Only enforced when the
-	// operator has opted in via SECURITY_UNQUARANTINE_TOKEN; an empty
-	// configured token leaves the endpoint unauthenticated (matches the
-	// pre-PR baseline + the documented reverse-proxy posture).
-	if s.unquarantineToken != "" {
+	// PR #244 H-02: optional shared-secret gate, SUPERSEDED under
+	// `auth.mode: enabled` (RFC 0039 §H): there the middleware has
+	// already enforced the operator role, the env token is IGNORED —
+	// the Authorization header now carries a session token, not the
+	// shared secret — and no deployment loses protection in either
+	// mode. Under `disabled` the opt-in env-token check still applies
+	// (an empty configured token leaves the endpoint unauthenticated,
+	// the pre-PR baseline + documented reverse-proxy posture).
+	if s.unquarantineToken != "" && !s.authEnforced() {
 		if !validBearerToken(r.Header.Get("Authorization"), s.unquarantineToken) {
 			writeError(w, "UNAUTHORIZED", "invalid or missing unquarantine token", http.StatusUnauthorized)
 			return
 		}
 	}
 	actor := r.Header.Get(security.AgentIDHeader)
+	if ident := identityFrom(r.Context()); ident.Authenticated {
+		// The verified participant beats the self-reported header —
+		// the audit trail names who actually flipped the breaker.
+		actor = ident.ParticipantID
+	}
 	if actor == "" {
 		actor = "operator"
 	}

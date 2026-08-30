@@ -72,14 +72,40 @@ func (s *Server) registerUIRoutes(mux *http.ServeMux) {
 		return
 	}
 	fileServer := http.FileServer(noListFS{http.FS(s.uiFS)})
-	mux.Handle("GET /ui/", http.StripPrefix("/ui/", fileServer))
+	mux.Handle("GET /ui/", http.StripPrefix("/ui/", uiSecurityHeaders(fileServer)))
 
 	// The two read-only endpoints the SPA boots off (RFC 0048 PR 2). Registered
 	// in the same uiFS-gated block as the static handler so they share the
 	// console's enablement: with --enable-ui off neither is registered and both
 	// are a clean 404.
-	mux.HandleFunc("GET /api/v1/ui/config", s.handleUIConfig)
-	mux.HandleFunc("GET /api/v1/ui/context", s.handleUIContext)
+	mux.Handle("GET /api/v1/ui/config", uiSecurityHeaders(http.HandlerFunc(s.handleUIConfig)))
+	mux.Handle("GET /api/v1/ui/context", uiSecurityHeaders(http.HandlerFunc(s.handleUIContext)))
+}
+
+// uiCSP is the console Content-Security-Policy (RFC 0039 enabled-mode
+// exposure amendment §A3). `script-src 'self'` (no inline) is the XSS
+// probability-reduction half of the browser posture — the damage bound
+// is the HttpOnly session cookie; `frame-ancestors 'none'` also closes
+// clickjacking, which SameSite does not touch. If the Svelte build ever
+// needs inline *scripts*, that is a build-configuration fix, not a CSP
+// relaxation. `style-src 'unsafe-inline'` is required by Svelte's
+// component-scoped style injection.
+const uiCSP = "default-src 'self'; script-src 'self'; " +
+	"style-src 'self' 'unsafe-inline'; img-src 'self' data:; " +
+	"connect-src 'self'; object-src 'none'; base-uri 'none'; " +
+	"frame-ancestors 'none'"
+
+// uiSecurityHeaders stamps the amendment §A3 browser-surface headers on
+// every console response — the static bundle and the two boot
+// endpoints alike (ui.go set none before this PR).
+func uiSecurityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("Content-Security-Policy", uiCSP)
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Referrer-Policy", "same-origin")
+		next.ServeHTTP(w, r)
+	})
 }
 
 // noListFS wraps an http.FileSystem so http.FileServer never renders a

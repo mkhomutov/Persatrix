@@ -390,8 +390,8 @@ fn server_leaf_knob_types() -> std::collections::BTreeMap<String, &'static str> 
 
     let mut server: BTreeMap<String, &'static str> = BTreeMap::new();
 
-    // Flat knobs — mergeConfigPatch's switch (the reasoning namespace is skipped).
-    let handlers = read("internal/server/channel_config_handlers.go");
+    // Flat knobs — mergeConfigPatch's switch (own file since #810's cap split).
+    let handlers = read("internal/server/channel_config_merge.go");
     let mut current: Option<String> = None;
     for line in handlers.lines().map(str::trim_start) {
         if let Some(rest) = line.strip_prefix("case \"") {
@@ -413,6 +413,7 @@ fn server_leaf_knob_types() -> std::collections::BTreeMap<String, &'static str> 
         }
     }
 
+    let flat_count = server.len();
     // Nested sub-knobs — each `merge<Block>Patch`'s decodeKnob lines, whose first
     // string-literal argument IS the dotted key (e.g. "reasoning.mode",
     // "autonomous.agenda"). Both nested files share one shape, so parse them the
@@ -435,10 +436,13 @@ fn server_leaf_knob_types() -> std::collections::BTreeMap<String, &'static str> 
         }
     }
 
+    // Per-HALF, not a bare `!server.is_empty()`: at #810 the flat parse returned
+    // ZERO yet the nested knobs satisfied that, so the guard silently went blind.
     assert!(
-        !server.is_empty(),
-        "parsed no knobs from the Go config sources — the switch / decodeKnob \
-             format changed; update this guard's parser",
+        flat_count > 0 && server.len() > flat_count,
+        "parsed no {} knobs — a merge switch moved file or changed shape; \
+             update this guard's paths (v0.3.13 release-prep PR 1 finding)",
+        if flat_count == 0 { "FLAT" } else { "NESTED" },
     );
     server
 }

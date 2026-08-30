@@ -230,7 +230,9 @@ class TestChannelIngestSanitization:
         # Tracker has the open scope — the turn was not dropped.
         expected_scope = scope_for_group("group:planning")
         assert agent._interaction_tracker.open_scopes() == [expected_scope]
-        interaction = agent._interaction_tracker.get(expected_scope)
+        interaction = agent._interaction_tracker.get(
+            expected_scope, speaker_id="iron-fox",
+        )
         assert interaction is not None
         assert interaction.turn_count == 1
 
@@ -290,7 +292,9 @@ class TestSuppressedEventsIngestMemory:
         # Tracker has the open scope — memory ingestion ran even though
         # the gate suppressed the LLM response.
         assert agent._interaction_tracker.open_scopes() == [expected_scope]
-        interaction = agent._interaction_tracker.get(expected_scope)
+        interaction = agent._interaction_tracker.get(
+            expected_scope, speaker_id="iron-fox",
+        )
         assert interaction is not None
         assert interaction.turn_count == 1
 

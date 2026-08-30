@@ -122,13 +122,15 @@ class TestPromptShape:
     def test_unprotected_prompt_is_byte_identical_to_pre_pr6(self) -> None:
         """The golden-stability pin: an ``internal``-default close ends
         with the RFC 0026 facts suffix and never mentions projections."""
-        prompt = _build_summarization_prompt(_interaction("internal"), self._VIEW)
+        prompt = _build_summarization_prompt(
+            _interaction("internal"), self._VIEW, shown_turns=2,
+        )
         assert prompt.endswith(build_combined_prompt_suffix())
         assert "projections" not in prompt
 
     def test_protected_prompt_appends_the_projection_suffix(self) -> None:
         prompt = _build_summarization_prompt(
-            _interaction("restricted"), self._VIEW,
+            _interaction("restricted"), self._VIEW, shown_turns=2,
         )
         assert "`projections`" in prompt
         assert "`public`, `internal`" in prompt
@@ -153,7 +155,7 @@ class TestPromptShape:
             side_effect=_broken,
         ):
             prompt = _build_summarization_prompt(
-                _interaction("restricted"), self._VIEW,
+                _interaction("restricted"), self._VIEW, shown_turns=2,
             )
         assert prompt.endswith(build_combined_prompt_suffix())
         assert "projections" not in prompt

@@ -146,6 +146,11 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	responders, nonResponders := orderResponders(members, msg, threadParentSenderID)
 	respIDs := responderIDs(responders)
 	r.markActivity(msg.ChannelID, respIDs)
+	// ISSUE-0124: the same election, in the shape the concurrent path needs to
+	// stamp it per recipient. One set serves both consumers so the presence
+	// signal and the causal-attribution write can never disagree about who was
+	// asked to answer.
+	elected := electedSet(respIDs)
 
 	// The two dispatch paths (floor round vs concurrent), resolved once so the
 	// RFC 0052 §D bounded close below has ONE call site serving both.
@@ -321,7 +326,7 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 		// the last one or the discussion dies here (human/stalled rounds no-op).
 		r.maybeContinueDiscussion(context.WithoutCancel(ctx), ct, outcome, autonomous)
 	} else {
-		r.dispatchConcurrent(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, members, channelSize, floorMentions, nil)
+		r.dispatchConcurrent(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, members, elected, channelSize, floorMentions, nil)
 	}
 	// ISSUE-0099 resynthesize, DISPATCH half — the re-force the head claimed,
 	// dispatched only now that the bounded close has ruled the round sub-bound
@@ -337,6 +342,21 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	}
 }
 
+// electedSet projects [orderResponders]' responder ids to a membership set —
+// the per-recipient lookup shape [ChannelRouter.dispatchConcurrent] needs,
+// built once per fanout rather than re-scanned per member. Nil for an empty
+// election, which reads as "nobody elected" on every lookup.
+func electedSet(respIDs []string) map[string]bool {
+	if len(respIDs) == 0 {
+		return nil
+	}
+	set := make(map[string]bool, len(respIDs))
+	for _, id := range respIDs {
+		set[id] = true
+	}
+	return set
+}
+
 // dispatchConcurrent fans `msg` out to every member of `members` other than
 // the sender and `never` participants, with peak in-flight dispatches capped
 // at `channelFanoutMaxConcurrency` (ISSUE-0014). Blocks until every selected
@@ -349,7 +369,14 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 // `failures` collects per-recipient dispatch errors for the floor path's
 // redelivery accounting (live_delivery.go); nil (a recording no-op) on the
 // concurrent fanout path, whose bounded close is sole-delivery by ordering.
-func (r *ChannelRouter) dispatchConcurrent(ctx context.Context, msg ChannelMessage, ct ChannelType, threadParentSenderID string, members []Member, channelSize int, floorMentions []string, failures *liveDeliveryFailures) {
+//
+// `elected` is the [orderResponders] responder subset of `members` — the
+// recipients the orchestrator actually asked for a turn. Everyone else on the
+// list is delivered to for INGESTION ONLY (see the Tier A note in the loop
+// below), which is a different fact from having received the message, and the
+// one [DispatchEnvelope.ExpectsReply] carries. Nil on the floor path, whose
+// `members` argument is already the non-responder remainder.
+func (r *ChannelRouter) dispatchConcurrent(ctx context.Context, msg ChannelMessage, ct ChannelType, threadParentSenderID string, members []Member, elected map[string]bool, channelSize int, floorMentions []string, failures *liveDeliveryFailures) {
 	// Buffered channel as a semaphore: each goroutine acquires a slot
 	// before starting and releases it on exit, so peak in-flight
 	// dispatches never exceed `channelFanoutMaxConcurrency`. The
@@ -397,7 +424,7 @@ func (r *ChannelRouter) dispatchConcurrent(ctx context.Context, msg ChannelMessa
 			// paths, so a panicking dispatch is not caught by the server's
 			// recoveryMiddleware — recover here or it crashes the process.
 			defer r.recoverFanout("dispatch", msg.ChannelID, msg.ID)
-			if err := r.dispatchTo(ctx, msg, ct, threadParentSenderID, m, channelSize, floorMentions, dispatchControl{}); err != nil {
+			if err := r.dispatchTo(ctx, msg, ct, threadParentSenderID, m, channelSize, floorMentions, dispatchControl{respondersTurn: elected[m.ParticipantID]}); err != nil {
 				failures.record(m.ParticipantID)
 			}
 		}()
