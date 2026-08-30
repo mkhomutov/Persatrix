@@ -40,9 +40,12 @@ func TestSQLiteStore_SchemaV11_FreshDB_ChannelsHasClassificationColumn(t *testin
 	})
 }
 
-// TestSQLiteStore_SchemaV11_Migration_Idempotent pins the literal latest
-// version (the newest migration's test owns the literal pin, per the v5/v6
-// test-header convention) and that a reopen is a no-op.
+// TestSQLiteStore_SchemaV11_Migration_Idempotent asserts the no-op-reopen
+// contract. When v11 was the newest migration this test also held the literal
+// "newest == N" pin; that pin moved to the newest migration's idempotent test
+// (TestSQLiteStore_SchemaV12_Migration_Idempotent) when v12 landed, per the
+// v5/v6 test-header convention, so this test now asserts only the symbolic
+// contract.
 func TestSQLiteStore_SchemaV11_Migration_Idempotent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "channels.db")
 
@@ -57,10 +60,13 @@ func TestSQLiteStore_SchemaV11_Migration_Idempotent(t *testing.T) {
 	withDB(t, path, func(db *sql.DB) {
 		var version int
 		require.NoError(t, db.QueryRow(`PRAGMA user_version`).Scan(&version))
-		assert.Equal(t, 11, version,
-			"channelStoreSchemaVersion is v11 as of RFC 0037 PR 1; reopen is a no-op")
 		assert.Equal(t, channelStoreSchemaVersion, version,
-			"the literal pin and the const must agree")
+			"user_version stamped to the latest schema version; reopen is a no-op")
+		// The literal-version pin moved to the newest migration's idempotent
+		// test (TestSQLiteStore_SchemaV12_Migration_Idempotent) when v12 landed;
+		// this test now asserts only the symbolic no-op-reopen contract.
+		assert.GreaterOrEqual(t, channelStoreSchemaVersion, 11,
+			"RFC 0037 PR 1 introduced v11; the chain continues to the latest")
 	})
 }
 

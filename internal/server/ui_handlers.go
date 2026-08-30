@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"os"
 	"runtime/debug"
+
+	"github.com/mkhomutov/persatrix/internal/channels"
 )
 
 // uiConfigResponse is the /api/v1/ui/config payload (RFC 0048 §C): which panels
@@ -51,6 +53,16 @@ type uiBuildInfo struct {
 // PR 4's chat panel derives its user_id from `principal` here rather than
 // prompting for or hard-coding a user, so the contract composes cleanly with
 // RFC 0039 auth later.
+//
+// `Principal` and `Tenant` move TOGETHER in both modes. They are one axis
+// reported twice, not two that happen to agree in local mode: under a
+// resolved account both are the verified §F participant, which is the same
+// value the channel store stamps as `messages.principal_id` (ISSUE-0130
+// shape (b)) and the persona tiers partition on under strict-equality recall
+// (`agents/principal_id.py` defines the principal as "which tenant owns this
+// row"). Reporting a `local` tenant beside an authenticated principal would
+// tell an operator they were in the shared tenant while every write they made
+// landed in their own.
 type uiContextResponse struct {
 	Principal     string `json:"principal"`
 	Tenant        string `json:"tenant"`
@@ -89,9 +101,21 @@ func (s *Server) handleUIConfig(w http.ResponseWriter, _ *http.Request) {
 // (or `auth.mode: disabled`) keeps the degenerate local identity; the
 // route stays public because the SPA boots off it before any login.
 func (s *Server) handleUIContext(w http.ResponseWriter, r *http.Request) {
-	resp := uiContextResponse{Principal: "local", Tenant: "local"}
+	// [channels.DefaultPrincipalID], not a bare "local": this IS the tenant
+	// the channel store stamps onto a publish that resolves no account
+	// (ISSUE-0130 shape (b)), so the console's degenerate identity and the
+	// value its own messages persist under have to be one string, not two
+	// that happen to match today.
+	resp := uiContextResponse{
+		Principal: channels.DefaultPrincipalID,
+		Tenant:    channels.DefaultPrincipalID,
+	}
 	if ident := identityFrom(r.Context()); ident.Authenticated {
+		// Both fields, for the reason on [uiContextResponse]: the principal
+		// IS the tenant axis, so leaving `Tenant` at the degenerate default
+		// here would contradict the row this account's own publishes carry.
 		resp.Principal = ident.ParticipantID
+		resp.Tenant = ident.ParticipantID
 		resp.Authenticated = true
 	}
 	writeJSON(w, resp, http.StatusOK)

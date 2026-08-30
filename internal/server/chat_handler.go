@@ -159,7 +159,10 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		// per §F, not rejected — existing clients keep working.
 		userID = identityFrom(r.Context()).ParticipantID
 	} else if userID == "" {
-		userID = "local"
+		// The same shared tenant the channel store stamps (ISSUE-0130
+		// shape (b)); named rather than re-spelled so the DM peer and the
+		// persisted `principal_id` cannot drift apart.
+		userID = channels.DefaultPrincipalID
 		chatLocalFallbackWarnOnce.Do(func() {
 			s.logger.Warn("chat: empty user_id; using shared 'local' fallback (cross-talk hazard, RFC 0009 Phase 4)",
 				zap.String("agent_id", agentID),

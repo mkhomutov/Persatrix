@@ -32,18 +32,23 @@ package server
 // ([authIdentity.Authenticated]), which is false for every request under
 // `auth.mode: disabled` and for every unauthenticated caller under `enabled`
 // — including the whole persona fleet, which holds no accounts and drives the
-// §Non-Goals public REST seams (see auth_policy.go). So agents emit nothing
-// and collapse to `'local'`, which is the declared agent-origin contract.
+// §Non-Goals public REST seams (see auth_policy.go). So THIS middleware emits
+// nothing for an agent publish — which is not the same as saying the turn ends
+// up in `'local'`; see the next paragraph.
 //
-// Read that contract at its real scope (ISSUE-0082 residual R-2): a persona's
-// reply re-enters here as a fresh unauthenticated publish, so every fanout
-// descending from it dispatches under `'local'` even when it is relaying what
-// an authenticated person just said. In a multi-agent room the relayed
-// content therefore lands in the shared tenant. The fix is NOT to let the
-// persona send a principal back — the persona binds `principal_scope` from
-// that header and recall is strict equality on it, so trusting an
-// agent-supplied claim would hand an unauthenticated caller a cross-tenant
-// READ primitive. Closing it needs server-side causal tracking; deferred.
+// That was the whole story until ISSUE-0082 residual R-2 (ISSUE-0124) closed
+// in v0.3.15. A persona's reply re-enters here as a fresh unauthenticated
+// publish, so every fanout descending from it USED TO dispatch under `'local'`
+// even when it was relaying what an authenticated person had just said. The
+// fix was never to let the persona send a principal back — the persona binds
+// `principal_scope` from that header and recall is strict equality on it, so
+// trusting an agent-supplied claim would hand an unauthenticated caller a
+// cross-tenant READ primitive. It is server-side causal tracking instead:
+// [channels.ChannelRouter.publishCommit] consults the dispatcher's
+// attribution table and re-stamps the publish context with the principal that
+// provoked it (channels/principal_restamp.go). So the emission rule here is
+// unchanged and still narrow, but the DOWNSTREAM claim "an agent turn is
+// `'local'`" now holds only where the table cannot name a cause.
 //
 // # The enumeration
 //
@@ -100,9 +105,14 @@ const (
 	// all (agents/server_servicers.py lifts `persatrix-principal` in
 	// `SendChatMessage` and `ReceiveChannelMessage` only), and
 	// `POST /api/v1/personas/{participant_id}/recall` reads the CHANNEL store
-	// — membership-scoped verbatim messages, a table with no `principal_id`
-	// column — never principal-partitioned persona memory. Both are declared
-	// here rather than assumed, per the plan.
+	// — membership-scoped verbatim messages — never principal-partitioned
+	// persona memory. That `messages` gained its own `principal_id` at
+	// channel-store v12 (ISSUE-0130 shape (b)) does not change the verdict:
+	// the column records who caused a row, and no recall predicate reads it.
+	// The room's transcript is scoped by who was IN the room (RFC 0035 §F
+	// interval + epoch), which is a different question from which tenant's
+	// derived memory a turn writes. Both are declared here rather than
+	// assumed, per the plan.
 	originNonDispatching
 )
 

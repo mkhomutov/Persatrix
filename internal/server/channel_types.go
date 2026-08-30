@@ -158,15 +158,71 @@ type memberResponse struct {
 
 // channelMessageResponse is the JSON shape for individual messages
 // returned by the publish, history, and thread endpoints.
+//
+// `PrincipalID` (ISSUE-0130 shape (b), channel-store v12) is the tenant the
+// orchestrator attributed the publish to. Always present — never `omitempty`
+// — because the consumer is a *seed*: PR B2 reads it off the history payload
+// to attribute what catch-up replay derives, and an absent key there is
+// indistinguishable from "this deployment predates the column", which is
+// exactly the ambiguity the narrowed derivation skip must resolve. The
+// `local` value is a real answer ("no verified tenant"), not a missing one.
+//
+// It is response-only: [publishMessageRequest] has no counterpart, by design
+// — see [channels.ChannelMessage.PrincipalID].
+//
+// # ACCEPTED READ EXPOSURE, STATED
+//
+// The write side is closed to a DIRECT claim (no caller can name a tenant;
+// the indirect sender-spoof path the R-2 re-stamp leaves open is stated on
+// ISSUE-0130). The READ side is deliberately open, and that is a real
+// disclosure rather than a non-event. `GET /api/v1/channels/{id}/messages`
+// (with its `?as_participant=` variant) and the `POST` publish response this
+// DTO is echoed on are BOTH `policyPublic` (auth_policy.go) — they must be,
+// because the persona fleet holds no accounts and catch-up replay is the
+// consumer this column exists for. So every value here is readable by any
+// caller that can reach the ingress, with no credential — and the publish
+// echo is the sharper of the two, since it answers "who caused this?" in the
+// caller's own 201 without paging history at all. The thread GET carries the
+// field as well, but that route is `policyAuthenticated`, so it is not part
+// of the anonymous surface.
+//
+// What that newly discloses is NOT the message content (already public on the
+// same route) but the CAUSAL LINK: since the ISSUE-0124 R-2 re-stamp, an
+// agent-sender row carries the §F participant id of the human whose turn
+// provoked it, so an unauthenticated reader can attribute each persona
+// utterance in each room to a named person. Before v12 that link existed only
+// in orchestrator memory. Two mitigations, neither of which is a code gate:
+// the ingress is the same surface `cmd/orchestrator/auth.go` already WARNs
+// "stays UNGATED" and that operators are told to network-restrict to the agent
+// fleet, and RFC 0009 agent tokens are what would let these routes stop being
+// public at all. Withholding the field from unauthenticated callers was
+// considered and rejected — it would blind the one consumer the column has.
+//
+// # The degraded publish echo
+//
+// No value is ever outside that vocabulary, including on the one path that
+// answers a publish WITHOUT reading the committed row back: when the
+// post-publish `GetMessage` fails, [Server.handlePublishMessage] returns the
+// request's own struct, which the store never stamped (it stamps its own
+// copy). Echoing that raw would emit `"principal_id": ""` — a THIRD value a
+// consumer branching `== "local"`, which is exactly what B2's replay
+// attribution does, reads as a real tenant. So the handler resolves the field
+// from the same request context the store read: identical to the committed row
+// for an authenticated publish and for an unattributable one, and
+// under-reporting as `local` only when `publishCommit` re-stamped an R-2
+// causal principal the handler never holds. In-vocabulary and wrong in one
+// direction beats out-of-vocabulary; that path already logs at ERROR, and
+// TestPrincipalColumn_DegradedEchoStillCarriesATenant pins it.
 type channelMessageResponse struct {
-	ID        string         `json:"id"`
-	ChannelID string         `json:"channel_id"`
-	SenderID  string         `json:"sender_id"`
-	Content   string         `json:"content"`
-	Timestamp time.Time      `json:"timestamp"`
-	ThreadID  string         `json:"thread_id,omitempty"`
-	Mentions  []string       `json:"mentions"`
-	Metadata  map[string]any `json:"metadata,omitempty"`
+	ID          string         `json:"id"`
+	ChannelID   string         `json:"channel_id"`
+	SenderID    string         `json:"sender_id"`
+	Content     string         `json:"content"`
+	Timestamp   time.Time      `json:"timestamp"`
+	ThreadID    string         `json:"thread_id,omitempty"`
+	Mentions    []string       `json:"mentions"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
+	PrincipalID string         `json:"principal_id"`
 }
 
 // listChannelsResponse is the envelope for GET /api/v1/channels.
