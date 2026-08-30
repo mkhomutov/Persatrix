@@ -56,6 +56,14 @@ type ChannelConfigOverrides struct {
 	// SalienceMaxChannelMembers overrides the RFC 0030 Tier B channel-size cap
 	// ([ChannelConfig.SalienceMaxChannelMembers]).
 	SalienceMaxChannelMembers *int `json:"salience_max_channel_members,omitempty"`
+	// MaxCascadeDepth overrides the ISSUE-0114 (v0.3.13) per-channel Layer 0
+	// cascade-depth cap ([ChannelConfig.MaxCascadeDepth]) — the productive-
+	// discussion length knob. nil inherits the fleet cap; a set value must be
+	// >= 1 ([ChannelConfigOverrides.Validate] — the setter treats non-positive
+	// as the inherit sentinel, so an explicit 0 would be indistinguishable
+	// from nil, the salience-cap posture). A live edit above the fleet cap is
+	// warned, not rejected ([ChannelRouter.SetChannelMaxCascadeDepth]).
+	MaxCascadeDepth *int `json:"max_cascade_depth,omitempty"`
 	// InteractionBudgetTokens overrides the RFC 0030 Layer 1 per-interaction
 	// cost ceiling ([ChannelConfig.InteractionBudgetTokens]). Persisted here
 	// uniformly with the other knobs; router-held as of the RFC 0050 amendment

@@ -1,0 +1,35 @@
+1d8a73f9531d1bce50741b7332e58874e25176824e5dfb597e58c5f0c836a376:
+  stop_reason: end_turn
+  text: '{"summary": "Sam shared in the war room that the Zephyr acquisition closes
+    March 3; ember-owl acknowledged it stays in the room.", "facts": [{"subject":
+    "zephyr", "predicate": "topic.has_deadline", "object": "the acquisition closes
+    March 3", "certainty": 0.9}]}'
+  usage:
+    input_tokens: 667
+    output_tokens: 65
+2a64ed1073b112d5fb0c46a7d6c9c9e9a7dc2d26a3e836dc88547a200c6bd455:
+  stop_reason: end_turn
+  text: Zephyr closes March 3 — the date we captured in this war room.
+  usage:
+    input_tokens: 2128
+    output_tokens: 15
+34767815b6a8bc58293d5577d91556c77a1be7d1bdb931a454aff76c37e2b48a:
+  stop_reason: end_turn
+  text: I don't have a closing date for Zephyr I can share in this room — nothing
+    for the roadmap from me.
+  usage:
+    input_tokens: 2058
+    output_tokens: 24
+3bf4aea7732e23ad43d70c3807615cd815a55b80dd0a12abe66b2f9417e0e279:
+  stop_reason: end_turn
+  text: Understood — the Zephyr acquisition closes March 3. That stays inside this
+    room.
+  usage:
+    input_tokens: 2057
+    output_tokens: 20
+cc8b73fb21168f0aa7cd7ee4376511f5f00d3a4b0e95716885761c4e2e7f080d:
+  stop_reason: end_turn
+  text: Morning! Nothing pressing from my side — what's on the standup agenda?
+  usage:
+    input_tokens: 2048
+    output_tokens: 17

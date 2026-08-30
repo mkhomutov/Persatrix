@@ -7,6 +7,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/mkhomutov/persatrix/internal/channels"
+	"github.com/mkhomutov/persatrix/internal/security"
 )
 
 // handleGetChatHistory handles GET /api/v1/agents/{id}/chat/history?user_id=&limit=&before=
@@ -50,8 +51,40 @@ func (s *Server) handleGetChatHistory(w http.ResponseWriter, r *http.Request) {
 	// defaults an omitted user to the shared "local" fallback), a read endpoint
 	// has no turn to attribute, so an absent principal is a client error rather
 	// than a silent fallback that would leak the shared-local history.
+	//
+	// RFC 0039 §F (Phase 2): under `enabled` the lookup key must BE the
+	// verified claim — this read is the impersonation hole's other half
+	// (the v0.2 TODO above). An omitted user_id defaults to the claim; a
+	// user_id naming someone else is refused loudly (403) rather than
+	// silently answering with the caller's own history — the coarse
+	// role gate has no cross-user read story until Phase 3+.
 	userID := r.URL.Query().Get("user_id")
-	if userID == "" {
+	if s.authEnforced() {
+		ident := identityFrom(r.Context())
+		if userID == "" {
+			userID = ident.ParticipantID
+		} else if userID != ident.ParticipantID {
+			// An authenticated principal refused at an authorization
+			// boundary gets the same security-class record as the §E
+			// role gate — and unlike that gate this refusal is reachable
+			// with only the bootstrap account, so it is a live
+			// deployment's first observable `authz.denied`.
+			s.emitAudit(r.Context(), security.AuditEvent{
+				EventType: security.AuditAuthzDenied,
+				Action:    "authorize",
+				Resource:  r.URL.Path,
+				Detail: map[string]any{
+					"method":   r.Method,
+					"username": ident.Username,
+					"role":     ident.Role,
+					"required": "claim-match",
+					"source":   clientIP(r, s.auth.cfg.TrustedProxies),
+				},
+			})
+			writeError(w, "FORBIDDEN", "user_id does not match the authenticated participant", http.StatusForbidden)
+			return
+		}
+	} else if userID == "" {
 		writeError(w, "BAD_REQUEST", "user_id is required", http.StatusBadRequest)
 		return
 	}

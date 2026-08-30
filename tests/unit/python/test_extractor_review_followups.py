@@ -37,9 +37,10 @@ Pinned contracts
   :func:`dispatch_facts_from_response`'s broad ``except``, and drop
   the entire batch with no ``agent.facts.extraction_failed`` counter
   bump — silent data loss indistinguishable from "no facts
-  extracted."  The close-path :func:`_interaction_sender` already
-  filters whitespace senders to ``None``, so this is defence-in-depth
-  for non-close-path callers.
+  extracted."  The close path passes the record key's frozen
+  ``speaker_id or None`` (stripped at key resolution), so whitespace
+  never arrives from there; this is defence-in-depth for
+  non-close-path callers.
 """
 
 from __future__ import annotations
@@ -239,9 +240,9 @@ class TestWhitespaceSenderIdNormalisedAtBoundary:
     WARNING that looks identical to an infra failure — no signal that
     the LLM emitted N tuples that all got silently lost.
 
-    Reachability: the production close-path
-    (:func:`_interaction_sender`) already filters whitespace senders
-    to ``None``, so this is a defence-in-depth pin for direct callers
+    Reachability: the production close path passes the record key's
+    frozen ``speaker_id or None`` (stripped at key resolution), so
+    whitespace cannot arrive from there; a defence-in-depth pin for direct callers
     — test fixtures today, and the future RFC 0026 OQ #9
     operator-seeded write path tomorrow.  Tests rather than docstring
     promises because the contract belongs to the function boundary

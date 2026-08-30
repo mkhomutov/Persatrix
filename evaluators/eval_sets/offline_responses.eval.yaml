@@ -32,6 +32,19 @@ responses:
     # injects.
     - match: ["json", "atlas launch"]
       reply: '{"summary": "Sam said the Atlas launch ships Friday; ember-owl acknowledged the hard deadline.", "facts": [{"subject": "atlas", "predicate": "topic.has_deadline", "object": "ships Friday", "certainty": 0.9}, {"subject": "sam", "predicate": "committed_to", "object": "shipping Atlas by Friday", "certainty": 0.85}]}'
+    # EVAL-MEMORY-004 — the war-room (restricted) interaction close's
+    # combined summarize + extract call. Same top-of-list placement and
+    # keying discipline as the entry above ("json" = the envelope
+    # instruction; the PHRASE "zephyr acquisition" = this recipe's
+    # transcript, absent from every other recipe's close prompt). The
+    # single topic fact is the §D gate's test subject — stamped
+    # `restricted` by the frozen-at-open capture, NOT by anything in this
+    # reply. Deliberately emits NO §E projections block, so the internal
+    # ask records the blunt-withhold shape (a live re-record may add a
+    # projection — the close prompt for a protected interaction requests
+    # one; that is the feature, not drift).
+    - match: ["json", "zephyr acquisition"]
+      reply: '{"summary": "Sam shared in the war room that the Zephyr acquisition closes March 3; ember-owl acknowledged it stays in the room.", "facts": [{"subject": "zephyr", "predicate": "topic.has_deadline", "object": "the acquisition closes March 3", "certainty": 0.9}]}'
     # EVAL-MEMORY-001 — dementia test. One entry per user turn, keyed on
     # keywords unique to that turn so exactly one matches.
     - match: ["daughter", "mira"]           # i1 — establish the named entity
@@ -69,3 +82,20 @@ responses:
       reply: "I don't have a deadline on record for Atlas in this room — want me to chase one down?"
     - match: ["atlas", "working toward"]    # 003 i3 — live: the DM fact is in the prompt
       reply: "Atlas ships Friday — that's the deadline we're working toward; Sam committed to it in our DM."
+    # EVAL-MEMORY-004 — RFC 0037 §D gate (learn restricted / act internal
+    # withheld / act restricted verbatim). Keywords per turn are disjoint
+    # from every entry above (all four prompts contain "zephyr" or "need
+    # from", which no other recipe's turns carry; none contains "plate",
+    # "atlas", or the 001/WORKING keys), so no earlier entry all-matches
+    # and these shadow nothing at the other seeds' re-record. The mock
+    # keys on the latest user text only — the i3 hedge and the i4 verbatim
+    # answer are SCRIPTED here; what makes the gate load-bearing is the
+    # request hash (see the recipe description), not these replies.
+    - match: ["zephyr", "march 3"]          # 004 i1 — the war-room teach turn
+      reply: "Understood — the Zephyr acquisition closes March 3. That stays inside this room."
+    - match: ["standup", "need from"]       # 004 i2 — the standup bridge turn
+      reply: "Morning! Nothing pressing from my side — what's on the standup agenda?"
+    - match: ["zephyr", "roadmap"]          # 004 i3 — internal ask: the prompt is gate-withheld
+      reply: "I don't have a closing date for Zephyr I can share in this room — nothing for the roadmap from me."
+    - match: ["zephyr", "war room"]         # 004 i4 — restricted re-ask: the fact is in the prompt
+      reply: "Zephyr closes March 3 — the date we captured in this war room."

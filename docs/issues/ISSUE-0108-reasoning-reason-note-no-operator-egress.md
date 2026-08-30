@@ -173,6 +173,19 @@ Adding an egress to a deliberately-walled field is feature work that wants its o
 PR + review, not a ride-along on the release-prep MT-execution PR — hence
 deferred.
 
+## Notes
+
+> 2026-08-19 — **slotted v0.3.16** by the
+> [sequencing Amendment 2026-08-19](../v0.3.x-sequencing.md#amendment-2026-08-19--v0315--v0316-attribution-and-audience-before-the-v040-train),
+> paired with
+> [ISSUE-0122](ISSUE-0122-relationship-tier-emits-no-provenance.md) as the
+> operator-observability half of that release. The "own PR + review" bar this
+> issue set for itself is met by giving it a named release slot rather than a
+> ride-along: v0.3.16's audience gate
+> ([ISSUE-0132](ISSUE-0132-memory-egress-gate-blind-to-room-audience.md))
+> introduces a new withhold decision, and the `reason_note` egress is what
+> makes that decision readable.
+
 [e]: ../rfcs/0051-reasoning-before-posting.md#e-privacy-boundary--the-trace-is-walled
 [mt]: ../manual-tests/MT-REASON-001.md
 [prep]: ../v0.3.10-release-prep-plan.md#known-follow-up-issues

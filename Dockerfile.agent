@@ -41,6 +41,18 @@ COPY prompts/ prompts/
 RUN SITE_PKGS=$(python -c 'import sysconfig; print(sysconfig.get_path("purelib"))') && \
     cp -r prompts "$SITE_PKGS/"
 
+# RFC 0040 Phase 1: the channel-payload contract (schemas/channel.schema.json)
+# is read at runtime by agents/channel_payload_contract.py, which resolves it
+# off Path(__file__).parent.parent — the SAME site-packages resolution the
+# prompts block above documents, not /app. So the schema is copied into
+# site-packages for the identical reason; a /app-only copy would leave the
+# send-side validator a permanent no-op in every container, i.e. disabled in
+# the one deployment where it observes live payloads. Placed after pip install
+# to keep the pip layer cache hot across schema-only edits.
+COPY schemas/ schemas/
+RUN SITE_PKGS=$(python -c 'import sysconfig; print(sysconfig.get_path("purelib"))') && \
+    cp -r schemas "$SITE_PKGS/"
+
 # Security: run as non-root to limit blast radius if agent code is compromised
 # (agents execute LLM-suggested actions and must be sandboxed).
 RUN useradd -r -s /bin/false appuser \

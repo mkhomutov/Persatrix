@@ -1,5 +1,6 @@
 mod active_session;
 mod commands;
+mod credentials;
 mod epoch_resolve;
 mod session_resolve;
 mod types;
@@ -10,6 +11,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use colored::Colorize;
 
 use commands::agent::{cmd_agent_info, cmd_agent_list, cmd_agent_reload, cmd_test};
+use commands::auth::{cmd_login, cmd_logout, cmd_whoami};
 use commands::channel_dispatch::{dispatch as dispatch_channel, ChannelCommands};
 use commands::chat::cmd_chat;
 use commands::interactions::cmd_agent_interactions;
@@ -159,6 +161,17 @@ enum Commands {
         #[arg(long, default_value = "agent")]
         group_by: String,
     },
+    /// Log in to the orchestrator and store the session token (RFC 0039 §J)
+    Login {
+        /// Account username (prompted when omitted; the password is
+        /// always prompted — never passed on the command line)
+        #[arg(long)]
+        username: Option<String>,
+    },
+    /// Revoke the current session server-side and clear the stored token
+    Logout,
+    /// Show the identity the orchestrator resolves for this client
+    Whoami,
     /// Manage persona-memory sessions (RFC 0031 §E)
     #[command(subcommand)]
     Session(SessionCommands),
@@ -301,11 +314,37 @@ async fn main() {
         std::process::exit(1);
     }
 
-    let client = reqwest::Client::builder()
+    // RFC 0039 Phase 2 (§J): every command attaches the stored bearer
+    // token for THIS orchestrator as a default header, so the whole
+    // surface authenticates without per-command plumbing (login/logout/
+    // whoami included — logout revokes the presented token, and login
+    // simply ignores a stale header). No stored token → no header →
+    // behaviour exactly as before; under `auth.mode: disabled` the
+    // server ignores the header entirely.
+    let mut builder = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(10))
-        .timeout(std::time::Duration::from_secs(60))
-        .build()
-        .expect("failed to create HTTP client");
+        .timeout(std::time::Duration::from_secs(60));
+    if let Some(token) = credentials::token(server) {
+        let mut headers = reqwest::header::HeaderMap::new();
+        match reqwest::header::HeaderValue::from_str(&format!("Bearer {token}")) {
+            Ok(mut value) => {
+                // Mark sensitive so debug-logging middleware never
+                // prints the credential.
+                value.set_sensitive(true);
+                headers.insert(reqwest::header::AUTHORIZATION, value);
+                builder = builder.default_headers(headers);
+            }
+            Err(_) => {
+                // A token with header-invalid bytes can only be a
+                // corrupted credential file — warn, act logged-out.
+                eprintln!(
+                    "{} stored credential for {server} is malformed; run 'persatrix login'",
+                    "warning:".yellow().bold()
+                );
+            }
+        }
+    }
+    let client = builder.build().expect("failed to create HTTP client");
 
     // Exhaustive match — adding a Commands variant produces a compile error
     // until its handler is added.
@@ -425,6 +464,9 @@ async fn main() {
             println!("{}", "Command 'state' not yet implemented".yellow());
             Ok(())
         }
+        Commands::Login { username } => cmd_login(&client, server, username.as_deref()).await,
+        Commands::Logout => cmd_logout(&client, server).await,
+        Commands::Whoami => cmd_whoami(&client, server).await,
         Commands::Channel(cmd) => dispatch_channel(&client, server, cmd, default_user_id).await,
         Commands::Session(cmd) => dispatch_session(&client, server, cmd).await,
         Commands::Node(_) => {

@@ -3,7 +3,7 @@ id: RFC-0038
 title: Persona Concurrent-Context Awareness & Cross-Channel Relay
 summary: Give a persona an explicit, bounded awareness of every channel it belongs to, and a sanctioned way to move information between channels — by scheduling a fresh single-channel turn on the destination rather than publishing across channels inline. Makes the single-channel-turn property RFC 0037 already depends on a code-enforced invariant, and routes all deliberate cross-channel flow through RFC 0037's confidentiality gate.
 type: architecture
-status: proposed
+status: partially_implemented
 author: Maksim Khomutov
 created: 2026-05-16
 target: "v0.3.12 (§B single-channel-turn enforcement only, carved forward per RFC 0037 Decision #3) + v0.4.0 (§C–§E)"
@@ -17,7 +17,7 @@ depends_on:
 # RFC 0038 — Persona Concurrent-Context Awareness & Cross-Channel Relay
 
 **Type**: architecture
-**Status**: 📋 Proposed
+**Status**: ⚠️ Partially Implemented — **§B (the single-channel-turn guard) ✅ shipped v0.3.12** via [RFC 0037](0037-memory-confidentiality-channel-classification.md) Phase 1 (its PR 4, [#776](https://github.com/mkhomutov/Persatrix/pull/776), per Decision #3 — this section remains the owning spec); **§C–§E (contexts / awareness / relay) stay 📋 proposed for v0.4.0**
 **Author**: Maksim Khomutov
 **Date**: 2026-05-16
 **Target**: v0.3.12 (**§B only** — the single-channel-turn guard is carved forward into [RFC 0037](0037-memory-confidentiality-channel-classification.md)'s Phase 1 per its Decision #3, 2026-07-19 decision; 0037 owns that PR slice against this section's spec) + v0.4.0 (§C–§E — contexts, awareness, relay; deferred from v0.3.x per the [2026-06-04 sequencing amendment](../v0.3.x-sequencing.md#amendment-2026-06-04--re-sequence-the-v03x-tail-for-conversation-realism--usefulness-ahead-of-v040))

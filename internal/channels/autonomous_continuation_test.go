@@ -182,11 +182,19 @@ func TestAutonomousContinuation_CascadeCapCloses(t *testing.T) {
 // fanout-suppressed by the commit-path cap branch, and — with no human and no
 // further stimulus possible on this chain — must close the interaction rather
 // than leave it immortal-but-inert.
+//
+// The dispatcher is the silent recorder, NOT continuationDispatcher: this
+// path's close runs synchronously inside the at-cap Publish, and the test
+// scripts both publishes itself. An auto-replying dispatcher re-enters
+// Publish on goroutines WaitForPendingFanout cannot see (unlike the floor
+// path, where the round awaits each reply via the floor waiter), so on a
+// slow runner its unstamped straggler reply — which the no-reopen latch
+// cannot suppress — lands after the close, mints a fresh open interaction,
+// and flakes the tracked assertion (CI run 30544507713).
 func TestAutonomousConcurrentCascadeCap_Closes(t *testing.T) {
 	store := newTestStore(t, SQLiteOptions{})
-	disp := &continuationDispatcher{}
+	disp := &recordingDispatcher{}
 	router := NewChannelRouter(store, disp, zap.NewNop(), nil)
-	disp.router = router
 	ch := mustCreateGroupWithPolicies(t, store, "brainstorm", map[string]RespondPolicy{
 		"nova": RespondAlways, "ember": RespondAlways,
 	}, "nova", "ember")
@@ -215,4 +223,22 @@ func TestAutonomousConcurrentCascadeCap_Closes(t *testing.T) {
 	_, _, tracked := router.openInteractionEscalationState(ch)
 	assert.False(t, tracked,
 		"an at-cap publish on an armed concurrent channel must close the interaction")
+
+	// The dispatch record pins both halves of the terminal shape: the opener
+	// was the interaction's one LIVE dispatch (the §D artifact guarantee's
+	// precondition), the at-cap publish drew NO stimulus dispatch (cap-
+	// suppressed), and the close notification — its sole delivery — reached
+	// every member, the sender included (bounded-close excludeSender=false).
+	var stimuli, closes []string
+	for _, c := range disp.snapshot() {
+		if c.closeNotification {
+			closes = append(closes, c.participantID)
+		} else {
+			stimuli = append(stimuli, c.participantID)
+		}
+	}
+	assert.Equal(t, []string{"ember"}, stimuli,
+		"exactly one live stimulus dispatch: the sub-cap opener; the at-cap publish must not fan")
+	assert.ElementsMatch(t, []string{"nova", "ember"}, closes,
+		"the structural close notification is the sole delivery and must reach every member")
 }

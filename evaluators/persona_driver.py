@@ -357,7 +357,14 @@ class PersonaRuntimeDriver:
                                 # every internal-stamped memory is withheld,
                                 # which is the version-skew posture, not the
                                 # production wire shape this driver replays.
-                                "channel_classification": "internal",
+                                # A recipe interaction may override the level
+                                # (RFC 0037 PR 8 — the confidentiality seed
+                                # acts/teaches at declared §A levels); absent,
+                                # the DM default keeps every landed golden
+                                # byte-identical.
+                                "channel_classification": (
+                                    interaction.classification or "internal"
+                                ),
                             }
                             if interaction.room:
                                 # RFC 0049 PR 4: bind the interaction's memory

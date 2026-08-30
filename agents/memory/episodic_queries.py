@@ -382,6 +382,7 @@ async def insert_episode(
     epoch_id: str = DEFAULT_EPOCH_ID,
     protection_level: str = PROTECTION_LEVEL_DEFAULT,
     source_channel_id: str | None = None,
+    speaker_id: str | None = None,
 ) -> str:
     """INSERT one episode row and COMMIT; return the generated episode id.
 
@@ -395,10 +396,28 @@ async def insert_episode(
     persist verbatim; see :meth:`EpisodicMemory.store_episode` for the
     stamp-site normalization contract.
 
+    ``speaker_id`` (ISSUE-0131 — v18) is the PROJECTION of the
+    ``(principal, speaker, scope)`` record key's speaker half: WHO said
+    the content this row was derived from.  ``None`` for a row with no
+    speaker (a tick, a single-turn scope, an operator/test write) and
+    for every pre-v18 row, whose speaker is genuinely unknowable — the
+    aggregate it came from spanned the whole room, which is the defect
+    the key exists to fix.  Sound only because a record is single-speaker
+    by construction; the one §G breach is excluded upstream
+    (``close_entries`` states the argument).
+
     The INSERT is plain DML — stepped to completion inside ``execute()``
     with no VDBE left active — so a concurrent ``COMMIT`` on the shared
     connection cannot race it (ISSUE-0055).
     """
+    # PR #849 review round 3: the ``"" == no speaker → NULL`` convention
+    # is enforced HERE, at the storage boundary, so a direct caller that
+    # passes the tracker's empty-string sentinel cannot mint a third
+    # speaker state (same rationale as subject canonicalisation in
+    # ``_facts_write``: call-site discipline does not cover direct
+    # writers).  The projection call sites still pass ``or None`` — that
+    # keeps their intent readable; this line makes it structural.
+    speaker_id = speaker_id or None
     episode_id = str(uuid.uuid4())
     now = time.time()
     await db.execute(
@@ -409,11 +428,11 @@ async def insert_episode(
              tags_json, created_at, compressed_at, compression_level,
              interaction_id, started_at, closed_at, turn_count, scope,
              session_id, principal_id, epoch_id, governance_interaction_id,
-             protection_level, source_channel_id)
+             protection_level, source_channel_id, speaker_id)
         VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, NULL, 0,
                 ?, ?, ?, ?, ?,
                 ?, ?, ?, ?,
-                ?, ?)
+                ?, ?, ?)
         """,
         (
             episode_id,
@@ -435,6 +454,7 @@ async def insert_episode(
             governance_interaction_id,
             protection_level,
             source_channel_id,
+            speaker_id,
         ),
     )
     await db.commit()

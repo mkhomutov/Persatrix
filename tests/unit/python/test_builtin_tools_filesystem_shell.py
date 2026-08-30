@@ -6,6 +6,8 @@ permission enforcement, sandboxing, output truncation, and error handling.
 Uses autouse fixture for tool-module state isolation.
 """
 
+import shlex
+import sys
 from pathlib import Path
 
 import pytest
@@ -15,6 +17,24 @@ from agents.tools.builtin import MAX_OUTPUT_BYTES
 from agents.tools.permissions import PermissionGate
 from agents.tools.registry import clear_registry
 from agents.tools.sandbox import PathValidator
+
+# ISSUE-0129: the interpreter running these tests, not the bare name
+# `python`. `shell_exec` execs through `asyncio.create_subprocess_exec`,
+# which does no PATH fallback and no python→python3 aliasing, so a bare
+# `python` resolves to nothing on macOS (dropped with the Python 2
+# sunset) and the five exec tests failed with `Command not found:
+# python` on every Mac while CI stayed green — `actions/setup-python`
+# installs a `python` shim.
+#
+# `_PY` must ALSO be what `_setup_tools` allowlists, absolute path and
+# all: `PermissionGate.is_command_allowed` matches by exact token prefix
+# (`args[:n] == pattern_parts`), so the entry `"python"` does not admit
+# `/…/bin/python3.12`. Fixing the call sites alone just trades
+# `FileNotFoundError` for `PermissionError` — see
+# `TestIsCommandAllowed.test_denied_absolute_path_for_bare_name_entry`
+# in test_permissions.py, which pins that matching rule deliberately.
+_PY = sys.executable
+_PY_CMD = shlex.quote(_PY)
 
 
 @pytest.fixture(autouse=True)
@@ -47,7 +67,7 @@ def _setup_tools(tmp_path: Path, permissions: dict | None = None) -> None:
         },
         "shell": {
             "exec": True,
-            "allowed_commands": ["echo", "python", "cat"],
+            "allowed_commands": ["echo", _PY, "cat"],
         },
         "network": {
             "allow": ["api.example.com"],
@@ -189,7 +209,7 @@ class TestFileWrite:
 class TestShellExec:
     async def test_allowed_command(self, tmp_path):
         _setup_tools(tmp_path)
-        result = await builtin.shell_exec('python -c "print(\'hello\')"')
+        result = await builtin.shell_exec(f'{_PY_CMD} -c "print(\'hello\')"')
         assert result.success is True
         assert "hello" in result.data["stdout"]
         assert result.data["exit_code"] == 0
@@ -220,14 +240,14 @@ class TestShellExec:
 
     async def test_nonzero_exit_code(self, tmp_path):
         _setup_tools(tmp_path)
-        result = await builtin.shell_exec("python -c \"import sys; sys.exit(1)\"")
+        result = await builtin.shell_exec(f"{_PY_CMD} -c \"import sys; sys.exit(1)\"")
         assert result.success is False
         assert result.data["exit_code"] == 1
 
     async def test_timeout_kills_process(self, tmp_path):
         _setup_tools(tmp_path)
         result = await builtin.shell_exec(
-            "python -c \"import time; time.sleep(60)\"", timeout=1
+            f"{_PY_CMD} -c \"import time; time.sleep(60)\"", timeout=1
         )
         assert result.success is False
         assert result.error_type == "TimeoutError"
@@ -259,7 +279,7 @@ class TestShellExec:
         _setup_tools(tmp_path)
         # Generate output exceeding MAX_OUTPUT_BYTES (100 KB)
         result = await builtin.shell_exec(
-            'python -c "print(\'A\' * 200000)"'
+            f'{_PY_CMD} -c "print(\'A\' * 200000)"'
         )
         assert result.success is True
         assert result.data["stdout"].endswith("[truncated at 100 KB]")
@@ -268,7 +288,7 @@ class TestShellExec:
         """Verify timeout is clamped to [1, MAX_TIMEOUT_SECONDS]."""
         _setup_tools(tmp_path)
         # timeout=0 should be clamped to 1, not cause immediate failure
-        result = await builtin.shell_exec('python -c "print(\'ok\')"', timeout=0)
+        result = await builtin.shell_exec(f'{_PY_CMD} -c "print(\'ok\')"', timeout=0)
         assert result.success is True
         assert "ok" in result.data["stdout"]
 

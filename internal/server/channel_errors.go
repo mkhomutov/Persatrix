@@ -31,6 +31,7 @@ func (s *Server) writeChannelError(w http.ResponseWriter, err error) {
 		errors.Is(err, channels.ErrAutonomousNoTopic):       // RFC 0052 PR 3 — convene a channel with no topic/agenda/goal
 		writeError(w, "CONFLICT", err.Error(), http.StatusConflict)
 	case errors.Is(err, channels.ErrInvalidSalienceMaxChannelMembers), // RFC 0050 PR 4 config validation
+		errors.Is(err, channels.ErrInvalidMaxCascadeDepth), // ISSUE-0114 per-channel cascade-depth cap
 		errors.Is(err, channels.ErrInvalidInteractionBudgetTokens),
 		errors.Is(err, channels.ErrInvalidMaxRepliesPerParticipant),
 		errors.Is(err, channels.ErrInvalidEndVoteThreshold),

@@ -310,7 +310,7 @@ func (r *ChannelRouter) floorRound(
 	failures := &liveDeliveryFailures{}
 
 	if len(nonResponders) > 0 {
-		r.dispatchConcurrent(detached, msg, ct, threadParentSenderID, nonResponders, channelSize, floorMentions, failures)
+		r.dispatchConcurrent(detached, msg, ct, threadParentSenderID, nonResponders, nil, channelSize, floorMentions, failures)
 	}
 
 	r.floors.acquire(msg.ChannelID)
@@ -423,7 +423,7 @@ func (r *ChannelRouter) runFloorTurn(
 		defer cancel()
 	}
 
-	if err := r.dispatchTo(ctx, msg, ct, threadParentSenderID, speaker, channelSize, floorMentions, dispatchControl{}); err != nil {
+	if err := r.dispatchTo(ctx, msg, ct, threadParentSenderID, speaker, channelSize, floorMentions, dispatchControl{respondersTurn: true}); err != nil {
 		// Fire-and-forget by contract (the warn lives in dispatchTo) — but the
 		// bounded close's redelivery marker must know this speaker never got
 		// the stimulus live (PR #718 review; live_delivery.go).

@@ -118,19 +118,33 @@ def current_epoch_id() -> str | None:
     return _ACTIVE_EPOCH_ID.get()
 
 
+def resolve_world_epoch_id() -> str:
+    """Return the PROCESS's world epoch — env var → default, NEVER the
+    task-local scope.
+
+    The one resolver for "which single world does this process's
+    persistent state belong to" (ISSUE-0118: the recall tool's
+    foreign-epoch wall compares the per-request scope against this).
+    :func:`resolve_epoch_id_silent` layers the scope on top; a caller
+    snapshotting the world must NOT use that form — an ambient
+    :func:`epoch_scope` active at snapshot time (a lazily wired tool, a
+    scoped test fixture) would poison the snapshot with one request's
+    epoch and invert every later comparison against it (PR #809 review
+    finding 2).  An empty / unset / whitespace-only env →
+    :data:`DEFAULT_EPOCH_ID`.
+    """
+    return os.environ.get(EPOCH_ID_ENV_VAR, "").strip() or DEFAULT_EPOCH_ID
+
+
 def resolve_epoch_id_silent() -> str:
     """Return the resolved active epoch with no log output.
 
-    Precedence: **task-local scope → env var → default epoch**.  An
-    empty / unset / whitespace-only env → :data:`DEFAULT_EPOCH_ID`.  Tier
+    Precedence: **task-local scope → world**
+    (:func:`resolve_world_epoch_id`: env var → default epoch).  Tier
     constructors call this with no scope active, so their cached snapshot
     resolves from the env var.
     """
-    return (
-        current_epoch_id()
-        or os.environ.get(EPOCH_ID_ENV_VAR, "").strip()
-        or DEFAULT_EPOCH_ID
-    )
+    return current_epoch_id() or resolve_world_epoch_id()
 
 
 def normalize_epoch_id(value: str | None) -> str:
@@ -167,19 +181,37 @@ def epoch_scope(epoch_id: str | None) -> Iterator[str]:
         _ACTIVE_EPOCH_ID.reset(token)
 
 
+def epoch_id_from_metadata(metadata: Mapping[str, object]) -> str | None:
+    """Read the per-request epoch off event metadata, or ``None``.
+
+    The ONE validation seam behind both consumers of
+    :data:`EVENT_EPOCH_METADATA_KEY`: the handler-side scope binder
+    (:func:`epoch_scope_from_metadata`) and the executor-hop structural
+    lift (``DispatchContext.for_event`` — ISSUE-0118).  A present,
+    non-empty string is the epoch; anything else (missing key, blank,
+    tick event, non-string) reads as ``None`` so both consumers agree on
+    what "no per-request epoch" looks like and cannot drift on the key
+    name or the validation rule.
+    """
+    eid = metadata.get(EVENT_EPOCH_METADATA_KEY)
+    if isinstance(eid, str) and eid:
+        return eid
+    return None
+
+
 def epoch_scope_from_metadata(
     metadata: Mapping[str, object],
 ) -> AbstractContextManager[str | None]:
     """Return the per-request :func:`epoch_scope` for an event's metadata.
 
-    Reads :data:`EVENT_EPOCH_METADATA_KEY` off ``metadata``.  A present,
-    non-empty string binds a scope; anything else (missing key, blank,
-    tick event, non-string) yields a :func:`~contextlib.nullcontext` so
+    Reads :data:`EVENT_EPOCH_METADATA_KEY` via :func:`epoch_id_from_metadata`.
+    A present, non-empty string binds a scope; anything else (missing key,
+    blank, tick event, non-string) yields a :func:`~contextlib.nullcontext` so
     call-time resolution falls back to the construction snapshot — leaving
     single-world / CLI / tick paths unchanged.  Sibling of
     :func:`agents.principal_id.principal_scope_from_metadata`.
     """
-    eid = metadata.get(EVENT_EPOCH_METADATA_KEY)
-    if isinstance(eid, str) and eid:
+    eid = epoch_id_from_metadata(metadata)
+    if eid is not None:
         return epoch_scope(eid)
     return nullcontext()

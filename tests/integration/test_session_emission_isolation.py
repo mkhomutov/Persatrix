@@ -321,7 +321,7 @@ class TestSessionHeaderBindsInteraction:
         )
 
         scope = scope_for_dm(_AGENT_ID, "alice")
-        interaction = grpc_world.agent._interaction_tracker.get(scope)
+        interaction = grpc_world.agent._interaction_tracker.get(scope, speaker_id="alice")
         assert interaction is not None, (
             "DM ingest did not open an interaction for the alice scope"
         )
@@ -347,7 +347,7 @@ class TestSessionHeaderBindsInteraction:
         )
 
         scope = scope_for_dm(_AGENT_ID, "alice")
-        interaction = grpc_world.agent._interaction_tracker.get(scope)
+        interaction = grpc_world.agent._interaction_tracker.get(scope, speaker_id="alice")
         assert interaction is not None
         assert interaction.session_id == LEGACY_SESSION_ID, (
             "with no persatrix-session header the interaction must fall through "

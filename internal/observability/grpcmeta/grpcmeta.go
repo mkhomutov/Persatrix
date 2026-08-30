@@ -61,6 +61,19 @@ const (
 	// wire value MUST byte-match `agents.epoch_id.EPOCH_METADATA_GRPC_KEY` — a
 	// rename on either side silently disables the per-request epoch rail.
 	MDEpoch = "persatrix-epoch"
+	// MDPrincipal is the per-request verified principal the orchestrator
+	// emits on the channel-dispatch path (ISSUE-0082 Part 2, v0.3.14 PR 1).
+	// It is the third scope axis beside MDSession and MDEpoch: session
+	// answers "which room?", epoch answers "which logical run?", principal
+	// answers "which authenticated human/tenant owns this row?". Its
+	// persona-side consumer is the same `on_event` funnel, which binds a
+	// `principal_scope` from it for the STRICT-EQUALITY tenant filter —
+	// unlike the session axis there is deliberately no legacy carve-out, so
+	// a row tagged with one principal is invisible to every other principal.
+	// The wire value MUST byte-match
+	// `agents.principal_id.PRINCIPAL_METADATA_GRPC_KEY` — a rename on either
+	// side silently disables tenant isolation without failing anything else.
+	MDPrincipal = "persatrix-principal"
 )
 
 // IDs carries the four correlation IDs propagated across the gRPC boundary.
@@ -138,6 +151,28 @@ func InjectEpoch(ctx context.Context, epochID string) context.Context {
 		return ctx
 	}
 	return metadata.AppendToOutgoingContext(ctx, MDEpoch, epochID)
+}
+
+// InjectPrincipal returns ctx with the per-request verified principal appended
+// to the outgoing gRPC metadata under [MDPrincipal]. An empty id is a no-op
+// (the ctx is returned unchanged), matching the partial-set semantics of
+// [InjectSession] / [InjectEpoch] — and here the empty case is the NORMAL one,
+// not a defensive edge: under `auth.mode: disabled`, for any unauthenticated
+// caller, and on every agent/autonomous-origin turn nothing is emitted, so the
+// persona resolves its `'local'` default byte-identically to pre-activation
+// behaviour (the ISSUE-0082 Part 2 `disabled`-mode no-delta contract).
+//
+// Principal is a separate helper rather than folded into [InjectSession]
+// because the axes have independent producers and lifetimes: the session id is
+// resolved per request by the SessionResolver, the epoch once at boot, and the
+// principal — once PR 2 lands the producer — from the request's authenticated
+// identity (RFC 0039 §F). AppendToOutgoingContext merges, so this composes
+// with a prior InjectSession / InjectEpoch / InjectIDs on the same ctx.
+func InjectPrincipal(ctx context.Context, principalID string) context.Context {
+	if principalID == "" {
+		return ctx
+	}
+	return metadata.AppendToOutgoingContext(ctx, MDPrincipal, principalID)
 }
 
 // ExtractIDs reads the four metadata keys from ctx's incoming gRPC metadata

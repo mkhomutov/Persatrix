@@ -12,9 +12,11 @@ import (
 )
 
 // Sentinel errors for registry operations.
+//
+// ErrAgentAlreadyRegistered was removed with ISSUE-0125: Register is an upsert,
+// so there is no duplicate to report. See the Register doc for why.
 var (
-	ErrAgentAlreadyRegistered = errors.New("agent already registered")
-	ErrAgentNotFound          = errors.New("agent not found")
+	ErrAgentNotFound = errors.New("agent not found")
 )
 
 // AgentInfo holds metadata about a registered agent.
@@ -85,9 +87,23 @@ func NewInMemoryRegistry(logger *zap.Logger) *InMemoryRegistry {
 	}
 }
 
-// Register adds a new agent to the registry. Returns ErrAgentAlreadyRegistered
-// if an agent with the same ID is already registered. Re-registration requires
-// calling Unregister first (non-atomic; see RFC 0001 Phase 2 notes).
+// Register adds an agent to the registry, REPLACING any row already held under
+// the same ID. It is an upsert: it never fails on a duplicate, and the last
+// registration wins.
+//
+// It used to reject duplicates with ErrAgentAlreadyRegistered — "re-registration
+// requires calling Unregister first" (RFC 0001 Phase 2) — which the REST layer
+// surfaced as 409 CONFLICT. ISSUE-0125 hoists that away because every shape of
+// fleet re-registration inherits it as a precondition: against a POPULATED
+// registry a re-register was a no-op, so an agent that moved to a new address
+// could never correct it, and any boot-time seed would 409-block the agent's own
+// registration — the one call that carries the real advertise address.
+//
+// The upsert is NOT itself the restart fix, and must not be read as one: after
+// an orchestrator restart the map is empty and a re-register already succeeded
+// without a 409. It covers the connection blip and the stale address; the agent
+// side has to actually call again, which is what ReregistrationWatcher
+// (agents/server_reregister.py) does.
 //
 // Agent ID format validation (^[a-z0-9][a-z0-9-]*[a-z0-9]$) is enforced at the
 // REST API layer (RFC 0002), not in the registry. The registry accepts any non-empty
@@ -96,9 +112,7 @@ func (r *InMemoryRegistry) Register(_ context.Context, agent AgentInfo) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, exists := r.agents[agent.ID]; exists {
-		return ErrAgentAlreadyRegistered
-	}
+	_, replaced := r.agents[agent.ID]
 
 	// Store an internal copy with Capabilities slice deep-copied.
 	stored := &AgentInfo{
@@ -118,7 +132,11 @@ func (r *InMemoryRegistry) Register(_ context.Context, agent AgentInfo) error {
 	copy(stored.Capabilities, agent.Capabilities)
 
 	r.agents[agent.ID] = stored
-	r.logger.Debug("agent registered", zap.String("agent_id", agent.ID), zap.String("address", agent.Address))
+	r.logger.Debug("agent registered",
+		zap.String("agent_id", agent.ID),
+		zap.String("address", agent.Address),
+		zap.Bool("replaced", replaced),
+	)
 	return nil
 }
 

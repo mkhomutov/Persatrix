@@ -48,18 +48,6 @@ func TestRegisterAndGet(t *testing.T) {
 	assert.Equal(t, StatusHealthy, got.Status)
 }
 
-func TestRegisterDuplicate(t *testing.T) {
-	r := newTestRegistry()
-	ctx := context.Background()
-
-	agent := sampleAgent("agent-01")
-	err := r.Register(ctx, agent)
-	require.NoError(t, err)
-
-	err = r.Register(ctx, agent)
-	assert.ErrorIs(t, err, ErrAgentAlreadyRegistered)
-}
-
 func TestGetNotFound(t *testing.T) {
 	r := newTestRegistry()
 	ctx := context.Background()

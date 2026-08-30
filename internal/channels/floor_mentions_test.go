@@ -225,7 +225,9 @@ func TestDispatchConcurrent_NormalizesNeverCheck(t *testing.T) {
 	}
 	msg := ChannelMessage{ID: uuid.NewString(), ChannelID: "group:planning", SenderID: "user"}
 
-	router.dispatchConcurrent(context.Background(), msg, ChannelTypeGroup, "", members, len(members), nil, nil)
+	// nil election: this test asserts the `never` filter, not the ISSUE-0124
+	// responder split, so every recipient here is an ingestion-only delivery.
+	router.dispatchConcurrent(context.Background(), msg, ChannelTypeGroup, "", members, nil, len(members), nil, nil)
 
 	calls := disp.snapshot()
 	require.Len(t, calls, 1, "only the floor-capable member is dispatched")

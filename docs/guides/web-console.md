@@ -6,11 +6,13 @@ knowledge. It is the first vertical slice (Interactions) of
 [RFC 0048](../rfcs/0048-operator-tester-web-console.md), shipped in **v0.3.6**
 behind the `--enable-ui` flag (**default off**).
 
-> **Read this first — the security note below is load-bearing.** Enabling the
-> console makes the orchestrator's **unauthenticated** REST surface
-> browser-discoverable. The orchestrator binds `127.0.0.1` by default and the
-> console is off by default; **do not expose it beyond localhost** until the
-> REST surface is authenticated. See [§ Security](#security--do-not-expose-beyond-localhost).
+> **Read this first — the security note below is load-bearing.** Under the
+> shipped default (`auth.mode: disabled`) the console makes the orchestrator's
+> **unauthenticated** REST surface browser-discoverable. The orchestrator binds
+> `127.0.0.1` by default and the console is off by default; **keep it on
+> localhost** — or authenticate the surface with `auth.mode: enabled`
+> (v0.3.12, over HTTPS; see the [auth guide](auth.md)).
+> See [§ Security](#security--exposure-beyond-localhost).
 
 > **Spec-level detail** lives in [RFC 0048](../rfcs/0048-operator-tester-web-console.md)
 > (§B same-origin embedding, §C the feature-toggle model, §D Slice 1, §Security).
@@ -30,7 +32,7 @@ behind the `--enable-ui` flag (**default off**).
 - [Creating a channel](#creating-a-channel)
 - [Channel settings — edit governance from the browser](#channel-settings--edit-governance-from-the-browser)
 - [The feature-toggle model (`config/ui.yaml`)](#the-feature-toggle-model-configuiyaml)
-- [Security — do not expose beyond localhost](#security--do-not-expose-beyond-localhost)
+- [Security — exposure beyond localhost](#security--exposure-beyond-localhost)
 - [What is not in Slice 1](#what-is-not-in-slice-1)
 - [Troubleshooting](#troubleshooting)
 
@@ -51,11 +53,15 @@ On load the app boots off two read-only endpoints:
 - `GET /api/v1/ui/config` — which panels to render (`enabled` from
   `config/ui.yaml`, `available` derived at runtime from whether the backing
   subsystem is wired) plus the build version.
-- `GET /api/v1/ui/context` — who the principal is. Today this is the degenerate
-  single-tenant case `{"principal":"local","tenant":"local","authenticated":false}`;
-  the conversation panel derives its `user_id` from this `principal` — it is **never**
+- `GET /api/v1/ui/context` — who the principal is. Under the default
+  `auth.mode: disabled` this is the degenerate single-tenant case
+  `{"principal":"local","tenant":"local","authenticated":false}`; under
+  `enabled` it reports the **verified** logged-in account (and the console
+  shows a login form on the first `401` — see the [auth guide](auth.md)). The
+  conversation panel derives its `user_id` from this `principal` — it is **never**
   hard-coded or free-text typed (the [RFC §F](../rfcs/0048-operator-tester-web-console.md#f-auth--multi-tenancy-forward-compatibility)
-  single-identity-source rule, so the console composes with RFC 0039 auth later).
+  single-identity-source rule, which is what let RFC 0039 auth compose in
+  with no panel changes).
 
 A panel renders only when it is **both** `enabled` (operator toggle) **and**
 `available` (subsystem wired). Unknown panels are ignored, so an older binary
@@ -108,7 +114,7 @@ make demo-offline          # or demo-ollama / docker compose up --build
 ```
 
 The compose stack publishes `:8080` for local use only. See
-[§ Security](#security--do-not-expose-beyond-localhost) before changing that
+[§ Security](#security--exposure-beyond-localhost) before changing that
 publish or the bind address.
 
 ---
@@ -139,9 +145,9 @@ browser: switch the [epoch](epochs.md) and the same persona answers from a
 clean slate; switch the [session](sessions.md) and it answers from a different
 room's memory. Leave them unset for the default room.
 
-Over-length messages are caught client-side (mirroring the server's
-4 000-character limit) and the server's error envelope is surfaced as a
-user-visible message rather than crashing the panel.
+Over-length messages are caught client-side (the server's 4 000-character
+limit) and server errors surface as a user-visible message, not a crashed
+panel.
 
 ### Watch a group channel
 
@@ -155,7 +161,7 @@ user-visible message rather than crashing the panel.
    backgrounded** (Page Visibility API), **backs off on errors**, and
    **de-dupes** by polling the head against the last-seen message id rather than
    re-rendering the whole history each tick — so an idle tab does not hammer the
-   unauthenticated localhost surface.
+   localhost surface.
 4. **Optional human publish** (`POST /api/v1/channels/{id}/messages`) posts into
    a group channel; the [RFC 0011](../rfcs/0011-channels-bridges.md) mention
    fan-out surfaces the agent replies on the next poll.
@@ -166,16 +172,14 @@ When a conversation **closes** — a group brainstorm ends on a Layer 4 end-vote
 trips the Layer 1 cost ceiling, or goes idle — the conversation view renders an
 **"interaction closed" affordance** below the live turns, carrying the
 [RFC 0020](../rfcs/0020-interaction-lifecycle.md) one-per-interaction **summary**
-and the close trigger (*went idle* / *ended* / *cost limit reached*). This is the
-"a real result" half of the v0.3.8 *Conversations that converge* story: a
+and the close trigger (*went idle* / *ended* / *cost limit reached*): a
 terminated brainstorm hands back a readable synthesis, not just a stop.
 
-It is **additive and self-fetching** — an open interaction's live turns render
-exactly as before, and the affordance appears only at close (reading
-`GET /api/v1/agents/{id}/interactions/closed`, merged across the channel's
-participants). If the on-close summariser failed, the affordance shows an honest
-"summary unavailable" state rather than a blank. The same summary is readable
-from the terminal via `persatrix agent interactions <agent>` (see
+It is **additive and self-fetching** — the affordance appears only at close
+(reading `GET /api/v1/agents/{id}/interactions/closed`, merged across the
+channel's participants); a failed on-close summariser shows an honest
+"summary unavailable" state. The same summary is readable from the terminal
+via `persatrix agent interactions <agent>` (see
 [channels.md §"The interaction-summary surface"](channels.md#the-interaction-summary-surface-rfc-0020--v038)).
 
 ---
@@ -190,8 +194,9 @@ the console for the CLI or hand-editing
 ([RFC 0048 channel-creation amendment](../rfcs/0048-amendment-channel-creation.md)).
 
 It is **on by default** when the console is running with channels wired. It is a
-**structural write before auth**, so read the
-[Security](#security--do-not-expose-beyond-localhost) note before exposing the
+**structural write before auth** under the default `auth.mode: disabled`
+(`operator`-gated under `enabled`), so read the
+[Security](#security--exposure-beyond-localhost) note before exposing the
 console beyond localhost. To **hide** the affordance, set `create_enabled: false`
 under the `channel_timeline` panel in [`config/ui.yaml`](../../config/ui.yaml):
 
@@ -213,25 +218,22 @@ panels:
    `available:` key in the YAML is a `make validate` error.)
 
 **Using it.** In the sidebar's **Channels** section, click **New channel**
-(beside Refresh; a modal form opens). Enter a name (the server derives the canonical `group:<name>` id, shown
-read-only — do not type the `group:` prefix yourself), an optional description,
-and pick members — **only persona agents** are listed, each with a per-member
-respond policy (`when_mentioned` (default) / `always` / `never`). Task agents run
-workflow steps and never hold a conversation, so they are not selectable. On
-success the picker reloads and selects the channel you made.
+(a modal form opens). Enter a name (the server derives the canonical
+`group:<name>` id, shown read-only — do not type the prefix yourself), an
+optional description, and pick members — **only persona agents** are listed
+(task agents never hold a conversation), each with a respond policy
+(`when_mentioned` (default) / `always` / `never`). On success the picker
+reloads and selects the channel you made.
 
    **You are added automatically.** The acting user (the `/ui/context` principal)
-   is added to the new channel as a member with `respond: never`, because the
-   store rejects a publish from a non-member (a poster must be in the channel).
-   `never` means you can post but are never dispatched a turn like an agent — so
-   you can immediately publish into the channel you just created.
+   joins the new channel with `respond: never` — a poster must be a member, and
+   `never` means you can publish immediately without ever being dispatched a
+   turn.
 
-> **Group channels only.** This form creates `group:` channels. To start a **DM**
-> with a persona, use the **persona picker** in the sidebar
-> ([Direct-message a persona](#direct-message-a-persona)) — that is the single DM
-> entry point. DMs and threads are created implicitly on first message
-> ([RFC 0011](../rfcs/0011-channels-bridges.md)), so there is nothing to "create"
-> for those.
+> **Group channels only.** To start a **DM**, use the **persona picker**
+> ([Direct-message a persona](#direct-message-a-persona)) — DMs and threads are
+> created implicitly on first message
+> ([RFC 0011](../rfcs/0011-channels-bridges.md)); there is nothing to "create".
 
 **Verify the toggle is live:**
 
@@ -241,9 +243,8 @@ curl -s http://localhost:8080/api/v1/ui/config | jq '.panels.channel_timeline'
 #         "create": { "enabled": true, "available": true } }
 ```
 
-Both `create.enabled` **and** `create.available` must be `true` for the **New
-channel** affordance to render — the same `enabled && available` rule every panel
-follows.
+Both must be `true` for the affordance to render — the same
+`enabled && available` rule every panel follows.
 
 > **Scope.** Channel **deletion** and post-create membership editing are not in
 > Slice 1.
@@ -273,14 +274,12 @@ panels:
     config_edit_enabled: true   # shipped on (schema default false) — gates BOTH the web panel and CLI uniformly
 ```
 
-This is the **same toggle** that gates the CLI `channel config` verbs, covering
-the whole `/config` endpoint (read *and* write): on exposes both the panel and
-the CLI verbs; off returns `403` to both. The panel renders only
-when **both** `config_edit.enabled` and `config_edit.available` are true — the
-usual `enabled && available` rule. `available` is **runtime-derived** (true only
-when the channel store and router are both wired, mirroring the endpoint's `503`)
-and never authored — an `available:` key in the YAML is a `make validate` error.
-Verify with:
+The **same toggle** gates the CLI `channel config` verbs — the whole `/config`
+endpoint, read *and* write: on exposes both surfaces; off returns `403` to both.
+The panel renders under the usual `enabled && available` rule; `available` is
+**runtime-derived** (channel store + router wired, mirroring the endpoint's
+`503`) and never authored — an `available:` key in the YAML is a
+`make validate` error. Verify with:
 
 ```bash
 curl -s http://localhost:8080/api/v1/ui/config | jq '.panels.channel_timeline.config_edit'
@@ -315,8 +314,9 @@ revision as an `If-Match` guard:
 > Expect the channel to become **store-canonical** (previously-inherited knobs now
 > read source `channel`), and a lone `floor_control: false` on a chaired channel to
 > be **rejected** — clear the chair in the same save. Still a governance write
-> **before auth** — see
-> [Security](#security--do-not-expose-beyond-localhost) before exposing the
+> that is anonymous under the default `auth.mode: disabled` (`operator`-gated
+> under `enabled`) — see
+> [Security](#security--exposure-beyond-localhost) before exposing the
 > console beyond localhost.
 
 For the live cross-surface acceptance walkthrough, see
@@ -365,45 +365,50 @@ posture).
 
 ---
 
-## Security — do not expose beyond localhost
+## Security — exposure beyond localhost
 
-**The entire REST surface is unauthenticated until
-[RFC 0039](../rfcs/0039-user-accounts-authentication.md) ships.** The console
-does not add authentication; it makes that surface *more discoverable and
-usable from a browser*, which raises the stakes of accidental exposure.
+**Since v0.3.12 the surface can authenticate itself.** With
+[`auth.mode: enabled`](auth.md)
+([RFC 0039](../rfcs/0039-user-accounts-authentication.md) Phases 1–2 + the
+[enabled-mode exposure amendment](../rfcs/0039-amendment-enabled-mode-exposure.md)),
+the console logs in on its first `401`; the session rides an
+`HttpOnly`+`Secure`+`SameSite=Strict` cookie (the token never enters JS),
+cookie writes carry a server-side same-origin assertion (CSRF — closing the
+forward-looking flag earlier revisions of this guide carried), console
+responses get a CSP + `nosniff`, and login is throttled. Reads then require a
+session; mutations (channel creation included) the `operator` role. Two
+load-bearing caveats, expanded in the [auth guide](auth.md):
 
-The mitigations the console ships with:
+- **HTTPS is required beyond localhost** — over plain HTTP on a non-loopback
+  origin the browser silently drops the `Secure` cookie and login *loops with
+  no error*.
+- **The agent ingress stays open** (agents hold no accounts — RFC 0009 track):
+  anonymous channel list/read/publish stays possible on a routable bind,
+  WARN'd at startup — including reads of
+  [RFC 0037](../rfcs/0037-memory-confidentiality-channel-classification.md)-classified
+  channels. Containment + the
+  [ISSUE-0117](../issues/ISSUE-0117-agent-ingress-close-knob.md) close knob:
+  [auth guide](auth.md#what-stays-open-under-enabled--the-agent-ingress).
+
+**Under the shipped default (`auth.mode: disabled`) the entire REST surface is
+unauthenticated**, and the console makes it *more discoverable and usable from
+a browser*. The mitigations it ships with:
 
 - **`--enable-ui` defaults off.** You opt in explicitly.
 - **The orchestrator binds `127.0.0.1` by default** (`--http-bind 127.0.0.1`).
 - **The console is read-mostly.** Slice 1's writes are chat, the optional channel
   publish, and [group-channel creation](#creating-a-channel), all against existing
   endpoints. Channel creation is a deliberate, signed-off
-  **structural-write-before-auth** carve-out: it adds **zero new reachability**
-  (the `POST /api/v1/channels` endpoint is already exposed unauthenticated, so the
-  console changes *discoverability*, not *reachability*); it is **on by default**
-  when the console is enabled (itself off by default), set `create_enabled: false`
-  to hide it, and `create.available` becomes capability-gated once RFC 0039 auth
-  lands. The
-  destructive / admin control plane is Slice 5 and is **hard-gated on RFC 0039
-  auth** — it cannot be enabled before auth exists.
+  **structural-write-before-auth** carve-out adding **zero new reachability**
+  (`POST /api/v1/channels` is already exposed; the console changes
+  *discoverability*, not *reachability*); set `create_enabled: false` to hide
+  it — and under `auth.mode: enabled` the endpoint itself is `operator`-gated.
+  The destructive / admin control plane is Slice 5, **hard-gated on auth**.
 
-**The rule:** exposing the console (or the orchestrator's `:8080` REST surface
-at all) **beyond localhost requires fronting the orchestrator with an
-authenticating reverse proxy** until RFC 0039 lands. Do not bind the
-orchestrator to `0.0.0.0`, and do not publish `:8080` on a routable interface,
-without that proxy.
-
-**CSRF posture (forward-looking).** Slice 1 introduces browser-issued `POST`s
-(chat, optional channel publish) to a surface that today has no auth and no
-CSRF defense. While the surface is unauthenticated this is moot. But the moment
-the recommended exposure path lands — a fronting proxy adding *cookie/session*
-auth — those same-origin `POST`s become CSRF targets. The auth layer
-(RFC 0039 / the proxy) must pair cookie auth with a CSRF mitigation (SameSite
-cookies, a CSRF token, or a custom-header/Origin check); the console's API
-client is built to send whatever token/header that layer chooses. No live
-mitigation ships until auth exists — it is flagged here because the console is
-what first makes these endpoints reachable from a browser.
+**The rule under `disabled`:** exposing the console (or the `:8080` REST
+surface at all) beyond localhost requires an authenticating reverse proxy —
+or flipping `auth.mode: enabled` (over HTTPS) instead. Do not bind `0.0.0.0`,
+and do not publish `:8080` on a routable interface, with neither in place.
 
 ---
 
@@ -432,6 +437,8 @@ Deferred by RFC decision (2026-06-02); each is its own later slice
 | Every asset 404s under `/ui/` | A bundle built without Vite's `base: "/ui/"`. Use `make ui` (configured correctly); do not hand-build. |
 | The Channel-timeline panel is missing | `channel_timeline.available` is false — channels are not wired. Check the channel config; the panel hides itself when its subsystem is absent. |
 | The **New channel** button is missing | The create affordance needs **both** `channel_timeline.create_enabled: true` (the default — confirm it wasn't set false) **and** `create.available: true` (the channel store is wired). Confirm with `curl -s localhost:8080/api/v1/ui/config \| jq '.panels.channel_timeline.create'`. See [Creating a channel](#creating-a-channel). |
+| The login form reappears after a successful login, no error (`auth.mode: enabled`) | Plain HTTP on a non-loopback origin — the browser silently drops the `Secure` session cookie. Serve the console over HTTPS or use `http://localhost`. See the [auth guide](auth.md#https-is-required-beyond-localhost). |
+| Logged in, but a write (channel create/edit) answers 403 | The account's role is `user`; mutations need `operator`. See the [auth guide](auth.md#the-role-gate). |
 | Creating a channel fails with a conflict | A `group:<name>` with that name already exists (`409`). Pick a different name; the form keeps your entries so you can retry. |
 | `make validate` fails on `config/ui.yaml` | You likely added an `available:` key (runtime-derived, not authored) or a malformed panel entry. See [§ feature-toggle model](#the-feature-toggle-model-configuiyaml). |
 

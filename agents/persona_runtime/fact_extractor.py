@@ -174,6 +174,7 @@ async def store_extracted_facts(
     sender_id: str | None = None,
     protection_level: str | None = None,
     source_channel_id: str | None = None,
+    speaker_id: str | None = None,
 ) -> int:
     """Persist each parsed fact via :meth:`FactStore.store`.
 
@@ -182,6 +183,18 @@ async def store_extracted_facts(
     subject canonicalization rejection) are caught here and increment
     ``agent.facts.extraction_failed`` — one bad tuple does not drop
     the rest of the batch.
+
+    ``speaker_id`` (ISSUE-0131 — migration 18) is the source
+    interaction's frozen speaker, stamped identically onto every tuple
+    for the same reason the two below are: a fact is extracted from
+    exactly one interaction, and since the v0.3.15 re-key that
+    interaction is single-speaker by construction, so its speaker IS
+    every tuple's.  Do not confuse it with ``sender_id`` just above,
+    which is a subject-canonicalization input and not persisted: the
+    speaker is who SAID the content, the subject is who it is ABOUT, and
+    a counterparty fact differs in the two.  The one §G breach of the
+    single-speaker premise is excluded upstream — ``close_entries``
+    states the argument.
 
     ``protection_level`` / ``source_channel_id`` (RFC 0037 §C, PR 3) are
     the source interaction's frozen-at-open capture, stamped identically
@@ -260,6 +273,7 @@ async def store_extracted_facts(
                 session_id=session_id,
                 protection_level=stamped_level,
                 source_channel_id=source_channel_id,
+                speaker_id=speaker_id,
             )
         except ValueError as exc:
             failures += 1
@@ -414,7 +428,13 @@ async def dispatch_facts_from_response(
     """
     if interaction.interaction_id is None:
         return
-    sender_id = _interaction_sender(interaction)
+    # PR #849 review: since the ``(principal, speaker, scope)`` re-key a
+    # record is single-speaker, so the counterparty-canonicalisation
+    # input below and the persisted ``speaker_id`` column share ONE
+    # source — the key's frozen speaker half.  Re-deriving it from
+    # ``turns[0]`` (the pre-re-key idiom) could drift from the key on
+    # whitespace or fixture shape with no failing test.
+    sender_id = interaction.speaker_id or None
     asserted_at = interaction.closed_at or interaction.started_at
     try:
         facts = parse_facts_payload(facts_raw)
@@ -438,6 +458,12 @@ async def dispatch_facts_from_response(
             # frozen-at-open capture, like the Phase-1 episode row.
             protection_level=interaction.classification,
             source_channel_id=interaction.source_channel_id,
+            # ISSUE-0131 (migration 18): the speaker half of the record
+            # key, projected onto every tuple.  The SAME local as the
+            # canonicalisation input above — passing it (rather than
+            # re-deriving the expression) is what makes the "ONE source"
+            # claim structural instead of prose (PR #849 review round 3).
+            speaker_id=sender_id,
         )
     except Exception:
         logger.warning(
@@ -445,19 +471,3 @@ async def dispatch_facts_from_response(
             "(interaction_id=%s)",
             agent_id, interaction.interaction_id, exc_info=True,
         )
-
-
-def _interaction_sender(interaction: Interaction) -> str | None:
-    """Return the first turn's sender id, or ``None`` for tick scopes.
-
-    Used so counterparty facts land on the canonical ``sender_id``
-    (the same key the relationship row uses) instead of the LLM's
-    display-name spelling — see :func:`store_extracted_facts`.
-    """
-    if not interaction.turns:
-        return None
-    payload = interaction.turns[0].payload or {}
-    sender = payload.get("sender")
-    if isinstance(sender, str) and sender.strip():
-        return sender
-    return None

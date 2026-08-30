@@ -14,17 +14,17 @@ This module reconciles the wire and event shapes at the single
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
-
-from .cascade_depth_defaults import DEFAULT_MAX_CASCADE_DEPTH
 from .channel_event_classification import seed_channel_classification
-from .confidentiality_tripwire import tripwire_watch_from_event
+
+# ``DispatchContext`` and ``wire_interaction_id`` moved to
+# :mod:`agents.dispatch_context` (ISSUE-0118 — the epoch/session threading
+# pushed this module past the 500-line cap); re-exported here so existing
+# callers (``from agents.channel_wire_metadata import DispatchContext``)
+# keep working unchanged — the ``agents.dispatch`` / ``ActionExecutor``
+# re-export precedent.
+from .dispatch_context import DispatchContext, wire_interaction_id
 from .generated import task_pb2
 from .persona_types import AgentEvent
-
-if TYPE_CHECKING:
-    from .confidentiality_tripwire import TripwireWatch
 
 # Byte bound on the lifted ``interaction_id``, the receive-side counterpart to
 # the Go publish boundary's ``interactionIDMaxBytes`` (internal/channels/
@@ -337,148 +337,6 @@ def seed_replay_metadata(
         prev_id=_str("previous_interaction_id"),
         prev_trigger=_str("previous_interaction_close_trigger"),
     )
-
-
-def wire_interaction_id(event: AgentEvent) -> str:
-    """The interaction id ``event`` was dispatched under, read tolerantly off
-    the metadata key this module's ingress lifts seed (:func:`seed_wire_metadata`
-    / :func:`seed_replay_metadata`) — the ONE shared reader behind the RFC 0052
-    no-reopen claim's origin threading (PR #716 review: the executor entry
-    points each re-implemented this read inline, OUTSIDE the cross-language
-    drift pin, so a coordinated rename of the pinned sites would have left
-    them silently returning ``""`` — no claim echoed, the latch blind, and a
-    post-close straggler minting fresh and reopening the closed discussion).
-    Absent and non-string values read as ``""``, the untracked posture.
-
-    Also the body behind ``wallet_cause.lease_interaction_id_for_event`` and
-    the rotation-boundary wire-id read (``episode_routing``), which delegate
-    here rather than keeping byte-identical copies (PR #716 review): a
-    semantics change applied to one copy and not the others would have wallet
-    spend billed under an id the no-reopen latch and the soft-budget close
-    trigger never see. The import direction is persona_runtime → here — the
-    executor entry points must not grow a hard dep on the persona subpackage.
-    """
-    value = event.metadata.get("interaction_id", "")
-    return value if isinstance(value, str) else ""
-
-
-@dataclass(frozen=True, slots=True)
-class DispatchContext:
-    """The originating dispatch's ambient context, threaded WHOLE through the
-    executor entry points: ``cascade_depth`` plus the RFC 0052 no-reopen
-    claim's origin pair (the inputs :meth:`same_channel_claim` builds the wire
-    claim from).
-
-    One required parameter instead of three parallel defaulted kwargs
-    (PR #716 review): with per-value threading, "unstamped" was the silent
-    fallback for any entry point or action arm that forgot one kwarg — a
-    claim-less publish the no-reopen latch cannot see, post-close stragglers
-    minting fresh and reopening the closed discussion, with only
-    site-enumerating pin tests as protection. A required ``context``
-    parameter makes the choice visible at every call site: event-driven
-    ingress builds via :meth:`for_event` (the origin pair cannot be
-    half-threaded), and an event-less caller constructs the origin-less
-    posture explicitly.
-
-    ``cascade_depth`` keeps the terminate-at-clamp default the executor's
-    kwarg carried: a caller with no inbound event to derive depth from (the
-    tick scheduler) publishes at the cap so the orchestrator's per-hop clamp
-    drops fan-out — the v0.3.0 demo runaway was the consequence of a
-    publish-at-depth-0 default. Chain-origin callers (chat surface, the
-    dispatcher's first hop) state their depth explicitly.
-
-    ``origin_synthesis_turn`` (PR #718 review) records whether the
-    originating dispatch WAS the RFC 0052 §D synthesis directive (the
-    ``synthesis_turn`` payload marker, strict ``is True`` like the gate and
-    framing reads). :meth:`same_channel_claim` stamps it onto the publish as
-    the ``synthesis_reply`` marker — the fanout-head claim's third conjunct
-    (``claimSynthesisReply``, internal/channels/synthesis_claim.go): the
-    interaction id spans every round and every reply echoes it, so without
-    this echo an ordinary chair reply from an earlier round still in flight
-    at the bound is indistinguishable from the synthesis and would be fanned
-    to every member as the closing artifact. Both the derivation (here) and
-    the stamping (the method below) are structural, for the same reason as
-    the origin pair: a per-call-site kwarg would make "unmarked" the silent
-    fallback of any site that forgot it — and an unmarked synthesis reply is
-    silently withheld orchestrator-side, the close degrading to the timeout
-    net on every close of that path. The only per-site choice left is the
-    method's NAMED opt-out, for the one publish that must never be claimable
-    as the artifact (the error-reply apology).
-    """
-
-    cascade_depth: int = DEFAULT_MAX_CASCADE_DEPTH
-    origin_channel_id: str = ""
-    origin_interaction_id: str = ""
-    origin_synthesis_turn: bool = False
-    # RFC 0037 §G (PR 7): the turn's tripwire watch — §D-withheld entries'
-    # span fingerprints, stamped by ``_inject_memory_context`` and lifted
-    # structurally by :meth:`for_event` (same rationale as the origin pair:
-    # a per-site kwarg would make "unwatched" the silent fallback).  ``None``
-    # (the common case — nothing withheld, or an origin-less context) means
-    # the executor's §G check no-ops.
-    origin_tripwire_watch: TripwireWatch | None = None
-
-    @classmethod
-    def for_event(cls, event: AgentEvent, *, cascade_depth: int) -> DispatchContext:
-        """The context for actions produced in reply to ``event``: the origin
-        pair is derived here, structurally — through the drift-pinned
-        :func:`wire_interaction_id` reader — so an ingress site cannot thread
-        the channel without the interaction id (or vice versa). The synthesis
-        marker rides the same derivation (strict ``is True``, matching the
-        gate's admission read) so the reply-echo contract cannot be
-        half-threaded either."""
-        return cls(
-            cascade_depth=cascade_depth,
-            origin_channel_id=event.channel_id or "",
-            origin_interaction_id=wire_interaction_id(event),
-            origin_synthesis_turn=(event.payload or {}).get("synthesis_turn") is True,
-            origin_tripwire_watch=tripwire_watch_from_event(event),
-        )
-
-    def same_channel_claim(
-        self, target_channel: str, *, claim_synthesis_reply: bool = True,
-    ) -> dict[str, object] | None:
-        """Build a publish's RFC 0052 no-reopen claim from THIS context: a
-        SAME-channel publish echoes its dispatched-under interaction id as
-        the wire ``interaction_id`` claim; a cross-channel publish — or an
-        origin-less context (IP8 re-convene) — claims nothing (``None``).
-        The claim is the no-reopen latch's sole production input on every
-        same-channel publish path (the reply, end-vote, and error-recovery
-        publishes), so the rule lives here, beside the origin fields it
-        reads, rather than once per publish site (PR #716 review): a rule
-        change applied to one site and not the others would leave that
-        path's post-close stragglers minting fresh and re-fanning into the
-        closed discussion. The resolver stays authoritative (IP2): the claim
-        never keys governance state, it only lets the latch recognise
-        post-close traffic.
-
-        The ``synthesis_reply`` echo (PR #718 review) rides structurally off
-        :attr:`origin_synthesis_turn` — a context method rather than the
-        earlier per-call-site kwarg, for the class docstring's own reason: a
-        defaulted kwarg made "unmarked" the silent fallback of any publish
-        site that forgot to thread it. A publish authored in reply to the §D
-        synthesis directive additionally carries the marker — the
-        discriminator ``claimSynthesisReply``
-        (internal/channels/synthesis_claim.go) requires beside sender+claim
-        to recognise the closing artifact, because the id claim alone is
-        shared with every ordinary reply in the interaction. It rides BESIDE
-        the id claim (never instead of it): the id claim is what lets an
-        orphaned reply — the arm disarmed by a racing end-vote close — land
-        in the no-reopen latch instead of minting fresh and reopening.
-        Stamped only on a same-channel claim: a cross-channel or origin-less
-        publish cannot be the closing artifact of the interaction it does
-        not claim. ``claim_synthesis_reply=False`` is the NAMED opt-out for
-        the one publish that must never be claimable as the artifact — the
-        error-reply apology (``chat_reply.publish_chat_error_on_channel``) —
-        so the withhold is spelled at the seam instead of implied by an
-        omitted kwarg.
-        """
-        if self.origin_interaction_id and target_channel == self.origin_channel_id:
-            claim: dict[str, object] = {"interaction_id": self.origin_interaction_id}
-            if claim_synthesis_reply and self.origin_synthesis_turn:
-                claim["synthesis_reply"] = True
-            return claim
-        return None
 
 
 __all__ = [

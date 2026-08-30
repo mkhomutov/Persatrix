@@ -40,7 +40,10 @@ use crate::types::{api_error_message, validate_path_param};
 /// is heterogeneous (bool / int / string), and keeping it dynamic also lets the
 /// CLI tolerate a JSON `null` defensively — a single dynamic cell renders every
 /// knob uniformly without a per-knob struct.
-#[derive(Deserialize)]
+/// `Default` backs the `#[serde(default)]` cells (knobs a pre-v0.3.13
+/// orchestrator's payload omits): a null value renders as `(none)` through the
+/// same defensive path an explicit JSON `null` already takes.
+#[derive(Deserialize, Default)]
 pub(crate) struct ConfigField {
     pub(crate) value: Value,
     pub(crate) source: String,
@@ -58,6 +61,11 @@ pub(crate) struct ChannelConfigView {
     pub(crate) revision: i64,
     pub(crate) floor_control: ConfigField,
     pub(crate) salience_max_channel_members: ConfigField,
+    /// ISSUE-0114 (v0.3.13): the per-channel Layer 0 cascade-depth cap. Absent
+    /// from a pre-v0.3.13 orchestrator's payload, so it defaults rather than
+    /// failing the decode against an older server.
+    #[serde(default)]
+    pub(crate) max_cascade_depth: ConfigField,
     pub(crate) max_replies_per_participant_per_interaction: ConfigField,
     pub(crate) end_vote_threshold: ConfigField,
     pub(crate) end_vote_window: ConfigField,
@@ -108,6 +116,7 @@ pub(crate) enum KnobType {
 pub(crate) const CONFIG_KNOBS: &[(&str, KnobType)] = &[
     ("floor_control", KnobType::Bool),
     ("salience_max_channel_members", KnobType::Int),
+    ("max_cascade_depth", KnobType::Int),
     ("max_replies_per_participant_per_interaction", KnobType::Int),
     ("end_vote_threshold", KnobType::Int),
     ("end_vote_window", KnobType::Int),
@@ -283,6 +292,7 @@ pub(crate) fn config_rows(view: &ChannelConfigView) -> Vec<(&'static str, &Confi
             let field = match *key {
                 "floor_control" => &view.floor_control,
                 "salience_max_channel_members" => &view.salience_max_channel_members,
+                "max_cascade_depth" => &view.max_cascade_depth,
                 "max_replies_per_participant_per_interaction" => {
                     &view.max_replies_per_participant_per_interaction
                 }

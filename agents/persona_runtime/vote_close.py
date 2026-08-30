@@ -49,7 +49,9 @@ Re-vote dedup mirror (PR 607 second-pass review): Go's vote gate counts
 a participant once per interaction — an in-window re-vote is suppressed
 but still commits, so its publish reports ``published``.  The discharge
 mirrors that idempotency with a per-scope memory of the wire id it last
-vote-closed: a re-vote on the SAME wire interaction (the scope reopened
+cast a COUNTED vote on — written when the discharge confirms the publish,
+not when its fan happens to close a record (PR #846 review): a re-vote on
+the SAME wire interaction (the scope reopened
 on continued traffic, stamped with the unrotated id) closes nothing —
 the record stays open exactly like Go's interaction — instead of
 minting a second "ended" record per re-vote.  A record with no wire id
@@ -84,7 +86,8 @@ from uuid import uuid4
 from ..memory.boundary_detectors import REASON_STRUCTURAL
 from ..memory.scopes import is_group_scope
 from ..persona_types import VOTE_CLOSE_TOKEN_KEY
-from .interaction_boundary import matching_end_votes
+from .close_path import persist_fanned_closes
+from .interaction_boundary import matching_end_votes, wire_admits_record
 
 if TYPE_CHECKING:
     from ..memory.interactions import Interaction
@@ -103,14 +106,29 @@ __all__ = [
 class PendingVoteClose(NamedTuple):
     """One parked vote close: the scope the voter's record lives under,
     the open interaction's id at decide time (the staleness guard), the
-    correlation token stamped onto the covered vote actions, and how
-    many of them are still in flight (failures decrement; the first
-    success — or the last failure — consumes the park)."""
+    correlation token stamped onto the covered vote actions, how many of
+    them are still in flight (failures decrement; the first success — or
+    the last failure — consumes the park), the wire id of the
+    conversation the vote judged complete (PR #846 review: the
+    discharge's per-record admission anchor; ``""`` when the parked
+    record was unstamped at decide time), and the identities of the
+    records the vote actually judged (see ``sibling_ids``)."""
 
     scope: str
     interaction_id: str
     token: str
     in_flight: int
+    wire_id: str = ""
+    # PR #846 review: the ids open in the scope at DECIDE time.  The
+    # discharge fans over the scope's records, so it must tell a SIBLING
+    # (open before the vote, and one Go's quorum fan will never close
+    # for this voter) from a SUCCESSOR opened after it — including a
+    # fresh record of the parked speaker's OWN, which reuses the still
+    # unrotated wire id and so passes the anchor test.  Identity, not a
+    # timestamp: ``started_at`` ties under a coarse or frozen clock, and
+    # a tie here silently buries a live record.  Empty = an old park
+    # with no capture; the guard stays inert.
+    sibling_ids: frozenset[str] = frozenset()
 
 
 def park_end_vote_close(
@@ -147,6 +165,11 @@ def park_end_vote_close(
         interaction_id=interaction.interaction_id,
         token=token,
         in_flight=len(votes),
+        wire_id=interaction.wire_interaction_id,
+        sibling_ids=frozenset(
+            record.interaction_id
+            for record in agent._interaction_tracker.records_for_scope(scope)
+        ),
     )
 
 
@@ -223,43 +246,115 @@ async def discharge_end_vote_publish(
             )
             return
         agent._pending_vote_closes.pop(channel_id, None)
+        # Since the ``(principal, speaker, scope)`` re-key (v0.3.15
+        # residuals PR 3) the scope holds N records.  The close anchors on
+        # the WIRE CONVERSATION the vote judged complete (PR #846 review):
+        # the id frozen at park time, upgraded by the parked record's later
+        # stamp — its first wire-carrying turn can land between decide and
+        # publish.  The parked record is found by identity; its own fate no
+        # longer gates the fan, because its speaker's inline cap close or
+        # idle flush says nothing about the siblings, which Go's quorum fan
+        # will never close for this voter.
+        parked = next(
+            (
+                record
+                for record in agent._interaction_tracker.records_for_scope(
+                    pending.scope,
+                )
+                if record.interaction_id == pending.interaction_id
+            ),
+            None,
+        )
+        anchor = pending.wire_id or (
+            parked.wire_interaction_id if parked is not None else ""
+        )
+        revote = bool(anchor) and (
+            agent._vote_closed_wire_ids.get(pending.scope) == anchor
+        )
+        if anchor:
+            # Memo the wire conversation this voter has now cast a COUNTED
+            # vote on.  Written here, not after the fan (PR #846 review):
+            # what Go counted is decided by the PUBLISH, so gating the memo
+            # on ``closed_records`` left it blank whenever the fan admitted
+            # nothing — the parked record gone to an inline cap close or an
+            # idle flush, every remaining record opened after the park, or
+            # the synthesis leg below returning early — and the NEXT
+            # in-window vote, which Go dedups but still commits 2xx →
+            # "published", then passed this guard and closed a live record
+            # as "ended" plus a summariser call.  Idempotent: the same
+            # anchor re-written is the same value, and ``revote`` above is
+            # read first so a re-vote still recognises itself.
+            agent._vote_closed_wire_ids[pending.scope] = anchor
         if synthesis_reply:
             # Docstring: the echo is not an acceptance signal, so the close
             # and its OQ #6 metering belong to the close-notification
             # self-echo, which arrives iff Go closed on this reply. Leave
             # the record open: if the arm was consumed or abandoned the
             # discussion is still live and Go demoted this vote to an
-            # ordinary one — the record keeps ingesting its turns.
+            # ordinary one — the record keeps ingesting its turns.  The
+            # memo above still stands: demoted or not, the vote counted.
             logger.info(
                 "Agent %s: synthesis-reply vote to %s published; the local "
                 "close defers to the close-notification self-echo (scope=%s)",
                 agent.agent_id, channel_id, pending.scope,
             )
             return
-        open_record = agent._interaction_tracker.get(pending.scope)
-        if (
-            open_record is None
-            or not open_record.is_open
-            or open_record.interaction_id != pending.interaction_id
-        ):
-            # The scope moved on between decide and publish (max-turns
-            # inline close, idle flush, wire rotation) — that close already
-            # told the truth; do not close its successor.
-            return
-        wire_id = open_record.wire_interaction_id
-        if wire_id and agent._vote_closed_wire_ids.get(pending.scope) == wire_id:
+        if revote:
             # Re-vote on a wire interaction this voter already vote-closed
             # (the scope reopened on continued traffic under the SAME id —
             # no quorum formed).  Go deduped the vote but the suppressed
             # duplicate still committed (2xx → "published"); mirror the
             # dedup here so one channel interaction never fragments into
-            # N "ended" local records.  The record stays open, like the
-            # wire's, and closes on the eventual rotation or idle gap.
+            # N "ended" local records.  The records stay open, like the
+            # wire's, and close on the eventual rotation or idle gap.
             return
-        closed = agent._interaction_tracker.close(
-            pending.scope, reason=REASON_STRUCTURAL,
+        if not anchor and parked is None:
+            # No wire anchor and the parked record is gone (max-turns
+            # inline close, idle flush, wire rotation): nothing ties the
+            # remaining records to the conversation this vote judged —
+            # that close already told the truth; do not close a successor.
+            return
+        # The vote judged the CONVERSATION complete, and an end-vote
+        # quorum is a room event (ISSUE-0123 part 3) — fan the close over
+        # every record of THAT conversation.  Per-record admission
+        # (PR #846 review, the close_notification conjunct): skip records
+        # positively stamped with a DIFFERENT wire id — a successor opened
+        # after a rotation the park predates — so a stale vote never
+        # mislabels a live discussion "ended".  A blank anchor admits only
+        # blank-stamped records for the same reason.  One room event, one
+        # instant: a single clock read stamps every close.
+        def _vote_admits(record: Interaction) -> bool:
+            if pending.sibling_ids and record.interaction_id not in (
+                pending.sibling_ids
+            ):
+                # PR #846 review: opened AFTER the vote was parked, so
+                # the vote never judged it.  Without this the fan buried
+                # the parked speaker's OWN successor — same scope, same
+                # unrotated wire id, so the anchor test admits it — as a
+                # phantom 1-turn "ended" record plus a summariser call.
+                # This is the surviving half of the identity guard the
+                # fan replaced: that guard returned outright when the
+                # parked record was gone, which spared the siblings too.
+                return False
+            # ``tolerate_blank_anchor=False`` — the one place the shared
+            # conjunct is STRICT: a vote parked on an unstamped record
+            # judged an unstamped conversation, so it must not reach
+            # across and close records that DO name one.  The other two
+            # fans are tolerant; the divergence is deliberate and now
+            # lives in the signature rather than in three loop bodies.
+            return wire_admits_record(
+                record, anchor, tolerate_blank_anchor=False,
+            )
+
+        # ``close_scope`` owns the replay exclusion, the single close
+        # instant, and the per-record close.
+        closed_records = agent._interaction_tracker.close_scope(
+            pending.scope, reason=REASON_STRUCTURAL, admit=_vote_admits,
         )
-        if closed is not None:
-            if wire_id:
-                agent._vote_closed_wire_ids[pending.scope] = wire_id
-            await agent._persist_closed_interaction(closed)
+        if closed_records:
+            # Guarded per record (v0.3.15 PR 3 review fix): the fan
+            # popped every record before the first persist ran — one
+            # failure must not discard the siblings.
+            await persist_fanned_closes(
+                closed_records, agent._persist_closed_interaction,
+            )

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -133,6 +134,20 @@ type GRPCMessageDispatcher struct {
 	// emission — an empty epoch means no header, so behaviour is
 	// byte-identical to the pre-ISSUE-0085 dispatch.
 	epoch string
+	// fleetLossReported de-duplicates the ISSUE-0125 zero-registered-agents
+	// ERROR to once per OUTAGE (not once per process, and emphatically not
+	// once per dropped message). Re-armed by [GRPCMessageDispatcher.noteFleetAlive]
+	// on any evidence the registry is populated again, so a fleet that is
+	// lost, recovers, and is lost again reports twice.
+	fleetLossReported atomic.Bool
+	// attribution records which principal each delivered dispatch was made
+	// under, so a persona's REPLY — which re-enters as a fresh unauthenticated
+	// publish and would otherwise lose the tenant — can be re-stamped with the
+	// principal that caused it (ISSUE-0124 / ISSUE-0082 residual R-2). Nil
+	// unless wired with [WithPrincipalAttribution], and nil-safe: the table's
+	// methods accept a nil receiver. DORMANT in this PR — written here, read
+	// by nothing until PR 2 lands the re-stamp in [ChannelRouter.Publish].
+	attribution *PrincipalAttributionTable
 }
 
 // DispatcherOption configures a [GRPCMessageDispatcher] at construction.
@@ -153,6 +168,22 @@ func WithSessionResolver(b SessionBinder) DispatcherOption {
 // pre-ISSUE-0085 behaviour.
 func WithEpoch(epoch string) DispatcherOption {
 	return func(d *GRPCMessageDispatcher) { d.epoch = epoch }
+}
+
+// WithPrincipalAttribution wires the ISSUE-0124 causal-attribution table the
+// dispatcher writes on every DELIVERED dispatch it asked a turn for. Omitting
+// it leaves the dispatcher recording nothing — the way to opt a deployment out
+// entirely. With it wired, a dispatch carrying NO principal is recorded too,
+// as the anonymous stimulus: it competes for the reply and can only make a
+// pair ambiguous, never resolve one. So under `auth.mode: disabled` the table
+// holds anonymous-only rows that answer nothing, rather than staying empty.
+//
+// The table is passed IN rather than owned by the dispatcher because its
+// reader is the router: PR 2 hands the same instance to
+// [ChannelRouter.Publish], and a dispatcher-owned table would have to be
+// reached back through the [MessageDispatcher] interface to get there.
+func WithPrincipalAttribution(t *PrincipalAttributionTable) DispatcherOption {
+	return func(d *GRPCMessageDispatcher) { d.attribution = t }
 }
 
 // ErrAgentNotReady is returned (wrapped) when the registry reports a
@@ -231,12 +262,19 @@ func (d *GRPCMessageDispatcher) Dispatch(ctx context.Context, env DispatchEnvelo
 				zap.String("channel_id", msg.ChannelID),
 				zap.String("message_id", msg.ID),
 			)
+			// ISSUE-0125: one absent member is benign; an EMPTY registry while
+			// channels still have members means the fleet is gone.
+			d.probeFleetLoss(ctx, msg.ChannelID)
 			return fmt.Errorf("dispatch target %s not registered: %w", participantID, err)
 		}
 		span.RecordError(err)
 		span.SetStatus(otelcodes.Error, err.Error())
 		return fmt.Errorf("registry lookup for %s: %w", participantID, err)
 	}
+	// ISSUE-0125: a resolve that succeeded proves the registry is populated, so
+	// whatever outage the fleet-loss ERROR last reported is over. This is the
+	// re-arm that a healthy recovery actually reaches — see noteFleetAlive.
+	d.noteFleetAlive()
 	if agent.Status != registry.StatusHealthy {
 		err := fmt.Errorf("%w: %s status=%s", ErrAgentNotReady, participantID, agent.Status)
 		span.RecordError(err)
@@ -326,6 +364,26 @@ func (d *GRPCMessageDispatcher) Dispatch(ctx context.Context, env DispatchEnvelo
 		span.SetAttributes(attribute.String("epoch.id", d.epoch))
 	}
 
+	// ISSUE-0082 Part 2 PR 1 (v0.3.14): emit the per-request verified
+	// principal — the tenant axis beside session and epoch — as the
+	// `persatrix-principal` header, feeding the strict-equality principal
+	// rail persona-side. Unlike the two axes above there is no resolver and
+	// no boot default: the request context is the only source
+	// ([WithPrincipal], stamped by the REST handlers under
+	// `auth.mode: enabled` once PR 2 lands the producer). Absent a value
+	// nothing is emitted and the persona resolves its 'local' default —
+	// the normal path for `disabled` mode, unauthenticated callers, and
+	// every agent/autonomous-origin turn, byte-identical to pre-activation
+	// behaviour. Dormant in this PR: no production code stamps the ctx yet.
+	if principal := PrincipalFromContext(ctx); principal != "" {
+		ctx = grpcmeta.InjectPrincipal(ctx, principal)
+		// Low-cardinality-on-span, never a metric label (RFC 0031 OQ #7),
+		// matching the session/epoch posture: pin the principal so a trace
+		// can be pivoted to the authenticated person it served — the
+		// provenance signal the v0.3.14 live MT reads.
+		span.SetAttributes(attribute.String("principal.id", principal))
+	}
+
 	conn, err := d.dial(agent.Address, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		span.RecordError(err)
@@ -375,6 +433,53 @@ func (d *GRPCMessageDispatcher) Dispatch(ctx context.Context, env DispatchEnvelo
 		span.RecordError(ackErr)
 		span.SetStatus(otelcodes.Error, ackErr.Error())
 		return ackErr
+	}
+
+	// ISSUE-0124 (ISSUE-0082 residual R-2) PR 1: record that this agent was
+	// handed this stimulus under this principal, so its REPLY — which
+	// re-enters as a fresh unauthenticated publish and today loses the tenant
+	// for the whole cascade below it — can be re-stamped by PR 2. Server-held
+	// state built from what the orchestrator already knows; nothing is ever
+	// accepted from the agent, because any correlation key the agent supplies
+	// resolves to a principal the agent chose (principal_attribution.go).
+	//
+	// Written HERE, after the ack, rather than beside the header injection
+	// above: the entry means "this agent holds this stimulus", and a dispatch
+	// that was dropped, refused or never dialled leaves the agent holding
+	// nothing. An entry left behind by an undelivered stimulus would be live
+	// for a full turn budget and inherited by whatever that agent published
+	// next — an autonomous tick, say — attributing content nobody caused to a
+	// real person. The miss paths above all return before this point.
+	//
+	// DELIVERY IS NOT THE WHOLE TEST, though, because the ack is pre-ingest:
+	// `ReceiveChannelMessage` returns as soon as the wake is accepted
+	// (agents/server_servicers.py), and the receiver's response gate runs
+	// afterwards, inside the event loop. The router deliberately delivers to
+	// members that gate will silence — an unmentioned `when_mentioned` member,
+	// a directed-elsewhere `always` member — so they ingest the room rather
+	// than going amnesiac (fanout.go). Those hold the stimulus and never
+	// answer it, so an entry for one would be inherited by their next,
+	// unrelated publish: the same mis-attribution the delivered-path rule
+	// above exists to prevent. [DispatchEnvelope.ExpectsReply] is the
+	// orchestrator's own election ([orderResponders], the set the RFC 0048
+	// presence signal already trusts for "expecting a reply from"), so the
+	// write follows it rather than re-deriving the receiver's gate in Go.
+	//
+	// RESIDUAL, stated: the election is a SUPERSET of the gate's respond-true
+	// set, so an elected member whose RFC 0030 salience bid comes in below
+	// threshold still leaves an entry. That bid is an LLM-side judgement the
+	// orchestrator cannot predict. Since PR 2 the TTL does NOT bound that entry:
+	// expiry only DISQUALIFIES a stimulus from resolving, it does not remove it
+	// (the crossover rule in principal_attribution.go), so such an entry outlives
+	// the TTL and — while it does — blocks a fresh authenticated stimulus from
+	// resolving, until the agent's own publish retires the row or the whole row
+	// goes cold at 2×TTL. So the residual costs more misses than "bounded by the
+	// TTL" would imply, and its true bound is the consuming read or the cold sweep.
+	//
+	// Dormant: no reader until PR 2, and the wire is byte-identical either way
+	// (grpc_dispatcher_attribution_test.go).
+	if env.ExpectsReply {
+		d.attribution.Record(msg.ChannelID, participantID, PrincipalFromContext(ctx))
 	}
 	return nil
 }

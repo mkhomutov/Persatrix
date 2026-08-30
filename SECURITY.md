@@ -31,6 +31,27 @@ Persatrix uses deny-by-default security for agent permissions. For details on th
 - [Agent Configuration](config/agents.yaml) — Agent permissions and capabilities
 - [Security Gates](internal/security/) — Go orchestrator security enforcement
 
+### Human authentication (v0.3.12+)
+
+The REST API and web console can authenticate human callers: `auth.mode: enabled`
+in [config/security.yaml](config/security.yaml) turns on password login with
+opaque revocable sessions and a coarse `user`/`operator` role gate — unmapped
+routes fail closed to `operator` ([RFC 0039](docs/rfcs/0039-user-accounts-authentication.md)
+Phases 1–2; the [operator guide](docs/guides/auth.md)). The shipped default is
+`disabled` (unauthenticated, localhost-only posture, WARN'd at startup on a
+routable bind). Two limits to know before exposing a deployment:
+
+- **Enabled beyond localhost requires HTTPS** — the browser session cookie is
+  `Secure` and is silently dropped over plain HTTP on non-loopback origins.
+- **The agent-attributable REST ingress stays unauthenticated by design**
+  (persona agents hold no accounts; their authorization story is the RFC 0009
+  agent-token track) — anonymous channel reads/writes remain possible on a
+  routable bind. Keep that surface network-restricted to the agent fleet; see
+  the [auth guide](docs/guides/auth.md#what-stays-open-under-enabled--the-agent-ingress).
+
+Account administration, self-service password change, and failed-login lockout
+are RFC 0039 Phase 3 (v0.4.0).
+
 ## Responsible Use
 
 Persatrix is experimental, pre-1.0 software distributed under

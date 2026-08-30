@@ -38,6 +38,10 @@ _GRPC_DISPATCHER_GO = Path("internal/channels/grpc_dispatcher_proto.go")
 # cap (PR #718 follow-up review) — the marker constant lives with the claim.
 _SYNTHESIS_CLAIM_GO = Path("internal/channels/synthesis_claim.go")
 _CHANNEL_WIRE_METADATA_PY = Path("agents/channel_wire_metadata.py")
+# DispatchContext (the claim rule + the synthesis derivation) moved out of
+# channel_wire_metadata.py at the 500-line cap (ISSUE-0118 PR 1); the
+# reply-echo pins follow it.
+_DISPATCH_CONTEXT_PY = Path("agents/dispatch_context.py")
 _CLOSE_NOTIFICATION_PY = Path("agents/persona_runtime/close_notification.py")
 _PROMPT_ASSEMBLY_PY = Path("agents/persona_runtime/prompt_assembly.py")
 _RESPONSE_GATE_PY = Path("agents/response_gate.py")
@@ -143,13 +147,13 @@ def test_synthesis_reply_metadata_key_agrees() -> None:
     ``end_interaction_vote``.
     """
     go_value = _go_const(_SYNTHESIS_CLAIM_GO, "synthesisReplyMetadataKey")
-    py_src = _CHANNEL_WIRE_METADATA_PY.read_text(encoding="utf-8")
+    py_src = _DISPATCH_CONTEXT_PY.read_text(encoding="utf-8")
     stamp = f'claim["{go_value}"] = True'
     if stamp not in py_src:
         _parse_miss(
             f"the reply-echo stamp `{stamp}` "
             f"(Go synthesisReplyMetadataKey = {go_value!r})",
-            _CHANNEL_WIRE_METADATA_PY,
+            _DISPATCH_CONTEXT_PY,
         )
     # The derivation is structural (DispatchContext.for_event, strict
     # ``is True``) — the same one-home rule as the interaction-id claim: a
@@ -158,7 +162,7 @@ def test_synthesis_reply_metadata_key_agrees() -> None:
         _parse_miss(
             'the strict `…get("synthesis_turn") is True` derivation '
             "(DispatchContext.for_event)",
-            _CHANNEL_WIRE_METADATA_PY,
+            _DISPATCH_CONTEXT_PY,
         )
 
 

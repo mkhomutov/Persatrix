@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .channel_publisher import (
     DEFAULT_PUBLISH_TIMEOUT_SECONDS,
@@ -19,6 +19,9 @@ from .channel_publisher import (
 )
 from .channel_wire_metadata import DispatchContext
 from .persona_types import VOTE_CLOSE_TOKEN_KEY, AgentAction
+
+if TYPE_CHECKING:
+    from .dispatch import EventDispatcher
 
 logger = logging.getLogger(__name__)
 
@@ -196,3 +199,66 @@ async def publish_end_interaction_vote(
         # "published" status carries the key: a failed publish rode no wire.
         "synthesis_reply": synthesis_reply,
     }
+
+
+async def notify_end_vote_outcome(
+    dispatcher: EventDispatcher | None, agent_id: str, result: dict[str, Any],
+) -> None:
+    """Discharge the voter's parked local close with the publish outcome
+    (PR 607 review finding 5).
+
+    The decide-time path parks the END_INTERACTION_VOTE's local
+    interaction close instead of executing it (the vote has not been
+    published yet — see ``agents/persona_runtime/vote_close.py``); this
+    callback reports how the publish went so the park is closed
+    (``status == "published"``) or dropped (any failure status, so a
+    vote that never reached the orchestrator leaves no early "ended"
+    record).  Best-effort: no dispatcher / unknown agent / an agent
+    without the vote-close seam / missing ``channel_id`` (the
+    ``no_channel_id`` drop) simply leaves the park to the staleness
+    guards, and a callback error must not fail the action whose
+    publish already succeeded.
+
+    Lived on :class:`~agents.action_executor.ActionExecutor` as
+    ``_notify_end_vote_outcome`` until ISSUE-0118's scope threading pushed
+    that module past the 500-line cap; moved here beside its publish
+    sibling (same carve rationale as the module docstring), taking the
+    executor's dispatcher as a parameter.
+    """
+    if dispatcher is None:
+        return
+    agent = dispatcher.get_agent(agent_id)
+    if agent is None:
+        return
+    channel_id = str(result.get("channel_id", "") or "")
+    if not channel_id:
+        return
+    # The dispatcher registry is typed for persona agents but not
+    # enforced; an agent without the seam has no parked closes to
+    # discharge — skip, keeping the except's WARNING for discharges
+    # that actually fail (PR 607 third-pass review).
+    resolve = getattr(agent, "resolve_end_vote_publish", None)
+    if resolve is None:
+        return
+    try:
+        await resolve(
+            channel_id,
+            published=result.get("status") == "published",
+            # The park's correlation handle (PR 607 second-pass
+            # review), echoed by publish_end_interaction_vote off the
+            # action payload — "" for a vote the park never stamped,
+            # which the discharge treats as not-mine.
+            token=str(result.get("vote_close_token", "") or ""),
+            # PR #718 review (OQ #6): a published vote that rode the
+            # ``synthesis_reply`` echo IS claimable as the §D closing
+            # artifact — the discharge marks the chair's record for the
+            # metered close summary. Strict ``is True``: only the
+            # "published" result carries the key, so a failure status
+            # reads unmarked.
+            synthesis_reply=result.get("synthesis_reply") is True,
+        )
+    except Exception:
+        logger.warning(
+            "End-vote publish-outcome callback failed for agent %s "
+            "(channel %s)", agent_id, channel_id, exc_info=True,
+        )

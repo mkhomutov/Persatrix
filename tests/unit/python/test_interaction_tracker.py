@@ -21,6 +21,7 @@ from _otel_test_helpers import counter_total
 
 from agents.memory.boundary_detectors import (
     DEFAULT_IDLE_TIMEOUT_SEC,
+    REASON_CATCHUP_COMPLETE,
     REASON_COST,
     REASON_IDLE_GAP,
     REASON_MAX_TURNS,
@@ -89,18 +90,25 @@ class TestInteractionTracker:
 
     def test_close_sets_closed_at_and_reason(self):
         tracker = InteractionTracker()
-        tracker.add_turn("tick", now=100.0)
-        closed = tracker.close("tick", reason=REASON_STRUCTURAL, now=200.0)
+        opened = tracker.add_turn("tick", now=100.0)
+        closed = tracker.close_record(
+            opened, reason=REASON_STRUCTURAL, now=200.0,
+        )
         assert closed is not None
         assert closed.closed_at == 200.0
         assert closed.close_reason == REASON_STRUCTURAL
         assert tracker.get("tick") is None
 
     def test_close_unknown_scope_is_noop(self):
+        """PR #846 review: the scope-keyed ``close`` was removed (it
+        resolved the ambient principal and empty speaker, so post-re-key
+        it closed nothing or the wrong record).  The no-op contract it
+        carried now belongs to the room fan, which returns an empty
+        list rather than ``None``."""
         tracker = InteractionTracker()
-        # ``reason`` is keyword-required (PR-214 review fix Should-Fix #1);
-        # the no-op path still expects callers to spell it.
-        assert tracker.close("never-opened", reason=REASON_STRUCTURAL) is None
+        assert tracker.close_scope(
+            "never-opened", reason=REASON_STRUCTURAL,
+        ) == []
 
     def test_reopen_rule_starts_fresh_interaction(self):
         # RFC 0020 §C: once closed, a new turn in the same scope starts a
@@ -108,7 +116,7 @@ class TestInteractionTracker:
         # interaction_id.
         tracker = InteractionTracker()
         first = tracker.add_turn("dm:a:b", now=100.0)
-        tracker.close("dm:a:b", reason=REASON_STRUCTURAL, now=110.0)
+        tracker.close_record(first, reason=REASON_STRUCTURAL, now=110.0)
         second = tracker.add_turn("dm:a:b", now=120.0)
         assert second.interaction_id != first.interaction_id
         assert second.turn_count == 1
@@ -404,8 +412,8 @@ class TestMetricEmission:
     def test_close_emits_closed_and_by_structural(self):
         reader, _ = self._build_meter()
         tracker = InteractionTracker()
-        tracker.add_turn("tick", now=100.0)
-        tracker.close("tick", reason=REASON_STRUCTURAL, now=200.0)
+        opened = tracker.add_turn("tick", now=100.0)
+        tracker.close_record(opened, reason=REASON_STRUCTURAL, now=200.0)
         assert counter_total(reader, "agent.interactions.closed") == 1
         assert (
             counter_total(reader, "agent.interactions.closed.by_structural")
@@ -431,6 +439,10 @@ class TestMetricEmission:
             (REASON_TOPIC_SHIFT, "agent.interactions.closed.by_topic_shift"),
             (REASON_SHUTDOWN, "agent.interactions.closed.by_shutdown"),
             (REASON_COST, "agent.interactions.closed.by_cost"),
+            (
+                REASON_CATCHUP_COMPLETE,
+                "agent.interactions.closed.by_catchup_complete",
+            ),
         ],
     )
     def test_close_emits_per_reason_subtotal(self, reason, subtotal_metric):
@@ -444,8 +456,8 @@ class TestMetricEmission:
         # / table-lookup miss instead of a silent telemetry hole.
         reader, _ = self._build_meter()
         tracker = InteractionTracker()
-        tracker.add_turn("tick", now=100.0)
-        tracker.close("tick", reason=reason, now=200.0)
+        opened = tracker.add_turn("tick", now=100.0)
+        tracker.close_record(opened, reason=reason, now=200.0)
         assert counter_total(reader, "agent.interactions.closed") == 1
         assert counter_total(reader, subtotal_metric) == 1
 
@@ -466,8 +478,8 @@ class TestMetricEmission:
         assert metrics_mod.try_get_instruments() is None
 
         tracker = InteractionTracker()
-        tracker.add_turn("tick", now=100.0)
-        tracker.close("tick", reason=REASON_STRUCTURAL, now=200.0)
+        opened = tracker.add_turn("tick", now=100.0)
+        tracker.close_record(opened, reason=REASON_STRUCTURAL, now=200.0)
         # No exception is the assertion; no counter to read.
 
 

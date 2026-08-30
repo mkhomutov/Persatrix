@@ -23,7 +23,7 @@ Policy:
 
 ## Go dependencies
 
-Collected via `go-licenses report ./cmd/... ./internal/...` (39 packages).
+Collected via `go-licenses report ./cmd/... ./internal/...` (40 packages).
 
 | Package | License | Source |
 | --- | --- | --- |
@@ -56,6 +56,7 @@ Collected via `go-licenses report ./cmd/... ./internal/...` (39 packages).
 | `golang.org/x/crypto` | BSD-3-Clause | [link](https://cs.opensource.google/go/x/crypto/+/v0.54.0:LICENSE) |
 | `golang.org/x/net` | BSD-3-Clause | [link](https://cs.opensource.google/go/x/net/+/v0.56.0:LICENSE) |
 | `golang.org/x/sys/unix` | BSD-3-Clause | [link](https://cs.opensource.google/go/x/sys/+/v0.47.0:LICENSE) |
+| `golang.org/x/term` | BSD-3-Clause | [link](https://cs.opensource.google/go/x/term/+/v0.45.0:LICENSE) |
 | `golang.org/x/text` | BSD-3-Clause | [link](https://cs.opensource.google/go/x/text/+/v0.40.0:LICENSE) |
 | `google.golang.org/genproto/googleapis/api/httpbody` | Apache-2.0 | [link](https://github.com/googleapis/go-genproto/blob/afd174a4e478/googleapis/api/LICENSE) |
 | `google.golang.org/genproto/googleapis/rpc/status` | Apache-2.0 | [link](https://github.com/googleapis/go-genproto/blob/afd174a4e478/googleapis/rpc/LICENSE) |
@@ -152,7 +153,7 @@ Collected via `pip-licenses --from=mixed` against the `agents` extras (76 packag
 
 ## Rust dependencies
 
-Collected via `cargo license --json` inside `cli/` (224 crates).
+Collected via `cargo license --json` inside `cli/` (226 crates).
 
 | Package | Version | License | Source |
 | --- | --- | --- | --- |
@@ -268,6 +269,8 @@ Collected via `cargo license --json` inside `cli/` (224 crates).
 | `redox_users` | 0.4.6 | MIT | [link](https://gitlab.redox-os.org/redox-os/users) |
 | `reqwest` | 0.12.28 | Apache-2.0 OR MIT | [link](https://github.com/seanmonstar/reqwest) |
 | `ring` | 0.17.14 | Apache-2.0 AND ISC | [link](https://github.com/briansmith/ring) |
+| `rpassword` | 7.5.4 | Apache-2.0 | [link](https://github.com/conradkleinespel/rpassword) |
+| `rtoolbox` | 0.0.5 | Apache-2.0 | [link](https://github.com/conradkleinespel/rtoolbox) |
 | `rustix` | 1.1.4 | Apache-2.0 OR Apache-2.0 WITH LLVM-exception OR MIT | [link](https://github.com/bytecodealliance/rustix) |
 | `rustls` | 0.23.37 | Apache-2.0 OR ISC OR MIT | [link](https://github.com/rustls/rustls) |
 | `rustls-pki-types` | 1.14.0 | Apache-2.0 OR MIT | [link](https://github.com/rustls/pki-types) |

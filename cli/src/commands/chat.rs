@@ -7,6 +7,28 @@ use colored::Colorize;
 
 use crate::types::{api_error_message, validate_resource_id, ChatRequest, ChatResponse};
 
+/// Build the default-header map carrying the stored bearer token, or
+/// `None` when there is no token (or its bytes are header-invalid, which
+/// can only mean a corrupted credential file — act logged-out rather than
+/// fail the command).
+///
+/// Split out of [`cmd_chat`] so the attach is pure and unit-testable: the
+/// chat REPL builds its own long-timeout client, so it does NOT inherit the
+/// default headers `main.rs` installs on the shared client. Losing that
+/// attach made the chat POST the one unauthenticated verb on the whole CLI
+/// surface — `persatrix chat` answered 401 for every logged-in caller under
+/// `auth.mode: enabled` (found live at the v0.3.14 MT-MEMORY-MULTIUSER-001
+/// run, F-1). The tests below are the regression bar.
+fn bearer_headers(token: Option<String>) -> Option<reqwest::header::HeaderMap> {
+    let token = token?;
+    let mut value = reqwest::header::HeaderValue::from_str(&format!("Bearer {token}")).ok()?;
+    // Mark sensitive so debug-logging middleware never prints the credential.
+    value.set_sensitive(true);
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(reqwest::header::AUTHORIZATION, value);
+    Some(headers)
+}
+
 /// Interactive REPL for chatting with a persona agent via the orchestrator
 /// REST endpoint `POST /api/v1/agents/{agent_id}/chat`.
 pub(crate) async fn cmd_chat(
@@ -41,10 +63,15 @@ pub(crate) async fn cmd_chat(
     let operator_epoch_id = crate::epoch_resolve::resolve_epoch(epoch_flag).unwrap_or_default();
 
     // Build a dedicated client with a longer timeout for chat (agent LLM
-    // calls can take a while).
-    let chat_client = reqwest::Client::builder()
+    // calls can take a while). Being a fresh client, it does not inherit
+    // `main.rs`'s default headers — see [`bearer_headers`].
+    let mut chat_builder = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(300))
+        .timeout(Duration::from_secs(300));
+    if let Some(headers) = bearer_headers(crate::credentials::token(server)) {
+        chat_builder = chat_builder.default_headers(headers);
+    }
+    let chat_client = chat_builder
         .build()
         .map_err(|e| format!("failed to create HTTP client: {e}"))?;
 
@@ -216,3 +243,7 @@ pub(crate) async fn cmd_chat(
 
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "chat_tests.rs"]
+mod tests;

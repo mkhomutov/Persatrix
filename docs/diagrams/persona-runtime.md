@@ -72,9 +72,9 @@ sits between the event handler and the episodic store. The four stages:
 | Stage | Trigger | What happens |
 |-------|---------|--------------|
 | **open** | First inbound turn under a new scope (e.g. `dm:alice:ember-owl`, `group:planning`, or per-workflow id) | New `interaction_id` allocated, scope registered |
-| **multi-turn** | Each subsequent `add_turn` under the same scope | Turn appended to the in-memory transcript; **no episodic write** |
+| **multi-turn** | Each subsequent `add_turn` under the same **record key** — `(principal, speaker, scope)` since v0.3.15, so a group room holds one record per speaker per tenant | Turn appended to that record's in-memory transcript; **no episodic write** |
 | **close** | Quiescence timeout via the janitor on `on_tick` cadence, **or** explicit close signal | Summary generation kicks off |
-| **summarize** | After close — runs in [`agents/persona_runtime/summarize_close.py`](../../agents/persona_runtime/summarize_close.py) | **One** episodic entry written for the entire interaction, tagged with `interaction_id` + scope |
+| **summarize** | After close — runs in [`agents/persona_runtime/summarize_close.py`](../../agents/persona_runtime/summarize_close.py) | One episodic entry written **per closed record**, tagged with `interaction_id` + scope (a room-wide close fans, so N speakers → N entries) |
 
 Per-scope recall (`recall_with_scope_filter` in
 [agents/memory/scope_recall.py](../../agents/memory/scope_recall.py)) reads

@@ -23,6 +23,8 @@
 // as a circuit-breaker exemption so a console that trips its own rate limit
 // gets a self-clearing 429 rather than a sticky quarantine (a quarantine has no
 // automatic recovery and no console UI to clear it).
+import { reportUnauthorized } from "./auth.js";
+
 const CONSOLE_AGENT_ID = "web-console";
 const AGENT_ID_HEADER = "X-Agent-ID";
 
@@ -68,6 +70,12 @@ async function errorFromResponse(path, response) {
     envelope && typeof envelope.error === "string"
       ? envelope.error
       : `${path} responded ${response.status}`;
+  if (response.status === 401) {
+    // RFC 0039 enabled mode: every data call flows through here, so this
+    // is the single seam that flips the shell into its login state
+    // (amendment §A4 — "a minimal login form on 401").
+    reportUnauthorized();
+  }
   return new ApiError(message, response.status, { code: envelope?.code });
 }
 

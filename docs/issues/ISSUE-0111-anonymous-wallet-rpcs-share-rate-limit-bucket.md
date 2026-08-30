@@ -83,3 +83,18 @@ Landed with the v0.3.11 release-prep MT-execution PR (TDD,
 > 2026-07-21 — found + fixed during the v0.3.11 release-prep offline
 > smoke; see the [v0.3.11 execution report](../manual-tests/v0.3.11-execution-report.md)
 > finding F-1. Set `closed_pr` when the MT-execution PR merges.
+
+> 2026-08-02 — disposition, mirrored here from the
+> [v0.3.12 release checklist §6](../v0.3.12-release-checklist.md#6-known-gaps-to-document-in-release-notes)
+> (confirmed at the v0.3.12 post-release follow-up,
+> [#804](https://github.com/mkhomutov/Persatrix/pull/804)): the
+> §Residuals above — `retry-after-seconds` unconsumed on the
+> close-summary path; the REST publish surface still on the anonymous
+> bucket — ride as **their own code PR**, deliberately NOT slotted into
+> v0.3.13 or v0.3.14 (the
+> [sequencing Amendment 2026-08-02](../v0.3.x-sequencing.md#amendment-2026-08-02--v0313--v0314-the-two-release-tail-to-v040)
+> keeps v0.3.13 to its three deferred calls plus one fold-in). The
+> 2026-07-21 instruction above is overtaken: the fix half merged with the
+> v0.3.11 MT-execution PR
+> ([#763](https://github.com/mkhomutov/Persatrix/pull/763)); `closed_pr`
+> stays unset and status stays `in_progress` until the residuals land.

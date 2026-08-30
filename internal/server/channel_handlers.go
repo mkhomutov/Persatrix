@@ -217,8 +217,12 @@ func (s *Server) handleGetChannel(w http.ResponseWriter, r *http.Request) {
 
 // handlePublishMessage handles POST /api/v1/channels/{id}/messages.
 //
-// Routes through [ChannelRouter.Publish] when a router was injected, so
-// channel_type cross-validation and fanout fire. Falls back to a direct
+// Routes through [ChannelRouter.PublishAsync] when a router was injected, so
+// channel_type cross-validation and fanout fire — NOT `Publish`, which the
+// RFC 0048 latency fix left to the chat façade and in-process callers. Worth
+// naming precisely: this is the seam a persona's reply re-enters on, so a
+// publish-path change written against `Publish` misses every agent turn
+// (ISSUE-0124 R-2 took that shape). Falls back to a direct
 // store write when the router is unset (test fixtures only — production
 // always wires the router). The fallback path emits a once-per-process
 // Warn ([channelFallbackWarnOnce]) so a forgotten WithChannels(store,
@@ -268,6 +272,16 @@ func (s *Server) handlePublishMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "BAD_REQUEST", msg, http.StatusBadRequest)
 		return
 	}
+	// ISSUE-0119: reject an out-of-vocabulary `participant_type` claim here —
+	// before any side effect, and with the same wording as the chat handler's
+	// ISSUE-0068 guard. Left unchecked it rides the wire verbatim and the
+	// agent-side allowlist clamp silently degrades it to "agent", which is the
+	// misclassification both guards exist to make loud.
+	if claimed := channels.ReadParticipantType(req.Metadata); claimed != "" &&
+		!channels.IsValidParticipantType(claimed) {
+		writeError(w, "BAD_REQUEST", fmt.Sprintf("participant_type %q must be one of [agent, user]", claimed), http.StatusBadRequest)
+		return
+	}
 
 	// RFC 0031 Phase 3 PR 4: apply the optional `session_id` override (the
 	// CLI's `--session`) — see [Server.resolveSessionOverride].
@@ -295,6 +309,25 @@ func (s *Server) handlePublishMessage(w http.ResponseWriter, r *http.Request) {
 	// resolution miss returns the producer's array untouched.
 	// See [Server.liftContentMentions].
 	req.Mentions = s.liftContentMentions(ctx, id, req.SenderID, req.Content, req.Mentions)
+
+	// ISSUE-0119: stamp the sender's peer type so the persona's cross-room
+	// person identity (RFC 0031 F-7) resolves onto the right relationship row.
+	//
+	// Precedence: **the registry is authoritative when it knows the sender; a
+	// caller claim only fills what the registry cannot see.** A registry hit
+	// is proof the sender is an agent of this deployment, so the claim is
+	// overridden — which also closes half of the reply-budget exemption hole
+	// the [channels.exemptPrincipalParticipantType] SECURITY note flags (a
+	// registered agent can no longer self-assert `user` to buy an exemption
+	// meant for humans). A miss leaves the claim standing, because that is the
+	// only way a bridge can type an *external* agent the registry has never
+	// seen; absent a claim, a miss is a human. See
+	// [Server.resolveSenderParticipantType] for why an unresolved read stamps
+	// nothing at all rather than guessing.
+	resolved := s.resolveSenderParticipantType(ctx, req.SenderID)
+	if resolved == channels.ParticipantTypeAgent || channels.ReadParticipantType(req.Metadata) == "" {
+		req.Metadata = channels.StampParticipantType(req.Metadata, resolved)
+	}
 
 	msg := channels.ChannelMessage{
 		ID:        uuid.NewString(),

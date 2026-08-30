@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING
 from ..memory.fact_predicates import TOPIC_PREDICATES, canonicalize_subject
 from ..memory.working import ContextSection, estimate_tokens
 from ..observability.metrics import current_agent_id, try_get_instruments
+from .facts_render import bounded_header_subject, format_fact_line
 from .memory_budget import MemoryBudget
 from .topic_seeds import topic_subject_seeds
 
@@ -252,17 +253,6 @@ async def recall_facts_for_event(
     return collected
 
 
-def _format_fact_line(fact: Fact) -> str:
-    """One-line ``- subject predicate object`` render.
-
-    The predicate is intentionally rendered as the raw verb (no
-    prettification): the LLM gets the same shape the extractor wrote,
-    and operators reading prompt dumps can grep for the canonical
-    vocabulary without a translation layer.
-    """
-    return f"- {fact.subject} {fact.predicate} {fact.object}"
-
-
 def render_facts_section(
     facts: list[Fact],
     budget: MemoryBudget,
@@ -299,7 +289,10 @@ def render_facts_section(
     invites the persona to interpret a row like
     ``- bob has_child_named Mira`` as a fact about *itself* — the
     persona-inversion footgun that the dementia test is meant to
-    fence off.
+    fence off.  The subject slot renders through the ISSUE-0116
+    bounded template (:func:`.facts_render.bounded_header_subject` —
+    header-only truncation; rows, grouping, and recall keep the full
+    canonical form).
 
     Multi-subject fan-out (RFC 0026 PR 4)
     -------------------------------------
@@ -410,7 +403,7 @@ def render_facts_section(
             if budget.remaining <= 0:
                 break
             remaining_before = budget.remaining
-            line = _format_fact_line(fact)
+            line = format_fact_line(fact)
             admitted = budget.try_add(line, min_tokens=MIN_TOKENS_FACTS)
             if admitted is None:
                 continue
@@ -438,7 +431,13 @@ def render_facts_section(
         # bearing prefix (may truncate) and a guaranteed ``"\n"``
         # separator so the rendering invariant survives long-subject
         # truncation.
-        header_prefix = f"Known facts about {subject}:"
+        #
+        # The subject renders through the ISSUE-0116 bounded template
+        # (header-only — rows and grouping keep the canonical form;
+        # see :mod:`.facts_render`).
+        header_prefix = (
+            f"Known facts about {bounded_header_subject(subject)}:"
+        )
         admitted_prefix = budget.try_add(
             header_prefix, min_tokens=MIN_TOKENS_FACTS,
         )

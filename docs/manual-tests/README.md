@@ -79,6 +79,12 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 | [MT-CONSOLE-001](MT-CONSOLE-001.md) | Web Console fresh-stack Interactions slice (`--enable-ui` → chat + channel timeline) | Active |
 | [MT-CONSOLE-002](MT-CONSOLE-002.md) | Web Console `@`-mention compose & fan-out (typeahead → `mentions` → highlight) | Active |
 
+## Accounts & Auth (RFC 0039)
+
+| ID | Title | Status |
+|----|-------|--------|
+| [MT-AUTH-001](MT-AUTH-001.md) | Accounts & auth end-to-end — first-operator bootstrap, the §E 401/403/200 matrix under `enabled` (incl. the open agent ingress), the §F verified claim, the browser cookie session (token never in JS, cross-site write 403), logout, and the `disabled`-mode no-delta (RFC 0039 Phases 1–2) | Active (live execution = v0.3.12 release-prep) |
+
 ## Session
 
 | ID | Title | Status |
@@ -133,7 +139,7 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 | [MT-MEMORY-003](MT-MEMORY-003.md) | Working memory: summarisation triggers near context-window threshold | Complete |
 | [MT-MEMORY-004](MT-MEMORY-004.md) | Memory injection token budget: per-event bound holds (RFC 0017 §B) | Active |
 | [MT-MEMORY-005](MT-MEMORY-005-dementia-test.md) | Persona Memory — Dementia Test | Active |
-| [MT-MEMORY-CROSSROOM-001](MT-MEMORY-CROSSROOM-001.md) | Memory that travels — a project fact taught in a DM is recalled in the standup (cross-room L2 recall + `topic.*` capture behind the RFC 0037 gate; fresh-epoch wall holds) (RFC 0049 Phases 0–1) | Active (live execution = v0.3.12 release-prep) |
+| [MT-MEMORY-CROSSROOM-001](MT-MEMORY-CROSSROOM-001.md) | Memory that travels — a project fact taught in a DM is recalled in the standup (cross-room L2 recall + `topic.*` capture behind the RFC 0037 gate; fresh-epoch wall holds) (RFC 0049 Phases 0–1) | Active (Legs 1–4 run live at v0.3.12; **Legs 1b/2b deferred to the next memory-touching release**) |
 
 ## Cost
 
@@ -186,6 +192,9 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 | v0.3.7 | [v0.3.7-execution-report.md](v0.3.7-execution-report.md) | ✅ Complete — clean pass on tip `92a5a00` (the first-run blocker [ISSUE-0094](../issues/ISSUE-0094-everyone-broadcast-rejected-by-agent-inbound-validation.md) / MT-CHANNEL-RELEVANCE-001 Step 4 fixed in [#562](https://github.com/mkhomutov/Persatrix/pull/562)/[#563](https://github.com/mkhomutov/Persatrix/pull/563), re-verified live) |
 | v0.3.8 | [v0.3.8-execution-report.md](v0.3.8-execution-report.md) | ✅ Complete — clean pass on tip `8897727` (Tier B no-pile-on + end-vote convergence + chair stall + interaction-summary surface + RFC 0050 channel config + the combined convergence walkthrough, all live; MT-INTERACTION-SUMMARY-001 Part A DM `idle_gap` accepted-with-known-gap, structurally pinned; one non-blocking finding F-1) |
 | v0.3.9 | [v0.3.9-execution-report.md](v0.3.9-execution-report.md) | ✅ Complete — pass on tip `2bd72a8` (MT-PERSONA-RECALL-001 live on Anthropic: both stints recalled, removal gap unreachable via both paths, persona cannot surface the gap fact, two-interval history + count-not-content audit, cross-session recall after restart; recall-surface structural gates green live on host; one non-blocking finding F-1 / ISSUE-0107 — recall `channel_id` narrowing not canonicalized — found and fixed in this PR, ISSUE-0107 resolved) |
+| v0.3.10 | [v0.3.10-execution-report.md](v0.3.10-execution-report.md) | ✅ Complete (row back-filled at v0.3.12 release-prep — the index was not updated at the time) |
+| v0.3.11 | [v0.3.11-execution-report.md](v0.3.11-execution-report.md) | ✅ Complete — pass; F-1/F-2/F-3 fixed in the PR, F-4 ([ISSUE-0113](../issues/ISSUE-0113-four-vendor-shared-role-lanes-single-client-mismatch.md)) slipped (row back-filled at v0.3.12 release-prep) |
+| v0.3.12 | [v0.3.12-execution-report.md](v0.3.12-execution-report.md) | ✅ Complete — pass; eval-replay 5/5, MT-AUTH-001 all six legs (F-1 `authz.denied` fixed in-PR), offline smoke (F-2 compose accounts-db boot FATAL fixed in-PR), both memory MTs live on Anthropic; CROSSROOM Leg 4 accepted-with-known-gap ([ISSUE-0118](../issues/ISSUE-0118-tool-recall-bypasses-epoch-session-scopes.md) — tool-recall epoch-scope bypass, injection-path wall proven) |
 
 ---
 

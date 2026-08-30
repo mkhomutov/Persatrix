@@ -6,107 +6,35 @@ the 500-line code size limit.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock
-
 import pytest
 
-from agents.clock import WallClock
 from agents.persona_runtime.memory_budget import MEMORY_BUDGET_TOKENS as _MEMORY_BUDGET_TOKENS
-from agents.persona_runtime.memory_context import (
-    MemoryInjectionResult,
-    _MemoryContextMixin,
+from agents.persona_runtime.memory_context import MemoryInjectionResult
+
+# The doubles are shared with test_inject_memory_context_gates.py — see
+# _memory_context_helpers.py for why they are not duplicated per file.
+from agents.tests._memory_context_helpers import (
+    FakeEpisode as _FakeEpisode,
+)
+from agents.tests._memory_context_helpers import (
+    FakeNote as _FakeNote,
+)
+from agents.tests._memory_context_helpers import (
+    FakeRelSummary as _FakeRelSummary,
+)
+from agents.tests._memory_context_helpers import (
+    episodic_tier,
+)
+from agents.tests._memory_context_helpers import (
+    make_mixin as _make_mixin,
 )
 
-# ─── Helpers ──────────────────────────────────────────────────────────────────
-
-
-@dataclass
-class _FakeEpisode:
-    summary: str
-    id: str = "ep-0001"
-    # RFC 0021 PR 2: temporal fields accessed by recency rendering.
-    # created_at mirrors the DB NOT NULL column — always set in production.
-    created_at: float = 0.0
-    closed_at: float | None = None
-    started_at: float | None = None
-    turn_count: int | None = None
-
-
-@dataclass
-class _FakeNote:
-    topic: str
-    content: str
-    # RFC 0026 PR 4 wired ``record_admission(item_id=note.id)`` into the
-    # notes tier of ``_inject_memory_context``; this fake predates that
-    # and must carry an ``id`` or every admitted-note path raises
-    # ``AttributeError``.  Default keeps the existing keyword-only
-    # constructors (``_FakeNote(topic=…, content=…)``) working.
-    id: str = "note-fake"
-
-
-@dataclass
-class _FakeRelSummary:
-    other_participant_id: str
-    other_participant_type: str = "agent"
-    interaction_count: int = 1
-    # Default away from _DEFAULT_TRUST_SCORE (0.5) so the trust-injection
-    # branch in _inject_memory_context (which only emits "Trust: ..." when
-    # the score deviates from the default by more than
-    # _TRUST_DEVIATION_THRESHOLD) is reachable from tests that do not
-    # explicitly set trust_score.
-    # (PR #146 re-review: trust branch unreachable with the prior 0.5 default.)
-    trust_score: float = 0.7
-    notes: str = ""
-    # RFC 0021 PR 2: temporal fields accessed by recency + cadence rendering.
-    last_interaction_at: float | None = None
-    first_interaction_at: float | None = None
-
-
-def _make_mixin(
-    *,
-    episodes: list[_FakeEpisode] | None = None,
-    notes: list[_FakeNote] | None = None,
-    rel: _FakeRelSummary | None = None,
-    sender_id: str | None = None,
-    event_type: str = "CHANNEL_MESSAGE",
-) -> tuple[_ConcreteMemoryMixin, Any]:
-    """Return a wired _MemoryContextMixin instance and a matching fake event."""
-    from agents.memory.working import WorkingMemory
-    from agents.persona_types import EventType
-
-    mixin = _ConcreteMemoryMixin()
-    mixin.agent_id = "test-agent"
-    mixin._working_memory = WorkingMemory(max_tokens=8192)
-    # RFC 0021 PR 2: temporal seam required by _MemoryContextMixin._inject_memory_context.
-    mixin._clock = WallClock()
-    mixin._timezone = "UTC"
-
-    # Wire episodic memory mock.
-    mixin._episodic_memory = AsyncMock()
-    mixin._episodic_memory.recall.return_value = episodes or []
-    mixin._episodic_memory.recall_notes.return_value = notes or []
-
-    # Wire relationship memory mock.
-    mixin._relationship_memory = AsyncMock()
-    mixin._relationship_memory.get_relationship_summary.return_value = rel
-
-    et = getattr(EventType, event_type)
-    event = MagicMock()
-    event.event_type = et
-    event.sender_id = sender_id
-    event.metadata = {}
-    event.payload = {"content": "hello"}
-
-    return mixin, event
-
-
-class _ConcreteMemoryMixin(_MemoryContextMixin):
-    """Minimal concrete subclass for testing _MemoryContextMixin."""
-
-    def _format_event(self, event: Any) -> str:  # type: ignore[override]
-        return str(event.payload.get("content", ""))
+# ``episodic_tier`` is autouse: having it in THIS module's namespace is what
+# activates it for these tests.  Re-exporting marks it deliberately imported
+# — a bare import reads as unused and gets stripped by ``ruff --fix``, which
+# silently returns every test here to the empty-episodic-tier state the
+# fixture exists to prevent.
+__all__ = ["episodic_tier"]
 
 
 # ─── _inject_memory_context allocate-loop (RFC 0017 PR 2) ─────────────────────

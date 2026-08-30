@@ -171,8 +171,32 @@ func initChannels(
 			zap.Error(srErr))
 		sessionResolver = nil
 	}
-	dispatcher := selectChannelDispatcher(reg, sessionResolver, epochID, logger)
+	// ISSUE-0124 PR 1: the causal-attribution table — which principal each
+	// delivered dispatch was made under. Born here rather than inside the
+	// dispatcher because its reader is the ROUTER: PR 2 hands this same
+	// instance to the re-stamp at the head of `ChannelRouter.publishCommit`
+	// (the commit path both publish entry points share — NOT `Publish`, which
+	// the REST seam a persona's reply takes no longer goes through), which is
+	// what lets a persona's reply (a fresh unauthenticated publish) keep the
+	// tenant of the person who caused it. Unconditional and cheap: an
+	// unauthenticated dispatch is recorded too (it is a competing stimulus, and
+	// skipping it is what let a later authenticated one resolve a reply it never
+	// caused), so under `auth.mode: disabled` this holds one anonymous-only row
+	// per dispatched-to `(channel, agent)` pair — the map's stated
+	// `channels × members` bound, resolving nothing, reclaimed by the sweep two
+	// turn budgets after the traffic stops (the cold-row horizon: PR 2 made
+	// expiry disqualify a stimulus without removing it, so a row is reclaimed
+	// only once every stimulus in it is 2×TTL old).
+	principalAttribution := channels.NewPrincipalAttributionTable()
+	dispatcher := selectChannelDispatcher(reg, sessionResolver, epochID, principalAttribution, logger)
 	router := channels.NewChannelRouter(chanStore, dispatcher, logger, routerMetrics)
+	// ISSUE-0124 PR 2: the same instance on the READ side. The dispatcher
+	// writes the table, the router consumes it at the head of every publish —
+	// two instances would leave the re-stamp permanently empty, which is why
+	// the table is born above rather than inside either collaborator. This is
+	// the line that makes R-2 behavioural: from here a persona's reply carries
+	// the principal of the person who caused it.
+	router.SetPrincipalAttribution(principalAttribution)
 	// RFC 0050 amendment (interaction-budget enforcement): make the channel
 	// router the authority for the wallet's per-interaction cost ceiling. The
 	// wallet was constructed before this point (it has no channels dependency),
@@ -288,6 +312,16 @@ func initChannels(
 	if vErr := router.ResolveEndVotes(context.Background(), chanCfg); vErr != nil {
 		logger.Warn("channels: end-vote resolution incomplete; channels fall back to the default quorum until next restart",
 			zap.Error(vErr))
+	}
+
+	// ISSUE-0114 (v0.3.13): resolve the per-channel Layer 0 cascade-depth
+	// override for every config-declared channel — the end-vote posture:
+	// store-resident channels fall back to the fleet cap at read time, so
+	// there is no store enumeration to fail. Runs after SetMaxCascadeDepth
+	// above so the setter's above-fleet warning compares the right fleet cap.
+	if ccErr := router.ResolveChannelCascadeCaps(context.Background(), chanCfg); ccErr != nil {
+		logger.Warn("channels: per-channel cascade-cap resolution incomplete; channels fall back to the fleet cap until next restart",
+			zap.Error(ccErr))
 	}
 
 	// RFC 0030 interaction-id producer (IP3): resolve the per-channel idle
@@ -431,7 +465,14 @@ func initChannels(
 //     (`live` in production, a per-job id in CI); empty disables epoch
 //     emission (personas fall back to their construction-time "live"
 //     snapshot, byte-identical to the pre-epoch dispatch).
-func selectChannelDispatcher(reg registry.Registry, sessionResolver channels.SessionBinder, epochID string, logger *zap.Logger) channels.MessageDispatcher {
+//   - attribution != nil → the dispatcher records which principal each
+//     delivered dispatch was made under (ISSUE-0124 PR 1), so a persona's
+//     reply can later be re-stamped with the principal that caused it. Nil
+//     records nothing. Writing it changes no behaviour on its own — nothing
+//     reads the table until PR 2 — and a dispatch carrying no principal is
+//     recorded as the anonymous stimulus, which can only ever make a pair
+//     ambiguous, never resolve one.
+func selectChannelDispatcher(reg registry.Registry, sessionResolver channels.SessionBinder, epochID string, attribution *channels.PrincipalAttributionTable, logger *zap.Logger) channels.MessageDispatcher {
 	if reg == nil {
 		logger.Info("channels: registry not available; cross-process dispatch disabled (NoopDispatcher in use)")
 		return channels.NoopDispatcher{}
@@ -442,6 +483,9 @@ func selectChannelDispatcher(reg registry.Registry, sessionResolver channels.Ses
 	}
 	if epochID != "" {
 		opts = append(opts, channels.WithEpoch(epochID))
+	}
+	if attribution != nil {
+		opts = append(opts, channels.WithPrincipalAttribution(attribution))
 	}
 	return channels.NewGRPCMessageDispatcher(reg, logger, opts...)
 }

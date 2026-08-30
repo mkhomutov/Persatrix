@@ -3,7 +3,7 @@ id: RFC-0039
 title: User Accounts & Authentication
 summary: Human user accounts with password login, opaque revocable sessions, and a coarse operator/user role gate on the REST surface — so the caller's participant_id becomes a verified claim instead of an unverified request parameter, and the unauthenticated REST API (RFC 0002) gains a foundation that IdP federation, MFA, and RFC 0012 organizational clearance extend cleanly.
 type: architecture
-status: implementing
+status: partially_implemented
 author: Maksim Khomutov
 created: 2026-05-16
 target: v0.3.12 (Phases 1–2) + v0.4.0 (Phase 3)
@@ -15,7 +15,7 @@ depends_on:
 # RFC 0039 — User Accounts & Authentication
 
 **Type**: architecture
-**Status**: 🚧 Implementing — Phases 1–2 slotted into v0.3.12 as the bundled second workstream (plan opened 2026-07-25; [PR plan](0039-pr-plan.md), [v0.3.12 plan](../v0.3.12-plan.md)); independently shippable and cuttable whole
+**Status**: ⚠️ Partially Implemented — **Phases 1–2 shipped in v0.3.12** (PRs [#779](https://github.com/mkhomutov/Persatrix/pull/779) accounts store, [#780](https://github.com/mkhomutov/Persatrix/pull/780) sessions, [#790](https://github.com/mkhomutov/Persatrix/pull/790) REST + middleware + [amendment](0039-amendment-enabled-mode-exposure.md) browser posture, [#791](https://github.com/mkhomutov/Persatrix/pull/791) bootstrap + CLI — Phase 1 complete, inert, [#793](https://github.com/mkhomutov/Persatrix/pull/793) Phase 2 enforcement + verified claim + console login; per the [PR plan](0039-pr-plan.md)): enforcement is opt-in behind `auth.mode: enabled`, the shipped default stays `disabled`. Phase 3 (account administration REST API, self-service password change, failed-login lockout) targets v0.4.0. Operator surface: [auth guide](../guides/auth.md)
 **Author**: Maksim Khomutov
 **Date**: 2026-05-16
 **Target**: v0.3.12 (Phases 1–2) + v0.4.0 (Phase 3)
@@ -520,17 +520,23 @@ recall endpoint authenticates against.
 > `principal_id` storage dimension with a strict-equality recall filter and
 > a `persatrix-principal` gRPC header bound task-locally per request
 > ([RFC 0031 §C amendment](0031-per-session-namespacing-channels.md#c-storage-model);
-> [`agents/principal_id.py`](../../agents/principal_id.py)) — but it is
-> **armed and unfed**: nothing emits a principal, so every request resolves
+> [`agents/principal_id.py`](../../agents/principal_id.py)) — but it was
+> **armed and unfed**: nothing emitted a principal, so every request resolved
 > to the single-tenant `'local'` default. The verified `participant_id`
-> claim defined here is that missing **source**: once `auth.mode: enabled`,
-> the orchestrator emits the session's verified principal on the
-> `persatrix-principal` header at the same dispatch chokepoint it emits
-> `persatrix-session` (ISSUE-0082 Part 1, a self-contained Go follow-up that
-> does not wait on this RFC). This does **not** change this RFC's
-> multi-tenancy / per-user-memory-isolation Non-Goals — it records that the
-> principal rail's activation is *gated on this RFC's verified claim*, and
-> that the storage layer correctly collapses to `'local'` until then.
+> claim defined here is that missing **source**, and it was supplied in
+> **v0.3.14**: under `auth.mode: enabled` the orchestrator emits the
+> caller's verified principal on the `persatrix-principal` header, stamped
+> once in `authMiddleware` (a missed dispatch origin would fail *open* into
+> the shared `'local'` tenant, so the threading is structural rather than
+> per-handler). Proven live at that release's
+> [MT-MEMORY-MULTIUSER-001 run](../manual-tests/v0.3.14-execution-report.md),
+> with two distinct principals read off storage. This does **not** change
+> this RFC's multi-tenancy / per-user-memory-isolation Non-Goals — the
+> boundary is **per-turn**, and two residuals of the same shape are stated
+> rather than closed: a group room's close-derived aggregate and a persona's
+> relayed cascade turn do not inherit the principal (ISSUE-0082 R-1 / R-2,
+> v0.3.15). Under `disabled`, and for every unauthenticated caller, the
+> storage layer still correctly collapses to `'local'`.
 
 ### G. Bootstrapping the first operator
 

@@ -30,6 +30,22 @@ the other four are backed by a shared SQLite database.
 > [RFC 0036](../rfcs/0036-persona-message-recall.md) and the
 > [persona-agents guide §2](../guides/persona-agents.md#2-the-three-memory-tiers).
 
+> **v0.3.12 — confidentiality classification rides every channel-derived
+> row.** RFC 0037 adds a `protection_level` (+ `source_channel_id`
+> provenance) to episodes, facts, and notes — stamped at interaction close
+> from the source channel's §A classification, frozen at interaction open —
+> plus a `memory_projections` table holding §E one-line lower-level
+> summaries a *protected* interaction's close leaves behind. On the read
+> side the deterministic **§D hard gate** sits in `memory_context.py`
+> between recall and injection: every candidate whose level outranks the
+> acting channel's classification is withheld (or replaced by its highest
+> at-or-below projection), channel-less turns (ticks) act at the `public`
+> floor, and the verbatim-recall surface applies the same rank check
+> server-side (§F). None of this changes the tier diagram's shape — it is
+> a stamp on the rows and a gate on the arrows into `CTX`. See
+> [RFC 0037](../rfcs/0037-memory-confidentiality-channel-classification.md)
+> and the [channels guide §2](../guides/channels.md#confidentiality-classification-rfc-0037--v0312).
+
 In v0.3.0 the **`MemoryFacade`** ([agents/memory/facade.py](../../agents/memory/facade.py),
 [RFC 0008 §B](../rfcs/0008-agent-memory-context-optimization.md#b-memory-for-all-agent-types))
 is the read/write contract for **task agents** —
@@ -61,7 +77,7 @@ from `channel_history.py`.
 graph TB
     subgraph Runtime["Persona runtime (per-agent process)"]
         PR["persona_runtime/<br/>action_loop"]
-        CTX["memory_context<br/>assembler"]
+        CTX["memory_context<br/>assembler<br/>+ §D injection gate (RFC 0037)"]
         ITX["InteractionTracker<br/>(RFC 0020)"]
     end
 
@@ -78,7 +94,7 @@ graph TB
     end
 
     subgraph Persistence["Persistence"]
-        DB[(memory.db<br/>SQLite + FTS5<br/>episodes / relationships / facts<br/>carry session_id — RFC 0031 P1)]
+        DB[(memory.db<br/>SQLite + FTS5<br/>episodes / relationships / facts<br/>carry session_id — RFC 0031 P1<br/>+ protection_level & memory_projections — RFC 0037)]
         MIG["migrations.py<br/>schema versions"]
     end
 
@@ -155,7 +171,10 @@ read path through the facade is a deferred follow-up.
 ## Per-channel scoping (RFC 0020 P3 + RFC 0011 P3)
 
 `InteractionTracker.add_turn` accepts a `scope` (e.g. `dm:alice:ember-owl`,
-`group:planning`, or a per-workflow id). On interaction close,
+`group:planning`, or a per-workflow id) — one component of the v0.3.15 record
+key `(principal, speaker, scope)`, so a group room holds one record per speaker
+per tenant while `scope` stays the persisted column and recall predicate. On
+interaction close,
 `summarize_close.py` writes the resulting episodic entry tagged with that
 scope. On the read side, `recall_with_scope_filter` applies the scope as
 an AND filter on top of the BM25 / LIKE / recency ranking, so a recall
@@ -188,6 +207,11 @@ On every LLM call, `memory_context.py` composes the system prompt by layering
 5. Selected notes (if referenced by the event/goal).
 6. Working memory (most recent turns, priority-weighted).
 
+Since v0.3.12, every candidate in layers 2–6 that derives from a channel
+passes the RFC 0037 §D gate first — an entry whose `protection_level`
+outranks the acting channel's classification is withheld (or served as its
+§E projection) before the budget ever sees it.
+
 The list above is the **textual layering** (the order sections appear in the
 assembled prompt), not the eviction ranking. Each section is tagged with a
 numeric `priority` (see [persona_runtime/memory_context.py](../../agents/persona_runtime/memory_context.py):
@@ -216,6 +240,16 @@ write stamps the active
 carve-out. Phase 1 is write-path only — recall does not yet filter by
 session, so pre-existing rows stay visible. See
 [RFC 0031](../rfcs/0031-per-session-namespacing-channels.md).
+
+The v0.3.12 memory-side migration (v16, RFC 0037 §C) adds
+`protection_level` / `source_channel_id` / `provenance_json` to the
+stamped tiers and creates the `memory_projections` table; pre-migration
+rows backfill `protection_level = 'internal'` (see the RFC's §C
+*Migration backfill* note for why a blanket default is equivalent to the
+originally-specified source-channel join). A one-time
+`PERSATRIX_NOTES_BACKFILL_PROTECTION_LEVEL` flag lets operators with
+sensitive pre-v0.3.12 notes backfill the notes tier at a chosen level
+instead (honoured only at the migration moment).
 
 ## Token counting
 

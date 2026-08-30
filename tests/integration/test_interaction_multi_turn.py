@@ -180,7 +180,7 @@ class TestMultiTurnAggregation:
         open_scopes = agent._interaction_tracker.open_scopes()
         assert open_scopes == [expected_scope]
 
-        interaction = agent._interaction_tracker.get(expected_scope)
+        interaction = agent._interaction_tracker.get(expected_scope, speaker_id=peer)
         assert interaction is not None
         assert interaction.turn_count == 10
         assert interaction.is_open
@@ -240,7 +240,7 @@ class TestMultiTurnAggregation:
             payload={"content": "hello"},
             sender_id=peer,
         ))
-        first = agent._interaction_tracker.get(scope)
+        first = agent._interaction_tracker.get(scope, speaker_id=peer)
         assert first is not None
         first_id = first.interaction_id
 
@@ -281,7 +281,7 @@ class TestMultiTurnAggregation:
             payload={"content": "are you still there?"},
             sender_id=peer,
         ))
-        second = agent._interaction_tracker.get(scope)
+        second = agent._interaction_tracker.get(scope, speaker_id=peer)
         assert second is not None
         assert second.interaction_id != first_id
         assert second.turn_count == 1
@@ -421,7 +421,7 @@ class TestSessionEndMetadataTruthiness:
             metadata={"chat_end": flag_value},
         ))
         assert await _all_episodes(agent) == []
-        interaction = agent._interaction_tracker.get(scope)
+        interaction = agent._interaction_tracker.get(scope, speaker_id=peer)
         assert interaction is not None
         assert interaction.turn_count == 2
 

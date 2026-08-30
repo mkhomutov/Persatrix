@@ -40,12 +40,18 @@ type dispatchRecorder struct {
 type recordedDispatch struct {
 	env DispatchEnvelope
 	msg ChannelMessage
+	// principal is what [GRPCMessageDispatcher.Dispatch] would have emitted
+	// as `persatrix-principal` for this call (ISSUE-0082 Part 2, v0.3.14
+	// PR 2). Captured here because the tenant axis rides the CONTEXT, so it
+	// is invisible in (env, msg) — and the synthesis timeout net is the one
+	// close path that reaches a dispatch on a context it built itself.
+	principal string
 }
 
-func (d *dispatchRecorder) Dispatch(_ context.Context, env DispatchEnvelope, msg ChannelMessage) error {
+func (d *dispatchRecorder) Dispatch(ctx context.Context, env DispatchEnvelope, msg ChannelMessage) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.calls = append(d.calls, recordedDispatch{env: env, msg: msg})
+	d.calls = append(d.calls, recordedDispatch{env: env, msg: msg, principal: PrincipalFromContext(ctx)})
 	return nil
 }
 

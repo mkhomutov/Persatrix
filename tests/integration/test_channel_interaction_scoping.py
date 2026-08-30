@@ -269,14 +269,19 @@ class TestChannelScopeDiscrimination:
 
 
 @pytest.mark.asyncio
-async def test_six_agents_15_messages_one_episode_per_agent():
-    """RFC 0020 PR 5 acceptance: ``#planning`` 15-message exchange.
+async def test_six_agents_15_messages_one_episode_per_speaker():
+    """RFC 0020 PR 5 acceptance, re-keyed by v0.3.15 residuals PR 3.
 
     Six agents each receive every CHANNEL_MESSAGE in the group channel
     (orchestrator-side fanout filters self-messages — receivers see only
-    cross-agent traffic). On structural close (chat_end metadata),
-    each agent persists exactly one closed-interaction episode for the
-    group scope — not one episode per inbound message.
+    cross-agent traffic). Since the ``(principal, speaker, scope)``
+    tracker key (ISSUE-0123/0131) each receiver accumulates ONE record
+    per SPEAKER it hears — the Phase 0b split: a room of agents shares
+    the ``local`` principal, so without the speaker axis they would all
+    collapse into one aggregate. On structural close (chat_end
+    metadata) the fan closes every record, so each agent persists one
+    closed-interaction episode per speaker for the group scope — not
+    one per inbound message, and no longer one per room.
     """
     agent_ids = [
         f"agent-{i}" for i in range(6)
@@ -301,22 +306,30 @@ async def test_six_agents_15_messages_one_episode_per_agent():
                 sender_id=sender,
             ))
 
-    # Every agent has exactly one open scope, the group scope.
+    # Sender j sent 3 messages (j < 3) or 2 (j >= 3): turns 0..14
+    # round-robin over six senders.
+    sent_by = {
+        aid: sum(1 for i in range(15) if agent_ids[i % len(agent_ids)] == aid)
+        for aid in agent_ids
+    }
+
+    # Every agent has exactly one open scope, the group scope — but one
+    # RECORD per speaker it heard (the v0.3.15 re-key).
     for receiver_id, agent in agents.items():
         assert agent._interaction_tracker.open_scopes() == [expected_scope], (
             f"{receiver_id}: unexpected open scopes "
             f"{agent._interaction_tracker.open_scopes()}"
         )
-        # Each agent saw 15 - own_messages turns. Round-robin over 6 means
-        # each agent sent ⌈15/6⌉ = 3 messages and received the other 12.
-        # Senders for turn 0..14 = agent-(0..14 mod 6) = 3 each for the
-        # first 3 agents and 2 each for the last 3 agents.
-        own_sent = sum(
-            1 for i in range(15) if agent_ids[i % len(agent_ids)] == receiver_id
+        records = agent._interaction_tracker.records_for_scope(expected_scope)
+        by_speaker = {r.speaker_id: r for r in records}
+        assert set(by_speaker) == {a for a in agent_ids if a != receiver_id}, (
+            f"{receiver_id}: expected one record per other speaker"
         )
-        interaction = agent._interaction_tracker.get(expected_scope)
-        assert interaction is not None
-        assert interaction.turn_count == 15 - own_sent
+        for speaker, record in by_speaker.items():
+            assert record.turn_count == sent_by[speaker], (
+                f"{receiver_id}: record for {speaker} holds "
+                f"{record.turn_count} turns, expected {sent_by[speaker]}"
+            )
 
     # Structural close — every agent receives a final ``chat_end`` flag.
     closer = agent_ids[0]
@@ -333,25 +346,31 @@ async def test_six_agents_15_messages_one_episode_per_agent():
         await agent.drain_pending_summaries()
 
     # Each agent (except the closer who never received the final message)
-    # has exactly one closed-interaction episode for the group scope.
+    # has one closed-interaction episode PER SPEAKER for the group scope:
+    # the chat_end is a room event, so the structural close fans over
+    # every speaker's record (ISSUE-0123 part 3), the terminator itself
+    # landing as one extra turn in the closer's own record.
     for receiver_id, agent in agents.items():
         if receiver_id == closer:
             # The closer's own send was filtered upstream; their tracker
             # still has the open scope. Skip the close assertion for them.
             continue
         episodes = await _all_episodes(agent)
-        assert len(episodes) == 1, (
-            f"{receiver_id}: expected one episode, got {len(episodes)}"
+        other_speakers = [a for a in agent_ids if a != receiver_id]
+        assert len(episodes) == len(other_speakers), (
+            f"{receiver_id}: expected one episode per speaker, "
+            f"got {len(episodes)}"
         )
-        ep = episodes[0]
-        assert ep["scope"] == expected_scope
-        assert ep["interaction_id"] is not None
-        assert ep["closed_at"] is not None
-        # turn_count = received turns + 1 (chat_end terminator).
-        own_sent = sum(
-            1 for i in range(15) if agent_ids[i % len(agent_ids)] == receiver_id
+        for ep in episodes:
+            assert ep["scope"] == expected_scope
+            assert ep["interaction_id"] is not None
+            assert ep["closed_at"] is not None
+        # Per-speaker turn counts: each speaker's record carries what
+        # they sent; the closer's record carries the terminator too.
+        expected_counts = sorted(
+            sent_by[a] + (1 if a == closer else 0) for a in other_speakers
         )
-        assert ep["turn_count"] == 15 - own_sent + 1
+        assert sorted(e["turn_count"] for e in episodes) == expected_counts
 
 
 # ─── DM-vs-group isolation ────────────────────────────────────

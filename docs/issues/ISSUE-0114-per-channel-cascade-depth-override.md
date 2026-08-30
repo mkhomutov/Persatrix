@@ -1,10 +1,11 @@
 ---
 id: ISSUE-0114
 summary: "No per-channel cascade-depth override: the ISSUE-0109 calibration documented the fleet-wide `max_cascade_depth` (default 5) as the DE FACTO discussion-length knob on a productive autonomous roster (the ISSUE-0110 continuation advances round tally and reply depth together, so the depth cap binds before max_rounds on every productive chain), yet the cap is a single top-level channels.yaml value on an unsynchronised router-global field — lengthening or shortening ONE channel's productive chain means retuning the whole fleet. A per-channel override is a real feature, not a default: per-channel config + schema + validation, a synchronized hot-path read, an RFC 0050 runtime-override decision, and the Go/Python depth-cap alignment (the Python EventDispatcher defense-in-depth cap is per-process and must not fire below a legitimately raised channel cap). Deliberately scoped OUT of the ISSUE-0109 tuning PR (#769); filed for explicit slotting."
-status: open
+status: resolved
 severity: low
 area: channels
 created: 2026-07-25
+closed: 2026-08-04
 refs:
   - docs/issues/ISSUE-0109-rfc0052-autonomous-defaults-calibration.md
   - docs/rfcs/0011-amendment-cascade-depth-wire-propagation.md
@@ -111,3 +112,107 @@ ISSUE-0109 defaults PR):
 > caps must be ≤ it (raising one channel above the fleet default means raising
 > the backstop too) — revisitable in the fold-in PR with the alternatives
 > above. Droppable to v0.3.13 without touching either v0.3.12 workstream.
+
+> 2026-07-31 — **CUT from v0.3.12 → v0.3.13** (maintainer call, exercised at
+> [release-prep PR 2](../v0.3.12-release-prep-plan.md#pr-2--docs--release-checklist)
+> per the master plan's "closed (or explicitly cut)" acceptance wording): the
+> fold-in was never implemented during the v0.3.12 window and neither
+> workstream depends on it. Listed in the
+> [v0.3.12 release checklist Known Gaps](../v0.3.12-release-checklist.md#6-known-gaps-to-document-in-release-notes);
+> the design fork in step 4 (default: option (c)) is unchanged and still the
+> first decision the implementing PR must take.
+
+> 2026-08-02 — **v0.3.12 shipped without it, as the cut anticipated**
+> ([v0.3.12 — Memory that travels](https://github.com/mkhomutov/Persatrix/releases/tag/v0.3.12),
+> tagged on `c833da34`). The cut is confirmed by the release rather than
+> merely planned: the fleet-wide `max_cascade_depth` remains the de facto
+> discussion-length knob in the shipped binary, and the issue carries to
+> **v0.3.13** as the first of that line's three deferred calls (with
+> [ISSUE-0118](ISSUE-0118-tool-recall-bypasses-epoch-session-scopes.md) and
+> [ISSUE-0121](ISSUE-0121-crossroom-person-identity-legs-never-run-live.md)).
+> Documented in the published release body's Known Gaps section.
+
+> 2026-08-03 — **v0.3.13 plan opened**
+> ([v0.3.13-plan.md](../v0.3.13-plan.md)): rides as a named scope item
+> (`feature/v0313-issue0114-cascade-depth`, parallel to the ISSUE-0118 fix).
+> The step-4 default — **option (c)**, per-channel caps validated ≤ the
+> Python per-process backstop — is reconfirmed as the plan-opening posture
+> and remains the first decision of the implementing PR, revisitable there;
+> the RFC 0050 PATCH-vs-config-as-code call is made in that PR too.
+
+> 2026-08-03 — **Implemented** (`feature/v0313-issue0114-cascade-depth`,
+> v0.3.13 PR 2). The five steps landed as scoped, with the two in-PR
+> decisions taken as follows:
+>
+> - **Step 4 (Go/Python alignment): option (c), as defaulted** — the Python
+>   dispatcher cap stays a per-process global backstop
+>   (`agents/cascade_depth_defaults.py` now says so explicitly), and the
+>   ≤-fleet requirement is enforced where each write path can honor it:
+>   the **YAML loader rejects** a per-channel cap above the resolved fleet
+>   cap (`Config.Validate` — config-as-code can always be fixed before
+>   boot), while a **live RFC 0050 edit warns and applies**
+>   (`SetChannelMaxCascadeDepth`, mirroring the `SetEndVoteParams` k>w
+>   posture: the fleet cap is startup-only, so a reject would force a
+>   restart into a live edit loop; the warning also covers boot replay of
+>   a store written before a fleet lowering, since it lives in the setter
+>   both callers funnel through). The failure mode above the fleet cap is
+>   degraded-not-runaway (the backstop suppresses first; stall/idle/cost
+>   still terminate), which is what makes warn-don't-reject safe live.
+> - **Step 3 (RFC 0050 surface): PATCHable.** `max_cascade_depth` is the
+>   ninth flat knob on `ChannelConfigOverrides` — merge case, apply-path
+>   stamp, GET provenance, web-console row (the knob registry moved to
+>   `web/src/lib/channelKnobs.js` at the panel's 500-line cap). Two
+>   capture seams are **conditional** (the chair precedent, not the
+>   unconditional flat knobs): the adopt freeze (`toConfigOverrides`)
+>   captures only a declared knob — both so adopted channels keep
+>   tracking the fleet cap and so pre-v0.3.13 store rows keep hashing
+>   identically to their re-resolved YAML (no spurious equal-revision
+>   drift warning at the first post-upgrade boot) — and the ISSUE-0103
+>   first-edit baseline freezes only an explicit router entry, keying on
+>   `MaxCascadeDepthFor`'s set flag.
+>
+> Mechanics: `channelCascadeCaps` (own `cascadeMu`, the
+> `endVoteThresholds` map pattern) read at the publish clamp + fanout
+> suppression (`publishCommit` resolves once per publish), the
+> continuation's terminal-bound check, and `closeOnCascadeBound`'s log;
+> `ResolveChannelCascadeCaps` seeds declared channels at startup (the
+> `ResolveEndVotes` no-store-enumeration posture — everyone else falls
+> back to the fleet cap at read time, so DMs/threads are unchanged).
+> Deterministic CI pins the precedence, both loader rejections, the
+> above-fleet warn, the per-channel clamp/suppression binding beside an
+> untouched sibling channel, the **autonomous structural close at the
+> per-channel cap with the fleet cap untouched** (the headline shape),
+> the apply/inherit round-trip, the REST PATCH surface (including the
+> 400-mapping for `ErrInvalidMaxCascadeDepth`, which the new tests
+> caught missing), both conditional captures, and the schema (Go + the
+> Python `make validate` suite). Closure (status → resolved) rides the
+> Phase 3 release-prep arc per the plan: a per-channel cascade-depth arc
+> on a live autonomous roster verifies the knob binds where the fleet
+> value used to.
+
+> 2026-08-04 — **RESOLVED on the live arc.** The implementation merged at
+> [#810](https://github.com/mkhomutov/Persatrix/pull/810) (`19f8e98d`); the live
+> verification ran at v0.3.13 release-prep PR 1 and all four claims hold.
+> **Resolution**: `group:cascade-probe` overridden to 2 reads
+> `{"value": 2, "source": "channel"}` while `group:planning` reads
+> `{"value": 5, "source": "default"}`. **Option (c) above-fleet posture**: a live
+> `PATCH` to 9 (> fleet 5) returned **200** and applied, with the loud WARN
+> carrying `fleet_max_cascade_depth=5` and a `remedy` field — warned, never
+> bricked, exactly the `SetEndVoteParams` shape. **Runtime binding**: with the
+> channel capped at 1, three live persona replies each had their fanout
+> terminated — `channels: cascade limit reached … max_cascade_depth=1 depth=1
+> suppressed_recipients=3` — the bound that fired being the channel's own value,
+> while `group:planning` emitted no cascade WARN at all across the entire run.
+> One behavioural note worth carrying: at cap 2 the discussion converged before
+> the bound was reached (the salience bid ended the round, not the depth cap),
+> so on a well-posed discussion this knob is a backstop that never trips.
+>
+> **Found while verifying**: the knob shipped with **no CLI surface** — server
+> merge switch and web console only, so `persatrix channel config set …
+> max_cascade_depth=N` failed with `unknown config knob` and `config get` omitted
+> the row. The CLI↔server lockstep guard that exists to catch exactly that had
+> been silently blinded by this issue's own 500-line-cap file split (the guard
+> parsed zero flat knobs, while its non-empty assert stayed satisfied on the
+> nested knobs), and CI never ran the Rust suite at all. All three fixed at
+> release-prep PR 1 — see the
+> [execution report findings](../manual-tests/v0.3.13-execution-report.md#findings--follow-ups).
