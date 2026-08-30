@@ -188,3 +188,49 @@ def principal_scope_from_metadata(
     if pid is not None:
         return principal_scope(pid)
     return nullcontext()
+
+
+def seed_principal_metadata(
+    metadata: dict[str, object], raw: object,
+) -> bool:
+    """Seed ``metadata`` with a principal carried on a REST payload.
+
+    The REPLAY-side twin of the live ingress's
+    ``event.metadata[EVENT_PRINCIPAL_METADATA_KEY] = request_principal``
+    (``agents.server_servicers``), added for ISSUE-0130 shape (b): the
+    on-startup catch-up replay is not a live dispatch, so its principal
+    arrives as the ``principal_id`` field of a history row
+    (channel-store v12) rather than as gRPC metadata.  Both producers
+    write the SAME key, so the one binder
+    (:func:`principal_scope_from_metadata`) attributes a replayed turn
+    exactly as it attributes a live one.
+
+    ``raw`` is accepted untyped because it comes off parsed JSON.  A
+    non-empty string seeds and returns ``True``; anything else — a
+    missing key, ``""``, a non-string — seeds nothing and returns
+    ``False``, which is the reader's rule (:func:`principal_id_from_metadata`)
+    applied at the write end so the two cannot drift on what counts as
+    "no principal".
+
+    **The boolean is the consumer's real question**, not a convenience:
+    absent means *this row predates the column* (a pre-v12 orchestrator),
+    which is unattributable, while a present ``"local"`` is a real answer
+    ("no verified tenant" — an unauthenticated publish, or the whole
+    deployment under ``auth.mode: disabled``) and IS attributable.  Only
+    the presence distinguishes them, which is why
+    ``channelMessageResponse.PrincipalID`` is deliberately not
+    ``omitempty`` on the Go side.  ``agents.persona_runtime.close_path``
+    branches on exactly this to decide whether a replayed span may derive.
+
+    This is a WRITE-side attribution only.  The seeded value is evidence
+    of the same grade as the publish that produced it — the publish
+    ingress is ``policyPublic``, so a spoofed ``sender_id`` inside a live
+    dispatch's TTL can steer the ISSUE-0124 re-stamp — and it must never
+    become a READ selector: the replay handler performs no recall (the
+    ``replay_mode`` short-circuit returns before the gate and the LLM),
+    so this binds nothing but where the derived rows land.
+    """
+    if isinstance(raw, str) and raw:
+        metadata[EVENT_PRINCIPAL_METADATA_KEY] = raw
+        return True
+    return False

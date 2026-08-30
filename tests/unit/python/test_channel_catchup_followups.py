@@ -114,7 +114,7 @@ class TestReplayPreservesTimestamp:
         defense-in-depth on the REST/JSON catch-up seam means the
         catch-up path rejects them too.
 
-        The fallback in ``_build_replay_event`` is now pure
+        The fallback in ``build_replay_event`` is now pure
         defense-in-depth for an impossible case — the validator
         prevents malformed timestamps from ever reaching it.
         """

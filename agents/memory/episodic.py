@@ -28,6 +28,7 @@ from ..observability.spans import (
 from ..principal_id import resolve_principal_id_silent
 from ..session_id import current_session_id, normalize_session_id, resolve_session_id_silent
 from ._boundary import warn_external_construction
+from ._episodic_replay_dedup import episode_exists_for_interaction
 from ._epoch_filter import resolve_active_epoch
 from ._principal_filter import resolve_active_principal
 from ._salience import EPISODIC_APPEND_SALIENCE, emit_for_tier, emit_session_write
@@ -291,6 +292,16 @@ class EpisodicMemory(_EpisodicNotesAPIMixin, _EpisodicStateAPIMixin):
     async def update_episode_summary(self, interaction_id: str, summary: str) -> bool:
         return await _update_episode_summary(
             self._ensure_db(), self._agent_id, interaction_id, summary)
+
+    async def has_episode_for_interaction(self, interaction_id: str) -> bool:
+        """ISSUE-0130 (b): was this interaction already turned into a row?
+
+        The close path's re-derivation guard for replayed spans — see
+        :mod:`agents.memory._episodic_replay_dedup` for why the lookup
+        is not principal-filtered and must stay off the read path.
+        """
+        return await episode_exists_for_interaction(
+            self._ensure_db(), self._agent_id, interaction_id)
 
     async def recall(
         self,

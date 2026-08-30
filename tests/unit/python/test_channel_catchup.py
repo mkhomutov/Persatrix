@@ -379,7 +379,7 @@ class TestReplayWireMetadata:
     propagation after every restart (PR 607 second-pass review)."""
 
     def test_replay_event_carries_validated_wire_keys(self):
-        from agents.channel_catchup import _build_replay_event
+        from agents.channel_replay_event import build_replay_event
 
         msg = _msg(
             msg_id="m1", channel_id="group:planning",
@@ -391,7 +391,7 @@ class TestReplayWireMetadata:
             "previous_interaction_close_trigger": "end_votes",
             "cascade_depth": 1,
         }
-        event = _build_replay_event(
+        event = build_replay_event(
             msg, "group:planning", "when_mentioned",
             _channel(channel_id="group:planning"),
         )
@@ -408,7 +408,7 @@ class TestReplayWireMetadata:
         as untracked, a half pair / unrecognised trigger seeds nothing,
         and rows with no metadata (pre-v0.3.8 history) replay exactly
         as before."""
-        from agents.channel_catchup import _build_replay_event
+        from agents.channel_replay_event import build_replay_event
 
         base = _msg(
             msg_id="m1", channel_id="group:planning",
@@ -417,7 +417,7 @@ class TestReplayWireMetadata:
         channel = _channel(channel_id="group:planning")
 
         oversized = dict(base, metadata={"interaction_id": "x" * 129})
-        event = _build_replay_event(
+        event = build_replay_event(
             oversized, "group:planning", "when_mentioned", channel,
         )
         assert "interaction_id" not in event.metadata
@@ -427,14 +427,14 @@ class TestReplayWireMetadata:
             "previous_interaction_id": "wire-A",
             "previous_interaction_close_trigger": "cosmic-rays",
         })
-        event = _build_replay_event(
+        event = build_replay_event(
             junk_trigger, "group:planning", "when_mentioned", channel,
         )
         assert event.metadata["interaction_id"] == "wire-B"
         assert "previous_interaction_id" not in event.metadata
         assert "previous_interaction_close_trigger" not in event.metadata
 
-        event = _build_replay_event(
+        event = build_replay_event(
             dict(base), "group:planning", "when_mentioned", channel,
         )
         assert event.metadata == {"replay_mode": True}

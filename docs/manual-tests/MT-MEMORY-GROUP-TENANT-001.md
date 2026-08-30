@@ -187,8 +187,10 @@ Read the close-derived episode (`turn_count > 1`) and the facts extracted
 from it.
 
 ```sql
-SELECT principal_id, turn_count, scope, substr(summary,1,200) FROM episodes WHERE turn_count > 1;
-SELECT principal_id, subject, predicate, object FROM facts ORDER BY asserted_at DESC LIMIT 20;
+SELECT principal_id, speaker_id, turn_count, scope, substr(summary,1,200)
+  FROM episodes WHERE turn_count > 1;
+SELECT principal_id, speaker_id, subject, predicate, object
+  FROM facts ORDER BY asserted_at DESC LIMIT 20;
 ```
 
 | | Expected |
@@ -198,7 +200,7 @@ SELECT principal_id, subject, predicate, object FROM facts ORDER BY asserted_at 
 
 - [ ] With three personas in the room, Leg 4 yields **three** `local` `turn_count > 1` rows, not one. A single merged `local` row means the speaker dimension of the key did not land — the exact defect [ISSUE-0131](../issues/ISSUE-0131-derived-memory-has-no-speaker-attribution.md) names, and the one plain Option A would have shipped.
 
-- [ ] The summary text and the `principal_id` of every `turn_count > 1` row are pasted into the execution report. *The pairing is the finding — either value alone proves nothing.*
+- [ ] The `(principal_id, speaker_id, summary)` **triple** of every `turn_count > 1` row is pasted into the execution report. *The triple is the finding — no value alone proves anything, and a pair proves only the tenant half: with every persona sharing the `local` principal, `speaker_id` is the ONLY column that distinguishes [ISSUE-0131](../issues/ISSUE-0131-derived-memory-has-no-speaker-attribution.md)'s three records from one row written three times.*
 
 ### Leg 5 — The travel: shared-tenant content reaches another room
 
@@ -250,6 +252,34 @@ Set `auth.mode: disabled`, restart, repeat Leg 1 with no credential.
 - [ ] No `principal.id` span attribute on any dispatch — the header is absent, not empty.
 - [ ] **Record count is NOT unchanged from v0.3.14.** Phase 0b splits on speaker regardless of auth mode, so a room of N personas now closes N records where v0.3.14 closed one. This leg was originally titled "byte-identical"; that claim held for Option A alone and does not survive Phase 0b. The two checks above still hold — the *principal* axis is genuinely unchanged under `disabled` — but the row count is not, and this is the deployment where the reserve multiplier bites hardest, since every speaker shares the one `local` principal.
 
+### Leg 9 — The replayed write: a restart derives nothing twice
+
+The [ISSUE-0130](../issues/ISSUE-0130-catchup-replay-rederives-memory-under-default-principal.md)
+shape-(b) leg. With Legs 1–4's traffic in the room, snapshot **both**
+partitions, restart the fleet, wait for catch-up, and snapshot again —
+sending **no new traffic** in between, or the comparison measures the
+traffic instead.
+
+```sql
+SELECT principal_id, speaker_id, COUNT(*) FROM episodes GROUP BY 1, 2;
+SELECT principal_id, speaker_id, COUNT(*) FROM facts GROUP BY 1, 2;
+```
+
+```bash
+docker compose restart orchestrator && sleep 20   # then wait for /healthz
+```
+
+| | Expected |
+|---|---|
+| **v0.3.14** | Flat, for the wrong reason: the leak-stopper derives nothing at all from a replayed span, so a restart adds no rows and also recovers no memory of the window the agent was down for. |
+| **after B1+B2** | **Flat, in every partition.** The replay now derives — under the tenant `messages.principal_id` names — so the counts that must not move are `alice-person`'s, not `local`'s. |
+
+- [ ] Both snapshots are pasted verbatim, per `(principal_id, speaker_id)`, and are **identical**.
+- [ ] Read `alice-person` first. This issue originally framed the missing check as a `local` read, which was right while every replayed derivation went there; once (b) lands, a re-derived duplicate appears in the **attributed** partition, so a `local`-only assertion passes at exactly the moment the regression is worst.
+- [ ] Restart **again** without traffic. The bar is that N restarts derive once, not that the second one is quiet.
+- [ ] Now send one message and restart a third time. New rows **must** appear: the guard bounds duplication, and a leg that only proves nothing was written cannot tell that apart from replay having stopped deriving at all.
+- [ ] No agent process is restarted by hand at any point ([ISSUE-0125](../issues/ISSUE-0125-agents-never-reregister-after-orchestrator-restart.md) — this leg is also that fix's live proof; `GET /api/v1/agents` non-empty after the restart is the check).
+
 ---
 
 ## Expected Results Summary
@@ -264,6 +294,7 @@ Set `auth.mode: disabled`, restart, repeat Leg 1 with no credential.
 | 6 | Asymmetry | aggregate under `alice-person`, narrates personas | same as Leg 4 |
 | 7 | Second human | reference = the leak, recorded | no reference |
 | 8 | `disabled` | `local`, no header, one record | `local`, no header, **N records** (speaker split is auth-independent) |
+| 9 | Replay across a restart | flat (nothing derives from a replay) | flat **in every partition** (replay derives, once) |
 
 ---
 
@@ -283,16 +314,20 @@ Set `auth.mode: disabled`, restart, repeat Leg 1 with no credential.
    the `relationship` tier charges the RFC 0017 budget without calling
    `record_admission`, so `PERSATRIX_MEMORY_PROVENANCE=1` is silent for
    exactly the cross-room identity read Leg 5 turns on.
-4. **MT-MEMORY-MULTIUSER-001 Edge Case 2** currently reads that two
-   people in one group channel "get per-speaker persona memory". True
-   for per-turn writes; **not** for the close-derived aggregate. Narrow
-   that wording when R-1 lands.
+4. **MT-MEMORY-MULTIUSER-001 Edge Case 2** reads that two people in one
+   group channel "get per-speaker persona memory". That was true for
+   per-turn writes only, and this note used to say *narrow* it. R-1 made
+   the claim true for the close-derived aggregate as well, so the edit is
+   the opposite one — **widen** it back to the now-true claim. Owned by
+   [residuals PR 5](../issues/ISSUE-0082-residuals-pr-plan.md); corrected
+   here so an executor does not make the withdrawn edit.
 
 ---
 
 ## Sign-off
 
-- [ ] All eight legs run on a live provider, with the expected column used (`v0.3.14` or post-fix) stated in the report.
-- [ ] Leg 2's per-dispatch `principal.id` table — **the** Leg 2 finding, since storage cannot see R-2 — and Leg 4 `(principal_id, summary)` pairs pasted verbatim.
+- [ ] All **ten** legs (0–9) run on a live provider, with the expected column used (`v0.3.14` or post-fix) stated in the report. *This line read "eight" while the procedure held nine; the restart leg makes ten.*
+- [ ] Leg 2's per-dispatch `principal.id` table — **the** Leg 2 finding, since storage cannot see R-2 — and Leg 4's `(principal_id, speaker_id, summary)` **triples** pasted verbatim.
+- [ ] Leg 9's two row-count snapshots pasted verbatim, per `(principal_id, speaker_id)`, in **both** partitions.
 - [ ] The two-human aggregate — unreachable on shipped verbs — is pinned deterministically by the R-1 unit gate (one tracker, two principals, one room scope, two records) rather than asserted from this arc.
 - [ ] MT-MEMORY-MULTIUSER-001 re-run green as the per-turn regression.

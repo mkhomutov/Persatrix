@@ -1,4 +1,9 @@
-"""The multi-turn ingest payload — one builder, two consumers.
+"""The multi-turn ingest shapes — what a turn carries, and what it opens.
+
+Two builders, both translating an :class:`~agents.persona_types.AgentEvent`
+into what the tracker is handed: :func:`build_turn_payload` for the turn
+itself, :func:`frozen_open_capture` for the fields a turn freezes onto the
+record when it is the one that OPENS it.
 
 Extracted from ``_EpisodeRoutingMixin._handle_multi_turn_event``
 (v0.3.15 residuals PR 3) so the close-notification room fan
@@ -14,12 +19,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from ..channel_event_classification import wire_channel_classification
 from ..memory.interaction_types import ROOM_CLOSE_TURN_KEY
+from ..principal_id import principal_id_from_metadata
 
 if TYPE_CHECKING:
     from ..persona_types import AgentEvent
 
-__all__ = ["build_turn_payload"]
+__all__ = ["build_turn_payload", "frozen_open_capture"]
 
 
 def build_turn_payload(
@@ -56,9 +63,57 @@ def build_turn_payload(
             "sender_participant_type", "agent",
         ),
     }
+    # ISSUE-0130 shape (b): the wire message id, carried for the replay
+    # span identity (:mod:`.replay_identity`) and — like ``text`` above —
+    # STRIPPED before the turn reaches ``context_json``, so RFC 0020 §D's
+    # "the episodic store is not a message log" stays true and the
+    # FTS-indexed column gains no wire ids.  Transient by construction.
+    if event.message_id:
+        payload["message_id"] = event.message_id
     message_text = (event.payload or {}).get("content")
     if isinstance(message_text, str) and message_text.strip():
         payload["text"] = message_text
     if room_close:
         payload[ROOM_CLOSE_TURN_KEY] = True
     return payload
+
+
+def frozen_open_capture(event: AgentEvent) -> dict[str, Any]:
+    """The record fields ``event`` freezes if its turn OPENS the record.
+
+    Extracted from ``_EpisodeRoutingMixin._handle_multi_turn_event``
+    (v0.3.15 PR B2) — that module was at the 500-line cap, and this is
+    the set the cap kept growing: four captures before this PR, five
+    after.  Naming the set is worth more than the lines, because they
+    share a rule that is invisible when they are spelled inline among
+    ordinary keyword arguments: the tracker honours every one of them
+    **only on open**, so a later turn arriving on an already-open record
+    cannot relabel it.  ``speaker_id`` is in the set for a different
+    reason — it is a KEY axis, so it is only-on-open trivially: a
+    different speaker is a different record.
+
+    * ``classification`` / ``source_channel_id`` — RFC 0037 §C, the
+      acting channel's verbatim wire classification (through the shared
+      drift-pinned reader) and its id.
+    * ``replayed`` — ISSUE-0130: this turn came from the on-startup
+      catch-up replay, not a live dispatch.
+    * ``replay_attributed`` — ISSUE-0130 shape (b): and it carried a
+      persisted principal (channel-store v12), so the span it opens may
+      derive under that tenant instead of being skipped as
+      unattributable.  Read off the metadata rather than the record's
+      resolved ``principal_id`` because a seeded ``"local"`` and an
+      unseeded default are the same value there — the presence is the
+      whole signal, and this is the last point that still has it.
+    * ``speaker_id`` — ISSUE-0131: the turn lands in ITS sender's
+      record.  The principal half of the key resolves ambient (the
+      ``on_event`` request scope) inside the tracker.
+    """
+    return {
+        "classification": wire_channel_classification(event),
+        "source_channel_id": event.channel_id or None,
+        "replayed": event.metadata.get("replay_mode") is True,
+        "replay_attributed": (
+            principal_id_from_metadata(event.metadata) is not None
+        ),
+        "speaker_id": event.sender_id,
+    }

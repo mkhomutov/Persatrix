@@ -26,6 +26,7 @@ from .classification import normalize_for_stamp
 from .close_entries import own_turn_items
 from .finalize_close import finalize_closed_interaction
 from .interaction_boundary import stale_close_reason
+from .replay_identity import replay_span_already_derived
 
 if TYPE_CHECKING:
     from ..llm_client import LLMClient
@@ -33,6 +34,15 @@ if TYPE_CHECKING:
     from . import MemoryNamespace
 
 logger = logging.getLogger(__name__)
+
+#: Turn-payload keys that exist only in memory and never reach
+#: ``episodes.context_json``.  ``text`` is the inbound body the RFC 0026
+#: extractor needs (ISSUE-0054); ``message_id`` is the wire id the
+#: ISSUE-0130 (b) replay span identity is built from.  Both are read off
+#: the in-memory turn during the close and dropped at persistence, so
+#: RFC 0020 §D's "the episodic store is not a message log" holds for
+#: bodies and for wire ids alike.
+_TRANSIENT_TURN_KEYS: frozenset[str] = frozenset({"text", "message_id"})
 
 __all__ = [
     "close_replayed_scopes",
@@ -131,18 +141,33 @@ async def persist_closed_interaction(
     """
     if interaction.turn_count == 0:
         return  # idle no-turn scope — nothing to persist.
-    if interaction.replayed:
-        # ISSUE-0130 — the leak-stopper.  This interaction was OPENED by an
-        # on-startup catch-up replay, whose turns carry no principal: the
-        # orchestrator's ``messages`` table has no principal column, so
-        # ``_build_replay_event`` has nothing to seed and the persona binds
-        # its default (``local``).  Summarising and extracting facts from
-        # such a span writes one authenticated person's content into the
-        # shared tenant, where every unauthenticated caller resolves —
-        # unbounded, because catch-up has no watermark and re-ingests the
-        # window on every boot (RFC 0011 OQ #8).
+    if interaction.replayed and not interaction.replay_attributed:
+        # ISSUE-0130 — the leak-stopper, NARROWED by shape (b) (v0.3.15
+        # PR B2) from "every replayed span" to the genuinely
+        # unattributable ones.
         #
-        # Skipping is bounded to spans that are ENTIRELY replay: the
+        # What it stops is unchanged.  This interaction was OPENED by an
+        # on-startup catch-up replay; if that replay could not establish
+        # whose tenant the messages belonged to, summarising them and
+        # running the RFC 0026 extractor over them writes one
+        # authenticated person's content into the shared ``local`` tenant,
+        # where the whole persona fleet, every autonomous turn and every
+        # caller under ``auth.mode: disabled`` resolves — unbounded,
+        # because catch-up has no watermark and re-ingests the window on
+        # every boot (RFC 0011 OQ #8).
+        #
+        # What changed is when that applies.  ``messages.principal_id``
+        # (channel-store v12, PR B1) persists the tenant at publish and
+        # ``build_replay_event`` seeds it, so ``replay_attributed`` marks
+        # the spans that DO know, and they derive below under their own
+        # principal.  The v0.3.14 cost this removes is the one that could
+        # not be told apart: "no principal because the deployment is
+        # single-tenant", where ``local`` is CORRECT, from "no principal
+        # because replay lost it".  A v12 orchestrator answers both — a
+        # present ``local`` is the first — and only a pre-v12 one (or a
+        # row from before the migration) still reaches this branch.
+        #
+        # Skipping is still bounded to spans that are ENTIRELY replay: the
         # catch-up boundary (:func:`close_replayed_scopes` at pass end, and
         # the replay→live split in ``_handle_multi_turn_event``) closes a
         # replay-opened scope before any live turn can join it, so a live
@@ -151,17 +176,11 @@ async def persist_closed_interaction(
         # that boundary this flag would eat the first post-restart
         # conversation in every replayed scope — catch-up opens scopes and
         # never closes them on its own (RFC 0011 OQ #8).
-        #
-        # This is the v0.3.14 leak-stopper, not the whole fix: it cannot
-        # tell "no principal because the deployment is single-tenant"
-        # (where ``local`` is CORRECT) from "no principal because replay
-        # lost it".  v0.3.15 persists the principal on the message row and
-        # seeds it here, at which point this skip narrows to genuinely
-        # unattributable spans.
         logger.debug(
-            "ISSUE-0130: skipping close-path derivation for replayed "
-            "interaction (agent=%s scope=%s interaction_id=%s turns=%d) — "
-            "a replayed span has no principal to attribute memory to",
+            "ISSUE-0130: skipping close-path derivation for unattributable "
+            "replayed interaction (agent=%s scope=%s interaction_id=%s "
+            "turns=%d) — the replayed rows carried no principal, so the "
+            "orchestrator predates channel-store v12",
             agent_id, interaction.scope, interaction.interaction_id,
             interaction.turn_count,
         )
@@ -190,6 +209,22 @@ async def persist_closed_interaction(
     # the prompt header's ``shown_turns`` fix corrects in
     # ``summarize_close`` (identical whenever nothing was excluded).
     own_turns = own_turn_items(interaction)
+    if interaction.replayed and await replay_span_already_derived(
+        episodic=episodic, interaction=interaction, agent_id=agent_id,
+        message_ids=[
+            str(t.payload.get("message_id") or "")
+            for _, t in own_turns
+            if t.payload.get("message_id")
+        ],
+    ):
+        # ISSUE-0130 (b) scope lock 4: narrowing the skip above without
+        # this hands back the growth curve it bounded — the same last-N
+        # window re-summarised on every boot, now under the correct
+        # tenant instead of ``local``, which is a relocation and not a
+        # fix.  The guard, its identity and the residual it does not
+        # cover are :mod:`.replay_identity`; note it also assigns the
+        # boot-stable ``interaction_id`` the row below is written with.
+        return
     ctx: dict[str, Any] = {
         "scope": interaction.scope,
         "close_reason": interaction.close_reason,
@@ -211,9 +246,16 @@ async def persist_closed_interaction(
         # multi-turn path stashes for the RFC 0026 extractor: Phase 2 reads it
         # off the in-memory interaction, so the persisted ``context_json``
         # stays body-free.
+        # ``text`` (ISSUE-0054) and ``message_id`` (ISSUE-0130 (b)) are
+        # both TRANSIENT turn fields: the extractor and the replay span
+        # identity read them off the in-memory turn, and neither reaches
+        # ``context_json`` — RFC 0020 §D, the episodic store is not a
+        # message log, and this column is the FTS-indexed one recall
+        # searches.
         "turns": [
             {"at": t.at, "payload": {
-                k: v for k, v in t.payload.items() if k != "text"}}
+                k: v for k, v in t.payload.items()
+                if k not in _TRANSIENT_TURN_KEYS}}
             for _, t in own_turns
         ],
     }
@@ -248,9 +290,11 @@ async def persist_closed_interaction(
     # Single-tenant deployments are unaffected: the frozen value was
     # resolved through the same precedence the tiers use (task-local
     # scope → ``PERSATRIX_PRINCIPAL_ID`` → ``local``), so it equals what
-    # the ambient read would have produced.  A replayed span never
-    # reaches here — the ISSUE-0130 skip returns above, so an
-    # unattributable record cannot bind a tenant it does not have.
+    # the ambient read would have produced.  An UNATTRIBUTABLE replayed
+    # span never reaches here — the ISSUE-0130 skip returns above — so a
+    # record still cannot bind a tenant it does not have; an attributed
+    # one does reach here, and binds the tenant the message row named,
+    # which is the whole of shape (b).
     #
     # This closes the principal half of the ISSUE-0123 boundary.  The
     # SPEAKER half is projected below (``speaker_id=``): migration 18's

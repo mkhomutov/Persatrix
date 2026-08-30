@@ -144,6 +144,24 @@ class Interaction:
     # the close path skips derivation when this is set.  See
     # :func:`~agents.persona_runtime.close_path.persist_closed_interaction`.
     replayed: bool = False
+    # ISSUE-0130 shape (b) — whether the replayed turn that OPENED this
+    # record carried a persisted principal (channel-store v12's
+    # ``messages.principal_id``, seeded by
+    # :func:`~agents.principal_id.seed_principal_metadata`).  Meaningful
+    # only while ``replayed`` is set, and frozen at open beside it.
+    #
+    # It exists because the record key CANNOT answer the question.  A
+    # seeded ``local`` and an unseeded default are the same
+    # ``principal_id`` on the record, and they mean opposite things: the
+    # first is a real answer ("this publish had no verified tenant" —
+    # an agent publish, or the whole deployment under
+    # ``auth.mode: disabled``), the second is the absence of an answer
+    # ("this orchestrator predates the column"), which is precisely the
+    # ambiguity the v0.3.14 leak-stopper could not resolve and so
+    # resolved conservatively for every span.  Only the field's PRESENCE
+    # on the wire separates them, so the presence is what is recorded
+    # here — the value is already on ``principal_id`` above.
+    replay_attributed: bool = False
     # RFC 0037 §C (v0.3.12 PR 3): the acting channel's wire classification
     # captured when the interaction *opened*, frozen for its lifetime — the
     # single point of truth the episodic and facts tiers inherit their

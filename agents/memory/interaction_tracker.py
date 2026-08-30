@@ -178,6 +178,7 @@ class InteractionTracker:
         classification: str | None = None,
         source_channel_id: str | None = None,
         replayed: bool = False,
+        replay_attributed: bool = False,
         principal_id: str | None = None,
         speaker_id: str | None = None,
     ) -> Interaction:
@@ -204,6 +205,13 @@ class InteractionTracker:
         the other two key axes, resolved per the class docstring and
         frozen onto the record — trivially only-on-open, since a
         different pair IS a different key.
+
+        ``replay_attributed`` (ISSUE-0130 shape (b)) rides beside
+        ``replayed`` under the same only-on-open rule and answers the one
+        question the key cannot: whether that replayed turn carried a
+        persisted principal at all, as opposed to resolving the
+        single-tenant default.  See
+        :class:`~agents.memory.interaction_types.Interaction`.
         """
         key = resolve_record_key(scope, principal_id, speaker_id)
         existing = self._open.get(key)
@@ -216,6 +224,7 @@ class InteractionTracker:
             started_at=ts,
             session_id=session_id or LEGACY_SESSION_ID,
             replayed=replayed,
+            replay_attributed=replay_attributed,
             classification=classification,
             source_channel_id=source_channel_id,
             principal_id=key[0],
@@ -235,6 +244,7 @@ class InteractionTracker:
         classification: str | None = None,
         source_channel_id: str | None = None,
         replayed: bool = False,
+        replay_attributed: bool = False,
         principal_id: str | None = None,
         speaker_id: str | None = None,
     ) -> Interaction:
@@ -265,6 +275,7 @@ class InteractionTracker:
                 classification=classification,
                 source_channel_id=source_channel_id,
                 replayed=replayed,
+                replay_attributed=replay_attributed,
                 principal_id=key[0], speaker_id=key[1],
             )
         interaction.turns.append(Turn(at=ts, payload=payload or {}))

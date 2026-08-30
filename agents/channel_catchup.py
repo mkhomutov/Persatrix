@@ -24,23 +24,26 @@ Behaviour:
 * **Oldest-first replay.** The orchestrator returns history newest-first
   (RFC 0011 §C); the fetcher reverses before replay so
   ``InteractionTracker`` sees turns in conversational order.
-* **No watermark, no dedup.** Per OQ #8, watermark + per-tick
-  recovery is deferred. v0.3.0 ships on-startup last-N as the only
-  trigger, so the fetcher may re-ingest messages from a previous run.
-  Self-sender skip handles own outbound; for peer messages,
-  ``InteractionTracker.add_turn`` does **not** deduplicate by
-  ``message_id`` — it appends every turn. K consecutive restarts
-  within the catch-up window produce ``K × N`` turns on the first
-  post-restart interaction. Duplicates share the same wire shape and
-  scope, but ``turn_count`` grows linearly with restart count.
+* **No watermark; dedup at the DERIVATION boundary, not at ingest.**
+  Per OQ #8, the ``?since=`` watermark and per-tick recovery are still
+  deferred, so the fetcher re-ingests the last-N window on every boot
+  and ``InteractionTracker.add_turn`` still appends every turn without
+  deduplicating by ``message_id``. What v0.3.15 PR B2 added is one
+  step further down: a replayed span that would derive an episode
+  identical to one an earlier boot already derived does not derive it
+  again (``persona_runtime.replay_identity``). The ingest duplication
+  is therefore still real and still visible in ``turn_count``, and it
+  is bounded where it used to compound — in the persisted memory.
   (PR-265 review L5: earlier "idempotent in shape" wording was
-  misleading — it suggested dedup; the tracker doesn't.)
+  misleading — it suggested ingest dedup; the tracker doesn't.)
 * **Catch-up → live boundary.** Replay events carry no ``chat_end`` /
   ``session_end`` metadata, so PR-265 review L6 left the scopes they
-  open bleeding into the next live turn. ISSUE-0130 closed that: a
-  replay-opened span derives no memory (no principal to attribute it
-  to), so a live turn joining it would lose its own conversation's
-  memory too. Both ends now close with ``REASON_CATCHUP_COMPLETE`` —
+  open bleeding into the next live turn. ISSUE-0130 closed that:
+  a replay-opened span derives under its own attribution or not at
+  all, so a live turn joining it would be summarised as part of a
+  span it does not belong to — and, before shape (b) seeded the
+  principal, under a tenant that was not its own. Both ends now
+  close with ``REASON_CATCHUP_COMPLETE`` —
   every replay-opened scope at pass end, plus any a live turn reaches
   first (dispatch is already serving while catch-up runs), which the
   persona splits on ingest. ``Interaction.started_at`` is still *boot*
@@ -63,14 +66,10 @@ from urllib.parse import quote
 
 import aiohttp
 
-from .channel_event_classification import seed_channel_classification
 from .channel_history_fetcher import HttpChannelHistoryFetcher
-from .channel_validation import (
-    parse_channel_timestamp,
-    validate_channel_message_dict,
-)
-from .channel_wire_metadata import seed_replay_metadata
-from .persona_types import AgentEvent, EventType
+from .channel_replay_event import build_replay_event
+from .channel_validation import validate_channel_message_dict
+from .persona_types import AgentEvent
 
 if TYPE_CHECKING:
     from .base import BaseAgent
@@ -275,7 +274,7 @@ async def _replay_channel_history_inner(
                     agent.agent_id, channel_id, msg.get("id", ""), err,
                 )
                 continue
-            event = _build_replay_event(msg, channel_id, respond_policy, ch)
+            event = build_replay_event(msg, channel_id, respond_policy, ch)
             try:
                 await agent.on_event(event)
             except Exception:
@@ -418,83 +417,3 @@ async def replay_for_persona_agents(
             # span that derives nothing.  Best-effort, does not raise:
             # ``close_path.close_replayed_scopes``.
             await agent.close_replayed_interactions()
-
-
-def _build_replay_event(
-    msg: dict,
-    channel_id: str,
-    respond_policy: str,
-    channel: dict,
-) -> AgentEvent:
-    """Build a CHANNEL_MESSAGE ``AgentEvent`` matching the shape that
-    ``ReceiveChannelMessage`` produces on the live path.
-
-    ``metadata["replay_mode"] = True`` is the marker the action-loop
-    short-circuit reads; without it the runtime would treat the row as
-    live traffic and fire the LLM.
-
-    PR-265 review S2: wire ``msg["timestamp"]`` (RFC 3339, set by the
-    orchestrator at publish time — see
-    ``internal/server/channel_types.go::channelMessageResponse``) is
-    parsed to epoch seconds and forwarded into
-    ``AgentEvent.timestamp``. Without this, replayed events default to
-    ``time.time()`` at boot, defeating RFC 0021 P1 now-anchor / recency
-    rendering, poisoning ``Turn.payload["timestamp"]``, and writing
-    wrong ``started_at`` on episodic rows. Shared parser with
-    ``validate_channel_message_event``.
-
-    Fallback (post-PR-265 L1 second pass): malformed timestamps cannot
-    reach this function — the catch-up loop runs every row through
-    ``validate_channel_message_dict`` first. The ``parsed_ts is None``
-    branch below is defense-in-depth against an impossible state.
-
-    PR-265 review L2: ``thread_parent_sender_id`` is intentionally
-    **not** propagated. The field exists on the live proto but **not**
-    on ``channelMessageResponse`` JSON shape — nothing to forward.
-    Documented gap, not a defect: the only in-tree consumer (the
-    response gate) is bypassed by the replay short-circuit. Future
-    threading-aware consumers will need a Go-side schema bump.
-
-    PR 607 second-pass review: the row's wire interaction keys
-    (``interaction_id`` + the OQ 5 close-cause pair) ARE propagated,
-    re-validated by :func:`agents.channel_wire_metadata
-    .seed_replay_metadata` with the live seed point's exact rules.
-    Without them a replayed span covering a vote-closed conversation
-    and the channel's next topic merges into one local record, and the
-    merged record opens with no wire id — the first LIVE id then reads
-    as adoption-not-rotation, silently disarming the RFC 0030 close
-    propagation after every restart.  Rotation still SEGMENTS the
-    replayed spans; what it no longer does is derive from them —
-    ISSUE-0130 skips the close-path summariser for every replay-opened
-    span, which has no principal to attribute a summary to.
-    """
-    payload: dict[str, Any] = {
-        "content": msg.get("content", ""),
-        "channel_type": channel.get("channel_type", ""),
-        "mentions": list(msg.get("mentions") or []),
-        "respond_policy": respond_policy,
-    }
-    raw_ts = msg.get("timestamp")
-    parsed_ts = (
-        parse_channel_timestamp(raw_ts) if isinstance(raw_ts, str) else None
-    )
-    metadata: dict[str, Any] = {"replay_mode": True}
-    seed_replay_metadata(metadata, msg.get("metadata"))
-    # RFC 0037 §B (v0.3.12 PR 2): stamp the channel's §A classification from
-    # the channel-list object already threaded here — the REST leg of the
-    # "both delivery paths carry the field" contract, mirroring the live
-    # path's typed-field seed. A pre-v0.3.12 orchestrator's JSON has no such
-    # key and seeds nothing (the read-side `public` floor, §A rule (b)).
-    seed_channel_classification(metadata, channel.get("classification"))
-    event_kwargs: dict[str, Any] = {
-        "event_type": EventType.CHANNEL_MESSAGE,
-        "payload": payload,
-        "channel_id": channel_id,
-        "sender_id": msg.get("sender_id"),
-        "message_id": msg.get("id"),
-        "thread_id": msg.get("thread_id") or None,
-        "metadata": metadata,
-    }
-    if parsed_ts is not None:
-        event_kwargs["timestamp"] = parsed_ts
-    return AgentEvent(**event_kwargs)

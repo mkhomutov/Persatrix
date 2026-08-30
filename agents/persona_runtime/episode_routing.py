@@ -27,7 +27,6 @@ if TYPE_CHECKING:
     from ..persona_types import AgentAction, AgentEvent
     from . import MemoryNamespace
 
-from ..channel_event_classification import wire_channel_classification
 from ..memory.boundary_detectors import (
     DEFAULT_CLOSING_GRACE_SEC,
     REASON_STRUCTURAL,
@@ -54,7 +53,7 @@ from .interaction_boundary import (
     scope_wire_anchor,
     wire_admits_record,
 )
-from .turn_payload import build_turn_payload
+from .turn_payload import build_turn_payload, frozen_open_capture
 from .vote_close import PendingVoteClose, park_end_vote_close
 
 logger = logging.getLogger(__name__)
@@ -356,19 +355,11 @@ class _EpisodeRoutingMixin:
         interaction = self._interaction_tracker.add_turn(
             scope, payload=payload,
             session_id=self._active_write_session_id,
-            # RFC 0037 §C (PR 3): the interaction-open capture pair —
-            # verbatim wire classification (the shared drift-pinned reader)
-            # + acting channel id; honoured only when this turn OPENS the
-            # interaction (frozen-at-open, the ``session_id`` rule).
-            classification=wire_channel_classification(event),
-            source_channel_id=event.channel_id or None,
-            # ISSUE-0130: frozen-at-open like the pair above; the close path
-            # skips derivation for a replayed span (no principal to attribute).
-            replayed=event.metadata.get("replay_mode") is True,
-            # ISSUE-0131: the speaker half of the key — the turn lands in
-            # ITS sender's record; the principal half resolves ambient
-            # (the ``on_event`` request scope) inside the tracker.
-            speaker_id=event.sender_id,
+            # The frozen-at-open capture set — RFC 0037 §C classification
+            # + channel, the ISSUE-0130 replay pair, and the ISSUE-0131
+            # speaker key half.  One named set in ``turn_payload`` since
+            # v0.3.15 PR B2, where the rule they share is stated.
+            **frozen_open_capture(event),
         )
         # Stamp the wire id the interaction was opened under (first turn
         # that carries one wins) plus its known predecessor — the
