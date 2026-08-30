@@ -41,10 +41,19 @@ async def episode_exists_for_interaction(
     on top of either would duplicate exactly what the guard exists to
     prevent, and the janitor already owns the recovery of a stuck row.
 
-    ``episodes`` has no index on ``interaction_id`` (adding one would be a
-    migration, and this release ships two already, both named in the
-    checklist), so this rides ``idx_episodes_agent`` and filters — one
-    agent's episodes, once per replayed span per boot.
+    Indexed by ``idx_episodes_interaction`` on
+    ``(agent_id, interaction_id)`` — migration 19, added by the PR B2
+    review.  It first shipped riding ``idx_episodes_agent`` and filtering,
+    on the reasoning that "this release ships two migrations already":
+    that was wrong twice over.  The v0.3.15 scope lock's "two stores, two
+    migrations" says the two stores are DISJOINT, not that the release
+    may ship no more; and the checklist it cited is written at
+    release-prep and did not exist.  Meanwhile the scan is linear in the
+    agent's episode count, which has no ceiling for a persona, and the
+    same predicate was already hot on the LIVE close path
+    (``update_episode_summary``, once per speaker per room per close), so
+    the index was never really this query's to pay for.  It is a covering
+    index for this one: 15.8 ms → 0.002 ms at 20 000 episodes.
     """
     async with db.execute(
         "SELECT 1 FROM episodes WHERE agent_id = ? AND interaction_id = ? "
