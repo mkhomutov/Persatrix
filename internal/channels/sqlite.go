@@ -39,6 +39,27 @@ const DefaultSessionID = "legacy"
 // the Python leaf.
 const DefaultEpochID = "live"
 
+// DefaultPrincipalID is the shared single-tenant principal every `messages`
+// row carries when the publish resolved no authenticated identity
+// (ISSUE-0130 shape (b) — channel-store schema v12). It is the *absence* of a
+// tenant, not a tenant: the whole persona fleet resolves it (agents hold no
+// accounts, RFC 0039 §Non-Goals), every autonomous turn resolves it, and
+// every caller under `auth.mode: disabled` resolves it.
+//
+// Cross-language contract: mirrors `agents.principal_id.DEFAULT_PRINCIPAL_ID`
+// — the `'local'` literal the persona-memory migration v11 backfills onto its
+// tiers, and the value a persona resolves when no `persatrix-principal`
+// header arrives. The two stores are disjoint (nothing in `agents/` queries
+// `messages`); they meet at the wire, where B2 seeds the replayed event from
+// the column this constant defaults. A rename here is a conscious break that
+// must move in lock-step with the Python leaf.
+//
+// Go has no lock-step guard for it — unlike [DefaultEpochID]'s Python twin
+// there is no shared config knob to parse — so the migration SQL spells the
+// literal out (see migrateV11ToV12) and this constant is the *write-side*
+// source of truth only.
+const DefaultPrincipalID = "local"
+
 // SessionMetrics is the subset of orchestrator OTEL handles the channel
 // store needs for the RFC 0031 `sessions.writes` counter. Defined locally
 // so the channels package does not take a dependency on the orchestrator-

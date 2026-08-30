@@ -100,9 +100,14 @@ const (
 	// all (agents/server_servicers.py lifts `persatrix-principal` in
 	// `SendChatMessage` and `ReceiveChannelMessage` only), and
 	// `POST /api/v1/personas/{participant_id}/recall` reads the CHANNEL store
-	// — membership-scoped verbatim messages, a table with no `principal_id`
-	// column — never principal-partitioned persona memory. Both are declared
-	// here rather than assumed, per the plan.
+	// — membership-scoped verbatim messages — never principal-partitioned
+	// persona memory. That `messages` gained its own `principal_id` at
+	// channel-store v12 (ISSUE-0130 shape (b)) does not change the verdict:
+	// the column records who caused a row, and no recall predicate reads it.
+	// The room's transcript is scoped by who was IN the room (RFC 0035 §F
+	// interval + epoch), which is a different question from which tenant's
+	// derived memory a turn writes. Both are declared here rather than
+	// assumed, per the plan.
 	originNonDispatching
 )
 

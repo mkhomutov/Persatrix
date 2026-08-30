@@ -840,12 +840,20 @@ ships **on-startup catch-up fetch** (RFC 0011 [OQ #8](../rfcs/0011-channels-brid
   `SEND_CHANNEL_MESSAGE` actions are suppressed so the agent does not blast
   everyone with stale responses on restart.
 - **Replayed spans derive no memory** (ISSUE-0130, v0.3.14). A replayed row
-  carries no principal — the `messages` table has no principal column — so
-  summarising it would write one authenticated person's content into the
-  shared `local` tenant. The span is closed at pass end (or split when a
-  live turn arrives) with `catchup_complete` and dropped; the live
-  conversation that resumes after the restart is unaffected and derives
-  normally. `agent.interactions.closed.by_catchup_complete` counts the drops.
+  reaches the persona with no principal on it, so summarising it would write
+  one authenticated person's content into the shared `local` tenant. The span
+  is closed at pass end (or split when a live turn arrives) with
+  `catchup_complete` and dropped; the live conversation that resumes after the
+  restart is unaffected and derives normally.
+  `agent.interactions.closed.by_catchup_complete` counts the drops.
+- **Since v0.3.15 the row itself carries the tenant.** Channel-store schema
+  **v12** adds `principal_id` to `messages`, stamped server-side at publish
+  from the authenticated request (`local` when no account resolved), and
+  surfaced on every message the REST API returns. It is recorded, not yet
+  acted on: nothing filters history or recall by it, and the skip above still
+  drops every replayed span. Seeding replay from it — so a restart re-derives
+  under the tenant that actually spoke instead of dropping the span — is the
+  remaining half of ISSUE-0130.
 - The `channel.messages.replayed{channel_id=…}` counter pins the contract.
 
 Watermark-based catch-up (`?since=<message_id>` per-channel, per-subscriber)

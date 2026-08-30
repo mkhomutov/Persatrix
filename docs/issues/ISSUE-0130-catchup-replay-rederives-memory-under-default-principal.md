@@ -306,3 +306,42 @@ alongside [ISSUE-0123](ISSUE-0123-per-speaker-interaction-scope.md) (R-1).
 > ingest, or gating the narrowed skip on "this span was not already derived";
 > the OQ #8(b) `?since=` watermark remains the deeper fix and stays out of
 > scope). The unit bar is that a span replayed twice derives once.
+>
+> 2026-08-30 — **B1 merged: the column exists and is written; nothing reads
+> it.** Channel store `v11 → v12` adds `principal_id TEXT NOT NULL DEFAULT
+> 'local'` to `messages`
+> ([`sqlite_principal_migration.go`](../../internal/channels/sqlite_principal_migration.go)),
+> stamped inside `sqliteStore.PublishMessage` from `PrincipalFromContext(ctx)`
+> and surfaced on `channelMessageResponse`. Three things worth carrying into
+> B2:
+>
+> * **The stamp OVERWRITES rather than defaults.** `PublishMessage` assigns
+>   from the context unconditionally instead of filling an empty field, so a
+>   caller-set `ChannelMessage.PrincipalID` is discarded. This is the
+>   diagnosis above turned into a boundary: the value is the orchestrator's
+>   own verification, and the REST body has no field to carry one (the
+>   request struct has no counterpart and `decodeJSON` disallows unknown
+>   keys, so a claim is a 400). B2 inherits a column no unauthenticated
+>   caller can influence — which is what makes seeding `principal_scope`
+>   from it safe.
+> * **A relayed row already carries the causal tenant.** The R-2 re-stamp
+>   ([ISSUE-0124](ISSUE-0124-orchestrator-hop-drops-tenant-on-agent-cascade.md),
+>   merged) runs at the head of `publishCommit`, *ahead of* the store commit,
+>   so a persona's reply persists the principal of the person who caused it
+>   rather than `local`. The wire-side R-2 tests cannot see that ordering —
+>   swapping the two leaves them all green — so it is pinned separately by
+>   `TestPublishMessage_PersistsTheRestampedCausalPrincipal`. The sequencing
+>   preference the 2026-08-23 correction described is now a fact on the rows
+>   B2 will read.
+> * **The backfill asserts nothing.** Unlike the persona store's v11 — whose
+>   `local` backfill hid rows that *did* have an owner — a pre-v12 `messages`
+>   row never held a tenant, so `local` is the truth for it and not a
+>   partition. There is no activation-day hazard here and no operator action.
+>
+> Still open, and B2's: `_build_replay_event` seeds nothing from the field,
+> the shape-(a) skip is unchanged (every replayed span still derives
+> nothing), RFC 0037's replayed-rotation stamping is still withdrawn, and the
+> idempotence half above is unwritten. Nothing filters on the column — recall
+> stays membership-and-epoch scoped, deliberately: `messages` is the room's
+> shared transcript, and who was in the room is a different question from
+> which tenant a derived write belongs to.

@@ -158,15 +158,35 @@ type memberResponse struct {
 
 // channelMessageResponse is the JSON shape for individual messages
 // returned by the publish, history, and thread endpoints.
+//
+// `PrincipalID` (ISSUE-0130 shape (b), channel-store v12) is the tenant the
+// orchestrator attributed the publish to. Always present — never `omitempty`
+// — because the consumer is a *seed*: PR B2 reads it off the history payload
+// to attribute what catch-up replay derives, and an absent key there is
+// indistinguishable from "this deployment predates the column", which is
+// exactly the ambiguity the narrowed derivation skip must resolve. The
+// `local` value is a real answer ("no verified tenant"), not a missing one.
+//
+// It is response-only: [publishMessageRequest] has no counterpart, by design
+// — see [channels.ChannelMessage.PrincipalID].
+//
+// One value is empty rather than `local`: the degraded publish echo, when the
+// post-publish `GetMessage` itself fails and the handler returns the request's
+// own struct. The store stamps the row from a context the handler does not
+// hold (the R-2 re-stamp happens inside `publishCommit`), so an empty string
+// there is the honest "the committed value is unknown to this response" —
+// reconstructing a plausible one would be wrong for exactly the relayed
+// publishes the re-stamp exists for. That path already logs at ERROR.
 type channelMessageResponse struct {
-	ID        string         `json:"id"`
-	ChannelID string         `json:"channel_id"`
-	SenderID  string         `json:"sender_id"`
-	Content   string         `json:"content"`
-	Timestamp time.Time      `json:"timestamp"`
-	ThreadID  string         `json:"thread_id,omitempty"`
-	Mentions  []string       `json:"mentions"`
-	Metadata  map[string]any `json:"metadata,omitempty"`
+	ID          string         `json:"id"`
+	ChannelID   string         `json:"channel_id"`
+	SenderID    string         `json:"sender_id"`
+	Content     string         `json:"content"`
+	Timestamp   time.Time      `json:"timestamp"`
+	ThreadID    string         `json:"thread_id,omitempty"`
+	Mentions    []string       `json:"mentions"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
+	PrincipalID string         `json:"principal_id"`
 }
 
 // listChannelsResponse is the envelope for GET /api/v1/channels.

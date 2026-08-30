@@ -274,6 +274,10 @@ type Member struct {
 // active at publish time. The store rewrites empty to `legacy`. Phase 1
 // ships no recall changes — the column exists so Phase 2 has a column to
 // filter on without a follow-up migration.
+//
+// ISSUE-0130 shape (b): `PrincipalID` tags the row with the tenant that
+// caused it. Unlike every other field it is NOT an input — see the field
+// comment.
 type ChannelMessage struct {
 	ID        string
 	ChannelID string
@@ -284,6 +288,20 @@ type ChannelMessage struct {
 	Mentions  []string
 	Metadata  map[string]any
 	SessionID string // RFC 0031 Phase 1 — defaults to "legacy" at the store boundary
+	// PrincipalID is the tenant the publish was attributed to (ISSUE-0130
+	// shape (b), channel-store schema v12): the RFC 0039 §F verified
+	// participant of the authenticated request, or the R-2 causal principal
+	// the router re-stamped onto its context, or [DefaultPrincipalID].
+	//
+	// **Output only.** [ChannelStore.PublishMessage] OVERWRITES whatever a
+	// caller puts here with [PrincipalFromContext] of the publishing context;
+	// a value set on the way in is discarded, never persisted. That is the
+	// whole point: the tenant is what the orchestrator *verified*, and an
+	// agent-supplied principal would be a cross-tenant READ primitive once
+	// B2 seeds the replayed event from this column (the persona binds
+	// `principal_scope` from it and recall is strict equality). Reads
+	// populate it from the row.
+	PrincipalID string
 }
 
 // MaxMessageContentBytes is the soft byte cap on [ChannelMessage.Content]
