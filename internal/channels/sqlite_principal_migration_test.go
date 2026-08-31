@@ -70,9 +70,11 @@ func TestSQLiteStore_SchemaV12_FreshDB_MessagesHasPrincipalColumn(t *testing.T) 
 	})
 }
 
-// TestSQLiteStore_SchemaV12_Migration_Idempotent pins the literal latest
-// version (the newest migration's test owns the literal pin, per the v5/v6
-// test-header convention) and that a reopen is a no-op.
+// TestSQLiteStore_SchemaV12_Migration_Idempotent pins that a reopen is a
+// no-op. The LITERAL latest-version pin moved to the v13 test with v13 (the
+// newest migration's test owns the literal, per the v5/v6 test-header
+// convention); what stays here is the v12-specific half — the column is
+// present and the store settles at whatever the const says.
 func TestSQLiteStore_SchemaV12_Migration_Idempotent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "channels.db")
 
@@ -87,10 +89,10 @@ func TestSQLiteStore_SchemaV12_Migration_Idempotent(t *testing.T) {
 	withDB(t, path, func(db *sql.DB) {
 		var version int
 		require.NoError(t, db.QueryRow(`PRAGMA user_version`).Scan(&version))
-		assert.Equal(t, 12, version,
-			"channelStoreSchemaVersion is v12 as of ISSUE-0130 shape (b); reopen is a no-op")
 		assert.Equal(t, channelStoreSchemaVersion, version,
-			"the literal pin and the const must agree")
+			"reopen is a no-op: the store settles at the const")
+		assert.Contains(t, tableColumns(t, db, "messages"), "principal_id",
+			"v12's column survives the reopen")
 	})
 }
 

@@ -29,6 +29,7 @@ import time
 import uuid
 from typing import TYPE_CHECKING, Protocol
 
+from ..epoch_id import resolve_epoch_id_silent
 from ..session_id import LEGACY_SESSION_ID
 from .boundary_detectors import (
     DEFAULT_IDLE_TIMEOUT_SEC,
@@ -212,6 +213,16 @@ class InteractionTracker:
         persisted principal at all, as opposed to resolving the
         single-tenant default.  See
         :class:`~agents.memory.interaction_types.Interaction`.
+
+        The EPOCH is captured here rather than accepted as an argument —
+        it is not a key axis, so no caller has to know about it, and
+        capturing it at the one place records are minted covers the fans
+        and the replay sweep as well as the ingest.  Same precedence the
+        tiers write under (:func:`~agents.epoch_id.resolve_epoch_id_silent`
+        — task-local scope, else the world epoch), so the frozen value
+        equals what an ambient read at open would have produced; the
+        close path re-binds it so a record closed inside another
+        request's scope is still stamped with its own.
         """
         key = resolve_record_key(scope, principal_id, speaker_id)
         existing = self._open.get(key)
@@ -229,6 +240,7 @@ class InteractionTracker:
             source_channel_id=source_channel_id,
             principal_id=key[0],
             speaker_id=key[1],
+            epoch_id=resolve_epoch_id_silent(),
         )
         self._open[key] = interaction
         _emit_opened()

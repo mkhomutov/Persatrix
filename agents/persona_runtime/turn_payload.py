@@ -26,7 +26,40 @@ from ..principal_id import principal_id_from_metadata
 if TYPE_CHECKING:
     from ..persona_types import AgentEvent
 
-__all__ = ["FrozenOpenCapture", "build_turn_payload", "frozen_open_capture"]
+__all__ = [
+    "FrozenOpenCapture",
+    "build_turn_payload",
+    "frozen_open_capture",
+    "replay_markers",
+]
+
+
+def replay_markers(event: AgentEvent) -> tuple[bool, bool]:
+    """``(replayed, replay_attributed)`` for ``event`` — the ISSUE-0130 pair.
+
+    ONE spelling, because two consumers have to agree on it exactly:
+    :func:`frozen_open_capture` freezes the pair onto the record a turn
+    OPENS, and
+    :func:`~agents.persona_runtime.interaction_boundary.stale_close_reason`
+    compares the arriving event's pair against the open record's to decide
+    whether they may share a span.  If those two drifted, the split would
+    either fire on every turn (fragmenting every span into one-turn
+    records) or never fire at all (which is the merge both guards exist to
+    prevent) — and neither shows up as a type error.
+
+    ``replay_attributed`` is conjoined with ``replayed`` here rather than
+    left to each reader.  The live gRPC ingress seeds the same principal
+    key, so an unconditional expression marks essentially every
+    authenticated live record ``replay_attributed=True`` — a state the
+    field's own contract calls meaningless, and one that reads as "was
+    authenticated" instead.  Making the pair unrepresentable costs one
+    ``and`` (v0.3.15 PR B2 review).
+    """
+    replayed = event.metadata.get("replay_mode") is True
+    return (
+        replayed,
+        replayed and principal_id_from_metadata(event.metadata) is not None,
+    )
 
 
 class FrozenOpenCapture(TypedDict):
@@ -125,28 +158,18 @@ def frozen_open_capture(event: AgentEvent) -> FrozenOpenCapture:
       unattributable.  Read off the metadata rather than the record's
       resolved ``principal_id`` because a seeded ``"local"`` and an
       unseeded default are the same value there — the presence is the
-      whole signal, and this is the last point that still has it.
+      whole signal, and this is the last point that still has it.  Both
+      come from :func:`replay_markers`, shared with the boundary that
+      splits on a disagreement.
     * ``speaker_id`` — ISSUE-0131: the turn lands in ITS sender's
       record.  The principal half of the key resolves ambient (the
       ``on_event`` request scope) inside the tracker.
     """
-    replayed = event.metadata.get("replay_mode") is True
+    replayed, replay_attributed = replay_markers(event)
     return {
         "classification": wire_channel_classification(event),
         "source_channel_id": event.channel_id or None,
         "replayed": replayed,
-        # Conjoined with ``replayed`` HERE rather than left to every
-        # reader.  The live gRPC ingress seeds the same principal key, so
-        # an unconditional expression marks essentially every
-        # authenticated live record ``replay_attributed=True`` — a state
-        # the field's own contract calls meaningless, and one that means
-        # "was authenticated" instead.  Any later reader that drops the
-        # conjunct (an observability attribute, a read-surface column,
-        # the v0.3.16 provenance work) would then report live records as
-        # replay-attributed.  Making the pair unrepresentable costs one
-        # ``and`` (v0.3.15 PR B2 review).
-        "replay_attributed": (
-            replayed and principal_id_from_metadata(event.metadata) is not None
-        ),
+        "replay_attributed": replay_attributed,
         "speaker_id": event.sender_id,
     }

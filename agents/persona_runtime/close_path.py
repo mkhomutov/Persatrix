@@ -10,12 +10,14 @@ all the orchestration lives here.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import Awaitable, Callable, Iterable
 from typing import TYPE_CHECKING, Any
 
-from ..memory.boundary_detectors import REASON_CATCHUP_COMPLETE
+from ..epoch_id import epoch_scope
 from ..memory.episodic import EpisodicMemory
+from ..memory.interaction_key import record_key, resolve_record_key
 from ..memory.interactions import (
     SUMMARY_PENDING_TEXT,
     Interaction,
@@ -44,8 +46,38 @@ logger = logging.getLogger(__name__)
 #: bodies and for wire ids alike.
 _TRANSIENT_TURN_KEYS: frozenset[str] = frozenset({"text", "message_id"})
 
+def _record_write_scopes(
+    interaction: Interaction,
+) -> contextlib.AbstractContextManager[object]:
+    """Bind the record's OWN tenant AND epoch for its whole derivation.
+
+    Both storage axes are resolved AMBIENT by every tier, and both are
+    frozen on the record at open, so both have to be re-bound here — the
+    room-wide fans, ``idle_check`` and (since v0.3.15 PR B2) the catch-up
+    split all close a record from inside whichever request happened to
+    trigger them, which is a DIFFERENT request's scope.
+
+    The principal half shipped with PR #846; the epoch half is the PR B2
+    review's, and it was reachable the moment the catch-up split became
+    symmetric: a replayed event carries no epoch key, so it force-closed a
+    live record with only the persona's world epoch bound and
+    ``store_episode`` stamped the row with that instead of the epoch the
+    live conversation was opened under.  Epoch recall filters with strict
+    equality and no carve-out, so the speaker's own conversation becomes
+    permanently unreadable from the epoch that produced it.
+
+    A blank ``epoch_id`` means the record was minted by a site that
+    captures none (a direct ``Interaction(...)``), and resolution stays
+    exactly where it was — ambient — so no pre-existing path changes.
+    """
+    stack = contextlib.ExitStack()
+    stack.enter_context(principal_scope(interaction.principal_id))
+    if interaction.epoch_id:
+        stack.enter_context(epoch_scope(interaction.epoch_id))
+    return stack
+
+
 __all__ = [
-    "close_replayed_scopes",
     "close_stale_records",
     "persist_closed_interaction",
     "persist_fanned_closes",
@@ -101,18 +133,38 @@ async def close_stale_records(
     owns WHICH boundary fired: the RFC 0030 wire-id rotation (the previous
     channel conversation ended, so the new turn must open fresh under the
     wire-carried cause — producer plan OQ 5) and the ISSUE-0130 catch-up
-    boundary (a LIVE turn landing on a replay-opened record splits there,
-    or the live conversation inherits the replayed span's no-derivation
-    flag).  ISSUE-0123 part 3: both are ROOM events and a re-keyed room
-    holds N records, so this FANS — per record, because every input is per
-    record (wire id, predecessor, replay flag), closing every stale record
-    rather than only the current sender's.  Persists behind
+    boundary (replayed and live turns never share a record, in either
+    direction).  ISSUE-0123 part 3: a re-keyed room holds N records, so
+    this FANS — per record, because every input is per record (wire id,
+    predecessor, replay pair).  Persists behind
     :func:`persist_fanned_closes`, so one failure neither aborts the
     remaining splits nor the caller's own ingest.
+
+    The two boundaries do NOT have the same reach, which is why the fan
+    tells the predicate which record is the event's own (PR B2 review).
+    Rotation is a ROOM event: the channel's conversation ended, so every
+    record in the scope is stale and every one closes.  The catch-up
+    boundary is a RECORD event: a turn can only merge into the record
+    under its own ``(principal, speaker, scope)`` key, so that is the
+    only one it can spoil.  Fanning it room-wide meant one replayed
+    event closed every unrelated live conversation in the room — all
+    speakers, all tenants — chopping each into a one-turn episode and
+    firing an unmetered summarise for it, on the boot path, while
+    dispatch was serving.
+
+    The target key is resolved the same way ``add_turn`` resolves the one
+    it is about to append to: AMBIENT principal (this event's bound
+    scope) plus the event's own ``sender_id``.  Resolving it here rather
+    than reading it off a record is deliberate — the record the turn will
+    land in may not exist yet, which is exactly the replay→live race.
     """
+    target = resolve_record_key(scope, None, event.sender_id)
     stale_splits: list[Interaction] = []
     for record in tracker.records_for_scope(scope):
-        stale_reason = stale_close_reason(record, event, wire_id=wire_id)
+        stale_reason = stale_close_reason(
+            record, event, wire_id=wire_id,
+            is_target_record=record_key(record) == target,
+        )
         if stale_reason is None:
             continue
         split = tracker.close_record(record, reason=stale_reason)
@@ -218,8 +270,19 @@ async def persist_closed_interaction(
         # different spans would share one id and the second would be
         # skipped, losing its content outright.  ``replay_identity`` owns
         # that rule and refuses the whole span instead.
+        #
+        # Read off ``interaction.turns``, NOT ``own_turns`` (PR B2
+        # review).  ``own_turns`` is the §G post-exclusion view, so a
+        # digest over it is a digest over a subset by construction —
+        # exactly the shape the paragraph above refuses.  The two agree
+        # today only because a second module holds the invariant
+        # (``admitted_records`` keeps the room-close fan off replayed
+        # records), which is not where this rule is stated; taking every
+        # turn keeps it here, and errs toward re-deriving rather than
+        # toward one span silently answering for another.
         message_ids=[
-            str(t.payload.get("message_id") or "") for _, t in own_turns
+            str((t.payload or {}).get("message_id") or "")
+            for t in interaction.turns
         ],
     ):
         # ISSUE-0130 (b) scope lock 4: narrowing the skip above without
@@ -301,6 +364,14 @@ async def persist_closed_interaction(
     # one does reach here, and binds the tenant the message row named,
     # which is the whole of shape (b).
     #
+    # The EPOCH rides the same binding since the PR B2 review
+    # (``_record_write_scopes`` above): it is the other ambient-resolved
+    # write axis, it is frozen at open exactly like the principal, and
+    # the symmetric catch-up split made a replayed event able to close a
+    # LIVE record — with no epoch of its own bound, which stamped the
+    # persona's world epoch onto a conversation opened under a request
+    # epoch and hid it from its own reader.
+    #
     # This closes the principal half of the ISSUE-0123 boundary.  The
     # SPEAKER half is projected below (``speaker_id=``): migration 18's
     # column is written from the record key, not judged per turn — sound
@@ -309,7 +380,7 @@ async def persist_closed_interaction(
     # (the §G chokepoint; that module states the single-speaker
     # argument): not into the derivation input, not into the persisted
     # turn context above.
-    with principal_scope(interaction.principal_id):
+    with _record_write_scopes(interaction):
         try:
             await episodic.store_episode(
                 summary=SUMMARY_PENDING_TEXT, context=ctx,
@@ -363,118 +434,3 @@ async def persist_closed_interaction(
         )
     pending_tasks.add(task)
     task.add_done_callback(pending_tasks.discard)
-
-
-#: Ceiling on Phase-2 summarise tasks the boot sweep leaves in flight at
-#: once.  Until v0.3.15 PR B2 the sweep derived nothing, so it spawned
-#: nothing; now every ATTRIBUTED replayed record runs the full two-phase
-#: write, and the ``(principal, speaker, scope)`` re-key makes that one
-#: record per SENDER per room — so an unbounded sweep fires K×N provider
-#: calls the instant a persona boots, unmetered (a catch-up close is not a
-#: wire-bounded close, so it draws no wallet lease) and straight into the
-#: RFC 0009 limiter that a restart does not reset.  The cap turns the burst
-#: into a bounded pipeline; it does not reduce the total work.
-_REPLAY_SUMMARIZE_MAX_IN_FLIGHT: int = 4
-
-
-async def close_replayed_scopes(
-    tracker: InteractionTracker,
-    persist: Callable[[Interaction], Awaitable[None]],
-    *,
-    derive: bool = True,
-    pending_tasks: set[asyncio.Task[None]] | None = None,
-    max_in_flight: int = _REPLAY_SUMMARIZE_MAX_IN_FLIGHT,
-) -> int:
-    """Close every scope the on-startup catch-up replay opened (ISSUE-0130).
-
-    Replay events open :class:`InteractionTracker` scopes but carry no
-    session-end signal, and catch-up has no synthetic completion event of
-    its own (RFC 0011 OQ #8 "lifecycle bleed"), so the scope stayed open
-    until the idle timer and the next live turn appended to it.  A merged
-    span is wrong in both of the ways the two halves differ: the live half
-    would be dropped along with an unattributable replayed one, and the
-    replayed half would escape the re-derivation guard, which only a
-    ``replayed`` record consults.  The ingest-time split
-    (:func:`~agents.persona_runtime.interaction_boundary.stale_close_reason`)
-    is the other door on the same boundary; this is the one for scopes no
-    live turn reaches.
-
-    Called at the end of the catch-up pass
-    (:func:`agents.channel_catchup.replay_for_persona_agents`).  Returns
-    the number of records closed (since the v0.3.15 ``(principal,
-    speaker, scope)`` re-key one scope may hold several replay-opened
-    records — one per replayed sender).  Best-effort by contract — it runs on the
-    boot path, so a per-scope failure is logged and the sweep continues
-    rather than propagating; the caller may treat it as non-raising.  Note
-    the scope is popped before the persist call, so even a failing persist
-    leaves the tracker in the state live traffic depends on.
-
-    Deliberately runs WITHOUT the agent lock: a persona holds ``_lock`` for
-    a whole event (LLM calls included), so grabbing it here would stall boot
-    behind an in-flight turn.  Safe unlocked because ``replayed`` is frozen
-    at open, both this sweep and the ingest-time split tolerate a ``close``
-    that returns ``None`` (the other got there first), and a live turn can
-    never be inside a flagged span — the split guarantees it opens its own.
-
-    What ``persist`` costs here changed with v0.3.15 PR B2 and the argument
-    above no longer covers all of it.  For an ATTRIBUTED replayed span the
-    call is a real ``store_episode`` INSERT plus a background summarise /
-    extract task, so this sweep now writes and spawns rather than only
-    manipulating tracker state.  Two consequences worth naming:
-
-    * ``max_in_flight`` bounds the spawn, because one record per replayed
-      SENDER per room otherwise means an unmetered provider burst at boot.
-    * the Phase-2 tasks register into ``pending_tasks`` from OUTSIDE
-      ``_lock``, while ``close_memory`` drains that set under it — so a
-      shutdown racing this sweep could snapshot the set before a late task
-      joins.  Not reachable today (``server_cli`` starts and stops strictly
-      in sequence, so a shutdown cannot overlap catch-up); a refactor that
-      makes them concurrent must switch the drain to loop-until-empty,
-      which ``drain_pending_summaries`` already documents as its condition.
-    """
-    closed = 0
-    # Per RECORD since the ``(principal, speaker, scope)`` re-key
-    # (v0.3.15 residuals PR 3): replay can open several records in one
-    # scope — one per replayed sender — and every one of them carries
-    # the ``replayed`` flag, so the sweep walks records, not scopes.
-    for interaction in list(tracker.open_records()):
-        if not interaction.replayed:
-            continue
-        try:
-            popped = tracker.close_record(
-                interaction, reason=REASON_CATCHUP_COMPLETE,
-            )
-            if popped is None:
-                continue
-            closed += 1
-            # ``persist`` is the full two-phase write for an ATTRIBUTED
-            # replayed span as of v0.3.15 PR B2 — a ``store_episode``
-            # INSERT plus a background summarise/extract task.  It is a
-            # no-op only for the unattributable ones (which still skip on
-            # ``replay_attributed``) and for a span an earlier boot
-            # already derived.  One close→persist contract either way.
-            if not derive:
-                # An unfinished pass (budget overrun / abort) ingested a
-                # PREFIX of some window.  Pop without persisting: the
-                # span identity is built from the turns the record holds,
-                # so deriving a prefix claims an id no later boot can
-                # recompute and the next complete boot re-derives the
-                # whole window on top of it.  Catch-up re-reads the same
-                # window every boot anyway (no watermark, RFC 0011 OQ #8),
-                # so this costs one boot's derivation, not the memory.
-                continue
-            await persist(popped)
-            # Bound what the sweep leaves in flight.  Phase 2 is spawned
-            # inside ``persist``, so the cap is applied here, where the
-            # loop that produces them is: wait for one to land before
-            # opening another slot.
-            if pending_tasks is not None and len(pending_tasks) >= max_in_flight:
-                await asyncio.wait(
-                    set(pending_tasks), return_when=asyncio.FIRST_COMPLETED,
-                )
-        except Exception:
-            logger.warning(
-                "Catch-up close failed for replayed scope %s",
-                interaction.scope, exc_info=True,
-            )
-    return closed

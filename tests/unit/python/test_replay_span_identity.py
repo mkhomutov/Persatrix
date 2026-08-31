@@ -199,16 +199,139 @@ class TestTheGuard:
             "would have Phase 2's unbounded UPDATE rewrite both"
         )
 
-    async def test_the_guard_asks_under_the_tiers_own_epoch(self):
-        # The digest must be built from the epoch the row will be stamped
-        # with, or the guard asks about an id the write never uses.
-        live, evaluated = _Episodic(epoch="live"), _Episodic(epoch="eval-7")
+    async def test_the_guard_asks_under_the_records_frozen_epoch(self):
+        """The epoch comes off the record, not off the ambient context.
+
+        The digest must be built from the epoch the row will be stamped
+        with, or the guard asks about an id the write never uses — and
+        ``close_path._record_write_scopes`` binds exactly
+        ``interaction.epoch_id`` around ``store_episode``.  Reading the
+        AMBIENT epoch instead (the first cut, via
+        ``episodic.active_epoch_id()``) made the digest depend on WHICH
+        close path fired rather than on the span: the pass-end sweep runs
+        with no request scope bound, the ingest-time split runs inside a
+        live event's ``on_event`` with that request's epoch bound, so the
+        same window hashed two ways and the guard missed (PR B2 review).
+
+        The tier is deliberately handed the SAME epoch in both calls
+        here: if the guard were still reading it, the two digests would
+        match and this test would fail.
+        """
+        live_record = _record()
+        live_record.epoch_id = "live"
+        eval_record = _record()
+        eval_record.epoch_id = "eval-7"
+
+        tier_a, tier_b = _Episodic(epoch="live"), _Episodic(epoch="live")
         await replay_span_already_derived(
-            episodic=live, interaction=_record(), agent_id="ember-owl",
+            episodic=tier_a, interaction=live_record, agent_id="ember-owl",
             message_ids=["m-1"],
         )
         await replay_span_already_derived(
-            episodic=evaluated, interaction=_record(), agent_id="ember-owl",
+            episodic=tier_b, interaction=eval_record, agent_id="ember-owl",
+            message_ids=["m-1"],
+        )
+        assert tier_a.asked != tier_b.asked, (
+            "two epochs must derive and read their own: a row written "
+            "under one epoch cannot be allowed to suppress derivation "
+            "under another, where strict-equality recall can never see it"
+        )
+
+    async def test_the_tier_answers_only_when_the_record_froze_no_epoch(self):
+        """The fallback, and it has to match what the write does.
+
+        A record minted by a site that captures no epoch (a bare
+        ``Interaction(...)``) leaves resolution ambient on BOTH sides —
+        ``_record_write_scopes`` binds nothing for it either — so the two
+        still agree.
+        """
+        record = _record()
+        record.epoch_id = ""
+        live, evaluated = _Episodic(epoch="live"), _Episodic(epoch="eval-7")
+
+        await replay_span_already_derived(
+            episodic=live, interaction=record, agent_id="ember-owl",
+            message_ids=["m-1"],
+        )
+        record.epoch_id = ""
+        await replay_span_already_derived(
+            episodic=evaluated, interaction=record, agent_id="ember-owl",
             message_ids=["m-1"],
         )
         assert live.asked != evaluated.asked
+
+    async def test_the_tracker_freezes_an_epoch_on_every_record(self):
+        """The premise the two tests above rest on.
+
+        If ``InteractionTracker`` stopped capturing it, every record would
+        fall to the ambient branch and the instability would be back with
+        both tests still green.
+        """
+        assert _record().epoch_id, (
+            "a tracker-opened record must carry its own epoch — the close "
+            "path re-binds this value, so a blank one silently restores "
+            "ambient resolution at close time"
+        )
+
+
+# ─── What the CLOSE PATH feeds it (PR B2 review finding 11) ────────────
+
+
+@pytest.mark.asyncio
+async def test_the_close_path_digests_every_turn_not_the_filtered_view(
+) -> None:
+    """``persist_closed_interaction`` must hand over ``interaction.turns``.
+
+    It used to read the ids off ``own_turn_items`` — the RFC 0020 §G
+    POST-EXCLUSION view — which is a digest over a subset by
+    construction, the exact shape :func:`replay_span_identity` refuses
+    two paragraphs into its own docstring.  The two agree today only
+    because a different module holds the invariant (``admitted_records``
+    keeps the room-close fan off replayed records), which is not where
+    this rule is stated; a change there would silently make two different
+    spans hash the same and cost the second its memory.
+    """
+    from agents.memory.interaction_types import ROOM_CLOSE_TURN_KEY
+    from agents.persona_runtime.close_path import persist_closed_interaction
+
+    tracker = InteractionTracker()
+    record = tracker.add_turn(
+        "group:planning",
+        payload={"summary": "s", "text": "hi", "message_id": "m-1"},
+        replayed=True, replay_attributed=True,
+        principal_id="alice-person", speaker_id="alice",
+    )
+    # A turn the §G chokepoint EXCLUDES from the derivation input: a
+    # room-close message somebody else spoke.
+    tracker.add_turn(
+        "group:planning",
+        payload={
+            "summary": "closing", "sender": "robin", "message_id": "m-close",
+            ROOM_CLOSE_TURN_KEY: True,
+        },
+        principal_id="alice-person", speaker_id="alice",
+    )
+    closed = tracker.close_record(record, reason="structural")
+    assert closed is not None
+
+    episodic = _Episodic(known=True)  # skip before any real write
+    await persist_closed_interaction(
+        episodic=episodic,  # type: ignore[arg-type]
+        llm_client=None,  # type: ignore[arg-type]
+        memory_ns=None,  # type: ignore[arg-type]
+        agent_id="ember-owl", interaction=closed,
+        pending_tasks=set(),
+        on_finalized=_noop,
+    )
+
+    expected = replay_span_identity(
+        closed, "ember-owl", closed.epoch_id, ["m-1", "m-close"],
+    )
+    assert episodic.asked == [expected], (
+        "the excluded turn is still part of WHICH SPAN this is, even "
+        "though it is not part of what the span derives"
+    )
+
+
+async def _noop() -> None:
+    return None

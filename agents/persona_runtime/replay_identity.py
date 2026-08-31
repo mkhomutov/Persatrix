@@ -20,7 +20,16 @@ ordered wire ids of the messages it replays.  Every axis the stored row is
 partitioned by has to be in the digest, or the guard reaches across that
 partition and suppresses a derivation the asking side can never read; the
 epoch is the one such axis that is not part of the record key, so it is
-threaded in from the tier that stamps it.
+read off the record, which freezes it at open beside the principal.
+
+Reading the epoch AMBIENT — which the first cut of this module did, via
+``episodic.active_epoch_id()`` — was itself a boot-instability rather than
+a fix, because the ambient epoch depends on WHICH close path fires and not
+on the span: the pass-end sweep runs with no request scope bound, while the
+ingest-time split runs inside a live event's ``on_event``, where
+``request_scope_from_metadata`` has bound that request's epoch.  The same
+window therefore hashed one way on a boot no live turn interrupted and
+another way on a boot it did, and the guard missed (PR B2 review).
 Nothing in that is clock- or boot-derived — ``interaction_id`` normally is
 (``uuid4``), and ``started_at`` is boot time, not wire time, which is
 exactly why neither can answer this.
@@ -94,7 +103,9 @@ def replay_span_identity(
     room legitimately derive their own episodes from the same messages.
 
     ``epoch_id`` is in the digest for the same reason the principal is,
-    and it is the axis the first cut missed.  ``store_episode`` stamps
+    and it is the axis the first cut missed twice — once by omitting it,
+    then by reading it ambient instead of off the record.
+    ``store_episode`` stamps
     the row with the ambient epoch and every episodic recall filters it
     with unconditional strict equality — no ``"*"`` bypass, no carve-out
     (:mod:`agents.memory._epoch_filter`).  An epoch-free digest therefore
@@ -169,8 +180,16 @@ async def replay_span_already_derived(
     and mis-report ``rowcount``.  The uuid4 keeps the failed attempt in
     its own namespace; the next boot computes the digest cleanly.
     """
+    # The record's OWN epoch, frozen at open, NOT the ambient one: the
+    # close path binds exactly this value around ``store_episode``
+    # (``close_path._record_write_scopes``), so the digest and the row it
+    # guards agree however this close was reached.  A blank means the
+    # record was minted by a site that captures no epoch, and both this
+    # and the write fall back to the ambient read together.
     identity = replay_span_identity(
-        interaction, agent_id, episodic.active_epoch_id(), message_ids,
+        interaction, agent_id,
+        interaction.epoch_id or episodic.active_epoch_id(),
+        message_ids,
     )
     if identity is None:
         return False

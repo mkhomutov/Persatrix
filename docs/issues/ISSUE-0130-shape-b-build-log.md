@@ -209,3 +209,17 @@ keeps the build history.
 > `(principal_id, speaker_id, summary)` triples, and the sign-off's leg
 > count corrected — it said eight while the procedure held nine, and the
 > restart leg makes ten. The issue closes at Phase 4 with the rest.
+
+---
+
+> 2026-08-31 — **the B2 review's second round**: eleven findings, seven of
+> which changed a contract. The catch-up boundary was fanning a
+> record-scoped rule over the whole room; `replay_attributed` was decided
+> only for a span's opening turn; the epoch was still resolved ambient at
+> close, in the stamped row and in the span digest alike; the v12 backfill
+> correction could not reach stores already at v12 (channel-store **v13**
+> repairs them); the derive gate was per agent where the hazard is per
+> channel; and the boot sweep's throttle had no wall-clock budget and
+> counted the live close path's tasks as its own. Written up in full, with
+> what each one would have cost, in
+> [PR B2 review, round 2](ISSUE-0130-shape-b-round-2-review.md).

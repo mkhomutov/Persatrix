@@ -136,6 +136,27 @@ class Interaction:
     # come from another speaker's words.
     principal_id: str = DEFAULT_PRINCIPAL_ID
     speaker_id: str = ""
+    # ISSUE-0085 / ISSUE-0130 (b) review — the EPOCH half of the same
+    # frozen-at-open rule, and the last write axis that was still read
+    # ambient at close time.  ``principal_id`` above is bound around the
+    # derivation so an idle flush or a room-close fan cannot stamp the
+    # closer's tenant on this record; the epoch had no such twin, so a
+    # record closed inside ANOTHER request's scope was stamped with that
+    # request's epoch instead of its own.  ``store_episode`` writes the
+    # ambient epoch and every episodic recall filters it with strict
+    # equality and no carve-out (:mod:`agents.memory._epoch_filter`), so
+    # a mis-stamped row is permanently unreadable by the epoch that
+    # produced it.  Since v0.3.15 PR B2 that also decides an IDENTITY:
+    # the replay span digest carries the epoch, so an ambient read made
+    # the digest depend on WHICH close path fired rather than on the
+    # span.
+    #
+    # ``""`` means the record was opened by a construction site that
+    # captures nothing (a direct ``Interaction(...)`` in a test), and the
+    # close path then leaves epoch resolution exactly where it was —
+    # ambient — so no existing path changes shape.  The tracker fills it
+    # for every record it opens.
+    epoch_id: str = ""
     # ISSUE-0130: True when this interaction was OPENED by an on-startup
     # catch-up replay turn, captured under the same only-on-open rule as
     # ``session_id`` above.

@@ -42,6 +42,7 @@ from ..memory.boundary_detectors import (
 )
 from ..memory.scopes import is_thread_scope
 from ..persona_types import ActionType
+from .turn_payload import replay_markers
 
 if TYPE_CHECKING:
     from ..memory.boundary_detectors import CloseReason
@@ -264,6 +265,7 @@ def stale_close_reason(
     event: AgentEvent,
     *,
     wire_id: str,
+    is_target_record: bool = True,
 ) -> CloseReason | None:
     """The reason the scope's open interaction must close *before* this
     event's turn is appended — ``None`` when the turn belongs to it.
@@ -272,14 +274,15 @@ def stale_close_reason(
 
     1. **The catch-up boundary (ISSUE-0130).**  Replayed and live turns
        never share a record, in EITHER direction: the split fires whenever
-       the open record's ``replayed`` flag disagrees with the arriving
-       event's ``replay_mode``.  Checked first because it holds regardless
-       of what the wire ids say — the two must not merge even when the
-       conversation genuinely continues under the same wire interaction id,
-       which is the common mid-conversation-restart case (and the only case
-       for thread scopes, whose ``wire_id`` is always empty).  Replay→replay
-       and live→live are NOT splits: those turns share a span, segmented by
-       rotation like any other.
+       the open record's :func:`~agents.persona_runtime.turn_payload
+       .replay_markers` pair disagrees with the arriving event's.  Checked
+       first because it holds regardless of what the wire ids say — the two
+       must not merge even when the conversation genuinely continues under
+       the same wire interaction id, which is the common
+       mid-conversation-restart case (and the only case for thread scopes,
+       whose ``wire_id`` is always empty).  Replay→replay and live→live are
+       NOT splits: those turns share a span, segmented by rotation like any
+       other.
 
        Both directions are reachable because dispatch is already serving
        while catch-up runs (``agents.server`` self-registers before
@@ -297,14 +300,37 @@ def stale_close_reason(
          not ``replayed`` — neither does the re-derivation guard, so that
          window is summarised again on every boot the race is lost.  The
          live record closes and derives normally; the replay opens its own.
+
+       ``replay_attributed`` is half of that comparison, not decoration
+       (PR B2 review).  A seeded ``"local"`` and an unseeded default
+       resolve to the SAME record key, so a row that cannot name its
+       tenant otherwise joins a span opened by one that can, and its
+       content is summarised into the shared tenant under the opener's
+       attribution — the ISSUE-0130 leak, through the one field the
+       frozen-at-open flag was supposed to answer.  Splitting on the
+       pair sends each to its own record: the unattributable one is
+       skipped, the attributed one derives.
+
+       **``is_target_record`` bounds the blast radius.**  The caller fans
+       this predicate over EVERY record in the scope, because wire
+       rotation is a room event — the channel's conversation rotated, so
+       every record in it is stale.  The catch-up boundary is not: a turn
+       can only ever join the record under ITS OWN
+       ``(principal, speaker, scope)`` key, so that is the only record it
+       could merge into.  Applying it room-wide made a replayed event
+       close every unrelated live conversation in the room — every
+       speaker, every tenant — chopping them into one-turn episodes and
+       firing an uncapped summarise for each (PR B2 review).  The caller
+       passes ``True`` only for the record this event's turn would land
+       in.
     2. **The wire rotation** — see :func:`wire_rotation_closes` /
        :func:`wire_rotation_close_reason`.
     """
     if open_interaction is None or not open_interaction.is_open:
         return None
-    if open_interaction.replayed != (
-        event.metadata.get("replay_mode") is True
-    ):
+    if is_target_record and (
+        open_interaction.replayed, open_interaction.replay_attributed,
+    ) != replay_markers(event):
         return REASON_CATCHUP_COMPLETE
     if wire_rotation_closes(open_interaction, wire_id):
         return wire_rotation_close_reason(open_interaction, event.metadata)

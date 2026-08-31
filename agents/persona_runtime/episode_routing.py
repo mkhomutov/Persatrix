@@ -42,7 +42,6 @@ from ..memory.interactions import (
 from ..persona_types import EventType
 from ..session_id import current_session_id
 from .close_path import (
-    close_replayed_scopes,
     close_stale_records,
     persist_closed_interaction,
     persist_fanned_closes,
@@ -53,6 +52,7 @@ from .interaction_boundary import (
     scope_wire_anchor,
     wire_admits_record,
 )
+from .replay_sweep import close_replayed_scopes
 from .turn_payload import build_turn_payload, frozen_open_capture
 from .vote_close import PendingVoteClose, park_end_vote_close
 
@@ -439,15 +439,19 @@ class _EpisodeRoutingMixin:
             on_finalized=self._tick_auto_reflect_counter,
         )
 
-    async def close_replayed_interactions(self, *, derive: bool = True) -> int:
+    async def close_replayed_interactions(
+        self, *, derive_channels: frozenset[str] | None = None,
+    ) -> int:
         """The catch-up caller's ISSUE-0130 hook — see
         :func:`agents.persona_runtime.close_path.close_replayed_scopes`,
-        which states both what ``derive=False`` means (the pass did not
-        finish) and what the task set is for (bounding the boot burst).
+        which states what ``derive_channels`` means (the channels whose
+        replay actually finished; ``None`` = derive everything) and what
+        the task set is for (bounding the boot burst).
         """
         return await close_replayed_scopes(
             self._interaction_tracker, self._persist_closed_interaction,
-            derive=derive, pending_tasks=self._pending_summarize_tasks,
+            derive_channels=derive_channels,
+            pending_tasks=self._pending_summarize_tasks,
         )
 
     async def drain_pending_summaries(self) -> None:

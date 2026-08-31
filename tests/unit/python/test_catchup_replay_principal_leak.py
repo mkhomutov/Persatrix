@@ -57,11 +57,9 @@ from agents.memory.boundary_detectors import (
 )
 from agents.memory.interactions import InteractionTracker
 from agents.persona import create_persona_agent
-from agents.persona_runtime.close_path import (
-    close_replayed_scopes,
-    persist_closed_interaction,
-)
+from agents.persona_runtime.close_path import persist_closed_interaction
 from agents.persona_runtime.interaction_boundary import stale_close_reason
+from agents.persona_runtime.replay_sweep import close_replayed_scopes
 from agents.persona_types import AgentEvent, EventType
 
 from ._persona_test_helpers import _PERSONA_CONFIG, _make_client

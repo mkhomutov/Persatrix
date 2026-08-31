@@ -142,11 +142,25 @@ async def replay_channel_history(
     orchestrator_url: str,
     session: aiohttp.ClientSession,
     limit: int = DEFAULT_CATCHUP_LIMIT,
-) -> bool:
+    completed: set[str] | None = None,
+) -> set[str]:
     """Fetch recent channel history and replay it through the agent.
 
     See module docstring for the contract. This function never raises;
     every failure path is best-effort with a WARN log line.
+
+    Returns the ids of the channels whose window replayed to COMPLETION —
+    the ISSUE-0130 (b) derivation gate (``close_replayed_scopes``), since
+    a record holding a prefix of its window would claim a span identity
+    no later boot can recompute.  Per CHANNEL rather than per pass
+    (v0.3.15 PR B2 review): the budget below can cut the pass off in its
+    ninth channel without touching the eight that already finished, and a
+    single row that raised inside ``on_event`` leaves ITS channel
+    incomplete without implying anything about the others.
+
+    ``completed`` may be passed in so a caller keeps the partial result
+    even when this raises something other than the budget timeout —
+    the set is mutated in place, exactly like ``counts``.
 
     PR-265 review L3 (second pass): the body is wrapped in
     :func:`asyncio.wait_for` against ``_CATCHUP_BUDGET_SECONDS`` so a
@@ -162,6 +176,8 @@ async def replay_channel_history(
     """
     started_at = time.monotonic()
     counts = {"channels": 0, "events": 0}
+    if completed is None:
+        completed = set()
     try:
         await asyncio.wait_for(
             _replay_channel_history_inner(
@@ -170,6 +186,7 @@ async def replay_channel_history(
                 session=session,
                 limit=limit,
                 counts=counts,
+                completed=completed,
             ),
             timeout=_CATCHUP_BUDGET_SECONDS,
         )
@@ -182,7 +199,7 @@ async def replay_channel_history(
             counts["events"],
             elapsed_ms,
         )
-        return True
+        return completed
     except TimeoutError:
         elapsed_ms = (time.monotonic() - started_at) * 1000
         logger.warning(
@@ -195,7 +212,10 @@ async def replay_channel_history(
             counts["events"],
             elapsed_ms,
         )
-        return False
+        # The channels that finished BEFORE the budget ran out are
+        # complete and derive normally; only the one it cut off (and any
+        # it never reached) is held back.
+        return completed
 
 
 async def _replay_channel_history_inner(
@@ -205,15 +225,18 @@ async def _replay_channel_history_inner(
     session: aiohttp.ClientSession,
     limit: int,
     counts: dict[str, int],
+    completed: set[str],
 ) -> None:
     """Wall-clock-budget-wrapped body of :func:`replay_channel_history`.
 
-    Mutates ``counts`` in-place so the outer wrapper can surface
-    per-pass totals on both the success-INFO and budget-WARN paths
-    (the latter needs to log how far the partial pass got before the
-    cancellation). Mutation is intentional — returning a tuple from a
+    Mutates ``counts`` and ``completed`` in-place so the outer wrapper
+    can surface per-pass totals on both the success-INFO and budget-WARN
+    paths (the latter needs to log how far the partial pass got before
+    the cancellation). Mutation is intentional — returning a tuple from a
     function that may be cancelled mid-execution would lose the
-    partial progress.
+    partial progress, and ``completed`` is load-bearing on exactly that
+    path: the channels finished before a budget overrun are the ones the
+    ISSUE-0130 (b) derivation gate must still let through.
     """
     base = orchestrator_url.rstrip("/")
     timeout = aiohttp.ClientTimeout(total=_REQUEST_TIMEOUT_SECONDS)
@@ -256,6 +279,14 @@ async def _replay_channel_history_inner(
         if not isinstance(channel_type, str):
             channel_type = ""
 
+        # ISSUE-0130 (b): this channel's window counts as replayed to
+        # COMPLETION only if every row in it reached the tracker.  A row
+        # dropped by the validator does not disqualify it — that is
+        # deterministic, so the next boot drops the same row and computes
+        # the same span identity — but a row whose ``on_event`` RAISED
+        # does: the record then holds a gap this boot invented, and
+        # deriving from it claims an id no later boot recomputes.
+        channel_complete = True
         # The orchestrator returns newest-first; reverse so the agent's
         # InteractionTracker sees the turns in conversational order.
         for msg in reversed(messages):
@@ -290,8 +321,11 @@ async def _replay_channel_history_inner(
                     "channels: catch-up replay raised on agent=%s channel=%s msg=%s",
                     agent.agent_id, channel_id, msg.get("id", ""),
                 )
+                channel_complete = False
                 continue
             counts["events"] += 1
+        if channel_complete:
+            completed.add(channel_id)
 
 
 # ─── Internal helpers ──────────────────────────────────────
@@ -402,13 +436,17 @@ async def replay_for_persona_agents(
     for agent_id, agent in agents.items():
         if not isinstance(agent, _LLMPersonaAgent):
             continue
-        complete = False
+        # Owned HERE, and mutated in place by the call below, so the
+        # ``finally`` still sees which channels finished even when the
+        # call raises something its own timeout branch does not catch.
+        completed: set[str] = set()
         try:
-            complete = await replay_channel_history(
+            await replay_channel_history(
                 agent=agent,
                 orchestrator_url=orchestrator_url,
                 session=session,
                 limit=limit,
+                completed=completed,
             )
         except Exception:
             logger.exception(
@@ -420,15 +458,23 @@ async def replay_for_persona_agents(
             # into one.  Best-effort, does not raise:
             # ``close_path.close_replayed_scopes``.
             #
-            # ``derive`` carries whether the pass actually FINISHED (v0.3.15
-            # PR B2 review).  A pass cut short by the wall-clock budget or
-            # by an exception has ingested a PREFIX of some channel's
-            # window, and the shape-(b) span identity is computed from the
-            # turns the record holds — so deriving that prefix claims an
-            # id no later boot can ever recompute, and the next complete
-            # boot derives the whole window again on top of it.  That is
-            # not the documented "moved window" residual; the window never
-            # moved.  Closing without deriving costs this boot's
-            # derivation, which catch-up re-reads anyway (no watermark,
-            # RFC 0011 OQ #8), and keeps the identity honest.
-            await agent.close_replayed_interactions(derive=complete)
+            # ``derive_channels`` carries which channels actually FINISHED
+            # (v0.3.15 PR B2 review).  A channel cut short by the
+            # wall-clock budget or by a raising row has ingested a PREFIX
+            # of its window, and the shape-(b) span identity is computed
+            # from the turns the record holds — so deriving that prefix
+            # claims an id no later boot can ever recompute, and the next
+            # complete boot derives the whole window again on top of it.
+            # That is not the documented "moved window" residual; the
+            # window never moved.  Closing without deriving costs this
+            # boot's derivation, which catch-up re-reads anyway (no
+            # watermark, RFC 0011 OQ #8), and keeps the identity honest.
+            #
+            # PER CHANNEL, because that is the granularity of the hazard:
+            # the first cut passed one boolean for the whole agent, which
+            # threw away every completed channel's window whenever any
+            # later channel overran, and still said "complete" for a
+            # window a raising ``on_event`` had left a hole in.
+            await agent.close_replayed_interactions(
+                derive_channels=frozenset(completed),
+            )

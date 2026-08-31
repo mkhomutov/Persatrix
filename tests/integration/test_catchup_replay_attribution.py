@@ -330,14 +330,51 @@ class TestAnUnfinishedPassDerivesNothing:
             _history_row("m-1", "alice", "Mira turns seven", "alice-person"),
             _history_row("m-2", "alice", "and she loves whales", "alice-person"),
         ]
-        # The pass is cut off after the first row.
+        # The pass is cut off after the first row: this channel finished
+        # nothing, so it is not in the completed set.
         await agent.on_event(build_replay_event(
             rows[0], GROUP_CHANNEL, "all", CHANNEL,
         ))
-        await agent.close_replayed_interactions(derive=False)
+        await agent.close_replayed_interactions(derive_channels=frozenset())
         await agent.drain_pending_summaries()
         assert await _derived(agent) == [], "a prefix must not be derived"
 
         # The next boot completes the window and derives it whole, once.
         await _replay(agent, *rows)
         assert len(await _derived(agent)) == 1
+
+    async def test_a_channel_that_finished_derives_even_when_another_did_not(
+        self,
+    ):
+        """Completeness is per CHANNEL, not per pass (PR B2 review).
+
+        The first cut carried one boolean for the whole agent, so a
+        budget overrun in the ninth channel threw away the eight windows
+        that had already replayed to completion — memory the boot had
+        legitimately earned, discarded for a channel it had nothing to do
+        with.  Here the sweep is told exactly one channel finished, and
+        that channel's record must still derive.
+        """
+        agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
+        other_channel = "group:other"
+        await agent.on_event(build_replay_event(
+            _history_row("m-1", "alice", "Mira turns seven", "alice-person"),
+            GROUP_CHANNEL, "all", CHANNEL,
+        ))
+        await agent.on_event(build_replay_event(
+            _history_row("m-2", "bob", "half a window", "bob-person"),
+            other_channel, "all",
+            {"channel_type": "group", "id": other_channel},
+        ))
+
+        await agent.close_replayed_interactions(
+            derive_channels=frozenset({GROUP_CHANNEL}),
+        )
+        await agent.drain_pending_summaries()
+
+        assert [row[:2] for row in await _derived(agent)] == [
+            ("alice-person", "alice"),
+        ], (
+            "the completed channel derives; the truncated one waits for a "
+            "boot that finishes it"
+        )
