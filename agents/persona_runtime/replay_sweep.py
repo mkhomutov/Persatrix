@@ -118,6 +118,7 @@ async def close_replayed_scopes(
     persist: Callable[[Interaction], Awaitable[None]],
     *,
     derive_channels: frozenset[str] | None = None,
+    speaker_gaps: frozenset[tuple[str, str]] | None = None,
 ) -> int:
     """Close every scope the on-startup catch-up replay opened (ISSUE-0130).
 
@@ -174,6 +175,13 @@ async def close_replayed_scopes(
       a budget overrun in the ninth channel discarded the eight windows that
       had already completed, and a channel whose replay aborted mid-window
       still reported the whole pass complete.
+    * ``speaker_gaps`` — ``(channel_id, speaker_id)`` pairs where a row
+      RAISED inside ``on_event``.  That hole is in one speaker's record and
+      no one else's, since records are keyed per speaker; disqualifying the
+      whole channel for it meant one deterministically raising row cost
+      every other speaker in that room their derivation, on every boot
+      (PR B2 review round 3).  A gap the catch-up loop could not attribute
+      to a sender takes the channel out of ``derive_channels`` instead.
     * ``tracker.replayed_closes_by_channel()`` — whether some OTHER door
       already closed a replayed record for that channel during the pass.  If
       one did, what is still open is the REMAINDER of a window that was
@@ -210,6 +218,10 @@ async def close_replayed_scopes(
             popped.replay_window_complete = (
                 (derive_channels is None or channel in derive_channels)
                 and not already_cut.get(channel)
+                and (
+                    speaker_gaps is None
+                    or (channel, popped.speaker_id) not in speaker_gaps
+                )
             )
             # ``persist`` is the full two-phase write for a DERIVABLE
             # attributed replayed span as of v0.3.15 PR B2 — a
@@ -226,8 +238,9 @@ async def close_replayed_scopes(
                 interaction.scope, exc_info=True,
             )
             continue
-    # The count is scoped to ONE PASS: this sweep's own closes must not
-    # disqualify the next catch-up's windows, and a reconnect-triggered
-    # re-catch-up in the same process is exactly that (RFC 0011 OQ #8).
-    tracker.clear_replayed_closes()
+    # Both facts are scoped to ONE PASS: this sweep's own closes must not
+    # disqualify the next catch-up's windows (a reconnect-triggered
+    # re-catch-up in the same process is exactly that, RFC 0011 OQ #8), and
+    # once catch-up is over no turn can be a replayed duplicate.
+    tracker.clear_replay_pass_state()
     return closed

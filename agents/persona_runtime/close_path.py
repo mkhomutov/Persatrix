@@ -10,13 +10,11 @@ all the orchestration lives here.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import functools
 import logging
 from collections.abc import Awaitable, Callable, Iterable
 from typing import TYPE_CHECKING, Any
 
-from ..epoch_id import epoch_scope
 from ..memory.episodic import EpisodicMemory
 from ..memory.interaction_key import record_key, resolve_record_key
 from ..memory.interactions import (
@@ -24,11 +22,11 @@ from ..memory.interactions import (
     Interaction,
     InteractionTracker,
 )
-from ..principal_id import principal_scope
 from .classification import normalize_for_stamp
 from .close_entries import own_turn_items
 from .finalize_close import finalize_closed_interaction
 from .interaction_boundary import stale_close_reason
+from .record_write_scope import record_write_scopes
 from .replay_identity import replay_span_already_derived
 from .replay_sweep import gated_replay_finalize
 from .turn_payload import replay_markers
@@ -48,37 +46,6 @@ logger = logging.getLogger(__name__)
 #: RFC 0020 §D's "the episodic store is not a message log" holds for
 #: bodies and for wire ids alike.
 _TRANSIENT_TURN_KEYS: frozenset[str] = frozenset({"text", "message_id"})
-
-def _record_write_scopes(
-    interaction: Interaction,
-) -> contextlib.AbstractContextManager[object]:
-    """Bind the record's OWN tenant AND epoch for its whole derivation.
-
-    Both storage axes are resolved AMBIENT by every tier, and both are
-    frozen on the record at open, so both have to be re-bound here — the
-    room-wide fans, ``idle_check`` and (since v0.3.15 PR B2) the catch-up
-    split all close a record from inside whichever request happened to
-    trigger them, which is a DIFFERENT request's scope.
-
-    The principal half shipped with PR #846; the epoch half is the PR B2
-    review's, and it was reachable the moment the catch-up split became
-    symmetric: a replayed event carries no epoch key, so it force-closed a
-    live record with only the persona's world epoch bound and
-    ``store_episode`` stamped the row with that instead of the epoch the
-    live conversation was opened under.  Epoch recall filters with strict
-    equality and no carve-out, so the speaker's own conversation becomes
-    permanently unreadable from the epoch that produced it.
-
-    A blank ``epoch_id`` means the record was minted by a site that
-    captures none (a direct ``Interaction(...)``), and resolution stays
-    exactly where it was — ambient — so no pre-existing path changes.
-    """
-    stack = contextlib.ExitStack()
-    stack.enter_context(principal_scope(interaction.principal_id))
-    if interaction.epoch_id:
-        stack.enter_context(epoch_scope(interaction.epoch_id))
-    return stack
-
 
 __all__ = [
     "close_stale_records",
@@ -297,6 +264,22 @@ async def persist_closed_interaction(
     # the prompt header's ``shown_turns`` fix corrects in
     # ``summarize_close`` (identical whenever nothing was excluded).
     own_turns = own_turn_items(interaction)
+    if not own_turns:
+        # Everything this record held was excluded at the §G chokepoint —
+        # a foreign room-close turn, or (ISSUE-0130 (b)) replayed turns
+        # this boot had already ingested live.  There is nothing to
+        # summarise, and writing an empty episode would put a row in the
+        # store that recall can only ever return as noise.  Deliberately
+        # BEFORE the re-derivation guard, so no digest is claimed for a
+        # span that derived nothing: the next boot, with no live overlap,
+        # finds the window unclaimed and derives it properly.
+        logger.debug(
+            "ISSUE-0130: closed interaction has no derivable turns after "
+            "the §G exclusions (agent=%s scope=%s turns=%d replayed=%s)",
+            agent_id, interaction.scope, interaction.turn_count,
+            interaction.replayed,
+        )
+        return
     # RFC 0037 §A rule-(a) owner (absent/unknown -> ``internal``, never
     # ``public``).  Resolved ONCE: the row below is stamped with it and the
     # replay span digest is taken over it, so the guard cannot suppress a
@@ -408,7 +391,7 @@ async def persist_closed_interaction(
     # which is the whole of shape (b).
     #
     # The EPOCH rides the same binding since the PR B2 review
-    # (``_record_write_scopes`` above): it is the other ambient-resolved
+    # (:mod:`.record_write_scope`): it is the other ambient-resolved
     # write axis, it is frozen at open exactly like the principal, and
     # the symmetric catch-up split made a replayed event able to close a
     # LIVE record — with no epoch of its own bound, which stamped the
@@ -423,7 +406,7 @@ async def persist_closed_interaction(
     # (the §G chokepoint; that module states the single-speaker
     # argument): not into the derivation input, not into the persisted
     # turn context above.
-    with _record_write_scopes(interaction):
+    with record_write_scopes(interaction):
         try:
             await episodic.store_episode(
                 summary=SUMMARY_PENDING_TEXT, context=ctx,

@@ -20,7 +20,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, TypedDict
 
 from ..channel_event_classification import wire_channel_classification
-from ..memory.interaction_types import ROOM_CLOSE_TURN_KEY
+from ..memory.interaction_types import (
+    LIVE_DUPLICATE_TURN_KEY,
+    ROOM_CLOSE_TURN_KEY,
+)
 from ..principal_id import principal_id_from_metadata
 
 if TYPE_CHECKING:
@@ -86,6 +89,7 @@ class FrozenOpenCapture(TypedDict):
 
 def build_turn_payload(
     event: AgentEvent, summary: str, *, room_close: bool = False,
+    live_duplicate: bool = False,
 ) -> dict[str, Any]:
     """The in-memory turn payload for a multi-turn ``event``.
 
@@ -130,6 +134,11 @@ def build_turn_payload(
         payload["text"] = message_text
     if room_close:
         payload[ROOM_CLOSE_TURN_KEY] = True
+    if live_duplicate:
+        # ISSUE-0130 (b): this replayed message was already ingested live
+        # this boot.  Kept on the record (the span digest needs every turn)
+        # and dropped from the derivation input by ``own_turn_items``.
+        payload[LIVE_DUPLICATE_TURN_KEY] = True
     return payload
 
 

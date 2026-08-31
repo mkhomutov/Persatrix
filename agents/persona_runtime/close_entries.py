@@ -36,7 +36,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ..memory.interaction_types import ROOM_CLOSE_TURN_KEY
+from ..memory.interaction_types import (
+    LIVE_DUPLICATE_TURN_KEY,
+    ROOM_CLOSE_TURN_KEY,
+)
 from ..memory.store import MemoryEntry
 
 if TYPE_CHECKING:
@@ -85,16 +88,29 @@ def own_turn_items(interaction: Interaction) -> list[tuple[int, Turn]]:
 
     One filtered view for every close-pipeline consumer of
     ``interaction.turns`` (the module header names the three), so the
-    exclusion is applied by construction rather than by each site
-    remembering :func:`is_foreign_room_close_turn`.  Ordinals are the
-    record's real turn positions: a dropped turn does not renumber its
-    siblings or shift the compressor's importance weights.
+    exclusions are applied by construction rather than by each site
+    remembering them.  Ordinals are the record's real turn positions: a
+    dropped turn does not renumber its siblings or shift the compressor's
+    importance weights.
+
+    Two exclusions, for two different reasons:
+
+    * :func:`is_foreign_room_close_turn` — RFC 0020 §G, a room-close turn
+      someone ELSE spoke.  Dropped because the record's ``speaker_id`` is
+      projected onto everything the close derives.
+    * :data:`~agents.memory.interaction_types.LIVE_DUPLICATE_TURN_KEY` —
+      ISSUE-0130 (b), a REPLAYED turn whose message this boot already
+      ingested live.  Dropped so the same message is not summarised twice
+      in one boot, while the turn STAYS on the record so the replay span
+      identity, which digests every turn the record holds, remains
+      boot-stable.
     """
     return [
         (idx, turn)
         for idx, turn in enumerate(interaction.turns, start=1)
         if not is_foreign_room_close_turn(
             turn.payload or {}, interaction.speaker_id)
+        and not (turn.payload or {}).get(LIVE_DUPLICATE_TURN_KEY)
     ]
 
 

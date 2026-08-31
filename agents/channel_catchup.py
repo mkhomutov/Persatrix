@@ -68,6 +68,7 @@ import aiohttp
 
 from .channel_history_fetcher import HttpChannelHistoryFetcher
 from .channel_replay_event import build_replay_event
+from .channel_replay_outcome import ReplayPassOutcome
 from .channel_validation import validate_channel_message_dict
 from .persona_types import AgentEvent
 
@@ -142,25 +143,20 @@ async def replay_channel_history(
     orchestrator_url: str,
     session: aiohttp.ClientSession,
     limit: int = DEFAULT_CATCHUP_LIMIT,
-    completed: set[str] | None = None,
-) -> set[str]:
+    outcome: ReplayPassOutcome | None = None,
+) -> None:
     """Fetch recent channel history and replay it through the agent.
 
     See module docstring for the contract. This function never raises;
     every failure path is best-effort with a WARN log line.
 
-    Returns the ids of the channels whose window replayed to COMPLETION —
+    ``outcome`` records what the pass learned about its own completeness —
     the ISSUE-0130 (b) derivation gate (``close_replayed_scopes``), since
-    a record holding a prefix of its window would claim a span identity
-    no later boot can recompute.  Per CHANNEL rather than per pass
-    (v0.3.15 PR B2 review): the budget below can cut the pass off in its
-    ninth channel without touching the eight that already finished, and a
-    single row that raised inside ``on_event`` leaves ITS channel
-    incomplete without implying anything about the others.
-
-    ``completed`` may be passed in so a caller keeps the partial result
-    even when this raises something other than the budget timeout —
-    the set is mutated in place, exactly like ``counts``.
+    a record holding a prefix of its window would claim a span identity no
+    later boot can recompute.  It is MUTATED IN PLACE and never returned,
+    exactly like ``counts``: the caller owns it and reads it in a
+    ``finally``, so a partial pass still reports what finished.  See
+    :class:`ReplayPassOutcome` for why completeness has two axes.
 
     PR-265 review L3 (second pass): the body is wrapped in
     :func:`asyncio.wait_for` against ``_CATCHUP_BUDGET_SECONDS`` so a
@@ -176,8 +172,8 @@ async def replay_channel_history(
     """
     started_at = time.monotonic()
     counts = {"channels": 0, "events": 0}
-    if completed is None:
-        completed = set()
+    if outcome is None:
+        outcome = ReplayPassOutcome()
     try:
         await asyncio.wait_for(
             _replay_channel_history_inner(
@@ -186,7 +182,7 @@ async def replay_channel_history(
                 session=session,
                 limit=limit,
                 counts=counts,
-                completed=completed,
+                outcome=outcome,
             ),
             timeout=_CATCHUP_BUDGET_SECONDS,
         )
@@ -199,7 +195,6 @@ async def replay_channel_history(
             counts["events"],
             elapsed_ms,
         )
-        return completed
     except TimeoutError:
         elapsed_ms = (time.monotonic() - started_at) * 1000
         logger.warning(
@@ -215,7 +210,6 @@ async def replay_channel_history(
         # The channels that finished BEFORE the budget ran out are
         # complete and derive normally; only the one it cut off (and any
         # it never reached) is held back.
-        return completed
 
 
 async def _replay_channel_history_inner(
@@ -225,16 +219,16 @@ async def _replay_channel_history_inner(
     session: aiohttp.ClientSession,
     limit: int,
     counts: dict[str, int],
-    completed: set[str],
+    outcome: ReplayPassOutcome,
 ) -> None:
     """Wall-clock-budget-wrapped body of :func:`replay_channel_history`.
 
-    Mutates ``counts`` and ``completed`` in-place so the outer wrapper
+    Mutates ``counts`` and ``outcome`` in-place so the outer wrapper
     can surface per-pass totals on both the success-INFO and budget-WARN
     paths (the latter needs to log how far the partial pass got before
     the cancellation). Mutation is intentional — returning a tuple from a
     function that may be cancelled mid-execution would lose the
-    partial progress, and ``completed`` is load-bearing on exactly that
+    partial progress, and ``outcome`` is load-bearing on exactly that
     path: the channels finished before a budget overrun are the ones the
     ISSUE-0130 (b) derivation gate must still let through.
     """
@@ -321,11 +315,24 @@ async def _replay_channel_history_inner(
                     "channels: catch-up replay raised on agent=%s channel=%s msg=%s",
                     agent.agent_id, channel_id, msg.get("id", ""),
                 )
-                channel_complete = False
+                # PER SENDER where the row names one (PR B2 review round
+                # 3).  The hole this leaves is in the record keyed by THAT
+                # sender, and only that one — so disqualifying the whole
+                # channel made one deterministically raising row cost every
+                # other speaker in the room their derivation, on every boot,
+                # with nothing to distinguish it from replay having stopped.
+                # A row whose sender cannot be read is the case that still
+                # takes the channel down: an unattributable gap could be in
+                # any record.
+                sender = msg.get("sender_id")
+                if isinstance(sender, str) and sender:
+                    outcome.speaker_gaps.add((channel_id, sender))
+                else:
+                    channel_complete = False
                 continue
             counts["events"] += 1
         if channel_complete:
-            completed.add(channel_id)
+            outcome.completed.add(channel_id)
 
 
 # ─── Internal helpers ──────────────────────────────────────
@@ -437,16 +444,16 @@ async def replay_for_persona_agents(
         if not isinstance(agent, _LLMPersonaAgent):
             continue
         # Owned HERE, and mutated in place by the call below, so the
-        # ``finally`` still sees which channels finished even when the
-        # call raises something its own timeout branch does not catch.
-        completed: set[str] = set()
+        # ``finally`` still sees what finished even when the call raises
+        # something its own timeout branch does not catch.
+        outcome = ReplayPassOutcome()
         try:
             await replay_channel_history(
                 agent=agent,
                 orchestrator_url=orchestrator_url,
                 session=session,
                 limit=limit,
-                completed=completed,
+                outcome=outcome,
             )
         except Exception:
             logger.exception(
@@ -476,5 +483,6 @@ async def replay_for_persona_agents(
             # later channel overran, and still said "complete" for a
             # window a raising ``on_event`` had left a hole in.
             await agent.close_replayed_interactions(
-                derive_channels=frozenset(completed),
+                derive_channels=frozenset(outcome.completed),
+                speaker_gaps=frozenset(outcome.speaker_gaps),
             )

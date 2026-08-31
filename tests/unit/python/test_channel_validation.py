@@ -307,6 +307,19 @@ class TestValidateChannelMessageDict:
         assert "content" in err
         assert ts is None
 
+    def test_rejects_a_blank_message_id(self):
+        """ISSUE-0130 (b): one id-less row disarmed the replay
+        re-derivation guard for its whole window, on every boot —
+        ``agents.persona_runtime.replay_identity`` states why the span
+        identity is all-or-nothing.  Dropping the row is safe because it
+        is deterministic: every boot drops the same one.
+        """
+        for blank in ("", "   "):
+            err, ts = validate_channel_message_dict(
+                _msg_dict(id=blank), channel_type="group")
+            assert err is not None and "message_id" in err, f"{blank!r}"
+            assert ts is None
+
     def test_rejects_too_many_mentions(self):
         err, _ = validate_channel_message_dict(
             _msg_dict(mentions=[f"agent-{i:02d}" for i in range(11)]),

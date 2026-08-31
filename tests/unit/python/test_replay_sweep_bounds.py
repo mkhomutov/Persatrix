@@ -246,3 +246,60 @@ class TestTheSweepBoundsWhatItCostsBoot:
 
 
 # ─── The record's own epoch at close (PR B2 review finding 3) ──────────
+
+
+@pytest.mark.asyncio
+class TestCompletenessIsPerSpeakerNotPerRoom:
+    """A raising row leaves a hole in ONE speaker's record.
+
+    Records are keyed `(principal, speaker, scope)`, so a row that raised
+    inside ``on_event`` can only have gapped the record its own sender's
+    turns land in. The first cut disqualified the whole CHANNEL for it —
+    and because such a failure is deterministic (the ``except`` calls
+    reaching it "a programming error somewhere upstream"), the same row
+    raised on every boot, so that room's replayed memory was never derived
+    for anyone, with nothing to distinguish it from replay having stopped.
+    """
+
+    async def test_a_gap_blocks_only_its_own_speaker(self) -> None:
+        tracker = InteractionTracker()
+        for speaker in ("alice", "bob"):
+            tracker.add_turn(
+                SCOPE, speaker_id=speaker, replayed=True,
+                replay_attributed=True, source_channel_id="group:planning",
+            )
+        seen: dict[str, bool] = {}
+
+        async def _persist(interaction: Interaction) -> None:
+            seen[interaction.speaker_id] = interaction.replay_window_complete
+
+        await close_replayed_scopes(
+            tracker, _persist,
+            derive_channels=frozenset({"group:planning"}),
+            speaker_gaps=frozenset({("group:planning", "alice")}),
+        )
+        assert seen == {"alice": False, "bob": True}, (
+            "alice's window has a hole and must not derive; bob's replayed "
+            "cleanly and must not be punished for it"
+        )
+
+
+def test_an_unattributable_gap_takes_the_channel_down() -> None:
+    """The one case that still costs the whole room.
+
+    ``_replay_channel_history_inner`` can only name the gapped speaker when
+    the raising row carries a readable ``sender_id``. Without one the hole
+    could be in any record, so the channel leaves ``completed`` instead —
+    the conservative direction, and the only one available.
+    """
+    from agents.channel_replay_outcome import ReplayPassOutcome
+
+    outcome = ReplayPassOutcome()
+    assert outcome.completed == set()
+    assert outcome.speaker_gaps == set()
+    outcome.speaker_gaps.add(("group:planning", "alice"))
+    outcome.completed.add("group:planning")
+    assert ("group:planning", "alice") in outcome.speaker_gaps, (
+        "the two axes are independent: a channel can finish its window and "
+        "still owe one speaker a gap"
+    )

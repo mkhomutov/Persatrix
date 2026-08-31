@@ -203,9 +203,17 @@ class TestMigrations:
         ) as cursor:
             rows = await cursor.fetchall()
         index_names = {r[0] for r in rows}
-        assert "idx_episodes_agent" in index_names
+        assert "idx_episodes_interaction" in index_names
         assert "idx_episodes_importance" in index_names
         assert "idx_episodes_created" in index_names
+        assert "idx_episodes_agent" not in index_names, (
+            "migration 19 drops it: ``idx_episodes_agent(agent_id)`` is a "
+            "strict prefix of ``idx_episodes_interaction(agent_id, "
+            "interaction_id)``, so every predicate it served is still "
+            "served — and keeping the dead B-tree cost 24% on every "
+            "``store_episode`` INSERT, which since the ISSUE-0123 re-key "
+            "runs once per close per speaker per room"
+        )
 
 
 # ─── Store and recall ───────────────────────────────────────

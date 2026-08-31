@@ -32,6 +32,23 @@ from ..session_id import LEGACY_SESSION_ID
 # v0.3.15 PR B2) — this one is not among them.
 ROOM_CLOSE_TURN_KEY = "room_close"
 
+# ISSUE-0130 (b), PR B2 review round 3: this REPLAYED turn carries a wire
+# message the agent had ALREADY ingested live during this same boot, so its
+# content is in a live record too.  Dispatch self-registers before catch-up
+# runs, so a message published in that gap reaches both paths — and the
+# re-derivation guard cannot see across them, because the live record's
+# ``interaction_id`` is a ``uuid4`` and not a content digest.
+#
+# The turn is kept ON the record and dropped from the DERIVATION INPUT, and
+# that asymmetry is the whole point: the span identity is a digest over the
+# turns the record HOLDS, so removing the turn would make the digest depend
+# on which messages happened to race — boot-unstable, and the next boot
+# would derive the window again under a different id.  Excluding it only
+# from what gets summarised keeps the identity boot-stable AND the content
+# unduplicated.  Stripped before ``context_json`` like the other transient
+# keys.
+LIVE_DUPLICATE_TURN_KEY = "live_duplicate"
+
 
 @dataclass
 class Turn:

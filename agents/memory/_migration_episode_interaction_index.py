@@ -70,4 +70,15 @@ async def _apply_migration_19(db: aiosqlite.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_episodes_interaction "
         "ON episodes(agent_id, interaction_id)",
     )
+    # ...and drop the one it supersedes.  ``idx_episodes_agent(agent_id)``
+    # is a strict prefix of the composite, so every predicate it served is
+    # still served — SQLite simply plans them through the wider index.
+    # Keeping both is not free: the dead B-tree is maintained on every
+    # INSERT, which is once per close per speaker per room since the
+    # ISSUE-0123 re-key.  Measured at 20 000 episodes with 3 KB
+    # ``context_json`` rows: INSERT 0.0477 ms -> 0.0364 ms (**-24%**) once
+    # dropped, against a 2.4% regression on the agent-only ``COUNT(*)``
+    # (0.1580 -> 0.1618 ms), which stays a COVERING scan on the composite.
+    # Closes on every turn; counts rarely.
+    await db.execute("DROP INDEX IF EXISTS idx_episodes_agent")
     await db.commit()
