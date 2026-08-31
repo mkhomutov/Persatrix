@@ -287,14 +287,17 @@ docker compose restart agent-ember-owl agent-iron-fox agent-nova-sparrow
 sleep 20   # then wait for each agent's /healthz
 ```
 
+Take **three** snapshots — before the restart (**A**), after it (**B**),
+and after a second restart with no traffic in between (**C**).
+
 | | Expected |
 |---|---|
-| **v0.3.14** | Flat, for the wrong reason: the leak-stopper derives nothing at all from a replayed span, so a restart adds no rows and also recovers no memory of the window the agent was down for. |
-| **after B1+B2** | **Flat, in every partition.** The replay now derives — under the tenant `messages.principal_id` names — so the counts that must not move are `alice-person`'s, not `local`'s. |
+| **v0.3.14** | A = B = C, for the wrong reason: the leak-stopper derives nothing at all from a replayed span, so a restart adds no rows and also recovers no memory of the window the agent was down for. |
+| **after B1+B2** | **A → B grows; B = C.** Legs 1–4's traffic derived LIVE, under `uuid4` ids, and the guard matches only a previous *replay* derivation — so the first restart has nothing to match and derives the window once. The bar is the SECOND restart: `B = C`, in every partition. |
 
-- [ ] Both snapshots are pasted verbatim, per `(principal_id, speaker_id)`, and are **identical**.
+- [ ] Snapshots **B and C** are pasted verbatim, per `(principal_id, speaker_id)`, and are **identical**. Do not expect `A = B`: that bar fails on correct code, and "correcting" it to accept whatever appears destroys the gate.
+- [ ] `A → B` adds `replay-` rows, in **`alice-person`**. Zero growth means replay derived nothing — the v0.3.14 cost, not a pass.
 - [ ] Read `alice-person` first. This issue originally framed the missing check as a `local` read, which was right while every replayed derivation went there; once (b) lands, a re-derived duplicate appears in the **attributed** partition, so a `local`-only assertion passes at exactly the moment the regression is worst.
-- [ ] Restart **again** without traffic. The bar is that N restarts derive once, not that the second one is quiet.
 - [ ] Now send one message and restart a third time. New rows **must** appear, and at least one **must** carry a `replay-` interaction id: the guard bounds duplication, and a leg that only proves nothing was written cannot tell that apart from replay having stopped deriving at all. Counting rows alone does not settle it — the live close writes rows too, with no replay involved, so the `replay-` prefix is what makes this check discriminating.
 - [ ] ISSUE-0125's live proof is **Leg 8's** orchestrator restart, not this one (`docker compose restart orchestrator`, then `GET /api/v1/agents` non-empty). Keep the two apart: this leg needs the agents restarted, which is exactly what that check forbids, and running them as one leg is how the shape-(b) guard ended up with no live proof at all.
 

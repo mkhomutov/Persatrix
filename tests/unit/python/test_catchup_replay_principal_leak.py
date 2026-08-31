@@ -271,6 +271,12 @@ async def test_attributed_replayed_interaction_derives_on_close() -> None:
     )
     closed = tracker.close_record(opened, reason=REASON_STRUCTURAL)
     assert closed is not None
+    # This test is about ATTRIBUTION, so it isolates that axis: a record
+    # closed by a non-sweep door is refused by the completeness gate
+    # regardless of its tenant (its own test lives in
+    # ``test_replay_span_identity``), which would make the assertion below
+    # pass for the wrong reason.
+    closed.replay_window_complete = True
     minted_at_open = closed.interaction_id
 
     episodic = _RecordingEpisodic()

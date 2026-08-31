@@ -42,6 +42,9 @@ from agents.channel_replay_event import build_replay_event
 from agents.clock import FrozenClock
 from agents.memory.interactions import scope_for_group
 from agents.persona_runtime import _LLMPersonaAgent
+from agents.persona_runtime.replay_identity import (
+    REPLAY_INTERACTION_ID_PREFIX,
+)
 from agents.principal_id import seed_principal_metadata
 from agents.tools.registry import clear_registry
 
@@ -109,6 +112,26 @@ async def _derived(agent: _LLMPersonaAgent) -> list[tuple]:
         "SELECT principal_id, speaker_id, summary FROM episodes "
         "WHERE agent_id = ? ORDER BY created_at",
         (agent.agent_id,),
+    ) as cursor:
+        return [tuple(r) for r in await cursor.fetchall()]
+
+
+async def _replay_derived(agent: _LLMPersonaAgent) -> list[tuple]:
+    """Only the episodes a REPLAYED span produced.
+
+    ``REPLAY_INTERACTION_ID_PREFIX`` is the production marker — a replay
+    derivation writes its content digest as ``interaction_id``, where a
+    live close writes a ``uuid4`` — so this is the discriminator the store
+    itself carries, not one the test invents.  Filtering by principal is
+    NOT enough: an authenticated live turn derives under the same tenant
+    as the replayed rows it interleaved with, which is the whole point of
+    shape (b).
+    """
+    db = agent._episodic_memory._ensure_db()
+    async with db.execute(
+        "SELECT principal_id, speaker_id, turn_count FROM episodes "
+        "WHERE agent_id = ? AND interaction_id LIKE ? ORDER BY created_at",
+        (agent.agent_id, f"{REPLAY_INTERACTION_ID_PREFIX}%"),
     ) as cursor:
         return [tuple(r) for r in await cursor.fetchall()]
 
@@ -377,4 +400,92 @@ class TestAnUnfinishedPassDerivesNothing:
         ], (
             "the completed channel derives; the truncated one waits for a "
             "boot that finishes it"
+        )
+
+
+@pytest.mark.asyncio
+class TestALiveTurnMidPassDerivesNoPrefix:
+    """The doors the completeness gate did not cover (PR B2 review).
+
+    Dispatch is already serving while catch-up runs — ``agents.server``
+    self-registers before ``replay_for_persona_agents`` — so a live turn
+    can land between two replayed rows.  Both of the ways it can reach a
+    replay-opened record used to close AND derive it, holding only the
+    prefix ingested so far, because the gate lived in the pass-end sweep's
+    own loop body and neither of these paths goes through it.
+
+    A prefix's span identity is a digest over the turns the record holds,
+    so no later boot recomputes it: the next uninterrupted boot derives the
+    whole window on top, and every interrupted boot adds another orphan.
+    That is the ``0 → 2 → 5 → 13 → 18`` growth curve shape (b) exists to
+    bound, through the doors its gate did not reach.  Both now read
+    ``Interaction.replay_window_complete`` at the shared chokepoint.
+    """
+
+    async def test_a_live_turn_splitting_the_window_derives_no_prefix(self):
+        """Door 1: the ingest-time replay→live split, on the SAME key."""
+        agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
+        rows = [
+            _history_row("m-1", "alice", "Mira turns seven", "alice-person"),
+            _history_row("m-2", "alice", "and she loves whales", "alice-person"),
+        ]
+        await agent.on_event(build_replay_event(
+            rows[0], GROUP_CHANNEL, "all", CHANNEL,
+        ))
+        # Alice speaks LIVE, mid-window, AUTHENTICATED — the live gRPC
+        # ingress seeds the same metadata key the replay builder does, so
+        # her turn resolves to the same ``(principal, speaker, scope)``
+        # record the replay opened.  That identity is what makes this the
+        # split: an unauthenticated live turn would resolve to ``local``
+        # and simply open its own record, never touching the replayed one.
+        live = channel_event("still there?", sender="alice", wire_id="wire-A")
+        seed_principal_metadata(live.metadata, "alice-person")
+        await agent.on_event(live)
+        await agent.on_event(build_replay_event(
+            rows[1], GROUP_CHANNEL, "all", CHANNEL,
+        ))
+        await agent.close_replayed_interactions(
+            derive_channels=frozenset({GROUP_CHANNEL}),
+        )
+        await agent.drain_pending_summaries()
+
+        assert await _replay_derived(agent) == [], (
+            "no replayed span may derive from this pass: the split cut the "
+            "window, so the prefix AND the tail it left behind both claim "
+            "identities no uninterrupted boot can recompute"
+        )
+        assert [r for r in await _derived(agent) if r[1] == "alice"], (
+            "the LIVE half must still derive normally — refusing it is the "
+            "v0.3.14 cost, and without this the assertion above is vacuous"
+        )
+
+    async def test_a_wire_rotation_derives_no_other_speakers_prefix(self):
+        """Door 2: a live wire ROTATION reaching a non-target record.
+
+        ``stale_close_reason`` narrows the catch-up boundary to the record
+        the arriving turn would land in — correctly, since fanning it
+        room-wide chopped every unrelated live conversation into one-turn
+        episodes.  But that narrowing also let a NON-target replayed record
+        fall through to the rotation check, which closes it ``structural``
+        and, before this gate, derived its prefix.
+        """
+        agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
+        await agent.on_event(build_replay_event(
+            _history_row("m-1", "alice", "Mira turns seven", "alice-person"),
+            GROUP_CHANNEL, "all", CHANNEL,
+        ))
+        # BOB speaks live under a ROTATED wire id: a different record key,
+        # so alice's replayed record is not the target — it reaches the
+        # rotation branch instead of the catch-up one.
+        await agent.on_event(channel_event(
+            "new topic", sender="bob", wire_id="wire-B",
+        ))
+        await agent.close_replayed_interactions(
+            derive_channels=frozenset({GROUP_CHANNEL}),
+        )
+        await agent.drain_pending_summaries()
+
+        assert await _replay_derived(agent) == [], (
+            "a replayed record closed by someone else's wire rotation holds "
+            "a prefix like any other, and must not derive"
         )

@@ -5,6 +5,7 @@ package channels
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 )
 
@@ -67,8 +68,26 @@ const v12PrincipalBackfillOriginalDefault = `'local'`
 //
 // Runs in one transaction and stamps `user_version` inside it (PR #335 review
 // L3) so the repair and its version bookkeeping commit atomically.
-// `messages_fts` (v10) is an external-content index over `content` only, so
-// rewriting this column does not touch it.
+//
+// # Why the FTS trigger is dropped around the rewrite
+//
+// `messages_fts` (v10) indexes `content` only, so this rewrite changes nothing
+// it holds — but [messagesFTSUpdateTriggerDDL] is `AFTER UPDATE ON messages`,
+// a WHOLE-ROW trigger, not `AFTER UPDATE OF content`. Left in place it fires
+// once per repaired row and does a full FTS5 `'delete'` + re-insert of that
+// row's content, turning a cheap column rewrite into a re-tokenisation of
+// every affected row on the orchestrator's boot path — and on an affected
+// store that is every pre-v12 row plus every unauthenticated publish. Worse,
+// the trigger's `'delete'` passes `old.content`: if the external-content index
+// is ever out of step with `messages` (the v10 header's own VACUUM caveat)
+// that corrupts the index for exactly the rows this migration touches.
+//
+// Dropping and recreating it inside the same transaction keeps the index
+// bit-identical (which is correct — no content changed) and keeps the v10
+// invariant that the trigger "is expected never to fire" literally true. The
+// drop is conditional because a build without FTS5 has no trigger to drop:
+// v9->v10 skips the whole FTS block in that case and only advances the
+// version line.
 func migrateV12ToV13(db *sql.DB) error {
 	needsRepair, err := v12PrincipalBackfilledLocal(db)
 	if err != nil {
@@ -82,11 +101,25 @@ func migrateV12ToV13(db *sql.DB) error {
 	defer func() { _ = tx.Rollback() }()
 
 	if needsRepair {
+		hadFTSTrigger, err := messagesFTSUpdateTriggerExists(tx)
+		if err != nil {
+			return err
+		}
+		if hadFTSTrigger {
+			if _, err := tx.Exec(`DROP TRIGGER messages_au`); err != nil {
+				return fmt.Errorf("drop messages_au for backfill repair: %w", err)
+			}
+		}
 		if _, err := tx.Exec(
 			`UPDATE messages SET principal_id = '' WHERE principal_id = ?`,
 			DefaultPrincipalID,
 		); err != nil {
 			return fmt.Errorf("repair messages.principal_id backfill: %w", err)
+		}
+		if hadFTSTrigger {
+			if _, err := tx.Exec(messagesFTSUpdateTriggerDDL); err != nil {
+				return fmt.Errorf("restore messages_au after backfill repair: %w", err)
+			}
 		}
 	}
 	if err := stampUserVersionTx(tx, 13); err != nil {
@@ -133,4 +166,22 @@ func v12PrincipalBackfilledLocal(db *sql.DB) (bool, error) {
 		return false, fmt.Errorf("iterate messages table_info: %w", err)
 	}
 	return false, nil
+}
+
+// messagesFTSUpdateTriggerExists reports whether this store carries the v10
+// `messages_au` trigger. It is absent on a build without FTS5, where v9->v10
+// skips the whole index block and only advances the version line, so the
+// repair must not assume it can drop it.
+func messagesFTSUpdateTriggerExists(tx *sql.Tx) (bool, error) {
+	var name string
+	err := tx.QueryRow(
+		`SELECT name FROM sqlite_master WHERE type='trigger' AND name='messages_au'`,
+	).Scan(&name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read messages_au trigger: %w", err)
+	}
+	return true, nil
 }

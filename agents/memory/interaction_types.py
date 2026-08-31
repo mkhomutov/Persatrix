@@ -191,6 +191,31 @@ class Interaction:
     # on the wire separates them, so the presence is what is recorded
     # here — the value is already on ``principal_id`` above.
     replay_attributed: bool = False
+    # ISSUE-0130 shape (b) — may this replayed record's span be DERIVED?
+    #
+    # ``False`` by default, and that polarity is the point (PR B2 review).
+    # The span identity is a digest over the turns the record HOLDS, so a
+    # record holding a PREFIX of its channel's window claims an id no later
+    # boot can recompute — and the next complete boot then derives the whole
+    # window on top of it, which is the unbounded growth shape (b) exists to
+    # bound.  Only :func:`~agents.persona_runtime.replay_sweep
+    # .close_replayed_scopes` can know a record holds a whole window (it runs
+    # after the pass, and is told which channels finished), so only it sets
+    # this.  Every OTHER close door — the ingest-time replay/live split, a
+    # wire rotation reaching a non-target record, ``idle_check``, the
+    # ``max_turns`` cap — closes a record mid-pass, which by construction
+    # means a partial window, and leaves the default standing.
+    #
+    # The first cut kept this decision in the sweep's own loop body, so those
+    # other doors derived prefixes unguarded.  Moving it onto the record puts
+    # it where the ONE chokepoint every door funnels through can read it
+    # (``persist_closed_interaction``), and makes the unguarded case the safe
+    # one.  Refusing costs a boot's derivation, which catch-up re-reads on the
+    # next boot anyway (no watermark, RFC 0011 OQ #8); deriving a prefix costs
+    # a duplicate episode that nothing can ever match again.
+    #
+    # Meaningful only while ``replayed`` is set.
+    replay_window_complete: bool = False
     # RFC 0037 §C (v0.3.12 PR 3): the acting channel's wire classification
     # captured when the interaction *opened*, frozen for its lifetime — the
     # single point of truth the episodic and facts tiers inherit their

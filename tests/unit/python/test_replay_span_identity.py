@@ -42,12 +42,12 @@ def _record(*, principal: str = "alice-person", speaker: str = "alice",
 
 class TestIdentityIsStableAndDiscriminating:
     def test_the_same_span_hashes_the_same(self):
-        a = replay_span_identity(_record(), "ember-owl", "live", ["m-1", "m-2"])
-        b = replay_span_identity(_record(), "ember-owl", "live", ["m-1", "m-2"])
+        a = replay_span_identity(_record(), "ember-owl", "live", "internal", ["m-1", "m-2"])
+        b = replay_span_identity(_record(), "ember-owl", "live", "internal", ["m-1", "m-2"])
         assert a is not None and a == b
 
     def test_it_is_marked_as_a_replay_derivation(self):
-        identity = replay_span_identity(_record(), "ember-owl", "live", ["m-1"])
+        identity = replay_span_identity(_record(), "ember-owl", "live", "internal", ["m-1"])
         assert identity is not None
         assert identity.startswith(REPLAY_INTERACTION_ID_PREFIX)
 
@@ -56,9 +56,9 @@ class TestIdentityIsStableAndDiscriminating:
         [("principal", "bob-person"), ("speaker", "bob"), ("scope", "dm:bob")],
     )
     def test_every_key_axis_changes_the_identity(self, field, value):
-        base = replay_span_identity(_record(), "ember-owl", "live", ["m-1"])
+        base = replay_span_identity(_record(), "ember-owl", "live", "internal", ["m-1"])
         other = replay_span_identity(
-            _record(**{field: value}), "ember-owl", "live", ["m-1"],
+            _record(**{field: value}), "ember-owl", "live", "internal", ["m-1"],
         )
         assert base != other, (
             f"{field} must discriminate — one record's derivation would "
@@ -70,20 +70,20 @@ class TestIdentityIsStableAndDiscriminating:
         # episode from the same messages; ``episodes.interaction_id`` is
         # not constrained to one agent.
         assert (
-            replay_span_identity(_record(), "ember-owl", "live", ["m-1"])
-            != replay_span_identity(_record(), "slate-fox", "live", ["m-1"])
+            replay_span_identity(_record(), "ember-owl", "live", "internal", ["m-1"])
+            != replay_span_identity(_record(), "slate-fox", "live", "internal", ["m-1"])
         )
 
     def test_a_grown_window_is_a_different_span(self):
         assert (
-            replay_span_identity(_record(), "ember-owl", "live", ["m-1"])
-            != replay_span_identity(_record(), "ember-owl", "live", ["m-1", "m-2"])
+            replay_span_identity(_record(), "ember-owl", "live", "internal", ["m-1"])
+            != replay_span_identity(_record(), "ember-owl", "live", "internal", ["m-1", "m-2"])
         )
 
     def test_message_order_is_part_of_the_span(self):
         assert (
-            replay_span_identity(_record(), "ember-owl", "live", ["m-1", "m-2"])
-            != replay_span_identity(_record(), "ember-owl", "live", ["m-2", "m-1"])
+            replay_span_identity(_record(), "ember-owl", "live", "internal", ["m-1", "m-2"])
+            != replay_span_identity(_record(), "ember-owl", "live", "internal", ["m-2", "m-1"])
         )
 
     def test_the_epoch_discriminates(self):
@@ -92,12 +92,12 @@ class TestIdentityIsStableAndDiscriminating:
         # identity across epochs would have one epoch's row suppress
         # another's derivation — permanently, and of a row it cannot read.
         assert (
-            replay_span_identity(_record(), "ember-owl", "live", ["m-1"])
-            != replay_span_identity(_record(), "ember-owl", "eval-7", ["m-1"])
+            replay_span_identity(_record(), "ember-owl", "live", "internal", ["m-1"])
+            != replay_span_identity(_record(), "ember-owl", "eval-7", "internal", ["m-1"])
         )
 
     def test_no_message_ids_means_no_identity(self):
-        assert replay_span_identity(_record(), "ember-owl", "live", []) is None
+        assert replay_span_identity(_record(), "ember-owl", "live", "internal", []) is None
 
     @pytest.mark.parametrize(
         "ids",
@@ -112,12 +112,12 @@ class TestIdentityIsStableAndDiscriminating:
         # message_dict`` accepts a row whose ``id`` is missing or empty
         # (it only type- and length-checks), so this is reachable, and the
         # honest answer is to refuse the whole span and derive unguarded.
-        assert replay_span_identity(_record(), "ember-owl", "live", ids) is None
+        assert replay_span_identity(_record(), "ember-owl", "live", "internal", ids) is None
 
     def test_a_partial_span_does_not_collide_with_its_identified_subset(self):
-        subset = replay_span_identity(_record(), "ember-owl", "live", ["m-1"])
+        subset = replay_span_identity(_record(), "ember-owl", "live", "internal", ["m-1"])
         partial = replay_span_identity(
-            _record(), "ember-owl", "live", ["m-1", ""],
+            _record(), "ember-owl", "live", "internal", ["m-1", ""],
         )
         assert subset is not None
         assert partial is None, (
@@ -135,6 +135,16 @@ class _Episodic:
         self.raises = raises
         self.epoch = epoch
         self.asked: list[str] = []
+        self.stored: list[str] = []
+
+    async def store_episode(self, **kwargs: object) -> None:
+        self.stored.append(str(kwargs.get("interaction_id", "")))
+
+    async def update_episode_summary(self, *a: object, **k: object) -> int:
+        # Present so a REGRESSION (the gate removed) fails on this file's
+        # own assertions rather than on a missing attribute three frames
+        # down in Phase 2.
+        return 1
 
     def active_epoch_id(self) -> str:
         return self.epoch
@@ -155,6 +165,7 @@ class TestTheGuard:
 
         assert await replay_span_already_derived(
             episodic=episodic, interaction=record, agent_id="ember-owl",
+            protection_level="internal",
             message_ids=["m-1"],
         ) is False
         assert record.interaction_id != minted_at_open, (
@@ -166,7 +177,8 @@ class TestTheGuard:
     async def test_a_known_span_is_reported_as_derived(self):
         assert await replay_span_already_derived(
             episodic=_Episodic(known=True), interaction=_record(),
-            agent_id="ember-owl", message_ids=["m-1"],
+            agent_id="ember-owl", protection_level="internal",
+            message_ids=["m-1"],
         ) is True
 
     async def test_an_unidentifiable_span_derives_unguarded(self):
@@ -176,6 +188,7 @@ class TestTheGuard:
 
         assert await replay_span_already_derived(
             episodic=episodic, interaction=record, agent_id="ember-owl",
+            protection_level="internal",
             message_ids=[],
         ) is False
         assert episodic.asked == [], "nothing to ask about"
@@ -191,7 +204,8 @@ class TestTheGuard:
 
         assert await replay_span_already_derived(
             episodic=_Episodic(raises=True), interaction=record,
-            agent_id="ember-owl", message_ids=["m-1"],
+            agent_id="ember-owl", protection_level="internal",
+            message_ids=["m-1"],
         ) is False
         assert record.interaction_id == minted_at_open, (
             "a failed lookup must NOT claim the digest: deriving twice is "
@@ -225,10 +239,12 @@ class TestTheGuard:
         tier_a, tier_b = _Episodic(epoch="live"), _Episodic(epoch="live")
         await replay_span_already_derived(
             episodic=tier_a, interaction=live_record, agent_id="ember-owl",
+            protection_level="internal",
             message_ids=["m-1"],
         )
         await replay_span_already_derived(
             episodic=tier_b, interaction=eval_record, agent_id="ember-owl",
+            protection_level="internal",
             message_ids=["m-1"],
         )
         assert tier_a.asked != tier_b.asked, (
@@ -251,11 +267,13 @@ class TestTheGuard:
 
         await replay_span_already_derived(
             episodic=live, interaction=record, agent_id="ember-owl",
+            protection_level="internal",
             message_ids=["m-1"],
         )
         record.epoch_id = ""
         await replay_span_already_derived(
             episodic=evaluated, interaction=record, agent_id="ember-owl",
+            protection_level="internal",
             message_ids=["m-1"],
         )
         assert live.asked != evaluated.asked
@@ -313,6 +331,10 @@ async def test_the_close_path_digests_every_turn_not_the_filtered_view(
     )
     closed = tracker.close_record(record, reason="structural")
     assert closed is not None
+    # This close is a NON-sweep door, so the completeness gate would refuse
+    # it outright (that is its own test below).  Mark the record derivable
+    # so this test isolates WHICH TURNS the digest is taken over.
+    closed.replay_window_complete = True
 
     episodic = _Episodic(known=True)  # skip before any real write
     await persist_closed_interaction(
@@ -325,7 +347,7 @@ async def test_the_close_path_digests_every_turn_not_the_filtered_view(
     )
 
     expected = replay_span_identity(
-        closed, "ember-owl", closed.epoch_id, ["m-1", "m-close"],
+        closed, "ember-owl", closed.epoch_id, "internal", ["m-1", "m-close"],
     )
     assert episodic.asked == [expected], (
         "the excluded turn is still part of WHICH SPAN this is, even "
@@ -335,3 +357,55 @@ async def test_the_close_path_digests_every_turn_not_the_filtered_view(
 
 async def _noop() -> None:
     return None
+
+
+async def test_a_replayed_record_closed_off_the_sweep_never_derives():
+    """The ISSUE-0130 (b) completeness gate, at the shared chokepoint.
+
+    A replayed record reaches ``persist_closed_interaction`` through four
+    doors, and only the pass-end sweep can know the record holds a WHOLE
+    replay window.  The other three — the ingest-time replay/live split, a
+    wire rotation reaching a non-target record, and ``idle_check`` — close
+    it mid-pass, so it holds a PREFIX, and the span digest over a prefix is
+    an id no later boot recomputes: the next complete boot derives the whole
+    window on top of it, unbounded across boots.
+
+    While the decision lived in the sweep's own loop body all three of those
+    doors derived prefixes unguarded (PR B2 review).  Reading a frozen field
+    here fixes every door at once and, more to the point, FAILS CLOSED — a
+    future close path that has never heard of replay windows cannot derive
+    one by omission.
+    """
+    from agents.persona_runtime.close_path import persist_closed_interaction
+
+    tracker = InteractionTracker()
+    record = tracker.add_turn(
+        "group:planning",
+        payload={"summary": "s", "text": "hi", "message_id": "m-1"},
+        replayed=True, replay_attributed=True,
+        source_channel_id="group:planning",
+        principal_id="alice-person", speaker_id="alice",
+    )
+    # The finding-2 path verbatim: a live wire rotation reaching a replayed
+    # record that is not the arriving event's own.
+    closed = tracker.close_record(record, reason="structural")
+    assert closed is not None
+    assert not closed.replay_window_complete, (
+        "only the pass-end sweep may mark a replayed record derivable"
+    )
+
+    episodic = _Episodic(known=False)
+    await persist_closed_interaction(
+        episodic=episodic,  # type: ignore[arg-type]
+        llm_client=None,  # type: ignore[arg-type]
+        memory_ns=None,  # type: ignore[arg-type]
+        agent_id="ember-owl", interaction=closed,
+        pending_tasks=set(),
+        on_finalized=_noop,
+    )
+
+    assert episodic.asked == [], (
+        "a prefix must not even ASK the guard — claiming the digest is "
+        "what makes the duplicate permanent"
+    )
+    assert not episodic.stored, "and it must not write a row"

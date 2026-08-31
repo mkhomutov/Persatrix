@@ -445,13 +445,13 @@ class _EpisodeRoutingMixin:
         """The catch-up caller's ISSUE-0130 hook — see
         :func:`agents.persona_runtime.close_path.close_replayed_scopes`,
         which states what ``derive_channels`` means (the channels whose
-        replay actually finished; ``None`` = derive everything) and what
-        the task set is for (bounding the boot burst).
+        replay finished; ``None`` = derive everything), the two other
+        conditions a replayed record must meet to derive, and why the boot
+        summarise burst is now bounded by the Phase-2 tasks themselves.
         """
         return await close_replayed_scopes(
             self._interaction_tracker, self._persist_closed_interaction,
             derive_channels=derive_channels,
-            pending_tasks=self._pending_summarize_tasks,
         )
 
     async def drain_pending_summaries(self) -> None:

@@ -9,58 +9,108 @@ only close fan in the tree that runs before the agent is serving its
 first live turn, and therefore the only one whose cost is measured in
 startup latency rather than in per-turn latency.
 
-That is what its two knobs are about (``max_in_flight`` and
-``throttle_budget_sec``), and why they live here and not beside the
-two-phase write they pace.
+That is why :data:`REPLAY_SUMMARIZE_MAX_IN_FLIGHT` lives here and not
+beside the two-phase write it bounds.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-import time
-from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING
+from collections.abc import Awaitable, Callable, Coroutine
+from typing import TYPE_CHECKING, Any
 
 from ..memory.boundary_detectors import REASON_CATCHUP_COMPLETE
 
 if TYPE_CHECKING:
     from ..memory.interactions import Interaction, InteractionTracker
 
-__all__ = ["close_replayed_scopes"]
+__all__ = [
+    "REPLAY_SUMMARIZE_MAX_IN_FLIGHT",
+    "close_replayed_scopes",
+    "gated_replay_finalize",
+    "replay_summarize_gate",
+]
 
 logger = logging.getLogger(__name__)
 
 
-#: Ceiling on Phase-2 summarise tasks the boot sweep leaves in flight at
-#: once.  Until v0.3.15 PR B2 the sweep derived nothing, so it spawned
-#: nothing; now every ATTRIBUTED replayed record runs the full two-phase
-#: write, and the ``(principal, speaker, scope)`` re-key makes that one
-#: record per SENDER per room — so an unbounded sweep fires K×N provider
-#: calls the instant a persona boots, unmetered (a catch-up close is not a
-#: wire-bounded close, so it draws no wallet lease) and straight into the
-#: RFC 0009 limiter that a restart does not reset.  The cap turns the burst
-#: into a bounded pipeline; it does not reduce the total work.
-_REPLAY_SUMMARIZE_MAX_IN_FLIGHT: int = 4
+#: Ceiling on Phase-2 summarise calls a replayed close may have IN FLIGHT
+#: at once, process-wide.  Until v0.3.15 PR B2 the sweep derived nothing,
+#: so it spawned nothing; now every DERIVABLE replayed record runs the full
+#: two-phase write, and the ``(principal, speaker, scope)`` re-key makes
+#: that one record per SENDER per room — so an unbounded boot fires K×N
+#: provider calls the instant a persona starts, unmetered (a catch-up close
+#: is not a wire-bounded close, so it draws no wallet lease) and straight
+#: into the RFC 0009 limiter that a restart does not reset.
+REPLAY_SUMMARIZE_MAX_IN_FLIGHT: int = 4
 
-#: Total wall-clock the sweep may spend WAITING on those tasks, across the
-#: whole pass (PR B2 review).  Pacing the burst is worth some boot time;
-#: it is not worth unbounded boot time, and the first cut had no bound at
-#: all.  ``replay_channel_history`` runs under a 60 s
-#: ``asyncio.wait_for`` precisely so a slow orchestrator cannot stall
-#: boot — but this sweep runs in the caller's ``finally``, OUTSIDE that
-#: budget, and each task it waits on holds a
-#: ``SUMMARIZATION_TIMEOUT_SEC`` (30 s) LLM round trip.  At four in
-#: flight that made the boot tail grow with the replayed-record count,
-#: and ``AgentServer.start`` arms the ISSUE-0125 re-registration watcher
-#: only AFTER catch-up returns — so the persona stays unregistered, and
-#: silently mute to an orchestrator restart, for the whole of it.
-#:
-#: When the budget is spent the sweep stops WAITING, not working: every
-#: record is still closed and still persisted, and the Phase-2 tasks
-#: still run.  Only the pacing is dropped, which is the part that was
-#: costing boot.
-_REPLAY_SUMMARIZE_THROTTLE_BUDGET_SEC: float = 20.0
+_gate: asyncio.Semaphore | None = None
+
+
+def replay_summarize_gate() -> asyncio.Semaphore:
+    """The process-wide cap on in-flight replay-derived summarisations.
+
+    Held by the Phase-2 TASK, not by the sweep loop — and that is the
+    whole correction (PR B2 review).  The first cut enforced the cap by
+    ``await``\\ ing inside the sweep, which was wrong twice over:
+
+    * it made the cap cost BOOT TIME.  ``replay_channel_history`` runs
+      under a 60 s ``asyncio.wait_for`` precisely so a slow orchestrator
+      cannot stall boot, but the sweep runs in that caller's ``finally``,
+      OUTSIDE the budget, and each task it waited on holds a
+      ``SUMMARIZATION_TIMEOUT_SEC`` (30 s) LLM round trip.  Measured: 5 s
+      of blocked boot at four replayed records, 10 s at eight, and the
+      whole 20 s ceiling at twenty — during which ``AgentServer.start``
+      has not yet armed the ISSUE-0125 re-registration watcher, so an
+      orchestrator restart in that window goes unnoticed.
+    * and to bound that cost it took a wall-clock budget, which then
+      DEFEATED the cap.  The budget was anchored at sweep start and so
+      counted time spent working — a ``store_episode`` INSERT per record —
+      not only time spent waiting; once it expired the pacing was dropped
+      entirely rather than degraded.  Measured at the shipped defaults:
+      87 concurrent summarise calls against a cap of 4.  A slow disk alone
+      was enough, with no slow provider involved at all.
+
+    A semaphore the task itself acquires has neither failure mode.  The
+    sweep never blocks, so boot pays only its INSERTs (measured ~0.4 ms
+    each); the cap holds for the whole pass because nothing can expire it;
+    and the queue behind it is cheap — a coroutine parked on a semaphore,
+    not an open provider connection.  ``drain_pending_summaries`` still
+    drains them all at shutdown, four at a time.
+
+    Lazily built because :class:`asyncio.Semaphore` should be created on
+    the running loop's watch, and this module is imported at process
+    start.  One agent runs per process (``AgentServer``), so process-wide
+    and per-persona are the same ceiling today; if that changes this
+    becomes the fleet-wide budget, which is the more useful of the two.
+    """
+    global _gate
+    if _gate is None:
+        _gate = asyncio.Semaphore(REPLAY_SUMMARIZE_MAX_IN_FLIGHT)
+    return _gate
+
+
+async def gated_replay_finalize(
+    gated: bool, phase_two: Callable[[], Coroutine[Any, Any, None]],
+) -> None:
+    """Run Phase 2, holding the replay summarise gate when it applies.
+
+    ``phase_two`` is a FACTORY, not a coroutine object.  Passing the object
+    would build it at the call site, and a task cancelled or dropped before
+    it ever reaches the ``await`` would leave that coroutine un-awaited —
+    a ``RuntimeWarning`` and, worse, a silently skipped Phase 2 that looks
+    like a completed one.  Building it only once the slot is granted makes
+    "created" and "will run" the same event.
+
+    Only a REPLAYED close is gated: live closes are wire-bounded and
+    metered, and stalling one behind a boot backlog would be a regression.
+    """
+    if not gated:
+        await phase_two()
+        return
+    async with replay_summarize_gate():
+        await phase_two()
 
 
 async def close_replayed_scopes(
@@ -68,9 +118,6 @@ async def close_replayed_scopes(
     persist: Callable[[Interaction], Awaitable[None]],
     *,
     derive_channels: frozenset[str] | None = None,
-    pending_tasks: set[asyncio.Task[None]] | None = None,
-    max_in_flight: int = _REPLAY_SUMMARIZE_MAX_IN_FLIGHT,
-    throttle_budget_sec: float = _REPLAY_SUMMARIZE_THROTTLE_BUDGET_SEC,
 ) -> int:
     """Close every scope the on-startup catch-up replay opened (ISSUE-0130).
 
@@ -88,12 +135,12 @@ async def close_replayed_scopes(
 
     Called at the end of the catch-up pass
     (:func:`agents.channel_catchup.replay_for_persona_agents`).  Returns
-    the number of records closed (since the v0.3.15 ``(principal,
-    speaker, scope)`` re-key one scope may hold several replay-opened
-    records — one per replayed sender).  Best-effort by contract — it runs on the
-    boot path, so a per-scope failure is logged and the sweep continues
-    rather than propagating; the caller may treat it as non-raising.  Note
-    the scope is popped before the persist call, so even a failing persist
+    the number of records closed (since the v0.3.15 ``(principal, speaker,
+    scope)`` re-key one scope may hold several replay-opened records — one
+    per replayed sender).  Best-effort by contract — it runs on the boot
+    path, so a per-scope failure is logged and the sweep continues rather
+    than propagating; the caller may treat it as non-raising.  Note the
+    scope is popped before the persist call, so even a failing persist
     leaves the tracker in the state live traffic depends on.
 
     Deliberately runs WITHOUT the agent lock: a persona holds ``_lock`` for
@@ -103,43 +150,48 @@ async def close_replayed_scopes(
     that returns ``None`` (the other got there first), and a live turn can
     never be inside a flagged span — the split guarantees it opens its own.
 
-    What ``persist`` costs here changed with v0.3.15 PR B2 and the argument
-    above no longer covers all of it.  For an ATTRIBUTED replayed span the
-    call is a real ``store_episode`` INSERT plus a background summarise /
-    extract task, so this sweep now writes and spawns rather than only
-    manipulating tracker state.  Two consequences worth naming:
+    **This is the only place that may mark a replayed record DERIVABLE**
+    (``Interaction.replay_window_complete``), and the flag is what
+    ``persist_closed_interaction`` reads.  The first cut kept the decision
+    inline here instead, which left it enforced on this door alone: the
+    ingest-time split, a wire rotation reaching a non-target record, and
+    ``idle_check`` all reach the same two-phase write, and all three derived
+    PREFIXES unguarded (PR B2 review).  A prefix claims a span id no later
+    boot can recompute, so the next complete boot derives the whole window
+    on top of it — the growth curve shape (b) exists to bound, through the
+    doors its gate did not cover.  Putting the decision on the record moves
+    it to the one chokepoint all four doors funnel through, and makes the
+    default (``False``) the safe answer for every door that cannot know.
 
-    * ``max_in_flight`` bounds the spawn, because one record per replayed
-      SENDER per room otherwise means an unmetered provider burst at boot;
-      ``throttle_budget_sec`` bounds what that pacing may cost the boot
-      path, because this runs outside the catch-up wall-clock budget.
-      The cap counts the tasks THIS SWEEP spawned, not ``pending_tasks``
-      itself — that set is shared with the live close path, which is
-      serving throughout, so measuring it both blocked the sweep on
-      unrelated live closes and released a slot when one of those landed
-      while every replay task was still running (PR B2 review).
-    * the Phase-2 tasks register into ``pending_tasks`` from OUTSIDE
-      ``_lock``, while ``close_memory`` drains that set under it — so a
-      shutdown racing this sweep could snapshot the set before a late task
-      joins.  Not reachable today (``server_cli`` starts and stops strictly
-      in sequence, so a shutdown cannot overlap catch-up); a refactor that
-      makes them concurrent must switch the drain to loop-until-empty,
-      which ``drain_pending_summaries`` already documents as its condition.
+    Three conditions have to hold for a record to derive, and each is a
+    different way of not holding a whole window:
 
-    ``derive_channels`` is which channels' replay actually FINISHED —
-    ``None`` means "no completeness information, derive everything" (the
-    default every direct caller and test wants).  It is a set rather than
-    the boolean the first cut used because completeness is per CHANNEL
-    while that boolean was per AGENT, and it was wrong in both directions
-    (PR B2 review): a budget overrun in the ninth channel discarded the
-    eight windows that had already completed, and a channel whose replay
-    aborted mid-window still reported the whole pass complete.
+    * ``derive_channels`` — which channels' replay actually FINISHED.
+      ``None`` means "no completeness information, derive everything" (the
+      default every direct caller and test wants).  It is a set rather than
+      the boolean the first cut used because completeness is per CHANNEL
+      while that boolean was per AGENT, and it was wrong in both directions:
+      a budget overrun in the ninth channel discarded the eight windows that
+      had already completed, and a channel whose replay aborted mid-window
+      still reported the whole pass complete.
+    * ``tracker.replayed_closes_by_channel()`` — whether some OTHER door
+      already closed a replayed record for that channel during the pass.  If
+      one did, what is still open is the REMAINDER of a window that was
+      already cut, so it is no more derivable than the prefix that was cut
+      off it.  Snapshotted BEFORE the loop so the sweep's own closes do not
+      disqualify each other.
+    * the record must name a channel at all.  Unattributable to a channel is
+      unattributable to a completed one.
+
+    Refusing costs one boot's derivation, which catch-up re-reads on the next
+    boot anyway (no watermark, RFC 0011 OQ #8).  Deriving a prefix costs a
+    duplicate episode nothing can ever match again.
     """
     closed = 0
-    # The tasks THIS sweep spawned — see ``max_in_flight`` above for why
-    # it is not ``pending_tasks``.
-    spawned: set[asyncio.Task[None]] = set()
-    throttle_deadline = time.monotonic() + throttle_budget_sec
+    # Snapshot BEFORE the loop: the sweep's own ``close_record`` calls also
+    # count, and a record must not be disqualified by its own close or by a
+    # sibling's.
+    already_cut = tracker.replayed_closes_by_channel()
     # Per RECORD since the ``(principal, speaker, scope)`` re-key
     # (v0.3.15 residuals PR 3): replay can open several records in one
     # scope — one per replayed sender — and every one of them carries
@@ -154,58 +206,28 @@ async def close_replayed_scopes(
             if popped is None:
                 continue
             closed += 1
-            # ``persist`` is the full two-phase write for an ATTRIBUTED
-            # replayed span as of v0.3.15 PR B2 — a ``store_episode``
-            # INSERT plus a background summarise/extract task.  It is a
-            # no-op only for the unattributable ones (which still skip on
-            # ``replay_attributed``) and for a span an earlier boot
-            # already derived.  One close→persist contract either way.
-            if derive_channels is not None and (
-                popped.source_channel_id or ""
-            ) not in derive_channels:
-                # This channel's replay did not FINISH, so the record
-                # holds a PREFIX of its window.  Pop without persisting:
-                # the span identity is built from the turns the record
-                # holds, so deriving a prefix claims an id no later boot
-                # can recompute and the next complete boot re-derives the
-                # whole window on top of it.  Catch-up re-reads the same
-                # window every boot anyway (no watermark, RFC 0011 OQ #8),
-                # so this costs one boot's derivation, not the memory.
-                # A record with no ``source_channel_id`` is treated the
-                # same way — unattributable to a channel is unattributable
-                # to a completed one.
-                continue
-            before = set(pending_tasks) if pending_tasks is not None else set()
+            channel = popped.source_channel_id or ""
+            popped.replay_window_complete = (
+                (derive_channels is None or channel in derive_channels)
+                and not already_cut.get(channel)
+            )
+            # ``persist`` is the full two-phase write for a DERIVABLE
+            # attributed replayed span as of v0.3.15 PR B2 — a
+            # ``store_episode`` INSERT plus a background summarise/extract
+            # task, the latter paced by :func:`replay_summarize_gate`.  It
+            # is a no-op for the unattributable ones (which still skip on
+            # ``replay_attributed``), for the ones this loop just marked
+            # incomplete, and for a span an earlier boot already derived.
+            # One close→persist contract for all four.
             await persist(popped)
-            if pending_tasks is not None:
-                spawned |= set(pending_tasks) - before
         except Exception:
             logger.warning(
                 "Catch-up close failed for replayed scope %s",
                 interaction.scope, exc_info=True,
             )
             continue
-        # Pace the burst — deliberately OUTSIDE the close/persist ``try``
-        # (PR B2 review).  A failure here is a throttle failure, not a
-        # close failure: the record above was closed AND persisted, and
-        # reporting it as "Catch-up close failed" pointed an operator at
-        # the wrong half of the sweep.
-        spawned = {task for task in spawned if not task.done()}
-        if not spawned or len(spawned) < max_in_flight:
-            continue
-        remaining = throttle_deadline - time.monotonic()
-        if remaining <= 0:
-            # Budget spent.  Keep closing and persisting; just stop
-            # paying boot time to pace.
-            continue
-        try:
-            await asyncio.wait(
-                spawned, timeout=remaining,
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-        except Exception:
-            logger.warning(
-                "Catch-up summarise throttle failed; continuing unpaced",
-                exc_info=True,
-            )
+    # The count is scoped to ONE PASS: this sweep's own closes must not
+    # disqualify the next catch-up's windows, and a reconnect-triggered
+    # re-catch-up in the same process is exactly that (RFC 0011 OQ #8).
+    tracker.clear_replayed_closes()
     return closed

@@ -15,12 +15,15 @@ one is not a fix.
 So a replayed span gets an identity that does not change between boots,
 and the close path declines to derive one it has already derived.  The
 identity is the record's own content: its ``(principal, speaker, scope)``
-key, the agent, the ACTIVE EPOCH the row will be stamped with, and the
-ordered wire ids of the messages it replays.  Every axis the stored row is
-partitioned by has to be in the digest, or the guard reaches across that
-partition and suppresses a derivation the asking side can never read; the
-epoch is the one such axis that is not part of the record key, so it is
-read off the record, which freezes it at open beside the principal.
+key, the agent, every OTHER axis the row will be stamped and later filtered
+by, and the ordered wire ids of the messages it replays.  Every axis the
+stored row is partitioned by has to be in the digest, or the guard reaches
+across that partition and suppresses a derivation the asking side can never
+read.  Three such axes are not part of the record key and so are named
+explicitly: the ACTIVE EPOCH, the SESSION, and the RFC 0037 §D
+``protection_level``.  All three are read off the record or handed in by the
+close path that is about to stamp them, never resolved independently here —
+a digest that disagrees with the row it guards is the whole failure mode.
 
 Reading the epoch AMBIENT — which the first cut of this module did, via
 ``episodic.active_epoch_id()`` — was itself a boot-instability rather than
@@ -71,6 +74,7 @@ def replay_span_identity(
     interaction: Interaction,
     agent_id: str,
     epoch_id: str,
+    protection_level: str,
     message_ids: list[str],
 ) -> str | None:
     """The boot-stable id for a replayed span, or ``None``.
@@ -102,18 +106,31 @@ def replay_span_identity(
     nothing constrains to one agent, and two personas replaying the same
     room legitimately derive their own episodes from the same messages.
 
-    ``epoch_id`` is in the digest for the same reason the principal is,
-    and it is the axis the first cut missed twice — once by omitting it,
-    then by reading it ambient instead of off the record.
-    ``store_episode`` stamps
-    the row with the ambient epoch and every episodic recall filters it
-    with unconditional strict equality — no ``"*"`` bypass, no carve-out
-    (:mod:`agents.memory._epoch_filter`).  An epoch-free digest therefore
-    let a row written under one epoch suppress derivation under another,
-    where that row can never be read: the span's memory silently absent
-    from the epoch that asked for it, permanently, since every later boot
-    re-matches the same row.  With the epoch in the digest each epoch
-    derives and reads its own.
+    ``epoch_id``, ``interaction.session_id`` and ``protection_level`` are
+    in the digest for the same reason the principal is: each is written
+    onto the row and then filtered on read, so a digest missing one lets a
+    row written under one value suppress derivation under another, where
+    that row can never be read — the span's memory silently absent from
+    the partition that asked for it, permanently, since every later boot
+    re-matches the same row.
+
+    * ``epoch_id`` — ``store_episode`` stamps it and every episodic recall
+      filters it with unconditional strict equality, no ``"*"`` bypass and
+      no carve-out (:mod:`agents.memory._epoch_filter`).  It is the axis
+      the first cut missed twice: once by omitting it, then by reading it
+      ambient instead of off the record.
+    * ``session_id`` — same shape, one axis over, and missed the same way
+      (PR B2 review).  It is written from ``interaction.session_id`` and
+      walled by ``session_in_clause`` on every episodic read, with a
+      carve-out for ``legacy`` only.  An operator rotating
+      ``PERSATRIX_SESSION_ID`` between boots would otherwise recompute an
+      identical digest, skip the derivation, and never be able to read the
+      row the earlier session wrote.
+    * ``protection_level`` — the RFC 0037 §C capture the row is stamped
+      with, gating readability at the §D wall.  Handed in by the close
+      path rather than derived here, so the value in the digest is
+      provably the value in the row: one ``normalize_for_stamp`` call
+      feeds both.
     """
     if not message_ids or not all(message_ids):
         logger.warning(
@@ -124,17 +141,46 @@ def replay_span_identity(
             sum(1 for m in message_ids if not m), len(message_ids),
         )
         return None
-    digest = hashlib.sha256(
-        "\x1f".join([
-            agent_id,
-            epoch_id,
-            interaction.principal_id,
-            interaction.speaker_id,
-            interaction.scope,
-            *message_ids,
-        ]).encode("utf-8"),
-    ).hexdigest()
+    digest = hashlib.sha256(_join_components([
+        agent_id,
+        epoch_id,
+        interaction.session_id,
+        protection_level,
+        interaction.principal_id,
+        interaction.speaker_id,
+        interaction.scope,
+        *message_ids,
+    ])).hexdigest()
     return f"{REPLAY_INTERACTION_ID_PREFIX}{digest}"
+
+
+def _join_components(parts: list[str]) -> bytes:
+    """Encode ``parts`` so distinct component lists give distinct bytes.
+
+    LENGTH-PREFIXED, not delimiter-joined (PR B2 review).  The first cut
+    joined on ``\x1f``, which is only injective if no component can contain
+    that byte — and ``message_id`` can: ``validate_channel_message_dict``
+    type- and length-checks ``msg["id"]`` but applies no character class,
+    unlike ``sender_id``'s ``^[a-z0-9][a-z0-9-]*[a-z0-9]$``.  A single row
+    whose id is ``"m1\x1fm2"`` therefore produced the same digest as a
+    two-message span ``["m1", "m2"]``, and the second span was reported
+    "already derived": its content never summarised, never extracted, never
+    retried, because the record is popped by then.  That is the losing
+    direction this module refuses everywhere else.
+
+    The component count is variable (``message_ids`` is splatted last), so
+    the encoding has to be self-delimiting rather than merely escaped.
+    ``<byte-length>:<utf-8 bytes>`` per component is, and it costs nothing:
+    no component can forge a boundary because the length is read before the
+    bytes.
+    """
+    out = bytearray()
+    for part in parts:
+        raw = part.encode("utf-8")
+        out += str(len(raw)).encode("ascii")
+        out += b":"
+        out += raw
+    return bytes(out)
 
 
 async def replay_span_already_derived(
@@ -142,6 +188,7 @@ async def replay_span_already_derived(
     episodic: EpisodicMemory,
     interaction: Interaction,
     agent_id: str,
+    protection_level: str,
     message_ids: list[str],
 ) -> bool:
     """Give ``interaction`` its boot-stable id; report if it is a repeat.
@@ -189,6 +236,7 @@ async def replay_span_already_derived(
     identity = replay_span_identity(
         interaction, agent_id,
         interaction.epoch_id or episodic.active_epoch_id(),
+        protection_level,
         message_ids,
     )
     if identity is None:

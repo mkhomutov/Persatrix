@@ -211,7 +211,7 @@ class TestCatchupReplayStampsWhatItCanAttribute:
     async def test_replayed_secret_episodes_stamp_secret(self):
         agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
         secret_channel = {"channel_type": "group", "classification": "secret"}
-        await agent._store_event_episode(
+        await agent.on_event(
             _replay_event(
                 {
                     "id": "m-1", "sender_id": "alex",
@@ -221,12 +221,11 @@ class TestCatchupReplayStampsWhatItCanAttribute:
                 },
                 channel=secret_channel,
             ),
-            [],
         )
         # A second replayed row on a rotated wire id closes wire-A — the
         # replayed-rotation close the catch-up docstring promises runs at
         # boot ("those conversations genuinely closed").
-        await agent._store_event_episode(
+        await agent.on_event(
             _replay_event(
                 {
                     "id": "m-2", "sender_id": "alex",
@@ -236,13 +235,20 @@ class TestCatchupReplayStampsWhatItCanAttribute:
                 },
                 channel=secret_channel,
             ),
-            [],
         )
         episode = await _closed_episode(agent)
         assert episode["protection_level"] == "secret", (
             "the restart path must label exactly like the live path — an "
             "`internal` stamp here downgrades the channel's whole history "
             "on every reboot"
+        )
+        assert episode["principal_id"] == "alex-person", (
+            "and it must land in the tenant the row NAMES.  These rows are "
+            "driven through ``on_event`` for exactly this reason: binding "
+            "the seeded principal is ``request_scope_from_metadata``'s job "
+            "there, so a suite that reached past it would stamp `secret` "
+            "correctly while attributing the whole span to the shared "
+            "`local` tenant — the ISSUE-0130 leak, green (PR B2 review)"
         )
 
     async def test_pre_v0312_orchestrator_replays_stamp_the_rule_a_default(self):
@@ -255,7 +261,7 @@ class TestCatchupReplayStampsWhatItCanAttribute:
             ("m-1", "wire-A", "legacy history"),
             ("m-2", "wire-B", "new topic"),
         ):
-            await agent._store_event_episode(
+            await agent.on_event(
                 _replay_event(
                     {
                         "id": msg_id, "sender_id": "alex",
@@ -265,7 +271,6 @@ class TestCatchupReplayStampsWhatItCanAttribute:
                     },
                     channel=legacy_channel,
                 ),
-                [],
             )
         episode = await _closed_episode(agent)
         assert episode["protection_level"] == DEFAULT_CLASSIFICATION
@@ -278,7 +283,7 @@ class TestCatchupReplayStampsWhatItCanAttribute:
         agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
         secret_channel = {"channel_type": "group", "classification": "secret"}
         for msg_id, wire in (("m-1", "wire-A"), ("m-2", "wire-B")):
-            await agent._store_event_episode(
+            await agent.on_event(
                 _replay_event(
                     {
                         "id": msg_id, "sender_id": "alex",
@@ -287,7 +292,6 @@ class TestCatchupReplayStampsWhatItCanAttribute:
                     },
                     channel=secret_channel,
                 ),
-                [],
             )
         assert await all_episodes(agent) == [], (
             "a span whose rows named no tenant must persist nothing — any "

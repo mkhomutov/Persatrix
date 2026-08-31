@@ -3,6 +3,7 @@ package channels
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -201,4 +202,66 @@ func TestSQLiteStore_V12Store_RepairsOnOpen(t *testing.T) {
 	assert.Equal(t, "said before the column existed", msg.Content, "no data loss")
 	assert.Equal(t, "", msg.PrincipalID,
 		"opening a v12 store repairs the backfill the corrected v12 can never reach")
+}
+
+// TestMigrateV12ToV13_LeavesMessagesFTSUntouched pins the header's claim that
+// the repair does not disturb the v10 index.
+//
+// `messages_au` is a WHOLE-ROW `AFTER UPDATE` trigger, not `AFTER UPDATE OF
+// content`, so an unguarded `UPDATE messages SET principal_id` fires a full
+// FTS5 `'delete'` + re-insert per repaired row. The content is unchanged, so
+// MATCH still answers identically afterwards — which is exactly why this test
+// asserts on the index's STORAGE (`messages_fts_data`) instead. That is where
+// the wasted re-tokenisation shows up: measured, the trigger appends a whole
+// new segment and roughly doubles the index bytes for the rewritten rows, on
+// the orchestrator's boot path, for every pre-v12 row on an affected store.
+// It is also the path that corrupts the index if the external-content table is
+// ever out of step with `messages` (the v10 header's own VACUUM caveat), since
+// the trigger's `'delete'` passes `old.content`.
+func TestMigrateV12ToV13_LeavesMessagesFTSUntouched(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "channels.db")
+	db := migrateThroughV11(t, path)
+	t.Cleanup(func() { _ = db.Close() })
+
+	for i := range 40 {
+		seedChannelAndMessage(t, db,
+			fmt.Sprintf("msg-pre-v12-%d", i),
+			fmt.Sprintf("quarterly budget roadmap number %d", i))
+	}
+	migrateV11ToV12Original(t, db)
+
+	before := ftsIndexDigest(t, db)
+	require.NoError(t, migrateV12ToV13(db))
+
+	require.Equal(t, "", messagePrincipal(t, db, "msg-pre-v12-0"),
+		"precondition: the repair did run on this store")
+	assert.Equal(t, before, ftsIndexDigest(t, db),
+		"the content index must be byte-identical — no content changed, so the "+
+			"repair must not pay to re-tokenise it")
+
+	var hits int
+	require.NoError(t, db.QueryRow(
+		`SELECT COUNT(*) FROM messages_fts WHERE messages_fts MATCH 'roadmap'`,
+	).Scan(&hits))
+	assert.Equal(t, 40, hits, "and it must still answer MATCH")
+
+	var triggers int
+	require.NoError(t, db.QueryRow(
+		`SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name='messages_au'`,
+	).Scan(&triggers))
+	assert.Equal(t, 1, triggers,
+		"the trigger is restored inside the same transaction — dropping it is a "+
+			"rewrite detail, not a schema change")
+}
+
+// ftsIndexDigest summarises the FTS5 external-content index's own storage.
+// `messages_fts_data` is where a `'delete'` + re-insert lands, so this changes
+// when the index is rewritten and does not when only `messages` columns are.
+func ftsIndexDigest(t *testing.T, db *sql.DB) string {
+	t.Helper()
+	var blocks, size int
+	require.NoError(t, db.QueryRow(
+		`SELECT COUNT(*), COALESCE(SUM(LENGTH(block)), 0) FROM messages_fts_data`,
+	).Scan(&blocks, &size))
+	return fmt.Sprintf("blocks=%d bytes=%d", blocks, size)
 }

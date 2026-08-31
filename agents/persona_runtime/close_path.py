@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import logging
 from collections.abc import Awaitable, Callable, Iterable
 from typing import TYPE_CHECKING, Any
@@ -29,6 +30,8 @@ from .close_entries import own_turn_items
 from .finalize_close import finalize_closed_interaction
 from .interaction_boundary import stale_close_reason
 from .replay_identity import replay_span_already_derived
+from .replay_sweep import gated_replay_finalize
+from .turn_payload import replay_markers
 
 if TYPE_CHECKING:
     from ..llm_client import LLMClient
@@ -167,6 +170,21 @@ async def close_stale_records(
         )
         if stale_reason is None:
             continue
+        if record.replayed and replay_markers(event)[0]:
+            # Replay-INTERNAL segmentation, not truncation (PR B2 review).
+            # A wire rotation between two REPLAYED rows is a genuine
+            # conversation boundary inside the window — RFC 0037's
+            # replayed-rotation stamping is exactly this — and the segment
+            # it closes holds a WHOLE wire conversation, so its digest is
+            # boot-stable: the next boot replays the same window, forms the
+            # same segment and computes the same id.  Only the segment still
+            # OPEN when a pass is cut short is a prefix, and the pass-end
+            # sweep is what refuses that one.
+            #
+            # A LIVE event closing a replayed record is the opposite case
+            # and must not take this branch: the record is then whatever
+            # replay had ingested when the live turn interrupted it.
+            record.replay_window_complete = True
         split = tracker.close_record(record, reason=stale_reason)
         if split is not None:
             stale_splits.append(split)
@@ -237,6 +255,24 @@ async def persist_closed_interaction(
             interaction.turn_count,
         )
         return
+    if interaction.replayed and not interaction.replay_window_complete:
+        # ISSUE-0130 (b), PR B2 review — the COMPLETENESS gate.  A replayed
+        # record reaches this ONE chokepoint through four doors, and only a
+        # record holding its channel's WHOLE window may derive: the span
+        # identity below is a digest over the turns the record holds, so a
+        # prefix claims an id no later boot recomputes.  The decision lived
+        # in the pass-end sweep's own loop body, which left the other three
+        # doors deriving prefixes unguarded; reading a frozen field here
+        # fixes all four and fails CLOSED.
+        # ``Interaction.replay_window_complete`` states it in full.
+        logger.debug(
+            "ISSUE-0130: skipping close-path derivation for a replayed "
+            "interaction that does not hold a whole replay window "
+            "(agent=%s scope=%s channel=%s turns=%d close_reason=%s)",
+            agent_id, interaction.scope, interaction.source_channel_id,
+            interaction.turn_count, interaction.close_reason,
+        )
+        return
     # PR-4 review #25 (slice 7): dead ``or llm_client is None`` clause removed;
     # the mixin annotation is now ``LLMClient`` (non-optional).
     if interaction.interaction_id is None:
@@ -261,8 +297,15 @@ async def persist_closed_interaction(
     # the prompt header's ``shown_turns`` fix corrects in
     # ``summarize_close`` (identical whenever nothing was excluded).
     own_turns = own_turn_items(interaction)
+    # RFC 0037 §A rule-(a) owner (absent/unknown -> ``internal``, never
+    # ``public``).  Resolved ONCE: the row below is stamped with it and the
+    # replay span digest is taken over it, so the guard cannot suppress a
+    # derivation across a protection boundary the asking side reads from
+    # (PR B2 review).  Two calls could drift; one cannot.
+    protection_level = normalize_for_stamp(interaction.classification)
     if interaction.replayed and await replay_span_already_derived(
         episodic=episodic, interaction=interaction, agent_id=agent_id,
+        protection_level=protection_level,
         # ONE ENTRY PER TURN, ``""`` where that turn carried no wire id.
         # Filtering the unnamed turns out here instead would hand the
         # identity a digest over the identified SUBSET, which cannot tell
@@ -402,7 +445,7 @@ async def persist_closed_interaction(
                 # frozen-at-open capture — ``normalize_for_stamp`` is the §A
                 # rule-(a) owner (absent/unknown → ``internal``, never
                 # ``public``).  Dark until the PR 4 §D gate reads it.
-                protection_level=normalize_for_stamp(interaction.classification),
+                protection_level=protection_level,
                 source_channel_id=interaction.source_channel_id,
                 # ISSUE-0131 (migration 18): the record key's speaker
                 # half — the §G soundness argument is above.  ``""``
@@ -419,17 +462,26 @@ async def persist_closed_interaction(
             return
         # Phase 2: background summarise + finalise.  add_done_callback
         # auto-cleans the tracking set so references don't accumulate.
+        #
+        # A REPLAYED span's Phase 2 is additionally paced —
+        # :func:`~agents.persona_runtime.replay_sweep.replay_summarize_gate`
+        # owns why (the boot burst it bounds, and why the cap is held by the
+        # task rather than by the sweep loop).  Live closes are untouched.
         task: asyncio.Task[None] = asyncio.create_task(
-            finalize_closed_interaction(
-                llm_client=llm_client, memory_ns=memory_ns,
-                episodic=episodic, agent_id=agent_id,
-                interaction=interaction,
-                on_finalized=on_finalized,
-                # Phase-2 facts + relationship writes must match the Phase-1
-                # row's session (sibling-mislabel guard) — the interaction's
-                # frozen session, not the bound scope.  Its principal twin
-                # rides the context this block binds.
-                session_id=interaction.session_id,
+            gated_replay_finalize(
+                interaction.replayed,
+                functools.partial(
+                    finalize_closed_interaction,
+                    llm_client=llm_client, memory_ns=memory_ns,
+                    episodic=episodic, agent_id=agent_id,
+                    interaction=interaction,
+                    on_finalized=on_finalized,
+                    # Phase-2 facts + relationship writes must match the
+                    # Phase-1 row's session (sibling-mislabel guard) — the
+                    # interaction's frozen session, not the bound scope.
+                    # Its principal twin rides the context this block binds.
+                    session_id=interaction.session_id,
+                ),
             ),
         )
     pending_tasks.add(task)

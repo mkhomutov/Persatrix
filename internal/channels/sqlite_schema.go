@@ -114,8 +114,8 @@ import (
 //	    the additive-column precedent (v3/v6): the lattice helpers
 //	    (classification.go) own the vocabulary, and the §A rule-(c) read
 //	    posture (unknown label ⇒ withheld) is the corruption net.
-//	v12 — ISSUE-0130 shape (b) (v0.3.15 PR B1, this PR): adds
-//	    `principal_id TEXT NOT NULL DEFAULT 'local'` to `messages` — the
+//	  - v12 (ISSUE-0130 shape (b), v0.3.15 PR B1) adds
+//	    `principal_id TEXT NOT NULL DEFAULT ''` to `messages` — the
 //	    tenant that caused the row, stamped SERVER-SIDE at publish from the
 //	    request context ([PrincipalFromContext]) and never from the request
 //	    body. Closes the structural half of ISSUE-0130: the emitting tenant

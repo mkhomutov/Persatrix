@@ -105,6 +105,9 @@ class InteractionTracker:
         clock: Clock | None = None,
     ) -> None:
         self._open: dict[RecordKey, Interaction] = {}
+        # ISSUE-0130 (b): replay-opened records closed per source channel
+        # this pass — see ``replayed_closes_by_channel`` below.
+        self._replayed_closes: dict[str, int] = {}
         # Detector chain is evaluated in order; first ``(True, reason)``
         # wins.  Default chain: structural → idle-gap → topic-shift no-op.
         self._detectors: tuple[BoundaryDetector, ...] = (
@@ -366,8 +369,35 @@ class InteractionTracker:
         ts = now if now is not None else self._clock()
         interaction.closed_at = ts
         interaction.close_reason = reason
+        if interaction.replayed and not interaction.replay_window_complete:
+            # A TRUNCATED replayed record.  Replay-internal segmentation
+            # sets the flag before closing, so it is not counted.
+            channel = interaction.source_channel_id or ""
+            self._replayed_closes[channel] = (
+                self._replayed_closes.get(channel, 0) + 1
+            )
         _emit_closed(reason)
         return interaction
+
+    def replayed_closes_by_channel(self) -> dict[str, int]:
+        """Replay-opened records TRUNCATED this pass, per source channel.
+
+        A channel counted here had a replayed record cut short, so whatever
+        is still open for it is the remainder of an already-cut window.
+        ``Interaction.replay_window_complete`` states what that costs;
+        ``replay_sweep.close_replayed_scopes`` is the only reader.
+        """
+        return dict(self._replayed_closes)
+
+    def clear_replayed_closes(self) -> None:
+        """Forget the per-channel truncation counts.
+
+        Called at the END of a catch-up sweep, scoping the count to ONE PASS
+        rather than to the tracker's lifetime: a second catch-up in the same
+        process (RFC 0011 OQ #8's reconnect re-catch-up) must not inherit
+        pass 1's cuts and refuse pass 2's whole windows forever.
+        """
+        self._replayed_closes.clear()
 
     def admitted_records(
         self,
