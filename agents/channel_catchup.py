@@ -62,10 +62,14 @@ import asyncio
 import logging
 import time
 from typing import TYPE_CHECKING, Any, Protocol
-from urllib.parse import quote
 
 import aiohttp
 
+from .channel_catchup_discovery import (
+    fetch_channel_list,
+    fetch_channel_membership,
+    resolve_respond_policy,
+)
 from .channel_history_fetcher import HttpChannelHistoryFetcher
 from .channel_replay_event import build_replay_event
 from .channel_replay_outcome import ReplayPassOutcome
@@ -99,16 +103,6 @@ DEFAULT_CATCHUP_LIMIT: int = 50
 # two REST surfaces share one tunable mental model.
 _REQUEST_TIMEOUT_SECONDS: float = 10.0
 
-# PR-265 review L1 (first pass): ``GET /api/v1/channels`` falls back
-# to ``channelDefaultListLimit = 50`` server-side when no ``?limit=``
-# is supplied (``internal/server/channel_handlers.go``); an agent
-# enrolled in >50 channels would silently miss catch-up for the tail
-# of its membership. We pin the request to ``channelMaxLimit = 1000``
-# (the orchestrator clamp) so the explicit cap is the contract — the
-# silent default cannot drift on either side without breaking the
-# request URL.
-_CHANNEL_LIST_LIMIT: int = 1000
-
 # PR-265 review L3 (second pass): per-agent wall-clock budget for the
 # whole catch-up pass. ``_REQUEST_TIMEOUT_SECONDS × 2N`` is unbounded
 # at the ``channelMaxLimit = 1000`` ceiling; this single-budget cap
@@ -135,6 +129,19 @@ class _AgentLike(Protocol):
     agent_id: str
 
     async def on_event(self, event: AgentEvent) -> Any: ...
+
+    def note_replay_gap(self, channel_id: str, speaker_id: str) -> None:
+        """Tell the agent a replayed ROW never reached its tracker.
+
+        Required, not optional: the pass ``outcome`` below is read only at
+        pass END, while the ingest-time segmentation door closes and
+        DERIVES a record mid-pass, so
+        ``close_path.close_stale_records`` has to learn the gap from the
+        tracker instead.  An implementer that dropped it would silently
+        derive a span with a hole in it, so this Protocol asks for it and
+        the type checker holds every caller to it.
+        """
+        ...
 
 
 async def replay_channel_history(
@@ -238,7 +245,7 @@ async def _replay_channel_history_inner(
         session=session, orchestrator_url=orchestrator_url, timeout=timeout,
     )
 
-    channels = await _fetch_channel_list(session, base, timeout)
+    channels = await fetch_channel_list(session, base, timeout)
     if channels is None:
         return
 
@@ -247,12 +254,12 @@ async def _replay_channel_history_inner(
         if not isinstance(channel_id, str) or not channel_id:
             continue
 
-        membership = await _fetch_channel_membership(
+        membership = await fetch_channel_membership(
             session, base, channel_id, timeout,
         )
         if membership is None:
             continue
-        respond_policy = _resolve_respond_policy(membership, agent.agent_id)
+        respond_policy = resolve_respond_policy(membership, agent.agent_id)
         if respond_policy is None:
             # Agent is not a member — skip without fetching history.
             continue
@@ -329,91 +336,17 @@ async def _replay_channel_history_inner(
                     outcome.speaker_gaps.add((channel_id, sender))
                 else:
                     channel_complete = False
+                # BOTH derivation doors have to learn this, and the outcome
+                # above only reaches the pass-end sweep (PR B2 review).  A
+                # blank sender is a gap that could be in any record, so the
+                # agent-side note takes the whole channel down.
+                agent.note_replay_gap(
+                    channel_id, sender if isinstance(sender, str) else "",
+                )
                 continue
             counts["events"] += 1
         if channel_complete:
             outcome.completed.add(channel_id)
-
-
-# ─── Internal helpers ──────────────────────────────────────
-
-
-async def _fetch_channel_list(
-    session: aiohttp.ClientSession,
-    base: str,
-    timeout: aiohttp.ClientTimeout,
-) -> list[dict] | None:
-    """``GET /api/v1/channels?limit=N`` → list of channel JSON, or
-    ``None`` on error.  ``None`` means "best-effort failure already
-    logged".
-
-    PR-265 review L1: the explicit ``?limit=`` is mandatory — without
-    it the Go orchestrator returns at most ``channelDefaultListLimit =
-    50`` channels, silently capping catch-up for high-fanout agents.
-    """
-    url = f"{base}/api/v1/channels?limit={_CHANNEL_LIST_LIMIT}"
-    try:
-        async with session.get(url, timeout=timeout) as resp:
-            if resp.status >= 400:
-                body = await resp.text()
-                logger.warning(
-                    "channels: catch-up list returned HTTP %d: %s",
-                    resp.status, body[:256],
-                )
-                return None
-            data = await resp.json()
-    except Exception as exc:
-        logger.warning("channels: catch-up list failed: %s", exc)
-        return None
-    channels = data.get("channels")
-    if not isinstance(channels, list):
-        return []
-    return channels
-
-
-async def _fetch_channel_membership(
-    session: aiohttp.ClientSession,
-    base: str,
-    channel_id: str,
-    timeout: aiohttp.ClientTimeout,
-) -> list[dict] | None:
-    """``GET /api/v1/channels/{id}`` → member list, or ``None`` on error."""
-    url = f"{base}/api/v1/channels/{quote(channel_id, safe='')}"
-    try:
-        async with session.get(url, timeout=timeout) as resp:
-            if resp.status >= 400:
-                body = await resp.text()
-                logger.warning(
-                    "channels: catch-up get-channel %s returned HTTP %d: %s",
-                    channel_id, resp.status, body[:256],
-                )
-                return None
-            data = await resp.json()
-    except Exception as exc:
-        logger.warning(
-            "channels: catch-up get-channel %s failed: %s",
-            channel_id, exc,
-        )
-        return None
-    members = data.get("members")
-    if not isinstance(members, list):
-        return []
-    return members
-
-
-def _resolve_respond_policy(
-    members: list[dict], agent_id: str,
-) -> str | None:
-    """Return the agent's ``respond`` policy from the member list, or
-    ``None`` when the agent is not a member.
-    """
-    for m in members:
-        if m.get("id") == agent_id:
-            policy = m.get("respond")
-            if isinstance(policy, str) and policy:
-                return policy
-            return "when_mentioned"
-    return None
 
 
 async def replay_for_persona_agents(

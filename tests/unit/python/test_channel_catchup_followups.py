@@ -335,13 +335,13 @@ class TestCatchupWallClockBudget:
         base_url, state = orchestrator
 
         # Wrap the existing list endpoint with a deliberate delay.
-        original = channel_catchup._fetch_channel_list
+        original = channel_catchup.fetch_channel_list
 
         async def slow_fetch(session, base, timeout):
             await asyncio.sleep(0.5)
             return await original(session, base, timeout)
 
-        monkeypatch.setattr(channel_catchup, "_fetch_channel_list", slow_fetch)
+        monkeypatch.setattr(channel_catchup, "fetch_channel_list", slow_fetch)
         # Tighten the budget far below the artificial delay.
         monkeypatch.setattr(channel_catchup, "_CATCHUP_BUDGET_SECONDS", 0.05)
 

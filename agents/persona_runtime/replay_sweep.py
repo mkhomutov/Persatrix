@@ -46,6 +46,7 @@ logger = logging.getLogger(__name__)
 REPLAY_SUMMARIZE_MAX_IN_FLIGHT: int = 4
 
 _gate: asyncio.Semaphore | None = None
+_gate_loop: asyncio.AbstractEventLoop | None = None
 
 
 def replay_summarize_gate() -> asyncio.Semaphore:
@@ -79,15 +80,29 @@ def replay_summarize_gate() -> asyncio.Semaphore:
     not an open provider connection.  ``drain_pending_summaries`` still
     drains them all at shutdown, four at a time.
 
-    Lazily built because :class:`asyncio.Semaphore` should be created on
-    the running loop's watch, and this module is imported at process
-    start.  One agent runs per process (``AgentServer``), so process-wide
-    and per-persona are the same ceiling today; if that changes this
-    becomes the fleet-wide budget, which is the more useful of the two.
+    Lazily built because this module is imported at process start, and
+    rebuilt when the RUNNING LOOP changes (PR B2 review).  A cached
+    ``asyncio.Semaphore`` is not loop-portable: CPython's
+    ``_LoopBoundMixin._get_loop()`` latches the loop on the first
+    CONTENDED acquire and every later loop then raises ``RuntimeError:
+    ... is bound to a different event loop``, while the leaked counter
+    strands the next loop's waiters.  Latching only under contention is
+    what makes it dangerous — it survives every low-concurrency test and
+    fails exactly under the boot burst this cap exists to bound, as an
+    exception inside a Phase-2 task that nobody retrieves.  Keying on the
+    loop also lets a test patch :data:`REPLAY_SUMMARIZE_MAX_IN_FLIGHT`
+    and get the new ceiling instead of the first one ever built.
+
+    ``AgentServer`` warns that it supports one agent per process, so
+    process-wide and per-persona are the same ceiling today; where a
+    process does host several personas this is the fleet-wide budget,
+    which is the more useful of the two.
     """
-    global _gate
-    if _gate is None:
+    global _gate, _gate_loop
+    loop = asyncio.get_running_loop()
+    if _gate is None or _gate_loop is not loop:
         _gate = asyncio.Semaphore(REPLAY_SUMMARIZE_MAX_IN_FLIGHT)
+        _gate_loop = loop
     return _gate
 
 
@@ -105,12 +120,33 @@ async def gated_replay_finalize(
 
     Only a REPLAYED close is gated: live closes are wire-bounded and
     metered, and stalling one behind a boot backlog would be a regression.
+
+    The gate acquire is GUARDED, because this coroutine is the task's
+    outermost frame and ``finalize_closed_interaction``'s own top-level
+    guard therefore no longer covers everything the task can raise (PR B2
+    review).  That guard exists so a Phase-2 failure "does not surface as
+    ``Task exception was never retrieved`` at GC"; wrapping it moved the
+    acquire outside it, and ``close_path``'s ``add_done_callback`` only
+    discards the task without reading its exception — so anything raised
+    here would have been a silently skipped Phase 2 on a span whose
+    re-derivation digest is already claimed.  ``CancelledError`` is
+    re-raised: a cancelled shutdown drain is not a failure to swallow.
     """
     if not gated:
         await phase_two()
         return
-    async with replay_summarize_gate():
-        await phase_two()
+    try:
+        async with replay_summarize_gate():
+            await phase_two()
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.warning(
+            "ISSUE-0130: replay Phase 2 did not run — the summarise gate "
+            "failed; the span's row stays pending for the janitor and the "
+            "next boot re-derives it",
+            exc_info=True,
+        )
 
 
 async def close_replayed_scopes(
@@ -151,9 +187,13 @@ async def close_replayed_scopes(
     that returns ``None`` (the other got there first), and a live turn can
     never be inside a flagged span — the split guarantees it opens its own.
 
-    **This is the only place that may mark a replayed record DERIVABLE**
-    (``Interaction.replay_window_complete``), and the flag is what
-    ``persist_closed_interaction`` reads.  The first cut kept the decision
+    **This is the pass-end door onto** ``Interaction
+    .replay_window_complete``, the flag ``persist_closed_interaction``
+    reads.  One other door may set it — the replay-internal segmentation in
+    :func:`~agents.persona_runtime.close_path.close_stale_records`, which
+    closes a whole wire conversation mid-pass and applies the same
+    ``replay_record_compromised`` test this loop does.  Every REMAINING
+    door leaves the default standing.  The first cut kept the decision
     inline here instead, which left it enforced on this door alone: the
     ingest-time split, a wire rotation reaching a non-target record, and
     ``idle_check`` all reach the same two-phase write, and all three derived
@@ -164,9 +204,13 @@ async def close_replayed_scopes(
     it to the one chokepoint all four doors funnel through, and makes the
     default (``False``) the safe answer for every door that cannot know.
 
-    Three conditions have to hold for a record to derive, and each is a
-    different way of not holding a whole window:
+    FOUR conditions have to hold for a record to derive, and each is a
+    different way of not holding a whole window.  All four are in the
+    expression below — the fourth used to be in this list only:
 
+    * the record must NAME a channel.  Unattributable to a channel is
+      unattributable to a completed one, and the sweep can make no
+      completeness claim about a record it cannot match to a pass.
     * ``derive_channels`` — which channels' replay actually FINISHED.
       ``None`` means "no completeness information, derive everything" (the
       default every direct caller and test wants).  It is a set rather than
@@ -175,31 +219,30 @@ async def close_replayed_scopes(
       a budget overrun in the ninth channel discarded the eight windows that
       had already completed, and a channel whose replay aborted mid-window
       still reported the whole pass complete.
-    * ``speaker_gaps`` — ``(channel_id, speaker_id)`` pairs where a row
-      RAISED inside ``on_event``.  That hole is in one speaker's record and
-      no one else's, since records are keyed per speaker; disqualifying the
-      whole channel for it meant one deterministically raising row cost
-      every other speaker in that room their derivation, on every boot
-      (PR B2 review round 3).  A gap the catch-up loop could not attribute
-      to a sender takes the channel out of ``derive_channels`` instead.
-    * ``tracker.replayed_closes_by_channel()`` — whether some OTHER door
-      already closed a replayed record for that channel during the pass.  If
-      one did, what is still open is the REMAINDER of a window that was
-      already cut, so it is no more derivable than the prefix that was cut
-      off it.  Snapshotted BEFORE the loop so the sweep's own closes do not
-      disqualify each other.
-    * the record must name a channel at all.  Unattributable to a channel is
-      unattributable to a completed one.
+    * ``tracker.replay_record_compromised(channel, speaker)`` — whether this
+      window was already cut short by some other door, or holed by a row
+      that raised on the way in.  If it was, what is still open is the
+      REMAINDER of a cut window, no more derivable than the prefix that was
+      cut off it.  Keyed ``(channel, speaker)`` since the PR B2 review: the
+      channel-wide spelling let one live turn racing catch-up in a busy room
+      refuse every OTHER speaker's complete window there, on every boot.
+      Read LIVE rather than snapshotted, which the flag-before-close
+      handoff below makes safe.
+    * ``speaker_gaps`` — the same raised-row fact as the catch-up pass
+      recorded it, kept as a parameter for direct callers that drive the
+      sweep without a tracker-fed pass.  That hole is in one speaker's
+      record and no one else's, since records are keyed per speaker;
+      disqualifying the whole channel for it meant one deterministically
+      raising row cost every other speaker in that room their derivation,
+      on every boot (PR B2 review round 3).  A gap the catch-up loop could
+      not attribute to a sender takes the channel out of ``derive_channels``
+      instead.
 
     Refusing costs one boot's derivation, which catch-up re-reads on the next
     boot anyway (no watermark, RFC 0011 OQ #8).  Deriving a prefix costs a
     duplicate episode nothing can ever match again.
     """
     closed = 0
-    # Snapshot BEFORE the loop: the sweep's own ``close_record`` calls also
-    # count, and a record must not be disqualified by its own close or by a
-    # sibling's.
-    already_cut = tracker.replayed_closes_by_channel()
     # Per RECORD since the ``(principal, speaker, scope)`` re-key
     # (v0.3.15 residuals PR 3): replay can open several records in one
     # scope — one per replayed sender — and every one of them carries
@@ -208,21 +251,38 @@ async def close_replayed_scopes(
         if not interaction.replayed:
             continue
         try:
+            channel = interaction.source_channel_id or ""
+            # Decided BEFORE the close and handed to it, so the record
+            # cannot self-register as a truncation on the way out and the
+            # compromised set can be read LIVE (PR B2 review).  The
+            # previous shape — close, then assign — needed a snapshot
+            # taken before the loop to stay correct, which in turn could
+            # not see a truncation landing during this loop's own
+            # ``await persist(...)`` while dispatch was serving.
+            derivable = (
+                # Unattributable to a channel is unattributable to a
+                # COMPLETED channel: the sweep can make no completeness
+                # claim about a record that names none.  Stated in this
+                # docstring since the first cut, but enforced only by
+                # ``"" in derive_channels`` being false — which said
+                # nothing at all on the documented ``None`` path.
+                bool(channel)
+                and (derive_channels is None or channel in derive_channels)
+                and not tracker.replay_record_compromised(
+                    channel, interaction.speaker_id,
+                )
+                and (
+                    speaker_gaps is None
+                    or (channel, interaction.speaker_id) not in speaker_gaps
+                )
+            )
             popped = tracker.close_record(
                 interaction, reason=REASON_CATCHUP_COMPLETE,
+                replay_window_complete=derivable,
             )
             if popped is None:
                 continue
             closed += 1
-            channel = popped.source_channel_id or ""
-            popped.replay_window_complete = (
-                (derive_channels is None or channel in derive_channels)
-                and not already_cut.get(channel)
-                and (
-                    speaker_gaps is None
-                    or (channel, popped.speaker_id) not in speaker_gaps
-                )
-            )
             # ``persist`` is the full two-phase write for a DERIVABLE
             # attributed replayed span as of v0.3.15 PR B2 — a
             # ``store_episode`` INSERT plus a background summarise/extract

@@ -294,7 +294,8 @@ def validate_channel_message_dict(
     * ``respond_policy`` — not on the JSON wire shape
       (``internal/server/channel_types.go::channelMessageResponse``);
       the catch-up fetcher resolves it from the membership endpoint
-      via ``_resolve_respond_policy`` and validates the result there.
+      via ``channel_catchup_discovery.resolve_respond_policy`` and
+      validates the result there.
     * ``thread_parent_sender_id`` — not on the JSON wire shape (PR-265
       review L2 documents the asymmetry); validation is a no-op for
       this field on the catch-up path.

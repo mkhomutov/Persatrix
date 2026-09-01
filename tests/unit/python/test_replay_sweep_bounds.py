@@ -213,9 +213,12 @@ class TestTheSweepBoundsWhatItCostsBoot:
         a SECOND record for the rest of the window, and at pass end its
         channel is legitimately in ``derive_channels``.  Deriving that tail
         claims a digest no uninterrupted boot recomputes, exactly like the
-        prefix.  The tracker counts replayed closes per channel so the
-        sweep can tell "nothing has cut this window" from "I am looking at
-        what is left of one".
+        prefix.  The tracker records a cut window per ``(channel,
+        speaker)`` so the sweep can tell "nothing has cut this window"
+        from "I am looking at what is left of one" — per SPEAKER since the
+        PR B2 review, or one live turn racing catch-up cost every other
+        speaker in the room their derivation
+        (``test_replay_window_compromise.py``).
         """
         tracker = InteractionTracker()
         prefix = tracker.add_turn(

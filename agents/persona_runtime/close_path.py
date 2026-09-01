@@ -15,6 +15,7 @@ import logging
 from collections.abc import Awaitable, Callable, Iterable
 from typing import TYPE_CHECKING, Any
 
+from ..memory.boundary_detectors import REASON_CATCHUP_COMPLETE
 from ..memory.episodic import EpisodicMemory
 from ..memory.interaction_key import record_key, resolve_record_key
 from ..memory.interactions import (
@@ -137,22 +138,50 @@ async def close_stale_records(
         )
         if stale_reason is None:
             continue
-        if record.replayed and replay_markers(event)[0]:
-            # Replay-INTERNAL segmentation, not truncation (PR B2 review).
-            # A wire rotation between two REPLAYED rows is a genuine
-            # conversation boundary inside the window — RFC 0037's
-            # replayed-rotation stamping is exactly this — and the segment
-            # it closes holds a WHOLE wire conversation, so its digest is
-            # boot-stable: the next boot replays the same window, forms the
-            # same segment and computes the same id.  Only the segment still
-            # OPEN when a pass is cut short is a prefix, and the pass-end
-            # sweep is what refuses that one.
-            #
-            # A LIVE event closing a replayed record is the opposite case
-            # and must not take this branch: the record is then whatever
-            # replay had ingested when the live turn interrupted it.
-            record.replay_window_complete = True
-        split = tracker.close_record(record, reason=stale_reason)
+        # Replay-INTERNAL segmentation, not truncation (PR B2 review).
+        # A wire ROTATION between two REPLAYED rows is a genuine
+        # conversation boundary inside the window — RFC 0037's
+        # replayed-rotation stamping is exactly this — and the segment it
+        # closes holds a WHOLE wire conversation, so its digest is
+        # boot-stable: the next boot replays the same window, forms the
+        # same segment and computes the same id.  Only the segment still
+        # OPEN when a pass is cut short is a prefix, and the pass-end
+        # sweep is what refuses that one.
+        #
+        # THREE conjuncts narrow it to that case, and the first cut had
+        # none of them (PR B2 review):
+        #
+        # * a LIVE event closing a replayed record is the opposite case —
+        #   the record is then whatever replay had ingested when the live
+        #   turn interrupted it;
+        # * so is the ISSUE-0130 ATTRIBUTION split, which
+        #   ``stale_close_reason`` also answers ``REASON_CATCHUP_COMPLETE``
+        #   for when a seeded ``"local"`` row and an unseeded one resolve
+        #   to the same record key.  That closes a prefix, not a
+        #   conversation, so only a rotation reason may mark complete; and
+        # * a window this pass has ALREADY cut or holed cannot have a
+        #   whole conversation left in it.  Without this the door derived
+        #   the remainder of an already-cut window, and derived segments
+        #   with a hole where a row had raised — both claiming an id no
+        #   later boot recomputes, which is the growth curve the gate
+        #   exists to bound, reached through the one door that did not
+        #   ask.  Same predicate the pass-end sweep applies.
+        channel = record.source_channel_id or ""
+        segment_complete = (
+            record.replayed
+            and replay_markers(event)[0]
+            and stale_reason != REASON_CATCHUP_COMPLETE
+            and bool(channel)
+            and not tracker.replay_record_compromised(
+                channel, record.speaker_id,
+            )
+        )
+        split = tracker.close_record(
+            record, reason=stale_reason,
+            # ``None`` leaves the fail-closed default standing AND lets
+            # ``close_record`` record the truncation this pass.
+            replay_window_complete=True if segment_complete else None,
+        )
         if split is not None:
             stale_splits.append(split)
     await persist_fanned_closes(stale_splits, persist)

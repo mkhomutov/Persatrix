@@ -26,20 +26,39 @@ from __future__ import annotations
 
 import aiosqlite
 
-__all__ = ["episode_exists_for_interaction"]
+from .interaction_janitor import SUMMARY_UNAVAILABLE_TEXT
+
+__all__ = [
+    "clear_failed_episode_for_interaction",
+    "episode_exists_for_interaction",
+]
 
 
 async def episode_exists_for_interaction(
     db: aiosqlite.Connection, agent_id: str, interaction_id: str,
 ) -> bool:
-    """``True`` iff ``agent_id`` already has an episode for this interaction.
+    """``True`` iff ``agent_id`` already DERIVED an episode for this span.
 
-    Any lifecycle state counts, including a ``[summary pending]`` row a
-    crash left behind and one the janitor finalised to
-    ``[summary unavailable]``: the question is whether this span was
-    already turned into a row, not whether the row is good.  Re-deriving
-    on top of either would duplicate exactly what the guard exists to
-    prevent, and the janitor already owns the recovery of a stuck row.
+    A row the janitor finalised to ``[interaction summary unavailable]``
+    does NOT count, and that exclusion is the whole correction (PR B2
+    review).  Counting it made a transient Phase-2 failure permanent: the
+    digest is boot-stable, so every later boot recomputed the same id,
+    matched the tombstone, and declined — while
+    ``cleanup_closing_interactions`` only rewrites the sentinel and
+    ``update_episode_summary`` matches ``[summary pending]`` alone, so
+    nothing ever retried the summary.  The janitor owns the recovery of a
+    stuck ROW; it does not recover the span's CONTENT, and the turns only
+    ever lived in memory (``close_path._TRANSIENT_TURN_KEYS`` keeps bodies
+    out of ``context_json``).  Losing a span's memory to one provider
+    hiccup on the boot path inverts the cost rule
+    :mod:`agents.persona_runtime.replay_identity` applies everywhere else.
+
+    A ``[summary pending]`` row DOES still count.  It means either a
+    Phase 2 in flight or a boot that died before one, and the two are
+    indistinguishable from here — so the guard waits for the janitor to
+    convert it (``DEFAULT_CLOSING_GRACE_SEC``), which costs one extra boot
+    and cannot race a live writer.  Recovery is therefore bounded and
+    automatic rather than permanent.
 
     Indexed by ``idx_episodes_interaction`` on
     ``(agent_id, interaction_id)`` — migration 19, added by the PR B2
@@ -57,7 +76,38 @@ async def episode_exists_for_interaction(
     """
     async with db.execute(
         "SELECT 1 FROM episodes WHERE agent_id = ? AND interaction_id = ? "
-        "LIMIT 1",
-        (agent_id, interaction_id),
+        "AND summary <> ? LIMIT 1",
+        (agent_id, interaction_id, SUMMARY_UNAVAILABLE_TEXT),
     ) as cursor:
         return await cursor.fetchone() is not None
+
+
+async def clear_failed_episode_for_interaction(
+    db: aiosqlite.Connection, agent_id: str, interaction_id: str,
+) -> int:
+    """Drop the tombstone rows blocking a re-derivation of this span.
+
+    Called only once :func:`episode_exists_for_interaction` has answered
+    ``False``, i.e. immediately before the caller re-derives.  Without it
+    the retry would leave one ``[interaction summary unavailable]`` row
+    per failed boot under a single digest — an unbounded growth curve
+    under the guard that exists to bound one, and a set of rows recall can
+    only ever return as noise.
+
+    Deleting is safe precisely because the sentinel is TERMINAL:
+    ``cleanup_closing_interactions`` writes it only after
+    ``DEFAULT_CLOSING_GRACE_SEC``, and ``update_episode_summary`` refuses
+    to overwrite it, so no writer can still be holding this row.  It also
+    keeps ``interaction_id`` effectively single-rowed, which
+    ``update_episode_summary`` depends on — it matches without a ``LIMIT``
+    and reports ``rowcount``.
+    """
+    cursor = await db.execute(
+        "DELETE FROM episodes WHERE agent_id = ? AND interaction_id = ? "
+        "AND summary = ?",
+        (agent_id, interaction_id, SUMMARY_UNAVAILABLE_TEXT),
+    )
+    deleted = cursor.rowcount or 0
+    if deleted:
+        await db.commit()
+    return deleted

@@ -223,3 +223,44 @@ keeps the build history.
 > counted the live close path's tasks as its own. Written up in full, with
 > what each one would have cost, in
 > [PR B2 review, round 2](ISSUE-0130-shape-b-round-2-review.md).
+
+---
+
+> 2026-09-01 — **the B2 review's third round**: fifteen findings, ten of
+> them confirmed and fixed here. Three shared one root cause — completeness
+> was decided in two places under two different rules. The truncation
+> bookkeeping was keyed per CHANNEL while records are keyed per speaker, so
+> one live turn racing catch-up in a busy room refused every other
+> speaker's *complete* window there, on every boot; the ingest-time
+> segmentation door set `replay_window_complete` unconditionally, firing on
+> the attribution split as well as the wire rotation its comment described
+> and consulting none of the pass's bookkeeping, so it derived the
+> remainder of an already-cut window and derived segments with a hole where
+> a row had raised; and the sweep's own "the record must name a channel"
+> condition was documented but never written. Both doors now ask one
+> `(channel, speaker)`-keyed question, the decision is handed to
+> `close_record` rather than assigned after it, and the raised-row gap is
+> routed into the tracker so the mid-pass door can see it.
+>
+> The other seven: the re-derivation guard counted the janitor's terminal
+> `[interaction summary unavailable]` as a derivation, so one transient
+> Phase-2 failure cost a span its memory on *every* later boot — it now
+> ignores that sentinel and the retry deletes the row it retries;
+> `gated_replay_finalize` had moved the gate acquire outside
+> `finalize_closed_interaction`'s top-level guard, turning a gate failure
+> into a silently skipped Phase 2 on a span whose digest was already
+> claimed; the summarise gate was a module-global semaphore that latches
+> its event loop on the first *contended* acquire; `_live_message_ids` kept
+> recording for the process lifetime although its only reader is the
+> catch-up pass; the shutdown drain was unbounded under the agent lock, now
+> that the sweep spawns Phase-2 tasks at all; `scripts/issues.py`'s new
+> `-review` companion suffix was a bare `endswith` on a common word; and
+> ROADMAP still said three migrations where the plan says four.
+>
+> Every fix is mutation-checked and pinned by
+> `test_replay_window_compromise.py` and `test_replay_phase2_recovery.py`.
+> Two 500-line splits were preconditions: `channel_catchup_discovery`
+> (which rooms a pass replays, and under what policy — the half that runs
+> to completion before a single row is replayed) and
+> `episodic_replay_api` (the write-path-only replay surface on
+> `EpisodicMemory`).

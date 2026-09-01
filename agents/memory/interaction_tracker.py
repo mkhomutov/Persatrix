@@ -349,6 +349,7 @@ class InteractionTracker(_ReplayBookkeepingMixin):
         *,
         reason: CloseReason,
         now: float | None = None,
+        replay_window_complete: bool | None = None,
     ) -> Interaction | None:
         """Close one specific open record (identity-guarded).
 
@@ -368,9 +369,22 @@ class InteractionTracker(_ReplayBookkeepingMixin):
         ts = now if now is not None else self._clock()
         interaction.closed_at = ts
         interaction.close_reason = reason
+        if replay_window_complete is not None:
+            # Set HERE rather than by the caller after the fact (PR B2
+            # review): the truncation note below reads the flag, so a
+            # caller that assigned it after ``close_record`` returned had
+            # every record it closed self-register as a truncation.  That
+            # was inert only because the one such caller snapshotted the
+            # compromised set before its loop and cleared it afterwards —
+            # an invariant spread across two packages, with the failure
+            # mode "every derivation in the pass is silently refused".
+            # Passing it in makes "decided" and "recorded" one event.
+            interaction.replay_window_complete = replay_window_complete
         if interaction.replayed and not interaction.replay_window_complete:
             # A TRUNCATED replayed record — see ``_replay_bookkeeping``.
-            self.note_replayed_close(interaction.source_channel_id or "")
+            self.note_replayed_close(
+                interaction.source_channel_id or "", interaction.speaker_id,
+            )
         _emit_closed(reason)
         return interaction
 

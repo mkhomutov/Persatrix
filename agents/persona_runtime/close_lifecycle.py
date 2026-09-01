@@ -28,7 +28,7 @@ from ..memory.boundary_detectors import DEFAULT_CLOSING_GRACE_SEC
 from ..memory.episodic import EpisodicMemory
 from ..memory.interactions import InteractionTracker, cleanup_closing_interactions
 from .close_path import persist_closed_interaction
-from .finalize_close import drain_pending_summary_tasks
+from .finalize_close import DRAIN_TIMEOUT_SEC, drain_pending_summary_tasks
 from .replay_sweep import close_replayed_scopes
 
 if TYPE_CHECKING:
@@ -72,6 +72,19 @@ class _CloseLifecycleMixin:
             on_finalized=self._tick_auto_reflect_counter,
         )
 
+    def note_replay_gap(self, channel_id: str, speaker_id: str) -> None:
+        """ISSUE-0130 (b): a replayed row raised before reaching the tracker.
+
+        The catch-up loop's hook onto
+        :meth:`~agents.memory._replay_bookkeeping._ReplayBookkeepingMixin
+        .note_replay_gap` — the record that row belonged to now holds a
+        gap this boot invented, so it must not derive.  Routed through the
+        tracker rather than only through ``ReplayPassOutcome`` because the
+        outcome is read at pass END, and the ingest-time segmentation door
+        derives a record mid-pass.
+        """
+        self._interaction_tracker.note_replay_gap(channel_id, speaker_id)
+
     async def close_replayed_interactions(
         self, *,
         derive_channels: frozenset[str] | None = None,
@@ -88,7 +101,9 @@ class _CloseLifecycleMixin:
             derive_channels=derive_channels, speaker_gaps=speaker_gaps,
         )
 
-    async def drain_pending_summaries(self) -> None:
+    async def drain_pending_summaries(
+        self, *, timeout: float | None = DRAIN_TIMEOUT_SEC,
+    ) -> None:
         """Await in-flight background summary tasks (RFC 0020 PR 4).
 
         PR 6 review #23 — :func:`drain_pending_summary_tasks`
@@ -97,8 +112,17 @@ class _CloseLifecycleMixin:
         race in and spawn an un-awaited task.  A refactor that moves
         the drain outside the lock MUST switch to a loop-until-empty
         drain or it will silently lose late-arriving tasks.
+
+        BOUNDED by default since v0.3.15 PR B2 (:data:`DRAIN_TIMEOUT_SEC`),
+        because the replay sweep now spawns one Phase-2 task per replayed
+        speaker per room and paces them four at a time — an unbounded
+        drain of that backlog holds ``_lock``, and therefore blocks
+        ``on_event``, for as long as the backlog takes.  Pass
+        ``timeout=None`` to restore the wait-forever behaviour.
         """
-        await drain_pending_summary_tasks(self._pending_summarize_tasks)
+        await drain_pending_summary_tasks(
+            self._pending_summarize_tasks, timeout=timeout,
+        )
 
     async def _tick_auto_reflect_counter(self) -> None:
         """Increment the auto-reflect counter on close (RFC 0020 §H).

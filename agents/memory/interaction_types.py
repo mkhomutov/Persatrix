@@ -215,13 +215,31 @@ class Interaction:
     # record holding a PREFIX of its channel's window claims an id no later
     # boot can recompute — and the next complete boot then derives the whole
     # window on top of it, which is the unbounded growth shape (b) exists to
-    # bound.  Only :func:`~agents.persona_runtime.replay_sweep
-    # .close_replayed_scopes` can know a record holds a whole window (it runs
-    # after the pass, and is told which channels finished), so only it sets
-    # this.  Every OTHER close door — the ingest-time replay/live split, a
-    # wire rotation reaching a non-target record, ``idle_check``, the
-    # ``max_turns`` cap — closes a record mid-pass, which by construction
-    # means a partial window, and leaves the default standing.
+    # bound.  TWO doors may set it, and both have to prove the window is
+    # whole:
+    #
+    # * :func:`~agents.persona_runtime.replay_sweep.close_replayed_scopes` —
+    #   the pass-end sweep, which runs after the pass and is told which
+    #   channels finished; and
+    # * the replay-internal SEGMENTATION in
+    #   :func:`~agents.persona_runtime.close_path.close_stale_records` — a
+    #   wire rotation between two replayed rows, which closes a whole wire
+    #   conversation rather than a prefix, so its digest is boot-stable.
+    #
+    # Both ask ``InteractionTracker.replay_record_compromised`` first, so a
+    # window this pass already cut short or holed is refused at either door.
+    # Every OTHER door — a LIVE turn's replay/live split, the ISSUE-0130
+    # attribution split, a wire rotation reaching a non-target record,
+    # ``idle_check``, the ``max_turns`` cap — closes a record mid-pass,
+    # which by construction means a partial window, and leaves the default
+    # standing.
+    #
+    # The PR B2 review found the segmentation door setting this
+    # UNCONDITIONALLY: it fired on the attribution split as well as on a
+    # rotation, and consulted none of the pass's completeness bookkeeping,
+    # so it derived the remainder of an already-cut window and derived
+    # segments with a hole where a row had raised — both claiming an id no
+    # later boot recomputes, through the one door the gate did not cover.
     #
     # The first cut kept this decision in the sweep's own loop body, so those
     # other doors derived prefixes unguarded.  Moving it onto the record puts

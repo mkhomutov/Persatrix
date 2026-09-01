@@ -28,7 +28,6 @@ from ..observability.spans import (
 from ..principal_id import resolve_principal_id_silent
 from ..session_id import current_session_id, normalize_session_id, resolve_session_id_silent
 from ._boundary import warn_external_construction
-from ._episodic_replay_dedup import episode_exists_for_interaction
 from ._epoch_filter import resolve_active_epoch
 from ._principal_filter import resolve_active_principal
 from ._salience import EPISODIC_APPEND_SALIENCE, emit_for_tier, emit_session_write
@@ -55,6 +54,7 @@ from .episodic_queries import (
 from .episodic_queries import (
     update_episode_summary as _update_episode_summary,
 )
+from .episodic_replay_api import _EpisodicReplayAPIMixin
 from .episodic_retention import (
     delete_old_episodes as _delete_old_episodes,
 )
@@ -92,7 +92,9 @@ DEFAULT_NOTES_MIN_SCORE: float = 0.20
 # ─── EpisodicMemory ────────────────────────────────────────
 
 
-class EpisodicMemory(_EpisodicNotesAPIMixin, _EpisodicStateAPIMixin):
+class EpisodicMemory(
+    _EpisodicNotesAPIMixin, _EpisodicReplayAPIMixin, _EpisodicStateAPIMixin,
+):
     """Long-term memory store using SQLite with FTS5 search.
 
     The notes-tier delegation methods (``store_note`` / ``recall_notes`` /
@@ -293,26 +295,6 @@ class EpisodicMemory(_EpisodicNotesAPIMixin, _EpisodicStateAPIMixin):
         return await _update_episode_summary(
             self._ensure_db(), self._agent_id, interaction_id, summary)
 
-    def active_epoch_id(self) -> str:
-        """The epoch a write from this call site would be stamped with.
-
-        The same resolution :meth:`store_episode` applies (a per-request
-        ``epoch_scope`` wins over the construction-time snapshot), exposed
-        so the ISSUE-0130 (b) replay span identity can put it in its digest
-        and be sure it matches the row the derivation goes on to write.
-        """
-        return resolve_active_epoch(self._active_epoch_id)
-
-    async def has_episode_for_interaction(self, interaction_id: str) -> bool:
-        """ISSUE-0130 (b): was this interaction already turned into a row?
-
-        The close path's re-derivation guard for replayed spans — see
-        :mod:`agents.memory._episodic_replay_dedup` for why the lookup
-        is not principal-filtered and must stay off the read path.
-        """
-        return await episode_exists_for_interaction(
-            self._ensure_db(), self._agent_id, interaction_id)
-
     async def recall(
         self,
         query: str = "",
@@ -484,3 +466,8 @@ class EpisodicMemory(_EpisodicNotesAPIMixin, _EpisodicStateAPIMixin):
     # ─── Interaction counter & persona state ───────────────
     # ``get_interaction_count`` / ``persist_agent_state`` / … — see
     # :class:`_EpisodicStateAPIMixin`.
+
+    # The ISSUE-0130 (b) replay write-path surface —
+    # ``active_epoch_id`` / ``has_episode_for_interaction`` /
+    # ``clear_failed_episode``, see
+    # :class:`_EpisodicReplayAPIMixin`.

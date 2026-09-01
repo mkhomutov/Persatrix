@@ -217,6 +217,15 @@ async def replay_span_already_derived(
     span's memory outright — and the close path has exactly one attempt
     at it.
 
+    A previous boot's FAILED derivation does not count as derived (PR B2
+    review).  ``episode_exists_for_interaction`` ignores the janitor's
+    terminal ``[interaction summary unavailable]`` sentinel, and this
+    function deletes that row before re-deriving, so a transient Phase-2
+    failure costs one boot rather than the span's memory forever.  A
+    ``[summary pending]`` row still counts: it may be a Phase 2 in flight,
+    and the janitor converts it within its grace period, so the retry
+    happens on the boot after instead.
+
     A lookup that raises additionally leaves the ``uuid4`` in place
     rather than claiming the digest.  Deriving twice is the accepted
     residual; deriving twice UNDER ONE ID is not, because
@@ -260,4 +269,27 @@ async def replay_span_already_derived(
             agent_id, interaction.scope, interaction.principal_id,
             interaction.speaker_id, len(message_ids), identity,
         )
-    return already
+        return True
+    # Deriving.  Clear any tombstone an earlier boot's failed Phase 2 left
+    # under this digest first (PR B2 review), or the retry accumulates one
+    # ``[interaction summary unavailable]`` row per failed boot under a
+    # single id — and ``update_episode_summary`` matches that id without a
+    # ``LIMIT``.  Best-effort in the same direction as everything else
+    # here: a failure to tidy must not cost the span its derivation.
+    try:
+        cleared = await episodic.clear_failed_episode(identity)
+    except Exception:
+        logger.warning(
+            "ISSUE-0130: could not clear the failed episode for agent=%s "
+            "interaction_id=%s; deriving anyway",
+            agent_id, identity, exc_info=True,
+        )
+    else:
+        if cleared:
+            logger.info(
+                "ISSUE-0130: retrying a replayed span whose earlier "
+                "derivation failed (agent=%s scope=%s interaction_id=%s "
+                "tombstones_cleared=%d)",
+                agent_id, interaction.scope, identity, cleared,
+            )
+    return False
