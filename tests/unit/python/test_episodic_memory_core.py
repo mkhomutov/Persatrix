@@ -83,7 +83,10 @@ class TestMigrations:
         # agent-typed relationship row onto the user-typed one).
         # 17 → 18 alongside migration v18 (ISSUE-0131: speaker_id on
         # episodes + facts — the v0.3.15 residuals PR 3 speaker axis).
-        assert len(rows) == 18
+        # 18 → 19 alongside migration v19 (ISSUE-0130 (b), PR B2 review:
+        # index episodes(agent_id, interaction_id) — the close path's
+        # Phase-2 match and the replay re-derivation guard).
+        assert len(rows) == 19
         assert rows[0][0] == 1
         assert "Initial schema" in rows[0][1]
         assert rows[1][0] == 2
@@ -149,6 +152,11 @@ class TestMigrations:
         # tiers — disambiguated by the ``speaker_id`` token.
         assert rows[17][0] == 18
         assert "speaker_id" in rows[17][1].lower()
+        # v19 pins on ``index`` — v5 also carries the ``interaction``
+        # token ("episodes interaction columns + scope index"), so a
+        # swap between the two would otherwise round-trip green.
+        assert rows[18][0] == 19
+        assert "index episodes" in rows[18][1].lower()
 
     async def test_migrations_are_idempotent(self, memory: EpisodicMemory):
         """Re-running migrations does not error or duplicate rows."""
@@ -165,9 +173,10 @@ class TestMigrations:
         # provenance + memory_projections).  16 → 17 alongside migration v17
         # (ISSUE-0120: fold split agent-typed human relationship rows).
         # 17 → 18 alongside migration v18 (ISSUE-0131: speaker_id on
-        # episodes + facts).  Same row-count discipline as
-        # ``test_migration_version_recorded``.
-        assert row[0] == 18
+        # episodes + facts).  18 → 19 alongside migration v19
+        # (ISSUE-0130 (b): the episodes(agent_id, interaction_id) index).
+        # Same row-count discipline as ``test_migration_version_recorded``.
+        assert row[0] == 19
 
     async def test_wal_mode_enabled(self):
         """WAL mode is set on file-based databases (not :memory:)."""
@@ -194,9 +203,17 @@ class TestMigrations:
         ) as cursor:
             rows = await cursor.fetchall()
         index_names = {r[0] for r in rows}
-        assert "idx_episodes_agent" in index_names
+        assert "idx_episodes_interaction" in index_names
         assert "idx_episodes_importance" in index_names
         assert "idx_episodes_created" in index_names
+        assert "idx_episodes_agent" not in index_names, (
+            "migration 19 drops it: ``idx_episodes_agent(agent_id)`` is a "
+            "strict prefix of ``idx_episodes_interaction(agent_id, "
+            "interaction_id)``, so every predicate it served is still "
+            "served — and keeping the dead B-tree cost 24% on every "
+            "``store_episode`` INSERT, which since the ISSUE-0123 re-key "
+            "runs once per close per speaker per room"
+        )
 
 
 # ─── Store and recall ───────────────────────────────────────

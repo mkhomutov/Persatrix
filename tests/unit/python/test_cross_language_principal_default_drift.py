@@ -12,10 +12,12 @@ times, in two languages and one frozen SQL string:
   when no ``persatrix-principal`` header arrives, and the value the
   persona-memory migration v11 backfilled onto its tiers.
 * the ``DEFAULT '<value>'`` inside ``migrateV11ToV12``
-  (``internal/channels/sqlite_principal_migration.go``) — deliberately a
-  literal rather than an interpolation of the Go constant, because
-  migration SQL is frozen history: a later rename must not silently
-  rewrite what v12 backfilled.
+  (``internal/channels/sqlite_principal_migration.go``) — which is
+  deliberately EMPTY rather than either constant, and is pinned here as
+  such.  See
+  :func:`test_migration_backfill_is_empty_and_not_the_default_principal`:
+  a row predating the column has no tenant to name, and ``local`` is a
+  real answer rather than a way to say so.
 
 Why it needs a pin rather than a doc-comment.  The two stores are
 disjoint today — nothing in ``agents/`` queries ``messages`` — so a
@@ -99,15 +101,34 @@ def test_go_and_python_default_principal_agree():
     )
 
 
-def test_migration_backfill_matches_the_go_constant():
-    """The v12 backfill literal MUST equal the constant it stands in for.
+def test_migration_backfill_is_empty_and_not_the_default_principal():
+    """The v12 backfill MUST be empty — deliberately NOT ``local``.
 
-    The migration deliberately spells ``local`` out instead of
-    interpolating :data:`channels.DefaultPrincipalID`, because applied
-    migrations are frozen history.  That is only safe while the two
-    agree at HEAD: a rename that touches the constant and not the ALTER
-    would leave freshly-migrated databases backfilled to one value and
-    freshly-published rows stamped with another, inside one table.
+    This pin was inverted by the PR B2 review, and the inversion is the
+    point rather than a relaxation.
+
+    ``local`` is not a neutral placeholder: it is a REAL answer a v12
+    writer stamps, meaning "this publish had no verified tenant" (an
+    agent publish, or the whole deployment under ``auth.mode: disabled``).
+    PR B2's consumer branches on a principal's PRESENCE — a present value
+    means the replay knows whose tenant the messages belong to, and the
+    span derives persona memory under it.  Backfilling ``local`` makes a
+    row that predates the column indistinguishable from that real answer,
+    so the first post-upgrade catch-up would read every pre-migration row
+    as attributed and derive one authenticated person's content into the
+    shared tenant — the ISSUE-0130 leak, reopened for the upgrade window
+    and then made permanent by the re-derivation guard.
+
+    The empty string is absent to both Python readers
+    (:func:`agents.principal_id.seed_principal_metadata` and
+    :func:`~agents.principal_id.principal_id_from_metadata` reject it), so
+    those rows stay unattributable and the shape-(a) skip still covers
+    them.  Nothing is lost by not spelling the constant here: every
+    production writer names ``principal_id`` explicitly
+    (``sqliteStore.AddMessage``), so the DEFAULT is only ever the
+    backfill, never a value a new row takes — which is also why the
+    "two spellings inside one table" drift this test originally guarded
+    against cannot arise.
     """
     const_value = _parse(_SQLITE_GO, _GO_CONST_PATTERN, "`const DefaultPrincipalID = \"...\"`")
     migration_value = _parse(
@@ -115,12 +136,17 @@ def test_migration_backfill_matches_the_go_constant():
         _GO_MIGRATION_DEFAULT_PATTERN,
         "the `DEFAULT '...'` in the v11 -> v12 ADD COLUMN",
     )
-    assert migration_value == const_value, (
-        f"the v11->v12 backfill literal ({migration_value!r}, {_MIGRATION_GO}) "
-        f"no longer equals DefaultPrincipalID ({const_value!r}, {_SQLITE_GO}). "
-        f"Migration SQL is frozen history and must not be rewritten — if the "
-        f"constant genuinely changed, that needs a NEW migration, not an edit "
-        f"to v12."
+    assert migration_value == "", (
+        f"the v11->v12 backfill literal is {migration_value!r} "
+        f"({_MIGRATION_GO}); it must be the empty string. A row that "
+        f"predates the column carries no evidence of who caused it, and "
+        f"the column's reader treats any present value as attribution."
+    )
+    assert migration_value != const_value, (
+        f"the v11->v12 backfill must NOT be DefaultPrincipalID "
+        f"({const_value!r}): `local` is the answer for an unauthenticated "
+        f"publish, so backfilling it would make every pre-upgrade row read "
+        f"as attributed and derive into the shared tenant."
     )
 
 

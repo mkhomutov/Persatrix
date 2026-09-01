@@ -76,13 +76,18 @@ const DefaultEpochID = "live"
 //
 // That contract is PINNED, not merely asserted:
 // tests/unit/python/test_cross_language_principal_default_drift.py parses this
-// declaration out of the Go source and compares it to the Python constant and
-// to the frozen `'local'` literal in migrateV11ToV12's `DEFAULT` — the same
-// source-parsing shape the respond-policy and cascade-depth drift pins use.
-// The migration SQL still spells the literal out rather than interpolating
-// this constant, because migration SQL is frozen history: a future rename must
-// not silently rewrite what v12 backfilled. The drift pin is what makes that
-// divergence a red build instead of a silent one.
+// declaration out of the Go source and compares it to the Python constant —
+// the same source-parsing shape the respond-policy and cascade-depth drift
+// pins use.
+//
+// It also pins the v11->v12 `ADD COLUMN` DEFAULT, but as an INEQUALITY: that
+// DEFAULT is the empty string and must NOT equal this constant. `local` is a
+// real answer a v12 writer stamps, so backfilling it onto rows that predate
+// the column would make them indistinguishable from it — and the reader
+// (`agents.principal_id.seed_principal_metadata`) treats any present value as
+// attribution, which is what decides whether a replayed span may derive
+// persona memory. See migrateV11ToV12's own header, and migrateV12ToV13,
+// which repairs stores that took the original `'local'` backfill.
 const DefaultPrincipalID = "local"
 
 // SessionMetrics is the subset of orchestrator OTEL handles the channel

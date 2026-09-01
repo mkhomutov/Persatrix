@@ -54,6 +54,7 @@ from .episodic_queries import (
 from .episodic_queries import (
     update_episode_summary as _update_episode_summary,
 )
+from .episodic_replay_api import _EpisodicReplayAPIMixin
 from .episodic_retention import (
     delete_old_episodes as _delete_old_episodes,
 )
@@ -91,7 +92,9 @@ DEFAULT_NOTES_MIN_SCORE: float = 0.20
 # ─── EpisodicMemory ────────────────────────────────────────
 
 
-class EpisodicMemory(_EpisodicNotesAPIMixin, _EpisodicStateAPIMixin):
+class EpisodicMemory(
+    _EpisodicNotesAPIMixin, _EpisodicReplayAPIMixin, _EpisodicStateAPIMixin,
+):
     """Long-term memory store using SQLite with FTS5 search.
 
     The notes-tier delegation methods (``store_note`` / ``recall_notes`` /
@@ -463,3 +466,8 @@ class EpisodicMemory(_EpisodicNotesAPIMixin, _EpisodicStateAPIMixin):
     # ─── Interaction counter & persona state ───────────────
     # ``get_interaction_count`` / ``persist_agent_state`` / … — see
     # :class:`_EpisodicStateAPIMixin`.
+
+    # The ISSUE-0130 (b) replay write-path surface —
+    # ``active_epoch_id`` / ``has_episode_for_interaction`` /
+    # ``clear_failed_episode``, see
+    # :class:`_EpisodicReplayAPIMixin`.

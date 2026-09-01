@@ -50,8 +50,26 @@ async def record_closed_interaction(
     those have no single peer to anchor a relationship row on.
     Channel-aware recording for thread / group scopes lands jointly
     with RFC 0011 P3 in PR 5.
+
+    Also skipped for a REPLAYED span (v0.3.15 PR B2 review).  The peer's
+    participant type is recovered from the first turn's payload, which
+    the live ingress fills from ``sender_participant_type`` wire metadata
+    — and ``channelMessageResponse`` (the REST history shape catch-up
+    replays from) carries no such field, so there is nothing to seed and
+    :func:`extract_peer_from_interaction` falls to its ``"agent"``
+    default.  Since ``other_participant_type`` is part of the
+    relationships row's conflict key, deriving a replayed DM span would
+    mint a SECOND, ``agent``-typed relationship row for a real person
+    rather than bump their existing one.  Unreachable until this release:
+    shape (a) returned before Phase 2 for every replayed span, so the
+    default was never exercised on this path.  Recording a peer type the
+    replay cannot establish is the same trade ISSUE-0130 refuses
+    everywhere else, so the relationship bump waits for a wire field to
+    carry the type.
     """
     if not interaction.scope.startswith("dm:"):
+        return
+    if interaction.replayed:
         return
     peer_id, peer_type = extract_peer_from_interaction(agent_id, interaction)
     if not peer_id:

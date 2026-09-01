@@ -407,7 +407,7 @@ def test_sqlite_default_is_when_mentioned() -> None:
     ``when_mentioned`` — the no-declared-policy fallback the schema
     ``default`` (``test_schema_default_normalizes_to_when_mentioned``)
     and the catch-up replay path
-    (``channel_catchup._resolve_respond_policy``) also resolve to.
+    (``channel_catchup_discovery.resolve_respond_policy``) also resolve to.
     Asserted as the literal legacy value, not "an alias of": the CHECK on
     the same column rejects dispositions, so a disposition DEFAULT would
     make every default-relying insert fail the constraint.
@@ -439,7 +439,7 @@ def test_schema_enum_is_the_full_vocabulary() -> None:
 def test_schema_default_normalizes_to_when_mentioned() -> None:
     """The schema's ``respond`` default MUST stay an alias of
     ``when_mentioned`` — the same conservative fallback the catch-up
-    replay path (``channel_catchup._resolve_respond_policy``) and the
+    replay path (``channel_catchup_discovery.resolve_respond_policy``) and the
     membership column default assume for a member with no declared
     policy. A default that silently became open-floor would put every
     default-policy member on the floor of every conversation.

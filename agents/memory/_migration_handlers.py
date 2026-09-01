@@ -37,6 +37,8 @@ from collections.abc import Awaitable, Callable
 
 import aiosqlite
 
+from ._migration_episode_interaction_index import _apply_migration_19
+
 # Migration v8 (RFC 0026 PR 1) lives in :mod:`agents.memory._migration_facts`
 # and v9 (RFC 0031 Phase 2 PR 1) in
 # :mod:`agents.memory._migration_notes_session` so this module stays under
@@ -479,4 +481,5 @@ _MIGRATION_HANDLERS: dict[int, Callable[[aiosqlite.Connection], Awaitable[None]]
     16: _apply_migration_16,
     17: _apply_migration_17,
     18: _apply_migration_18,
+    19: _apply_migration_19,
 }

@@ -7,8 +7,9 @@ package channels
 // function (here, or — now this file is near the same cap — in a dedicated
 // sibling file: v8→v9 lives in sqlite_membership_intervals_migration.go,
 // v9→v10 in sqlite_messages_fts_migration.go, v10→v11 in
-// sqlite_classification_migration.go and v11→v12 in
-// sqlite_principal_migration.go), a `case N:` arm in applyMigration, and
+// sqlite_classification_migration.go, v11→v12 in
+// sqlite_principal_migration.go and v12→v13 in
+// sqlite_principal_backfill_repair.go), a `case N:` arm in applyMigration, and
 // bumps channelStoreSchemaVersion.
 
 import (
@@ -58,6 +59,8 @@ func applyMigration(db *sql.DB, target int) error {
 		return migrateV10ToV11(db)
 	case 12:
 		return migrateV11ToV12(db)
+	case 13:
+		return migrateV12ToV13(db)
 	default:
 		return fmt.Errorf("no migration registered for v%d", target)
 	}
