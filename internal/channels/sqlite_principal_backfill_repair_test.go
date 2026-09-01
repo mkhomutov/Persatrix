@@ -181,6 +181,33 @@ func TestMigrateV12ToV13_SurvivesAMissingMessagesTable(t *testing.T) {
 	require.NoError(t, migrateV12ToV13(db))
 }
 
+// TestMigrateV12ToV13_SurvivesAV11StoreWithNoPrincipalColumn pins the other
+// half of the detector's absent case: the `messages` table exists but has
+// never had the column, so there is no default to read and nothing to repair.
+//
+// Distinct from the missing-table test below it, and a distinct branch since
+// the detector moved to `pragma_table_info(...)` (PR B2 review round 5): both
+// now arrive as `sql.ErrNoRows` rather than as an empty row scan, and neither
+// may fail the boot.
+func TestMigrateV12ToV13_SurvivesAV11StoreWithNoPrincipalColumn(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "channels.db")
+	db := migrateThroughV11(t, path)
+	t.Cleanup(func() { _ = db.Close() })
+
+	seedChannelAndMessage(t, db, "msg-v11", "written before the column existed")
+
+	needsRepair, err := v12PrincipalBackfilledLocal(db)
+	require.NoError(t, err)
+	assert.False(t, needsRepair,
+		"a v11 store has no principal_id column, so there is no bad backfill to find")
+
+	require.NoError(t, migrateV12ToV13(db))
+
+	var version int
+	require.NoError(t, db.QueryRow(`PRAGMA user_version`).Scan(&version))
+	assert.Equal(t, 13, version, "the version line still advances")
+}
+
 // TestSQLiteStore_V12Store_RepairsOnOpen is the end-to-end shape an operator
 // actually hits: a store left at v12 by the original code comes back at v13
 // with its rows un-attributed on the NEXT open, through the real store

@@ -135,37 +135,32 @@ func migrateV12ToV13(db *sql.DB) error {
 // Returns false — repair nothing — when the column is absent entirely, which
 // is the partial-baseline case every sibling handler also tolerates rather
 // than failing a boot on.
+//
+// Asked through the `pragma_table_info(...)` TABLE-VALUED form rather than the
+// `PRAGMA table_info(messages)` statement form (PR B2 review round 5). The
+// statement form returns a fixed column list that has grown before (SQLite
+// 3.26 added `hidden` to its `_xinfo` sibling), and reading it meant a
+// positional six-destination `Scan`. This runs on the orchestrator BOOT path:
+// a driver bump that changed that shape would fail `Scan`, propagate out
+// through applyMigration into applySchema, and refuse to open the channel
+// store — on every store, including the overwhelming majority that need no
+// repair at all. The table-valued form names the one column it wants and is
+// shape-independent; `sqlite_session_migration_test.go` already uses it.
 func v12PrincipalBackfilledLocal(db *sql.DB) (bool, error) {
-	rows, err := db.Query(`PRAGMA table_info(messages)`)
+	var dfltValue sql.NullString
+	err := db.QueryRow(
+		`SELECT dflt_value FROM pragma_table_info(?) WHERE name = ?`,
+		"messages", "principal_id",
+	).Scan(&dfltValue)
+	if errors.Is(err, sql.ErrNoRows) {
+		// No `messages` table, or a v11 store that never got the column.
+		return false, nil
+	}
 	if err != nil {
-		return false, fmt.Errorf("read messages table_info: %w", err)
+		return false, fmt.Errorf("read messages.principal_id default: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
-
-	for rows.Next() {
-		var (
-			cid        int
-			name       string
-			colType    string
-			notNull    int
-			dfltValue  sql.NullString
-			primaryKey int
-		)
-		if err := rows.Scan(
-			&cid, &name, &colType, &notNull, &dfltValue, &primaryKey,
-		); err != nil {
-			return false, fmt.Errorf("scan messages table_info: %w", err)
-		}
-		if name != "principal_id" {
-			continue
-		}
-		return dfltValue.Valid &&
-			dfltValue.String == v12PrincipalBackfillOriginalDefault, nil
-	}
-	if err := rows.Err(); err != nil {
-		return false, fmt.Errorf("iterate messages table_info: %w", err)
-	}
-	return false, nil
+	return dfltValue.Valid &&
+		dfltValue.String == v12PrincipalBackfillOriginalDefault, nil
 }
 
 // messagesFTSUpdateTriggerExists reports whether this store carries the v10
