@@ -326,20 +326,25 @@ func TestRestamp_HumanSenderCannotConsumeAnAgentsAttribution(t *testing.T) {
 // reviews as one — adding it stays compile-green, and only a structural
 // assertion turns it red.
 //
-// Two things are pinned. [PrincipalAttributionTable.TakeAttribution] — the
-// consuming read — must have exactly one caller, or the retirement accounting
-// is wrong and stimuli no reply answered get spent. [WithPrincipal] has a
-// two-entry reviewed allowlist, and the distinction between its entries is the
-// point of the test:
+// Two things are pinned, and since v0.3.15 both allowlists hold exactly ONE
+// entry. [PrincipalAttributionTable.TakeAttribution] — the consuming read —
+// must have exactly one caller, or the retirement accounting is wrong and
+// stimuli no reply answered get spent. [WithPrincipal] likewise:
+// principal_restamp.go INFERS a principal the caller never presented, which is
+// the mis-attribution surface, and one site is the whole design.
 //
-//   - principal_restamp.go INFERS a principal the caller never presented. That
-//     is the mis-attribution surface, and one site is the whole design.
-//   - synthesis_close.go RE-APPLIES one that a real request already presented
-//     and the arm captured, onto the background context its timer goroutine
-//     owns, so the close-notification fan lands in the interaction's own
-//     tenant. It cannot name anyone the arming request did not.
+// The allowlist USED to carry a second, weaker entry: synthesis_close.go
+// re-applied a principal the arming request had presented onto the background
+// context its timer goroutine owns, so the close-notification fan landed in the
+// interaction's own tenant. ISSUE-0082 residuals PR 4b retired it — the
+// `(principal, speaker, scope)` re-key made the fan's ambient tenant select
+// nothing, since each record now binds its OWN frozen principal for its whole
+// derivation (the audit is in synthesis_close.go's header). Narrowing the
+// allowlist is the point: the fewer contexts anyone stamps, the smaller the
+// surface this pin has to trust, so re-widening it back to two must be a
+// reviewed edit here and not a quiet reintroduction.
 //
-// A third site of either kind turns this red, which is the inversion
+// A second site of either kind turns this red, which is the inversion
 // ISSUE-0124 asks for: a second re-stamp must not be addable by omission.
 //
 // SCOPE CAVEAT: this scans only THIS package's non-test sources. [WithPrincipal]
@@ -382,10 +387,11 @@ func TestRestamp_IsTheOnlyPrincipalStampInThisPackage(t *testing.T) {
 		})
 	}
 
-	assert.Equal(t, []string{"principal_restamp.go", "synthesis_close.go"}, sites["WithPrincipal"],
-		"only the reviewed sites may stamp a principal: principal_restamp.go infers one, "+
-			"synthesis_close.go re-applies one the arming request presented; a third is the "+
-			"mis-attribution hazard ISSUE-0124 is built to exclude")
+	assert.Equal(t, []string{"principal_restamp.go"}, sites["WithPrincipal"],
+		"principal_restamp.go is the ONLY site that may stamp a principal onto a context "+
+			"in this package; a second is the mis-attribution hazard ISSUE-0124 is built to "+
+			"exclude, and re-adding synthesis_close.go's retired re-stamp (PR 4b) must be a "+
+			"reviewed edit to this allowlist, not a quiet reintroduction")
 	assert.Equal(t, []string{"principal_restamp.go"}, sites["TakeAttribution"],
 		"the consuming read must happen once per publish — a second caller would retire "+
 			"stimuli that no reply answered")

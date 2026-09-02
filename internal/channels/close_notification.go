@@ -193,8 +193,9 @@ func (r *ChannelRouter) recordInteractionClosedMetric(ctx context.Context, ct Ch
 // "went idle" label — which, on a BOUNDED close, is no longer the pre-4b-ii
 // status quo: the idle bury authors that member's RFC 0020 summary a window
 // late, idle-labeled, and UNLEASED, silently degrading the OQ #6 guarantee
-// that every per-persona close summary bills the interaction's `1 + N`
-// reserve (PR #718 review). Accepted for now — the miss is one member's
+// that every close-derived record's summary bills the interaction's `1 + R`
+// reserve (PR #718 review; `R` since the v0.3.15 re-size —
+// [wallet.CloseRecordUpperBound]). Accepted for now — the miss is one member's
 // metering, never the close itself — and nothing re-attempts a close
 // notification today (the 4b-ii redelivery marker only downgrades within
 // one fan); a retry would be new machinery, weighed with the PR 7
