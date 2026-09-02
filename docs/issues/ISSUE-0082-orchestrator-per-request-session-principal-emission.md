@@ -206,3 +206,23 @@ mechanism.
 > tenant. The Part 2 promise is met at the scope it claims: the per-turn
 > boundary on the live dispatch. Open by design beyond it — R-1, R-2, and
 > ISSUE-0130's **(b)** — all v0.3.15.
+>
+> 2026-09-03 — **the residuals are closed too; nothing of Part 2 remains
+> open.** All three landed in v0.3.15 and were verified on one live arc
+> ([v0.3.15 execution report](../manual-tests/v0.3.15-execution-report.md)):
+>
+> * **R-1** ([ISSUE-0123](ISSUE-0123-per-speaker-interaction-scope.md)) — the
+>   derived write binds the record's own frozen principal, so the close
+>   trigger no longer selects a tenant (Legs 4 and 6 agree).
+> * **R-2** ([ISSUE-0124](ISSUE-0124-orchestrator-hop-drops-tenant-on-agent-cascade.md))
+>   — 5 dispatches, **0 tenant-less**, against this issue's own 2026-08-07
+>   measurement of 9 of 15 lost. A persona-sender publish carried
+>   `alice-person` across the orchestrator hop.
+> * **ISSUE-0130 (b)** — replay derives under the attributed tenant, once
+>   (`B = C` in every partition).
+>
+> The axis none of the three supplied — *who said it* — closed with them
+> ([ISSUE-0131](ISSUE-0131-derived-memory-has-no-speaker-attribution.md)):
+> derived rows and extracted facts now carry the speaker, and the split holds
+> under `auth.mode: disabled` as well, being a property of the record key
+> rather than of authentication.

@@ -1,10 +1,11 @@
 ---
 id: ISSUE-0131
 summary: "Memory derived at interaction close records WHAT was said and WHERE, never WHO said it. A `Fact` carries `subject` / `source_channel_id` / `source_interaction_id` (`agents/memory/fact_types.py`) but no speaker; the interaction record it is extracted from is room-scoped in exactly the topology that matters (`scope_for_channel_event` returns `group:<channel_id>` / `thread:<thread_id>`, neither carrying a speaker; the DM branch DOES key on `sender_id` via `scope_for_dm`, so a DM is already per-speaker and a shared room is where the speakers collapse). The principal axis does not substitute: emission is `auth.mode: enabled`-only and agent publishes are unauthenticated, so in a multi-agent room every persona turn collapses into the one shared `local` tenant. Consequences: hearsay is stored indistinguishably from first-hand testimony (agent B's restatement of A becomes a fact with A's authority — the confabulation-laundering path in an A→A→A cascade), and the persona cannot ground `you told me` against `Bob told me` in a shared room. Sibling of the ISSUE-0082 R-1 residual: R-1 splits the close record by PRINCIPAL, which leaves every unauthenticated speaker in one bucket; the speaker axis is the half R-1 does not cover."
-status: open
+status: resolved
 severity: medium
 area: memory
 created: 2026-08-19
+closed: 2026-09-03
 refs:
   - docs/issues/ISSUE-0082-orchestrator-per-request-session-principal-emission.md
   - docs/issues/ISSUE-0130-catchup-replay-rederives-memory-under-default-principal.md
@@ -150,3 +151,14 @@ rather than failing loudly.
 > aggregate's speaker is unknowable without exactly the model-elected
 > attribution the scope lock forbids, which is also why the column is only sound
 > now that the record it projects from is single-speaker by construction.
+
+> **Resolved 2026-09-03 — the speaker axis verified live** ([v0.3.15 execution report](../manual-tests/v0.3.15-execution-report.md), Leg 4).
+> Every persona held one record **per speaker it heard** and none for itself:
+> 2 / 3 / 2 records across the fleet, each single-speaker and
+> single-principal. Pre-fix this is one merged record per persona aggregating
+> every speaker. The axis reaches the extracted facts too — e.g.
+> `(alice-person, nova-sparrow, ember, agreed_to, cover review slot)`.
+>
+> **Auth-independent, as designed**: under `auth.mode: disabled` (Leg 8) the
+> `local` partition still held **two** distinct speakers where v0.3.14 closed
+> one. The split is a property of the record key, not of authentication.

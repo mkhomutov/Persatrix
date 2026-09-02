@@ -1,10 +1,11 @@
 ---
 id: ISSUE-0125
 summary: "The orchestrator's agent registry is an in-memory map (`internal/registry/registry.go` `InMemoryRegistry`) and agents call `_self_register()` exactly once, in their own startup path (`agents/server.py`) — there is no heartbeat, no retry and no re-registration trigger. So an orchestrator restart empties the registry and the fleet never comes back: every dispatch is dropped with `channels: dispatch target not registered`, personas fall silent, and nothing self-heals until each agent process is restarted by hand. The failure is near-silent — /healthz is green, containers are up, publishes return 201, and the only signal is one WARN per dropped dispatch. Recorded as an operational quirk since the v0.3.0 execution report and as F-6 (severity low) in v0.3.2; filed 2026-08-07 when the group-channel path, where the same condition is silent rather than loud, voided a live MT arc on a paid provider. **Fixed in v0.3.15 PR C1** by shape (4): each agent watches its own orchestrator gRPC channel and re-registers on any return to `READY`, `Register` becomes an upsert, and zero registered agents is raised at ERROR. Open until the release's live gate exercises a real restart."
-status: open
+status: resolved
 severity: medium
 area: internal/registry
 created: 2026-08-07
+closed: 2026-09-03
 refs:
   - internal/registry/registry.go
   - internal/channels/grpc_dispatcher.go
@@ -133,80 +134,15 @@ stays reachable.
 
 ## Proposed fix / investigation path
 
-**One constraint every shape below inherits: registration is not
-idempotent.** `InMemoryRegistry.Register` returns
-`ErrAgentAlreadyRegistered` when the id is already present — "re-registration
-requires calling `Unregister` first" — which the REST handler surfaces as
-`409` ([`internal/server/agent_handlers.go`](../../internal/server/agent_handlers.go))
-and `_self_register` logs at info and shrugs off. So a re-register call
-repairs an *emptied* registry but is a no-op against a populated one: a
-stale address is never corrected, and any boot-time seed `409`-blocks the
-agent's own registration — the one call that carries the real
-`advertise_address`. Making `Register` an upsert (or pairing it with
-`Unregister`) is a precondition shared by (1), (3), (4) and (5), not a
-detail of any one of them.
-
-Five shapes, roughly in increasing order of rightness:
-
-1. **Agent-side periodic re-register.** Simplest and self-healing, but it
-   reintroduces *polling*. It would not breach the v0.3.3 idle-cost
-   guarantee in substance — no recall query, no `_inject_memory_context`,
-   no provider call, no wallet lease — but "structurally event-driven, not
-   polled" is [RFC 0024](../rfcs/0024-event-driven-scheduling.md)'s stated
-   property, and a fleet-wide timer is exactly the shape it removed. If
-   chosen, make the interval long and the call trivially cheap.
-2. **Persist the registry.** Survives restart, but an entry is a liveness
-   claim: a persisted row for a dead agent is a dispatch that fails slower.
-   Needs a liveness check regardless, so it solves the symptom and inherits
-   the harder half.
-3. **Seed from config at boot + verify by dial.** The orchestrator knows
-   the *roster* from `config/agents.yaml` and channel membership — but not
-   where any of it lives. There is no address field anywhere under
-   `config/`: an agent's address is a property of the agent process
-   (`--advertise-address`, defaulting to its own `host:port` and rewritten
-   after bind when the port is dynamic —
-   [`agents/server.py`](../../agents/server.py)), so outside the Docker
-   `service:50051` naming convention the orchestrator has nothing to dial,
-   and "verify by dial" has no address to verify. This shape needs an
-   address column in `agents.yaml` first — a config surface change, not the
-   cheap interim it looks like — and even then covers only config-declared
-   agents, never dynamically registered ones.
-4. **Re-register on the existing channel's connectivity state.** The agent
-   already holds the connection (Context 3) and gRPC exposes its state
-   transitions, so a `READY → TRANSIENT_FAILURE → READY` cycle can drive
-   the re-register. Event-driven, not polled — no timer, so none of (1)'s
-   RFC 0024 tension — and it needs no new transport, no proto and no
-   orchestrator change. It is (5)'s property approximated on wiring that
-   ships today; the approximation is that channel health proxies for
-   orchestrator *identity*, so reconnecting to a process that did not lose
-   its registry re-registers redundantly (harmless once `Register` is an
-   upsert, a `409` no-op until then).
-5. **Make registration a property of a live connection.** The right shape:
-   the agent holds a stream to the orchestrator, and a broken stream is
-   both the trigger to re-register and the liveness signal — one mechanism
-   answering both "who is here" and "is it still here", which (2) and (3)
-   each solve only half of.
-   [RFC 0040](../rfcs/0040-agent-orchestrator-transport-unification.md)
-   moves **agent registration** (with channel publish and history) from
-   REST onto a gRPC `OrchestratorService` in Phase 2 (v0.4.0), which is the
-   right place for this to live — **but Phase 2 as drafted does not deliver
-   it.** Its §C surface sketches `RegisterAgent` as a *unary* RPC, and the
-   design notes turn on that ("the new unary RPCs pick these up for free"):
-   one call, once, from the same agent startup path, over a typed transport
-   instead of REST. No stream, no liveness property. Landing Phase 2
-   unchanged leaves this issue exactly where it is.
-
-Recommendation: treat (5) as the destination, but note that reaching it
-means **amending RFC 0040 §C** — a connection-scoped or streaming
-`RegisterAgent` — rather than waiting on Phase 2 as written. That amendment
-is design work this issue is asking for. If the gap bites before it lands,
-(4) is the cheapest interim: no polling, no config surface, no proto, and
-the same property (5) formalises.
-
-Whichever lands, the observability gap deserves closing on its own: an
-orchestrator that has **zero** registered agents while channels have
-members is a state worth logging at ERROR once, or exposing as a metric, so
-the condition is visible without reading dispatch WARNs.
+**Split out to [the re-registration design record](ISSUE-0125-design-record.md)**
+— the five candidate shapes, why **(4)** (an agent-side watcher on the
+orchestrator connection, re-registering on any departure from `READY` and
+return) was taken at PR C1, and why **(5)** (registry persistence / registration
+as a property of a live stream) was deferred to v0.4.0 as an
+[RFC 0040](../rfcs/0040-agent-orchestrator-transport-unification.md) §C
+amendment. Closing this issue orphans RFC 0040's §C and OQ 6 pointers; the
+v0.3.15 Phase 4 follow-up re-files shape (5) as its own issue and re-points
+both.
 
 ## Notes
 
@@ -354,3 +290,15 @@ the condition is visible without reading dispatch WARNs.
 > [ISSUE-0126](ISSUE-0126-mt-orchestrator-restart-registry-note-missing.md) close
 > together at Phase 4, which also re-files shape (5) so closing this does not
 > orphan RFC 0040 §C and OQ 6.
+
+> **Resolved 2026-09-03 — verified live, more strongly than the gate asked**
+> ([v0.3.15 execution report](../manual-tests/v0.3.15-execution-report.md), Leg 8). The arc restarted the orchestrator **three** times
+> (Legs 0, 7 and 8). After each, `GET /api/v1/agents` returned all six agents
+> and every persona logged `Orchestrator channel reconnected` →
+> `Registered agent …`. **No agent process was touched**: every agent
+> container reported `Up 39 minutes` at the end of the arc.
+>
+> The restarts were ordinary `docker compose restart orchestrator` — an
+> `IDLE`/`CONNECTING` cycle, not `TRANSIENT_FAILURE` — which is the transition
+> the connectivity watcher had to cover and the one a narrower fix would have
+> missed.
