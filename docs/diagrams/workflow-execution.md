@@ -107,7 +107,8 @@ away; the convener opens the discussion, the roster carries it through the
 ordinary governed wake chain, and the deterministic bounded close terminates it
 with a goal-directed chair synthesis plus one metered RFC 0020 summary per
 persona — all under the mandatory per-interaction cost cap (a roster-scaled
-`1 + N` reserve is held back so the close path's leases survive a
+`1 + R` reserve (one chair turn + one summary per close-derived
+record) is held back so the close path's leases survive a
 budget-exhausted close).
 
 ```mermaid
@@ -139,7 +140,7 @@ sequenceDiagram
         Roster->>LLM: compose reply (RFC 0051 reasoning)
         Roster->>Router: Publish(reply, echoing interaction_id)
         Router->>Wallet: InteractionSpend(interaction_id)
-        Router->>Router: fanout tail: round tally vs max_rounds ·<br/>spend vs soft budget (cap − the `1 + N` reserve)
+        Router->>Router: fanout tail: round tally vs max_rounds ·<br/>spend vs soft budget (cap − the `1 + R` reserve)
     end
 
     Note over Router: bound crossed (trigger = structural | cost)
@@ -154,7 +155,7 @@ sequenceDiagram
     par Per-persona RFC 0020 close (each member, sender included)
         Roster->>Roster: ingest synthesis as final turn ·<br/>close scope (cost | structural)
         Roster->>Wallet: AcquireLease(interaction_id) — OQ #6 metered summary
-        Wallet-->>Roster: grant — the N of the 1 + N reserve
+        Wallet-->>Roster: grant — the R of the 1 + R reserve
         Roster->>LLM: summarize interaction
         Roster->>Roster: persist real summary (never the placeholder)
     end
@@ -179,7 +180,7 @@ standing-schedule PR (see the [PR plan](../rfcs/0052-pr-plan.md)).
   (`max_rounds` / wallet soft budget) with the `interaction_closed{trigger=structural|cost}`
   vocabulary; `internal/channels/synthesis_close.go` — the close-on-reply chair
   synthesis turn with its timeout net.
-- `internal/wallet/synthesis_reserve.go` — the roster-scaled `1 + N` reserve /
+- `internal/wallet/synthesis_reserve.go` — the record-scaled `1 + R` reserve /
   soft-budget accounting, coupled to the router in both directions
   (`SetInteractionSpender` ↔ `SetInteractionBudgetResolver`).
 - `agents/persona_runtime/convener.py` / `synthesis_turn.py` /

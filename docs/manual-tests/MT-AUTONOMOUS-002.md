@@ -23,7 +23,7 @@ The three invariants under test:
 
 **Out of Scope** — deferred, **not asserted** here:
 
-- **The Phase-1 convene→converge→terminate→synthesize backbone** and the `1 + N` reserve — [MT-AUTONOMOUS-001](MT-AUTONOMOUS-001.md).
+- **The Phase-1 convene→converge→terminate→synthesize backbone** and the `1 + R` reserve — [MT-AUTONOMOUS-001](MT-AUTONOMOUS-001.md).
 - **Standing / scheduled convening + the aggregate bound** (Phase 3 / PR 7) — [MT-AUTONOMOUS-003].
 - **A configurable liveness target.** The `min_substantive_turns_per_agenda_item` target ships at its default of **one** substantive turn per item (the value the silent-roster case collapses to anyway); promoting it to an operator-editable `autonomous.*` knob is a follow-up and is not exercised here.
 

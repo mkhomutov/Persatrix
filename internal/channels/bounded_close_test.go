@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/metric"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"go.uber.org/zap"
@@ -38,14 +39,42 @@ func (f fakeSpender) InteractionSpend(string) int64 { return f.v }
 // autonomous and the human-channel-regression legs.
 func boundedCloseHarness(t *testing.T, enabled bool, maxRounds int) (*ChannelRouter, *envelopeRecorder, string, *sdkmetric.ManualReader) {
 	t.Helper()
+	return autonomousCloseHarness(t, enabled, maxRounds, zap.NewNop(), nil)
+}
+
+// autonomousCloseHarness is the stage [boundedCloseHarness] and
+// bounded_close_reserve_test.go's `reserveHarness` share — ONE definition of the
+// three-seat room every close test's arithmetic is written against (one
+// RespondNever operator + two personas, so `channelSize` is 3), because the two
+// files hard-code expectations derived from that roster and a silently
+// divergent copy would invalidate one of them.
+//
+// `instrument` registers any additional counters the caller needs on the SAME
+// meter provider, and runs before [NewChannelRouter] because [RouterMetrics] is
+// read once at construction. `logger` is the caller's, so a test can assert on
+// the log lines the close path emits (the clamp Warn) instead of discarding
+// them; pass `zap.NewNop()` when it does not care.
+func autonomousCloseHarness(
+	t *testing.T,
+	enabled bool,
+	maxRounds int,
+	logger *zap.Logger,
+	instrument func(metric.Meter, *RouterMetrics),
+) (*ChannelRouter, *envelopeRecorder, string, *sdkmetric.ManualReader) {
+	t.Helper()
 	reader := sdkmetric.NewManualReader()
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 	t.Cleanup(func() { _ = mp.Shutdown(context.Background()) })
-	ctr, err := mp.Meter("test").Int64Counter("channel.conversation.interaction_closed")
+	meter := mp.Meter("test")
+	ctr, err := meter.Int64Counter("channel.conversation.interaction_closed")
 	require.NoError(t, err)
+	rm := &RouterMetrics{InteractionClosed: ctr}
+	if instrument != nil {
+		instrument(meter, rm)
+	}
 	store := newTestStore(t, SQLiteOptions{})
 	disp := &envelopeRecorder{}
-	router := NewChannelRouter(store, disp, zap.NewNop(), &RouterMetrics{InteractionClosed: ctr})
+	router := NewChannelRouter(store, disp, logger, rm)
 	ch := mustCreateGroupWithPolicies(t, store, "brainstorm",
 		map[string]RespondPolicy{
 			"operator":  RespondNever, // the stimulus author (no seat in the discussion)

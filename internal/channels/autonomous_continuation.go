@@ -128,5 +128,5 @@ func (r *ChannelRouter) closeOnCascadeBound(ctx context.Context, msg ChannelMess
 		// Fall through to the immediate artifact-bearing close; the tombstone
 		// CAS below keeps a racing closer single-shot.
 	}
-	r.boundedClose(ctx, msg, ct, stampedID, structuralTrigger, notify)
+	r.boundedClose(ctx, msg, ct, len(members), stampedID, structuralTrigger, notify)
 }

@@ -1,7 +1,7 @@
 # ISSUE-0082 — PR Implementation Plan (Residuals R-1 / R-2 — the derived and relayed tenant writes)
 
 **Issues**: [ISSUE-0123](ISSUE-0123-per-speaker-interaction-scope.md) (R-1) · [ISSUE-0124](ISSUE-0124-orchestrator-hop-drops-tenant-on-agent-cascade.md) (R-2) · [ISSUE-0131](ISSUE-0131-derived-memory-has-no-speaker-attribution.md) (the speaker axis)
-**Status**: 🔄 In progress — Phase 0 resolved (both axes); workstream **A** of the **v0.3.15** *Who said what* milestone, open at PR 3 (PRs 1–2 merged)
+**Status**: 🔄 In progress — Phase 0 resolved (both axes); workstream **A** of the **v0.3.15** *Who said what* milestone, open at PR 4b (PRs 1–4 merged)
 **Created**: 2026-08-07
 **Branch prefix**: `feature/v0315-issue0123-` / `feature/v0315-issue0124-` (per residual)
 **Target**: `main`
@@ -149,7 +149,7 @@ Write the migration-18 column: project the record key's speaker half onto the tw
 
 ---
 
-### PR 4b: reserve re-size and Go-side asymmetry cleanup
+### PR 4b: `feature/v0315-issue0123-reserve-resize` — reserve re-size and Go-side asymmetry cleanup
 
 #### Scope
 
@@ -157,12 +157,12 @@ Split out of PR 4 on 2026-08-29. Re-size the wallet reserve; retire the Go-side 
 
 #### Key implementation details
 
-* **The asymmetry is retired, not resolved.** Once the record names its principal, the trigger's principal no longer selects a tenant, so the four close paths in `internal/channels/synthesis_close.go` need not agree. Audit whether `pendingSynthesisClose.principal` becomes dead and drop it if so.
-* **Reserve re-size**: `1 + N` becomes `1 + (personas × principals × speakers)` — the largest single cost here, and under-sizing degrades *silently* into `SUMMARY_UNAVAILABLE_TEXT`. The multiplier, the half-cap clamp, and the signal / threshold-basis obligations are the [reserve-sizing record](ISSUE-0082-residuals-reserve-sizing.md), split out on 2026-08-23 to hold exactly this; file the calibration in the [ISSUE-0109](ISSUE-0109-rfc0052-autonomous-defaults-calibration.md) idiom rather than guessing a constant.
+Both halves in full — the partition bound and the constant factor it buys off `c³`, the signal's placement, the threshold-basis collapse, the three-leg audit that found `pendingSynthesisClose.principal` dead, and the RFC 0052 §D amendment — are the [reserve-sizing record](ISSUE-0082-residuals-reserve-sizing.md), PR 4b's companion since 2026-08-23 and the doc that exists to hold exactly this. The deferred constants are [ISSUE-0138](ISSUE-0138-close-reserve-multiplier-calibration.md).
 
 #### PR checklist
 
-- [ ] Re-size ships with its **signal**, and the calibration is filed as its own issue
+- [x] Re-size ships with its **signal**, and the calibration is filed as its own issue ([ISSUE-0138](ISSUE-0138-close-reserve-multiplier-calibration.md))
+- [x] The three test obligations the signal creates (one basis, definition-pinned multiplier, a negative for the counter) — [reserve-sizing record](ISSUE-0082-residuals-reserve-sizing.md)
 
 ---
 
@@ -186,7 +186,7 @@ Run [MT-MEMORY-GROUP-TENANT-001](../manual-tests/MT-MEMORY-GROUP-TENANT-001.md) 
 
 | Risk | Mitigation |
 |------|------------|
-| The Phase 0 + 0b cost multiplier bites a large roster. | The reserve re-size is PR 4b's whole scope, and its calibration is a tracked issue. **Phase 0b makes this materially worse than the principal axis alone**: the multiplier is now `personas × principals × speakers`, and an all-agent room — one `local` principal, N speakers — multiplies where plain Option A did not. A one-human DM is still unchanged. |
+| The Phase 0 + 0b cost multiplier bites a large roster. | The reserve re-size landed in PR 4b, and its calibration is [ISSUE-0138](ISSUE-0138-close-reserve-multiplier-calibration.md). **Phase 0b makes this materially worse than the principal axis alone**: the multiplier is now `personas × principals × speakers`, and an all-agent room — one `local` principal, N speakers — multiplies where plain Option A did not. A one-human DM is still unchanged. |
 | Phase 0b is read as re-opening a resolved gate. | It resolves a second axis on the *same* 2026-08-07 evidence, using the *same* decision rule, and does not disturb Option A. What changed is that [ISSUE-0131](ISSUE-0131-derived-memory-has-no-speaker-attribution.md) named a dimension the original three options did not enumerate — the gate's rule always implied it, since its decisive leak was agent-to-agent. |
 | R-2's attribution mis-fires under load and stamps the wrong tenant. | Every ambiguity and every expiry fails closed to `'local'` — today's behaviour. A wrong attribution requires two dispatches under the *same* principal, which is not ambiguous because it is not wrong. |
 | The re-stamp is read as "agents can now claim identities". | It is server-held state keyed on facts the orchestrator knows; nothing is accepted from the request. Stated in the PR body and pinned by the only-one-re-stamp-site test. |
@@ -203,8 +203,8 @@ Run [MT-MEMORY-GROUP-TENANT-001](../manual-tests/MT-MEMORY-GROUP-TENANT-001.md) 
 | 1 | R-2 causal attribution store, dormant | `feature/v0315-issue0124-attribution-store` | ✅ Merged | [#844](https://github.com/mkhomutov/Persatrix/pull/844) | `5b740f84` |
 | 2 | R-2 re-stamp + end-to-end gate | `feature/v0315-issue0124-restamp` | ✅ Merged | [#845](https://github.com/mkhomutov/Persatrix/pull/845) | `48b4a558` |
 | 3 | R-1 + [ISSUE-0131](ISSUE-0131-derived-memory-has-no-speaker-attribution.md) scope key `(principal, speaker, scope)` + RFC 0020 §G amendment | `feature/v0315-issue0123-scope-key` | ✅ Merged | [#846](https://github.com/mkhomutov/Persatrix/pull/846) | `5e23246c` |
-| 4 | [ISSUE-0131](ISSUE-0131-derived-memory-has-no-speaker-attribution.md) `speaker_id` projection onto the close-derived rows + the RFC 0020 §G room-close exclusion | `feature/v0315-issue0123-close-path` | 🔀 PR open | [#849](https://github.com/mkhomutov/Persatrix/pull/849) | — |
-| 4b | Reserve re-size (until it lands, a cost-trigger room fan over-commits `1 + N`) + Go-side asymmetry cleanup — split out of PR 4 | — | ⬜ Not started | — | — |
+| 4 | [ISSUE-0131](ISSUE-0131-derived-memory-has-no-speaker-attribution.md) `speaker_id` projection onto the close-derived rows + the RFC 0020 §G room-close exclusion | `feature/v0315-issue0123-close-path` | ✅ Merged | [#849](https://github.com/mkhomutov/Persatrix/pull/849) | `982058d6` |
+| 4b | Reserve re-size (`1 + N` → `1 + R`) + the clamp signal + the threshold basis + Go-side asymmetry cleanup — split out of PR 4 | `feature/v0315-issue0123-reserve-resize` | 🔀 PR open | [#852](https://github.com/mkhomutov/Persatrix/pull/852) | — |
 | 5 | Live MT + closeout | `feature/v0315-issue0082-residuals-close` | ⬜ Not started | — | — |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ⏭ Deferred

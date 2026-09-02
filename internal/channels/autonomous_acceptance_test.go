@@ -15,9 +15,10 @@ package channels
 //     no dispatch into the terminated discussion;
 //   - the CLOSE-BY-BUDGET leg (MT-AUTONOMOUS-001's Step 4 ground truth, on a
 //     ≥2-persona roster) — the soft threshold trips the close while the
-//     roster-scaled `1 + N` reserve still funds EVERY close-path lease (the
-//     chair synthesis turn + one OQ #6-metered RFC 0020 summary per persona),
-//     where the fail-closed hard cap alone would have denied them.
+//     record-scaled `1 + R` reserve still funds EVERY close-path lease (the
+//     chair synthesis turn + one OQ #6-metered RFC 0020 summary per
+//     close-derived record), where the fail-closed hard cap alone would have
+//     denied them.
 //
 // The Python halves of the same acceptance (the convener/chair authoring, the
 // metered summarize_close call, the placeholder-vs-real summary contract) are
@@ -202,7 +203,7 @@ func TestAutonomousAcceptance_FullCycle(t *testing.T) {
 	assert.Equal(t, openID, readInteractionID(turns[0].msg.Metadata))
 
 	// The chair's synthesis turn is itself a leased call — the first of the
-	// `1 + N` close-path calls the reserve exists for, sized to exactly one
+	// `1 + R` close-path calls the reserve exists for, sized to exactly one
 	// per-call reserve unit (in + out == the published per-call sizing).
 	require.NotNil(t, acquireLease(t, w, "iron-fox", openID,
 		wallet.DefaultSynthesisCallReserveTokens-1_024, 1_024).GetGrant(),
@@ -237,7 +238,7 @@ func TestAutonomousAcceptance_FullCycle(t *testing.T) {
 	require.Equal(t, int64(50_000), budget)
 	for _, member := range acceptanceRoster {
 		require.NotNilf(t, acquireLease(t, w, member, openID, 2_000, 1_024).GetGrant(),
-			"persona %s's metered close summary must be leased — the N of `1 + N`", member)
+			"persona %s's metered close summary must be leased — the R of `1 + R`", member)
 	}
 
 	// The mandatory-cap contract: everything the interaction spent — discussion
@@ -408,19 +409,34 @@ func TestAutonomousAcceptance_NoRunawayUnderAdversarialRoster(t *testing.T) {
 	assert.Empty(t, router.ChannelActivity(ch), "no persona is stranded 'thinking' after the close")
 }
 
-// TestAutonomousAcceptance_CloseByBudgetHonoursRosterScaledReserve — the
+// TestAutonomousAcceptance_CloseByBudgetHonoursRecordScaledReserve — the
 // close-by-budget leg (RFC 0052 §D / OQ #6, on a ≥2-persona roster): the SOFT
-// threshold (cap − the `1 + N` reserve) trips the close while the hard cap
+// threshold (cap − the `1 + R` reserve) trips the close while the hard cap
 // still has reserve headroom, so the chair synthesis turn AND every persona's
 // metered close summary lease are honoured — where a discussion-sized lease at
 // the same moment is already fail-closed DENIED. This is the regression the
 // fail-closed wallet would otherwise cause: without the reserve, the close
 // artifacts would be the calls the cap swallows.
-func TestAutonomousAcceptance_CloseByBudgetHonoursRosterScaledReserve(t *testing.T) {
-	const cap = int64(40_000)
-	// channelSize 3 → reserve (1+3)×3500 = 14 000 (unclamped), soft = 26 000.
-	soft := wallet.SynthesisSoftBudgetTokens(cap, len(acceptanceRoster))
-	require.Equal(t, int64(26_000), soft, "the leg's arithmetic rides the published reserve sizing")
+//
+// `soft` is derived the way the ROUTER derives it — off R, never off the member
+// count — and the cap holds the raw `1 + R` sizing back in full; the two
+// requires below enforce both, because a leg that violates either keeps PASSING
+// (its spends sit under every candidate threshold) while proving nothing about
+// the multiplier. A 40 000 cap on this roster violated both at once: clamped to
+// 20 000/20 000 behind a comment claiming 14 000/26 000, and a 120 000 cap
+// clamped again the moment the multiplier's speaker term grew to cover the
+// orchestrator's control senders — which is why the `require.False` below is
+// the load-bearing line and the cap is the shipped 200 000, not the smallest
+// number that happened to work.
+func TestAutonomousAcceptance_CloseByBudgetHonoursRecordScaledReserve(t *testing.T) {
+	const cap = int64(200_000)
+	// channelSize 3 → R = 20 → reserve (1+20)×3500 = 73 500 (unclamped), soft = 126 500.
+	records := wallet.CloseRecordUpperBound(len(acceptanceRoster))
+	soft := wallet.SynthesisSoftBudgetTokens(cap, records)
+	require.False(t, wallet.SynthesisReserveClamped(cap, records),
+		"fixture must exercise the RAW `1 + R` sizing — a clamped reserve stops "+
+			"tracking R, so the leg would prove nothing about the multiplier")
+	require.Equal(t, int64(126_500), soft, "the leg's arithmetic rides the published reserve sizing")
 	router, w, disp, _, ch, reader := acceptanceHarness(t, 100 /* out of reach */, cap)
 
 	// Convene + opening turn (uncapped, §B), minting the capped interaction.
@@ -470,8 +486,9 @@ func TestAutonomousAcceptance_CloseByBudgetHonoursRosterScaledReserve(t *testing
 			"the truthful cost cause rides the notification — the OQ #6 metering key")
 	}
 
-	// …then one metered RFC 0020 summary per persona (the N of `1 + N`) — the
-	// exact calls a reserve sized "for two" would have denied on this roster.
+	// …then one metered RFC 0020 summary per persona (drawn from the R of
+	// `1 + R`) — the exact calls a reserve sized "for two" would have denied on
+	// this roster.
 	for _, member := range acceptanceRoster {
 		require.NotNilf(t, acquireLease(t, w, member, openID, 2_000, 1_024).GetGrant(),
 			"persona %s's close summary must survive the budget-exhausted close", member)

@@ -1244,11 +1244,55 @@ taught about the knobs:
   collapse-proneness inversely tracks accumulated channel memory, so a fresh
   store needs the pointed opener a warmed store does not.
 - **Size caps from telemetry, not logs**: live arcs spent 0.24–0.59 of the
-  200k cap and never approached the `1 + N` reserve. The
+  200k cap. Those arcs predate v0.3.15 and cleared the reserve of the day;
+  **re-read them against the table below before reusing them**, because the
+  v0.3.15 re-size lowered the threshold they were measured against. The
   `channel.conversation.interaction_cap_utilization{channel_type,trigger}`
   histogram records spend-at-close ÷ cap on every capped close — read it to
   right-size `interaction_budget_tokens`, and multiply a typical utilization
   by the cap to size `standing_budget_tokens` per expected convening.
+- **The close reserve grew, so budget for a smaller discussion.** Since v0.3.15
+  the reserve funds one closing summary per `(principal, speaker)` record rather
+  than one per persona, and that record count grows with the **cube** of the
+  room. The speaker axis is the members **plus two**: the orchestrator's convene
+  and synthesis directives ride synthetic senders that hold no seat and key
+  close records of their own. The reserve is held back from the cap, so what the
+  discussion may spend before the bounded close fires — the *soft* threshold —
+  falls as the roster grows. At a 200 000 cap:
+
+  | seats | close records `R` | reserve | discussion budget | clamped? |
+  |---|---|---|---|---|
+  | 3 | 20 | 73 500 | 126 500 (63%) | no |
+  | 4 | 36 | 100 000 | 100 000 (50%) | **yes** |
+  | 5+ | 63+ | 100 000 | 100 000 (50%) | **yes** |
+
+  **Check the 4-seat row first.** It is the shape the bundled
+  `blueprints/autonomous-multivendor` roster ships, at the cap that blueprint
+  ships — and it clamps, so its discussion budget fell from 182 500 to 100 000
+  and the counter below fires on every close. An arc at the top of the
+  historical 0.24–0.59 band (≈118 000 tokens) now crosses that threshold and
+  closes on `cost` where it used to run on. Clearing the clamp on four seats
+  needs `interaction_budget_tokens` ≥ **259 000**.
+
+  The 3-seat row (the bundled `blueprints/autonomous-roundtable`) is the quiet
+  one: it is **not** clamped, so nothing warns — but its discussion budget still
+  fell from 186 000 to 126 500. That is the row to re-read the historical band
+  against by hand.
+- **Watch for a clamped close reserve.** When a cap cannot fund the sizing
+  above, the reserve is capped at half the ceiling — the discussion keeps a
+  working budget and the close fires earlier, but the tail of the close is
+  under-funded and its late summaries land as `[interaction summary
+  unavailable]`, which nothing retries.
+  `channel.conversation.synthesis_reserve_clamped{channel_type, trigger}` fires
+  once per bounded close that actually fired against a clamped reserve; a
+  non-zero rate means raise `interaction_budget_tokens` or shrink the room. A
+  warning naming the room size, the record count, the cap and the reserve
+  accompanies it **once per channel per configuration**, not once per close —
+  the clamp is a property of the room and the cap, so the counter is the
+  per-close surface and the log line is the explanation. Neither says anything
+  about the unclamped rows above, which is why they get their own table. On a
+  fleet with no wallet (no cost config) nothing is reported at all: no
+  close-path lease is drawn, so none can be denied.
 
 ### Try it offline — `make demo-autonomous`
 
@@ -1283,8 +1327,8 @@ the live acceptance is [MT-AUTONOMOUS-001](../manual-tests/MT-AUTONOMOUS-001.md)
 > **Scope in v0.3.11.** PR 3 ships convening + the opening turn. PR 4 adds the
 > mechanisms that make the discussion *bounded and artifact-bearing*: a
 > deterministic **bounded close** terminates the interaction when it crosses
-> `autonomous.max_rounds` or the wallet's soft budget (the cap minus a
-> roster-scaled synthesis reserve), and — on a chaired channel — first asks the
+> `autonomous.max_rounds` or the wallet's soft budget (the cap minus the
+> synthesis reserve), and — on a chaired channel — first asks the
 > `escalation_chair_id` for a goal-directed **closing synthesis** against
 > `autonomous.goal`: the chair's reply is delivered to every member as the
 > discussion's final message, each member's RFC 0020 interaction summary is

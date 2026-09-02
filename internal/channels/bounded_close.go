@@ -95,47 +95,6 @@ func isBoundedCloseTrigger(trigger string) bool {
 	return trigger == structuralTrigger || trigger == costTrigger
 }
 
-// boundVerdict is [boundStandsAgainst]'s answer at a bound action point.
-type boundVerdict int
-
-const (
-	// boundStands — the crossing survives the fresh config; act on it.
-	boundStands boundVerdict = iota
-	// boundDisabled — an RFC 0050 disable landed since the crossing: the
-	// operator took manual control, leave the interaction open.
-	boundDisabled
-	// boundExtended — a mid-flight `max_rounds` raise re-covers the structural
-	// crossing: the operator extended the discussion, the tally survives and
-	// re-crosses against the raised bound.
-	boundExtended
-)
-
-// boundStandsAgainst re-validates a crossed bound against the CURRENT config
-// at an ACTION point — THE one matrix of which config halves apply (PR #718
-// review, twice: the tail and the timeout net each originally hand-rolled a
-// subset and each shipped missing a half — the net's first shape re-checked
-// only Enabled and silently ignored a mid-arm raise). Every action point that
-// acts on a crossed bound (the tail's arm-or-close, the timeout net's fire,
-// any future close trigger) routes its `fresh` re-read through here and keeps
-// only its own verdict-to-action mapping; the deliberate asymmetries live
-// here once: the COST half is never re-checked (its per-interaction snapshot
-// immutability is the documented wallet-consistent design,
-// interaction_budget.go), so callers collapse their trigger label FIRST —
-// budget-crossed prefers `cost`, which a raise cannot extend. The REPLY path
-// deliberately consults nothing: the synthesis artifact is in hand, closing
-// with it is §D's point, and a raise governs the successor interaction.
-// `tally` is the caller's structural round count — live at the tail, frozen
-// on the armed entry at the fire.
-func boundStandsAgainst(fresh AutonomousConfig, trigger string, tally int) boundVerdict {
-	if !fresh.Enabled {
-		return boundDisabled
-	}
-	if trigger == structuralTrigger && tally < fresh.MaxRounds {
-		return boundExtended
-	}
-	return boundStands
-}
-
 // SetInteractionSpender wires the wallet's per-interaction spend read for the
 // RFC 0052 bounded-close soft-budget trigger. MUST run at startup before any
 // [ChannelRouter.Publish] — the field is unsynchronised, like maxCascadeDepth. A
@@ -243,12 +202,14 @@ func (r *ChannelRouter) advanceBoundedCloseRound(channelID, stampedID string) (i
 // the pair on human channels (autonomous disabled), so ordinary channels are
 // byte-for-byte unchanged.
 //
-// `channelSize` (the fanout's member count) is a conservative upper bound on the
-// roster size N the reserve is sized for (`1 + N` close-path calls): it includes
-// observer / operator seats that author no summary, so it can hold back a
-// slightly larger reserve than the true roster, tripping the soft close a touch
-// earlier — the safe direction (more hard-cap headroom for the close path), not
-// less.
+// `channelSize` (the fanout's member count) is the room the close-path reserve is
+// derived from: [wallet.CloseRecordUpperBound] turns it into R, the number of
+// RFC 0020 summaries one close can issue (`1 + R` close-path calls). It is a
+// conservative upper bound — it includes observer / operator seats that author no
+// summary and speak in no record, and it assumes the persona/principal partition
+// that maximises the record count — so it can hold back a larger reserve than the
+// interaction truly needs, tripping the soft close earlier: the safe direction
+// (more hard-cap headroom for the close path), not less.
 //
 // `dispatchPending` says the caller's dispatch for THIS cycle has not happened
 // yet and a close would withhold it (the concurrent path's close-before-dispatch
@@ -298,25 +259,41 @@ func (r *ChannelRouter) maybeBoundedClose(ctx context.Context, msg ChannelMessag
 	budgetExceeded := false
 	if r.spend != nil {
 		if budget, capped := r.ResolveInteractionBudgetForInteraction(interactionID); capped && budget > 0 {
-			// 4b-ii consistency (deep review): this soft threshold is derived from
-			// `channelSize`; PR 4a's reserve is sized from a persona roster N. While
-			// the reserve is dark (AcquireLease enforces only the hard cap) the basis
-			// does not matter, but it stays load-bearing once the reserve is ENFORCED.
-			// The safe requirement is ONE-DIRECTIONAL, not equality: the threshold
-			// basis must never be SMALLER than the roster the reserve was carved for.
-			// `channelSize` is always >= that persona roster (it counts every member,
-			// including the observer/operator seats that author no summary — see this
-			// method's doc), so `SynthesisReserveTokens` (monotonic in the roster) holds
-			// back a reserve at least as large as the true close cost and trips the
-			// close no LATER than a roster-exact threshold would: remaining budget at
-			// close is >= the close-path cost, so the reserve covers it. The hazard is
-			// the OPPOSITE mismatch — a threshold from a SMALLER roster than the reserve
-			// — which would fire the close at a spend the reserve cannot cover,
-			// re-opening the "close leases denied" hole. So when 4b-ii wires
-			// enforcement, keep the threshold basis >= the reserve basis; matching them
-			// exactly only trades the slightly-early close (this method's doc) for a
-			// tighter bound and is not required for safety.
-			soft := wallet.SynthesisSoftBudgetTokens(budget, channelSize)
+			// R — the close-path record count both the reserve and its soft
+			// threshold are derived from (ISSUE-0082 residuals PR 4b). Resolved
+			// ONCE so the two bases are the same value, not two derivations of it.
+			closeRecords := wallet.CloseRecordUpperBound(channelSize)
+			// 4b-ii consistency (deep review), settled by the v0.3.15 re-size:
+			// the threshold and the reserve now read ONE basis — the `closeRecords`
+			// resolved above — so they cannot diverge at all.
+			//
+			// The safe requirement was only ONE-DIRECTIONAL (the threshold basis must
+			// never be SMALLER than the room the reserve was carved for, or the close
+			// fires at a spend the reserve cannot cover — the "close leases denied"
+			// hole), and it USED to hold by an accident that the re-key destroyed:
+			// the threshold passed `channelSize` while PR 4a's reserve was sized from
+			// a persona roster N, and `channelSize >= N` because it counts every
+			// member. Once the close emits one record per `(principal, speaker)` the
+			// effective roster GREW past the member count — a 4-seat room can close
+			// three dozen records — so a `channelSize` threshold against a
+			// record-count reserve would have inverted exactly the inequality the old
+			// comment relied on. Passing the same R to both is what keeps the
+			// invariant true by construction rather than by arithmetic luck; the
+			// reserve stays monotonic in R, so remaining budget at close is still
+			// >= the close-path cost the reserve was carved for.
+			//
+			// UNLESS THE HALF-CAP CLAMP BIT, which since the re-size is the
+			// ordinary case, not the edge one ([wallet.SynthesisReserveClamped]).
+			// A clamped reserve is half the cap no matter how large R is, so the
+			// sentence above stops holding exactly there: a 3-seat room at a 60k
+			// cap is sized for 73 500 close-path tokens and gets 30 000 of
+			// headroom. The close still fires EARLIER than it used to (a bigger R
+			// lowers the threshold monotonically), which is why the clamp is safe
+			// for the DISCUSSION — but the close itself is under-funded, and its
+			// late per-record summaries commit the RFC 0020 janitor's unavailable
+			// placeholder. That is the gap [ChannelRouter.reportSynthesisReserveClamp]
+			// exists to make loud; the wallet package doc's KNOWN GAP note owns it.
+			soft := wallet.SynthesisSoftBudgetTokens(budget, closeRecords)
 			if soft > 0 && r.spend.InteractionSpend(interactionID) >= soft {
 				budgetExceeded = true
 			}
@@ -334,6 +311,16 @@ func (r *ChannelRouter) maybeBoundedClose(ctx context.Context, msg ChannelMessag
 	if budgetExceeded {
 		trigger = costTrigger
 	}
+	// NOTE the half-cap clamp's signal is NOT emitted here. This point is a
+	// crossed bound, not a close: the fresh re-check below can refuse it, the
+	// arm CAS can lose it to a sibling, and the tombstone CAS can lose it to a
+	// racing closer — and the counter's contract is one increment per close that
+	// actually FIRED ([RouterMetrics.SynthesisReserveClamped]), because
+	// ISSUE-0138 reads its rate AGAINST `interaction_closed`. So it rides
+	// [ChannelRouter.boundedClose], beside the `interaction_closed` bump it is
+	// divided by, on whichever close path wins the tombstone — which also brings
+	// the cascade-depth close (autonomous_continuation.go) into the signal, a
+	// bounded close that never passes through this trigger at all.
 	// Fresh config re-check at the ACTION point (PR #718 review + follow-up):
 	// `a` is the fanout-HEAD snapshot, and the floor round between that read
 	// and this tail can span minutes. An RFC 0050 disable landing inside it
@@ -390,7 +377,7 @@ func (r *ChannelRouter) maybeBoundedClose(ctx context.Context, msg ChannelMessag
 		// wins and delivers `msg` as the close, a racing deliberate close loses
 		// and is reported stale below (never withhold-swallowed, PR #718 review).
 	}
-	if !r.boundedClose(ctx, msg, ct, interactionID, trigger, notify) {
+	if !r.boundedClose(ctx, msg, ct, channelSize, interactionID, trigger, notify) {
 		// The tombstone CAS lost to a racing closer (a sibling bound-crossing
 		// fanout, or an end-vote quorum): the interaction IS closing, but not
 		// by this fanout's hand, and this fanout's message is not the one the
@@ -424,7 +411,17 @@ func (r *ChannelRouter) maybeBoundedClose(ctx context.Context, msg ChannelMessag
 // delivery by the fan. CONTRACT: callers leave `n.excludeSender` zero — the
 // bounded close always notifies the sender (see
 // [ChannelRouter.notifyInteractionClose]'s per-cause story).
-func (r *ChannelRouter) boundedClose(ctx context.Context, msg ChannelMessage, ct ChannelType, interactionID, trigger string, n closeNotify) bool {
+//
+// `channelSize` is the room the close-path reserve was carved for, carried here
+// ONLY for the clamp signal below (ISSUE-0082 residuals PR 4b). This is the one
+// funnel every bounded close passes through — the tail's immediate close, the
+// chair's claimed synthesis reply (synthesis_claim.go), the timeout net
+// (synthesis_close.go) and the cascade-depth close
+// (autonomous_continuation.go) — and the tombstone CAS above makes it fire once,
+// for the winner only, which is what the counter's "per close that fired"
+// contract needs. The armed paths read it off [pendingSynthesisClose.channelSize]
+// (the arm-time member count, the same staleness every other stashed field has).
+func (r *ChannelRouter) boundedClose(ctx context.Context, msg ChannelMessage, ct ChannelType, channelSize int, interactionID, trigger string, n closeNotify) bool {
 	r.endVoteMu.Lock()
 	won := r.tombstoneInteractionLocked(interactionID)
 	r.endVoteMu.Unlock()
@@ -433,6 +430,11 @@ func (r *ChannelRouter) boundedClose(ctx context.Context, msg ChannelMessage, ct
 	}
 
 	r.recordInteractionClosedBounded(ctx, msg, ct, interactionID, trigger)
+	// Beside the `interaction_closed` bump, and BEFORE finalizeInteractionClose
+	// — the budget snapshot the clamp is measured against must still resolve,
+	// the same ordering [ChannelRouter.recordInteractionClosedMetric]'s
+	// ISSUE-0109 cap-utilization sample already depends on.
+	r.reportSynthesisReserveClamp(ctx, msg.ChannelID, interactionID, ct, trigger, channelSize)
 	// The shared close-teardown tail ([ChannelRouter.finalizeInteractionClose]):
 	// reply-budget snapshot → discard → retire the id (truthful bounded-close
 	// cause, not end_votes) → fan the RFC 0020 summary notification. excludeSender
