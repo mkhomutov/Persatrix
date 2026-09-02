@@ -10,7 +10,7 @@ of them was learned by an arc failing without it.
 **Read this before spending the arc.** Seven of these steps were wrong or absent
 in v1.1, which had never been executed against a compose deployment — the full
 list, with the symptom each produces, is in the
-[v0.3.15 execution report](v0.3.15-execution-report.md#mt-corrections--seven-defects-in-the-procedure-itself).
+[v0.3.15 execution report](v0.3.15-execution-report.md#mt-corrections--ten-defects-in-the-procedure-itself).
 
 ---
 
@@ -29,7 +29,7 @@ list, with the symptom each produces, is in the
    startup on a store/config membership divergence (RFC 0011 §B). This MT
    restarts at Legs 0, 7 and 8, so a joined member is a crash loop one restart
    later; the check is symmetric, so both go in together, before the first
-   boot (or `make reset` after adding). [v0.3.15 report](v0.3.15-execution-report.md#mt-corrections--seven-defects-in-the-procedure-itself), correction 3.
+   boot (or `make reset` after adding). [v0.3.15 report](v0.3.15-execution-report.md#mt-corrections--ten-defects-in-the-procedure-itself), correction 3.
 
 3c. **Rebuild the HOST binaries** — `make build-orchestrator build-cli`.
    `--build` refreshes the containerised orchestrator, not `bin/persatrix`,

@@ -58,7 +58,7 @@ itself (MT-MEMORY-MULTIUSER-001), the auth substrate
 
 ### Leg 0 — Alice, authenticated
 
-> **v1.2 — corrections 1, 2 and 4** ([v0.3.15 report](v0.3.15-execution-report.md#mt-corrections--seven-defects-in-the-procedure-itself)): bootstrap **in the container** (the
+> **v1.2 — corrections 1, 2 and 4** ([v0.3.15 report](v0.3.15-execution-report.md#mt-corrections--ten-defects-in-the-procedure-itself)): bootstrap **in the container** (the
 > host default `data/accounts.db` is not what the orchestrator reads), remove
 > the `-wal`/`-shm` sidecars with it, and drive both credential prompts over
 > the provisioning pipe. **Do not `channel join`** — see Preconditions 3b.
@@ -77,7 +77,7 @@ printf 'PW\n' | ./bin/persatrix login --username alice
 
 ### Leg 1 — Alice discloses into the room, and a cascade runs
 
-> **v1.2 — `--as` is mandatory** ([v0.3.15 report](v0.3.15-execution-report.md#mt-corrections--seven-defects-in-the-procedure-itself), correction 4). It defaults to the **OS
+> **v1.2 — `--as` is mandatory** ([v0.3.15 report](v0.3.15-execution-report.md#mt-corrections--ten-defects-in-the-procedure-itself), correction 4). It defaults to the **OS
 > username**, not the authenticated principal: omitting it gives `403 … sender
 > is not a member`, or — if that username *is* a member — a green run whose
 > turns name a speaker who never spoke, which is worse.
@@ -164,7 +164,7 @@ Leg 1 usually reaches it; if not, prompt for wrap-up:
 Read the close-derived episode (`turn_count > 1`) and the facts extracted
 from it.
 
-> **v1.2 — drop the `turn_count > 1` filter** ([v0.3.15 report](v0.3.15-execution-report.md#mt-corrections--seven-defects-in-the-procedure-itself), correction 6). It is a
+> **v1.2 — drop the `turn_count > 1` filter** ([v0.3.15 report](v0.3.15-execution-report.md#mt-corrections--ten-defects-in-the-procedure-itself), correction 6). It is a
 > *pre-fix* lens: post-fix, an agent that spoke once owns a **one-turn**
 > record, so the filter hides exactly the rows ISSUE-0131 creates. Observed:
 > every store reported "1 row" and the split was invisible.
@@ -191,8 +191,13 @@ Facts are cross-room by default (RFC 0049 Phase 1) and **every**
 agent-origin turn resolves `'local'`, so the Leg 4 rows are readable from
 any room the fleet is in.
 
+> **v1.2 — correction 8.** `roundtable` ships **disarmed**, and `convene`
+> takes **no topic argument** — the agenda comes from the channel's own
+> `autonomous` block. Arm it at runtime first (MT-AUTONOMOUS-001 flow).
+
 ```bash
-./bin/persatrix channel convene roundtable "Draft the Q3 review rota."
+./bin/persatrix channel config set group:roundtable autonomous.enabled=true
+./bin/persatrix channel convene group:roundtable
 ```
 
 | | Expected |
@@ -223,6 +228,9 @@ rm -f data/accounts.db
 ```
 
 **Verification**:
+- [ ] **A reply actually happened** — record it before asserting what it lacks
+  (v1.2, correction 10: the first execution drew **no reply**, so the bar
+  passed with nothing to inspect). `@mention` an `addressed` persona.
 - [ ] The reply makes no reference to Mira or to surgery **on the post-fix run**.
 - [ ] On the **v0.3.14** run, record the outcome either way: a reference here is R-1/R-2 reaching a *second human*, and is the strongest single piece of evidence the report can carry.
 - [ ] `SELECT principal_id, COUNT(*) FROM episodes GROUP BY principal_id;` shows `alice-person`, `bob-person` and `local` coexisting — isolation is a recall filter, not a delete.
@@ -242,6 +250,11 @@ shape-(b) leg. With Legs 1–4's traffic in the room, snapshot **both**
 partitions, restart the **agents**, wait for catch-up, and snapshot again
 — sending **no new traffic** in between, or the comparison measures the
 traffic instead.
+
+> **v1.2 — correction 9: rotate BACK to alice first.** Leg 7 bootstrapped
+> `bob-person` and the verb is single-account, so alice is gone and
+> "re-authenticate as alice" fails `invalid credentials`. Repeat Leg 0's
+> rotation; its restart also closes whatever Leg 8 left open.
 
 **Restore `auth.mode: enabled` and re-authenticate first.** Leg 8 turns
 it off and does not turn it back on, and its re-run of Leg 1 leaves the
