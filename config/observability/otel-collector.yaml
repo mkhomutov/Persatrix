@@ -55,13 +55,7 @@ processors:
       - name: healthy-tick-sample
         type: probabilistic
         probabilistic:
-          # !!! TEMPORARY — MT-MEMORY-GROUP-TENANT-001 RUN KNOB. REVERT TO 1 !!!
-          # Leg 2 reads `principal.id` off `channel.dispatch` spans; at the
-          # standing 1% those spans are dropped and the leg passes vacuously
-          # with zero tenant-less hops — indistinguishable from R-2 being
-          # fixed. Restore `sampling_percentage: 1` immediately after the arc:
-          # 100% tail sampling is not a state to leave the collector in.
-          sampling_percentage: 100
+          sampling_percentage: 1
 
   # Standard batching keeps exporter pressure bounded.
   batch:

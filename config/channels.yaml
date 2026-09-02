@@ -138,24 +138,7 @@ channels:
     classification: internal
     # floor_control: true is the resolved default for group channels (v0.3.6);
     # shown here for discoverability. Remove or set false to opt out.
-    #
-    # !!! TEMPORARY — MT-MEMORY-GROUP-TENANT-001 RUN KNOB. REVERT TO true !!!
-    # Under floor control, ChannelRouter.Publish's deferred-fanout skip
-    # recognises a floor-turn reply and suppresses its re-fanout, so agent
-    # publishes never reach Dispatch. Leg 2 then observes ZERO tenant-less
-    # dispatches — which reads exactly like R-2 being fixed. Clearing this
-    # requires clearing escalation_chair_id in the same change (below): the
-    # chair needs floor control, and `floor_control: false` alongside it is
-    # rejected at load.
-    floor_control: false
-    # !!! TEMPORARY — MT-MEMORY-GROUP-TENANT-001 RUN KNOB. REVERT TO 600 !!!
-    # Legs 3-4 need the interaction still OPEN when Leg 4 asks for the close.
-    # This channel omits the knob, inheriting the 600s fleet default
-    # (internal/channels/config.go), which is short enough that the arc's own
-    # pacing can close an interaction by accident — silently changing which
-    # trigger fired, the variable Legs 4 and 6 turn on. Remove this line after
-    # the arc to fall back to the default.
-    interaction_idle_timeout_seconds: 1800
+    floor_control: true
     # salience_max_channel_members: 20 is the default (RFC 0030 Tier B); shown
     # for discoverability. Lower it to disable the salience bid on larger rooms.
     salience_max_channel_members: 20
@@ -185,12 +168,7 @@ channels:
     # so `floor_control: false` alongside this knob is rejected at load. Omit
     # to disable escalation. nova-sparrow pairs naturally with a `chair`
     # disposition, but any non-observer participant may be the synthesizer.
-    #
-    # !!! TEMPORARY — MT-MEMORY-GROUP-TENANT-001 RUN KNOB. RESTORE THIS LINE !!!
-    # Commented out ONLY because floor_control is false above for Leg 2, and
-    # the chair requires floor control — the pair is rejected at load, so the
-    # two knobs move together and must be restored together.
-    # escalation_chair_id: nova-sparrow
+    escalation_chair_id: nova-sparrow
     # Reasoning before posting (RFC 0051, v0.3.10) — before composing a reply an
     # open-floor participant privately decides WHETHER the turn is worth a post
     # (`mode: bid`, the silence-only rung — a net pile-on saving) and, one rung up,
@@ -222,23 +200,6 @@ channels:
         respond: participant
       - id: nova-sparrow
         respond: participant
-      # !!! TEMPORARY — MT-MEMORY-GROUP-TENANT-001 RUN KNOB. REMOVE BOTH !!!
-      # The two human principals the arc authenticates as. They must be
-      # DECLARED here, not added with `persatrix channel join`: publishing is
-      # membership-gated (`403 … sender is not a member`), but a join writes
-      # only to the channel STORE, and `ReconcileConfig` treats a store/config
-      # membership divergence as a FATAL at startup (RFC 0011 §B, "loud
-      # failure to surface ad-hoc REST additions"). Since this MT restarts the
-      # orchestrator at Legs 0, 7 and 8, a joined-but-undeclared member turns
-      # the next restart into a crash loop. Both are declared up front because
-      # the divergence check is symmetric — declaring only alice and adding bob
-      # at Leg 7 would fail the same way, in the other direction.
-      # `observer` (respond: never) is the right disposition for a human: a
-      # member who publishes and is never dispatched to.
-      - id: alice-person
-        respond: observer
-      - id: bob-person
-        respond: observer
 
   # Autonomous agent-only channel (RFC 0052, v0.3.11) — a roster that convenes
   # itself on a topic and runs a human-free discussion. This is a ready-to-arm

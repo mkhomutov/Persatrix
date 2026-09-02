@@ -17,14 +17,7 @@ auth:
   #     401/403 policy matrix enforces once Phase 2 (PR 5) lands.
   # Any networked deployment MUST set `enabled` — the orchestrator
   # WARNs at startup on a non-loopback --http-bind while disabled.
-  #
-  # !!! TEMPORARY — MT-MEMORY-GROUP-TENANT-001 RUN KNOB. REVERT TO disabled !!!
-  # Legs 0-7 and 9 are meaningless without it: with auth off, every request
-  # resolves to the anonymous `local` identity, so messages stamp
-  # `principal_id='local'`, dispatches carry no `principal.id`, and the arc
-  # completes green while proving nothing. Leg 8 turns it back off ON PURPOSE
-  # and does not restore it — Leg 9 must restore it first.
-  mode: enabled
+  mode: disabled
 
   # Bearer-transport session lifetime (§D/§H) — the CLI and
   # programmatic callers. Go duration syntax.
