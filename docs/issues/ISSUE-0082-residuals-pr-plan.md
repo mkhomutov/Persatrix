@@ -1,7 +1,7 @@
 # ISSUE-0082 — PR Implementation Plan (Residuals R-1 / R-2 — the derived and relayed tenant writes)
 
 **Issues**: [ISSUE-0123](ISSUE-0123-per-speaker-interaction-scope.md) (R-1) · [ISSUE-0124](ISSUE-0124-orchestrator-hop-drops-tenant-on-agent-cascade.md) (R-2) · [ISSUE-0131](ISSUE-0131-derived-memory-has-no-speaker-attribution.md) (the speaker axis)
-**Status**: 🔄 In progress — Phase 0 resolved (both axes); workstream **A** of the **v0.3.15** *Who said what* milestone, open at PR 4b (PRs 1–4 merged)
+**Status**: 🔄 In progress — Phase 0 resolved (both axes); workstream **A** of **v0.3.15** *Who said what*. All code merged (PRs 1–4b); only **PR 5**, the live arc, remains
 **Created**: 2026-08-07
 **Branch prefix**: `feature/v0315-issue0123-` / `feature/v0315-issue0124-` (per residual)
 **Target**: `main`
@@ -170,15 +170,15 @@ Both halves in full — the partition bound and the constant factor it buys off 
 
 #### Scope
 
-Run [MT-MEMORY-GROUP-TENANT-001](../manual-tests/MT-MEMORY-GROUP-TENANT-001.md) end to end on the post-fix column, execution report, issue closures (ISSUE-0123, ISSUE-0124, [ISSUE-0131](ISSUE-0131-derived-memory-has-no-speaker-attribution.md), and ISSUE-0082 itself), and the MT-MEMORY-MULTIUSER-001 Edge Case 2 wording widened back to the now-true claim.
+Run [MT-MEMORY-GROUP-TENANT-001](../manual-tests/MT-MEMORY-GROUP-TENANT-001.md) end to end on the post-fix column, execution report, issue closures (ISSUE-0123/0124/[0131](ISSUE-0131-derived-memory-has-no-speaker-attribution.md) and ISSUE-0082 itself), and MT-MEMORY-MULTIUSER-001 Edge Case 2 widened back to the now-true claim.
 
-**Amended 2026-08-23 by the [v0.3.15 plan](../v0.3.15-plan.md)**: this is the *extended* MT and runs **once**, at Phase 3, after **PR B2** — which authors the ISSUE-0130(b) restart leg and widens Leg 4. Running earlier burns the paid arc on a column that cannot observe either.
+**Amended 2026-08-23 by the [v0.3.15 plan](../v0.3.15-plan.md)**: this is the *extended* MT and runs **once**, at Phase 3, after **PR B2** — which authors the ISSUE-0130(b) restart leg and widens Leg 4. Running earlier burns the paid arc on a column that cannot observe either. B2 merged 2026-08-31, so the edge is discharged; this PR **is** [release-prep](../v0.3.15-release-prep-plan.md) PR 1, not a separate run.
 
 #### PR checklist
 
 - [ ] All **nine** legs (0–8) plus the restart leg green on a live provider, with the post-fix column stated
 - [ ] Leg 2's per-dispatch `principal.id` table (storage cannot see R-2) and Leg 4 `(principal_id, speaker_id, summary)` **triples** pasted verbatim
-- [ ] ISSUE-0082 closed — its Part 2 residuals note updated. The doc-cap problem this checklist anticipated is **already handled**: the v0.3.14 build log was split into [Part 2](ISSUE-0082-part2-v0314-build-log.md), leaving 1639/3000. Measure with `scripts/checks/file_size.py`, not `wc -w`
+- [ ] ISSUE-0082 closed — its Part 2 residuals note updated. The doc-cap problem this checklist anticipated is **already handled**: the v0.3.14 build log was split into [Part 2](ISSUE-0082-part2-v0314-build-log.md). Measure with `scripts/checks/file_size.py`, not `wc -w`
 
 ---
 
@@ -204,8 +204,8 @@ Run [MT-MEMORY-GROUP-TENANT-001](../manual-tests/MT-MEMORY-GROUP-TENANT-001.md) 
 | 2 | R-2 re-stamp + end-to-end gate | `feature/v0315-issue0124-restamp` | ✅ Merged | [#845](https://github.com/mkhomutov/Persatrix/pull/845) | `48b4a558` |
 | 3 | R-1 + [ISSUE-0131](ISSUE-0131-derived-memory-has-no-speaker-attribution.md) scope key `(principal, speaker, scope)` + RFC 0020 §G amendment | `feature/v0315-issue0123-scope-key` | ✅ Merged | [#846](https://github.com/mkhomutov/Persatrix/pull/846) | `5e23246c` |
 | 4 | [ISSUE-0131](ISSUE-0131-derived-memory-has-no-speaker-attribution.md) `speaker_id` projection onto the close-derived rows + the RFC 0020 §G room-close exclusion | `feature/v0315-issue0123-close-path` | ✅ Merged | [#849](https://github.com/mkhomutov/Persatrix/pull/849) | `982058d6` |
-| 4b | Reserve re-size (`1 + N` → `1 + R`) + the clamp signal + the threshold basis + Go-side asymmetry cleanup — split out of PR 4 | `feature/v0315-issue0123-reserve-resize` | 🔀 PR open | [#852](https://github.com/mkhomutov/Persatrix/pull/852) | — |
-| 5 | Live MT + closeout | `feature/v0315-issue0082-residuals-close` | ⬜ Not started | — | — |
+| 4b | Reserve re-size (`1 + N` → `1 + R`) + the clamp signal + the threshold basis + Go-side asymmetry cleanup — split out of PR 4 | `feature/v0315-issue0123-reserve-resize` | ✅ Merged | [#852](https://github.com/mkhomutov/Persatrix/pull/852) | `9003032e` |
+| 5 | Live MT + closeout — runs as [release-prep](../v0.3.15-release-prep-plan.md) **PR 1** | `feature/v0315-issue0082-residuals-close` | ⬜ Not started | — | — |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ⏭ Deferred
 
