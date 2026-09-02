@@ -1,11 +1,20 @@
 package channels
 
 // principal_restamp.go — ISSUE-0124 (ISSUE-0082 residual R-2) PR 2: the read
-// side of the causal-attribution table, and the one site that INFERS a
-// principal no caller ever presented. (The package's other [WithPrincipal]
-// call, in synthesis_close.go, re-applies one the arming request DID present
-// onto a timer goroutine's background context — it can name nobody new. The
-// two-site allowlist is pinned in principal_restamp_test.go.)
+// side of the causal-attribution table, and — since v0.3.15 — the ONLY site in
+// this package that stamps a principal onto a context at all. It is also the
+// only one that could INFER one no caller ever presented, which is why the
+// allowlist is one entry and not zero.
+//
+// It carried a second, weaker entry until ISSUE-0082 residuals PR 4b:
+// synthesis_close.go re-applied a principal the arming request HAD presented
+// onto its timer goroutine's background context, so the close-notification fan
+// landed in the interaction's tenant. The `(principal, speaker, scope)` re-key
+// retired it — each record now binds its own frozen principal for its whole
+// derivation, so that ambient tenant selects nothing (the audit is in
+// synthesis_close.go's header). The one-entry allowlist is pinned in
+// principal_restamp_test.go, and re-widening it is a reviewed edit there, never
+// a quiet reintroduction here.
 //
 // WHAT CHANGES HERE. PR 1 landed [PrincipalAttributionTable] as a producer with
 // no consumer: the dispatch chokepoint records `(channel, agent) → principal`

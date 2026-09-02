@@ -276,7 +276,9 @@ class Interaction:
     # between the tracker close and persistence), so the RFC 0020 close
     # summary must draw a wallet lease billed to ``wire_interaction_id``
     # (``summarize_close.py``) and count toward the mandatory cap the PR 4a
-    # ``1 + N`` reserve was carved from. In-memory only, like
+    # reserve was carved from — ``1 + R`` since the v0.3.15 residuals PR 4b
+    # re-size, where ``R`` is the close-RECORD count and this flag is set on
+    # every record the fan closes.  In-memory only, like
     # ``predecessor_wire_id`` — never persisted. The default keeps every
     # other close path (human channels, end-vote, idle, cost ceiling)
     # byte-for-byte on the unleased pre-4b-ii summariser call.

@@ -34,7 +34,7 @@
 
 **Related Automated Tests** — the deterministic CI backbone of this MT (mock provider, real wallet):
 
-- [`internal/channels/autonomous_acceptance_test.go`](../../internal/channels/autonomous_acceptance_test.go) — the full convene→converge→terminate→synthesize cycle against a real wallet; the **no-runaway leg** (an adversarial "everyone always wants to talk" roster stays bounded); the **close-by-budget leg** (the roster-scaled `1 + N` synthesis reserve funds the chair turn **and** every persona's metered summary where the fail-closed hard cap would have denied them).
+- [`internal/channels/autonomous_acceptance_test.go`](../../internal/channels/autonomous_acceptance_test.go) — the full convene→converge→terminate→synthesize cycle against a real wallet; the **no-runaway leg** (an adversarial "everyone always wants to talk" roster stays bounded); the **close-by-budget leg** (the record-scaled `1 + R` synthesis reserve funds the chair turn **and** every close-derived record's metered summary where the fail-closed hard cap would have denied them).
 - [`tests/unit/python/test_autonomous_phase1_acceptance.py`](../../tests/unit/python/test_autonomous_phase1_acceptance.py) — the per-persona close-artifact chain: truthful `cost`/`structural` close reason, the synthesis ingested as the final turn, the OQ #6 metered summary lease billing the shared governance id, a real summary (never the placeholder).
 
 This live MT confirms the *operator-observable* behaviour on a real provider; the bounded-close invariants themselves are pinned in CI.
@@ -113,7 +113,7 @@ Read the interaction's total spend (the wallet's per-interaction ledger — the 
 - Total tokens attributed to the closed interaction — the discussion turns **plus** the chair synthesis turn **plus** the three metered close summaries — is **≤ 200 000**.
 - No lease denial appears on the close path (no persona fell back to the placeholder for budget reasons — that would be the reserve failing).
 
-**Pass**: spend ≤ cap with the close path fully funded. (The tight version of this invariant — the close firing at the soft threshold with the `1 + N` reserve honoured to the token — is CI-pinned in the close-by-budget leg; here the live run confirms the ledger arithmetic on real usage.)
+**Pass**: spend ≤ cap with the close path fully funded. (The tight version of this invariant — the close firing at the soft threshold with the `1 + R` reserve honoured to the token — is CI-pinned in the close-by-budget leg; here the live run confirms the ledger arithmetic on real usage.)
 
 ### Step 5: Web-button smoke — re-convene from the console
 
