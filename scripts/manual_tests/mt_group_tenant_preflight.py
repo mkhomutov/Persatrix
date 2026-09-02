@@ -48,6 +48,19 @@ SECURITY_CONFIG = REPO_ROOT / "config" / "security.yaml"
 ROOM = "planning"
 PERSONAS = ("ember-owl", "iron-fox", "nova-sparrow")
 
+
+def _config_url(server: str, room: str) -> str:
+    """Governance lives on the `/config` sub-resource, under a prefixed id.
+
+    Two things bite here, and both cost a 404 the first time this ran against
+    a live stack: the REST id carries the topology prefix (`group:planning`,
+    not `planning`), and the channel resource itself returns members and
+    classification — **not** governance. `/config` returns each knob as a
+    ``{value, source}`` pair, where ``source`` separates a YAML-seeded default
+    from a store override.
+    """
+    return f"{server}/api/v1/channels/group:{room}/config"
+
 # Leg 4 needs the interaction still open when it asks for the close, and the
 # arc's own pacing runs several minutes. 1800s is the MT's suggested value.
 MIN_IDLE_TIMEOUT = 1800
@@ -71,8 +84,33 @@ class Gate:
         return line
 
 
+def _bearer_token() -> str:
+    """The operator's stored CLI token, if they have logged in.
+
+    Once `auth.mode: enabled` is live, most of the endpoints these gates read
+    (`/api/v1/agents`, a channel's `/config`) answer **401** to an anonymous
+    caller — so a preflight that reads them anonymously reports every gate as
+    broken the moment auth starts working. The token lives where the CLI put
+    it, keyed by server URL; missing or unreadable is not an error here, it
+    just means the probes go out unauthenticated and say so.
+    """
+    path = Path.home() / ".persatrix" / "credentials"
+    try:
+        blob = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return ""
+    for entry in blob.values():
+        if isinstance(entry, dict) and entry.get("token"):
+            return str(entry["token"])
+    return ""
+
+
 def _get_json(url: str, timeout: float = 5.0) -> Any:
-    with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310
+    req = urllib.request.Request(url)  # noqa: S310
+    token = _bearer_token()
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
         return json.loads(resp.read().decode())
 
 
@@ -136,18 +174,17 @@ def gate_agents_registered(server: str) -> Gate:
 def gate_floor_control(server: str, room: str = ROOM) -> Gate:
     """floor_control must be OFF or Leg 2 sees zero tenant-less dispatches."""
     try:
-        payload = _get_json(f"{server}/api/v1/channels/{room}")
+        payload = _get_json(_config_url(server, room))
     except (urllib.error.URLError, OSError, ValueError) as exc:
         return Gate(
             "floor_control off",
             "Leg 2 (R-2)",
             False,
-            f"could not read the channel: {exc}",
+            f"could not read the channel config: {exc}",
             "",
         )
-    channel = payload.get("channel", payload)
-    floor = channel.get("floor_control")
-    chair = channel.get("escalation_chair_id") or ""
+    floor = (payload.get("floor_control") or {}).get("value")
+    chair = (payload.get("escalation_chair_id") or {}).get("value") or ""
     ok = floor is False and not chair
     detail = f"floor_control={floor!r}, escalation_chair_id={chair!r}"
     return Gate(
@@ -194,32 +231,83 @@ def gate_auth_mode(expected: str = "enabled") -> Gate:
             f"missing {SECURITY_CONFIG.relative_to(REPO_ROOT)}",
             "",
         )
-    text = SECURITY_CONFIG.read_text()
-    ok = f"mode: {expected}" in text
+    # PARSE, do not grep. The first version of this gate tested
+    # `"mode: enabled" in text` and passed against a file whose auth block
+    # read `mode: disabled` — because a COMMENT eleven lines above says "a
+    # typo in `mode: enabled` must not silently boot an unauthenticated…".
+    # It cost a live arc: the run completed green with every message stamped
+    # `local` and every dispatch tenant-less, which reads exactly like an R-2
+    # failure and is in fact auth being off. The gate that exists to stop a
+    # leg passing vacuously was itself passing vacuously.
+    try:
+        import yaml  # noqa: PLC0415
+
+        doc = yaml.safe_load(SECURITY_CONFIG.read_text()) or {}
+        actual = str(((doc.get("auth") or {}).get("mode")) or "")
+    except Exception as exc:  # noqa: BLE001
+        return Gate(f"auth.mode: {expected}", "Legs 0-7, 9", False,
+                    f"could not parse security.yaml: {exc}", "")
+    ok = actual == expected
     return Gate(
         f"auth.mode: {expected}",
         "Legs 0-7, 9",
         ok,
-        f"expected mode: {expected}",
-        f"set mode: {expected} in "
+        f"auth.mode resolves to {actual!r}",
+        f"set auth.mode: {expected} in "
         f"{SECURITY_CONFIG.relative_to(REPO_ROOT)} and restart the orchestrator",
+    )
+
+
+def gate_auth_live(server: str, room: str = ROOM, expected: str = "enabled") -> Gate:
+    """Prove auth is live on the RUNNING orchestrator, not just in the file.
+
+    The config gate reads `config/security.yaml`; this reads the process that
+    is actually serving. They disagree whenever the stack was started before
+    the file was edited — which is the ordinary case, since enabling auth
+    requires a restart. Both gates are needed: the file gate tells you what
+    the next restart will do, this one tells you what the current process is
+    doing, and the arc is spent against the latter.
+
+    The probe is a read-only GET on a `policyAuthenticated` route. With auth
+    enabled and no bearer token it must answer **401**; with auth disabled the
+    policy matrix is not enforced and it answers anything else.
+    """
+    url = f"{server}/api/v1/channels/group:{room}/members/alice-person/history"
+    try:
+        req = urllib.request.Request(url)  # noqa: S310
+        with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
+            status = resp.status
+    except urllib.error.HTTPError as exc:
+        status = exc.code
+    except (urllib.error.URLError, OSError) as exc:
+        return Gate("auth enforced live", "Legs 0-7, 9", False,
+                    f"probe failed: {exc}", "")
+    enforcing = status == 401
+    ok = enforcing if expected == "enabled" else not enforcing
+    return Gate(
+        "auth enforced live",
+        "Legs 0-7, 9",
+        ok,
+        f"unauthenticated probe -> HTTP {status} "
+        f"({'enforcing' if enforcing else 'NOT enforcing'})",
+        "restart the orchestrator after editing security.yaml — a running "
+        "process keeps the mode it booted with",
     )
 
 
 def gate_idle_timeout(server: str, room: str = ROOM) -> Gate:
     """A short idle timeout closes the interaction before Leg 4 asks."""
     try:
-        payload = _get_json(f"{server}/api/v1/channels/{room}")
+        payload = _get_json(_config_url(server, room))
     except (urllib.error.URLError, OSError, ValueError) as exc:
         return Gate(
             "idle timeout raised",
             "Legs 3-4",
             False,
-            f"could not read the channel: {exc}",
+            f"could not read the channel config: {exc}",
             "",
         )
-    channel = payload.get("channel", payload)
-    raw = channel.get("interaction_idle_timeout_seconds")
+    raw = (payload.get("interaction_idle_timeout_seconds") or {}).get("value")
     value = raw if isinstance(raw, int) else 0
     ok = value >= MIN_IDLE_TIMEOUT
     return Gate(
@@ -280,6 +368,7 @@ def run_gates(server: str, jaeger: str, auth_mode: str = "enabled") -> list[Gate
         gate_docker(),
         gate_jaeger(jaeger),
         gate_auth_mode(auth_mode),
+        gate_auth_live(server, expected=auth_mode),
         gate_floor_control(server),
         gate_tail_sampling(),
         gate_idle_timeout(server),

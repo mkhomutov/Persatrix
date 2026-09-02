@@ -153,9 +153,20 @@ def _agent_query(persona: str, sql: str, timeout: int = 40) -> list[tuple[Any, .
         return []
 
 
+# The MT's Leg 4 query filters `WHERE turn_count > 1`, and that filter is a
+# PRE-FIX lens: it was written to find the single merged multi-speaker
+# aggregate the defect produced. Post-fix the record is keyed
+# `(principal, speaker, scope)`, so an agent that spoke once owns a
+# ONE-turn record — and the filter hides exactly the rows ISSUE-0131 exists
+# to create. Observed live: every persona kept a 3-turn record for the human
+# and 1-turn records per agent speaker; under the MT's query each store
+# reported "1 row" and the speaker split was invisible.
+#
+# Read every close-derived row and let the caller judge. `interaction_id` is
+# carried so replay-derived rows stay identifiable (the shape-(b) prefix).
 LEG4_EPISODES = (
     "SELECT principal_id, speaker_id, turn_count, scope, substr(summary,1,200) "
-    "FROM episodes WHERE turn_count > 1"
+    "FROM episodes ORDER BY speaker_id, turn_count DESC"
 )
 LEG4_FACTS = (
     "SELECT principal_id, speaker_id, subject, predicate, object "
@@ -168,7 +179,7 @@ def collect_leg4(personas: tuple[str, ...] = PERSONAS) -> str:
     blocks: list[str] = []
     for persona in personas:
         rows = _agent_query(persona, LEG4_EPISODES)
-        blocks.append(f"#### `{persona}` — close-derived episodes (`turn_count > 1`)\n")
+        blocks.append(f"#### `{persona}` — close-derived episodes (all records)\n")
         if not rows:
             blocks.append("_No rows._ A close-derived record should exist here.\n")
             continue
@@ -180,11 +191,17 @@ def collect_leg4(personas: tuple[str, ...] = PERSONAS) -> str:
                 f"| `{principal}` | `{speaker}` | {turns} | `{scope}` | {clean} |"
             )
         blocks.append("")
+        speakers = sorted({str(r[1]) for r in rows})
+        principals = sorted({str(r[0]) for r in rows})
         blocks.append(
-            f"**{len(rows)} row(s).** With three personas in the room the "
-            f"post-fix expectation is **three** `local` rows — one per agent "
-            f"speaker. A single merged `local` row means the speaker dimension "
-            f"of the key did not land."
+            f"**{len(rows)} record(s)** — {len(speakers)} distinct speaker(s) "
+            f"({', '.join(f'`{s}`' for s in speakers)}) across "
+            f"{len(principals)} principal(s) "
+            f"({', '.join(f'`{p}`' for p in principals)}). The assertion is "
+            f"that no record mixes two speakers or two principals, and that "
+            f"the speaker count matches the number of distinct speakers this "
+            f"persona actually heard. One record spanning several speakers "
+            f"means the speaker dimension of the key did not land."
         )
         blocks.append("")
         facts = _agent_query(persona, LEG4_FACTS)

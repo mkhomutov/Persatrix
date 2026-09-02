@@ -29,9 +29,13 @@ shape-(b) guard deleted).
 from __future__ import annotations
 
 import argparse
+import os
+import secrets
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -46,6 +50,21 @@ CLI = "./bin/persatrix"
 ROOM = "planning"
 SECOND_ROOM = "roundtable"
 PERSONAS = ev.PERSONAS
+
+# The MT's v1.1 setup was written for a HOST orchestrator and does not work
+# against the compose stack. The seven corrections this driver implements —
+# in-container bootstrap, the -wal/-shm sidecars, declared-not-joined
+# membership, mandatory `--as`, the Leg 1 check, the Leg 4 query lens, and the
+# Leg 3 fallback — are catalogued with their symptoms in
+# docs/manual-tests/v0.3.15-execution-report.md (§MT corrections) and fixed in
+# the MT at v1.2. Only the values they resolve to live here.
+CONTAINER_ACCOUNTS_DB = "/var/lib/persatrix/accounts.db"
+ACCOUNTS_SIDECARS = (
+    CONTAINER_ACCOUNTS_DB,
+    f"{CONTAINER_ACCOUNTS_DB}-wal",
+    f"{CONTAINER_ACCOUNTS_DB}-shm",
+)
+
 
 # Pacing. The end-vote window is 600s/W=3; these gaps keep the arc inside it
 # while still letting a round settle. Raising SETTLE is safe; lowering it
@@ -62,6 +81,17 @@ BOB_PROBE = "Who's covering the review slot this month?"
 ROUNDTABLE_AGENDA = "Draft the Q3 review rota."
 
 
+class ArcAbortedError(RuntimeError):
+    """A setup step failed; continuing would produce meaningless legs.
+
+    The first live run of this driver bootstrapped nothing (wrong binary
+    path), then logged in as nobody, then published as nobody — and still
+    "captured" a Leg 2 table and a cost figure. Empty artifacts from a broken
+    setup are worse than no artifacts: they are indistinguishable, in the
+    report, from a leg that genuinely found nothing.
+    """
+
+
 @dataclass
 class Ctx:
     execute: bool
@@ -69,24 +99,39 @@ class Ctx:
     jaeger: str
     out: Path
     artifacts: list[str]
+    password: str
 
     def say(self, msg: str) -> None:
         print(msg, flush=True)
 
-    def run(self, cmd: list[str], *, why: str, timeout: int = 120) -> str:
-        """Run a command, or describe it in a dry run."""
+    def run(self, cmd: list[str], *, why: str, timeout: int = 120,
+            stdin: str | None = None, secret: bool = False,
+            critical: bool = False) -> str:
+        """Run a command, or describe it in a dry run.
+
+        ``stdin`` feeds the provisioning pipe that both credential verbs
+        support (`promptPassword` in `cmd/orchestrator/bootstrap.go` and
+        `read_password` in `cli/src/commands/auth.rs` both fall back to
+        reading a line when stdin is not a terminal). ``secret`` keeps that
+        input out of the printed transcript — the password never reaches
+        argv, which is the §J discipline both verbs are written to.
+        """
         printable = " ".join(cmd)
+        piped = "  <<< (password on stdin)" if secret else ""
         if not self.execute:
-            self.say(f"    [dry-run] {printable}")
+            self.say(f"    [dry-run] {printable}{piped}")
             self.say(f"              ({why})")
             return ""
-        self.say(f"    $ {printable}")
+        self.say(f"    $ {printable}{piped}")
         proc = subprocess.run(  # noqa: S603
             cmd, cwd=REPO_ROOT, capture_output=True, text=True,
-            timeout=timeout, check=False,
+            timeout=timeout, check=False, input=stdin,
         )
         if proc.returncode != 0:
-            self.say(f"    ! exit {proc.returncode}: {proc.stderr.strip()[:400]}")
+            detail = (proc.stderr.strip() or proc.stdout.strip())[:400]
+            self.say(f"    ! exit {proc.returncode}: {detail}")
+            if critical:
+                raise ArcAbortedError(f"{printable} -> exit {proc.returncode}: {detail}")
         return proc.stdout
 
     def pause(self, seconds: int, why: str) -> None:
@@ -101,6 +146,103 @@ class Ctx:
         self.say(f"    + captured: {heading}")
 
 
+def wait_healthy(ctx: Ctx, timeout: int = 180) -> None:
+    """Poll /healthz instead of sleeping a fixed interval.
+
+    A fixed `sleep 25` after `compose restart orchestrator` is a coin flip:
+    the first live run of this driver lost a leg to `connection failed` on
+    the login that followed it. The MT's own guidance is to *wait for the
+    orchestrator to answer /healthz before publishing*, which is what this
+    does. The RFC 0009 rate-limit bucket is NOT flushed by a restart, so the
+    first turn afterwards can still draw a 429 for ~60s — healthy is
+    necessary, not sufficient.
+    """
+    if not ctx.execute:
+        ctx.say(f"    [dry-run] poll {ctx.server}/healthz until 200 "
+                f"(max {timeout}s)")
+        return
+    ctx.say(f"    … polling {ctx.server}/healthz")
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(f"{ctx.server}/healthz", timeout=5) as r:  # noqa: S310
+                if r.status == 200:
+                    ctx.say("    ✓ orchestrator healthy")
+                    return
+        except (urllib.error.URLError, OSError):
+            pass
+        time.sleep(2)
+    raise ArcAbortedError(f"orchestrator did not become healthy within {timeout}s")
+
+
+def mt_password() -> str:
+    """The throwaway credential for this arc's test principals.
+
+    A local fixture, not a secret worth protecting — but it still never goes
+    in argv (§J) and is never written to the repo. Override with
+    ``PERSATRIX_MT_PASSWORD``; otherwise one is generated per run and printed
+    once, so an operator can log in by hand afterwards. The 12-character
+    floor is enforced by bootstrap itself.
+    """
+    supplied = os.environ.get("PERSATRIX_MT_PASSWORD")
+    if supplied:
+        return supplied
+    return "mt-" + secrets.token_urlsafe(15)
+
+
+def bootstrap_account(ctx: Ctx, username: str, participant: str) -> None:
+    """Rotate the accounts store IN THE CONTAINER, then log in — unattended.
+
+    Both credential verbs fall back to reading one line per prompt when stdin
+    is not a terminal (the documented provisioning pipe), so the whole arc
+    runs without a human at the keyboard. Bootstrap asks twice (password +
+    confirm); login asks once.
+    """
+    ctx.run(
+        ["docker", "compose", "exec", "-T", "orchestrator",
+         "rm", "-f", *ACCOUNTS_SIDECARS],
+        why="remove the db AND its -wal/-shm, or bootstrap fails with "
+            "disk I/O error (522) — v0.3.14 F-4",
+    )
+    ctx.run(
+        ["docker", "compose", "exec", "-T", "orchestrator",
+         "persatrix-server", "account", "bootstrap",
+         "--accounts-db", CONTAINER_ACCOUNTS_DB,
+         "--username", username, "--participant", participant],
+        why=f"create {participant} where the orchestrator actually reads it",
+        stdin=f"{ctx.password}\n{ctx.password}\n", secret=True, critical=True,
+    )
+
+
+def login(ctx: Ctx, username: str) -> None:
+    """Authenticate the CLI as *username* over the same provisioning pipe."""
+    ctx.run([CLI, "login", "--username", username],
+            why=f"the CLI must hold {username}'s session for the sends below",
+            stdin=f"{ctx.password}\n", secret=True, critical=True)
+
+
+def send_as(ctx: Ctx, participant: str, room: str, body: str,
+            critical: bool = False) -> str:
+    """Publish as *participant*. The MT omits `--as` and the default is wrong.
+
+    `channel send`'s sender identity defaults to the **OS username**,
+    normalized — not to the authenticated principal. The MT writes Leg 1 as a
+    bare `persatrix channel send planning "..."`, which publishes as whoever
+    is running the script and 403s on a room they are not in. Worse, if the
+    operator's OS username *did* happen to be a member, the arc would run
+    green with the turns attributed to the wrong speaker — and ISSUE-0131's
+    speaker axis is read off the event's `sender_id`, so Leg 4's triples
+    would name a speaker who never spoke.
+
+    `sender_id` and the principal are separate axes: this sets the former,
+    while the latter comes from the authenticated session (`login` above).
+    Alice's turns need both to be `alice-person`.
+    """
+    return ctx.run([CLI, "channel", "send", room, body, "--as", participant],
+                   why=f"publish as {participant} — NOT the OS username",
+                   critical=critical)
+
+
 def leg0(ctx: Ctx) -> None:
     """Alice, authenticated. Bootstraps accounts.db and rotates the wire id."""
     ctx.say("\nLeg 0 — Alice, authenticated")
@@ -109,24 +251,17 @@ def leg0(ctx: Ctx) -> None:
     ctx.say("    restarting — which rotates the wire interaction id and")
     ctx.say("    structurally closes open records. That is why the two-human")
     ctx.say("    aggregate is pinned by the R-1 unit gate, not by this arc.")
-    ctx.run(["rm", "-f", "data/accounts.db"], why="Leg 0 bootstraps a fresh account")
-    ctx.run(
-        ["./bin/persatrix-server", "account", "bootstrap",
-         "--username", "alice", "--participant", "alice-person"],
-        why="create the authenticated principal alice-person",
-    )
+    bootstrap_account(ctx, "alice", "alice-person")
     ctx.run(["docker", "compose", "restart", "orchestrator"],
             why="the orchestrator must reopen the new accounts.db")
-    ctx.pause(RESTART_WAIT, "orchestrator restart; RFC 0009 rate-limit bucket "
-                            "is NOT flushed, so the first turn can draw 429 for ~60s")
-    ctx.say("    ACTION REQUIRED: run `persatrix login` as alice before continuing.")
+    wait_healthy(ctx)
+    login(ctx, "alice")
 
 
 def leg1(ctx: Ctx) -> None:
     """Alice discloses; a cascade must run at least two hops."""
     ctx.say("\nLeg 1 — Alice discloses into the room, and a cascade runs")
-    ctx.run([CLI, "channel", "send", ROOM, ALICE_DISCLOSURE],
-            why="the authenticated publish every later leg descends from")
+    send_as(ctx, "alice-person", ROOM, ALICE_DISCLOSURE, critical=True)
     ctx.pause(SETTLE, "let ember-owl reply and at least one further hop land")
     history = ctx.run([CLI, "channel", "history", ROOM],
                       why="Leg 1 needs >= 2 hops: a persona replying to a persona")
@@ -153,8 +288,7 @@ def leg2(ctx: Ctx) -> None:
 def leg3(ctx: Ctx) -> None:
     """Close from a persona publish — the trigger matters."""
     ctx.say("\nLeg 3 — close the interaction from a *persona* publish")
-    ctx.run([CLI, "channel", "send", ROOM, WRAP_PROMPT],
-            why="drive the room to an end-vote quorum (K=2 inside W=3)")
+    send_as(ctx, "alice-person", ROOM, WRAP_PROMPT)
     ctx.pause(SETTLE, "let the quorum form")
     ctx.say("    CHECK: orchestrator logs show `interaction_closed{…end_votes}`")
     ctx.say("    or `synthesis_reply` — NOT `structural` / `cost`. A")
@@ -193,8 +327,7 @@ def leg6(ctx: Ctx) -> None:
     ctx.say("    descends from Alice's own publish. Post-fix this must be")
     ctx.say("    IDENTICAL to Leg 4: the record binds its own frozen principal,")
     ctx.say("    so the close trigger no longer selects a tenant.")
-    ctx.run([CLI, "channel", "send", ROOM, "Let's keep going on the rota details."],
-            why="push toward max_rounds so the close is Alice-origin")
+    send_as(ctx, "alice-person", ROOM, "Let's keep going on the rota details.")
     ctx.pause(SETTLE, "let the bound-crossing close fire")
     if ctx.execute:
         ctx.record("Leg 6 — triples after a bound-crossing close", ev.collect_leg4())
@@ -203,17 +336,11 @@ def leg6(ctx: Ctx) -> None:
 def leg7(ctx: Ctx) -> None:
     """Bob — the absence bar for a second human."""
     ctx.say("\nLeg 7 — Bob: the absence bar")
-    ctx.run(["rm", "-f", "data/accounts.db"], why="rotate to a second principal")
-    ctx.run(
-        ["./bin/persatrix-server", "account", "bootstrap",
-         "--username", "bob", "--participant", "bob-person"],
-        why="the second human",
-    )
+    bootstrap_account(ctx, "bob", "bob-person")
     ctx.run(["docker", "compose", "restart", "orchestrator"], why="reopen accounts.db")
-    ctx.pause(RESTART_WAIT, "orchestrator restart")
-    ctx.say("    ACTION REQUIRED: `persatrix login` as bob before continuing.")
-    ctx.run([CLI, "channel", "send", ROOM, BOB_PROBE],
-            why="post-fix: no reference to Mira or surgery")
+    wait_healthy(ctx)
+    login(ctx, "bob")
+    send_as(ctx, "bob-person", ROOM, BOB_PROBE)
     ctx.pause(SETTLE, "let Bob's round settle")
     ctx.say("    CHECK: alice-person, bob-person and local coexist in episodes —")
     ctx.say("    isolation is a recall filter, not a delete.")
@@ -225,14 +352,14 @@ def leg8(ctx: Ctx) -> None:
     ctx.say("    ACTION REQUIRED: set auth.mode: disabled in config/security.yaml.")
     ctx.run(["docker", "compose", "restart", "orchestrator"],
             why="ISSUE-0125's live proof — this is the ORCHESTRATOR restart")
-    ctx.pause(RESTART_WAIT, "orchestrator restart; the fleet must re-register itself")
+    wait_healthy(ctx)
+    ctx.pause(RESTART_WAIT, "the fleet must re-register itself (ISSUE-0125)")
     agents = ctx.run(["curl", "-s", f"{ctx.server}/api/v1/agents"],
                      why="ISSUE-0125: non-empty WITHOUT touching an agent process")
     if agents:
         ctx.record("Leg 8 — registry after an orchestrator restart (ISSUE-0125)",
                    f"```json\n{agents.strip()[:2000]}\n```")
-    ctx.run([CLI, "channel", "send", ROOM, ALICE_DISCLOSURE],
-            why="repeat Leg 1 with no credential")
+    send_as(ctx, "alice-person", ROOM, ALICE_DISCLOSURE)
     ctx.pause(SETTLE, "let the unauthenticated round settle")
     ctx.say("    CHECK: every new row principal_id='local'; NO principal.id span")
     ctx.say("    attribute (absent, not empty). Row count is NOT unchanged from")
@@ -316,10 +443,20 @@ def main(argv: list[str] | None = None) -> int:
         if failed:
             print(f"\n({len(failed)} gate(s) failing — dry run continues anyway.)")
 
+    password = mt_password()
     ctx = Ctx(execute=args.execute, server=args.server, jaeger=args.jaeger,
-              out=Path(args.out), artifacts=[])
-    for number in legs:
-        LEGS[number](ctx)
+              out=Path(args.out), artifacts=[], password=password)
+    if args.execute and not os.environ.get("PERSATRIX_MT_PASSWORD"):
+        print(f"\nGenerated throwaway credential for this arc: {password}")
+        print("(local test fixture; set PERSATRIX_MT_PASSWORD to pin it)")
+    try:
+        for number in legs:
+            LEGS[number](ctx)
+    except ArcAbortedError as exc:
+        print(f"\nARC ABORTED — {exc}")
+        print("Setup failed; later legs would have produced empty artifacts "
+              "that read like real findings. Fix and re-run.")
+        return 1
 
     if args.execute:
         ctx.say("\nCost capture (before any teardown)")

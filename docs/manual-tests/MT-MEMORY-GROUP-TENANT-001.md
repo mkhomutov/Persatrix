@@ -2,10 +2,10 @@
 
 **Test ID**: `MT-MEMORY-GROUP-TENANT-001`
 **Feature Area**: Memory scope axes — the tenant/principal axis across the *aggregate* and *relayed* writes ([ISSUE-0082](../issues/ISSUE-0082-orchestrator-per-request-session-principal-emission.md) residuals R-1 / R-2)
-**Version**: 1.1
+**Version**: 1.2
 **Created**: 2026-08-06
-**Last Updated**: 2026-08-23
-**Status**: Active — **authored with the R-1/R-2 designs. Runnable in both directions**: run it against v0.3.14 to *evidence* the residuals, and re-run it after [ISSUE-0123](../issues/ISSUE-0123-per-speaker-interaction-scope.md) + [ISSUE-0124](../issues/ISSUE-0124-orchestrator-hop-drops-tenant-on-agent-cascade.md) land as the **v0.3.15** gate.
+**Last Updated**: 2026-09-02
+**Status**: Active — **v1.2 corrects seven setup defects found on first execution** (2026-09-02, [v0.3.15 execution report](v0.3.15-execution-report.md) §MT corrections). v1.1 and earlier were authored against a HOST orchestrator and never run; every step below that touches accounts, membership or sender identity was wrong for the compose deployment this MT targets. **Runnable in both directions**: run it against v0.3.14 to *evidence* the residuals, and re-run it after [ISSUE-0123](../issues/ISSUE-0123-per-speaker-interaction-scope.md) + [ISSUE-0124](../issues/ISSUE-0124-orchestrator-hop-drops-tenant-on-agent-cascade.md) land as the **v0.3.15** gate.
 
 ---
 
@@ -50,51 +50,7 @@ itself (MT-MEMORY-MULTIUSER-001), the auth substrate
 
 ## Preconditions
 
-1. `make build-orchestrator build-cli`; a live provider
-   (`ANTHROPIC_API_KEY`) — the personas must produce real replies and
-   land real rows. `make demo-anthropic`, `export
-   PERSATRIX_SERVER=http://127.0.0.1:8080`.
-2. `make reset` first — prior rows mask results.
-3. `auth.mode: enabled` in `config/security.yaml`; no `data/accounts.db`
-   (Leg 0 bootstraps it).
-4. The stock three-persona rooms from `config/channels.yaml`:
-   `group:planning` (ember-owl, iron-fox, nova-sparrow; chair
-   nova-sparrow; `end_vote_threshold: 2` / `end_vote_window: 3`) and
-   `group:roundtable` as the second room for the travel check.
-5. `interaction_idle_timeout_seconds` raised on `planning` (e.g. 1800)
-   so no leg closes an interaction by accident before Leg 4 asks for it.
-
-> **Pace the arc, do not sit in it.** The end-vote quorum is counted over
-> a 600s / W=3 window. Read every leg first and drive Legs 1–4 from one
-> script; an idle pause mid-arc expires the window and silently changes
-> which close trigger fires, which is the variable Legs 4 and 5 turn on.
-
-> **The personas re-register themselves — but give them the moment.** Through
-> v0.3.14 an orchestrator restart emptied the in-memory registry for good, and
-> this arc's `account bootstrap` → restart step left a healthy, green-looking
-> stack in which every dispatch was dropped, no persona ever replied, and the
-> run produced no cascade and no rows. It cost a full live arc on 2026-08-07
-> before it was spotted. Since v0.3.15 each agent watches its own orchestrator
-> connection and re-registers when it returns
-> ([ISSUE-0125](../issues/ISSUE-0125-agents-never-reregister-after-orchestrator-restart.md)),
-> so no `docker compose restart agent-<each>` is needed. What still applies:
-> **wait for the orchestrator to answer `/healthz` before publishing**, and if a
-> leg does go quiet, `GET /api/v1/agents` remains the check — an orchestrator
-> holding **zero** registered agents now says so at ERROR in its own log rather
-> than only in one dispatch WARN per dropped message. The RFC 0009 rate-limiter
-> bucket is *not* flushed by a restart either, so the first turn after one can
-> still draw `429` for ~60 s.
-
-> **One account at a time.** Same constraint as MT-MEMORY-MULTIUSER-001:
-> `account bootstrap` refuses once an account exists, so rotating to a
-> second principal means deleting `data/accounts.db`, bootstrapping
-> again and restarting the orchestrator. That restart rotates the wire
-> interaction id, which **structurally closes** the open records — so a
-> single record holding two *humans'* turns is not reachable on shipped
-> verbs. It is not needed: with one human, the room's other speakers are
-> the personas, whose turns are `'local'`, and `'local'`-vs-`alice-person`
-> is the same strict-equality boundary. The two-human aggregate is pinned
-> deterministically instead (see Sign-off).
+**Split out to [MT-MEMORY-GROUP-TENANT-001 — setup and preconditions](MT-MEMORY-GROUP-TENANT-001-setup.md)** at v1.2, for the word cap. Do not run the arc without reading it: it carries the in-container account bootstrap, the declared-not-joined membership rule (a `channel join` makes the *next* orchestrator restart a crash loop), the host-binary rebuild, the live auth probe, and the pacing discipline. `scripts/manual_tests/mt_group_tenant_preflight.py` checks the mechanical ones.
 
 ---
 
@@ -102,18 +58,34 @@ itself (MT-MEMORY-MULTIUSER-001), the auth substrate
 
 ### Leg 0 — Alice, authenticated
 
+> **v1.2 — corrections 1, 2 and 4** ([v0.3.15 report](v0.3.15-execution-report.md#mt-corrections--seven-defects-in-the-procedure-itself)): bootstrap **in the container** (the
+> host default `data/accounts.db` is not what the orchestrator reads), remove
+> the `-wal`/`-shm` sidecars with it, and drive both credential prompts over
+> the provisioning pipe. **Do not `channel join`** — see Preconditions 3b.
+
 ```bash
-rm -f data/accounts.db
-./bin/persatrix-server account bootstrap --username alice --participant alice-person
-# restart the orchestrator so it opens the new accounts.db
-persatrix login          # as alice
+docker compose exec -T orchestrator rm -f \
+  /var/lib/persatrix/accounts.db /var/lib/persatrix/accounts.db-wal /var/lib/persatrix/accounts.db-shm
+printf 'PW\nPW\n' | docker compose exec -T orchestrator persatrix-server account bootstrap \
+  --accounts-db /var/lib/persatrix/accounts.db --username alice --participant alice-person
+docker compose restart orchestrator
+# POLL /healthz — do not sleep a fixed interval; the login below fails
+# `connection failed` if it races the restart.
+printf 'PW\n' | ./bin/persatrix login --username alice
+./bin/persatrix whoami   # MUST read: alice (participant alice-person)
 ```
 
 ### Leg 1 — Alice discloses into the room, and a cascade runs
 
+> **v1.2 — `--as` is mandatory** ([v0.3.15 report](v0.3.15-execution-report.md#mt-corrections--seven-defects-in-the-procedure-itself), correction 4). It defaults to the **OS
+> username**, not the authenticated principal: omitting it gives `403 … sender
+> is not a member`, or — if that username *is* a member — a green run whose
+> turns name a speaker who never spoke, which is worse.
+
 ```bash
 ./bin/persatrix channel send planning \
-  "Before we plan Q3 — I'll be out the week of the 14th, my daughter Mira has surgery. @ember-owl can you take the review slot?"
+  "Before we plan Q3 — I'll be out the week of the 14th, my daughter Mira has surgery. @ember-owl can you take the review slot?" \
+  --as alice-person
 ```
 
 Wait for the round to settle (a reply from ember-owl, then at least one
@@ -122,7 +94,13 @@ Alice).
 
 **Verification**:
 - [ ] At least two hops occurred: `./bin/persatrix channel history planning` shows a persona message that replies to another persona's message.
-- [ ] In **each** persona's `memory.db`: `SELECT principal_id, COUNT(*) FROM episodes GROUP BY principal_id;` returns at least one `alice-person` row. *(If every row reads `local`, emission is not reaching the personas at all — stop and diagnose here, or every later leg passes vacuously.)*
+- [ ] **The stop-and-diagnose check (v1.2 — corrected, #5).** Read the
+  *message* row, not episodes: Alice's message must be stamped
+  `principal_id='alice-person'`. **Episodes cannot answer at Leg 1** — they are
+  close-derived and the close is Leg 3, so the table is legitimately empty and
+  the original check was unevaluable exactly where it guards every later leg.
+  A `'local'` stamp means emission never reached the publish path: **stop**,
+  and verify `auth.mode` on the RUNNING orchestrator, not in the file.
 
 ### Leg 2 — R-2: the relayed write
 
@@ -186,9 +164,14 @@ Leg 1 usually reaches it; if not, prompt for wrap-up:
 Read the close-derived episode (`turn_count > 1`) and the facts extracted
 from it.
 
+> **v1.2 — drop the `turn_count > 1` filter** ([v0.3.15 report](v0.3.15-execution-report.md#mt-corrections--seven-defects-in-the-procedure-itself), correction 6). It is a
+> *pre-fix* lens: post-fix, an agent that spoke once owns a **one-turn**
+> record, so the filter hides exactly the rows ISSUE-0131 creates. Observed:
+> every store reported "1 row" and the split was invisible.
+
 ```sql
 SELECT principal_id, speaker_id, turn_count, scope, substr(summary,1,200)
-  FROM episodes WHERE turn_count > 1;
+  FROM episodes ORDER BY speaker_id, turn_count DESC;
 SELECT principal_id, speaker_id, subject, predicate, object
   FROM facts ORDER BY asserted_at DESC LIMIT 20;
 ```
@@ -347,6 +330,7 @@ and after a second restart with no traffic in between (**C**).
 
 ## Sign-off
 
+- [ ] **Preflight green** — `python scripts/manual_tests/mt_group_tenant_preflight.py`, all gates. Each one guards a leg that otherwise passes vacuously.
 - [ ] All **ten** legs (0–9) run on a live provider, with the expected column used (`v0.3.14` or post-fix) stated in the report. *This line read "eight" while the procedure held nine; the restart leg makes ten.*
 - [ ] Leg 2's per-dispatch `principal.id` table — **the** Leg 2 finding, since storage cannot see R-2 — and Leg 4's `(principal_id, speaker_id, summary)` **triples** pasted verbatim.
 - [ ] Leg 9's two row-count snapshots pasted verbatim, per `(principal_id, speaker_id)`, in **both** partitions.
