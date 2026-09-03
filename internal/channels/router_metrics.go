@@ -50,6 +50,29 @@ type RouterMetrics struct {
 	// `conversation.governance.layer` span attribute correlates every drop in a
 	// trace (governance.go).
 	GovernanceDrop metric.Int64Counter
+	// SynthesisReserveClamped counts each bounded close that FIRED while the
+	// RFC 0052 PR 4a half-cap clamp was holding back LESS close-path reserve than
+	// the close is sized to need ([wallet.SynthesisReserveClamped]), labelled by
+	// `channel_type` and `trigger`. The under-funded close degrades SILENTLY —
+	// denied summary leases commit the RFC 0020 janitor's unavailable placeholder
+	// and nothing retries them — so this counter is the only signal that it
+	// happened.
+	//
+	// "Fired" is load-bearing, because ISSUE-0138 reads this as a RATE AGAINST
+	// [RouterMetrics.InteractionClosed]: it is emitted from
+	// [ChannelRouter.reportSynthesisReserveClamp] inside
+	// [ChannelRouter.boundedClose], beside that counter's own bump and behind the
+	// same tombstone CAS, so a crossed bound that the fresh-config re-check
+	// refuses, or that loses its arm/tombstone race, contributes to neither.
+	// A fleet with no wallet contributes to neither either — it draws no
+	// close-path lease, so it cannot suffer the failure (see that method).
+	//
+	// The attribution (channel, interaction, room size, record count, cap,
+	// reserve) rides a Warn line beside it, but ONCE PER (channel,
+	// configuration) rather than once per close: the clamp is a property of the
+	// room and the cap, so a per-close line would repeat verbatim forever. The
+	// counter is the per-close surface; the log is the explanation.
+	SynthesisReserveClamped metric.Int64Counter
 	// InteractionClosed counts each interaction closed by a governance layer
 	// (RFC 0030 Layer 4, v0.3.8), labelled by `channel_type` and `trigger`
 	// (`end_votes` today; `idle`/`structural`/`cost` join as their close paths are

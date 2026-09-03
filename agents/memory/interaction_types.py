@@ -27,8 +27,27 @@ from ..session_id import LEGACY_SESSION_ID
 # beside the builder, because it is part of the ``Turn.payload`` contract
 # and the read surface (``closed_interactions_read``) must not grow an
 # import into the persona subpackage to honour it.  Survives persistence:
-# ``persist_closed_interaction`` strips only ``text``.
+# ``persist_closed_interaction`` strips only the keys in its
+# ``_TRANSIENT_TURN_KEYS`` set (``text``, and ``message_id`` since
+# v0.3.15 PR B2) — this one is not among them.
 ROOM_CLOSE_TURN_KEY = "room_close"
+
+# ISSUE-0130 (b), PR B2 review round 3: this REPLAYED turn carries a wire
+# message the agent had ALREADY ingested live during this same boot, so its
+# content is in a live record too.  Dispatch self-registers before catch-up
+# runs, so a message published in that gap reaches both paths — and the
+# re-derivation guard cannot see across them, because the live record's
+# ``interaction_id`` is a ``uuid4`` and not a content digest.
+#
+# The turn is kept ON the record and dropped from the DERIVATION INPUT, and
+# that asymmetry is the whole point: the span identity is a digest over the
+# turns the record HOLDS, so removing the turn would make the digest depend
+# on which messages happened to race — boot-unstable, and the next boot
+# would derive the window again under a different id.  Excluding it only
+# from what gets summarised keeps the identity boot-stable AND the content
+# unduplicated.  Stripped before ``context_json`` like the other transient
+# keys.
+LIVE_DUPLICATE_TURN_KEY = "live_duplicate"
 
 
 @dataclass
@@ -134,16 +153,104 @@ class Interaction:
     # come from another speaker's words.
     principal_id: str = DEFAULT_PRINCIPAL_ID
     speaker_id: str = ""
+    # ISSUE-0085 / ISSUE-0130 (b) review — the EPOCH half of the same
+    # frozen-at-open rule, and the last write axis that was still read
+    # ambient at close time.  ``principal_id`` above is bound around the
+    # derivation so an idle flush or a room-close fan cannot stamp the
+    # closer's tenant on this record; the epoch had no such twin, so a
+    # record closed inside ANOTHER request's scope was stamped with that
+    # request's epoch instead of its own.  ``store_episode`` writes the
+    # ambient epoch and every episodic recall filters it with strict
+    # equality and no carve-out (:mod:`agents.memory._epoch_filter`), so
+    # a mis-stamped row is permanently unreadable by the epoch that
+    # produced it.  Since v0.3.15 PR B2 that also decides an IDENTITY:
+    # the replay span digest carries the epoch, so an ambient read made
+    # the digest depend on WHICH close path fired rather than on the
+    # span.
+    #
+    # ``""`` means the record was opened by a construction site that
+    # captures nothing (a direct ``Interaction(...)`` in a test), and the
+    # close path then leaves epoch resolution exactly where it was —
+    # ambient — so no existing path changes shape.  The tracker fills it
+    # for every record it opens.
+    epoch_id: str = ""
     # ISSUE-0130: True when this interaction was OPENED by an on-startup
     # catch-up replay turn, captured under the same only-on-open rule as
-    # ``session_id`` above.  A replayed turn carries no principal — the
-    # orchestrator's ``messages`` table has no principal column, so
-    # ``_build_replay_event`` has nothing to seed and the persona binds its
-    # default (``local``).  Deriving a summary and RFC 0026 facts from such
-    # a span therefore writes one person's content into the shared tenant;
-    # the close path skips derivation when this is set.  See
-    # :func:`~agents.persona_runtime.close_path.persist_closed_interaction`.
+    # ``session_id`` above.
+    #
+    # On its own this no longer decides derivation.  Since shape (b)
+    # (v0.3.15 PR B2) ``messages.principal_id`` persists the tenant at
+    # publish and ``build_replay_event`` seeds it, so a replayed span that
+    # knows its tenant DOES derive, under that tenant — see
+    # ``replay_attributed`` below, which is the half that decides, and
+    # :func:`~agents.persona_runtime.close_path.persist_closed_interaction`
+    # for both.  What this flag still governs by itself: the catch-up
+    # boundary (a replayed span never shares a record with live turns, in
+    # either direction), the room-close fan's eligibility rule
+    # (``admitted_records`` excludes replayed records unconditionally),
+    # and the re-derivation guard, which only a replayed span consults.
     replayed: bool = False
+    # ISSUE-0130 shape (b) — whether the replayed turn that OPENED this
+    # record carried a persisted principal (channel-store v12's
+    # ``messages.principal_id``, seeded by
+    # :func:`~agents.principal_id.seed_principal_metadata`).  Meaningful
+    # only while ``replayed`` is set, and frozen at open beside it.
+    #
+    # It exists because the record key CANNOT answer the question.  A
+    # seeded ``local`` and an unseeded default are the same
+    # ``principal_id`` on the record, and they mean opposite things: the
+    # first is a real answer ("this publish had no verified tenant" —
+    # an agent publish, or the whole deployment under
+    # ``auth.mode: disabled``), the second is the absence of an answer
+    # ("this orchestrator predates the column"), which is precisely the
+    # ambiguity the v0.3.14 leak-stopper could not resolve and so
+    # resolved conservatively for every span.  Only the field's PRESENCE
+    # on the wire separates them, so the presence is what is recorded
+    # here — the value is already on ``principal_id`` above.
+    replay_attributed: bool = False
+    # ISSUE-0130 shape (b) — may this replayed record's span be DERIVED?
+    #
+    # ``False`` by default, and that polarity is the point (PR B2 review).
+    # The span identity is a digest over the turns the record HOLDS, so a
+    # record holding a PREFIX of its channel's window claims an id no later
+    # boot can recompute — and the next complete boot then derives the whole
+    # window on top of it, which is the unbounded growth shape (b) exists to
+    # bound.  TWO doors may set it, and both have to prove the window is
+    # whole:
+    #
+    # * :func:`~agents.persona_runtime.replay_sweep.close_replayed_scopes` —
+    #   the pass-end sweep, which runs after the pass and is told which
+    #   channels finished; and
+    # * the replay-internal SEGMENTATION in
+    #   :func:`~agents.persona_runtime.close_path.close_stale_records` — a
+    #   wire rotation between two replayed rows, which closes a whole wire
+    #   conversation rather than a prefix, so its digest is boot-stable.
+    #
+    # Both ask ``InteractionTracker.replay_record_compromised`` first, so a
+    # window this pass already cut short or holed is refused at either door.
+    # Every OTHER door — a LIVE turn's replay/live split, the ISSUE-0130
+    # attribution split, a wire rotation reaching a non-target record,
+    # ``idle_check``, the ``max_turns`` cap — closes a record mid-pass,
+    # which by construction means a partial window, and leaves the default
+    # standing.
+    #
+    # The PR B2 review found the segmentation door setting this
+    # UNCONDITIONALLY: it fired on the attribution split as well as on a
+    # rotation, and consulted none of the pass's completeness bookkeeping,
+    # so it derived the remainder of an already-cut window and derived
+    # segments with a hole where a row had raised — both claiming an id no
+    # later boot recomputes, through the one door the gate did not cover.
+    #
+    # The first cut kept this decision in the sweep's own loop body, so those
+    # other doors derived prefixes unguarded.  Moving it onto the record puts
+    # it where the ONE chokepoint every door funnels through can read it
+    # (``persist_closed_interaction``), and makes the unguarded case the safe
+    # one.  Refusing costs a boot's derivation, which catch-up re-reads on the
+    # next boot anyway (no watermark, RFC 0011 OQ #8); deriving a prefix costs
+    # a duplicate episode that nothing can ever match again.
+    #
+    # Meaningful only while ``replayed`` is set.
+    replay_window_complete: bool = False
     # RFC 0037 §C (v0.3.12 PR 3): the acting channel's wire classification
     # captured when the interaction *opened*, frozen for its lifetime — the
     # single point of truth the episodic and facts tiers inherit their
@@ -169,7 +276,9 @@ class Interaction:
     # between the tracker close and persistence), so the RFC 0020 close
     # summary must draw a wallet lease billed to ``wire_interaction_id``
     # (``summarize_close.py``) and count toward the mandatory cap the PR 4a
-    # ``1 + N`` reserve was carved from. In-memory only, like
+    # reserve was carved from — ``1 + R`` since the v0.3.15 residuals PR 4b
+    # re-size, where ``R`` is the close-RECORD count and this flag is set on
+    # every record the fan closes.  In-memory only, like
     # ``predecessor_wire_id`` — never persisted. The default keeps every
     # other close path (human channels, end-vote, idle, cost ceiling)
     # byte-for-byte on the unleased pre-4b-ii summariser call.

@@ -879,6 +879,50 @@ speaker per tenant.
   single-speaker construction, since its `sender` is not the record's
   **speaker**.
 
+## ISSUE-0130 (b) — The replayed write (v0.3.15)
+
+Terms from the shape-(b) catch-up attribution: the on-startup replay
+seeds `messages.principal_id` onto the metadata key the live ingress
+writes, so a replayed turn is attributed like a live one.
+
+### Replay attribution
+- **Aliases:** `replay_attributed`.
+- **Disallowed:** "replay principal" (the *value* is just the record's
+  **principal**; this is about whether one was carried at all),
+  "authenticated replay".
+- **Definition:** Frozen at open beside `replayed` — whether the
+  replayed turn that OPENED the record carried a persisted principal.
+  The field records **presence, not value**, because a seeded `local`
+  and an unseeded default resolve to the same `principal_id`: the first
+  is a real answer ("no verified tenant"), the second the absence of
+  one. Only an attributed span derives; an unattributable one is still
+  skipped. The v11→v12 backfill is `''` rather than `local` so a row
+  predating the column reads as absent.
+
+### Replay span identity
+- **Aliases:** "the span digest", "boot-stable id".
+- **Disallowed:** "replay hash", "message hash" — it is not a hash of
+  the messages but of the record's whole identity.
+- **Definition:** A `sha256` over `(agent, epoch, principal, speaker,
+  scope, *ordered wire message ids)`, written as the row's
+  `interaction_id` with a `replay-` prefix. Nothing in it is clock- or
+  boot-derived, so the same window computes the same id on the next
+  boot. Every axis the stored row is **partitioned** by has to be in it,
+  or the guard reaches across that partition — which is why the epoch is
+  there despite not being part of the **record key**. Undefined when any
+  turn lacks a wire id: a digest over the identified subset would let
+  two different spans collide.
+
+### Re-derivation guard
+- **Disallowed:** "replay dedup", "ingest dedup" — the tracker still
+  appends every replayed turn; only the *derivation* is bounded.
+- **Definition:** The close path's check that no episode already exists
+  under this span's **replay span identity**. Write-path only. Bounds
+  the growth curve that narrowing the shape-(a) skip would otherwise
+  hand back, since catch-up has no watermark and re-reads the same
+  last-N window every boot. Does not cover a window that MOVED — a
+  different span, which derives again and overlaps.
+
 ## RFC 0052 — Autonomous Channels (PR 4b-i)
 
 Terms from [RFC 0052](rfcs/0052-autonomous-agent-channels.md) PR 4b-i,

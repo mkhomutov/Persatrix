@@ -25,7 +25,7 @@ from ..memory.projections import ENTRY_TIER_EPISODE, replace_entry_projections
 from ..observability.metrics import current_agent_id, try_get_instruments
 from .fact_extractor import dispatch_facts_from_response
 from .record_close import record_closed_interaction
-from .summarize_close import summarize_closed_interaction
+from .summarize_close import SUMMARIZATION_TIMEOUT_SEC, summarize_closed_interaction
 
 if TYPE_CHECKING:
     from ..llm_client import LLMClient
@@ -37,6 +37,22 @@ logger = logging.getLogger(__name__)
 
 # RFC 0020 PR 4 (PR #229 Should-Fix #2): on-tick janitor cooldown.
 JANITOR_INTERVAL_SEC: float = 300.0
+
+#: Wall-clock ceiling on the SHUTDOWN drain (v0.3.15 PR B2 review).  Two
+#: summarise rounds — enough for the tasks already holding a
+#: :func:`~agents.persona_runtime.replay_sweep.replay_summarize_gate` slot
+#: to finish, and not enough for a boot-sized backlog behind that gate to
+#: hold the agent lock for minutes.  Until this release the sweep derived
+#: nothing and so spawned nothing, and the drain was effectively empty;
+#: it now takes one task per replayed SPEAKER per room, paced four at a
+#: time at up to ``SUMMARIZATION_TIMEOUT_SEC`` each, and ``close_memory``
+#: awaits it while holding ``_lock``, which blocks ``on_event``.
+#:
+#: Bounding it is only safe because an abandoned Phase 2 is now
+#: RECOVERABLE: its row stays ``[summary pending]``, the janitor converts
+#: it, and the ISSUE-0130 (b) re-derivation guard no longer counts that
+#: tombstone as a derivation, so the next boot re-derives the span.
+DRAIN_TIMEOUT_SEC: float = SUMMARIZATION_TIMEOUT_SEC * 2
 
 
 async def finalize_closed_interaction(
@@ -161,16 +177,42 @@ async def finalize_closed_interaction(
 
 async def drain_pending_summary_tasks(
     pending: set[asyncio.Task[None]],
+    *,
+    timeout: float | None = None,
 ) -> None:
     """Await every in-flight background summary task.
 
     Snapshot semantics: a task spawned during the await is picked up
     by the next call rather than this one, which is what callers want
     on shutdown (``close_memory``) and in tests.
+
+    ``timeout`` bounds the wait (v0.3.15 PR B2 review); ``None`` — the
+    default every existing caller keeps — waits indefinitely, as before.
+    Tasks still running when it expires are CANCELLED and then awaited, so
+    the drain never returns while a task could still touch the
+    ``EpisodicMemory`` DB handle the caller is about to close.  A
+    cancelled Phase 2 leaves its row ``[summary pending]`` for the
+    janitor, which is a state the close path is already built to recover
+    from — see :data:`DRAIN_TIMEOUT_SEC` for why that is now true.
     """
     snapshot = list(pending)
-    if snapshot:
+    if not snapshot:
+        return
+    if timeout is None:
         await asyncio.gather(*snapshot, return_exceptions=True)
+        return
+    _, still_running = await asyncio.wait(snapshot, timeout=timeout)
+    if not still_running:
+        return
+    logger.warning(
+        "Summary drain timed out after %.0fs with %d task(s) still "
+        "running; cancelling them (their rows stay pending for the "
+        "janitor and re-derive on the next boot)",
+        timeout, len(still_running),
+    )
+    for task in still_running:
+        task.cancel()
+    await asyncio.gather(*still_running, return_exceptions=True)
 
 
 async def maybe_run_janitor(

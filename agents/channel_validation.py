@@ -294,7 +294,8 @@ def validate_channel_message_dict(
     * ``respond_policy`` — not on the JSON wire shape
       (``internal/server/channel_types.go::channelMessageResponse``);
       the catch-up fetcher resolves it from the membership endpoint
-      via ``_resolve_respond_policy`` and validates the result there.
+      via ``channel_catchup_discovery.resolve_respond_policy`` and
+      validates the result there.
     * ``thread_parent_sender_id`` — not on the JSON wire shape (PR-265
       review L2 documents the asymmetry); validation is a no-op for
       this field on the catch-up path.
@@ -360,6 +361,21 @@ def validate_channel_message_dict(
         return (
             f"message_id exceeds {_CHANNEL_MESSAGE_ID_MAX_CHARS} characters (got {len(message_id)})"
         ), None
+    if not message_id.strip():
+        # ISSUE-0130 (b): an id-less row is not merely odd, it is a row the
+        # replay span identity cannot name — and the identity is
+        # all-or-nothing by design (a digest over the identified SUBSET
+        # would let two different spans collide and cost the second its
+        # memory).  One blank id therefore disarmed the re-derivation guard
+        # for that whole window, on EVERY boot, since the condition is
+        # deterministic: the growth curve back, with only a WARN.
+        #
+        # Dropping the row here is the cheap end of that trade and is safe
+        # precisely because it IS deterministic — every boot drops the same
+        # row, so the surviving span's digest is identical across boots.
+        # `messages.id` is the store's primary key, so a real orchestrator
+        # never sends this.
+        return "message_id is empty", None
 
     expected_prefix = _CHANNEL_TYPE_PREFIXES.get(channel_type)
     if expected_prefix is None:

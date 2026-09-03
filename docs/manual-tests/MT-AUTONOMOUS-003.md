@@ -19,7 +19,7 @@ MT-AUTONOMOUS-001 proved one convening runs and terminates with artifacts; this 
 
 **Out of Scope** — deferred, **not asserted** here:
 
-- **The one-shot convene→converge→terminate→synthesize backbone** and the `1 + N` reserve — [MT-AUTONOMOUS-001](MT-AUTONOMOUS-001.md); the per-convening close is the same path and is not re-proved here.
+- **The one-shot convene→converge→terminate→synthesize backbone** and the `1 + R` reserve — [MT-AUTONOMOUS-001](MT-AUTONOMOUS-001.md); the per-convening close is the same path and is not re-proved here.
 - **Anti-collapse cadence** (Phase 2) — [MT-AUTONOMOUS-002](MT-AUTONOMOUS-002.md).
 - **An operator-supplied topic queue.** Phase 3 ships a fixed/rotating topic ([OQ #4](../rfcs/0052-autonomous-agent-channels.md#open-questions)); each scheduled convening opens on the same `autonomous.topic`/`agenda`. A per-convening topic queue is a follow-up.
 - **A runtime `RegisterTimer` API** and a **durable (cross-restart) aggregate count.** The bound is per-process (a restart refills it — [PR-plan §7c-ii-b residual](../rfcs/0052-pr-plan.md)); persisting it needs a store migration RFC 0052 rules out. Both are follow-ups.

@@ -167,7 +167,7 @@ func (r *ChannelRouter) closeOnSynthesisReply(ctx context.Context, msg ChannelMe
 	// The zero-value closeNotify IS this path's contract: notify the sender
 	// too, sole delivery (redelivery=false — no per-recipient miss ledger
 	// applies to a reply nobody was dispatched).
-	if r.boundedClose(ctx, msg, ct, pending.interactionID, pending.trigger, closeNotify{}) {
+	if r.boundedClose(ctx, msg, ct, pending.channelSize, pending.interactionID, pending.trigger, closeNotify{}) {
 		r.recordSynthesisTurn(ctx, ct, synthesisTurnClosedOnReply)
 		return
 	}

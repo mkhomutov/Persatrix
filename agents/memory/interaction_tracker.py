@@ -29,7 +29,9 @@ import time
 import uuid
 from typing import TYPE_CHECKING, Protocol
 
+from ..epoch_id import resolve_epoch_id_silent
 from ..session_id import LEGACY_SESSION_ID
+from ._replay_bookkeeping import _ReplayBookkeepingMixin
 from .boundary_detectors import (
     DEFAULT_IDLE_TIMEOUT_SEC,
     REASON_MAX_TURNS,
@@ -71,7 +73,7 @@ class Clock(Protocol):
 _DEFAULT_CLOCK: Clock = time.time
 
 
-class InteractionTracker:
+class InteractionTracker(_ReplayBookkeepingMixin):
     """Per-agent, in-memory tracker keyed ``(principal, speaker, scope)``.
 
     One open interaction per key at a time.  Calls to :meth:`add_turn`
@@ -104,6 +106,7 @@ class InteractionTracker:
         clock: Clock | None = None,
     ) -> None:
         self._open: dict[RecordKey, Interaction] = {}
+        self._init_replay_bookkeeping()
         # Detector chain is evaluated in order; first ``(True, reason)``
         # wins.  Default chain: structural → idle-gap → topic-shift no-op.
         self._detectors: tuple[BoundaryDetector, ...] = (
@@ -178,6 +181,7 @@ class InteractionTracker:
         classification: str | None = None,
         source_channel_id: str | None = None,
         replayed: bool = False,
+        replay_attributed: bool = False,
         principal_id: str | None = None,
         speaker_id: str | None = None,
     ) -> Interaction:
@@ -204,6 +208,23 @@ class InteractionTracker:
         the other two key axes, resolved per the class docstring and
         frozen onto the record — trivially only-on-open, since a
         different pair IS a different key.
+
+        ``replay_attributed`` (ISSUE-0130 shape (b)) rides beside
+        ``replayed`` under the same only-on-open rule and answers the one
+        question the key cannot: whether that replayed turn carried a
+        persisted principal at all, as opposed to resolving the
+        single-tenant default.  See
+        :class:`~agents.memory.interaction_types.Interaction`.
+
+        The EPOCH is captured here rather than accepted as an argument —
+        it is not a key axis, so no caller has to know about it, and
+        capturing it at the one place records are minted covers the fans
+        and the replay sweep as well as the ingest.  Same precedence the
+        tiers write under (:func:`~agents.epoch_id.resolve_epoch_id_silent`
+        — task-local scope, else the world epoch), so the frozen value
+        equals what an ambient read at open would have produced; the
+        close path re-binds it so a record closed inside another
+        request's scope is still stamped with its own.
         """
         key = resolve_record_key(scope, principal_id, speaker_id)
         existing = self._open.get(key)
@@ -216,10 +237,12 @@ class InteractionTracker:
             started_at=ts,
             session_id=session_id or LEGACY_SESSION_ID,
             replayed=replayed,
+            replay_attributed=replay_attributed,
             classification=classification,
             source_channel_id=source_channel_id,
             principal_id=key[0],
             speaker_id=key[1],
+            epoch_id=resolve_epoch_id_silent(),
         )
         self._open[key] = interaction
         _emit_opened()
@@ -235,6 +258,7 @@ class InteractionTracker:
         classification: str | None = None,
         source_channel_id: str | None = None,
         replayed: bool = False,
+        replay_attributed: bool = False,
         principal_id: str | None = None,
         speaker_id: str | None = None,
     ) -> Interaction:
@@ -265,6 +289,7 @@ class InteractionTracker:
                 classification=classification,
                 source_channel_id=source_channel_id,
                 replayed=replayed,
+                replay_attributed=replay_attributed,
                 principal_id=key[0], speaker_id=key[1],
             )
         interaction.turns.append(Turn(at=ts, payload=payload or {}))
@@ -324,6 +349,7 @@ class InteractionTracker:
         *,
         reason: CloseReason,
         now: float | None = None,
+        replay_window_complete: bool | None = None,
     ) -> Interaction | None:
         """Close one specific open record (identity-guarded).
 
@@ -343,6 +369,22 @@ class InteractionTracker:
         ts = now if now is not None else self._clock()
         interaction.closed_at = ts
         interaction.close_reason = reason
+        if replay_window_complete is not None:
+            # Set HERE rather than by the caller after the fact (PR B2
+            # review): the truncation note below reads the flag, so a
+            # caller that assigned it after ``close_record`` returned had
+            # every record it closed self-register as a truncation.  That
+            # was inert only because the one such caller snapshotted the
+            # compromised set before its loop and cleared it afterwards —
+            # an invariant spread across two packages, with the failure
+            # mode "every derivation in the pass is silently refused".
+            # Passing it in makes "decided" and "recorded" one event.
+            interaction.replay_window_complete = replay_window_complete
+        if interaction.replayed and not interaction.replay_window_complete:
+            # A TRUNCATED replayed record — see ``_replay_bookkeeping``.
+            self.note_replayed_close(
+                interaction.source_channel_id or "", interaction.speaker_id,
+            )
         _emit_closed(reason)
         return interaction
 

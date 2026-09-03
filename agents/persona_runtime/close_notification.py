@@ -316,13 +316,17 @@ async def close_interaction_on_notification(
         # cap the PR 4a reserve was carved from — ``summarize_close.py``
         # threads that lease off ``meter_close_summary``.  Marked on every
         # record the fan will close: each ``(principal, speaker)`` record
-        # authors its own summary, and each of those draws its own lease
-        # (the reserve multiplier residuals PR 4b re-sizes).  Interim
-        # consequence, stated (PR #846 review): on the COST trigger the
-        # residual hard-cap headroom is at most the old ``1 + N`` reserve
-        # by construction, so a multi-speaker room's ~N×S leases can
-        # over-commit it and late summaries degrade to the unavailable
-        # placeholder until the PR 4b re-size lands.  The
+        # authors its own summary, and each of those draws its own lease.
+        # The reserve is sized for exactly that count since residuals PR
+        # 4b (``wallet.CloseRecordUpperBound``), so the interim over-commit
+        # PR #846 stated — a multi-speaker room's ~N×S leases against a
+        # reserve carved for ``1 + N`` — is closed.  What remains is the
+        # half-cap CLAMP: on a cap too small to fund the room's close the
+        # reserve is capped at half the ceiling regardless, late summaries
+        # still degrade to the unavailable placeholder, and the
+        # orchestrator now says so on
+        # ``channel.conversation.synthesis_reserve_clamped`` rather than
+        # leaving it silent (calibration: ISSUE-0138).  The
         # pre-ingest/post-close double-mark the per-event ingest needed is
         # gone with it — the direct append below cannot close a record, so
         # one mark on the live records covers the only path left.

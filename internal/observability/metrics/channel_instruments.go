@@ -153,6 +153,25 @@ func registerChannelInstruments(m metric.Meter, i *Instruments) error {
 	); err != nil {
 		return fmt.Errorf("create channel.conversation.synthesis_turn: %w", err)
 	}
+	// ISSUE-0082 residuals PR 4b (v0.3.15) close-path reserve clamp signal. One
+	// increment per bounded close that fired while the half-cap clamp was holding
+	// back LESS than the close path is sized to need, labelled by `channel_type`
+	// and `trigger` (structural / cost). Every increment is a close whose late
+	// per-record summaries may commit the RFC 0020 janitor's unavailable
+	// placeholder — a SILENT quality regression the counter exists to make loud.
+	// The v0.3.15 `(principal, speaker, scope)` re-key multiplied the record
+	// count, so this fires in ordinary configs rather than only tiny caps; its
+	// rate against `interaction_closed` is the input the deferred multiplier
+	// calibration (ISSUE-0138) is filed against, in the ISSUE-0109 idiom.
+	if i.ChannelConversationSynthesisReserveClamped, err = m.Int64Counter(
+		"channel.conversation.synthesis_reserve_clamped",
+		metric.WithUnit("{close}"),
+		metric.WithDescription(
+			"Bounded closes fired with a half-cap-clamped close-path reserve, labelled by channel_type and trigger.",
+		),
+	); err != nil {
+		return fmt.Errorf("create channel.conversation.synthesis_reserve_clamped: %w", err)
+	}
 	// RFC 0052 §C (v0.3.11 PR 6) anti-collapse cadence counter. One increment per
 	// convener forced turn dispatched on a stalled autonomous floor round, labelled
 	// by `channel_type` and `outcome` (advance / reinvite / dispatch_error) — the

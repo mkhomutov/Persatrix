@@ -60,6 +60,19 @@ ISSUE_FILE_PATTERN = re.compile(r"^ISSUE-\d{4}-[a-z0-9-]+\.md$")
 #: INDEX.md — mirrors ``COMPANION_SUFFIXES`` in ``scripts/rfcs.py``.
 COMPANION_SUFFIXES = ("-pr-plan", "-phase0-gate", "-build-log", "-reserve-sizing")
 
+#: Companion stems matched by PATTERN rather than by a literal suffix.
+#: A round of PR review findings written up against one issue — sibling of
+#: ``scripts/rfcs.py``'s ``-calibration-review``, and numbered because
+#: there is a round 3 after a round 2.
+#:
+#: Spelled as a pattern because the suffix list is matched with a bare
+#: ``endswith``: a plain ``"-review"`` entry would silently reclassify any
+#: future issue whose slug merely ENDS in that very common word, dropping
+#: it from INDEX.md and exempting it from front-matter validation with no
+#: warning printed. Every literal above is a distinctive multi-word phrase
+#: for the same reason.
+COMPANION_PATTERNS = (re.compile(r"-round-\d+-review$"),)
+
 ALLOWED_STATUS = {"open", "in_progress", "resolved"}
 ALLOWED_SEVERITY = {"low", "medium", "high", "critical"}
 
@@ -102,7 +115,9 @@ def _is_companion(name: str) -> bool:
     is still treated as an issue.
     """
     stem = name.removesuffix(".md")
-    return any(stem.endswith(suffix) for suffix in COMPANION_SUFFIXES)
+    return any(
+        stem.endswith(suffix) for suffix in COMPANION_SUFFIXES
+    ) or any(pattern.search(stem) for pattern in COMPANION_PATTERNS)
 
 
 def collect_issues() -> list[Issue]:

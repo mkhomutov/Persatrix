@@ -2,7 +2,7 @@
 
 Pins the two-path ingress contract: the live gRPC lift
 (``channel_wire_metadata.seed_wire_metadata``) and the catch-up replay
-(``channel_catchup._build_replay_event``) seed the SAME
+(``channel_replay_event.build_replay_event``) seed the SAME
 ``channel_classification`` metadata key through the SAME seam
 (``agents/channel_event_classification.py``), and the one shared reader
 resolves it — with the §A rule-(b) fail-closed tie: an unclassified legacy
@@ -13,12 +13,12 @@ the PR 3 interaction-open capture.
 
 from __future__ import annotations
 
-from agents.channel_catchup import _build_replay_event
 from agents.channel_event_classification import (
     CHANNEL_CLASSIFICATION_METADATA_KEY,
     seed_channel_classification,
     wire_channel_classification,
 )
+from agents.channel_replay_event import build_replay_event
 from agents.channel_wire_metadata import seed_wire_metadata
 from agents.generated import task_pb2
 from agents.persona_runtime.classification import (
@@ -111,7 +111,7 @@ class TestLiveGRPCPath:
 
 
 class TestCatchupReplayPath:
-    """``_build_replay_event`` — the REST leg: the channel-list object's
+    """``build_replay_event`` — the REST leg: the channel-list object's
     ``classification`` (RFC 0037's channelResponse field) stamps replayed
     events with the same key the live path seeds."""
 
@@ -124,7 +124,7 @@ class TestCatchupReplayPath:
         }
 
     def test_replay_event_carries_channel_classification(self):
-        event = _build_replay_event(
+        event = build_replay_event(
             self._msg(), "group:leadership", "when_mentioned",
             {"id": "group:leadership", "channel_type": "group",
              "classification": "restricted"},
@@ -136,7 +136,7 @@ class TestCatchupReplayPath:
         """A pre-v0.3.12 orchestrator's channel JSON has no
         ``classification`` — the replayed event keeps key-ABSENCE (the
         exact-equality replay pins elsewhere rely on it) and reads floor."""
-        event = _build_replay_event(
+        event = build_replay_event(
             self._msg(), "group:planning", "when_mentioned",
             {"id": "group:planning", "channel_type": "group"},
         )

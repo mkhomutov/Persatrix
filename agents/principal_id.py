@@ -79,6 +79,12 @@ PRINCIPAL_METADATA_GRPC_KEY: Final[str] = "persatrix-principal"
 #: :data:`agents.session_id.EVENT_SESSION_METADATA_KEY`.
 EVENT_PRINCIPAL_METADATA_KEY: Final[str] = "persatrix_principal"
 
+#: Byte ceiling on a principal seeded from a REST payload
+#: (:func:`seed_principal_metadata`).  Mirrors the sibling wire seeds'
+#: bounds; generous against real subject ids, and far below anything that
+#: makes an unbounded metadata value interesting.
+_SEEDED_PRINCIPAL_MAX_BYTES: Final[int] = 256
+
 #: Task-local active principal (ISSUE-0081 PR 3).  Auto-copied into each
 #: :class:`asyncio.Task`, so a per-request ``principal_scope`` set on one
 #: task cannot bleed into a sibling task — the per-tenant isolation a
@@ -188,3 +194,71 @@ def principal_scope_from_metadata(
     if pid is not None:
         return principal_scope(pid)
     return nullcontext()
+
+
+def seed_principal_metadata(
+    metadata: dict[str, object], raw: object,
+) -> bool:
+    """Seed ``metadata`` with a principal carried on a REST payload.
+
+    The REPLAY-side twin of the live ingress's
+    ``event.metadata[EVENT_PRINCIPAL_METADATA_KEY] = request_principal``
+    (``agents.server_servicers``), added for ISSUE-0130 shape (b): the
+    on-startup catch-up replay is not a live dispatch, so its principal
+    arrives as the ``principal_id`` field of a history row
+    (channel-store v12) rather than as gRPC metadata.  Both producers
+    write the SAME key, so the one binder
+    (:func:`principal_scope_from_metadata`) attributes a replayed turn
+    exactly as it attributes a live one.
+
+    ``raw`` is accepted untyped because it comes off parsed JSON.  A
+    string that is non-empty AFTER STRIPPING and within
+    :data:`_SEEDED_PRINCIPAL_MAX_BYTES` seeds its stripped form and
+    returns ``True``; anything else — a missing key, ``""``, whitespace,
+    an over-long value, a non-string — seeds nothing and returns
+    ``False``.
+
+    Stripping is what makes the write end agree with the value that
+    ultimately decides the tenant.  :func:`principal_id_from_metadata`
+    tests bare truthiness, but the record key runs the bound principal
+    through :func:`normalize_principal_id`, which strips and falls back
+    to :data:`DEFAULT_PRINCIPAL_ID` — so seeding ``" "`` verbatim would
+    mark the span ATTRIBUTED while landing its content in the shared
+    ``local`` tenant, which is the leak the attribution exists to stop.
+    Seeding the stripped form keeps the presence bit and the resolved
+    value telling the same story (v0.3.15 PR B2 review).
+
+    The byte bound is the same reason the sibling seeds on the adjacent
+    lines carry one (:func:`agents.channel_event_classification
+    .seed_channel_classification`, :func:`agents.channel_wire_metadata
+    .seed_replay_metadata`): this value arrives on the REST history
+    surface, which shares the cleartext gRPC port's TLS-deferred trust
+    boundary, and it is written to a strict-equality tenant column.  An
+    unbounded one is both a memory vector and a way to strand rows in a
+    tenant no real caller can name.
+
+    **The boolean is the consumer's real question**, not a convenience:
+    absent means *this row predates the column* (a pre-v12 orchestrator),
+    which is unattributable, while a present ``"local"`` is a real answer
+    ("no verified tenant" — an unauthenticated publish, or the whole
+    deployment under ``auth.mode: disabled``) and IS attributable.  Only
+    the presence distinguishes them, which is why
+    ``channelMessageResponse.PrincipalID`` is deliberately not
+    ``omitempty`` on the Go side.  ``agents.persona_runtime.close_path``
+    branches on exactly this to decide whether a replayed span may derive.
+
+    This is a WRITE-side attribution only.  The seeded value is evidence
+    of the same grade as the publish that produced it — the publish
+    ingress is ``policyPublic``, so a spoofed ``sender_id`` inside a live
+    dispatch's TTL can steer the ISSUE-0124 re-stamp — and it must never
+    become a READ selector: the replay handler performs no recall (the
+    ``replay_mode`` short-circuit returns before the gate and the LLM),
+    so this binds nothing but where the derived rows land.
+    """
+    if not isinstance(raw, str):
+        return False
+    seeded = raw.strip()
+    if not seeded or len(seeded.encode("utf-8")) > _SEEDED_PRINCIPAL_MAX_BYTES:
+        return False
+    metadata[EVENT_PRINCIPAL_METADATA_KEY] = seeded
+    return True

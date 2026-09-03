@@ -155,7 +155,8 @@ func initChannels(
 			// End-vote-close-propagation amendment (CP5).
 			CloseNotification: orchMetrics.ChannelConversationCloseNotification,
 			// RFC 0052 §D chair synthesis-turn lifecycle (v0.3.11 PR 4b-ii).
-			SynthesisTurn: orchMetrics.ChannelConversationSynthesisTurn,
+			SynthesisTurn:           orchMetrics.ChannelConversationSynthesisTurn,
+			SynthesisReserveClamped: orchMetrics.ChannelConversationSynthesisReserveClamped,
 			// RFC 0052 §C convener anti-collapse cadence (v0.3.11 PR 6).
 			ConvenerAdvance: orchMetrics.ChannelConversationConvenerAdvance,
 		}

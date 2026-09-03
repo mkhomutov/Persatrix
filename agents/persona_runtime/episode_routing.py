@@ -2,10 +2,14 @@
 
 Extracted from :mod:`agents.persona_runtime.state_persistence` so that
 module stays under the 500-line file-size cap enforced by
-``scripts/checks/file_size.py --strict``.  Houses the per-event routing
-path (single-turn vs. multi-turn vs. unknown), the close-path two-phase
-write, the background-summary drain, and the ``closing``-row janitor
-entry point.
+``scripts/checks/file_size.py --strict``.  Houses the per-event ROUTING
+path — single-turn vs. multi-turn vs. unknown, which scope a turn joins,
+and what its payload carries — all of it on the dispatch hot path.  What
+happens to a record once it is CLOSED moved on to
+:mod:`agents.persona_runtime.close_lifecycle` (v0.3.15 PR B2 review round
+3), which this mixin INHERITS rather than sitting beside: the concrete
+agent composes one name, and callers typed against this mixin keep seeing
+``_persist_closed_interaction`` without an intersection type.
 
 This mixin is composed onto ``_LLMPersonaAgent`` alongside
 :class:`~agents.persona_runtime.state_persistence._StatePersistenceMixin`
@@ -27,34 +31,28 @@ if TYPE_CHECKING:
     from ..persona_types import AgentAction, AgentEvent
     from . import MemoryNamespace
 
-from ..channel_event_classification import wire_channel_classification
 from ..memory.boundary_detectors import (
-    DEFAULT_CLOSING_GRACE_SEC,
     REASON_STRUCTURAL,
 )
 from ..memory.episodic import EpisodicMemory
 from ..memory.interactions import (
     SCOPE_TICK,
-    Interaction,
     InteractionTracker,
-    cleanup_closing_interactions,
     scope_for_channel_event,
 )
 from ..persona_types import EventType
 from ..session_id import current_session_id
+from .close_lifecycle import _CloseLifecycleMixin
 from .close_path import (
-    close_replayed_scopes,
     close_stale_records,
-    persist_closed_interaction,
     persist_fanned_closes,
 )
-from .finalize_close import drain_pending_summary_tasks
 from .interaction_boundary import (
     is_session_end_event,
     scope_wire_anchor,
     wire_admits_record,
 )
-from .turn_payload import build_turn_payload
+from .turn_payload import build_turn_payload, frozen_open_capture
 from .vote_close import PendingVoteClose, park_end_vote_close
 
 logger = logging.getLogger(__name__)
@@ -62,7 +60,7 @@ logger = logging.getLogger(__name__)
 __all__ = ["_EpisodeRoutingMixin"]
 
 
-class _EpisodeRoutingMixin:
+class _EpisodeRoutingMixin(_CloseLifecycleMixin):
     """RFC 0020 routing + close-path orchestration for ``_LLMPersonaAgent``.
 
     Expects the following attributes on ``self`` (provided by the
@@ -324,7 +322,16 @@ class _EpisodeRoutingMixin:
         # (v0.3.15 residuals PR 3) — shared with the close-notification
         # room fan, which must land the closing message on every open
         # record, not just the sender's.
-        payload = build_turn_payload(event, summary)
+        # ISSUE-0130 (b) — the same-boot live/replay overlap.  The turn is
+        # APPENDED and only MARKED, so the span digest still covers it;
+        # ``agents.memory._replay_bookkeeping`` states why.
+        payload = build_turn_payload(
+            event, summary,
+            live_duplicate=self._interaction_tracker.observe_wire_message(
+                event.message_id or "",
+                replayed=event.metadata.get("replay_mode") is True,
+            ),
+        )
         # The wire anchor this scope answers to: the rotation boundary
         # below, the admission conjunct on the session-end fan, and the
         # wallet-lease read must all resolve the SAME id (PR #716 review),
@@ -356,19 +363,11 @@ class _EpisodeRoutingMixin:
         interaction = self._interaction_tracker.add_turn(
             scope, payload=payload,
             session_id=self._active_write_session_id,
-            # RFC 0037 §C (PR 3): the interaction-open capture pair —
-            # verbatim wire classification (the shared drift-pinned reader)
-            # + acting channel id; honoured only when this turn OPENS the
-            # interaction (frozen-at-open, the ``session_id`` rule).
-            classification=wire_channel_classification(event),
-            source_channel_id=event.channel_id or None,
-            # ISSUE-0130: frozen-at-open like the pair above; the close path
-            # skips derivation for a replayed span (no principal to attribute).
-            replayed=event.metadata.get("replay_mode") is True,
-            # ISSUE-0131: the speaker half of the key — the turn lands in
-            # ITS sender's record; the principal half resolves ambient
-            # (the ``on_event`` request scope) inside the tracker.
-            speaker_id=event.sender_id,
+            # The frozen-at-open capture set — RFC 0037 §C classification
+            # + channel, the ISSUE-0130 replay pair, and the ISSUE-0131
+            # speaker key half.  One named set in ``turn_payload`` since
+            # v0.3.15 PR B2, where the rule they share is stated.
+            **frozen_open_capture(event),
         )
         # Stamp the wire id the interaction was opened under (first turn
         # that carries one wins) plus its known predecessor — the
@@ -430,71 +429,3 @@ class _EpisodeRoutingMixin:
                 self, event, scope=scope, interaction=interaction,
                 actions=actions,
             )
-
-    async def _persist_closed_interaction(self, interaction: Interaction) -> None:
-        """RFC 0020 PR 4 close-path orchestrator — see
-        :func:`agents.persona_runtime.close_path.persist_closed_interaction`.
-
-        Thin seam over the extracted two-phase write so this module stays
-        under the file-size cap; tests patch / call this method directly.
-        """
-        await persist_closed_interaction(
-            episodic=self._episodic_memory,
-            llm_client=self._llm_client,
-            memory_ns=self._memory_ns,
-            agent_id=self.agent_id,
-            interaction=interaction,
-            pending_tasks=self._pending_summarize_tasks,
-            on_finalized=self._tick_auto_reflect_counter,
-        )
-
-    async def close_replayed_interactions(self) -> int:
-        """The catch-up caller's ISSUE-0130 hook — see
-        :func:`agents.persona_runtime.close_path.close_replayed_scopes`."""
-        return await close_replayed_scopes(
-            self._interaction_tracker, self._persist_closed_interaction,
-        )
-
-    async def drain_pending_summaries(self) -> None:
-        """Await in-flight background summary tasks (RFC 0020 PR 4).
-
-        PR 6 review #23 — :func:`drain_pending_summary_tasks`
-        snapshots the pending set with ``list(...)``.  :meth:`close_memory`
-        runs this drain under ``self._lock`` so no new close path can
-        race in and spawn an un-awaited task.  A refactor that moves
-        the drain outside the lock MUST switch to a loop-until-empty
-        drain or it will silently lose late-arriving tasks.
-        """
-        await drain_pending_summary_tasks(self._pending_summarize_tasks)
-
-    async def _tick_auto_reflect_counter(self) -> None:
-        """Increment the auto-reflect counter on close (RFC 0020 §H).
-
-        Nudges now fire on N closed interactions, not N inbound events.
-        Best-effort: counter-store hiccup must not break the close path.
-        """
-        memory_cfg = self.config.get("memory") or {}
-        notes_cfg = memory_cfg.get("notes") or {}
-        if int(notes_cfg.get("auto_reflect_after", 0)) <= 0:
-            return
-        try:
-            await self._episodic_memory.increment_interaction_count()
-        except Exception:
-            logger.debug(
-                "auto-reflect counter increment failed for agent %s",
-                self.agent_id, exc_info=True,
-            )
-
-    async def cleanup_closing_interactions(
-        self, *, grace_sec: float = DEFAULT_CLOSING_GRACE_SEC,
-        now: float | None = None,
-    ) -> int:
-        """Public janitor entry point (RFC 0020 PR 4 §C).
-
-        Wires the agent's own DB handle and id into
-        :func:`agents.memory.interactions.cleanup_closing_interactions`.
-        """
-        db = self._episodic_memory._ensure_db()
-        return await cleanup_closing_interactions(
-            db, self.agent_id, grace_sec=grace_sec, now=now,
-        )

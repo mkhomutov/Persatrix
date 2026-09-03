@@ -350,4 +350,39 @@ MIGRATIONS: list[tuple[int, str, str]] = [
         "close-path binding writes it)",
         "",  # handled by _apply_migration_18()
     ),
+    # Migration 19 (ISSUE-0130 (b), v0.3.15 PR B2 review) indexes the
+    # ``(agent_id, interaction_id)`` lookup on ``episodes``.  Two callers
+    # run exactly that predicate and BOTH were scanning the agent's whole
+    # partition through ``idx_episodes_agent``:
+    #
+    #   * ``update_episode_summary`` — the close path's Phase 2, on EVERY
+    #     close, live and replayed, and since the ISSUE-0123 re-key that
+    #     is once per speaker per room rather than once per room; and
+    #   * ``episode_exists_for_interaction`` — the shape-(b)
+    #     re-derivation guard, once per replayed span, on the boot path.
+    #
+    # The scan is linear in the agent's episode count, which for a persona
+    # has no ceiling: the eviction loop only runs inside ``MemoryStore``,
+    # which personas never construct (they build tiers through
+    # ``personal_tiers``).  Measured on file-backed SQLite with realistic
+    # 3 KB ``context_json`` rows: 0.64 ms per lookup at 1 000 episodes,
+    # 4.2 ms at 5 000, 15.8 ms at 20 000 — against 0.002 ms indexed, where
+    # the guard's lookup becomes a COVERING index scan.  Build cost is
+    # 20 ms and 520 KiB at 20 000 rows.
+    #
+    # ``CREATE INDEX IF NOT EXISTS`` is idempotent, so the inline-SQL
+    # path would have served — except on the baseline where ``episodes``
+    # does not exist at all (``TestEmptyEpisodesGuard``), where CREATE
+    # INDEX raises rather than no-opping.  So it takes the same
+    # ``sqlite_master`` guard as its siblings and lives in
+    # :mod:`agents.memory._migration_episode_interaction_index`.
+    # This adds no column and changes no read RESULT — only the plan —
+    # so there is no reader for it to land "after", in the sense the
+    # v0.3.15 plan's no-migration-after-its-consumer criterion means.
+    (
+        19,
+        "ISSUE-0130 (b): index episodes(agent_id, interaction_id) — the "
+        "close path's Phase-2 match and the replay re-derivation guard",
+        "",  # handled by _apply_migration_19()
+    ),
 ]

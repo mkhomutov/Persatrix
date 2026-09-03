@@ -98,6 +98,8 @@ type Instruments struct {
 	ChannelConversationCloseNotification    metric.Int64Counter
 	ChannelConversationSynthesisTurn        metric.Int64Counter
 	ChannelConversationConvenerAdvance      metric.Int64Counter
+	// ChannelConversationSynthesisReserveClamped — ISSUE-0082 residuals PR 4b; see channel_instruments.go.
+	ChannelConversationSynthesisReserveClamped metric.Int64Counter
 	// ChannelConversationInteractionCapUtilization — ISSUE-0109 calibration series (spend-at-close / cap); see channel_instruments.go.
 	ChannelConversationInteractionCapUtilization metric.Float64Histogram
 	// SessionsWrites — RFC 0031 Phase 1; see channel_instruments.go.
