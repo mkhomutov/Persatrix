@@ -5,7 +5,7 @@ On agent startup the RFC 0011 channel catch-up replays the last N messages
 of every subscribed channel through ``on_event`` with
 ``metadata["replay_mode"] = True``.  Those events carry **no principal**:
 the orchestrator's ``messages`` table has no principal column, so
-``_build_replay_event`` has nothing to seed and the persona binds its
+``build_replay_event`` has nothing to seed and the persona binds its
 default (``local``).  Before this fix the close path still summarised the
 replayed span and ran the RFC 0026 extractor over it, writing one
 authenticated person's content into the shared ``local`` tenant — where
@@ -18,10 +18,18 @@ Found live at the v0.3.14 ``MT-MEMORY-MULTIUSER-001`` execution run
 (F-2), where a persona restart mid-arc produced two ``local`` episodes
 and two ``local`` facts duplicating Alice's private disclosure.
 
+**Narrowed by shape (b) (v0.3.15 PR B2).**  ``messages.principal_id``
+(channel-store v12) now persists the tenant at publish and
+``build_replay_event`` seeds it, so the skip applies to the spans that
+still cannot name a tenant — a pre-v12 orchestrator's history — rather
+than to every replayed span.  These tests hold the SKIP; the attributed
+half, end to end from the history JSON, is
+:mod:`tests.integration.test_catchup_replay_attribution`.
+
 The bar these tests hold:
 
-1. an interaction opened by a replayed turn is flagged, and its close
-   derives nothing;
+1. an interaction opened by an UNATTRIBUTED replayed turn is flagged,
+   and its close derives nothing — while an attributed one derives;
 2. the flag rides the same only-on-open contract as ``session_id`` — it
    is frozen in both directions;
 3. **a live turn never lands in a flagged span.**  Replay opens tracker
@@ -49,11 +57,9 @@ from agents.memory.boundary_detectors import (
 )
 from agents.memory.interactions import InteractionTracker
 from agents.persona import create_persona_agent
-from agents.persona_runtime.close_path import (
-    close_replayed_scopes,
-    persist_closed_interaction,
-)
+from agents.persona_runtime.close_path import persist_closed_interaction
 from agents.persona_runtime.interaction_boundary import stale_close_reason
+from agents.persona_runtime.replay_sweep import close_replayed_scopes
 from agents.persona_types import AgentEvent, EventType
 
 from ._persona_test_helpers import _PERSONA_CONFIG, _make_client
@@ -71,6 +77,35 @@ def test_live_turn_leaves_the_interaction_unflagged() -> None:
     tracker = InteractionTracker()
     interaction = tracker.add_turn("dm:alice")
     assert interaction.replayed is False
+
+
+def test_replay_attribution_is_captured_at_open() -> None:
+    """ISSUE-0130 (b): the second half of the marker pair."""
+    tracker = InteractionTracker()
+    interaction = tracker.add_turn(
+        "dm:alice", replayed=True, replay_attributed=True,
+    )
+    assert (interaction.replayed, interaction.replay_attributed) == (True, True)
+
+
+def test_replay_attribution_defaults_off() -> None:
+    tracker = InteractionTracker()
+    assert tracker.add_turn("dm:alice", replayed=True).replay_attributed is False
+
+
+def test_a_later_turn_cannot_attribute_an_unattributed_span() -> None:
+    """Frozen at open beside ``replayed``.
+
+    The mixed-orchestrator case: whichever row OPENED the record decides,
+    so a span opened by an unattributable turn stays unattributable and
+    is skipped whole.  Letting a later turn flip it would derive a
+    summary spanning rows whose tenant was never established.
+    """
+    tracker = InteractionTracker()
+    opened = tracker.add_turn("dm:alice", replayed=True)
+    again = tracker.add_turn("dm:alice", replayed=True, replay_attributed=True)
+    assert again is opened
+    assert opened.replay_attributed is False
 
 
 def test_replay_appended_to_a_live_interaction_does_not_flag_it() -> None:
@@ -95,10 +130,11 @@ def test_live_turn_cannot_clear_a_replayed_interactions_flag() -> None:
 
 
 class _RecordingEpisodic:
-    """Fails the test if the close path writes anything."""
+    """Records every write the close path attempts."""
 
     def __init__(self) -> None:
         self.calls: list[str] = []
+        self.asked: list[str] = []
 
     async def store_episode(self, **kwargs: object) -> str:
         self.calls.append("store_episode")
@@ -108,10 +144,30 @@ class _RecordingEpisodic:
         self.calls.append("store_closed_interaction")
         return "should-not-happen"
 
+    def active_epoch_id(self) -> str:
+        # ISSUE-0130 (b): the epoch axis of the span identity.  The real
+        # tier resolves this the same way ``store_episode`` stamps the
+        # row, so the digest and the row it guards agree.
+        return "live"
+
+    async def has_episode_for_interaction(self, interaction_id: str) -> bool:
+        # ISSUE-0130 (b): the re-derivation guard's lookup.  A spy that
+        # lacked it would answer through the guard's own except-branch,
+        # so the attributed test below would pass on the error path
+        # rather than on the one production takes.
+        self.asked.append(interaction_id)
+        return False
+
 
 @pytest.mark.asyncio
-async def test_replayed_interaction_derives_nothing_on_close() -> None:
-    """The leak-stopper: no episode row, so no facts extracted from it."""
+async def test_unattributed_replayed_interaction_derives_nothing_on_close(
+) -> None:
+    """The leak-stopper: no episode row, so no facts extracted from it.
+
+    Narrowed but not withdrawn (shape (b)) — this is now the pre-v12
+    orchestrator case, where the replayed rows carried no
+    ``principal_id`` and the span genuinely cannot name a tenant.
+    """
     tracker = InteractionTracker()
     opened = tracker.add_turn(
         "dm:alice", payload={"text": "My daughter Mira turns seven next month."},
@@ -188,6 +244,72 @@ async def test_live_interaction_still_derives__positive_control() -> None:
         "the identical span must reach storage when it is NOT replayed — "
         "otherwise the absence assertion above is vacuous"
     )
+
+
+@pytest.mark.asyncio
+async def test_attributed_replayed_interaction_derives_on_close() -> None:
+    """Shape (b): the same span, with the tenant its rows named.
+
+    The counterpart control to the skip above — identical setup, only
+    ``replay_attributed`` flipped.  Without it the narrowing is
+    untested from this side and the suite would stay green for a close
+    path that had simply kept refusing every replay.
+    """
+    tracker = InteractionTracker()
+    opened = tracker.add_turn(
+        # ``message_id`` is what the production replay path puts on every
+        # turn (``build_turn_payload``), and the re-derivation guard is
+        # built from it.  Without one here the guard exits through its
+        # "span carries no wire message ids" branch — leaving ``asked``
+        # empty and the id unreplaced, so this test would pass against a
+        # guard that had been stubbed out entirely (v0.3.15 PR B2 review).
+        "dm:alice", payload={
+            "text": "My daughter Mira turns seven next month.",
+            "message_id": "m-1",
+        },
+        replayed=True, replay_attributed=True, principal_id="alice-person",
+    )
+    closed = tracker.close_record(opened, reason=REASON_STRUCTURAL)
+    assert closed is not None
+    # This test is about ATTRIBUTION, so it isolates that axis: a record
+    # closed by a non-sweep door is refused by the completeness gate
+    # regardless of its tenant (its own test lives in
+    # ``test_replay_span_identity``), which would make the assertion below
+    # pass for the wrong reason.
+    closed.replay_window_complete = True
+    minted_at_open = closed.interaction_id
+
+    episodic = _RecordingEpisodic()
+    pending: set[asyncio.Task[None]] = set()
+
+    async def _on_finalized() -> None:
+        return None
+
+    await persist_closed_interaction(
+        episodic=episodic,  # type: ignore[arg-type]
+        llm_client=None,  # type: ignore[arg-type]
+        memory_ns=None,  # type: ignore[arg-type]
+        agent_id="ember-owl",
+        interaction=closed,
+        pending_tasks=pending,
+        on_finalized=_on_finalized,
+    )
+
+    assert episodic.calls == ["store_episode"], (
+        "an attributed replayed span must derive — refusing it is the "
+        "v0.3.14 cost shape (b) exists to remove"
+    )
+    # The guard ran on the production path, not the no-ids branch.
+    assert episodic.asked == [closed.interaction_id], (
+        "the close path must ASK the guard, using the id it then writes"
+    )
+    assert closed.interaction_id.startswith("replay-"), (
+        "the boot-stable identity must replace the uuid4 minted at open, "
+        "or the next boot cannot recognise this span"
+    )
+    assert closed.interaction_id != minted_at_open
+    for task in pending:
+        task.cancel()
 
 
 # ─── The catch-up → live boundary ──────────────────────────────────────

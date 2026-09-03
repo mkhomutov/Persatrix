@@ -59,8 +59,10 @@ class _SpyAgent:
     AgentEvent shape (event_type, channel_id, sender_id, replay_mode)
     without booting the full persona runtime.
 
-    Mirrors the surface ``replay_channel_history`` consumes: ``agent_id``
-    + ``async on_event(event)``. The integration with the real
+    Mirrors the surface ``replay_channel_history`` consumes: ``agent_id``,
+    ``async on_event(event)`` and ``note_replay_gap`` (the ISSUE-0130 (b)
+    hook the ingest-time derivation door reads — the real persona routes
+    it into its ``InteractionTracker``). The integration with the real
     ``_LLMPersonaAgent`` is covered by
     ``tests/unit/python/test_replay_mode_action_loop.py``.
     """
@@ -68,10 +70,14 @@ class _SpyAgent:
     def __init__(self, agent_id: str) -> None:
         self.agent_id = agent_id
         self.events: list[AgentEvent] = []
+        self.replay_gaps: list[tuple[str, str]] = []
 
     async def on_event(self, event: AgentEvent):
         self.events.append(event)
         return []
+
+    def note_replay_gap(self, channel_id: str, speaker_id: str) -> None:
+        self.replay_gaps.append((channel_id, speaker_id))
 
 
 @pytest.fixture

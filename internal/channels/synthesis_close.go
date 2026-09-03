@@ -63,6 +63,34 @@ package channels
 // interaction stays open and no notification ever carries a final turn; the
 // same accepted loss, reached without a closing message (the operator's
 // deliberate intervention owns the trade).
+//
+// THE CLOSE PATHS NEED NOT AGREE ON A PRINCIPAL (ISSUE-0082 residuals PR 4b,
+// v0.3.15). Until the `(principal, speaker, scope)` re-key, the timeout net
+// stashed the ARMING request's verified principal on the pending entry and
+// re-stamped its bare `context.Background()` with it, because the close-
+// notification fan had to land in the same tenant as the rest of the
+// interaction — while the reply and end-vote closes deliberately did NOT,
+// descending from the chair's unauthenticated publish. That asymmetry was
+// load-bearing only because the close DERIVED its rows under whichever
+// principal was ambient at close time. It no longer does, so the asymmetry is
+// RETIRED rather than resolved, and the stashed field is gone. Three legs, each
+// checked rather than assumed:
+//
+//   - The fan selects no record by tenant. `close_notification.py` closes
+//     `records_for_scope(scope)` — every record in the room, principal-blind —
+//     and `record_write_scopes` re-binds each record's OWN frozen principal (and
+//     epoch) for the whole derivation, so the derived episode and its facts land
+//     in the speaker's tenant no matter who closed the room.
+//   - The fan leaves no causal attribution. [markerCloseNotification] resolves
+//     `expectsReply() == false` (dispatch_control.go), and the ISSUE-0124 table
+//     is written only for a dispatch the orchestrator elected a reply from, so a
+//     notification cannot re-stamp the recipient's next publish either.
+//   - The fan writes no message row. `finalizeInteractionClose` dispatches; it
+//     never publishes, so ISSUE-0130's server-stamped `messages.principal_id`
+//     never sees this context.
+//
+// What the principal still governs is every path that DOES derive under the
+// ambient tenant — an ordinary turn's own write — and that rail is untouched.
 
 import (
 	"context"
@@ -71,8 +99,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric"
 	"go.uber.org/zap"
 )
 
@@ -94,25 +120,6 @@ const SynthesisDispatchSenderID = "orchestrator:synthesis"
 // Calibration belongs to the OQ #5 tracked issue alongside the reserve sizing.
 const defaultSynthesisReplyTimeout = 120 * time.Second
 
-// Synthesis-turn lifecycle outcomes on `channel.conversation.synthesis_turn
-// {channel_type, outcome}`. `dispatched` fires once per armed close;
-// `chair_missing`/`dispatch_error` label the degraded-to-immediate-close
-// branches (the shutdown-drain refusal degrades the same way but is
-// deliberately unmetered: nothing was dispatched, and the close still counts
-// on interaction_closed{…}); exactly one of
-// `closed_on_reply`/`closed_on_timeout` follows a `dispatched` (a racing
-// end-vote close can orphan the arm — its close is counted on
-// interaction_closed{end_votes} — and a mid-arm abandon (the RFC 0050
-// disable, the timeout's max_rounds-raise re-check) leaves the interaction
-// open and counts nothing; in both shapes neither closed_on_* fires).
-const (
-	synthesisTurnDispatched      = "dispatched"
-	synthesisTurnChairMissing    = "chair_missing"
-	synthesisTurnDispatchError   = "dispatch_error"
-	synthesisTurnClosedOnReply   = "closed_on_reply"
-	synthesisTurnClosedOnTimeout = "closed_on_timeout"
-)
-
 // pendingSynthesisClose is one armed close-on-reply: the bound has fired, the
 // synthesis turn is on the wire, and the interaction closes when the chair's
 // claimed reply lands (or the timer fires). Rides the resolver entry
@@ -126,6 +133,12 @@ type pendingSynthesisClose struct {
 	// stimulus is the bounding message, stashed for the timeout net's 4b-i
 	// teardown (the reply path closes with the reply instead).
 	stimulus ChannelMessage
+	// channelSize is the arm-time member count, stashed because both close
+	// paths behind an arm — the chair's claimed reply and the timeout net —
+	// reach [ChannelRouter.boundedClose] with no roster in hand, and its clamp
+	// signal must read the room the reserve was carved from at the TRIGGER, not
+	// whatever the roster is a reply timeout later.
+	channelSize int
 	// stimulusNotify carries the bounding stimulus's close-notification
 	// choices as the NAMED [closeNotify] fields, stashed verbatim from the
 	// arming tail so the timeout net's fallback close fans exactly what the
@@ -137,20 +150,6 @@ type pendingSynthesisClose struct {
 	// withholds), `undelivered` the members that round MISSED (see
 	// [liveDeliveryFailures]), downgraded to sole delivery by the fan.
 	stimulusNotify closeNotify
-	// principal is the arming request's verified principal, stashed because
-	// the timeout net runs on a TIMER goroutine with no request context and
-	// would otherwise reach [ChannelRouter.boundedClose] on a bare
-	// `context.Background()` (ISSUE-0082 Part 2, v0.3.14 PR 2). Principal is
-	// the ONLY axis such a reset exposes — session re-resolves, epoch falls
-	// back to the boot value — so left unfixed the close fan lands in
-	// `'local'` while the arming person's own turns are partitioned. The
-	// STRING, not the detached ctx: it is the entire delta a fresh context
-	// loses, and holding one for the ~2-minute window would pin it for
-	// nothing. Empty on every agent origin. Deliberately NOT mirrored on the
-	// reply / end-vote closes (they descend from the chair's unauthenticated
-	// publish): ISSUE-0082 R-1 — the close summary aggregates every speaker,
-	// so no one principal is right for it until tracker scope is per-speaker.
-	principal string
 	// consumed flips when the arm's close is DECIDED — the reply claim or the
 	// timeout fire won the identity CAS — but the teardown has not yet reached
 	// [ChannelRouter.markInteractionClosed]. The pointer deliberately STAYS on
@@ -259,12 +258,9 @@ func (r *ChannelRouter) maybeArmSynthesisClose(
 		trigger:        trigger,
 		chairID:        chairID,
 		ct:             ct,
+		channelSize:    channelSize,
 		stimulus:       msg,
 		stimulusNotify: stimulusNotify,
-		// Arm time, not fire time: this ctx descends from the publish that
-		// crossed the bound (fanout's `context.WithoutCancel`), so it still
-		// carries the publisher's principal. See the field's doc.
-		principal: PrincipalFromContext(ctx),
 	}
 	// Arm under interactionMu — the CAS half: two sibling bound-crossing
 	// fanouts can both pass the tally advance before either arms; exactly one
@@ -470,31 +466,17 @@ func (r *ChannelRouter) onSynthesisTimeout(pending *pendingSynthesisClose) {
 	// calibrated below activityTTL.
 	r.clearActivity(pending.stimulus.ChannelID, pending.chairID)
 
-	// Background, then re-stamped with the arming request's principal: the
-	// timer goroutine owns no request, but the close-notification fan below
-	// must land in the same tenant as the rest of the interaction. A no-op
-	// when the arm had no principal (agent/autonomous origin, or `auth.mode:
-	// disabled`), which keeps that path byte-identical to a bare Background.
-	ctx := WithPrincipal(context.Background(), pending.principal)
+	// A bare Background: the timer goroutine owns no request, and since the
+	// v0.3.15 re-key it needs none. See "THE CLOSE PATHS NEED NOT AGREE ON A
+	// PRINCIPAL" in this file's header for the audit that retired the stashed
+	// `principal` this line used to re-stamp.
+	ctx := context.Background()
 	r.logger.Warn("channels: synthesis reply timed out; closing without the synthesis artifact",
 		zap.String("channel_id", pending.stimulus.ChannelID),
 		zap.String("interaction_id", pending.interactionID),
 		zap.String("trigger", pending.trigger),
 		zap.String("escalation_chair_id", pending.chairID))
-	if r.boundedClose(ctx, pending.stimulus, pending.ct, pending.interactionID, pending.trigger, pending.stimulusNotify) {
+	if r.boundedClose(ctx, pending.stimulus, pending.ct, pending.channelSize, pending.interactionID, pending.trigger, pending.stimulusNotify) {
 		r.recordSynthesisTurn(ctx, pending.ct, synthesisTurnClosedOnTimeout)
 	}
-}
-
-// recordSynthesisTurn emits `channel.conversation.synthesis_turn{channel_type,
-// outcome}` — see the outcome constants for the lifecycle contract. Nil-safe
-// like every other channel instrument.
-func (r *ChannelRouter) recordSynthesisTurn(ctx context.Context, ct ChannelType, outcome string) {
-	if r.metrics == nil || r.metrics.SynthesisTurn == nil {
-		return
-	}
-	r.metrics.SynthesisTurn.Add(ctx, 1, metric.WithAttributes(
-		attribute.String("channel_type", string(ct)),
-		attribute.String("outcome", outcome),
-	))
 }

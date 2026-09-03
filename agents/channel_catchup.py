@@ -24,23 +24,26 @@ Behaviour:
 * **Oldest-first replay.** The orchestrator returns history newest-first
   (RFC 0011 §C); the fetcher reverses before replay so
   ``InteractionTracker`` sees turns in conversational order.
-* **No watermark, no dedup.** Per OQ #8, watermark + per-tick
-  recovery is deferred. v0.3.0 ships on-startup last-N as the only
-  trigger, so the fetcher may re-ingest messages from a previous run.
-  Self-sender skip handles own outbound; for peer messages,
-  ``InteractionTracker.add_turn`` does **not** deduplicate by
-  ``message_id`` — it appends every turn. K consecutive restarts
-  within the catch-up window produce ``K × N`` turns on the first
-  post-restart interaction. Duplicates share the same wire shape and
-  scope, but ``turn_count`` grows linearly with restart count.
+* **No watermark; dedup at the DERIVATION boundary, not at ingest.**
+  Per OQ #8, the ``?since=`` watermark and per-tick recovery are still
+  deferred, so the fetcher re-ingests the last-N window on every boot
+  and ``InteractionTracker.add_turn`` still appends every turn without
+  deduplicating by ``message_id``. What v0.3.15 PR B2 added is one
+  step further down: a replayed span that would derive an episode
+  identical to one an earlier boot already derived does not derive it
+  again (``persona_runtime.replay_identity``). The ingest duplication
+  is therefore still real and still visible in ``turn_count``, and it
+  is bounded where it used to compound — in the persisted memory.
   (PR-265 review L5: earlier "idempotent in shape" wording was
-  misleading — it suggested dedup; the tracker doesn't.)
+  misleading — it suggested ingest dedup; the tracker doesn't.)
 * **Catch-up → live boundary.** Replay events carry no ``chat_end`` /
   ``session_end`` metadata, so PR-265 review L6 left the scopes they
-  open bleeding into the next live turn. ISSUE-0130 closed that: a
-  replay-opened span derives no memory (no principal to attribute it
-  to), so a live turn joining it would lose its own conversation's
-  memory too. Both ends now close with ``REASON_CATCHUP_COMPLETE`` —
+  open bleeding into the next live turn. ISSUE-0130 closed that:
+  a replay-opened span derives under its own attribution or not at
+  all, so a live turn joining it would be summarised as part of a
+  span it does not belong to — and, before shape (b) seeded the
+  principal, under a tenant that was not its own. Both ends now
+  close with ``REASON_CATCHUP_COMPLETE`` —
   every replay-opened scope at pass end, plus any a live turn reaches
   first (dispatch is already serving while catch-up runs), which the
   persona splits on ingest. ``Interaction.started_at`` is still *boot*
@@ -59,18 +62,19 @@ import asyncio
 import logging
 import time
 from typing import TYPE_CHECKING, Any, Protocol
-from urllib.parse import quote
 
 import aiohttp
 
-from .channel_event_classification import seed_channel_classification
-from .channel_history_fetcher import HttpChannelHistoryFetcher
-from .channel_validation import (
-    parse_channel_timestamp,
-    validate_channel_message_dict,
+from .channel_catchup_discovery import (
+    fetch_channel_list,
+    fetch_channel_membership,
+    resolve_respond_policy,
 )
-from .channel_wire_metadata import seed_replay_metadata
-from .persona_types import AgentEvent, EventType
+from .channel_history_fetcher import HttpChannelHistoryFetcher
+from .channel_replay_event import build_replay_event
+from .channel_replay_outcome import ReplayPassOutcome
+from .channel_validation import validate_channel_message_dict
+from .persona_types import AgentEvent
 
 if TYPE_CHECKING:
     from .base import BaseAgent
@@ -99,16 +103,6 @@ DEFAULT_CATCHUP_LIMIT: int = 50
 # two REST surfaces share one tunable mental model.
 _REQUEST_TIMEOUT_SECONDS: float = 10.0
 
-# PR-265 review L1 (first pass): ``GET /api/v1/channels`` falls back
-# to ``channelDefaultListLimit = 50`` server-side when no ``?limit=``
-# is supplied (``internal/server/channel_handlers.go``); an agent
-# enrolled in >50 channels would silently miss catch-up for the tail
-# of its membership. We pin the request to ``channelMaxLimit = 1000``
-# (the orchestrator clamp) so the explicit cap is the contract — the
-# silent default cannot drift on either side without breaking the
-# request URL.
-_CHANNEL_LIST_LIMIT: int = 1000
-
 # PR-265 review L3 (second pass): per-agent wall-clock budget for the
 # whole catch-up pass. ``_REQUEST_TIMEOUT_SECONDS × 2N`` is unbounded
 # at the ``channelMaxLimit = 1000`` ceiling; this single-budget cap
@@ -136,6 +130,19 @@ class _AgentLike(Protocol):
 
     async def on_event(self, event: AgentEvent) -> Any: ...
 
+    def note_replay_gap(self, channel_id: str, speaker_id: str) -> None:
+        """Tell the agent a replayed ROW never reached its tracker.
+
+        Required, not optional: the pass ``outcome`` below is read only at
+        pass END, while the ingest-time segmentation door closes and
+        DERIVES a record mid-pass, so
+        ``close_path.close_stale_records`` has to learn the gap from the
+        tracker instead.  An implementer that dropped it would silently
+        derive a span with a hole in it, so this Protocol asks for it and
+        the type checker holds every caller to it.
+        """
+        ...
+
 
 async def replay_channel_history(
     *,
@@ -143,11 +150,20 @@ async def replay_channel_history(
     orchestrator_url: str,
     session: aiohttp.ClientSession,
     limit: int = DEFAULT_CATCHUP_LIMIT,
+    outcome: ReplayPassOutcome | None = None,
 ) -> None:
     """Fetch recent channel history and replay it through the agent.
 
     See module docstring for the contract. This function never raises;
     every failure path is best-effort with a WARN log line.
+
+    ``outcome`` records what the pass learned about its own completeness —
+    the ISSUE-0130 (b) derivation gate (``close_replayed_scopes``), since
+    a record holding a prefix of its window would claim a span identity no
+    later boot can recompute.  It is MUTATED IN PLACE and never returned,
+    exactly like ``counts``: the caller owns it and reads it in a
+    ``finally``, so a partial pass still reports what finished.  See
+    :class:`ReplayPassOutcome` for why completeness has two axes.
 
     PR-265 review L3 (second pass): the body is wrapped in
     :func:`asyncio.wait_for` against ``_CATCHUP_BUDGET_SECONDS`` so a
@@ -163,6 +179,8 @@ async def replay_channel_history(
     """
     started_at = time.monotonic()
     counts = {"channels": 0, "events": 0}
+    if outcome is None:
+        outcome = ReplayPassOutcome()
     try:
         await asyncio.wait_for(
             _replay_channel_history_inner(
@@ -171,6 +189,7 @@ async def replay_channel_history(
                 session=session,
                 limit=limit,
                 counts=counts,
+                outcome=outcome,
             ),
             timeout=_CATCHUP_BUDGET_SECONDS,
         )
@@ -195,6 +214,9 @@ async def replay_channel_history(
             counts["events"],
             elapsed_ms,
         )
+        # The channels that finished BEFORE the budget ran out are
+        # complete and derive normally; only the one it cut off (and any
+        # it never reached) is held back.
 
 
 async def _replay_channel_history_inner(
@@ -204,15 +226,18 @@ async def _replay_channel_history_inner(
     session: aiohttp.ClientSession,
     limit: int,
     counts: dict[str, int],
+    outcome: ReplayPassOutcome,
 ) -> None:
     """Wall-clock-budget-wrapped body of :func:`replay_channel_history`.
 
-    Mutates ``counts`` in-place so the outer wrapper can surface
-    per-pass totals on both the success-INFO and budget-WARN paths
-    (the latter needs to log how far the partial pass got before the
-    cancellation). Mutation is intentional — returning a tuple from a
+    Mutates ``counts`` and ``outcome`` in-place so the outer wrapper
+    can surface per-pass totals on both the success-INFO and budget-WARN
+    paths (the latter needs to log how far the partial pass got before
+    the cancellation). Mutation is intentional — returning a tuple from a
     function that may be cancelled mid-execution would lose the
-    partial progress.
+    partial progress, and ``outcome`` is load-bearing on exactly that
+    path: the channels finished before a budget overrun are the ones the
+    ISSUE-0130 (b) derivation gate must still let through.
     """
     base = orchestrator_url.rstrip("/")
     timeout = aiohttp.ClientTimeout(total=_REQUEST_TIMEOUT_SECONDS)
@@ -220,7 +245,7 @@ async def _replay_channel_history_inner(
         session=session, orchestrator_url=orchestrator_url, timeout=timeout,
     )
 
-    channels = await _fetch_channel_list(session, base, timeout)
+    channels = await fetch_channel_list(session, base, timeout)
     if channels is None:
         return
 
@@ -229,12 +254,12 @@ async def _replay_channel_history_inner(
         if not isinstance(channel_id, str) or not channel_id:
             continue
 
-        membership = await _fetch_channel_membership(
+        membership = await fetch_channel_membership(
             session, base, channel_id, timeout,
         )
         if membership is None:
             continue
-        respond_policy = _resolve_respond_policy(membership, agent.agent_id)
+        respond_policy = resolve_respond_policy(membership, agent.agent_id)
         if respond_policy is None:
             # Agent is not a member — skip without fetching history.
             continue
@@ -255,6 +280,14 @@ async def _replay_channel_history_inner(
         if not isinstance(channel_type, str):
             channel_type = ""
 
+        # ISSUE-0130 (b): this channel's window counts as replayed to
+        # COMPLETION only if every row in it reached the tracker.  A row
+        # dropped by the validator does not disqualify it — that is
+        # deterministic, so the next boot drops the same row and computes
+        # the same span identity — but a row whose ``on_event`` RAISED
+        # does: the record then holds a gap this boot invented, and
+        # deriving from it claims an id no later boot recomputes.
+        channel_complete = True
         # The orchestrator returns newest-first; reverse so the agent's
         # InteractionTracker sees the turns in conversational order.
         for msg in reversed(messages):
@@ -275,7 +308,7 @@ async def _replay_channel_history_inner(
                     agent.agent_id, channel_id, msg.get("id", ""), err,
                 )
                 continue
-            event = _build_replay_event(msg, channel_id, respond_policy, ch)
+            event = build_replay_event(msg, channel_id, respond_policy, ch)
             try:
                 await agent.on_event(event)
             except Exception:
@@ -289,89 +322,31 @@ async def _replay_channel_history_inner(
                     "channels: catch-up replay raised on agent=%s channel=%s msg=%s",
                     agent.agent_id, channel_id, msg.get("id", ""),
                 )
+                # PER SENDER where the row names one (PR B2 review round
+                # 3).  The hole this leaves is in the record keyed by THAT
+                # sender, and only that one — so disqualifying the whole
+                # channel made one deterministically raising row cost every
+                # other speaker in the room their derivation, on every boot,
+                # with nothing to distinguish it from replay having stopped.
+                # A row whose sender cannot be read is the case that still
+                # takes the channel down: an unattributable gap could be in
+                # any record.
+                sender = msg.get("sender_id")
+                if isinstance(sender, str) and sender:
+                    outcome.speaker_gaps.add((channel_id, sender))
+                else:
+                    channel_complete = False
+                # BOTH derivation doors have to learn this, and the outcome
+                # above only reaches the pass-end sweep (PR B2 review).  A
+                # blank sender is a gap that could be in any record, so the
+                # agent-side note takes the whole channel down.
+                agent.note_replay_gap(
+                    channel_id, sender if isinstance(sender, str) else "",
+                )
                 continue
             counts["events"] += 1
-
-
-# ─── Internal helpers ──────────────────────────────────────
-
-
-async def _fetch_channel_list(
-    session: aiohttp.ClientSession,
-    base: str,
-    timeout: aiohttp.ClientTimeout,
-) -> list[dict] | None:
-    """``GET /api/v1/channels?limit=N`` → list of channel JSON, or
-    ``None`` on error.  ``None`` means "best-effort failure already
-    logged".
-
-    PR-265 review L1: the explicit ``?limit=`` is mandatory — without
-    it the Go orchestrator returns at most ``channelDefaultListLimit =
-    50`` channels, silently capping catch-up for high-fanout agents.
-    """
-    url = f"{base}/api/v1/channels?limit={_CHANNEL_LIST_LIMIT}"
-    try:
-        async with session.get(url, timeout=timeout) as resp:
-            if resp.status >= 400:
-                body = await resp.text()
-                logger.warning(
-                    "channels: catch-up list returned HTTP %d: %s",
-                    resp.status, body[:256],
-                )
-                return None
-            data = await resp.json()
-    except Exception as exc:
-        logger.warning("channels: catch-up list failed: %s", exc)
-        return None
-    channels = data.get("channels")
-    if not isinstance(channels, list):
-        return []
-    return channels
-
-
-async def _fetch_channel_membership(
-    session: aiohttp.ClientSession,
-    base: str,
-    channel_id: str,
-    timeout: aiohttp.ClientTimeout,
-) -> list[dict] | None:
-    """``GET /api/v1/channels/{id}`` → member list, or ``None`` on error."""
-    url = f"{base}/api/v1/channels/{quote(channel_id, safe='')}"
-    try:
-        async with session.get(url, timeout=timeout) as resp:
-            if resp.status >= 400:
-                body = await resp.text()
-                logger.warning(
-                    "channels: catch-up get-channel %s returned HTTP %d: %s",
-                    channel_id, resp.status, body[:256],
-                )
-                return None
-            data = await resp.json()
-    except Exception as exc:
-        logger.warning(
-            "channels: catch-up get-channel %s failed: %s",
-            channel_id, exc,
-        )
-        return None
-    members = data.get("members")
-    if not isinstance(members, list):
-        return []
-    return members
-
-
-def _resolve_respond_policy(
-    members: list[dict], agent_id: str,
-) -> str | None:
-    """Return the agent's ``respond`` policy from the member list, or
-    ``None`` when the agent is not a member.
-    """
-    for m in members:
-        if m.get("id") == agent_id:
-            policy = m.get("respond")
-            if isinstance(policy, str) and policy:
-                return policy
-            return "when_mentioned"
-    return None
+        if channel_complete:
+            outcome.completed.add(channel_id)
 
 
 async def replay_for_persona_agents(
@@ -401,12 +376,17 @@ async def replay_for_persona_agents(
     for agent_id, agent in agents.items():
         if not isinstance(agent, _LLMPersonaAgent):
             continue
+        # Owned HERE, and mutated in place by the call below, so the
+        # ``finally`` still sees what finished even when the call raises
+        # something its own timeout branch does not catch.
+        outcome = ReplayPassOutcome()
         try:
             await replay_channel_history(
                 agent=agent,
                 orchestrator_url=orchestrator_url,
                 session=session,
                 limit=limit,
+                outcome=outcome,
             )
         except Exception:
             logger.exception(
@@ -414,87 +394,28 @@ async def replay_for_persona_agents(
             )
         finally:
             # ISSUE-0130: pop the scopes this pass opened — in ``finally`` so a
-            # budget overrun closes them too — or the next LIVE turn joins a
-            # span that derives nothing.  Best-effort, does not raise:
+            # budget overrun closes them too, or the next LIVE turn merges
+            # into one.  Best-effort, does not raise:
             # ``close_path.close_replayed_scopes``.
-            await agent.close_replayed_interactions()
-
-
-def _build_replay_event(
-    msg: dict,
-    channel_id: str,
-    respond_policy: str,
-    channel: dict,
-) -> AgentEvent:
-    """Build a CHANNEL_MESSAGE ``AgentEvent`` matching the shape that
-    ``ReceiveChannelMessage`` produces on the live path.
-
-    ``metadata["replay_mode"] = True`` is the marker the action-loop
-    short-circuit reads; without it the runtime would treat the row as
-    live traffic and fire the LLM.
-
-    PR-265 review S2: wire ``msg["timestamp"]`` (RFC 3339, set by the
-    orchestrator at publish time — see
-    ``internal/server/channel_types.go::channelMessageResponse``) is
-    parsed to epoch seconds and forwarded into
-    ``AgentEvent.timestamp``. Without this, replayed events default to
-    ``time.time()`` at boot, defeating RFC 0021 P1 now-anchor / recency
-    rendering, poisoning ``Turn.payload["timestamp"]``, and writing
-    wrong ``started_at`` on episodic rows. Shared parser with
-    ``validate_channel_message_event``.
-
-    Fallback (post-PR-265 L1 second pass): malformed timestamps cannot
-    reach this function — the catch-up loop runs every row through
-    ``validate_channel_message_dict`` first. The ``parsed_ts is None``
-    branch below is defense-in-depth against an impossible state.
-
-    PR-265 review L2: ``thread_parent_sender_id`` is intentionally
-    **not** propagated. The field exists on the live proto but **not**
-    on ``channelMessageResponse`` JSON shape — nothing to forward.
-    Documented gap, not a defect: the only in-tree consumer (the
-    response gate) is bypassed by the replay short-circuit. Future
-    threading-aware consumers will need a Go-side schema bump.
-
-    PR 607 second-pass review: the row's wire interaction keys
-    (``interaction_id`` + the OQ 5 close-cause pair) ARE propagated,
-    re-validated by :func:`agents.channel_wire_metadata
-    .seed_replay_metadata` with the live seed point's exact rules.
-    Without them a replayed span covering a vote-closed conversation
-    and the channel's next topic merges into one local record, and the
-    merged record opens with no wire id — the first LIVE id then reads
-    as adoption-not-rotation, silently disarming the RFC 0030 close
-    propagation after every restart.  Rotation still SEGMENTS the
-    replayed spans; what it no longer does is derive from them —
-    ISSUE-0130 skips the close-path summariser for every replay-opened
-    span, which has no principal to attribute a summary to.
-    """
-    payload: dict[str, Any] = {
-        "content": msg.get("content", ""),
-        "channel_type": channel.get("channel_type", ""),
-        "mentions": list(msg.get("mentions") or []),
-        "respond_policy": respond_policy,
-    }
-    raw_ts = msg.get("timestamp")
-    parsed_ts = (
-        parse_channel_timestamp(raw_ts) if isinstance(raw_ts, str) else None
-    )
-    metadata: dict[str, Any] = {"replay_mode": True}
-    seed_replay_metadata(metadata, msg.get("metadata"))
-    # RFC 0037 §B (v0.3.12 PR 2): stamp the channel's §A classification from
-    # the channel-list object already threaded here — the REST leg of the
-    # "both delivery paths carry the field" contract, mirroring the live
-    # path's typed-field seed. A pre-v0.3.12 orchestrator's JSON has no such
-    # key and seeds nothing (the read-side `public` floor, §A rule (b)).
-    seed_channel_classification(metadata, channel.get("classification"))
-    event_kwargs: dict[str, Any] = {
-        "event_type": EventType.CHANNEL_MESSAGE,
-        "payload": payload,
-        "channel_id": channel_id,
-        "sender_id": msg.get("sender_id"),
-        "message_id": msg.get("id"),
-        "thread_id": msg.get("thread_id") or None,
-        "metadata": metadata,
-    }
-    if parsed_ts is not None:
-        event_kwargs["timestamp"] = parsed_ts
-    return AgentEvent(**event_kwargs)
+            #
+            # ``derive_channels`` carries which channels actually FINISHED
+            # (v0.3.15 PR B2 review).  A channel cut short by the
+            # wall-clock budget or by a raising row has ingested a PREFIX
+            # of its window, and the shape-(b) span identity is computed
+            # from the turns the record holds — so deriving that prefix
+            # claims an id no later boot can ever recompute, and the next
+            # complete boot derives the whole window again on top of it.
+            # That is not the documented "moved window" residual; the
+            # window never moved.  Closing without deriving costs this
+            # boot's derivation, which catch-up re-reads anyway (no
+            # watermark, RFC 0011 OQ #8), and keeps the identity honest.
+            #
+            # PER CHANNEL, because that is the granularity of the hazard:
+            # the first cut passed one boolean for the whole agent, which
+            # threw away every completed channel's window whenever any
+            # later channel overran, and still said "complete" for a
+            # window a raising ``on_event`` had left a hole in.
+            await agent.close_replayed_interactions(
+                derive_channels=frozenset(outcome.completed),
+                speaker_gaps=frozenset(outcome.speaker_gaps),
+            )

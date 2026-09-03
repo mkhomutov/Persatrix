@@ -37,7 +37,7 @@
 **Related Automated Tests**:
 
 - [`tests/unit/python/test_autonomous_multivendor_blueprint.py`](../../tests/unit/python/test_autonomous_multivendor_blueprint.py) — pins that the blueprint's four seats resolve (through the **real** RFC 0033 resolver) to four distinct cloud vendors, that every seat alias is priced (fail-closed — the demo cannot silently zero a vendor's RFC 0023 budget gate), and that the roster is a well-formed agent-only capped autonomous channel (convener ≠ chair, anchors resolve, no human member).
-- The single-provider autonomous invariants (bounded close, `1 + N` reserve honoured, both artifacts) are CI-pinned in [`internal/channels/autonomous_acceptance_test.go`](../../internal/channels/autonomous_acceptance_test.go) + [`tests/unit/python/test_autonomous_phase1_acceptance.py`](../../tests/unit/python/test_autonomous_phase1_acceptance.py) (mock provider); this live MT adds only the cross-vendor routing dimension on top.
+- The single-provider autonomous invariants (bounded close, `1 + R` reserve honoured, both artifacts) are CI-pinned in [`internal/channels/autonomous_acceptance_test.go`](../../internal/channels/autonomous_acceptance_test.go) + [`tests/unit/python/test_autonomous_phase1_acceptance.py`](../../tests/unit/python/test_autonomous_phase1_acceptance.py) (mock provider); this live MT adds only the cross-vendor routing dimension on top.
 
 ---
 
@@ -116,7 +116,7 @@ persatrix agent interactions nova-sparrow   # and ember-owl, iron-fox, slate-her
 
 Read the interaction's total spend from the wallet's per-interaction ledger. The cap is a **single shared per-interaction ceiling**, so it bounds the **whole** four-vendor discussion — every seat's turns (each priced at its own vendor's rate) **plus** the chair synthesis turn **plus** the four metered close summaries — **not** four separate per-seat budgets.
 
-**Pass**: total interaction spend ≤ `interaction_budget_tokens` (200 000); no close-path lease denial (the `1 + N` reserve funded the chair turn + all four summaries). Per-token cost re-keys correctly to each seat's vendor rate (the cost table is derived from the alias map).
+**Pass**: total interaction spend ≤ `interaction_budget_tokens` (200 000); no close-path lease denial (the `1 + R` reserve funded the chair turn + all four summaries). Per-token cost re-keys correctly to each seat's vendor rate (the cost table is derived from the alias map).
 
 ---
 

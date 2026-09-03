@@ -158,7 +158,7 @@ func TestSynthesisClose_ClaimWindowWithholdsStragglers(t *testing.T) {
 
 	// Finish the teardown as the commit path would; everything reconciles.
 	require.True(t, router.boundedClose(context.Background(), reply, ChannelTypeGroup,
-		pending.interactionID, pending.trigger, closeNotify{}))
+		pending.channelSize, pending.interactionID, pending.trigger, closeNotify{}))
 	router.WaitForPendingFanout()
 	assert.Equal(t, int64(1), closedCount(t, reader, structuralTrigger))
 	_, _, tracked := router.openInteractionEscalationState(ch)

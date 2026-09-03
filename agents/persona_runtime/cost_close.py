@@ -110,7 +110,7 @@ async def close_interaction_on_cost(
     # two race: a member whose own compose lease is denied
     # (``interaction_budget_exhausted``) self-closes here before the
     # orchestrator notification lands, and its summary escapes the cap, so the
-    # RFC 0052 ``1 + N`` accounting can undercount by one on the very
+    # RFC 0052 ``1 + R`` accounting can undercount by one on the very
     # close-by-budget path OQ #6 targets. This is DELIBERATELY not metered
     # here yet: the wallet reserve is still dark (AcquireLease enforces only
     # the hard cap — synthesis_reserve.go), so metering this summary against

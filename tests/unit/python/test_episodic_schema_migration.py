@@ -61,6 +61,49 @@ class TestFreshSchemaMigration:
     async def test_scope_index_created(self, memory: EpisodicMemory):
         assert await _index_exists(memory._ensure_db(), "idx_episodes_scope")
 
+    async def test_interaction_index_created(self, memory: EpisodicMemory):
+        # Migration 19 (ISSUE-0130 (b), PR B2 review).
+        assert await _index_exists(
+            memory._ensure_db(), "idx_episodes_interaction",
+        )
+
+    async def test_the_interaction_id_lookups_actually_use_the_index(
+        self, memory: EpisodicMemory,
+    ):
+        """The index exists AND both hot predicates are planned onto it.
+
+        Asserting existence alone would stay green if a later column or
+        predicate change stopped SQLite choosing it — and the failure mode
+        is invisible: the query still returns the right answer, just by
+        scanning the agent's whole partition. Both callers matter. The
+        Phase-2 match runs on EVERY close (once per speaker per room since
+        the ISSUE-0123 re-key), and the re-derivation guard runs once per
+        replayed span on the boot path.
+        """
+        db = memory._ensure_db()
+        for label, sql, params in (
+            (
+                "the replay re-derivation guard",
+                "SELECT 1 FROM episodes WHERE agent_id = ? "
+                "AND interaction_id = ? LIMIT 1",
+                ("a", "replay-x"),
+            ),
+            (
+                "the close path's Phase-2 summary match",
+                "SELECT id FROM episodes WHERE agent_id = ? "
+                "AND interaction_id = ? AND summary = ?",
+                ("a", "int-x", "[summary pending]"),
+            ),
+        ):
+            async with db.execute(
+                "EXPLAIN QUERY PLAN " + sql, params,
+            ) as cursor:
+                plan = " ".join(str(r[-1]) for r in await cursor.fetchall())
+            assert "idx_episodes_interaction" in plan, (
+                f"{label} must be planned onto the migration-19 index; "
+                f"SQLite chose: {plan}"
+            )
+
     async def test_schema_version_records_v5(self, memory: EpisodicMemory):
         async with memory._ensure_db().execute(
             "SELECT MAX(version) FROM schema_version",

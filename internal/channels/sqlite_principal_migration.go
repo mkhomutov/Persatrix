@@ -14,17 +14,31 @@ import (
 // Forward-only and a pure addition — one additive, defaulted column, no index
 // or table rebuild, every existing index left intact:
 //
-//   - `principal_id TEXT NOT NULL DEFAULT 'local'` is the tenant the publish
-//     was attributed to. The `'local'` DEFAULT doubles as the backfill: a
-//     message that predates the column carries no evidence of who caused it,
-//     and `local` is precisely "no verified tenant" — the value the persona
-//     already resolves for such a turn today, so the backfill asserts nothing
-//     that was not already true.
+//   - `principal_id TEXT NOT NULL DEFAULT ”` is the tenant the publish was
+//     attributed to. Every writer names the column explicitly ([sqliteStore]
+//     .AddMessage), so the DEFAULT is never a value a new row takes — it is
+//     purely the backfill, and it is deliberately EMPTY rather than
+//     [DefaultPrincipalID].
 //
-// The literal must stay in lock-step with [DefaultPrincipalID] (sqlite.go);
-// it is spelled out here because migration SQL is frozen history — a future
-// rename of the constant must not silently rewrite what v12 backfilled. Same
-// reasoning as v10→v11's `'internal'`.
+// # Why the backfill is `''` and not `'local'`
+//
+// A message that predates the column carries no evidence of who caused it.
+// `'local'` would be the wrong way to say that, because `'local'` is also a
+// real answer — "this publish had no verified tenant" — that a v12 writer
+// stamps on an unauthenticated publish, and on every publish under
+// `auth.mode: disabled`. Backfilling `'local'` makes those two indis-
+// tinguishable on read, and PR B2's consumer branches on exactly that
+// distinction: it treats a PRESENT principal as attribution and derives
+// persona memory under it. Under `'local'` the first post-upgrade catch-up
+// would read every pre-migration row as attributed and derive one
+// authenticated person's content into the shared tenant — the ISSUE-0130
+// leak, reopened for the upgrade window. `”` is absent to every reader
+// (`seed_principal_metadata` rejects it, as does `principal_id_from_metadata`),
+// so those rows stay unattributable and the shape-(a) skip still covers them.
+//
+// The v12 column has never shipped in a tagged release, so this default is
+// not yet frozen history; once v0.3.15 ships it is, and a change would need
+// v13.
 //
 // # Why the backfill is not a downgrade of what is already stored
 //
@@ -61,7 +75,7 @@ func migrateV11ToV12(db *sql.DB) error {
 	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.Exec(
-		`ALTER TABLE messages ADD COLUMN principal_id TEXT NOT NULL DEFAULT 'local'`,
+		`ALTER TABLE messages ADD COLUMN principal_id TEXT NOT NULL DEFAULT ''`,
 	); err != nil {
 		return fmt.Errorf("add messages.principal_id: %w", err)
 	}

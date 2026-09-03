@@ -233,7 +233,7 @@ async def all_episodes(agent: _LLMPersonaAgent) -> list[dict]:
         """
         SELECT summary, interaction_id, started_at, closed_at,
                turn_count, scope, context_json, governance_interaction_id,
-               protection_level, source_channel_id
+               protection_level, source_channel_id, principal_id
         FROM episodes
         WHERE agent_id = ?
         ORDER BY created_at
@@ -255,6 +255,7 @@ async def all_episodes(agent: _LLMPersonaAgent) -> list[dict]:
             # RFC 0037 §C (v0.3.12 PR 3): the v16 stamp pair.
             "protection_level": r[8],
             "source_channel_id": r[9],
+            "principal_id": r[10],
         }
         for r in rows
     ]

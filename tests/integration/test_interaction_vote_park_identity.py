@@ -34,7 +34,6 @@ import pytest
 
 from agents.clock import FrozenClock
 from agents.memory.interactions import (
-    REASON_CATCHUP_COMPLETE,
     REASON_STRUCTURAL,
     scope_for_group,
 )
@@ -369,14 +368,17 @@ class TestLateDeliveryDefence:
         retire a replay-opened span under a live structural cause.
 
         The vote fan carries the same ``replayed`` guard as the cost and
-        notification fans, but on THIS path it is defence in depth: the
-        live vote turn trips the ISSUE-0130 replay->live split first, so
-        the record is already closed as ``REASON_CATCHUP_COMPLETE`` by
-        the time the discharge fans.  Pinned from that side, since that
-        is the behaviour the system actually produces.  (The cost fan's
-        guard IS load-bearing — it fires from the LLM-error path, before
-        the stale fan reconciles the scope: see
-        ``test_cost_fan_leaves_replayed_records_to_the_catchup_sweep``.)"""
+        notification fans, and since the PR B2 review it is LOAD-BEARING
+        on this path too.  The ISSUE-0130 split is key-scoped — a turn can
+        only merge into the record under its own
+        ``(principal, speaker, scope)`` key — so a live vote from ``alex``
+        does not reach ``robin``'s replayed record at all.  Applying the
+        split room-wide instead did close it here, but at the cost of
+        closing every unrelated live conversation in the room whenever a
+        REPLAYED turn arrived.  So this record stays open, untouched, for
+        the catch-up sweep — the same place the cost fan leaves it
+        (``test_cost_fan_leaves_replayed_records_to_the_catchup_sweep``).
+        """
         agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
         replay_event = channel_event(
             "replayed backlog", wire_id="wire-A", sender="robin",
@@ -391,9 +393,14 @@ class TestLateDeliveryDefence:
 
         await discharge_vote(agent)
 
-        assert replayed.close_reason == REASON_CATCHUP_COMPLETE, (
-            "the ISSUE-0130 replay->live split owns this record; the vote "
-            "quorum must never relabel a replayed span as structural"
+        assert replayed.close_reason != REASON_STRUCTURAL, (
+            "the vote quorum must never relabel a replayed span as "
+            "structural — the catch-up sweep owns this record"
+        )
+        assert replayed.is_open, (
+            "a live turn from ANOTHER speaker cannot join robin's record, "
+            "so nothing about it is stale: closing it here would be the "
+            "room-wide split that chopped unrelated live conversations"
         )
 
     async def test_recordless_straggler_keeps_its_retired_stamp(self):

@@ -136,6 +136,17 @@ type ChannelRouter struct {
 	defaultInteractionBudget   int64
 	interactionBudgetSnapshots map[string]int64
 
+	// clampWarnMu guards the RFC 0052 close-reserve clamp's WARN dedup; the
+	// contract and its one method live in synthesis_metrics.go. clampWarned:
+	// channel id → the (room size, cap) pair the clamp was last warned about,
+	// so a permanently clamped channel logs once per CONFIGURATION rather than
+	// once per close. Deliberately not shared with budgetMu: the counter half
+	// of the signal fires while budgetMu is free, and a second acquisition of
+	// it here would nest for no gain. Bounded by the channel count, like
+	// channelBudgets, and it needs no discard seam for the same reason.
+	clampWarnMu sync.Mutex
+	clampWarned map[string]clampWarnKey
+
 	// endVoteMu guards the RFC 0030 Layer 4 (v0.3.8) end-of-interaction vote
 	// state; methods + the full field contracts live in end_vote.go.
 	// endVoteThresholds/endVoteWindows: channel id → resolved K / W (absent
@@ -308,6 +319,7 @@ func NewChannelRouter(store ChannelStore, dispatcher MessageDispatcher, logger *
 		replyCounts:                   make(map[string]map[string]int),
 		channelBudgets:                make(map[string]int64),
 		interactionBudgetSnapshots:    make(map[string]int64),
+		clampWarned:                   make(map[string]clampWarnKey),
 		endVoteThresholds:             make(map[string]int),
 		endVoteWindows:                make(map[string]int),
 		endVotes:                      make(map[string]*interactionEndVotes),

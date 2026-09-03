@@ -232,9 +232,10 @@ async def summarize_closed_interaction(
     # interaction ``close_notification.py`` marked ``meter_close_summary`` off
     # the typed wire trigger — the summariser call draws an RFC 0023 wallet
     # lease billed to the GOVERNANCE interaction id, so the summary's spend
-    # counts toward the mandatory cap: this is the ``N`` of the PR 4a
-    # ``1 + N`` reserve (one summary per persona; the soft-budget close fires
-    # early precisely so these leases keep hard-cap headroom). CONDITIONAL — an
+    # counts toward the mandatory cap: this is the ``R`` of the PR 4a reserve —
+    # one summary per close-derived RECORD since the v0.3.15 residuals PR 4b
+    # re-size, not one per persona (the soft-budget close fires early precisely
+    # so these leases keep hard-cap headroom). CONDITIONAL — an
     # unmarked (human / end-vote / idle) close keeps the pre-4b-ii unleased
     # call signature byte-for-byte (test_summarize_close_metering.py), and an
     # empty wire id (unreachable by CP2 construction) defensively stays
@@ -249,7 +250,7 @@ async def summarize_closed_interaction(
     elif interaction.meter_close_summary:
         # PR #718 review finding 2: the record is marked for metering but carries
         # no wire interaction id, so the summary below runs UNLEASED and its spend
-        # never counts against the mandatory cap the PR 4a ``1 + N`` reserve was
+        # never counts against the mandatory cap the PR 4a ``1 + R`` reserve was
         # carved for. The direction is safe (under-lease, and the reserve is still
         # dark), and CP2 construction makes an empty id unreachable in a
         # homogeneous fleet — but the over-length-id → untracked degradation at
@@ -291,8 +292,15 @@ async def summarize_closed_interaction(
         # OQ #6 residual (PR #718 review): a METERED close summary's lease can
         # be denied at the wallet hard cap — the reserve is trigger-side only
         # while lease-side enforcement stays dark (``synthesis_reserve.go``
-        # KNOWN GAPs), so on a cost close the ``1 + N`` close-path calls share
-        # the residual headroom and a late persona's lease loses.  The generic
+        # KNOWN GAPs), so on a cost close the ``1 + R`` close-path calls share
+        # the residual headroom and a late record's lease loses.  Since
+        # residuals PR 4b (v0.3.15) ``R`` is the close-RECORD count, so the
+        # sizing no longer undercounts a multi-speaker room; the remaining
+        # way to reach this arm on a well-sized fleet is the half-cap clamp,
+        # which the orchestrator reports on
+        # ``channel.conversation.synthesis_reserve_clamped``.  This counter is
+        # the agent-side half of that pair, and the reason the deferred
+        # multiplier calibration (ISSUE-0138) is safe to defer.  The generic
         # arm below labelled this ``llm_error``, making the tracked
         # calibration gap indistinguishable from a provider outage on the
         # failure counter; the denial's own reason (``exc.reason``, e.g.
