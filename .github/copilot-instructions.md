@@ -104,6 +104,10 @@ default in outputs, edits, plans, and reviews.
 - Do not introduce new project terms without updating `docs/ai-glossary.md` in
   the same change.
 
+## Methodology
+
+How releases are planned, reviewed, and shipped: [docs/methodology/README.md](../docs/methodology/README.md) — the release cycle (Phases 0–4, release-prep PRs 0–4), scope locks / cuttable items / amendments, the review process, and the process glossary. The RFC-level sub-cycle stays in [docs/development-workflow.md](../docs/development-workflow.md).
+
 ## Status Hygiene
 
 Follow [Status Hygiene rules](../docs/development-workflow.md#status-hygiene). In brief:
