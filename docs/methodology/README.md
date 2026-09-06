@@ -30,7 +30,9 @@ standalone blueprint later.
 | 5 | [Testing strategy](testing-strategy.md) | Every test layer, what it proves, where it runs, how to add to it — and the rule that every test tree has a named runner. |
 | 6 | [Enforcement matrix](enforcement-matrix.md) | Every rule with its document, its check, and whether the check is required, advisory, or local-only. Status tables are generated or checked, not hand-kept: `docs/merged-prs.md` and `make plan-status-check`. |
 | 7 | [Automation catalogue](automation-catalogue.md) | Every `make` target, script, hook and workflow, and when each runs. |
-| 8 | [Templates](../templates/README.md) | One per document kind the cycle produces: version plan, scope locks, amendment, PR plan, release-prep plan, execution report, release checklist, post-release follow-up, manual test. |
+| 8 | [Templates](../templates/README.md) | One per document kind the cycle produces: version plan, scope locks, amendment, PR plan, release-prep plan, release baseline, execution report, release checklist, post-release follow-up, manual test. `make release-doc` opens one. |
+| 9 | [Conformance manifest](conformance.json) | The contract: every document, tool, make target and CI step the methodology consists of. `make conformance-check` (hook + CI) fails when one is missing. |
+| 10 | [Blueprint extraction](blueprint-extraction.md) | How the methodology leaves this repository as a pinned upstream and comes back through the conformance check — the generic/specific split, placeholders, the one-way vendoring model, the steps. |
 
 ## How this relates to the older process documents
 

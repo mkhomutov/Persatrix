@@ -15,6 +15,7 @@ Checks executed:
   7. RFC index freshness (docs/rfcs/INDEX.md up to date with front-matter)
   8. File size check (code: ≤500 lines, docs: ≤3000 words)
   9. Plan status (no "PR open" row for a PR that has merged)
+ 10. Methodology conformance (every artifact the manifest names exists)
 
 Usage::
 
@@ -113,6 +114,7 @@ _CHECKS: list[tuple[str, list[str]]] = [
     ("rfcs index", ["{python}", "scripts/rfcs.py", "--check"]),
     ("file size", ["{python}", "scripts/checks/file_size.py", "--strict"]),
     ("plan status", ["{python}", "scripts/checks/plan_status.py"]),
+    ("conformance", ["{python}", "scripts/checks/methodology_conformance.py"]),
 ]
 
 
