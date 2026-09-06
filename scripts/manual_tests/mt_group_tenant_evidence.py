@@ -66,6 +66,14 @@ class DispatchSpan:
 @dataclass
 class Leg2Evidence:
     spans: list[DispatchSpan] = field(default_factory=list)
+    #: Dispatches Jaeger returned that predate this arc, excluded from the
+    #: table. Reported rather than silently dropped: a non-zero count means an
+    #: earlier attempt is still inside the query window, which is worth knowing
+    #: when reading the total.
+    before_arc: int = 0
+    #: The trace `limit` was reached, so the read may be partial and the count
+    #: is a floor, not a total.
+    truncated: bool = False
 
     @property
     def lost(self) -> int:
@@ -103,14 +111,45 @@ class Leg2Evidence:
             f"Post-fix expectation: **zero** tenant-less dispatches in the "
             f"causal chain. (v0.3.14 reference run: 6 with, 9 without.)"
         )
+        if self.before_arc:
+            lines.append("")
+            lines.append(
+                f"> {self.before_arc} further dispatch(es) predate this arc and "
+                f"are excluded — an earlier attempt is still inside the query "
+                f"window. They are not part of this run's causal chain."
+            )
+        if self.truncated:
+            lines.append("")
+            lines.append(
+                "> ⚠️ **The trace limit was reached, so this read may be "
+                "partial.** The count is a floor, not a total — re-read with a "
+                "higher `limit` before treating it as the assertion."
+            )
         return "\n".join(lines)
 
 
-def collect_leg2(jaeger: str, lookback: str = "20m", limit: int = 300) -> Leg2Evidence:
-    """Read `principal.id` off every `channel.dispatch` span."""
+def collect_leg2(jaeger: str, since_us: int = 0, lookback: str = "20m",
+                 limit: int = 300) -> Leg2Evidence:
+    """Read `principal.id` off every `channel.dispatch` span **this arc caused**.
+
+    ``since_us`` is the arc's start, in microseconds since the epoch — the
+    driver passes `Ctx.arc_start_us`. Without it the read was a fixed
+    twenty-minute wall-clock window over whatever Jaeger happened to hold,
+    which silently mixes runs in both directions: a re-run of Legs 0-2 inside
+    the window folds the *previous* attempt's tenant-less dispatches in as
+    `LOST` rows and reads as R-2 failing, while a stale clean read can mask a
+    real loss. This arc's own F-1 describes exactly such a first attempt,
+    minutes earlier. The bound is applied twice — as Jaeger's `start`
+    parameter, and again per span on `startTime`, because the second does not
+    depend on how the query endpoint interprets the first.
+
+    ``limit`` bounds **traces**, not the spans the count is taken over, so a
+    truncated read is flagged rather than reported as a total.
+    """
+    window = f"&start={since_us}" if since_us else f"&lookback={lookback}"
     url = (
         f"{jaeger}/api/traces?service=persatrix-server"
-        f"&operation=channel.dispatch&limit={limit}&lookback={lookback}"
+        f"&operation=channel.dispatch&limit={limit}{window}"
     )
     try:
         with urllib.request.urlopen(url, timeout=20) as resp:  # noqa: S310
@@ -118,21 +157,27 @@ def collect_leg2(jaeger: str, lookback: str = "20m", limit: int = 300) -> Leg2Ev
     except (urllib.error.URLError, OSError, ValueError):
         return Leg2Evidence()
 
+    traces = payload.get("data", []) or []
     spans: list[DispatchSpan] = []
-    for trace in payload.get("data", []):
+    dropped = 0
+    for trace in traces:
         for span in trace.get("spans", []):
             if span.get("operationName") != "channel.dispatch":
+                continue
+            start_us = span.get("startTime", 0)
+            if since_us and start_us < since_us:
+                dropped += 1
                 continue
             tags = {t.get("key"): t.get("value") for t in span.get("tags", [])}
             spans.append(
                 DispatchSpan(
-                    start_us=span.get("startTime", 0),
+                    start_us=start_us,
                     recipient=str(tags.get("recipient.agent_id", "?")),
                     message_id=str(tags.get("channel.message_id", "?")),
                     principal=str(tags.get("principal.id", "") or ""),
                 )
             )
-    return Leg2Evidence(spans)
+    return Leg2Evidence(spans, before_arc=dropped, truncated=len(traces) >= limit)
 
 
 @dataclass

@@ -18,8 +18,14 @@ list, with the symptom each produces, is in the
 
 1. `make build-orchestrator build-cli`; a live provider
    (`ANTHROPIC_API_KEY`) — the personas must produce real replies and
-   land real rows. `make demo-anthropic`, `export
-   PERSATRIX_SERVER=http://127.0.0.1:8080`.
+   land real rows. `make demo-anthropic`.
+
+   > **There is no `PERSATRIX_SERVER`.** The CLI's `--server` is a `global`
+   > clap argument with no `env` binding (`cli/src/main.rs`), so exporting that
+   > variable — as this doc and four sibling MTs did — changes nothing, and the
+   > CLI silently uses its own `http://localhost:8080` default. It reaches the
+   > same stack here, so the export looked like it worked. Against any other
+   > host, pass `--server` on every invocation; the driver now does.
 2. `make reset` first — prior rows mask results.
 3. `auth.mode: enabled` in `config/security.yaml`; no `data/accounts.db`
    (Leg 0 bootstraps it).

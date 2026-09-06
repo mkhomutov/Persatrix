@@ -76,6 +76,12 @@ class Ctx:
     #: the way out. An armed channel is convenable, and spends, on any boot.
     armed_rooms: list[str] = field(default_factory=list)
 
+    #: When this arc began, in microseconds since the epoch. Leg 2's span read
+    #: is bounded by it, so a re-run cannot fold an earlier attempt's
+    #: tenant-less dispatches into the R-2 table.
+    arc_start_us: int = field(
+        default_factory=lambda: int(time.time() * 1_000_000))
+
     def say(self, msg: str) -> None:
         print(msg, flush=True)
 
@@ -133,6 +139,20 @@ class Ctx:
     def record(self, heading: str, body: str) -> None:
         self.artifacts.append(f"### {heading}\n\n{body}\n")
         self.say(f"    + captured: {heading}")
+
+
+def cli_cmd(ctx: Ctx, *args: str) -> list[str]:
+    """A CLI invocation aimed at the orchestrator the rest of the arc probes.
+
+    `--server` is `global = true` on the Rust CLI with **no** `env =`
+    (`cli/src/main.rs`), so `PERSATRIX_SERVER` does nothing and the flag is the
+    only way to move it. Without this the arc was half-threaded: `--server`
+    reached `wait_healthy`, every preflight gate and Leg 8's roster read, while
+    every `login`, `send`, `history`, `config` and `convene` went to the CLI's
+    own `http://localhost:8080` default. Running against any other host probed
+    one orchestrator and published to another, silently.
+    """
+    return [CLI, "--server", ctx.server, *args]
 
 
 def set_auth_mode(ctx: Ctx, mode: str) -> None:
@@ -307,7 +327,7 @@ def bootstrap_account(ctx: Ctx, username: str, participant: str) -> None:
 
 def login(ctx: Ctx, username: str) -> None:
     """Authenticate the CLI as *username* over the same provisioning pipe."""
-    ctx.run([CLI, "login", "--username", username],
+    ctx.run(cli_cmd(ctx, "login", "--username", username),
             why=f"the CLI must hold {username}'s session for the sends below",
             stdin=f"{ctx.password}\n", secret=True, critical=True)
 
@@ -321,8 +341,8 @@ def arm_room(ctx: Ctx, room: str) -> None:
     test the travel path — so the arming is a run knob like the collector's
     sampling percentage, and every other run knob in this arc is reverted.
     """
-    ctx.run([CLI, "channel", "config", "set", f"group:{room}",
-             "autonomous.enabled=true"],
+    ctx.run(cli_cmd(ctx, "channel", "config", "set", f"group:{room}",
+                    "autonomous.enabled=true"),
             why="convene 409s on a disarmed channel", critical=True)
     if room not in ctx.armed_rooms:
         ctx.armed_rooms.append(room)
@@ -338,8 +358,8 @@ def disarm_rooms(ctx: Ctx) -> None:
     previous run did by hand — never touched this at all.
     """
     for room in list(ctx.armed_rooms):
-        ctx.run([CLI, "channel", "config", "set", f"group:{room}",
-                 "autonomous.enabled=false"],
+        ctx.run(cli_cmd(ctx, "channel", "config", "set", f"group:{room}",
+                        "autonomous.enabled=false"),
                 why=f"leave {room} disarmed — an armed channel spends on any boot")
         ctx.armed_rooms.remove(room)
 
@@ -361,6 +381,6 @@ def send_as(ctx: Ctx, participant: str, room: str, body: str,
     while the latter comes from the authenticated session (`login` above).
     Alice's turns need both to be `alice-person`.
     """
-    return ctx.run([CLI, "channel", "send", room, body, "--as", participant],
+    return ctx.run(cli_cmd(ctx, "channel", "send", room, body, "--as", participant),
                    why=f"publish as {participant} — NOT the OS username",
                    critical=critical)

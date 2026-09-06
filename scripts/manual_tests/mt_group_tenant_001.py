@@ -42,12 +42,12 @@ if str(REPO_ROOT) not in sys.path:
 from scripts.manual_tests import mt_group_tenant_evidence as ev  # noqa: E402
 from scripts.manual_tests import mt_group_tenant_preflight as pf  # noqa: E402
 from scripts.manual_tests.mt_group_tenant_ops import (  # noqa: E402
-    CLI,
     ROOM,
     ArcAbortedError,
     Ctx,
     arm_room,
     bootstrap_account,
+    cli_cmd,
     disarm_rooms,
     login,
     mt_password,
@@ -132,7 +132,7 @@ def leg1(ctx: Ctx) -> None:
     ctx.say("\nLeg 1 — Alice discloses into the room, and a cascade runs")
     send_as(ctx, "alice-person", ROOM, ALICE_DISCLOSURE, critical=True)
     ctx.pause(SETTLE, "let ember-owl reply and at least one further hop land")
-    history = ctx.run([CLI, "channel", "history", ROOM],
+    history = ctx.run(cli_cmd(ctx, "channel", "history", ROOM),
                       why="Leg 1 needs >= 2 hops: a persona replying to a persona")
     if history:
         ctx.record("Leg 1 — channel history", f"```\n{history.strip()}\n```")
@@ -147,7 +147,7 @@ def leg2(ctx: Ctx) -> None:
     ctx.say("\nLeg 2 — R-2: the relayed write (WIRE ONLY — storage cannot see this)")
     if ctx.execute:
         ctx.record("Leg 2 — per-dispatch principal table",
-                   ev.collect_leg2(ctx.jaeger).render())
+                   ev.collect_leg2(ctx.jaeger, ctx.arc_start_us).render())
     else:
         ctx.say(f"    [dry-run] GET {ctx.jaeger}/api/traces?...operation=channel.dispatch")
         ctx.say("              (per-dispatch principal.id table, grouped by "
@@ -190,11 +190,11 @@ def leg5(ctx: Ctx) -> None:
     # store overrides are canonical over YAML, so reverting `config/` left the
     # channel armed in `channels.db`.
     arm_room(ctx, SECOND_ROOM)
-    ctx.run([CLI, "channel", "convene", f"group:{SECOND_ROOM}"],
+    ctx.run(cli_cmd(ctx, "channel", "convene", f"group:{SECOND_ROOM}"),
             why="agent-origin turns in another room — the leak path Leg 5 tests",
             critical=True)
     ctx.pause(SETTLE * 3, "let the autonomous discussion run (max_rounds: 8)")
-    transcript = ctx.run([CLI, "channel", "history", SECOND_ROOM],
+    transcript = ctx.run(cli_cmd(ctx, "channel", "history", SECOND_ROOM),
                          why="the transcript is pasted verbatim into the report")
     if transcript:
         ctx.record("Leg 5 — roundtable transcript", f"```\n{transcript.strip()}\n```")
