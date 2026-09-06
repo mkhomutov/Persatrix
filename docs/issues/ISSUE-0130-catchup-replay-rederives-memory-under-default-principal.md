@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0130
 summary: "On agent startup the RFC 0011 channel catch-up replay re-derives episodes and facts from replayed channel history under the persona's **default** scope (`principal_id='local'`, `session_id='legacy'`), because `_build_replay_event` has no principal to seed — the orchestrator's `messages` table has no principal column, so the emitting tenant is not persisted with the message and exists only on the live gRPC dispatch. The result is that one authenticated person's private content is silently copied into the shared `local` tenant on **every** restart, unbounded, where any unauthenticated caller (the whole persona fleet, and every caller under `auth.mode: disabled`) resolves. The person↔person boundary v0.3.14 promises still holds — a second authenticated principal cannot read it — but the person→anonymous boundary does not. Third ISSUE-0082 residual (R-3); found live at the v0.3.14 MT-MEMORY-MULTIUSER-001 execution run. Shape (a) — the leak-stopper that skips derivation for replayed spans — shipped in v0.3.14; shape (b), persisting the principal on `messages` and seeding it at replay, is scheduled v0.3.15 as workstream B, which is why this issue is open."
-status: open
+status: resolved
 severity: high
 area: memory
 created: 2026-08-18
+closed: 2026-09-03
+closed_pr: 855
 refs:
   - agents/channel_catchup.py
   - agents/persona_runtime/__init__.py
@@ -252,3 +254,17 @@ The dated build log — the sequencing decisions, the per-PR scope locks and
 what each landing left open — lives in
 [ISSUE-0130 shape (b) — the build log](ISSUE-0130-shape-b-build-log.md),
 split out on 2026-08-30 when this file reached the documentation word cap.
+
+> **Resolved 2026-09-03 — shape (b) verified live** ([v0.3.15 execution report](../manual-tests/v0.3.15-execution-report.md), Leg 9).
+> Three snapshots across two agent restarts: **A → B grows** (0 → 7/9/7
+> `replay-` rows) and **B = C byte-identical in every partition**. The first
+> restart derived the window once; the second, with no traffic in between,
+> derived nothing.
+>
+> Two things beyond idempotence, both of which this issue turns on:
+> replay derives under the **attributed** tenant — the `replay-` rows are
+> spread across `alice-person`, `bob-person` and `local`, preserving the
+> speaker axis, rather than collapsing into `local`. And the discriminating
+> follow-up (one message, third restart) added exactly **+1 per persona**,
+> which is what separates "the guard bounds duplication" from "replay stopped
+> deriving at all" — a distinction row counts alone cannot make.

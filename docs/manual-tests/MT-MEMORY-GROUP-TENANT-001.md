@@ -2,10 +2,10 @@
 
 **Test ID**: `MT-MEMORY-GROUP-TENANT-001`
 **Feature Area**: Memory scope axes — the tenant/principal axis across the *aggregate* and *relayed* writes ([ISSUE-0082](../issues/ISSUE-0082-orchestrator-per-request-session-principal-emission.md) residuals R-1 / R-2)
-**Version**: 1.1
+**Version**: 1.2
 **Created**: 2026-08-06
-**Last Updated**: 2026-08-23
-**Status**: Active — **authored with the R-1/R-2 designs. Runnable in both directions**: run it against v0.3.14 to *evidence* the residuals, and re-run it after [ISSUE-0123](../issues/ISSUE-0123-per-speaker-interaction-scope.md) + [ISSUE-0124](../issues/ISSUE-0124-orchestrator-hop-drops-tenant-on-agent-cascade.md) land as the **v0.3.15** gate.
+**Last Updated**: 2026-09-02
+**Status**: Active — **v1.2 corrects all ten defects found on first execution** (2026-09-02, [v0.3.15 execution report](v0.3.15-execution-report.md#mt-corrections--ten-defects-in-the-procedure-itself) §MT corrections). v1.1 and earlier were authored against a HOST orchestrator and never run; every step touching accounts, membership or sender identity was wrong for the compose deployment this MT targets. **Runnable in both directions**: run it against v0.3.14 to *evidence* the residuals, and re-run it after [ISSUE-0123](../issues/ISSUE-0123-per-speaker-interaction-scope.md) + [ISSUE-0124](../issues/ISSUE-0124-orchestrator-hop-drops-tenant-on-agent-cascade.md) land as the **v0.3.15** gate.
 
 ---
 
@@ -50,51 +50,7 @@ itself (MT-MEMORY-MULTIUSER-001), the auth substrate
 
 ## Preconditions
 
-1. `make build-orchestrator build-cli`; a live provider
-   (`ANTHROPIC_API_KEY`) — the personas must produce real replies and
-   land real rows. `make demo-anthropic`, `export
-   PERSATRIX_SERVER=http://127.0.0.1:8080`.
-2. `make reset` first — prior rows mask results.
-3. `auth.mode: enabled` in `config/security.yaml`; no `data/accounts.db`
-   (Leg 0 bootstraps it).
-4. The stock three-persona rooms from `config/channels.yaml`:
-   `group:planning` (ember-owl, iron-fox, nova-sparrow; chair
-   nova-sparrow; `end_vote_threshold: 2` / `end_vote_window: 3`) and
-   `group:roundtable` as the second room for the travel check.
-5. `interaction_idle_timeout_seconds` raised on `planning` (e.g. 1800)
-   so no leg closes an interaction by accident before Leg 4 asks for it.
-
-> **Pace the arc, do not sit in it.** The end-vote quorum is counted over
-> a 600s / W=3 window. Read every leg first and drive Legs 1–4 from one
-> script; an idle pause mid-arc expires the window and silently changes
-> which close trigger fires, which is the variable Legs 4 and 5 turn on.
-
-> **The personas re-register themselves — but give them the moment.** Through
-> v0.3.14 an orchestrator restart emptied the in-memory registry for good, and
-> this arc's `account bootstrap` → restart step left a healthy, green-looking
-> stack in which every dispatch was dropped, no persona ever replied, and the
-> run produced no cascade and no rows. It cost a full live arc on 2026-08-07
-> before it was spotted. Since v0.3.15 each agent watches its own orchestrator
-> connection and re-registers when it returns
-> ([ISSUE-0125](../issues/ISSUE-0125-agents-never-reregister-after-orchestrator-restart.md)),
-> so no `docker compose restart agent-<each>` is needed. What still applies:
-> **wait for the orchestrator to answer `/healthz` before publishing**, and if a
-> leg does go quiet, `GET /api/v1/agents` remains the check — an orchestrator
-> holding **zero** registered agents now says so at ERROR in its own log rather
-> than only in one dispatch WARN per dropped message. The RFC 0009 rate-limiter
-> bucket is *not* flushed by a restart either, so the first turn after one can
-> still draw `429` for ~60 s.
-
-> **One account at a time.** Same constraint as MT-MEMORY-MULTIUSER-001:
-> `account bootstrap` refuses once an account exists, so rotating to a
-> second principal means deleting `data/accounts.db`, bootstrapping
-> again and restarting the orchestrator. That restart rotates the wire
-> interaction id, which **structurally closes** the open records — so a
-> single record holding two *humans'* turns is not reachable on shipped
-> verbs. It is not needed: with one human, the room's other speakers are
-> the personas, whose turns are `'local'`, and `'local'`-vs-`alice-person`
-> is the same strict-equality boundary. The two-human aggregate is pinned
-> deterministically instead (see Sign-off).
+**Split out to [MT-MEMORY-GROUP-TENANT-001 — setup and preconditions](MT-MEMORY-GROUP-TENANT-001-setup.md)** at v1.2, for the word cap. Do not run the arc without reading it: it carries the in-container account bootstrap, the declared-not-joined membership rule (a `channel join` makes the *next* orchestrator restart a crash loop), the host-binary rebuild, the live auth probe, and the pacing discipline. `scripts/manual_tests/mt_group_tenant_preflight.py` checks the mechanical ones.
 
 ---
 
@@ -102,18 +58,20 @@ itself (MT-MEMORY-MULTIUSER-001), the auth substrate
 
 ### Leg 0 — Alice, authenticated
 
-```bash
-rm -f data/accounts.db
-./bin/persatrix-server account bootstrap --username alice --participant alice-person
-# restart the orchestrator so it opens the new accounts.db
-persatrix login          # as alice
-```
+> **v1.2 — corrections 1, 2 and 4**; **do not `channel join`** (Preconditions 3b).
+
+Run [§ Rotating the accounts store](MT-MEMORY-GROUP-TENANT-001-setup.md#rotating-the-accounts-store--used-by-legs-0-and-7)
+with `<user>` = `alice`, `<participant>` = `alice-person`.
 
 ### Leg 1 — Alice discloses into the room, and a cascade runs
 
+> **v1.2 — `--as` is mandatory on every send** (correction 4; the default is the
+> OS username). Rationale in [§ Rotating the accounts store](MT-MEMORY-GROUP-TENANT-001-setup.md#rotating-the-accounts-store--used-by-legs-0-and-7).
+
 ```bash
 ./bin/persatrix channel send planning \
-  "Before we plan Q3 — I'll be out the week of the 14th, my daughter Mira has surgery. @ember-owl can you take the review slot?"
+  "Before we plan Q3 — I'll be out the week of the 14th, my daughter Mira has surgery. @ember-owl can you take the review slot?" \
+  --as alice-person
 ```
 
 Wait for the round to settle (a reply from ember-owl, then at least one
@@ -122,7 +80,13 @@ Alice).
 
 **Verification**:
 - [ ] At least two hops occurred: `./bin/persatrix channel history planning` shows a persona message that replies to another persona's message.
-- [ ] In **each** persona's `memory.db`: `SELECT principal_id, COUNT(*) FROM episodes GROUP BY principal_id;` returns at least one `alice-person` row. *(If every row reads `local`, emission is not reaching the personas at all — stop and diagnose here, or every later leg passes vacuously.)*
+- [ ] **The stop-and-diagnose check (v1.2 — corrected, #5).** Read the
+  *message* row, not episodes: Alice's message must be stamped
+  `principal_id='alice-person'`. **Episodes cannot answer at Leg 1** — they are
+  close-derived and the close is Leg 3, so the table is legitimately empty and
+  the original check was unevaluable exactly where it guards every later leg.
+  A `'local'` stamp means emission never reached the publish path: **stop**,
+  and verify `auth.mode` on the RUNNING orchestrator, not in the file.
 
 ### Leg 2 — R-2: the relayed write
 
@@ -173,8 +137,15 @@ end-of-interaction inside the W=3 window) — the natural continuation of
 Leg 1 usually reaches it; if not, prompt for wrap-up:
 
 ```bash
-./bin/persatrix channel send planning "Anything else before we wrap?"
+./bin/persatrix channel send planning "Anything else before we wrap?" --as alice-person
 ```
+
+> **v1.2 — the quorum may not form** (correction 7). On a stock roster it did
+> not, on either attempt (F-4). Use the deterministic fallback in
+> [§ Leg 3 fallback](MT-MEMORY-GROUP-TENANT-001-setup.md#leg-3-fallback--forcing-a-close-when-the-quorum-does-not-form),
+> and record the close as a **deviation**: an idle close is `structural`, not
+> `end_votes`, so the bar below is not met and Leg 6 becomes the only leg that
+> closes from a trigger the arc chose.
 
 - [ ] Orchestrator logs show `interaction_closed{…end_votes}` (or
   `synthesis_reply`) — **not** `structural` / `cost`. The trigger matters:
@@ -186,9 +157,14 @@ Leg 1 usually reaches it; if not, prompt for wrap-up:
 Read the close-derived episode (`turn_count > 1`) and the facts extracted
 from it.
 
+> **v1.2 — drop the `turn_count > 1` filter** ([v0.3.15 report](v0.3.15-execution-report.md#mt-corrections--ten-defects-in-the-procedure-itself), correction 6). It is a
+> *pre-fix* lens: post-fix, an agent that spoke once owns a **one-turn**
+> record, so the filter hides exactly the rows ISSUE-0131 creates. Observed:
+> every store reported "1 row" and the split was invisible.
+
 ```sql
 SELECT principal_id, speaker_id, turn_count, scope, substr(summary,1,200)
-  FROM episodes WHERE turn_count > 1;
+  FROM episodes ORDER BY speaker_id, turn_count DESC;
 SELECT principal_id, speaker_id, subject, predicate, object
   FROM facts ORDER BY asserted_at DESC LIMIT 20;
 ```
@@ -208,8 +184,13 @@ Facts are cross-room by default (RFC 0049 Phase 1) and **every**
 agent-origin turn resolves `'local'`, so the Leg 4 rows are readable from
 any room the fleet is in.
 
+> **v1.2 — correction 8.** `roundtable` ships **disarmed**, and `convene`
+> takes **no topic argument** — the agenda comes from the channel's own
+> `autonomous` block. Arm it at runtime first (MT-AUTONOMOUS-001 flow).
+
 ```bash
-./bin/persatrix channel convene roundtable "Draft the Q3 review rota."
+./bin/persatrix channel config set group:roundtable autonomous.enabled=true
+./bin/persatrix channel convene group:roundtable
 ```
 
 | | Expected |
@@ -232,14 +213,19 @@ until `max_rounds` fires, or lower it) so the close descends from
 
 ### Leg 7 — Bob: the absence bar
 
+Run [§ Rotating the accounts store](MT-MEMORY-GROUP-TENANT-001-setup.md#rotating-the-accounts-store--used-by-legs-0-and-7)
+again with `<user>` = `bob`, `<participant>` = `bob-person` — the **same**
+container procedure as Leg 0, not the host one v1.1 printed here.
+
 ```bash
-rm -f data/accounts.db
-./bin/persatrix-server account bootstrap --username bob --participant bob-person
-# restart the orchestrator; persatrix login as bob
-./bin/persatrix channel send planning "Who's covering the review slot this month?"
+./bin/persatrix channel send planning "Who's covering the review slot this month?" \
+  --as bob-person   # @mention an `addressed` persona, or nothing replies (F-5)
 ```
 
 **Verification**:
+- [ ] **A reply actually happened** — record it before asserting what it lacks
+  (v1.2, correction 10: the first execution drew **no reply**, so the bar
+  passed with nothing to inspect). `@mention` an `addressed` persona.
 - [ ] The reply makes no reference to Mira or to surgery **on the post-fix run**.
 - [ ] On the **v0.3.14** run, record the outcome either way: a reference here is R-1/R-2 reaching a *second human*, and is the strongest single piece of evidence the report can carry.
 - [ ] `SELECT principal_id, COUNT(*) FROM episodes GROUP BY principal_id;` shows `alice-person`, `bob-person` and `local` coexisting — isolation is a recall filter, not a delete.
@@ -259,6 +245,11 @@ shape-(b) leg. With Legs 1–4's traffic in the room, snapshot **both**
 partitions, restart the **agents**, wait for catch-up, and snapshot again
 — sending **no new traffic** in between, or the comparison measures the
 traffic instead.
+
+> **v1.2 — correction 9: rotate BACK to alice first.** Leg 7 bootstrapped
+> `bob-person` and the verb is single-account, so alice is gone and
+> "re-authenticate as alice" fails `invalid credentials`. Repeat Leg 0's
+> rotation; its restart also closes whatever Leg 8 left open.
 
 **Restore `auth.mode: enabled` and re-authenticate first.** Leg 8 turns
 it off and does not turn it back on, and its re-run of Leg 1 leaves the
@@ -347,6 +338,7 @@ and after a second restart with no traffic in between (**C**).
 
 ## Sign-off
 
+- [ ] **Preflight green** — `python scripts/manual_tests/mt_group_tenant_preflight.py`, all gates. Each one guards a leg that otherwise passes vacuously.
 - [ ] All **ten** legs (0–9) run on a live provider, with the expected column used (`v0.3.14` or post-fix) stated in the report. *This line read "eight" while the procedure held nine; the restart leg makes ten.*
 - [ ] Leg 2's per-dispatch `principal.id` table — **the** Leg 2 finding, since storage cannot see R-2 — and Leg 4's `(principal_id, speaker_id, summary)` **triples** pasted verbatim.
 - [ ] Leg 9's two row-count snapshots pasted verbatim, per `(principal_id, speaker_id)`, in **both** partitions.
