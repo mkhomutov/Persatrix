@@ -7,6 +7,8 @@ genuinely requires them.
 
 This file is referenced by both `.github/CLAUDE.md` and
 `.github/copilot-instructions.md`. Update it before introducing new terms.
+Process vocabulary (scope lock, cuttable, live arc, finding, …) lives in the
+[process glossary](methodology/process-glossary.md).
 
 ---
 
