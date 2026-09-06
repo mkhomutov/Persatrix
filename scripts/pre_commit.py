@@ -5,7 +5,7 @@ Runs a fast subset of checks (target: <10 s) sequentially and prints a
 summary at the end.  Exits 0 if all pass, 1 if any fail.
 
 Checks executed:
-  0. Regenerate FILEMAP.md and ``git add`` it
+  0. Regenerate FILEMAP.md and docs/merged-prs.md and ``git add`` them
   1. ``go fmt`` check (Go orchestrator)
   2. ``ruff check`` (Python agents)
   3. ``cargo fmt --check`` (Rust CLI)
@@ -14,6 +14,7 @@ Checks executed:
   6. Doc status markers check
   7. RFC index freshness (docs/rfcs/INDEX.md up to date with front-matter)
   8. File size check (code: ≤500 lines, docs: ≤3000 words)
+  9. Plan status (no "PR open" row for a PR that has merged)
 
 Usage::
 
@@ -111,6 +112,7 @@ _CHECKS: list[tuple[str, list[str]]] = [
     ("doc status", ["{python}", "scripts/checks/doc_status_markers.py"]),
     ("rfcs index", ["{python}", "scripts/rfcs.py", "--check"]),
     ("file size", ["{python}", "scripts/checks/file_size.py", "--strict"]),
+    ("plan status", ["{python}", "scripts/checks/plan_status.py"]),
 ]
 
 
@@ -118,21 +120,26 @@ def _resolve_argv(argv: list[str]) -> list[str]:
     return [sys.executable if tok == "{python}" else tok for tok in argv]
 
 
-def _update_filemap() -> bool:
-    """Regenerate FILEMAP.md and stage it.  Returns True on success."""
-    print("\n▶ filemap")
+_GENERATED = (
+    # (label, generator script, output path to stage) — regenerated before the
+    # checks so the commit carries the current file map and merged-PR history.
+    ("filemap", "scripts/generate_filemap.py", "FILEMAP.md"),
+    ("merged prs", "scripts/merged_prs.py", "docs/merged-prs.md"),
+)
+
+
+def _regenerate(label: str, script: str, output: str) -> bool:
+    """Run one generator and stage its output.  Returns True on success."""
+    print(f"\n▶ {label}")
     t0 = time.monotonic()
     try:
-        proc = subprocess.run(
-            [sys.executable, "scripts/generate_filemap.py"],
-            cwd=REPO_ROOT,
-        )
+        proc = subprocess.run([sys.executable, script], cwd=REPO_ROOT)
         if proc.returncode != 0:
             elapsed = time.monotonic() - t0
             print(f"  ✗ FAIL  ({elapsed:.1f}s)")
             return False
         # Stage the updated file so it's included in the commit.
-        subprocess.run(["git", "add", "FILEMAP.md"], cwd=REPO_ROOT, check=True)
+        subprocess.run(["git", "add", output], cwd=REPO_ROOT, check=True)
         elapsed = time.monotonic() - t0
         print(f"  ✓ PASS  ({elapsed:.1f}s)")
         return True
@@ -185,15 +192,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--skip-fmt", action="store_true", help="Skip formatting checks.")
     args = parser.parse_args(argv)
 
-    # Always regenerate the file map first (and stage it).
-    # Track result in summary so failures are visible.
-    filemap_t0 = time.monotonic()
-    filemap_ok = _update_filemap()
-    filemap_elapsed = time.monotonic() - filemap_t0
+    # Always regenerate the derived files first (and stage them).
+    # Track results in the summary so failures are visible.
+    results: list[tuple[str, bool, float]] = []
+    for label, script, output in _GENERATED:
+        t0 = time.monotonic()
+        ok = _regenerate(label, script, output)
+        results.append((label, ok, time.monotonic() - t0))
 
     checks = _CHECKS if not args.skip_fmt else [c for c in _CHECKS if c[0] not in _FMT_LABELS]
 
-    results: list[tuple[str, bool, float]] = [("filemap", filemap_ok, filemap_elapsed)]
     print("=" * 60)
     print("Pre-commit checks")
     print("=" * 60)

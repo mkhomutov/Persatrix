@@ -352,7 +352,7 @@ The v0.4.0 PR plan for Phases 2–6 opens when the v0.4.0 plan opens; the [RFC 0
 | 2 | Lint rule + deprecation warnings | `feature/v032-rfc0029p1-lint-deprecation` | ✅ Merged | [#372](https://github.com/mkhomutov/Persatrix/pull/372) | 2026-05-18 |
 | 3 | Downstream call-site refactor | `feature/v032-rfc0029p1-callsite-refactor` | ✅ Merged | [#373](https://github.com/mkhomutov/Persatrix/pull/373) | 2026-05-18 |
 | 4 | Review follow-ups | `feature/v032-rfc0029p1-followups` | ✅ Merged | [#375](https://github.com/mkhomutov/Persatrix/pull/375) | 2026-05-18 |
-| 5 | Phase 1 closeout | `feature/v032-rfc0029p1-close` | 🔀 PR open | [#376](https://github.com/mkhomutov/Persatrix/pull/376) | — |
+| 5 | Phase 1 closeout | `feature/v032-rfc0029p1-close` | ✅ Merged | [#376](https://github.com/mkhomutov/Persatrix/pull/376) | 2026-05-18 |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ⏭ Deferred
 

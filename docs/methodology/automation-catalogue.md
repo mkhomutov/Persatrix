@@ -37,6 +37,7 @@ dependencies.
 | `make notices` (`scripts/generate_third_party_notices.py`) | Regenerate `THIRD_PARTY_NOTICES.md` from the three dependency graphs | `notices-check` | Make-only; release-prep PR 4 |
 | `make rfcs` (`scripts/rfcs.py`) | Regenerate `docs/rfcs/INDEX.md` from RFC YAML front-matter | `rfcs-check` | CI (`Validate configs`) + pre-commit |
 | `make issues` (`scripts/issues.py`) | Regenerate `docs/issues/INDEX.md` from issue front-matter | `issues-check` | CI (`Validate configs`) |
+| `make merged-prs` (`scripts/merged_prs.py`) | Regenerate `docs/merged-prs.md` from the first-parent squash subjects on `main` (Area column derived from the title). Replaced ROADMAP's hand-kept table, which had stopped at #708 | `merged-prs-check` — passes when behind by the newest merges only | Pre-commit regenerates + stages it; CI (`Docs hygiene`) checks it |
 | `scripts/generate_filemap.py` | Regenerate `FILEMAP.md` from `git ls-files` (tracked files only — `git add` new files first). **Kept on purpose** (decision 2026-09-06): it is the one-read index assistants load before touching the tree, and the writer now leaves the date alone so it no longer churns on every commit | `--check` (ignores the header date) | Pre-commit regenerates and stages it; CI (`Docs hygiene`) checks it |
 | `make generate-persona-nickname COUNT= SEED=` (`scripts/persona_nickname_generator.py`) | Nickname-style persona id/name pairs | — | On demand |
 | `make bump-version VERSION=X.Y.Z [DRY_RUN=--dry-run]` (`scripts/bump_version.py`) | Bump the five version strings ([guide](../guides/version-bump.md)) | checklist §2 | Release-prep PR 3 |
@@ -72,6 +73,9 @@ dependencies.
 | `scripts/checks/doc_links.py` | Relative links and `#anchors` in every tracked `.md` | CI (`Docs hygiene`) + pre-commit |
 | `scripts/checks/doc_status_markers.py` | Only the standard status markers | CI (`Docs hygiene`) + pre-commit |
 | `scripts/checks/doc_leaked_markup.py` | No tool-call markup fragments in docs | CI (`Docs hygiene`) + pre-commit |
+| `scripts/checks/plan_status.py` (`make plan-status-check`) | A 🔀 / ⬜ progress row whose linked PRs have all merged is stale; released versions' plans are skipped, 🔄 rows are not judged | CI (`Docs hygiene`) + pre-commit |
+| `scripts/checks/released.py` | Shared: which versions shipped (dated CHANGELOG headings) and which version-cycle docs are therefore frozen — used by the size checker and the plan-status checker | library |
+| `scripts/_git.py` | The one read-only git call (ISSUE-0135); new call sites use it | library |
 | `scripts/checks/doc_audit.py [--format text\|json\|markdown]` | Runs links + markers + size warnings in one report | Local convenience; used by hand in PR bodies |
 | `scripts/checks/proto_drift.py` | Orphan generated protobuf artifacts (backs `proto-orphans-check`) | CI |
 
@@ -81,12 +85,13 @@ dependencies.
 directory `git rev-parse --git-path hooks` names (so linked worktrees and
 `core.hooksPath` both work). The hook runs `scripts/pre_commit.py`, which is
 **version-controlled** and warns when the installed hook has drifted from the
-installer. Nine steps, target under 10 s:
+installer. Eleven steps, target under 10 s:
 
-0. regenerate `FILEMAP.md` and `git add` it · 1. `gofmt -l` on staged Go blobs
-(CRLF-safe) · 2. `ruff check agents/` · 3. `cargo fmt --check` · 4. doc links ·
-5. leaked markup · 6. status markers · 7. RFC index freshness · 8. file sizes
-(`--strict`).
+0. regenerate `FILEMAP.md` and `docs/merged-prs.md` and `git add` them ·
+1. `gofmt -l` on staged Go blobs (CRLF-safe) · 2. `ruff check agents/` ·
+3. `cargo fmt --check` · 4. doc links · 5. leaked markup · 6. status markers ·
+7. RFC index freshness · 8. file sizes (`--strict`) · 9. plan status (no
+"PR open" row for a merged PR).
 
 Because the hook is outside version control it is absent for anyone who did
 not run the installer. Since the CI-promotion PR every step has a CI
@@ -99,7 +104,7 @@ copy, not the only copy.
 
 | Workflow | Trigger | Does |
 |----------|---------|------|
-| `ci.yml` | push to `main`, every PR | Eleven jobs: `Go (build + test)` (incl. gofmt, Go integration tests, sanitizer sync), `Web console (build + test)`, `Dockerignore context hygiene`, `Proto staleness check`, `Python (lint + test)` (incl. ruff/mypy on `scripts/` + `evaluators/`), `Cost regression gate (bored persona)` (path-filtered), `Rust (build + clippy)` (incl. rustfmt, `cargo test`), `Validate configs` (incl. `prompt_refs`), `Docs hygiene` (links, markup, markers, FILEMAP), `File size check`, `Third-party license check`. Every job carries a comment naming the incident it guards. |
+| `ci.yml` | push to `main`, every PR | Eleven jobs: `Go (build + test)` (incl. gofmt, Go integration tests, sanitizer sync), `Web console (build + test)`, `Dockerignore context hygiene`, `Proto staleness check`, `Python (lint + test)` (incl. ruff/mypy on `scripts/` + `evaluators/`), `Cost regression gate (bored persona)` (path-filtered), `Rust (build + clippy)` (incl. rustfmt, `cargo test`), `Validate configs` (incl. `prompt_refs`), `Docs hygiene` (links, markup, markers, FILEMAP, merged-PR history, plan status), `File size check`, `Third-party license check`. Every job carries a comment naming the incident it guards. |
 | `commitlint.yml` | PR opened/edited/synchronised | Conventional Commit PR title (`Validate PR Title`) |
 | `scheduled-audit.yml` | Mondays 06:00 UTC; manual | `cargo deny check advisories bans sources licenses`; opens or comments on a `Scheduled Dependency Audit Failure` issue |
 | `perf-baseline-capture.yml` | manual (`workflow_dispatch`) | Captures the recall-latency baseline on a runner and opens a PR with it; merging arms the perf gate. Never run yet |

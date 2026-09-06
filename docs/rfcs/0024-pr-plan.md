@@ -786,7 +786,7 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 | 4 | 4 | Channel-message dispatch + cost-regression CI gate | `feature/v033-rfc0024-channel-dispatch` | ✅ Merged | [#411](https://github.com/mkhomutov/Persatrix/pull/411) | 2026-05-22 |
 | 5 | — | Review follow-ups (lifecycle hardening) — PR 1 findings (1)/(2)/(5) | `feature/v033-rfc0024-followups` | ✅ Merged | [#412](https://github.com/mkhomutov/Persatrix/pull/412) | 2026-05-22 |
 | 5.1 | — | Review follow-ups (cleanups + test-gap fills) | `feature/v033-rfc0024-followups-cleanup` | ✅ Merged | [#413](https://github.com/mkhomutov/Persatrix/pull/413) | 2026-05-22 |
-| 6 | — | Phases-1–4 closeout | `feature/v033-rfc0024-close` | 🔀 PR open | [#414](https://github.com/mkhomutov/Persatrix/pull/414) | — |
+| 6 | — | Phases-1–4 closeout | `feature/v033-rfc0024-close` | ✅ Merged | [#414](https://github.com/mkhomutov/Persatrix/pull/414) | 2026-05-22 |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ⏭ Deferred
 
