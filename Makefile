@@ -513,6 +513,15 @@ issues-check: ## Fail if docs/issues/INDEX.md is stale or front-matter is invali
 rfcs: ## Regenerate docs/rfcs/INDEX.md from per-RFC YAML front-matter
 	$(PYTHON) scripts/rfcs.py --print
 
+merged-prs: ## Regenerate docs/merged-prs.md from the squash-merge subjects on main
+	$(PYTHON) scripts/merged_prs.py
+
+merged-prs-check: ## Fail if docs/merged-prs.md is behind git log (CI)
+	$(PYTHON) scripts/merged_prs.py --check
+
+plan-status-check: ## Fail if a plan's progress table says "PR open" for a PR that has merged (CI)
+	$(PYTHON) scripts/checks/plan_status.py
+
 rfcs-check: ## Fail if docs/rfcs/INDEX.md is stale or front-matter is invalid (CI)
 	$(PYTHON) scripts/rfcs.py --check
 

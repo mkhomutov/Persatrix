@@ -69,6 +69,9 @@ _EXTRA_EXCLUDES = [
     # `python scripts/issues.py --check` (sync) + per-issue front-matter, not a
     # prose cap — same data-scaling rationale as THIRD_PARTY_NOTICES.md above.
     "docs/issues/INDEX.md",
+    # Generated merged-PR history (scripts/merged_prs.py): one row per squash
+    # merge on main, so its length is the repository's PR count, not prose.
+    "docs/merged-prs.md",
     # PR review reports are local-only working artifacts and are intentionally
     # not committed; local copies should not block repo-wide size checks.
     "docs/pr-reviews/**",

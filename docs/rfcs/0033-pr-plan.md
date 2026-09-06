@@ -407,7 +407,7 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 | 4 | 2 | Missing-price guard — fail-closed for unpriced non-local aliases ([amendment item 1](../v0.3.4-plan-amendment-2026-05-24.md#what-changes)) | `feature/v034-rfc0033-missing-price-guard` | ✅ Merged | [#434](https://github.com/mkhomutov/Persatrix/pull/434) | 2026-05-26 |
 | 5 | 2 | `persatrix.llm.model_alias` span attr + alias-derived pricing + `/cost/summary` cost gate (+ OpenAI rows) | `feature/v034-rfc0033-telemetry-pricing` | ✅ Merged | [#435](https://github.com/mkhomutov/Persatrix/pull/435) | 2026-05-26 |
 | 6 | 2 | Documentation sweep — replace literal vendor IDs with alias examples | `feature/v034-rfc0033-docs-sweep` | ✅ Merged | [#436](https://github.com/mkhomutov/Persatrix/pull/436) | 2026-05-26 |
-| 7 | — | Phases-1–2 closeout | `feature/v034-rfc0033-close` | 🔀 PR open | [#437](https://github.com/mkhomutov/Persatrix/pull/437) | — |
+| 7 | — | Phases-1–2 closeout | `feature/v034-rfc0033-close` | ✅ Merged | [#437](https://github.com/mkhomutov/Persatrix/pull/437) | `4a38768c` |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ⏭ Deferred
 

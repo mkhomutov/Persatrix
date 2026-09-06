@@ -155,7 +155,7 @@ Calibration factors should be updated per-RFC based on actuals from the previous
    f. **Apply immediate fixes** — findings that are small and in-scope for the current PR get fixed immediately (committed on the branch before merge).
    g. **Defer remaining findings** — findings that are out-of-scope or cross-cutting get deferred to the follow-up PRs. Tag them with `→ deferred to PR N`.
    h. Merge the PR (squash merge to `main`).
-   i. Update ROADMAP.md merged PR count and Merged PR History table.
+   i. Update ROADMAP.md merged PR count (the Merged PR History itself is generated — `docs/merged-prs.md`).
    j. Mark the PR plan checklist items as complete.
 3. Repeat for each core PR in sequence.
 
@@ -193,7 +193,7 @@ The tracker uses a hybrid layout: a per-issue file (`ISSUE-NNNN-slug.md`) is the
 
 - Merged PRs on `main`.
 - PR plan updated with per-PR review findings and completed checklists.
-- ROADMAP.md Merged PR History updated per merge.
+- `docs/merged-prs.md` regenerated per merge (automatic in the pre-commit hook; `make merged-prs`).
 
 ---
 
@@ -312,7 +312,7 @@ Code changes accumulate across many PRs, but documentation and diagrams that exp
 4. Update ROADMAP.md:
    - RFC Tracker: status → `✅ Implemented`, merged count = total.
    - Component Status tables: update affected components.
-   - Final PR added to Merged PR History.
+   - Final PR appears in `docs/merged-prs.md` on the next regeneration.
 5. The close PR itself should be minimal (status updates only, ~50–100 lines).
 
 ### Artifacts
@@ -337,12 +337,12 @@ Status is tracked across multiple documents. **Before and after every task**, ve
 |----------|---------------|
 | RFC file | `Status:` field matches actual state. Use [lifecycle markers](rfcs/README.md#rfc-lifecycle). |
 | PR plan | Checklist items (`- [x]` / `- [ ]`) reflect completed work. Review findings recorded. |
-| [ROADMAP.md](../ROADMAP.md) | RFC Tracker (merged count, status), Component Status tables, Merged PR History. |
+| [ROADMAP.md](../ROADMAP.md) | RFC Tracker (merged count, status), Component Status tables. The Merged PR History is generated (`docs/merged-prs.md`) and checked by `make plan-status-check` / CI for rows that still say "PR open" after the PR merged. |
 
 Rules:
 
 1. Starting implementation of an RFC → status to `🚧 Implementing` in both RFC file and ROADMAP.
-2. PR merged → update PR plan checklist, ROADMAP merged-PR table and RFC merged count immediately.
+2. PR merged → update PR plan checklist and RFC merged count immediately; the merged-PR history regenerates itself, and `plan-status-check` flags any row left saying "PR open".
 3. All PRs merged → status to `✅ Implemented` in RFC file and ROADMAP.
 4. Component moves from stub to working → update Component Status table in ROADMAP.
 5. Never leave a stale status.

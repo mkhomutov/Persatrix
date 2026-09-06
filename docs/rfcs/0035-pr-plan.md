@@ -312,7 +312,7 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 | 2 | Read surface — struct, `GetMembershipIntervals`, `InScope`, interface | `feature/v039-rfc0035-read-surface` | ✅ Merged | [#672](https://github.com/mkhomutov/Persatrix/pull/672) | 2026-06-18 |
 | 3 | Write hooks — transactional interval open/close (load-bearing) + `CreateChannelWithMembers` (fourth hook) | `feature/v039-rfc0035-write-hooks` | ✅ Merged | [#673](https://github.com/mkhomutov/Persatrix/pull/673) | 2026-06-18 |
 | 4 | Phase 2 — inspection endpoint + `GetAccessibleChannels` (cut-tolerant) | `feature/v039-rfc0035-inspection-endpoint` | ✅ Merged | [#674](https://github.com/mkhomutov/Persatrix/pull/674) | 2026-06-18 |
-| 5 | Review follow-ups + closeout | `feature/v039-rfc0035-close` | 🔀 PR open | [#680](https://github.com/mkhomutov/Persatrix/pull/680) | — |
+| 5 | Review follow-ups + closeout | `feature/v039-rfc0035-close` | ✅ Merged | [#680](https://github.com/mkhomutov/Persatrix/pull/680) | `a12e02d9` |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ⏭ Deferred
 

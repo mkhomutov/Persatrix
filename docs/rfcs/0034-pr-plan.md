@@ -303,7 +303,7 @@ Extend the role mapper to multi-peer channels per [RFC §C](0034-persona-convers
 | 2 | Conversation Window module + config + schema | `feature/v031-rfc0034p1-conversation-window` | ✅ Merged | [#352](https://github.com/mkhomutov/Persatrix/pull/352) | 2026-05-16 |
 | 3 | Wire call site + DM integration test + manual-test doc | `feature/v031-rfc0034p1-wire-and-itest` | ✅ Merged | [#356](https://github.com/mkhomutov/Persatrix/pull/356) | 2026-05-16 |
 | 4 | Review follow-ups | `feature/v031-rfc0034p1-followups` | ✅ Merged | [#357](https://github.com/mkhomutov/Persatrix/pull/357) | 2026-05-16 |
-| 5 | Phase 1 closeout | `feature/v031-rfc0034p1-close` | 🔀 PR open | [#358](https://github.com/mkhomutov/Persatrix/pull/358) | — |
+| 5 | Phase 1 closeout | `feature/v031-rfc0034p1-close` | ✅ Merged | [#358](https://github.com/mkhomutov/Persatrix/pull/358) | `51be7f31` |
 
 ---
 
