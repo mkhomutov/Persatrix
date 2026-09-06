@@ -101,9 +101,9 @@ make validate              # validate YAML against JSON schemas
 
 Trunk-based development. See [BRANCHING.md](docs/BRANCHING.md) for details.
 
-- Feature branches: `feature/v0X-component-description` (1–5 day lifetime)
-- Squash merge to `main`
-- PRs < 500 lines
+- Branches: `feature/vNNN-component-description` for version work; `docs/`, `fix/`, `ci/` otherwise — hours to days
+- Rebase onto `main`, then squash merge; release tags are cut from `main` (no release branches)
+- PRs target < 500 changed lines (guidance; split code PRs, see BRANCHING §Pull requests)
 
 ### Significant Design Changes
 

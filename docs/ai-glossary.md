@@ -5,7 +5,7 @@ artifacts (code, docs, RFCs, PRs, reviews, plans). The terms below are the
 default vocabulary; alternative phrasings should be avoided unless clarity
 genuinely requires them.
 
-This file is referenced by both `.github/CLAUDE.md` and
+This file is referenced by both `CLAUDE.md` (repo root) and
 `.github/copilot-instructions.md`. Update it before introducing new terms.
 Process vocabulary (scope lock, cuttable, live arc, finding, …) lives in the
 [process glossary](methodology/process-glossary.md).
@@ -469,7 +469,7 @@ Process vocabulary (scope lock, cuttable, live arc, finding, …) lives in the
 ### Claude Code
 - **Aliases:** —
 - **Disallowed:** "Claude" (when meaning the assistant), "Anthropic CLI"
-- **Definition:** Anthropic's CLI assistant. Configured via `.github/CLAUDE.md`.
+- **Definition:** Anthropic's CLI assistant. Configured via the repo-root `CLAUDE.md`, which imports `.github/copilot-instructions.md`.
 - **Example:** "Claude Code follows the response-style rules in CLAUDE.md."
 
 ### Copilot

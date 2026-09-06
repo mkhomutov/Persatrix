@@ -37,7 +37,7 @@ standalone blueprint later.
 | Document | Role now |
 |----------|----------|
 | [development-workflow.md](../development-workflow.md) | The **RFC-level** sub-cycle (author → PR plan → implement → follow-ups → refactor → diagrams → close). Still accurate for an RFC; it nests inside [release-cycle.md](release-cycle.md) Phase 1. |
-| [BRANCHING.md](../BRANCHING.md) | Branch naming, commit convention, PR title rule. Its release-branch and artifact-publishing sections describe a process that was never used; the [release cycle](release-cycle.md) is authoritative on how a release is made. |
+| [BRANCHING.md](../BRANCHING.md) | Branch naming, commit convention, PR shape and size, tags. Rewritten 2026-09-06 to match practice (no release branches; tags from `main`); the [release cycle](release-cycle.md) owns how a release is made. |
 | [CONTRIBUTING.md](../../CONTRIBUTING.md) | Setup, quality gates, PR checklist. Accurate. |
 | [rfcs/README.md](../rfcs/README.md), [issues/README.md](../issues/README.md), [manual-tests/README.md](../manual-tests/README.md) | The three sub-systems the cycle draws on. Accurate and unchanged. |
 | [documentation-guide.md](../documentation-guide.md) | Writing style, size caps, ownership map, where documents live and when they freeze. The [enforcement matrix](enforcement-matrix.md) says which of its rules are checked. |
