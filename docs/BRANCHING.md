@@ -71,7 +71,8 @@ attribution trailers.
 
 **Title**: the commit subject above.
 
-**Body** — the shape every PR since v0.3.x has used:
+**Body** — the shape every PR since v0.3.x has used, pre-filled by
+`.github/PULL_REQUEST_TEMPLATE.md`:
 
 ```markdown
 ## What        — one paragraph
