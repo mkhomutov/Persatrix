@@ -537,6 +537,12 @@ release-doc: ## Open a version-cycle doc from its template (KIND=plan|scope-lock
 	@test -n "$(KIND)" -a -n "$(VERSION)" -a -n "$(CODENAME)" || (echo "error: KIND, VERSION and CODENAME are required" && exit 1)
 	$(PYTHON) scripts/release/open_doc.py --kind $(KIND) --version $(VERSION) --codename "$(CODENAME)" $(if $(PREVIOUS),--previous $(PREVIOUS),) $(if $(FORCE),--force,)
 
+branch-protection-show: ## Diff docs/methodology/branch-protection.json against main's live required checks (gh api)
+	$(PYTHON) scripts/release/branch_protection.py --show
+
+branch-protection-apply: ## Apply the versioned required-check set to main (repo admin; owner runs it)
+	$(PYTHON) scripts/release/branch_protection.py --apply
+
 bump-version: ## Bump version across all components (VERSION=X.Y.Z [DRY_RUN=--dry-run])
 	@test -n "$(VERSION)" || (echo "error: VERSION is required (e.g. make bump-version VERSION=0.3.0)" && exit 1)
 	$(PYTHON) scripts/bump_version.py $(VERSION) $(DRY_RUN)
