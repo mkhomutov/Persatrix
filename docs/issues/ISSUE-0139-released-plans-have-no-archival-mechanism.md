@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0139
 summary: "Every master plan and release-prep plan since v0.3.0 sits in GRANDFATHERED_FILES with the exit condition 'remove once the release is archived', but nothing defines or performs archival: nine plan entries have accumulated and none was ever retired (#838 recorded the first attempt failing — dropping v0.3.14-plan.md would have turned the file-size gate red on a 4 112-word frozen record). Frozen released plans are release evidence, the same category file_size.py already excludes by pattern for execution reports and checklists; the fix is a pattern exclusion for plans whose version tag exists, so only the open cycle's plan needs an allowlist entry."
-status: open
+status: resolved
 severity: low
 area: ci
 created: 2026-09-06
+closed: 2026-09-06
+closed_pr: 858
 refs:
   - scripts/checks/file_size.py
   - scripts/checks/file_size_allowlist.py
@@ -64,3 +66,20 @@ links for no gain.
 > 2026-09-06 — filed while writing the methodology set; the documentation
 > guide's new "Where Documents Live" section states the rule this issue
 > implements.
+
+> 2026-09-06 — RESOLVED in #858, with one change from the proposal.
+> `file_size.py` treats a version-cycle doc (plan, scope locks, plan
+> amendment, release-prep plan, release baseline) as excluded once
+> `CHANGELOG.md` carries the version's dated `## [X.Y.Z] - date` heading
+> (`_is_released_version_doc`; a two-part `v0.2` matches `0.2.0`). The
+> proposal said `git tag`; that shipped first and went red on its first CI
+> run — actions/checkout fetches a pull_request ref at depth 1 with no tags
+> and ignores the fetch-tags input in that mode — so the source moved to the
+> tree, where a depth-1 checkout, a worktree, and a tarball all answer the
+> same. The changelog is dated at release-prep PR 3, one PR before the tag;
+> that one-PR window is accepted. Sixteen allowlist entries retired; a
+> still-allowlisted released doc prints `[STALE-ALLOWLIST]` (advisory, so a
+> release does not turn `main` red before the follow-up retires the entry);
+> the narrow-exclusion tripwire still passes because an unreleased version
+> stays capped. No changelog → nothing released → everything capped. The
+> documentation guide's "Where Documents Live" section describes the rule.

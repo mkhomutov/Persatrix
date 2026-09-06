@@ -7,7 +7,6 @@ All utilities use only Python stdlib.  Minimum Python version: 3.11.
 
 from __future__ import annotations
 
-
 __all__ = [
     "has_allow_comment",
 ]

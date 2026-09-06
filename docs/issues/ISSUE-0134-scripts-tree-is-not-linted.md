@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0134
 summary: "CI lints `agents/` (`cd agents && ruff check .`) and `tests/` (`ruff check tests/`), but never `scripts/` — the 27-file tree that holds every pre-commit check, the file-map generator, the hook installer, and the version bumper. Nothing formats or lints the code that enforces formatting and linting. Confirmed during the #840 review, where an `I001` introduced in `scripts/install_hooks.py` was caught only by running ruff there by hand; CI was green on the same content."
-status: open
+status: resolved
 severity: low
 area: ci
 created: 2026-08-22
+closed: 2026-09-06
+closed_pr: 858
 refs:
   - .github/workflows/ci.yml
   - ruff.toml
@@ -81,3 +83,12 @@ change if the ruff half turns out to be noisy.
 > 2026-08-22 — captured during the #840 review. The `I001` finding above
 > was in that PR's own diff and was fixed before merge; the gap that let
 > it through to CI is what this issue records.
+
+> 2026-09-06 — RESOLVED in #858. CI now runs `ruff check scripts/ evaluators/`
+> and `mypy scripts/ evaluators/` in the Python job (evaluators/ was covered
+> by `make lint-python` but by no CI step — same gap, found by the
+> enforcement matrix). The backlog was 31 ruff findings: 13 auto-fixed, 17
+> E501 wrapped by hand, no per-file ignores. The mypy half turned out cheap:
+> `mypy.ini` gained `scripts` on `mypy_path` plus a crawl exclusion for
+> `scripts/_doc_index.py` — the same shape the tests/ helpers already use —
+> so the generators' sibling import resolves and the tree type-checks clean.

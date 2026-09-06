@@ -17,12 +17,6 @@ This ``__init__.py`` re-exports the full public API so that existing
 
 from __future__ import annotations
 
-# --- walking ---------------------------------------------------------------
-from scripts.checks.walking import (  # noqa: F401
-    DEFAULT_EXCLUDES,
-    walk_files,
-)
-
 # --- analysis --------------------------------------------------------------
 from scripts.checks.analysis import (  # noqa: F401
     has_allow_comment,
@@ -36,6 +30,12 @@ from scripts.checks.patterns import (  # noqa: F401
     ensure_utf8_stdout,
     ensure_utf8_streams,
     report_violations,
+)
+
+# --- walking ---------------------------------------------------------------
+from scripts.checks.walking import (  # noqa: F401
+    DEFAULT_EXCLUDES,
+    walk_files,
 )
 
 __all__ = [

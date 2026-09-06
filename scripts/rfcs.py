@@ -224,12 +224,15 @@ def validate(rfcs: list[RFC]) -> list[str]:
         if rfc.type and rfc.type not in ALLOWED_TYPE:
             errors.append(f"{loc}: invalid type '{rfc.type}' (allowed: {sorted(ALLOWED_TYPE)})")
         if rfc.status and rfc.status not in ALLOWED_STATUS:
-            errors.append(f"{loc}: invalid status '{rfc.status}' (allowed: {sorted(ALLOWED_STATUS)})")
+            errors.append(
+                f"{loc}: invalid status '{rfc.status}' (allowed: {sorted(ALLOWED_STATUS)})"
+            )
         if rfc.created and not is_iso_date(rfc.created):
             errors.append(f"{loc}: invalid 'created' date '{rfc.created}' (expected YYYY-MM-DD)")
         if rfc.superseded_by and rfc.superseded_by not in known_ids:
             errors.append(
-                f"{loc}: 'superseded_by: {rfc.superseded_by}' references an RFC id not present in docs/rfcs/"
+                f"{loc}: 'superseded_by: {rfc.superseded_by}' references an RFC id"
+                " not present in docs/rfcs/"
             )
         for dep in rfc.depends_on:
             if not _ID_RE.match(dep):
