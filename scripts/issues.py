@@ -58,7 +58,17 @@ ISSUE_FILE_PATTERN = re.compile(r"^ISSUE-\d{4}-[a-z0-9-]+\.md$")
 #: implementation plan) rather than the issue itself. Companions live
 #: alongside the issue but carry no front-matter and are excluded from
 #: INDEX.md — mirrors ``COMPANION_SUFFIXES`` in ``scripts/rfcs.py``.
-COMPANION_SUFFIXES = ("-pr-plan", "-phase0-gate", "-build-log", "-reserve-sizing")
+COMPANION_SUFFIXES = (
+    "-pr-plan",
+    "-phase0-gate",
+    "-build-log",
+    "-reserve-sizing",
+    # The "why the fix has this shape" record, split off a resolved issue that
+    # had no room left for its own closure note. Spelled with the second word
+    # deliberately: a bare "-design" is a common enough slug ending that a
+    # future issue could match it by accident and vanish from INDEX.md.
+    "-design-record",
+)
 
 #: Companion stems matched by PATTERN rather than by a literal suffix.
 #: A round of PR review findings written up against one issue — sibling of

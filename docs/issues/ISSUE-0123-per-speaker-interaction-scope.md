@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0123
 summary: "The RFC 0020 interaction scope is the ROOM, not the speaker: `scope_for_channel_event` (agents/memory/scopes.py) keys on channel/thread/sender and never on the principal, so in a group channel every speaker's turns accumulate into ONE `InteractionTracker` record. At close that whole record is summarised and facts are extracted from it inside the CLOSING turn's principal binding, so a fact derived from B's disclosure is written under A's principal — and facts are cross-room by default (RFC 0049 Phase 1), so A recalls it in a room B was never in. Fix: freeze a principal on the record at open, key the tracker by `(principal, scope)`, and bind the record's own frozen principal at close. ISSUE-0082 residual R-1."
-status: open
+status: resolved
 severity: high
 area: agents/memory
 created: 2026-08-06
+closed: 2026-09-03
+closed_pr: 855
 refs:
   - docs/issues/ISSUE-0082-orchestrator-per-request-session-principal-emission.md
   - docs/issues/ISSUE-0124-orchestrator-hop-drops-tenant-on-agent-cascade.md
@@ -260,3 +262,12 @@ the correct shape.
 > evaluated per record so a pre-rotation straggler skips the successors instead
 > of closing one. The metric-shape change part 3 predicted is real and is in the
 > changelog: `agent.interactions.closed[.by_<reason>]` fires once per record.
+
+> **Resolved 2026-09-03 — R-1 verified live** ([v0.3.15 execution report](../manual-tests/v0.3.15-execution-report.md), Legs 4 and 6).
+> The interaction record now binds its **own** frozen principal: every
+> close-derived row across the three-persona room read `alice-person`, never
+> `local`, and no record mixed two principals. The two close paths agree —
+> Leg 4 closed by idle and Leg 6 by an Alice-origin publish, and both produced
+> the same shape, which is the point: the trigger no longer selects a tenant.
+> The asymmetry in `synthesis_close.go` that this issue was filed against is
+> no longer observable.

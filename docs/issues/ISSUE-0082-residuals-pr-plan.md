@@ -205,7 +205,7 @@ Run [MT-MEMORY-GROUP-TENANT-001](../manual-tests/MT-MEMORY-GROUP-TENANT-001.md) 
 | 3 | R-1 + [ISSUE-0131](ISSUE-0131-derived-memory-has-no-speaker-attribution.md) scope key `(principal, speaker, scope)` + RFC 0020 §G amendment | `feature/v0315-issue0123-scope-key` | ✅ Merged | [#846](https://github.com/mkhomutov/Persatrix/pull/846) | `5e23246c` |
 | 4 | [ISSUE-0131](ISSUE-0131-derived-memory-has-no-speaker-attribution.md) `speaker_id` projection onto the close-derived rows + the RFC 0020 §G room-close exclusion | `feature/v0315-issue0123-close-path` | ✅ Merged | [#849](https://github.com/mkhomutov/Persatrix/pull/849) | `982058d6` |
 | 4b | Reserve re-size (`1 + N` → `1 + R`) + the clamp signal + the threshold basis + Go-side asymmetry cleanup — split out of PR 4 | `feature/v0315-issue0123-reserve-resize` | ✅ Merged | [#852](https://github.com/mkhomutov/Persatrix/pull/852) | `9003032e` |
-| 5 | Live MT + closeout — runs as [release-prep](../v0.3.15-release-prep-plan.md) **PR 1** | `feature/v0315-issue0082-residuals-close` | ⬜ Not started | — | — |
+| 5 | Live MT + closeout — runs as [release-prep](../v0.3.15-release-prep-plan.md) **PR 1** | `feature/v0315-issue0082-residuals-close` | 🔀 PR open — arc ran 2026-09-02 | [#855](https://github.com/mkhomutov/Persatrix/pull/855) | — |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ⏭ Deferred
 
