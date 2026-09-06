@@ -51,6 +51,15 @@ allow = [
     "Zlib",
     "CC0-1.0",
     "Unlicense",
+    # A *data* licence, not a code one: the Community Data License Agreement
+    # Permissive 2.0 covers `webpki-root-certs`, which is the Mozilla trusted
+    # certificate-authority list republished by the rustls project as bytes
+    # rather than as a program. It entered the tree with reqwest 0.13, whose
+    # default TLS path is rustls-platform-verifier. CDLA-Permissive-2.0 grants
+    # unrestricted use and redistribution of the data with no share-alike
+    # obligation and no patent grant to worry about, so redistributing it
+    # inside a BUSL-1.1 binary carries no condition we have to meet.
+    "CDLA-Permissive-2.0",
 ]
 exceptions = [
     # Persatrix itself ships under BUSL-1.1. The allow-list above governs
@@ -65,7 +74,8 @@ multiple-versions = "warn"
 wildcards = "allow"
 highlight = "all"
 # testing_table 0.3.x is a production (non-dev) transitive dep pulled in by
-# tabled 0.20 (introduced in PR #162 — RUSTSEC-2024-0370 fix). Its runtime
+# tabled 0.21 (introduced in PR #162 — RUSTSEC-2024-0370 fix — under tabled
+# 0.20, and still present after the 0.21 upgrade). Its runtime
 # impact is zero (compile-time only; it pulls only unicode-width). This is an
 # upstream design decision in tabled_derive and is not an error in our tree.
 # Revisit when tabled is next upgraded or replaced.

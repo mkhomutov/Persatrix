@@ -15,13 +15,13 @@ serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "time", "signal"] }
 # `stream` feature exposes `reqwest::Response::bytes_stream()`, which the
 # `persatrix logs --follow` SSE client (cli/src/commands/logs.rs) consumes.
-reqwest = { version = "0.12", features = ["json", "stream"] }
-colored = "2"
+reqwest = { version = "0.13", features = ["json", "stream"] }
+colored = "3"
 ctrlc = "3"                       # graceful Ctrl-C handling for chat REPL
-tabled = "0.20"                   # table output formatting
+tabled = "0.21"                   # table output formatting
 # Home-directory resolution for the `~/.persatrix/active-session` pointer file
 # (RFC 0031 Phase 3 §E). The only cross-platform homedir API; std has none.
-dirs = "5"
+dirs = "6"
 # No-echo password prompt for `persatrix login` (RFC 0039 §J — the
 # password is never in argv and never echoed). TTY-only; the CLI itself
 # falls back to a stdin line when stdin is not a terminal (pipes).
