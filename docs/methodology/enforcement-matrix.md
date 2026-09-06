@@ -65,9 +65,9 @@ Required, it rides inside one of the six required jobs.
 | Grandfathered files carry a reason and an exit condition | `file_size_allowlist.py` docstring | review; `test_allowlist_has_no_dead_entries`, `test_allowlist_holds_no_released_version_docs` | Convention + unit tests |
 | Released version-cycle docs are frozen evidence, exempt from the cap | documentation-guide §Where Documents Live | `file_size.py` excludes them once `CHANGELOG.md` has the version's dated heading (ISSUE-0139; read from the tree, not `git tag`, so a depth-1 checkout agrees with a full clone); a still-allowlisted released doc prints `[STALE-ALLOWLIST]` (advisory, retired at the post-release follow-up) | Required (`Python` unit tests pin it) |
 | Near-cap warning at 3 % | `file_size.py` | `--near-cap` output on every run | Advisory output |
-| PRs under 500 changed lines | CONTRIBUTING; BRANCHING; CLAUDE.md | — | **Convention only** — a third of recent merges exceed it |
+| PRs under 500 changed lines | CONTRIBUTING; BRANCHING; copilot-instructions | — | **Guidance, stated as such** since the BRANCHING rewrite — a third of merges exceed it, almost all docs-heavy; code PRs split |
 | Squash merge; linear history | BRANCHING | branch protection | Required |
-| Feature branch naming `feature/vNNN-…` | BRANCHING; each plan's header | — | Convention |
+| Branch naming (`feature/vNNN-…`, `docs/`, `fix/`, `ci/`) | BRANCHING; each plan's header | — | Convention |
 
 ## Documentation
 
@@ -95,6 +95,8 @@ Required, it rides inside one of the six required jobs.
 | Version strings aligned across five files | version-bump guide | `make bump-version` + checklist §2 | Manual at release-prep PR 3 |
 | TDD for new unit-level code | CLAUDE.md §TDD | review | Convention |
 | Version-train gate | release-cycle | review | Convention |
+| Debt sweep when ≥ 20 files sit at their cap or two releases have passed | release-cycle §The debt sweep | `file_size.py --near-cap` read at the post-release follow-up | Convention, with the count recorded in the follow-up PR |
+| PR body follows What / Why / How / Not in this PR / Gates / Review | BRANCHING §Pull requests | `.github/PULL_REQUEST_TEMPLATE.md` pre-fills it | Template (GitHub applies it to every new PR) |
 
 ---
 
@@ -112,9 +114,17 @@ Listed here so the matrix is honest about its own gaps.
    on `scripts/` and `evaluators/`, the Go integration tests, the sanitizer
    sync, `prompt_refs`, and the four doc-hygiene checks. `notices-check`
    stays make-only on purpose (see its row).
-3. **Arm the perf gate** by dispatching `perf-baseline-capture.yml` once.
-4. **Decide the PR-size rule**: enforce it (a size label or a check) or
-   restate it as guidance with the split heuristic it actually follows.
+3. **Arm the perf gate** by dispatching `perf-baseline-capture.yml` once —
+   after [ISSUE-0058](../issues/ISSUE-0058-perf-gate-runner-variance-tolerance.md)
+   settles the runner-variance tolerance; a 20 % fixed band on shared runners
+   was judged too flaky to arm during a release-prep window (2026-09-06).
+4. ~~Decide the PR-size rule.~~ Decided in the BRANCHING rewrite: guidance,
+   with the split heuristic code PRs follow; documentation-heavy release
+   evidence is the exception and is named as such.
+5. **Take RFC 0044 Phase 2 (evals in CI) at v0.3.16, not cut.** `make
+   eval-replay` is $0 and deterministic; gating it turns every release's
+   paid live arc into a free regression gate for the next. Slotted cuttable;
+   the recommendation is recorded on the RFC 0044 PR plan.
 
 ## Related documentation
 

@@ -328,7 +328,7 @@ file remains an honest record of what was flagged at review time.
    `python -m agents.persona_runtime_main` — no such module exists; the actual persona entry
    point is `python -m persatrix_agents.server` (per
    [Dockerfile.agent:32](../../Dockerfile.agent#L32) and
-   [.github/CLAUDE.md:57](../../.github/CLAUDE.md#L57)). An operator following MT-SESSION-001
+   [CLAUDE.md:57 (then at .github/CLAUDE.md)](../../CLAUDE.md#L57)). An operator following MT-SESSION-001
    step-by-step today gets `ModuleNotFoundError`. Fix: three one-line doc edits.
 
    **Resolution (PR 4)**: Three doc edits landed —

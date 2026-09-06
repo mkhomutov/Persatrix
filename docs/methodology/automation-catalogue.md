@@ -37,7 +37,7 @@ dependencies.
 | `make notices` (`scripts/generate_third_party_notices.py`) | Regenerate `THIRD_PARTY_NOTICES.md` from the three dependency graphs | `notices-check` | Make-only; release-prep PR 4 |
 | `make rfcs` (`scripts/rfcs.py`) | Regenerate `docs/rfcs/INDEX.md` from RFC YAML front-matter | `rfcs-check` | CI (`Validate configs`) + pre-commit |
 | `make issues` (`scripts/issues.py`) | Regenerate `docs/issues/INDEX.md` from issue front-matter | `issues-check` | CI (`Validate configs`) |
-| `scripts/generate_filemap.py` | Regenerate `FILEMAP.md` from `git ls-files` (tracked files only — `git add` new files first) | `--check` (ignores the header date) | Pre-commit regenerates and stages it; CI (`Docs hygiene`) checks it |
+| `scripts/generate_filemap.py` | Regenerate `FILEMAP.md` from `git ls-files` (tracked files only — `git add` new files first). **Kept on purpose** (decision 2026-09-06): it is the one-read index assistants load before touching the tree, and the writer now leaves the date alone so it no longer churns on every commit | `--check` (ignores the header date) | Pre-commit regenerates and stages it; CI (`Docs hygiene`) checks it |
 | `make generate-persona-nickname COUNT= SEED=` (`scripts/persona_nickname_generator.py`) | Nickname-style persona id/name pairs | — | On demand |
 | `make bump-version VERSION=X.Y.Z [DRY_RUN=--dry-run]` (`scripts/bump_version.py`) | Bump the five version strings ([guide](../guides/version-bump.md)) | checklist §2 | Release-prep PR 3 |
 

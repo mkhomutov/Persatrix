@@ -72,9 +72,9 @@ All new unit-level code follows Red-Green-Refactor:
 3. **Do not** write production code without a corresponding failing test (unit layer only).
 
 Per-language details are in `.github/instructions/`. Key rules:
-- **Go:** failing `_test.go` before `*.go`; table-driven tests; interface mocks in `internal/testutil/`.
+- **Go:** failing `_test.go` before `*.go`; table-driven tests; interface mocks in `internal/testutil/` (created on first use — it does not exist yet).
 - **Python:** failing pytest in `tests/unit/python/` first; mock `LLMClient` at the boundary; no real network calls.
-- **Rust:** `#[cfg(test)]` unit tests inline; `cli/tests/` for CLI integration tests; mock HTTP with `mockito`.
+- **Rust:** `#[cfg(test)]` unit tests inline (the whole suite today); `cli/tests/` for CLI integration tests and `mockito` for HTTP mocks, both added on first use — neither exists yet.
 - **Integration tests** (`tests/integration/`) are exempt — write them after the unit layer validates the pieces.
 
 ## Project Layout (key paths)
@@ -119,4 +119,8 @@ Follow [Status Hygiene rules](../docs/development-workflow.md#status-hygiene). I
 
 ## Branching
 
-Trunk-based. Branches: `feature/v0X-component-description`, 1–5 days, squash-merge to `main`, PRs < 500 lines. See [BRANCHING.md](../docs/BRANCHING.md).
+Trunk-based. Branches: `feature/vNNN-component-description` (also `docs/`, `fix/`, `ci/`), hours to days, rebase then squash-merge to `main`. PRs target < 500 changed lines (guidance, not enforced). Release tags are cut from `main`; there are no release branches. See [BRANCHING.md](../docs/BRANCHING.md).
+
+## Assistant-specific files
+
+This file is the shared source for every assistant. Claude Code reads the repo-root [CLAUDE.md](../CLAUDE.md), which imports this file and adds only Claude-specific guidance; language rules are in `instructions/`.

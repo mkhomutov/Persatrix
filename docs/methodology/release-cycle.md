@@ -297,6 +297,22 @@ still says the release is pending. PR body from
   reason, so the next cycle does not inherit a promise that cannot be kept
   (precedent: the allowlist exit condition at
   [#838](https://github.com/mkhomutov/Persatrix/pull/838)).
+- **Read the near-cap list** (`python scripts/checks/file_size.py --near-cap`)
+  and decide the **debt sweep** (below).
+
+### The debt sweep
+
+The size caps are a cliff, and a sweep on 2026-08-29 found 29 code files
+sitting at exactly 500 lines against a background of ~3.5 per line-count
+bucket — the shape trimming-to-fit leaves behind. The RFC-level cycle has a
+refactoring assessment ([development-workflow.md §Phase 6](../development-workflow.md#phase-6--refactoring-assessment));
+the release cycle had none. Rule: at every post-release follow-up, if the
+near-cap list shows **twenty or more files at their cap**, or two releases
+have passed since the last sweep, the follow-up files a `debt-sweep` issue
+and the next master plan carries a cuttable **Workstream D — debt sweep**
+that splits the at-cap files first (pure structural PRs, no behaviour
+change, under 500 lines each). Below the threshold, the follow-up records the
+count and moves on.
 
 ---
 
