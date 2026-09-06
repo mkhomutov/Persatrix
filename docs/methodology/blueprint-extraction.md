@@ -24,7 +24,7 @@ The [conformance manifest](conformance.json) is the split, kept as data:
 
 | Section | Travels to the blueprint | Notes |
 |---|---|---|
-| `documents` | yes, with project names replaced by placeholders | The eight methodology docs, the documentation guide, BRANCHING, CONTRIBUTING skeleton, the RFC / issue / manual-test conventions and templates, the eleven document templates, the PR template, `dependabot.yml`, and the generated files' *shapes* (FILEMAP, merged-prs, the two indexes) |
+| `documents` | yes, with project names replaced by placeholders | The nine methodology docs, the documentation guide, BRANCHING, CONTRIBUTING skeleton, the RFC / issue / manual-test conventions and templates, the ten document templates, the PR template, `dependabot.yml`, and the generated files' *shapes* (FILEMAP, merged-prs, the two indexes) |
 | `tooling` | yes, unchanged | Everything under `scripts/checks/`, the generators, the hook, the release tooling. All stdlib-only and path-relative by design |
 | `make_targets` | yes, as a `Makefile.methodology` include | A consumer's Makefile includes it and keeps its own build targets |
 | `ci_jobs`, `ci_steps_in_docs_hygiene` | yes, as a reusable workflow | `Docs hygiene` and `File size check` become `uses: <blueprint>/.github/workflows/methodology.yml@vN` |
@@ -77,7 +77,7 @@ this repository uses for its own product.
    `scripts/_git.py`, the generators, the hook and installer, the release
    tooling, the tests that pin them — unchanged — plus the manifest with
    `persatrix_specific` emptied.
-3. Second PR: the generic documents with placeholders applied, the eleven
+3. Second PR: the generic documents with placeholders applied, the ten
    templates, `Makefile.methodology`, the reusable workflow.
 4. Third PR, here: replace the vendored files with the pinned copy, add
    `BLUEPRINT_VERSION`, point the conformance check at both manifests. Tag
