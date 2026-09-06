@@ -45,9 +45,8 @@ def test_select_filters_by_only_and_skip() -> None:
 
 def test_render_table_is_the_execution_report_shape() -> None:
     gates = select(GATES, only=["make lint", "make validate"], skip=None, include_optional=False)
-    results = run_gates(
-        gates, runner=_fake_runner(fail=frozenset({"make validate"}), slow=frozenset({"make lint"})),
-    )
+    runner = _fake_runner(fail=frozenset({"make validate"}), slow=frozenset({"make lint"}))
+    results = run_gates(gates, runner=runner)
     table = render_table(results)
     assert table.splitlines()[0] == "| Gate | Command | Result |"
     assert "| make lint | `make lint` | ✅ pass (42.0s) |" in table
