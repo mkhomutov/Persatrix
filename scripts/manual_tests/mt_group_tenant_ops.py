@@ -17,13 +17,21 @@ from __future__ import annotations
 import os
 import secrets
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
+if str(Path(__file__).resolve().parent.parent.parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+
+from scripts.manual_tests import mt_group_tenant_preflight as pf  # noqa: E402
+
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+
+SECURITY_CONFIG = REPO_ROOT / "config" / "security.yaml"
 
 CLI = "./bin/persatrix"
 ROOM = "planning"
@@ -56,6 +64,18 @@ class Ctx:
     artifacts: list[str]
     password: str
 
+    #: Original text of `config/security.yaml`, taken the first time
+    #: :func:`set_auth_mode` rewrites it. The arc flips auth twice — Leg 8 off,
+    #: Leg 9 back on — so every path that leaves before Leg 9 finishes used to
+    #: strand a TRACKED file in a modified state: an abort, a Ctrl-C, or even
+    #: `--legs 0-8` completing cleanly. One release-prep commit in this repo
+    #: exists purely to undo that by hand. :func:`restore_config` puts it back.
+    security_backup: str | None = None
+
+    #: Channels this arc armed (`autonomous.enabled=true`) and must disarm on
+    #: the way out. An armed channel is convenable, and spends, on any boot.
+    armed_rooms: list[str] = field(default_factory=list)
+
     def say(self, msg: str) -> None:
         print(msg, flush=True)
 
@@ -78,10 +98,24 @@ class Ctx:
             self.say(f"              ({why})")
             return ""
         self.say(f"    $ {printable}{piped}")
-        proc = subprocess.run(  # noqa: S603
-            cmd, cwd=REPO_ROOT, capture_output=True, text=True,
-            timeout=timeout, check=False, input=stdin,
-        )
+        try:
+            proc = subprocess.run(  # noqa: S603
+                cmd, cwd=REPO_ROOT, capture_output=True, text=True,
+                encoding="utf-8", errors="replace",
+                timeout=timeout, check=False, input=stdin,
+            )
+        except (subprocess.SubprocessError, OSError) as exc:
+            # A timeout or a missing binary is not a command that FAILED — it
+            # is a command that never ran, so `critical` does not enter into
+            # it. Both used to escape as a bare traceback past the driver's
+            # `except ArcAbortedError`, which skipped the partial-artifact
+            # write and discarded every leg the arc had already paid for.
+            # `./bin/persatrix` is a gitignored build artifact no gate checks,
+            # and a slow `docker compose restart` clears the 120s default.
+            self.say(f"    ! {type(exc).__name__}: {exc}")
+            raise ArcAbortedError(
+                f"{printable} -> {type(exc).__name__}: {exc}"
+            ) from exc
         if proc.returncode != 0:
             detail = (proc.stderr.strip() or proc.stdout.strip())[:400]
             self.say(f"    ! exit {proc.returncode}: {detail}")
@@ -113,12 +147,20 @@ def set_auth_mode(ctx: Ctx, mode: str) -> None:
     substitution would also hit the comment above it, which contains the
     literal string `mode: enabled` while the setting reads `disabled` — the
     same trap that made the first preflight pass on prose (F-1).
+
+    The original text is stashed on the ``Ctx`` the first time through, so
+    :func:`restore_config` can put the tracked file back however the arc ends.
     """
-    path = REPO_ROOT / "config" / "security.yaml"
+    path = SECURITY_CONFIG
     if not ctx.execute:
         ctx.say(f"    [dry-run] set auth.mode: {mode} in config/security.yaml + restart")
+        ctx.say(f"    [dry-run] probe a policyAuthenticated route: expect "
+                f"{'401' if mode == 'enabled' else 'not 401'}")
         return
-    lines = path.read_text().splitlines(keepends=True)
+    original = path.read_text(encoding="utf-8")
+    if ctx.security_backup is None:
+        ctx.security_backup = original
+    lines = original.splitlines(keepends=True)
     out, in_auth, done = [], False, False
     for line in lines:
         if line.startswith("auth:"):
@@ -135,11 +177,56 @@ def set_auth_mode(ctx: Ctx, mode: str) -> None:
         out.append(line)
     if not done:
         raise ArcAbortedError("could not find the auth.mode setting line")
-    path.write_text("".join(out))
+    path.write_text("".join(out), encoding="utf-8")
     ctx.say(f"    ~ config/security.yaml -> auth.mode: {mode}")
     ctx.run(["docker", "compose", "restart", "orchestrator"],
-            why="the running process keeps the mode it booted with")
+            why="the running process keeps the mode it booted with",
+            critical=True)
     wait_healthy(ctx)
+    verify_auth_live(ctx, mode)
+
+
+def verify_auth_live(ctx: Ctx, mode: str) -> None:
+    """Prove the RESTARTED process actually booted with *mode*.
+
+    `wait_healthy` proves only that something answers, and it cannot tell a
+    restart that took from one that never happened — the old process answers
+    `/healthz` just as fast, and faster. That is the file-versus-process
+    divergence `gate_auth_live` exists to draw, so reuse the same 401 probe
+    here rather than trusting an exit code.
+
+    It matters in both directions. If Leg 8's flip to `disabled` does not
+    take, the new rows carry `alice-person` instead of `local` and the leg's
+    central assertion reads as the fix failing. If Leg 9's flip back to
+    `enabled` does not take, the `alice-person` partition never grows and the
+    "A → B grows" bar goes flat — which the leg text itself warns is a
+    wrong-looking result.
+    """
+    gate = pf.gate_auth_live(ctx.server, expected=mode)
+    ctx.say(gate.render())
+    if not gate.ok:
+        raise ArcAbortedError(
+            f"config/security.yaml now reads auth.mode: {mode}, but the "
+            f"running orchestrator disagrees ({gate.detail}). Every later leg "
+            f"would read the wrong tenant."
+        )
+
+
+def restore_config(ctx: Ctx) -> None:
+    """Put `config/security.yaml` back exactly as the arc found it.
+
+    Called from the driver's ``finally``, so it runs on the clean path, on an
+    abort, and on a Ctrl-C alike. Leaving a tracked config modified is not a
+    cosmetic problem here: the next `git add -A` sweeps a run knob into a
+    commit, which has already happened once in this repo.
+    """
+    if ctx.security_backup is None:
+        return
+    if not ctx.execute:
+        return
+    SECURITY_CONFIG.write_text(ctx.security_backup, encoding="utf-8")
+    ctx.security_backup = None
+    ctx.say("    ~ config/security.yaml restored to its pre-arc contents")
 
 
 def wait_healthy(ctx: Ctx, timeout: int = 180) -> None:
@@ -223,6 +310,38 @@ def login(ctx: Ctx, username: str) -> None:
     ctx.run([CLI, "login", "--username", username],
             why=f"the CLI must hold {username}'s session for the sends below",
             stdin=f"{ctx.password}\n", secret=True, critical=True)
+
+
+def arm_room(ctx: Ctx, room: str) -> None:
+    """Arm a channel's `autonomous` block, and remember to put it back.
+
+    `roundtable` ships DISARMED on purpose: `config/channels.yaml` says an
+    armed autonomous channel "would spend real tokens with no human present",
+    convenable on any boot, with no enforced cost cap. Leg 5 has to arm it to
+    test the travel path — so the arming is a run knob like the collector's
+    sampling percentage, and every other run knob in this arc is reverted.
+    """
+    ctx.run([CLI, "channel", "config", "set", f"group:{room}",
+             "autonomous.enabled=true"],
+            why="convene 409s on a disarmed channel", critical=True)
+    if room not in ctx.armed_rooms:
+        ctx.armed_rooms.append(room)
+
+
+def disarm_rooms(ctx: Ctx) -> None:
+    """Disarm every channel this arc armed. Called from the driver's ``finally``.
+
+    Sets `false` explicitly rather than `channel config unset`: this arc's own
+    finding F-3 records that `unset` falls back to the FLEET default, not to
+    the channel's YAML, so `unset` is not a reliable way back to `disabled`.
+    Store overrides are canonical over YAML, so reverting `config/` — which a
+    previous run did by hand — never touched this at all.
+    """
+    for room in list(ctx.armed_rooms):
+        ctx.run([CLI, "channel", "config", "set", f"group:{room}",
+                 "autonomous.enabled=false"],
+                why=f"leave {room} disarmed — an armed channel spends on any boot")
+        ctx.armed_rooms.remove(room)
 
 
 def send_as(ctx: Ctx, participant: str, room: str, body: str,

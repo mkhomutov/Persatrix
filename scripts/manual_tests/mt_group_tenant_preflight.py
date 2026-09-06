@@ -6,8 +6,9 @@ the part worth running on their own: every one of them guards a leg that
 otherwise passes *vacuously*, and an operator wants to clear them before
 spending a paid arc — not discover a silent no-op halfway through.
 
-Each gate returns a :class:`Gate` naming the leg it protects and, when it
-fails, the exact remedy. Nothing here mutates the stack: the driver applies
+Each gate returns a :class:`Gate` (from ``mt_gate.py``, which also holds the
+credential-aware ``GET`` the authenticated gates need) naming the leg it
+protects and, when it fails, the exact remedy. Nothing here mutates the stack: the driver applies
 fixes, this module only reports. That separation is deliberate — a preflight
 that quietly reconfigures the system under test is not a preflight.
 
@@ -30,14 +31,27 @@ The four vacuity traps, all recorded in the MT itself:
 from __future__ import annotations
 
 import argparse
-import json
 import subprocess
 import sys
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+
+if str(Path(__file__).resolve().parent.parent.parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+
+from scripts.manual_tests.mt_gate import (  # noqa: E402  (re-exported)
+    Gate,
+    bearer_token,
+    credentials_path,
+    deferred_gate,
+    get_json,
+)
+
+__all__ = [
+    "Gate", "bearer_token", "credentials_path", "deferred_gate", "get_json",
+    "run_gates", "run_deferred_gates", "DEFAULT_SERVER", "DEFAULT_JAEGER",
+]
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -64,54 +78,6 @@ def _config_url(server: str, room: str) -> str:
 # Leg 4 needs the interaction still open when it asks for the close, and the
 # arc's own pacing runs several minutes. 1800s is the MT's suggested value.
 MIN_IDLE_TIMEOUT = 1800
-
-
-@dataclass
-class Gate:
-    """One preflight check: what it protects, and how to fix it."""
-
-    name: str
-    leg: str
-    ok: bool
-    detail: str
-    remedy: str = ""
-
-    def render(self) -> str:
-        mark = "PASS" if self.ok else "FAIL"
-        line = f"  [{mark}] {self.name} (protects {self.leg}) — {self.detail}"
-        if not self.ok and self.remedy:
-            line += f"\n         remedy: {self.remedy}"
-        return line
-
-
-def _bearer_token() -> str:
-    """The operator's stored CLI token, if they have logged in.
-
-    Once `auth.mode: enabled` is live, most of the endpoints these gates read
-    (`/api/v1/agents`, a channel's `/config`) answer **401** to an anonymous
-    caller — so a preflight that reads them anonymously reports every gate as
-    broken the moment auth starts working. The token lives where the CLI put
-    it, keyed by server URL; missing or unreadable is not an error here, it
-    just means the probes go out unauthenticated and say so.
-    """
-    path = Path.home() / ".persatrix" / "credentials"
-    try:
-        blob = json.loads(path.read_text())
-    except (OSError, ValueError):
-        return ""
-    for entry in blob.values():
-        if isinstance(entry, dict) and entry.get("token"):
-            return str(entry["token"])
-    return ""
-
-
-def _get_json(url: str, timeout: float = 5.0) -> Any:
-    req = urllib.request.Request(url)  # noqa: S310
-    token = _bearer_token()
-    if token:
-        req.add_header("Authorization", f"Bearer {token}")
-    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
-        return json.loads(resp.read().decode())
 
 
 def gate_orchestrator(server: str) -> Gate:
@@ -145,7 +111,17 @@ def gate_agents_registered(server: str) -> Gate:
     2026-08-07 arc was lost to exactly this.
     """
     try:
-        payload = _get_json(f"{server}/api/v1/agents")
+        payload = get_json(f"{server}/api/v1/agents", server)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 401:
+            return deferred_gate("agents registered", "all legs")
+        return Gate(
+            "agents registered",
+            "all legs",
+            False,
+            f"/api/v1/agents -> HTTP {exc.code}",
+            "check the orchestrator is up",
+        )
     except (urllib.error.URLError, OSError, ValueError) as exc:
         return Gate(
             "agents registered",
@@ -155,8 +131,23 @@ def gate_agents_registered(server: str) -> Gate:
             "check the orchestrator is up",
         )
     agents = payload.get("agents", payload) if isinstance(payload, dict) else payload
-    count = len(agents) if isinstance(agents, list) else 0
-    missing = [p for p in PERSONAS if p not in json.dumps(payload)]
+    if not isinstance(agents, list):
+        agents = []
+    # Match REGISTERED IDS, not the serialized blob. `p not in
+    # json.dumps(payload)` passed on a roster of one unrelated agent that
+    # merely *mentioned* the three personas — in a subscription list, a
+    # description, a URL. That is the same shape as the `mode: enabled`-in-a-
+    # comment trap below: the gate that exists to stop a vacuous pass, passing
+    # vacuously. This gate's own docstring says a live arc was lost to an
+    # empty registry.
+    ids = {
+        str(a.get("id") or a.get("agent_id") or "")
+        for a in agents
+        if isinstance(a, dict)
+    }
+    ids.discard("")
+    count = len(ids)
+    missing = [p for p in PERSONAS if p not in ids]
     ok = count > 0 and not missing
     detail = f"{count} registered"
     if missing:
@@ -174,7 +165,17 @@ def gate_agents_registered(server: str) -> Gate:
 def gate_floor_control(server: str, room: str = ROOM) -> Gate:
     """floor_control must be OFF or Leg 2 sees zero tenant-less dispatches."""
     try:
-        payload = _get_json(_config_url(server, room))
+        payload = get_json(_config_url(server, room), server)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 401:
+            return deferred_gate("floor_control off", "Leg 2 (R-2)")
+        return Gate(
+            "floor_control off",
+            "Leg 2 (R-2)",
+            False,
+            f"channel config -> HTTP {exc.code}",
+            "",
+        )
     except (urllib.error.URLError, OSError, ValueError) as exc:
         return Gate(
             "floor_control off",
@@ -298,7 +299,17 @@ def gate_auth_live(server: str, room: str = ROOM, expected: str = "enabled") -> 
 def gate_idle_timeout(server: str, room: str = ROOM) -> Gate:
     """A short idle timeout closes the interaction before Leg 4 asks."""
     try:
-        payload = _get_json(_config_url(server, room))
+        payload = get_json(_config_url(server, room), server)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 401:
+            return deferred_gate("idle timeout raised", "Legs 3-4")
+        return Gate(
+            "idle timeout raised",
+            "Legs 3-4",
+            False,
+            f"channel config -> HTTP {exc.code}",
+            "",
+        )
     except (urllib.error.URLError, OSError, ValueError) as exc:
         return Gate(
             "idle timeout raised",
@@ -375,6 +386,21 @@ def run_gates(server: str, jaeger: str, auth_mode: str = "enabled") -> list[Gate
     ]
 
 
+def run_deferred_gates(server: str) -> list[Gate]:
+    """Re-run the three gates that need an operator token.
+
+    Called by the driver right after Leg 0's login. Everything these protect —
+    a registry that is silently empty, a room under floor control, an idle
+    timeout that closes the interaction before Leg 4 asks — still lies ahead,
+    so deferring them costs nothing and skipping them costs the arc.
+    """
+    return [
+        gate_agents_registered(server),
+        gate_floor_control(server),
+        gate_idle_timeout(server),
+    ]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--server", default=DEFAULT_SERVER)
@@ -387,13 +413,18 @@ def main(argv: list[str] | None = None) -> int:
     gates = run_gates(args.server, args.jaeger, args.auth_mode)
     for gate in gates:
         print(gate.render())
-    failed = [g for g in gates if not g.ok]
+    failed = [g for g in gates if g.blocking]
+    deferred = [g for g in gates if g.skipped]
     print("=" * 62)
+    if deferred:
+        print(f"{len(deferred)} gate(s) deferred — they read an authenticated "
+              f"route and no operator token exists yet. The driver re-checks "
+              f"them after Leg 0 logs in.")
     if failed:
         print(f"{len(failed)}/{len(gates)} gate(s) FAILED — fix before spending the arc.")
         print("Every failure above is a leg that would otherwise pass vacuously.")
         return 1
-    print(f"All {len(gates)} gates pass. The arc can run.")
+    print(f"{len(gates) - len(deferred)}/{len(gates)} gates pass. The arc can run.")
     return 0
 
 

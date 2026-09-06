@@ -29,8 +29,10 @@ shape-(b) guard deleted).
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
+import urllib.error
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -44,9 +46,12 @@ from scripts.manual_tests.mt_group_tenant_ops import (  # noqa: E402
     ROOM,
     ArcAbortedError,
     Ctx,
+    arm_room,
     bootstrap_account,
+    disarm_rooms,
     login,
     mt_password,
+    restore_config,
     send_as,
     set_auth_mode,
 )
@@ -54,20 +59,18 @@ from scripts.manual_tests.mt_group_tenant_ops import (  # noqa: E402
 SECOND_ROOM = "roundtable"
 PERSONAS = ev.PERSONAS
 
-# Setup corrections live in mt_group_tenant_ops.py. The MT's v1.1 setup was
-# written for a HOST orchestrator and does not work
-# against the compose stack. The seven corrections this driver implements —
-# in-container bootstrap, the -wal/-shm sidecars, declared-not-joined
-# membership, mandatory `--as`, the Leg 1 check, the Leg 4 query lens, and the
-# Leg 3 fallback — are catalogued with their symptoms in
-# docs/manual-tests/v0.3.15-execution-report.md (§MT corrections) and fixed in
-# the MT at v1.2. Only the values they resolve to live here.
-CONTAINER_ACCOUNTS_DB = "/var/lib/persatrix/accounts.db"
-ACCOUNTS_SIDECARS = (
-    CONTAINER_ACCOUNTS_DB,
-    f"{CONTAINER_ACCOUNTS_DB}-wal",
-    f"{CONTAINER_ACCOUNTS_DB}-shm",
-)
+# The MT's v1.1 setup was written for a HOST orchestrator and does not work
+# against the compose stack. Its ten defects are catalogued with their symptoms
+# in docs/manual-tests/v0.3.15-execution-report.md (§MT corrections) and fixed
+# in the MT at v1.2. Six of them are things a *driver* can carry, and this one
+# does: in-container bootstrap with the -wal/-shm sidecars (1, 2), mandatory
+# `--as` on every send (4), the retired `turn_count > 1` lens (6, in
+# mt_group_tenant_evidence.py), arming `roundtable` before convene (8), and
+# rotating the accounts store back to alice before Leg 9 (9). The other four
+# are procedural and live only in the MT: declared-not-joined membership (3),
+# Leg 1's replacement check (5), Leg 3's deterministic close fallback (7), and
+# compelling a reply at Leg 7 (10). The verbs themselves are in
+# mt_group_tenant_ops.py, which is where the container paths live too.
 
 
 # Pacing. The end-vote window is 600s/W=3; these gaps keep the arc inside it
@@ -95,6 +98,33 @@ def leg0(ctx: Ctx) -> None:
     ctx.say("    aggregate is pinned by the R-1 unit gate, not by this arc.")
     bootstrap_account(ctx, "alice", "alice-person")
     login(ctx, "alice")
+    check_deferred_gates(ctx)
+
+
+def check_deferred_gates(ctx: Ctx) -> None:
+    """Run the preflight gates that needed a token, now that one exists.
+
+    Three gates read `policyAuthenticated` routes. On the clean start the MT
+    itself prescribes — `make reset`, no `accounts.db`, Leg 0 bootstraps the
+    very first account — no operator token exists at preflight time, so they
+    could only 401 while `gate_auth_live` simultaneously required a 401 to
+    prove enforcement. They are deferred there and answered here: the first
+    moment they are answerable, and still before a cent is spent.
+    """
+    if not ctx.execute:
+        ctx.say("    [dry-run] re-check the three deferred gates "
+                "(agents registered, floor_control off, idle timeout)")
+        return
+    gates = pf.run_deferred_gates(ctx.server)
+    for gate in gates:
+        ctx.say(gate.render())
+    failed = [g for g in gates if not g.ok]
+    if failed:
+        raise ArcAbortedError(
+            "deferred preflight gate(s) failing after Leg 0's login: "
+            + ", ".join(g.name for g in failed)
+            + ". Each is a leg that would otherwise pass vacuously."
+        )
 
 
 def leg1(ctx: Ctx) -> None:
@@ -153,10 +183,13 @@ def leg5(ctx: Ctx) -> None:
     # posture — an armed channel is convenable, and spends, on any boot), and
     # `convene` takes NO topic argument; the agenda comes from the channel's
     # own `autonomous` block. The MT's `convene roundtable "<topic>"` fails
-    # twice over. Arm at runtime, the MT-AUTONOMOUS-001 operator flow.
-    ctx.run([CLI, "channel", "config", "set", f"group:{SECOND_ROOM}",
-             "autonomous.enabled=true"],
-            why="convene 409s on a disarmed channel", critical=True)
+    # twice over. Arm at runtime, the MT-AUTONOMOUS-001 operator flow —
+    # through `arm_room`, which records the room so the driver's teardown puts
+    # the safety posture back. Arming is a run knob like the collector's
+    # sampling percentage, and it is the one knob no revert used to reach:
+    # store overrides are canonical over YAML, so reverting `config/` left the
+    # channel armed in `channels.db`.
+    arm_room(ctx, SECOND_ROOM)
     ctx.run([CLI, "channel", "convene", f"group:{SECOND_ROOM}"],
             why="agent-origin turns in another room — the leak path Leg 5 tests",
             critical=True)
@@ -197,11 +230,27 @@ def leg8(ctx: Ctx) -> None:
     ctx.say("\nLeg 8 — auth.mode: disabled (and the ISSUE-0125 orchestrator restart)")
     set_auth_mode(ctx, "disabled")   # this IS the ISSUE-0125 orchestrator restart
     ctx.pause(RESTART_WAIT, "the fleet must re-register itself (ISSUE-0125)")
-    agents = ctx.run(["curl", "-s", f"{ctx.server}/api/v1/agents"],
-                     why="ISSUE-0125: non-empty WITHOUT touching an agent process")
-    if agents:
+    # Read the roster over HTTP, not through `curl -s`. `curl -s` has no `-f`,
+    # so it exits **0** on a 401 or a 500 and prints the error body — and
+    # `Ctx.run` only inspects the exit code. ISSUE-0125's bar is "the registry
+    # is non-empty afterwards", which a non-empty error body satisfies
+    # trivially; `/api/v1/agents` is `policyAuthenticated` and this arc's own
+    # finding F-2 records the fleet drawing a 401 on exactly that route. An
+    # unread roster is not an empty one, so a failure aborts rather than
+    # recording itself as the issue's live proof.
+    if ctx.execute:
+        try:
+            roster = pf.get_json(f"{ctx.server}/api/v1/agents", ctx.server)
+        except (urllib.error.URLError, OSError, ValueError) as exc:
+            raise ArcAbortedError(
+                f"ISSUE-0125's registry proof could not be read: {exc}"
+            ) from exc
         ctx.record("Leg 8 — registry after an orchestrator restart (ISSUE-0125)",
-                   f"```json\n{agents.strip()[:2000]}\n```")
+                   f"```json\n{json.dumps(roster, indent=2)[:2000]}\n```")
+    else:
+        ctx.say(f"    [dry-run] GET {ctx.server}/api/v1/agents")
+        ctx.say("              (ISSUE-0125: non-empty WITHOUT touching an "
+                "agent process)")
     send_as(ctx, "alice-person", ROOM, ALICE_DISCLOSURE)
     ctx.pause(SETTLE, "let the unauthenticated round settle")
     ctx.say("    CHECK: every new row principal_id='local'; NO principal.id span")
@@ -264,44 +313,87 @@ def _write_artifacts(ctx: Ctx, execute: bool, partial: bool = False) -> None:
     header = ("# MT-MEMORY-GROUP-TENANT-001 — collected evidence\n"
               f"{note}\n"
               "Paste these into `docs/manual-tests/v0.3.15-execution-report.md`.\n\n")
-    ctx.out.write_text(header + "\n".join(ctx.artifacts))
+    # `encoding=` explicitly: the artifacts carry `—`, `↳` and `✓`, and
+    # `write_text` truncates the file to zero bytes *before* it raises, so a
+    # non-UTF-8 locale destroyed the evidence rather than failing to write it.
+    ctx.out.write_text(header + "\n".join(ctx.artifacts), encoding="utf-8")
     print(f"Evidence written to {ctx.out}")
 
 
 def parse_legs(spec: str) -> list[int]:
+    """Expand a leg spec, rejecting anything that would run nothing.
+
+    Wired as argparse's ``type=`` so every rejection below surfaces as a usage
+    error. Silence here was a live hazard: `--legs 10` filtered to the empty
+    set and `--legs 5-3` expanded to an empty range, and a zero-leg `--execute`
+    run still captured cost, wrote an evidence file headed "collected
+    evidence", and exited **0** — a paid arc that drove nothing and reported
+    success. That is precisely the vacuous pass this toolchain exists to stop.
+    A non-numeric spec used to raise a bare `ValueError` traceback.
+    """
     chosen: set[int] = set()
     for part in spec.split(","):
         part = part.strip()
-        if "-" in part:
-            lo, hi = part.split("-", 1)
-            chosen.update(range(int(lo), int(hi) + 1))
-        elif part:
-            chosen.add(int(part))
-    return sorted(n for n in chosen if n in LEGS)
+        if not part:
+            continue
+        lo_raw, hi_raw = part.split("-", 1) if "-" in part else (part, part)
+        try:
+            lo, hi = int(lo_raw), int(hi_raw)
+        except ValueError:
+            raise argparse.ArgumentTypeError(
+                f"{part!r} is not a leg number or range"
+            ) from None
+        if hi < lo:
+            raise argparse.ArgumentTypeError(f"range {part!r} runs backwards")
+        unknown = [str(n) for n in range(lo, hi + 1) if n not in LEGS]
+        if unknown:
+            raise argparse.ArgumentTypeError(
+                f"no leg {', '.join(unknown)} "
+                f"(this MT has legs {min(LEGS)}-{max(LEGS)})"
+            )
+        chosen.update(range(lo, hi + 1))
+    if not chosen:
+        raise argparse.ArgumentTypeError(f"{spec!r} selects no legs")
+    return sorted(chosen)
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--execute", action="store_true",
                         help="actually drive the arc (default is a dry run)")
-    parser.add_argument("--legs", default="0-9", help="e.g. 0-4, 9, 1,3,5")
+    parser.add_argument("--legs", default="0-9", type=parse_legs,
+                        help="e.g. 0-4, 9, 1,3,5")
     parser.add_argument("--server", default=pf.DEFAULT_SERVER)
     parser.add_argument("--jaeger", default=pf.DEFAULT_JAEGER)
     parser.add_argument("--out", default="mt-group-tenant-evidence.md")
     parser.add_argument("--skip-preflight", action="store_true")
+    # Leg 8 leaves the stack `disabled` on purpose. Without this the preflight
+    # always demanded `enabled` and so refused the `--legs 9` resume the module
+    # docstring advertises — the state Leg 9 exists to repair being the state
+    # preflight rejected — leaving `--skip-preflight` (which drops all nine
+    # gates) as the only way forward.
+    parser.add_argument("--auth-mode", default="enabled",
+                        choices=["enabled", "disabled"],
+                        help="the auth.mode the preflight should expect "
+                             "(use `disabled` to resume after Leg 8)")
     args = parser.parse_args(argv)
 
-    legs = parse_legs(args.legs)
+    legs = args.legs
     mode = "EXECUTE (live, spends money)" if args.execute else "DRY RUN (no side effects)"
     print(f"MT-MEMORY-GROUP-TENANT-001 — {mode}")
     print(f"Legs: {', '.join(str(n) for n in legs)}")
     print("=" * 62)
 
     if not args.skip_preflight:
-        gates = pf.run_gates(args.server, args.jaeger)
+        gates = pf.run_gates(args.server, args.jaeger, args.auth_mode)
         for gate in gates:
             print(gate.render())
-        failed = [g for g in gates if not g.ok]
+        deferred = [g for g in gates if g.skipped]
+        if deferred:
+            print(f"\n({len(deferred)} gate(s) deferred — they read an "
+                  f"authenticated route and no operator token exists yet. "
+                  f"Leg 0 creates one, and they are re-checked there.)")
+        failed = [g for g in gates if g.blocking]
         if failed and args.execute:
             print("\nPreflight FAILED — refusing to spend the arc. "
                   "Every failure above is a leg that would pass vacuously.")
@@ -315,33 +407,53 @@ def main(argv: list[str] | None = None) -> int:
     if args.execute and not os.environ.get("PERSATRIX_MT_PASSWORD"):
         print(f"\nGenerated throwaway credential for this arc: {password}")
         print("(local test fixture; set PERSATRIX_MT_PASSWORD to pin it)")
+    # Everything that spends money or mutates the stack sits inside this try,
+    # and everything that recovers from it sits in the finally. Two ways out
+    # used to lose a paid arc outright: `except ArcAbortedError` alone let a
+    # `subprocess.TimeoutExpired` or a missing `./bin/persatrix` escape as a
+    # traceback (both now arrive as ArcAbortedError, from Ctx.run), and the
+    # cost capture below used to sit OUTSIDE the try — so a slow
+    # `docker compose logs` on a fully completed ten-leg arc threw away every
+    # artifact at the very last step.
+    partial = False
     try:
         for number in legs:
             LEGS[number](ctx)
+        if args.execute:
+            ctx.say("\nCost capture (before any teardown)")
+            ctx.record("Live spend", ev.collect_cost())
+        else:
+            print("\n[dry-run] cost capture reads `actualUSD` off the orchestrator")
+            print("          logs BEFORE teardown — see collect_cost() for why the")
+            print("          v0.3.14 checklist's `\"op\":\"settle\"` grep finds no USD.")
     except ArcAbortedError as exc:
+        partial = True
         print(f"\nARC ABORTED — {exc}")
-        print("Setup failed; later legs would have produced empty artifacts "
-              "that read like real findings. Fix and re-run.")
-        # Whatever DID complete is still evidence and was paid for. Discarding
-        # it on the way out (the first version of this handler returned here)
-        # means re-running earlier legs to recover artifacts that already
-        # existed.
-        _write_artifacts(ctx, args.execute, partial=True)
-        return 1
-
-    if args.execute:
-        ctx.say("\nCost capture (before any teardown)")
-        ctx.record("Live spend", ev.collect_cost())
-    else:
-        print("\n[dry-run] cost capture reads `actualUSD` off the orchestrator")
-        print("          logs BEFORE teardown — see collect_cost() for why the")
-        print("          v0.3.14 checklist's `\"op\":\"settle\"` grep finds no USD.")
+        print("Later legs would have produced empty artifacts that read like "
+              "real findings. Fix and re-run.")
+    except KeyboardInterrupt:
+        partial = True
+        print("\nARC INTERRUPTED — writing what was collected, then restoring "
+              "the run knobs.")
+    finally:
+        # Whatever DID complete is still evidence and was paid for.
+        _write_artifacts(ctx, args.execute, partial=partial)
+        # Run knobs go back however the arc ended. Leaving them set is not
+        # cosmetic: `config/security.yaml` is tracked, and an armed
+        # `roundtable` can convene and spend unattended on the next boot.
+        try:
+            disarm_rooms(ctx)
+            restore_config(ctx)
+        except ArcAbortedError as exc:
+            print(f"\n⚠️  TEARDOWN INCOMPLETE — {exc}")
+            print("   Check `git status config/` and "
+                  "`persatrix channel config get group:roundtable` by hand.")
 
     print("\n" + "=" * 62)
-    if ctx.artifacts and args.execute:
-        _write_artifacts(ctx, args.execute)
-    elif not args.execute:
-        print("Dry run complete — no commands were run and nothing was spent.")
+    if partial:
+        return 1
+    if not args.execute:
+        print("Dry run complete — nothing was published, restarted or spent.")
         print("Re-run with --execute once preflight is green.")
     return 0
 

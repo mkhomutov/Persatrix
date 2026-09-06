@@ -25,6 +25,7 @@ Read-only. Nothing here publishes, restarts, or reconfigures.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import urllib.error
 import urllib.request
@@ -34,6 +35,13 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 PERSONAS = ("ember-owl", "iron-fox", "nova-sparrow")
+
+#: Every `actualUSD` value on a `provisional charge reconciled` line, in either
+#: the JSON or the logfmt spelling the encoder can emit, with a full float
+#: grammar (an exponent may carry `+`, and the value may be quoted).
+_ACTUAL_USD = re.compile(
+    r'"?actualUSD"?\s*[:=]\s*"?(-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)"?'
+)
 
 # The persona memory store resolves `data/memory.db` against the container
 # WORKDIR (/app), and the agent image ships no sqlite3 CLI — so every query
@@ -127,30 +135,73 @@ def collect_leg2(jaeger: str, lookback: str = "20m", limit: int = 300) -> Leg2Ev
     return Leg2Evidence(spans)
 
 
-def _agent_query(persona: str, sql: str, timeout: int = 40) -> list[tuple[Any, ...]]:
+@dataclass
+class QueryResult:
+    """The outcome of one persona query — ran-and-found-nothing, or did not run.
+
+    The distinction is the whole point. Leg 9's bar is an ABSENCE bar (`B = C`),
+    so a query that never ran but renders as "no rows" satisfies it with
+    nothing measured — and `docker compose exec` returns non-zero for the few
+    seconds after `docker compose restart`, which is exactly when Leg 9 reads.
+    Collapsing both into `[]` reproduced, inside the instrument, the failure
+    this module's header says the instrument exists to prevent.
+    """
+
+    rows: list[tuple[Any, ...]] = field(default_factory=list)
+    error: str = ""
+
+    @property
+    def failed(self) -> bool:
+        return bool(self.error)
+
+
+def _cell(value: Any) -> str:
+    """One markdown table cell, safe for text this arc did not author.
+
+    `|` ends a cell and a newline ends the row, and the facts tables carry
+    model-extracted free text: an object of `Mira | surgery` shifted every
+    later column one place left in the evidence pasted into the report.
+    """
+    return str(value).replace("|", "\\|").replace("\n", " ").replace("\r", " ")
+
+
+def _agent_query(persona: str, sql: str, timeout: int = 40) -> QueryResult:
     """Run one read-only SQL statement inside a persona container.
 
     The image has no sqlite3 CLI, so this goes through the runtime's python.
+    Every failure mode — a stopped container, a `docker compose exec` error, a
+    renamed column, a store below the migration that added `speaker_id` — comes
+    back as a :class:`QueryResult` carrying stderr, never as an empty table.
     """
     script = (
         "import sqlite3, json; "
         f"c = sqlite3.connect({CONTAINER_DB!r}); "
         f"print(json.dumps(c.execute({sql!r}).fetchall()))"
     )
-    proc = subprocess.run(  # noqa: S603
-        ["docker", "compose", "exec", "-T", f"agent-{persona}", "python", "-c", script],  # noqa: S607
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        check=False,
-    )
-    if proc.returncode != 0:
-        return []
     try:
-        return [tuple(row) for row in json.loads(proc.stdout.strip().splitlines()[-1])]
+        proc = subprocess.run(  # noqa: S603
+            ["docker", "compose", "exec", "-T", f"agent-{persona}",  # noqa: S607
+             "python", "-c", script],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            check=False,
+        )
+    except (subprocess.SubprocessError, OSError) as exc:
+        return QueryResult(error=f"{type(exc).__name__}: {exc}")
+    if proc.returncode != 0:
+        detail = (proc.stderr.strip() or proc.stdout.strip() or "no output")
+        return QueryResult(error=f"exit {proc.returncode}: {detail[:300]}")
+    try:
+        raw = json.loads(proc.stdout.strip().splitlines()[-1])
     except (ValueError, IndexError):
-        return []
+        return QueryResult(
+            error=f"unparseable output: {proc.stdout.strip()[:300] or '(empty)'}"
+        )
+    return QueryResult(rows=[tuple(row) for row in raw])
 
 
 # The MT's Leg 4 query filters `WHERE turn_count > 1`, and that filter is a
@@ -178,40 +229,62 @@ def collect_leg4(personas: tuple[str, ...] = PERSONAS) -> str:
     """The triples. The row count is the assertion."""
     blocks: list[str] = []
     for persona in personas:
-        rows = _agent_query(persona, LEG4_EPISODES)
+        episodes = _agent_query(persona, LEG4_EPISODES)
         blocks.append(f"#### `{persona}` — close-derived episodes (all records)\n")
-        if not rows:
-            blocks.append("_No rows._ A close-derived record should exist here.\n")
-            continue
-        blocks.append("| principal_id | speaker_id | turns | scope | summary (200ch) |")
-        blocks.append("|---|---|---|---|---|")
-        for principal, speaker, turns, scope, summary in rows:
-            clean = str(summary).replace("|", "\\|").replace("\n", " ")
+        if episodes.failed:
             blocks.append(
-                f"| `{principal}` | `{speaker}` | {turns} | `{scope}` | {clean} |"
+                f"> ⚠️ **QUERY FAILED — this is not a finding.** "
+                f"`{_cell(episodes.error)}`\n>\n"
+                f"> Nothing was measured here. Do not read it as an empty "
+                f"table: re-run the leg once the container answers.\n"
             )
-        blocks.append("")
-        speakers = sorted({str(r[1]) for r in rows})
-        principals = sorted({str(r[0]) for r in rows})
-        blocks.append(
-            f"**{len(rows)} record(s)** — {len(speakers)} distinct speaker(s) "
-            f"({', '.join(f'`{s}`' for s in speakers)}) across "
-            f"{len(principals)} principal(s) "
-            f"({', '.join(f'`{p}`' for p in principals)}). The assertion is "
-            f"that no record mixes two speakers or two principals, and that "
-            f"the speaker count matches the number of distinct speakers this "
-            f"persona actually heard. One record spanning several speakers "
-            f"means the speaker dimension of the key did not land."
-        )
-        blocks.append("")
+        elif not episodes.rows:
+            blocks.append("_No rows._ A close-derived record should exist here.\n")
+        else:
+            blocks.append(
+                "| principal_id | speaker_id | turns | scope | summary (200ch) |")
+            blocks.append("|---|---|---|---|---|")
+            for principal, speaker, turns, scope, summary in episodes.rows:
+                blocks.append(
+                    f"| `{principal}` | `{speaker}` | {turns} | `{scope}` | "
+                    f"{_cell(summary)} |"
+                )
+            blocks.append("")
+            speakers = sorted({str(r[1]) for r in episodes.rows})
+            principals = sorted({str(r[0]) for r in episodes.rows})
+            blocks.append(
+                f"**{len(episodes.rows)} record(s)** — {len(speakers)} distinct "
+                f"speaker(s) ({', '.join(f'`{s}`' for s in speakers)}) across "
+                f"{len(principals)} principal(s) "
+                f"({', '.join(f'`{p}`' for p in principals)}). The assertion is "
+                f"that no record mixes two speakers or two principals, and that "
+                f"the speaker count matches the number of distinct speakers this "
+                f"persona actually heard. One record spanning several speakers "
+                f"means the speaker dimension of the key did not land."
+            )
+            blocks.append("")
+        # Always ask for the facts, even when the episodes half came back
+        # empty or broken. Facts are the ISSUE-0131 speaker-projection
+        # evidence the closure note cites, and facts-present-with-episodes-
+        # absent is itself an anomaly worth seeing — both are close-derived.
+        # `continue`-ing past this made that state render identically to a
+        # persona that derived nothing at all.
         facts = _agent_query(persona, LEG4_FACTS)
-        if facts:
-            blocks.append(f"#### `{persona}` — extracted facts\n")
+        blocks.append(f"#### `{persona}` — extracted facts\n")
+        if facts.failed:
+            blocks.append(
+                f"> ⚠️ **QUERY FAILED — this is not a finding.** "
+                f"`{_cell(facts.error)}`\n"
+            )
+        elif not facts.rows:
+            blocks.append("_No facts._\n")
+        else:
             blocks.append("| principal_id | speaker_id | subject | predicate | object |")
             blocks.append("|---|---|---|---|---|")
-            for principal, speaker, subj, pred, obj in facts:
+            for principal, speaker, subj, pred, obj in facts.rows:
                 blocks.append(
-                    f"| `{principal}` | `{speaker}` | {subj} | {pred} | {obj} |"
+                    f"| `{principal}` | `{speaker}` | {_cell(subj)} | "
+                    f"{_cell(pred)} | {_cell(obj)} |"
                 )
             blocks.append("")
     return "\n".join(blocks)
@@ -236,41 +309,36 @@ def collect_cost() -> str:
     ``DebugLevel`` there. A deployment running ``--env production`` logs
     neither, and cost capture is impossible from logs alone.
     """
-    proc = subprocess.run(  # noqa: S603
-        ["docker", "compose", "logs", "--no-color", "orchestrator"],  # noqa: S607
-        cwd=REPO_ROOT, capture_output=True, text=True, timeout=90, check=False,
-    )
+    try:
+        proc = subprocess.run(  # noqa: S603
+            ["docker", "compose", "logs", "--no-color", "orchestrator"],  # noqa: S607
+            cwd=REPO_ROOT, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=90, check=False,
+        )
+    except (subprocess.SubprocessError, OSError) as exc:
+        return f"_Could not read orchestrator logs — {type(exc).__name__}: {exc}._"
     if proc.returncode != 0:
         return "_Could not read orchestrator logs._"
-    lines = [ln for ln in proc.stdout.splitlines() if "actualUSD" in ln]
-    if not lines:
+    # ONE pass, so the count and the sum cannot disagree. The previous form
+    # counted lines with the loose substring `"actualUSD" in ln` but summed
+    # only those matching the exact JSON spelling `"actualUSD":` — so a
+    # differently-shaped line was counted and silently never added, halving a
+    # published total beside a count that looked consistent with it. It also
+    # read only the FIRST match per line and rejected an exponent's `+`.
+    amounts = _ACTUAL_USD.findall(proc.stdout)
+    if not amounts:
         return (
             "_No `actualUSD` lines._ Check the orchestrator is running with "
             "`--env development` (production suppresses DEBUG), and that the "
             "logs have not been rotated or the stack torn down."
         )
-    total = 0.0
-    for line in lines:
-        marker = '"actualUSD":'
-        idx = line.find(marker)
-        if idx == -1:
-            continue
-        tail = line[idx + len(marker):].lstrip()
-        number = ""
-        for ch in tail:
-            if ch.isdigit() or ch in ".-e":
-                number += ch
-            else:
-                break
-        try:
-            total += float(number)
-        except ValueError:
-            continue
+    total = sum(float(a) for a in amounts)
     return (
-        f"**{len(lines)} reconciled lease(s), ${total:.4f} total.**\n\n"
+        f"**{len(amounts)} reconciled lease(s), ${total:.4f} total.**\n\n"
         f"Read from `provisional charge reconciled` / `actualUSD` "
         f"(`internal/cost/cost.go`) — *not* from `\"op\":\"settle\"`, which "
-        f"carries token counts only. Captured before teardown."
+        f"carries token counts only. Captured before teardown. Count and total "
+        f"come from the same match list, so they cannot disagree."
     )
 
 
@@ -285,22 +353,39 @@ LEG9_REPLAY = (
 def collect_leg9(label: str, personas: tuple[str, ...] = PERSONAS) -> str:
     """One snapshot (A, B or C), per (principal_id, speaker_id), both partitions."""
     blocks = [f"#### Snapshot {label}\n"]
+    broken = False
     for persona in personas:
         blocks.append(f"**`{persona}`**\n")
         for title, sql in (("episodes", LEG9_EPISODES), ("facts", LEG9_FACTS)):
-            rows = _agent_query(persona, sql)
+            result = _agent_query(persona, sql)
+            broken = broken or result.failed
             blocks.append(f"{title}:")
             blocks.append("")
             blocks.append("| principal_id | speaker_id | count |")
             blocks.append("|---|---|---|")
-            for principal, speaker, count in rows or []:
+            for principal, speaker, count in result.rows:
                 blocks.append(f"| `{principal}` | `{speaker}` | {count} |")
-            if not rows:
+            if result.failed:
+                # NOT `_(empty)_`. An unread store and an empty one render the
+                # same, and `B = C` is an absence bar: two failed reads satisfy
+                # it exactly, with nothing measured.
+                blocks.append(f"| **QUERY FAILED** | {_cell(result.error)} | |")
+            elif not result.rows:
                 blocks.append("| _(empty)_ | | |")
             blocks.append("")
         replay = _agent_query(persona, LEG9_REPLAY)
-        blocks.append(f"`replay-` derived rows: **{len(replay)}**")
-        for interaction_id, principal, speaker in replay:
-            blocks.append(f"- `{interaction_id}` — `{principal}` / `{speaker}`")
+        broken = broken or replay.failed
+        if replay.failed:
+            blocks.append(f"`replay-` derived rows: **QUERY FAILED** — "
+                          f"`{_cell(replay.error)}`")
+        else:
+            blocks.append(f"`replay-` derived rows: **{len(replay.rows)}**")
+            for interaction_id, principal, speaker in replay.rows:
+                blocks.append(f"- `{interaction_id}` — `{principal}` / `{speaker}`")
         blocks.append("")
+    if broken:
+        blocks.insert(1, "> ⚠️ **At least one query in this snapshot did not "
+                         "run.** The `B = C` bar is an absence bar and is "
+                         "satisfied by any empty recall, so this snapshot "
+                         "cannot be compared until every query answers.\n")
     return "\n".join(blocks)
