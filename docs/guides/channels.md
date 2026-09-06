@@ -839,23 +839,30 @@ ships **on-startup catch-up fetch** (RFC 0011 [OQ #8](../rfcs/0011-channels-brid
   agent runs in **replay mode** for those events: outbound
   `SEND_CHANNEL_MESSAGE` actions are suppressed so the agent does not blast
   everyone with stale responses on restart.
-- **Replayed spans derive no memory** (ISSUE-0130, v0.3.14). Nothing binds a
-  tenant to a replayed turn, so summarising it would write one authenticated
-  person's content into the shared `local` tenant. The span is closed at pass
-  end (or split when a live turn arrives) with `catchup_complete` and dropped;
-  the live conversation that resumes after the restart is unaffected and
-  derives normally. `agent.interactions.closed.by_catchup_complete` counts the
-  drops.
-- **Since v0.3.15 the row itself carries the tenant.** Channel-store schema
-  **v12** adds `principal_id` to `messages`, stamped server-side at publish
-  from the authenticated request (`local` when no account resolved), and
-  surfaced on every message the REST API returns — so the value the replay
-  needs is already on the history payload the agent fetches. What is still
-  missing is the *binding*: the replay event seeds no principal from it,
-  nothing filters history or recall by it, and the skip above still drops
-  every replayed span. Doing that binding — so a restart re-derives under the
-  tenant that actually spoke instead of dropping the span — is the remaining
-  half of ISSUE-0130.
+- **The row itself carries the tenant** (v0.3.15). Channel-store schema **v12**
+  adds `principal_id` to `messages`, stamped server-side at publish from the
+  authenticated request (`local` when no account resolved), and surfaced on
+  every message the REST API returns — so the value the replay needs is
+  already on the history payload the agent fetches. Schema **v13** repairs
+  stores that took v12's original, inverted backfill.
+- **Replayed spans now derive under their own tenant** (ISSUE-0130 shape (b),
+  v0.3.15). `build_replay_event` seeds the principal off the persisted row, so
+  a restart re-derives the replayed window under the person who actually spoke
+  instead of dropping it. It derives **exactly once**: a span already derived
+  by an earlier boot is recognised and not re-derived, which matters because
+  catch-up has no watermark and re-ingests the window on every boot.
+- **The leak-stopper survives, narrowed.** v0.3.14 skipped derivation for
+  *every* replayed span, because nothing could tell "no principal because the
+  deployment is single-tenant" (where `local` is correct) from "no principal
+  because replay lost it". A v12 orchestrator answers both, so the skip now
+  applies only to the genuinely unattributable — a pre-v12 orchestrator, or a
+  row written before the migration. Those still close at pass end (or split
+  when a live turn arrives) with `catchup_complete`;
+  `agent.interactions.closed.by_catchup_complete` counts them.
+- **Replayed and live turns never share a record.** The catch-up boundary
+  closes a replay-opened scope before any live turn can join it, so the
+  conversation that resumes after a restart opens its own record and derives
+  normally under its own principal.
 - **`principal_id` is readable without a credential.** The history GET and
   the publish response are public by design (the agent fleet holds no
   accounts), and the field is not withheld from anonymous callers — doing so

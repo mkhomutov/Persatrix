@@ -83,6 +83,8 @@ The persona's continuous existence is **not** a session concept. Its whole memor
 
 This makes the v0.5.0 multi-party room coherent: one room = one shared episodic memory per agent, with every speaker's turns visible to that agent within it. Two separate DM threads are already two distinct channel ids (`dm:a:b` vs `dm:c:b`), so `(agent, channel)` keeps them apart without a sender axis — the sender axis only ever changed the group case, which is the case it got wrong.
 
+> **Superseded in part by v0.3.15 (2026-09-06).** The *scope* axis is unchanged: still `(agent, channel)`-derived, still no sender. What changed is what a scope **holds** — the [RFC 0020 §G amendment](rfcs/0020-interaction-lifecycle.md#amendment-2026-08-26--the-record-key-gains-a-principal-and-a-speaker-dimension-v0315-issue-0123--issue-0131) re-keyed the *interaction record* to `(principal_id, speaker_id, scope)`, so **close-derived** group memory does fragment by speaker after all: one record per `(principal, speaker)` pair. The paragraph above still describes recall scope and the live transcript, which are speaker-blind; it no longer describes the derived episodic row. Deliberate trade, taken to keep one agent's turns out of the record another's restatement derives from ([ISSUE-0123](issues/ISSUE-0123-per-speaker-interaction-scope.md), [ISSUE-0131](issues/ISSUE-0131-derived-memory-has-no-speaker-attribution.md)); the amendment is authoritative where the two differ.
+
 Reaching across rooms ("what did I discuss with Alice in the other channel?") is an **explicit, opt-in recall path**, not an automatic scope — exactly what [RFC 0031 §D](rfcs/0031-per-session-namespacing-channels.md#d-recall-semantics)'s `sessions=[…]` / `sessions="*"` already provides. Session-scoped *default* recall (Phase 2) is therefore correct under this model; what was wrong was the *framing* of session as a per-run isolation namespace and the *sender* in its key.
 
 ### Relationship — cross-room, per-individual
@@ -122,7 +124,7 @@ The key insight for the declarative tiers: **scope follows the fact's subject, n
 
 | Tier | Rides on | Crosses rooms? | Note |
 |------|----------|----------------|------|
-| **Episodes** (narrative) | session `(agent, channel)` | no (explicit recall only) | the room's conversational record |
+| **Episodes** (narrative) | session `(agent, channel)`; the close-derived **record** is keyed `(principal, speaker, scope)` since v0.3.15 | no (explicit recall only) | the room's conversational record — one row per speaker per tenant, not one per room |
 | **Facts — person subject** (`Alice's daughter is Mira`) | participant `(agent, subject)` | **yes** | knowledge about a person travels with the person, like trust |
 | **Facts — topic/room subject** (`this channel shipped Friday`) | session `(agent, channel)` | no | belongs to the room |
 | **Relationship** (trust/opinion) | participant `(agent, participant)` | **yes** | cross-room core (+ future facets) |
@@ -130,7 +132,7 @@ The key insight for the declarative tiers: **scope follows the fact's subject, n
 
 This resolves the earlier flip-flop on facts: the right answer is neither "all facts are room-scoped" nor "all facts are person-scoped" — it is subject-dependent. Narrative is room-bound; knowledge and affect *about people* are person-bound. This is also what keeps the dementia test passing across rooms without making every room leak into every other.
 
-Everything above sits inside an `(epoch, principal)` pair: cross-room recall and cross-room relationships range over *rooms*, never across *epochs* or *principals*.
+Everything above sits inside an `(epoch, principal)` pair: cross-room recall and cross-room relationships range over *rooms*, never across *epochs* or *principals*. Since v0.3.15 the close-derived tiers also carry a `speaker_id` — a projection of the record key, not a fifth scoping axis: it records *who said it* without bounding what recall ranges over.
 
 ## Decisions taken
 
