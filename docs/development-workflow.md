@@ -1,6 +1,8 @@
 # Persatrix — Development Workflow
 
-> **Last updated**: 2026-04-14
+> **Last updated**: 2026-09-06
+
+> **Scope note (2026-09-06).** This document describes the **RFC-level** cycle: how one RFC goes from authoring to closure. It is still accurate for that. The **release-level** cycle that has run every version since v0.3.0 — sequencing amendment → master plan with scope locks → implementation PRs → release-prep plan → release-prep PRs 1–4 → tag → post-release follow-up — is described in [docs/methodology/release-cycle.md](methodology/release-cycle.md); this document nests inside its Phase 1. The review discipline the phases below rely on is in [methodology/review-process.md](methodology/review-process.md), and the process vocabulary in the [process glossary](methodology/process-glossary.md).
 
 This document describes the end-to-end development lifecycle for Persatrix, from version planning through RFC closure. It connects the strategic planning loop to the tactical processes documented in [CONTRIBUTING.md](../CONTRIBUTING.md) (PR process), [BRANCHING.md](BRANCHING.md) (branch naming), and [rfcs/README.md](rfcs/README.md) (RFC format and lifecycle).
 
@@ -374,6 +376,7 @@ RFC 0005 (Persona Agent & Memory System) is the first v0.2 RFC and demonstrates 
 
 ## Related Documentation
 
+- [Methodology](methodology/README.md) — the release-level cycle, decision mechanisms, review process, and process glossary this RFC cycle sits inside
 - [CONTRIBUTING.md](../CONTRIBUTING.md) — PR process, quality gates, development setup
 - [BRANCHING.md](BRANCHING.md) — Branch naming, lifecycle, merge strategy
 - [rfcs/README.md](rfcs/README.md) — RFC format, lifecycle, and templates
