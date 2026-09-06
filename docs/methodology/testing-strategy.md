@@ -14,7 +14,9 @@ layers of this repository were lint-clean and type-clean while no job ran them
 a knob shipped with a red lockstep guard
 ([#813](https://github.com/mkhomutov/Persatrix/pull/813) F-2), and the full
 integration tier until a config change broke its close-path tests on `main`
-([ISSUE-0076](../issues/ISSUE-0076-full-integration-suite-not-run-in-ci.md)). A
+([ISSUE-0076](../issues/ISSUE-0076-full-integration-suite-not-run-in-ci.md)) —
+and a fourth, the Go integration tests, was found by the audit that produced
+this document and wired into CI in the same series. A
 green lint is not a running tree. When a new test directory is created, the
 same PR adds its `make` target and its CI step, and adds a row to the table
 below.
@@ -29,7 +31,7 @@ below.
 | 2 | Python unit, root tree | Agent-runtime modules, mirrored per source module | `tests/unit/python/test_<module>.py` (347 files) | `make test-python` (~5.5 min) | `python` job |
 | 3 | Python unit, agents tree | Component tests that need agent fixtures; the **only** executable coverage of `observability/tracing.py`, `grpc_logging.py`, `memory/scheduled_wakes.py` | `agents/tests/` (46 files) | `make test-agents` | `python` job (since #848) |
 | 4 | Python integration | Assembled pieces: close path, channels, memory scoping, catch-up replay, confidentiality, delegation | `tests/integration/test_*.py` (73 files) + `_*_helpers.py` | `make test-integration` | `python` job (since ISSUE-0076) |
-| 5 | Go integration | Scheduler → executor → mock agent over bufconn; rate limiter; audit logger | `tests/integration/*_test.go` (3 files) | `go test ./tests/integration/...` | **none** — see [enforcement matrix](enforcement-matrix.md) |
+| 5 | Go integration | Scheduler → executor → mock agent over bufconn; rate limiter; audit logger | `tests/integration/*_test.go` (3 files) | `go test ./tests/integration/... -race` | `go` job (since the CI-promotion PR) |
 | 6 | Rust | CLI parsing, output, and the CLI↔server **lockstep guards** (knob set and wire types parsed out of the Go sources) | inline `#[cfg(test)]` modules (24 files) | `cd cli && cargo test` | `rust` job (since #813) |
 | 7 | Web console | Svelte components and stores under jsdom | `web/src/**/*.test.js` (30 files) | `make ui-test` (Vitest) | `web-console` job |
 | 8 | Golden-trace evals | Persona-quality regressions replayed deterministically against recorded goldens ([RFC 0044](../rfcs/0044-eval-set-golden-traces.md)) | `evaluators/eval_sets/*.yaml` + `.golden.yaml` (5 recipes) | `make eval-replay` | none (Phase 2 CI gate slotted v0.3.16, cuttable) |
@@ -150,11 +152,9 @@ limit parked in the RFC 0044 PR plan.
 
 | Gap | State | Owner |
 |-----|-------|-------|
-| Go integration tests (`tests/integration/*_test.go`) run in no job | passes locally in ~2 s under `-race` | CI promotion PR in this series |
 | Perf gate never armed — `tests/perf/baselines/` does not exist | `perf-baseline-capture.yml` exists, never dispatched | maintainer; [ISSUE-0058](../issues/ISSUE-0058-perf-gate-runner-variance-tolerance.md) covers the tolerance |
 | Eval replay not in CI | RFC 0044 Phase 2, v0.3.16 cuttable | sequencing |
 | `cli/tests/` and `internal/testutil/` are prescribed by the instruction files and do not exist | instructions overstate | instruction-file collapse PR in this series |
-| `scripts/` (the checks themselves) is not linted; `evaluators/` is linted only by `make lint`, never in CI | [ISSUE-0134](../issues/ISSUE-0134-scripts-tree-is-not-linted.md) | CI promotion PR |
 
 ## Related documentation
 

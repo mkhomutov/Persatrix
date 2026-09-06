@@ -144,7 +144,8 @@ def check_status_markers(
                         reason=f"Non-standard status marker (use one of: {allowed_str})",
                     ))
 
-    print(f"[OK] Checked status markers in {len(md_files)} markdown file{'s' if len(md_files) != 1 else ''}")
+    plural = "s" if len(md_files) != 1 else ""
+    print(f"[OK] Checked status markers in {len(md_files)} markdown file{plural}")
     return failures, warnings
 
 

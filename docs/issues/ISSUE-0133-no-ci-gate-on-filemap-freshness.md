@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0133
 summary: "`FILEMAP.md` is regenerated only by the pre-commit hook, which lives in `.git/` and is not version-controlled. No CI job checks it, so a stale or wrong file map merges green — which is exactly how the linked-worktree corruption fixed in #840 stayed invisible: the committed content happened to be right, the working trees were wrong, and nothing would have said otherwise if the commit had been wrong too. `scripts/generate_filemap.py --check` already exists and exits 1 when stale; nothing calls it."
-status: open
+status: resolved
 severity: medium
 area: ci
 created: 2026-08-22
+closed: 2026-09-06
+closed_pr: 858
 refs:
   - scripts/generate_filemap.py
   - scripts/pre_commit.py
@@ -80,3 +82,20 @@ half: CI catches the wrong map, the warning catches the cause.
 
 > 2026-08-22 — captured during the #840 review. The `--check` flag was
 > verified present and functional on `main`; it simply has no caller.
+
+> 2026-09-06 — RESOLVED in #858. New `Docs hygiene` CI job runs
+> `python scripts/generate_filemap.py --check` on every PR alongside the
+> doc-links, leaked-markup, and status-marker checks. Both caveats above
+> were addressed: the default `actions/checkout` is a full index so
+> `git ls-files` sees every tracked path, and the failure message now says
+> what changed and what to run. One more caveat surfaced on the way: the
+> header carries the generation date, so a byte comparison would have gone
+> red on any PR older than a day — `--check` now compares everything except
+> that date (`_comparable`, pinned by test_generate_filemap_check.py).
+
+> The merge-commit skew caveat is kept as designed: on a pull_request the check
+> runs on the merge ref, so a PR behind a file-adding commit on `main` fails
+> until it is updated — `main`'s required checks are already `strict`, so the
+> update is owed anyway, and the message names the fix. The writer now also
+> keeps the committed date when nothing else changed, so the hook stops
+> producing a date-only FILEMAP.md diff on the first commit of each day.

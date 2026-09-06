@@ -16,11 +16,22 @@ exit condition ("archive once the tag ships") was unachievable — 19 had
 accumulated across v0.3.0–v0.3.10 and none was ever retired. Do not add new
 ones back; add the *pattern* if a genuinely new write-once category appears.
 
+**Scope (narrowed again 2026-09-06, ISSUE-0139).** Version-cycle documents
+of *released* versions — master plans, scope locks, plan amendments,
+release-prep plans, release baselines — are also gone from here. They are
+frozen at the post-release follow-up, so ``file_size.py`` now excludes them
+once ``CHANGELOG.md`` carries the version's dated release heading
+(``_is_released_version_doc``; read from the tree, not ``git tag``, so a
+depth-1 CI checkout answers the same as a full clone).
+Sixteen entries whose exit condition ("remove once archived") nothing could
+execute were retired in one move; ``#838`` had recorded the first failed
+attempt.
+
 What remains here is the honest case for an allowlist: files that are still
 edited, where the cap continues to do useful work and the entry really is
-expected to go away — master plans and release-prep plans (removable once the
-release is archived), living specs/guides (removable once a topic split
-lands), and long-form RFC PR plans (removable at RFC seal).
+expected to go away — the OPEN cycle's plan (its entry now expires by itself
+at the tag), living specs/guides (removable once a topic split lands), and
+long-form RFC PR plans (removable at RFC seal).
 
 Separating the data from the logic keeps ``file_size.py`` honestly under the
 code-line cap (it measures complexity, which should not grow just because the
@@ -48,97 +59,23 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     "ROADMAP.md",
     "docs/ai-agents-orchestration-spec.md",
     "docs/persatrix-extension-spec.md",
-    "docs/v0.2-release-prep-plan.md",
-    # v0.3.0-plan.md is the active release plan; it accumulates MQ rows
-    # and Memory Quality follow-ups during the v0.3.x release cycle (same
-    # pattern as the PR plans below and as v0.2-release-prep-plan above).
-    # PR 238 ratified the Memory Quality Roadmap and added MQ-1..MQ-9; the
-    # PR 238 review pass added MQ-10..MQ-13 (SubjectErasure traversal,
-    # per-turn provenance, cross-scope identity, within-interaction
-    # pressure). These tracking rows are load-bearing for the v0.3.x
-    # work and trimming the surrounding narrative would erase release-cycle
-    # context. Remove this entry once v0.3.0 ships and the plan is archived.
-    "docs/v0.3.0-plan.md",
-    # docs/v0.3.1-plan.md is the v0.3.1 master plan — same release-cycle
-    # accumulator pattern as docs/v0.3.0-plan.md above. It crossed the
-    # 3000-word prose cap when the v0.3.1 post-release follow-up flipped the
-    # Status / Completed header and rolled the release-prep and post-release
-    # PRs into the Master Progress Overview. The RFC 0034 amendment was
-    # already split out into docs/v0.3.1-plan-amendment-2026-05-15.md to
-    # hold the line earlier in the cycle; trimming the remaining
-    # release-cycle narrative would erase context. Remove this entry once
-    # v0.3.1 is archived.
-    "docs/v0.3.1-plan.md",
-    # docs/v0.3.5-plan.md and docs/v0.3.6-plan.md are the active v0.3.5 /
-    # v0.3.6 master plans — same release-cycle accumulator pattern as
-    # docs/v0.3.0-plan.md / docs/v0.3.1-plan.md above. Each crossed the
-    # 3000-word prose cap when a release-scope decision folded a new row in
-    # (v0.3.5: the epoch axis / Phase 3b, per docs/rfcs/0031-epoch-pr-plan.md;
-    # v0.3.6: the RFC 0030 floor-control channel blocker, per
-    # docs/rfcs/0030-amendment-floor-control-pr-plan.md). The umbrellas hold
-    # only release-level framing; per-PR detail lives in those dedicated
-    # plans, and trimming the narrative would erase release-cycle context.
-    # Remove each entry once its release ships and the plan is archived.
-    "docs/v0.3.5-plan.md",
-    "docs/v0.3.6-plan.md",
-    "docs/v0.3.7-plan.md",  # v0.3.7 master plan — same accumulator pattern as v0.3.5/v0.3.6 above (3-workstream realism cut); remove once shipped/archived.
-    "docs/v0.3.8-plan.md",  # v0.3.8 master plan — same accumulator pattern as v0.3.5/v0.3.6/v0.3.7 above (3-workstream convergence cut); remove once shipped/archived.
-    "docs/v0.3.9-plan.md",  # v0.3.9 master plan — same accumulator pattern as v0.3.5–v0.3.8 above (2-RFC verbatim-recall cut: ledger substrate + recall consumer, with the §OQ-6 scope lock folded in); remove once shipped/archived.
-    # docs/v0.3.12-plan.md — v0.3.12 master plan; same release-cycle accumulator
-    # pattern as the v0.3.0–v0.3.9 plans above, but it crossed the 3 000-word
-    # prose cap already at *plan opening* rather than mid-cycle. Two causes,
-    # both structural: (1) v0.3.12 is a deliberate two-story release (the
-    # RFC 0037/0049 memory cluster headlines, RFC 0039 accounts/auth rides
-    # bundled), so the acceptance list, the cuttability contract, and the risk
-    # table each cover two workstreams instead of one; (2) the release turns on
-    # a cross-plan merge gate and a shadow→live promotion gate, both of which
-    # are release-level contract this doc exists to own. It is still scheduled
-    # to accumulate status flips across Phases 0–4 (the Master Progress
-    # Overview, the ROADMAP-hygiene checkpoints). Successive trims during the
-    # planning review had already reached the point of deleting contract rather
-    # than prose. Remove once v0.3.12 ships and the plan is archived.
-    "docs/v0.3.12-plan.md",
-    # docs/v0.3.14-plan.md — v0.3.14 master plan; same release-cycle
-    # accumulator pattern as the v0.3.0–v0.3.12 plans above. It opened at
-    # 2 964 words and crossed the cap during its own planning review, when
-    # two findings folded in as scope locks: the dispatch-origin enumeration
-    # (a missed REST origin fails *open* — it collapses silently to the
-    # 'local' principal, which is the defect the release exists to close)
-    # and the activation-day reset (migration v11 backfilled every
-    # pre-existing row to 'local' and the principal predicate is strict
-    # equality with no carve-out, so an authenticated caller cannot reach
-    # its pre-upgrade memory). Both are release-level contract: the
-    # acceptance criteria, an MT leg, and the release-notes obligations key
-    # off them. A trim pass reclaimed ~370 words of narrative first — what
-    # remains is contract, and the doc still has Phases 1–4 status flips to
-    # absorb.
-    #
-    # 2026-08-19, v0.3.14 post-release follow-up: removal was ATTEMPTED per the
-    # plan's own Phase 4 instruction and is BLOCKED. The archived plan measures
-    # 4 112 words against a 3 000 cap, so dropping the entry turns the CI
-    # `file_size.py --strict` gate red; the only ways to land it are to delete
-    # ~1 112 words of ratified contract (scope locks, the three recorded
-    # deviation notes, acceptance criteria) out of a historical record, or to
-    # pattern-exclude master plans -- which file_size.py's own
-    # _EXTRA_EXCLUDES comment considered and deliberately rejected, because
-    # plans are edited *during* their cycle and the cap does useful work then.
-    # That rationale expires on archival, but nothing implements archival: there
-    # is no docs/archive/, and all NINE plan entries here (v0.3.0 onward) carry
-    # the same never-executed exit condition. Left in place deliberately, with
-    # the blocker recorded, rather than carrying a promise that cannot be kept.
-    # Retiring these needs an archival mechanism, not another per-release note.
-    "docs/v0.3.14-plan.md",
-    # docs/v0.3.x-sequencing.md orchestrates the v0.3.1 / v0.3.2 / v0.3.3
-    # patch sequence and accumulates amendments as new v0.3.x-targeted
-    # RFCs file (the 2026-05-12 amendment captured the RFC 0030 + RFC
-    # 0031 landings and re-shuffled v0.3.1 / v0.3.2 scope). The original
-    # 2026-05-10 ratified decision is preserved verbatim above the
-    # amendment for context — that "preserve original + dated amendment"
-    # framing is the load-bearing shape of the doc and trimming the
-    # original body to fit the cap would defeat the comparison the
-    # amendment depends on. Same release-cycle-accumulator pattern as
-    # docs/v0.3.0-plan.md above. Remove this entry once v0.3.3 ships
-    # and the doc is archived.
+    # Version-cycle documents of RELEASED versions (master plans, release-prep
+    # plans, scope locks, amendments, baselines) are no longer listed here:
+    # file_size.py treats them as frozen release evidence once CHANGELOG.md
+    # carries the version's dated heading (ISSUE-0139 — the archival mechanism
+    # #838 found missing). Only the OPEN cycle's documents may appear below,
+    # and each such entry expires on its own at the release.
+    # docs/v0.3.x-sequencing.md is the LIVING sequencing record for the whole
+    # v0.3.x line: the original 2026-05-10 decision is preserved verbatim and
+    # every later scope decision lands as a dated amendment appended below it
+    # (eight so far, through 2026-08-19). That "preserve original + append
+    # amendment" shape is the load-bearing property — trimming an earlier body
+    # to fit the cap would defeat the comparison each amendment depends on —
+    # and, unlike a single version's plan, no single release ever freezes it,
+    # so the released-version exclusion does not apply. Exit condition: when the
+    # v0.3.x line closes (the v0.4.0 train opens a new sequencing doc) this
+    # file freezes and the entry goes; or earlier if the amendments are split
+    # into their own file.
     "docs/v0.3.x-sequencing.md",
     "docs/rfcs/0005-persona-agent-memory.md",
     "docs/rfcs/0005-pr-plan.md",
@@ -250,9 +187,10 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # condition was never achievable; 19 such entries (v0.3.0–v0.3.10) had
     # accumulated and none was ever retired. They are now excluded by pattern
     # in scripts/checks/file_size.py (_EXTRA_EXCLUDES), which is also why new
-    # ones must NOT be added back here. Master plans and release-prep plans
-    # stay enumerated below: those are edited during their cycle, so the cap
-    # still does useful work on them.
+    # ones must NOT be added back here. Master plans and release-prep plans of
+    # RELEASED versions are likewise excluded, by their dated CHANGELOG heading
+    # (_is_released_version_doc, ISSUE-0139); only the open cycle's plan may
+    # still need an entry.
     # docs/manual-tests/MT-MEMORY-005-dementia-test.md — the qualitative
     # memory acceptance gate; gains a Test Results row every memory-touching
     # release (v0.3.1 ×2, v0.3.5 ×2), so it sits at the 3 000-word prose cap
@@ -276,48 +214,6 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # followed step-by-step under live timing pressure. Trim only if a leg is
     # dropped.
     "docs/manual-tests/MT-MEMORY-CROSSROOM-001.md",
-    # docs/v0.3.4-release-prep-plan.md is the v0.3.4 release-prep sequencer —
-    # same release-cycle-accumulator pattern as the v0.3.0 / v0.3.1 plans and
-    # the v0.3.3 checklist above. It crossed the 3 000-word prose cap when PR 1
-    # made the provider-neutral onboarding scope explicit (the F-5 per-agent
-    # OPENAI_API_KEY plumbing requirement) on top of the four PR scope +
-    # acceptance blocks and the §Current state / §Known follow-up inventories;
-    # it will keep accumulating as PRs 2–4 land their status + acceptance
-    # residuals. Trimming the per-PR scope/acceptance detail would erase the
-    # contract the sequence depends on. Remove this entry once v0.3.4 ships and
-    # the plan is archived.
-    "docs/v0.3.4-release-prep-plan.md",
-    # docs/v0.3.6-release-prep-plan.md — v0.3.6 release-prep sequencer; same
-    # accumulator pattern as the v0.3.4 plan above. Crossed the cap when PR 4
-    # flipped §Status + Progress Overview to ✅ Complete. Archive once tagged.
-    "docs/v0.3.6-release-prep-plan.md",
-    # docs/v0.3.7-release-prep-plan.md — v0.3.7 release-prep sequencer; same
-    # accumulator pattern as the v0.3.4/v0.3.6 plans above, and carries the
-    # extra §Schema/migration-state contract for the F-7 Option D persona-memory
-    # migration (v12→v14) this release adds. Archive once v0.3.7 ships.
-    "docs/v0.3.7-release-prep-plan.md",
-    # docs/v0.3.8-release-prep-plan.md — v0.3.8 release-prep sequencer; same
-    # accumulator pattern as the v0.3.4/v0.3.6/v0.3.7 plans above, and carries an
-    # extra workstream (the RFC 0050 channel-config fold-in) plus the §Schema/
-    # migration-state contract for the two migrations this release adds (channel
-    # store v6→v8, persona-memory v14→v15). Archive once v0.3.8 ships.
-    "docs/v0.3.8-release-prep-plan.md",
-    # docs/v0.3.9-release-prep-plan.md — v0.3.9 release-prep sequencer; same
-    # accumulator pattern as the v0.3.4/v0.3.6/v0.3.7/v0.3.8 plans above, and
-    # carries the §Schema/migration-state contract for the two channel-store
-    # migrations this release adds (v8→v9 ledger, v9→v10 FTS; persona-memory
-    # unchanged) plus the structural-gate + Known-follow-up inventories for the
-    # verbatim-recall surface. Archive once v0.3.9 ships.
-    "docs/v0.3.9-release-prep-plan.md",
-    # docs/v0.3.10-release-prep-plan.md — v0.3.10 release-prep sequencer; same
-    # accumulator pattern as the v0.3.4–v0.3.9 plans above. This release adds NO
-    # store migration (channel store stays v10, persona-memory unchanged), so in
-    # place of the §Schema/migration-state contract it carries the reasoning
-    # go-live gate trio (the privacy-wall no-leak test, the off→bid flip + kill
-    # switch, the deliberation/reflexion telemetry) plus the additive-proto-field
-    # wire-compat contract and the structural-gate + Known-follow-up inventories
-    # for the reasoning-before-posting surface. Archive once v0.3.10 ships.
-    "docs/v0.3.10-release-prep-plan.md",
     # docs/guides/persona-agents.md was at 2 867 words on the v0.3.0
     # release-candidate tip; release-prep PR 2 added three §2 callouts
     # (interactions-not-messages per RFC 0020, now-anchor per RFC 0021,
@@ -354,7 +250,8 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # cap and crossed it when RFC 0029 Phase 1 PR 5 (the Phase 1 closeout)
     # flipped the SA-1 row — vehicle "new RFC" → RFC 0029, target + status
     # updated to record the v0.3.2 `MemoryStore` facade landing. Same
-    # status-flip-tips-a-tracking-doc pattern as docs/v0.3.1-plan.md above;
+    # status-flip-tips-a-tracking-doc pattern the version plans followed
+    # (a status change, not new prose, pushed it over the cap);
     # trimming the SA-1..SA-10 narrative would erase planning context and a
     # topic split is a separate docs refactor. Remove this entry once that
     # split lands.

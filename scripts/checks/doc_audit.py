@@ -14,14 +14,14 @@ Exit code: 0 if all checks pass, 1 if any fail.
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import sys
 import time
-from dataclasses import asdict, dataclass, field
-from pathlib import Path
 from collections.abc import Callable
 from contextlib import redirect_stdout
-import io
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -70,7 +70,10 @@ def _safe_run(fn: Callable[..., CheckResult], name: str, verbose: bool = False) 
             passed=False,
             violation_count=1,
             violations=[
-                AuditViolation(file="<runner>", detail=str(exc), reason="Check raised an unexpected exception"),
+                AuditViolation(
+                    file="<runner>", detail=str(exc),
+                    reason="Check raised an unexpected exception",
+                ),
             ],
         )
 
@@ -179,7 +182,10 @@ def _print_text_report(report: AuditReport) -> None:
     for check in report.checks:
         status = "\u2705" if check.passed else "\u274c"
         warn_str = f" ({check.warning_count} warnings)" if check.warning_count else ""
-        print(f"\n{status} {check.name}: {check.violation_count} violations{warn_str} [{check.elapsed_secs}s]")
+        print(
+            f"\n{status} {check.name}: {check.violation_count} violations{warn_str}"
+            f" [{check.elapsed_secs}s]"
+        )
 
         for v in check.violations:
             print(f"    [FAIL] {v.file}: {v.detail}")
@@ -191,7 +197,10 @@ def _print_text_report(report: AuditReport) -> None:
 
     print("\n" + "=" * 60)
     status = "\u2705 ALL PASSED" if report.all_passed else "\u274c FAILURES DETECTED"
-    print(f"{status} | {report.total_violations} violations | {report.total_warnings} warnings | {report.elapsed_secs}s")
+    print(
+        f"{status} | {report.total_violations} violations"
+        f" | {report.total_warnings} warnings | {report.elapsed_secs}s"
+    )
     print("=" * 60)
 
 

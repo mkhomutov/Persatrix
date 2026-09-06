@@ -62,7 +62,11 @@ def _reconfigure_stream(name: str) -> None:
     stream = getattr(sys, name)
     if hasattr(stream, "reconfigure"):
         stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
-    elif hasattr(stream, "buffer") and stream.encoding and stream.encoding.lower() not in ("utf-8", "utf8"):
+    elif (
+        hasattr(stream, "buffer")
+        and stream.encoding
+        and stream.encoding.lower() not in ("utf-8", "utf8")
+    ):
         setattr(
             sys,
             name,
@@ -193,15 +197,15 @@ def report_violations(
     out = file if file is not None else sys.stdout
 
     if not violations:
-        print("[PASS] {} \u2014 no issues found.".format(title), file=out)
+        print(f"[PASS] {title} \u2014 no issues found.", file=out)
         return 0
 
-    print("[FAIL] Found {} violation(s):\n".format(len(violations)), file=out)
+    print(f"[FAIL] Found {len(violations)} violation(s):\n", file=out)
     for v in violations:
-        print("  {}:{}".format(v.file, v.line), file=out)
-        print("    {}".format(v.message), file=out)
+        print(f"  {v.file}:{v.line}", file=out)
+        print(f"    {v.message}", file=out)
         if v.content:
-            print("    > {}".format(v.content), file=out)
+            print(f"    > {v.content}", file=out)
         print(file=out)
 
     if verbose:
@@ -210,7 +214,7 @@ def report_violations(
             files[v.file] = files.get(v.file, 0) + 1
         print("  Files with violations:", file=out)
         for fname, count in sorted(files.items()):
-            print("    {} ({})".format(fname, count), file=out)
+            print(f"    {fname} ({count})", file=out)
         print(file=out)
 
     return 1

@@ -136,16 +136,19 @@ One canonical document per topic. Link to it; do not copy from it.
 | Version-cycle documents | `docs/vX.Y.Z-plan.md`, `-scope-locks.md`, `-plan-amendment-*.md`, `-release-prep-plan.md`, `-release-baseline.md`, `-release-checklist.md` | Edited during the cycle; **frozen at the post-release follow-up** except for the Released stamp |
 | Release evidence | `docs/manual-tests/vX.Y.Z-execution-report.md` | Written once against the tag; never edited after |
 
-**Archival rule.** A version-cycle document is *archived* when its version's
-tag exists and the post-release follow-up has stamped it Released. Archived
+**Archival rule.** A version-cycle document is *archived* when its version has
+shipped — the changelog carries its dated section and the post-release
+follow-up has stamped it Released. Archived
 documents are not moved (every plan is linked from ROADMAP, issues, and later
 plans, and moving them would break those links); they are frozen in place.
 Frozen release documents are **release evidence**, so they are exempt from the
-word cap: execution reports and checklists are already excluded by pattern in
-`scripts/checks/file_size.py`, and plans / release-prep plans of **released**
-versions should be too — today they are grandfathered one by one with an exit
-condition nothing can execute ([ISSUE-0139](issues/ISSUE-0139-released-plans-have-no-archival-mechanism.md)).
-Only the **open** cycle's plan needs an allowlist entry.
+word cap: execution reports and checklists are excluded by pattern in
+`scripts/checks/file_size.py`, and plans, scope locks, amendments,
+release-prep plans and baselines are excluded **once `CHANGELOG.md` carries
+their version's dated heading** — written at release-prep PR 3, one PR before
+the tag ([ISSUE-0139](issues/ISSUE-0139-released-plans-have-no-archival-mechanism.md)).
+Only the **open** cycle's plan can need an allowlist entry, and that entry
+expires by itself at the release.
 
 ## Historical Artifacts Policy
 

@@ -6,8 +6,17 @@
 # to main.
 #
 # Scope: Go build+test, Go proto staleness check, Python lint+test,
-# Rust build+clippy, config validation, and a lightweight Docker build-context
-# hygiene probe (ISSUE-0104). Full Docker product-image builds are excluded.
+# Rust build+clippy+test, config validation, docs hygiene, and a lightweight
+# Docker build-context hygiene probe (ISSUE-0104). Full Docker product-image
+# builds are excluded.
+#
+# 2026-09-06 (methodology series): every check that used to run only in the
+# local pre-commit hook or a bare `make` target now has a CI step — gofmt,
+# cargo fmt, ruff/mypy on scripts/ and evaluators/, the Go integration tests,
+# the sanitizer-pattern sync, prompt_refs, and the four doc-hygiene checks.
+# The hook lives outside version control and not every contributor has it,
+# so a local-only check is a check the merge never sees. The enforcement
+# matrix (docs/methodology/enforcement-matrix.md) lists the level of each.
 
 name: CI
 
@@ -44,8 +53,32 @@ jobs:
       - name: Build orchestrator
         run: go build ./cmd/orchestrator
 
+      # Formatting used to be pre-commit-only; a contributor without the hook
+      # could merge unformatted Go. Every tracked .go file, not just internal/
+      # and cmd/ — tests/integration/ is Go too and this job now runs it. The
+      # two-step form fails on gofmt's own error exit (a file it cannot parse
+      # prints to stderr with empty stdout, which a bare `test -z` would pass).
+      - name: Check gofmt
+        run: |
+          unformatted="$(gofmt -l $(git ls-files '*.go'))" || exit 1
+          if [ -n "$unformatted" ]; then echo "gofmt needed:"; echo "$unformatted"; exit 1; fi
+
       - name: Run Go tests
         run: go test ./internal/... -v -race -cover
+
+      # tests/integration/*_test.go (scheduler→executor over bufconn, the rate
+      # limiter, the audit logger) sat outside `./internal/...` and so ran in
+      # no job — the fourth "test tree with no runner" this repo has found
+      # (after agents/tests/, the Rust suite, and the Python integration tier).
+      # ~2 s under -race.
+      - name: Run Go integration tests
+        run: go test ./tests/integration/... -v -race
+
+      # agents/security_patterns.py + security_enums.py are generated from the
+      # Go canonical sources (RFC 0009 PR 3). The sync check needs `go run`, so
+      # it lives in this job rather than the Python one. Was make-only.
+      - name: Check generated sanitizer mirrors are in sync with Go
+        run: make generate-sanitizer-patterns-check
 
   web-console:
     # RFC 0048 Phase 1 PR 3 — the embedded web console's JS toolchain (the
@@ -191,6 +224,20 @@ jobs:
       - name: Type check tests/ tree with mypy
         run: mypy tests/
 
+      # ISSUE-0134: scripts/ — every pre-commit check, the generators, the hook
+      # installer — was the one Python tree neither ruff nor mypy ever saw in
+      # CI, so the code that enforces linting was itself unlinted (an I001 in
+      # #840 was caught only by hand). evaluators/ (the RFC 0044 eval harness)
+      # was covered by `make lint-python` but by no CI step. Both ride the root
+      # ruff.toml / mypy.ini; mypy.ini gained `scripts` on mypy_path so the
+      # generators' sibling `_doc_index` import resolves the way it does at
+      # runtime.
+      - name: Lint scripts/ and evaluators/ trees with ruff
+        run: ruff check scripts/ evaluators/
+
+      - name: Type check scripts/ and evaluators/ trees with mypy
+        run: mypy scripts/ evaluators/
+
       # RFC 0045 §B — the MIT↛BUSL dependency-direction gate (Python half).
       # Runs the [tool.importlinter] forbidden contract so a leaf MIT-candidate
       # primitive (wallet client, prompt-safety kit, mock provider) that grows
@@ -334,10 +381,14 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          components: clippy, rustfmt
 
       - name: Build CLI
         run: cd cli && cargo build
+
+      # Was pre-commit-only (see the gofmt note in the Go job).
+      - name: Check rustfmt
+        run: cd cli && cargo fmt -- --check
 
       - name: Clippy
         run: cd cli && cargo clippy -- -D warnings
@@ -370,16 +421,66 @@ jobs:
       - name: Validate YAML configs
         run: python agents/validate.py config/
 
+      # `make validate` runs this after the schema pass; CI called
+      # agents/validate.py directly and skipped it, so a persona whose
+      # `instructions_file` pointed at a missing prompt validated green.
+      - name: Check agents.yaml instructions_file references resolve
+        run: python scripts/checks/prompt_refs.py
+
       - name: Check issues index is up to date
         run: make issues-check
 
       - name: Check RFCs index is up to date
         run: make rfcs-check
 
+  docs-hygiene:
+    # The four documentation checks the pre-commit hook runs (links + anchors,
+    # leaked tool-call markup, status markers, FILEMAP freshness) had no CI
+    # counterpart, so a checkout without the hook — or a `--no-verify` — could
+    # merge a broken link or a stale file map (ISSUE-0133: the #840 worktree
+    # corruption would have merged a wrong FILEMAP.md unnoticed). All four are
+    # stdlib-only; the runner's system python3 suffices, and the checks read
+    # `git ls-files`, so the default checkout depth is enough.
+    name: Docs hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Check documentation links and anchors
+        run: python scripts/checks/doc_links.py
+
+      - name: Check for leaked tool-call markup in docs
+        run: python scripts/checks/doc_leaked_markup.py
+
+      - name: Check status markers
+        run: python scripts/checks/doc_status_markers.py
+
+      # Compares everything except the generation date in the header, so a
+      # correct map committed yesterday does not read as stale today.
+      #
+      # On a pull_request event this runs on the MERGE ref (branch ∪ main), so
+      # a PR that is behind a file-adding commit on main fails here until it
+      # is updated and the hook regenerates the map. That is deliberate, per
+      # ISSUE-0133's own analysis: it is the exact staleness the merge would
+      # commit, and `main`'s required checks are already `strict` (the branch
+      # must be current before it can merge), so the update is not extra work.
+      # The failure message names the fix.
+      - name: Check FILEMAP.md is up to date
+        run: python scripts/generate_filemap.py --check
+
   file-size-check:
     name: File size check
     runs-on: ubuntu-latest
     steps:
+      # The size gate tells a frozen (released) plan from the open cycle's by
+      # reading CHANGELOG.md's dated release headings — deliberately not
+      # `git tag`: on a pull_request ref checkout@v4 fetches --depth=1 with no
+      # tags and ignores the fetch-tags input in that mode, which turned this
+      # job red on the #858 review's first two CI runs.
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5

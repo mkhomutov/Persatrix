@@ -68,7 +68,10 @@ SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$")
 def bump(version: str, *, dry_run: bool = False) -> list[str]:
     """Update version in all tracked files. Returns list of changed paths."""
     if not SEMVER_RE.match(version):
-        print(f"error: '{version}' is not valid semver (expected X.Y.Z[-prerelease])", file=sys.stderr)
+        print(
+            f"error: '{version}' is not valid semver (expected X.Y.Z[-prerelease])",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     changed: list[str] = []
@@ -104,7 +107,9 @@ def bump(version: str, *, dry_run: bool = False) -> list[str]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Bump Persatrix version across all components")
     parser.add_argument("version", help="New version string (semver, e.g. 0.3.0)")
-    parser.add_argument("--dry-run", action="store_true", help="Show what would change without writing")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Show what would change without writing",
+    )
     args = parser.parse_args()
 
     print(f"Bumping to {args.version}{' (dry run)' if args.dry_run else ''}:")
@@ -121,8 +126,8 @@ def main() -> None:
     # Remind about manual steps
     print("\nRemaining manual steps:")
     print("  1. cd cli && cargo update --workspace   # regenerate Cargo.lock")
-    print("  2. git-cliff --tag v{ver} ...            # update CHANGELOG.md".format(ver=args.version))
-    print("  3. git tag -a v{ver} -m 'v{ver}'         # tag release".format(ver=args.version))
+    print(f"  2. git-cliff --tag v{args.version} ...            # update CHANGELOG.md")
+    print(f"  3. git tag -a v{args.version} -m 'v{args.version}'         # tag release")
     print("  4. See docs/guides/version-bump.md for the full checklist")
 
 
