@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import argparse
 import re
-import subprocess
 import sys
 from pathlib import Path
 from typing import NamedTuple
@@ -101,7 +100,7 @@ _EXTRA_EXCLUDES = [
     # Master plans (docs/v*-plan.md) and release-prep plans are NOT matched here
     # because they are *edited during* their cycle and the cap still does useful
     # work on them; they are excluded conditionally instead — once their
-    # version's tag exists (_VERSION_DOC_RE below). Permanent acceptance gates that happen to
+    # version has shipped (_VERSION_DOC_RE below). Permanent acceptance gates that happen to
     # live under docs/manual-tests/ (MT-MEMORY-005, MT-CHANNEL-GOV-004) are not
     # per-release reports and are not matched here. The `v[0-9]` prefix keeps
     # non-version names (verify-*, variants-*) out; note fnmatch's `*` crosses
@@ -115,86 +114,67 @@ EXCLUDE_PATTERNS = DEFAULT_EXCLUDES + _EXTRA_EXCLUDES
 
 # Version-cycle documents (ISSUE-0139). A master plan, scope-locks record, plan
 # amendment, release-prep plan, or release baseline is edited while its version
-# is in flight — the cap does useful work then — and frozen once the version's
-# tag exists. From that point it is release evidence, the same category the two
+# is in flight — the cap does useful work then — and frozen once the version
+# ships. From that point it is release evidence, the same category the two
 # write-once patterns above cover, so it is excluded *conditionally*: matched by
-# name here, and treated as excluded only when ``git tag`` lists its version
+# name here, and treated as excluded only when the version has shipped
 # (:func:`_is_released_version_doc`). The open cycle's plan keeps its cap and,
 # if it must exceed it, its allowlist entry — which now really does expire at
-# the tag. Checklists are unconditional (pattern above): frozen from the start.
+# the release. Checklists are unconditional (pattern above): frozen from the
+# start.
 _VERSION_DOC_RE = re.compile(
     r"^docs/v(\d+\.\d+(?:\.\d+)?)-"
     r"(?:plan|scope-locks|plan-amendment-[0-9-]+|release-prep-plan|release-baseline)\.md$"
 )
 
+# "Shipped" is read from the tree, not from git: CHANGELOG.md carries one dated
+# `## [X.Y.Z] - YYYY-MM-DD` heading per release (written at release-prep PR 3,
+# one PR before the tag), so the answer is the same in a full clone, a depth-1
+# CI checkout, a worktree, and a tarball. `git tag` was the first design and
+# failed in CI on its first run: actions/checkout fetches a pull_request ref
+# with --depth=1 and no tags, and ignores `fetch-tags: true` in that mode.
+_CHANGELOG_RELEASE_RE = re.compile(r"^## \[(\d+\.\d+\.\d+)\] - \d{4}-\d{2}-\d{2}", re.M)
 
-def _git(repo_root: Path, *args: str) -> str | None:
-    """Run one read-only git command in *repo_root*; ``None`` when git cannot answer."""
+
+def _released_versions(repo_root: Path) -> frozenset[str]:
+    """Versions with a dated CHANGELOG section under *repo_root*.
+
+    Empty when there is no changelog at the root — a scan of a sub-tree or a
+    temp dir. Empty means nothing counts as released, so every version-cycle
+    doc is capped: the conservative side.
+    """
     try:
-        return subprocess.run(
-            ["git", *args],
-            cwd=repo_root,
-            capture_output=True,
-            encoding="utf-8",
-            errors="replace",
-            check=True,
-            timeout=10,
-        ).stdout
-    except (OSError, subprocess.SubprocessError):
-        return None
-
-
-def _released_tags(repo_root: Path) -> frozenset[str]:
-    """Tags ``vX.Y.Z`` of the repository whose top level is *repo_root*.
-
-    Empty when git cannot answer, when *repo_root* is not a repository, or
-    when it is merely a directory *inside* one — a scan rooted in a temp dir
-    that happens to live under some checkout must not inherit that checkout's
-    tags. Empty means nothing counts as released, so every version-cycle doc
-    is capped: the conservative side. CI therefore fetches tags explicitly
-    (``fetch-tags: true``); a depth-1 ``--no-tags`` checkout would cap the
-    frozen plans too.
-    """
-    top = _git(repo_root, "rev-parse", "--show-toplevel")
-    if top is None or Path(top.strip()).resolve() != repo_root.resolve():
+        text = (repo_root / "CHANGELOG.md").read_text(encoding="utf-8", errors="replace")
+    except OSError:
         return frozenset()
-    out = _git(repo_root, "tag", "--list", "v[0-9]*")
-    if out is None:
-        return frozenset()
-    return frozenset(t.strip() for t in out.splitlines() if t.strip())
+    return frozenset(_CHANGELOG_RELEASE_RE.findall(text))
 
 
-def _stale_allowlist_entries(tags: frozenset[str]) -> list[str]:
-    """Allowlist entries that are released version-cycle docs.
+def _is_released_version_doc(rel: str, released: frozenset[str]) -> bool:
+    """True when *rel* is a version-cycle doc whose version has shipped.
 
-    Such an entry is dead weight: the file is excluded by tag before the
-    allowlist is consulted. It is reported as a notice, not a failure — the
-    entry for the open cycle's plan becomes stale the instant the release tag
-    is pushed, and turning ``main`` red between the tag and the post-release
-    follow-up that retires it would punish every unrelated PR in between.
-    """
-    return sorted(rel for rel in GRANDFATHERED_FILES if _is_released_version_doc(rel, tags))
-
-
-def _is_released_version_doc(rel: str, tags: frozenset[str]) -> bool:
-    """True when *rel* is a version-cycle doc whose version has been tagged.
-
-    A two-part version (``v0.2``) matches its ``.0`` tag: the v0.2 release-prep
-    plan shipped as ``v0.2.0``.
+    A two-part version (``v0.2``) matches its ``.0`` release: the v0.2
+    release-prep plan shipped as ``0.2.0``.
     """
     match = _VERSION_DOC_RE.match(rel)
     if not match:
         return False
     version = match.group(1)
-    if f"v{version}" in tags:
+    if version in released:
         return True
-    return version.count(".") == 1 and f"v{version}.0" in tags
+    return version.count(".") == 1 and f"{version}.0" in released
 
-# ``GRANDFATHERED_FILES`` — the size-audit allowlist — lives in
-# ``scripts/checks/file_size_allowlist.py`` (imported above). It is reference
-# data whose length scales with release history, so it is kept out of this
-# module to keep the *logic* honestly under the 500-line code cap; see that
-# module's docstring for the full rationale.
+
+def _stale_allowlist_entries(released: frozenset[str]) -> list[str]:
+    """Allowlist entries that are released version-cycle docs.
+
+    Such an entry is dead weight: the file is excluded before the allowlist is
+    consulted. It is reported as a notice, not a failure — the entry for the
+    open cycle's plan becomes stale the moment the changelog is dated, and
+    turning ``main`` red between that and the post-release follow-up that
+    retires it would punish every unrelated PR in between.
+    """
+    return sorted(rel for rel in GRANDFATHERED_FILES if _is_released_version_doc(rel, released))
 
 
 class FileSizeWarning(NamedTuple):
@@ -268,7 +248,7 @@ def _scan_files(
     warnings: list[FileSizeWarning] = []
     code_results: list[tuple[str, int]] = []
     doc_results: list[tuple[str, int]] = []
-    released = _released_tags(repo_root)
+    released = _released_versions(repo_root)
 
     for fpath in walk_files(
         repo_root, extensions=CODE_EXTENSIONS, exclude_patterns=EXCLUDE_PATTERNS,
@@ -401,9 +381,9 @@ def check_file_size(
     the tier from the one audience already reading size output.
     """
     warnings, code_results, doc_results = _scan_files(repo_root, max_code_lines, max_doc_words)
-    for rel in _stale_allowlist_entries(_released_tags(repo_root)):
+    for rel in _stale_allowlist_entries(_released_versions(repo_root)):
         print(
-            f"[STALE-ALLOWLIST] {rel} is a released version-cycle doc, excluded by tag — "
+            f"[STALE-ALLOWLIST] {rel} is a released version-cycle doc, already excluded — "
             "drop its entry from scripts/checks/file_size_allowlist.py (post-release follow-up)."
         )
 

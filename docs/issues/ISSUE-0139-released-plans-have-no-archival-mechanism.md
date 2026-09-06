@@ -67,12 +67,19 @@ links for no gain.
 > guide's new "Where Documents Live" section states the rule this issue
 > implements.
 
-> 2026-09-06 — RESOLVED in #858, as proposed. `file_size.py` treats a
-> version-cycle doc (plan, scope locks, plan amendment, release-prep plan,
-> release baseline) as excluded once `git tag --list` carries its version
-> (`_is_released_version_doc`; a two-part `v0.2` matches `v0.2.0`). Sixteen
-> allowlist entries retired; `test_allowlist_holds_no_released_version_docs`
-> keeps them out, and the existing narrow-exclusion tripwire still passes
-> because an untagged version stays capped. No tags → nothing released →
-> everything capped, the conservative fallback. The documentation guide's
-> "Where Documents Live" section now describes an implemented rule.
+> 2026-09-06 — RESOLVED in #858, with one change from the proposal.
+> `file_size.py` treats a version-cycle doc (plan, scope locks, plan
+> amendment, release-prep plan, release baseline) as excluded once
+> `CHANGELOG.md` carries the version's dated `## [X.Y.Z] - date` heading
+> (`_is_released_version_doc`; a two-part `v0.2` matches `0.2.0`). The
+> proposal said `git tag`; that shipped first and went red on its first CI
+> run — actions/checkout fetches a pull_request ref at depth 1 with no tags
+> and ignores the fetch-tags input in that mode — so the source moved to the
+> tree, where a depth-1 checkout, a worktree, and a tarball all answer the
+> same. The changelog is dated at release-prep PR 3, one PR before the tag;
+> that one-PR window is accepted. Sixteen allowlist entries retired; a
+> still-allowlisted released doc prints `[STALE-ALLOWLIST]` (advisory, so a
+> release does not turn `main` red before the follow-up retires the entry);
+> the narrow-exclusion tripwire still passes because an unreleased version
+> stays capped. No changelog → nothing released → everything capped. The
+> documentation guide's "Where Documents Live" section describes the rule.

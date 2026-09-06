@@ -68,7 +68,7 @@ dependencies.
 | `make ui-html-check` (`scripts/checks/ui_html_directive.py`) | Reject `{@html}` under `web/src` | CI (`Web console`) |
 | `make dockerignore-check` (`scripts/checks/dockerignore_context.py`) | Seed a sentinel, run a real `docker build`, prove the context excludes nested `node_modules` | CI (`Dockerignore`) |
 | `make check-licenses` (`-go`/`-python`/`-rust`) | go-licenses, `scripts/checks/python_licenses.py`, cargo-deny against `scripts/checks/allowed_licenses.txt` / `deny.toml` | CI (`Third-party license check`) |
-| `scripts/checks/file_size.py [--strict] [--near-cap]` | Code ≤ 500 lines, docs ≤ 3 000 words, RFCs ≤ 8 000; allowlist in `file_size_allowlist.py`; near-cap band 3 %; version-cycle docs of tagged versions excluded (ISSUE-0139) | CI (`File size check`) + pre-commit |
+| `scripts/checks/file_size.py [--strict] [--near-cap]` | Code ≤ 500 lines, docs ≤ 3 000 words, RFCs ≤ 8 000; allowlist in `file_size_allowlist.py`; near-cap band 3 %; version-cycle docs of released versions (dated CHANGELOG heading) excluded (ISSUE-0139) | CI (`File size check`) + pre-commit |
 | `scripts/checks/doc_links.py` | Relative links and `#anchors` in every tracked `.md` | CI (`Docs hygiene`) + pre-commit |
 | `scripts/checks/doc_status_markers.py` | Only the standard status markers | CI (`Docs hygiene`) + pre-commit |
 | `scripts/checks/doc_leaked_markup.py` | No tool-call markup fragments in docs | CI (`Docs hygiene`) + pre-commit |

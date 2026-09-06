@@ -63,7 +63,7 @@ Required, it rides inside one of the six required jobs.
 | Code files ≤ 500 lines | documentation-guide §Size Limits | `file_size.py --strict` | CI-advisory (`File size check`) + Pre-commit |
 | Docs ≤ 3 000 words; RFCs ≤ 8 000 words | documentation-guide | same | CI-advisory + Pre-commit |
 | Grandfathered files carry a reason and an exit condition | `file_size_allowlist.py` docstring | review; `test_allowlist_has_no_dead_entries`, `test_allowlist_holds_no_released_version_docs` | Convention + unit tests |
-| Released version-cycle docs are frozen evidence, exempt from the cap | documentation-guide §Where Documents Live | `file_size.py` tag-aware exclusion (ISSUE-0139); CI fetches tags for it; a still-allowlisted released doc prints `[STALE-ALLOWLIST]` (advisory, retired at the post-release follow-up) | Required (`Python` unit tests pin it) |
+| Released version-cycle docs are frozen evidence, exempt from the cap | documentation-guide §Where Documents Live | `file_size.py` excludes them once `CHANGELOG.md` has the version's dated heading (ISSUE-0139; read from the tree, not `git tag`, so a depth-1 checkout agrees with a full clone); a still-allowlisted released doc prints `[STALE-ALLOWLIST]` (advisory, retired at the post-release follow-up) | Required (`Python` unit tests pin it) |
 | Near-cap warning at 3 % | `file_size.py` | `--near-cap` output on every run | Advisory output |
 | PRs under 500 changed lines | CONTRIBUTING; BRANCHING; CLAUDE.md | — | **Convention only** — a third of recent merges exceed it |
 | Squash merge; linear history | BRANCHING | branch protection | Required |

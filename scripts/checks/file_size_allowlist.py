@@ -20,7 +20,9 @@ ones back; add the *pattern* if a genuinely new write-once category appears.
 of *released* versions — master plans, scope locks, plan amendments,
 release-prep plans, release baselines — are also gone from here. They are
 frozen at the post-release follow-up, so ``file_size.py`` now excludes them
-the moment ``git tag`` lists their version (``_is_released_version_doc``).
+once ``CHANGELOG.md`` carries the version's dated release heading
+(``_is_released_version_doc``; read from the tree, not ``git tag``, so a
+depth-1 CI checkout answers the same as a full clone).
 Sixteen entries whose exit condition ("remove once archived") nothing could
 execute were retired in one move; ``#838`` had recorded the first failed
 attempt.
@@ -59,18 +61,18 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     "docs/persatrix-extension-spec.md",
     # Version-cycle documents of RELEASED versions (master plans, release-prep
     # plans, scope locks, amendments, baselines) are no longer listed here:
-    # file_size.py treats them as frozen release evidence once `git tag` lists
-    # their version (ISSUE-0139 — the archival mechanism #838 found missing).
-    # Only the OPEN cycle's documents may appear below, and each such entry
-    # expires on its own at the tag.
+    # file_size.py treats them as frozen release evidence once CHANGELOG.md
+    # carries the version's dated heading (ISSUE-0139 — the archival mechanism
+    # #838 found missing). Only the OPEN cycle's documents may appear below,
+    # and each such entry expires on its own at the release.
     # docs/v0.3.x-sequencing.md is the LIVING sequencing record for the whole
     # v0.3.x line: the original 2026-05-10 decision is preserved verbatim and
     # every later scope decision lands as a dated amendment appended below it
     # (eight so far, through 2026-08-19). That "preserve original + append
     # amendment" shape is the load-bearing property — trimming an earlier body
     # to fit the cap would defeat the comparison each amendment depends on —
-    # and, unlike a single version's plan, no tag ever freezes it, so the
-    # tag-aware exclusion above does not apply. Exit condition: when the
+    # and, unlike a single version's plan, no single release ever freezes it,
+    # so the released-version exclusion does not apply. Exit condition: when the
     # v0.3.x line closes (the v0.4.0 train opens a new sequencing doc) this
     # file freezes and the entry goes; or earlier if the amendments are split
     # into their own file.
@@ -186,8 +188,9 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # accumulated and none was ever retired. They are now excluded by pattern
     # in scripts/checks/file_size.py (_EXTRA_EXCLUDES), which is also why new
     # ones must NOT be added back here. Master plans and release-prep plans of
-    # RELEASED versions are likewise excluded, by tag (_is_released_version_doc,
-    # ISSUE-0139); only the open cycle's plan may still need an entry.
+    # RELEASED versions are likewise excluded, by their dated CHANGELOG heading
+    # (_is_released_version_doc, ISSUE-0139); only the open cycle's plan may
+    # still need an entry.
     # docs/manual-tests/MT-MEMORY-005-dementia-test.md — the qualitative
     # memory acceptance gate; gains a Test Results row every memory-touching
     # release (v0.3.1 ×2, v0.3.5 ×2), so it sits at the 3 000-word prose cap

@@ -183,16 +183,7 @@ jobs:
     name: Python (lint + test)
     runs-on: ubuntu-latest
     steps:
-      # fetch-tags: the file-size checker decides whether a version-cycle
-      # plan is frozen release evidence by asking `git tag` (ISSUE-0139), and
-      # two unit tests pin that against this repo's real tags. checkout@v4's
-      # default is a depth-1 fetch with --no-tags, under which nothing is ever
-      # "released" — the checker then caps sixteen frozen plans and both tests
-      # fail. Found by the #858 review, live: the first CI run of that PR was
-      # red exactly this way.
       - uses: actions/checkout@v4
-        with:
-          fetch-tags: true
 
       - uses: actions/setup-python@v5
         with:
@@ -485,11 +476,12 @@ jobs:
     name: File size check
     runs-on: ubuntu-latest
     steps:
-      # fetch-tags: see the Python job — the size gate needs the tag list to
-      # tell a frozen (released) plan from the open cycle's.
+      # The size gate tells a frozen (released) plan from the open cycle's by
+      # reading CHANGELOG.md's dated release headings — deliberately not
+      # `git tag`: on a pull_request ref checkout@v4 fetches --depth=1 with no
+      # tags and ignores the fetch-tags input in that mode, which turned this
+      # job red on the #858 review's first two CI runs.
       - uses: actions/checkout@v4
-        with:
-          fetch-tags: true
 
       - uses: actions/setup-python@v5
         with:

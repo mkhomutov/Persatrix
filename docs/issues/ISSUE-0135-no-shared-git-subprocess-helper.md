@@ -90,9 +90,3 @@ unused imports — run ruff over the tree by hand.
 > 2026-08-22 — captured during the #840 review, which added the sixth
 > copy and fixed two latent defects in it that the other five were not
 > checked for.
-
-
-> 2026-09-06 — #858 adds a seventh site: `scripts/checks/file_size.py::_git`
-> (tags + top-level lookup for the released-plan exclusion). It is already a
-> small local helper of the shape this issue asks for; when the shared one
-> lands it should absorb this one.
