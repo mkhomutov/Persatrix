@@ -51,7 +51,7 @@ leaning on `make test` reading as comprehensive.
 
 From v0.3.0, new unit-level code follows red-green-refactor: a failing test
 first, confirmed failing; the minimum implementation; then refactor
-([CLAUDE.md §TDD](../../.github/CLAUDE.md#tdd-from-v030-onward), per-language
+([copilot-instructions §TDD](../../.github/copilot-instructions.md#tdd-from-v030-onward), per-language
 rules in `.github/instructions/`). Integration tests (layers 4–5) are exempt
 and are written after the unit layer validates the pieces. TDD is a
 convention with no automated evidence trail; the review checks for it by

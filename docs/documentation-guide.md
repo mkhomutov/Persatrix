@@ -123,7 +123,7 @@ One canonical document per topic. Link to it; do not copy from it.
 | Protobuf contracts | `proto/*.proto` |
 | Contributor setup and quality gates | `CONTRIBUTING.md` |
 | Security policy | `SECURITY.md` |
-| Agent working rules | `.github/CLAUDE.md`, `.github/copilot-instructions.md`, `.github/instructions/*.md` |
+| Agent working rules | `.github/copilot-instructions.md` (shared source), `CLAUDE.md` at the repo root (Claude-specific, imports the shared file), `.github/instructions/*.md` (per language) |
 
 ## Where Documents Live, and When They Freeze
 

@@ -132,7 +132,7 @@ budget denial + RESOURCE_EXHAUSTED is finalised by [#395](https://github.com/mkh
 
 The stub packages are placeholders with `TODO` comments that compile but do not
 implement behaviour. They are intentional — removing them is a policy violation
-per [CLAUDE.md](../../.github/CLAUDE.md).
+per [CLAUDE.md](../../CLAUDE.md).
 
 ## Package import rules
 
