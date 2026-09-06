@@ -118,13 +118,13 @@ Listed here so the matrix is honest about its own gaps.
    after [ISSUE-0058](../issues/ISSUE-0058-perf-gate-runner-variance-tolerance.md)
    settles the runner-variance tolerance; a 20 % fixed band on shared runners
    was judged too flaky to arm during a release-prep window (2026-09-06).
+4. ~~Decide the PR-size rule.~~ Decided in the BRANCHING rewrite: guidance,
+   with the split heuristic code PRs follow; documentation-heavy release
+   evidence is the exception and is named as such.
 5. **Take RFC 0044 Phase 2 (evals in CI) at v0.3.16, not cut.** `make
    eval-replay` is $0 and deterministic; gating it turns every release's
    paid live arc into a free regression gate for the next. Slotted cuttable;
    the recommendation is recorded on the RFC 0044 PR plan.
-4. ~~Decide the PR-size rule.~~ Decided in the BRANCHING rewrite: guidance,
-   with the split heuristic code PRs follow; documentation-heavy release
-   evidence is the exception and is named as such.
 
 ## Related documentation
 
