@@ -11,7 +11,7 @@ license = {text = "BUSL-1.1"}
 dependencies = [
     "grpcio>=1.71.2,<2",
     "grpcio-tools>=1.71.2,<2",
-    "protobuf>=5.28.0,<8",
+    "protobuf>=5.28.0,<6",
     "pyyaml>=6.0,<7",
     "aiohttp>=3.9.0,<4",
     "anthropic>=0.40.0,<2",
@@ -68,7 +68,7 @@ dev = [
     # protobuf>=6 while the runtime closure above caps protobuf<6
     # (see grpcio-tools constraint). Bump deliberately, regenerate the
     # *.pyi, and commit in the same change.
-    "mypy-protobuf==5.1.0",
+    "mypy-protobuf==3.6.0",
     # RFC 0045 §B — the MIT↛BUSL dependency-direction gate. import-linter's
     # `lint-imports` runs the `[tool.importlinter]` forbidden contract below as
     # a hard CI gate (`make imports-check`), failing the build if an
