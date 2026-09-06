@@ -25,8 +25,8 @@ from scripts.checks.file_size import (
     _is_released_version_doc,
     _released_tags,
     _scan_files,
+    _stale_allowlist_entries,
 )
-from scripts.checks.file_size_allowlist import GRANDFATHERED_FILES
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -134,17 +134,44 @@ def test_released_tags_is_empty_outside_a_repository(tmp_path: Path) -> None:
     assert _released_tags(tmp_path) == frozenset()
 
 
+def test_released_tags_ignores_a_directory_nested_inside_a_repository() -> None:
+    """A scan rooted below the top level must not inherit the parent's tags.
+
+    Otherwise a pytest ``tmp_path`` that happens to live under a checkout
+    would silently treat a fixture named after a real version as released.
+    """
+    assert _released_tags(REPO_ROOT / "docs") == frozenset()
+
+
 # --------------------------------------------------------------------------
-# Allowlist hygiene: released docs must not also be allowlisted
+# Allowlist hygiene: released docs are reported, not failed
 # --------------------------------------------------------------------------
 
 
-def test_allowlist_holds_no_released_version_docs() -> None:
-    """Once the tag exists the entry is dead weight — and the reason this
-    mechanism exists is so those entries stop accumulating."""
-    tags = _released_tags(REPO_ROOT)
-    stale = sorted(rel for rel in GRANDFATHERED_FILES if _is_released_version_doc(rel, tags))
-    assert not stale, (
-        "these allowlist entries are released version-cycle docs, now excluded by "
-        f"the archival rule — drop them from file_size_allowlist.py: {stale}"
+def test_stale_allowlist_entries_names_released_docs_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The open cycle's plan is not stale; a tagged one is."""
+    monkeypatch.setattr(
+        file_size, "GRANDFATHERED_FILES",
+        frozenset({"docs/v0.3.14-plan.md", "docs/v0.3.15-plan.md", "ROADMAP.md"}),
     )
+    assert _stale_allowlist_entries(TAGS) == ["docs/v0.3.14-plan.md"]
+
+
+def test_stale_allowlist_is_a_notice_not_a_gate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A tag pushed while the plan is still allowlisted must not turn CI red.
+
+    The entry is retired by the post-release follow-up; until then every
+    unrelated PR would otherwise fail on it. So: printed, exit code untouched.
+    """
+    monkeypatch.setattr(file_size, "_released_tags", lambda _root: TAGS)
+    monkeypatch.setattr(file_size, "GRANDFATHERED_FILES", frozenset({"docs/v0.3.14-plan.md"}))
+    _write(tmp_path, "docs/v0.3.14-plan.md", DEFAULT_MAX_DOC_WORDS + 50)
+
+    rc = file_size.check_file_size(tmp_path, strict=True)
+
+    assert rc == 0
+    assert "[STALE-ALLOWLIST] docs/v0.3.14-plan.md" in capsys.readouterr().out

@@ -63,17 +63,17 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # their version (ISSUE-0139 — the archival mechanism #838 found missing).
     # Only the OPEN cycle's documents may appear below, and each such entry
     # expires on its own at the tag.
-    # docs/v0.3.x-sequencing.md orchestrates the v0.3.1 / v0.3.2 / v0.3.3
-    # patch sequence and accumulates amendments as new v0.3.x-targeted
-    # RFCs file (the 2026-05-12 amendment captured the RFC 0030 + RFC
-    # 0031 landings and re-shuffled v0.3.1 / v0.3.2 scope). The original
-    # 2026-05-10 ratified decision is preserved verbatim above the
-    # amendment for context — that "preserve original + dated amendment"
-    # framing is the load-bearing shape of the doc and trimming the
-    # original body to fit the cap would defeat the comparison the
-    # amendment depends on. Same release-cycle-accumulator pattern as
-    # docs/v0.3.0-plan.md above. Remove this entry once v0.3.3 ships
-    # and the doc is archived.
+    # docs/v0.3.x-sequencing.md is the LIVING sequencing record for the whole
+    # v0.3.x line: the original 2026-05-10 decision is preserved verbatim and
+    # every later scope decision lands as a dated amendment appended below it
+    # (eight so far, through 2026-08-19). That "preserve original + append
+    # amendment" shape is the load-bearing property — trimming an earlier body
+    # to fit the cap would defeat the comparison each amendment depends on —
+    # and, unlike a single version's plan, no tag ever freezes it, so the
+    # tag-aware exclusion above does not apply. Exit condition: when the
+    # v0.3.x line closes (the v0.4.0 train opens a new sequencing doc) this
+    # file freezes and the entry goes; or earlier if the amendments are split
+    # into their own file.
     "docs/v0.3.x-sequencing.md",
     "docs/rfcs/0005-persona-agent-memory.md",
     "docs/rfcs/0005-pr-plan.md",
@@ -247,7 +247,8 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # cap and crossed it when RFC 0029 Phase 1 PR 5 (the Phase 1 closeout)
     # flipped the SA-1 row — vehicle "new RFC" → RFC 0029, target + status
     # updated to record the v0.3.2 `MemoryStore` facade landing. Same
-    # status-flip-tips-a-tracking-doc pattern as docs/v0.3.1-plan.md above;
+    # status-flip-tips-a-tracking-doc pattern the version plans followed
+    # (a status change, not new prose, pushed it over the cap);
     # trimming the SA-1..SA-10 narrative would erase planning context and a
     # topic split is a separate docs refactor. Remove this entry once that
     # split lands.

@@ -8,6 +8,11 @@ never touched. The check compares everything *except* that date.
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
+
+from scripts import generate_filemap
 from scripts.generate_filemap import _comparable
 
 HEADER_A = (
@@ -28,3 +33,29 @@ def test_a_changed_file_count_is_still_a_difference() -> None:
 
 def test_a_changed_tree_is_still_a_difference() -> None:
     assert _comparable(HEADER_A + "a/b.py\n") != _comparable(HEADER_A + "a/c.py\n")
+
+
+def test_the_writer_keeps_the_committed_date_when_only_the_date_would_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The hook regenerates on every commit; a date-only diff is churn."""
+    out = tmp_path / "FILEMAP.md"
+    out.write_text(HEADER_A, encoding="utf-8")
+    monkeypatch.setattr(generate_filemap, "OUTPUT_FILE", out)
+    monkeypatch.setattr(generate_filemap, "generate_filemap", lambda: HEADER_B)
+
+    assert generate_filemap.main([]) == 0
+    assert out.read_text(encoding="utf-8") == HEADER_A
+    assert "unchanged" in capsys.readouterr().out
+
+
+def test_the_writer_still_writes_a_real_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    out = tmp_path / "FILEMAP.md"
+    out.write_text(HEADER_A, encoding="utf-8")
+    monkeypatch.setattr(generate_filemap, "OUTPUT_FILE", out)
+    monkeypatch.setattr(generate_filemap, "generate_filemap", lambda: HEADER_B + "a/b.py\n")
+
+    assert generate_filemap.main([]) == 0
+    assert out.read_text(encoding="utf-8") == HEADER_B + "a/b.py\n"

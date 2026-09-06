@@ -48,7 +48,7 @@ Required, it rides inside one of the six required jobs.
 | `.dockerignore` excludes nested `node_modules` | ISSUE-0104 | `make dockerignore-check` | CI-advisory |
 | Third-party licences on the allow-list (Go, Python, Rust) | Makefile; `allowed_licenses.txt`; `deny.toml` | `make check-licenses` | CI-advisory |
 | Idle persona spends nothing (RFC 0024) | RFC 0024 §Test Strategy | `test_bored_persona_cost.py`, path-filtered | CI-advisory |
-| `gofmt` / `cargo fmt` clean | instructions | `gofmt -l`; `cargo fmt -- --check` | Required (`Go`, `Rust`) + Pre-commit |
+| `gofmt` / `cargo fmt` clean | instructions | `gofmt -l` over every tracked `.go` file; `cargo fmt -- --check` | Required (`Go`, `Rust`) + Pre-commit (hook covers `internal/`, `cmd/` only) |
 | Go integration tests pass | testing-strategy | `go test ./tests/integration/... -race` | Required (`Go`) |
 | Python sanitizer patterns/enums match the Go canonical source | Makefile (RFC 0009 PR 3) | `make generate-sanitizer-patterns-check` | Required (`Go`) |
 | `THIRD_PARTY_NOTICES.md` matches the dependency graphs | Makefile | `make notices-check` | Make-only — deliberately: the notices file is regenerated at release-prep PR 4, so it is legitimately stale between a dependency bump and the next release (it is stale today) |
@@ -63,7 +63,7 @@ Required, it rides inside one of the six required jobs.
 | Code files ≤ 500 lines | documentation-guide §Size Limits | `file_size.py --strict` | CI-advisory (`File size check`) + Pre-commit |
 | Docs ≤ 3 000 words; RFCs ≤ 8 000 words | documentation-guide | same | CI-advisory + Pre-commit |
 | Grandfathered files carry a reason and an exit condition | `file_size_allowlist.py` docstring | review; `test_allowlist_has_no_dead_entries`, `test_allowlist_holds_no_released_version_docs` | Convention + unit tests |
-| Released version-cycle docs are frozen evidence, exempt from the cap | documentation-guide §Where Documents Live | `file_size.py` tag-aware exclusion (ISSUE-0139) | Required (`Python` unit tests pin it) |
+| Released version-cycle docs are frozen evidence, exempt from the cap | documentation-guide §Where Documents Live | `file_size.py` tag-aware exclusion (ISSUE-0139); CI fetches tags for it; a still-allowlisted released doc prints `[STALE-ALLOWLIST]` (advisory, retired at the post-release follow-up) | Required (`Python` unit tests pin it) |
 | Near-cap warning at 3 % | `file_size.py` | `--near-cap` output on every run | Advisory output |
 | PRs under 500 changed lines | CONTRIBUTING; BRANCHING; CLAUDE.md | — | **Convention only** — a third of recent merges exceed it |
 | Squash merge; linear history | BRANCHING | branch protection | Required |
@@ -76,7 +76,7 @@ Required, it rides inside one of the six required jobs.
 | No broken relative links or anchors in tracked markdown | documentation-guide; consistency checklist | `doc_links.py` | CI-advisory (`Docs hygiene`) + Pre-commit |
 | Only the standard status markers | documentation-guide §Status Markers | `doc_status_markers.py` | CI-advisory (`Docs hygiene`) + Pre-commit |
 | No leaked tool-call markup in docs | — | `doc_leaked_markup.py` | CI-advisory (`Docs hygiene`) + Pre-commit |
-| `FILEMAP.md` matches `git ls-files` | `generate_filemap.py` | `--check` (date-insensitive) | CI-advisory (`Docs hygiene`) + Pre-commit regenerates — closed [ISSUE-0133](../issues/ISSUE-0133-no-ci-gate-on-filemap-freshness.md) |
+| `FILEMAP.md` matches `git ls-files` | `generate_filemap.py` | `--check` (date-insensitive; on a PR it compares against the merge tree, so a PR behind a file-adding merge fails until updated) | CI-advisory (`Docs hygiene`) + Pre-commit regenerates — closed [ISSUE-0133](../issues/ISSUE-0133-no-ci-gate-on-filemap-freshness.md) |
 | Unified doc audit (links + markers + sizes) | `doc_audit.py` | — | Local convenience wrapper; its three checks run individually in CI |
 | Local-only files never referenced from committed files | CLAUDE.md; copilot-instructions; review-process | review | Convention |
 | Glossary terms mandatory; new terms added in the same change | CLAUDE.md §Terminology | review | Convention |

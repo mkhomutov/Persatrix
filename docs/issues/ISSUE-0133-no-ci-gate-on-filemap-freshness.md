@@ -92,3 +92,10 @@ half: CI catches the wrong map, the warning catches the cause.
 > header carries the generation date, so a byte comparison would have gone
 > red on any PR older than a day — `--check` now compares everything except
 > that date (`_comparable`, pinned by test_generate_filemap_check.py).
+
+> The merge-commit skew caveat is kept as designed: on a pull_request the check
+> runs on the merge ref, so a PR behind a file-adding commit on `main` fails
+> until it is updated — `main`'s required checks are already `strict`, so the
+> update is owed anyway, and the message names the fix. The writer now also
+> keeps the committed date when nothing else changed, so the hook stops
+> producing a date-only FILEMAP.md diff on the first commit of each day.

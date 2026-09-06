@@ -176,6 +176,15 @@ def main(argv: list[str] | None = None) -> int:
         print("[OK] FILEMAP.md is up-to-date.")
         return 0
 
+    # Keep the committed date when nothing but the date would change: the hook
+    # regenerates on every commit, and a daily date-only diff is churn the
+    # --check above already declares meaningless.
+    if OUTPUT_FILE.is_file():
+        existing = OUTPUT_FILE.read_text(encoding="utf-8")
+        if _comparable(existing) == _comparable(content):
+            print("[OK] FILEMAP.md unchanged.")
+            return 0
+
     # newline="\n" forces LF on write regardless of platform. Use Path.open()
     # rather than Path.write_text(newline=...) — the latter kwarg is 3.10+, but
     # the pre-commit hook resolves whatever `python3` is on PATH (which can be

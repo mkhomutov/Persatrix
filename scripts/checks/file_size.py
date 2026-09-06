@@ -128,15 +128,11 @@ _VERSION_DOC_RE = re.compile(
 )
 
 
-def _released_tags(repo_root: Path) -> frozenset[str]:
-    """Tags ``vX.Y.Z`` in *repo_root*; empty when git cannot answer.
-
-    Empty means nothing counts as released, so a tarball or a checkout without
-    tags falls back to capping every version-cycle doc — the conservative side.
-    """
+def _git(repo_root: Path, *args: str) -> str | None:
+    """Run one read-only git command in *repo_root*; ``None`` when git cannot answer."""
     try:
-        out = subprocess.run(
-            ["git", "tag", "--list", "v[0-9]*"],
+        return subprocess.run(
+            ["git", *args],
             cwd=repo_root,
             capture_output=True,
             encoding="utf-8",
@@ -145,8 +141,39 @@ def _released_tags(repo_root: Path) -> frozenset[str]:
             timeout=10,
         ).stdout
     except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def _released_tags(repo_root: Path) -> frozenset[str]:
+    """Tags ``vX.Y.Z`` of the repository whose top level is *repo_root*.
+
+    Empty when git cannot answer, when *repo_root* is not a repository, or
+    when it is merely a directory *inside* one — a scan rooted in a temp dir
+    that happens to live under some checkout must not inherit that checkout's
+    tags. Empty means nothing counts as released, so every version-cycle doc
+    is capped: the conservative side. CI therefore fetches tags explicitly
+    (``fetch-tags: true``); a depth-1 ``--no-tags`` checkout would cap the
+    frozen plans too.
+    """
+    top = _git(repo_root, "rev-parse", "--show-toplevel")
+    if top is None or Path(top.strip()).resolve() != repo_root.resolve():
+        return frozenset()
+    out = _git(repo_root, "tag", "--list", "v[0-9]*")
+    if out is None:
         return frozenset()
     return frozenset(t.strip() for t in out.splitlines() if t.strip())
+
+
+def _stale_allowlist_entries(tags: frozenset[str]) -> list[str]:
+    """Allowlist entries that are released version-cycle docs.
+
+    Such an entry is dead weight: the file is excluded by tag before the
+    allowlist is consulted. It is reported as a notice, not a failure — the
+    entry for the open cycle's plan becomes stale the instant the release tag
+    is pushed, and turning ``main`` red between the tag and the post-release
+    follow-up that retires it would punish every unrelated PR in between.
+    """
+    return sorted(rel for rel in GRANDFATHERED_FILES if _is_released_version_doc(rel, tags))
 
 
 def _is_released_version_doc(rel: str, tags: frozenset[str]) -> bool:
@@ -374,6 +401,11 @@ def check_file_size(
     the tier from the one audience already reading size output.
     """
     warnings, code_results, doc_results = _scan_files(repo_root, max_code_lines, max_doc_words)
+    for rel in _stale_allowlist_entries(_released_tags(repo_root)):
+        print(
+            f"[STALE-ALLOWLIST] {rel} is a released version-cycle doc, excluded by tag — "
+            "drop its entry from scripts/checks/file_size_allowlist.py (post-release follow-up)."
+        )
 
     print(f"[SCAN] Scanned {len(code_results)} code files and {len(doc_results)} doc files")
 
