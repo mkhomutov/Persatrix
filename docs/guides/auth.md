@@ -38,13 +38,23 @@ becomes a verified claim instead of a body field.
 > continuity is unaffected — **the transcript and verbatim history are not
 > principal-scoped**, so both people still see the same conversation.
 >
-> Four bounds worth reading before you rely on it:
+> **v0.3.15 extended it past the turn.** v0.3.14 bounded each turn's *own*
+> write; the three writes that are not turns — derived, relayed, replayed —
+> still collapsed into the shared tenant. All three are now attributed, and
+> derived rows additionally carry the **speaker** they came from
+> ([ISSUE-0131](../issues/ISSUE-0131-derived-memory-has-no-speaker-attribution.md)),
+> so a persona can tell what a person told it from what it heard someone say.
 >
-> - **`auth.mode: disabled` is byte-identical.** No header is emitted and every
->   caller resolves the single `local` tenant, exactly as before v0.3.14. The
->   same holds for every *unauthenticated* caller under `enabled` — which is
->   the entire persona fleet, since agents hold no accounts. Expect `local`
->   rows from autonomous and agent-authored traffic.
+> Three bounds worth reading before you rely on it:
+>
+> - **`auth.mode: disabled` is byte-identical *on the principal axis*.** No
+>   header is emitted and every caller resolves the single `local` tenant,
+>   exactly as before v0.3.14. The same holds for every *unauthenticated*
+>   caller under `enabled` — which is the entire persona fleet, since agents
+>   hold no accounts. Expect `local` rows from autonomous and agent-authored
+>   traffic. It is **not** byte-identical on the speaker axis, deliberately:
+>   within that one `local` tenant, close-derived records still split per
+>   speaker, so a single-tenant deployment gets the v0.3.15 attribution too.
 > - **The upgrade is not transparent if you already run `enabled`.** Migration
 >   v11 backfilled every pre-existing row to `local` and the recall predicate
 >   is strict equality with no carve-out, so accumulated memory becomes
@@ -53,22 +63,17 @@ becomes a verified claim instead of a body field.
 >   reachable by running single-tenant or by re-tagging. Bridging it
 >   automatically would *be* the cross-tenant bridge this boundary exists to
 >   forbid. See [Upgrade notes](#operational-notes).
-> - **The boundary is per-*turn*.** A write *derived* from a turn does not
->   always inherit it: a group room's close-time summary and extracted facts
->   land under whichever principal closed the interaction (R-1), and a
->   persona's relayed reply re-enters as an unauthenticated publish and
->   dispatches under `local` (R-2). Both are stated residuals of ISSUE-0082,
->   slated **v0.3.15**.
-> - **Memory re-derived from a replayed transcript is unattributed.** On
->   restart the persona replays recent channel history, which carries no
->   principal; v0.3.14 stops it deriving memory from that span rather than
->   filing it under `local`
->   ([ISSUE-0130](../issues/ISSUE-0130-catchup-replay-rederives-memory-under-default-principal.md)).
->   The completion that *persists and seeds* the principal rides v0.3.15, so
->   until then a replayed span contributes nothing to memory at all.
+> - **Close-derived group memory fragments — that is the trade, not a bug.**
+>   Because a group room now closes one record per `(principal, speaker)` pair
+>   rather than one aggregate, a persona's close-derived memory of a
+>   discussion is N partial views rather than one narrative. Room continuity
+>   is unaffected: the transcript and RFC 0036 verbatim history are scoped by
+>   neither axis, so everyone still sees the same conversation.
 >
-> If you need a harder guarantee than per-turn today, keep giving users who
-> must not share a persona's memory separate rooms — and classify those rooms.
+> The residual that remains is **capacity**, not recall: the agent-global
+> capacity paths are not principal-partitioned (ISSUE-0082 Part 2, deferred to
+> v0.4.0). If you need a harder guarantee than that, keep giving users who must
+> not share a persona's memory separate rooms — and classify those rooms.
 
 ---
 
