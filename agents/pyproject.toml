@@ -11,6 +11,14 @@ license = {text = "BUSL-1.1"}
 dependencies = [
     "grpcio>=1.71.2,<2",
     "grpcio-tools>=1.71.2,<2",
+    # The <6 cap is what keeps the committed protobuf stubs reproducible, and
+    # it does it indirectly: it constrains which grpcio-tools pip may resolve
+    # in the range above, and grpcio-tools is what emits *_pb2.py. Widening it
+    # turns every generated file stale at once, not just the mypy-protobuf
+    # .pyi below — PRs #870 and #879 each did exactly that. Lifting it means
+    # regenerating with the CI-pinned toolchain and dropping the matching
+    # `ignore` rule in `.github/dependabot.yml`, tracked in
+    # docs/issues/ISSUE-0145-proto-toolchain-pinned-to-protobuf-5x.md.
     "protobuf>=5.28.0,<6",
     "pyyaml>=6.0,<7",
     "aiohttp>=3.9.0,<4",
