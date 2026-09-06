@@ -87,16 +87,16 @@ as written. It is a disposition for plan promises, not for code findings.
 
 | PR type | Findings go to |
 |---|---|
-| RFC implementation PR | The RFC's PR plan: a "Review findings" table in the PR's section, and a "From PR N review" subsection in the follow-up PR's section |
-| Version-plan or issue-plan PR | The plan's PR section, same table shape |
+| RFC implementation PR | The RFC's PR plan: a "Review findings" table in the PR's section, and a "From PR N review" subsection in the follow-up PR's section (24 PR plans carry these) |
+| Version-plan or issue-plan PR | The PR body (`F-n` lines with dispositions); deferred findings become issues, and the plan row links the issue. Master plans do **not** carry per-PR findings tables |
 | Release-prep PR 1 (the live arc) | The execution report's **Findings & follow-ups** section, and the PR body |
 | Any PR | The PR body, as `F-n <one line> — <disposition>` |
 
-The table shape, from RFC 0005 onward:
+The table shape the existing PR plans use:
 
 ```markdown
-| # | Severity | Finding | Action |
-|---|----------|---------|--------|
+| Finding | Severity | Description | Disposition |
+|---------|----------|-------------|-------------|
 | F-1 | Medium | The lockstep guard parsed the old file after the split, so it read zero knobs while its non-empty assert stayed satisfied | Fixed in-PR (`cargo test` now red on this) |
 | F-2 | Low | MT Leg 2b's run rule is confounded by Leg 2 naming the operator | → deferred to PR 2 (re-run on an empty channel) |
 ```

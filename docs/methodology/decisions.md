@@ -44,7 +44,8 @@ order; the reasoning that made the ordering is next to the ordering.
 
 **What**: the decisions fixed at plan opening (Phase 0) that the whole cycle
 builds on. Each lock is one paragraph: **the decision, then its binding
-consequence**, then where the evidence lives. Five is typical; each was
+consequence**, then where the evidence lives. The count is whatever the
+version needs — five in v0.3.15, more than a dozen in v0.3.14 — and each was
 either named by the amendment or forced by the plan-opening audit.
 
 Examples from v0.3.15 ([scope locks](../v0.3.15-scope-locks.md)):

@@ -26,6 +26,12 @@ Phase 4  Post-release follow-up PR statuses → Released, ROADMAP repointed, bac
 Each phase below states its **entry**, **exit**, **artifacts**, and **failure
 path**. The vocabulary is defined in the [process glossary](process-glossary.md).
 
+> **Numbering note.** The phase numbers above have been stable since v0.3.8.
+> Earlier plans numbered the same steps differently — the release-prep plan
+> was "Phase 3" in v0.3.2 and v0.3.4 and "Phase 4" in v0.3.5 — because those
+> plans counted their implementation sub-phases separately. Read an older
+> plan by its section titles, not its numbers; the steps are the same.
+
 ---
 
 ## Before Phase 0 — deciding what the version is
@@ -76,7 +82,10 @@ restate designs that live elsewhere. Its fixed sections, in order:
 6. **Phase 0 — this planning PR** — what the PR itself changes (this doc,
    ROADMAP hygiene, plan-opening notes on issues, FILEMAP regen).
 7. **Phase 1 — implementation PRs** — per workstream, per PR: branch, scope,
-   tests, acceptance, and a "review findings" slot.
+   tests, acceptance. Review findings for these PRs are recorded in the PR
+   body and, when deferred, as issues — the per-PR findings *table* is the
+   RFC PR plan's pattern, not the master plan's
+   ([review-process.md](review-process.md#where-findings-are-recorded)).
 8. **Phase 2 / 3 / 4** — one paragraph each, naming the release-prep plan,
    the live deliverable, and the tag + follow-up obligations.
 9. **ROADMAP hygiene** — which row flips at which event.
@@ -176,8 +185,11 @@ The release-prep plan owns Phase 3's sequencing. Its sections:
 at ✅ Complete with zero `Fail` and zero `Pending`.
 
 - Run the designated manual-test arc **once**, **live**, on a real (paid)
-  provider, **machine-paced in one script** so governance windows never
-  expire mid-arc ([live-arc discipline](../manual-tests/README.md)).
+  provider, **machine-paced in one script** so governance windows (600 s
+  end-vote timers, floor-control rounds) never expire while the operator is
+  reading — the pacing rules are in the arc's setup document
+  ([MT-MEMORY-GROUP-TENANT-001-setup.md](../manual-tests/MT-MEMORY-GROUP-TENANT-001-setup.md))
+  and the driver under `scripts/manual_tests/`.
 - Run the offline smoke (`make demo-autonomous`, $0) and `make eval-replay`.
 - Record every evidence obligation **verbatim** — tables, triples, counts —
   and the cost.
@@ -246,8 +258,11 @@ post-bump tip; ROADMAP reads `✅ All pre-tag gates green`; release notes drafte
 
 ```bash
 git tag -a vX.Y.Z -m "vX.Y.Z — <codename>"
-git push origin vX.Y.Z
+git push origin main --tags
 ```
+
+(the same commands the [version-bump guide](../guides/version-bump.md) lists;
+the guide owns the pre-tag bump steps, this section owns what follows).
 
 Release body = curated changelog + Upgrade Notes + Known Gaps + the closing
 evidence quoted from the PR 1 report. Links in the body must be re-rooted to
