@@ -11,7 +11,7 @@
 **Goal**: <Two to four sentences. What holds today, what does not, and what
 this release makes true. Name the issues and RFC phases by ID; link each.>
 
-Scope was ratified by `docs/v0.3.x-sequencing.md` §Amendment YYYY-MM-DD,
+Scope was ratified by `docs/v<line>.x-sequencing.md` (the current line's sequencing doc) §Amendment YYYY-MM-DD,
 whose next-steps item <n> this executes. <If an issue-owned PR plan already
 exists, say so here: "The per-PR breakdown already exists — `<path>` — so this
 is a thin orchestration overlay, owning what that plan does not: …">
@@ -159,5 +159,5 @@ plan's allowlist entry (if any) retired.
 ## Related documentation
 
 - `docs/methodology/release-cycle.md` — the cycle this plan instantiates
-- `docs/v0.3.x-sequencing.md` §Amendment YYYY-MM-DD — the ratifying decision
+- `docs/v<line>.x-sequencing.md` (the current line's sequencing doc) §Amendment YYYY-MM-DD — the ratifying decision
 - <RFCs, issues, prior plan>

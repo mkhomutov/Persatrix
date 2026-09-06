@@ -1,7 +1,7 @@
 # vX.Y.Z — the scope locks (record)
 
 **Companion to**: `docs/vX.Y.Z-plan.md`
-**Locked**: YYYY-MM-DD, at plan opening · ratified by `docs/v0.3.x-sequencing.md` §Amendment YYYY-MM-DD
+**Locked**: YYYY-MM-DD, at plan opening · ratified by `docs/v<line>.x-sequencing.md` (the current line's sequencing doc) §Amendment YYYY-MM-DD
 **Status**: 🔄 Binding for the whole cycle — a lock is re-opened by an amendment, not by a PR
 
 Each lock states a decision and its binding consequence; the evidence sits in

@@ -23,7 +23,7 @@ vX.Y.Z tagged at `<sha>` and the GitHub Release published YYYY-MM-DD
 
 ## Forward pointer
 
-- [ ] ROADMAP Current phase → **the next ratified version** (per `docs/v0.3.x-sequencing.md`
+- [ ] ROADMAP Current phase → **the next ratified version** (per `docs/v<line>.x-sequencing.md` (the current line's sequencing doc)
       §Amendment YYYY-MM-DD), not the next major train if a version sits in between
 - [ ] README "what's next" line, if it has one
 
