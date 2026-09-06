@@ -5,7 +5,7 @@
 **Version**: 1.2
 **Created**: 2026-08-06
 **Last Updated**: 2026-09-02
-**Status**: Active — **v1.2 corrects seven setup defects found on first execution** (2026-09-02, [v0.3.15 execution report](v0.3.15-execution-report.md) §MT corrections). v1.1 and earlier were authored against a HOST orchestrator and never run; every step below that touches accounts, membership or sender identity was wrong for the compose deployment this MT targets. **Runnable in both directions**: run it against v0.3.14 to *evidence* the residuals, and re-run it after [ISSUE-0123](../issues/ISSUE-0123-per-speaker-interaction-scope.md) + [ISSUE-0124](../issues/ISSUE-0124-orchestrator-hop-drops-tenant-on-agent-cascade.md) land as the **v0.3.15** gate.
+**Status**: Active — **v1.2 corrects all ten defects found on first execution** (2026-09-02, [v0.3.15 execution report](v0.3.15-execution-report.md#mt-corrections--ten-defects-in-the-procedure-itself) §MT corrections). v1.1 and earlier were authored against a HOST orchestrator and never run; every step touching accounts, membership or sender identity was wrong for the compose deployment this MT targets. **Runnable in both directions**: run it against v0.3.14 to *evidence* the residuals, and re-run it after [ISSUE-0123](../issues/ISSUE-0123-per-speaker-interaction-scope.md) + [ISSUE-0124](../issues/ISSUE-0124-orchestrator-hop-drops-tenant-on-agent-cascade.md) land as the **v0.3.15** gate.
 
 ---
 
@@ -58,29 +58,15 @@ itself (MT-MEMORY-MULTIUSER-001), the auth substrate
 
 ### Leg 0 — Alice, authenticated
 
-> **v1.2 — corrections 1, 2 and 4** ([v0.3.15 report](v0.3.15-execution-report.md#mt-corrections--ten-defects-in-the-procedure-itself)): bootstrap **in the container** (the
-> host default `data/accounts.db` is not what the orchestrator reads), remove
-> the `-wal`/`-shm` sidecars with it, and drive both credential prompts over
-> the provisioning pipe. **Do not `channel join`** — see Preconditions 3b.
+> **v1.2 — corrections 1, 2 and 4**; **do not `channel join`** (Preconditions 3b).
 
-```bash
-docker compose exec -T orchestrator rm -f \
-  /var/lib/persatrix/accounts.db /var/lib/persatrix/accounts.db-wal /var/lib/persatrix/accounts.db-shm
-printf 'PW\nPW\n' | docker compose exec -T orchestrator persatrix-server account bootstrap \
-  --accounts-db /var/lib/persatrix/accounts.db --username alice --participant alice-person
-docker compose restart orchestrator
-# POLL /healthz — do not sleep a fixed interval; the login below fails
-# `connection failed` if it races the restart.
-printf 'PW\n' | ./bin/persatrix login --username alice
-./bin/persatrix whoami   # MUST read: alice (participant alice-person)
-```
+Run [§ Rotating the accounts store](MT-MEMORY-GROUP-TENANT-001-setup.md#rotating-the-accounts-store--used-by-legs-0-and-7)
+with `<user>` = `alice`, `<participant>` = `alice-person`.
 
 ### Leg 1 — Alice discloses into the room, and a cascade runs
 
-> **v1.2 — `--as` is mandatory** ([v0.3.15 report](v0.3.15-execution-report.md#mt-corrections--ten-defects-in-the-procedure-itself), correction 4). It defaults to the **OS
-> username**, not the authenticated principal: omitting it gives `403 … sender
-> is not a member`, or — if that username *is* a member — a green run whose
-> turns name a speaker who never spoke, which is worse.
+> **v1.2 — `--as` is mandatory on every send** (correction 4; the default is the
+> OS username). Rationale in [§ Rotating the accounts store](MT-MEMORY-GROUP-TENANT-001-setup.md#rotating-the-accounts-store--used-by-legs-0-and-7).
 
 ```bash
 ./bin/persatrix channel send planning \
@@ -151,8 +137,15 @@ end-of-interaction inside the W=3 window) — the natural continuation of
 Leg 1 usually reaches it; if not, prompt for wrap-up:
 
 ```bash
-./bin/persatrix channel send planning "Anything else before we wrap?"
+./bin/persatrix channel send planning "Anything else before we wrap?" --as alice-person
 ```
+
+> **v1.2 — the quorum may not form** (correction 7). On a stock roster it did
+> not, on either attempt (F-4). Use the deterministic fallback in
+> [§ Leg 3 fallback](MT-MEMORY-GROUP-TENANT-001-setup.md#leg-3-fallback--forcing-a-close-when-the-quorum-does-not-form),
+> and record the close as a **deviation**: an idle close is `structural`, not
+> `end_votes`, so the bar below is not met and Leg 6 becomes the only leg that
+> closes from a trigger the arc chose.
 
 - [ ] Orchestrator logs show `interaction_closed{…end_votes}` (or
   `synthesis_reply`) — **not** `structural` / `cost`. The trigger matters:
@@ -220,11 +213,13 @@ until `max_rounds` fires, or lower it) so the close descends from
 
 ### Leg 7 — Bob: the absence bar
 
+Run [§ Rotating the accounts store](MT-MEMORY-GROUP-TENANT-001-setup.md#rotating-the-accounts-store--used-by-legs-0-and-7)
+again with `<user>` = `bob`, `<participant>` = `bob-person` — the **same**
+container procedure as Leg 0, not the host one v1.1 printed here.
+
 ```bash
-rm -f data/accounts.db
-./bin/persatrix-server account bootstrap --username bob --participant bob-person
-# restart the orchestrator; persatrix login as bob
-./bin/persatrix channel send planning "Who's covering the review slot this month?"
+./bin/persatrix channel send planning "Who's covering the review slot this month?" \
+  --as bob-person   # @mention an `addressed` persona, or nothing replies (F-5)
 ```
 
 **Verification**:
