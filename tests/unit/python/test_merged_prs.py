@@ -55,7 +55,10 @@ def test_parse_log_strips_the_pr_suffix_from_the_title() -> None:
             "test(manual-tests,docs): v0.3.15 release-prep PR 1 — the ten-leg live arc",
             "v0.3.15 release prep",
         ),
-        ("docs(release): v0.3.14 post-release follow-up — Phase-4 backfills", "v0.3.14 post-release"),
+        (
+            "docs(release): v0.3.14 post-release follow-up — Phase-4 backfills",
+            "v0.3.14 post-release",
+        ),
         ("chore(deps): bump google.golang.org/grpc from 1.82.1 to 1.83.1", "deps"),
         ("docs(branching,claude): rewrite BRANCHING.md", "branching, claude"),
         ("feat: scaffold initial project structure", "—"),

@@ -23,7 +23,7 @@ DOC = """# vX plan
 | 1 | arc | 🔀 PR open — arc ran | [#855](https://github.com/x/pull/855) |
 | 2 | docs | ⬜ Not started | — |
 | 3 | bump | ⬜ Not started | [#858](https://github.com/x/pull/858) |
-| 4 | mixed | 🔄 In progress — [#854](https://github.com/x/pull/854) merged, [#999](https://github.com/x/pull/999) open | — |
+| 4 | mixed | 🔄 In progress — [#854](https://x/854) merged, [#999](https://x/999) open | — |
 | 5 | open | 🔀 PR open | [#999](https://github.com/x/pull/999) |
 """
 
