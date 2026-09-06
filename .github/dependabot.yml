@@ -68,6 +68,14 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "mypy-protobuf"
         update-types: ["version-update:semver-major"]
+      # grpcio-tools is pinned exactly in agents/pyproject.toml because it
+      # emits the committed stubs. Every release above 1.71.2 requires
+      # protobuf>=6, so under the cap above they cannot install at all — an
+      # offer to bump the minor is an offer to break `pip install`. Patch
+      # releases inside 1.71.x stay available.
+      - dependency-name: "grpcio-tools"
+        update-types:
+          ["version-update:semver-major", "version-update:semver-minor"]
 
   - package-ecosystem: cargo
     directory: /cli

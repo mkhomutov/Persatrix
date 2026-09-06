@@ -1,6 +1,6 @@
 ---
 id: ISSUE-0145
-summary: "Reproducible Python protobuf stubs rest on the `protobuf<6` cap indirectly constraining which grpcio-tools pip resolves — an implicit coupling no comment or gate states, so a widening that looks like a dependency bump silently restages every generated file, as PRs #870 and #879 each did"
+summary: "The Python protobuf toolchain is frozen at protobuf 5.x with grpcio-tools pinned to 1.71.2 — every later grpcio-tools requires protobuf>=6, so the two move together or not at all, and lifting the pair means regenerating every committed stub with the CI-pinned toolchain rather than widening a range"
 status: open
 severity: medium
 area: build/proto
@@ -14,13 +14,14 @@ refs:
 ## Summary
 
 `agents/generated/*_pb2.py`, `*_pb2_grpc.py` and `*.pyi` are committed, and
-`make proto-python-check` fails the build when they drift from `proto/`. What
-keeps them reproducible is not a pin on the generator. It is the
-`protobuf>=5.28.0,<6` cap, which indirectly constrains which `grpcio-tools`
-pip may resolve inside `>=1.71.2,<2` — and `grpcio-tools` is the thing that
-actually emits the stubs.
+`make proto-python-check` fails the build when they drift from `proto/`. The
+generator is now pinned exactly — `grpcio-tools==1.71.2` — so what emits those
+files says so.
 
-Nothing states that coupling. It is load-bearing and invisible.
+What remains is that the toolchain is frozen. Every `grpcio-tools` release
+above 1.71.2 requires `protobuf>=6`, and the runtime caps `protobuf<6`, so the
+pair moves together or not at all. Upgrading is a coordinated change that
+regenerates every committed stub, not a range widening.
 
 ## Context
 
@@ -48,10 +49,13 @@ exactly the same two changes, which failed on exactly the same gate. That is
 the recurrence this issue exists to stop: a refusal held only in a reviewer's
 memory is not a control.
 
-`mypy-protobuf`'s own comment in `agents/pyproject.toml` already says the
-right thing — bump deliberately, regenerate the `.pyi`, commit in the same
-change. The `protobuf` cap carries no equivalent note, and it is the one
-doing the load-bearing work.
+Resolving that showed the range was never real. Under `protobuf<6`, **every**
+`grpcio-tools` from 1.72.1 to 1.83.1 is unresolvable — they all require
+`protobuf>=6` — so `>=1.71.2,<2` could only ever resolve to 1.71.2. The
+declared range implied a choice that did not exist, and the actual constraint
+lived on a different package. `grpcio-tools` is therefore pinned exactly as of
+this file, verified by regenerating every stub and getting a byte-identical
+tree.
 
 ## Impact
 
@@ -59,18 +63,19 @@ Nothing is broken today: the caps hold and the committed stubs match
 `proto/`. Two costs accrue.
 
 - **The Python runtime stays on protobuf 5.x** while 6.x and 7.x exist, and
-  `grpcio-tools` is effectively frozen with it.
-- **The coupling is undocumented**, so the next person to read
-  `protobuf>=5.28.0,<6` sees an ordinary compatibility cap and has no way to
-  know that relaxing it restages generated files. That is precisely the
-  mistake Dependabot made mechanically, twice.
+  `grpcio-tools` is frozen at 1.71.2 with it. Both are build- and
+  wire-critical, so this is not a peripheral freeze.
+- **The freeze is now visible but still unscheduled.** The pin and the cap
+  comments explain themselves, and Dependabot will no longer propose the
+  jump — which also means nothing recurring will raise it. Same shape as
+  [ISSUE-0144](ISSUE-0144-anthropic-sdk-pinned-below-1x.md).
 
 ## Proposed fix / investigation path
 
 The upgrade is not a bump. It needs, in one change:
 
-1. Raise the `protobuf` cap and the `grpcio-tools` floor together, deciding
-   the pair deliberately rather than letting pip resolve it.
+1. Raise the `protobuf` cap and the `grpcio-tools` pin together — they are a
+   matched pair, and pip cannot resolve a mixed state at all.
 2. Regenerate every Python stub **with the CI-pinned toolchain** — `CLAUDE.md`
    pins protoc and the plugin versions precisely because a newer local
    toolchain emits stubs that fail the staleness gate.
@@ -78,20 +83,21 @@ The upgrade is not a bump. It needs, in one change:
    regenerate the `.pyi`, per its existing comment.
 4. Verify `make proto-python-check` **and** `make proto-check` (Go stubs and
    orphan detection, ISSUE-0023) are green together.
-5. Drop the `protobuf` and `mypy-protobuf` entries from `ignore:` in
-   `.github/dependabot.yml`.
+5. Drop the `protobuf`, `mypy-protobuf` and `grpcio-tools` entries from
+   `ignore:` in `.github/dependabot.yml`.
 
-Worth doing regardless of the upgrade: state the coupling in
-`agents/pyproject.toml` next to the `protobuf` cap, so the cap explains itself
-the way the `mypy-protobuf` pin already does. A stronger form would pin
-`grpcio-tools` exactly, making the generator explicit rather than a
-consequence of a cap on a different package.
+The prerequisite work is already done: the generator is pinned explicitly and
+both caps carry their reasoning, so the upgrade starts from a state that says
+what it is rather than one that has to be re-derived.
 
 ## Notes
 
 > 2026-09-07 — captured after #879 re-proposed what #870 had already been
-> reverted for. Dependabot `ignore` rules for both packages' majors landed
-> with this file; they are deliberate and should stay until the upgrade above
-> is done. Same shape as [ISSUE-0144](ISSUE-0144-anthropic-sdk-pinned-below-1x.md)
-> — a cap held by a rule that also suppresses the reminder to lift it. Not yet
+> reverted for. Landed with this file: `grpcio-tools` pinned exactly (verified
+> by regenerating every stub for a byte-identical tree), both cap comments
+> stating what they hold, and Dependabot `ignore` rules for the `protobuf`,
+> `mypy-protobuf` and `grpcio-tools` updates that cannot resolve under the cap.
+> Those rules are deliberate and should stay until the upgrade above is done.
+> Same shape as [ISSUE-0144](ISSUE-0144-anthropic-sdk-pinned-below-1x.md) — a
+> freeze held by a rule that also suppresses the reminder to lift it. Not yet
 > slotted to a version.

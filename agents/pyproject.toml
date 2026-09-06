@@ -10,15 +10,28 @@ license = {text = "BUSL-1.1"}
 # compatible updates while guarding against breaking API changes.
 dependencies = [
     "grpcio>=1.71.2,<2",
-    "grpcio-tools>=1.71.2,<2",
-    # The <6 cap is what keeps the committed protobuf stubs reproducible, and
-    # it does it indirectly: it constrains which grpcio-tools pip may resolve
-    # in the range above, and grpcio-tools is what emits *_pb2.py. Widening it
-    # turns every generated file stale at once, not just the mypy-protobuf
-    # .pyi below — PRs #870 and #879 each did exactly that. Lifting it means
-    # regenerating with the CI-pinned toolchain and dropping the matching
-    # `ignore` rule in `.github/dependabot.yml`, tracked in
-    # docs/issues/ISSUE-0145-proto-toolchain-pinned-to-protobuf-5x.md.
+    # Pinned exactly because this is the program that emits the committed
+    # `agents/generated/*_pb2.py` and `*_pb2_grpc.py`, and `make
+    # proto-python-check` fails the build when they drift. Same reasoning as
+    # the `mypy-protobuf` pin below, which covers the `.pyi` half — and the
+    # same reasoning CI uses to pin protoc to an exact version.
+    #
+    # The pin is not a new restriction. Under the `protobuf<6` cap below,
+    # every grpcio-tools from 1.72.1 to 1.83.1 is unresolvable (they all
+    # require protobuf>=6), so `>=1.71.2,<2` could only ever resolve to
+    # 1.71.2 anyway. What changes is that the generator now says so, instead
+    # of being a side effect of a cap on a different package. Bump it the way
+    # `mypy-protobuf` asks to be bumped: deliberately, regenerating the stubs
+    # in the same change, with the toolchain CLAUDE.md pins.
+    "grpcio-tools==1.71.2",
+    # Load-bearing beyond ordinary compatibility: until the pin above existed,
+    # this cap was the only thing holding the stub generator still, by
+    # constraining what pip could resolve for it. Widening it turned every
+    # generated file stale at once, not just the mypy-protobuf .pyi — PRs #870
+    # and #879 each did exactly that. Lifting it now means moving the
+    # generator pin with it, regenerating with the CI-pinned toolchain, and
+    # dropping the matching `ignore` rules in `.github/dependabot.yml`.
+    # Tracked in docs/issues/ISSUE-0145-proto-toolchain-pinned-to-protobuf-5x.md.
     "protobuf>=5.28.0,<6",
     "pyyaml>=6.0,<7",
     "aiohttp>=3.9.0,<4",
