@@ -27,9 +27,9 @@ standalone blueprint later.
 | 2 | [Decisions](decisions.md) | How scope is frozen (sequencing amendments, scope locks), how it changes (amendments, never edits), and how it shrinks safely (cuttable items with cut clauses). |
 | 3 | [Review process](review-process.md) | How every PR is reviewed, what a finding looks like, the four dispositions a finding can take, and the rule that review reports are never linked from committed files. |
 | 4 | [Process glossary](process-glossary.md) | The terms the other three use. |
-| 5 | Testing strategy (`testing-strategy.md`) | Every test layer, what it proves, where it runs, how to add to it. *(next PR)* |
-| 6 | Enforcement matrix (`enforcement-matrix.md`) | Every rule with its document, its check, and whether the check is required, advisory, or local-only. *(next PR)* |
-| 7 | Automation catalogue (`automation-catalogue.md`) | Every `make` target, script, hook and workflow, and when each runs. *(next PR)* |
+| 5 | [Testing strategy](testing-strategy.md) | Every test layer, what it proves, where it runs, how to add to it — and the rule that every test tree has a named runner. |
+| 6 | [Enforcement matrix](enforcement-matrix.md) | Every rule with its document, its check, and whether the check is required, advisory, or local-only. |
+| 7 | [Automation catalogue](automation-catalogue.md) | Every `make` target, script, hook and workflow, and when each runs. |
 | 8 | Templates | One per document kind the cycle produces — in [`docs/templates/`](../templates/). *(later PR)* |
 
 ## How this relates to the older process documents
@@ -40,7 +40,7 @@ standalone blueprint later.
 | [BRANCHING.md](../BRANCHING.md) | Branch naming, commit convention, PR title rule. Its release-branch and artifact-publishing sections describe a process that was never used; the [release cycle](release-cycle.md) is authoritative on how a release is made. |
 | [CONTRIBUTING.md](../../CONTRIBUTING.md) | Setup, quality gates, PR checklist. Accurate. |
 | [rfcs/README.md](../rfcs/README.md), [issues/README.md](../issues/README.md), [manual-tests/README.md](../manual-tests/README.md) | The three sub-systems the cycle draws on. Accurate and unchanged. |
-| [documentation-guide.md](../documentation-guide.md) | Writing style, size caps, ownership. Extended by the enforcement matrix. |
+| [documentation-guide.md](../documentation-guide.md) | Writing style, size caps, ownership map, where documents live and when they freeze. The [enforcement matrix](enforcement-matrix.md) says which of its rules are checked. |
 | [ROADMAP.md §How to Update This File](../../ROADMAP.md#how-to-update-this-file) | The status-hygiene recipe. Unchanged. |
 
 ## Ground rules that apply to every document here

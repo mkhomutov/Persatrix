@@ -10,9 +10,10 @@ Checks executed:
   2. ``ruff check`` (Python agents)
   3. ``cargo fmt --check`` (Rust CLI)
   4. Doc links check
-  5. Doc status markers check
-  6. RFC index freshness (docs/rfcs/INDEX.md up to date with front-matter)
-  7. File size check (code: ≤500 lines, docs: ≤3000 words)
+  5. Leaked tool-call markup check (docs)
+  6. Doc status markers check
+  7. RFC index freshness (docs/rfcs/INDEX.md up to date with front-matter)
+  8. File size check (code: ≤500 lines, docs: ≤3000 words)
 
 Usage::
 
