@@ -20,12 +20,18 @@ list, with the symptom each produces, is in the
    (`ANTHROPIC_API_KEY`) — the personas must produce real replies and
    land real rows. `make demo-anthropic`.
 
-   > **There is no `PERSATRIX_SERVER`.** The CLI's `--server` is a `global`
+   > **`PERSATRIX_SERVER` does not reach the CLI.** `--server` is a `global`
    > clap argument with no `env` binding (`cli/src/main.rs`), so exporting that
-   > variable — as this doc and four sibling MTs did — changes nothing, and the
-   > CLI silently uses its own `http://localhost:8080` default. It reaches the
-   > same stack here, so the export looked like it worked. Against any other
-   > host, pass `--server` on every invocation; the driver now does.
+   > variable changes nothing and the CLI silently uses its own
+   > `http://localhost:8080` default. It reaches the same stack here, which is
+   > why the export looked like it worked. Against any other host, pass
+   > `--server` on every invocation; the driver now does.
+   >
+   > The export was dead in MT-SESSION-002/003 and MT-EPOCH-001 and has been
+   > removed. It stays in [MT-MEMORY-MULTIUSER-001](MT-MEMORY-MULTIUSER-001.md),
+   > where it is **not** dead: that MT expands `$PERSATRIX_SERVER` in three
+   > `curl` commands of its own. A shell variable and a CLI setting are
+   > different things, and only the second one was ever broken.
 2. `make reset` first — prior rows mask results.
 3. `auth.mode: enabled` in `config/security.yaml`; no `data/accounts.db`
    (Leg 0 bootstraps it).

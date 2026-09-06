@@ -58,7 +58,6 @@ A live persona stack with `ANTHROPIC_API_KEY` set:
 
 ```bash
 make demo-anthropic
-export PERSATRIX_SERVER=http://127.0.0.1:8080
 ```
 
 The orchestrator boots under the default `live` epoch (an INFO line records the
