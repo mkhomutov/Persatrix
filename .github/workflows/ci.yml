@@ -487,6 +487,12 @@ jobs:
       - name: Check no plan row announces an already-merged PR as open
         run: python scripts/checks/plan_status.py
 
+      # The methodology's contract (docs/methodology/conformance.json): the
+      # documents, tools, make targets and CI steps it consists of. A PR that
+      # deletes a template or drops a target fails here, not in an audit.
+      - name: Check the checkout conforms to the methodology manifest
+        run: python scripts/checks/methodology_conformance.py
+
   file-size-check:
     name: File size check
     runs-on: ubuntu-latest
