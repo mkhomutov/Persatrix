@@ -450,7 +450,7 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 | 6 | 3c | Telemetry + default flip `off → bid` (GO-LIVE) | `feature/v0310-rfc0051-telemetry-golive` | ✅ Merged | [#697](https://github.com/mkhomutov/Persatrix/pull/697) | ✅ |
 | 7 | OQ 6a | Operator reasoning reveal (separate / cuttable) | `feature/v0310-rfc0051-operator-reveal` | ⏭ Cut from v0.3.10 | — | — |
 | 8 | 5a | Reflexion loop (default `revise: 0`) | `feature/v0310-rfc0051-reflexion` | ✅ Merged | [#698](https://github.com/mkhomutov/Persatrix/pull/698) | ✅ |
-| 9 | 5b | No-leak extension + closeout | `feature/v0310-rfc0051-close` | 🔀 PR open | [#699](https://github.com/mkhomutov/Persatrix/pull/699) | — |
+| 9 | 5b | No-leak extension + closeout | `feature/v0310-rfc0051-close` | ✅ Merged | [#699](https://github.com/mkhomutov/Persatrix/pull/699) | ✅ |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ⏭ Deferred
 **Excluded from v0.3.10**: Phase 4 (`depth: deep` native extended thinking) — deferred behind the OQ-1 telemetry trigger + a provider-protocol change.

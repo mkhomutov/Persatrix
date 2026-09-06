@@ -54,6 +54,7 @@ def _write(root: Path, rel: str, words: int) -> None:
         "docs/v0.3.14-release-prep-plan.md",
         "docs/v0.3.14-release-baseline.md",
         "docs/v0.3.14-plan-amendment-2026-08-10.md",
+        "docs/v0.3.14-test-findings-pr-plan.md",
     ],
 )
 def test_every_version_cycle_kind_is_released_once_its_version_shipped(rel: str) -> None:

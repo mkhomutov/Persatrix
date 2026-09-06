@@ -24,7 +24,6 @@ Usage::
 from __future__ import annotations
 
 import argparse
-import re
 import sys
 from pathlib import Path
 from typing import NamedTuple
@@ -36,6 +35,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from scripts.checks import DEFAULT_EXCLUDES, ensure_utf8_stdout, walk_files  # noqa: E402
 from scripts.checks.file_size_allowlist import GRANDFATHERED_FILES  # noqa: E402
+from scripts.checks.released import is_released_version_doc, released_versions  # noqa: E402
 
 DEFAULT_MAX_CODE_LINES = 500
 DEFAULT_MAX_DOC_WORDS = 3000
@@ -69,6 +69,9 @@ _EXTRA_EXCLUDES = [
     # `python scripts/issues.py --check` (sync) + per-issue front-matter, not a
     # prose cap — same data-scaling rationale as THIRD_PARTY_NOTICES.md above.
     "docs/issues/INDEX.md",
+    # Generated merged-PR history (scripts/merged_prs.py): one row per squash
+    # merge on main, so its length is the repository's PR count, not prose.
+    "docs/merged-prs.md",
     # PR review reports are local-only working artifacts and are intentionally
     # not committed; local copies should not block repo-wide size checks.
     "docs/pr-reviews/**",
@@ -100,7 +103,7 @@ _EXTRA_EXCLUDES = [
     # Master plans (docs/v*-plan.md) and release-prep plans are NOT matched here
     # because they are *edited during* their cycle and the cap still does useful
     # work on them; they are excluded conditionally instead — once their
-    # version has shipped (_VERSION_DOC_RE below). Permanent acceptance gates that happen to
+    # version has shipped (scripts/checks/released.py). Permanent acceptance gates that happen to
     # live under docs/manual-tests/ (MT-MEMORY-005, MT-CHANNEL-GOV-004) are not
     # per-release reports and are not matched here. The `v[0-9]` prefix keeps
     # non-version names (verify-*, variants-*) out; note fnmatch's `*` crosses
@@ -112,57 +115,12 @@ _EXTRA_EXCLUDES = [
 
 EXCLUDE_PATTERNS = DEFAULT_EXCLUDES + _EXTRA_EXCLUDES
 
-# Version-cycle documents (ISSUE-0139). A master plan, scope-locks record, plan
-# amendment, release-prep plan, or release baseline is edited while its version
-# is in flight — the cap does useful work then — and frozen once the version
-# ships. From that point it is release evidence, the same category the two
-# write-once patterns above cover, so it is excluded *conditionally*: matched by
-# name here, and treated as excluded only when the version has shipped
-# (:func:`_is_released_version_doc`). The open cycle's plan keeps its cap and,
-# if it must exceed it, its allowlist entry — which now really does expire at
-# the release. Checklists are unconditional (pattern above): frozen from the
-# start.
-_VERSION_DOC_RE = re.compile(
-    r"^docs/v(\d+\.\d+(?:\.\d+)?)-"
-    r"(?:plan|scope-locks|plan-amendment-[0-9-]+|release-prep-plan|release-baseline)\.md$"
-)
-
-# "Shipped" is read from the tree, not from git: CHANGELOG.md carries one dated
-# `## [X.Y.Z] - YYYY-MM-DD` heading per release (written at release-prep PR 3,
-# one PR before the tag), so the answer is the same in a full clone, a depth-1
-# CI checkout, a worktree, and a tarball. `git tag` was the first design and
-# failed in CI on its first run: actions/checkout fetches a pull_request ref
-# with --depth=1 and no tags, and ignores `fetch-tags: true` in that mode.
-_CHANGELOG_RELEASE_RE = re.compile(r"^## \[(\d+\.\d+\.\d+)\] - \d{4}-\d{2}-\d{2}", re.M)
-
-
-def _released_versions(repo_root: Path) -> frozenset[str]:
-    """Versions with a dated CHANGELOG section under *repo_root*.
-
-    Empty when there is no changelog at the root — a scan of a sub-tree or a
-    temp dir. Empty means nothing counts as released, so every version-cycle
-    doc is capped: the conservative side.
-    """
-    try:
-        text = (repo_root / "CHANGELOG.md").read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return frozenset()
-    return frozenset(_CHANGELOG_RELEASE_RE.findall(text))
-
-
-def _is_released_version_doc(rel: str, released: frozenset[str]) -> bool:
-    """True when *rel* is a version-cycle doc whose version has shipped.
-
-    A two-part version (``v0.2``) matches its ``.0`` release: the v0.2
-    release-prep plan shipped as ``0.2.0``.
-    """
-    match = _VERSION_DOC_RE.match(rel)
-    if not match:
-        return False
-    version = match.group(1)
-    if version in released:
-        return True
-    return version.count(".") == 1 and f"{version}.0" in released
+# Version-cycle documents of released versions are frozen release evidence and
+# are excluded conditionally (ISSUE-0139) — the predicate and the CHANGELOG read
+# live in scripts/checks/released.py, shared with the plan-status checker. The
+# names are bound here so tests can monkeypatch ``file_size._released_versions``.
+_released_versions = released_versions
+_is_released_version_doc = is_released_version_doc
 
 
 def _stale_allowlist_entries(released: frozenset[str]) -> list[str]:

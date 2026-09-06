@@ -28,7 +28,7 @@ standalone blueprint later.
 | 3 | [Review process](review-process.md) | How every PR is reviewed, what a finding looks like, the four dispositions a finding can take, and the rule that review reports are never linked from committed files. |
 | 4 | [Process glossary](process-glossary.md) | The terms the other three use. |
 | 5 | [Testing strategy](testing-strategy.md) | Every test layer, what it proves, where it runs, how to add to it — and the rule that every test tree has a named runner. |
-| 6 | [Enforcement matrix](enforcement-matrix.md) | Every rule with its document, its check, and whether the check is required, advisory, or local-only. |
+| 6 | [Enforcement matrix](enforcement-matrix.md) | Every rule with its document, its check, and whether the check is required, advisory, or local-only. Status tables are generated or checked, not hand-kept: `docs/merged-prs.md` and `make plan-status-check`. |
 | 7 | [Automation catalogue](automation-catalogue.md) | Every `make` target, script, hook and workflow, and when each runs. |
 | 8 | [Templates](../templates/README.md) | One per document kind the cycle produces: version plan, scope locks, amendment, PR plan, release-prep plan, execution report, release checklist, post-release follow-up, manual test. |
 
