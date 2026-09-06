@@ -25,6 +25,7 @@ DOC = """# vX plan
 | 3 | bump | ⬜ Not started | [#858](https://github.com/x/pull/858) |
 | 4 | mixed | 🔄 In progress — [#854](https://x/854) merged, [#999](https://x/999) open | — |
 | 5 | open | 🔀 PR open | [#999](https://github.com/x/pull/999) |
+| 6 | cites | ⬜ Not started — after [#855](https://github.com/x/pull/855) lands | — |
 """
 
 
@@ -78,3 +79,23 @@ def test_target_docs_skips_released_versions_and_keeps_pr_plans(tmp_path: Path) 
         "docs/rfcs/0049-pr-plan.md",
         "docs/issues/ISSUE-0082-residuals-pr-plan.md",
     }
+
+
+def test_a_not_started_row_that_merely_cites_a_merged_pr_in_prose_is_not_stale() -> None:
+    """Only a cell that is nothing but a PR link counts for a ⬜ row."""
+    lines = {s.line for s in find_stale_rows(DOC, MERGED)}
+    assert 11 not in lines
+
+
+def test_target_docs_skips_released_test_findings_plans(tmp_path: Path) -> None:
+    for rel in ("docs/v0.3.7-test-findings-pr-plan.md", "docs/v0.3.15-test-findings-pr-plan.md"):
+        p = tmp_path / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("# x\n", encoding="utf-8")
+    (tmp_path / "docs" / "rfcs").mkdir()
+    (tmp_path / "docs" / "issues").mkdir()
+    (tmp_path / "CHANGELOG.md").write_text("## [0.3.7] - 2026-06-06\n", encoding="utf-8")
+
+    found = {p.relative_to(tmp_path).as_posix() for p in target_docs(tmp_path)}
+
+    assert found == {"docs/v0.3.15-test-findings-pr-plan.md"}

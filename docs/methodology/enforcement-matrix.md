@@ -77,6 +77,8 @@ Required, it rides inside one of the six required jobs.
 | Only the standard status markers | documentation-guide §Status Markers | `doc_status_markers.py` | CI-advisory (`Docs hygiene`) + Pre-commit |
 | No leaked tool-call markup in docs | — | `doc_leaked_markup.py` | CI-advisory (`Docs hygiene`) + Pre-commit |
 | `FILEMAP.md` matches `git ls-files` | `generate_filemap.py` | `--check` (date-insensitive; on a PR it compares against the merge tree, so a PR behind a file-adding merge fails until updated) | CI-advisory (`Docs hygiene`) + Pre-commit regenerates — closed [ISSUE-0133](../issues/ISSUE-0133-no-ci-gate-on-filemap-freshness.md) |
+| Merged-PR history (`docs/merged-prs.md`) matches the squash log, allowing only the newest merges to be missing | automation-catalogue | `scripts/merged_prs.py --check` | CI-advisory (`Docs hygiene`) + Pre-commit regenerates |
+| No plan row says "PR open" / "not started" for a PR that has merged | release-cycle §Phase 1 | `scripts/checks/plan_status.py` (`make plan-status-check`) | CI-advisory (`Docs hygiene`) + Pre-commit — first run found ten stale rows |
 | Unified doc audit (links + markers + sizes) | `doc_audit.py` | — | Local convenience wrapper; its three checks run individually in CI |
 | Local-only files never referenced from committed files | CLAUDE.md; copilot-instructions; review-process | review | Convention |
 | Glossary terms mandatory; new terms added in the same change | CLAUDE.md §Terminology | review | Convention |

@@ -35,9 +35,10 @@ if str(REPO_ROOT) not in sys.path:
 
 from scripts._git import git_output  # noqa: E402
 from scripts.checks import ensure_utf8_stdout  # noqa: E402
-from scripts.checks.file_size import _is_released_version_doc, _released_versions  # noqa: E402
+from scripts.checks.released import is_released_version_doc, released_versions  # noqa: E402
 
 _PR_LINK_RE = re.compile(r"\[#(\d+)\]\(")
+_LINK_ONLY_CELL_RE = re.compile(r"^\[#(\d+)\]\([^)]+\)$")
 _SUBJECT_RE = re.compile(r"\(#(\d+)\)$")
 _STALE_LEADERS = ("🔀", "⬜")
 
@@ -70,10 +71,12 @@ def _split_row(line: str) -> list[str]:
 
 
 def find_stale_rows(text: str, merged: frozenset[int]) -> list[StaleRow]:
-    """Rows whose 🔀 / ⬜ status cell links only to merged PRs.
+    """Rows whose 🔀 / ⬜ status cell announces PRs that have all merged.
 
-    The PR links may sit in the status cell itself or anywhere else on the
-    row (a dedicated "GitHub PR" column is the usual shape); both are read.
+    For a 🔀 row every PR link on the row counts (the status cell names the
+    open PR, or a dedicated "GitHub PR" column does). For a ⬜ row only a
+    cell that is *nothing but* a PR link counts — a not-started row that
+    merely cites a merged PR in prose ("after #844 lands") is not stale.
     """
     stale: list[StaleRow] = []
     for lineno, line in enumerate(text.splitlines(), start=1):
@@ -83,7 +86,12 @@ def find_stale_rows(text: str, merged: frozenset[int]) -> list[StaleRow]:
         status = next((c for c in cells if c.startswith(_STALE_LEADERS)), None)
         if status is None:
             continue
-        linked = {int(n) for n in _PR_LINK_RE.findall(line)}
+        if status.startswith("🔀"):
+            linked = {int(n) for n in _PR_LINK_RE.findall(line)}
+        else:
+            linked = {
+                int(m.group(1)) for c in cells if (m := _LINK_ONLY_CELL_RE.match(c))
+            }
         if not linked or not linked <= merged:
             continue
         stale.append(StaleRow("", lineno, tuple(sorted(linked)), status[:60]))
@@ -92,12 +100,13 @@ def find_stale_rows(text: str, merged: frozenset[int]) -> list[StaleRow]:
 
 def target_docs(repo_root: Path) -> list[Path]:
     """Open-cycle plans + every RFC / issue PR plan."""
-    released = _released_versions(repo_root)
+    released = released_versions(repo_root)
     docs: list[Path] = []
-    # ``v*-plan.md`` also matches ``v*-release-prep-plan.md``; one glob, deduped.
+    # ``v*-plan.md`` also matches ``v*-release-prep-plan.md`` and the two
+    # ``v*-test-findings-pr-plan.md`` files; one glob, deduped, frozen ones out.
     for p in sorted(set((repo_root / "docs").glob("v*-plan.md"))):
         rel = p.relative_to(repo_root).as_posix()
-        if not _is_released_version_doc(rel, released):
+        if not is_released_version_doc(rel, released):
             docs.append(p)
     docs += sorted((repo_root / "docs" / "rfcs").glob("*pr-plan*.md"))
     docs += sorted((repo_root / "docs" / "issues").glob("*pr-plan*.md"))

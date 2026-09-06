@@ -434,13 +434,13 @@ jobs:
         run: make rfcs-check
 
   docs-hygiene:
-    # The four documentation checks the pre-commit hook runs (links + anchors,
-    # leaked tool-call markup, status markers, FILEMAP freshness) had no CI
-    # counterpart, so a checkout without the hook — or a `--no-verify` — could
-    # merge a broken link or a stale file map (ISSUE-0133: the #840 worktree
-    # corruption would have merged a wrong FILEMAP.md unnoticed). All four are
-    # stdlib-only; the runner's system python3 suffices, and the checks read
-    # `git ls-files`, so the default checkout depth is enough.
+    # The documentation checks the pre-commit hook runs (links + anchors,
+    # leaked tool-call markup, status markers, FILEMAP freshness, merged-PR
+    # history, plan status) had no CI counterpart, so a checkout without the
+    # hook — or a `--no-verify` — could merge a broken link or a stale file map
+    # (ISSUE-0133: the #840 worktree corruption would have merged a wrong
+    # FILEMAP.md unnoticed). All are stdlib-only; the runner's system python3
+    # suffices. Full history is fetched because the last two read `git log`.
     name: Docs hygiene
     runs-on: ubuntu-latest
     steps:
@@ -475,9 +475,10 @@ jobs:
         run: python scripts/generate_filemap.py --check
 
       # docs/merged-prs.md is generated from the squash-merge subjects on main
-      # (the hand-kept ROADMAP table had stopped at #708 in June). Same
-      # merge-ref caveat as FILEMAP above. Needs history: git log walks
-      # first-parent from HEAD, so this job fetches the full history.
+      # (the hand-kept ROADMAP table had stopped at #708 in June). Unlike
+      # FILEMAP, the check tolerates being behind by the newest merges — the
+      # file can never contain the merge that lands it — and fails only on a
+      # hand edit or format drift. The hook catches it up on the next commit.
       - name: Check docs/merged-prs.md is up to date
         run: python scripts/merged_prs.py --check
 

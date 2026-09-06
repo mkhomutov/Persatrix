@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from scripts.merged_prs import MergedPR, classify, parse_log, render
+from scripts.merged_prs import MergedPR, behind_by, classify, compare, parse_log, render
 
 LOG = "\n".join(
     [
@@ -81,3 +81,34 @@ def test_render_writes_the_table_between_auto_markers() -> None:
 def test_render_escapes_pipes_in_titles() -> None:
     prs = [MergedPR(number=1, date="2026-01-01", title="feat: a | b")]
     assert "a \\| b" in render(prs)
+
+
+def test_parse_log_keeps_one_row_per_pr_number() -> None:
+    """A branch commit quoting a PR number must not add a second row for it."""
+    log = "\n".join(
+        [
+            "aaaa|2026-09-07|fix: follow-up (#844)",
+            "bbbb|2026-09-01|feat(memory): the real squash (#844)",
+        ]
+    )
+    prs = parse_log(log)
+    assert [p.number for p in prs] == [844]
+    assert prs[0].title == "fix: follow-up"  # first (newest) occurrence wins
+
+
+def _table(*numbers: int) -> str:
+    return render([MergedPR(n, "2026-01-01", f"feat: pr {n}") for n in numbers])
+
+
+def test_check_passes_when_the_file_is_behind_by_the_newest_merges() -> None:
+    """The file can never contain the merge that lands it; a suffix is fresh enough."""
+    assert behind_by(_table(3, 2, 1), _table(4, 3, 2, 1)) == 1
+    assert behind_by(_table(3, 2, 1), _table(3, 2, 1)) == 0
+    assert compare(_table(3, 2, 1), _table(5, 4, 3, 2, 1)) is None
+
+
+def test_check_fails_on_a_hand_edit_or_a_lost_row() -> None:
+    assert behind_by(_table(4, 2, 1), _table(4, 3, 2, 1)) is None  # lost a middle row
+    assert behind_by(_table(4, 3, 2, 1, 0), _table(4, 3, 2, 1)) is None  # extra row
+    edited = _table(3, 2, 1).replace("feat: pr 2", "feat: pr two")
+    assert compare(edited, _table(3, 2, 1)) is not None
