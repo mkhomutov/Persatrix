@@ -30,7 +30,7 @@ standalone blueprint later.
 | 5 | [Testing strategy](testing-strategy.md) | Every test layer, what it proves, where it runs, how to add to it — and the rule that every test tree has a named runner. |
 | 6 | [Enforcement matrix](enforcement-matrix.md) | Every rule with its document, its check, and whether the check is required, advisory, or local-only. |
 | 7 | [Automation catalogue](automation-catalogue.md) | Every `make` target, script, hook and workflow, and when each runs. |
-| 8 | Templates | One per document kind the cycle produces — in [`docs/templates/`](../templates/). *(later PR)* |
+| 8 | [Templates](../templates/README.md) | One per document kind the cycle produces: version plan, scope locks, amendment, PR plan, release-prep plan, execution report, release checklist, post-release follow-up, manual test. |
 
 ## How this relates to the older process documents
 
