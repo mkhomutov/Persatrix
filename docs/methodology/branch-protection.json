@@ -1,0 +1,18 @@
+{
+  "_comment": "Required status checks for `main`, versioned so the set is reviewed in a PR rather than remembered. Apply with `make branch-protection-apply` (owner; needs repo admin). `make branch-protection-show` diffs this file against the live setting. Context names are the CI job `name:` values in .github/workflows/ci.yml plus the commitlint job.",
+  "strict": true,
+  "contexts": [
+    "Go (build + test)",
+    "Proto staleness check",
+    "Python (lint + test)",
+    "Rust (build + clippy)",
+    "Validate configs",
+    "Validate PR Title",
+    "File size check",
+    "Third-party license check",
+    "Web console (build + test)",
+    "Dockerignore context hygiene",
+    "Cost regression gate (bored persona)",
+    "Docs hygiene"
+  ]
+}

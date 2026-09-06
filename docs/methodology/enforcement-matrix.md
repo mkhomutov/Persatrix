@@ -55,6 +55,8 @@ Required, it rides inside one of the six required jobs.
 | `agents.yaml` `instructions_file` references resolve | prompt-organization | `scripts/checks/prompt_refs.py` | Required (`Validate configs`) |
 | Personal-tier recall latency within 20 % of baseline | RFC 0029 | `tests/perf/personal_tier_latency.py` | CI-advisory, **informational** until a baseline exists |
 | Weekly Rust advisory / bans / sources audit | CONTRIBUTING | `scheduled-audit.yml` (cargo-deny, Mondays; files an issue on failure) | Scheduled |
+| Dependencies bumped monthly, one grouped PR per ecosystem (Go, pip, Cargo, npm, Actions), `chore(deps)` titles | `.github/dependabot.yml` | Dependabot | Scheduled (security updates run on their own cadence) |
+| Required status checks on `main` match the versioned set | `branch-protection.json` | `make branch-protection-show`; `test_branch_protection_config.py` pins the file to the CI job list | Owner applies; file is reviewed |
 
 ## Size and shape
 
@@ -106,11 +108,13 @@ Required, it rides inside one of the six required jobs.
 
 Listed here so the matrix is honest about its own gaps.
 
-1. **Make the six advisory CI jobs required.** File size, licences, web
-   console, dockerignore hygiene, cost gate, docs hygiene — all green on
-   `main`; a required-check rule costs nothing and closes a merge path that
-   currently accepts red. This is a repository setting, not a code change,
-   and needs the owner's hand.
+1. **Make the six advisory CI jobs required.** The intended set is now
+   versioned in [`branch-protection.json`](branch-protection.json) (all
+   twelve contexts; a test keeps it equal to the CI job list) and applied
+   with `make branch-protection-apply` — a repository setting that needs the
+   owner's admin token, so it is still the one step in this list that is
+   run by hand. `make branch-protection-show` says whether the live setting
+   matches the file.
 2. ~~Move the pre-commit-only and make-only checks into CI.~~ Done in the
    CI-promotion PR of the methodology series: gofmt, cargo fmt, ruff + mypy
    on `scripts/` and `evaluators/`, the Go integration tests, the sanitizer
