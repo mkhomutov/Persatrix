@@ -106,7 +106,7 @@ dev = [
     # protobuf>=6 while the runtime closure above caps protobuf<6
     # (see grpcio-tools constraint). Bump deliberately, regenerate the
     # *.pyi, and commit in the same change.
-    "mypy-protobuf==3.6.0",
+    "mypy-protobuf==3.7.0",
     # RFC 0045 §B — the MIT↛BUSL dependency-direction gate. import-linter's
     # `lint-imports` runs the `[tool.importlinter]` forbidden contract below as
     # a hard CI gate (`make imports-check`), failing the build if an
