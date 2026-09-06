@@ -95,6 +95,8 @@ Required, it rides inside one of the six required jobs.
 | Version strings aligned across five files | version-bump guide | `make bump-version` + checklist §2 | Manual at release-prep PR 3 |
 | TDD for new unit-level code | CLAUDE.md §TDD | review | Convention |
 | Version-train gate | release-cycle | review | Convention |
+| Debt sweep when ≥ 20 files sit at their cap or two releases have passed | release-cycle §The debt sweep | `file_size.py --near-cap` read at the post-release follow-up | Convention, with the count recorded in the follow-up PR |
+| PR body follows What / Why / How / Not in this PR / Gates / Review | BRANCHING §Pull requests | `.github/PULL_REQUEST_TEMPLATE.md` pre-fills it | Template (GitHub applies it to every new PR) |
 
 ---
 
@@ -112,10 +114,17 @@ Listed here so the matrix is honest about its own gaps.
    on `scripts/` and `evaluators/`, the Go integration tests, the sanitizer
    sync, `prompt_refs`, and the four doc-hygiene checks. `notices-check`
    stays make-only on purpose (see its row).
-3. **Arm the perf gate** by dispatching `perf-baseline-capture.yml` once.
+3. **Arm the perf gate** by dispatching `perf-baseline-capture.yml` once —
+   after [ISSUE-0058](../issues/ISSUE-0058-perf-gate-runner-variance-tolerance.md)
+   settles the runner-variance tolerance; a 20 % fixed band on shared runners
+   was judged too flaky to arm during a release-prep window (2026-09-06).
 4. ~~Decide the PR-size rule.~~ Decided in the BRANCHING rewrite: guidance,
    with the split heuristic code PRs follow; documentation-heavy release
    evidence is the exception and is named as such.
+5. **Take RFC 0044 Phase 2 (evals in CI) at v0.3.16, not cut.** `make
+   eval-replay` is $0 and deterministic; gating it turns every release's
+   paid live arc into a free regression gate for the next. Slotted cuttable;
+   the recommendation is recorded on the RFC 0044 PR plan.
 
 ## Related documentation
 

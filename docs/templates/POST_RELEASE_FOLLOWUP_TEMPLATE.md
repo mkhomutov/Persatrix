@@ -38,6 +38,7 @@ vX.Y.Z tagged at `<sha>` and the GitHub Release published YYYY-MM-DD
 - [ ] `scripts/checks/file_size_allowlist.py`: any entry for this cycle's plan or release-prep plan retired (the checker now treats them as frozen evidence — `[STALE-ALLOWLIST]` names any left)
 - [ ] Execution-report index row, if PR 1 did not add it
 - [ ] New issues the release surfaced: <IDs>, each with a dated note and a slot
+- [ ] Near-cap list read (`python scripts/checks/file_size.py --near-cap`): <n> files at cap → debt-sweep issue filed / not needed (threshold: 20, or two releases since the last sweep)
 
 ## NOT done, and recorded rather than forced
 
