@@ -116,7 +116,8 @@ Before and after every task, verify consistency across RFC files, PR plans, and 
 
 - Architecture: `.github/copilot-instructions.md`
 - Glossary: `docs/ai-glossary.md`
-- Development lifecycle: `docs/development-workflow.md`
+- Methodology (release cycle, decisions, review process, process glossary): `docs/methodology/README.md`
+- RFC-level development lifecycle: `docs/development-workflow.md`
 - Branching: `docs/BRANCHING.md`
 - RFC process: `docs/rfcs/README.md`; live RFC list: [`docs/rfcs/INDEX.md`](../docs/rfcs/INDEX.md) (`make rfcs`)
 - Issue tracker: `docs/issues/README.md`; live issue list: [`docs/issues/INDEX.md`](../docs/issues/INDEX.md) (`make issues`)
