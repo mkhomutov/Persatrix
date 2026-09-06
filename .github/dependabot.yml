@@ -45,7 +45,8 @@ updates:
       # The cost is that the eventual deliberate upgrade will not be offered
       # either. Doing it means porting the provider to whatever 1.x replaced
       # `temperature` with, lifting the `<1` cap in agents/pyproject.toml, and
-      # dropping this rule in the same change.
+      # dropping this rule in the same change. Tracked in
+      # docs/issues/ISSUE-0144-anthropic-sdk-pinned-below-1x.md.
       - dependency-name: "anthropic"
         update-types: ["version-update:semver-major"]
 
