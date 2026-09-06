@@ -11,7 +11,6 @@ import argparse
 import random
 from dataclasses import dataclass
 
-
 ADJECTIVES: tuple[str, ...] = (
     "amber",
     "arc",

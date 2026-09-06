@@ -33,11 +33,11 @@ dependencies.
 | Target / script | Does | Check twin | When the check runs |
 |-----------------|------|------------|---------------------|
 | `make proto` (`proto-go`, `proto-python`) | Regenerate Go and Python gRPC stubs, incl. `.pyi` via mypy-protobuf. Pinned toolchain: protoc 34.1, protoc-gen-go 1.36.11, protoc-gen-go-grpc 1.6.1 (local brew tools are newer and fail the gate) | `make proto-check` = `proto-python-check` + `proto-orphans-check`; Go side is `make proto-go && git diff --exit-code internal/generated/` | CI (`Proto staleness`, `Python`) |
-| `make generate-sanitizer-patterns` | Regenerate `agents/security_patterns.py` + `security_enums.py` from the Go canonical sources | `generate-sanitizer-patterns-check` | Make-only |
+| `make generate-sanitizer-patterns` | Regenerate `agents/security_patterns.py` + `security_enums.py` from the Go canonical sources | `generate-sanitizer-patterns-check` | CI (`Go`) |
 | `make notices` (`scripts/generate_third_party_notices.py`) | Regenerate `THIRD_PARTY_NOTICES.md` from the three dependency graphs | `notices-check` | Make-only; release-prep PR 4 |
 | `make rfcs` (`scripts/rfcs.py`) | Regenerate `docs/rfcs/INDEX.md` from RFC YAML front-matter | `rfcs-check` | CI (`Validate configs`) + pre-commit |
 | `make issues` (`scripts/issues.py`) | Regenerate `docs/issues/INDEX.md` from issue front-matter | `issues-check` | CI (`Validate configs`) |
-| `scripts/generate_filemap.py` | Regenerate `FILEMAP.md` from `git ls-files` (tracked files only — `git add` new files first) | `--check` | Pre-commit regenerates and stages it; no CI check (ISSUE-0133) |
+| `scripts/generate_filemap.py` | Regenerate `FILEMAP.md` from `git ls-files` (tracked files only — `git add` new files first) | `--check` (ignores the header date) | Pre-commit regenerates and stages it; CI (`Docs hygiene`) checks it |
 | `make generate-persona-nickname COUNT= SEED=` (`scripts/persona_nickname_generator.py`) | Nickname-style persona id/name pairs | — | On demand |
 | `make bump-version VERSION=X.Y.Z [DRY_RUN=--dry-run]` (`scripts/bump_version.py`) | Bump the five version strings ([guide](../guides/version-bump.md)) | checklist §2 | Release-prep PR 3 |
 
@@ -52,7 +52,7 @@ dependencies.
 | `make test-integration` | `pytest tests/integration/` with `PYTHONPATH=agents/generated` | `Python` |
 | `cd cli && cargo test` | Rust suite incl. lockstep guards | `Rust` |
 | `make ui-test` | `npm ci && npm test` (Vitest) | `Web console` |
-| `go test ./tests/integration/...` | Go integration (bufconn scheduler→executor, rate limiter, audit log) | none |
+| `go test ./tests/integration/... -race` | Go integration (bufconn scheduler→executor, rate limiter, audit log) | `Go` |
 | `make eval-replay [TARGET= REPORT=]` | Replay goldens deterministically under the offline overlay | none |
 | `make eval-record` / `eval-record-offline TARGET=` / `eval-drift` | Record a golden live / against the mock; report live drift (never gates) | on demand |
 | `python tests/perf/personal_tier_latency.py [--capture-baseline PATH]` | Recall latency vs baseline | `Python` (informational) |
@@ -64,15 +64,15 @@ dependencies.
 |-----------------|------|---------------|
 | `make lint` | `lint-go` (golangci-lint) + `lint-python` (ruff + mypy on `agents/`, `tests/`, `evaluators/`; `imports-check`) + `lint-rust` (clippy `-D warnings`) | Locally; CI runs the same tools directly |
 | `make imports-check` | import-linter forbidden contract, MIT↛BUSL (RFC 0045 §B) | CI (`Python`) |
-| `make validate` | `agents/validate.py config/` + `scripts/checks/prompt_refs.py` | CI runs only the first half |
+| `make validate` | `agents/validate.py config/` + `scripts/checks/prompt_refs.py` | CI (`Validate configs`) runs both |
 | `make ui-html-check` (`scripts/checks/ui_html_directive.py`) | Reject `{@html}` under `web/src` | CI (`Web console`) |
 | `make dockerignore-check` (`scripts/checks/dockerignore_context.py`) | Seed a sentinel, run a real `docker build`, prove the context excludes nested `node_modules` | CI (`Dockerignore`) |
 | `make check-licenses` (`-go`/`-python`/`-rust`) | go-licenses, `scripts/checks/python_licenses.py`, cargo-deny against `scripts/checks/allowed_licenses.txt` / `deny.toml` | CI (`Third-party license check`) |
-| `scripts/checks/file_size.py [--strict] [--near-cap]` | Code ≤ 500 lines, docs ≤ 3 000 words, RFCs ≤ 8 000; allowlist in `file_size_allowlist.py`; near-cap band 3 % | CI (`File size check`) + pre-commit |
-| `scripts/checks/doc_links.py` | Relative links and `#anchors` in every tracked `.md` | Pre-commit |
-| `scripts/checks/doc_status_markers.py` | Only the standard status markers | Pre-commit |
-| `scripts/checks/doc_leaked_markup.py` | No tool-call markup fragments in docs | Pre-commit |
-| `scripts/checks/doc_audit.py [--format text\|json\|markdown]` | Runs links + markers + size warnings in one report | Nothing calls it; used by hand in PR bodies |
+| `scripts/checks/file_size.py [--strict] [--near-cap]` | Code ≤ 500 lines, docs ≤ 3 000 words, RFCs ≤ 8 000; allowlist in `file_size_allowlist.py`; near-cap band 3 %; version-cycle docs of released versions (dated CHANGELOG heading) excluded (ISSUE-0139) | CI (`File size check`) + pre-commit |
+| `scripts/checks/doc_links.py` | Relative links and `#anchors` in every tracked `.md` | CI (`Docs hygiene`) + pre-commit |
+| `scripts/checks/doc_status_markers.py` | Only the standard status markers | CI (`Docs hygiene`) + pre-commit |
+| `scripts/checks/doc_leaked_markup.py` | No tool-call markup fragments in docs | CI (`Docs hygiene`) + pre-commit |
+| `scripts/checks/doc_audit.py [--format text\|json\|markdown]` | Runs links + markers + size warnings in one report | Local convenience; used by hand in PR bodies |
 | `scripts/checks/proto_drift.py` | Orphan generated protobuf artifacts (backs `proto-orphans-check`) | CI |
 
 ## The pre-commit hook
@@ -89,14 +89,17 @@ installer. Nine steps, target under 10 s:
 (`--strict`).
 
 Because the hook is outside version control it is absent for anyone who did
-not run the installer; nothing in CI replays steps 1, 3, 4, 5, 6 — see the
-[enforcement matrix](enforcement-matrix.md#documentation).
+not run the installer. Since the CI-promotion PR every step has a CI
+counterpart: gofmt and cargo fmt in the `Go` / `Rust` jobs, ruff in `Python`,
+the doc checks and FILEMAP freshness in `Docs hygiene`, the RFC index and file
+sizes in `Validate configs` / `File size check`. The hook is the fast local
+copy, not the only copy.
 
 ## GitHub workflows
 
 | Workflow | Trigger | Does |
 |----------|---------|------|
-| `ci.yml` | push to `main`, every PR | Ten jobs: `Go (build + test)`, `Web console (build + test)`, `Dockerignore context hygiene`, `Proto staleness check`, `Python (lint + test)`, `Cost regression gate (bored persona)` (path-filtered), `Rust (build + clippy)`, `Validate configs`, `File size check`, `Third-party license check`. Every job carries a comment naming the incident it guards. |
+| `ci.yml` | push to `main`, every PR | Eleven jobs: `Go (build + test)` (incl. gofmt, Go integration tests, sanitizer sync), `Web console (build + test)`, `Dockerignore context hygiene`, `Proto staleness check`, `Python (lint + test)` (incl. ruff/mypy on `scripts/` + `evaluators/`), `Cost regression gate (bored persona)` (path-filtered), `Rust (build + clippy)` (incl. rustfmt, `cargo test`), `Validate configs` (incl. `prompt_refs`), `Docs hygiene` (links, markup, markers, FILEMAP), `File size check`, `Third-party license check`. Every job carries a comment naming the incident it guards. |
 | `commitlint.yml` | PR opened/edited/synchronised | Conventional Commit PR title (`Validate PR Title`) |
 | `scheduled-audit.yml` | Mondays 06:00 UTC; manual | `cargo deny check advisories bans sources licenses`; opens or comments on a `Scheduled Dependency Audit Failure` issue |
 | `perf-baseline-capture.yml` | manual (`workflow_dispatch`) | Captures the recall-latency baseline on a runner and opens a PR with it; merging arms the perf gate. Never run yet |
