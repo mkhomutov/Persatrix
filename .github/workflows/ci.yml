@@ -34,9 +34,9 @@ jobs:
     name: Go (build + test)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
@@ -91,15 +91,15 @@ jobs:
     name: Web console (build + test)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
@@ -143,9 +143,9 @@ jobs:
     name: Dockerignore context hygiene
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
 
@@ -156,9 +156,9 @@ jobs:
     name: Proto staleness check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
@@ -183,9 +183,9 @@ jobs:
     name: Python (lint + test)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
 
@@ -325,13 +325,13 @@ jobs:
     name: Cost regression gate (bored persona)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0  # paths-filter needs history for push-event diffs
 
       - name: Detect wake-path changes
         id: changes
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@v4
         with:
           filters: |
             wake_path:
@@ -351,7 +351,7 @@ jobs:
               - 'agents/observability/_metrics_wakes.py'
               - 'tests/integration/test_bored_persona_cost.py'
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         if: steps.changes.outputs.wake_path == 'true'
         with:
           python-version: "3.11"
@@ -377,7 +377,7 @@ jobs:
     name: Rust (build + clippy)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -407,9 +407,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: [python]  # needs agent deps installed
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
 
@@ -444,11 +444,11 @@ jobs:
     name: Docs hygiene
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0  # merged-prs + plan-status read the whole first-parent log
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
 
@@ -499,12 +499,15 @@ jobs:
     steps:
       # The size gate tells a frozen (released) plan from the open cycle's by
       # reading CHANGELOG.md's dated release headings — deliberately not
-      # `git tag`: on a pull_request ref checkout@v4 fetches --depth=1 with no
-      # tags and ignores the fetch-tags input in that mode, which turned this
-      # job red on the #858 review's first two CI runs.
-      - uses: actions/checkout@v4
+      # `git tag`: on a pull_request ref the checkout action fetches
+      # --depth=1 with no tags and ignores the fetch-tags input in that mode,
+      # which turned this job red on the #858 review's first two CI runs. The
+      # version is deliberately unnamed here: the shallow-and-tagless default
+      # has survived every major bump of the action, so naming one only goes
+      # stale the next time the pin moves.
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
 
@@ -515,13 +518,13 @@ jobs:
     name: Third-party license check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
 
@@ -532,7 +535,7 @@ jobs:
 
       - name: Cache cargo-deny
         id: cache-cargo-deny
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/bin/cargo-deny
