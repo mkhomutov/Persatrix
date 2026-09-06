@@ -11,11 +11,11 @@ license = {text = "BUSL-1.1"}
 dependencies = [
     "grpcio>=1.71.2,<2",
     "grpcio-tools>=1.71.2,<2",
-    "protobuf>=5.28.0,<6",
+    "protobuf>=5.28.0,<8",
     "pyyaml>=6.0,<7",
     "aiohttp>=3.9.0,<4",
-    "anthropic>=0.40.0,<1",
-    "openai>=1.50.0,<2",
+    "anthropic>=0.40.0,<2",
+    "openai>=1.50.0,<4",
     "opentelemetry-api>=1.28.0,<2",
     "opentelemetry-sdk>=1.28.0,<2",
     "opentelemetry-exporter-otlp-proto-http>=1.28.0,<2",
@@ -26,7 +26,7 @@ dependencies = [
     # install closure for one PR cycle. PR 3 will reintroduce it alongside
     # its first consumer. See PR #163 review round 2 (Nit #3).
     "opentelemetry-semantic-conventions>=0.49b0,<1",
-    "structlog>=24.1.0,<26",
+    "structlog>=24.1.0,<27",
     "jsonschema>=4.23.0,<5",
     "aiosqlite>=0.19.0,<1",
     # RFC 0021 P1 — agents/temporal/ and agents/clock.py read named
@@ -68,7 +68,7 @@ dev = [
     # protobuf>=6 while the runtime closure above caps protobuf<6
     # (see grpcio-tools constraint). Bump deliberately, regenerate the
     # *.pyi, and commit in the same change.
-    "mypy-protobuf==3.6.0",
+    "mypy-protobuf==5.1.0",
     # RFC 0045 §B — the MIT↛BUSL dependency-direction gate. import-linter's
     # `lint-imports` runs the `[tool.importlinter]` forbidden contract below as
     # a hard CI gate (`make imports-check`), failing the build if an
@@ -84,7 +84,7 @@ dev = [
 # SystemExit` install hint when the extra is not present. The native
 # `google-genai` SDK (RFC 0053 OQ #1 — not the OpenAI-compat endpoint).
 gemini = [
-    "google-genai>=1.0.0,<2",
+    "google-genai>=1.0.0,<3",
 ]
 # watsonx.ai native SDK — the `create_provider` watsonx branch surfaces the
 # actionable `ImportError → SystemExit` install hint when this extra is absent.
