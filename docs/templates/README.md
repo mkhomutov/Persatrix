@@ -12,6 +12,7 @@ the checks rely on it.
 | `PLAN_AMENDMENT_TEMPLATE.md` | `docs/vX.Y.Z-plan-amendment-YYYY-MM-DD.md`, or a dated section in a sequencing doc / RFC | Whenever a ratified decision changes |
 | `PR_PLAN_TEMPLATE.md` | `docs/rfcs/NNNN-pr-plan.md` or `docs/issues/ISSUE-NNNN-…-pr-plan.md` | RFC Phase 3, or an issue-owned workstream |
 | `RELEASE_PREP_PLAN_TEMPLATE.md` | `docs/vX.Y.Z-release-prep-plan.md` | Phase 2 (release-prep PR 0) |
+| `RELEASE_BASELINE_TEMPLATE.md` | `docs/vX.Y.Z-release-baseline.md` | Phase 2, when the prep plan nears the word cap |
 | `EXECUTION_REPORT_TEMPLATE.md` | `docs/manual-tests/vX.Y.Z-execution-report.md` | Release-prep PR 1 |
 | `RELEASE_CHECKLIST_TEMPLATE.md` | `docs/vX.Y.Z-release-checklist.md` | Release-prep PR 2 |
 | `POST_RELEASE_FOLLOWUP_TEMPLATE.md` | The Phase 4 PR body | After the tag |
@@ -19,6 +20,10 @@ the checks rely on it.
 
 RFCs have their own template at [`docs/rfcs/RFC_TEMPLATE.md`](../rfcs/RFC_TEMPLATE.md)
 and issues at [`docs/issues/ISSUE-TEMPLATE.md`](../issues/ISSUE-TEMPLATE.md).
+
+`make release-doc KIND=<kind> VERSION=X.Y.Z CODENAME="…"` copies a template to
+its versioned path with `vX.Y.Z`, `<Codename>`, the previous version and the
+date filled in and the guidance blockquotes removed (`scripts/release/open_doc.py`).
 
 ## Conventions the templates assume
 
