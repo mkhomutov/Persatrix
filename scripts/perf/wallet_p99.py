@@ -126,7 +126,8 @@ async def run(target: str, cycles: int, warmup: int) -> None:
     print(f"max:     {sorted_ms[-1]:.3f} ms")
     print(f"min:     {sorted_ms[0]:.3f} ms")
     print()
-    print(f"RFC 0023 Goal #6 target: p99 <= 5 ms -- {'PASS' if p99 <= 5.0 else 'INFO (above target)'}")
+    verdict = "PASS" if p99 <= 5.0 else "INFO (above target)"
+    print(f"RFC 0023 Goal #6 target: p99 <= 5 ms -- {verdict}")
 
 
 def main() -> None:

@@ -173,9 +173,14 @@ def validate(issues: list[Issue]) -> list[str]:
         else:
             seen_ids[issue.id] = loc
         if issue.status and issue.status not in ALLOWED_STATUS:
-            errors.append(f"{loc}: invalid status '{issue.status}' (allowed: {sorted(ALLOWED_STATUS)})")
+            errors.append(
+                f"{loc}: invalid status '{issue.status}' (allowed: {sorted(ALLOWED_STATUS)})"
+            )
         if issue.severity and issue.severity not in ALLOWED_SEVERITY:
-            errors.append(f"{loc}: invalid severity '{issue.severity}' (allowed: {sorted(ALLOWED_SEVERITY)})")
+            errors.append(
+                f"{loc}: invalid severity '{issue.severity}'"
+                f" (allowed: {sorted(ALLOWED_SEVERITY)})"
+            )
         if issue.status == "resolved" and not issue.closed:
             errors.append(f"{loc}: status=resolved requires 'closed' date")
         if issue.created and not is_iso_date(issue.created):

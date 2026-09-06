@@ -24,6 +24,8 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import NamedTuple
@@ -33,7 +35,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.checks import ensure_utf8_stdout, walk_files, DEFAULT_EXCLUDES  # noqa: E402
+from scripts.checks import DEFAULT_EXCLUDES, ensure_utf8_stdout, walk_files  # noqa: E402
 from scripts.checks.file_size_allowlist import GRANDFATHERED_FILES  # noqa: E402
 
 DEFAULT_MAX_CODE_LINES = 500
@@ -96,9 +98,10 @@ _EXTRA_EXCLUDES = [
     # allowlist stops growing by one entry per release.
     #
     # Deliberately narrow: this matches only the two write-once categories.
-    # Master plans (docs/v*-plan.md) and release-prep plans stay allowlisted
-    # individually, because those are *edited during* their cycle and the cap
-    # still does useful work on them. Permanent acceptance gates that happen to
+    # Master plans (docs/v*-plan.md) and release-prep plans are NOT matched here
+    # because they are *edited during* their cycle and the cap still does useful
+    # work on them; they are excluded conditionally instead — once their
+    # version's tag exists (_VERSION_DOC_RE below). Permanent acceptance gates that happen to
     # live under docs/manual-tests/ (MT-MEMORY-005, MT-CHANNEL-GOV-004) are not
     # per-release reports and are not matched here. The `v[0-9]` prefix keeps
     # non-version names (verify-*, variants-*) out; note fnmatch's `*` crosses
@@ -109,6 +112,56 @@ _EXTRA_EXCLUDES = [
 ]
 
 EXCLUDE_PATTERNS = DEFAULT_EXCLUDES + _EXTRA_EXCLUDES
+
+# Version-cycle documents (ISSUE-0139). A master plan, scope-locks record, plan
+# amendment, release-prep plan, or release baseline is edited while its version
+# is in flight — the cap does useful work then — and frozen once the version's
+# tag exists. From that point it is release evidence, the same category the two
+# write-once patterns above cover, so it is excluded *conditionally*: matched by
+# name here, and treated as excluded only when ``git tag`` lists its version
+# (:func:`_is_released_version_doc`). The open cycle's plan keeps its cap and,
+# if it must exceed it, its allowlist entry — which now really does expire at
+# the tag. Checklists are unconditional (pattern above): frozen from the start.
+_VERSION_DOC_RE = re.compile(
+    r"^docs/v(\d+\.\d+(?:\.\d+)?)-"
+    r"(?:plan|scope-locks|plan-amendment-[0-9-]+|release-prep-plan|release-baseline)\.md$"
+)
+
+
+def _released_tags(repo_root: Path) -> frozenset[str]:
+    """Tags ``vX.Y.Z`` in *repo_root*; empty when git cannot answer.
+
+    Empty means nothing counts as released, so a tarball or a checkout without
+    tags falls back to capping every version-cycle doc — the conservative side.
+    """
+    try:
+        out = subprocess.run(
+            ["git", "tag", "--list", "v[0-9]*"],
+            cwd=repo_root,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            check=True,
+            timeout=10,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return frozenset()
+    return frozenset(t.strip() for t in out.splitlines() if t.strip())
+
+
+def _is_released_version_doc(rel: str, tags: frozenset[str]) -> bool:
+    """True when *rel* is a version-cycle doc whose version has been tagged.
+
+    A two-part version (``v0.2``) matches its ``.0`` tag: the v0.2 release-prep
+    plan shipped as ``v0.2.0``.
+    """
+    match = _VERSION_DOC_RE.match(rel)
+    if not match:
+        return False
+    version = match.group(1)
+    if f"v{version}" in tags:
+        return True
+    return version.count(".") == 1 and f"v{version}.0" in tags
 
 # ``GRANDFATHERED_FILES`` — the size-audit allowlist — lives in
 # ``scripts/checks/file_size_allowlist.py`` (imported above). It is reference
@@ -188,8 +241,11 @@ def _scan_files(
     warnings: list[FileSizeWarning] = []
     code_results: list[tuple[str, int]] = []
     doc_results: list[tuple[str, int]] = []
+    released = _released_tags(repo_root)
 
-    for fpath in walk_files(repo_root, extensions=CODE_EXTENSIONS, exclude_patterns=EXCLUDE_PATTERNS):
+    for fpath in walk_files(
+        repo_root, extensions=CODE_EXTENSIONS, exclude_patterns=EXCLUDE_PATTERNS,
+    ):
         try:
             text = fpath.read_text(encoding="utf-8", errors="replace")
         except OSError:
@@ -203,13 +259,17 @@ def _scan_files(
                 limit=max_code_lines, unit="lines",
             ))
 
-    for fpath in walk_files(repo_root, extensions=DOC_EXTENSIONS, exclude_patterns=EXCLUDE_PATTERNS):
+    for fpath in walk_files(
+        repo_root, extensions=DOC_EXTENSIONS, exclude_patterns=EXCLUDE_PATTERNS,
+    ):
+        rel = fpath.relative_to(repo_root).as_posix()
+        if _is_released_version_doc(rel, released):
+            continue  # frozen release evidence — see _VERSION_DOC_RE
         try:
             text = fpath.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
         word_count = _count_words(text)
-        rel = fpath.relative_to(repo_root).as_posix()
         doc_results.append((rel, word_count))
         effective_limit = max_rfc_words if rel.startswith(_RFC_PREFIX) else max_doc_words
         if word_count > effective_limit and rel not in GRANDFATHERED_FILES:

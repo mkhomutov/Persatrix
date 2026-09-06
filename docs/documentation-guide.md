@@ -141,11 +141,12 @@ tag exists and the post-release follow-up has stamped it Released. Archived
 documents are not moved (every plan is linked from ROADMAP, issues, and later
 plans, and moving them would break those links); they are frozen in place.
 Frozen release documents are **release evidence**, so they are exempt from the
-word cap: execution reports and checklists are already excluded by pattern in
-`scripts/checks/file_size.py`, and plans / release-prep plans of **released**
-versions should be too — today they are grandfathered one by one with an exit
-condition nothing can execute ([ISSUE-0139](issues/ISSUE-0139-released-plans-have-no-archival-mechanism.md)).
-Only the **open** cycle's plan needs an allowlist entry.
+word cap: execution reports and checklists are excluded by pattern in
+`scripts/checks/file_size.py`, and plans, scope locks, amendments,
+release-prep plans and baselines are excluded **once their version's tag
+exists** ([ISSUE-0139](issues/ISSUE-0139-released-plans-have-no-archival-mechanism.md)).
+Only the **open** cycle's plan can need an allowlist entry, and that entry
+expires by itself at the tag.
 
 ## Historical Artifacts Policy
 

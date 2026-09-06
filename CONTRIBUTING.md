@@ -28,9 +28,10 @@ make validate # config validation
 
 ### CI Workflows
 
-- **[`ci.yml`](.github/workflows/ci.yml)** — Runs on every PR and push to `main`. Covers Go build+test, Python lint+test, Rust build+clippy, config validation.
+- **[`ci.yml`](.github/workflows/ci.yml)** — Runs on every PR and push to `main`. Eleven jobs: Go build + gofmt + unit and integration tests + sanitizer sync; web console build + test; Docker build-context hygiene; proto staleness; Python lint + types + three test trees + import direction; the bored-persona cost gate; Rust build + rustfmt + clippy + test; config validation + index freshness; docs hygiene (links, markup, markers, FILEMAP); file sizes; third-party licences. Each job's comment names the incident it guards. Which jobs branch protection requires is in the [enforcement matrix](docs/methodology/enforcement-matrix.md).
 - **[`commitlint.yml`](.github/workflows/commitlint.yml)** — Enforces Conventional Commit format on PR titles (for automated changelog generation).
 - **[`scheduled-audit.yml`](.github/workflows/scheduled-audit.yml)** — Weekly dependency audit for Rust crates.
+- **[`perf-baseline-capture.yml`](.github/workflows/perf-baseline-capture.yml)** — Maintainer-dispatched capture of the recall-latency baseline that arms the perf gate.
 
 ### Pre-commit Hook
 

@@ -21,8 +21,9 @@ blocked, **0 approving reviews required**, and six required contexts —
 `Go (build + test)`, `Proto staleness check`, `Python (lint + test)`,
 `Rust (build + clippy)`, `Validate configs`, `Validate PR Title`. The other
 CI jobs (`File size check`, `Third-party license check`, `Web console (build
-+ test)`, `Dockerignore context hygiene`, `Cost regression gate`) run but are
-not required.
++ test)`, `Dockerignore context hygiene`, `Cost regression gate`, and the new
+`Docs hygiene`) run but are not required. Where a check below says
+Required, it rides inside one of the six required jobs.
 
 ---
 
@@ -34,7 +35,7 @@ not required.
 | Committed UI embed is the placeholder, never build output | `.gitignore` comment; `ci.yml` | `grep` assert in the `go` job | Required (`Go`) |
 | Python lint (ruff) — `agents/`, `tests/` | instructions; ISSUE-0056 | `ruff check` ×2 | Required (`Python`) |
 | Python types (mypy) — `agents/`, `tests/` | instructions; ISSUE-0062 | `mypy` ×2 | Required (`Python`) |
-| Python lint + types — `evaluators/` (the eval harness) | Makefile `lint-python` | `ruff check evaluators/`; `mypy evaluators/` | Make-only — CI lints `agents/` and `tests/` but never `evaluators/` |
+| Python lint + types — `scripts/`, `evaluators/` | Makefile `lint-python`; ISSUE-0134 | `ruff check scripts/ evaluators/`; `mypy scripts/ evaluators/` | Required (`Python`) — since the CI-promotion PR |
 | Python unit + agents + integration suites pass | testing-strategy | three `pytest` steps | Required (`Python`) |
 | Go and Python protobuf stubs match `proto/*.proto`; no orphans | Makefile; ISSUE-0017/0023 | `make proto-go && git diff --exit-code`; `make proto-python-check proto-orphans-check` | Required (`Proto staleness`, `Python`) |
 | MIT-candidate primitives never import BUSL code (RFC 0045 §B) | RFC 0045; CONTRIBUTING | `make imports-check` (import-linter) | Required (`Python`) |
@@ -47,12 +48,11 @@ not required.
 | `.dockerignore` excludes nested `node_modules` | ISSUE-0104 | `make dockerignore-check` | CI-advisory |
 | Third-party licences on the allow-list (Go, Python, Rust) | Makefile; `allowed_licenses.txt`; `deny.toml` | `make check-licenses` | CI-advisory |
 | Idle persona spends nothing (RFC 0024) | RFC 0024 §Test Strategy | `test_bored_persona_cost.py`, path-filtered | CI-advisory |
-| `gofmt` / `cargo fmt` clean | instructions | `gofmt -l`; `cargo fmt --check` | Pre-commit |
-| `scripts/` lint-clean | [ISSUE-0134](../issues/ISSUE-0134-scripts-tree-is-not-linted.md) | — | **Nowhere** |
-| Go integration tests pass | testing-strategy | `go test ./tests/integration/...` | **Nowhere** |
-| Python sanitizer patterns/enums match the Go canonical source | Makefile (RFC 0009 PR 3) | `make generate-sanitizer-patterns-check` | Make-only |
-| `THIRD_PARTY_NOTICES.md` matches the dependency graphs | Makefile | `make notices-check` | Make-only (release-prep PR 4 runs it by hand) |
-| `agents.yaml` `instructions_file` references resolve | prompt-organization | `scripts/checks/prompt_refs.py` via `make validate` | Make-only — CI's validate job calls `agents/validate.py` directly and skips this |
+| `gofmt` / `cargo fmt` clean | instructions | `gofmt -l`; `cargo fmt -- --check` | Required (`Go`, `Rust`) + Pre-commit |
+| Go integration tests pass | testing-strategy | `go test ./tests/integration/... -race` | Required (`Go`) |
+| Python sanitizer patterns/enums match the Go canonical source | Makefile (RFC 0009 PR 3) | `make generate-sanitizer-patterns-check` | Required (`Go`) |
+| `THIRD_PARTY_NOTICES.md` matches the dependency graphs | Makefile | `make notices-check` | Make-only — deliberately: the notices file is regenerated at release-prep PR 4, so it is legitimately stale between a dependency bump and the next release (it is stale today) |
+| `agents.yaml` `instructions_file` references resolve | prompt-organization | `scripts/checks/prompt_refs.py` | Required (`Validate configs`) |
 | Personal-tier recall latency within 20 % of baseline | RFC 0029 | `tests/perf/personal_tier_latency.py` | CI-advisory, **informational** until a baseline exists |
 | Weekly Rust advisory / bans / sources audit | CONTRIBUTING | `scheduled-audit.yml` (cargo-deny, Mondays; files an issue on failure) | Scheduled |
 
@@ -62,7 +62,8 @@ not required.
 |------|-----------|-------|-------------|
 | Code files ≤ 500 lines | documentation-guide §Size Limits | `file_size.py --strict` | CI-advisory (`File size check`) + Pre-commit |
 | Docs ≤ 3 000 words; RFCs ≤ 8 000 words | documentation-guide | same | CI-advisory + Pre-commit |
-| Grandfathered files carry a reason and an exit condition | `file_size_allowlist.py` docstring | review | Convention |
+| Grandfathered files carry a reason and an exit condition | `file_size_allowlist.py` docstring | review; `test_allowlist_has_no_dead_entries`, `test_allowlist_holds_no_released_version_docs` | Convention + unit tests |
+| Released version-cycle docs are frozen evidence, exempt from the cap | documentation-guide §Where Documents Live | `file_size.py` tag-aware exclusion (ISSUE-0139) | Required (`Python` unit tests pin it) |
 | Near-cap warning at 3 % | `file_size.py` | `--near-cap` output on every run | Advisory output |
 | PRs under 500 changed lines | CONTRIBUTING; BRANCHING; CLAUDE.md | — | **Convention only** — a third of recent merges exceed it |
 | Squash merge; linear history | BRANCHING | branch protection | Required |
@@ -72,11 +73,11 @@ not required.
 
 | Rule | Stated in | Check | Enforcement |
 |------|-----------|-------|-------------|
-| No broken relative links or anchors in tracked markdown | documentation-guide; consistency checklist | `doc_links.py` | Pre-commit |
-| Only the standard status markers | documentation-guide §Status Markers | `doc_status_markers.py` | Pre-commit |
-| No leaked tool-call markup in docs | — | `doc_leaked_markup.py` | Pre-commit |
-| `FILEMAP.md` matches `git ls-files` | `generate_filemap.py` | `--check` exists; hook regenerates | Pre-commit (regenerate); **no CI check** — [ISSUE-0133](../issues/ISSUE-0133-no-ci-gate-on-filemap-freshness.md) |
-| Unified doc audit (links + markers + sizes) | `doc_audit.py` | — | Make-only in spirit — **nothing calls it** |
+| No broken relative links or anchors in tracked markdown | documentation-guide; consistency checklist | `doc_links.py` | CI-advisory (`Docs hygiene`) + Pre-commit |
+| Only the standard status markers | documentation-guide §Status Markers | `doc_status_markers.py` | CI-advisory (`Docs hygiene`) + Pre-commit |
+| No leaked tool-call markup in docs | — | `doc_leaked_markup.py` | CI-advisory (`Docs hygiene`) + Pre-commit |
+| `FILEMAP.md` matches `git ls-files` | `generate_filemap.py` | `--check` (date-insensitive) | CI-advisory (`Docs hygiene`) + Pre-commit regenerates — closed [ISSUE-0133](../issues/ISSUE-0133-no-ci-gate-on-filemap-freshness.md) |
+| Unified doc audit (links + markers + sizes) | `doc_audit.py` | — | Local convenience wrapper; its three checks run individually in CI |
 | Local-only files never referenced from committed files | CLAUDE.md; copilot-instructions; review-process | review | Convention |
 | Glossary terms mandatory; new terms added in the same change | CLAUDE.md §Terminology | review | Convention |
 | Plain English; lead with the point | documentation-guide §Writing Style | review | Convention |
@@ -99,19 +100,18 @@ not required.
 
 ## What this table says the project should change
 
-Listed here so the matrix is honest about its own gaps; the CI-promotion PR
-in the methodology series addresses the first two groups.
+Listed here so the matrix is honest about its own gaps.
 
-1. **Make the five advisory CI jobs required.** File size, licences, web
-   console, dockerignore hygiene, cost gate — all green on `main` today; a
-   required-check rule costs nothing and closes a merge path that currently
-   accepts red. This is a repository setting, not a code change.
-2. **Move the pre-commit-only and make-only checks into CI**: doc links,
-   status markers, leaked markup, FILEMAP `--check`, `prompt_refs`, sanitizer
-   sync, `gofmt`/`cargo fmt`, `ruff check scripts/`, ruff + mypy over
-   `evaluators/`, Go integration tests. All but `ruff check scripts/` pass on
-   `main` today ([ISSUE-0134](../issues/ISSUE-0134-scripts-tree-is-not-linted.md)
-   has 31 findings, 13 auto-fixable).
+1. **Make the six advisory CI jobs required.** File size, licences, web
+   console, dockerignore hygiene, cost gate, docs hygiene — all green on
+   `main`; a required-check rule costs nothing and closes a merge path that
+   currently accepts red. This is a repository setting, not a code change,
+   and needs the owner's hand.
+2. ~~Move the pre-commit-only and make-only checks into CI.~~ Done in the
+   CI-promotion PR of the methodology series: gofmt, cargo fmt, ruff + mypy
+   on `scripts/` and `evaluators/`, the Go integration tests, the sanitizer
+   sync, `prompt_refs`, and the four doc-hygiene checks. `notices-check`
+   stays make-only on purpose (see its row).
 3. **Arm the perf gate** by dispatching `perf-baseline-capture.yml` once.
 4. **Decide the PR-size rule**: enforce it (a size label or a check) or
    restate it as guidance with the split heuristic it actually follows.
