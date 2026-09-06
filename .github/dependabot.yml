@@ -49,6 +49,33 @@ updates:
       # docs/issues/ISSUE-0144-anthropic-sdk-pinned-below-1x.md.
       - dependency-name: "anthropic"
         update-types: ["version-update:semver-major"]
+      # The generated protobuf stubs are committed, and a CI gate fails the
+      # build when they drift from proto/. What holds them reproducible is the
+      # protobuf `<6` cap: it constrains which grpcio-tools pip may resolve
+      # inside `>=1.71.2,<2`, and that is the thing that actually emits
+      # `*_pb2.py`. mypy-protobuf is pinned exactly for the same reason, one
+      # layer up, for the `.pyi`. Widening either turns every generated file
+      # stale at once — not just the mypy-protobuf output — which is what
+      # #870 and then #879 both did.
+      #
+      # Regenerating against a new protobuf major is real work with a
+      # toolchain requirement (CLAUDE.md pins protoc and the plugins to the
+      # versions CI uses), so it does not belong in a monthly sweep. Same
+      # trade as the anthropic rule above: the deliberate upgrade will not be
+      # offered either, and is tracked in
+      # docs/issues/ISSUE-0145-proto-toolchain-pinned-to-protobuf-5x.md.
+      - dependency-name: "protobuf"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "mypy-protobuf"
+        update-types: ["version-update:semver-major"]
+      # grpcio-tools is pinned exactly in agents/pyproject.toml because it
+      # emits the committed stubs. Every release above 1.71.2 requires
+      # protobuf>=6, so under the cap above they cannot install at all — an
+      # offer to bump the minor is an offer to break `pip install`. Patch
+      # releases inside 1.71.x stay available.
+      - dependency-name: "grpcio-tools"
+        update-types:
+          ["version-update:semver-major", "version-update:semver-minor"]
 
   - package-ecosystem: cargo
     directory: /cli
