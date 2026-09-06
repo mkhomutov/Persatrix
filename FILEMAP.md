@@ -15,11 +15,11 @@
 | `prompts/` | 48 |
 | `cli/` | 42 |
 | `scripts/` | 33 |
-| `(root)` | 30 |
+| `(root)` | 31 |
 | `cmd/` | 23 |
 | `config/` | 22 |
 | `evaluators/` | 22 |
-| `.github/` | 16 |
+| `.github/` | 15 |
 | `schemas/` | 7 |
 | `blueprints/` | 4 |
 | `proto/` | 3 |
@@ -59,7 +59,6 @@
 ├── .env.example
 ├── .gitattributes
 ├── .github/
-│   ├── CLAUDE.md
 │   ├── ISSUE_TEMPLATE/
 │   │   ├── bug_report.yml
 │   │   ├── config.yml
@@ -81,6 +80,7 @@
 │       └── scheduled-audit.yml
 ├── .gitignore
 ├── CHANGELOG.md
+├── CLAUDE.md
 ├── CONTRIBUTING.md
 ├── Dockerfile.agent
 ├── Dockerfile.orchestrator
