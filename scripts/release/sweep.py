@@ -19,9 +19,16 @@ Usage::
 
 Dry-run by default: the full sweep takes 15–25 minutes (the Python unit
 tree alone is ~5.5 min) and ``make ui`` overwrites a tracked file that the
-sweep restores afterwards. Gates run through ``$SHELL`` from the repo root
-with ``PYTHON=<repo .venv python>`` exported so ``make`` targets use the
-environment that has the dev dependencies.
+sweep restores afterwards (only if it was clean before; a timeout mid-gate
+cannot restore it — ``git checkout -- internal/ui/assets/index.html``).
+Gates are POSIX shell lines (Git Bash on Windows) run from the repo root.
+The repo ``.venv`` interpreter reaches the ``make`` targets through
+``MAKEFLAGS=PYTHON=…``: the Makefile assigns ``PYTHON := python3``, which
+overrides a plain environment variable, and a command-line variable is the
+one form that wins.
+
+Not covered, by design: "this release's named suites" (the checklist's
+per-release line — run them by hand) and the live arc.
 """
 
 from __future__ import annotations
@@ -39,7 +46,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from scripts.checks import ensure_utf8_streams  # noqa: E402
+
 DEFAULT_TIMEOUT_S = 1800
+_UI_PLACEHOLDER = "internal/ui/assets/index.html"
 
 
 @dataclass(frozen=True)
@@ -63,7 +73,7 @@ GATES: tuple[Gate, ...] = (
     Gate("make test", "make test", "four legs: go, python, agents, integration"),
     Gate("cargo test", "cd cli && cargo test", "incl. the CLI↔server lockstep guards"),
     Gate("make lint", "make lint", "golangci-lint, ruff + mypy, imports-check, clippy"),
-    Gate("mypy tests", "mypy tests/", "the separate leg"),
+    Gate("mypy trees", "mypy tests/ scripts/ evaluators/", "the legs CI runs outside agents/"),
     Gate("make validate", "make validate"),
     Gate(
         "proto in sync",
@@ -73,9 +83,10 @@ GATES: tuple[Gate, ...] = (
     Gate("sanitizer sync", "make generate-sanitizer-patterns-check"),
     Gate(
         "ui build + test",
+        f"git diff --quiet -- {_UI_PLACEHOLDER} && clean=1; "
         "make ui && make ui-test && make ui-html-check; rc=$?; "
-        "git checkout -- internal/ui/assets/index.html; exit $rc",
-        "restores the tracked placeholder index.html afterwards",
+        f'[ -n "$clean" ] && git checkout -- {_UI_PLACEHOLDER}; exit $rc',
+        "restores the tracked placeholder index.html afterwards (if it was clean before)",
     ),
     Gate("eval-replay", "make eval-replay", "all recipes must replay green"),
     Gate("licenses", "make check-licenses"),
@@ -103,6 +114,9 @@ def select(
     chosen = [g for g in gates if g.default or include_optional]
     if only:
         wanted = [o.strip() for o in only]
+        unknown = sorted(set(wanted) - {g.name for g in gates})
+        if unknown:
+            raise ValueError(f"unknown gate(s): {', '.join(unknown)}")
         chosen = [g for g in chosen if g.name in wanted]
     if skip:
         unwanted = {s.strip() for s in skip}
@@ -111,18 +125,31 @@ def select(
 
 
 def _venv_python() -> str:
-    venv = REPO_ROOT / ".venv" / "bin" / "python"
-    return str(venv) if venv.exists() else sys.executable
+    for rel in ("bin/python", "Scripts/python.exe"):
+        venv = REPO_ROOT / ".venv" / rel
+        if venv.exists():
+            return str(venv)
+    return sys.executable
+
+
+def gate_env(python: str, base: dict[str, str] | None = None) -> dict[str, str]:
+    """The environment a gate runs in: the venv first on PATH, and reaching ``make``.
+
+    ``PYTHON`` in the environment alone is ignored by the Makefile's
+    ``PYTHON := python3``; a command-line variable via ``MAKEFLAGS`` wins.
+    """
+    env = dict(os.environ if base is None else base)
+    env["PYTHON"] = python
+    env["MAKEFLAGS"] = (env.get("MAKEFLAGS", "") + f" PYTHON={python}").strip()
+    env["PATH"] = str(Path(python).parent) + os.pathsep + env.get("PATH", "")
+    return env
 
 
 def shell_runner(timeout_s: int = DEFAULT_TIMEOUT_S) -> Callable[[Gate], GateResult]:
     """The real runner: one shell line per gate, output captured, tail kept on failure."""
 
     def run(gate: Gate) -> GateResult:
-        env = dict(os.environ)
-        python = _venv_python()
-        env["PYTHON"] = python
-        env["PATH"] = str(Path(python).parent) + os.pathsep + env.get("PATH", "")
+        env = gate_env(_venv_python())
         t0 = time.monotonic()
         try:
             proc = subprocess.run(
@@ -177,6 +204,7 @@ def exit_code(results: list[GateResult]) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    ensure_utf8_streams()
     parser = argparse.ArgumentParser(description="Run the release checklist §1 gates.")
     parser.add_argument(
         "--execute", action="store_true", help="run the gates (default: print the plan)",
@@ -192,12 +220,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--report", type=Path, help="write the results table to this file")
     args = parser.parse_args(argv)
 
-    gates = select(
-        GATES,
-        only=args.only.split(",") if args.only else None,
-        skip=args.skip.split(",") if args.skip else None,
-        include_optional=args.include_optional,
-    )
+    try:
+        gates = select(
+            GATES,
+            only=args.only.split(",") if args.only else None,
+            skip=args.skip.split(",") if args.skip else None,
+            include_optional=args.include_optional,
+        )
+    except ValueError as exc:
+        print(f"error: {exc}; gates are: {', '.join(g.name for g in GATES)}", file=sys.stderr)
+        return 2
+    if not gates:
+        print("error: nothing to run after --only/--skip", file=sys.stderr)
+        return 2
     if not args.execute:
         print("Dry run — pass --execute to run. The sweep would run, in order:\n")
         for g in gates:

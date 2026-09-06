@@ -17,7 +17,7 @@
 
 Every gate as a command, run on a clean checkout of the post-bump tip
 (`make release-sweep RUN=1 REPORT=/tmp/sweep.md` runs the list below and
-prints the results table; `--include-optional` adds the Docker smoke):
+prints the results table; `OPTIONAL=1` adds the Docker smoke):
 
 - [ ] `make test` — all four legs (`test-go`, `test-python`, `test-agents`, `test-integration`)
 - [ ] `cd cli && cargo test` — incl. the CLI↔server lockstep guards

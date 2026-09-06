@@ -261,7 +261,7 @@ post-bump tip; ROADMAP reads `✅ All pre-tag gates green`; release notes drafte
   sync, `make ui` + `make ui-test` + `make ui-html-check`, `make eval-replay`,
   licences, notices (state whether a delta is expected), sizes, doc gates,
   indexes, and the separate `mypy tests/` leg — and prints the results table
-  for the report; add the offline Docker smoke with `--include-optional`.
+  for the report; add the offline Docker smoke with `OPTIONAL=1`.
 - Do **not** write "Released". The tag does not exist yet.
 
 ### Tag and GitHub Release

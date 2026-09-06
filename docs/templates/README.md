@@ -12,6 +12,7 @@ the checks rely on it.
 | `PLAN_AMENDMENT_TEMPLATE.md` | `docs/vX.Y.Z-plan-amendment-YYYY-MM-DD.md`, or a dated section in a sequencing doc / RFC | Whenever a ratified decision changes |
 | `PR_PLAN_TEMPLATE.md` | `docs/rfcs/NNNN-pr-plan.md` or `docs/issues/ISSUE-NNNN-…-pr-plan.md` | RFC Phase 3, or an issue-owned workstream |
 | `RELEASE_PREP_PLAN_TEMPLATE.md` | `docs/vX.Y.Z-release-prep-plan.md` | Phase 2 (release-prep PR 0) |
+| `RELEASE_BASELINE_TEMPLATE.md` | `docs/vX.Y.Z-release-baseline.md` | Phase 2, when the prep plan nears the word cap |
 | `EXECUTION_REPORT_TEMPLATE.md` | `docs/manual-tests/vX.Y.Z-execution-report.md` | Release-prep PR 1 |
 | `RELEASE_CHECKLIST_TEMPLATE.md` | `docs/vX.Y.Z-release-checklist.md` | Release-prep PR 2 |
 | `POST_RELEASE_FOLLOWUP_TEMPLATE.md` | The Phase 4 PR body | After the tag |
