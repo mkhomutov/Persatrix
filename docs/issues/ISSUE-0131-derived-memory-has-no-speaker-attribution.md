@@ -6,6 +6,7 @@ severity: medium
 area: memory
 created: 2026-08-19
 closed: 2026-09-03
+closed_pr: 855
 refs:
   - docs/issues/ISSUE-0082-orchestrator-per-request-session-principal-emission.md
   - docs/issues/ISSUE-0130-catchup-replay-rederives-memory-under-default-principal.md

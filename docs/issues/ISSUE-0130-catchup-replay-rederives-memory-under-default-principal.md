@@ -6,6 +6,7 @@ severity: high
 area: memory
 created: 2026-08-18
 closed: 2026-09-03
+closed_pr: 855
 refs:
   - agents/channel_catchup.py
   - agents/persona_runtime/__init__.py

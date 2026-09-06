@@ -6,6 +6,7 @@ severity: low
 area: docs/manual-tests
 created: 2026-08-08
 closed: 2026-09-03
+closed_pr: 855
 refs:
   - docs/manual-tests/MT-MEMORY-MULTIUSER-001.md
   - docs/manual-tests/MT-MEMORY-GROUP-TENANT-001.md

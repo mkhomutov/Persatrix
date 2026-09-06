@@ -6,6 +6,7 @@ severity: high
 area: agents/memory
 created: 2026-08-06
 closed: 2026-09-03
+closed_pr: 855
 refs:
   - docs/issues/ISSUE-0082-orchestrator-per-request-session-principal-emission.md
   - docs/issues/ISSUE-0124-orchestrator-hop-drops-tenant-on-agent-cascade.md

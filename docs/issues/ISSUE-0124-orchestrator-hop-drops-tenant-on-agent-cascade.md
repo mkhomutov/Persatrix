@@ -6,6 +6,7 @@ severity: high
 area: internal/channels
 created: 2026-08-06
 closed: 2026-09-03
+closed_pr: 855
 refs:
   - docs/issues/ISSUE-0082-orchestrator-per-request-session-principal-emission.md
   - docs/issues/ISSUE-0123-per-speaker-interaction-scope.md

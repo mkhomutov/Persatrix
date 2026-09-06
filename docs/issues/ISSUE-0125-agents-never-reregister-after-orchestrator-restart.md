@@ -6,6 +6,7 @@ severity: medium
 area: internal/registry
 created: 2026-08-07
 closed: 2026-09-03
+closed_pr: 855
 refs:
   - internal/registry/registry.go
   - internal/channels/grpc_dispatcher.go
