@@ -434,17 +434,19 @@ jobs:
         run: make rfcs-check
 
   docs-hygiene:
-    # The four documentation checks the pre-commit hook runs (links + anchors,
-    # leaked tool-call markup, status markers, FILEMAP freshness) had no CI
-    # counterpart, so a checkout without the hook — or a `--no-verify` — could
-    # merge a broken link or a stale file map (ISSUE-0133: the #840 worktree
-    # corruption would have merged a wrong FILEMAP.md unnoticed). All four are
-    # stdlib-only; the runner's system python3 suffices, and the checks read
-    # `git ls-files`, so the default checkout depth is enough.
+    # The documentation checks the pre-commit hook runs (links + anchors,
+    # leaked tool-call markup, status markers, FILEMAP freshness, merged-PR
+    # history, plan status) had no CI counterpart, so a checkout without the
+    # hook — or a `--no-verify` — could merge a broken link or a stale file map
+    # (ISSUE-0133: the #840 worktree corruption would have merged a wrong
+    # FILEMAP.md unnoticed). All are stdlib-only; the runner's system python3
+    # suffices. Full history is fetched because the last two read `git log`.
     name: Docs hygiene
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # merged-prs + plan-status read the whole first-parent log
 
       - uses: actions/setup-python@v5
         with:
@@ -471,6 +473,19 @@ jobs:
       # The failure message names the fix.
       - name: Check FILEMAP.md is up to date
         run: python scripts/generate_filemap.py --check
+
+      # docs/merged-prs.md is generated from the squash-merge subjects on main
+      # (the hand-kept ROADMAP table had stopped at #708 in June). Unlike
+      # FILEMAP, the check tolerates being behind by the newest merges — the
+      # file can never contain the merge that lands it — and fails only on a
+      # hand edit or format drift. The hook catches it up on the next commit.
+      - name: Check docs/merged-prs.md is up to date
+        run: python scripts/merged_prs.py --check
+
+      # A plan row that says "PR open (#N)" after #N merged is the most common
+      # status-hygiene defect in the history. Checked against the same log.
+      - name: Check no plan row announces an already-merged PR as open
+        run: python scripts/checks/plan_status.py
 
   file-size-check:
     name: File size check

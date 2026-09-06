@@ -1255,7 +1255,7 @@ Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) "St
 | 5c | Review follow-ups slice 3 — PR 3 review storage/render defensive fixes | `feature/v031-rfc0026-followups-pr3a` | ✅ Merged | [#346](https://github.com/mkhomutov/Persatrix/pull/346) | 2026-05-15 |
 | 5d | Review follow-ups slice 4 — PR 3 review tests + counter polish | `feature/v031-rfc0026-followups-pr3b` | ✅ Merged | [#347](https://github.com/mkhomutov/Persatrix/pull/347) | 2026-05-15 |
 | 5e | Review follow-ups slice 5 — PR 4 review (audit, chunking, edge cases) | `feature/v031-rfc0026-followups-pr4` | ✅ Merged | [#348](https://github.com/mkhomutov/Persatrix/pull/348) | 2026-05-15 |
-| 6 | RFC close | `feature/v031-rfc0026-close` | 🔀 PR open | [#359](https://github.com/mkhomutov/Persatrix/pull/359) | — |
+| 6 | RFC close | `feature/v031-rfc0026-close` | ✅ Merged | [#359](https://github.com/mkhomutov/Persatrix/pull/359) | 2026-05-16 |
 
 ---
 

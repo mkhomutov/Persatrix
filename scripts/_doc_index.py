@@ -115,12 +115,18 @@ def run_index_cli(
     repo_root: Path,
     build_content: Callable[[], tuple[str, int, list[str]]],
     make_target: str,
+    compare: Callable[[str, str], str | None] | None = None,
 ) -> int:
     """Drive the standard ``--check`` / ``--print`` CLI for an INDEX generator.
 
     ``build_content`` must return ``(content, row_count, errors)``. When
     ``errors`` is non-empty the runner prints them to stderr and exits 1
     before touching ``index_file``.
+
+    ``compare(committed, generated)`` may replace the byte-exact ``--check``
+    comparison: it returns ``None`` when the committed file is acceptable and
+    a reason string otherwise. The merged-PR history uses it, because that
+    file can never contain the merge that lands it.
     """
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -149,9 +155,12 @@ def run_index_cli(
     rel = index_file.relative_to(repo_root)
     if args.check:
         current = index_file.read_text(encoding="utf-8") if index_file.exists() else ""
-        if current != new_content:
+        reason = compare(current, new_content) if compare else (
+            None if current == new_content else "is stale"
+        )
+        if reason is not None:
             print(
-                f"error: {rel} is stale — run `make {make_target}`",
+                f"error: {rel} {reason} — run `make {make_target}`",
                 file=sys.stderr,
             )
             return 1
