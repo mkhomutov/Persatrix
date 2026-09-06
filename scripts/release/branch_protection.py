@@ -92,7 +92,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Show or apply main's required status checks.")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--show", action="store_true", help="diff the file against the live setting")
-    mode.add_argument("--apply", action="store_true", help="PATCH the live setting to the file (admin)")
+    mode.add_argument(
+        "--apply", action="store_true", help="PATCH the live setting to the file (admin)",
+    )
     args = parser.parse_args(argv)
     desired = load_desired()
     try:
