@@ -122,7 +122,7 @@ RFC 0010 (Protocols + Organizations)
 
 ### Artifacts
 
-- `docs/rfcs/NNNN-pr-plan.md` with full PR sequence, dependency graph, and estimates.
+- `docs/rfcs/NNNN-pr-plan.md` with full PR sequence, dependency graph, and estimates (start from [`docs/templates/PR_PLAN_TEMPLATE.md`](templates/PR_PLAN_TEMPLATE.md)).
 - RFC status at `🚧 Implementing`.
 - ROADMAP.md updated.
 

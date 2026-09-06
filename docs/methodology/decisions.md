@@ -117,7 +117,8 @@ under which it is dropped.
 ## Amendments
 
 **What**: the only mechanism that changes a ratified decision — a sequencing
-entry, a scope lock, an RFC's phased plan, or a plan's own structure.
+entry, a scope lock, an RFC's phased plan, or a plan's own structure. Shape:
+[`PLAN_AMENDMENT_TEMPLATE.md`](../templates/PLAN_AMENDMENT_TEMPLATE.md).
 
 **Where they live**
 
