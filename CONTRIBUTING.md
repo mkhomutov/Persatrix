@@ -32,6 +32,9 @@ make validate # config validation
 - **[`commitlint.yml`](.github/workflows/commitlint.yml)** — Enforces Conventional Commit format on PR titles (for automated changelog generation).
 - **[`scheduled-audit.yml`](.github/workflows/scheduled-audit.yml)** — Weekly dependency audit for Rust crates.
 - **[`perf-baseline-capture.yml`](.github/workflows/perf-baseline-capture.yml)** — Maintainer-dispatched capture of the recall-latency baseline that arms the perf gate.
+- **[`dependabot.yml`](.github/dependabot.yml)** — Monthly grouped dependency-update PRs per ecosystem, titled `chore(deps): …` so the title check passes.
+
+Which CI jobs branch protection requires is versioned in [`docs/methodology/branch-protection.json`](docs/methodology/branch-protection.json); `make branch-protection-show` diffs it against the live setting.
 
 ### Pre-commit Hook
 

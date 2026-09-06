@@ -1,0 +1,66 @@
+# Dependabot version updates — committed so the cadence is reviewable.
+#
+# Until 2026-09-06 only GitHub's security updates ran (they need no config),
+# which is why Go, npm and Cargo bump PRs existed with no file here. Version
+# updates are deliberately quiet: once a month, one grouped PR per ecosystem,
+# so a review sees one diff and CI runs once. The commit prefix matches the
+# PR-title check (`commitlint.yml`): `chore(deps)` is an accepted type/scope.
+# Security updates keep their own cadence regardless of this file.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      go:
+        patterns: ["*"]
+    commit-message:
+      prefix: "chore(deps)"
+    open-pull-requests-limit: 2
+
+  - package-ecosystem: pip
+    directory: /agents
+    schedule:
+      interval: monthly
+    groups:
+      python:
+        patterns: ["*"]
+    commit-message:
+      prefix: "chore(deps)"
+      prefix-development: "chore(deps)"
+    open-pull-requests-limit: 2
+
+  - package-ecosystem: cargo
+    directory: /cli
+    schedule:
+      interval: monthly
+    groups:
+      rust:
+        patterns: ["*"]
+    commit-message:
+      prefix: "chore(deps)"
+    open-pull-requests-limit: 2
+
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: monthly
+    groups:
+      web:
+        patterns: ["*"]
+    commit-message:
+      prefix: "chore(deps)"
+      prefix-development: "chore(deps)"
+    open-pull-requests-limit: 2
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "chore(deps)"
+    open-pull-requests-limit: 1
