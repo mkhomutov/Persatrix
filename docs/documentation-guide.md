@@ -127,14 +127,14 @@ One canonical document per topic. Link to it; do not copy from it.
 
 ## Where Documents Live, and When They Freeze
 
-| Kind | Path | Lifecycle |
-|------|------|-----------|
-| Standing reference (specs, guides, methodology, glossaries) | `docs/`, `docs/guides/`, `docs/methodology/`, `docs/diagrams/` | Edited whenever the thing they describe changes; `Last updated` bumped |
-| RFCs and their PR plans | `docs/rfcs/NNNN-*.md`, `docs/rfcs/NNNN-pr-plan.md` | Live until `✅ Implemented`; then edited only for divergence notes and status |
-| Issues | `docs/issues/ISSUE-NNNN-*.md` | Live until `resolved`; resolved files stay for `grep` |
-| Manual tests | `docs/manual-tests/MT-*.md` | Live; versioned (`v1.1`, `v1.2`) when a leg changes |
-| Version-cycle documents | `docs/vX.Y.Z-plan.md`, `-scope-locks.md`, `-plan-amendment-*.md`, `-release-prep-plan.md`, `-release-baseline.md`, `-release-checklist.md` | Edited during the cycle; **frozen at the post-release follow-up** except for the Released stamp |
-| Release evidence | `docs/manual-tests/vX.Y.Z-execution-report.md` | Written once against the tag; never edited after |
+| Kind | Path | Lifecycle | Template |
+|------|------|-----------|----------|
+| Standing reference (specs, guides, methodology, glossaries) | `docs/`, `docs/guides/`, `docs/methodology/`, `docs/diagrams/` | Edited whenever the thing they describe changes; `Last updated` bumped | — |
+| RFCs and their PR plans | `docs/rfcs/NNNN-*.md`, `docs/rfcs/NNNN-pr-plan.md` | Live until `✅ Implemented`; then edited only for divergence notes and status | `rfcs/RFC_TEMPLATE.md`, `templates/PR_PLAN_TEMPLATE.md` |
+| Issues | `docs/issues/ISSUE-NNNN-*.md` | Live until `resolved`; resolved files stay for `grep` | `issues/ISSUE-TEMPLATE.md` |
+| Manual tests | `docs/manual-tests/MT-*.md` | Live; versioned (`v1.1`, `v1.2`) when a leg changes | `templates/MANUAL_TEST_TEMPLATE.md` |
+| Version-cycle documents | `docs/vX.Y.Z-plan.md`, `-scope-locks.md`, `-plan-amendment-*.md`, `-release-prep-plan.md`, `-release-baseline.md`, `-release-checklist.md` | Edited during the cycle; **frozen at the post-release follow-up** except for the Released stamp | one each in [`docs/templates/`](templates/README.md) |
+| Release evidence | `docs/manual-tests/vX.Y.Z-execution-report.md` | Written once against the tag; never edited after | `templates/EXECUTION_REPORT_TEMPLATE.md` |
 
 **Archival rule.** A version-cycle document is *archived* when its version has
 shipped — the changelog carries its dated section and the post-release

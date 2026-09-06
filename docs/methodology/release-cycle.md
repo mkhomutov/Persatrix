@@ -66,7 +66,10 @@ changes; the index does not change.
 
 The plan is a **thin orchestration overlay**: it owns sequencing, the live
 arc, and whatever no RFC or issue-owned PR plan already owns. It does not
-restate designs that live elsewhere. Its fixed sections, in order:
+restate designs that live elsewhere. Start from
+[`VERSION_PLAN_TEMPLATE.md`](../templates/VERSION_PLAN_TEMPLATE.md) (locks:
+[`SCOPE_LOCKS_TEMPLATE.md`](../templates/SCOPE_LOCKS_TEMPLATE.md)). Its fixed
+sections, in order:
 
 1. **Header** — status, target version, created date, branch prefix
    (`feature/v0315-`), target `main`, squash merge, codename, goal.
@@ -151,7 +154,9 @@ Rules that hold for every PR:
 **Entry**: Phase 1 exit.
 **Exit**: `docs/vX.Y.Z-release-prep-plan.md` merged.
 
-The release-prep plan owns Phase 3's sequencing. Its sections:
+The release-prep plan owns Phase 3's sequencing. Start from
+[`RELEASE_PREP_PLAN_TEMPLATE.md`](../templates/RELEASE_PREP_PLAN_TEMPLATE.md).
+Its sections:
 
 - **Header** as in the master plan, plus branch prefix `feature/v0315-release-prep-`
   and a link to the master plan's Phase 2 anchor.
@@ -182,6 +187,7 @@ The release-prep plan owns Phase 3's sequencing. Its sections:
 ### PR 1 — the live arc and its execution report
 
 **Entry**: PR 0 merged. **Exit**: `docs/manual-tests/vX.Y.Z-execution-report.md`
+(from [`EXECUTION_REPORT_TEMPLATE.md`](../templates/EXECUTION_REPORT_TEMPLATE.md))
 at ✅ Complete with zero `Fail` and zero `Pending`.
 
 - Run the designated manual-test arc **once**, **live**, on a real (paid)
@@ -220,8 +226,9 @@ README Roadmap row and ROADMAP Version Map read "release prep".
 
 - **Verify**, against shipped behaviour, every guide, RFC section, and diagram
   this release edited. Fix stale spots in this PR.
-- Create the checklist from the previous one **and the baseline's list of
-  differing facts**. Sections: §1 pre-release verification (every gate as a
+- Create the checklist from
+  [`RELEASE_CHECKLIST_TEMPLATE.md`](../templates/RELEASE_CHECKLIST_TEMPLATE.md),
+  the previous one, **and the baseline's list of differing facts**. Sections: §1 pre-release verification (every gate as a
   command), §2 version alignment, §3 changelog with §3.1 upgrade notes, §4
   manual-test sign-off (cites the report), §5 tag + GitHub Release procedure,
   §6 Known Gaps to state in release notes, §7 summary checklist.
@@ -273,7 +280,8 @@ absolute GitHub URLs; relative doc links do not resolve from a release page.
 ## Phase 4 — post-release follow-up PR
 
 **Entry**: tag pushed and Release published. **Exit**: nothing in the tree
-still says the release is pending.
+still says the release is pending. PR body from
+[`POST_RELEASE_FOLLOWUP_TEMPLATE.md`](../templates/POST_RELEASE_FOLLOWUP_TEMPLATE.md).
 
 - Statuses → **Released** with the tag link: README roadmap row, ROADMAP
   Version Map + `Last updated` + Current phase, the checklist, the prep plan,
