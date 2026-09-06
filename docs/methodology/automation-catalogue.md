@@ -41,6 +41,8 @@ dependencies.
 | `scripts/generate_filemap.py` | Regenerate `FILEMAP.md` from `git ls-files` (tracked files only — `git add` new files first). **Kept on purpose** (decision 2026-09-06): it is the one-read index assistants load before touching the tree, and the writer now leaves the date alone so it no longer churns on every commit | `--check` (ignores the header date) | Pre-commit regenerates and stages it; CI (`Docs hygiene`) checks it |
 | `make generate-persona-nickname COUNT= SEED=` (`scripts/persona_nickname_generator.py`) | Nickname-style persona id/name pairs | — | On demand |
 | `make bump-version VERSION=X.Y.Z [DRY_RUN=--dry-run]` (`scripts/bump_version.py`) | Bump the five version strings ([guide](../guides/version-bump.md)) | checklist §2 | Release-prep PR 3 |
+| `make release-doc KIND= VERSION= CODENAME= [PREVIOUS=] [FORCE=1]` (`scripts/release/open_doc.py`) | Open a plan / scope-locks / release-prep plan / release baseline / release checklist / execution report from its template with version, codename, previous version and date filled and the guidance blockquotes removed; never overwrites | — | Phase 0, release-prep PRs 0–2 |
+| `make release-sweep [RUN=1] [REPORT=path] [ONLY=…] [SKIP=…] [OPTIONAL=1] [TIMEOUT=s]` (`scripts/release/sweep.py`) | The checklist §1 gates as one command; dry-run prints the plan, `RUN=1` runs them and prints the execution-report results table; `OPTIONAL=1` adds the Docker smoke. The venv interpreter reaches `make` through `MAKEFLAGS` (the Makefile's `PYTHON :=` ignores a plain env var) | — | Release-prep PR 4; PR 1's structural-gates table |
 
 ## Tests
 
