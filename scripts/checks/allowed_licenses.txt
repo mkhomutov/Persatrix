@@ -25,6 +25,13 @@ CC0-1.0
 Unicode-DFS-2016
 Unicode-3.0
 Unlicense
+# A data licence, not a code one. Covers `webpki-root-certs` — the Mozilla
+# trusted certificate-authority list republished by the rustls project as
+# bytes rather than as a program — which entered the Rust tree with reqwest
+# 0.13, whose default TLS path is rustls-platform-verifier. Unrestricted use
+# and redistribution, no share-alike obligation, so redistributing it inside a
+# BUSL-1.1 binary carries no condition we have to meet. Mirrored in deny.toml.
+CDLA-Permissive-2.0
 # Python historical license (Python 1.6.1 era). OSI-approved, permissive,
 # compatible with BUSL-1.1 distribution. Transitively pulled in by `regex`
 # which is dual-licensed Apache-2.0 AND CNRI-Python.
