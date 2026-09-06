@@ -537,6 +537,9 @@ release-doc: ## Open a version-cycle doc from its template (KIND=plan|scope-lock
 	@test -n "$(KIND)" -a -n "$(VERSION)" -a -n "$(CODENAME)" || (echo "error: KIND, VERSION and CODENAME are required" && exit 1)
 	$(PYTHON) scripts/release/open_doc.py --kind $(KIND) --version $(VERSION) --codename "$(CODENAME)" $(if $(PREVIOUS),--previous $(PREVIOUS),) $(if $(FORCE),--force,)
 
+conformance-check: ## Fail if the checkout lacks an artifact the methodology manifest names (docs/methodology/conformance.json)
+	$(PYTHON) scripts/checks/methodology_conformance.py
+
 branch-protection-show: ## Diff docs/methodology/branch-protection.json against main's live required checks (gh api)
 	$(PYTHON) scripts/release/branch_protection.py --show
 
