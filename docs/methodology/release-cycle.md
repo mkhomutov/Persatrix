@@ -226,9 +226,10 @@ README Roadmap row and ROADMAP Version Map read "release prep".
 
 - **Verify**, against shipped behaviour, every guide, RFC section, and diagram
   this release edited. Fix stale spots in this PR.
-- Create the checklist from
-  [`RELEASE_CHECKLIST_TEMPLATE.md`](../templates/RELEASE_CHECKLIST_TEMPLATE.md),
-  the previous one, **and the baseline's list of differing facts**. Sections: §1 pre-release verification (every gate as a
+- Create the checklist with `make release-doc KIND=release-checklist
+  VERSION=X.Y.Z CODENAME="…"` (fills the template's placeholders), then
+  reconcile it against the previous one **and the baseline's list of
+  differing facts**. Sections: §1 pre-release verification (every gate as a
   command), §2 version alignment, §3 changelog with §3.1 upgrade notes, §4
   manual-test sign-off (cites the report), §5 tag + GitHub Release procedure,
   §6 Known Gaps to state in release notes, §7 summary checklist.
@@ -254,11 +255,13 @@ README Roadmap row and ROADMAP Version Map read "release prep".
 **Entry**: PR 3 merged. **Exit**: every §1 gate green **live on host** on the
 post-bump tip; ROADMAP reads `✅ All pre-tag gates green`; release notes drafted.
 
-- Run the full sweep on a clean checkout: all four `make test` legs,
-  `cargo test`, `make lint`, `make validate`, `make proto && git diff
-  --exit-code`, `make check-licenses`, `make notices` (state whether a delta
-  is expected), sanitizer sync, `make ui` + `make ui-test` + `make ui-html-check`,
-  `make eval-replay`, the separate `mypy tests/` leg, the offline Docker smoke.
+- Run the full sweep on a clean checkout: `make release-sweep RUN=1
+  REPORT=/tmp/sweep.md` runs the checklist §1 list — all four `make test`
+  legs, `cargo test`, `make lint`, `make validate`, proto sync, sanitizer
+  sync, `make ui` + `make ui-test` + `make ui-html-check`, `make eval-replay`,
+  licences, notices (state whether a delta is expected), sizes, doc gates,
+  indexes, and the separate `mypy tests/` leg — and prints the results table
+  for the report; add the offline Docker smoke with `--include-optional`.
 - Do **not** write "Released". The tag does not exist yet.
 
 ### Tag and GitHub Release

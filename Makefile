@@ -526,6 +526,13 @@ rfcs-check: ## Fail if docs/rfcs/INDEX.md is stale or front-matter is invalid (C
 	$(PYTHON) scripts/rfcs.py --check
 
 # ─── Version ────────────────────────────────────────────
+release-sweep: ## Print the release checklist §1 gate sweep (dry run); RUN=1 executes it, REPORT=path writes the table
+	$(PYTHON) scripts/release/sweep.py $(if $(RUN),--execute,) $(if $(REPORT),--report $(REPORT),) $(if $(ONLY),--only "$(ONLY)",) $(if $(SKIP),--skip "$(SKIP)",)
+
+release-doc: ## Open a version-cycle doc from its template (KIND=plan|scope-locks|release-prep-plan|release-checklist|execution-report VERSION=X.Y.Z CODENAME="…")
+	@test -n "$(KIND)" -a -n "$(VERSION)" -a -n "$(CODENAME)" || (echo "error: KIND, VERSION and CODENAME are required" && exit 1)
+	$(PYTHON) scripts/release/open_doc.py --kind $(KIND) --version $(VERSION) --codename "$(CODENAME)"
+
 bump-version: ## Bump version across all components (VERSION=X.Y.Z [DRY_RUN=--dry-run])
 	@test -n "$(VERSION)" || (echo "error: VERSION is required (e.g. make bump-version VERSION=0.3.0)" && exit 1)
 	$(PYTHON) scripts/bump_version.py $(VERSION) $(DRY_RUN)

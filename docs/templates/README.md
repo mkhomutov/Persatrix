@@ -20,6 +20,10 @@ the checks rely on it.
 RFCs have their own template at [`docs/rfcs/RFC_TEMPLATE.md`](../rfcs/RFC_TEMPLATE.md)
 and issues at [`docs/issues/ISSUE-TEMPLATE.md`](../issues/ISSUE-TEMPLATE.md).
 
+`make release-doc KIND=<kind> VERSION=X.Y.Z CODENAME="…"` copies a template to
+its versioned path with `vX.Y.Z`, `<Codename>`, the previous version and the
+date filled in and the guidance blockquotes removed (`scripts/release/open_doc.py`).
+
 ## Conventions the templates assume
 
 - **Links in the produced document are relative** and are checked by
