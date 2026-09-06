@@ -14,8 +14,22 @@ dependencies = [
     "protobuf>=5.28.0,<6",
     "pyyaml>=6.0,<7",
     "aiohttp>=3.9.0,<4",
+    # The <1 cap is load-bearing, not just cautious: anthropic 1.x removed
+    # `temperature` from `messages.create`, and AnthropicProvider passes it on
+    # every call (agents/llm_providers.py), so 1.x turns every Anthropic
+    # request into a TypeError raised before the request is even sent. CI
+    # cannot see it — the unit tests construct the provider (whose signature
+    # did not change) and mock the client from there. Lifting this cap means
+    # moving the provider to whatever 1.x replaced `temperature` with, in the
+    # same change.
     "anthropic>=0.40.0,<1",
-    "openai>=1.50.0,<2",
+    # <4 admits openai 2.x and 3.x. Checked against 3.8.0 on the surface this
+    # tree actually touches — AsyncOpenAI(api_key, base_url),
+    # chat.completions.create(model, messages, max_tokens, temperature, tools),
+    # and the fields _normalize reads back (choices[].message.tool_calls[]
+    # .function, finish_reason, usage.prompt_tokens/completion_tokens) — all
+    # still present.
+    "openai>=1.50.0,<4",
     "opentelemetry-api>=1.28.0,<2",
     "opentelemetry-sdk>=1.28.0,<2",
     "opentelemetry-exporter-otlp-proto-http>=1.28.0,<2",
@@ -26,7 +40,7 @@ dependencies = [
     # install closure for one PR cycle. PR 3 will reintroduce it alongside
     # its first consumer. See PR #163 review round 2 (Nit #3).
     "opentelemetry-semantic-conventions>=0.49b0,<1",
-    "structlog>=24.1.0,<26",
+    "structlog>=24.1.0,<27",
     "jsonschema>=4.23.0,<5",
     "aiosqlite>=0.19.0,<1",
     # RFC 0021 P1 — agents/temporal/ and agents/clock.py read named
@@ -84,7 +98,7 @@ dev = [
 # SystemExit` install hint when the extra is not present. The native
 # `google-genai` SDK (RFC 0053 OQ #1 — not the OpenAI-compat endpoint).
 gemini = [
-    "google-genai>=1.0.0,<2",
+    "google-genai>=1.0.0,<3",
 ]
 # watsonx.ai native SDK — the `create_provider` watsonx branch surfaces the
 # actionable `ImportError → SystemExit` install hint when this extra is absent.
