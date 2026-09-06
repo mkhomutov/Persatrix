@@ -74,10 +74,17 @@ Use these standardized markers consistently:
 | Marker | Meaning |
 |--------|---------|
 | ✅ **Implemented** | Feature is complete and tested |
-| 🚧 **In Progress** | Currently being worked on |
+| 🚀 **Stable** | Proven in production (RFC lifecycle) |
+| 🚧 **In Progress** | Currently being worked on (phase-level) |
+| 🚧 **Implementing** | Implementation in progress (RFC lifecycle) |
 | ⚠️ **Partial** | Partially implemented |
+| ⚠️ **Partially Implemented** | Some phases complete, others remain (RFC lifecycle) |
 | 📋 **Planned** | Designed but not yet started |
+| 📋 **Proposed** | Complete and open for review (RFC lifecycle) |
 | 🔮 **Future** | Post-current-phase roadmap item |
+
+This is the full set `scripts/checks/doc_status_markers.py` accepts; the RFC
+lifecycle markers are defined in [rfcs/README.md](rfcs/README.md#rfc-lifecycle).
 
 ## Ownership Map
 

@@ -32,8 +32,9 @@ not required.
 |------|-----------|-------|-------------|
 | Go builds; Go unit tests pass with `-race` | CONTRIBUTING | `go build ./cmd/orchestrator`; `go test ./internal/... -race -cover` | Required (`Go`) |
 | Committed UI embed is the placeholder, never build output | `.gitignore` comment; `ci.yml` | `grep` assert in the `go` job | Required (`Go`) |
-| Python lint (ruff) — `agents/`, `tests/`, `evaluators/` | instructions; ISSUE-0056 | `ruff check` ×2 | Required (`Python`) |
+| Python lint (ruff) — `agents/`, `tests/` | instructions; ISSUE-0056 | `ruff check` ×2 | Required (`Python`) |
 | Python types (mypy) — `agents/`, `tests/` | instructions; ISSUE-0062 | `mypy` ×2 | Required (`Python`) |
+| Python lint + types — `evaluators/` (the eval harness) | Makefile `lint-python` | `ruff check evaluators/`; `mypy evaluators/` | Make-only — CI lints `agents/` and `tests/` but never `evaluators/` |
 | Python unit + agents + integration suites pass | testing-strategy | three `pytest` steps | Required (`Python`) |
 | Go and Python protobuf stubs match `proto/*.proto`; no orphans | Makefile; ISSUE-0017/0023 | `make proto-go && git diff --exit-code`; `make proto-python-check proto-orphans-check` | Required (`Proto staleness`, `Python`) |
 | MIT-candidate primitives never import BUSL code (RFC 0045 §B) | RFC 0045; CONTRIBUTING | `make imports-check` (import-linter) | Required (`Python`) |
@@ -107,8 +108,10 @@ in the methodology series addresses the first two groups.
    accepts red. This is a repository setting, not a code change.
 2. **Move the pre-commit-only and make-only checks into CI**: doc links,
    status markers, leaked markup, FILEMAP `--check`, `prompt_refs`, sanitizer
-   sync, `gofmt`/`cargo fmt`, `ruff check scripts/`, Go integration tests.
-   Every one passes on `main` today.
+   sync, `gofmt`/`cargo fmt`, `ruff check scripts/`, ruff + mypy over
+   `evaluators/`, Go integration tests. All but `ruff check scripts/` pass on
+   `main` today ([ISSUE-0134](../issues/ISSUE-0134-scripts-tree-is-not-linted.md)
+   has 31 findings, 13 auto-fixable).
 3. **Arm the perf gate** by dispatching `perf-baseline-capture.yml` once.
 4. **Decide the PR-size rule**: enforce it (a size label or a check) or
    restate it as guidance with the split heuristic it actually follows.

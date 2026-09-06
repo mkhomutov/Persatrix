@@ -31,7 +31,7 @@ below.
 | 4 | Python integration | Assembled pieces: close path, channels, memory scoping, catch-up replay, confidentiality, delegation | `tests/integration/test_*.py` (73 files) + `_*_helpers.py` | `make test-integration` | `python` job (since ISSUE-0076) |
 | 5 | Go integration | Scheduler → executor → mock agent over bufconn; rate limiter; audit logger | `tests/integration/*_test.go` (3 files) | `go test ./tests/integration/...` | **none** — see [enforcement matrix](enforcement-matrix.md) |
 | 6 | Rust | CLI parsing, output, and the CLI↔server **lockstep guards** (knob set and wire types parsed out of the Go sources) | inline `#[cfg(test)]` modules (24 files) | `cd cli && cargo test` | `rust` job (since #813) |
-| 7 | Web console | Svelte components and stores under jsdom | `web/src/**/*.test.ts` (30 files) | `make ui-test` (Vitest) | `web-console` job |
+| 7 | Web console | Svelte components and stores under jsdom | `web/src/**/*.test.js` (30 files) | `make ui-test` (Vitest) | `web-console` job |
 | 8 | Golden-trace evals | Persona-quality regressions replayed deterministically against recorded goldens ([RFC 0044](../rfcs/0044-eval-set-golden-traces.md)) | `evaluators/eval_sets/*.yaml` + `.golden.yaml` (5 recipes) | `make eval-replay` | none (Phase 2 CI gate slotted v0.3.16, cuttable) |
 | 9 | Cost regression | The bored-persona gate: an idle persona spends nothing ([RFC 0024](../rfcs/0024-event-driven-scheduling.md)) | `tests/integration/test_bored_persona_cost.py` | direct pytest | `cost-regression-gate` job, path-filtered on wake-path files |
 | 10 | Perf | Personal-tier recall p99/p50 against a committed baseline ([RFC 0029](../rfcs/0029-personal-society-storage-split.md)) | `tests/perf/personal_tier_latency.py` | direct | `python` job, **informational** — no baseline captured yet |
@@ -154,7 +154,7 @@ limit parked in the RFC 0044 PR plan.
 | Perf gate never armed — `tests/perf/baselines/` does not exist | `perf-baseline-capture.yml` exists, never dispatched | maintainer; [ISSUE-0058](../issues/ISSUE-0058-perf-gate-runner-variance-tolerance.md) covers the tolerance |
 | Eval replay not in CI | RFC 0044 Phase 2, v0.3.16 cuttable | sequencing |
 | `cli/tests/` and `internal/testutil/` are prescribed by the instruction files and do not exist | instructions overstate | instruction-file collapse PR in this series |
-| `scripts/` (the checks themselves) is not linted | [ISSUE-0134](../issues/ISSUE-0134-scripts-tree-is-not-linted.md) | CI promotion PR |
+| `scripts/` (the checks themselves) is not linted; `evaluators/` is linted only by `make lint`, never in CI | [ISSUE-0134](../issues/ISSUE-0134-scripts-tree-is-not-linted.md) | CI promotion PR |
 
 ## Related documentation
 
