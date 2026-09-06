@@ -499,9 +499,12 @@ jobs:
     steps:
       # The size gate tells a frozen (released) plan from the open cycle's by
       # reading CHANGELOG.md's dated release headings — deliberately not
-      # `git tag`: on a pull_request ref checkout@v4 fetches --depth=1 with no
-      # tags and ignores the fetch-tags input in that mode, which turned this
-      # job red on the #858 review's first two CI runs.
+      # `git tag`: on a pull_request ref the checkout action fetches
+      # --depth=1 with no tags and ignores the fetch-tags input in that mode,
+      # which turned this job red on the #858 review's first two CI runs. The
+      # version is deliberately unnamed here: the shallow-and-tagless default
+      # has survived every major bump of the action, so naming one only goes
+      # stale the next time the pin moves.
       - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v7
