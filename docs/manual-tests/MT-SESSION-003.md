@@ -78,7 +78,6 @@ arcs land real episode/fact rows from chat turns):
 
 ```bash
 make demo-anthropic        # or any cloud/offline provider that returns real replies
-export PERSATRIX_SERVER=http://127.0.0.1:8080
 ```
 
 Start from a clean memory surface so prior rows do not mask the result — a fresh

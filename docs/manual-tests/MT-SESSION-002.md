@@ -66,7 +66,6 @@ the session verbs are pure REST + pointer operations and need **no** LLM:
 
 ```bash
 make demo-offline          # orchestrator + agents up on the mock provider
-export PERSATRIX_SERVER=http://127.0.0.1:8080
 ```
 
 To keep the pointer file out of `~/.persatrix` during the test (and make

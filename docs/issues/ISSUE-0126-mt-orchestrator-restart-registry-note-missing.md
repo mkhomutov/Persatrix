@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0126
 summary: "Eight manual tests prescribe an orchestrator restart mid-arc, and none of them warns that the restart empties the in-memory agent registry. The v0.3.2 execution report (F-6) asked for exactly this note in an operator playbook and it was never written, so the same trap has re-cost live runs across three releases. PR #823 fixed one instance (MT-MEMORY-MULTIUSER-001) and the group-channel MT later carried a second, leaving eight unguarded. Subordinate to ISSUE-0125 — if re-registration lands, the correct action is to REMOVE these notes rather than write eight more. **Option 1 executed in v0.3.15 PR C1**: re-registration landed and both warnings were deleted. Open until the release verifies the fix live at Phase 3."
-status: open
+status: resolved
 severity: low
 area: docs/manual-tests
 created: 2026-08-08
+closed: 2026-09-03
+closed_pr: 855
 refs:
   - docs/manual-tests/MT-MEMORY-MULTIUSER-001.md
   - docs/manual-tests/MT-MEMORY-GROUP-TENANT-001.md
@@ -210,3 +212,10 @@ status first.
 > Closes with ISSUE-0125 at v0.3.15 Phase 4, after the live gate exercises a real
 > restart at Phase 3. If ISSUE-0125 had been cut, neither deletion would have
 > landed; it was not.
+
+> **Resolved 2026-09-03.** Both MT warnings were deleted at PR C1, and the
+> live arc confirms the behaviour they warned about is gone: the fleet
+> self-healed across three orchestrator restarts with no manual agent restart
+> ([v0.3.15 execution report](../manual-tests/v0.3.15-execution-report.md), Leg 8). The workaround the warnings described is no longer
+> reachable from the MT text, so an executor cannot fall back to it by
+> accident.
