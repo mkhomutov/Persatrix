@@ -91,3 +91,16 @@ Filed at the v0.3.15 post-release follow-up, the first application of the
 [debt-sweep rule](../methodology/release-cycle.md#the-debt-sweep) since
 [#861](https://github.com/mkhomutov/Persatrix/pull/861) recorded it. Count at
 filing: **26 at cap, 102 within 3%**.
+
+> 2026-09-07 — **v0.3.16 planning-readiness: default = Workstream D rides
+> and goes first, with a not-cuttable minimum.** Two of the 26 sit on the
+> release's own path, not only on ISSUE-0137's:
+> `agents/persona_runtime/memory_context.py` (500/500) is where the
+> [ISSUE-0132](ISSUE-0132-memory-egress-gate-blind-to-room-audience.md)
+> audience gate wires in, and `close_path.py` (500/500) is where the
+> [ISSUE-0137](ISSUE-0137-episode-write-boundary-cannot-express-the-records-principal.md)
+> guard goes. Those two splits are the minimum the plan should carry
+> uncuttable; the other 24 are the cuttable remainder. Three documents the
+> cycle must edit are within 30 words of their caps and take the amendment
+> route instead of a split: RFC 0037 (7 973/8 000), RFC 0051 (7 985/8 000)
+> and `docs/memory-scope-axes.md` (2 960/3 000).

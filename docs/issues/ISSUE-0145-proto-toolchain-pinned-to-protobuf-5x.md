@@ -110,3 +110,8 @@ what it is rather than one that has to be re-derived.
 > Same shape as [ISSUE-0144](ISSUE-0144-anthropic-sdk-pinned-below-1x.md) — a
 > freeze held by a rule that also suppresses the reminder to lift it. Not yet
 > slotted to a version.
+>
+> 2026-09-07 — **v0.3.16 planning-readiness: default = out of scope,
+> deferred explicitly.** Lifting the pair regenerates every committed stub
+> and moves the CI-pinned toolchain in the same PR — a train-boundary
+> change, not patch-release work. Re-decide at the v0.4.0 plan opening.

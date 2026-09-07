@@ -71,3 +71,8 @@ Options, cheapest first — this is a UX decision, not a mechanism one:
 Filed at v0.3.15 release-prep PR 2 from the PR 1 arc's F-3. Not release-blocking
 — behaviour-as-designed, unchanged by this cycle — and carried as a Known Gap on
 the [v0.3.15 release checklist](../v0.3.15-release-checklist.md#6-known-gaps-to-document-in-release-notes).
+
+> 2026-09-07 — **v0.3.16 planning-readiness: default = stays unslated.**
+> Behaviour-as-designed with no v0.3.16 story attached; step (1) of the
+> proposed fix is small enough to ride any later CLI PR that touches
+> `channel config`.

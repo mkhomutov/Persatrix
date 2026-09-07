@@ -90,3 +90,14 @@ that running them surfaced.
 > a new withhold reason, and an operator cannot read why the persona decided
 > what it decided while the identity tier still charges the RFC 0017 budget
 > without recording an admission.
+>
+> 2026-09-07 — **v0.3.16 planning-readiness: plan-opening default.** One PR,
+> no lock needed: pair the `try_add` with
+> `record_admission(tier="relationship", …)` carrying ids, tier and
+> protection level — never the identity text, the provenance log being an
+> egress surface of its own. The same PR flips the
+> [MT-MEMORY-CROSSROOM-001 Leg 2b](../manual-tests/MT-MEMORY-CROSSROOM-001.md)
+> "provenance does not see this leg" note, since the line it says never
+> exists will exist. The `relationship` tier stays outside the RFC 0037 §D
+> gate (the RFC's Non-Goals): this adds an admission record, not a gate
+> decision. Rides with ISSUE-0108 as the one observability workstream.

@@ -113,3 +113,10 @@ rather than leave it looking like an oversight.
 > so it stops riding on a PR description. Not a blocker for #849 — the live
 > paths are correct — but it should land before the workstream closes, and
 > before v0.4.0 organizations add derived-write paths on top of this boundary.
+>
+> 2026-09-07 — **v0.3.16 planning-readiness: default = rides, after the
+> [ISSUE-0143](ISSUE-0143-debt-sweep-26-files-at-size-cap.md) `close_path.py`
+> split, under the same cut clause as Workstream D.** Steps 1–4 above are
+> one PR once the file has room for the step-4 test; the relationship-tier
+> statement in the last paragraph rides the ISSUE-0122 PR, which touches
+> that tier anyway.

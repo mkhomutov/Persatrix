@@ -107,3 +107,75 @@ this composes with the §E declassification-projection branch.
 > — after ISSUE-0131, which supplies the attribution this gate needs to
 > reason about, and before the v0.4.0 clearance work that would otherwise
 > build on top of an audience-blind gate.
+>
+> 2026-09-07 — **v0.3.16 planning-readiness: plan-opening defaults.** The
+> amendment's next-steps item 4 names three locks for the plan (default
+> posture, assertion-time vs. injection-time audience, whether RFC 0044
+> Phase 2 rides); the readiness audit of the code the fix touches adds the
+> rest. Each is a default the plan locks and the first ISSUE-0132 PR may
+> overturn at review — recorded here so the plan opens with no dangling
+> question, not decided here.
+>
+> - **Default posture → shadow-first for the whole cycle; the flip is gated
+>   on the measured delta, never scheduled.** The shadow counts two withhold
+>   causes separately — *disjoint* (the acting room holds a member the
+>   entry's source room did not) and *unknown* (membership unresolvable) —
+>   so the verdict can tell the gate working from the gate blind. The flip
+>   default, when the verdict allows one, is **withhold-disjoint /
+>   admit-unknown**: withhold-unknown is the safe reading but degrades a
+>   persona that has been useful for four releases silently, and the
+>   amendment's risk row makes the measurement the guard, not the default.
+>   Entries at `public` are always shareable — the lattice already defines
+>   `public` as "no confidentiality expectation" — so audience applies to
+>   `internal` and above, and no new "shareable" marking lands this cycle.
+> - **Which membership → injection-time, for both rooms, from the roster
+>   fetch the turn already makes.** The entry's audience is the *current*
+>   member set of its `source_channel_id` (episodes and facts carry it since
+>   RFC 0037 §C; notes do not and stay out of the shadow); the acting
+>   audience is the current member set of the acting channel. Distinct
+>   source rooms among a turn's candidates are fetched once each, cached per
+>   turn. The RFC 0035 assertion-time snapshot is the refinement, taken only
+>   if the verdict shows churned rooms matter: the only ledger endpoint
+>   (`GET …/members/{participant_id}/history`) is per participant and
+>   authenticated, so an assertion-time answer needs a new endpoint or an
+>   audience column stamped at §C time — both wider than a shadow PR.
+> - **Audience is the type-agnostic member-id set.** A persona in the acting
+>   room that was not in the source room counts as audience — an agent→agent
+>   leak is a leak. This keeps the agent directory out of the decision,
+>   which matters for the next point.
+> - **The roster fetcher needs two changes before it can feed the gate; both
+>   belong to the first ISSUE-0132 PR.** `HttpChannelRosterFetcher.fetch`
+>   returns `None` when the agents-directory call fails, and that call fails
+>   with `401` for the whole fleet under `auth.mode: enabled`
+>   ([ISSUE-0140](ISSUE-0140-agent-fleet-401-on-roster-fetch-under-auth.md)),
+>   so today the *public* channel-members half is discarded with it. And
+>   `inject_channel_roster` runs for `group:` events only and *after* the §D
+>   gate in `_inject_memory_context`, while the audience check must run for
+>   every channel-anchored turn (a DM with Bob is an audience) and *before*
+>   the gate. The fetch splits so the members half survives a directory
+>   miss, and it moves ahead of the gate. With the id-set default,
+>   ISSUE-0140 is **not** on this issue's path; it returns only if the
+>   verdict motivates a person-only audience.
+> - **Composition with §E → an audience withhold is terminal.** A projection
+>   lowers an entry's *classification*, not its audience, so the projection
+>   branch does not substitute for an audience-withheld entry; it is withheld
+>   entirely, and the §G tripwire watch sees it as withheld.
+> - **The RFC 0037 amendment is a separate file** (the RFC 0049 L1
+>   precedent): the RFC sits at 7 973 of 8 000 words.
+> - **Where the wiring lands is at its cap.** `memory_context.py` is at
+>   500/500 lines, so the gate wiring starts with a structural split —
+>   [ISSUE-0143](ISSUE-0143-debt-sweep-26-files-at-size-cap.md) Workstream
+>   D is on this issue's path, not only ISSUE-0137's.
+> - **Live leg → a new leg on
+>   [MT-PERSONA-CONFIDENTIALITY-001](../manual-tests/MT-PERSONA-CONFIDENTIALITY-001.md)**,
+>   authored by the shadow PR before the paid arc, not at closeout.
+>   Vacuity rule: under `auth.mode: enabled` the v0.3.15 tenant partition
+>   already withholds Alice's DM content from any agent-origin turn, so a leg
+>   where a persona volunteers it in a room passes for the wrong reason. The
+>   leg has **Alice herself** ask in a room where Bob is present — her
+>   tenant, her entry admissible on both the classification and the
+>   principal axes, audience the only thing that can withhold it — and runs
+>   once more with `auth.mode: disabled`, where everything is `local` and
+>   audience is the only boundary at all. MT-MEMORY-GROUP-TENANT-001 stays
+>   untouched: its Leg 5 row is this topology but closes on the tenant axis,
+>   and the file has 14 words of headroom.

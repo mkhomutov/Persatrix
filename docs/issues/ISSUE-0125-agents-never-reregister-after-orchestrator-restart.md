@@ -303,3 +303,9 @@ both.
 > `IDLE`/`CONNECTING` cycle, not `TRANSIENT_FAILURE` — which is the transition
 > the connectivity watcher had to cover and the one a narrower fix would have
 > missed.
+>
+> 2026-09-07 — the shape (5) re-file the note above promised for Phase 4
+> was not done by the follow-up; it is done at the v0.3.16
+> planning-readiness audit as
+> [ISSUE-0146](ISSUE-0146-registration-not-a-property-of-a-live-connection.md),
+> with RFC 0040 §C and OQ 6 re-pointed there.
