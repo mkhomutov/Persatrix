@@ -85,11 +85,25 @@ One change, three edits that must land together:
 2. Lift the cap to `<2` in `agents/pyproject.toml`.
 3. Drop the `anthropic` entry from `ignore:` in `.github/dependabot.yml`.
 
-Worth pairing with it: a test that exercises a provider's `create_message`
-against the real SDK rather than a mocked client. The gap this issue records
-is not specific to `temperature` — it is that the boundary where the tree
-meets a vendor SDK has no coverage at all, so any signature change in any
-provider arrives silently and green.
+The coverage gap that let this reach a green CI is **closed** for the two
+providers CI installs: `tests/unit/python/test_llm_sdk_boundary.py` drives
+`create_message` through the real SDK — real kwarg validation, real request
+building, real response parsing — with only the socket replaced by a
+`MockTransport`. Verified against 1.4.0 in a throwaway venv: the three
+Anthropic contract tests fail on
+
+```
+TypeError: AsyncMessages.create() got an unexpected keyword argument 'temperature'
+```
+
+while the pre-existing mocked suite reports 26 passed on the same install. So
+the port above will be caught by a test rather than by a reviewer.
+
+Still uncovered: the **Gemini** provider. `google-genai` is an optional extra
+and CI installs only `[dev]`, so a test would skip there and imply coverage
+that does not exist — the `google-genai>=1.0.0,<3` cap kept during the sweep
+still rests on a hand-run signature check. Closing that means either
+installing the provider extras in CI or accepting the gap explicitly.
 
 ## Notes
 
@@ -98,3 +112,8 @@ provider arrives silently and green.
 > done; this file exists so the port is discoverable somewhere other than a
 > comment in the file that suppresses the reminder. Not yet slotted to a
 > version — a candidate to lock or defer at the v0.3.16 plan opening.
+>
+> 2026-09-07 — the SDK-boundary coverage this issue asked for landed for the
+> Anthropic and OpenAI providers, checked by running it against the broken
+> major rather than only against the pinned one. Gemini stays uncovered and is
+> now the only part of the original finding outstanding besides the port.

@@ -2016,6 +2016,7 @@
 │           ├── test_llm_offline.py
 │           ├── test_llm_ollama.py
 │           ├── test_llm_persona_agent.py
+│           ├── test_llm_sdk_boundary.py
 │           ├── test_llm_watsonx.py
 │           ├── test_llm_watsonx_resolve.py
 │           ├── test_make_reset_documents_all_volumes.py
