@@ -192,8 +192,9 @@ deferred.
 > guarded to the agent log, with the no-leak test extended (debug log yes;
 > a message, the channel store, or a peer's reconstructed `messages` never).
 > The doc half has a size constraint the issue text predates: RFC 0051 sits
-> at 7 985 of 8 000 words, so the §E correction is an **amendment file**,
-> not an in-place edit; MT-REASON-001 Step 2 and its Step-2 caveat flip in
+> at 7 985 of 8 000 words, so the §E correction is appended to the
+> **existing [amendment file](../rfcs/0051-amendment-reasoning-kernel.md)**
+> (1 528 words), not made in the RFC; MT-REASON-001 Step 2 and its Step-2 caveat flip in
 > the same PR, as do the "wired in a later PR" docstrings. Rides with
 > ISSUE-0122.
 

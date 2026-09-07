@@ -119,12 +119,17 @@ this composes with the §E declassification-projection branch.
 > - **Default posture → shadow-first for the whole cycle; the flip is gated
 >   on the measured delta, never scheduled.** The shadow counts two withhold
 >   causes separately — *disjoint* (the acting room holds a member the
->   entry's source room did not) and *unknown* (membership unresolvable) —
->   so the verdict can tell the gate working from the gate blind. The flip
->   default, when the verdict allows one, is **withhold-disjoint /
->   admit-unknown**: withhold-unknown is the safe reading but degrades a
->   persona that has been useful for four releases silently, and the
->   amendment's risk row makes the measurement the guard, not the default.
+>   entry's source room did not) and *unknown* — and splits *unknown* by
+>   cause: *fetch-failed* (the roster call missed; transient) and
+>   *no-provenance* (`source_channel_id` NULL by design — pre-migration
+>   rows and tick/task-scoped records; permanent, never resolvable) — so
+>   the verdict can tell the gate working from the gate blind from the gate
+>   blind by design. The flip default, when the verdict allows one, is
+>   **withhold-disjoint / admit-unknown**, taken per unknown cause:
+>   withhold-unknown is the safe reading but degrades a persona that has
+>   been useful for four releases silently, and the amendment's risk row
+>   makes the measurement the guard, not the default. No-provenance rows
+>   never acquire an audience; they stay the classification gate's problem.
 >   Entries at `public` are always shareable — the lattice already defines
 >   `public` as "no confidentiality expectation" — so audience applies to
 >   `internal` and above, and no new "shareable" marking lands this cycle.
@@ -153,7 +158,11 @@ this composes with the §E declassification-projection branch.
 >   gate in `_inject_memory_context`, while the audience check must run for
 >   every channel-anchored turn (a DM with Bob is an audience) and *before*
 >   the gate. The fetch splits so the members half survives a directory
->   miss, and it moves ahead of the gate. With the id-set default,
+>   miss, and it moves ahead of the gate. The check itself is an input to
+>   `TurnInjectionGate.filter_entries` — a distinct withhold cause — not a
+>   pre-filter on the candidate lists: the §G watch, the manifest and the
+>   shadow log all read the gate's own decision record, so a pre-filtered
+>   entry would be invisible to every one of them. With the id-set default,
 >   ISSUE-0140 is **not** on this issue's path; it returns only if the
 >   verdict motivates a person-only audience.
 > - **Composition with §E → an audience withhold is terminal.** A projection
@@ -170,9 +179,12 @@ this composes with the §E declassification-projection branch.
 >   [MT-PERSONA-CONFIDENTIALITY-001](../manual-tests/MT-PERSONA-CONFIDENTIALITY-001.md)**,
 >   authored by the shadow PR before the paid arc, not at closeout.
 >   Vacuity rule: under `auth.mode: enabled` the v0.3.15 tenant partition
->   already withholds Alice's DM content from any agent-origin turn, so a leg
->   where a persona volunteers it in a room passes for the wrong reason. The
->   leg has **Alice herself** ask in a room where Bob is present — her
+>   already withholds Alice's DM content from any agent-origin turn *Alice
+>   did not cause* (ISSUE-0124's re-stamp keeps every turn descending from
+>   her publish in her tenant), so a leg where a persona volunteers it on
+>   someone else's turn passes for the wrong reason, while a persona
+>   replying *to Alice* would fail for the right one. The leg has **Alice
+>   herself** ask in a room where Bob is present — her
 >   tenant, her entry admissible on both the classification and the
 >   principal axes, audience the only thing that can withhold it — and runs
 >   once more with `auth.mode: disabled`, where everything is `local` and

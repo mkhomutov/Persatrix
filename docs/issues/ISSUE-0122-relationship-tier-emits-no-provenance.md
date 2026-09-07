@@ -93,9 +93,11 @@ that running them surfaced.
 >
 > 2026-09-07 — **v0.3.16 planning-readiness: plan-opening default.** One PR,
 > no lock needed: pair the `try_add` with
-> `record_admission(tier="relationship", …)` carrying ids, tier and
-> protection level — never the identity text, the provenance log being an
-> egress surface of its own. The same PR flips the
+> `record_admission(tier="relationship", …)`. Its signature is pinned to
+> `(tier, item_id, tokens_admitted)` and the record shape is deliberately
+> narrow, so carrying the protection level too is the one signature
+> widening the PR has to argue at review — never the identity text, the
+> provenance log being an egress surface of its own. The same PR flips the
 > [MT-MEMORY-CROSSROOM-001 Leg 2b](../manual-tests/MT-MEMORY-CROSSROOM-001.md)
 > "provenance does not see this leg" note, since the line it says never
 > exists will exist. The `relationship` tier stays outside the RFC 0037 §D

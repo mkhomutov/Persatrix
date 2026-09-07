@@ -55,7 +55,9 @@ Before the plan opens, every issue the amendment slots gets a dated note
 recording its slotting and any plan-opening default the plan will rely on
 (precedent: [#807](https://github.com/mkhomutov/Persatrix/pull/807)). The goal
 is that the plan can open "with no dangling questions". No status or severity
-changes; the index does not change.
+changes; the index does not change — except to file an issue a prior cycle's
+Phase 4 promised and did not (precedent: the ISSUE-0146 re-file in
+[#885](https://github.com/mkhomutov/Persatrix/pull/885)).
 
 ---
 
