@@ -66,8 +66,15 @@ updates:
       # docs/issues/ISSUE-0145-proto-toolchain-pinned-to-protobuf-5x.md.
       - dependency-name: "protobuf"
         update-types: ["version-update:semver-major"]
+      # Minor as well as major, unlike protobuf above. mypy-protobuf is a
+      # generator, and its own pin comment records that the output differs
+      # across *minor* versions — 3.5 to 3.6 swapped `typing_extensions.final`
+      # for `typing.final` and rewrote the `Literal` references. A
+      # major-only rule let 3.6.0 -> 3.7.0 through in #882, which duly turned
+      # the three .pyi stale. Patch releases inside 3.6.x stay available.
       - dependency-name: "mypy-protobuf"
-        update-types: ["version-update:semver-major"]
+        update-types:
+          ["version-update:semver-major", "version-update:semver-minor"]
       # grpcio-tools is pinned exactly in agents/pyproject.toml because it
       # emits the committed stubs. Every release above 1.71.2 requires
       # protobuf>=6, so under the cap above they cannot install at all — an

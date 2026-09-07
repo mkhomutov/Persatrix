@@ -43,6 +43,15 @@ The tell is the breadth. A `mypy-protobuf` bump alone can only restage the
 pip take the newest `grpcio-tools` in range rather than one compatible with
 protobuf 5.
 
+That discriminator was then confirmed by accident.
+[PR #882](https://github.com/mkhomutov/Persatrix/pull/882) moved
+`mypy-protobuf` 3.6.0 → 3.7.0 and nothing else, and exactly three files went
+stale — the `.pyi`, with both `_pb2.py` and `_pb2_grpc.py` clean. It also
+exposed the first `ignore` rules as too narrow: `mypy-protobuf` was ignored
+for majors only, and this is a *minor*. Its own pin comment already said
+minors change the output. Both generators are now ignored for minor and major
+alike, patch releases still flowing.
+
 Both edits were reverted in #870. Within hours of that merge, Dependabot
 opened [PR #879](https://github.com/mkhomutov/Persatrix/pull/879) proposing
 exactly the same two changes, which failed on exactly the same gate. That is
