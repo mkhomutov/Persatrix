@@ -76,3 +76,13 @@ Filed at v0.3.15 release-prep PR 2 from the PR 1 arc's F-2. Not release-blocking
 for v0.3.15 — it predates this cycle's changes and touches none of the
 attribution axes — and is carried as a Known Gap on the
 [v0.3.15 release checklist](../v0.3.15-release-checklist.md#6-known-gaps-to-document-in-release-notes).
+
+> 2026-09-07 — **v0.3.16 planning-readiness: default = deferred, stated
+> out of scope.** The ROADMAP row calls this load-bearing for the audience
+> gate. The [ISSUE-0132](ISSUE-0132-memory-egress-gate-blind-to-room-audience.md)
+> plan-opening defaults take a type-agnostic member-id audience and split
+> the roster fetch so the public channel-members half survives the
+> directory `401` — so the gate does not need the directory, and this issue
+> returns to its path only if the shadow verdict motivates a person-only
+> audience. The fix shape (route, network carve-out, RFC 0009 agent tokens)
+> is decided with RFC 0009, not at a patch-release plan opening.
