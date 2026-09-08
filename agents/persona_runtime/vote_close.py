@@ -86,7 +86,7 @@ from uuid import uuid4
 from ..memory.boundary_detectors import REASON_STRUCTURAL
 from ..memory.scopes import is_group_scope
 from ..persona_types import VOTE_CLOSE_TOKEN_KEY
-from .close_path import persist_fanned_closes
+from .close_fan import persist_fanned_closes
 from .interaction_boundary import matching_end_votes, wire_admits_record
 
 if TYPE_CHECKING:

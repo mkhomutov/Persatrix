@@ -28,10 +28,8 @@ from agents.memory.boundary_detectors import (
     REASON_STRUCTURAL,
 )
 from agents.memory.interactions import Interaction, InteractionTracker
-from agents.persona_runtime.close_path import (
-    close_stale_records,
-    persist_closed_interaction,
-)
+from agents.persona_runtime.close_fan import close_stale_records
+from agents.persona_runtime.close_path import persist_closed_interaction
 from agents.persona_runtime.interaction_boundary import stale_close_reason
 from agents.persona_types import AgentEvent, EventType
 from agents.principal_id import EVENT_PRINCIPAL_METADATA_KEY
