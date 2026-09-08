@@ -396,7 +396,7 @@ async def replay_for_persona_agents(
             # ISSUE-0130: pop the scopes this pass opened — in ``finally`` so a
             # budget overrun closes them too, or the next LIVE turn merges
             # into one.  Best-effort, does not raise:
-            # ``close_path.close_replayed_scopes``.
+            # ``replay_sweep.close_replayed_scopes``.
             #
             # ``derive_channels`` carries which channels actually FINISHED
             # (v0.3.15 PR B2 review).  A channel cut short by the
