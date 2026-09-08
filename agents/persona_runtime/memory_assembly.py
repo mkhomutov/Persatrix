@@ -7,13 +7,19 @@ RFC 0037 §D gate and owns the per-turn :class:`MemoryBudget`; this
 module renders each gated tier against that budget in the canonical
 priority order and stages the admitted sections in working memory.
 
-The tier recalls and the budget constructor stay behind deliberately:
-the test harnesses patch ``recall_room_ranked`` and ``MemoryBudget`` by
-``memory_context``'s name, and a moved call would silently escape those
-patches.  The channel-roster tier stays behind too — it is injected
-outside the budget, and v0.3.16 PR A1 moves it ahead of the gate.
+The tier recalls and the budget construction stay behind deliberately:
+the test harnesses patch ``recall_room_ranked`` and monkeypatch the
+``MEMORY_BUDGET_TOKENS`` constant by ``memory_context``'s name, and a
+moved call would silently escape those patches.  The channel-roster
+tier stays behind too — it is injected outside the budget, and v0.3.16
+PR A1 moves it ahead of the gate.
 
-Behaviour is what the mixin inlined before the split, unchanged.
+This module is a leaf: it takes the handful of per-agent values it
+needs as plain arguments rather than the mixin instance, so it knows
+nothing about the mixin's attribute layout and can be exercised without
+one.  Behaviour is what the mixin inlined before the split, unchanged,
+except that the fact-reinforcement failure warning now logs under this
+module's logger.
 """
 
 from __future__ import annotations
@@ -26,16 +32,15 @@ from .episodic_section import render_episodic_section
 from .facts_section import render_facts_section
 from .notes_section import render_notes_section
 from .relationship_section import render_relationship_section
+from .text_truncate import _truncate_with_ellipsis
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from ..memory.episodic import Episode
-    from ..memory.facts import Fact
+    from ..memory.facts import Fact, FactStore
     from ..memory.notes import Note
     from ..memory.relationship_types import RelationshipSummary
+    from ..memory.working import WorkingMemory
     from .memory_budget import MemoryBudget
-    from .memory_context import _MemoryContextMixin
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +48,12 @@ __all__ = ["inject_admitted_sections"]
 
 
 async def inject_admitted_sections(
-    agent: _MemoryContextMixin,
     *,
+    working_memory: WorkingMemory,
+    agent_id: str,
+    timezone: str,
+    fact_store: FactStore | None,
+    facts_budget_tokens: int,
     budget: MemoryBudget,
     now: float,
     rel: RelationshipSummary | None,
@@ -52,9 +61,8 @@ async def inject_admitted_sections(
     facts: list[Fact],
     episodes: list[Episode],
     notes: list[Note],
-    truncate: Callable[[str, int], str],
 ) -> None:
-    """Render the gated tiers against *budget* and stage them in working memory.
+    """Render the gated tiers against *budget* and stage them in *working_memory*.
 
     Tiers are processed in fixed priority order (relationship=8 →
     channel history → facts → episodic=7 → notes=6); higher-priority
@@ -62,22 +70,19 @@ async def inject_admitted_sections(
     ``render_*`` helper owns its admission, line shape and MQ-11
     provenance; this loop only sequences them and stages the sections.
     The facts tier also issues the RFC 0026 PR 4 use-based reinforcement
-    write, non-fatal because the section is already staged.
+    write against *fact_store*, non-fatal because the section is already
+    staged.
 
-    *agent* is the :class:`_MemoryContextMixin` instance whose working
-    memory, fact store and per-tier settings the loop reads.  *truncate*
-    is the mixin's ``_truncate_with_ellipsis`` — passed in rather than
-    imported so the ``memory_context → memory_assembly`` import stays
-    one-directional.
+    *agent_id*, *timezone* and *facts_budget_tokens* are the mixin's
+    per-agent settings, passed as values so this module stays a leaf.
     """
-    working_memory = agent._working_memory
+    truncate = _truncate_with_ellipsis
 
     # Relationship tier (priority 8).  Admission, label formatting,
     # default-trust filtering, and the temporal-recency metric live
     # in ``relationship_section.render_relationship_section``.
     rel_section = render_relationship_section(
-        rel, budget,
-        now=now, timezone=agent._timezone, truncate=truncate,
+        rel, budget, now=now, timezone=timezone, truncate=truncate,
     )
     if rel_section is not None:
         working_memory.add_section(rel_section)
@@ -85,8 +90,7 @@ async def inject_admitted_sections(
     # Channel-history tier (RFC 0011 §E + RFC 0021 §J).  Slots
     # between relationship and episodic admissions.
     ch_section = render_channel_history_section(
-        channel_episodes, budget,
-        now=now, timezone=agent._timezone, truncate=truncate,
+        channel_episodes, budget, now=now, timezone=timezone, truncate=truncate,
     )
     if ch_section is not None:
         working_memory.add_section(ch_section)
@@ -98,8 +102,7 @@ async def inject_admitted_sections(
     # registry for the PR 4 reinforcement write below (MQ-11).
     if facts:
         facts_section = render_facts_section(
-            facts, budget,
-            facts_budget_tokens=agent._facts_budget_tokens,
+            facts, budget, facts_budget_tokens=facts_budget_tokens,
         )
         if facts_section is not None:
             working_memory.add_section(facts_section)
@@ -107,13 +110,13 @@ async def inject_admitted_sections(
             # because the section is already staged and the caller
             # builds the prompt after this returns (PR #342 M-3).
             admitted_fact_ids = budget.admissions_by_tier("facts")
-            if admitted_fact_ids and agent._fact_store is not None:
+            if admitted_fact_ids and fact_store is not None:
                 try:
-                    await agent._fact_store.mark_recalled(admitted_fact_ids)
+                    await fact_store.mark_recalled(admitted_fact_ids)
                 except Exception:
                     logger.warning(
                         "Agent %s: fact reinforcement write failed; skipping",
-                        agent.agent_id, exc_info=True,
+                        agent_id, exc_info=True,
                     )
 
     # Episodic tier (priority 7).  Extracted to
@@ -122,8 +125,7 @@ async def inject_admitted_sections(
     # behaviour (recency tags, budget admission, MQ-11 provenance,
     # ``source="episode"`` metric) is preserved there.
     ep_section = render_episodic_section(
-        episodes, budget,
-        now=now, timezone=agent._timezone, truncate=truncate,
+        episodes, budget, now=now, timezone=timezone, truncate=truncate,
     )
     if ep_section is not None:
         working_memory.add_section(ep_section)
@@ -133,8 +135,6 @@ async def inject_admitted_sections(
     # notes tier matches the other tiers' ``render_*`` shape;
     # behaviour (line shape, budget admission, MQ-11 provenance) is
     # preserved there.
-    notes_section = render_notes_section(
-        notes, budget, truncate=truncate,
-    )
+    notes_section = render_notes_section(notes, budget, truncate=truncate)
     if notes_section is not None:
         working_memory.add_section(notes_section)

@@ -1,17 +1,19 @@
 """Memory context injection for _LLMPersonaAgent.
 
-Handles episodic recall, relationship summary, working-memory
-truncation, and note injection into the persona agent's context window.
-The recall-and-gate half lives here; the allocate-loop that renders the
-gated tiers against the budget and stages them in working memory is
-:mod:`agents.persona_runtime.memory_assembly` (v0.3.16 D1 split).
+Reads the memory tiers (relationship, channel history, facts, episodic,
+notes) for the current event, applies the RFC 0037 §D gate, and owns the
+per-turn budget.  The allocate-loop that renders the gated tiers against
+that budget and stages them in working memory is
+:mod:`agents.persona_runtime.memory_assembly`; the text-truncation helper
+is :mod:`agents.persona_runtime.text_truncate` and is re-exported here
+(v0.3.16 D1 split).
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from ..memory._session_filter import SESSIONS_ALL
 from ..memory.episodic import (
@@ -49,7 +51,6 @@ from .memory_assembly import inject_admitted_sections
 from .memory_budget import (
     MEMORY_BUDGET_TOKENS,
     MemoryBudget,
-    _truncate_to_token_limit,
 )
 from .notes_section import (
     NOTES_SECTION_NAME,
@@ -60,6 +61,7 @@ from .relationship_section import (
     RELATIONSHIP_SECTION_NAME,
     recall_relationship_summary,
 )
+from .text_truncate import _truncate_with_ellipsis
 from .tripwire_watch import stamp_turn_tripwire_watch
 
 if TYPE_CHECKING:
@@ -121,52 +123,6 @@ class MemoryInjectionResult:
             raise ValueError(
                 f"memory_admitted_tokens must be >= 0, got {self.memory_admitted_tokens}"
             )
-
-
-# ─── Helper Functions ──────────────────────────────────────
-
-
-def _truncate_with_ellipsis(
-    text: str,
-    limit: int,
-    *,
-    mode: Literal["chars", "tokens"] = "chars",
-) -> str:
-    """Truncate *text* to *limit* with word-boundary or token-boundary awareness.
-
-    If *text* fits within *limit* (measured in chars or tokens, depending on
-    *mode*), it is returned unchanged.
-
-    In ``"chars"`` mode (default): slices to *limit* chars, cuts at the
-    last space so the LLM sees a complete word, and appends ``"..."``;
-    a space-free slice is used whole (3-char worst-case overage).
-
-    In ``"tokens"`` mode: truncates at a token boundary via tiktoken
-    ``cl100k_base``, falling back to char-proportional slicing when
-    tiktoken is absent (never panics).  The ellipsis ``"\u2026"``
-    counts toward the token budget.
-
-    Extracted from _inject_memory_context() where the pattern was
-    copy-pasted three times.  (PR #60 review.)
-    """
-    if mode == "tokens":
-        # PR 1 review finding 4: ``_truncate_with_ellipsis_tokens`` was a
-        # one-liner wrapper around ``_truncate_to_token_limit``.  Inlined
-        # here to remove indirection now that the
-        # ``memory_context → memory_budget`` import direction is known to
-        # be safe (no cycle).
-        return _truncate_to_token_limit(text, limit)
-
-    # Original char mode (unchanged).
-    if len(text) <= limit:
-        return text
-    sliced = text[:limit]
-    truncated = sliced.rsplit(" ", 1)[0]
-    # Zero-space guard: if the slice has no space, rsplit returns it
-    # unchanged (len(truncated) == len(sliced)), so we use the full slice.
-    if len(truncated) == len(sliced):
-        truncated = sliced
-    return truncated + "..."
 
 
 # ─── Mixin ─────────────────────────────────────────────────
@@ -250,7 +206,7 @@ class _MemoryContextMixin:
         and allocates injected tokens via a single :class:`MemoryBudget`
         (RFC 0017 §B).  Tiers are processed in the canonical cross-RFC
         priority order: relationship → channel history (CHANNEL_MESSAGE
-        only) → episodic recall → recent notes; open-commitments and
+        only) → facts → episodic recall → recent notes; open-commitments and
         duration-priors slots ship empty until v0.4.0.  Pinned verbatim
         by RFC 0011 §E and RFC 0021 §J — see
         :mod:`agents.persona_runtime.channel_history` for the channel
@@ -407,24 +363,27 @@ class _MemoryContextMixin:
         stamp_turn_tripwire_watch(event, gate)
 
         # ── Allocate-loop ──────────────────────────────────────────────────
-        # Process tiers in fixed priority order (relationship=8 → episodic=7
-        # → notes=6).  Higher-priority tiers consume the budget first.
-        # RFC 0017 §B / OQ4.
+        # Tiers are rendered in fixed priority order (relationship=8 →
+        # channel history → facts → episodic=7 → notes=6); higher-priority
+        # tiers consume the budget first.  RFC 0017 §B / OQ4.
         budget = MemoryBudget(total_tokens=MEMORY_BUDGET_TOKENS)
         # RFC 0021 PR 2: snapshot the temporal seam once per event.
         now = self._clock.now()
 
-        # Allocate-loop proper — relationship → channel history → facts →
-        # episodic → notes, each rendered against ``budget`` and staged in
-        # working memory.  Lives in ``memory_assembly`` (v0.3.16 D1 split);
-        # the budget is constructed here because harnesses patch
-        # ``MemoryBudget`` by this module's name.
+        # Allocate-loop proper lives in ``memory_assembly`` (v0.3.16 D1
+        # split).  The budget is constructed here, not there, because the
+        # zero-budget harness monkeypatches ``MEMORY_BUDGET_TOKENS`` by
+        # this module's name — a constructor reading the constant from
+        # ``memory_assembly`` would silently escape that patch.
         await inject_admitted_sections(
-            self,
+            working_memory=self._working_memory,
+            agent_id=self.agent_id,
+            timezone=self._timezone,
+            fact_store=self._fact_store,
+            facts_budget_tokens=self._facts_budget_tokens,
             budget=budget, now=now,
             rel=rel, channel_episodes=channel_episodes, facts=facts,
             episodes=episodes, notes=notes,
-            truncate=_truncate_with_ellipsis,
         )
 
         # Channel-roster tier (F-4, priority 9 — highest). Group channels
