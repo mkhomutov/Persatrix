@@ -119,7 +119,7 @@ class TestResolveChannelRoster:
         assert roster is not None
         assert roster.channel_id == "group:planning"
         assert roster.member_ids == {"ember-owl", "iron-fox", "nova-sparrow"}
-        assert roster.directory_ok is True
+        assert roster.has_display_names is True
 
     async def test_dm_turn_resolves_a_roster(self) -> None:
         """A DM with Bob is an audience — today's group-only fetch is why
@@ -141,7 +141,7 @@ class TestResolveChannelRoster:
         )
         assert roster is not None
         assert roster.member_ids == {"ember-owl", "iron-fox", "nova-sparrow"}
-        assert roster.directory_ok is False
+        assert roster.has_display_names is False
 
     async def test_turn_without_a_channel_resolves_nothing(self) -> None:
         """A tick-shaped turn names no channel, so there is no audience to
@@ -189,7 +189,7 @@ class TestResolveChannelRoster:
         )
         assert roster is not None
         assert roster.member_ids == {"ember-owl", "iron-fox", "nova-sparrow"}
-        assert roster.directory_ok is False
+        assert roster.has_display_names is False
 
     async def test_no_fetcher_resolves_nothing(self) -> None:
         assert await resolve_channel_roster(
@@ -396,6 +396,6 @@ class TestInjectionPathWiring:
         """The audience PR A2 reads must not be mutable per-turn state."""
         roster = ChannelRoster(
             channel_id="group:planning", channel_meta=_CHANNEL,
-            members=(), directory_ok=True,
+            members=(), has_display_names=True,
         )
         assert roster.member_ids == frozenset()

@@ -79,25 +79,29 @@ class ChannelRoster:
     type-agnostic id set, because a peer persona in the acting room that
     was not in the source room is audience too (scope lock 3). Frozen:
     it is a per-turn fact, read by the gate and the prompt section, owned
-    by neither.
+    by neither. (Shallowly — ``channel_meta`` is the raw response dict.
+    Nothing mutates it; PR A2 caches these per turn and must not start.)
 
     Attributes:
         channel_id: The acting channel this roster describes.
         channel_meta: The raw channel object, for the prompt section's
             name and description.
         members: The joined membership, in the room's declared order.
-        directory_ok: Whether the members carry directory display names.
-            ``False`` when the directory half missed **or was never
-            requested** — a DM or thread turn renders no section, so it
-            does not spend the authenticated round trip. Either way the
-            names fell back to ids: fine for an audience, not for a
-            prompt section (see :func:`inject_channel_roster`).
+        has_display_names: Whether the members carry directory names
+            rather than bare ids. **Not** a fetch-failure signal: it is
+            ``False`` both when the directory missed and when it was
+            never requested, because a DM or thread turn renders no
+            section and so does not spend the authenticated round trip.
+            The withhold cause PR A2 owes lock 1 —
+            *withhold-unknown-fetch-failed* — is a **members**-half
+            failure, which surfaces as no roster at all. Only
+            :func:`inject_channel_roster` reads this field.
     """
 
     channel_id: str
     channel_meta: dict[str, Any]
     members: tuple[RosterMember, ...]
-    directory_ok: bool
+    has_display_names: bool
 
     @property
     def member_ids(self) -> frozenset[str]:
@@ -289,7 +293,7 @@ async def resolve_channel_roster(
 
     Returns ``None`` — never raises — when there is no channel, no wired
     fetcher, or the members half missed. A resolved roster whose
-    ``directory_ok`` is ``False`` still carries the member ids.
+    ``has_display_names`` is ``False`` still carries the member ids.
 
     *Cost*: one round trip per channel turn, two on a group turn, where
     before PR A1 only group turns paid anything. The per-source-room
@@ -328,7 +332,7 @@ async def resolve_channel_roster(
         members=tuple(
             build_roster(channel_meta, agents or [], self_agent_id=agent_id),
         ),
-        directory_ok=agents is not None,
+        has_display_names=agents is not None,
     )
 
 
@@ -361,7 +365,7 @@ def inject_channel_roster(
     working_memory.remove_section(ROSTER_SECTION_NAME)
     if roster is None or not roster.channel_id.startswith(GROUP_CHANNEL_PREFIX):
         return
-    if not roster.directory_ok:
+    if not roster.has_display_names:
         return
     section = render_roster_section(roster.channel_meta, list(roster.members))
     if section is not None:
