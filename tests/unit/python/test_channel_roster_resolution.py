@@ -66,21 +66,45 @@ def _event(channel_id: str | None) -> MagicMock:
 
 
 class _FakeFetcher:
-    """Records every channel it was asked for, so a test can assert both
-    *that* a turn resolved a roster and *which* room it resolved."""
+    """Records each half separately, so a test can assert *that* a turn
+    resolved a roster, *which* room it resolved, and whether it spent the
+    authenticated directory round trip."""
 
-    def __init__(self, result: object) -> None:
-        self._result = result
+    def __init__(
+        self,
+        members: dict[str, Any] | None,
+        agents: list[dict[str, Any]] | None = None,
+    ) -> None:
+        self._members = members
+        self._agents = agents
         self.calls: list[str] = []
+        self.directory_calls: int = 0
 
-    async def fetch(self, channel_id: str):  # noqa: ANN201
+    async def fetch_members(self, channel_id: str):  # noqa: ANN201
         self.calls.append(channel_id)
-        return self._result
+        return self._members
+
+    async def fetch_directory(self):  # noqa: ANN201
+        self.directory_calls += 1
+        return self._agents
 
 
 class _RaisingFetcher:
-    async def fetch(self, channel_id: str):  # noqa: ANN201
+    async def fetch_members(self, channel_id: str):  # noqa: ANN201
         raise RuntimeError("orchestrator unreachable")
+
+    async def fetch_directory(self):  # noqa: ANN201
+        raise RuntimeError("orchestrator unreachable")
+
+
+class _RaisingDirectoryFetcher:
+    """Members fine, directory blows up — the audience must survive it."""
+
+    async def fetch_members(self, channel_id: str):  # noqa: ANN201
+        return _CHANNEL
+
+    async def fetch_directory(self):  # noqa: ANN201
+        raise RuntimeError("directory unreachable")
 
 
 # ─── resolve_channel_roster ───────────────────────────────────
@@ -89,7 +113,7 @@ class _RaisingFetcher:
 class TestResolveChannelRoster:
     async def test_group_turn_resolves_the_member_set(self) -> None:
         roster = await resolve_channel_roster(
-            _FakeFetcher((_CHANNEL, _AGENTS)),
+            _FakeFetcher(_CHANNEL, _AGENTS),
             _event("group:planning"), "iron-fox",
         )
         assert roster is not None
@@ -100,7 +124,7 @@ class TestResolveChannelRoster:
     async def test_dm_turn_resolves_a_roster(self) -> None:
         """A DM with Bob is an audience — today's group-only fetch is why
         the gate has nothing to read on the very turn ISSUE-0132 is about."""
-        fetcher = _FakeFetcher((_DM, _AGENTS))
+        fetcher = _FakeFetcher(_DM, _AGENTS)
         roster = await resolve_channel_roster(
             fetcher, _event("dm:alice:iron-fox"), "iron-fox",
         )
@@ -112,7 +136,7 @@ class TestResolveChannelRoster:
         """The audience is member ids; the directory only supplies display
         names. A ``401`` on the authenticated half must not cost the ids."""
         roster = await resolve_channel_roster(
-            _FakeFetcher((_CHANNEL, None)),
+            _FakeFetcher(_CHANNEL, None),
             _event("group:planning"), "iron-fox",
         )
         assert roster is not None
@@ -122,9 +146,50 @@ class TestResolveChannelRoster:
     async def test_turn_without_a_channel_resolves_nothing(self) -> None:
         """A tick-shaped turn names no channel, so there is no audience to
         resolve and no round trip to spend."""
-        fetcher = _FakeFetcher((_CHANNEL, _AGENTS))
+        fetcher = _FakeFetcher(_CHANNEL, _AGENTS)
         assert await resolve_channel_roster(fetcher, _event(None), "iron-fox") is None
         assert fetcher.calls == []
+
+    async def test_dm_turn_does_not_spend_the_directory_round_trip(self) -> None:
+        """A DM renders no roster section, so its display names can never be
+        used — and under auth the directory half is a guaranteed ``401``
+        plus a warning line. The audience is ids; do not pay for names."""
+        fetcher = _FakeFetcher(_DM, _AGENTS)
+        roster = await resolve_channel_roster(
+            fetcher, _event("dm:alice:iron-fox"), "iron-fox",
+        )
+        assert roster is not None
+        assert roster.member_ids == {"alice", "iron-fox"}
+        assert fetcher.directory_calls == 0
+
+    async def test_group_turn_spends_both_halves(self) -> None:
+        fetcher = _FakeFetcher(_CHANNEL, _AGENTS)
+        await resolve_channel_roster(
+            fetcher, _event("group:planning"), "iron-fox",
+        )
+        assert fetcher.calls == ["group:planning"]
+        assert fetcher.directory_calls == 1
+
+    async def test_thread_turn_resolves_members_only(self) -> None:
+        """``thread:`` is the third channel prefix
+        (``internal/channels/identifiers.go``). It has an audience like any
+        other room and, like a DM, no roster section."""
+        fetcher = _FakeFetcher(_DM, _AGENTS)
+        roster = await resolve_channel_roster(
+            fetcher, _event("thread:planning:abc"), "iron-fox",
+        )
+        assert roster is not None
+        assert fetcher.directory_calls == 0
+
+    async def test_raising_directory_still_yields_the_audience(self) -> None:
+        """The directory half is best-effort: a raise inside it must cost
+        display names, not the member set."""
+        roster = await resolve_channel_roster(
+            _RaisingDirectoryFetcher(), _event("group:planning"), "iron-fox",
+        )
+        assert roster is not None
+        assert roster.member_ids == {"ember-owl", "iron-fox", "nova-sparrow"}
+        assert roster.directory_ok is False
 
     async def test_no_fetcher_resolves_nothing(self) -> None:
         assert await resolve_channel_roster(
@@ -150,7 +215,7 @@ class TestResolveChannelRoster:
 
     async def test_self_is_marked_in_the_resolved_members(self) -> None:
         roster = await resolve_channel_roster(
-            _FakeFetcher((_CHANNEL, _AGENTS)),
+            _FakeFetcher(_CHANNEL, _AGENTS),
             _event("group:planning"), "iron-fox",
         )
         assert roster is not None
@@ -176,7 +241,7 @@ class TestInjectChannelRoster:
     async def test_group_section_is_byte_identical(self) -> None:
         wm = WorkingMemory(max_tokens=8192)
         roster = await resolve_channel_roster(
-            _FakeFetcher((_CHANNEL, _AGENTS)),
+            _FakeFetcher(_CHANNEL, _AGENTS),
             _event("group:planning"), "iron-fox",
         )
         inject_channel_roster(wm, roster)
@@ -188,7 +253,7 @@ class TestInjectChannelRoster:
         """Resolved for the gate, invisible to the prompt (review F-4)."""
         wm = WorkingMemory(max_tokens=8192)
         roster = await resolve_channel_roster(
-            _FakeFetcher((_DM, _AGENTS)),
+            _FakeFetcher(_DM, _AGENTS),
             _event("dm:alice:iron-fox"), "iron-fox",
         )
         assert roster is not None  # the gate has an audience …
@@ -201,7 +266,7 @@ class TestInjectChannelRoster:
         and ISSUE-0140 is off this release's path (scope lock 3)."""
         wm = WorkingMemory(max_tokens=8192)
         roster = await resolve_channel_roster(
-            _FakeFetcher((_CHANNEL, None)),
+            _FakeFetcher(_CHANNEL, None),
             _event("group:planning"), "iron-fox",
         )
         assert roster is not None
@@ -216,13 +281,13 @@ class TestInjectChannelRoster:
     async def test_stale_section_cleared_on_a_later_dm_turn(self) -> None:
         wm = WorkingMemory(max_tokens=8192)
         group = await resolve_channel_roster(
-            _FakeFetcher((_CHANNEL, _AGENTS)),
+            _FakeFetcher(_CHANNEL, _AGENTS),
             _event("group:planning"), "iron-fox",
         )
         inject_channel_roster(wm, group)
         assert wm.get_section(ROSTER_SECTION_NAME) is not None
         dm = await resolve_channel_roster(
-            _FakeFetcher((_DM, _AGENTS)),
+            _FakeFetcher(_DM, _AGENTS),
             _event("dm:alice:iron-fox"), "iron-fox",
         )
         inject_channel_roster(wm, dm)
@@ -231,7 +296,7 @@ class TestInjectChannelRoster:
     async def test_stale_section_cleared_when_resolution_fails(self) -> None:
         wm = WorkingMemory(max_tokens=8192)
         inject_channel_roster(wm, await resolve_channel_roster(
-            _FakeFetcher((_CHANNEL, _AGENTS)),
+            _FakeFetcher(_CHANNEL, _AGENTS),
             _event("group:planning"), "iron-fox",
         ))
         assert wm.get_section(ROSTER_SECTION_NAME) is not None
@@ -243,15 +308,17 @@ class TestInjectChannelRoster:
 
 
 class _OrderRecordingFetcher:
-    def __init__(self, order: list[str], result: object) -> None:
+    def __init__(self, order: list[str]) -> None:
         self._order = order
-        self._result = result
         self.calls: list[str] = []
 
-    async def fetch(self, channel_id: str):  # noqa: ANN201
+    async def fetch_members(self, channel_id: str):  # noqa: ANN201
         self._order.append("roster")
         self.calls.append(channel_id)
-        return self._result
+        return _CHANNEL
+
+    async def fetch_directory(self):  # noqa: ANN201
+        return _AGENTS
 
 
 class TestInjectionPathWiring:
@@ -266,9 +333,7 @@ class TestInjectionPathWiring:
             llm_client=_make_client(),
         )
         await agent.initialize_memory()
-        agent.set_roster_fetcher(
-            _OrderRecordingFetcher(order, (_CHANNEL, _AGENTS)),
-        )
+        agent.set_roster_fetcher(_OrderRecordingFetcher(order))
         real_gate = memory_context.TurnInjectionGate
 
         def _spy(*args: Any, **kwargs: Any):  # noqa: ANN202
@@ -292,7 +357,7 @@ class TestInjectionPathWiring:
             llm_client=_make_client(),
         )
         await agent.initialize_memory()
-        fetcher = _FakeFetcher((_DM, _AGENTS))
+        fetcher = _FakeFetcher(_DM, _AGENTS)
         agent.set_roster_fetcher(fetcher)
 
         event = AgentEvent(
@@ -313,7 +378,7 @@ class TestInjectionPathWiring:
             llm_client=_make_client(),
         )
         await agent.initialize_memory()
-        agent.set_roster_fetcher(_FakeFetcher((_CHANNEL, _AGENTS)))
+        agent.set_roster_fetcher(_FakeFetcher(_CHANNEL, _AGENTS))
 
         event = AgentEvent(
             event_type=EventType.CHANNEL_MESSAGE,

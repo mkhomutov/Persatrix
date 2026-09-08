@@ -167,15 +167,25 @@ async def _serve(*, channel_status: int = 200,
 
 
 class TestHttpChannelRosterFetcher:
-    async def test_fetch_returns_channel_meta_and_agents(self) -> None:
+    """The two halves are requested and lost independently (v0.3.16 PR A1):
+    the public members call carries the audience, the authenticated
+    directory call carries only display names."""
+
+    async def test_fetch_members_returns_the_channel(self) -> None:
         async with _serve() as base, aiohttp.ClientSession() as session:
             fetcher = HttpChannelRosterFetcher(
                 session=session, orchestrator_url=base,
             )
-            result = await fetcher.fetch("group:planning")
-        assert result is not None
-        channel_meta, agents = result
+            channel_meta = await fetcher.fetch_members("group:planning")
+        assert channel_meta is not None
         assert channel_meta["name"] == "planning"
+
+    async def test_fetch_directory_returns_the_agents(self) -> None:
+        async with _serve() as base, aiohttp.ClientSession() as session:
+            fetcher = HttpChannelRosterFetcher(
+                session=session, orchestrator_url=base,
+            )
+            agents = await fetcher.fetch_directory()
         assert agents is not None
         assert {a["id"] for a in agents} == {
             "ember-owl", "iron-fox", "nova-sparrow",
@@ -187,26 +197,22 @@ class TestHttpChannelRosterFetcher:
             fetcher = HttpChannelRosterFetcher(
                 session=session, orchestrator_url=base,
             )
-            assert await fetcher.fetch("group:planning") is None
+            assert await fetcher.fetch_members("group:planning") is None
 
-    async def test_directory_error_still_yields_members(self) -> None:
-        """The two GETs are independent halves (v0.3.16 PR A1): the
-        channel-members call is public, the agent directory is
-        authenticated and ``401``s for the fleet under auth
-        ([ISSUE-0140]). Discarding the members because the *directory*
-        missed is what leaves the audience check with nothing to read, so
-        a directory miss now returns ``agents=None`` beside intact
-        membership rather than collapsing the whole fetch."""
+    async def test_directory_error_does_not_touch_the_members(self) -> None:
+        """The directory is the half that ``401``s for the fleet under auth
+        ([ISSUE-0140]). Before PR A1 the two shared one call and one return,
+        so that ``401`` discarded membership that had arrived fine — which
+        is what left the audience check with nothing to read."""
         async with _serve(agents_status=401) as base, \
                 aiohttp.ClientSession() as session:
             fetcher = HttpChannelRosterFetcher(
                 session=session, orchestrator_url=base,
             )
-            result = await fetcher.fetch("group:planning")
-        assert result is not None
-        channel_meta, agents = result
+            assert await fetcher.fetch_directory() is None
+            channel_meta = await fetcher.fetch_members("group:planning")
+        assert channel_meta is not None
         assert channel_meta["name"] == "planning"
-        assert agents is None
 
     async def test_transport_failure_returns_none(self) -> None:
         # No server listening: the GET raises (connection refused) and the
@@ -219,7 +225,8 @@ class TestHttpChannelRosterFetcher:
             fetcher = HttpChannelRosterFetcher(
                 session=session, orchestrator_url=dead_base,
             )
-            assert await fetcher.fetch("group:planning") is None
+            assert await fetcher.fetch_members("group:planning") is None
+            assert await fetcher.fetch_directory() is None
 
     async def test_non_dict_channel_body_returns_none(self) -> None:
         # 200 OK but the channel payload is the wrong shape (a list, not the
@@ -229,20 +236,17 @@ class TestHttpChannelRosterFetcher:
             fetcher = HttpChannelRosterFetcher(
                 session=session, orchestrator_url=base,
             )
-            assert await fetcher.fetch("group:planning") is None
+            assert await fetcher.fetch_members("group:planning") is None
 
-    async def test_non_list_directory_body_still_yields_members(self) -> None:
+    async def test_non_list_directory_body_returns_none(self) -> None:
         # 200 OK but the agents payload is the wrong shape (an object, not the
-        # expected directory list): the isinstance(agents, list) guard rejects
-        # it — as a directory miss, not as a whole-fetch failure.
+        # expected directory list): the isinstance(agents, list) guard rejects.
         async with _serve(agents_body={"not": "a list"}) as base, \
                 aiohttp.ClientSession() as session:
             fetcher = HttpChannelRosterFetcher(
                 session=session, orchestrator_url=base,
             )
-            result = await fetcher.fetch("group:planning")
-        assert result is not None
-        assert result[1] is None
+            assert await fetcher.fetch_directory() is None
 
     async def test_empty_directory_is_not_a_miss(self) -> None:
         """A fleet with no registered agents answers ``[]`` — a successful
@@ -254,6 +258,15 @@ class TestHttpChannelRosterFetcher:
             fetcher = HttpChannelRosterFetcher(
                 session=session, orchestrator_url=base,
             )
-            result = await fetcher.fetch("group:planning")
-        assert result is not None
-        assert result[1] == []
+            assert await fetcher.fetch_directory() == []
+
+    async def test_channel_id_is_url_quoted(self) -> None:
+        """The id goes in a single path segment. An unquoted slash would
+        split it in two and miss the ``/channels/{id}`` route entirely —
+        a 404 the fetcher reports as "no roster", indistinguishable from a
+        room that does not exist."""
+        async with _serve() as base, aiohttp.ClientSession() as session:
+            fetcher = HttpChannelRosterFetcher(
+                session=session, orchestrator_url=base,
+            )
+            assert await fetcher.fetch_members("group:a/b") is not None
