@@ -136,7 +136,7 @@ class _AgentLike(Protocol):
         Required, not optional: the pass ``outcome`` below is read only at
         pass END, while the ingest-time segmentation door closes and
         DERIVES a record mid-pass, so
-        ``close_path.close_stale_records`` has to learn the gap from the
+        ``close_fan.close_stale_records`` has to learn the gap from the
         tracker instead.  An implementer that dropped it would silently
         derive a span with a hole in it, so this Protocol asks for it and
         the type checker holds every caller to it.

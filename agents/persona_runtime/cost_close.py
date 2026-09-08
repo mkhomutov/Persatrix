@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Protocol
 from ..memory.boundary_detectors import REASON_COST
 from ..memory.interactions import SCOPE_TICK
 from ..persona_types import EventType
-from .close_path import persist_fanned_closes
+from .close_fan import persist_fanned_closes
 from .interaction_boundary import scope_wire_anchor, wire_admits_record
 
 if TYPE_CHECKING:

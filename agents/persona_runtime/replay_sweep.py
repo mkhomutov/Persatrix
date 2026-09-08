@@ -190,7 +190,7 @@ async def close_replayed_scopes(
     **This is the pass-end door onto** ``Interaction
     .replay_window_complete``, the flag ``persist_closed_interaction``
     reads.  One other door may set it — the replay-internal segmentation in
-    :func:`~agents.persona_runtime.close_path.close_stale_records`, which
+    :func:`~agents.persona_runtime.close_fan.close_stale_records`, which
     closes a whole wire conversation mid-pass and applies the same
     ``replay_record_compromised`` test this loop does.  Every REMAINING
     door leaves the default standing.  The first cut kept the decision

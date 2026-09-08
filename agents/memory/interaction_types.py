@@ -222,7 +222,7 @@ class Interaction:
     #   the pass-end sweep, which runs after the pass and is told which
     #   channels finished; and
     # * the replay-internal SEGMENTATION in
-    #   :func:`~agents.persona_runtime.close_path.close_stale_records` — a
+    #   :func:`~agents.persona_runtime.close_fan.close_stale_records` — a
     #   wire rotation between two replayed rows, which closes a whole wire
     #   conversation rather than a prefix, so its digest is boot-stable.
     #
