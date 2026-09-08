@@ -11,7 +11,7 @@ in ``persona_behavior``, event dispatch in ``dispatch``, the tick scheduler
 in ``tick``.  The runtime class itself is split across mixin submodules for
 file-size hygiene:
 
-- ``memory_context`` — memory injection + context-window assembly
+- ``memory_context`` — memory recall + §D gate; ``memory_assembly`` — the allocate-loop
 - ``action_loop`` — multi-turn tool-use loop, prompt assembly, action parsing
 - ``state_persistence`` — state serialisation and memory lifecycle
 """
