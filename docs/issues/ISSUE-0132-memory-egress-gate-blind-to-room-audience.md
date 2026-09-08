@@ -191,3 +191,5 @@ this composes with the §E declassification-projection branch.
 >   audience is the only boundary at all. MT-MEMORY-GROUP-TENANT-001 stays
 >   untouched: its Leg 5 row is this topology but closes on the tenant axis,
 >   and the file has 14 words of headroom.
+>
+> 2026-09-08 — **Locked at the v0.3.16 plan opening** ([v0.3.16 plan](../v0.3.16-plan.md) Workstream A, [v0.3.16 scope locks](../v0.3.16-scope-locks.md) locks 1–3): the defaults above are now decisions. Three PRs — A1 the roster split moved ahead of the gate, A2 the audience input in shadow with the RFC 0037 amendment file, the audience eval seed and MT Leg 5, A3 the verdict-gated flip (green only, before release-prep PR 0). The audience seed needs an in-process roster seam on the eval driver, the way PR 4c added the history fetcher. If the verdict is red or absent this issue stays open at the tag with the measured delta recorded here.

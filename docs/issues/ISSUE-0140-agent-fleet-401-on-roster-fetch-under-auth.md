@@ -86,3 +86,5 @@ attribution axes — and is carried as a Known Gap on the
 > returns to its path only if the shadow verdict motivates a person-only
 > audience. The fix shape (route, network carve-out, RFC 0009 agent tokens)
 > is decided with RFC 0009, not at a patch-release plan opening.
+>
+> 2026-09-08 — **Confirmed out of scope at the v0.3.16 plan opening** ([v0.3.16 scope locks](../v0.3.16-scope-locks.md) lock 3); the ROADMAP row that called this load-bearing for the audience gate is corrected in the same PR.

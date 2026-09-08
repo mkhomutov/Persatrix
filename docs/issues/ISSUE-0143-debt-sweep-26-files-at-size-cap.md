@@ -104,3 +104,5 @@ filing: **26 at cap, 102 within 3%**.
 > or near the cycle's path are within 40 words of their caps and take the
 > amendment route instead of a split: RFC 0037 (7 973/8 000), RFC 0051 (7 985/8 000)
 > and `docs/memory-scope-axes.md` (2 960/3 000).
+>
+> 2026-09-08 — **Locked at the v0.3.16 plan opening** ([v0.3.16 plan](../v0.3.16-plan.md) Workstream D; [v0.3.16 scope locks](../v0.3.16-scope-locks.md) lock 4). Twenty-six at cap today, re-measured with `file_size.py --near-cap`. D1 (`memory_context.py`) and D2 (`close_path.py`) are uncuttable and go first; D3… take the remainder in blast-radius order, as many as land before release-prep PR 0. The count is re-read at the Phase 4 follow-up per step 4 above.

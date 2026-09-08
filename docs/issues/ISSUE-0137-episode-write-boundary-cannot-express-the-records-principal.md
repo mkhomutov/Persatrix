@@ -120,3 +120,5 @@ rather than leave it looking like an oversight.
 > one PR once the file has room for the step-4 test; the relationship-tier
 > statement in the last paragraph rides the ISSUE-0122 PR, which touches
 > that tier anyway.
+>
+> 2026-09-08 — **Locked at the v0.3.16 plan opening** ([v0.3.16 plan](../v0.3.16-plan.md) Workstream E, PR E1, behind the `close_path.py` split D2; [v0.3.16 scope locks](../v0.3.16-scope-locks.md) lock 4). Cuttable with Workstream D.

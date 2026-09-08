@@ -197,6 +197,8 @@ deferred.
 > (1 528 words), not made in the RFC; MT-REASON-001 Step 2 and its Step-2 caveat flip in
 > the same PR, as do the "wired in a later PR" docstrings. Rides with
 > ISSUE-0122.
+>
+> 2026-09-08 — **Locked at the v0.3.16 plan opening** ([v0.3.16 plan](../v0.3.16-plan.md) PR B2), as defaulted above. The release note must state that the DEBUG line is a new egress surface for operators who ship agent logs off-host — the §E correction says so.
 
 [e]: ../rfcs/0051-reasoning-before-posting.md#e-privacy-boundary--the-trace-is-walled
 [mt]: ../manual-tests/MT-REASON-001.md

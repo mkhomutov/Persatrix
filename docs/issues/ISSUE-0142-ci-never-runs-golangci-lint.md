@@ -92,3 +92,5 @@ sweep.
 > runs unpinned). Expect the first golangci-lint run red; the per-linter
 > fix-or-exclude calls are the PR's, not the plan's. Step 4 (re-audit the
 > enforcement matrix for make targets with no CI job) rides the same PR.
+>
+> 2026-09-08 — **Locked at the v0.3.16 plan opening** ([v0.3.16 plan](../v0.3.16-plan.md) PR C1, paired with RFC 0044 Phase 2 as PR C2; [v0.3.16 scope locks](../v0.3.16-scope-locks.md) lock 5). The PR that adds the job also lists it in the branch-protection file — a job is a gate only once it is required.

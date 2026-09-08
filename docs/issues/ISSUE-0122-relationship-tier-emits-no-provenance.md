@@ -103,3 +103,5 @@ that running them surfaced.
 > exists will exist. The `relationship` tier stays outside the RFC 0037 §D
 > gate (the RFC's Non-Goals): this adds an admission record, not a gate
 > decision. Rides with ISSUE-0108 as the one observability workstream.
+>
+> 2026-09-08 — **Locked at the v0.3.16 plan opening** ([v0.3.16 plan](../v0.3.16-plan.md) PR B1). Also carries ISSUE-0137's one-sentence statement that the relationship tier stays ambient-only on the tenant axis, since B1 touches that tier anyway.
