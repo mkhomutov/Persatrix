@@ -10,33 +10,28 @@ and roles, sourced from the orchestrator (`GET /api/v1/channels/{id}` for
 membership + `GET /api/v1/agents` for the id→name/role directory, one call
 each — no N+1).
 
-This slice (A) lands the pure, self-contained building blocks with full
-unit coverage and **no wiring** into `_inject_memory_context` (zero
-behaviour change): the `build_roster` join, the `render_roster_section`
-renderer, and the `HttpChannelRosterFetcher`. Slice B wires the section
-into the budgeted injection path (and the `memory_context` refactor that
-needs).
+This module covers the pure, self-contained building blocks: the
+`build_roster` join, the `render_roster_section` renderer, and the
+`HttpChannelRosterFetcher` transport. Resolution and injection — which
+since v0.3.16 PR A1 run for every channel-anchored turn and feed the
+ISSUE-0132 audience rail — live in `test_channel_roster_resolution.py`.
 """
 
 from __future__ import annotations
 
-import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
-from unittest.mock import MagicMock
 
 import aiohttp
 from aiohttp import web
 
-from agents.memory.working import WorkingMemory
 from agents.persona_runtime.channel_roster import (
     ROSTER_SECTION_NAME,
     ROSTER_SECTION_PRIORITY,
     HttpChannelRosterFetcher,
     RosterMember,
     build_roster,
-    inject_channel_roster,
     render_roster_section,
 )
 
@@ -181,6 +176,7 @@ class TestHttpChannelRosterFetcher:
         assert result is not None
         channel_meta, agents = result
         assert channel_meta["name"] == "planning"
+        assert agents is not None
         assert {a["id"] for a in agents} == {
             "ember-owl", "iron-fox", "nova-sparrow",
         }
@@ -193,13 +189,24 @@ class TestHttpChannelRosterFetcher:
             )
             assert await fetcher.fetch("group:planning") is None
 
-    async def test_agents_error_returns_none(self) -> None:
-        async with _serve(agents_status=500) as base, \
+    async def test_directory_error_still_yields_members(self) -> None:
+        """The two GETs are independent halves (v0.3.16 PR A1): the
+        channel-members call is public, the agent directory is
+        authenticated and ``401``s for the fleet under auth
+        ([ISSUE-0140]). Discarding the members because the *directory*
+        missed is what leaves the audience check with nothing to read, so
+        a directory miss now returns ``agents=None`` beside intact
+        membership rather than collapsing the whole fetch."""
+        async with _serve(agents_status=401) as base, \
                 aiohttp.ClientSession() as session:
             fetcher = HttpChannelRosterFetcher(
                 session=session, orchestrator_url=base,
             )
-            assert await fetcher.fetch("group:planning") is None
+            result = await fetcher.fetch("group:planning")
+        assert result is not None
+        channel_meta, agents = result
+        assert channel_meta["name"] == "planning"
+        assert agents is None
 
     async def test_transport_failure_returns_none(self) -> None:
         # No server listening: the GET raises (connection refused) and the
@@ -224,121 +231,29 @@ class TestHttpChannelRosterFetcher:
             )
             assert await fetcher.fetch("group:planning") is None
 
-    async def test_non_list_agents_body_returns_none(self) -> None:
+    async def test_non_list_directory_body_still_yields_members(self) -> None:
         # 200 OK but the agents payload is the wrong shape (an object, not the
-        # expected directory list): the isinstance(agents, list) guard rejects.
+        # expected directory list): the isinstance(agents, list) guard rejects
+        # it — as a directory miss, not as a whole-fetch failure.
         async with _serve(agents_body={"not": "a list"}) as base, \
                 aiohttp.ClientSession() as session:
             fetcher = HttpChannelRosterFetcher(
                 session=session, orchestrator_url=base,
             )
-            assert await fetcher.fetch("group:planning") is None
+            result = await fetcher.fetch("group:planning")
+        assert result is not None
+        assert result[1] is None
 
-
-# ─── inject_channel_roster (injection wiring) ─────────────────
-
-
-def _event(channel_id: str) -> MagicMock:
-    """A stand-in AgentEvent — the helper only reads ``channel_id``."""
-    event = MagicMock()
-    event.channel_id = channel_id
-    return event
-
-
-class _FakeFetcher:
-    def __init__(self, result: object) -> None:
-        self._result = result
-
-    async def fetch(self, channel_id: str):  # noqa: ANN201
-        return self._result
-
-
-class _RaisingFetcher:
-    """A fetcher whose ``fetch`` raises — exercises the non-fatal
-    ``except Exception`` branch (distinct from a clean ``None`` return)."""
-
-    async def fetch(self, channel_id: str):  # noqa: ANN201
-        raise RuntimeError("orchestrator unreachable")
-
-
-class TestInjectChannelRoster:
-    async def test_group_event_injects_roster(self) -> None:
-        wm = WorkingMemory(max_tokens=8192)
-        fetcher = _FakeFetcher((_CHANNEL, _AGENTS))
-        await inject_channel_roster(
-            wm, fetcher, _event("group:planning"), "iron-fox",
-        )
-        section = wm.get_section(ROSTER_SECTION_NAME)
-        assert section is not None
-        assert "Ember Owl" in section.content
-        # The viewing persona (iron-fox) is flagged.
-        iron_line = next(
-            ln for ln in section.content.splitlines() if "Iron Fox" in ln
-        )
-        assert "(you)" in iron_line
-
-    async def test_dm_event_injects_no_roster(self) -> None:
-        wm = WorkingMemory(max_tokens=8192)
-        fetcher = _FakeFetcher((_CHANNEL, _AGENTS))
-        await inject_channel_roster(
-            wm, fetcher, _event("dm:local:iron-fox"), "iron-fox",
-        )
-        assert wm.get_section(ROSTER_SECTION_NAME) is None
-
-    async def test_no_fetcher_injects_no_roster(self) -> None:
-        wm = WorkingMemory(max_tokens=8192)
-        await inject_channel_roster(
-            wm, None, _event("group:planning"), "iron-fox",
-        )
-        assert wm.get_section(ROSTER_SECTION_NAME) is None
-
-    async def test_fetch_failure_injects_no_roster(self) -> None:
-        wm = WorkingMemory(max_tokens=8192)
-        await inject_channel_roster(
-            wm, _FakeFetcher(None), _event("group:planning"), "iron-fox",
-        )
-        assert wm.get_section(ROSTER_SECTION_NAME) is None
-
-    async def test_stale_roster_cleared_on_a_later_dm_turn(self) -> None:
-        wm = WorkingMemory(max_tokens=8192)
-        fetcher = _FakeFetcher((_CHANNEL, _AGENTS))
-        await inject_channel_roster(
-            wm, fetcher, _event("group:planning"), "iron-fox",
-        )
-        assert wm.get_section(ROSTER_SECTION_NAME) is not None
-        # A subsequent DM turn must not carry the prior group's roster.
-        await inject_channel_roster(
-            wm, fetcher, _event("dm:local:iron-fox"), "iron-fox",
-        )
-        assert wm.get_section(ROSTER_SECTION_NAME) is None
-
-    async def test_fetch_raising_is_non_fatal_and_warns(
-        self, caplog: Any,
-    ) -> None:
-        """A fetcher whose ``fetch`` *raises* (not just returns ``None``) is
-        swallowed: no roster section, and the failure is logged at WARNING
-        so operators can see it. Covers the ``except Exception`` branch the
-        ``None``-return case does not exercise."""
-        wm = WorkingMemory(max_tokens=8192)
-        with caplog.at_level(logging.WARNING):
-            await inject_channel_roster(
-                wm, _RaisingFetcher(), _event("group:planning"), "iron-fox",
+    async def test_empty_directory_is_not_a_miss(self) -> None:
+        """A fleet with no registered agents answers ``[]`` — a successful
+        directory call. It must stay distinguishable from the ``401``,
+        because an empty directory still renders a roster section (every
+        member falls back to its id) and a missed one renders none."""
+        async with _serve(agents_body=[]) as base, \
+                aiohttp.ClientSession() as session:
+            fetcher = HttpChannelRosterFetcher(
+                session=session, orchestrator_url=base,
             )
-        assert wm.get_section(ROSTER_SECTION_NAME) is None
-        assert any(
-            "roster injection failed" in r.getMessage() for r in caplog.records
-        )
-
-    async def test_stale_roster_cleared_even_when_refresh_raises(self) -> None:
-        """The stale-section clear happens before the fetch, so a later group
-        turn whose refresh raises must not leave the prior roster lingering."""
-        wm = WorkingMemory(max_tokens=8192)
-        await inject_channel_roster(
-            wm, _FakeFetcher((_CHANNEL, _AGENTS)),
-            _event("group:planning"), "iron-fox",
-        )
-        assert wm.get_section(ROSTER_SECTION_NAME) is not None
-        await inject_channel_roster(
-            wm, _RaisingFetcher(), _event("group:planning"), "iron-fox",
-        )
-        assert wm.get_section(ROSTER_SECTION_NAME) is None
+            result = await fetcher.fetch("group:planning")
+        assert result is not None
+        assert result[1] == []
