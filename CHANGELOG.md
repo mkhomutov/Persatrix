@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### 🔧 Changed
+
+- **The persona memory-context injector is split at its recall/assembly seam** ([ISSUE-0143](docs/issues/ISSUE-0143-debt-sweep-26-files-at-size-cap.md) debt sweep, v0.3.16 PR D1): `agents/persona_runtime/memory_context.py` sat at exactly its 500-line cap and is the file the v0.3.16 audience gate must grow into. The allocate-loop — rendering each gated tier against the per-turn budget and staging the sections in working memory — now lives in the new `memory_assembly.py`; the tier recalls, the RFC 0037 §D gate and the budget constructor stay behind, because the test harnesses patch them by that module's name. Pure structure: no behaviour change, every existing test passes unchanged, the five offline eval goldens replay byte-identically.
+
 ## [0.3.15] - 2026-09-06
 
 > **Codename:** Who said what

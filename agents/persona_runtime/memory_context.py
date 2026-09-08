@@ -2,6 +2,9 @@
 
 Handles episodic recall, relationship summary, working-memory
 truncation, and note injection into the persona agent's context window.
+The recall-and-gate half lives here; the allocate-loop that renders the
+gated tiers against the budget and stages them in working memory is
+:mod:`agents.persona_runtime.memory_assembly` (v0.3.16 D1 split).
 """
 
 from __future__ import annotations
@@ -22,7 +25,6 @@ from ..memory.working import WorkingMemory
 from .channel_history import (
     CHANNEL_HISTORY_SECTION_NAME,
     recall_channel_episodes,
-    render_channel_history_section,
 )
 from .channel_roster import inject_channel_roster
 from .cross_room import (
@@ -31,12 +33,11 @@ from .cross_room import (
     DEFAULT_FACTS_CROSS_ROOM,
 )
 from .episodes_shadow import emit_episodes_shadow
-from .episodic_section import EPISODIC_RECALL_LIMIT, render_episodic_section
+from .episodic_section import EPISODIC_RECALL_LIMIT
 from .facts_section import (
     DEFAULT_FACTS_BUDGET_TOKENS,
     FACTS_SECTION_NAME,
     recall_facts_for_event,
-    render_facts_section,
 )
 from .facts_shadow import emit_facts_shadow
 from .injection_gate import (
@@ -44,6 +45,7 @@ from .injection_gate import (
     TurnInjectionGate,
     acting_classification_for_event,
 )
+from .memory_assembly import inject_admitted_sections
 from .memory_budget import (
     MEMORY_BUDGET_TOKENS,
     MemoryBudget,
@@ -52,13 +54,11 @@ from .memory_budget import (
 from .notes_section import (
     NOTES_SECTION_NAME,
     recall_notes_for_event,
-    render_notes_section,
 )
 from .projection_branch import apply_episode_projections
 from .relationship_section import (
     RELATIONSHIP_SECTION_NAME,
     recall_relationship_summary,
-    render_relationship_section,
 )
 from .tripwire_watch import stamp_turn_tripwire_watch
 
@@ -414,72 +414,18 @@ class _MemoryContextMixin:
         # RFC 0021 PR 2: snapshot the temporal seam once per event.
         now = self._clock.now()
 
-        # Relationship tier (priority 8).  Admission, label formatting,
-        # default-trust filtering, and the temporal-recency metric live
-        # in ``relationship_section.render_relationship_section``.
-        rel_section = render_relationship_section(
-            rel, budget,
-            now=now, timezone=self._timezone, truncate=_truncate_with_ellipsis,
+        # Allocate-loop proper — relationship → channel history → facts →
+        # episodic → notes, each rendered against ``budget`` and staged in
+        # working memory.  Lives in ``memory_assembly`` (v0.3.16 D1 split);
+        # the budget is constructed here because harnesses patch
+        # ``MemoryBudget`` by this module's name.
+        await inject_admitted_sections(
+            self,
+            budget=budget, now=now,
+            rel=rel, channel_episodes=channel_episodes, facts=facts,
+            episodes=episodes, notes=notes,
+            truncate=_truncate_with_ellipsis,
         )
-        if rel_section is not None:
-            self._working_memory.add_section(rel_section)
-
-        # Channel-history tier (RFC 0011 §E + RFC 0021 §J).  Slots
-        # between relationship and episodic admissions.
-        ch_section = render_channel_history_section(
-            channel_episodes, budget,
-            now=now, timezone=self._timezone, truncate=_truncate_with_ellipsis,
-        )
-        if ch_section is not None:
-            self._working_memory.add_section(ch_section)
-
-        # Facts tier (RFC 0026 PR 3).  Admitted between channel_history
-        # and episodic so a high-signal fact displaces lower-signal
-        # prose under budget pressure.  Header charged against the
-        # global budget; admitted fact_ids land on the per-turn
-        # registry for the PR 4 reinforcement write below (MQ-11).
-        if facts:
-            facts_section = render_facts_section(
-                facts, budget,
-                facts_budget_tokens=self._facts_budget_tokens,
-            )
-            if facts_section is not None:
-                self._working_memory.add_section(facts_section)
-                # RFC 0026 PR 4 — use-based reinforcement; non-fatal
-                # because the section is already staged and the caller
-                # builds the prompt after this returns (PR #342 M-3).
-                admitted_fact_ids = budget.admissions_by_tier("facts")
-                if admitted_fact_ids and self._fact_store is not None:
-                    try:
-                        await self._fact_store.mark_recalled(admitted_fact_ids)
-                    except Exception:
-                        logger.warning(
-                            "Agent %s: fact reinforcement write failed; skipping",
-                            self.agent_id, exc_info=True,
-                        )
-
-        # Episodic tier (priority 7).  Extracted to
-        # ``episodic_section.render_episodic_section`` (F-4 slice B) so the
-        # episodic tier matches the other recall tiers' ``render_*`` shape;
-        # behaviour (recency tags, budget admission, MQ-11 provenance,
-        # ``source="episode"`` metric) is preserved there.
-        ep_section = render_episodic_section(
-            episodes, budget,
-            now=now, timezone=self._timezone, truncate=_truncate_with_ellipsis,
-        )
-        if ep_section is not None:
-            self._working_memory.add_section(ep_section)
-
-        # Notes tier (priority 6).  Extracted to
-        # ``notes_section.render_notes_section`` (RFC 0037 PR 4) so the
-        # notes tier matches the other tiers' ``render_*`` shape;
-        # behaviour (line shape, budget admission, MQ-11 provenance) is
-        # preserved there.
-        notes_section = render_notes_section(
-            notes, budget, truncate=_truncate_with_ellipsis,
-        )
-        if notes_section is not None:
-            self._working_memory.add_section(notes_section)
 
         # Channel-roster tier (F-4, priority 9 — highest). Group channels
         # only; structural room context injected outside the recall budget
