@@ -120,3 +120,7 @@ rather than leave it looking like an oversight.
 > one PR once the file has room for the step-4 test; the relationship-tier
 > statement in the last paragraph rides the ISSUE-0122 PR, which touches
 > that tier anyway.
+>
+> 2026-09-08 — **Locked at the v0.3.16 plan opening** ([v0.3.16 plan](../v0.3.16-plan.md) Workstream E, PR E1, behind the `close_path.py` split D2; [v0.3.16 scope locks](../v0.3.16-scope-locks.md) lock 4). Cuttable with Workstream D.
+>
+> 2026-09-08 — **Correction at the [#886](https://github.com/mkhomutov/Persatrix/pull/886) review (F-1).** The `with principal_scope(...)` binding this file places in `close_path.py` has lived in `record_write_scopes` (`agents/persona_runtime/record_write_scope.py`) since v0.3.15 PR B2 ([#851](https://github.com/mkhomutov/Persatrix/pull/851)), where the epoch half joined it. What `close_path.py` holds is the `store_episode` call site that E1 grows a `principal_id=` argument on — still a 500/500 file, which is why the D2 split precedes E1.
