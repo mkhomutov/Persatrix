@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0137
 summary: "The persona-memory write boundary takes speaker_id explicitly but resolves principal_id ambiently, so a record's tenant is carried by one `with` statement rather than by the call"
-status: open
+status: resolved
 severity: medium
 area: memory
 created: 2026-08-30
+closed: 2026-09-09
+closed_pr: 893
 refs:
   - docs/issues/ISSUE-0123-per-speaker-interaction-scope.md
   - docs/issues/ISSUE-0131-derived-memory-has-no-speaker-attribution.md
@@ -124,3 +126,19 @@ rather than leave it looking like an oversight.
 > 2026-09-08 — **Locked at the v0.3.16 plan opening** ([v0.3.16 plan](../v0.3.16-plan.md) Workstream E, PR E1, behind the `close_path.py` split D2; [v0.3.16 scope locks](../v0.3.16-scope-locks.md) lock 4). Cuttable with Workstream D.
 >
 > 2026-09-08 — **Correction at the [#886](https://github.com/mkhomutov/Persatrix/pull/886) review (F-1).** The `with principal_scope(...)` binding this file places in `close_path.py` has lived in `record_write_scopes` (`agents/persona_runtime/record_write_scope.py`) since v0.3.15 PR B2 ([#851](https://github.com/mkhomutov/Persatrix/pull/851)), where the epoch half joined it. What `close_path.py` holds is the `store_episode` call site that E1 grows a `principal_id=` argument on — still a 500/500 file, which is why the D2 split precedes E1.
+>
+> 2026-09-09 — **Resolved by v0.3.16 PR E1.** Steps 1–4 as written:
+> `EpisodicMemory.store_episode` and `FactStore.store` take
+> `principal_id: str | None = None` (`None` = resolve ambient, so every
+> pre-existing caller is unchanged); the close path passes
+> `interaction.principal_id` beside `speaker_id`, and the facts half
+> passes it through `dispatch_facts_from_response` →
+> `store_extracted_facts` from the same frozen record key. The
+> `record_write_scopes` binding stays as defence-in-depth — it is what
+> still carries the EPOCH, which has no explicit parameter. The pin is
+> `tests/unit/python/test_explicit_record_principal.py`: with the wrapper
+> monkeypatched to a `nullcontext`, the close-derived episode and its
+> facts still land under the record's principal, so the invariant is
+> carried by the call rather than by one `with` statement. The
+> relationship tier is stated here as ambient-only either way and its
+> `record_admission` gap rides the ISSUE-0122 PR (B1), per the plan.

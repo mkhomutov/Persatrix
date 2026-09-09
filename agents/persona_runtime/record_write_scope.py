@@ -18,6 +18,15 @@ That list has grown once per release, and each time it was found by a bug
 rather than by looking: the principal in PR #846, the epoch in this one.
 Naming the set in one module is the cheapest way to make the next addition
 an edit to a list instead of a fourth incident.
+
+Since ISSUE-0137 this module is no longer what HOLDS the tenant right.
+``store_episode`` and ``FactStore.store`` take ``principal_id`` and the
+close path passes the record's own, so the principal now travels by the
+call the way ``speaker_id`` always has, and a derived-write path that
+forgets this wrapper still writes to the right tenant.  The binding stays
+as defence-in-depth, and it is still load-bearing for the EPOCH, which
+has no such parameter — and for the relationship tier, which has no
+explicit tenant argument at all and is therefore ambient-only either way.
 """
 
 from __future__ import annotations
@@ -57,6 +66,11 @@ def record_write_scopes(
     A blank ``epoch_id`` means the record was minted by a site that
     captures none (a direct ``Interaction(...)``), and resolution stays
     exactly where it was — ambient — so no pre-existing path changes.
+
+    Both halves are still bound here after ISSUE-0137 gave the principal
+    an explicit parameter: the argument is the contract, this is the net
+    under it, and removing the principal half would silently re-expose
+    every tier the close path does not pass it to.
     """
     stack = contextlib.ExitStack()
     stack.enter_context(principal_scope(interaction.principal_id))
