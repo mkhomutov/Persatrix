@@ -521,6 +521,19 @@
             }
           }
         },
+        "egress": {
+          "type": "object",
+          "description": "Memory egress configuration (RFC 0037 §D — what may be SPOKEN, as opposed to what is recalled). The classification knobs live on the channel; this block holds the cross-cutting checks the injection gate applies on top of it.",
+          "additionalProperties": false,
+          "properties": {
+            "audience": {
+              "type": "string",
+              "enum": ["off", "shadow", "live"],
+              "default": "shadow",
+              "description": "Audience as an AND-condition on the RFC 0037 §D egress gate (ISSUE-0132 / the RFC 0037 audience-egress amendment). The §D gate compares an entry's protection level against the acting channel's classification and nothing else, so a fact taught in a DM is admissible in any equally-classified room — including one the teacher is not in. This knob adds the missing half: an entry's audience is the current member set of its source room, and the check is that the acting room adds nobody that room did not hold. 'shadow' (the v0.3.16 default) records the per-entry verdict — admit / withhold-disjoint / withhold-unknown-fetch-failed / withhold-unknown-no-provenance — and injects the entry anyway, so every prompt is byte-identical to v0.3.15; it is the measurement the shadow->live flip is gated on. 'live' withholds the DISJOINT verdict only: both unknown causes are recorded and admitted, because withholding on an unresolved roster would silently degrade a persona that has been useful for four releases. 'off' skips the check entirely. Cost: one roster round trip per distinct source room among a turn's candidates, deduplicated per turn and free for the acting room, which the turn already resolves."
+            }
+          }
+        },
         "relationship": {
           "type": "object",
           "description": "Relationship memory configuration (extension spec E7.2)",

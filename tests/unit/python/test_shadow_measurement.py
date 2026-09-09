@@ -182,13 +182,25 @@ class TestPromotionVerdict:
 
 def test_default_bounds_pin_runtime_recall_limits():
     """The pure module cannot import ``agents``; this pin holds its defaults
-    equal to the live recall limits from the outside."""
+    equal to the live recall limits from the outside.
+
+    The ``audience`` bound is the SUM of all four gated tiers' limits
+    (v0.3.16 A2): the audience check judges §D-admitted entries across
+    every tier, so its per-turn ceiling is what the recalls can put in
+    front of the gate at all.
+    """
     from agents.persona_runtime.episodic_section import EPISODIC_RECALL_LIMIT
     from agents.persona_runtime.facts_section import FACTS_RECALL_LIMIT
+    from agents.persona_runtime.memory_budget import CHANNEL_RECALL_LIMIT
+    from agents.persona_runtime.notes_section import NOTES_RECALL_LIMIT
 
     assert DEFAULT_TIER_BOUNDS == {
         "episodic": EPISODIC_RECALL_LIMIT,
         "facts": FACTS_RECALL_LIMIT,
+        "audience": (
+            CHANNEL_RECALL_LIMIT + FACTS_RECALL_LIMIT
+            + EPISODIC_RECALL_LIMIT + NOTES_RECALL_LIMIT
+        ),
     }
 
 

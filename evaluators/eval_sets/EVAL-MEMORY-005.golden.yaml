@@ -1,0 +1,35 @@
+9cc3f34db3b0ee6ba824080dfa9a4749225039848d0b3548ded0b3aaa8b16fbd:
+  stop_reason: end_turn
+  text: Morning! Nothing blocking from me — go ahead with the round.
+  usage:
+    input_tokens: 2071
+    output_tokens: 15
+b450978ae9a5359d06da03c75fc900c591bc33436fb79cc443bc47828816f64b:
+  stop_reason: end_turn
+  text: Helix is paused until the security review clears — that's where the rollout
+    stands.
+  usage:
+    input_tokens: 2099
+    output_tokens: 20
+cbf85eef52a4435b01c8cab3f042bbf8cfde7bbcb3847bf56d6ed86324fe885f:
+  stop_reason: end_turn
+  text: Understood — the Helix rollout is paused until the security review clears.
+    I'll keep that between us.
+  usage:
+    input_tokens: 2057
+    output_tokens: 25
+d352fe6a9077ceaf8f7d78d257e6c690e30fab7482d272db0a9fd5f580475a47:
+  stop_reason: end_turn
+  text: 'Same picture: the Helix rollout is paused until the security review clears.'
+  usage:
+    input_tokens: 2092
+    output_tokens: 18
+dac8ffd7222d3f53b9895d6a095e4e23cd1e2d494f204a0ddb5ef621d558d43a:
+  stop_reason: end_turn
+  text: '{"summary": "Alice said in the DM that the Helix rollout is paused until
+    the security review clears, and asked to keep it between them.", "facts": [{"subject":
+    "helix", "predicate": "topic.has_status", "object": "the rollout is paused until
+    the security review clears", "certainty": 0.9}]}'
+  usage:
+    input_tokens: 473
+    output_tokens: 72
