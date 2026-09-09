@@ -10,7 +10,7 @@ share:
   per ``(principal, speaker, scope)``, so one live turn racing catch-up in
   a busy room refused every OTHER speaker's complete window there;
 * the ingest-time segmentation door
-  (:func:`~agents.persona_runtime.close_path.close_stale_records`) marked
+  (:func:`~agents.persona_runtime.close_fan.close_stale_records`) marked
   records derivable without consulting any of that bookkeeping — so it
   derived the remainder of an already-cut window, derived segments with a
   hole where a row had raised, and fired on the ISSUE-0130 ATTRIBUTION
@@ -29,7 +29,7 @@ import pytest
 
 from agents.memory.interaction_tracker import InteractionTracker
 from agents.memory.interaction_types import Interaction
-from agents.persona_runtime.close_path import close_stale_records
+from agents.persona_runtime.close_fan import close_stale_records
 from agents.persona_runtime.replay_sweep import close_replayed_scopes
 from agents.persona_types import AgentEvent, EventType
 

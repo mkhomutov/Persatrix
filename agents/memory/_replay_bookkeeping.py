@@ -88,7 +88,7 @@ class _ReplayBookkeepingMixin:
         channel.  Recorded HERE as well as on ``ReplayPassOutcome`` because
         both derivation doors have to see it: the pass-end sweep reads the
         outcome, but the ingest-time segmentation door in
-        ``close_path.close_stale_records`` closes and persists a record
+        ``close_fan.close_stale_records`` closes and persists a record
         mid-pass, long before the outcome is read.
         """
         if speaker_id:

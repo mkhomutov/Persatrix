@@ -45,6 +45,20 @@ responses:
     # one; that is the feature, not drift).
     - match: ["json", "zephyr acquisition"]
       reply: '{"summary": "Sam shared in the war room that the Zephyr acquisition closes March 3; ember-owl acknowledged it stays in the room.", "facts": [{"subject": "zephyr", "predicate": "topic.has_deadline", "object": "the acquisition closes March 3", "certainty": 0.9}]}'
+    # EVAL-MEMORY-005 — the DM interaction close's combined summarize +
+    # extract call. THIRD, for the same reason the two above are first:
+    # the summarizer's own instruction text all-matches some reply-keyed
+    # entries below, so every envelope entry must sit above them. Keying:
+    # "json" = the envelope instruction (absent from every action
+    # prompt); the PHRASE "helix rollout" = this recipe's transcript,
+    # absent from every other close prompt. The single topic fact is
+    # what the audience check judges — its `source_channel_id` is the DM
+    # (frozen at open), which is the whole point of the seed; the fact
+    # itself is stamped `internal` by the DM's classification, so §D
+    # admits it in every `internal` room and audience is the only thing
+    # that can withhold it.
+    - match: ["json", "helix rollout"]
+      reply: '{"summary": "Alice said in the DM that the Helix rollout is paused until the security review clears, and asked to keep it between them.", "facts": [{"subject": "helix", "predicate": "topic.has_status", "object": "the rollout is paused until the security review clears", "certainty": 0.9}]}'
     # EVAL-MEMORY-001 — dementia test. One entry per user turn, keyed on
     # keywords unique to that turn so exactly one matches.
     - match: ["daughter", "mira"]           # i1 — establish the named entity
@@ -99,3 +113,21 @@ responses:
       reply: "I don't have a closing date for Zephyr I can share in this room — nothing for the roadmap from me."
     - match: ["zephyr", "war room"]         # 004 i4 — restricted re-ask: the fact is in the prompt
       reply: "Zephyr closes March 3 — the date we captured in this war room."
+    # EVAL-MEMORY-005 — the ISSUE-0132 audience seed (teach in a DM, ask
+    # in front of Bob, ask without him). Keys are disjoint from every
+    # entry above: no other recipe's turns mention Helix, "the board" or
+    # "just us", and the bridge turn deliberately avoids "plate" /
+    # "need from" (the 002/003 and 004 bridge keys) so it does not
+    # all-match theirs. The i3 and i4 replies are BOTH answers on
+    # purpose: the audience check ships in shadow, so the standup ask
+    # still has the fact in its prompt — a scripted decline there would
+    # bake a posture this release does not ship. The load-bearing pin is
+    # the request hash and the run's shadow traces (see the recipe).
+    - match: ["helix rollout", "security review"]   # 005 i1 — the DM teach turn
+      reply: "Understood — the Helix rollout is paused until the security review clears. I'll keep that between us."
+    - match: ["quick round", "this morning"]        # 005 i2 — the standup bridge turn
+      reply: "Morning! Nothing blocking from me — go ahead with the round."
+    - match: ["helix", "the board"]                 # 005 i3 — the ask in front of Bob
+      reply: "Helix is paused until the security review clears — that's where the rollout stands."
+    - match: ["helix", "just us"]                   # 005 i4 — the ask without him
+      reply: "Same picture: the Helix rollout is paused until the security review clears."

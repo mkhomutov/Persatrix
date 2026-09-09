@@ -29,7 +29,7 @@ from ..principal_id import resolve_principal_id_silent
 from ..session_id import current_session_id, normalize_session_id, resolve_session_id_silent
 from ._boundary import warn_external_construction
 from ._epoch_filter import resolve_active_epoch
-from ._principal_filter import resolve_active_principal
+from ._principal_filter import resolve_active_principal, resolve_write_principal
 from ._salience import EPISODIC_APPEND_SALIENCE, emit_for_tier, emit_session_write
 from ._session_filter import _resolve_session_list
 from .episodic_crud import (
@@ -213,6 +213,7 @@ class EpisodicMemory(
         protection_level: str = PROTECTION_LEVEL_DEFAULT,
         source_channel_id: str | None = None,
         speaker_id: str | None = None,
+        principal_id: str | None = None,
     ) -> str:
         """Store a new episode. Returns the generated episode ID.
 
@@ -234,6 +235,11 @@ class EpisodicMemory(
 
         ``speaker_id`` (ISSUE-0131 — v18): the record key's speaker half, projected at close;
         ``None`` = no speaker.  Full contract: :func:`.episodic_queries.insert_episode`.
+
+        ``principal_id`` (ISSUE-0137) is the key's OTHER half — the tenant that owns the
+        record, so the call site shows the whole key rather than half of it plus an
+        assumption about the enclosing scope.  Precedence and normalisation:
+        :func:`.resolve_write_principal`.
         """
         with _tracer.start_as_current_span(
             EPISODIC_REMEMBER_SPAN,
@@ -254,8 +260,12 @@ class EpisodicMemory(
                     logger.warning("importance=%.4f out of [0.0, 1.0] range, clamping", importance)
                     importance = max(0.0, min(1.0, importance))
                 session_id = normalize_session_id(session_id)  # PR 4 / F16
-                # ISSUE-0081 PR 3: tag the row with the active tenant.
-                principal_id = resolve_active_principal(self._active_principal_id)
+                # ISSUE-0081 PR 3: tag the row with the tenant — the caller's
+                # if it named one (ISSUE-0137), otherwise the active one.
+                # Normalises either way, like ``session_id`` above.
+                principal_id = resolve_write_principal(
+                    principal_id, self._active_principal_id,
+                )
                 # ISSUE-0085 PR 3: tag the row with the active epoch.
                 epoch_id = resolve_active_epoch(self._active_epoch_id)
                 episode_id = await insert_episode(

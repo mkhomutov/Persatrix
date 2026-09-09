@@ -136,7 +136,7 @@ class _AgentLike(Protocol):
         Required, not optional: the pass ``outcome`` below is read only at
         pass END, while the ingest-time segmentation door closes and
         DERIVES a record mid-pass, so
-        ``close_path.close_stale_records`` has to learn the gap from the
+        ``close_fan.close_stale_records`` has to learn the gap from the
         tracker instead.  An implementer that dropped it would silently
         derive a span with a hole in it, so this Protocol asks for it and
         the type checker holds every caller to it.
@@ -396,7 +396,7 @@ async def replay_for_persona_agents(
             # ISSUE-0130: pop the scopes this pass opened — in ``finally`` so a
             # budget overrun closes them too, or the next LIVE turn merges
             # into one.  Best-effort, does not raise:
-            # ``close_path.close_replayed_scopes``.
+            # ``replay_sweep.close_replayed_scopes``.
             #
             # ``derive_channels`` carries which channels actually FINISHED
             # (v0.3.15 PR B2 review).  A channel cut short by the

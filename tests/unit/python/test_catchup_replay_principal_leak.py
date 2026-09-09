@@ -38,7 +38,7 @@ The bar these tests hold:
    (``channel_catchup``'s "catch-up → live" contract) and the skip would
    eat a fully attributable conversation.  Two closes hold that line:
    the sweep at the end of the catch-up pass
-   (:func:`~agents.persona_runtime.close_path.close_replayed_scopes`)
+   (:func:`~agents.persona_runtime.replay_sweep.close_replayed_scopes`)
    and, for a live turn that arrives while the pass is still running —
    the gRPC dispatch surface is already serving by then — the ingest-time
    split (:func:`~agents.persona_runtime.interaction_boundary

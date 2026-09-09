@@ -31,71 +31,20 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock
 
-import pytest
-
-from agents.memory.boundary_detectors import REASON_STRUCTURAL
-from agents.memory.interactions import Interaction, Turn
 from agents.persona_runtime import close_path
 from agents.principal_id import current_principal_id, principal_scope
 
-_CLOSER = "p-bob"
-_OWNER = "p-alice"
-
-
-def _closed_record(principal: str) -> Interaction:
-    """A closed record frozen under ``principal`` — what a room fan hands
-    the close path for a speaker who is NOT the one that closed the room."""
-    return Interaction(
-        interaction_id=f"i-{principal}",
-        scope="group:planning",
-        started_at=1_000.0,
-        closed_at=1_100.0,
-        close_reason=REASON_STRUCTURAL,
-        principal_id=principal,
-        speaker_id="alice",
-        turns=[Turn(at=1_000.0, payload={"sender": "alice"})],
-    )
-
-
-async def _persist(memory: Any, interaction: Interaction) -> None:
-    await close_path.persist_closed_interaction(
-        episodic=memory,
-        llm_client=MagicMock(),
-        memory_ns=MagicMock(),
-        agent_id="test-agent",
-        interaction=interaction,
-        pending_tasks=set(),
-        on_finalized=_noop,
-    )
-
-
-async def _noop() -> None:
-    return None
-
-
-@pytest.fixture
-def _no_phase_two(monkeypatch):
-    """Stub Phase 2 so these pins exercise the Phase-1 write only."""
-    async def _skip(**kwargs: object) -> None:
-        return None
-
-    monkeypatch.setattr(close_path, "finalize_closed_interaction", _skip)
-
-
-async def _principal_of(memory: Any, interaction_id: str) -> str:
-    db = memory._ensure_db()
-    async with db.execute(
-        "SELECT principal_id FROM episodes WHERE interaction_id = ?",
-        (interaction_id,),
-    ) as cursor:
-        row = await cursor.fetchone()
-    assert row is not None, "the close path wrote no episode"
-    return str(row[0])
+from ._close_path_test_helpers import CLOSER as _CLOSER
+from ._close_path_test_helpers import OWNER as _OWNER
+from ._close_path_test_helpers import closed_record as _closed_record
+from ._close_path_test_helpers import episode_principal as _principal_of
+from ._close_path_test_helpers import noop as _noop
+from ._close_path_test_helpers import persist as _persist
 
 
 class TestPhaseOneTenant:
     async def test_row_carries_the_records_principal_not_the_closers(
-        self, memory, _no_phase_two,
+        self, memory, no_phase_two,
     ):
         """The fan closes alice's record inside bob's request scope."""
         record = _closed_record(_OWNER)
@@ -105,7 +54,7 @@ class TestPhaseOneTenant:
         assert await _principal_of(memory, record.interaction_id) == _OWNER
 
     async def test_owner_can_recall_it_and_the_closer_cannot(
-        self, memory, _no_phase_two,
+        self, memory, no_phase_two,
     ):
         """The consequence that makes it a boundary defect rather than a
         mislabel: the principal predicate is unconditional strict
@@ -130,7 +79,7 @@ class TestPhaseOneTenant:
             assert await memory.recall(limit=10) == []
 
     async def test_single_tenant_deployment_is_unchanged(
-        self, memory, _no_phase_two,
+        self, memory, no_phase_two,
     ):
         """The frozen value was resolved through the same precedence the
         tiers use, so with no scope active it equals what the ambient
@@ -171,7 +120,7 @@ class TestPhaseTwoInheritsTheBinding:
         )
 
     async def test_the_scope_is_restored_after_the_close(
-        self, memory, _no_phase_two,
+        self, memory, no_phase_two,
     ):
         """The binding is a block, not a latch: the caller's own request
         scope survives it, so the next record in the fan resolves its own
