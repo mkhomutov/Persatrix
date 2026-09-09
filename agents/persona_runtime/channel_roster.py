@@ -10,27 +10,38 @@ Sourced from the orchestrator, never per member (no N+1): `GET
 id→name/role directory.
 
 Since v0.3.16 PR A1 the module also carries the **audience rail** that
-ISSUE-0132's egress check reads. Two things changed, both structural:
+ISSUE-0132's egress check reads. The rationale lives here once; the
+functions below point back rather than restate it.
 
-* the two GETs are **independent halves of the seam**, requested and
-  failing separately. Membership is public and load-bearing — the member
-  set *is* the audience. The agent directory is authenticated, answers
-  `401` to the fleet under auth ([ISSUE-0140]), and supplies display
-  names for one thing only: the group-channel prompt section. So a turn
-  that renders no section never asks for it, and a directory that misses
-  costs names, not membership.
-* resolution (:func:`resolve_channel_roster`) is separate from injection
-  (:func:`inject_channel_roster`) and runs for **every turn that names a
-  channel** — group, DM (`dm:`) and thread (`thread:`), the three
-  prefixes `internal/channels/identifiers.go` defines. A DM with Bob is
-  an audience, and it is the turn ISSUE-0132 is actually about. Only a
-  group turn with a live directory injects a section, so no prompt moves.
+* The two GETs are **independent halves of the seam**. Membership is
+  public and load-bearing — the member set *is* the audience. The
+  directory is authenticated, `401`s for the fleet under auth
+  ([ISSUE-0140]), and supplies display names for the group-channel
+  section alone. A turn that renders no section never asks for it, and a
+  directory that misses costs names, not membership.
+* Resolution (:func:`resolve_channel_roster`) is separate from injection
+  (:func:`inject_channel_roster`) and runs *ahead of* the RFC 0037 §D
+  gate, for **every turn that names a channel**: the gate cannot ask who
+  is listening if the roster arrives after it has decided. A DM with Bob
+  is an audience, and is the turn ISSUE-0132 is about. Only a group turn
+  with a resolved directory injects a section, so no prompt moves.
+* An **unknown** audience is never presented as an empty one. A channel
+  returned without a usable member list resolves to ``None``, not to a
+  roster nobody is in: the Go response tags `members` `omitempty`, so
+  "empty room" and "no member list" are the same bytes.
+* Nothing here raises across the seam — both halves and the join are
+  guarded. A malformed body must cost a roster, never a turn.
+
+*Cost*: one round trip per channel turn, two on a group turn, where
+before only group turns paid anything. ``_inject_memory_context`` issues
+it concurrently with the tier recalls, off the critical path.
 """
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import Enum
 from typing import TYPE_CHECKING, Any, Protocol
 from urllib.parse import quote
 
@@ -54,11 +65,25 @@ ROSTER_SECTION_PRIORITY: int = 9
 
 #: The one channel prefix that renders a roster *section*
 #: (``internal/channels/identifiers.go`` also defines ``dm:`` and
-#: ``thread:``, which resolve an audience and show it to nobody). Read by
-#: both :func:`resolve_channel_roster` — which skips the directory half
-#: when no section can render — and :func:`inject_channel_roster`, so the
-#: fetch and the render cannot disagree about what needs display names.
+#: ``thread:``, which resolve an audience and show it to nobody).
 GROUP_CHANNEL_PREFIX: str = "group:"
+
+
+class DirectoryStatus(Enum):
+    """What became of the authenticated ``/api/v1/agents`` half.
+
+    Three states, not a boolean: "never asked" and "asked and missed" are
+    different facts, and PR A2 owes scope lock 1 a withhold cause it
+    cannot name from one bit.
+    """
+
+    #: DM or thread turn — renders no section, so no names were wanted.
+    NOT_REQUESTED = "not_requested"
+    #: Asked and lost it: ``401`` under auth, an error, or a bad shape.
+    MISSED = "missed"
+    #: Answered — possibly ``[]``, which still renders the section with
+    #: bare ids exactly as it did before PR A1.
+    RESOLVED = "resolved"
 
 
 @dataclass(frozen=True)
@@ -77,36 +102,30 @@ class ChannelRoster:
 
     The audience [ISSUE-0132] checks is :attr:`member_ids` — a
     type-agnostic id set, because a peer persona in the acting room that
-    was not in the source room is audience too (scope lock 3). Frozen:
-    it is a per-turn fact, read by the gate and the prompt section, owned
-    by neither. (Shallowly — ``channel_meta`` is the raw response dict.
-    Nothing mutates it; PR A2 caches these per turn and must not start.)
+    was not in the source room is audience too (scope lock 3). A resolved
+    roster always has at least one member (see the module docstring).
 
-    Attributes:
-        channel_id: The acting channel this roster describes.
-        channel_meta: The raw channel object, for the prompt section's
-            name and description.
-        members: The joined membership, in the room's declared order.
-        has_display_names: Whether the members carry directory names
-            rather than bare ids. **Not** a fetch-failure signal: it is
-            ``False`` both when the directory missed and when it was
-            never requested, because a DM or thread turn renders no
-            section and so does not spend the authenticated round trip.
-            The withhold cause PR A2 owes lock 1 —
-            *withhold-unknown-fetch-failed* — is a **members**-half
-            failure, which surfaces as no roster at all. Only
-            :func:`inject_channel_roster` reads this field.
+    ``channel_meta`` is the raw response dict, kept for the section's name
+    and description and excluded from equality/hashing: PR A2 caches these
+    per turn, and a dict field would make the frozen record unhashable.
     """
 
     channel_id: str
-    channel_meta: dict[str, Any]
+    channel_meta: dict[str, Any] = field(compare=False, repr=False)
     members: tuple[RosterMember, ...]
-    has_display_names: bool
+    directory: DirectoryStatus
+    #: Computed once: the gate reads the audience per entry per turn.
+    _member_ids: frozenset[str] = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "_member_ids", frozenset(m.id for m in self.members),
+        )
 
     @property
     def member_ids(self) -> frozenset[str]:
         """The audience: every member id, self included."""
-        return frozenset(m.id for m in self.members)
+        return self._member_ids
 
 
 def build_roster(
@@ -119,17 +138,20 @@ def build_roster(
 
     Membership order is preserved (it is the room's declared order).
     Members absent from ``agents`` fall back to ``name=id, role=""`` so an
-    unregistered or task-only participant still appears. Malformed member
-    entries (non-dict, or missing ``id``) are skipped defensively — this
-    feeds an LLM prompt, never raise across it.
+    unregistered or task-only participant still appears. A missing or
+    non-list ``members`` value, and malformed entries within it, yield no
+    members rather than raising — this feeds an LLM prompt.
     """
+    declared = channel_meta.get("members")
+    if not isinstance(declared, list):
+        return []
     directory = {
         a["id"]: a
         for a in agents
         if isinstance(a, dict) and isinstance(a.get("id"), str)
     }
     roster: list[RosterMember] = []
-    for member in channel_meta.get("members", []):
+    for member in declared:
         if not isinstance(member, dict):
             continue
         mid = member.get("id")
@@ -188,21 +210,13 @@ def render_roster_section(
 class HttpChannelRosterFetcher:
     """Fetch a channel's roster inputs from the orchestrator over aiohttp.
 
-    Two GETs, exposed as two seam methods so the caller can request —
-    and lose — them independently (v0.3.16 PR A1):
-
-    * :meth:`fetch_members` — ``/api/v1/channels/{id}``. Public, and
-      load-bearing: the member set is the audience.
-    * :meth:`fetch_directory` — ``/api/v1/agents``. Authenticated, so it
-      is the half that ``401``s for the fleet under auth
-      ([ISSUE-0140]); it supplies display names for the group-channel
-      prompt section and nothing else.
-
-    Each returns ``None`` on any HTTP error / transport failure /
-    unusable body, and never raises across the seam. An empty directory
-    (``[]``) is a *success* and stays distinguishable from a miss: it
-    still renders a roster (every member falls back to its id) where a
-    miss renders none. The caller owns the ``aiohttp`` session.
+    Two GETs as two seam methods, so the caller can request — and lose —
+    them independently (see the module docstring): :meth:`fetch_members`
+    (``/api/v1/channels/{id}``, public) and :meth:`fetch_directory`
+    (``/api/v1/agents``, authenticated). Each returns ``None`` on any HTTP
+    error / transport failure / unusable body and never raises across the
+    seam; an empty directory (``[]``) is a *success*, distinct from a
+    miss. The caller owns the ``aiohttp`` session.
     """
 
     def __init__(
@@ -251,10 +265,9 @@ class ChannelRosterFetcher(Protocol):
     """Seam the injection path depends on (``server_persona`` sets an
     :class:`HttpChannelRosterFetcher`; tests inject a fake).
 
-    Two halves, because they are wanted at different times: every
-    channel turn needs the membership, only a group turn needs the
-    names. Each returns ``None`` when its half missed — see
-    :class:`HttpChannelRosterFetcher`."""
+    Two halves, because they are wanted at different times: every channel
+    turn needs the membership, only a group turn needs the names. Each
+    returns ``None`` when its half missed."""
 
     async def fetch_members(
         self, channel_id: str,
@@ -269,44 +282,25 @@ async def resolve_channel_roster(
     agent_id: str,
 ) -> ChannelRoster | None:
     """Resolve who is in the acting channel, for **any** turn that names
-    one (v0.3.16 PR A1, [ISSUE-0132] scope lock 3).
-
-    Runs *ahead* of the RFC 0037 §D gate, which is the whole point: the
-    gate cannot ask who is listening if the roster arrives after it has
-    already decided. DMs and threads resolve too — a DM with Bob is an
-    audience, and the DM is the turn ISSUE-0132 is actually about — but
-    they inject no section (see :func:`inject_channel_roster`).
+    one — see the module docstring for why (ISSUE-0132 scope lock 3).
 
     The predicate is the event's ``channel_id``, not the gate's
-    ``CHANNEL_ACTING_EVENT_TYPES``. That is a requirement, not a
-    preference: before PR A1 *any* event carrying a ``group:`` channel id
-    resolved and rendered a roster, whatever its event type, so narrowing
-    to the gate's two channel-anchored types would delete the section
-    from every other one — a prompt change, which is exactly what this PR
-    must not make. It also keeps "which room is this?" independent of
-    "which classification do we act at?".
-
-    The **directory** half is spent only where its display names can be
-    used — a group channel, the one shape that renders a section. A DM or
-    thread turn therefore costs one round trip, not two, and does not
-    trip the fleet's authenticated ``401`` ([ISSUE-0140]) once per turn.
+    ``CHANNEL_ACTING_EVENT_TYPES``: before PR A1 *any* event carrying a
+    ``group:`` channel id rendered a roster whatever its event type, so
+    narrowing to the gate's two types would delete the section from every
+    other one — a prompt change this PR must not make.
 
     Returns ``None`` — never raises — when there is no channel, no wired
-    fetcher, or the members half missed. A resolved roster whose
-    ``has_display_names`` is ``False`` still carries the member ids.
-
-    *Cost*: one round trip per channel turn, two on a group turn, where
-    before PR A1 only group turns paid anything. The per-source-room
-    fetches the audience check adds are PR A2's, cached per turn.
+    fetcher, the members half missed, or the channel declared no usable
+    membership.
     """
     channel_id = getattr(event, "channel_id", None)
     if not isinstance(channel_id, str) or not channel_id:
         return None
     if fetcher is None:
         return None
-    # Each half is guarded on its own, which is the point of splitting
-    # them: losing the membership loses the audience, losing the names
-    # loses only the prompt section's cosmetics.
+    # Each half is guarded on its own: losing the membership loses the
+    # audience, losing the names loses only the section's cosmetics.
     try:
         channel_meta = await fetcher.fetch_members(channel_id)
     except Exception:
@@ -317,6 +311,7 @@ async def resolve_channel_roster(
         return None
     if channel_meta is None:
         return None
+    directory = DirectoryStatus.NOT_REQUESTED
     agents: list[dict[str, Any]] | None = None
     if channel_id.startswith(GROUP_CHANNEL_PREFIX):
         try:
@@ -326,13 +321,23 @@ async def resolve_channel_roster(
                 "channels: roster directory fetch failed for %s; "
                 "falling back to member ids", channel_id, exc_info=True,
             )
+        directory = (
+            DirectoryStatus.MISSED if agents is None
+            else DirectoryStatus.RESOLVED
+        )
+    members = build_roster(channel_meta, agents or [], self_agent_id=agent_id)
+    if not members:
+        # Unknown membership, not an empty room — see the module docstring.
+        logger.debug(
+            "channels: %s declared no usable membership; no roster",
+            channel_id,
+        )
+        return None
     return ChannelRoster(
         channel_id=channel_id,
         channel_meta=channel_meta,
-        members=tuple(
-            build_roster(channel_meta, agents or [], self_agent_id=agent_id),
-        ),
-        has_display_names=agents is not None,
+        members=tuple(members),
+        directory=directory,
     )
 
 
@@ -342,30 +347,22 @@ def inject_channel_roster(
 ) -> None:
     """Inject the resolved roster as a **group**-channel prompt section (F-4).
 
-    Clears any stale roster section first (so a roster from a prior group
-    event does not linger on a later DM turn), then adds the rendered
-    section only when the turn is a ``group:`` channel *and* the agent
-    directory resolved. Both conditions preserve the prompt exactly as it
-    stood before PR A1 moved the fetch:
+    Clears any stale roster section first (so a prior group event's roster
+    does not linger on a later DM turn), then renders only for a ``group:``
+    channel whose directory answered — both conditions hold the prompt
+    exactly where it stood before PR A1 moved the fetch. The two guards
+    overlap by construction (the directory is only requested for group
+    channels) and are kept apart so a hand-built roster cannot smuggle a
+    section onto a DM turn.
 
-    * **group only** — a DM has two known participants and needs no
-      roster; it resolves one for the gate and shows it to nobody, or
-      PR A2's byte-identity claim fails on the first DM (review F-4);
-    * **directory required** — a member set with no display names would
-      render bare ids, which is a *different* prompt. Restoring the
-      roster under a directory ``401`` is [ISSUE-0140]'s fix, off this
-      release's path by scope lock 3.
-
-    Non-fatal throughout: an unresolved roster simply leaves no section
-    (the persona is no worse off than before F-4). Not charged against
-    ``MemoryBudget`` — the roster is structural room context, not
-    recalled memory; it rides ``WorkingMemory``'s own priority-weighted
-    retention (priority 9, non-compressible) instead.
+    Not charged against ``MemoryBudget``: the roster is structural room
+    context, not recalled memory, and rides ``WorkingMemory``'s own
+    priority-weighted retention (priority 9, non-compressible).
     """
     working_memory.remove_section(ROSTER_SECTION_NAME)
     if roster is None or not roster.channel_id.startswith(GROUP_CHANNEL_PREFIX):
         return
-    if not roster.has_display_names:
+    if roster.directory is not DirectoryStatus.RESOLVED:
         return
     section = render_roster_section(roster.channel_meta, list(roster.members))
     if section is not None:

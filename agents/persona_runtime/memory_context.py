@@ -11,6 +11,7 @@ is :mod:`agents.persona_runtime.text_truncate` and is re-exported here
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -248,104 +249,115 @@ class _MemoryContextMixin:
         self._working_memory.remove_section(CHANNEL_HISTORY_SECTION_NAME)
         self._working_memory.remove_section(FACTS_SECTION_NAME)
 
-        # ── Query all three tiers ──────────────────────────────────────────
-        # Sequential, not concurrent (PR #60 review): the tiers share
-        # one aiosqlite connection, which serialises operations anyway.
-
-        # Tier 1 (priority 8): Relationship context for the event sender.
-        # Recall is delegated to ``relationship_section`` which handles
-        # the no-sender / backend-failure cases and metadata-driven
-        # participant-type extraction.
-        rel = await recall_relationship_summary(
-            self._relationship_memory, event, agent_id=self.agent_id,
+        # The roster fetch is the one HTTP call in this method: the tiers
+        # below share a single aiosqlite connection and serialise anyway,
+        # so it is also the only work that can overlap them.  Issued here
+        # and awaited just before the gate (v0.3.16 PR A1) — it MUST
+        # precede the gate, but it need not sit on the turn's critical
+        # path, and a DM turn now pays for it where before it fetched no
+        # roster at all.  ``resolve_channel_roster`` never raises; the
+        # ``finally`` is what keeps a failing tier recall from leaving the
+        # task orphaned (asyncio logs a pending task destroyed at GC).
+        roster_task = asyncio.create_task(
+            resolve_channel_roster(self._roster_fetcher, event, self.agent_id),
         )
-
-        # Channel-history tier (RFC 0011 §E + RFC 0021 §J) — issued
-        # before the episodic recall so harnesses asserting on
-        # ``recall.call_args`` still pin the episodic ``min_score``.
-        channel_episodes = await recall_channel_episodes(
-            self._episodic_memory, event, agent_id=self.agent_id,
-        )
-
-        # Facts tier (RFC 0026 PR 3) — declarative facts about the
-        # canonical sender (dementia-test invariant: stored at N,
-        # injects at N+1 without subject-string overlap) plus topic
-        # subjects ``query`` mentions (RFC 0049 P1).  Returns ``[]``
-        # when disabled / sender-less / backend raises — all non-fatal.
-        # ``cross_room: live`` (RFC 0049 PR 4, the promoted default)
-        # widens the ONE live read past the §D room wall — visibility
-        # belongs to the RFC 0037 gate below; shadow mode keeps the
-        # walled read and logs the widened delta instead.
-        if self._facts_enabled:
-            facts = await recall_facts_for_event(
-                self._fact_store, event, stimulus=query,
-                sessions=SESSIONS_ALL
-                if self._facts_cross_room == CROSS_ROOM_LIVE else None,
-            )
-            await emit_facts_shadow(
-                self._fact_store, event, stimulus=query,
-                live_fact_ids={f.fact_id for f in facts},
-                agent_id=self.agent_id, mode=self._facts_cross_room,
-            )
-        else:
-            facts = []
-
-        # Tier 2 (priority 7): Episodic recall (TICK skip removed —
-        # RFC 0017 §D min_score + the PR 5 empty-context short-circuit).
-        # ``cross_room: live`` (RFC 0049 PR 4, the promoted default) =
-        # room-first-RANKED recall in ONE widened, reinforcing query
-        # (the shadow pass does not run in live mode, so the episodic
-        # tier costs one read per turn in every mode); otherwise the
-        # RFC 0031 §D wall (``sessions=None``; ``"*"`` pinned
-        # unreachable) with shadow mode logging the widened delta.
         try:
-            if self._episodic_cross_room == CROSS_ROOM_LIVE:
-                episodes = await recall_room_ranked(
-                    self._episodic_memory, query,
-                    limit=EPISODIC_RECALL_LIMIT,
-                    min_score=DEFAULT_EPISODIC_MIN_SCORE,
-                    reinforce=True,
+            # ── Query all three tiers ──────────────────────────────────────────
+            # Sequential, not concurrent (PR #60 review): the tiers share
+            # one aiosqlite connection, which serialises operations anyway.
+
+            # Tier 1 (priority 8): Relationship context for the event sender.
+            # Recall is delegated to ``relationship_section`` which handles
+            # the no-sender / backend-failure cases and metadata-driven
+            # participant-type extraction.
+            rel = await recall_relationship_summary(
+                self._relationship_memory, event, agent_id=self.agent_id,
+            )
+
+            # Channel-history tier (RFC 0011 §E + RFC 0021 §J) — issued
+            # before the episodic recall so harnesses asserting on
+            # ``recall.call_args`` still pin the episodic ``min_score``.
+            channel_episodes = await recall_channel_episodes(
+                self._episodic_memory, event, agent_id=self.agent_id,
+            )
+
+            # Facts tier (RFC 0026 PR 3) — declarative facts about the
+            # canonical sender (dementia-test invariant: stored at N,
+            # injects at N+1 without subject-string overlap) plus topic
+            # subjects ``query`` mentions (RFC 0049 P1).  Returns ``[]``
+            # when disabled / sender-less / backend raises — all non-fatal.
+            # ``cross_room: live`` (RFC 0049 PR 4, the promoted default)
+            # widens the ONE live read past the §D room wall — visibility
+            # belongs to the RFC 0037 gate below; shadow mode keeps the
+            # walled read and logs the widened delta instead.
+            if self._facts_enabled:
+                facts = await recall_facts_for_event(
+                    self._fact_store, event, stimulus=query,
+                    sessions=SESSIONS_ALL
+                    if self._facts_cross_room == CROSS_ROOM_LIVE else None,
+                )
+                await emit_facts_shadow(
+                    self._fact_store, event, stimulus=query,
+                    live_fact_ids={f.fact_id for f in facts},
+                    agent_id=self.agent_id, mode=self._facts_cross_room,
                 )
             else:
-                episodes = await self._episodic_memory.recall(
-                    query,
-                    limit=EPISODIC_RECALL_LIMIT,
-                    min_score=DEFAULT_EPISODIC_MIN_SCORE,
-                    sessions=None,
+                facts = []
+
+            # Tier 2 (priority 7): Episodic recall (TICK skip removed —
+            # RFC 0017 §D min_score + the PR 5 empty-context short-circuit).
+            # ``cross_room: live`` (RFC 0049 PR 4, the promoted default) =
+            # room-first-RANKED recall in ONE widened, reinforcing query
+            # (the shadow pass does not run in live mode, so the episodic
+            # tier costs one read per turn in every mode); otherwise the
+            # RFC 0031 §D wall (``sessions=None``; ``"*"`` pinned
+            # unreachable) with shadow mode logging the widened delta.
+            try:
+                if self._episodic_cross_room == CROSS_ROOM_LIVE:
+                    episodes = await recall_room_ranked(
+                        self._episodic_memory, query,
+                        limit=EPISODIC_RECALL_LIMIT,
+                        min_score=DEFAULT_EPISODIC_MIN_SCORE,
+                        reinforce=True,
+                    )
+                else:
+                    episodes = await self._episodic_memory.recall(
+                        query,
+                        limit=EPISODIC_RECALL_LIMIT,
+                        min_score=DEFAULT_EPISODIC_MIN_SCORE,
+                        sessions=None,
+                    )
+            except Exception:
+                logger.warning(
+                    "Agent %s: episodic recall failed, skipping",
+                    self.agent_id, exc_info=True,
                 )
-        except Exception:
-            logger.warning(
-                "Agent %s: episodic recall failed, skipping",
-                self.agent_id, exc_info=True,
+                episodes = []
+            await emit_episodes_shadow(
+                self._episodic_memory, event, query=query,
+                live_episode_ids={e.id for e in episodes},
+                agent_id=self.agent_id, mode=self._episodic_cross_room,
             )
-            episodes = []
-        await emit_episodes_shadow(
-            self._episodic_memory, event, query=query,
-            live_episode_ids={e.id for e in episodes},
-            agent_id=self.agent_id, mode=self._episodic_cross_room,
-        )
 
-        # Tier 3 (priority 6): Recent notes — min_score at the DB layer
-        # (RFC 0017 §D / PR #131 F-1).  Room-scoped §D default;
-        # cross-room person identity rides the relationship tier (F-7).
-        notes = await recall_notes_for_event(
-            self._episodic_memory,
-            query=query,
-            event=event,
-            agent_id=self.agent_id,
-            min_score=DEFAULT_NOTES_MIN_SCORE,
-        )
-
-        # ── Channel roster (F-4 tier; the ISSUE-0132 audience rail) ────────
-        # Resolved BEFORE the §D gate and for every channel-anchored turn,
-        # DMs included: the gate cannot ask who is listening if the roster
-        # arrives after it has decided (v0.3.16 PR A1, scope lock 3).  The
-        # gate does not read it yet — A2 passes it in as the audience input;
-        # here the rail is dormant and only the prompt section consumes it,
-        # below and unchanged.
-        roster = await resolve_channel_roster(
-            self._roster_fetcher, event, self.agent_id,
-        )
+            # Tier 3 (priority 6): Recent notes — min_score at the DB layer
+            # (RFC 0017 §D / PR #131 F-1).  Room-scoped §D default;
+            # cross-room person identity rides the relationship tier (F-7).
+            notes = await recall_notes_for_event(
+                self._episodic_memory,
+                query=query,
+                event=event,
+                agent_id=self.agent_id,
+                min_score=DEFAULT_NOTES_MIN_SCORE,
+            )
+        finally:
+            # ── Channel roster (F-4 tier; the ISSUE-0132 audience rail) ────
+            # Resolved BEFORE the §D gate and for every channel-anchored
+            # turn, DMs included: the gate cannot ask who is listening if
+            # the roster arrives after it has decided (scope lock 3).  The
+            # gate does not read it yet — A2 passes it in as the audience
+            # input; here the rail is dormant and only the prompt section
+            # consumes it, below and unchanged.
+            roster = await roster_task
 
         # ── RFC 0037 §D hard gate ──────────────────────────────────────────
         # Applied to every channel-derived tier BEFORE the RFC 0017 budget,

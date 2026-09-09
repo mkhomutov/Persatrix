@@ -8,104 +8,36 @@ channels. PR A1 lays the rail the audience check (PR A2) will read:
 * the fetcher's two GETs are split, so a directory ``401`` (the fleet's
   authenticated ``/api/v1/agents``) no longer throws away the public
   channel-members half — the member set survives;
-* resolution moves **ahead** of the gate and runs for every
-  channel-anchored turn, DMs included — a DM with Bob is an audience;
-* on a DM turn the roster is resolved **for the gate only**: no roster
-  section is injected, or PR A2's byte-identity claim fails on the first
-  DM (scope lock 3, review F-4).
+* resolution runs for every channel-anchored turn, DMs included — a DM
+  with Bob is an audience;
+* an audience that could not be established resolves to ``None`` rather
+  than to a roster nobody is in.
 
-Nothing reads the resolved roster yet — the gate is unchanged and no
-prompt moves. These tests pin that: the rail exists, and the prompt does
-not know it.
+This module covers resolution and the resolved record. What the prompt
+does with it — which is nothing, on every turn but a group one — lives in
+``test_channel_roster_injection.py``.
 """
 
 from __future__ import annotations
 
+import logging
 from typing import Any
-from unittest.mock import MagicMock, patch
 
-from agents.memory.working import WorkingMemory
-from agents.persona import create_persona_agent
 from agents.persona_runtime.channel_roster import (
-    ROSTER_SECTION_NAME,
     ChannelRoster,
-    inject_channel_roster,
+    DirectoryStatus,
+    build_roster,
     resolve_channel_roster,
 )
-from agents.persona_types import AgentEvent, EventType
 
-from ._persona_test_helpers import _PERSONA_CONFIG, _make_client
-
-_AGENTS = [
-    {"id": "ember-owl", "name": "Ember Owl", "role": "Engineering leadership"},
-    {"id": "iron-fox", "name": "Iron Fox", "role": "Staff engineering"},
-    {"id": "nova-sparrow", "name": "Nova Sparrow", "role": "Product management"},
-]
-_CHANNEL = {
-    "id": "group:planning",
-    "name": "planning",
-    "description": "engineering + product planning discussion",
-    "members": [
-        {"id": "ember-owl", "respond": "when_mentioned"},
-        {"id": "iron-fox", "respond": "always"},
-        {"id": "nova-sparrow", "respond": "always"},
-    ],
-}
-_DM = {
-    "id": "dm:alice:iron-fox",
-    "name": "alice ↔ iron-fox",
-    "members": [{"id": "alice"}, {"id": "iron-fox"}],
-}
-
-
-def _event(channel_id: str | None) -> MagicMock:
-    """A stand-in AgentEvent — resolution only reads ``channel_id``."""
-    event = MagicMock()
-    event.channel_id = channel_id
-    return event
-
-
-class _FakeFetcher:
-    """Records each half separately, so a test can assert *that* a turn
-    resolved a roster, *which* room it resolved, and whether it spent the
-    authenticated directory round trip."""
-
-    def __init__(
-        self,
-        members: dict[str, Any] | None,
-        agents: list[dict[str, Any]] | None = None,
-    ) -> None:
-        self._members = members
-        self._agents = agents
-        self.calls: list[str] = []
-        self.directory_calls: int = 0
-
-    async def fetch_members(self, channel_id: str):  # noqa: ANN201
-        self.calls.append(channel_id)
-        return self._members
-
-    async def fetch_directory(self):  # noqa: ANN201
-        self.directory_calls += 1
-        return self._agents
-
-
-class _RaisingFetcher:
-    async def fetch_members(self, channel_id: str):  # noqa: ANN201
-        raise RuntimeError("orchestrator unreachable")
-
-    async def fetch_directory(self):  # noqa: ANN201
-        raise RuntimeError("orchestrator unreachable")
-
-
-class _RaisingDirectoryFetcher:
-    """Members fine, directory blows up — the audience must survive it."""
-
-    async def fetch_members(self, channel_id: str):  # noqa: ANN201
-        return _CHANNEL
-
-    async def fetch_directory(self):  # noqa: ANN201
-        raise RuntimeError("directory unreachable")
-
+from ._channel_roster_helpers import (
+    _AGENTS,
+    _CHANNEL,
+    _DM,
+    _MEMBERLESS,
+    _event,
+    _FakeFetcher,
+)
 
 # ─── resolve_channel_roster ───────────────────────────────────
 
@@ -119,7 +51,7 @@ class TestResolveChannelRoster:
         assert roster is not None
         assert roster.channel_id == "group:planning"
         assert roster.member_ids == {"ember-owl", "iron-fox", "nova-sparrow"}
-        assert roster.has_display_names is True
+        assert roster.directory is DirectoryStatus.RESOLVED
 
     async def test_dm_turn_resolves_a_roster(self) -> None:
         """A DM with Bob is an audience — today's group-only fetch is why
@@ -141,7 +73,7 @@ class TestResolveChannelRoster:
         )
         assert roster is not None
         assert roster.member_ids == {"ember-owl", "iron-fox", "nova-sparrow"}
-        assert roster.has_display_names is False
+        assert roster.directory is DirectoryStatus.MISSED
 
     async def test_turn_without_a_channel_resolves_nothing(self) -> None:
         """A tick-shaped turn names no channel, so there is no audience to
@@ -161,6 +93,7 @@ class TestResolveChannelRoster:
         assert roster is not None
         assert roster.member_ids == {"alice", "iron-fox"}
         assert fetcher.directory_calls == 0
+        assert roster.directory is DirectoryStatus.NOT_REQUESTED
 
     async def test_group_turn_spends_both_halves(self) -> None:
         fetcher = _FakeFetcher(_CHANNEL, _AGENTS)
@@ -170,26 +103,30 @@ class TestResolveChannelRoster:
         assert fetcher.calls == ["group:planning"]
         assert fetcher.directory_calls == 1
 
-    async def test_thread_turn_resolves_members_only(self) -> None:
+    async def test_thread_turn_has_no_channel_row_to_resolve(self) -> None:
         """``thread:`` is the third channel prefix
-        (``internal/channels/identifiers.go``). It has an audience like any
-        other room and, like a DM, no roster section."""
-        fetcher = _FakeFetcher(_DM, _AGENTS)
+        (``internal/channels/identifiers.go``), but no production path
+        creates a thread channel ROW — replies are messages in the parent
+        channel. So the members GET 404s and resolution yields nothing;
+        the directory round trip is not spent on the way."""
+        fetcher = _FakeFetcher(None, _AGENTS)
         roster = await resolve_channel_roster(
             fetcher, _event("thread:planning:abc"), "iron-fox",
         )
-        assert roster is not None
+        assert roster is None
+        assert fetcher.calls == ["thread:planning:abc"]
         assert fetcher.directory_calls == 0
 
     async def test_raising_directory_still_yields_the_audience(self) -> None:
         """The directory half is best-effort: a raise inside it must cost
         display names, not the member set."""
         roster = await resolve_channel_roster(
-            _RaisingDirectoryFetcher(), _event("group:planning"), "iron-fox",
+            _FakeFetcher(_CHANNEL, RuntimeError("directory unreachable")),
+            _event("group:planning"), "iron-fox",
         )
         assert roster is not None
         assert roster.member_ids == {"ember-owl", "iron-fox", "nova-sparrow"}
-        assert roster.has_display_names is False
+        assert roster.directory is DirectoryStatus.MISSED
 
     async def test_no_fetcher_resolves_nothing(self) -> None:
         assert await resolve_channel_roster(
@@ -202,11 +139,10 @@ class TestResolveChannelRoster:
         ) is None
 
     async def test_raising_fetch_is_non_fatal(self, caplog: Any) -> None:
-        import logging
-
         with caplog.at_level(logging.WARNING):
             roster = await resolve_channel_roster(
-                _RaisingFetcher(), _event("group:planning"), "iron-fox",
+                _FakeFetcher(RuntimeError("orchestrator unreachable")),
+                _event("group:planning"), "iron-fox",
             )
         assert roster is None
         assert any(
@@ -221,181 +157,71 @@ class TestResolveChannelRoster:
         assert roster is not None
         assert [m.id for m in roster.members if m.is_self] == ["iron-fox"]
 
+    async def test_memberless_channel_is_not_an_empty_audience(self) -> None:
+        """A room the orchestrator returns with no member list is UNKNOWN
+        membership, not a room where nobody is listening: the Go response
+        tags `members` `omitempty`, so the two are the same bytes. The gate
+        must not read that as a resolved, authoritative empty audience."""
+        roster = await resolve_channel_roster(
+            _FakeFetcher(_MEMBERLESS, _AGENTS),
+            _event("group:ghost"), "iron-fox",
+        )
+        assert roster is None
 
-# ─── inject_channel_roster (now fed the resolved roster) ──────
+    async def test_malformed_member_list_resolves_nothing(self) -> None:
+        """A members value that is not a list must not raise across the
+        seam — the resolver promises it never does — and must not present
+        itself as a resolved audience either."""
+        roster = await resolve_channel_roster(
+            _FakeFetcher({"id": "group:x", "members": "nope"}, _AGENTS),
+            _event("group:x"), "iron-fox",
+        )
+        assert roster is None
 
 
-#: The group-roster section, verbatim. PR A1 only *moves* the resolution;
-#: this string is the guard that it did not also rewrite the prompt (the
-#: plan's risk row: "A1 changes roster prompt text while 'only moving' it").
-_EXPECTED_GROUP_SECTION = (
-    "Channel #planning — engineering + product planning discussion\n"
-    "Participants:\n"
-    "- Ember Owl — Engineering leadership\n"
-    "- Iron Fox — Staff engineering (you)\n"
-    "- Nova Sparrow — Product management"
-)
-
-
-class TestInjectChannelRoster:
-    async def test_group_section_is_byte_identical(self) -> None:
-        wm = WorkingMemory(max_tokens=8192)
+class TestChannelRosterRecord:
+    async def test_roster_is_hashable(self) -> None:
+        """Frozen means usable as a value: PR A2 caches these per turn, and
+        a record carrying a raw dict field cannot be a key or a set member."""
         roster = await resolve_channel_roster(
             _FakeFetcher(_CHANNEL, _AGENTS),
-            _event("group:planning"), "iron-fox",
-        )
-        inject_channel_roster(wm, roster)
-        section = wm.get_section(ROSTER_SECTION_NAME)
-        assert section is not None
-        assert section.content == _EXPECTED_GROUP_SECTION
-
-    async def test_dm_roster_injects_no_section(self) -> None:
-        """Resolved for the gate, invisible to the prompt (review F-4)."""
-        wm = WorkingMemory(max_tokens=8192)
-        roster = await resolve_channel_roster(
-            _FakeFetcher(_DM, _AGENTS),
-            _event("dm:alice:iron-fox"), "iron-fox",
-        )
-        assert roster is not None  # the gate has an audience …
-        inject_channel_roster(wm, roster)
-        assert wm.get_section(ROSTER_SECTION_NAME) is None  # … the prompt does not
-
-    async def test_directory_miss_injects_no_section(self) -> None:
-        """The members half survives for the audience, but the section still
-        needs display names — rendering bare ids would be a prompt change,
-        and ISSUE-0140 is off this release's path (scope lock 3)."""
-        wm = WorkingMemory(max_tokens=8192)
-        roster = await resolve_channel_roster(
-            _FakeFetcher(_CHANNEL, None),
             _event("group:planning"), "iron-fox",
         )
         assert roster is not None
-        inject_channel_roster(wm, roster)
-        assert wm.get_section(ROSTER_SECTION_NAME) is None
+        assert hash(roster) == hash(roster)
+        assert len({roster, roster}) == 1
 
-    async def test_unresolved_roster_injects_no_section(self) -> None:
-        wm = WorkingMemory(max_tokens=8192)
-        inject_channel_roster(wm, None)
-        assert wm.get_section(ROSTER_SECTION_NAME) is None
-
-    async def test_stale_section_cleared_on_a_later_dm_turn(self) -> None:
-        wm = WorkingMemory(max_tokens=8192)
-        group = await resolve_channel_roster(
+    async def test_member_ids_is_computed_once(self) -> None:
+        """The gate reads the audience per entry per turn; rebuilding the
+        frozenset on each access makes that one allocation per entry."""
+        roster = await resolve_channel_roster(
             _FakeFetcher(_CHANNEL, _AGENTS),
             _event("group:planning"), "iron-fox",
         )
-        inject_channel_roster(wm, group)
-        assert wm.get_section(ROSTER_SECTION_NAME) is not None
-        dm = await resolve_channel_roster(
-            _FakeFetcher(_DM, _AGENTS),
-            _event("dm:alice:iron-fox"), "iron-fox",
-        )
-        inject_channel_roster(wm, dm)
-        assert wm.get_section(ROSTER_SECTION_NAME) is None
+        assert roster is not None
+        assert roster.member_ids is roster.member_ids
 
-    async def test_stale_section_cleared_when_resolution_fails(self) -> None:
-        wm = WorkingMemory(max_tokens=8192)
-        inject_channel_roster(wm, await resolve_channel_roster(
-            _FakeFetcher(_CHANNEL, _AGENTS),
-            _event("group:planning"), "iron-fox",
-        ))
-        assert wm.get_section(ROSTER_SECTION_NAME) is not None
-        inject_channel_roster(wm, None)
-        assert wm.get_section(ROSTER_SECTION_NAME) is None
-
-
-# ─── the wiring: resolution runs ahead of the §D gate ─────────
-
-
-class _OrderRecordingFetcher:
-    def __init__(self, order: list[str]) -> None:
-        self._order = order
-        self.calls: list[str] = []
-
-    async def fetch_members(self, channel_id: str):  # noqa: ANN201
-        self._order.append("roster")
-        self.calls.append(channel_id)
-        return _CHANNEL
-
-    async def fetch_directory(self):  # noqa: ANN201
-        return _AGENTS
-
-
-class TestInjectionPathWiring:
-    async def test_roster_resolution_precedes_the_gate(self) -> None:
-        """The gate cannot consult a roster the turn resolves after it —
-        the hard edge the plan's dependency graph draws from A1 to A2."""
-        from agents.persona_runtime import memory_context
-
-        order: list[str] = []
-        agent = create_persona_agent(
-            agent_id="iron-fox", config=_PERSONA_CONFIG,
-            llm_client=_make_client(),
-        )
-        await agent.initialize_memory()
-        agent.set_roster_fetcher(_OrderRecordingFetcher(order))
-        real_gate = memory_context.TurnInjectionGate
-
-        def _spy(*args: Any, **kwargs: Any):  # noqa: ANN202
-            order.append("gate")
-            return real_gate(*args, **kwargs)
-
-        event = AgentEvent(
-            event_type=EventType.CHANNEL_MESSAGE,
-            payload={"content": "hello"},
-            sender_id="alice",
-            channel_id="group:planning",
-        )
-        with patch.object(memory_context, "TurnInjectionGate", _spy):
-            await agent._inject_memory_context(event)
-        await agent.close_memory()
-        assert order == ["roster", "gate"]
-
-    async def test_dm_turn_resolves_a_roster_and_injects_no_section(self) -> None:
-        agent = create_persona_agent(
-            agent_id="iron-fox", config=_PERSONA_CONFIG,
-            llm_client=_make_client(),
-        )
-        await agent.initialize_memory()
-        fetcher = _FakeFetcher(_DM, _AGENTS)
-        agent.set_roster_fetcher(fetcher)
-
-        event = AgentEvent(
-            event_type=EventType.CHANNEL_MESSAGE,
-            payload={"content": "hello"},
-            sender_id="alice",
-            channel_id="dm:alice:iron-fox",
-        )
-        await agent._inject_memory_context(event)
-        await agent.close_memory()
-
-        assert fetcher.calls == ["dm:alice:iron-fox"]
-        assert agent._working_memory.get_section(ROSTER_SECTION_NAME) is None
-
-    async def test_group_turn_still_injects_the_same_section(self) -> None:
-        agent = create_persona_agent(
-            agent_id="iron-fox", config=_PERSONA_CONFIG,
-            llm_client=_make_client(),
-        )
-        await agent.initialize_memory()
-        agent.set_roster_fetcher(_FakeFetcher(_CHANNEL, _AGENTS))
-
-        event = AgentEvent(
-            event_type=EventType.CHANNEL_MESSAGE,
-            payload={"content": "hello"},
-            sender_id="alice",
-            channel_id="group:planning",
-        )
-        await agent._inject_memory_context(event)
-        section = agent._working_memory.get_section(ROSTER_SECTION_NAME)
-        await agent.close_memory()
-        assert section is not None
-        assert section.content == _EXPECTED_GROUP_SECTION
-
-    async def test_roster_is_a_frozen_record(self) -> None:
+    def test_roster_is_a_frozen_record(self) -> None:
         """The audience PR A2 reads must not be mutable per-turn state."""
         roster = ChannelRoster(
             channel_id="group:planning", channel_meta=_CHANNEL,
-            members=(), has_display_names=True,
+            members=(), directory=DirectoryStatus.RESOLVED,
         )
         assert roster.member_ids == frozenset()
+
+
+class TestBuildRosterHardening:
+    def test_non_list_members_yields_no_members(self) -> None:
+        """``build_roster`` feeds an LLM prompt and promises never to raise
+        across it — a members value of the wrong type is skipped, not
+        iterated."""
+        assert build_roster(
+            {"id": "group:x", "members": "nope"}, _AGENTS,
+            self_agent_id="iron-fox",
+        ) == []
+
+    def test_missing_members_key_yields_no_members(self) -> None:
+        assert build_roster(
+            _MEMBERLESS, _AGENTS, self_agent_id="iron-fox",
+        ) == []
+
