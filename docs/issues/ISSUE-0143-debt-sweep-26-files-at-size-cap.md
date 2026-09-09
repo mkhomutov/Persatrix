@@ -91,3 +91,20 @@ Filed at the v0.3.15 post-release follow-up, the first application of the
 [debt-sweep rule](../methodology/release-cycle.md#the-debt-sweep) since
 [#861](https://github.com/mkhomutov/Persatrix/pull/861) recorded it. Count at
 filing: **26 at cap, 102 within 3%**.
+
+> 2026-09-07 — **v0.3.16 planning-readiness: default = Workstream D rides
+> and goes first, with a not-cuttable minimum.** Two of the 26 sit on the
+> release's own path, not only on ISSUE-0137's:
+> `agents/persona_runtime/memory_context.py` (500/500) is where the
+> [ISSUE-0132](ISSUE-0132-memory-egress-gate-blind-to-room-audience.md)
+> audience gate wires in, and `close_path.py` (500/500) is where the
+> [ISSUE-0137](ISSUE-0137-episode-write-boundary-cannot-express-the-records-principal.md)
+> guard goes. Those two splits are the minimum the plan should carry
+> uncuttable; the other 24 are the cuttable remainder. Three documents on
+> or near the cycle's path are within 40 words of their caps and take the
+> amendment route instead of a split: RFC 0037 (7 973/8 000), RFC 0051 (7 985/8 000)
+> and `docs/memory-scope-axes.md` (2 960/3 000).
+>
+> 2026-09-08 — **Locked at the v0.3.16 plan opening** ([v0.3.16 plan](../v0.3.16-plan.md) Workstream D; [v0.3.16 scope locks](../v0.3.16-scope-locks.md) lock 4). Twenty-six at cap today, re-measured with `file_size.py --near-cap`. D1 (`memory_context.py`) and D2 (`close_path.py`) are uncuttable and go first; D3… take the remainder in blast-radius order, as many as land before release-prep PR 0. The count is re-read at the Phase 4 follow-up per step 4 above.
+>
+> 2026-09-08 — **Correction at the [#886](https://github.com/mkhomutov/Persatrix/pull/886) review (F-1).** The `with principal_scope(...)` binding this file places in `close_path.py` has lived in `record_write_scopes` (`agents/persona_runtime/record_write_scope.py`) since v0.3.15 PR B2 ([#851](https://github.com/mkhomutov/Persatrix/pull/851)), where the epoch half joined it. What `close_path.py` holds is the `store_episode` call site that E1 grows a `principal_id=` argument on — still a 500/500 file, which is why the D2 split precedes E1.

@@ -2,10 +2,10 @@
 
 **Test ID**: `MT-PERSONA-CONFIDENTIALITY-001`
 **Feature Area**: Memory confidentiality (RFC 0037 — classification lattice, protection levels, the §D egress gate, §E projections, §G tripwire)
-**Version**: 1.0
+**Version**: 1.1
 **Created**: 2026-07-29
-**Last Updated**: 2026-07-29
-**Status**: Active — authored at RFC 0037 PR 8 (closeout); **live execution is a v0.3.12 release-prep deliverable** (run against a real provider per [v0.3.12-plan §Acceptance](../v0.3.12-plan.md#acceptance-for-v0312)).
+**Last Updated**: 2026-09-09
+**Status**: Active — authored at RFC 0037 PR 8 (closeout), executed live at v0.3.12 release-prep. **v1.1 adds [Leg 5](#leg-5--the-audience-leg-issue-0132-the-audience-egress-amendment)** (v0.3.16 PR A2, authored before the paid arc per [scope lock 6](../v0.3.16-scope-locks.md)); the whole five-leg arc is a **v0.3.16 release-prep deliverable**, run once against a real provider per [v0.3.16-plan §Acceptance](../v0.3.16-plan.md#acceptance-for-v0316). Legs 1–4 run first as the regression baseline of the existing gate.
 
 ---
 
@@ -20,6 +20,7 @@
 - **The cross-room carry half of the headline** (teach in a DM, know it in the standup, both rooms `internal`) — [MT-MEMORY-CROSSROOM-001](MT-MEMORY-CROSSROOM-001.md); the two MTs are complementary halves of the headline sentence.
 - **Accounts/auth** (RFC 0039) and the **authority axis** (RFC 0012) — different axes; classification is about *what a room's content is*, not *who may act*.
 - **Tripwire-driven enforcement** — §G is logging-only by design (the RFC 0012 enforced egress gate is future work); Leg 4 asserts observability, never blocking.
+- **The audience check's *enforcement*** — Leg 5 asserts the recorded verdict, because v0.3.16 ships the check in `shadow` ([the audience-egress amendment](../rfcs/0037-amendment-audience-egress.md)). If the release flips it to `live`, Leg 5's criterion becomes the withhold itself; the leg says which reading applies.
 
 ---
 
@@ -28,6 +29,7 @@
 - [RFC 0037 — Memory Confidentiality & Channel Classification](../rfcs/0037-memory-confidentiality-channel-classification.md) — the design; [PR plan](../rfcs/0037-pr-plan.md) (8 PRs, all merged at closeout).
 - [Channels guide](../guides/channels.md) — declaring `classification:` on a channel; [sessions guide](../guides/sessions.md) — rooms vs. classification (the two-axis model).
 - [MT-MEMORY-CROSSROOM-001](MT-MEMORY-CROSSROOM-001.md) — the admit-side half, same mechanics with both rooms at `internal`.
+- [RFC 0037 audience-egress amendment](../rfcs/0037-amendment-audience-egress.md) — Leg 5's design; [ISSUE-0132](../issues/ISSUE-0132-memory-egress-gate-blind-to-room-audience.md) — the finding it closes.
 
 **Related Automated Tests** — the deterministic CI backbone of this MT:
 
@@ -36,6 +38,7 @@
 - [`tests/integration/test_confidentiality_tripwire.py`](../../tests/integration/test_confidentiality_tripwire.py) — the §G tripwire through the real event loop + executor.
 - [`tests/integration/test_interaction_classification_capture.py`](../../tests/integration/test_interaction_classification_capture.py) — the §C wire→capture→stamp seam, live and catch-up-replay producers.
 - [`EVAL-MEMORY-004`](../../evaluators/eval_sets/EVAL-MEMORY-004.yaml) + [`tests/integration/test_confidentiality_seed_replay.py`](../../tests/integration/test_confidentiality_seed_replay.py) — the RFC 0044 golden: the gate pinned at the request-hash level in both directions on every CI run.
+- [`EVAL-MEMORY-005`](../../evaluators/eval_sets/EVAL-MEMORY-005.yaml) — Leg 5's offline twin: teach in a DM, ask in front of Bob (*disjoint*), ask without him (*admit*). Offline it can never produce a `withhold-unknown-fetch-failed`, which is why Leg 5 reports that count live.
 
 This live MT confirms the *operator-observable* behaviour on a real provider; the gate/projection/tripwire invariants themselves are pinned in CI.
 
@@ -59,7 +62,8 @@ This live MT confirms the *operator-observable* behaviour on a real provider; th
 4. `agent-ember-owl` is up and a member of both `group:warroom` and `group:planning` (bundled at `respond: addressed` — the triggers @-mention it).
 5. **The operator identity is a member of both rooms** — the publish path refuses a non-member sender (`403 sender is not a member of the channel`). Either add `alex` to both YAML blocks alongside ember-owl, or join at runtime (`persatrix channel join warroom --as alex` / `… join planning --as alex`); the runtime join must not outlive the run — a config-declared channel with runtime-divergent membership fails the strict reconcile on the next orchestrator restart (tear the stack down with `make reset` after, per the cleanup note).
 6. `persatrix` CLI on `PATH` pointed at the running orchestrator.
-7. Optional but recommended: `PERSATRIX_MEMORY_PROVENANCE=1` on the persona container, so a leg fail can be split into a **gate withhold** (fact absent from the admitted `facts` slice) vs. a **reasoning miss** — the MQ-11 discipline [MT-MEMORY-005 §Telemetry](MT-MEMORY-005-dementia-test.md#telemetry-required-for-diagnosis) established.
+7. **For Leg 5 only** — **`alice`** (the DM's other party, and Leg 5's asker) and a second human identity, `bob`, are **members of `group:planning`**, and `bob` is in nothing else in this arc (add him to the `planning` block, or `persatrix channel join planning --as bob`; the same runtime-join caveat as item 5 applies). Bob never speaks: audience is the room's *member set*, not who is talking. Item 5's `alex` cannot stand in for Alice — the publish path refuses a non-member sender, and Leg 5 turns on Alice's own tenant. Also confirm `memory.egress.audience` resolves `shadow` (the shipped v0.3.16 default — verify no overlay pins `live`/`off`) and note which, because it selects Leg 5's pass criterion.
+8. Optional but recommended: `PERSATRIX_MEMORY_PROVENANCE=1` on the persona container, so a leg fail can be split into a **gate withhold** (fact absent from the admitted `facts` slice) vs. a **reasoning miss** — the MQ-11 discipline [MT-MEMORY-005 §Telemetry](MT-MEMORY-005-dementia-test.md#telemetry-required-for-diagnosis) established.
 
 ---
 
@@ -153,6 +157,87 @@ docker compose logs agent-ember-owl | grep confidentiality_tripwire
 
 **Inconclusive, not a fail**: a real model may decline or paraphrase the echo (fewer than 8 verbatim words → no hit, by §G design). Retry once with the proofread framing; if it still paraphrases, mark the leg inconclusive — the deterministic firing is pinned in [`tests/integration/test_confidentiality_tripwire.py`](../../tests/integration/test_confidentiality_tripwire.py), and this leg's value is confirming the audit record is operator-visible on a live stack.
 
+### Leg 5 — The audience leg (ISSUE-0132, the audience-egress amendment)
+
+Legs 1–4 teach in `warroom` at `restricted`, which **classification alone**
+withholds in `planning`. That makes them useless for audience: nothing
+they store could reach an `internal` room anyway. So Leg 5 is
+**self-contained** — it teaches its own `internal` fact in Alice's DM,
+closes that interaction, and only then asks.
+
+It also has **Alice herself** ask. Under `auth.mode: enabled` the
+v0.3.15 tenant partition already withholds Alice's DM content from any
+agent-origin turn Alice did not cause, so a leg where a persona
+volunteers it on someone else's turn passes for the wrong reason. Alice
+asking in her own tenant makes her entry admissible on both the
+classification and the principal axes — leaving **audience as the only
+thing that can withhold it**.
+
+**5a — teach in the DM** (Alice, `internal` by the DM default):
+
+```bash
+persatrix chat send "Between us for now — the Helix rollout is paused until the security review clears." --as alice
+```
+
+**5b — close the interaction**: wait out the idle gap (≥ 11 min at the
+600 s default) and send one bridge turn in the DM. Edge Case 2 applies
+verbatim — a fact that never consolidated makes this a **failed** leg,
+not a vacuous pass. Confirm the row before continuing, and confirm its
+provenance is the DM, since that column is what the check reads
+(the Leg 1 query with `helix` for `zephyr`, plus `source_channel_id`):
+
+```bash
+docker compose exec agent-ember-owl python3 -c "
+import asyncio, aiosqlite
+async def main():
+    async with aiosqlite.connect('/data/memory.db') as db:
+        async with db.execute('SELECT subject, protection_level, source_channel_id FROM facts') as cur:
+            for row in await cur.fetchall():
+                if 'helix' in (row[0] or ''): print(row)
+asyncio.run(main())"
+```
+
+→ at least one `helix` row at `protection_level = internal` whose
+`source_channel_id` starts `dm:`. A NULL there means the run measures
+*no-provenance*, not audience — redo 5a/5b.
+
+**5c — ask in front of Bob** (Alice, in `planning`, where Bob is a
+member and was not in the DM):
+
+```bash
+persatrix channel send planning "Where did the Helix rollout land? I want to know what to put on the board." --as alice --mention ember-owl
+```
+
+**Pass criterion**, by shipped mode (precondition 7):
+
+- **`shadow`** (the v0.3.16 default): the reply *may* carry the fact —
+  that is the posture, not a fail. What passes is the **recorded
+  verdict**: the persona container logs one `audience egress` record for
+  the turn naming the entry at `withhold-disjoint`.
+- **`live`**: the withhold itself — the reply carries neither the paused
+  rollout nor the security review — **and** the same record.
+
+```bash
+docker compose logs agent-ember-owl | grep "audience egress"
+```
+
+**Report, in both runs**: the record's `withhold-unknown-fetch-failed`
+count. It cannot occur offline (the eval driver's roster seam is an
+in-process map that never fails), so this leg is the *only* place it is
+observable — and a run that resolved no rosters at all would show every
+entry as unknown-transient rather than as evidence.
+
+**5d — the second run, `auth.mode: disabled`**: repeat 5a–5c with auth
+off. Everything is then the `local` principal and the tenant axis is
+gone entirely, so audience is the only boundary in play at all. Under
+`shadow` both runs record the same verdict; under `live` both withhold.
+
+**Vacuity rule**: Alice asks. A turn caused by anyone else — Bob, a peer
+persona, a tick — proves nothing under `enabled` (the tenant partition
+would explain the outcome) and is re-run rather than counted. Likewise a
+leg whose record shows the fact was never a §D-admitted candidate at
+all: read the admitted set first, the audience verdict second.
+
 ---
 
 ## Expected Results Summary
@@ -163,8 +248,9 @@ docker compose logs agent-ember-owl | grep confidentiality_tripwire
 | 2 — Internal ask | `planning` (`internal`) | names `zephyr`, never the content | withheld **or** projected — no date/sign-off/location | ☐ |
 | 3 — War-room re-ask | `warroom` (`restricted`) | names `zephyr` | verbatim specifics return | ☐ |
 | 4 — Seeded tripwire | `planning` (`internal`) | operator pastes the stored bytes | echo ⇒ audit record + metric; message not blocked | ☐ |
+| 5 — Audience (×2: auth on, then off) | DM (`internal`) → `planning` (`internal`, Bob a member) | **Alice** asks about her own DM fact; ≥ 11 min idle + bridge first | `shadow`: the turn records `withhold-disjoint` on her entry. `live`: also withheld. Fetch-failed count reported either way | ☐ |
 
-**Overall pass**: Legs 2 and 3 both pass (Leg 4 may be inconclusive per its criterion). A Leg 2 fail is a confidentiality regression — file immediately, release-blocking.
+**Overall pass**: Legs 2, 3 and 5 all pass (Leg 4 may be inconclusive per its criterion). A Leg 2 fail is a confidentiality regression — file immediately, release-blocking. A Leg 5 fail under `shadow` means the *measurement* is broken, not the boundary: it blocks the flip, not the release.
 
 ---
 
@@ -181,6 +267,12 @@ docker compose logs agent-ember-owl | grep confidentiality_tripwire
 **Scenario**: Leg 2 runs a few minutes after Leg 1 with no idle gap or bridge turn.
 
 **Expected Behavior**: the extractor has not run, so there is nothing stamped to withhold — Leg 2 passes vacuously. Test invalid — redo the Leg 1 idle + bridge, confirm the fact row, re-ask.
+
+### Edge Case 4: Leg 5's room turns out to hold nobody new
+
+**Scenario**: `planning`'s member set is a subset of the DM's — Bob was never added, or the roster fetch returned only the persona.
+
+**Expected Behavior**: the verdict is `admit`, correctly, and the leg has measured nothing. That is the vacuity failure [scope lock 1](../v0.3.16-scope-locks.md) names, not a pass: confirm the room's membership and re-run. A record showing `withhold-unknown-fetch-failed` instead means the roster call missed — an infrastructure fault to fix before the leg counts, and the reason that count is reported.
 
 ### Edge Case 3: the channel is reclassified upward mid-interaction
 
@@ -201,5 +293,6 @@ docker compose logs agent-ember-owl | grep confidentiality_tripwire
 ## Notes
 
 - **Why this MT exists when CI already pins the matrix**: the integration suites and `EVAL-MEMORY-004` drive the runtime deterministically; this MT is the qualitative gate that a real provider, real idle-close timing, real extractor phrasing, and a real projection author produce the behaviour an operator would actually see — including the §E judgment call ("informed but non-disclosing") that no mock can exercise.
+- **Three axes by v0.3.16**: rooms (sessions), classification, and now *audience* (who is in the room). Legs 2–3 move classification; Leg 5 holds classification **fixed at `internal` in both rooms** and moves only audience — which is what makes it a test of the amendment rather than a second gate test.
 - **Two-axis hygiene**: rooms (sessions) and classification are independent axes — `warroom` and `planning` differ in *both* here, which is what makes Leg 2 a gate test rather than a room-wall test (the RFC 0049 widening removed the wall for facts). Do not pin `PERSATRIX_SESSION_ID` across the arc.
 - **Cleanup**: remove the `warroom` block from `config/channels.yaml` after the run (or leave it — a `restricted` room on a demo deployment is harmless, but the bundled config should stay the shipped shape for later MTs).

@@ -96,6 +96,13 @@ class Interaction:
     #: ``channel_classification`` wire stamp (schema-enforced vocabulary).
     #: ``None`` keeps the driver's DM default ``internal``.
     classification: str | None = None
+    #: ISSUE-0132 (v0.3.16 A2) — optional per-interaction channel id,
+    #: overriding ``setup.channel`` for this interaction's turns. The
+    #: RFC 0037 §C provenance an entry is stamped with is the event's
+    #: CHANNEL, not its ``room``, so an audience recipe — which needs a
+    #: DM-taught entry recalled in a group room — cannot be written
+    #: without it. ``None`` keeps ``setup.channel``, byte-identical.
+    channel: str | None = None
 
 
 @dataclass
@@ -109,6 +116,12 @@ class Setup:
     #: RFC 0049 PR 4 — optional deep-merge override for the resolved persona
     #: config's ``memory`` block (pins runtime memory knobs per recipe).
     memory: dict[str, Any] = field(default_factory=dict)
+    #: ISSUE-0132 (v0.3.16 A2) — ``channel_id -> [member ids]`` for the
+    #: driver's in-process roster seam. Declaring it wires the fetcher the
+    #: audience check reads; a channel absent from the map resolves
+    #: *unknown*, which is the deliberate fetch-failed lever. Empty (the
+    #: landed seeds) wires no fetcher at all.
+    rosters: dict[str, list[str]] = field(default_factory=dict)
 
 
 @dataclass
@@ -247,6 +260,10 @@ def _parse_setup(raw: dict[str, Any]) -> Setup:
         seed_state=dict(raw.get("seed_state") or {}),
         llm_mode=raw.get("llm_mode", "replay"),
         memory=dict(raw.get("memory") or {}),
+        rosters={
+            channel_id: list(members)
+            for channel_id, members in (raw.get("rosters") or {}).items()
+        },
     )
 
 
@@ -256,6 +273,7 @@ def _parse_interaction(raw: dict[str, Any]) -> Interaction:
         elapsed=raw.get("elapsed"),
         room=raw.get("room"),
         classification=raw.get("classification"),
+        channel=raw.get("channel"),
         turns=[_parse_turn(t) for t in raw["turns"]],
     )
 

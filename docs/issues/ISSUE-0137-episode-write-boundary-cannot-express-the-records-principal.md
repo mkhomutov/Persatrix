@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0137
 summary: "The persona-memory write boundary takes speaker_id explicitly but resolves principal_id ambiently, so a record's tenant is carried by one `with` statement rather than by the call"
-status: open
+status: resolved
 severity: medium
 area: memory
 created: 2026-08-30
+closed: 2026-09-09
+closed_pr: 893
 refs:
   - docs/issues/ISSUE-0123-per-speaker-interaction-scope.md
   - docs/issues/ISSUE-0131-derived-memory-has-no-speaker-attribution.md
@@ -113,3 +115,41 @@ rather than leave it looking like an oversight.
 > so it stops riding on a PR description. Not a blocker for #849 — the live
 > paths are correct — but it should land before the workstream closes, and
 > before v0.4.0 organizations add derived-write paths on top of this boundary.
+>
+> 2026-09-07 — **v0.3.16 planning-readiness: default = rides, after the
+> [ISSUE-0143](ISSUE-0143-debt-sweep-26-files-at-size-cap.md) `close_path.py`
+> split, under the same cut clause as Workstream D.** Steps 1–4 above are
+> one PR once the file has room for the step-4 test; the relationship-tier
+> statement in the last paragraph rides the ISSUE-0122 PR, which touches
+> that tier anyway.
+>
+> 2026-09-08 — **Locked at the v0.3.16 plan opening** ([v0.3.16 plan](../v0.3.16-plan.md) Workstream E, PR E1, behind the `close_path.py` split D2; [v0.3.16 scope locks](../v0.3.16-scope-locks.md) lock 4). Cuttable with Workstream D.
+>
+> 2026-09-08 — **Correction at the [#886](https://github.com/mkhomutov/Persatrix/pull/886) review (F-1).** The `with principal_scope(...)` binding this file places in `close_path.py` has lived in `record_write_scopes` (`agents/persona_runtime/record_write_scope.py`) since v0.3.15 PR B2 ([#851](https://github.com/mkhomutov/Persatrix/pull/851)), where the epoch half joined it. What `close_path.py` holds is the `store_episode` call site that E1 grows a `principal_id=` argument on — still a 500/500 file, which is why the D2 split precedes E1.
+>
+> 2026-09-09 — **Resolved by v0.3.16 PR E1.** Steps 1–4 as written:
+> `EpisodicMemory.store_episode` and `FactStore.store` take
+> `principal_id: str | None = None` (`None` = resolve ambient, so every
+> pre-existing caller is unchanged); the close path passes
+> `interaction.principal_id` beside `speaker_id`, and the facts half
+> passes it through `dispatch_facts_from_response` →
+> `store_extracted_facts` from the same frozen record key. The
+> `record_write_scopes` binding stays as defence-in-depth, and its
+> module docstring now enumerates what still rides it alone — the EPOCH
+> on every tier, and the relationship tier's tenant. The pin is
+> `tests/unit/python/test_explicit_record_principal.py`: with the wrapper
+> monkeypatched to a `nullcontext`, the close-derived episode and its
+> facts — both driven through `persist_closed_interaction`, so the
+> Phase-2 task boundary is exercised too — still land under the record's
+> principal, so the invariant is carried by the call rather than by one
+> `with` statement. The relationship tier is stated here as ambient-only
+> either way and its `record_admission` gap rides the ISSUE-0122 PR (B1),
+> per the plan.
+>
+> Review follow-up (E1): the explicit argument initially skipped
+> `normalize_principal_id`, which every prior route to the column ran, so
+> a padded value would have been stored verbatim and orphaned under
+> strict-equality recall, and `""` would have fallen through to the
+> closer's tenant instead of the default. The precedence now lives in one
+> seam, `agents/memory/_principal_filter.py::resolve_write_principal`,
+> rather than in a copy per tier.

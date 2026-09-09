@@ -141,9 +141,11 @@ orchestrator connection, re-registering on any departure from `READY` and
 return) was taken at PR C1, and why **(5)** (registry persistence / registration
 as a property of a live stream) was deferred to v0.4.0 as an
 [RFC 0040](../rfcs/0040-agent-orchestrator-transport-unification.md) §C
-amendment. Closing this issue orphans RFC 0040's §C and OQ 6 pointers; the
-v0.3.15 Phase 4 follow-up re-files shape (5) as its own issue and re-points
-both.
+amendment. Closing this issue orphans RFC 0040's §C and OQ 6 pointers;
+shape (5) is re-filed as
+[ISSUE-0146](ISSUE-0146-registration-not-a-property-of-a-live-connection.md)
+and both are re-pointed there (done at the v0.3.16 planning-readiness audit,
+not by the Phase 4 follow-up as first planned — see the Notes).
 
 ## Notes
 
@@ -303,3 +305,9 @@ both.
 > `IDLE`/`CONNECTING` cycle, not `TRANSIENT_FAILURE` — which is the transition
 > the connectivity watcher had to cover and the one a narrower fix would have
 > missed.
+>
+> 2026-09-07 — the shape (5) re-file the note above promised for Phase 4
+> was not done by the follow-up; it is done at the v0.3.16
+> planning-readiness audit as
+> [ISSUE-0146](ISSUE-0146-registration-not-a-property-of-a-live-connection.md),
+> with RFC 0040 §C and OQ 6 re-pointed there.

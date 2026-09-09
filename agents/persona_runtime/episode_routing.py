@@ -42,11 +42,8 @@ from ..memory.interactions import (
 )
 from ..persona_types import EventType
 from ..session_id import current_session_id
+from .close_fan import close_stale_records, persist_fanned_closes
 from .close_lifecycle import _CloseLifecycleMixin
-from .close_path import (
-    close_stale_records,
-    persist_fanned_closes,
-)
 from .interaction_boundary import (
     is_session_end_event,
     scope_wire_anchor,
@@ -340,7 +337,7 @@ class _EpisodeRoutingMixin(_CloseLifecycleMixin):
         # found the carve-out inline at three sites and dropped at one.
         wire_id = scope_wire_anchor(scope, event)
         # The ingest-time boundary fan (wire rotation + the ISSUE-0130
-        # catch-up split) lives in :func:`close_path.close_stale_records`
+        # catch-up split) lives in :func:`close_fan.close_stale_records`
         # — a close+guarded-persist fan, per record since the re-key.
         await close_stale_records(
             self._interaction_tracker, scope, event, wire_id=wire_id,

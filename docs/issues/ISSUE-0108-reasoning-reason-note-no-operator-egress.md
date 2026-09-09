@@ -186,6 +186,20 @@ deferred.
 > introduces a new withhold decision, and the `reason_note` egress is what
 > makes that decision readable.
 
+> 2026-09-07 — **v0.3.16 planning-readiness: plan-opening default.** Gap B
+> lands as one PR on `salience_gate.py` (438 lines; room to grow): a single
+> DEBUG-level egress of the verbatim `reason_note` on the suppression path,
+> guarded to the agent log, with the no-leak test extended (debug log yes;
+> a message, the channel store, or a peer's reconstructed `messages` never).
+> The doc half has a size constraint the issue text predates: RFC 0051 sits
+> at 7 985 of 8 000 words, so the §E correction is appended to the
+> **existing [amendment file](../rfcs/0051-amendment-reasoning-kernel.md)**
+> (1 528 words), not made in the RFC; MT-REASON-001 Step 2 and its Step-2 caveat flip in
+> the same PR, as do the "wired in a later PR" docstrings. Rides with
+> ISSUE-0122.
+>
+> 2026-09-08 — **Locked at the v0.3.16 plan opening** ([v0.3.16 plan](../v0.3.16-plan.md) PR B2), as defaulted above. The release note must state that the DEBUG line is a new egress surface for operators who ship agent logs off-host — the §E correction says so.
+
 [e]: ../rfcs/0051-reasoning-before-posting.md#e-privacy-boundary--the-trace-is-walled
 [mt]: ../manual-tests/MT-REASON-001.md
 [prep]: ../v0.3.10-release-prep-plan.md#known-follow-up-issues

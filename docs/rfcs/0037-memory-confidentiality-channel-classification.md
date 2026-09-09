@@ -453,6 +453,10 @@ cite it rather than restating it:
 
 ### D. The hard gate at memory injection
 
+> **Amended** (v0.3.16, shadow-first): ANDed with the acting room's
+> audience — [audience-egress amendment](0037-amendment-audience-egress.md),
+> which also amends §E and §G.
+
 The memory-injection layer ([`memory_context.py`](../../agents/persona_runtime/memory_context.py),
 budgeted per [RFC 0017](0017-persona-memory-injection-budget.md)) gains
 one filter, applied to every tier that injects channel-derived memory

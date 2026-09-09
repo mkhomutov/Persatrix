@@ -84,3 +84,13 @@ Filed at v0.3.15 release-prep PR 4. Not release-blocking; recorded as a Known
 Gap on the [v0.3.15 release checklist](../v0.3.15-release-checklist.md#6-known-gaps-to-document-in-release-notes)
 and noted in §1 there, so the next cycle does not re-derive it from a failing
 sweep.
+
+> 2026-09-07 — **v0.3.16 planning-readiness: default = rides, paired with
+> RFC 0044 Phase 2 as the one CI workstream, cuttable together with it.**
+> The pairing is by shape: both add a job the tree already passes locally
+> (`make eval-replay` replays five offline goldens; `make lint`'s Go leg
+> runs unpinned). Expect the first golangci-lint run red; the per-linter
+> fix-or-exclude calls are the PR's, not the plan's. Step 4 (re-audit the
+> enforcement matrix for make targets with no CI job) rides the same PR.
+>
+> 2026-09-08 — **Locked at the v0.3.16 plan opening** ([v0.3.16 plan](../v0.3.16-plan.md) PR C1, paired with RFC 0044 Phase 2 as PR C2; [v0.3.16 scope locks](../v0.3.16-scope-locks.md) lock 5). The PR that adds the job also lists it in the branch-protection file — a job is a gate only once it is required.

@@ -9,9 +9,11 @@ words** and its closure note would not fit. Splitting rather than trimming
 follows the precedent set by [ISSUE-0082 Part 2](ISSUE-0082-part2-v0314-build-log.md)
 and applied the same day to [ISSUE-0124](ISSUE-0124-design-record.md): the
 option analysis below is *why the fix has the shape it has*, and shape (5) is
-still live work — [RFC 0040](../rfcs/0040-agent-orchestrator-transport-unification.md)
-§C and OQ 6 both route their ask through it, which the v0.3.15 Phase 4
-follow-up re-files as its own issue.
+still live work, re-filed as
+[ISSUE-0146](ISSUE-0146-registration-not-a-property-of-a-live-connection.md)
+at the v0.3.16 planning-readiness audit (the v0.3.15 Phase 4 follow-up did
+not do it) — [RFC 0040](../rfcs/0040-agent-orchestrator-transport-unification.md)
+§C and OQ 6 both route their ask through that issue.
 
 ---
 

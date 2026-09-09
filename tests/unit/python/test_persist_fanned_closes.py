@@ -16,7 +16,7 @@ import logging
 
 from agents.memory.boundary_detectors import REASON_STRUCTURAL
 from agents.memory.interactions import Interaction, InteractionTracker
-from agents.persona_runtime.close_path import persist_fanned_closes
+from agents.persona_runtime.close_fan import persist_fanned_closes
 
 _SCOPE = "group:planning"
 

@@ -18,6 +18,24 @@ That list has grown once per release, and each time it was found by a bug
 rather than by looking: the principal in PR #846, the epoch in this one.
 Naming the set in one module is the cheapest way to make the next addition
 an edit to a list instead of a fourth incident.
+
+Since ISSUE-0137 the tenant also travels by the call for TWO of those
+tiers: ``store_episode`` and ``FactStore.store`` take ``principal_id``
+and the close path passes the record's own, the way ``speaker_id``
+always has.  Read the scope of that narrowly — this wrapper is still
+what holds the invariant everywhere else, and a derived-write path that
+forgets it still produces rows their own reader cannot see:
+
+* the EPOCH has no such parameter on any tier, and its recall predicate
+  is the same strict equality, so forgetting the wrapper still hides the
+  conversation from the epoch that produced it;
+* the RELATIONSHIP tier has no tenant argument at all
+  (:mod:`agents.memory.relationship` resolves ambient at every write),
+  and the close path writes it in Phase 2.
+
+So the argument is the contract for the two tiers that take it, this is
+the net under everything else, and removing the principal half would
+silently re-expose every tier the close path cannot pass it to.
 """
 
 from __future__ import annotations
@@ -57,6 +75,10 @@ def record_write_scopes(
     A blank ``epoch_id`` means the record was minted by a site that
     captures none (a direct ``Interaction(...)``), and resolution stays
     exactly where it was — ambient — so no pre-existing path changes.
+
+    Both halves are still bound here after ISSUE-0137 gave the principal
+    an explicit parameter on two tiers — the module docstring lists what
+    still rides this binding alone.
     """
     stack = contextlib.ExitStack()
     stack.enter_context(principal_scope(interaction.principal_id))

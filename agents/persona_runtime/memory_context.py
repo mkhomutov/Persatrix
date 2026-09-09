@@ -1,14 +1,22 @@
 """Memory context injection for _LLMPersonaAgent.
 
-Handles episodic recall, relationship summary, working-memory
-truncation, and note injection into the persona agent's context window.
+Reads the memory tiers (relationship, channel history, facts, episodic,
+notes) for the current event, applies the RFC 0037 §D gate — since
+v0.3.16 with the ISSUE-0132 audience AND-condition beside the
+classification rank comparison — and owns the per-turn budget.  The
+allocate-loop that renders the gated tiers against that budget and
+stages them in working memory is
+:mod:`agents.persona_runtime.memory_assembly`; the text-truncation helper
+is :mod:`agents.persona_runtime.text_truncate` and is re-exported here
+(v0.3.16 D1 split).
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from ..memory._session_filter import SESSIONS_ALL
 from ..memory.episodic import (
@@ -19,24 +27,24 @@ from ..memory.episodic import (
 from ..memory.episodic_room_ranked import recall_room_ranked
 from ..memory.relationship import RelationshipMemory
 from ..memory.working import WorkingMemory
+from .audience import DEFAULT_MEMORY_AUDIENCE, resolve_turn_audience
+from .audience_shadow import emit_audience_shadow
 from .channel_history import (
     CHANNEL_HISTORY_SECTION_NAME,
     recall_channel_episodes,
-    render_channel_history_section,
 )
-from .channel_roster import inject_channel_roster
+from .channel_roster import inject_channel_roster, resolve_channel_roster
 from .cross_room import (
     CROSS_ROOM_LIVE,
     DEFAULT_EPISODIC_CROSS_ROOM,
     DEFAULT_FACTS_CROSS_ROOM,
 )
 from .episodes_shadow import emit_episodes_shadow
-from .episodic_section import EPISODIC_RECALL_LIMIT, render_episodic_section
+from .episodic_section import EPISODIC_RECALL_LIMIT
 from .facts_section import (
     DEFAULT_FACTS_BUDGET_TOKENS,
     FACTS_SECTION_NAME,
     recall_facts_for_event,
-    render_facts_section,
 )
 from .facts_shadow import emit_facts_shadow
 from .injection_gate import (
@@ -44,22 +52,21 @@ from .injection_gate import (
     TurnInjectionGate,
     acting_classification_for_event,
 )
+from .memory_assembly import inject_admitted_sections
 from .memory_budget import (
     MEMORY_BUDGET_TOKENS,
     MemoryBudget,
-    _truncate_to_token_limit,
 )
 from .notes_section import (
     NOTES_SECTION_NAME,
     recall_notes_for_event,
-    render_notes_section,
 )
 from .projection_branch import apply_episode_projections
 from .relationship_section import (
     RELATIONSHIP_SECTION_NAME,
     recall_relationship_summary,
-    render_relationship_section,
 )
+from .text_truncate import _truncate_with_ellipsis
 from .tripwire_watch import stamp_turn_tripwire_watch
 
 if TYPE_CHECKING:
@@ -123,52 +130,6 @@ class MemoryInjectionResult:
             )
 
 
-# ─── Helper Functions ──────────────────────────────────────
-
-
-def _truncate_with_ellipsis(
-    text: str,
-    limit: int,
-    *,
-    mode: Literal["chars", "tokens"] = "chars",
-) -> str:
-    """Truncate *text* to *limit* with word-boundary or token-boundary awareness.
-
-    If *text* fits within *limit* (measured in chars or tokens, depending on
-    *mode*), it is returned unchanged.
-
-    In ``"chars"`` mode (default): slices to *limit* chars, cuts at the
-    last space so the LLM sees a complete word, and appends ``"..."``;
-    a space-free slice is used whole (3-char worst-case overage).
-
-    In ``"tokens"`` mode: truncates at a token boundary via tiktoken
-    ``cl100k_base``, falling back to char-proportional slicing when
-    tiktoken is absent (never panics).  The ellipsis ``"\u2026"``
-    counts toward the token budget.
-
-    Extracted from _inject_memory_context() where the pattern was
-    copy-pasted three times.  (PR #60 review.)
-    """
-    if mode == "tokens":
-        # PR 1 review finding 4: ``_truncate_with_ellipsis_tokens`` was a
-        # one-liner wrapper around ``_truncate_to_token_limit``.  Inlined
-        # here to remove indirection now that the
-        # ``memory_context → memory_budget`` import direction is known to
-        # be safe (no cycle).
-        return _truncate_to_token_limit(text, limit)
-
-    # Original char mode (unchanged).
-    if len(text) <= limit:
-        return text
-    sliced = text[:limit]
-    truncated = sliced.rsplit(" ", 1)[0]
-    # Zero-space guard: if the slice has no space, rsplit returns it
-    # unchanged (len(truncated) == len(sliced)), so we use the full slice.
-    if len(truncated) == len(sliced):
-        truncated = sliced
-    return truncated + "..."
-
-
 # ─── Mixin ─────────────────────────────────────────────────
 
 
@@ -208,6 +169,12 @@ class _MemoryContextMixin:
     # RFC 0049 PR 2/PR 3 — ``memory.{facts,episodic}.cross_room`` (off|shadow).
     _facts_cross_room: str = DEFAULT_FACTS_CROSS_ROOM
     _episodic_cross_room: str = DEFAULT_EPISODIC_CROSS_ROOM
+    # ISSUE-0132 (v0.3.16 A2) — ``memory.egress.audience`` (off|shadow|live).
+    # ``shadow`` for the whole cycle: the verdict is recorded, the prompt
+    # does not move.  The class-level default keeps the legacy mixin
+    # harnesses (assembled without ``create_persona_agent``) on the same
+    # posture as production.
+    _memory_audience: str = DEFAULT_MEMORY_AUDIENCE
     # F-4: channel-roster fetcher, wired in ``server_persona`` like the
     # history fetcher. ``None`` (default) → no roster section, so the
     # legacy mixin harnesses and DM-only paths are unaffected.
@@ -250,7 +217,7 @@ class _MemoryContextMixin:
         and allocates injected tokens via a single :class:`MemoryBudget`
         (RFC 0017 §B).  Tiers are processed in the canonical cross-RFC
         priority order: relationship → channel history (CHANNEL_MESSAGE
-        only) → episodic recall → recent notes; open-commitments and
+        only) → facts → episodic recall → recent notes; open-commitments and
         duration-priors slots ship empty until v0.4.0.  Pinned verbatim
         by RFC 0011 §E and RFC 0021 §J — see
         :mod:`agents.persona_runtime.channel_history` for the channel
@@ -292,92 +259,140 @@ class _MemoryContextMixin:
         self._working_memory.remove_section(CHANNEL_HISTORY_SECTION_NAME)
         self._working_memory.remove_section(FACTS_SECTION_NAME)
 
-        # ── Query all three tiers ──────────────────────────────────────────
-        # Sequential, not concurrent (PR #60 review): the tiers share
-        # one aiosqlite connection, which serialises operations anyway.
-
-        # Tier 1 (priority 8): Relationship context for the event sender.
-        # Recall is delegated to ``relationship_section`` which handles
-        # the no-sender / backend-failure cases and metadata-driven
-        # participant-type extraction.
-        rel = await recall_relationship_summary(
-            self._relationship_memory, event, agent_id=self.agent_id,
+        # The roster fetch is the one HTTP call in this method: the tiers
+        # below share a single aiosqlite connection and serialise anyway,
+        # so it is also the only work that can overlap them.  Issued here
+        # and awaited just before the gate (v0.3.16 PR A1) — it MUST
+        # precede the gate, but it need not sit on the turn's critical
+        # path, and a DM turn now pays for it where before it fetched no
+        # roster at all.  ``resolve_channel_roster`` never raises; the
+        # ``finally`` is what keeps a failing tier recall from leaving the
+        # task orphaned (asyncio logs a pending task destroyed at GC).
+        roster_task = asyncio.create_task(
+            resolve_channel_roster(self._roster_fetcher, event, self.agent_id),
         )
-
-        # Channel-history tier (RFC 0011 §E + RFC 0021 §J) — issued
-        # before the episodic recall so harnesses asserting on
-        # ``recall.call_args`` still pin the episodic ``min_score``.
-        channel_episodes = await recall_channel_episodes(
-            self._episodic_memory, event, agent_id=self.agent_id,
-        )
-
-        # Facts tier (RFC 0026 PR 3) — declarative facts about the
-        # canonical sender (dementia-test invariant: stored at N,
-        # injects at N+1 without subject-string overlap) plus topic
-        # subjects ``query`` mentions (RFC 0049 P1).  Returns ``[]``
-        # when disabled / sender-less / backend raises — all non-fatal.
-        # ``cross_room: live`` (RFC 0049 PR 4, the promoted default)
-        # widens the ONE live read past the §D room wall — visibility
-        # belongs to the RFC 0037 gate below; shadow mode keeps the
-        # walled read and logs the widened delta instead.
-        if self._facts_enabled:
-            facts = await recall_facts_for_event(
-                self._fact_store, event, stimulus=query,
-                sessions=SESSIONS_ALL
-                if self._facts_cross_room == CROSS_ROOM_LIVE else None,
-            )
-            await emit_facts_shadow(
-                self._fact_store, event, stimulus=query,
-                live_fact_ids={f.fact_id for f in facts},
-                agent_id=self.agent_id, mode=self._facts_cross_room,
-            )
-        else:
-            facts = []
-
-        # Tier 2 (priority 7): Episodic recall (TICK skip removed —
-        # RFC 0017 §D min_score + the PR 5 empty-context short-circuit).
-        # ``cross_room: live`` (RFC 0049 PR 4, the promoted default) =
-        # room-first-RANKED recall in ONE widened, reinforcing query
-        # (the shadow pass does not run in live mode, so the episodic
-        # tier costs one read per turn in every mode); otherwise the
-        # RFC 0031 §D wall (``sessions=None``; ``"*"`` pinned
-        # unreachable) with shadow mode logging the widened delta.
         try:
-            if self._episodic_cross_room == CROSS_ROOM_LIVE:
-                episodes = await recall_room_ranked(
-                    self._episodic_memory, query,
-                    limit=EPISODIC_RECALL_LIMIT,
-                    min_score=DEFAULT_EPISODIC_MIN_SCORE,
-                    reinforce=True,
+            # ── Query all three tiers ──────────────────────────────────────────
+            # Sequential, not concurrent (PR #60 review): the tiers share
+            # one aiosqlite connection, which serialises operations anyway.
+
+            # Tier 1 (priority 8): Relationship context for the event sender.
+            # Recall is delegated to ``relationship_section`` which handles
+            # the no-sender / backend-failure cases and metadata-driven
+            # participant-type extraction.
+            rel = await recall_relationship_summary(
+                self._relationship_memory, event, agent_id=self.agent_id,
+            )
+
+            # Channel-history tier (RFC 0011 §E + RFC 0021 §J) — issued
+            # before the episodic recall so harnesses asserting on
+            # ``recall.call_args`` still pin the episodic ``min_score``.
+            channel_episodes = await recall_channel_episodes(
+                self._episodic_memory, event, agent_id=self.agent_id,
+            )
+
+            # Facts tier (RFC 0026 PR 3) — declarative facts about the
+            # canonical sender (dementia-test invariant: stored at N,
+            # injects at N+1 without subject-string overlap) plus topic
+            # subjects ``query`` mentions (RFC 0049 P1).  Returns ``[]``
+            # when disabled / sender-less / backend raises — all non-fatal.
+            # ``cross_room: live`` (RFC 0049 PR 4, the promoted default)
+            # widens the ONE live read past the §D room wall — visibility
+            # belongs to the RFC 0037 gate below; shadow mode keeps the
+            # walled read and logs the widened delta instead.
+            if self._facts_enabled:
+                facts = await recall_facts_for_event(
+                    self._fact_store, event, stimulus=query,
+                    sessions=SESSIONS_ALL
+                    if self._facts_cross_room == CROSS_ROOM_LIVE else None,
+                )
+                await emit_facts_shadow(
+                    self._fact_store, event, stimulus=query,
+                    live_fact_ids={f.fact_id for f in facts},
+                    agent_id=self.agent_id, mode=self._facts_cross_room,
                 )
             else:
-                episodes = await self._episodic_memory.recall(
-                    query,
-                    limit=EPISODIC_RECALL_LIMIT,
-                    min_score=DEFAULT_EPISODIC_MIN_SCORE,
-                    sessions=None,
-                )
-        except Exception:
-            logger.warning(
-                "Agent %s: episodic recall failed, skipping",
-                self.agent_id, exc_info=True,
-            )
-            episodes = []
-        await emit_episodes_shadow(
-            self._episodic_memory, event, query=query,
-            live_episode_ids={e.id for e in episodes},
-            agent_id=self.agent_id, mode=self._episodic_cross_room,
-        )
+                facts = []
 
-        # Tier 3 (priority 6): Recent notes — min_score at the DB layer
-        # (RFC 0017 §D / PR #131 F-1).  Room-scoped §D default;
-        # cross-room person identity rides the relationship tier (F-7).
-        notes = await recall_notes_for_event(
-            self._episodic_memory,
-            query=query,
-            event=event,
+            # Tier 2 (priority 7): Episodic recall (TICK skip removed —
+            # RFC 0017 §D min_score + the PR 5 empty-context short-circuit).
+            # ``cross_room: live`` (RFC 0049 PR 4, the promoted default) =
+            # room-first-RANKED recall in ONE widened, reinforcing query
+            # (the shadow pass does not run in live mode, so the episodic
+            # tier costs one read per turn in every mode); otherwise the
+            # RFC 0031 §D wall (``sessions=None``; ``"*"`` pinned
+            # unreachable) with shadow mode logging the widened delta.
+            try:
+                if self._episodic_cross_room == CROSS_ROOM_LIVE:
+                    episodes = await recall_room_ranked(
+                        self._episodic_memory, query,
+                        limit=EPISODIC_RECALL_LIMIT,
+                        min_score=DEFAULT_EPISODIC_MIN_SCORE,
+                        reinforce=True,
+                    )
+                else:
+                    episodes = await self._episodic_memory.recall(
+                        query,
+                        limit=EPISODIC_RECALL_LIMIT,
+                        min_score=DEFAULT_EPISODIC_MIN_SCORE,
+                        sessions=None,
+                    )
+            except Exception:
+                logger.warning(
+                    "Agent %s: episodic recall failed, skipping",
+                    self.agent_id, exc_info=True,
+                )
+                episodes = []
+            await emit_episodes_shadow(
+                self._episodic_memory, event, query=query,
+                live_episode_ids={e.id for e in episodes},
+                agent_id=self.agent_id, mode=self._episodic_cross_room,
+            )
+
+            # Tier 3 (priority 6): Recent notes — min_score at the DB layer
+            # (RFC 0017 §D / PR #131 F-1).  Room-scoped §D default;
+            # cross-room person identity rides the relationship tier (F-7).
+            notes = await recall_notes_for_event(
+                self._episodic_memory,
+                query=query,
+                event=event,
+                agent_id=self.agent_id,
+                min_score=DEFAULT_NOTES_MIN_SCORE,
+            )
+        finally:
+            # ── Channel roster (F-4 tier; the ISSUE-0132 audience rail) ────
+            # Resolved BEFORE the §D gate and for every channel-anchored
+            # turn, DMs included: the gate cannot ask who is listening if
+            # the roster arrives after it has decided (scope lock 3).  Two
+            # consumers since A2 — the audience resolution below reads its
+            # member ids as the ACTING audience (and as the pre-seeded
+            # cache entry that makes a same-room recall free), and the
+            # prompt section below consumes it unchanged.
+            roster = await roster_task
+
+        # ── ISSUE-0132: who is listening ───────────────────────────────────
+        # Resolved between the recalls and the gate, because it needs both:
+        # the candidates name the source rooms to fetch, and the gate is
+        # what asks the question.  One round trip per distinct source room
+        # among the entries the gate will actually JUDGE — not per room the
+        # recalls happened to name — issued in parallel, minus the acting
+        # room the rail above already resolved (scope lock 2).  ``None`` in
+        # ``off`` mode and on a turn acting at the §D public floor, where
+        # no candidate can carry a verdict.  The tier names ride along so
+        # the audience module applies its own ``AUDIENCE_TIERS`` rule
+        # rather than this call site encoding it a second time.
+        acting = acting_classification_for_event(event)
+        audience = await resolve_turn_audience(
+            self._roster_fetcher, roster,
+            mode=self._memory_audience,
+            acting_channel_id=getattr(event, "channel_id", None),
+            acting_classification=acting,
+            candidates=(
+                ("channel_history", channel_episodes),
+                ("episodic", episodes),
+                ("facts", facts),
+            ),
             agent_id=self.agent_id,
-            min_score=DEFAULT_NOTES_MIN_SCORE,
         )
 
         # ── RFC 0037 §D hard gate ──────────────────────────────────────────
@@ -389,8 +404,7 @@ class _MemoryContextMixin:
         # (b)).  The relationship tier is deliberately ungated (§C write-
         # through + the Non-Goals trust-score carve-out — see injection_gate).
         gate = TurnInjectionGate(
-            acting=acting_classification_for_event(event),
-            agent_id=self.agent_id,
+            acting=acting, agent_id=self.agent_id, audience=audience,
         )
         channel_episodes = gate.filter_entries("channel_history", channel_episodes)
         episodes = gate.filter_entries("episodic", episodes)
@@ -403,93 +417,49 @@ class _MemoryContextMixin:
             channel_history=channel_episodes, episodic_entries=episodes,
         )
         gate.emit_log()
+        # ISSUE-0132: one structured record per turn with a verdict — the
+        # shadow measurement's input (and, in ``live``, the operator's
+        # account of what the audience check withheld).
+        emit_audience_shadow(
+            gate, agent_id=self.agent_id,
+            mode=self._memory_audience, audience=audience,
+        )
         # §G (PR 7): stamp the withheld-entry tripwire watch for the executor.
         stamp_turn_tripwire_watch(event, gate)
 
         # ── Allocate-loop ──────────────────────────────────────────────────
-        # Process tiers in fixed priority order (relationship=8 → episodic=7
-        # → notes=6).  Higher-priority tiers consume the budget first.
-        # RFC 0017 §B / OQ4.
+        # Tiers are rendered in fixed priority order (relationship=8 →
+        # channel history → facts → episodic=7 → notes=6); higher-priority
+        # tiers consume the budget first.  RFC 0017 §B / OQ4.
         budget = MemoryBudget(total_tokens=MEMORY_BUDGET_TOKENS)
         # RFC 0021 PR 2: snapshot the temporal seam once per event.
         now = self._clock.now()
 
-        # Relationship tier (priority 8).  Admission, label formatting,
-        # default-trust filtering, and the temporal-recency metric live
-        # in ``relationship_section.render_relationship_section``.
-        rel_section = render_relationship_section(
-            rel, budget,
-            now=now, timezone=self._timezone, truncate=_truncate_with_ellipsis,
+        # Allocate-loop proper lives in ``memory_assembly`` (v0.3.16 D1
+        # split).  The budget is constructed here, not there, because the
+        # zero-budget harness monkeypatches ``MEMORY_BUDGET_TOKENS`` by
+        # this module's name — a constructor reading the constant from
+        # ``memory_assembly`` would silently escape that patch.
+        await inject_admitted_sections(
+            working_memory=self._working_memory,
+            agent_id=self.agent_id,
+            timezone=self._timezone,
+            fact_store=self._fact_store,
+            facts_budget_tokens=self._facts_budget_tokens,
+            budget=budget, now=now,
+            rel=rel, channel_episodes=channel_episodes, facts=facts,
+            episodes=episodes, notes=notes,
         )
-        if rel_section is not None:
-            self._working_memory.add_section(rel_section)
 
-        # Channel-history tier (RFC 0011 §E + RFC 0021 §J).  Slots
-        # between relationship and episodic admissions.
-        ch_section = render_channel_history_section(
-            channel_episodes, budget,
-            now=now, timezone=self._timezone, truncate=_truncate_with_ellipsis,
-        )
-        if ch_section is not None:
-            self._working_memory.add_section(ch_section)
-
-        # Facts tier (RFC 0026 PR 3).  Admitted between channel_history
-        # and episodic so a high-signal fact displaces lower-signal
-        # prose under budget pressure.  Header charged against the
-        # global budget; admitted fact_ids land on the per-turn
-        # registry for the PR 4 reinforcement write below (MQ-11).
-        if facts:
-            facts_section = render_facts_section(
-                facts, budget,
-                facts_budget_tokens=self._facts_budget_tokens,
-            )
-            if facts_section is not None:
-                self._working_memory.add_section(facts_section)
-                # RFC 0026 PR 4 — use-based reinforcement; non-fatal
-                # because the section is already staged and the caller
-                # builds the prompt after this returns (PR #342 M-3).
-                admitted_fact_ids = budget.admissions_by_tier("facts")
-                if admitted_fact_ids and self._fact_store is not None:
-                    try:
-                        await self._fact_store.mark_recalled(admitted_fact_ids)
-                    except Exception:
-                        logger.warning(
-                            "Agent %s: fact reinforcement write failed; skipping",
-                            self.agent_id, exc_info=True,
-                        )
-
-        # Episodic tier (priority 7).  Extracted to
-        # ``episodic_section.render_episodic_section`` (F-4 slice B) so the
-        # episodic tier matches the other recall tiers' ``render_*`` shape;
-        # behaviour (recency tags, budget admission, MQ-11 provenance,
-        # ``source="episode"`` metric) is preserved there.
-        ep_section = render_episodic_section(
-            episodes, budget,
-            now=now, timezone=self._timezone, truncate=_truncate_with_ellipsis,
-        )
-        if ep_section is not None:
-            self._working_memory.add_section(ep_section)
-
-        # Notes tier (priority 6).  Extracted to
-        # ``notes_section.render_notes_section`` (RFC 0037 PR 4) so the
-        # notes tier matches the other tiers' ``render_*`` shape;
-        # behaviour (line shape, budget admission, MQ-11 provenance) is
-        # preserved there.
-        notes_section = render_notes_section(
-            notes, budget, truncate=_truncate_with_ellipsis,
-        )
-        if notes_section is not None:
-            self._working_memory.add_section(notes_section)
-
-        # Channel-roster tier (F-4, priority 9 — highest). Group channels
-        # only; structural room context injected outside the recall budget
-        # (see ``inject_channel_roster``), so it does not affect
-        # ``memory_admitted_tokens`` below — group CHANNEL_MESSAGE events are
-        # never the TICK that the empty-context short-circuit guards. The
-        # helper clears its own stale section (incl. on a later DM turn).
-        await inject_channel_roster(
-            self._working_memory, self._roster_fetcher, event, self.agent_id,
-        )
+        # Channel-roster tier (F-4, priority 9 — highest). Injected from the
+        # roster resolved above, in this position and for group channels
+        # only, so the prompt is byte-identical to v0.3.15. Structural room
+        # context outside the recall budget (see ``inject_channel_roster``),
+        # so it does not affect ``memory_admitted_tokens`` below — group
+        # CHANNEL_MESSAGE events are never the TICK that the empty-context
+        # short-circuit guards. The helper clears its own stale section
+        # (incl. on a later DM turn, whose roster resolves but never shows).
+        inject_channel_roster(self._working_memory, roster)
 
         memory_admitted_tokens = MEMORY_BUDGET_TOKENS - budget.remaining
         # Consumed by ``_on_event_inner`` for the RFC 0017 §F empty-context

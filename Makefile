@@ -1,4 +1,4 @@
-.PHONY: all build build-orchestrator build-orchestrator-ui ui ui-test ui-html-check build-cli build-agents proto proto-go proto-python proto-python-check proto-orphans-check proto-check clean reset test lint run run-ui validate dockerignore-check help demo-autonomous demo-offline demo-ollama generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues issues-check rfcs rfcs-check imports-check eval-replay eval-record eval-record-offline eval-drift
+.PHONY: all build build-orchestrator build-orchestrator-ui ui ui-test ui-html-check build-cli build-agents proto proto-go proto-python proto-python-check proto-orphans-check proto-check clean reset test lint run run-ui validate dockerignore-check help demo-autonomous demo-offline demo-ollama generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues issues-check rfcs rfcs-check imports-check eval-replay eval-record eval-record-offline eval-drift eval-verdict
 
 # ─── Config ─────────────────────────────────────────────
 GO_MODULE     := github.com/mkhomutov/persatrix
@@ -222,6 +222,15 @@ eval-record-offline: ## Re-record a seed golden against the mock, deterministica
 	PERSATRIX_OPTIMIZATION_CONFIG=config/demo/offline/optimization.yaml \
 	PERSATRIX_OFFLINE_RESPONSES=evaluators/eval_sets/offline_responses.eval.yaml \
 	$(PYTHON) -m evaluators.runner --mode record $(if $(TARGET),--target $(TARGET),)
+
+# Render the RFC 0049 / ISSUE-0132 shadow verdict over a replay report.
+# `--audience` is explicit, not inferred: "no audience traces" must read
+# as a RED verdict (a vacuous measurement is the exact failure the
+# v0.3.16 shadow guards against), so the flag names the expectation
+# rather than the traces answering for themselves.
+eval-verdict: ## Render the shadow->live promotion verdict (RFC 0049 PR 4 + ISSUE-0132). REPORT=<path> from `make eval-replay REPORT=...`.
+	@test -n "$(REPORT)" || { echo "REPORT=<path> is required (make eval-replay REPORT=<path> writes it)"; exit 2; }
+	$(PYTHON) -m evaluators.shadow_measurement $(REPORT) --audience
 
 eval-drift: ## Live drift check against recorded goldens (reports, never gates). TARGET optional.
 	$(PYTHON) -m evaluators.runner --mode drift $(if $(TARGET),--target $(TARGET),)

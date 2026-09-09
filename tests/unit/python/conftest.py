@@ -19,6 +19,10 @@ from agents.tools.registry import clear_registry
 # 500-line review cap after adding the timestamp / explicit-limit
 # tests.)
 from ._catchup_test_helpers import orchestrator  # noqa: F401
+from ._close_path_test_helpers import (  # noqa: F401
+    no_phase_two,
+    wrapper_neutralised,
+)
 
 
 @pytest.fixture(autouse=True)

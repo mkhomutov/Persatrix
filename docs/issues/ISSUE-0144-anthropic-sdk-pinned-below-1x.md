@@ -117,3 +117,9 @@ installing the provider extras in CI or accepting the gap explicitly.
 > Anthropic and OpenAI providers, checked by running it against the broken
 > major rather than only against the pinned one. Gemini stays uncovered and is
 > now the only part of the original finding outstanding besides the port.
+>
+> 2026-09-07 — **v0.3.16 planning-readiness: default = out of scope,
+> deferred explicitly** so it does not pressure the cut. Provider-port work
+> with no v0.3.16 story; the Dependabot rule keeps holding the line.
+> Re-decide at the v0.4.0 plan opening, or earlier if a provider feature
+> the 1.x line gates becomes wanted.
