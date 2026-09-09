@@ -1,9 +1,11 @@
 """Memory context injection for _LLMPersonaAgent.
 
 Reads the memory tiers (relationship, channel history, facts, episodic,
-notes) for the current event, applies the RFC 0037 §D gate, and owns the
-per-turn budget.  The allocate-loop that renders the gated tiers against
-that budget and stages them in working memory is
+notes) for the current event, applies the RFC 0037 §D gate — since
+v0.3.16 with the ISSUE-0132 audience AND-condition beside the
+classification rank comparison — and owns the per-turn budget.  The
+allocate-loop that renders the gated tiers against that budget and
+stages them in working memory is
 :mod:`agents.persona_runtime.memory_assembly`; the text-truncation helper
 is :mod:`agents.persona_runtime.text_truncate` and is re-exported here
 (v0.3.16 D1 split).
@@ -25,6 +27,8 @@ from ..memory.episodic import (
 from ..memory.episodic_room_ranked import recall_room_ranked
 from ..memory.relationship import RelationshipMemory
 from ..memory.working import WorkingMemory
+from .audience import DEFAULT_MEMORY_AUDIENCE, resolve_turn_audience
+from .audience_shadow import emit_audience_shadow
 from .channel_history import (
     CHANNEL_HISTORY_SECTION_NAME,
     recall_channel_episodes,
@@ -165,6 +169,12 @@ class _MemoryContextMixin:
     # RFC 0049 PR 2/PR 3 — ``memory.{facts,episodic}.cross_room`` (off|shadow).
     _facts_cross_room: str = DEFAULT_FACTS_CROSS_ROOM
     _episodic_cross_room: str = DEFAULT_EPISODIC_CROSS_ROOM
+    # ISSUE-0132 (v0.3.16 A2) — ``memory.egress.audience`` (off|shadow|live).
+    # ``shadow`` for the whole cycle: the verdict is recorded, the prompt
+    # does not move.  The class-level default keeps the legacy mixin
+    # harnesses (assembled without ``create_persona_agent``) on the same
+    # posture as production.
+    _memory_audience: str = DEFAULT_MEMORY_AUDIENCE
     # F-4: channel-roster fetcher, wired in ``server_persona`` like the
     # history fetcher. ``None`` (default) → no roster section, so the
     # legacy mixin harnesses and DM-only paths are unaffected.
@@ -353,11 +363,37 @@ class _MemoryContextMixin:
             # ── Channel roster (F-4 tier; the ISSUE-0132 audience rail) ────
             # Resolved BEFORE the §D gate and for every channel-anchored
             # turn, DMs included: the gate cannot ask who is listening if
-            # the roster arrives after it has decided (scope lock 3).  The
-            # gate does not read it yet — A2 passes it in as the audience
-            # input; here the rail is dormant and only the prompt section
-            # consumes it, below and unchanged.
+            # the roster arrives after it has decided (scope lock 3).  Two
+            # consumers since A2 — the audience resolution below reads its
+            # member ids as the ACTING audience (and as the pre-seeded
+            # cache entry that makes a same-room recall free), and the
+            # prompt section below consumes it unchanged.
             roster = await roster_task
+
+        # ── ISSUE-0132: who is listening ───────────────────────────────────
+        # Resolved between the recalls and the gate, because it needs both:
+        # the candidates name the source rooms to fetch, and the gate is
+        # what asks the question.  One round trip per distinct source room
+        # among the entries the gate will actually JUDGE — not per room the
+        # recalls happened to name — issued in parallel, minus the acting
+        # room the rail above already resolved (scope lock 2).  ``None`` in
+        # ``off`` mode and on a turn acting at the §D public floor, where
+        # no candidate can carry a verdict.  The tier names ride along so
+        # the audience module applies its own ``AUDIENCE_TIERS`` rule
+        # rather than this call site encoding it a second time.
+        acting = acting_classification_for_event(event)
+        audience = await resolve_turn_audience(
+            self._roster_fetcher, roster,
+            mode=self._memory_audience,
+            acting_channel_id=getattr(event, "channel_id", None),
+            acting_classification=acting,
+            candidates=(
+                ("channel_history", channel_episodes),
+                ("episodic", episodes),
+                ("facts", facts),
+            ),
+            agent_id=self.agent_id,
+        )
 
         # ── RFC 0037 §D hard gate ──────────────────────────────────────────
         # Applied to every channel-derived tier BEFORE the RFC 0017 budget,
@@ -368,8 +404,7 @@ class _MemoryContextMixin:
         # (b)).  The relationship tier is deliberately ungated (§C write-
         # through + the Non-Goals trust-score carve-out — see injection_gate).
         gate = TurnInjectionGate(
-            acting=acting_classification_for_event(event),
-            agent_id=self.agent_id,
+            acting=acting, agent_id=self.agent_id, audience=audience,
         )
         channel_episodes = gate.filter_entries("channel_history", channel_episodes)
         episodes = gate.filter_entries("episodic", episodes)
@@ -382,6 +417,13 @@ class _MemoryContextMixin:
             channel_history=channel_episodes, episodic_entries=episodes,
         )
         gate.emit_log()
+        # ISSUE-0132: one structured record per turn with a verdict — the
+        # shadow measurement's input (and, in ``live``, the operator's
+        # account of what the audience check withheld).
+        emit_audience_shadow(
+            gate, agent_id=self.agent_id,
+            mode=self._memory_audience, audience=audience,
+        )
         # §G (PR 7): stamp the withheld-entry tripwire watch for the executor.
         stamp_turn_tripwire_watch(event, gate)
 

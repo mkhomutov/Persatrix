@@ -164,14 +164,13 @@ class _LLMPersonaAgent(
         self._relationship_memory = relationship_memory
         self._working_memory = working_memory
         self._fact_store = fact_store  # RFC 0026 PR 2; optional.
-        from .facts_section import resolve_facts_config  # noqa: PLC0415 — RFC 0026 PR 3
-        self._facts_enabled, self._facts_budget_tokens = resolve_facts_config(config)
-        from .cross_room import (  # noqa: PLC0415 — RFC 0049
-            resolve_episodic_cross_room,
-            resolve_facts_cross_room,
-        )
-        self._facts_cross_room = resolve_facts_cross_room(config)
-        self._episodic_cross_room = resolve_episodic_cross_room(config)
+        from .memory_knobs import resolve_memory_knobs  # noqa: PLC0415
+        knobs = resolve_memory_knobs(config)  # RFC 0026 / RFC 0049 / ISSUE-0132
+        self._facts_enabled, self._facts_budget_tokens = (
+            knobs.facts_enabled, knobs.facts_budget_tokens)
+        self._facts_cross_room = knobs.facts_cross_room
+        self._episodic_cross_room = knobs.episodic_cross_room
+        self._memory_audience = knobs.audience
         self._memory_tools = memory_tools
         self._clock, self._timezone = resolve_persona_clock(config, clock)  # RFC 0021 PR 2
         self._memory_ns = MemoryNamespace(

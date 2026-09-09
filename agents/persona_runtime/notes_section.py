@@ -54,6 +54,13 @@ logger = logging.getLogger(__name__)
 NOTES_SECTION_NAME = "recent_notes"
 NOTES_SECTION_PRIORITY = 6
 
+#: Notes pulled per event before the budget allocator decides which fit —
+#: the notes-tier twin of ``EPISODIC_RECALL_LIMIT`` / ``FACTS_RECALL_LIMIT``
+#: / ``CHANNEL_RECALL_LIMIT``.  Named (v0.3.16 A2) so the RFC 0044
+#: measurement's per-turn audience bound can be pinned against the four
+#: live limits instead of a literal.
+NOTES_RECALL_LIMIT: int = 5
+
 
 async def recall_notes_for_event(
     episodic: EpisodicMemory,
@@ -62,7 +69,7 @@ async def recall_notes_for_event(
     event: AgentEvent,
     agent_id: str,
     min_score: float | None,
-    limit: int = 5,
+    limit: int = NOTES_RECALL_LIMIT,
 ) -> list[Note]:
     """Recall the notes tier for one event (room-scoped, query-driven,
     classification-gated).

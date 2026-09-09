@@ -169,6 +169,32 @@ def build_roster(
     return roster
 
 
+def member_ids_from_meta(
+    channel_meta: dict[str, Any] | None,
+) -> frozenset[str] | None:
+    """The audience half of a channel response: just the member ids.
+
+    Used by the ISSUE-0132 egress check for a *source* room — a room the
+    turn is not acting in, whose display names nobody will render — so
+    it needs the public members half alone and never the authenticated
+    directory. Applies the same parsing guards as :func:`build_roster`
+    (a non-list ``members``, non-dict entries, blank ids) and returns
+    ``None``, never an empty set, for a channel with no usable
+    membership: "unknown audience" and "empty room" must not collapse,
+    or a lost roster would spuriously admit everything.
+    """
+    if not isinstance(channel_meta, dict):
+        return None
+    declared = channel_meta.get("members")
+    if not isinstance(declared, list):
+        return None
+    ids = {
+        m["id"] for m in declared
+        if isinstance(m, dict) and isinstance(m.get("id"), str) and m["id"]
+    }
+    return frozenset(ids) or None
+
+
 def render_roster_section(
     channel_meta: dict[str, Any],
     members: list[RosterMember],

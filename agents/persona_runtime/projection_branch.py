@@ -30,6 +30,15 @@ reached the prompt.  Order is preserved via the gate's per-tier decision
 record: a projected entry re-enters exactly where the withheld original
 stood in the relevance ranking.
 
+Composition with the v0.3.16 audience check (ISSUE-0132 scope lock 3),
+in both directions.  An **audience** withhold is terminal — this branch
+skips it entirely.  A projection lowers an entry's classification, which
+is the axis §D gates on; it does nothing about who is in the room, so
+serving one to the wrong audience would substitute an abstraction for a
+boundary.  And a **classification** withhold returns from the gate
+before the audience clause, so its stand-in has no verdict yet: this
+branch asks for one before serving it, at the projection's own level.
+
 Failure posture: any storage error degrades to the Phase-1 blunt
 withhold (the safe direction — never fail open, never fail the turn).
 """
@@ -90,6 +99,7 @@ async def apply_episode_projections(
         for tier in _EPISODE_TIERS
         for entry, admitted in gate.decisions(tier)
         if not admitted
+        and not gate.audience_terminal(tier, getattr(entry, "id", ""))
         and (interaction_id := getattr(entry, "interaction_id", None))
     }
     if not withheld_ids:
@@ -118,10 +128,28 @@ async def apply_episode_projections(
             if admitted:
                 out.append(episode)
                 continue
+            if gate.audience_terminal(tier, episode.id):
+                # ISSUE-0132 scope lock 3: a projection lowers an entry's
+                # CLASSIFICATION, not its audience.  Abstracting "the
+                # Zephyr close date" for Bob still tells Bob there is a
+                # Zephyr close date Alice mentioned — so an audience
+                # withhold is terminal and nothing is served in its place.
+                continue
             candidates = available.get(episode.interaction_id or "")
             if not candidates:
                 continue
             level, text = max(candidates, key=lambda lt: _level_rank(lt[0]))
+            if not gate.audience_admits_projection(
+                tier=tier, entry_id=episode.id, protection_level=level,
+                source_channel_id=episode.source_channel_id,
+            ):
+                # The other half of scope lock 3: this entry was withheld
+                # on CLASSIFICATION, so it never reached the audience
+                # clause in the gate — the stand-in is judged here
+                # instead, at its own (lower) level and the original's
+                # provenance.  Without this the AND-condition would hold
+                # for verbatim entries and be open for their abstractions.
+                continue
             out.append(replace(episode, summary=text, protection_level=level))
             gate.record_projection(tier=tier, entry_id=episode.id, level=level)
             served = True

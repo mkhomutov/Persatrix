@@ -18,6 +18,15 @@ its own prior turns. A recipe with no channel drives the pre-window
 current-event-only path, byte-identical to before, so enabling this never perturbs
 a landed channel-less golden (e.g. EVAL-MEMORY-001).
 
+Room membership is opt-in the same way (ISSUE-0132, v0.3.16 A2): a recipe that
+declares ``setup.rosters`` gets an
+:class:`~evaluators.eval_channel_roster.InProcessChannelRoster` wired as its
+channel-roster fetcher, so the RFC 0037 audience check can resolve who is in a
+room. Paired with the per-interaction ``channel`` override, that is what lets a
+recipe teach something in a DM and ask about it in a room somebody else is in —
+the scenario the audience seed exists to pin. Neither is declared by any earlier
+seed, so both are inert for them.
+
 Determinism — the property that lets a golden recorded once replay byte-stably in
 CI (RFC 0044 §D) — comes from the ``FrozenClock`` (the only wall-clock the prompt
 reads, ``agents/persona_runtime/prompt_assembly.py``) and an in-memory (``:memory:``)
@@ -33,15 +42,16 @@ from __future__ import annotations
 
 import copy
 import logging
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from evaluators.assertions import EvalRun
 from evaluators.eval_channel_history import InProcessChannelHistory
+from evaluators.eval_channel_roster import InProcessChannelRoster
 from evaluators.eval_set import EvalSet
 from evaluators.runner import parse_elapsed
+from evaluators.shadow_capture import capture_shadow_traces
 
 logger = logging.getLogger(__name__)
 
@@ -179,67 +189,6 @@ def _apply_seed_state(config: dict[str, Any], seed_state: dict[str, Any], *, per
         config["relationships"] = relationships
 
 
-class _ShadowTraceHandler(logging.Handler):
-    """Collects the structured payload off each shadow log record.
-
-    ``traces`` may be shared across handlers (RFC 0049 PR 3: one handler
-    per shadow logger, one merged stream) — records append in emission
-    order, so a run's L2 (facts) and L1 (episodes) traces interleave
-    chronologically; consumers partition on each payload's ``tier`` key.
-    """
-
-    def __init__(self, attr: str, traces: list[dict[str, Any]]) -> None:
-        super().__init__(level=logging.INFO)
-        self._attr = attr
-        self.traces = traces
-
-    def emit(self, record: logging.LogRecord) -> None:
-        payload = getattr(record, self._attr, None)
-        if isinstance(payload, dict):
-            self.traces.append(payload)
-
-
-@contextmanager
-def capture_shadow_traces() -> Iterator[list[dict[str, Any]]]:
-    """Capture RFC 0049 cross-room shadow traces for the block's duration.
-
-    Attaches a collecting handler directly to each of the runtime's
-    shadow loggers — ``agents.persona_runtime.facts_shadow`` (L2, PR 2)
-    and ``agents.persona_runtime.episodes_shadow`` (L1, PR 3) — and,
-    because a handler only sees records the logger's effective level
-    admits, temporarily lowers each to ``INFO`` when the ambient config
-    would filter the trace. Both are restored on exit, so the harness
-    never perturbs the process's logging outside the run. Shadow traces
-    are the measurement input for the RFC 0049 PR 4 shadow→live
-    promotion gate; the runner threads the captured (merged, ``tier``-
-    keyed) list into the report artifact.
-
-    The runtime imports are deferred (module convention: ``agents``
-    loads only on the driver paths, never from ``import evaluators``).
-    """
-    from agents.persona_runtime import (  # noqa: PLC0415
-        episodes_shadow,
-        facts_shadow,
-    )
-
-    traces: list[dict[str, Any]] = []
-    attached: list[tuple[logging.Logger, logging.Handler, int]] = []
-    try:
-        for mod in (facts_shadow, episodes_shadow):
-            shadow_logger = logging.getLogger(mod.SHADOW_LOGGER_NAME)
-            handler = _ShadowTraceHandler(mod.SHADOW_TRACE_ATTR, traces)
-            prev_level = shadow_logger.level
-            shadow_logger.addHandler(handler)
-            if shadow_logger.getEffectiveLevel() > logging.INFO:
-                shadow_logger.setLevel(logging.INFO)
-            attached.append((shadow_logger, handler, prev_level))
-        yield traces
-    finally:
-        for attached_logger, attached_handler, level in attached:
-            attached_logger.removeHandler(attached_handler)
-            attached_logger.setLevel(level)
-
-
 def _collect_events() -> list[dict[str, Any]]:
     """The flat event stream for this run — empty in Phase 1.
 
@@ -277,6 +226,7 @@ class PersonaRuntimeDriver:
         from agents.llm_client import LLMClient  # noqa: PLC0415
         from agents.persona import create_persona_agent  # noqa: PLC0415
         from agents.persona_types import AgentEvent, EventType  # noqa: PLC0415
+        from agents.response_policies import POLICY_ALWAYS  # noqa: PLC0415
         from agents.session_id import EVENT_SESSION_METADATA_KEY  # noqa: PLC0415
 
         setup = eval_set.setup
@@ -295,8 +245,8 @@ class PersonaRuntimeDriver:
 
         user = setup.user or "user"
         session = setup.session_id or eval_set.id
-        # RFC 0034 working memory (opt-in per recipe via ``setup.channel``). With a
-        # channel declared, an in-process history fetcher is wired and every
+        # RFC 0034 working memory (opt-in per recipe via a declared channel). With
+        # a channel declared, an in-process history fetcher is wired and every
         # delivered turn is logged, so the persona's conversation window
         # reconstructs the in-channel transcript — the persona sees its own prior
         # turns (``agents/persona_runtime/conversation_window.py``). Without a
@@ -305,11 +255,24 @@ class PersonaRuntimeDriver:
         # is purely additive and never perturbs a landed golden. Message ids are a
         # deterministic monotonic sequence so the window content — and thus every
         # request hash — is stable across a record and its replays (RFC 0044 §D).
+        # The seam follows the TURNS' channels, not ``setup.channel`` alone
+        # (ISSUE-0132): a recipe may declare its channels per interaction and
+        # none at setup — the audience seed does — and keying the wiring off the
+        # setup default would leave exactly those runs with no window at all,
+        # pinning a prompt shape production never emits.
         channel = setup.channel
+        windowed = bool(channel) or any(i.channel for i in eval_set.interactions)
         history: InProcessChannelHistory | None = None
-        if channel:
+        if windowed:
             history = InProcessChannelHistory()
             agent.set_history_fetcher(history)
+        # ISSUE-0132 (v0.3.16 A2): the in-process roster seam. Declaring
+        # ``setup.rosters`` wires the fetcher the audience check reads —
+        # without it every source room resolves *unknown* and the audience
+        # seed could only ever record a fetch-failed verdict. A recipe that
+        # declares none wires nothing, so the landed goldens are untouched.
+        if setup.rosters:
+            agent.set_roster_fetcher(InProcessChannelRoster(setup.rosters))
         msg_seq = 0
         turn_outputs: list[str] = []
         # The persona's reply to the most recent user turn. An `assistant` turn is
@@ -331,6 +294,12 @@ class PersonaRuntimeDriver:
                 for interaction in eval_set.interactions:
                     if interaction.elapsed:
                         clock.advance(parse_elapsed(interaction.elapsed))
+                    # ISSUE-0132: an entry's RFC 0037 §C provenance is the
+                    # event's CHANNEL, not its ``room``, so an audience
+                    # recipe needs a per-interaction channel to teach in one
+                    # room and ask in another. Absent (every landed seed),
+                    # this is ``setup.channel`` and nothing moves.
+                    turn_channel = interaction.channel or channel
                     for turn in interaction.turns:
                         if turn.role == "user":
                             # Log the inbound turn *before* dispatch (as the
@@ -338,11 +307,11 @@ class PersonaRuntimeDriver:
                             # persona acts) so it is the ordering anchor the window
                             # dedups the current event against.
                             message_id: str | None = None
-                            if history is not None and channel:
+                            if history is not None and turn_channel:
                                 message_id = f"m{msg_seq}"
                                 msg_seq += 1
                                 history.append(
-                                    channel_id=channel,
+                                    channel_id=turn_channel,
                                     message_id=message_id,
                                     sender_id=user,
                                     content=turn.user_text or "",
@@ -376,15 +345,30 @@ class PersonaRuntimeDriver:
                                 # Room-less recipes never set the key, keeping
                                 # the landed single-room goldens byte-identical.
                                 metadata[EVENT_SESSION_METADATA_KEY] = interaction.room
+                            payload: dict[str, Any] = {
+                                "content": turn.user_text or "",
+                                "user_id": user,
+                                "participant_type": "user",
+                            }
+                            if turn_channel and not turn_channel.startswith("dm:"):
+                                # Mirror the orchestrator's dispatch-time
+                                # per-membership stamp. Only GROUP/thread
+                                # turns need it: the RFC 0011 §D response
+                                # gate overrides a ``dm:`` channel to
+                                # ``always`` and bypasses a channel-less
+                                # event entirely, so every landed seed —
+                                # all DM or channel-less — is untouched. An
+                                # eval whose persona never answers is
+                                # vacuous, so the responding-participant
+                                # policy is the only sensible default; a
+                                # recipe that wants a suppression path is a
+                                # response-gate recipe, not a memory one.
+                                payload["respond_policy"] = POLICY_ALWAYS
                             event = AgentEvent(
                                 event_type=EventType.CHANNEL_MESSAGE,
-                                payload={
-                                    "content": turn.user_text or "",
-                                    "user_id": user,
-                                    "participant_type": "user",
-                                },
+                                payload=payload,
                                 sender_id=user,
-                                channel_id=channel,
+                                channel_id=turn_channel,
                                 message_id=message_id,
                                 metadata=metadata,
                             )
@@ -405,9 +389,9 @@ class PersonaRuntimeDriver:
                             last_reply, _status = extract_chat_reply(actions, user)
                             # Log the persona's reply *after* — so the window replays
                             # it as the persona's own prior ``assistant`` turn next time.
-                            if history is not None and channel:
+                            if history is not None and turn_channel:
                                 history.append(
-                                    channel_id=channel,
+                                    channel_id=turn_channel,
                                     message_id=f"m{msg_seq}",
                                     sender_id=setup.persona,
                                     content=last_reply,

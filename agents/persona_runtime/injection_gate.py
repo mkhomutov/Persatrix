@@ -12,6 +12,15 @@ The declassification-projection branch (§E, PR 6) lives in
 per-tier decision record; an entry with no admissible projection is
 withheld entirely.
 
+Since v0.3.16 PR A2 the rank comparison is one of **two** conditions.
+The second — audience, :mod:`agents.persona_runtime.audience` — asks
+whether the acting room adds anyone the entry's source room did not
+hold, and is applied here rather than in front of the gate on purpose:
+the §G watch, the §G manifest and the shadow trace all read this one
+decision record, and an entry filtered out upstream would be invisible
+to all three ([ISSUE-0132] scope lock 3).  It ships in ``shadow``, where
+the verdict is recorded and the entry still injects.
+
 Two deliberately ungated surfaces, recorded here so the review trail does
 not re-litigate them:
 
@@ -48,12 +57,14 @@ from typing import TYPE_CHECKING, Final
 
 from ..channel_event_classification import wire_channel_classification
 from ..persona_types import EventType
+from .audience import ENFORCED_VERDICTS, AudienceRecord
 from .classification import acting_rank, entry_rank_or_withhold
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from ..persona_types import AgentEvent
+    from .audience import TurnAudience
     from .memory_budget import MemoryBudget
 
 logger = logging.getLogger(__name__)
@@ -138,10 +149,23 @@ class TurnInjectionGate:
     the budget-admitted subset afterwards.
     """
 
-    def __init__(self, *, acting: str | None, agent_id: str) -> None:
+    def __init__(
+        self,
+        *,
+        acting: str | None,
+        agent_id: str,
+        audience: TurnAudience | None = None,
+    ) -> None:
         self._acting = acting
         self._acting_rank = acting_rank(acting)
         self._agent_id = agent_id
+        # ISSUE-0132: the audience AND-condition.  ``None`` — the mode is
+        # ``off``, or the turn has no acting channel — restores the pure
+        # v0.3.15 §D gate exactly, which is what every pre-A2 caller
+        # (the two shadow passes among them) keeps getting.
+        self._audience = audience
+        self._audience_records: list[AudienceRecord] = []
+        self._audience_terminal: set[tuple[str, str]] = set()
         self._withheld = 0
         # Rule-(c) casualties: (tier, entry_id, raw_level, source_channel).
         self._unknown: list[tuple[str, str, str | None, str | None]] = []
@@ -179,8 +203,91 @@ class TurnInjectionGate:
         if rank > self._acting_rank:
             self._withheld += 1
             return False
+        # ── ISSUE-0132: the audience AND-condition ──────────────────
+        # Reached only by entries §D has already admitted, which is what
+        # makes the recorded delta answer scope lock 1's question: the
+        # share of GATE-ADMITTED entries the audience check would
+        # withhold.  A classification withhold above is a different
+        # story and stays in its own tally.
+        if not self._judge_audience(
+            tier=tier, entry_id=entry_id,
+            protection_level=protection_level,  # type: ignore[arg-type]
+            source_channel_id=source_channel_id,
+        ):
+            return False
         self._passed_levels[(tier, entry_id)] = protection_level  # type: ignore[assignment]
         return True
+
+    def _judge_audience(
+        self,
+        *,
+        tier: str,
+        entry_id: str,
+        protection_level: str,
+        source_channel_id: str | None,
+    ) -> bool:
+        """The ISSUE-0132 check for one entry, recording its verdict.
+
+        Returns whether the entry may still reach the prompt: ``True``
+        when the check is not running, the entry is out of its scope, or
+        the mode is not enforcing.  The verdict is recorded either way —
+        that recording IS the shadow measurement.
+
+        Shared by the two ways an entry reaches the prompt (scope lock 3
+        composition): :meth:`admit` for a verbatim §D-admitted entry and
+        :meth:`audience_admits_projection` for a §E declassified stand-in.
+        """
+        if self._audience is None:
+            return True
+        verdict = self._audience.verdict(
+            tier=tier,
+            protection_level=protection_level,
+            source_channel_id=source_channel_id,
+        )
+        if verdict is None:
+            return True
+        self._audience_records.append(AudienceRecord(
+            tier=tier, entry_id=entry_id,
+            protection_level=protection_level,
+            source_channel_id=source_channel_id, verdict=verdict,
+        ))
+        if not (self._audience.enforcing and verdict in ENFORCED_VERDICTS):
+            return True
+        # §E composition (scope lock 3): a projection lowers an entry's
+        # CLASSIFICATION, not its audience, so an audience withhold is
+        # terminal — no projection substitutes for it.
+        self._audience_terminal.add((tier, entry_id))
+        return False
+
+    def audience_admits_projection(
+        self,
+        *,
+        tier: str,
+        entry_id: str,
+        protection_level: str,
+        source_channel_id: str | None,
+    ) -> bool:
+        """Whether §E may serve a projection at ``protection_level``.
+
+        A §D **rank** withhold returns from :meth:`admit` before the
+        audience clause, so the entry carries no verdict — and the §E
+        branch then re-admits exactly those entries as declassified
+        stand-ins.  Without this call the AND-condition would be open in
+        that direction: abstracting Alice's DM fact to ``internal`` and
+        serving it in Bob's room still tells Bob there is such a fact.
+
+        The **projection's** level is judged (a ``public`` stand-in is
+        shareable by definition, the same exemption verbatim entries
+        get) against the **original's** provenance, which a projection
+        does not change.  Recording it here is also what keeps the
+        measured denominator honest: a projected entry reaches the
+        prompt, so it belongs in the share the flip is argued from.
+        """
+        return self._judge_audience(
+            tier=tier, entry_id=entry_id,
+            protection_level=protection_level,
+            source_channel_id=source_channel_id,
+        )
 
     def filter_entries(
         self,
@@ -234,6 +341,38 @@ class TurnInjectionGate:
         projection affordance.
         """
         self._passed_levels[(tier, entry_id)] = level
+
+    @property
+    def audience_records(self) -> tuple[AudienceRecord, ...]:
+        """Every §D-admitted entry's audience verdict, in candidate order.
+
+        One decision record, three readers (scope lock 3): the §G watch
+        reads :meth:`decisions`, the shadow trace reads this, and the
+        measurement reads the trace.  A pre-filtered entry would be
+        invisible to all three — which is why the check is a gate input
+        and not a filter in front of it.
+        """
+        return tuple(self._audience_records)
+
+    @property
+    def audience_withheld_count(self) -> int:
+        """Entries this turn withheld for audience, not classification.
+
+        Non-zero only in ``live`` mode: in ``shadow`` the verdict is
+        recorded and the entry still injects.
+
+        Derived from the terminal set rather than counted alongside it:
+        the two are the same fact — an entry withheld for audience is
+        exactly an entry §E must not stand in for — and keeping a
+        separate tally would let them drift the day a second verdict
+        joins :data:`ENFORCED_VERDICTS`.
+        """
+        return len(self._audience_terminal)
+
+    def audience_terminal(self, tier: str, entry_id: str) -> bool:
+        """Whether this entry was withheld for audience, so §E must not
+        serve a projection in its place (scope lock 3)."""
+        return (tier, entry_id) in self._audience_terminal
 
     @property
     def withheld_count(self) -> int:
