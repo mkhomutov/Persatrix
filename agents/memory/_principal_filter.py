@@ -6,13 +6,17 @@ persona-memory tiers (``episodes`` / ``relationships`` / ``facts`` /
 ``notes`` / ``interactions``), so a future refactor cannot drift the
 tenant filter across tiers.
 
-Two functions:
+Three functions:
 
 * :func:`resolve_active_principal` — apply the call-time precedence
   (task-local ``principal_scope`` → tier construction snapshot).  Call
   once at the tier's public-API boundary; pass the resolved id down to
   the recall helpers *and* use it on the write path so a row is tagged
   with the same principal its reader will filter on.
+* :func:`resolve_write_principal` — the same thing for a write boundary
+  that a caller may TELL whose record it is (ISSUE-0137).  One seam
+  rather than a copy per tier, so the normalisation rule cannot drift
+  between them.
 * :func:`principal_eq_clause` — given a resolved principal and a column
   reference, return the ``" AND col = ?"`` SQL fragment + params.
 
@@ -35,11 +39,12 @@ Internal helper (leading-underscore module name); callers inside
 
 from __future__ import annotations
 
-from ..principal_id import current_principal_id
+from ..principal_id import current_principal_id, normalize_principal_id
 
 __all__ = [
     "principal_eq_clause",
     "resolve_active_principal",
+    "resolve_write_principal",
 ]
 
 
@@ -58,6 +63,34 @@ def resolve_active_principal(snapshot: str) -> str:
     it.
     """
     return current_principal_id() or snapshot
+
+
+def resolve_write_principal(explicit: str | None, snapshot: str) -> str:
+    """Resolve the tenant a WRITE tags its row with (ISSUE-0137).
+
+    ``explicit`` is the record's own principal, passed by a caller that
+    knows whose record this is; ``None`` — and only ``None`` — means "no
+    opinion, resolve ambient", which is what leaves every pre-existing
+    caller unchanged.
+
+    An explicit value is **normalised** exactly as the ambient one is.
+    Every other route to a ``principal_id`` column already was: the
+    ContextVar is set by :func:`~agents.principal_id.principal_scope`,
+    which runs :func:`~agents.principal_id.normalize_principal_id`, and
+    the tier snapshot comes from
+    :func:`~agents.principal_id.resolve_principal_id_silent`.  Skipping
+    it here would let a padded id reach the column, and the tenancy
+    predicate is unconditional strict equality with no carve-out — so
+    such a row is not mislabelled but ORPHANED: every reader resolves
+    through the normalising path, so no principal can ever name it, not
+    even the one that wrote it.  ``""`` normalises to the default tenant
+    rather than falling through to ambient, matching
+    :func:`agents.memory.interaction_key.resolve_record_key`, which
+    resolves the same axis for the record key the same way.
+    """
+    if explicit is None:
+        return resolve_active_principal(snapshot)
+    return normalize_principal_id(explicit)
 
 
 def principal_eq_clause(

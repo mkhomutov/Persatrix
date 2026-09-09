@@ -201,7 +201,6 @@ async def store_extracted_facts(
     TENANT, stamped onto the batch for the same one-source reason: a
     close runs inside whichever request triggered it, which for a room
     fan or an idle flush is routinely another tenant's.
-
     ``protection_level`` / ``source_channel_id`` (RFC 0037 §C, PR 3) are
     the source interaction's frozen-at-open capture, stamped identically
     onto every tuple in the batch — a fact is extracted from exactly one
@@ -471,9 +470,9 @@ async def dispatch_facts_from_response(
             # re-deriving the expression) is what makes the "ONE source"
             # claim structural instead of prose (PR #849 review round 3).
             speaker_id=sender_id,
-            # ISSUE-0137: the tenant half of that same key.  Binds no
-            # new row today — it is what holds when a future derived
-            # writer forgets ``record_write_scopes``.
+            # ISSUE-0137: the tenant half of that same key — what holds
+            # these tuples if a derived writer forgets
+            # ``record_write_scopes`` (which lists what it would still lose).
             principal_id=interaction.principal_id,
         )
     except Exception:
