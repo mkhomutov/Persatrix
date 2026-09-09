@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from evaluators.shadow_measurement import (
+    AUDIENCE_TURN_BOUND,
     NOTE_FETCH_FAILED_IS_LIVE_ONLY,
     main,
     promotion_verdict,
@@ -29,22 +30,36 @@ DM = "dm:alice:iron-fox"
 STANDUP = "group:standup"
 
 
-def _trace(acting_channel_id: str, verdicts: dict[str, int], **extra) -> dict:
+def _trace(
+    acting_channel_id: str,
+    verdicts: dict[str, int],
+    *,
+    tiers: tuple[str, ...] = ("facts",),
+    **extra,
+) -> dict:
+    """One audience trace in the runtime's emitted shape.
+
+    ``tiers`` names the judged tiers the counts are attributed to — the
+    sample-coverage axis the fourth criterion reads.  One by default, so
+    the aggregation tests stay self-consistent; the criterion tests name
+    two, because one tier is deliberately NOT a measurement.
+    """
+    counts = {
+        "admit": 0, "withhold-disjoint": 0,
+        "withhold-unknown-fetch-failed": 0,
+        "withhold-unknown-no-provenance": 0,
+        **verdicts,
+    }
     return {
         "tier": "audience",
         "agent_id": "iron-fox",
         "acting": "internal",
         "acting_channel_id": acting_channel_id,
         "mode": "shadow",
-        "candidates": [],
-        "verdicts": {
-            "admit": 0, "withhold-disjoint": 0,
-            "withhold-unknown-fetch-failed": 0,
-            "withhold-unknown-no-provenance": 0,
-            **verdicts,
-        },
+        "judged": sum(counts.values()),
+        "verdicts": counts,
+        "by_tier": {tier: dict(counts) for tier in tiers},
         "withheld": 0,
-        "unknown_label": 0,
         "source_rooms": extra.get("source_rooms", 1),
         "fetches": extra.get("fetches", 1),
     }
@@ -77,11 +92,42 @@ def test_the_delta_is_reported_per_cause_and_per_room_shape() -> None:
         _trace(STANDUP, {"withhold-disjoint": 2}),
         _trace(DM, {"withhold-unknown-no-provenance": 1, "admit": 1}),
     ])
+    # Zero-filled, not sparse: a consumer reading ``by_room_shape["dm"]
+    # ["withhold-disjoint"]`` must not KeyError on exactly the runs where
+    # that shape scored none — "measured none" and "not measured" are
+    # different facts and the top-level ``verdicts`` already says so.
     assert summary.by_room_shape == {
-        "group": {"withhold-disjoint": 2},
-        "dm": {"withhold-unknown-no-provenance": 1, "admit": 1},
+        "group": {
+            "withhold-disjoint": 2, "admit": 0,
+            "withhold-unknown-fetch-failed": 0,
+            "withhold-unknown-no-provenance": 0,
+        },
+        "dm": {
+            "withhold-unknown-no-provenance": 1, "admit": 1,
+            "withhold-disjoint": 0, "withhold-unknown-fetch-failed": 0,
+        },
     }
     assert summary.unknown_share == pytest.approx(1 / 4)
+
+
+def test_the_delta_is_reported_per_judged_tier() -> None:
+    """The check spans three tiers; a sample that exercises one measures
+    one, however healthy the headline share looks.  ``by_tier`` is what
+    lets a reader — and the fourth criterion — see which."""
+    summary = summarize_audience([
+        _trace(STANDUP, {"withhold-disjoint": 1}, tiers=("facts",)),
+    ])
+    assert set(summary.by_tier) == {"facts"}
+    assert summary.by_tier["facts"]["withhold-disjoint"] == 1
+
+
+def test_the_per_turn_volume_bound_is_the_max_not_the_sum() -> None:
+    summary = summarize_audience([
+        _trace(STANDUP, {"admit": 2}),
+        _trace(STANDUP, {"admit": 9}),
+    ])
+    assert summary.max_judged_per_turn == 9
+    assert summary.judged == 11
 
 
 def test_the_cost_bound_is_reported_not_asserted() -> None:
@@ -100,10 +146,48 @@ def _verdict(traces: list[dict], **kwargs):
     )
 
 
-def test_a_disjoint_withhold_makes_the_criterion_green() -> None:
-    verdict = _verdict([_trace(STANDUP, {"withhold-disjoint": 1, "admit": 2})])
+def test_a_disjoint_withhold_over_two_tiers_makes_the_criterion_green() -> None:
+    verdict = _verdict([_trace(
+        STANDUP, {"withhold-disjoint": 1, "admit": 2},
+        tiers=("facts", "episodic"),
+    )])
     assert verdict.criteria["audience_delta_measured"] is True
+    assert verdict.criteria["audience_bounded_volume"] is True
     assert verdict.green
+
+
+def test_a_single_tier_sample_is_not_a_measurement() -> None:
+    """The check spans three tiers.  A sample that exercises one of them
+    lets a regression in either other tier ship green — which is how a
+    seed with no conversation window, and so no ``channel_history``
+    candidates, quietly halved what the flip was argued from."""
+    verdict = _verdict([_trace(
+        STANDUP, {"withhold-disjoint": 1, "admit": 2}, tiers=("facts",),
+    )])
+    assert verdict.criteria["audience_delta_measured"] is False
+    assert set(verdict.audience.by_tier) == {"facts"}
+
+
+def test_a_withhold_everything_run_is_vacuous_too() -> None:
+    """The mirror of the admit-only case: a check that withheld every
+    entry would satisfy 'a disjoint occurred' while measuring a predicate
+    that had stopped discriminating."""
+    verdict = _verdict([_trace(
+        STANDUP, {"withhold-disjoint": 9}, tiers=("facts", "episodic"),
+    )])
+    assert verdict.criteria["audience_delta_measured"] is False
+
+
+def test_a_turn_judging_past_the_recall_ceiling_is_red() -> None:
+    """The volume bound the audience partition kept when it left the
+    recall-tier walk — its own criterion, because ``bounded_volume`` is
+    about recall."""
+    verdict = _verdict([_trace(
+        STANDUP, {"admit": AUDIENCE_TURN_BOUND, "withhold-disjoint": 1},
+        tiers=("facts", "episodic"),
+    )])
+    assert verdict.criteria["audience_bounded_volume"] is False
+    assert not verdict.green
 
 
 def test_no_audience_traces_at_all_is_red_not_silent() -> None:
@@ -152,6 +236,27 @@ def test_the_audience_summary_rides_to_dict() -> None:
     payload = verdict.to_dict()
     assert payload["audience"]["withhold_share"] == pytest.approx(0.5)
     assert payload["audience"]["by_room_shape"]["group"]["withhold-disjoint"] == 1
+    assert payload["audience"]["by_tier"]["facts"]["withhold-disjoint"] == 1
+
+
+def test_the_audience_partition_never_reaches_the_recall_tier_walk() -> None:
+    """It is not a recall tier, and forcing it through ``summarize_tier``
+    cost every caller with its own ``tier_bounds`` a red ``bounded_volume``
+    the day an audience trace reached its report."""
+    traces = [_trace(STANDUP, {"withhold-disjoint": 1, "admit": 1})]
+    verdict = promotion_verdict(
+        traces, goldens_green=True, audience_expected=True,
+        tier_bounds={"episodic": 5, "facts": 20},
+    )
+    assert [t.tier for t in verdict.tiers] == []
+    assert verdict.criteria["bounded_volume"] is True
+
+    # …and the same holds for a caller that never asked for the criterion.
+    plain = promotion_verdict(
+        traces, goldens_green=True, tier_bounds={"episodic": 5, "facts": 20},
+    )
+    assert plain.criteria["bounded_volume"] is True
+    assert plain.green
 
 
 # ─── the CLI flag ──────────────────────────────────────────
@@ -169,11 +274,14 @@ def _report(tmp_path: Path, traces: list[dict]) -> str:
 def test_cli_audience_flag_renders_the_fourth_criterion(
     tmp_path: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
-    report = _report(tmp_path, [_trace(STANDUP, {"withhold-disjoint": 1})])
+    report = _report(tmp_path, [_trace(
+        STANDUP, {"withhold-disjoint": 1, "admit": 1},
+        tiers=("facts", "episodic"),
+    )])
     assert main([report, "--audience"]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["criteria"]["audience_delta_measured"] is True
-    assert payload["audience"]["judged"] == 1
+    assert payload["audience"]["judged"] == 2
 
 
 def test_cli_exits_nonzero_on_a_vacuous_audience_run(

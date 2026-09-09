@@ -39,7 +39,9 @@ The verdict criteria (each mapped to a named boolean in
   else moves, so a verdict that only checked for defects would go green
   on a run where no disjoint audience ever occurred — the flip would
   then ship on a vacuous measurement. What it asserts is therefore that
-  the delta was **measured over a sample that exercised the case**; the
+  the delta was **measured over a sample that exercised the case**: a
+  disjoint AND an admit verdict, over at least
+  :data:`AUDIENCE_MIN_JUDGED_TIERS` of the three judged tiers. The
   delta's own *threshold* is PR A3's argument, stated in that PR, not
   hard-coded here. The number itself
   (:class:`AudienceSummary.withhold_share`, reported per cause and per
@@ -78,7 +80,9 @@ from pathlib import Path
 from typing import Any
 
 __all__ = [
+    "AUDIENCE_MIN_JUDGED_TIERS",
     "AUDIENCE_TIER",
+    "AUDIENCE_TURN_BOUND",
     "DEFAULT_TIER_BOUNDS",
     "NOTE_ACTING_FLOOR",
     "NOTE_FETCH_FAILED_IS_LIVE_ONLY",
@@ -101,11 +105,28 @@ AUDIENCE_TIER: str = "audience"
 #: (see the module docstring for why these two numbers).  Callers with
 #: the runtime importable should pass the live constants instead; the
 #: verdict test pins these defaults against them so they cannot drift.
-#: ``audience`` 50 = the four gated tiers' recall limits summed
-#: (channel_history 20 + facts 20 + episodic 5 + notes 5): the audience
-#: check judges §D-admitted entries, so its per-turn ceiling is what the
-#: recalls can put in front of the gate at all.
-DEFAULT_TIER_BOUNDS: dict[str, int] = {"episodic": 5, "facts": 20, "audience": 50}
+#: ``audience`` is deliberately NOT a member: it is not a recall tier
+#: and does not go through ``summarize_tier`` at all (see
+#: :func:`promotion_verdict`), so adding it here would make every caller
+#: that passes its own ``tier_bounds`` fail ``bounded_volume`` the day an
+#: audience trace appears in its report — a red verdict naming a
+#: criterion with nothing to do with the cause.
+DEFAULT_TIER_BOUNDS: dict[str, int] = {"episodic": 5, "facts": 20}
+
+#: The audience check's own per-turn ceiling: the THREE judged tiers'
+#: recall limits summed (channel_history 20 + facts 20 + episodic 5).
+#: ``notes`` is excluded because ``AUDIENCE_TIERS`` excludes it — a note
+#: carries no provenance to judge — so counting its limit here would
+#: leave the bound five entries of slack it was never meant to have.
+AUDIENCE_TURN_BOUND: int = 45
+
+#: How many of the three judged tiers a sample must actually exercise
+#: before ``audience_delta_measured`` will call the delta measured.  Two,
+#: not three: ``channel_history`` and ``episodic`` both need a closed
+#: interaction to produce a cross-room candidate, so demanding all three
+#: from one recipe would gate the flip on a seed shape rather than on
+#: evidence — but one tier is a sample, not a measurement.
+AUDIENCE_MIN_JUDGED_TIERS: int = 2
 
 NOTE_RANK_PESSIMISM = (
     "shadow ranks are marginally pessimistic: the shadow pass runs after "
@@ -181,6 +202,13 @@ class AudienceSummary:
     unknown_share: float
     #: Acting-room shape → that shape's verdict counts.
     by_room_shape: dict[str, dict[str, int]]
+    #: Judged tier → that tier's verdict counts.  Reported because the
+    #: check spans three tiers and a sample that exercises one of them
+    #: measures one of them, however healthy the headline share looks.
+    by_tier: dict[str, dict[str, int]]
+    #: The most entries any single turn judged — the volume bound, which
+    #: rides here rather than in ``DEFAULT_TIER_BOUNDS``.
+    max_judged_per_turn: int
     #: Roster round trips vs distinct source rooms — the scope-lock-2
     #: cost bound, reported rather than asserted (a run whose fetches
     #: exceed its source rooms has lost the per-turn cache).
@@ -194,19 +222,30 @@ def summarize_audience(traces: list[dict[str, Any]]) -> AudienceSummary:
     """Aggregate the audience traces of one run."""
     verdicts: dict[str, int] = {}
     by_shape: dict[str, dict[str, int]] = {}
+    by_tier: dict[str, dict[str, int]] = {}
     fetches = 0
     source_rooms = 0
     withheld = 0
+    max_judged = 0
     for trace in traces:
         shape = room_shape(trace.get("acting_channel_id"))
         shape_counts = by_shape.setdefault(shape, {})
         for verdict, count in (trace.get("verdicts") or {}).items():
+            # Every bucket is zero-filled, here and per shape and per
+            # tier: a consumer that reads ``by_room_shape["dm"][v]`` must
+            # not ``KeyError`` on exactly the runs where that shape scored
+            # zero — "measured none" and "not measured" are different
+            # facts and the top-level ``verdicts`` already says so.
             verdicts[verdict] = verdicts.get(verdict, 0) + int(count)
-            if count:
-                shape_counts[verdict] = shape_counts.get(verdict, 0) + int(count)
+            shape_counts[verdict] = shape_counts.get(verdict, 0) + int(count)
+        for tier, tier_counts in (trace.get("by_tier") or {}).items():
+            bucket = by_tier.setdefault(tier, {})
+            for verdict, count in tier_counts.items():
+                bucket[verdict] = bucket.get(verdict, 0) + int(count)
         fetches += int(trace.get("fetches") or 0)
         source_rooms += int(trace.get("source_rooms") or 0)
         withheld += int(trace.get("withheld") or 0)
+        max_judged = max(max_judged, int(trace.get("judged") or 0))
     judged = sum(verdicts.values())
     disjoint = verdicts.get("withhold-disjoint", 0)
     unknown = (
@@ -220,6 +259,8 @@ def summarize_audience(traces: list[dict[str, Any]]) -> AudienceSummary:
         withhold_share=(disjoint / judged) if judged else 0.0,
         unknown_share=(unknown / judged) if judged else 0.0,
         by_room_shape=by_shape,
+        by_tier=by_tier,
+        max_judged_per_turn=max_judged,
         fetches=fetches,
         source_rooms=source_rooms,
         withheld=withheld,
@@ -323,6 +364,13 @@ def promotion_verdict(
     """
     bounds = DEFAULT_TIER_BOUNDS if tier_bounds is None else tier_bounds
     partitioned = partition_traces(traces)
+    # The audience partition leaves the RECALL-tier walk before it starts.
+    # It is not a recall tier: it has no rank, no rule-(c) casualties, and
+    # a ``withheld`` that counts a different thing from every other row's.
+    # Forcing it through ``summarize_tier`` bought shape-compatibility and
+    # cost every caller with its own ``tier_bounds`` a red ``bounded_volume``
+    # the moment an audience trace reached its report.
+    audience_traces = partitioned.pop(AUDIENCE_TIER, [])
     summaries = [
         summarize_tier(tier, tier_traces)
         for tier, tier_traces in sorted(partitioned.items())
@@ -340,16 +388,35 @@ def promotion_verdict(
     audience: AudienceSummary | None = None
     notes: tuple[str, ...] = (NOTE_RANK_PESSIMISM, NOTE_ACTING_FLOOR)
     if audience_expected:
-        audience = summarize_audience(partitioned.get(AUDIENCE_TIER, []))
+        audience = summarize_audience(audience_traces)
         # Lock 1's fourth criterion is *not* a threshold — that is PR A3's
         # argument.  What it asserts here is that the delta was measured
         # over a sample that actually exercised the case: the whole risk
         # this shadow guards against is a green verdict on data where no
         # disjoint audience ever occurred.  A run that judged nothing, or
         # judged only same-room entries, is vacuous, not passing.
+        #
+        # Four clauses, because "exercised the case" has four ways to be
+        # false and only the first was being caught:
+        #   * nothing judged at all;
+        #   * no ``withhold-disjoint`` — the case itself never occurred;
+        #   * no ``admit`` — a check that withheld EVERYTHING would pass
+        #     the clause above while measuring a broken predicate;
+        #   * one tier judged — the check spans three, and a sample that
+        #     touches one lets a regression in either other tier ship
+        #     green.  ``by_tier`` reports which, so a red here names the
+        #     seed to widen rather than the knob to turn.
         criteria["audience_delta_measured"] = (
             audience.judged > 0
             and audience.verdicts.get("withhold-disjoint", 0) > 0
+            and audience.verdicts.get("admit", 0) > 0
+            and len(audience.by_tier) >= AUDIENCE_MIN_JUDGED_TIERS
+        )
+        # The volume bound the audience partition kept when it left the
+        # tier walk — reported as its own criterion rather than folded
+        # into ``bounded_volume``, whose name is about recall.
+        criteria["audience_bounded_volume"] = (
+            audience.max_judged_per_turn <= AUDIENCE_TURN_BOUND
         )
         notes = (*notes, NOTE_FETCH_FAILED_IS_LIVE_ONLY)
     return PromotionVerdict(

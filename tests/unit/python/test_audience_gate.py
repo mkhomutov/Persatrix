@@ -108,20 +108,22 @@ def _roster(channel_id: str) -> ChannelRoster:
 
 
 async def _audience(
-    acting: str,
+    acting: str | None,
     candidates: list[_Entry],
     *,
     mode: str = AUDIENCE_SHADOW,
+    classification: str | None = "internal",
     fetcher: _RoomFetcher | None = None,
     roster: ChannelRoster | None = ...,  # type: ignore[assignment]
 ):
     """Resolve one turn's audience the way ``_inject_memory_context`` does."""
     return await resolve_turn_audience(
         fetcher if fetcher is not None else _RoomFetcher(),
-        _roster(acting) if roster is ... else roster,
+        _roster(acting) if roster is ... and acting else roster,
         mode=mode,
         acting_channel_id=acting,
-        candidates=(candidates,),
+        acting_classification=classification,
+        candidates=(("facts", candidates),),
         agent_id="iron-fox",
     )
 
@@ -337,10 +339,15 @@ async def test_an_entry_the_d_gate_already_withheld_gets_no_verdict() -> None:
     a classification-withheld entry must not enter the denominator."""
     above_rank = _Entry("e1", "restricted", DM)
     unknown_label = _Entry("e2", "confidential-ish", DM)
-    audience = await _audience(WITH_BOB, [above_rank, unknown_label])
+    fetcher = _RoomFetcher()
+    audience = await _audience(WITH_BOB, [above_rank, unknown_label], fetcher=fetcher)
     gate = TurnInjectionGate(acting="internal", agent_id="iron-fox", audience=audience)
     assert gate.filter_entries("facts", [above_rank, unknown_label]) == []
     assert gate.audience_records == ()
+    # …and no round trip was spent resolving a room whose entries the
+    # gate was always going to withhold before the audience clause.
+    assert fetcher.calls == []
+    assert audience is not None and audience.fetches == 0
 
 
 # ─── the fetch bound (scope lock 2 / review F-6) ────────────
@@ -373,11 +380,11 @@ async def test_candidates_are_pooled_across_tiers_before_fetching() -> None:
     fetcher = _RoomFetcher()
     audience = await resolve_turn_audience(
         fetcher, _roster(WITH_BOB), mode=AUDIENCE_SHADOW,
-        acting_channel_id=WITH_BOB,
+        acting_channel_id=WITH_BOB, acting_classification="internal",
         candidates=(
-            [_Entry("e1", "internal", DM)],
-            [_Entry("f1", "internal", DM)],
-            [_Entry("n1", "internal", WITHOUT_BOB)],
+            ("channel_history", [_Entry("e1", "internal", DM)]),
+            ("facts", [_Entry("f1", "internal", DM)]),
+            ("episodic", [_Entry("n1", "internal", WITHOUT_BOB)]),
         ),
         agent_id="iron-fox",
     )

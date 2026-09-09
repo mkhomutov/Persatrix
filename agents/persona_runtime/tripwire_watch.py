@@ -73,11 +73,25 @@ def build_tripwire_watch(gate: TurnInjectionGate) -> TripwireWatch | None:
     the executor no-ops.  Admitted entries are deliberately absent: their
     level is ≤ the acting level = the §B-guarded publish target, so they
     can never satisfy §G's above-target condition.
+
+    An ISSUE-0132 **audience** withhold is skipped for that same reason,
+    and it is the reason stated the other way round: such an entry
+    cleared the rank comparison, so its level is ≤ the acting level too,
+    and watching it would put text AT the publish target on a watch
+    :func:`~agents.confidentiality_tripwire.find_tripwire_hits` matches
+    by span overlap alone — no level comparison — turning every echo of
+    it into a confidentiality-breach audit record for a boundary §G does
+    not police.  Audience is a *who*, not a *how secret*; the §G tripwire
+    is the classification axis's alarm and stays on that axis.
     """
     entries: list[TripwireWatchEntry] = []
     for tier, content_attr in TIER_CONTENT_ATTRS.items():
         for entry, admitted in gate.decisions(tier):
             if admitted:
+                continue
+            entry_id = str(getattr(entry, "fact_id", None)
+                           or getattr(entry, "id", ""))
+            if gate.audience_terminal(tier, entry_id):
                 continue
             content = getattr(entry, content_attr, None)
             if not isinstance(content, str):
@@ -89,8 +103,7 @@ def build_tripwire_watch(gate: TurnInjectionGate) -> TripwireWatch | None:
             known = entry_rank_or_withhold(level) is not None
             entries.append(TripwireWatchEntry(
                 tier=tier,
-                entry_id=str(getattr(entry, "fact_id", None)
-                             or getattr(entry, "id", "")),
+                entry_id=entry_id,
                 protection_level=level if known else _UNKNOWN_LEVEL,  # type: ignore[arg-type]
                 span_hashes=hashes,
             ))

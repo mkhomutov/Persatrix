@@ -42,8 +42,7 @@ from __future__ import annotations
 
 import copy
 import logging
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +51,7 @@ from evaluators.eval_channel_history import InProcessChannelHistory
 from evaluators.eval_channel_roster import InProcessChannelRoster
 from evaluators.eval_set import EvalSet
 from evaluators.runner import parse_elapsed
+from evaluators.shadow_capture import capture_shadow_traces
 
 logger = logging.getLogger(__name__)
 
@@ -189,70 +189,6 @@ def _apply_seed_state(config: dict[str, Any], seed_state: dict[str, Any], *, per
         config["relationships"] = relationships
 
 
-class _ShadowTraceHandler(logging.Handler):
-    """Collects the structured payload off each shadow log record.
-
-    ``traces`` may be shared across handlers (RFC 0049 PR 3: one handler
-    per shadow logger, one merged stream) — records append in emission
-    order, so a run's L2 (facts) and L1 (episodes) traces interleave
-    chronologically; consumers partition on each payload's ``tier`` key.
-    """
-
-    def __init__(self, attr: str, traces: list[dict[str, Any]]) -> None:
-        super().__init__(level=logging.INFO)
-        self._attr = attr
-        self.traces = traces
-
-    def emit(self, record: logging.LogRecord) -> None:
-        payload = getattr(record, self._attr, None)
-        if isinstance(payload, dict):
-            self.traces.append(payload)
-
-
-@contextmanager
-def capture_shadow_traces() -> Iterator[list[dict[str, Any]]]:
-    """Capture the runtime's shadow traces for the block's duration.
-
-    Attaches a collecting handler directly to each of the runtime's
-    shadow loggers — ``agents.persona_runtime.facts_shadow`` (L2, RFC
-    0049 PR 2), ``agents.persona_runtime.episodes_shadow`` (L1, PR 3)
-    and ``agents.persona_runtime.audience_shadow`` (the ISSUE-0132
-    audience verdicts, v0.3.16 A2) — and,
-    because a handler only sees records the logger's effective level
-    admits, temporarily lowers each to ``INFO`` when the ambient config
-    would filter the trace. Both are restored on exit, so the harness
-    never perturbs the process's logging outside the run. Shadow traces
-    are the measurement input for the RFC 0049 PR 4 shadow→live
-    promotion gate; the runner threads the captured (merged, ``tier``-
-    keyed) list into the report artifact.
-
-    The runtime imports are deferred (module convention: ``agents``
-    loads only on the driver paths, never from ``import evaluators``).
-    """
-    from agents.persona_runtime import (  # noqa: PLC0415
-        audience_shadow,
-        episodes_shadow,
-        facts_shadow,
-    )
-
-    traces: list[dict[str, Any]] = []
-    attached: list[tuple[logging.Logger, logging.Handler, int]] = []
-    try:
-        for mod in (facts_shadow, episodes_shadow, audience_shadow):
-            shadow_logger = logging.getLogger(mod.SHADOW_LOGGER_NAME)
-            handler = _ShadowTraceHandler(mod.SHADOW_TRACE_ATTR, traces)
-            prev_level = shadow_logger.level
-            shadow_logger.addHandler(handler)
-            if shadow_logger.getEffectiveLevel() > logging.INFO:
-                shadow_logger.setLevel(logging.INFO)
-            attached.append((shadow_logger, handler, prev_level))
-        yield traces
-    finally:
-        for attached_logger, attached_handler, level in attached:
-            attached_logger.removeHandler(attached_handler)
-            attached_logger.setLevel(level)
-
-
 def _collect_events() -> list[dict[str, Any]]:
     """The flat event stream for this run — empty in Phase 1.
 
@@ -309,8 +245,8 @@ class PersonaRuntimeDriver:
 
         user = setup.user or "user"
         session = setup.session_id or eval_set.id
-        # RFC 0034 working memory (opt-in per recipe via ``setup.channel``). With a
-        # channel declared, an in-process history fetcher is wired and every
+        # RFC 0034 working memory (opt-in per recipe via a declared channel). With
+        # a channel declared, an in-process history fetcher is wired and every
         # delivered turn is logged, so the persona's conversation window
         # reconstructs the in-channel transcript — the persona sees its own prior
         # turns (``agents/persona_runtime/conversation_window.py``). Without a
@@ -319,9 +255,15 @@ class PersonaRuntimeDriver:
         # is purely additive and never perturbs a landed golden. Message ids are a
         # deterministic monotonic sequence so the window content — and thus every
         # request hash — is stable across a record and its replays (RFC 0044 §D).
+        # The seam follows the TURNS' channels, not ``setup.channel`` alone
+        # (ISSUE-0132): a recipe may declare its channels per interaction and
+        # none at setup — the audience seed does — and keying the wiring off the
+        # setup default would leave exactly those runs with no window at all,
+        # pinning a prompt shape production never emits.
         channel = setup.channel
+        windowed = bool(channel) or any(i.channel for i in eval_set.interactions)
         history: InProcessChannelHistory | None = None
-        if channel:
+        if windowed:
             history = InProcessChannelHistory()
             agent.set_history_fetcher(history)
         # ISSUE-0132 (v0.3.16 A2): the in-process roster seam. Declaring

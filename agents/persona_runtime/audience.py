@@ -41,13 +41,19 @@ resolved, so the overwhelmingly common same-room turn costs nothing.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Final
 
 from .channel_roster import member_ids_from_meta
-from .classification import CLASSIFICATION_PUBLIC
+from .classification import (
+    CLASSIFICATION_PUBLIC,
+    CLASSIFICATION_RANKS,
+    acting_rank,
+    entry_rank_or_withhold,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -176,7 +182,9 @@ class TurnAudience:
     """
 
     mode: str
-    acting_channel_id: str
+    #: The acting room, or ``None`` for a turn that acts above ``public``
+    #: without one — an unknown audience, never an absent check.
+    acting_channel_id: str | None
     #: Room id → its current member ids, or ``None`` when the fetch
     #: missed.  Pre-seeded with the acting room from the A1 rail.
     rooms: dict[str, frozenset[str] | None]
@@ -187,9 +195,11 @@ class TurnAudience:
     _acting: frozenset[str] | None = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        object.__setattr__(
-            self, "_acting", self.rooms.get(self.acting_channel_id),
+        acting = (
+            self.rooms.get(self.acting_channel_id)
+            if self.acting_channel_id else None
         )
+        object.__setattr__(self, "_acting", acting)
 
     @property
     def enforcing(self) -> bool:
@@ -226,14 +236,34 @@ class TurnAudience:
 
 
 def _distinct_source_rooms(
-    candidates: Iterable[Sequence[object]],
+    candidates: Iterable[tuple[str, Sequence[object]]],
+    *,
+    acting: int,
 ) -> list[str]:
-    """Every non-NULL ``source_channel_id`` a turn's candidates named,
-    deduplicated, in first-seen order (stable fetch order for the tests
-    and for a reader following a live log)."""
+    """Every source room a turn will actually *judge*, deduplicated, in
+    first-seen order (a stable fetch order for the tests and for a reader
+    following a live log).
+
+    Filtered to the judged set rather than to every candidate, because a
+    fetch that cannot change a verdict is a round trip nobody spends: a
+    tier outside :data:`AUDIENCE_TIERS` and a ``public`` entry are the
+    two out-of-scope arms of :meth:`TurnAudience.verdict`, and an entry
+    ranking above ``acting`` is withheld by §D before the audience clause
+    is ever reached.  Passing the tier names in also replaces the caller
+    knowing which lists to hand over with the module saying which tiers
+    it judges — one encoding of that rule, not two.
+    """
     seen: dict[str, None] = {}
-    for tier_entries in candidates:
+    for tier, tier_entries in candidates:
+        if tier not in AUDIENCE_TIERS:
+            continue
         for entry in tier_entries:
+            level = getattr(entry, "protection_level", None)
+            if level == CLASSIFICATION_PUBLIC:
+                continue
+            rank = entry_rank_or_withhold(level)
+            if rank is None or rank > acting:
+                continue
             room = getattr(entry, "source_channel_id", None)
             if isinstance(room, str) and room:
                 seen.setdefault(room, None)
@@ -246,15 +276,24 @@ async def resolve_turn_audience(
     *,
     mode: str,
     acting_channel_id: str | None,
-    candidates: Sequence[Sequence[object]],
+    acting_classification: str | None,
+    candidates: Sequence[tuple[str, Sequence[object]]],
     agent_id: str,
 ) -> TurnAudience | None:
     """Resolve the turn's audience view, or ``None`` when there is none.
 
-    ``None`` — the check does not run — for ``mode="off"`` and for a
-    turn with no acting channel.  The second is not a gap: the §D scope
-    rule (b) floors a channel-less turn to ``public``, so nothing above
-    ``public`` is in its context to leak.
+    ``None`` — the check does not run — for ``mode="off"`` and for a turn
+    whose acting classification is the §A rule-(b) ``public`` FLOOR.  The
+    second is not a gap and not an assumption: at that floor every
+    above-``public`` entry is withheld by §D before the audience clause,
+    and every ``public`` one is exempt by scope lock 1, so no candidate
+    can carry a verdict.  The test is the resolved acting level, not the
+    presence of a channel id — those are separate facts
+    (``acting_classification_for_event`` reads the wire stamp and never
+    looks at ``channel_id``), and keying the skip on the id would let a
+    stamped turn that lost its channel skip the check *while* admitting
+    ``internal`` entries: a fail-open.  Such a turn resolves an
+    **unknown** audience instead — recorded, never enforced.
 
     ``roster`` is the A1 rail's already-resolved acting roster; it seeds
     the cache so a same-room recall — the overwhelmingly common turn —
@@ -265,24 +304,45 @@ async def resolve_turn_audience(
     Never raises: a lost roster is an unknown audience, never a failed
     turn (``_inject_memory_context``'s never-fail contract).
     """
-    if mode == AUDIENCE_OFF or not acting_channel_id:
+    if mode == AUDIENCE_OFF:
+        return None
+    acting = acting_rank(acting_classification)
+    if acting <= CLASSIFICATION_RANKS[CLASSIFICATION_PUBLIC]:
         return None
     acting_members = (
         roster.member_ids
-        if roster is not None and roster.channel_id == acting_channel_id
+        if roster is not None
+        and acting_channel_id is not None
+        and roster.channel_id == acting_channel_id
         else None
     )
-    rooms: dict[str, frozenset[str] | None] = {acting_channel_id: acting_members}
-    fetches = 0
-    source_rooms = _distinct_source_rooms(candidates)
-    for room in source_rooms:
-        if room in rooms:
-            continue
-        rooms[room] = await _fetch_member_ids(fetcher, room, agent_id=agent_id)
-        fetches += 1
+    rooms: dict[str, frozenset[str] | None] = (
+        {acting_channel_id: acting_members} if acting_channel_id else {}
+    )
+    source_rooms = _distinct_source_rooms(candidates, acting=acting)
+    view = TurnAudience(
+        mode=mode, acting_channel_id=acting_channel_id, rooms=rooms,
+        fetches=0, source_rooms=len(source_rooms),
+    )
+    if acting_members is None or fetcher is None:
+        # Nothing a source fetch returns can move a verdict: an unknown
+        # ACTING audience short-circuits ``verdict`` to fetch-failed for
+        # every entry, and no fetcher means no source room resolves
+        # either.  Spending K round trips on a fixed answer is the N+1
+        # shape scope lock 2 exists to forbid.
+        return view
+    pending = [room for room in source_rooms if room not in rooms]
+    if pending:
+        resolved = await asyncio.gather(*(
+            _fetch_member_ids(fetcher, room, agent_id=agent_id)
+            for room in pending
+        ))
+        rooms.update(zip(pending, resolved, strict=True))
+    # One rebuild rather than a mutable view: ``rooms`` is read through
+    # the ``_acting`` snapshot ``__post_init__`` takes.
     return TurnAudience(
         mode=mode, acting_channel_id=acting_channel_id, rooms=rooms,
-        fetches=fetches, source_rooms=len(source_rooms),
+        fetches=len(pending), source_rooms=len(source_rooms),
     )
 
 

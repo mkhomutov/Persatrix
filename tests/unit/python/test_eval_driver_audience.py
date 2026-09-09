@@ -71,6 +71,7 @@ class _FakeAgent:
     def __init__(self) -> None:
         self.events: list[Any] = []
         self.roster_fetchers: list[Any] = []
+        self.history_fetchers: list[Any] = []
 
         class _Rel:
             async def get_all_relationships(self):  # noqa: ANN202
@@ -85,7 +86,8 @@ class _FakeAgent:
     async def close_memory(self) -> None: ...
     async def drain_pending_summaries(self) -> None: ...
 
-    def set_history_fetcher(self, fetcher: Any) -> None: ...
+    def set_history_fetcher(self, fetcher: Any) -> None:
+        self.history_fetchers.append(fetcher)
 
     def set_roster_fetcher(self, fetcher: Any) -> None:
         self.roster_fetchers.append(fetcher)
@@ -124,6 +126,36 @@ async def test_declaring_none_wires_no_fetcher_at_all(tmp_path: Path) -> None:
     resolves nothing and the run is the pre-A2 path exactly."""
     fake = await _drive(tmp_path, _BARE)
     assert fake.roster_fetchers == []
+
+
+async def test_per_interaction_channels_alone_still_wire_the_window(
+    tmp_path: Path,
+) -> None:
+    """The RFC 0034 conversation window follows the TURNS' channels.  A
+    recipe may declare its channels per interaction and none at setup —
+    the audience seed does — and keying the seam off ``setup.channel``
+    alone left exactly those runs with no window at all: no fetcher, no
+    reconstructed transcript, ``message_id`` ``None`` on every event, and
+    a golden pinning a prompt shape production never emits."""
+    recipe = _AUDIENCE.replace('  channel: "group:default"\n', "")
+    fake = await _drive(tmp_path, recipe)
+
+    assert len(fake.history_fetchers) == 1
+    # The two channelled interactions log and carry a message id (the
+    # persona's own reply takes ``m1`` between them); the third declares
+    # no channel now that ``setup.channel`` is gone, so it stays on the
+    # pre-window path — the seam is per-turn, not per-recipe.
+    assert [e.message_id for e in fake.events] == ["m0", "m2", None]
+
+
+async def test_a_channel_less_recipe_still_wires_no_window(
+    tmp_path: Path,
+) -> None:
+    """The complement, so the widening above cannot quietly turn the
+    pre-window path on for every landed channel-less golden."""
+    fake = await _drive(tmp_path, _BARE)
+    assert fake.history_fetchers == []
+    assert [e.message_id for e in fake.events] == [None]
 
 
 async def test_per_interaction_channel_overrides_setup_channel(

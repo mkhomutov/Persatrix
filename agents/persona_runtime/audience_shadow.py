@@ -9,18 +9,30 @@ shadow passes use, so the RFC 0044 harness threads it into the report
 artifact beside them and ``evaluators/shadow_measurement.py`` renders
 the verdict scope lock 1 gates the flip on.
 
-Two properties this module owes, both inherited rather than invented:
+Three properties this module owes, the first two inherited rather than
+invented:
 
-* **Quiet turns say nothing.** A turn whose candidates produced no
-  verdict — a single-room deployment, a turn with only ``public``
-  entries — emits no record at all, so enabling the shadow costs no log
-  volume where there is nothing to measure.
+* **Turns with nothing to say say nothing.** A turn whose candidates
+  produced no verdict — a turn acting at the ``public`` floor, one with
+  only ``public`` entries — emits no record at all, so enabling the
+  shadow costs no log volume where there is nothing to measure.  Note
+  what this is *not*: a same-room entry scores ``admit``, which is a
+  verdict and belongs in the denominator, so a healthy single-room
+  deployment does trace.
 * **The log is its own egress surface.** The trace names each entry's
   tier, id, protection level, source room and verdict; it never carries
   the entry's **content**.  Dumping the protected text into the process
   log would undo at the log exactly what the gate enforces at the
   prompt.  The measurement joins ids back against the store when it
   needs content — it never has.
+* **INFO carries the measurement, DEBUG carries the detail.** Every
+  number the verdict is rendered from rides at INFO in constant size.
+  The per-entry ``candidates`` array — up to the three judged tiers'
+  recall limits, ~40× the rest of the record, and read by no consumer
+  of the measurement — is attached only when this logger is enabled for
+  DEBUG.  The eval harness lowers it there, so the seeds keep their
+  per-entry evidence; a production deployment on the shipped ``shadow``
+  default does not pay for it on every turn.
 
 Emitted in ``live`` too, not only in ``shadow``: an operator who has
 flipped the knob needs the per-entry record more, not less, and
@@ -75,12 +87,18 @@ def emit_audience_shadow(
         return
     try:
         records = gate.audience_records
-        if not records:
+        fetches = audience.fetches if audience is not None else 0
+        if not records and not fetches:
             return
         verdicts = {v.value: 0 for v in AudienceVerdict}
+        by_tier: dict[str, dict[str, int]] = {}
         for record in records:
             verdicts[record.verdict.value] += 1
-        trace = {
+            tier_counts = by_tier.setdefault(record.tier, {})
+            tier_counts[record.verdict.value] = (
+                tier_counts.get(record.verdict.value, 0) + 1
+            )
+        trace: dict[str, object] = {
             "tier": AUDIENCE_TIER,
             "agent_id": agent_id,
             "acting": gate.acting,
@@ -88,7 +106,27 @@ def emit_audience_shadow(
                 audience.acting_channel_id if audience is not None else None
             ),
             "mode": mode,
-            "candidates": [
+            #: The denominator, carried as a number so the measurement
+            #: never has to count a per-entry array that INFO may omit.
+            "judged": len(records),
+            "verdicts": verdicts,
+            # Per-tier counts ride at INFO in constant size (three tiers,
+            # four verdicts) because the measurement needs to say WHICH of
+            # the judged tiers a sample exercised: a delta measured over
+            # one tier is a sample, not a measurement, and that is not
+            # visible from the totals.
+            "by_tier": by_tier,
+            # ``withheld`` is what the audience check actually withheld
+            # (0 in shadow, by definition).  ``fetches`` rides even on a
+            # turn that judged nothing: a round trip this turn paid for
+            # is a cost the scope-lock-2 bound must see, and suppressing
+            # it would make the one shape worth catching invisible.
+            "withheld": gate.audience_withheld_count,
+            "source_rooms": audience.source_rooms if audience is not None else 0,
+            "fetches": fetches,
+        }
+        if logger.isEnabledFor(logging.DEBUG):
+            trace["candidates"] = [
                 {
                     "tier": r.tier,
                     "entry_id": r.entry_id,
@@ -97,19 +135,7 @@ def emit_audience_shadow(
                     "verdict": r.verdict.value,
                 }
                 for r in records
-            ],
-            "verdicts": verdicts,
-            # ``withheld`` is what the audience check actually withheld
-            # (0 in shadow, by definition); ``unknown_label`` is carried
-            # as a constant 0 so this tier's summary is shape-compatible
-            # with the RFC 0049 tiers' — a §D rule-(c) casualty never
-            # reaches the audience check, so the field is not merely
-            # unset here, it is structurally zero.
-            "withheld": gate.audience_withheld_count,
-            "unknown_label": 0,
-            "source_rooms": audience.source_rooms if audience is not None else 0,
-            "fetches": audience.fetches if audience is not None else 0,
-        }
+            ]
         logger.info(
             "Agent %s: audience egress (%s) — %d entr%s judged at "
             "acting=%r: %d admit, %d disjoint, %d unknown "

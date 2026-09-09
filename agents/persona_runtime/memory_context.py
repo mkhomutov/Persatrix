@@ -374,17 +374,24 @@ class _MemoryContextMixin:
         # Resolved between the recalls and the gate, because it needs both:
         # the candidates name the source rooms to fetch, and the gate is
         # what asks the question.  One round trip per distinct source room
-        # the turn's candidates named, minus the acting room the rail above
-        # already resolved (scope lock 2).  ``None`` in ``off`` mode and on
-        # a channel-less turn — whose §D public floor leaves nothing above
-        # ``public`` in context to leak.  The notes tier is absent from the
-        # candidates for the same reason it is absent from
-        # ``AUDIENCE_TIERS``: a note's source channel is NULL by design.
+        # among the entries the gate will actually JUDGE — not per room the
+        # recalls happened to name — issued in parallel, minus the acting
+        # room the rail above already resolved (scope lock 2).  ``None`` in
+        # ``off`` mode and on a turn acting at the §D public floor, where
+        # no candidate can carry a verdict.  The tier names ride along so
+        # the audience module applies its own ``AUDIENCE_TIERS`` rule
+        # rather than this call site encoding it a second time.
+        acting = acting_classification_for_event(event)
         audience = await resolve_turn_audience(
             self._roster_fetcher, roster,
             mode=self._memory_audience,
             acting_channel_id=getattr(event, "channel_id", None),
-            candidates=(channel_episodes, episodes, facts),
+            acting_classification=acting,
+            candidates=(
+                ("channel_history", channel_episodes),
+                ("episodic", episodes),
+                ("facts", facts),
+            ),
             agent_id=self.agent_id,
         )
 
@@ -397,9 +404,7 @@ class _MemoryContextMixin:
         # (b)).  The relationship tier is deliberately ungated (§C write-
         # through + the Non-Goals trust-score carve-out — see injection_gate).
         gate = TurnInjectionGate(
-            acting=acting_classification_for_event(event),
-            agent_id=self.agent_id,
-            audience=audience,
+            acting=acting, agent_id=self.agent_id, audience=audience,
         )
         channel_episodes = gate.filter_entries("channel_history", channel_episodes)
         episodes = gate.filter_entries("episodic", episodes)

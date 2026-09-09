@@ -28,7 +28,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-from evaluators.shadow_measurement import promotion_verdict, summarize_audience
+from evaluators.shadow_measurement import (
+    AUDIENCE_TURN_BOUND,
+    promotion_verdict,
+    summarize_audience,
+)
 
 _REPO = Path(__file__).resolve().parents[2]
 _EVAL_SETS = _REPO / "evaluators" / "eval_sets"
@@ -69,17 +73,39 @@ def _traces(tmp_path: Path) -> list[dict]:
     ]
 
 
-def test_the_seed_replays_green_and_the_verdict_is_green(tmp_path: Path) -> None:
+def test_the_seed_contributes_both_conclusive_verdicts(tmp_path: Path) -> None:
+    """What this ONE recipe owes the sample: a non-empty trace stream
+    carrying both conclusive verdicts.
+
+    Not ``verdict.green``: ``audience_delta_measured`` also asks that the
+    delta span at least :data:`AUDIENCE_MIN_JUDGED_TIERS` of the three
+    judged tiers, and tier coverage is a property of the whole replay
+    report — what ``make eval-verdict`` renders — not of a single recipe.
+    Asserting it here would pin this seed's tier mix, which is the
+    opposite of what the clause is for.
+    """
     traces = _traces(tmp_path)
     assert traces, (
         "the audience seed must capture audience traces — an empty stream "
         "means the check never ran and the measurement is vacuous"
     )
-    verdict = promotion_verdict(
-        traces, goldens_green=True, audience_expected=True,
-    )
+    summary = summarize_audience(traces)
+    assert summary.verdicts["withhold-disjoint"] == 1, summary
+    assert summary.verdicts["admit"] == 1, summary
+    assert summary.max_judged_per_turn <= AUDIENCE_TURN_BOUND, summary
+    # The three criteria that are this recipe's to satisfy still hold.
+    verdict = promotion_verdict(traces, goldens_green=True)
     assert verdict.green, verdict.to_dict()
-    assert verdict.criteria["audience_delta_measured"] is True
+
+
+def test_the_tier_the_seed_measures_is_named_not_assumed(tmp_path: Path) -> None:
+    """``by_tier`` exists so a reader of the verdict can see WHICH of the
+    three judged tiers a sample exercised.  This seed exercises ``facts``
+    and says so — the visibility that keeps a one-tier delta from reading
+    as a whole-check measurement."""
+    summary = summarize_audience(_traces(tmp_path))
+    assert set(summary.by_tier) == {"facts"}, summary.by_tier
+    assert summary.by_tier["facts"]["withhold-disjoint"] == 1
 
 
 def test_both_halves_of_the_regression_are_exercised(tmp_path: Path) -> None:
@@ -128,11 +154,15 @@ def test_no_unknown_verdicts_and_the_fetch_bound_holds(tmp_path: Path) -> None:
 
     The fetch bound is the scope-lock-2 cost: one round trip per distinct
     source room, and the acting room — already resolved by the A1 rail —
-    is free.
+    is FREE, so ``fetches`` is a floor of ``source_rooms`` and never an
+    equality.  Asserting equality would pass only while no candidate came
+    from the acting room — i.e. only while the pre-seed this bound exists
+    to credit was never exercised.  The same-room case is pinned
+    directly in ``tests/unit/python/test_audience_scope.py``.
     """
     summary = summarize_audience(_traces(tmp_path))
     assert summary.unknown_share == 0.0, summary
     assert summary.verdicts.get("withhold-unknown-fetch-failed", 0) == 0
     assert summary.verdicts.get("withhold-unknown-no-provenance", 0) == 0
-    assert summary.fetches == summary.source_rooms, summary
+    assert summary.fetches <= summary.source_rooms, summary
     assert summary.withhold_share == 0.5, summary

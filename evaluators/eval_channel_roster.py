@@ -32,11 +32,18 @@ assertion-time membership snapshot RFC 0035 would need is out of scope
 for the whole release (scope lock 2), so a static map is not a
 simplification here — it is the shipped semantics.
 
-An empty directory is deliberate, not a shortcut: it is exactly what
-the fleet sees under auth today ([ISSUE-0140] — the authenticated
-``/api/v1/agents`` half ``401``s), so a group turn in an eval renders
-no roster section and the audience check still resolves, which is the
-composition PR A1 split the fetcher to make possible.
+The directory half returns ``None``, not ``[]``, and the distinction is
+load-bearing: the runtime maps ``None`` to ``DirectoryStatus.MISSED``
+(no roster section) and a list — ``[]`` included — to ``RESOLVED``,
+which renders the section with bare ids. ``None`` is therefore what
+reproduces the fleet's posture under auth today ([ISSUE-0140] — the
+authenticated ``/api/v1/agents`` half ``401``s, and the HTTP fetcher
+returns ``None``): a group turn in an eval renders no roster section and
+the audience check still resolves, which is the composition PR A1 split
+the fetcher to make possible. Returning ``[]`` would model the opposite
+branch and, worse for the audience seed, name every member of the room
+— Bob included — in the prompt whose whole subject is whether the
+persona knows who is listening.
 """
 
 from __future__ import annotations
@@ -72,5 +79,9 @@ class InProcessChannelRoster:
         }
 
     async def fetch_directory(self) -> list[dict[str, Any]] | None:
-        """The authenticated half: empty, as the fleet sees it under auth."""
-        return []
+        """The authenticated half: MISSED, as the fleet sees it under auth.
+
+        ``None``, not ``[]`` — see the module docstring: only ``None``
+        maps to ``DirectoryStatus.MISSED`` and suppresses the section.
+        """
+        return None

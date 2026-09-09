@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 
 from evaluators.shadow_measurement import (
+    AUDIENCE_TURN_BOUND,
     DEFAULT_TIER_BOUNDS,
     partition_traces,
     promotion_verdict,
@@ -184,24 +185,35 @@ def test_default_bounds_pin_runtime_recall_limits():
     """The pure module cannot import ``agents``; this pin holds its defaults
     equal to the live recall limits from the outside.
 
-    The ``audience`` bound is the SUM of all four gated tiers' limits
-    (v0.3.16 A2): the audience check judges §D-admitted entries across
-    every tier, so its per-turn ceiling is what the recalls can put in
-    front of the gate at all.
+    ``audience`` is deliberately absent: it is not a recall tier, does not
+    go through ``summarize_tier``, and listing it here would make every
+    caller that passes its own ``tier_bounds`` fail ``bounded_volume``
+    the day an audience trace reached its report.  Its own per-turn
+    ceiling is :data:`AUDIENCE_TURN_BOUND`, pinned below.
     """
     from agents.persona_runtime.episodic_section import EPISODIC_RECALL_LIMIT
     from agents.persona_runtime.facts_section import FACTS_RECALL_LIMIT
-    from agents.persona_runtime.memory_budget import CHANNEL_RECALL_LIMIT
-    from agents.persona_runtime.notes_section import NOTES_RECALL_LIMIT
 
     assert DEFAULT_TIER_BOUNDS == {
         "episodic": EPISODIC_RECALL_LIMIT,
         "facts": FACTS_RECALL_LIMIT,
-        "audience": (
-            CHANNEL_RECALL_LIMIT + FACTS_RECALL_LIMIT
-            + EPISODIC_RECALL_LIMIT + NOTES_RECALL_LIMIT
-        ),
     }
+
+
+def test_audience_bound_pins_the_three_judged_tiers_limits() -> None:
+    """The audience ceiling is the sum of the tiers ``AUDIENCE_TIERS``
+    actually judges.  ``notes`` is excluded there — a note carries no
+    provenance — so counting ``NOTES_RECALL_LIMIT`` would leave the bound
+    five entries of slack it was never meant to have."""
+    from agents.persona_runtime.audience import AUDIENCE_TIERS
+    from agents.persona_runtime.episodic_section import EPISODIC_RECALL_LIMIT
+    from agents.persona_runtime.facts_section import FACTS_RECALL_LIMIT
+    from agents.persona_runtime.memory_budget import CHANNEL_RECALL_LIMIT
+
+    assert AUDIENCE_TIERS == {"channel_history", "facts", "episodic"}
+    assert AUDIENCE_TURN_BOUND == (
+        CHANNEL_RECALL_LIMIT + FACTS_RECALL_LIMIT + EPISODIC_RECALL_LIMIT
+    )
 
 
 # ─── the CLI over a suite report artifact ────────────────────────────────────
