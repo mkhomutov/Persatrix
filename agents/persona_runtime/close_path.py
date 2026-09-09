@@ -330,12 +330,10 @@ async def persist_closed_interaction(
                 # "no speaker" rather than an empty attribution.
                 speaker_id=interaction.speaker_id or None,
                 # ISSUE-0137: the key's TENANT half, now travelling the
-                # same way as the speaker half above.  The block this
-                # call sits in still binds it ambiently — Phase 2's
-                # facts, projections and relationship writes inherit
-                # that across the task boundary, and the relationship
-                # tier has no parameter to pass — but the invariant is
-                # the argument, and the scope is defence-in-depth.
+                # same way as the speaker half above.  The facts half
+                # gets it by argument too (``dispatch_facts_from_response``);
+                # what still rides the enclosing block alone is listed in
+                # :mod:`.record_write_scope`.
                 principal_id=interaction.principal_id)
         except Exception:
             logger.warning(

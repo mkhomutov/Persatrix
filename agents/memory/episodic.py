@@ -29,7 +29,7 @@ from ..principal_id import resolve_principal_id_silent
 from ..session_id import current_session_id, normalize_session_id, resolve_session_id_silent
 from ._boundary import warn_external_construction
 from ._epoch_filter import resolve_active_epoch
-from ._principal_filter import resolve_active_principal
+from ._principal_filter import resolve_active_principal, resolve_write_principal
 from ._salience import EPISODIC_APPEND_SALIENCE, emit_for_tier, emit_session_write
 from ._session_filter import _resolve_session_list
 from .episodic_crud import (
@@ -237,10 +237,9 @@ class EpisodicMemory(
         ``None`` = no speaker.  Full contract: :func:`.episodic_queries.insert_episode`.
 
         ``principal_id`` (ISSUE-0137) is the key's OTHER half — the tenant that owns the
-        record.  ``None`` (every pre-existing caller) keeps the ambient resolution; a caller
-        that knows whose record this is passes it and is believed.  Both halves then travel
-        the same way, so the call site shows the whole key instead of half of it plus an
-        assumption about the enclosing scope.
+        record, so the call site shows the whole key rather than half of it plus an
+        assumption about the enclosing scope.  Precedence and normalisation:
+        :func:`.resolve_write_principal`.
         """
         with _tracer.start_as_current_span(
             EPISODIC_REMEMBER_SPAN,
@@ -263,8 +262,9 @@ class EpisodicMemory(
                 session_id = normalize_session_id(session_id)  # PR 4 / F16
                 # ISSUE-0081 PR 3: tag the row with the tenant — the caller's
                 # if it named one (ISSUE-0137), otherwise the active one.
-                principal_id = principal_id or resolve_active_principal(
-                    self._active_principal_id,
+                # Normalises either way, like ``session_id`` above.
+                principal_id = resolve_write_principal(
+                    principal_id, self._active_principal_id,
                 )
                 # ISSUE-0085 PR 3: tag the row with the active epoch.
                 epoch_id = resolve_active_epoch(self._active_epoch_id)

@@ -134,11 +134,22 @@ rather than leave it looking like an oversight.
 > `interaction.principal_id` beside `speaker_id`, and the facts half
 > passes it through `dispatch_facts_from_response` →
 > `store_extracted_facts` from the same frozen record key. The
-> `record_write_scopes` binding stays as defence-in-depth — it is what
-> still carries the EPOCH, which has no explicit parameter. The pin is
+> `record_write_scopes` binding stays as defence-in-depth, and its
+> module docstring now enumerates what still rides it alone — the EPOCH
+> on every tier, and the relationship tier's tenant. The pin is
 > `tests/unit/python/test_explicit_record_principal.py`: with the wrapper
 > monkeypatched to a `nullcontext`, the close-derived episode and its
-> facts still land under the record's principal, so the invariant is
-> carried by the call rather than by one `with` statement. The
-> relationship tier is stated here as ambient-only either way and its
-> `record_admission` gap rides the ISSUE-0122 PR (B1), per the plan.
+> facts — both driven through `persist_closed_interaction`, so the
+> Phase-2 task boundary is exercised too — still land under the record's
+> principal, so the invariant is carried by the call rather than by one
+> `with` statement. The relationship tier is stated here as ambient-only
+> either way and its `record_admission` gap rides the ISSUE-0122 PR (B1),
+> per the plan.
+>
+> Review follow-up (E1): the explicit argument initially skipped
+> `normalize_principal_id`, which every prior route to the column ran, so
+> a padded value would have been stored verbatim and orphaned under
+> strict-equality recall, and `""` would have fallen through to the
+> closer's tenant instead of the default. The precedence now lives in one
+> seam, `agents/memory/_principal_filter.py::resolve_write_principal`,
+> rather than in a copy per tier.
