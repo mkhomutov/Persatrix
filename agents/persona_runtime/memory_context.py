@@ -28,7 +28,7 @@ from .channel_history import (
     CHANNEL_HISTORY_SECTION_NAME,
     recall_channel_episodes,
 )
-from .channel_roster import inject_channel_roster
+from .channel_roster import inject_channel_roster, resolve_channel_roster
 from .cross_room import (
     CROSS_ROOM_LIVE,
     DEFAULT_EPISODIC_CROSS_ROOM,
@@ -336,6 +336,17 @@ class _MemoryContextMixin:
             min_score=DEFAULT_NOTES_MIN_SCORE,
         )
 
+        # ── Channel roster (F-4 tier; the ISSUE-0132 audience rail) ────────
+        # Resolved BEFORE the §D gate and for every channel-anchored turn,
+        # DMs included: the gate cannot ask who is listening if the roster
+        # arrives after it has decided (v0.3.16 PR A1, scope lock 3).  The
+        # gate does not read it yet — A2 passes it in as the audience input;
+        # here the rail is dormant and only the prompt section consumes it,
+        # below and unchanged.
+        roster = await resolve_channel_roster(
+            self._roster_fetcher, event, self.agent_id,
+        )
+
         # ── RFC 0037 §D hard gate ──────────────────────────────────────────
         # Applied to every channel-derived tier BEFORE the RFC 0017 budget,
         # so a withheld entry never competes for tokens and never reaches
@@ -386,15 +397,15 @@ class _MemoryContextMixin:
             episodes=episodes, notes=notes,
         )
 
-        # Channel-roster tier (F-4, priority 9 — highest). Group channels
-        # only; structural room context injected outside the recall budget
-        # (see ``inject_channel_roster``), so it does not affect
-        # ``memory_admitted_tokens`` below — group CHANNEL_MESSAGE events are
-        # never the TICK that the empty-context short-circuit guards. The
-        # helper clears its own stale section (incl. on a later DM turn).
-        await inject_channel_roster(
-            self._working_memory, self._roster_fetcher, event, self.agent_id,
-        )
+        # Channel-roster tier (F-4, priority 9 — highest). Injected from the
+        # roster resolved above, in this position and for group channels
+        # only, so the prompt is byte-identical to v0.3.15. Structural room
+        # context outside the recall budget (see ``inject_channel_roster``),
+        # so it does not affect ``memory_admitted_tokens`` below — group
+        # CHANNEL_MESSAGE events are never the TICK that the empty-context
+        # short-circuit guards. The helper clears its own stale section
+        # (incl. on a later DM turn, whose roster resolves but never shows).
+        inject_channel_roster(self._working_memory, roster)
 
         memory_admitted_tokens = MEMORY_BUDGET_TOKENS - budget.remaining
         # Consumed by ``_on_event_inner`` for the RFC 0017 §F empty-context
