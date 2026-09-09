@@ -159,6 +159,7 @@ class FactStore:
         protection_level: str = PROTECTION_LEVEL_DEFAULT,
         source_channel_id: str | None = None,
         speaker_id: str | None = None,
+        principal_id: str | None = None,
     ) -> str:
         """Persist a new fact tuple.  Returns the generated ``fact_id``.
 
@@ -176,6 +177,14 @@ class FactStore:
         :func:`resolve_active_epoch` seams the recall path uses — so a
         row is always readable by the principal that wrote it, and the
         supersede chain keys on the same tuple recall filters on.
+
+        ``principal_id`` (ISSUE-0137) lets a caller that already knows
+        whose record the tuple derives from say so, instead of relying
+        on the enclosing scope to be the right one; ``None`` — every
+        pre-existing caller — keeps the ambient resolution.  It reaches
+        the row AND the supersede chain, because both read the one
+        argument below: a tenant's newer fact must not retract another
+        tenant's.
 
         One stated precedence change vs the pre-split body (PR #849
         review): the connection and the ambient axes resolve WITH the
@@ -196,8 +205,11 @@ class FactStore:
             # with the other three persona-memory tier write paths.
             session_id=normalize_session_id(session_id),
             # ISSUE-0081 PR 3 / ISSUE-0085 PR 3: the row tag AND the
-            # supersede chain key.
-            principal_id=resolve_active_principal(self._active_principal_id),
+            # supersede chain key — the record's own tenant when the
+            # caller named it (ISSUE-0137), else the ambient one.
+            principal_id=principal_id or resolve_active_principal(
+                self._active_principal_id,
+            ),
             epoch_id=resolve_active_epoch(self._active_epoch_id),
             predicate_validator=self._predicate_validator,
             protection_level=protection_level,

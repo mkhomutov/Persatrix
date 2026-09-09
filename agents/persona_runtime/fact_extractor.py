@@ -175,6 +175,7 @@ async def store_extracted_facts(
     protection_level: str | None = None,
     source_channel_id: str | None = None,
     speaker_id: str | None = None,
+    principal_id: str | None = None,
 ) -> int:
     """Persist each parsed fact via :meth:`FactStore.store`.
 
@@ -195,6 +196,11 @@ async def store_extracted_facts(
     a counterparty fact differs in the two.  The one §G breach of the
     single-speaker premise is excluded upstream — ``close_entries``
     states the argument.
+
+    ``principal_id`` (ISSUE-0137) is that same interaction's frozen
+    TENANT, stamped onto the batch for the same one-source reason: a
+    close runs inside whichever request triggered it, which for a room
+    fan or an idle flush is routinely another tenant's.
 
     ``protection_level`` / ``source_channel_id`` (RFC 0037 §C, PR 3) are
     the source interaction's frozen-at-open capture, stamped identically
@@ -274,6 +280,7 @@ async def store_extracted_facts(
                 protection_level=stamped_level,
                 source_channel_id=source_channel_id,
                 speaker_id=speaker_id,
+                principal_id=principal_id,
             )
         except ValueError as exc:
             failures += 1
@@ -464,6 +471,10 @@ async def dispatch_facts_from_response(
             # re-deriving the expression) is what makes the "ONE source"
             # claim structural instead of prose (PR #849 review round 3).
             speaker_id=sender_id,
+            # ISSUE-0137: the tenant half of that same key.  Binds no
+            # new row today — it is what holds when a future derived
+            # writer forgets ``record_write_scopes``.
+            principal_id=interaction.principal_id,
         )
     except Exception:
         logger.warning(
