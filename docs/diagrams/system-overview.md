@@ -30,7 +30,7 @@ graph LR
         REG["Registry<br/>internal/registry"]
         STATE["Run state<br/>internal/state"]
         COST["Cost & budgets<br/>internal/cost"]
-        TELE["Telemetry<br/>internal/telemetry"]
+        TELE["Telemetry<br/>internal/observability"]
     end
 
     subgraph Agents["Agent runtime — Python (agents/)"]

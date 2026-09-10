@@ -25,7 +25,7 @@ graph TB
         STATE["state/"]
         COST["cost/<br/>tokens · cache · reporter"]
         WALLET["wallet/<br/>LLM-call leasing"]
-        TELE["telemetry/<br/>OTEL"]
+        TELE["observability/<br/>logs · metrics · traces"]
         CHAN["channels/"]
         SEC["security/"]
 
@@ -88,7 +88,7 @@ graph TB
         PRUNTIME --> LLM
         TASK --> TOOLS
         PRUNTIME --> TOOLS
-        PERSONA --> SUB
+        PERSONA -. planned .-> SUB
     end
 
     Rust -.->|REST/JSON| Go
@@ -101,10 +101,11 @@ graph TB
 
 | Phase | Shipped components |
 |-------|--------------------|
-| v0.1 | `planner/`, `scheduler/`, `executor/`, `registry/`, `state/`, `server/`, `agents/task_agent.py`, `agents/tools/` |
-| v0.2 | `cost/`, `telemetry/`, `agents/persona*`, `agents/persona_runtime/`, `agents/memory/`, `agents/sub_agents/` |
+| v0.1 | `planner/`, `scheduler/`, `executor/`, `registry/`, `state/`, `server/`, `agents/tools/` |
+| v0.2 | `cost/`, `agents/task_agent.py`, `agents/persona*`, `agents/persona_runtime/`, `agents/memory/` |
 | v0.2.1 | `agents/participant.py` (`UserParticipant`, `UserStore`), `internal/server/chat_handler.go` (`POST /api/v1/agents/{id}/chat`), `internal/executor/` chat path (`SendChatMessage` gRPC), `cli/src/commands/chat` (`persatrix chat`) |
-| v0.3.0 | `internal/channels/` (RFC 0011 — internal agent-to-agent messaging), `internal/security/` (RFC 0009 Phases 1–2 — redactor, audit log, rate limiter) |
+| v0.2.3 | `internal/observability/` (RFC 0018 + RFC 0019 — telemetry: structured logs, metrics and traces; renamed from `internal/telemetry/`, which had OpenTelemetry tracing since v0.2) |
+| v0.3.0 | `internal/channels/` (RFC 0011 — internal agent-to-agent messaging), `internal/security/` (RFC 0009 Phases 1–2 — redactor, audit log, rate limiter), `agents/sub_agents/` (RFC 0008 — delegation contract and result merge) |
 | v0.3.2 | `internal/wallet/` (RFC 0023 — LLM-call leasing `WalletService`; Phases 1–6 implemented: enforcement + TTL reaper + per-agent active-lease cap composed over `cost/`, with the Python `WalletClient` wired into all five LLM-call origins — workflow task, chat, autonomous TICK, sub-agent, channel-message) |
 | v0.3+ (stubs) | `a2a/`, `bridges/`, `resilience/`, `mesh/`, `mcp/`, `protocols/`, `agents/tools/mcp_bridge.py` |
 
@@ -120,6 +121,13 @@ route chat traffic through `UserStore`. Only the pure validator
 `(agent_id, user_id)` and written directly. The dashed edge mirrors the
 `AGSVC -. planned .-> PART` treatment in [system-overview.md](system-overview.md)
 so the two diagrams agree about the v0.2.1 wiring gap.
+
+The `PERSONA -. planned .-> SUB` edge is dashed for a similar reason.
+`agents/sub_agents/` holds tested code for handing a task to a
+[sub-agent](../ai-glossary.md#sub-agent) and merging its result back
+(RFC 0008), so the box is solid. But nothing starts a sub-agent yet: a
+persona's `SPAWN_SUB_AGENT` action returns `not_implemented`, and ROADMAP
+plans spawning for [v0.4.0](../../ROADMAP.md#planned-components-v040).
 
 The `WALLET --> COST` edge is solid: RFC 0023 PR 2 ([#384](https://github.com/mkhomutov/Persatrix/pull/384))
 composes `cost.BudgetEnforcer` and `cost.TokenCounter` into the
