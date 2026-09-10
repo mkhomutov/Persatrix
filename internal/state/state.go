@@ -6,11 +6,16 @@
 // loses them. (Channels, user accounts and agent memory are saved to
 // SQLite, but by other parts of Persatrix, not through this package.)
 //
-// Planned, as the TODOs at the end of this file: a SQLite-backed Store that
+// Planned, as the TODOs at the end of state.go: a SQLite-backed Store that
 // survives a restart, periodic checkpoints (snapshots that can be restored),
-// and export and import of saved state. No RFC covers this yet, and
-// ROADMAP.md gives it no target release; docs/ai-agents-orchestration-spec.md
-// §12.8 sketches the design.
+// and export and import of saved state. RFC 0001, which built this package,
+// left saving runs to disk out of scope but shaped [Store] so a SQLite
+// version could be added later; docs/ai-agents-orchestration-spec.md §12.8
+// sketches the design. Three RFCs also plan additions to this file: a
+// "skipped" step status and a record of how each loop ran and why it
+// stopped (RFC 0007), actions held until a person approves them (RFC 0009
+// Phase 4), and skills granted to an agent for a single task (RFC 0014
+// Phase 3). ROADMAP.md tracks the status.
 package state
 
 import (
@@ -98,9 +103,8 @@ type StepState struct {
 
 // Store defines the interface for workflow run state persistence.
 // All methods accept context.Context for forward compatibility with a
-// persistent backend, such as the planned SQLiteStore (see the TODOs at
-// the end of this file). In-memory implementations may ignore the context
-// parameter.
+// persistent backend, such as the planned SQLite store. In-memory
+// implementations may ignore the context parameter.
 type Store interface {
 	CreateRun(ctx context.Context, run *WorkflowRun) error
 	GetRun(ctx context.Context, runID string) (*WorkflowRun, error)

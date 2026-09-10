@@ -21,8 +21,8 @@ type AuditEventType string
 const (
 	// Lifecycle
 	AuditAgentRegistered     AuditEventType = "agent.registered"
-	AuditAgentTokenIssued    AuditEventType = "agent.token_issued"  // reserved (Phase 3 — agent identity tokens)
-	AuditAgentTokenInvalid   AuditEventType = "agent.token_invalid" // reserved (Phase 3)
+	AuditAgentTokenIssued    AuditEventType = "agent.token_issued"  // reserved (Phase 4 — agent identity tokens)
+	AuditAgentTokenInvalid   AuditEventType = "agent.token_invalid" // reserved (Phase 4)
 	AuditCapabilityViolation AuditEventType = "capability.violation"
 
 	// Tool dispatch
@@ -166,7 +166,7 @@ func AllAuditEventTypes() []AuditEventType {
 //   - Capability and rate-limit violations are the primary signals an
 //     attacker is probing the system; losing them on crash defeats the audit.
 //   - HITL outcomes carry a human decision that must not silently disappear.
-//   - Token-validation outcomes (Phase 3) gate every authenticated call.
+//   - Token-validation outcomes (Phase 4) gate every authenticated call.
 //   - Chain-bootstrap and chain-recovered (PR #232 review SF-3) mark integrity
 //     boundaries an operator must be able to detect after the fact.
 //   - Unauthenticated-caller rate-limit hits (PR #232 review SF-6) are emitted

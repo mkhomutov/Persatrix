@@ -14,10 +14,13 @@
 //
 // Note on CircuitBreaker (PR #244 round-2 review M-03): the
 // per-agent, configurable-threshold circuit breaker for the
-// **security policy** layer (capability / rate-limit / tool-denied
-// quarantine) ships as `internal/security.CircuitBreaker` (RFC 0009
-// PR 2). It is wired into the REST + gRPC middleware and is keyed on
-// agent identity. The resilience-package breaker that remains TODO
+// **security policy** layer ships as `internal/security.CircuitBreaker`
+// (RFC 0009 PR 2). It is wired into the REST + gRPC rate-limit
+// middleware and is keyed on the agent ID the caller sends. Only
+// rate-limit violations reach it, so it quarantines an agent that keeps
+// hitting the rate cap. It also has thresholds for capability,
+// tool-denied and flagged-input violations, but no code reports those.
+// The resilience-package breaker that remains TODO
 // below is for a different concern: **model-call failover** — short-
 // circuiting requests to a misbehaving LLM provider so the
 // orchestrator falls back to a healthy one instead of hammering the

@@ -1,7 +1,10 @@
-// Package main: audit logger bootstrap helpers (RFC 0009 PR 1b).
+// Audit logger bootstrap helpers (RFC 0009 PR 1b).
 //
 // Extracted from main.go so the orchestrator entry point stays under the
 // 500-line code-review limit enforced by scripts/checks/file_size.py.
+// The blank line below keeps this out of the package comment, which is
+// in main.go.
+
 package main
 
 import (
