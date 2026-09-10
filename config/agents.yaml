@@ -46,6 +46,8 @@ agents:
       - file_read
       - file_write
       - shell_exec
+      # No tool yet: the MCP bridge is not built, and the entry is dropped
+      # silently — docs/issues/ISSUE-0147-unregistered-agent-tools-dropped-silently.md
       - mcp:github
     max_retries: 2
     timeout_seconds: 300
@@ -91,6 +93,8 @@ agents:
       - security_audit
     tools:
       - file_read
+      # No tool yet: the MCP bridge is not built, and the entry is dropped
+      # silently — docs/issues/ISSUE-0147-unregistered-agent-tools-dropped-silently.md
       - mcp:github
     max_retries: 1
     timeout_seconds: 180
@@ -124,6 +128,8 @@ agents:
       - team_management
     tools:
       - file_read
+      # No tool yet: the MCP bridge is not built, and the entry is dropped
+      # silently — docs/issues/ISSUE-0147-unregistered-agent-tools-dropped-silently.md
       - mcp:github
     max_retries: 2
     timeout_seconds: 300
