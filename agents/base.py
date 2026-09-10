@@ -35,7 +35,7 @@ from .task_types import (
     TaskOutput,
     TaskStatus,
 )
-from .tools.registry import get_tool, list_tools
+from .tools.tool_list import offered_tool, offered_tools
 
 logger = logging.getLogger(__name__)
 
@@ -193,30 +193,28 @@ class BaseAgent(ABC):
         """Build normalized tool definitions from the tool registry.
 
         S-12: filters to only tools in the agent's ``tools`` config; an empty
-        list exposes no tools (e.g. planner agent).
+        list exposes no tools (e.g. planner agent). The rule lives in
+        :mod:`agents.tools.tool_list`, which ``_execute_tools`` shares.
         """
-        # F-04: early return avoids iterating the full registry when no tools
-        # are configured for this agent.
-        allowed = self.config.get("tools", [])
-        if not allowed:
-            return []
-        # N-04: set for O(1) membership checks as the tool registry grows.
-        allowed_set = set(allowed)
         return [
             {
                 "name": td.name,
                 "description": td.description,
                 "parameters": td.parameters,
             }
-            for td in list_tools()
-            if td.name in allowed_set
+            for td in offered_tools(self.config)
         ]
 
     async def _execute_tools(self, tool_calls: list[ToolCall]) -> list[LLMToolResult]:
-        """Execute tool calls sequentially, returning LLM-facing results."""
+        """Execute tool calls sequentially, returning LLM-facing results.
+
+        ISSUE-0151: a tool the agent was not offered (one its ``tools`` list
+        leaves out) gets the same ``Unknown tool`` error as a tool that does
+        not exist and never runs, as personas already do.
+        """
         results: list[LLMToolResult] = []
         for call in tool_calls:
-            tool_def = get_tool(call.name)
+            tool_def = offered_tool(self.config, call.name)
             if tool_def is None or tool_def.func is None:
                 results.append(
                     LLMToolResult(
