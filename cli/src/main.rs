@@ -21,7 +21,7 @@ use commands::validate::cmd_validate;
 use commands::workflow::{cmd_run, cmd_status};
 use user_id::default_user_id;
 
-/// Persatrix CLI — manage agents, workflows, and the mesh.
+/// Persatrix CLI — manage agents, workflows, and channels.
 #[derive(Parser)]
 #[command(name = "persatrix", version, about)]
 struct Cli {
@@ -129,7 +129,7 @@ enum Commands {
         #[arg(long)]
         epoch: Option<String>,
     },
-    /// Manage blueprints
+    /// Manage blueprints (not implemented yet)
     Init {
         /// Blueprint name (software-team, social-experiment)
         #[arg(long)]
@@ -138,7 +138,7 @@ enum Commands {
         #[arg(default_value = ".")]
         output: String,
     },
-    /// Session replay
+    /// Session replay (not implemented yet)
     Replay {
         /// Session ID
         session_id: String,
@@ -152,7 +152,7 @@ enum Commands {
         #[arg(long)]
         export: Option<String>,
     },
-    /// Cost reports
+    /// Cost reports (not implemented yet)
     Cost {
         /// Time period (today, week, month)
         #[arg(default_value = "today")]
@@ -175,16 +175,16 @@ enum Commands {
     /// Manage persona-memory sessions (RFC 0031 §E)
     #[command(subcommand)]
     Session(SessionCommands),
-    /// State management
+    /// State management (not implemented yet)
     #[command(subcommand)]
     State(StateCommands),
     /// Manage internal channels (RFC 0011 §F)
     #[command(subcommand)]
     Channel(ChannelCommands),
-    /// Manage mesh nodes (v0.3+)
+    /// Manage mesh nodes (not implemented yet)
     #[command(subcommand)]
     Node(NodeCommands),
-    /// Mesh status and diagnostics (v0.3+)
+    /// Mesh status and diagnostics (not implemented yet)
     #[command(subcommand)]
     Mesh(MeshCommands),
 }
@@ -217,7 +217,7 @@ enum AgentCommands {
     List,
     /// Show agent details
     Info { agent_id: String },
-    /// Reload agent config without restart
+    /// Reload agent config without restart (not implemented yet)
     Reload {
         agent_id: String,
         #[arg(long)]

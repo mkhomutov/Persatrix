@@ -5,11 +5,16 @@ Sandbox rules for tool execution. Only path restriction is built so far.
 agent's permissions allow.
 
 Planned, not built (RFC 0009 Phase 3): ``ResourceLimiter``, to cap the
-processor and clock time a ``shell_exec`` command may use, and
-``OutputSizeLimiter``, to set a per-tool cap on output size. They are the
-TODOs at the end of this file. Until they land, ``builtin.py`` applies fixed
-caps of its own: ``MAX_TIMEOUT_SECONDS`` for ``shell_exec`` and
-``MAX_OUTPUT_BYTES`` for what the built-in tools return.
+processor time and total running time of a ``shell_exec`` command, and
+``OutputSizeLimiter``, to cap the size of every tool's output (one limit,
+set per agent). They are the TODOs at the end of this file.
+
+Until they land, ``builtin.py`` applies fixed limits of its own, and only to
+some tools: ``MAX_TIMEOUT_SECONDS`` limits how long ``shell_exec`` may run,
+and ``MAX_OUTPUT_BYTES`` limits what ``file_read``, ``shell_exec`` (stdout
+and stderr separately) and ``http_request`` return. The other built-in
+tools, such as ``recall_notes`` and ``recall_channel_messages``, have no
+output limit yet.
 """
 
 import fnmatch

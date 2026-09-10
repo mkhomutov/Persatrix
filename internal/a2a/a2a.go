@@ -2,7 +2,7 @@
 // protocol), an open standard that lets agents built on different platforms
 // discover each other and hand over tasks. Nothing is implemented yet: the
 // TODOs below are the plan, sketched in docs/persatrix-extension-spec.md
-// §E8.6. No RFC covers it yet; ROADMAP.md has the target release.
+// §E8.6. ROADMAP.md tracks the status.
 package a2a
 
 // TODO: Implement A2AServer (Agent Card serving, task endpoint)

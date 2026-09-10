@@ -2,9 +2,15 @@
 // retrying failed model calls, falling back to another model, and a
 // dead-letter queue that keeps tasks that failed for good so an operator
 // can inspect them. Nothing is implemented yet: the TODOs below are the
-// plan, and ROADMAP.md lists the package as a TODO stub with no target
-// release. Sending a task to an agent is already retried, by a loop inside
-// internal/executor.
+// plan, sketched in docs/ai-agents-orchestration-spec.md §6.7 (the circuit
+// breaker there works per agent; this package's would work per model
+// provider, as the note below explains). ROADMAP.md tracks the status.
+//
+// Some retrying already happens elsewhere. The Anthropic and OpenAI client
+// libraries retry a model call that hits a rate limit, a timeout or a
+// server error, and agents/llm_providers.py keeps their default retry
+// count. A loop in internal/executor retries sending a task to an agent
+// when the send itself fails, but not a task the agent reports as failed.
 //
 // Note on CircuitBreaker (PR #244 round-2 review M-03): the
 // per-agent, configurable-threshold circuit breaker for the
