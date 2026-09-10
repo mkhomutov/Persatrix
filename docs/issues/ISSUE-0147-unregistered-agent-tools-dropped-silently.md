@@ -49,6 +49,8 @@ not read the list at all.
 The two copies already differ in a related way. When the model asks to run a
 tool, a persona runs it only if the tool is on its list, but a task agent runs
 any registered tool the model names (`_execute_tools` in `agents/base.py`).
+[ISSUE-0151](ISSUE-0151-task-agents-run-tools-missing-from-their-list.md)
+proposes closing that gap.
 
 **What gets dropped today.** A probe on 2026-09-10 (at `f52e7ff6`) loaded every
 agent in the shipped `config/agents.yaml` through `load_agent`, with the model
@@ -236,3 +238,10 @@ after `wire_recall_tools`.
 > resolution should read "planned fix" and link here, in #900 before it merges
 > or in a follow-up. Each `mcp:github` entry in `config/agents.yaml` points
 > here.
+>
+> 2026-09-11 — the Context gap, a task agent running tools its list leaves
+> out, is filed as
+> [ISSUE-0151](ISSUE-0151-task-agents-run-tools-missing-from-their-list.md),
+> also proposed for v0.4.0. Its fix puts the offer rule in a small module under
+> `agents/tools/`, the kind of function point 2 asks for; whichever of the two
+> fixes lands second extends that module rather than writing another.
