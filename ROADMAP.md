@@ -146,7 +146,7 @@ v0.1.0 complete — end-to-end execution working
 | `internal/executor/` | gRPC task dispatch to agents | ✅ Complete (96.1% coverage) |
 | `internal/generated/` | Protobuf/gRPC generated code | ✅ Complete (generated stubs) |
 | `internal/resilience/` | Circuit breaker, dead letter queue | 🔲 TODO stub (post-v0.1) |
-| `internal/security/` | Audit logger, redactor, rate limiter, circuit breaker, REST/gRPC middleware, input sanitizer | 🚧 In progress (v0.3.0 — RFC 0009 PRs 1/1b/1c/2/3) |
+| `internal/security/` | Audit logger, secret redactor, rate limiter, circuit breaker, REST/gRPC middleware, gRPC panic recovery ([ISSUE-0059](docs/issues/ISSUE-0059-grpc-server-no-panic-recovery-interceptor.md)), input sanitizer | ⚠️ Partially Implemented (RFC 0009 Phases 1–2, shipped in v0.3.0; the input sanitizer is built but the orchestrator does not call it — `cmd/genpatterns` copies its patterns into the Python module the agents run; Phases 3–4, including agent identity tokens, slotted for v0.4.0) |
 | `internal/observability/` (renamed from `internal/telemetry/`) | OTEL span instrumentation + structured logging encoder + log buffer + LogService | ✅ Complete (RFC 0018 + RFC 0019, shipped in v0.2.3) |
 | `internal/cost/` | Token/cost tracking aggregation | ✅ Complete (RFC 0006) |
 
