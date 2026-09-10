@@ -24,6 +24,13 @@ the ``RFC_TEMPLATE.md``, and ``README.md`` are excluded — those are
 companion docs, not standalone RFCs) and writes a Markdown table into
 ``docs/rfcs/INDEX.md`` between auto-generation markers.
 
+It also checks each RFC's bold ``**Status**:`` header line — the copy of the
+status GitHub shows under the title — against the front-matter: the first
+such line below the front-matter must start with the INDEX marker for that
+status (``partially_implemented`` → ``⚠️ Partially Implemented``) and may go
+on with a qualifier. A disagreement is an error, so ``make rfcs`` and
+``--check`` both fail on it.
+
 Usage::
 
     python scripts/rfcs.py            # rewrite INDEX.md
@@ -43,6 +50,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _doc_index import (  # noqa: E402  -- path-mutation needed for direct script run
+    FRONT_MATTER_RE,
     is_iso_date,
     parse_front_matter,
     run_index_cli,
@@ -92,6 +100,14 @@ _STATUS_MARKER = {
     "superseded": "🔄 Superseded",
 }
 
+# The bold header line under an RFC's title repeats the status for readers:
+# ``**Status**: ⚠️ Partially Implemented (Phases 1–4)``. It must open with the
+# marker above, emoji and label, and may go on with a qualifier. Nothing used
+# to compare the two, and RFC 0048's header said "🚧 Implementing" for three
+# months after its front-matter moved on.
+_HEADER_STATUS_RE = re.compile(r"^\*\*Status\*\*:[ \t]*(.*?)[ \t]*$", re.MULTILINE)
+_VARIATION_SELECTOR = "\ufe0f"  # the invisible second code point of "⚠️"
+
 # Group "open work" together at the top; "done" / "shelved" at the bottom.
 # Within each band, sort by id ascending (RFC number order is meaningful).
 _STATUS_ORDER = {
@@ -124,6 +140,8 @@ class RFC:
     target: str
     depends_on: list[str] = field(default_factory=list)
     superseded_by: str = ""
+    # What the first ``**Status**:`` line below the front-matter says; None if absent.
+    header_status: str | None = None
 
     @property
     def link(self) -> str:
@@ -156,6 +174,13 @@ def _list(fm: dict[str, str | list[str]], key: str) -> list[str]:
     if isinstance(value, list):
         return value
     return [value] if value else []
+
+
+def _header_status(text: str) -> str | None:
+    """What the first ``**Status**:`` line below the front-matter says, if any."""
+    front_matter = FRONT_MATTER_RE.match(text)
+    line = _HEADER_STATUS_RE.search(text, front_matter.end() if front_matter else 0)
+    return line.group(1) if line else None
 
 
 def collect_rfcs() -> tuple[list[RFC], list[str]]:
@@ -195,12 +220,45 @@ def collect_rfcs() -> tuple[list[RFC], list[str]]:
                 target=_scalar(fm, "target"),
                 depends_on=_list(fm, "depends_on"),
                 superseded_by=_scalar(fm, "superseded_by"),
+                header_status=_header_status(text),
             )
         )
     return rfcs, errors
 
 
 _ID_RE = re.compile(r"^RFC-\d{4}$")
+
+
+def _marker_re(marker: str) -> re.Pattern[str]:
+    """Match a header that opens with ``marker``; the label may be bold (``✅ **Implemented**``)."""
+    emoji, label = map(re.escape, marker.split(" ", 1))
+    # (?!\w): the label ends where the marker's does — "🔨 Drafting" is not "🔨 Draft".
+    return re.compile(rf"{emoji} (?:{label}|\*\*{label}\*\*)(?!\w)")
+
+
+def _header_status_error(rfc: RFC) -> str | None:
+    """Say how an RFC's ``**Status**:`` header line disagrees with its front-matter."""
+    marker = _STATUS_MARKER.get(rfc.status)
+    if marker is None:
+        return None  # no status to compare, or an invalid one validate() reports
+    loc = rfc.path.name
+    header = rfc.header_status
+    if header is None:
+        return (
+            f"{loc}: missing '**Status**:' header line (front-matter status"
+            f" '{rfc.status}' needs one starting with '{marker}')"
+        )
+    if _marker_re(marker).match(header):
+        return None
+    shown = header if len(header) <= 60 else header[:59] + "…"
+    error = (
+        f"{loc}: header '**Status**: {shown}' disagrees with front-matter status"
+        f" '{rfc.status}' (the header must start with '{marker}')"
+    )
+    bare = _marker_re(marker.replace(_VARIATION_SELECTOR, ""))
+    if bare.match(header.replace(_VARIATION_SELECTOR, "")):
+        error += " — they differ only by U+FE0F, the invisible emoji variation selector"
+    return error
 
 
 def validate(rfcs: list[RFC]) -> list[str]:
@@ -227,6 +285,9 @@ def validate(rfcs: list[RFC]) -> list[str]:
             errors.append(
                 f"{loc}: invalid status '{rfc.status}' (allowed: {sorted(ALLOWED_STATUS)})"
             )
+        header_error = _header_status_error(rfc)
+        if header_error:
+            errors.append(header_error)
         if rfc.created and not is_iso_date(rfc.created):
             errors.append(f"{loc}: invalid 'created' date '{rfc.created}' (expected YYYY-MM-DD)")
         if rfc.superseded_by and rfc.superseded_by not in known_ids:

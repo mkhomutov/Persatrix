@@ -41,7 +41,7 @@ Required, it rides inside one of the six required jobs.
 | MIT-candidate primitives never import BUSL code (RFC 0045 §B) | RFC 0045; CONTRIBUTING | `make imports-check` (import-linter) | Required (`Python`) |
 | Rust builds; clippy clean; `cargo test` passes (incl. lockstep guards) | instructions | `cargo build`, `cargo clippy -- -D warnings`, `cargo test` | Required (`Rust`) |
 | YAML configs validate against `schemas/` | CLAUDE.md; instructions | `python agents/validate.py config/` | Required (`Validate configs`) |
-| RFC and issue INDEX files fresh; front-matter valid | rfcs/README, issues/README | `make rfcs-check issues-check` | Required (`Validate configs`) |
+| RFC and issue INDEX files fresh; front-matter valid; each RFC's `**Status**` header line agrees with its front-matter | rfcs/README, issues/README | `make rfcs-check issues-check` | Required (`Validate configs`) |
 | PR title is a Conventional Commit | CONTRIBUTING; BRANCHING | `commitlint.yml` | Required (`Validate PR Title`) |
 | Web console unit tests pass; bundle builds; orchestrator compiles with it | web-console guide | `make ui-test`, `make ui`, `go build` | CI-advisory |
 | No `{@html}` under `web/src` (session-riding XSS) | RFC 0039 amendment §A3 | `make ui-html-check` | CI-advisory |
@@ -87,7 +87,7 @@ Required, it rides inside one of the six required jobs.
 | Glossary terms mandatory; new terms added in the same change | CLAUDE.md §Terminology | review | Convention |
 | Plain English; lead with the point | documentation-guide §Writing Style | review | Convention |
 | Status hygiene before and after every task | ROADMAP §How to Update; CLAUDE.md | review | Convention |
-| Every RFC has front-matter, required sections, ToC | rfcs/README checklist | `rfcs-check` (front-matter only) | Required for front-matter; Convention for sections |
+| Every RFC has front-matter, required sections, ToC | rfcs/README checklist | `rfcs-check` (front-matter and its `**Status**` header line only) | Required for front-matter; Convention for sections |
 
 ## Process
 
