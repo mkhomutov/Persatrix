@@ -1,18 +1,27 @@
 # Component Architecture
 
-Package-level view across the three languages. Shipped packages are shown
-as solid boxes; intentional TODO stubs reserved for later phases are shown
-with dashed borders.
+Package-level view across the three languages, plus the web console's
+JavaScript. Shipped packages are shown as solid boxes; intentional TODO stubs
+reserved for later phases are shown with dashed borders.
 
 ```mermaid
 graph TB
     subgraph Rust["Rust CLI — cli/"]
         direction TB
         MAIN["main.rs"]
-        CMD["commands/<br/>agent · workflow · logs · validate · chat"]
+        CMD["commands/<br/>agent · workflow · logs · validate · chat<br/>channel · session · interactions · auth"]
         TYPES["types.rs"]
         MAIN --> CMD
         CMD --> TYPES
+    end
+
+    subgraph Web["Web console — web/ (Svelte)"]
+        direction TB
+        WAPP["App.svelte<br/>boot · sign-in · tabs"]
+        WPANELS["panels/<br/>conversation panel · login · settings"]
+        WLIB["lib/<br/>api.js · auth.js · bootstrap.js"]
+        WAPP --> WPANELS
+        WPANELS --> WLIB
     end
 
     subgraph Go["Go orchestrator — cmd/orchestrator + internal/"]
@@ -28,6 +37,8 @@ graph TB
         TELE["observability/<br/>logs · metrics · traces"]
         CHAN["channels/"]
         SEC["security/"]
+        ACCOUNTS["accounts/<br/>accounts.db · password hashes · sign-in sessions"]
+        UI["ui/<br/>embedded web console files"]
 
         A2A["a2a/ (stub)"]:::stub
         BRIDGES["bridges/ (stub)"]:::stub
@@ -40,6 +51,8 @@ graph TB
         SERVER --> STATE
         SERVER --> COST
         SERVER -->|chat dispatch| EXECUTOR
+        SERVER -->|sign-in| ACCOUNTS
+        SERVER -->|serves /ui/| UI
         PLANNER --> SCHEDULER
         SCHEDULER --> EXECUTOR
         SCHEDULER --> COST
@@ -92,6 +105,7 @@ graph TB
     end
 
     Rust -.->|REST/JSON| Go
+    Web -.->|REST/JSON| Go
     Go -.->|gRPC| Py
 
     classDef stub stroke-dasharray: 4 4,fill:#f7f7f7,color:#666
@@ -105,8 +119,12 @@ graph TB
 | v0.2 | `cost/`, `agents/task_agent.py`, `agents/persona*`, `agents/persona_runtime/`, `agents/memory/` |
 | v0.2.1 | `agents/participant.py` (`UserParticipant`, `UserStore`), `internal/server/chat_handler.go` (`POST /api/v1/agents/{id}/chat`), `internal/executor/` chat path (`SendChatMessage` gRPC), `cli/src/commands/chat` (`persatrix chat`) |
 | v0.2.3 | `internal/observability/` (RFC 0018 + RFC 0019 — telemetry: structured logs, metrics and traces; renamed from `internal/telemetry/`, which had OpenTelemetry tracing since v0.2) |
-| v0.3.0 | `internal/channels/` (RFC 0011 — internal agent-to-agent messaging), `internal/security/` (RFC 0009 Phases 1–2 — redactor, audit log, rate limiter), `agents/sub_agents/` (RFC 0008 — delegation contract and result merge) |
+| v0.3.0 | `internal/channels/` (RFC 0011 — internal agent-to-agent messaging), `internal/security/` (RFC 0009 Phases 1–2 — redactor, audit log, rate limiter), `agents/sub_agents/` (RFC 0008 — delegation contract and result merge), `cli/src/commands/channel` (`persatrix channel`) |
 | v0.3.2 | `internal/wallet/` (RFC 0023 — LLM-call leasing `WalletService`; Phases 1–6 implemented: enforcement + TTL reaper + per-agent active-lease cap composed over `cost/`, with the Python `WalletClient` wired into all five LLM-call origins — workflow task, chat, autonomous TICK, sub-agent, channel-message) |
+| v0.3.5 | `cli/src/commands/session` (`persatrix session` — RFC 0031 persona-memory sessions) |
+| v0.3.6 | `web/` and `internal/ui/` (RFC 0048 — the web console, compiled into the orchestrator and served at `/ui/` when it starts with `--enable-ui`) |
+| v0.3.8 | `cli/src/commands/interactions` (`persatrix agent interactions` — RFC 0020 summaries of closed interactions) |
+| v0.3.12 | `internal/accounts/` (RFC 0039 — accounts, password hashes and sign-in sessions in `accounts.db`), `cli/src/commands/auth` (`persatrix login` · `logout` · `whoami`) |
 | v0.3+ (stubs) | `a2a/`, `bridges/`, `resilience/`, `mesh/`, `mcp/`, `protocols/`, `agents/tools/mcp_bridge.py` |
 
 The labeled `SERVER -->|chat dispatch| EXECUTOR` edge represents the chat
@@ -138,6 +156,22 @@ task → PR 3 #385, chat → PR 4 #387, autonomous TICK + sub-agent → PR 5
 #388, channel-message → PR 6 #389); the chat-error publish path for
 budget denial + RESOURCE_EXHAUSTED is finalised by [#395](https://github.com/mkhomutov/Persatrix/pull/395) / [#396](https://github.com/mkhomutov/Persatrix/pull/396) / [#398](https://github.com/mkhomutov/Persatrix/pull/398).
 
+The `SERVER -->|sign-in| ACCOUNTS` edge is the REST server checking passwords
+and sign-in sessions against `accounts.db`
+([RFC 0039](../rfcs/0039-user-accounts-authentication.md)); auth ships
+switched off, so the server only turns callers away once
+`config/security.yaml` sets `auth.mode: enabled` ([auth guide](../guides/auth.md)).
+
+The `SERVER -->|serves /ui/| UI` edge is how the web console reaches a
+browser: `make ui` builds `web/` into `internal/ui/assets/`, those files are
+compiled into the orchestrator binary, and the server hands them out at `/ui/`
+only when the orchestrator starts with `--enable-ui`, which is off by default
+([web console guide](../guides/web-console.md)).
+
+The `Web -.->|REST/JSON| Go` edge is the console, once loaded in the browser,
+calling the same REST API as the CLI; it polls for new messages rather than
+streaming them.
+
 The `EXECUTOR -. planned .-> MCPG` and `EXECUTOR -. planned .-> PROTOS` edges
 are dashed, and those two boxes and `mcp_bridge.py` are stubs, because none of
 them is built. The [MCP bridge](../ai-glossary.md#mcp-bridge) is planned, and
@@ -148,6 +182,21 @@ lists both among the
 The stub packages are placeholders with `TODO` comments that compile but do not
 implement behaviour. They are intentional — removing them is a policy violation
 per [CLAUDE.md](../../CLAUDE.md).
+
+## Packages without a box
+
+Three Go packages under `internal/` hold real code but have no box on purpose:
+
+- `internal/generated/` — code generated from the `.proto` files; see the
+  import rules below.
+- `internal/defaults/` (since v0.2.0) — shared default limits, such as how many
+  LLM calls one workflow step may make and how long it may run. It holds
+  constants only, which `scheduler/`, `executor/` and `channels/` read.
+- `internal/archpolicy/` (since v0.3.10) — a licence check that runs as a Go
+  test. It fails if a package meant to be published on its own under the MIT
+  licence imports orchestrator code that stays under the stricter BUSL licence
+  ([RFC 0045](../rfcs/0045-open-core-extraction-policy.md)). Nothing imports it
+  at run time; today it guards one package, `internal/generated/walletpb`.
 
 ## Package import rules
 
