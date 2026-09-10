@@ -64,8 +64,8 @@ make generate-persona-nickname COUNT=3 SEED=42
 
 ### A worked example
 
-The repository ships with `ember-owl`, a "VP of Engineering" persona
-([config/agents.yaml:133–192](../../config/agents.yaml#L133-L192)):
+The repository ships with `ember-owl`, a "VP of Engineering" persona (the
+`ember-owl` entry in [config/agents.yaml](../../config/agents.yaml)):
 
 ```yaml
 - id: "ember-owl"
@@ -120,6 +120,13 @@ The repository ships with `ember-owl`, a "VP of Engineering" persona
       type: "reports_to_me"
       trust_level: 0.9
 ```
+
+Neither tool on that `tools` line works for ember-owl yet. `mcp:github` gives
+it no tools: the [MCP bridge](../ai-glossary.md#mcp-bridge) is planned but not
+built. `file_read` is offered to the model, but every call returns
+"Permission denied: filesystem:read": permissions are deny-by-default, and
+ember-owl's `permissions` block (not shown above) grants memory and channel
+recall, not `filesystem` access.
 
 Launch it once the orchestrator is running:
 
