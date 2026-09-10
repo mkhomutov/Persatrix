@@ -369,6 +369,7 @@ _LIMIT_CONFIG: dict = {
     "model": "test-model",
     "role": "Limit test role",
 }
+_LIMIT_TOOL_CONFIG: dict = {**_LIMIT_CONFIG, "tools": ["noop", "noop_explicit"]}
 
 
 class TestExecutionLimitValidation:
@@ -445,7 +446,7 @@ class TestExecutionLimitValidation:
         # driven by max_llm_calls, not by exhausted mock responses.
         responses = [tool_response] * 10
         client = _make_client(responses=responses)
-        agent = TaskAgent(agent_id="test-agent", config=_LIMIT_CONFIG, llm_client=client)
+        agent = TaskAgent(agent_id="test-agent", config=_LIMIT_TOOL_CONFIG, llm_client=client)
         output = await agent.handle(_task_with_config(TaskInputConfig(max_llm_calls=3)))
         assert output.status == TaskStatus.FAILED
         assert "Max LLM call iterations exceeded" in output.result
@@ -476,8 +477,8 @@ class TestExecutionLimitValidation:
     async def test_loop_exhaustion_uses_default_max_llm_calls(self):
         """With max_llm_calls=0 and LLM always returning TOOL_USE, loop runs
         DEFAULT_MAX_LLM_CALLS times."""
-        # Register a noop tool so the test doesn't depend on _execute_tools'
-        # graceful handling of unknown tools (which returns an error result).
+        # Register (and list, in _LIMIT_TOOL_CONFIG) a noop tool so the test
+        # doesn't depend on _execute_tools refusing an unknown or unlisted tool.
         @tool(name="noop", description="No-op tool for loop exhaustion test")
         async def noop_tool() -> ToolResult:
             return ToolResult(success=True, data="no-op")
@@ -491,7 +492,7 @@ class TestExecutionLimitValidation:
         # Provide enough responses for DEFAULT_MAX_LLM_CALLS iterations.
         responses = [tool_response] * DEFAULT_MAX_LLM_CALLS
         client = _make_client(responses=responses)
-        agent = TaskAgent(agent_id="test-agent", config=_LIMIT_CONFIG, llm_client=client)
+        agent = TaskAgent(agent_id="test-agent", config=_LIMIT_TOOL_CONFIG, llm_client=client)
         output = await agent.handle(_task_with_config(TaskInputConfig(max_llm_calls=0)))
         assert output.status == TaskStatus.FAILED
         assert "Max LLM call iterations exceeded" in output.result
