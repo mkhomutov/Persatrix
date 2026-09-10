@@ -15,7 +15,7 @@ phase-prefixed copies.
 
 | Diagram | Scope |
 |---------|-------|
-| [system-overview.md](system-overview.md) | Top-level runtime context: CLI ↔ Orchestrator ↔ Agents, external LLM providers, MCP servers, OTEL, SQLite; includes human-user chat path (`persatrix chat` → `POST /api/v1/agents/{id}/chat` → `SendChatMessage` gRPC) |
+| [system-overview.md](system-overview.md) | Top-level runtime context: CLI ↔ Orchestrator ↔ Agents, external LLM providers, MCP servers (planned), OTEL, SQLite; includes human-user chat path (`persatrix chat` → `POST /api/v1/agents/{id}/chat` → `SendChatMessage` gRPC) |
 | [component-architecture.md](component-architecture.md) | Package-level layout across Rust, Go, and Python; shipped modules (including v0.2.1 chat surface: `agents/participant.py`, chat handler in `internal/server/`, `SendChatMessage` in `internal/executor/`, `persatrix chat` CLI command) vs stubs reserved for later phases |
 | [workflow-execution.md](workflow-execution.md) | Two sequences: (1) end-to-end workflow run (CLI → REST → planner → scheduler → executor → agent → LLM, with cost/budget accounting); (2) chat-message path (CLI → `POST /chat` → chat executor → `SendChatMessage` gRPC → PersonaAgent → memory → LLM → reply) |
 | [persona-runtime.md](persona-runtime.md) | Persona agent lifecycle: event-driven dispatch and autonomous tick loop, lock protocol, action-loop termination |

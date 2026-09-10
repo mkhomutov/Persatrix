@@ -121,6 +121,9 @@ The repository ships with `ember-owl`, a "VP of Engineering" persona
       trust_level: 0.9
 ```
 
+`mcp:github` has no effect yet: the [MCP bridge](../ai-glossary.md#mcp-bridge)
+is planned but not built, so ember-owl gets no GitHub tools.
+
 Launch it once the orchestrator is running:
 
 ```bash

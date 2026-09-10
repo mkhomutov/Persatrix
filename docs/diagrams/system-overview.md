@@ -12,7 +12,7 @@ graph LR
         Operator["Operator"]
         HumanUser["Human user"]
         LLM["LLM providers<br/>Anthropic · OpenAI · Gemini · watsonx"]
-        MCP["MCP servers<br/>stdio / HTTP"]
+        MCP["MCP servers (planned)<br/>stdio / HTTP"]
         OTEL["OTEL collector<br/>Jaeger / Tempo"]
     end
 
@@ -77,7 +77,7 @@ graph LR
 
     TASK -->|HTTPS| LLM
     PERS -->|HTTPS| LLM
-    TOOLS -->|stdio/HTTP| MCP
+    TOOLS -. planned .-> MCP
     Orchestrator -.OTEL spans.-> OTEL
     Agents -.OTEL spans.-> OTEL
 ```
@@ -89,8 +89,9 @@ graph LR
 - **Orchestrator ↔ Agents**: gRPC/protobuf (`proto/task.proto`). The
   orchestrator never calls LLMs directly. v0.3.0 adds
   `ReceiveChannelMessage` for channel fan-out.
-- **Agents ↔ External**: LLM providers (HTTPS) and MCP servers (stdio or HTTP).
-  Both are initiated by the agent runtime, never by the orchestrator.
+- **Agents ↔ External**: LLM providers over HTTPS, always called by the agent
+  runtime, never by the orchestrator. MCP servers (stdio or HTTP) are planned
+  but not connected yet — see the note below.
 - **Agent → Orchestrator (publish)**: a persona's `SEND_CHANNEL_MESSAGE`
   action publishes back over REST (`POST /api/v1/channels/{id}/messages`)
   rather than calling a Go function in-process — the same wire surface
@@ -132,6 +133,11 @@ channels surface accepts arbitrary participant ids that satisfy
 `validate_participant_id` without persisting them as users either. Wiring the
 participant store into both paths is tracked as a v0.3.x follow-up; the
 diagram keeps the nodes visible so the architectural intent is preserved.
+
+The `TOOLS -. planned .-> MCP` edge is dashed because the
+[MCP bridge](../ai-glossary.md#mcp-bridge) is not built yet:
+`agents/tools/mcp_bridge.py` and `internal/mcp/` are TODO stubs, so no agent
+reaches an MCP server today.
 
 See [component-architecture.md](component-architecture.md) for the module-level
 view of each component.

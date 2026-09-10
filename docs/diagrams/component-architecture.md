@@ -26,7 +26,6 @@ graph TB
         COST["cost/<br/>tokens · cache · reporter"]
         WALLET["wallet/<br/>LLM-call leasing"]
         TELE["telemetry/<br/>OTEL"]
-        MCPG["mcp/"]
         PROTOS["protocols/"]
         CHAN["channels/"]
         SEC["security/"]
@@ -35,6 +34,7 @@ graph TB
         BRIDGES["bridges/ (stub)"]:::stub
         RES["resilience/ (stub)"]:::stub
         MESH["mesh/ (stub)"]:::stub
+        MCPG["mcp/ (stub)"]:::stub
 
         SERVER --> PLANNER
         SERVER --> STATE
@@ -46,7 +46,7 @@ graph TB
         WALLET --> COST
         EXECUTOR --> REGISTRY
         EXECUTOR --> PROTOS
-        EXECUTOR --> MCPG
+        EXECUTOR -. planned .-> MCPG
     end
 
     subgraph Py["Python agents — agents/ (persatrix_agents)"]
@@ -74,7 +74,7 @@ graph TB
             TBI["builtin.py"]
             TPERM["permissions.py"]
             TSB["sandbox.py"]
-            TMCP["mcp_bridge.py"]
+            TMCP["mcp_bridge.py (stub)"]:::stub
         end
 
         SRV --> BASE
@@ -101,12 +101,12 @@ graph TB
 
 | Phase | Shipped components |
 |-------|--------------------|
-| v0.1 | `planner/`, `scheduler/`, `executor/`, `registry/`, `state/`, `server/`, `mcp/`, `protocols/`, `agents/task_agent.py`, `agents/tools/` |
+| v0.1 | `planner/`, `scheduler/`, `executor/`, `registry/`, `state/`, `server/`, `protocols/`, `agents/task_agent.py`, `agents/tools/` |
 | v0.2 | `cost/`, `telemetry/`, `agents/persona*`, `agents/persona_runtime/`, `agents/memory/`, `agents/sub_agents/` |
 | v0.2.1 | `agents/participant.py` (`UserParticipant`, `UserStore`), `internal/server/chat_handler.go` (`POST /api/v1/agents/{id}/chat`), `internal/executor/` chat path (`SendChatMessage` gRPC), `cli/src/commands/chat` (`persatrix chat`) |
 | v0.3.0 | `internal/channels/` (RFC 0011 — internal agent-to-agent messaging), `internal/security/` (RFC 0009 Phases 1–2 — redactor, audit log, rate limiter) |
 | v0.3.2 | `internal/wallet/` (RFC 0023 — LLM-call leasing `WalletService`; Phases 1–6 implemented: enforcement + TTL reaper + per-agent active-lease cap composed over `cost/`, with the Python `WalletClient` wired into all five LLM-call origins — workflow task, chat, autonomous TICK, sub-agent, channel-message) |
-| v0.3+ (stubs) | `a2a/`, `bridges/`, `resilience/`, `mesh/` |
+| v0.3+ (stubs) | `a2a/`, `bridges/`, `resilience/`, `mesh/`, `mcp/`, `agents/tools/mcp_bridge.py` |
 
 The labeled `SERVER -->|chat dispatch| EXECUTOR` edge represents the chat
 path (`POST /api/v1/agents/{id}/chat` → `GRPCChatExecutor.SendChatMessage`);
@@ -129,6 +129,10 @@ Python `WalletClient` is wired into all five LLM-call origins (workflow
 task → PR 3 #385, chat → PR 4 #387, autonomous TICK + sub-agent → PR 5
 #388, channel-message → PR 6 #389); the chat-error publish path for
 budget denial + RESOURCE_EXHAUSTED is finalised by [#395](https://github.com/mkhomutov/Persatrix/pull/395) / [#396](https://github.com/mkhomutov/Persatrix/pull/396) / [#398](https://github.com/mkhomutov/Persatrix/pull/398).
+
+The `EXECUTOR -. planned .-> MCPG` edge is dashed, and both MCP boxes are
+stubs, because the [MCP bridge](../ai-glossary.md#mcp-bridge) is not built:
+nothing connects to an MCP server yet.
 
 The stub packages are placeholders with `TODO` comments that compile but do not
 implement behaviour. They are intentional — removing them is a policy violation

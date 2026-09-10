@@ -192,20 +192,28 @@ Process vocabulary (scope lock, cuttable, live arc, finding, …) lives in the
   "adapter" (when meaning channel bridge), "integration"
 - **Definition:** A v0.5.0 component that connects an internal channel to an
   external service (Slack, Discord, email, Telegram). Always qualified as
-  "channel bridge" to disambiguate from **MCP Bridge** (a separate, existing
-  concept — see below).
+  "channel bridge" to disambiguate from **MCP Bridge** (a separate component,
+  also not built yet — see below).
 - **Example:** "The Slack channel bridge mirrors `#ops` into a Slack workspace."
 
 ### MCP Bridge
 - **Aliases:** —
 - **Disallowed:** "bridge" (unqualified, when meaning the MCP integration);
   "MCP connector"
-- **Definition:** The Python component in
-  [`agents/tools/mcp_bridge.py`](../agents/tools/mcp_bridge.py) that connects to
-  external Model Context Protocol (MCP) servers and exposes their tools to
-  agents over stdio or SSE. Distinct from **Channel Bridge** above. Configured
-  via `config/mcp-servers.yaml`.
-- **Example:** "The MCP bridge surfaces filesystem tools from a stdio MCP server."
+- **Definition:** 📋 **Planned**, not yet implemented. The component that will
+  let agents use tools from external Model Context Protocol (MCP) servers.
+  Nothing connects to an MCP server today:
+  [`agents/tools/mcp_bridge.py`](../agents/tools/mcp_bridge.py) and
+  [`internal/mcp/mcp.go`](../internal/mcp/mcp.go) are placeholders with TODO
+  notes and no working code, and an `mcp:` entry in an agent's `tools` list
+  gives that agent no tools. It will be configured via
+  `config/mcp-servers.yaml`, which nothing reads yet. The design is in
+  [orchestration spec §5.2](ai-agents-orchestration-spec.md#52-mcp-model-context-protocol-support),
+  and ROADMAP lists it among the
+  [v0.4.0 planned components](../ROADMAP.md#planned-components-v040). Distinct
+  from **Channel Bridge** above.
+- **Example:** "When the MCP bridge ships, agents that list `mcp:github` will
+  get the GitHub MCP server's tools; today they get none."
 
 ### Message Bus
 - **Aliases:** —

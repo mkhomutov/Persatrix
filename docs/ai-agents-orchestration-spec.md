@@ -318,6 +318,10 @@ Tools exposed by external MCP-compatible servers (see 5.2).
 
 ### 5.2 MCP (Model Context Protocol) Support
 
+> **Status:** 📋 **Planned** — not yet implemented. This section is the design;
+> nothing connects to an MCP server today. See
+> [MCP Bridge](ai-glossary.md#mcp-bridge) in the glossary for what exists.
+
 The framework acts as an **MCP client** — it connects to external MCP servers and exposes their tools to agents. This is a first-class integration, not a plugin.
 
 #### How It Works
@@ -689,7 +693,7 @@ external_input:
 | LLM provider abstraction | Support Anthropic + OpenAI via adapter pattern with fallback chains |
 | Built-in tools           | file_read, file_write, shell_exec, http_request      |
 | Custom tools             | User-defined async Python tools with `@tool` decorator |
-| MCP client support       | Connect to stdio/SSE MCP servers, expose tools to agents |
+| MCP client support       | Connect to stdio/SSE MCP servers, expose tools to agents — 📋 **Planned**: did not ship in v0.1 and is not built yet ([§5.2](#52-mcp-model-context-protocol-support)) |
 | Permission system        | Per-agent tool/filesystem/network allowlists (deny-by-default) |
 | Resource limits          | Max LLM calls, tokens, execution time per task       |
 | Action rate limiting     | Per-agent messages/minute, tool calls/minute caps    |
