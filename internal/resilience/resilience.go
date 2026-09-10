@@ -1,5 +1,10 @@
-// Package resilience implements retry logic, fallback chains, and a
-// dead-letter queue for failed model calls.
+// Package resilience is a placeholder for planned failure handling:
+// retrying failed model calls, falling back to another model, and a
+// dead-letter queue that keeps tasks that failed for good so an operator
+// can inspect them. Nothing is implemented yet: the TODOs below are the
+// plan, and ROADMAP.md lists the package as a TODO stub with no target
+// release. Sending a task to an agent is already retried, by a loop inside
+// internal/executor.
 //
 // Note on CircuitBreaker (PR #244 round-2 review M-03): the
 // per-agent, configurable-threshold circuit breaker for the
