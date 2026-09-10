@@ -205,7 +205,7 @@ func main() {
 	reg := registry.NewInMemoryRegistry(logger)
 	logger.Info("agent registry initialized", zap.String("type", "in-memory"))
 
-	// 7. Initialize tool system + MCP client
+	// 7. MCP client: not implemented yet (internal/mcp is a placeholder). Tools run in the Python agents.
 
 	// 8. Initialize workflow planner
 	plan := planner.NewYAMLPlanner(logger)
