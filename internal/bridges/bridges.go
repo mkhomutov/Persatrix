@@ -1,4 +1,9 @@
-// Package bridges implements external communication bridges (v0.2+).
+// Package bridges is a placeholder for planned channel bridges, which will
+// connect a Persatrix channel to an outside service such as Slack, Discord,
+// Telegram, email or a generic webhook. Nothing is implemented yet: the
+// TODOs below are the plan, sketched in docs/persatrix-extension-spec.md
+// §E5.4. RFC 0011 built internal channels and deferred its external part,
+// the channel bridges, to a later release; ROADMAP.md tracks the status.
 package bridges
 
 // TODO: Implement BridgeManager (lifecycle, routing, approval)

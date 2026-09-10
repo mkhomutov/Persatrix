@@ -1,5 +1,5 @@
 ---
-description: "Implement a TODO stub for a specific phase. Use when: filling in a v0.1/v0.2/v0.3 placeholder, implementing a planned feature, replacing NotImplementedError with real logic."
+description: "Implement a TODO stub for a specific phase. Use when: filling in a placeholder that ROADMAP.md schedules for the release in progress, implementing a planned feature, replacing NotImplementedError with real logic."
 ---
 
 # Implement TODO Stub

@@ -2,7 +2,7 @@
 name = "persatrix"
 version = "0.3.15"
 edition = "2021"
-description = "Persatrix CLI — manage agents, workflows, and the mesh"
+description = "Persatrix CLI — manage agents, workflows, and channels"
 license = "BUSL-1.1"
 
 [dependencies]
