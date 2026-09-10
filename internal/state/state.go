@@ -1,4 +1,16 @@
-// Package state manages execution state, checkpoints, and persistence.
+// Package state keeps track of workflow runs: each run's status, inputs,
+// errors and timing, and each step's result and cost.
+//
+// Built: the [Store] interface and one implementation, [InMemoryStore],
+// which the orchestrator uses. Runs are kept in memory only, so a restart
+// loses them. (Channels, user accounts and agent memory are saved to
+// SQLite, but by other parts of Persatrix, not through this package.)
+//
+// Planned, as the TODOs at the end of this file: a SQLite-backed Store that
+// survives a restart, periodic checkpoints (snapshots that can be restored),
+// and export and import of saved state. No RFC covers this yet, and
+// ROADMAP.md gives it no target release; docs/ai-agents-orchestration-spec.md
+// §12.8 sketches the design.
 package state
 
 import (
@@ -85,9 +97,10 @@ type StepState struct {
 }
 
 // Store defines the interface for workflow run state persistence.
-// All methods accept context.Context for forward compatibility with
-// persistent backends (SQLite in v0.2). In-memory implementations
-// may ignore the context parameter.
+// All methods accept context.Context for forward compatibility with a
+// persistent backend, such as the planned SQLiteStore (see the TODOs at
+// the end of this file). In-memory implementations may ignore the context
+// parameter.
 type Store interface {
 	CreateRun(ctx context.Context, run *WorkflowRun) error
 	GetRun(ctx context.Context, runID string) (*WorkflowRun, error)
@@ -333,6 +346,6 @@ func (s RunStatus) String() string {
 	}
 }
 
-// TODO: Implement SQLiteStore (v0.2+)
+// TODO: Implement SQLiteStore, a Store that keeps runs across restarts
 // TODO: Implement checkpoint/restore
 // TODO: Implement export/import
