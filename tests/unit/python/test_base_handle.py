@@ -65,7 +65,12 @@ def _make_agent(
         ]
     )
     client = LLMClient(mock_provider)
-    agent_config = config or {"model": "test-model", "max_llm_calls": 10, "max_tokens": 4096}
+    # ISSUE-0151: a task agent runs only the tools on its list, so the default
+    # agent lists every tool the loop tests below register.
+    agent_config = config or {
+        "model": "test-model", "max_llm_calls": 10, "max_tokens": 4096,
+        "tools": ["echo_tool", "restricted_tool", "failing_tool", "err_tool", "acc_tool"],
+    }
     return _TestableAgent(agent_id="test-agent", config=agent_config, llm_client=client)
 
 
@@ -353,90 +358,6 @@ class TestTokenAccumulation:
         assert output.metadata["tool_calls"] == "2"
 
 
-# ─── _execute_tools Tests ───────────────────────────────────
-
-
-class TestExecuteTools:
-    async def test_successful_tool(self):
-        @tool(name="good_tool", description="Works")
-        async def good_tool(x: str) -> ToolResult:
-            return ToolResult(success=True, data=f"result: {x}")
-
-        agent = _TestableAgent(agent_id="t", config={})
-        results = await agent._execute_tools(
-            [ToolCall(id="c1", name="good_tool", input={"x": "hello"})]
-        )
-        assert len(results) == 1
-        assert results[0].content == "result: hello"
-        assert results[0].is_error is False
-
-    async def test_failed_tool(self):
-        @tool(name="bad_tool", description="Error")
-        async def bad_tool() -> ToolResult:
-            return ToolResult(success=False, error="something broke")
-
-        agent = _TestableAgent(agent_id="t", config={})
-        results = await agent._execute_tools(
-            [ToolCall(id="c1", name="bad_tool", input={})]
-        )
-        assert results[0].content == "something broke"
-        assert results[0].is_error is True
-
-    async def test_unknown_tool(self):
-        agent = _TestableAgent(agent_id="t", config={})
-        results = await agent._execute_tools(
-            [ToolCall(id="c1", name="nonexistent", input={})]
-        )
-        assert results[0].is_error is True
-        assert "Unknown tool" in results[0].content
-
-    async def test_permission_error_caught(self):
-        @tool(name="perm_tool", description="Perm check")
-        async def perm_tool() -> ToolResult:
-            raise PermissionError("denied")
-
-        agent = _TestableAgent(agent_id="t", config={})
-        results = await agent._execute_tools(
-            [ToolCall(id="c1", name="perm_tool", input={})]
-        )
-        assert results[0].is_error is True
-        assert "denied" in results[0].content
-
-    async def test_generic_exception_caught(self):
-        @tool(name="crash_tool", description="Crashes")
-        async def crash_tool() -> ToolResult:
-            raise ValueError("boom")
-
-        agent = _TestableAgent(agent_id="t", config={})
-        results = await agent._execute_tools(
-            [ToolCall(id="c1", name="crash_tool", input={})]
-        )
-        assert results[0].is_error is True
-        assert "ValueError" in results[0].content
-        assert "boom" in results[0].content
-
-    async def test_multiple_tools_sequential(self):
-        call_order: list[str] = []
-
-        @tool(name="tool_a", description="A")
-        async def tool_a() -> ToolResult:
-            call_order.append("a")
-            return ToolResult(success=True, data="a")
-
-        @tool(name="tool_b", description="B")
-        async def tool_b() -> ToolResult:
-            call_order.append("b")
-            return ToolResult(success=True, data="b")
-
-        agent = _TestableAgent(agent_id="t", config={})
-        results = await agent._execute_tools([
-            ToolCall(id="c1", name="tool_a", input={}),
-            ToolCall(id="c2", name="tool_b", input={}),
-        ])
-        assert len(results) == 2
-        assert call_order == ["a", "b"]
-
-
 # ─── Capabilities Property ──────────────────────────────────
 
 
@@ -453,34 +374,5 @@ class TestCapabilities:
         assert agent.capabilities == []
 
 
-# ─── Build Tool Definitions ─────────────────────────────────
-
-
-class TestBuildToolDefinitions:
-    def test_builds_from_registry(self):
-        @tool(name="my_tool", description="My tool")
-        async def my_tool(path: str) -> ToolResult:
-            return ToolResult(success=True, data="ok")
-
-        # S-12: agent must have the tool in its config to expose it
-        agent = _TestableAgent(agent_id="t", config={"tools": ["my_tool"]})
-        defs = agent._build_tool_definitions()
-        assert len(defs) == 1
-        assert defs[0]["name"] == "my_tool"
-        assert defs[0]["description"] == "My tool"
-        assert "path" in defs[0]["parameters"]["properties"]
-
-    def test_empty_registry(self):
-        agent = _TestableAgent(agent_id="t", config={})
-        defs = agent._build_tool_definitions()
-        assert defs == []
-
-    def test_empty_tools_config_exposes_nothing(self):
-        """S-12: empty tools list means no tools exposed."""
-        @tool(name="hidden_tool", description="Should not appear")
-        async def hidden_tool() -> ToolResult:
-            return ToolResult(success=True, data="ok")
-
-        agent = _TestableAgent(agent_id="t", config={"tools": []})
-        defs = agent._build_tool_definitions()
-        assert defs == []
+# `_execute_tools` and `_build_tool_definitions` tests live in
+# test_task_agent_tool_list.py, beside the ISSUE-0151 rule the two share.

@@ -38,12 +38,17 @@ def _clean_registry():
     clear_registry()
 
 
+# ISSUE-0151: a task agent runs only the tools on its ``tools`` list, so the
+# agent under test lists every tool this module stubs.
+_STUBBED_TOOLS = ["http_request", "file_read", "recall_channel_messages", "recall_notes"]
+
+
 def _make_agent() -> _TestableAgent:
     mock_provider = AsyncMock()
     mock_provider.format_tool_definitions = MagicMock(return_value=[])
     return _TestableAgent(
         agent_id="t",
-        config={"model": "test-model"},
+        config={"model": "test-model", "tools": _STUBBED_TOOLS},
         llm_client=LLMClient(mock_provider),
     )
 
