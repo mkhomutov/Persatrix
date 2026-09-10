@@ -1,7 +1,20 @@
 """
-Resource limits and sandboxing for tool execution.
+Sandbox rules for tool execution. Only path restriction is built so far.
 
-Enforces: max execution time, max output size, path restrictions.
+``PathValidator`` keeps ``file_read`` and ``file_write`` to the paths an
+agent's permissions allow.
+
+Planned, not built (RFC 0009 Phase 3): ``ResourceLimiter``, to cap the
+processor time and total running time of a ``shell_exec`` command, and
+``OutputSizeLimiter``, to cap the size of every tool's output (one limit,
+set per agent). They are the TODOs at the end of this file.
+
+Until they land, ``builtin.py`` applies fixed limits of its own, and only to
+some tools: ``MAX_TIMEOUT_SECONDS`` limits how long ``shell_exec`` may run,
+and ``MAX_OUTPUT_BYTES`` limits what ``file_read``, ``shell_exec`` (stdout
+and stderr separately) and ``http_request`` return. The other built-in
+tools, such as ``recall_notes`` and ``recall_channel_messages``, have no
+output limit yet.
 """
 
 import fnmatch
