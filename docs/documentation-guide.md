@@ -65,6 +65,9 @@ When updating:
 When updating:
 - Validate against JSON schemas in `schemas/`
 - Run `make validate` after changes
+- `config/mcp-servers.yaml` has no schema yet, so `make validate` skips it;
+  check it by hand. Nothing reads it until the
+  [MCP bridge](ai-glossary.md#mcp-bridge) ships.
 - Document permission changes carefully (deny-by-default model)
 
 ## Status Markers
