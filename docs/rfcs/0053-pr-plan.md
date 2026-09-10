@@ -182,7 +182,7 @@ Authored in the feature PRs, verified at release-prep:
 |----|-------|--------|--------|
 | 1 | 1 — Gemini (native) | `feature/v0311-rfc0053-gemini` | ✅ Merged |
 | 2 | 2 — watsonx.ai (native) | `feature/v0311-rfc0053-watsonx` | ✅ Merged |
-| 3 | 3 — extras + handoff + closeout | `feature/v0311-rfc0053-closeout` | 🔀 PR open |
+| 3 | 3 — extras + handoff + closeout | `feature/v0311-rfc0053-closeout` | ✅ Merged [#733](https://github.com/mkhomutov/Persatrix/pull/733) |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged
 

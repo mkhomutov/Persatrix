@@ -76,7 +76,7 @@ dependencies.
 | `scripts/checks/doc_links.py` | Relative links and `#anchors` in every tracked `.md` | CI (`Docs hygiene`) + pre-commit |
 | `scripts/checks/doc_status_markers.py` | Only the standard status markers | CI (`Docs hygiene`) + pre-commit |
 | `scripts/checks/doc_leaked_markup.py` | No tool-call markup fragments in docs | CI (`Docs hygiene`) + pre-commit |
-| `scripts/checks/plan_status.py` (`make plan-status-check`) | A 🔀 / ⬜ progress row whose linked PRs have all merged is stale; released versions' plans are skipped, 🔄 rows are not judged | CI (`Docs hygiene`) + pre-commit |
+| `scripts/checks/plan_status.py` (`make plan-status-check`) | A 🔀 / ⬜ progress row whose linked PRs have all merged is stale; a 🔀 row that links no PR — a PR's own row, written before its number existed — is stale once the squash-merge that wrote it is on `main` (`git blame --first-parent`); released versions' plans are skipped, 🔄 rows are not judged | CI (`Docs hygiene`) + pre-commit |
 | `scripts/checks/methodology_conformance.py` (`make conformance-check`) | The checkout has every document, tool, make target and Docs-hygiene step `docs/methodology/conformance.json` names; the manifest names the checker itself | CI (`Docs hygiene`) + pre-commit |
 | `scripts/checks/released.py` | Shared: which versions shipped (dated CHANGELOG headings) and which version-cycle docs are therefore frozen — used by the size checker and the plan-status checker | library |
 | `scripts/_git.py` | The one read-only git call (ISSUE-0135); new call sites use it | library |

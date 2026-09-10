@@ -1,7 +1,7 @@
 # ISSUE-0082 — PR Implementation Plan (Part 1 — Orchestrator Per-Request Session Emission)
 
 **Issue**: [ISSUE-0082](ISSUE-0082-orchestrator-per-request-session-principal-emission.md)
-**Status**: 📋 Ready
+**Status**: ✅ Complete — v0.3.5; PRs 1–3 merged ([#458](https://github.com/mkhomutov/Persatrix/pull/458), [#459](https://github.com/mkhomutov/Persatrix/pull/459), [#460](https://github.com/mkhomutov/Persatrix/pull/460))
 **Created**: 2026-05-29
 **Branch prefix**: `feature/v035-issue0082-`
 **Target**: `main`
@@ -189,7 +189,7 @@ No production code in PR 3 — test + docs only.
 |---|-------|--------|--------|-----------|--------|
 | 1 | Per-request session binding store | `feature/v035-issue0082-session-source` | ✅ Merged | [#458](https://github.com/mkhomutov/Persatrix/pull/458) | ✅ |
 | 2 | `persatrix-session` emission on the dispatch path | `feature/v035-issue0082-emit` | ✅ Merged | [#459](https://github.com/mkhomutov/Persatrix/pull/459) | ✅ |
-| 3 | End-to-end isolation test + closeout | `feature/v035-issue0082-e2e-close` | 🔀 PR open | — | — |
+| 3 | End-to-end isolation test + closeout | `feature/v035-issue0082-e2e-close` | ✅ Merged | [#460](https://github.com/mkhomutov/Persatrix/pull/460) | ✅ |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ⏭ Deferred
 
