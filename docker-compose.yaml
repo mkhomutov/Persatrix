@@ -212,9 +212,11 @@ services:
       # config/agents.yaml declares `tools: [file_read, mcp:github]` but has
       # NO `permissions.filesystem` block, so both PermissionGate.check
       # ("filesystem:read") and PathValidator (empty allow_read) deny every
-      # file_read at the tool layer. The read-only mount is defense-in-depth
-      # in case a compromised MCP server bypasses the tool sandbox with raw
-      # Python I/O, and matches the code-reviewer service's pattern. If a
+      # file_read at the tool layer, and `mcp:github` gives no tools because
+      # the MCP bridge is not built yet. The read-only mount is
+      # defense-in-depth in case a tool (such as a compromised MCP server,
+      # once the bridge ships) bypasses the tool sandbox with raw Python I/O,
+      # and matches the code-reviewer service's pattern. If a
       # future config grants the persona `permissions.filesystem.read`, this
       # mount is already in place; only flip to rw if write access is also
       # granted.
