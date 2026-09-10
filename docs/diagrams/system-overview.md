@@ -135,8 +135,7 @@ participant store into both paths is tracked as a v0.3.x follow-up; the
 diagram keeps the nodes visible so the architectural intent is preserved.
 
 The `TOOLS -. planned .-> MCP` edge is dashed because the
-[MCP bridge](../ai-glossary.md#mcp-bridge) is not built yet:
-`agents/tools/mcp_bridge.py` and `internal/mcp/` are TODO stubs, so no agent
+[MCP bridge](../ai-glossary.md#mcp-bridge) is planned, not built: no agent
 reaches an MCP server today.
 
 See [component-architecture.md](component-architecture.md) for the module-level

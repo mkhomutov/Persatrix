@@ -200,18 +200,15 @@ Process vocabulary (scope lock, cuttable, live arc, finding, …) lives in the
 - **Aliases:** —
 - **Disallowed:** "bridge" (unqualified, when meaning the MCP integration);
   "MCP connector"
-- **Definition:** 📋 **Planned**, not yet implemented. The component that will
-  let agents use tools from external Model Context Protocol (MCP) servers.
-  Nothing connects to an MCP server today:
-  [`agents/tools/mcp_bridge.py`](../agents/tools/mcp_bridge.py) and
-  [`internal/mcp/mcp.go`](../internal/mcp/mcp.go) are placeholders with TODO
-  notes and no working code, and an `mcp:` entry in an agent's `tools` list
-  gives that agent no tools. It will be configured via
-  `config/mcp-servers.yaml`, which nothing reads yet. The design is in
-  [orchestration spec §5.2](ai-agents-orchestration-spec.md#52-mcp-model-context-protocol-support),
-  and ROADMAP lists it among the
-  [v0.4.0 planned components](../ROADMAP.md#planned-components-v040). Distinct
-  from **Channel Bridge** above.
+- **Definition:** 📋 **Planned** — the component that will let agents use tools
+  from external Model Context Protocol (MCP) servers, configured in
+  `config/mcp-servers.yaml` (design:
+  [orchestration spec §5.2](ai-agents-orchestration-spec.md#52-mcp-model-context-protocol-support);
+  ROADMAP: [v0.4.0](../ROADMAP.md#planned-components-v040)). Nothing connects
+  to an MCP server today: [`agents/tools/mcp_bridge.py`](../agents/tools/mcp_bridge.py)
+  and [`internal/mcp/mcp.go`](../internal/mcp/mcp.go) are TODO placeholders,
+  nothing reads the config file, and an `mcp:` entry in an agent's `tools`
+  list gives that agent no tools. Distinct from **Channel Bridge** above.
 - **Example:** "When the MCP bridge ships, agents that list `mcp:github` will
   get the GitHub MCP server's tools; today they get none."
 
