@@ -538,6 +538,9 @@ plan-status-check: ## Fail if a plan's progress table says "PR open" for a PR th
 rfcs-check: ## Fail if docs/rfcs/INDEX.md is stale, front-matter is invalid, or an RFC's **Status** header line disagrees with it (CI)
 	$(PYTHON) scripts/rfcs.py --check
 
+roadmap-status-check: ## Fail if a ROADMAP Component Status row says less than the RFC it names (CI)
+	$(PYTHON) scripts/checks/roadmap_status.py
+
 # ─── Version ────────────────────────────────────────────
 release-sweep: ## Print the release checklist §1 gate sweep (dry run); RUN=1 executes, REPORT=path writes the table, ONLY=/SKIP= filter, OPTIONAL=1 adds the Docker smoke, TIMEOUT=secs
 	$(PYTHON) scripts/release/sweep.py $(if $(RUN),--execute,) $(if $(REPORT),--report $(REPORT),) $(if $(ONLY),--only "$(ONLY)",) $(if $(SKIP),--skip "$(SKIP)",) $(if $(OPTIONAL),--include-optional,) $(if $(TIMEOUT),--timeout $(TIMEOUT),)

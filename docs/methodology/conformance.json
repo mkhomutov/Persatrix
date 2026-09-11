@@ -95,6 +95,7 @@
     "docs/ai-glossary.md",
     "docs/v0.3.x-sequencing.md",
     "ROADMAP.md",
+    "scripts/checks/roadmap_status.py",
     "CLAUDE.md",
     ".github/copilot-instructions.md"
   ]
