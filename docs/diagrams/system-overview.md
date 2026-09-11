@@ -54,14 +54,16 @@ graph LR
     HumanUser -->|browser| WEB
     CLI -->|HTTP/JSON| REST
     WEB -->|HTTP/JSON| REST
-    REST --> PLAN
     REST --> STATE
+    REST --> PLAN
     REST --> COST
     REST -->|auth| ACCOUNTS
     REST -- "/api/v1/channels/**<br/>POST /api/v1/agents/{id}/chat (as a DM)" --> CHANROUTE
-    PLAN --> SCHED
+    SCHED -->|pending runs| STATE
     SCHED --> EXEC
     SCHED --> COST
+    %% Layout only: the invisible ~~~ link keeps the scheduler beside run state.
+    STATE ~~~ SCHED
     EXEC -->|gRPC ExecuteTask| AGSVC
     CHANROUTE -->|gRPC ReceiveChannelMessage| AGSVC
     EXEC --> REG
@@ -143,6 +145,14 @@ gRPC dispatch shapes visible — workflow (`ExecuteTask`) and channels
 and waits for the agent's reply there. The older `SendChatMessage` RPC is
 still defined, but nothing calls it
 ([ISSUE-0035](../issues/ISSUE-0035-chat-executor-dead-but-wired-cleanup.md)).
+
+A workflow run changes hands through run state. The REST API checks the
+workflow file with the planner and stores the run as pending; the scheduler
+checks `internal/state` every second, picks the run up
+(`SCHED -->|pending runs| STATE`) and sends its steps to the executor. Nothing
+calls the scheduler directly. This overview leaves out the scheduler's call to
+the planner, which works out each step's inputs;
+[component-architecture.md](component-architecture.md) draws it.
 
 The persona ↔ REST edge (`SEND_CHANNEL_MESSAGE`) is drawn back to the REST
 node rather than a direct in-process hop because that is the actual wire path
