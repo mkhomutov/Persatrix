@@ -2,13 +2,13 @@
 
 **RFC**: [0009-security-sandboxing.md](0009-security-sandboxing.md)
 **Created**: 2026-04-25
-**Last updated**: 2026-05-04
+**Last updated**: 2026-09-11
 **Branch prefix**: `feature/v030-rfc0009-`
 **Target**: `main`
 **Merge strategy**: Squash merge per [BRANCHING.md](../BRANCHING.md)
 **Master plan**: [v0.3.0-plan.md Phase 1 (combined plans PR)](../v0.3.0-plan.md#phase-1--author-the-six-rfc-pr-plans)
 
-> **Status**: ✅ Fleshed out — ready for PR 1 to open. Per-PR key implementation details and test plans are pinned. Open Questions 2, 3, 5, 6, 7, 8 from the RFC are resolved and reflected here; OQ 1 + 4 are deferred to v0.4.0 with the RFC itself.
+> **Status**: ✅ All v0.3.0 PRs merged — PRs 1 [#233](https://github.com/mkhomutov/Persatrix/pull/233), 1b [#234](https://github.com/mkhomutov/Persatrix/pull/234), 1c [#236](https://github.com/mkhomutov/Persatrix/pull/236), 2 [#244](https://github.com/mkhomutov/Persatrix/pull/244), 3 [#253](https://github.com/mkhomutov/Persatrix/pull/253) and 4 [#306](https://github.com/mkhomutov/Persatrix/pull/306). Per-PR key implementation details and test plans are pinned. Open Questions 2, 3, 5, 6, 7, 8 from the RFC are resolved and reflected here; OQ 1 + 4 are deferred to v0.4.0 with the RFC itself.
 
 ---
 
@@ -56,7 +56,7 @@ PR 4  (Review follow-ups + RFC partial-close — Phases 1–2 scope only)
 
 ## PR Sequence
 
-### PR 1: `feature/v030-rfc0009-audit-redactor` — Phase 1a: AuditLogger + SecretRedactor (package + unit tests)
+### PR 1: `feature/v030-rfc0009-audit-redactor` — Phase 1a: AuditLogger + SecretRedactor (package + unit tests) ✅ Merged as [#233](https://github.com/mkhomutov/Persatrix/pull/233)
 
 **Depends on**: Nothing.
 **Estimated size**: ~450–500 lines originally. **Split into PR 1 (this) + PR 1b** at implementation time per the contingency below: PR 1 ships the security package + unit tests only, PR 1b ships orchestrator wiring + integration tests + observability docs. The split keeps each PR comfortably below the 500-line cap and lets PR 1 land on a pure-additive package boundary with no orchestrator surface change.
@@ -163,7 +163,7 @@ All prior High/Critical findings (H-1, H-2, M-1, M-2, M-4, L-1, L-2, L-4, MF-1, 
 
 ---
 
-### PR 1b: `feature/v030-rfc0009-audit-wiring` — Phase 1a wiring
+### PR 1b: `feature/v030-rfc0009-audit-wiring` — Phase 1a wiring ✅ Merged as [#234](https://github.com/mkhomutov/Persatrix/pull/234)
 
 **Depends on**: PR 1.
 **Estimated size**: ~250–350 lines (handler + executor wiring + integration tests + docs).
@@ -214,7 +214,7 @@ Verdict: **APPROVE with minor follow-ups.** No blocking findings. Items dispatch
 
 ---
 
-### PR 1c: `feature/v030-rfc0009-audit-hardening` — Phase 1a hardening
+### PR 1c: `feature/v030-rfc0009-audit-hardening` — Phase 1a hardening ✅ Merged as [#236](https://github.com/mkhomutov/Persatrix/pull/236)
 
 **Depends on**: PR 1b. **Gates**: PR 3.
 **Estimated size**: ~250–400 lines.
@@ -447,7 +447,7 @@ Verdict: **APPROVE with all findings fixed inline.** 8 findings total (F1 High, 
 
 ---
 
-### PR 4: `feature/v030-rfc0009-close` — Review Follow-Ups + Phases 1–2 Close
+### PR 4: `feature/v030-rfc0009-close` — Review Follow-Ups + Phases 1–2 Close ✅ Merged as [#306](https://github.com/mkhomutov/Persatrix/pull/306)
 
 **Depends on**: PR 3.
 **Estimated size**: ~150–300 lines.
@@ -515,6 +515,6 @@ Track actual vs. estimated PR sizes; recalibrate the 1.7× factor for v0.4.0 (Ph
 | 1c | 250–400              | 751  (#236; net 719)       | 2.2×  |
 | 2  | 400–500              | 3071 (#244; net 3017)      | 6.7×  |
 | 3  | 450–500              | 2345 (#253; net 2319)      | 4.9×  |
-| 4  | 150–300              | ~725 (this PR; net ~660)   | 2.9×  |
+| 4  | 150–300              | 933  (#306; net 834)       | 3.7×  |
 
-**Calibration drift**: 4 of 6 PRs landed >2× estimate, with PR 2 (rate-limit middleware) at 6.7×. The 1.7× factor is structurally too low for v0.3.0 security work — `internal/security/` PRs are test-heavy (every behavioural change pins a regression test, often parametric) and the calibration assumed RFC-0017-style ratios where the package surface was already settled. **Recommendation for the v0.4.0 RFC 0009 PR plan (Phases 3–4)**: bump the working factor to 3.5× and split PRs more aggressively when they cross ~400 estimated lines. Re-validate after the first v0.4.0 PR merges.
+**Calibration drift**: all 6 PRs landed >2× estimate and 5 of 6 landed >3×, with PR 2 (rate-limit middleware) at 6.7×. The 1.7× factor is structurally too low for v0.3.0 security work — `internal/security/` PRs are test-heavy (every behavioural change pins a regression test, often parametric) and the calibration assumed RFC-0017-style ratios where the package surface was already settled. **Recommendation for the v0.4.0 RFC 0009 PR plan (Phases 3–4)**: bump the working factor to 3.5× and split PRs more aggressively when they cross ~400 estimated lines. Re-validate after the first v0.4.0 PR merges.
