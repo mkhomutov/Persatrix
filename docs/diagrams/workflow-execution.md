@@ -11,52 +11,107 @@ in the third diagram.
 
 ## Workflow execution sequence
 
+A workflow run changes hands through run state (`internal/state`), the
+orchestrator's record of every run and its steps, kept in memory only, so a
+restart loses them. Nothing calls the scheduler directly. The REST server
+checks the workflow file with the planner, stores the run as pending and
+answers `201 Created` with the run ID. The scheduler checks run state every
+second and picks the run up. It reads the workflow file again, has the planner
+split it into stages, and runs the stages in order, writing each step's
+progress back to run state. `persatrix status` reads the run from there.
+
 ```mermaid
 sequenceDiagram
     autonumber
-    participant User as Operator
-    participant CLI as Rust CLI
+    participant Op as Operator<br/>(persatrix CLI)
     participant Srv as REST Server<br/>(internal/server)
-    participant Plan as YAMLPlanner
-    participant Sched as Scheduler<br/>(stage_runner)
-    participant Exec as Executor<br/>(gRPC)
-    participant Agent as Python Agent<br/>(task_agent.py)
-    participant LLM as LLM Provider
+    participant Plan as Planner<br/>(internal/planner)
+    participant State as Run state<br/>(internal/state)
+    participant Sched as Scheduler<br/>(internal/scheduler)
     participant Cost as Cost tracker<br/>(internal/cost)
+    participant Exec as Executor<br/>(internal/executor)
+    participant Agent as Task agent<br/>(agents/task_agent.py)
+    participant Wallet as Wallet<br/>(internal/wallet)
+    participant LLM as LLM Provider
 
-    User->>CLI: persatrix run workflow.yaml
-    CLI->>Srv: POST /api/v1/workflows/run
-    Srv->>Plan: parse + validate DAG
-    Plan->>Plan: cycle detection + topological sort
-    Plan-->>Srv: stages[] (parallel-ready sets)
-    Srv-->>CLI: run_id (202 Accepted)
+    Op->>Srv: persatrix run <workflow_id><br/>POST /api/v1/workflows/run<br/>{ workflow_id, inputs }
+    Srv->>Plan: Parse + ValidateDAG<br/>(<workflow_id>.yaml)
+    Plan-->>Srv: valid (else 422)
+    Srv->>State: CreateRun(status pending)
+    Srv-->>Op: 201 Created { run_id,<br/>workflow_id, status: pending }
+    Note over Op: the CLI prints the run_id and exits
 
-    loop For each stage
-        Sched->>Cost: check budget (max_tokens, max_llm_calls)
-        alt budget exhausted
-            Cost-->>Sched: BudgetExceeded
-            Sched-->>Srv: mark run failed
-        else budget ok
-            par Parallel steps in stage
-                Sched->>Exec: execute step_i
-                Exec->>Agent: ExecuteTask(task) [gRPC]
+    Note over Srv,Sched: the server never calls the scheduler ·<br/>the run waits in run state
+    Sched->>State: ListRuns (every second)
+    State-->>Sched: all runs · this one is pending
+    Sched->>Plan: Parse + ValidateDAG + Plan
+    Plan-->>Sched: stages (steps that can run side by side)
+    Sched->>State: UpdateRunStatus(running) ·<br/>SetRunTimestamps(start)
+
+    loop Each stage, in order
+        par Every step in the stage at once
+            Sched->>State: UpdateStepState(running)
+            Sched->>Plan: ResolveInputs(step, run inputs, earlier outputs)
+            Plan-->>Sched: the step's input
+            Sched->>Cost: CheckBudget(the step's<br/>worst-case cost)
+            Cost-->>Sched: allowed<br/>(a reject fails the step)
+            Sched->>Exec: ExecuteTask(step, input)
+            Exec->>Agent: ExecuteTask(task) [gRPC]
+            loop Each LLM call (at most max_llm_calls)
+                Agent->>Wallet: AcquireLease(estimated tokens) [gRPC]
+                Wallet-->>Agent: lease (a refusal fails the step)
                 Agent->>LLM: complete(prompt, tools)
                 LLM-->>Agent: output + usage
-                Agent-->>Exec: TaskResult + cost metadata
-                Exec->>Cost: record tokens/cost/cache-hit
-                Exec-->>Sched: step result
+                Agent->>Wallet: SettleLease(tokens used) [gRPC]
             end
-            Sched->>Srv: update run + step state
+            Agent-->>Exec: TaskResponse(result + usage)
+            Exec-->>Sched: step result
+            Sched->>Cost: RecordStepCost(tokens · USD)
+            Sched->>State: UpdateStepState(completed ·<br/>output · metadata)
+        end
+        break a step failed
+            Sched->>State: SetRunTimestamps(finish) ·<br/>SetRunError ·<br/>UpdateRunStatus(failed)
         end
     end
+    Sched->>State: SetRunTimestamps(finish) ·<br/>UpdateRunStatus(completed)
 
-    CLI->>Srv: GET /api/v1/workflows/{run_id}/status
-    Srv-->>CLI: run + per-step status + cost summary
-    opt Cost endpoint
-        CLI->>Srv: GET /api/v1/cost/summary
-        Srv-->>CLI: aggregated tokens · USD · cache hits
+    Op->>Srv: persatrix status <run_id><br/>GET /api/v1/workflows/{run_id}/status
+    Srv->>State: GetRun(run_id)
+    State-->>Srv: the run and its steps
+    Srv-->>Op: 200 { status, error, times, steps }<br/>(the CLI prints status, error and times)
+    opt Totals so far (persatrix cost is not built yet)
+        Op->>Srv: GET /api/v1/cost/summary
+        Srv->>Cost: GlobalSummary
+        Cost-->>Srv: tokens · USD · top agents
+        Srv-->>Op: 200 { daily_input_tokens,<br/>daily_output_tokens,<br/>daily_estimated_usd, top_agents }
     end
 ```
+
+How the pieces fit:
+
+- **The run waits in run state.** A new run waits there until the
+  scheduler's next check, or longer when 10 runs are already going. The
+  scheduler reads the workflow file again when it starts the run, so an edit
+  made in between is what runs, and a file that no longer parses fails the
+  run.
+- **Two budget checks.** Before each step, the scheduler asks the cost
+  tracker whether the step's worst-case cost still fits the spending limits in
+  `config/optimization.yaml`: a daily total, one per workflow and one per
+  agent. That check only stops a clearly over-budget step early. The wallet
+  is what enforces the limits: the agent takes a lease before every LLM call
+  ([RFC 0023](../rfcs/0023-llm-call-leasing.md)), and the wallet refuses one
+  that would overspend. The wallet also counts each call's tokens in the cost
+  tracker, which is what `GET /api/v1/cost/summary` reports. Nothing resets
+  those counts at midnight yet (a TODO in `cmd/orchestrator/main.go`), so the
+  daily total and the summary's `daily_*` fields count from when the
+  orchestrator started. No endpoint reads the scheduler's own per-step entry
+  (`RecordStepCost`) today.
+- **Cached steps skip the agent.** For a step marked `cacheable: true`, the
+  executor first looks in the response cache (`internal/cost`) for an earlier
+  answer to the same input, and returns it without calling the agent.
+- **A failed step stops the run.** The other steps in its stage still finish,
+  later stages never start, and the run is marked failed with the error of
+  every step that failed.
 
 ## Chat message sequence (chat as a DM, since v0.3.0)
 
