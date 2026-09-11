@@ -668,9 +668,10 @@ is visible through the workflow-run APIs and OTEL spans
 
 v0.2.1 adds a synchronous human-to-agent chat surface so you can talk to a
 persona agent from a terminal instead of authoring a workflow. The CLI
-command is `persatrix chat <agent_id>`; under the hood it calls the new
-REST endpoint `POST /api/v1/agents/{id}/chat` on the orchestrator, which
-dispatches a `SendChatMessage` gRPC call to the agent.
+command is `persatrix chat <agent_id>`. It calls the orchestrator's
+`POST /api/v1/agents/{id}/chat` endpoint, which posts your message to your
+[DM channel](../ai-glossary.md#chat-as-dm) with the agent and returns the
+agent's reply.
 
 > **Spec-level detail** for the chat surface lives in
 > [RFC 0016](../rfcs/0016-human-participant-chat-interface.md). The

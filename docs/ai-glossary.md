@@ -451,15 +451,16 @@ Process vocabulary (scope lock, cuttable, live arc, finding, …) lives in the
 - **Definition:** v0.3.0 unification ([RFC 0011 amendment](rfcs/0011-amendment-chat-as-dm.md), amending RFC 0016)
   modelling every user–agent chat as a `dm` channel
   `dm:<user>:<agent>` in the RFC 0011 channel store. The
-  `POST /api/v1/agents/{id}/chat` REST endpoint, the `SendChatMessage`
-  gRPC RPC, and the `persatrix chat` REPL are preserved as
-  synchronous-reply façades — they publish on the DM channel, await one
-  `SEND_CHANNEL_MESSAGE` reply on the same channel, and return it to the
-  caller. Eliminates the parallel chat transport that v0.2.1 introduced
-  and is the reason `EventType.MESSAGE_RECEIVED` /
+  `POST /api/v1/agents/{id}/chat` REST endpoint and the `persatrix chat`
+  REPL are preserved as synchronous-reply façades — they publish on the
+  DM channel, await one `SEND_CHANNEL_MESSAGE` reply there, and return it
+  to the caller. Eliminates the parallel chat transport that v0.2.1
+  introduced and is the reason `EventType.MESSAGE_RECEIVED` /
   `ActionType.SEND_MESSAGE` were renamed (not just superseded) to
   `CHANNEL_MESSAGE` / `SEND_CHANNEL_MESSAGE` in PR 4a-ii-α
-  (RFC 0011, v0.3.0). The chat-as-DM façade lands in PR 4b.
+  (RFC 0011, v0.3.0). The chat-as-DM façade landed in PR 4a-ii-β-2; the
+  `SendChatMessage` RPC is now unused
+  ([ISSUE-0035](issues/ISSUE-0035-chat-executor-dead-but-wired-cleanup.md)).
 - **Example:** "Under chat-as-DM, the chat REST handler is a thin
   publish-and-await wrapper over `ChannelRouter.Publish` — no separate
   ingest path."
