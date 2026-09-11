@@ -7,10 +7,16 @@ the Go orchestrator and the Python agents. Every directory directly under
 main modules only. Shipped packages are shown as solid boxes; intentional TODO
 stubs reserved for later phases are shown with dashed borders.
 
-Inside the Go group, arrows follow a request from one package to the next;
-they are not the import graph, and `security/` and `observability/` have no
-arrows yet. Dotted arrows between the language groups are network calls; the
-other dotted arrows are planned links.
+Inside the Go and Python groups, an arrow follows a request: the box at its
+tail hands part of the work to the box at its head. The arrows are not the
+import graph. A package used only for its types, constants, or logging,
+metrics and tracing helpers gets no arrow, and neither does a class that is
+built on another: `task_agent.py → base.py` is there because a task agent
+runs the LLM and tool loop in `base.py`. Every such hand-off between two Go
+packages is drawn, except the ones under [Arrows left out](#arrows-left-out).
+In the Rust and web groups, an arrow means one module uses the next. Dotted
+arrows between the language groups are network calls; the other dotted
+arrows are planned links.
 
 ```mermaid
 graph TB
@@ -45,7 +51,7 @@ graph TB
         WALLET["wallet/<br/>LLM-call leasing"]
         TELE["observability/<br/>logs · metrics · traces"]
         CHAN["channels/"]
-        SEC["security/"]
+        SEC["security/<br/>rate limiter · audit log · redactor"]
         ACCOUNTS["accounts/<br/>accounts.db · password hashes · auth sessions"]
         UI["ui/<br/>embedded web console files"]
 
@@ -56,31 +62,46 @@ graph TB
         MCPG["mcp/ (stub)"]:::stub
         PROTOS["protocols/ (stub)"]:::stub
 
-        SERVER --> PLANNER
-        SERVER --> STATE
+        SERVER -->|logs| TELE
+        SERVER -->|serves /ui/| UI
+        SERVER -->|auth| ACCOUNTS
+        SERVER --> SEC
         SERVER --> COST
         SERVER -->|channels · chat as a DM| CHAN
+        SERVER --> REGISTRY
         SERVER -->|closed interactions| EXECUTOR
-        SERVER -->|auth| ACCOUNTS
-        SERVER -->|serves /ui/| UI
-        PLANNER --> SCHEDULER
-        SCHEDULER --> EXECUTOR
-        SCHEDULER --> COST
+        SERVER --> PLANNER
+        SERVER --> STATE
+        CHAN -->|conversation spend| WALLET
+        CHAN --> REGISTRY
         WALLET --> COST
         EXECUTOR --> REGISTRY
+        EXECUTOR -->|response cache| COST
         EXECUTOR -. planned .-> PROTOS
         EXECUTOR -. planned .-> MCPG
+        SCHEDULER -->|pending runs| STATE
+        SCHEDULER --> PLANNER
+        SCHEDULER --> EXECUTOR
+        SCHEDULER --> COST
+
+        %% Layout only: a ~~~ link is invisible. These keep the packages that
+        %% several boxes call on rows of their own and the stubs at the bottom,
+        %% so the Go arrows do not cross. The order of the arrows above matters too.
+        STATE ~~~ PLANNER
+        PLANNER ~~~ EXECUTOR
+        REGISTRY ~~~ COST
+        COST ~~~ A2A & BRIDGES & RES & MESH
     end
 
     subgraph Py["Python agents — agents/ (persatrix_agents)"]
         direction TB
         SRV["server.py<br/>+ server_persona.py<br/>+ server_servicers.py"]
-        BASE["base.py"]
         TASK["task_agent.py"]
         PERSONA["persona.py"]
-        PART["participant.py<br/>UserParticipant · UserStore"]
+        DISPATCH["dispatch.py · tick.py<br/>event_loop.py · action_executor.py"]
+        BASE["base.py<br/>LLM and tool loop"]
         PRUNTIME["persona_runtime/<br/>memory_context · action_loop · state_persistence"]
-        DISPATCH["dispatch.py · tick.py"]
+        PART["participant.py<br/>UserParticipant · UserStore"]
         LLM["llm_client.py"]
         SUB["sub_agents/"]
 
@@ -100,23 +121,25 @@ graph TB
             TMCP["mcp_bridge.py (stub)"]:::stub
         end
 
-        SRV --> BASE
+        SRV -->|ExecuteTask| TASK
+        SRV -->|ExecuteTask| PERSONA
+        SRV -->|ReceiveChannelMessage| DISPATCH
+        SRV -->|GetClosedInteractions| MEM
         SRV -. planned .-> PART
-        BASE --> TASK
-        BASE --> PERSONA
+        TASK --> BASE
         PERSONA --> PRUNTIME
-        PRUNTIME --> DISPATCH
-        PRUNTIME --> MEM
-        TASK --> LLM
+        DISPATCH --> PRUNTIME
+        DISPATCH -. planned .-> SUB
+        BASE --> LLM
+        BASE --> TOOLS
         PRUNTIME --> LLM
-        TASK --> TOOLS
         PRUNTIME --> TOOLS
-        PERSONA -. planned .-> SUB
+        PRUNTIME --> MEM
     end
 
     Rust -.->|REST/JSON| Go
     Web -.->|REST/JSON| Go
-    Go <-.->|gRPC| Py
+    Go <-.->|gRPC · REST| Py
 
     classDef stub stroke-dasharray: 4 4,fill:#f7f7f7,color:#666
 ```
@@ -145,13 +168,48 @@ executor's v0.2.1 `SendChatMessage` path is still built but never called
 ([ISSUE-0035](../issues/ISSUE-0035-chat-executor-dead-but-wired-cleanup.md)).
 The `SERVER -->|closed interactions| EXECUTOR` edge is
 `persatrix agent interactions` fetching an agent's closed-conversation
-summaries (`GetClosedInteractions` gRPC). The workflow path still flows
-`SERVER → PLANNER → SCHEDULER → EXECUTOR`.
+summaries (`GetClosedInteractions` gRPC).
 
-The `Go <-.->|gRPC| Py` edge runs both ways: the orchestrator calls agents
-(`ExecuteTask`, `ReceiveChannelMessage`, `GetClosedInteractions`), and agents
-call back to lease LLM calls from `wallet/` and to stream their logs to
-`observability/`.
+A workflow run changes hands through `state/`, which is why no arrow joins
+`server/` to `scheduler/`: neither calls the other. The server checks the
+workflow file with the planner and stores the run as pending
+(`SERVER --> STATE`). The scheduler looks in `state/` every second, picks the
+run up and records each step's progress there
+(`SCHEDULER -->|pending runs| STATE`). It has the planner work out each step's
+inputs, checks the step against its budget in `cost/`, and hands it to the
+executor.
+
+`SERVER --> REGISTRY` is agents registering themselves when they start
+(`POST /api/v1/agents/register`) and callers listing them. `SERVER --> SEC`
+is the per-agent rate limiter that REST calls go through, and the audit log
+that records registrations and refused permission checks. `SERVER -->|logs| TELE`
+is `persatrix logs` reading the log buffer that the agents' log streams fill.
+
+`EXECUTOR -->|response cache| COST` looks for an earlier answer to a
+cacheable step before calling the agent, and stores the new one afterwards.
+`CHAN --> REGISTRY` finds each member agent's address before the router sends
+it `ReceiveChannelMessage`. `CHAN -->|conversation spend| WALLET` reads how
+many tokens a conversation has used, so the router can close an autonomous
+channel's conversation before its budget runs out
+([RFC 0052](../rfcs/0052-autonomous-agent-channels.md)).
+
+In the Python group, the orchestrator's calls arrive at
+`server_servicers.py`. `ExecuteTask` goes to the agent's `handle`: a task
+agent runs the LLM and tool loop in `base.py`, and a persona agent turns the
+task into an event for its runtime. `ReceiveChannelMessage` is queued for the
+persona's event loop (`dispatch.py`, `event_loop.py`), which passes each
+event, like each timer tick from `tick.py`, to `persona_runtime/`.
+`GetClosedInteractions` reads the stored summaries from `memory/`. When a
+persona decides to post in a channel, `action_executor.py` sends the message
+back over REST.
+
+The `Go <-.->|gRPC · REST| Py` edge runs both ways. The orchestrator calls
+agents over gRPC (`ExecuteTask`, `ReceiveChannelMessage`,
+`GetClosedInteractions`). Agents call back over gRPC to lease LLM calls from
+`wallet/` and to stream their logs to the server, which keeps them in the
+`observability/` log buffer. They also call the REST API like any other
+client: to register when they start, to post channel messages, and to read
+channel history and members.
 
 The `SRV -. planned .-> PART` edge is dashed because `agents/server.py` /
 `agents/server_servicers.py` ship `participant.py` in v0.2.1 but do not yet
@@ -162,12 +220,13 @@ edge mirrors the `AGSVC -. planned .-> PART` treatment in
 [system-overview.md](system-overview.md) so the two diagrams agree about the
 v0.2.1 wiring gap.
 
-The `PERSONA -. planned .-> SUB` edge is dashed for a similar reason.
+The `DISPATCH -. planned .-> SUB` edge is dashed for a similar reason.
 `agents/sub_agents/` holds tested code for handing a task to a
 [sub-agent](../ai-glossary.md#sub-agent) and merging its result back
-(RFC 0008), so the box is solid. But nothing starts a sub-agent yet: a
-persona's `SPAWN_SUB_AGENT` action returns `not_implemented`, and ROADMAP
-plans spawning for [v0.4.0](../../ROADMAP.md#planned-components-v040).
+(RFC 0008), so the box is solid. But nothing starts a sub-agent yet: when a
+persona picks the `SPAWN_SUB_AGENT` action, `action_executor.py` answers
+`not_implemented`, and ROADMAP plans spawning for
+[v0.4.0](../../ROADMAP.md#planned-components-v040).
 
 The `WALLET --> COST` edge is solid: RFC 0023 PR 2 ([#384](https://github.com/mkhomutov/Persatrix/pull/384))
 composes `cost.BudgetEnforcer` and `cost.TokenCounter` into the
@@ -208,6 +267,20 @@ lists both among the
 The stub packages are placeholders with `TODO` comments that compile but do not
 implement behaviour. They are intentional — removing them is a policy violation
 per [CLAUDE.md](../../CLAUDE.md).
+
+## Arrows left out
+
+Three real hand-offs have no arrow. Drawing them made other arrows cross or
+run through boxes, so they are listed here instead:
+
+- `scheduler/ → registry/` — for each step, the scheduler reads the agent's
+  own call and token limits, and the model it uses to estimate the step's
+  cost, from the registry.
+- `executor/ → security/` — the executor writes an audit record for every step
+  it sends to an agent.
+- `base.py → memory/` — a task agent's LLM loop reads memory, but only when
+  `memory.enabled` is set for that agent in `config/agents.yaml`; it is off by
+  default.
 
 ## Packages without a box
 
