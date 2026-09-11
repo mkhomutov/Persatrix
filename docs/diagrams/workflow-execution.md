@@ -149,9 +149,13 @@ How the pieces fit:
   `process_inbound_channel_event` (`agents/chat_reply.py`), reading the
   recent messages of the DM so the model sees the conversation so far.
 - **Every reply call is leased.** The agent asks the wallet for a lease
-  before each LLM call ([RFC 0023](../rfcs/0023-llm-call-leasing.md)). If the
-  wallet refuses — a spending limit is reached, or the agent already holds
-  too many leases — the agent posts the refusal as its reply, marked
+  before each LLM call ([RFC 0023](../rfcs/0023-llm-call-leasing.md)). The
+  lease is labeled `CAUSE_CHANNEL_MESSAGE`, as for any channel message,
+  because the `chat_session_id` that would label it `CAUSE_CHAT` never
+  reaches the agent; the wallet only writes the label to its logs
+  ([ISSUE-0155](../issues/ISSUE-0155-rest-chat-leased-as-channel-message.md)).
+  If the wallet refuses — a spending limit is reached, or the agent already
+  holds too many leases — the agent posts the refusal as its reply, marked
   `reply_status="error"`. The handler then returns HTTP 200 with
   `reply_status="error"` and the refusal text in `reply`.
 - **Memory is written once per conversation.** Each turn joins the open DM
@@ -348,12 +352,3 @@ open tickets.
   that summarizes a DM conversation when it closes runs without a lease, so
   the cost summary never sees its tokens. Only the autonomous brainstorm's
   bounded close leases its summaries (above).
-- **Chat leases are labeled as channel messages.** The agent picks each
-  lease's cause in `agents/persona_runtime/wallet_cause.py`: `CAUSE_CHAT` when
-  the event's metadata carries `chat_session_id`, `CAUSE_CHANNEL_MESSAGE`
-  otherwise. The chat handler stores `chat_session_id` with the message, but
-  the gRPC event (`ChannelMessageEvent` in `proto/task.proto`) has no field
-  for it, so a chat reply leases as `CAUSE_CHANNEL_MESSAGE`. Only the unused
-  `SendChatMessage` servicer sets the key. The wallet reads the cause only for
-  its log lines, so budgets and the cost summary are unaffected, but those
-  logs cannot tell chat from other channel traffic.

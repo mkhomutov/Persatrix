@@ -11,6 +11,7 @@ refs:
   - internal/server/options.go
   - internal/server/chat_handler.go
   - agents/server_servicers.py
+  - agents/persona_runtime/wallet_cause.py
   - proto/orchestrator.proto
   - docs/rfcs/0011-amendment-chat-as-dm.md
 ---
@@ -47,6 +48,7 @@ The dead-but-wired surfaces are:
 | `internal/server/options.go` — `WithChatExecutor` | sets `s.chatExecutor`, never consumed |
 | `internal/server/chat_handler.go` — `s.chatExecutor` field | unread after rewrite |
 | `agents/server_servicers.py` — `SendChatMessage` RPC | orphaned servicer; clients no longer call it |
+| `agents/persona_runtime/wallet_cause.py` — the `chat_session_id` arm of `cause_for_event` | reached only through `SendChatMessage`, the one producer of the `CAUSE_CHAT` lease cause ([ISSUE-0155](ISSUE-0155-rest-chat-leased-as-channel-message.md)) |
 | `proto/orchestrator.proto` — `SendChatMessage` rpc | orphaned wire entry |
 
 ## Impact
@@ -74,7 +76,14 @@ the symbols above in a single PR:
    any `WithChatExecutor(...)` calls in test fixtures.
 2. **Python-side**: delete `SendChatMessage` from
    `agents/server_servicers.py`. Verify no agent test still calls the
-   stub.
+   stub. Then delete the `chat_session_id` arm of `cause_for_event` and
+   the tests that build its event shape by hand
+   (`agents/tests/test_action_loop_chat_lease.py` and the `CAUSE_CHAT`
+   cases in `agents/tests/test_action_loop_channel_lease.py`), and give
+   the cause-threading case in `tests/integration/test_salience_action_loop.py`
+   another non-default cause. Keep `CAUSE_CHAT = 2` in
+   `proto/wallet.proto` so old values still decode, with a comment that
+   nothing produces it.
 3. **Proto-side**: delete the `SendChatMessage` rpc from the `.proto`
    file, regenerate stubs (`make proto`), and confirm no Go or Python
    code still imports the generated symbol.
@@ -98,3 +107,8 @@ introduced the dead-but-wired state) and this issue.
 > `CAUSE_CHANNEL_MESSAGE` anyway:
 > [ISSUE-0155](ISSUE-0155-rest-chat-leased-as-channel-message.md). The two
 > should agree on what happens to `CAUSE_CHAT`.
+
+> 2026-09-11 — agreed: ISSUE-0155 keeps the channel-message label, so the
+> `CAUSE_CHAT` arm goes with `SendChatMessage`. The table and step 2 now
+> include the `cause_for_event` arm and the tests that pin it; the enum
+> value stays in the proto for wire compatibility.
