@@ -82,11 +82,12 @@ Required, it rides inside one of the six required jobs.
 | Merged-PR history (`docs/merged-prs.md`) matches the squash log, allowing only the newest merges to be missing | automation-catalogue | `scripts/merged_prs.py --check` | CI-advisory (`Docs hygiene`) + Pre-commit regenerates |
 | No plan row says "PR open" / "not started" for a PR that has merged | release-cycle §Phase 1 | `scripts/checks/plan_status.py` (`make plan-status-check`) | CI-advisory (`Docs hygiene`) + Pre-commit — first run found ten stale rows; judging an unlinked 🔀 row by the commit that wrote it found eight more |
 | Every artifact the methodology names exists (documents, tools, make targets, Docs-hygiene steps) | [conformance.json](conformance.json) | `make conformance-check` | CI-advisory (`Docs hygiene`) + Pre-commit |
+| No ROADMAP Component Status row says less than the RFC it names | ROADMAP §How to Update | `scripts/checks/roadmap_status.py` (`make roadmap-status-check`) | Required (`Validate configs`) + Pre-commit — its first run found `internal/security/` still "In progress" four months after RFC 0009 closed part-way |
 | Unified doc audit (links + markers + sizes) | `doc_audit.py` | — | Local convenience wrapper; its three checks run individually in CI |
 | Local-only files never referenced from committed files | CLAUDE.md; copilot-instructions; review-process | review | Convention |
 | Glossary terms mandatory; new terms added in the same change | CLAUDE.md §Terminology | review | Convention |
 | Plain English; lead with the point | documentation-guide §Writing Style | review | Convention |
-| Status hygiene before and after every task | ROADMAP §How to Update; CLAUDE.md | review | Convention |
+| Status hygiene before and after every task | ROADMAP §How to Update; CLAUDE.md | review; ROADMAP's Component Status rows also by `roadmap_status.py` (above) | Convention; Required for the Component Status rows |
 | Every RFC has front-matter, required sections, ToC | rfcs/README checklist | `rfcs-check` (front-matter and its `**Status**` header line only) | Required for front-matter; Convention for sections |
 
 ## Process

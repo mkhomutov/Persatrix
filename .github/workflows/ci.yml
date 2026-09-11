@@ -433,6 +433,13 @@ jobs:
       - name: Check RFCs index is up to date
         run: make rfcs-check
 
+      # A ROADMAP Component Status row names the RFC that built its component,
+      # and nothing compared the two: the internal/security/ row said "In
+      # progress" for four months after RFC 0009 closed part-way. It reads the
+      # same RFC front-matter as rfcs-check, so it runs beside it.
+      - name: Check ROADMAP Component Status rows keep up with their RFCs
+        run: make roadmap-status-check
+
   docs-hygiene:
     # The documentation checks the pre-commit hook runs (links + anchors,
     # leaked tool-call markup, status markers, FILEMAP freshness, merged-PR
