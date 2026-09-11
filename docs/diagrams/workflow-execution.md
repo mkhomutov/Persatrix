@@ -79,10 +79,10 @@ sequenceDiagram
     Srv->>State: GetRun(run_id)
     State-->>Srv: the run and its steps
     Srv-->>Op: 200 { status, error, times, steps }<br/>(the CLI prints status, error and times)
-    opt Today's totals (persatrix cost is not built yet)
+    opt Totals so far (persatrix cost is not built yet)
         Op->>Srv: GET /api/v1/cost/summary
         Srv->>Cost: GlobalSummary
-        Cost-->>Srv: today's tokens · USD · top agents
+        Cost-->>Srv: tokens · USD · top agents
         Srv-->>Op: 200 { daily_input_tokens,<br/>daily_output_tokens,<br/>daily_estimated_usd, top_agents }
     end
 ```
@@ -96,13 +96,16 @@ How the pieces fit:
   run.
 - **Two budget checks.** Before each step, the scheduler asks the cost
   tracker whether the step's worst-case cost still fits the spending limits in
-  `config/optimization.yaml` (per day, per workflow and per agent). That check
-  only stops a clearly over-budget step early. The wallet is what enforces
-  the limits: the agent takes a lease before every LLM call
+  `config/optimization.yaml`: a daily total, one per workflow and one per
+  agent. That check only stops a clearly over-budget step early. The wallet
+  is what enforces the limits: the agent takes a lease before every LLM call
   ([RFC 0023](../rfcs/0023-llm-call-leasing.md)), and the wallet refuses one
   that would overspend. The wallet also counts each call's tokens in the cost
-  tracker, which is what `GET /api/v1/cost/summary` reports. No endpoint reads
-  the scheduler's own per-step entry (`RecordStepCost`) today.
+  tracker, which is what `GET /api/v1/cost/summary` reports. Nothing resets
+  those counts at midnight yet (a TODO in `cmd/orchestrator/main.go`), so the
+  daily total and the summary's `daily_*` fields count from when the
+  orchestrator started. No endpoint reads the scheduler's own per-step entry
+  (`RecordStepCost`) today.
 - **Cached steps skip the agent.** For a step marked `cacheable: true`, the
   executor first looks in the response cache (`internal/cost`) for an earlier
   answer to the same input, and returns it without calling the agent.
