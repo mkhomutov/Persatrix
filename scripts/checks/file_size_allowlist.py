@@ -231,8 +231,11 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # legacy back-compat mapping + the Tier A-vs-Tier B scope note in the
     # operator-facing "§Per-membership respond dispositions" section. The new
     # content is already trimmed (terse bullets + a single combined blockquote).
-    # A future maintenance PR can split the floor-control (§7) / memory (§5)
-    # subsections into their own pages; grandfather here until that lands.
+    # It later grew to 10 158 words; moving §13 (autonomous channels, RFC 0052)
+    # to docs/guides/autonomous-channels.md in 2026-09 left 7 846. Getting under
+    # the cap takes more splits: §4, the response gate and its governance
+    # subsections (3 926 words, over the cap on its own), then §2, declaring
+    # channels (1 021). Grandfather here until those land.
     "docs/guides/channels.md",
     # docs/ai-glossary.md was at 2 999 words (1 word under the cap) when
     # RFC 0020 PR 4 (PR #229) landed. The PR #229 review Should-Fix #5

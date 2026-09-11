@@ -555,6 +555,7 @@
 │   ├── evaluators-guide.md
 │   ├── guides/
 │   │   ├── auth.md
+│   │   ├── autonomous-channels.md
 │   │   ├── channels.md
 │   │   ├── epochs.md
 │   │   ├── model-providers.md
