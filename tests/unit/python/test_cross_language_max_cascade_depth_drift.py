@@ -104,7 +104,7 @@ def test_go_and_python_defaults_agree():
         f"Python (agents.dispatch.EventDispatcher) = {python_value}. "
         f"One side was edited without the other. Update both — and "
         f"if the change is operator-visible, update the docs in "
-        f"docs/guides/channels.md too."
+        f"docs/guides/channels.md and docs/guides/autonomous-channels.md too."
     )
 
 
@@ -113,8 +113,10 @@ def test_go_default_matches_documented_value():
 
     Independent of the cross-language equality test: pins the absolute
     value the operator-facing docs (``docs/guides/channels.md``
-    §"Cascade-depth backstop") and the ``schemas/channel.schema.json``
-    `default: 5` advertise. A change to the absolute value should also
-    update those surfaces; this test surfaces the omission.
+    §"Cascade-depth backstop" and the tuning notes in
+    ``docs/guides/autonomous-channels.md``) and the
+    ``schemas/channel.schema.json`` `default: 5` advertise. A change to the
+    absolute value should also update those surfaces; this test surfaces
+    the omission.
     """
     assert _go_default_max_cascade_depth() == 5

@@ -598,8 +598,8 @@ persatrix channel config diff planning
   `.agenda` (a comma-separated list → a `[]string`), `.convener`, `.goal`,
   `.max_rounds`, and the standing-schedule knobs `.schedule_interval_seconds`,
   `.max_convenings` and `.standing_budget_tokens`
-  ([standing channels](autonomous-channels.md#standing-channels--convening-on-a-schedule)). Each `set`/`unset` nests
-  under its block (`set planning
+  ([standing channels](autonomous-channels.md#standing-channels--convening-on-a-schedule)).
+  Each `set`/`unset` nests under its block (`set planning
   autonomous.enabled=true autonomous.agenda='Cost, Coupling'`); `get` renders them
   as `autonomous.<sub>` rows. `validate` rejects an `autonomous.enabled` channel
   without a positive `interaction_budget_tokens` cap and a convener that is not a

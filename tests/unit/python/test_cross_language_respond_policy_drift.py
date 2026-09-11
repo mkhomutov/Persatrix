@@ -315,8 +315,8 @@ def test_go_consts_and_python_constants_agree() -> None:
         f"{go}, Python (agents.response_gate POLICY_*) declares "
         f"{_PYTHON_POLICIES}. One side was edited without the other. "
         f"Update both — and if the vocabulary is operator-visible, update "
-        f"schemas/channel.schema.json (`respond.enum`) and "
-        f"docs/guides/channels.md too."
+        f"schemas/channel.schema.json (`respond.enum`), docs/guides/channels.md and "
+        f"docs/guides/autonomous-channels.md too."
     )
 
 

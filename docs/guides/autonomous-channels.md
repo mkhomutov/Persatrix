@@ -1,10 +1,10 @@
-# Autonomous Channels — User Guide
+# Autonomous Channels — Operator Guide
 
-This guide shows how to run a channel discussion that no one has to start or
-keep going: arming a channel, convening it by hand or on a schedule, tuning
-the roster, and a free offline demo. It used to be §13 of the
+This guide shows how to have personas hold a whole channel discussion with no
+person taking part: arming a channel, convening it by hand or on a timer,
+tuning the roster, and a free offline demo. It used to be §13 of the
 [channels guide](channels.md), which still covers the basics it builds on:
-declaring a channel, the
+[declaring a channel](channels.md#2-declaring-channels-in-config), the
 [response gate](channels.md#4-the-response-gate-who-replies-and-when), and
 [`channel config`](channels.md#editing-governance-config-at-runtime--channel-config-rfc-0050-phase-1).
 
@@ -15,7 +15,7 @@ declaring a channel, the
 
 ---
 
-## Arming and convening
+## Running an autonomous channel
 
 An **autonomous channel** runs a discussion with **no human in the loop**: no
 human seeds the topic, no human keeps it alive. It is an ordinary group channel
