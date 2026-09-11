@@ -19,7 +19,7 @@ See [README.md](README.md) for RFC process, format, and lifecycle. Reserved RFC 
 | [RFC-0028](0028-agent-decision-policy-engine.md) | 📋 Proposed | architecture | v0.4.0 (Phases 1–3); v0.5.0+ (Phase 4 collective extension) | 2026-05-02 | Agent Decision Policy Engine |
 | [RFC-0040](0040-agent-orchestrator-transport-unification.md) | 📋 Proposed | protocol | v0.3.x (Phase 1) + v0.4.0 (Phases 2–4) | 2026-05-17 | Agent–Orchestrator Transport Unification |
 | [RFC-0041](0041-typed-event-taxonomy-lifecycle-callbacks.md) | 📋 Proposed | architecture | v0.4.0+ | 2026-05-20 | Typed Event Taxonomy and Lifecycle Callbacks |
-| [RFC-0046](0046-budget-lease-extraction.md) | 📋 Proposed | architecture | v0.4.0+ (gated on RFC-0045 acceptance + the MIT↛BUSL boundary CI gate) | 2026-05-25 | Budget-Lease Library Extraction (persatrix-budget) |
+| [RFC-0046](0046-budget-lease-extraction.md) | 📋 Proposed | architecture | not standalone — rides the governance-core extraction, if any; decided at the first strategy review (Amendment 2026-09-12) | 2026-05-25 | Budget-Lease Library Extraction (persatrix-budget) |
 | [RFC-0047](0047-low-coupling-batch-extraction.md) | 📋 Proposed | architecture | v0.4.0+ (gated on RFC-0045 acceptance + the MIT↛BUSL boundary CI gate) | 2026-05-25 | Low-Coupling Batch Library Extraction (prompt kit, mock LLM, schemas) |
 | [RFC-0032](0032-channel-interaction-layer.md) | 🔨 Draft | architecture | v0.4.0+ | 2026-05-12 | Wire-Level Channel Interaction Layer and Chat-Façade Unification |
 | [RFC-0042](0042-state-namespacing-by-scope.md) | 🔨 Draft | architecture | v0.4.0+ | 2026-05-20 | State Namespacing by Scope Prefix |

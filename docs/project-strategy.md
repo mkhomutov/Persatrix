@@ -255,6 +255,7 @@ ratified by the sequencing amendment that acts on it, not by this file.
 | Date | Tree | What changed | Decision rules fired |
 |------|------|--------------|----------------------|
 | 2026-09-11 | `cbeea7bc` | Written from PRs #895–#898, all closed unmerged. | None; the experiment has not run. |
+| 2026-09-12 | `604fab72` | The maintainer chose the product reading. [Amendment 2026-09-12](v0.3.x-sequencing.md#amendment-2026-09-12--close-v0316-small-then-measure-before-any-train-opens) ratifies §6 items 1–4, §7 items 1–4 as rulings, and §8's RFC 0046 row; K1 rides v0.3.16 as a cuttable fold-in. | None; the experiment has not run. |
 
 ## Related documentation
 

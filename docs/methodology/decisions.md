@@ -34,6 +34,17 @@ the next version after it.
 5. A ruling made in one amendment (for example "no pull-forward of RFC 0041
    Phase 1 ahead of v0.4.0", 2026-08-02) **holds** until a later amendment
    says otherwise; a later plan cites the ruling rather than re-deciding it.
+6. Every amendment opens with an **External evidence since the last
+   amendment** section: installs by anyone other than the author, issues or
+   pull requests from anyone else, demos shown (to whom, when), user
+   conversations written up, experiment results published. An amendment
+   whose section holds no positive entry may not scope a version on
+   internal correctness alone. Ratified by the
+   [Amendment 2026-09-12](../v0.3.x-sequencing.md#amendment-2026-09-12--close-v0316-small-then-measure-before-any-train-opens);
+   the check that enforces it is its own PR.
+7. An amendment that **adds a release** to a train names the release it
+   removes, or the train closes and the remainder moves to the next minor.
+   Same ratification.
 
 **Why not a ticket tracker?** The amendment is one page a reviewer can read in
 order; the reasoning that made the ordering is next to the ordering.
