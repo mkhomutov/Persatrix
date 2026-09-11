@@ -447,7 +447,7 @@ sequenceDiagram
     Note over CLI: token written to ~/.persatrix/credentials (0600)
 
     CLI->>MW: GET /api/v1/auth/whoami  Authorization: Bearer <token>
-    MW->>DB: lookup session by sha256(token); check expiry/revocation/account status
+    MW->>DB: lookup session by sha256(token), check expiry/revocation/account status
     alt valid session
         MW->>H: request + verified identity in context
         H-->>CLI: 200 {participant_id, role, ...}

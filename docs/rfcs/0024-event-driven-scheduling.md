@@ -94,7 +94,7 @@ What happens if we do nothing: v0.3 channels ship on top of the tick loop. Inter
 ```mermaid
 flowchart TD
     Timer["asyncio timer<br/>(every interval s)"] -->|elapsed| Run["TickScheduler._run"]
-    Inbound["EventDispatcher.dispatch()<br/>(chat / channel / task)"] -->|wake_event.set()| Run
+    Inbound["EventDispatcher.dispatch()<br/>(chat / channel / task)"] -->|"wake_event.set()"| Run
     Run -->|is_idle?| IdleBranch["recover_idle_energy()<br/>continue"]
     Run -->|not idle| OnTick["agent.on_tick()"]
     OnTick --> InjectMem["_inject_memory_context<br/>(SQLite recall)"]
@@ -162,19 +162,19 @@ sequenceDiagram
     participant RPC as gRPC Handler
     participant Disp as EventDispatcher
     participant Queue as asyncio.Queue
-    participant Loop as EventLoop._run
+    participant EventLoop as EventLoop._run
     participant Agent as _LLMPersonaAgent
 
     RPC->>Disp: dispatch(event)
     Disp->>Queue: put_nowait(InboundEventWake(event))
-    Note over Loop: parked on queue.get()
-    Queue-->>Loop: InboundEventWake
-    Loop->>Agent: on_event(event)
+    Note over EventLoop: parked on queue.get()
+    Queue-->>EventLoop: InboundEventWake
+    EventLoop->>Agent: on_event(event)
     Agent->>Agent: _inject_memory_context (event-keyed)
     Agent->>Agent: LLM call
-    Agent-->>Loop: actions
-    Loop->>Loop: execute actions
-    Note over Loop: return to queue.get()
+    Agent-->>EventLoop: actions
+    EventLoop->>EventLoop: execute actions
+    Note over EventLoop: return to queue.get()
 ```
 
 ### C. Scheduled Timer Registry
