@@ -4,7 +4,7 @@
 **Feature Area**: Persona
 **Version**: 1.0
 **Created**: 2026-06-05
-**Last Updated**: 2026-06-05
+**Last Updated**: 2026-09-11
 **Status**: Active
 
 ---
@@ -169,10 +169,12 @@ genuine question about prompt injection.
 
 **Expected Behavior**: This is a `<|user_message|>` turn, not external
 data. The persona may discuss it but should not respond with the
-external-data warning. (Note: the Go/Python input sanitizer may still
-neutralise the literal pattern in the wrapped user message per RFC 0011
-PR 5 — that is a separate, content-level mechanism from this prompt
-carve-out.)
+external-data warning. (Note: the agent's input sanitizer — a Python copy
+of the Go patterns, run on every incoming channel message since RFC 0011
+PR 5 — will flag the phrase, but it only logs an `input.flagged` warning
+in the agent's log; the message reaches the persona unchanged. That is a
+separate mechanism from this prompt carve-out; see
+[RFC 0009 IN-8](../rfcs/0009-security-sandboxing.md#in-8-the-orchestrator-never-calls-the-go-inputsanitizer).)
 
 ### Edge Case 2: Stale Stack Serving the Old Prompt
 
