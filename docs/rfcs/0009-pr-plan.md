@@ -26,6 +26,8 @@ This plan splits Phases 1–2 into **4 PRs**.
 - **PR 2 (RateLimiter middleware)** must merge before [RFC 0011 PR plan](0011-pr-plan.md) PR 2 (REST channel publish endpoint) — see [RFC 0011 §Phase 1 — Dependencies](0011-channels-bridges.md#phase-1-channel-store-and-rest-routing) for the rate-limit-as-DoS-vector rationale.
 - **PR 3 (InputSanitizer wired into channel message storage)** integrates at [RFC 0011 PR plan](0011-pr-plan.md) PR 5 (Phase 3).
 
+> **Correction (2026-09-11), recorded not amended.** PR 3 did not wire the `InputSanitizer` into channel message storage, and nothing has since: no Go code outside its tests calls it, so the orchestrator writes no `input.flagged` audit event and never marks a message with the `channel_message` source. At RFC 0011 PR 5 the agents began running a Python copy of its patterns on each incoming channel message, which only flags a match and logs a warning. Wherever this plan relies on those audit events or on the orchestrator marking sources, including the accepted divergences in PR 3's review follow-ups, it describes what was planned, not what shipped ([RFC 0009 IN-8](0009-security-sandboxing.md#in-8-the-orchestrator-never-calls-the-go-inputsanitizer)).
+
 ---
 
 ## Dependency Graph

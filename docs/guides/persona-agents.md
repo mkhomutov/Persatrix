@@ -839,19 +839,25 @@ deferred (matched against
 | Area | v0.2.1 behaviour | Deferred to |
 |------|------------------|-------------|
 | Concurrency | Single `UserParticipant` per session | v0.3.0 (RFC 0011) |
-| Authentication | Sessions are local; `--user` is caller-supplied | v0.3.0 (RFC 0009) |
+| Authentication | Sessions are local; `--user` is caller-supplied | Human logins: v0.3.12 ([RFC 0039](../rfcs/0039-user-accounts-authentication.md), off by default). Agent identity tokens: RFC 0009 Phase 4, slotted for v0.4.0 |
 | Streaming | Synchronous request-response, no SSE | future RFC |
 | Agent-initiated messages | No notification path; agents can only reply within an active session | future RFC |
 | Channel routing | Point-to-point user ↔ agent only | v0.3.0 (RFC 0011) |
 | Chat history API | No `GET /chat/history` endpoint; inspect via memory tools | v0.2.2 candidate |
-| Rate limiting | No per-user rate limit on the chat endpoint | v0.3.0 (RFC 0009) |
+| Rate limiting | No per-user rate limit on the chat endpoint | Still none. Since v0.3.0 (RFC 0009) the limit is per agent ID; `persatrix chat` sends none, so it shares one limit with every other caller that sends none |
 | Web / GUI | CLI only | future RFC |
 
-> **Operational warning — no authentication.** Because `--user` is
-> caller-supplied and the chat endpoint performs no authentication in
-> v0.2.1, do not expose the orchestrator chat endpoint on a network shared
-> with untrusted callers. Treat `persatrix chat` as a local-developer
-> surface until RFC 0009 lands.
+> **Operational warning — no authentication by default.** Under the
+> default `auth.mode: disabled`, `--user` is caller-supplied and the chat
+> endpoint checks no identity, so do not expose the orchestrator on a
+> network shared with untrusted callers. `auth.mode: enabled` (RFC 0039,
+> v0.3.12) makes people log in, and the chat endpoint then uses the
+> logged-in account instead of `--user`. That alone does not make
+> exposure safe: the routes agents use
+> [stay open](auth.md#what-stays-open-under-enabled--the-agent-ingress),
+> and beyond localhost you need
+> [HTTPS](auth.md#https-is-required-beyond-localhost). See the
+> [auth guide](auth.md#the-switch-authmode).
 
 The chat endpoint enforces a 4000-character message ceiling (counted in
 runes, not bytes, so emoji and CJK text are measured consistently) and
