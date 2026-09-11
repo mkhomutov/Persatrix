@@ -37,7 +37,7 @@ const (
 // IsValidParticipantType reports whether t is a recognised peer type
 // ("agent" | "user"). The REST chat handler uses it to reject an explicit
 // out-of-vocabulary `participant_type` at the request boundary, matching
-// the gRPC SendChatMessage servicer's `validate_participant_type` guard.
+// the unused gRPC SendChatMessage servicer's `validate_participant_type` guard.
 // The empty string is NOT valid here: callers apply their own default
 // (REST chat defaults an omitted field to "user") before validating.
 func IsValidParticipantType(t string) bool {
