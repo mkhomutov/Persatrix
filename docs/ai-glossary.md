@@ -1018,13 +1018,19 @@ verbatim) are defined now (PR #232 review SF-5).
   `AuditLogger` startup based on the state of `audit.jsonl`:
   - `chain.bootstrap` — file missing or zero-length; chain seeded from
     `sha256("")`.
-  - `chain.restart` — tail line parses and its checksum recomputes;
-    event carries the prior tail checksum so external tooling can
-    detect the process-boundary discontinuity.
-  - `chain.recovered` — tail line is unparseable / truncated /
-    checksum-mismatch; carries `Detail.prior_tail = "unknown"` and a
-    WARN log. Operators must acknowledge — the log is **not** silently
-    continued from a fresh chain.
+  - `chain.restart` — tail line parses as JSON and its checksum field is
+    well-formed (64 hex characters); event carries the prior tail
+    checksum so external tooling can detect the process-boundary
+    discontinuity.
+  - `chain.recovered` — tail line is unreadable / truncated / not JSON /
+    missing a well-formed checksum; carries `Detail.prior_tail = "unknown"`
+    and `Outcome = "warn"`. Operators must acknowledge — the log is
+    **not** silently continued from a fresh chain.
+
+  Startup recomputes no checksum, so an edited record that keeps a
+  well-formed checksum passes as a normal restart. Only
+  `security.VerifyChain` recomputes the chain, and only tests call it
+  today.
 
 ### `SanitizerAction.Passthrough` / `SanitizerAction.Quarantine`
 - **Disallowed:** "sanitizer mode", "drop-on-flag".
@@ -1048,9 +1054,14 @@ verbatim) are defined now (PR #232 review SF-5).
 - **Definition:** New `ContextSource` enum variant (Phase 2) tagging
   inputs that arrive through the RFC 0011 channel-publish path.
   Treated as `external`-equivalent for sanitization but kept distinct
-  in the audit trail so forensics can distinguish "agent posted to
-  channel" from "scraped webpage". The orchestrator is the authority on
-  this tagging — agents cannot self-report `source` values.
+  so forensics can distinguish "agent posted to channel" from "scraped
+  webpage". The persona agent sets this tag itself: it runs
+  `sanitize(content, source=CONTEXT_SOURCE_CHANNEL_MESSAGE)` on each
+  incoming channel message (`agents/persona_runtime/channel_ingest.py`),
+  and a flagged message shows up only as an `input.flagged` warning in
+  the agent's log, not in the audit log. The orchestrator neither tags
+  nor checks channel messages: no Go code outside `internal/security`
+  runs the Go `InputSanitizer`.
 
 ### Audit `CorrelationID` (4-segment form)
 - **Disallowed:** "correlation tuple", "audit trace ID".
