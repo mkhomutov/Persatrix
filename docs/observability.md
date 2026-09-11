@@ -493,6 +493,8 @@ Configuration lives at [config/observability/otel-collector.yaml](../config/obse
 
 The Prometheus host port is shifted to `9091` so it does not collide with the orchestrator gRPC port (`9090`).
 
+The stack publishes these ports on `127.0.0.1` only. None of these services checks who is calling, and traces, metrics and logs can carry conversation content, so from another machine tunnel over SSH (for example `ssh -L 16686:127.0.0.1:16686 <host>`) rather than widening the publish.
+
 > **Breaking dev-workflow change (v0.2.3):** Jaeger's OTLP ports
 > (`4317`/`4318`) are no longer published on the host. The Collector now
 > owns the host-facing OTLP ingress on the same port numbers and forwards

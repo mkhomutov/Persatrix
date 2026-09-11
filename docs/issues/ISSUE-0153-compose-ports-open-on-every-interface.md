@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0153
 summary: "The demo compose stack still publishes the agents' gRPC ports (50051–50057) and the observability ports (4317, 4318, 8889, 16686, 9091, 3100) on every host interface; the agent gRPC service has no authentication, so anyone on the developer's network can run persona turns and spend provider budget"
-status: open
+status: resolved
 severity: medium
 area: deployment/docker
 created: 2026-09-11
+closed: 2026-09-11
+closed_pr: 934
 refs:
   - docker-compose.yaml
   - docker-compose.multivendor.yaml
@@ -76,3 +78,11 @@ file today.)
 
 > 2026-09-11 — filed from the review of PR #918 (F-1: the remaining ports had
 > no tracking issue; F-4: the guard test's blind spots).
+>
+> 2026-09-11 — resolved by PR #934. The agents publish no host port any more:
+> nothing on the host dialled them, and the orchestrator reaches each one over
+> the compose network. The observability publishes are bound to `127.0.0.1`,
+> which still serves every `localhost` URL the README, the observability guide
+> and `test_observability_e2e.py` use. The guard test checks every service in
+> every compose file and rejects `network_mode: host`. The glob blind spot
+> needed no change: every tracked compose file is at the repo root.
