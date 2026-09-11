@@ -79,8 +79,9 @@ services:
         AGENT_EXTRAS: providers
     restart: unless-stopped
     command: ["--agent", "slate-heron", "--port", "50057", "--host", "0.0.0.0", "--orchestrator-url", "http://orchestrator:8080", "--advertise-address", "agent-slate-heron:50057"]
-    ports:
-      - "50057:50057"
+    # No host publish: the orchestrator reaches this agent at
+    # agent-slate-heron:50057 over the compose network, and the agent gRPC
+    # service has no authentication (see agent-planner in docker-compose.yaml).
     volumes:
       - ./config:/app/config:ro
       - ./config/demo/multivendor/optimization.yaml:/app/config/optimization.yaml:ro

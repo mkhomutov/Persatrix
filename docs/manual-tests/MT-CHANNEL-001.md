@@ -54,7 +54,7 @@ no `channel create` CLI subcommand exists in v0.3.0; the test does the create vi
 - ☐ `.env` exists at repo root and contains `ANTHROPIC_API_KEY=…` (the agent containers in
   `docker-compose.yaml` fail-fast otherwise; the channel REST surface itself does not need
   the key, but the compose stack does)
-- ☐ All local ports free: 8080, 9090, 50051–50054, 4317/4318, 16686, 3100, 9091
+- ☐ All local ports free: 8080, 9090, 4317/4318, 8889, 16686, 3100, 9091 (the agents publish none)
 - ☐ CLI built: `make build-cli` → `bin/persatrix(.exe)`
 - ☐ Compose stack up and healthy: `docker compose up -d --build` then
   `docker compose ps` shows every service `Up … (healthy)`

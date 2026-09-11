@@ -19,6 +19,17 @@
 #   make demo-openai    # OpenAI        (needs OPENAI_API_KEY)
 #   make demo-ollama    # real local model via Ollama — no key, no cloud spend
 #   make demo-offline   # mock provider — $0, no key, no network
+#
+# HOST PORTS STAY ON THIS MACHINE. Under the shipped defaults nothing in this
+# stack checks who is calling: the REST API and web console, the gRPC
+# LogService, the agents' gRPC service, the observability UIs and OTLP ingest
+# all answer anyone who can reach them. A `ports:` mapping with no host
+# address ("16686:16686") is published on every interface — to your whole
+# network — so every mapping below names 127.0.0.1, and the agents publish
+# none at all: the orchestrator dials each one at its --advertise-address over
+# the compose network. tests/unit/python/test_docker_compose_host_publish.py
+# enforces this for every service in every docker-compose*.yaml, and rejects
+# network_mode: host.
 
 services:
   # ─── Orchestrator (Go) ────────────────────────────
@@ -120,8 +131,11 @@ services:
       dockerfile: Dockerfile.agent
     restart: unless-stopped
     command: ["--agent", "planner", "--port", "50051", "--host", "0.0.0.0", "--orchestrator-url", "http://orchestrator:8080", "--advertise-address", "agent-planner:50051"]
-    ports:
-      - "50051:50051"
+    # No host publish, for any agent (see the file header): the agent gRPC
+    # service has no authentication, and nothing on the host needs it — the
+    # orchestrator reaches this agent at agent-planner:50051 over the compose
+    # network. To call an agent from the host (grpcurl), publish it on loopback
+    # in a local overlay, for example "127.0.0.1:50051:50051".
     volumes:
       - ./config:/app/config:ro
       - workspace:/workspace
@@ -154,8 +168,6 @@ services:
       dockerfile: Dockerfile.agent
     restart: unless-stopped
     command: ["--agent", "code-writer", "--port", "50052", "--host", "0.0.0.0", "--orchestrator-url", "http://orchestrator:8080", "--advertise-address", "agent-coder:50052"]
-    ports:
-      - "50052:50052"
     volumes:
       - ./config:/app/config:ro
       - workspace:/workspace
@@ -183,8 +195,6 @@ services:
       dockerfile: Dockerfile.agent
     restart: unless-stopped
     command: ["--agent", "code-reviewer", "--port", "50053", "--host", "0.0.0.0", "--orchestrator-url", "http://orchestrator:8080", "--advertise-address", "agent-reviewer:50053"]
-    ports:
-      - "50053:50053"
     volumes:
       - ./config:/app/config:ro
       - workspace:/workspace:ro
@@ -215,8 +225,6 @@ services:
       dockerfile: Dockerfile.agent
     restart: unless-stopped
     command: ["--agent", "ember-owl", "--port", "50054", "--host", "0.0.0.0", "--orchestrator-url", "http://orchestrator:8080", "--advertise-address", "agent-ember-owl:50054"]
-    ports:
-      - "50054:50054"
     volumes:
       - ./config:/app/config:ro
       # NOTE(review-PR188, N1): `:ro` intentional. The ember-owl persona in
@@ -271,8 +279,6 @@ services:
       dockerfile: Dockerfile.agent
     restart: unless-stopped
     command: ["--agent", "iron-fox", "--port", "50055", "--host", "0.0.0.0", "--orchestrator-url", "http://orchestrator:8080", "--advertise-address", "agent-iron-fox:50055"]
-    ports:
-      - "50055:50055"
     volumes:
       - ./config:/app/config:ro
       - workspace:/workspace:ro
@@ -302,8 +308,6 @@ services:
       dockerfile: Dockerfile.agent
     restart: unless-stopped
     command: ["--agent", "nova-sparrow", "--port", "50056", "--host", "0.0.0.0", "--orchestrator-url", "http://orchestrator:8080", "--advertise-address", "agent-nova-sparrow:50056"]
-    ports:
-      - "50056:50056"
     volumes:
       - ./config:/app/config:ro
       - workspace:/workspace:ro
@@ -348,9 +352,9 @@ services:
     volumes:
       - ./config/observability/otel-collector.yaml:/etc/otelcol/otel-collector.yaml:ro
     ports:
-      - "4317:4317"     # OTLP gRPC ingest (host -> Collector)
-      - "4318:4318"     # OTLP HTTP ingest (host -> Collector)
-      - "8889:8889"     # Prometheus exporter (scraped by prometheus service)
+      - "127.0.0.1:4317:4317"   # OTLP gRPC ingest (host -> Collector)
+      - "127.0.0.1:4318:4318"   # OTLP HTTP ingest (host -> Collector)
+      - "127.0.0.1:8889:8889"   # Prometheus exporter (scraped by prometheus service)
     depends_on:
       - jaeger
       - loki
@@ -361,7 +365,7 @@ services:
     # non-deterministic across machines and over time.
     image: jaegertracing/all-in-one:1.76.0
     ports:
-      - "16686:16686"   # Jaeger UI
+      - "127.0.0.1:16686:16686"   # Jaeger UI
       # OTLP ingest is now reached through the Collector; ports are not
       # published on the host.
     expose:
@@ -380,7 +384,7 @@ services:
     volumes:
       - ./config/observability/prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
     ports:
-      - "9091:9090"     # Prometheus UI (host port shifted to avoid orchestrator gRPC :9090)
+      - "127.0.0.1:9091:9090"   # Prometheus UI (host port shifted to avoid orchestrator gRPC :9090)
     # NOTE(review-PR171, Should-Fix #1): readiness probe lets the Prometheus
     # exporter scrape loop quiesce before E2E tests query against /api/v1.
     # The `/-/ready` endpoint flips to 200 once the TSDB and config have
@@ -400,7 +404,7 @@ services:
     restart: unless-stopped
     command: ["-config.file=/etc/loki/local-config.yaml"]
     ports:
-      - "3100:3100"     # Loki HTTP API (push + query)
+      - "127.0.0.1:3100:3100"   # Loki HTTP API (push + query)
     # NOTE(review-PR171, Should-Fix #1): probe Loki's `/ready` so dependent
     # tests / log-shippers do not race ingester startup. `wget` is bundled
     # in the upstream `grafana/loki` image (BusyBox base).

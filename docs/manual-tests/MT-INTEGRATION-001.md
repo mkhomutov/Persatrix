@@ -51,8 +51,8 @@ enforcement.
 
 ### Application State
 
-- ☐ All local ports free: 8080 (REST), 9090 (gRPC), 50051–50053 (agents), 16686 (Jaeger UI),
-  4317/4318 (OTLP)
+- ☐ All local ports free: 8080 (REST), 9090 (gRPC), 4317/4318 (OTLP), 8889 (Collector
+  metrics), 16686 (Jaeger UI), 9091 (Prometheus UI), 3100 (Loki); the agents publish none
 - ☐ No local orchestrator or agent processes running: `make` targets stopped
 
 ---
