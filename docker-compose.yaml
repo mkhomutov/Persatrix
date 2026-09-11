@@ -42,9 +42,11 @@ services:
     # permission denied", channels stay disabled, and chat-as-DM
     # (RFC 0011 PR 4a-ii-β-2) returns 500 'chat not available'.
     # NOTE(RFC 0048): --enable-ui serves the embedded operator/tester web
-    # console at /ui (default off). The host publish of :8080 below stays the
-    # one boundary; keep it as-is (do not expose beyond localhost) until the
-    # REST surface is authenticated (RFC 0039). The Svelte bundle is baked into
+    # console at /ui (default off). The host publish of :8080 below is the one
+    # boundary, and it is bound to 127.0.0.1. Keep it there while auth.mode is
+    # disabled; to serve the console beyond localhost, enable auth (RFC 0039)
+    # and put a TLS proxy in front instead of widening the publish — see
+    # docs/guides/web-console.md, "Security". The Svelte bundle is baked into
     # the binary from internal/ui/assets, built in-image by Dockerfile.orchestrator's
     # Node stage — `compose build` always embeds the real console with no host JS
     # toolchain and no prior `make ui`. (`make run-ui` is the local, non-Docker path.)
@@ -66,7 +68,15 @@ services:
       # intent (the binary default) while still letting `grpcurl
       # localhost:9090` on the host work for dev debugging.
       - "127.0.0.1:9090:9090"   # gRPC (loopback-only; unauthenticated LogService)
-      - "8080:8080"   # HTTP REST + SSE
+      # The REST API and the web console (--enable-ui above) share :8080, and
+      # both are unauthenticated under the shipped auth.mode: disabled
+      # (config/security.yaml). --http-bind 0.0.0.0 is required for the same
+      # reason as --grpc-bind (the agents dial orchestrator:8080), so this
+      # host publish is the only thing keeping :8080 off the local network:
+      # a mapping with no host address ("8080:8080") is published on every
+      # interface. http://localhost:8080 on the host still works. Guarded by
+      # tests/unit/python/test_docker_compose_host_publish.py.
+      - "127.0.0.1:8080:8080"   # HTTP REST + SSE + web console (loopback-only)
     volumes:
       - ./config:/app/config:ro
       - ./workflows:/app/workflows:ro
