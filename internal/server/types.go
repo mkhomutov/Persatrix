@@ -121,10 +121,12 @@ type chatResponse struct {
 	Timestamp        int64  `json:"timestamp"`
 	AgentDisplayName string `json:"agent_display_name"`
 	ReplyStatus      string `json:"reply_status"`
-	// ChannelID is the resolved DM channel id (`dm:<agent>:<user>`,
-	// GetOrCreateDM) the chat persisted to. Exposed so a client can open the
-	// conversation as a channel without a second lookup — the web console's
-	// direct-message create flow lands the operator in this channel on the
-	// timeline (RFC 0048 channel-creation amendment §B, direct mode).
+	// ChannelID is the resolved DM channel id the chat persisted to
+	// (GetOrCreateDM): `dm:<a>:<b>`, the user and agent IDs in sorted order,
+	// so either can come first (`channels.CanonicalDMID`). Exposed so a
+	// client can open the conversation as a channel without a second lookup —
+	// the web console's direct-message create flow lands the operator in this
+	// channel on the timeline (RFC 0048 channel-creation amendment §B, direct
+	// mode).
 	ChannelID string `json:"channel_id"`
 }

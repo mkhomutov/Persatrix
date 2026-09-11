@@ -450,7 +450,7 @@ Process vocabulary (scope lock, cuttable, live arc, finding, …) lives in the
   "DM-chat bridge".
 - **Definition:** v0.3.0 unification ([RFC 0011 amendment](rfcs/0011-amendment-chat-as-dm.md), amending RFC 0016)
   modelling every user–agent chat as a `dm` channel
-  `dm:<user>:<agent>` in the RFC 0011 channel store. The
+  (`dm:<a>:<b>`, IDs sorted) in the channel store. The
   `POST /api/v1/agents/{id}/chat` REST endpoint and the `persatrix chat`
   REPL are preserved as synchronous-reply façades — they publish on the
   DM channel, await one `SEND_CHANNEL_MESSAGE` reply there, and return it
