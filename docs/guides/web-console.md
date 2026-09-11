@@ -368,10 +368,11 @@ a browser*. The mitigations it ships with:
 **The rule under `disabled`:** exposing the console (or the `:8080` REST
 surface at all) beyond localhost requires an authenticating reverse proxy —
 or flipping `auth.mode: enabled` (over HTTPS) instead. Do not start the binary
-with `--http-bind 0.0.0.0`, and do not publish `:8080` on a routable interface,
-with neither in place. A proxy on the same host reaches the Docker stack at
-`127.0.0.1:8080` (or at `orchestrator:8080` from inside the compose network),
-so the publish itself never needs widening.
+on a host with `--http-bind 0.0.0.0` (the compose container needs it; its
+loopback publish is the boundary), and do not publish `:8080` on a routable
+interface, with neither in place. A proxy on the same host reaches the Docker
+stack at `127.0.0.1:8080` (or at `orchestrator:8080` from inside the compose
+network), so the publish itself never needs widening.
 
 ---
 
