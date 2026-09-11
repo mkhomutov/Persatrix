@@ -182,7 +182,7 @@ func main() {
 	store := state.NewInMemoryStore(logger)
 	logger.Info("state store initialized", zap.String("type", "in-memory"))
 
-	// 4. Initialize security (permission gate, rate limiter, audit logger)
+	// 4. Initialize security: the audit logger. Tool permission checks run in the Python agents.
 	auditor, err := initAuditLogger(logger, orchMetrics)
 	if err != nil {
 		logger.Fatal("failed to initialize audit logger", zap.Error(err))
@@ -195,7 +195,7 @@ func main() {
 		}()
 		logger.Info("audit logger initialized", zap.String("path", auditor.Path()))
 	}
-	// 5. Initialize resilience (circuit breakers)
+	// 5. Initialize the rate limiter and circuit breaker (internal/security)
 	rateLimiter, circuitBreaker, err := initRateLimiter(logger, auditor)
 	if err != nil {
 		logger.Fatal("failed to initialize rate limiter", zap.Error(err))

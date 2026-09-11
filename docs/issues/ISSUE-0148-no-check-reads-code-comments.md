@@ -13,7 +13,7 @@ refs:
   - .github/workflows/ci.yml
   - docs/methodology/automation-catalogue.md
   - docs/methodology/enforcement-matrix.md
-  - internal/state/state.go
+  - internal/scheduler/stage_runner.go
   - cli/src/main.rs
   - evaluators/conversation_scorer.py
 ---
@@ -40,11 +40,11 @@ failing any check. Found in the review of PR #903 (finding F-12).
   still found two cases its own search had missed: the `--help` text for the
   CLI's mesh commands and `evaluators/conversation_scorer.py`, which is
   outside `agents/`.
-- **Stale version tags.** Go, Python and Rust code still holds 32 comments
-  of the form `TODO(v0.x)` or `(v0.x+)` that name a version already released
-  — for example `internal/state/state.go`, "TODO: Implement SQLiteStore
-  (v0.2+)", and the `agents/persona.py` docstring, "Persatrix Persona Agent
-  Interface (v0.2+)".
+- **Stale version tags.** Go and Python code still holds 29 comments of the
+  form `TODO(v0.x)` or `(v0.x+)` that name a version already released — for
+  example `internal/scheduler/stage_runner.go`, "TODO(v0.2): evaluate step
+  conditions", and the `agents/persona.py` docstring, "Persatrix Persona
+  Agent Interface (v0.2+)".
 
 ## Impact
 
@@ -71,7 +71,7 @@ hygiene` CI job and `_CHECKS` in `scripts/pre_commit.py` — and list it in
    a plain word match also hits unrelated uses, such as `internal/ui/ui.go`.
 3. **Stale-tag rule, later.** Flag `TODO(v0.x)` and `(v0.x+)` in code once
    that version appears in `released_versions()` (`scripts/checks/released.py`).
-   It needs a cleanup pass or an exemption list first, because of the 32
+   It needs a cleanup pass or an exemption list first, because of the 29
    existing hits.
 
 ## Notes
@@ -84,3 +84,11 @@ hygiene` CI job and `_CHECKS` in `scripts/pre_commit.py` — and list it in
 > its API lists "Distributed Mesh (v0.3)", "A2A Interop (v0.3)" and
 > "Bridges (v0.2+)". A stale-tag rule could cover Markdown too; PR #903 left
 > these headings alone.
+>
+> 2026-09-11 — PR #905 rewrote the `internal/state/state.go` TODO that the
+> Context section quoted, so the example, the count and the refs now point
+> at `internal/scheduler/stage_runner.go`. The 32 was counted before the
+> #903 review removed the CLI's two `(v0.3+)` help lines, the only Rust
+> hits. `git grep -nE 'TODO\(v0\.[0-9]+\)|\(v0\.[0-9]+\+\)' -- '*.go' '*.py' '*.rs'`
+> now finds 30; one of them, the `(v0.5+)` in
+> `agents/persona_runtime/action_loop.py`, names a release not yet shipped.
