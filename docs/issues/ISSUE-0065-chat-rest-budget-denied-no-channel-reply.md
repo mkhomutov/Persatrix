@@ -275,3 +275,8 @@ removes the legacy `chatExecutor` per [ISSUE-0035](ISSUE-0035-chat-executor-dead
 > open: Path B was never taken, so REST chat is still leased as
 > `CAUSE_CHANNEL_MESSAGE`, never `CAUSE_CHAT`. Filed as
 > [ISSUE-0155](ISSUE-0155-rest-chat-leased-as-channel-message.md).
+
+> 2026-09-11 — ISSUE-0155 is resolved by keeping that label, so Path B's
+> proto change is not planned, and
+> [ISSUE-0035](ISSUE-0035-chat-executor-dead-but-wired-cleanup.md) removes
+> `SendChatMessage` rather than routing chat through it.

@@ -17,6 +17,11 @@ The receiver-side channel-message origin flips to
 regression check that the chat discriminator (``chat_session_id``
 metadata) still selects ``CAUSE_CHAT`` rather than collapsing to one
 ``CHANNEL_MESSAGE``-shaped event class.
+
+REST chat never reaches the ``CAUSE_CHAT`` arm: since v0.3.0 it arrives
+through ``ReceiveChannelMessage`` like any channel message, without
+``chat_session_id``, so it leases as ``CAUSE_CHANNEL_MESSAGE``
+(ISSUE-0155, pinned in ``tests/unit/python/test_rest_chat_lease_cause.py``).
 """
 
 from __future__ import annotations
@@ -106,10 +111,11 @@ async def _make_agent(client: LLMClient) -> _LLMPersonaAgent:
 def _chat_event(*, content: str = "hello", chat_session_id: str = "chat-123") -> AgentEvent:
     """An ``AgentEvent`` shaped like the one ``SendChatMessage`` builds.
 
-    The discriminating signal is ``metadata["chat_session_id"]``: it is
-    set unconditionally on the chat path (RFC 0016 OQ 9) and never set on
-    the receiver-side ``ReceiveChannelMessage`` path. Tests rely on that
-    invariant — keep the chat handler's metadata in sync if it changes.
+    The discriminating signal is ``metadata["chat_session_id"]``: the
+    ``SendChatMessage`` servicer sets it on every event it builds (RFC 0016
+    OQ 9), and ``ReceiveChannelMessage`` never does. REST chat takes the
+    second path, so the chat handler's own ``chat_session_id`` never
+    reaches an event like this one (ISSUE-0155).
     """
     return AgentEvent(
         event_type=EventType.CHANNEL_MESSAGE,
@@ -179,12 +185,12 @@ class TestChatPathCauseTagging:
     async def test_channel_event_tagged_channel_message_post_pr6(self) -> None:
         """Receiver-side channel events tagged ``CAUSE_CHANNEL_MESSAGE`` (PR 6).
 
-        Kept in this file as the negative-of-the-positive: PR 4's chat
-        discriminator (``chat_session_id`` metadata) must select
-        ``CAUSE_CHAT`` rather than ``CAUSE_CHANNEL_MESSAGE``; without
-        this regression check a refactor that erases the discriminator
-        would silently route all channel-shaped events to one cause.
-        The dedicated PR 6 coverage lives in
+        Kept in this file as the negative-of-the-positive: PR 4's
+        ``SendChatMessage`` discriminator (``chat_session_id`` metadata)
+        must select ``CAUSE_CHAT`` rather than ``CAUSE_CHANNEL_MESSAGE``;
+        without this regression check a refactor that erases the
+        discriminator would silently route all channel-shaped events to one
+        cause. The dedicated PR 6 coverage lives in
         ``agents/tests/test_action_loop_channel_lease.py``.
         """
         client = _make_client_with_recording_create()
@@ -200,8 +206,8 @@ class TestChatPathCauseTagging:
         first = calls[0]
         assert first.get("cause") == walletpb.CAUSE_CHANNEL_MESSAGE, (
             "PR 6: receiver-side channel events must tag the lease with "
-            "CAUSE_CHANNEL_MESSAGE (the chat discriminator must not select "
-            f"this arm). Got cause={first.get('cause')!r}"
+            "CAUSE_CHANNEL_MESSAGE (the SendChatMessage discriminator must "
+            f"not select this arm). Got cause={first.get('cause')!r}"
         )
 
 

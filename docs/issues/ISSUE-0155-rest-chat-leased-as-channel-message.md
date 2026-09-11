@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0155
 summary: "REST chat is leased as CAUSE_CHANNEL_MESSAGE, never CAUSE_CHAT: the chat handler stamps `chat_session_id` on the DM message it publishes, but `ChannelMessageEvent` has no field or metadata map for it, so the key `cause_for_event` looks for never reaches the agent — only the unused gRPC `SendChatMessage` servicer builds that shape. No budget, limit, metric or dashboard reads the cause, so nothing is overspent or charged wrongly; but the wallet's logs file chat spend under channel traffic, and test docstrings say chat-as-DM events get CAUSE_CHAT"
-status: open
+status: resolved
 severity: low
 area: cost
 created: 2026-09-11
+closed: 2026-09-11
+closed_pr: 928
 refs:
   - docs/rfcs/0023-llm-call-leasing.md
   - docs/rfcs/0023-pr-plan.md
@@ -29,7 +31,52 @@ refs:
   - agents/tests/test_action_loop_chat_lease.py
   - agents/tests/test_action_loop_tick_lease.py
   - tests/integration/test_channel_message_budget_denied.py
+  - tests/unit/python/test_rest_chat_lease_cause.py
+  - docs/diagrams/workflow-execution.md
+  - CHANGELOG.md
 ---
+
+## Resolution (2026-09-11) — option 3: label kept, prose corrected
+
+Resolved by [#928](https://github.com/mkhomutov/Persatrix/pull/928) with
+option 3. A chat turn keeps the `CAUSE_CHANNEL_MESSAGE` label: since chat
+became a DM channel, a chat turn *is* a channel message, so the label is
+accurate, and what was wrong was the prose that said otherwise. Option 1
+would add a wire field for the chat session RFC 0032 plans to retire, and
+would label one DM two ways depending on the route that posted it. Option 2
+would redefine `CAUSE_CHAT` to feed a split nothing consumes yet, and as a
+code change it would wait for the v0.3.16 tag. #928 is docs, comments and
+tests only, so it needs no version slot. It:
+
+- adds
+  [`tests/unit/python/test_rest_chat_lease_cause.py`](../../tests/unit/python/test_rest_chat_lease_cause.py),
+  the test that drives a REST chat turn to the cause on its lease. It sends a
+  person's message in their DM with the persona through the real
+  `ReceiveChannelMessage` path and pins the lease to `CAUSE_CHANNEL_MESSAGE`,
+  the persona's ID and the DM's interaction ID. It passes on today's code,
+  since there is no code change to drive, and fails when option 2's rule is
+  patched in. A second case fails if `ChannelMessageEvent` ever gains a
+  `chat_session_id` field, so changing the label reopens this decision;
+- fixes the prose listed under Impact: the test docstrings, the two
+  "per-cause dashboards", and the v0.3.2 changelog entry, whose budgets are
+  now per-agent / per-workflow / global and which now says how chat leases
+  are labeled;
+- adds a note to [RFC 0023](../rfcs/0023-llm-call-leasing.md) under its
+  implementation status: PR 6, not PR 4, put REST chat under a lease;
+- states the label in [workflow-execution.md](../diagrams/workflow-execution.md)
+  where the chat sequence describes its lease, and drops the known-gap
+  bullet there;
+- puts the `cause_for_event` arm and its tests on
+  [ISSUE-0035](ISSUE-0035-chat-executor-dead-but-wired-cleanup.md)'s removal
+  list. That settles what happens to `CAUSE_CHAT`: the arm goes with
+  `SendChatMessage`, and the enum value stays for wire compatibility.
+
+[#921](https://github.com/mkhomutov/Persatrix/pull/921) corrects the
+`cause_for_event` docstring itself; its pointer to ISSUE-0065 reaches this
+issue through that issue's notes.
+
+If chat spend ever needs its own line — per-cause budget policies, or a
+report keyed on the cause — option 2 below is the way to do it.
 
 ## Summary
 
@@ -247,3 +294,8 @@ tagged.
 > [ISSUE-0065](ISSUE-0065-chat-rest-budget-denied-no-channel-reply.md) and
 > [ISSUE-0035](ISSUE-0035-chat-executor-dead-but-wired-cleanup.md) now link
 > here.
+
+> 2026-09-11 — resolved the same day by
+> [#928](https://github.com/mkhomutov/Persatrix/pull/928) with option 3 (see
+> the Resolution above). #928 is stacked on this filing PR and on #922, whose
+> known-gap bullet it removes.
