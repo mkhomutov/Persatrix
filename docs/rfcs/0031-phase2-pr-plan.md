@@ -339,7 +339,7 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 | 3 | Relationship + facts recall filtering | `feature/v035-rfc0031p2-relationship-facts-recall` | ✅ Merged | [#450](https://github.com/mkhomutov/Persatrix/pull/450) | 2026-05-28 |
 | 4 | Facade read-path extension + call-site threading | `feature/v035-rfc0031p2-facade-callsites` | ✅ Merged | [#451](https://github.com/mkhomutov/Persatrix/pull/451) | 2026-05-28 |
 | 5 | Dementia-test bridge + review follow-ups | `feature/v035-rfc0031p2-dementia-bridge` | ✅ Merged | [#452](https://github.com/mkhomutov/Persatrix/pull/452) | 2026-05-28 |
-| 6 | Phase 2 closeout | `feature/v035-rfc0031p2-close` | 🔀 PR open | — | — |
+| 6 | Phase 2 closeout | `feature/v035-rfc0031p2-close` | ✅ Merged | [#461](https://github.com/mkhomutov/Persatrix/pull/461) | 2026-05-29 |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ⏭ Deferred
 

@@ -321,7 +321,7 @@ No production code in PR 5 — test + docs only.
 | 2 | CLI registry verbs (`new` / `list` / `archive`) | `feature/v035-rfc0031p3-cli-registry` | ✅ Merged | [#466](https://github.com/mkhomutov/Persatrix/pull/466) | 2026-05-30 |
 | 3 | Active-session pointer file + `use` / `current` / `--activate` | `feature/v035-rfc0031p3-active-file` | ✅ Merged | [#467](https://github.com/mkhomutov/Persatrix/pull/467) | 2026-05-30 |
 | 4 | `--session` override on `chat` / `channel` | `feature/v035-rfc0031p3-session-override` | ✅ Merged | [#469](https://github.com/mkhomutov/Persatrix/pull/469) | 2026-05-30 |
-| 5 | Closeout + `--all-sessions` carve-out | `feature/v035-rfc0031p3-close` | 🔀 PR open | — | — |
+| 5 | Closeout + `--all-sessions` carve-out | `feature/v035-rfc0031p3-close` | ✅ Merged | [#470](https://github.com/mkhomutov/Persatrix/pull/470) | 2026-05-30 |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ⏭ Deferred
 
