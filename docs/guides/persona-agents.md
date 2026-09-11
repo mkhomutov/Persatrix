@@ -832,20 +832,21 @@ SQLite database via `UserStore`
 
 ### Known limitations
 
-The v0.2.1 chat surface is intentionally minimal. The following are
-deferred (matched against
-[RFC 0016 §Non-goals](../rfcs/0016-human-participant-chat-interface.md)):
+The v0.2.1 chat surface was deliberately small. The table lists what it
+left out (matched against
+[RFC 0016 §Non-goals](../rfcs/0016-human-participant-chat-interface.md#non-goals))
+and what has happened to each since:
 
-| Area | v0.2.1 behaviour | Deferred to |
-|------|------------------|-------------|
-| Concurrency | Single `UserParticipant` per session | v0.3.0 (RFC 0011) |
+| Area | v0.2.1 behaviour | What happened since |
+|------|------------------|---------------------|
+| Concurrency | Single `UserParticipant` per session | Shipped in v0.3.0 (RFC 0011): a group channel can hold several people and agents at once. `persatrix chat` is still one person talking to one agent |
 | Authentication | Sessions are local; `--user` is caller-supplied | Human logins: v0.3.12 ([RFC 0039](../rfcs/0039-user-accounts-authentication.md), off by default). Agent identity tokens: RFC 0009 Phase 4, slotted for v0.4.0 |
-| Streaming | Synchronous request-response, no SSE | future RFC |
-| Agent-initiated messages | No notification path; agents can only reply within an active session | future RFC |
-| Channel routing | Point-to-point user ↔ agent only | v0.3.0 (RFC 0011) |
-| Chat history API | No `GET /chat/history` endpoint; inspect via memory tools | v0.2.2 candidate |
+| Streaming | Synchronous request-response, no SSE | Not built. The chat endpoint still returns the whole reply at once. `persatrix channel watch` (v0.3.0) and the web console (v0.3.6) check for new messages every few seconds instead |
+| Agent-initiated messages | No notification path; agents can only reply within an active session | Partly. Since v0.3.0 a persona with a timer can post on its own in its channels; the shipped personas have had no timers since v0.3.3. Since v0.3.11 personas can also hold a whole discussion with no person present (RFC 0052), started by an operator ([how to convene](channels.md#13-autonomous-channels-rfc-0052)) or by a timer ([setup](../manual-tests/MT-AUTONOMOUS-003.md)). Nothing notifies anyone of a new message; people see it when they next read the channel. Channel bridges to Slack, Discord and email are planned for v0.5.0 (RFC 0011) |
+| Channel routing | Point-to-point user ↔ agent only | Shipped in v0.3.0 (RFC 0011): group channels, DMs and threads. `persatrix chat` now runs over a DM channel between you and the agent |
+| Chat history API | No `GET /chat/history` endpoint; inspect via memory tools | Shipped in v0.3.6 with the web console (RFC 0048): `GET /api/v1/agents/{id}/chat/history` returns a user's saved conversation with an agent. The CLI has no command for it, but `persatrix channel history dm:<a>:<b>` (your ID and the agent's, in alphabetical order) shows the same messages. With logins off (the default `auth.mode: disabled`), anyone who can reach the orchestrator can read any user's history |
 | Rate limiting | No per-user rate limit on the chat endpoint | Still none. Since v0.3.0 (RFC 0009) the limit is per agent ID; `persatrix chat` sends none, so it shares one limit with every other caller that sends none |
-| Web / GUI | CLI only | future RFC |
+| Web / GUI | CLI only | Shipped in v0.3.6: the [web console](web-console.md) (RFC 0048). It is off unless the orchestrator is started with `--enable-ui`; the Docker demo turns it on |
 
 > **Operational warning — no authentication by default.** Under the
 > default `auth.mode: disabled`, `--user` is caller-supplied and the chat
