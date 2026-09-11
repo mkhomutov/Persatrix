@@ -83,7 +83,7 @@ func TestConvene_AllowedBelowStandingBudget(t *testing.T) {
 // TestConvene_StandingBudgetZeroIsUnbounded — `standing_budget_tokens` unset (0)
 // leaves the spend check off: a one-shot channel (or a standing channel bounded
 // only by max_convenings) is never gated on spend, however much it has folded.
-// The spend is still tracked, for the readout a later slice surfaces.
+// The spend is still tracked (StandingSpend), though no readout reports it.
 func TestConvene_StandingBudgetZeroIsUnbounded(t *testing.T) {
 	disp := &messageRecordingDispatcher{}
 	router, ch := conveningHarness(t, disp, standingArmedBudget(0))

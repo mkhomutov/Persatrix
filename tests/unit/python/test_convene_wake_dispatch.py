@@ -5,10 +5,11 @@ convene client — and NEVER falls through to the ordinary idle/LLM tick path (a
 convene wake is a re-open signal, not a heartbeat; running a tick on it would be
 both a misfire and unbudgeted spend on an unattended channel).
 
-Ships DARK: nothing registers a ``convene`` timer yet (the ``agents.yaml``
-writer is PR 7c-ii-b), so this branch is unreachable in production and is
-exercised only here — exactly as PR 7c-i's ``StandingConveneTimers`` producer
-shipped exported-but-unconsumed.
+Nothing arms a ``convene`` timer automatically — the PR 7c-ii-b ``agents.yaml``
+writer has no production caller, just as PR 7c-i's ``StandingConveneTimers``
+producer has none — so in production this branch runs only for a timer an
+operator writes by hand into the convener's ``agents.yaml``
+(docs/guides/channels.md §13).
 """
 
 from __future__ import annotations
@@ -233,8 +234,8 @@ async def test_transport_failure_is_logged_with_traceback_and_dropped(
 
 
 def test_wire_convene_clients_injects_into_every_scheduler() -> None:
-    # The post-session injection (server.py) is what makes the dark handler
-    # reachable once PR 7c-ii-b registers a convene timer — without it a fired
+    # The post-session injection (server.py) is what lets the handler reach the
+    # orchestrator when a hand-written convene timer fires — without it a fired
     # wake would log-and-drop on a client-less scheduler. Pin that every started
     # scheduler receives an HTTPConveneClient built on the shared session.
     schedulers: dict[str, TickScheduler] = {}

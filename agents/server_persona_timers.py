@@ -55,23 +55,25 @@ def wire_convene_clients(
 
     Shared + stateless across schedulers. Wiring it into *every* scheduler (not
     only conveners) is harmless and keeps the call site config-free: a
-    ``ScheduledWake(callback_kind="convene")`` only ever reaches a convener,
-    because only a standing channel's config-round-trip writer (PR 7c-ii-b)
-    registers a convene timer — so on a non-convener the client is never called.
-    DARK until that writer lands: nothing registers a convene timer yet.
+    ``ScheduledWake(callback_kind="convene")`` reaches only a persona whose
+    ``autonomy.timers`` carries a ``convene`` entry, and an operator adds that
+    entry to the convener's ``agents.yaml`` by hand (docs/guides/channels.md
+    §13) — the PR 7c-ii-b writer
+    (:func:`agents.convene_timer_writer.merge_convene_timers`) has no production
+    caller. On every other persona the client is never called.
 
-    Ordering caveat for PR 7c-ii-b: this injection runs in
-    ``AgentServer.start`` *after* ``initialize_persona_agents`` has already
-    started the schedulers and registered their configured timers. Once 7c-ii-b
-    adds the ``convene`` timer to that config, the timer is armed before this
-    client is wired — so a first fire landing in the init→wire window would hit a
-    client-less scheduler and log-and-drop (``_handle_convene_wake``'s
-    "no convene client is configured" path), silently skipping that convening
-    with no retry until the next interval. The window is normally sub-first-fire
-    (first fire is ``>= _MIN_INTERVAL`` out), but a saved cache anchor clamped to
-    ``_MIN_INTERVAL`` plus slow multi-agent init could close it. 7c-ii-b should
-    wire the client before arming convene timers (or make the client-less drop a
-    re-arm), not rely on this ordering staying benign.
+    Ordering caveat: this injection runs in ``AgentServer.start`` *after*
+    ``initialize_persona_agents`` has already started the schedulers and
+    registered their configured timers, so a hand-written ``convene`` timer is
+    armed before this client is wired. A first fire landing in that init→wire
+    window hits a client-less scheduler and log-and-drops
+    (``_handle_convene_wake``'s "no convene client is configured" path),
+    silently skipping that convening with no retry until the next interval. The
+    window is normally sub-first-fire (first fire is ``>= _MIN_INTERVAL`` out),
+    but a saved cache anchor clamped to ``_MIN_INTERVAL`` plus slow multi-agent
+    init could close it. The 7c-ii-b writer did not fix this; the fix (wire the
+    client before arming convene timers, or make the client-less drop re-arm)
+    is a tracked residual in docs/rfcs/0052-pr-plan.md.
     """
     client = HTTPConveneClient(
         orchestrator_url=orchestrator_url, session=session,

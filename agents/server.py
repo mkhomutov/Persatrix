@@ -192,8 +192,8 @@ class AgentServer:
         # RFC 0034 Phase 1 — wire the conversation-window history fetcher.
         wire_history_fetchers(self.agents, self._session, self.orchestrator_url)
         # RFC 0052 §E (PR 7c-ii-a) — wire the convene client onto the started
-        # tick schedulers (post-session, like the channel publisher above). Dark
-        # until the standing-timer writer (PR 7c-ii-b) registers a convene timer.
+        # tick schedulers (post-session, like the channel publisher above). A
+        # convene timer the operator hand-writes into agents.yaml fires through it.
         wire_convene_clients(
             self._tick_schedulers, self._session, self.orchestrator_url,
         )

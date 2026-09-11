@@ -17,9 +17,10 @@ import "errors"
 // interaction, so the per-interaction cost cap does NOT bound the recurring total
 // ([RFC 0052 §E](../../docs/rfcs/0052-autonomous-agent-channels.md)). A standing
 // channel is therefore un-creatable without an AGGREGATE bound — the §E mirror of
-// the per-interaction cap-required gate. This slice ships DARK apart from that
-// gate: nothing fires the schedule or counts convenings yet (the config-round-trip
-// timer seam + the convening counter are PR 7b).
+// the per-interaction cap-required gate. Convening enforces both halves of that
+// bound (convening_counter.go, standing_budget.go). The schedule itself runs from a
+// `convene` timer the operator adds by hand to the convener's agents.yaml; nothing
+// writes that timer automatically (standing_schedule.go).
 
 // Standing validation sentinels (RFC 0052 §E). Matched by [errors.Is]; the REST
 // layer maps each to 400 Bad Request, symmetric with the one-shot autonomous

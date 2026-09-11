@@ -6,10 +6,9 @@ package channels
 // PR 7a landed the standing config backend + the aggregate-bound gate, and PR 7b
 // activated both aggregate ceilings (`max_convenings` count, `standing_budget_tokens`
 // spend) as live runtime bounds inside [ChannelRouter.ConveneChannel]. What
-// remained of §E is the SCHEDULE itself: `autonomous.schedule_interval_seconds`
-// is parsed, validated, and surfaced, but nothing FIRES it — a standing channel
-// is convened manually, exactly like a one-shot ([convening_counter.go]/[standing_budget.go]
-// both note the timer is "a later slice").
+// remained of §E was the SCHEDULE itself. `autonomous.schedule_interval_seconds`
+// is parsed, validated, and surfaced, but it fires nothing on its own: the
+// schedule runs from a `convene` timer in the convener's `agents.yaml` (below).
 //
 // §E resolves the wiring (OQ #4) as a CONFIG ROUND-TRIP, not a runtime
 // `RegisterTimer` API: RFC 0024 timers are `agents.yaml`-canonical (the per-agent
@@ -17,15 +16,19 @@ package channels
 // so a channel's schedule reaches the convener by registering an
 // `autonomy.timers` entry in the convener persona's config. This file is the
 // PRODUCER of that entry: the pure derivation from a resolved autonomous block to
-// the [ConveneTimerSpec] the round-trip must register. It ships DARK — nothing
-// consumes [ChannelRouter.StandingConveneTimers] yet, exactly as PR 1's
-// router_autonomous.go registry shipped dark before the convene path, and as
-// [ChannelRouter.ConveningCount] / [ChannelRouter.StandingSpend] shipped exported
-// for a readout a later slice rendered. PR 7c-ii wires the consumer: the
-// `agents.yaml` writer and the convener-side `ScheduledWake(callback_kind=convene)`
-// handler that calls back into [ChannelRouter.ConveneChannel] (so the fired
-// schedule passes the SAME §E aggregate ceilings the manual path does — the
-// timer must never bypass the bounds PR 7b built for it).
+// the [ConveneTimerSpec] the round-trip must register. PR 7c-ii landed the other
+// two pieces: the convener-side `ScheduledWake(callback_kind=convene)` handler
+// (agents/tick.py), which POSTs `/convene` (agents/convene_client.py) so a fired
+// schedule passes the SAME §E aggregate ceilings a manual convene does, and the
+// `agents.yaml` writer (agents/convene_timer_writer.py `merge_convene_timers`).
+//
+// Nothing consumes [ChannelRouter.StandingConveneTimers] yet, and nothing calls
+// that writer, so no production code arms a timer. An operator writes the
+// convener's `convene` timer by hand (docs/guides/channels.md §13 "Standing
+// channels"; docs/manual-tests/MT-AUTONOMOUS-003.md Step 2) and restarts the
+// persona; that timer then fires the live path above. A hand-written timer
+// skips [deriveConveneTimer]'s bound check, so one aimed at a channel with no
+// aggregate bound opens discussions, each capped, with no limit on how many.
 //
 // Two contracts this producer must honour, both pinned by standing_schedule_test.go:
 //
@@ -46,13 +49,15 @@ package channels
 //     never one looser than the §E bounds (an unbounded standing schedule is the
 //     runaway those bounds exist to stop; see [deriveConveneTimer]).
 //
-// DEFERRED to the PR 7c-ii consumer (NOT this producer's concern): the convener
-// persona must run at `autonomy.level` semi-autonomous/autonomous for its
-// EventLoop scheduler to exist and pick the timer up (agents/server_persona.py
-// gates the scheduler on level; a `reactive` convener silently ignores a `timers`
-// entry) — the `agents.yaml` writer bumps the level alongside writing the timer.
-// The same writer must ALSO carry any existing legacy tick forward: writing a
-// `timers` block flips `register_legacy_timer` to false (server_persona.py passes
+// Two rules bind whoever WRITES the timer (NOT this producer's concern);
+// `merge_convene_timers` applies both, and an operator writing the entry by hand
+// must apply them too (channels.md §13 shows both). The convener persona must run
+// at `autonomy.level` semi-autonomous/autonomous for its EventLoop scheduler to
+// exist and pick the timer up (agents/server_persona.py gates the scheduler on
+// level; a `reactive` convener silently ignores a `timers` entry), so the writer
+// bumps the level alongside writing the timer. The writer must ALSO carry any
+// existing legacy tick forward: writing a `timers` block flips
+// `register_legacy_timer` to false (server_persona.py passes
 // `register_legacy_timer=timers is None`), so injecting the convene entry into a
 // convener that today ticks on `tick_interval_seconds` with NO `timers` block
 // SILENTLY drops its ordinary autonomy tick — the writer must translate that tick
@@ -132,10 +137,12 @@ func standingConveneTimerID(channelID string) (string, bool) {
 // ParseStandingConveneTimerID reverses [standingConveneTimerID]: it recovers the
 // canonical group channel id a convene timer id encodes, returning ok=false for a
 // timer id that is not a convene timer (the legacy tick, another kind's entry, or
-// a bare prefix with no name). Exported because the PR 7c-ii consumer — the
-// convener-side wake handler that maps a fired `ScheduledWake.timer_id` back to
-// the channel to convene — is the load-bearing caller (a fired wake carries no
-// channel_id; the id is the only channel reference).
+// a bare prefix with no name). It is the reference for the convener-side wake
+// handler, which maps a fired `ScheduledWake.timer_id` back to the channel to
+// convene (a fired wake carries no channel_id; the id is the only channel
+// reference). That handler is Python (agents/tick.py), so it runs its own copy,
+// agents/convene_timer.py `parse_standing_convene_timer_id`; no Go code outside
+// tests calls this function.
 //
 // The recovered name must match `channelNamePattern`, not merely survive the
 // prefix strip: the `autonomy.timers[].id` charset admits `_` (see the schema
@@ -195,12 +202,11 @@ func deriveConveneTimer(channelID string, a AutonomousConfig) (ConveneTimerSpec,
 }
 
 // StandingConveneTimers enumerates the convener timer specs implied by every
-// armed STANDING channel in the resolved autonomous registry — the full set the
-// PR 7c-ii round-trip registers into the conveners' `agents.yaml` timer sets. The
-// result is deterministic (timer-id sorted) so a config-round-trip diff is stable
-// across boots. DARK: nothing fires these yet; this is the exported producer a
-// later slice consumes, the readout-method precedent [ChannelRouter.ConveningCount]
-// / [ChannelRouter.StandingSpend] set.
+// armed STANDING channel in the resolved autonomous registry — the full set a
+// config round-trip would register into the conveners' `agents.yaml` timer sets.
+// The result is deterministic (timer-id sorted) so a config-round-trip diff is
+// stable across boots. No production code calls it yet (see the file header):
+// operators write the same entries by hand.
 func (r *ChannelRouter) StandingConveneTimers() []ConveneTimerSpec {
 	r.autonomousMu.RLock()
 	specs := make([]ConveneTimerSpec, 0, len(r.autonomous))
