@@ -91,3 +91,10 @@ introduced the dead-but-wired state) and this issue.
 > 2026-05-05 — captured during PR #251 deep review (Finding L-1). The
 > inline TODO already exists; this issue is the tracker so the work
 > shows up in [INDEX.md](INDEX.md) and not just `grep -rn TODO`.
+
+> 2026-09-11 — the `SendChatMessage` servicer is the only code that builds
+> the event shape `cause_for_event` maps to `CAUSE_CHAT`, so deleting it
+> leaves that wallet cause with no producer. REST chat is leased as
+> `CAUSE_CHANNEL_MESSAGE` anyway:
+> [ISSUE-0155](ISSUE-0155-rest-chat-leased-as-channel-message.md). The two
+> should agree on what happens to `CAUSE_CHAT`.
