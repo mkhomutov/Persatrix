@@ -26,8 +26,9 @@ type AuditMetrics interface {
 
 	// RecordChainRecovered is called when [NewFileAuditLogger] emits a
 	// `chain.recovered` synthetic event at startup — i.e. the prior
-	// process's tail line was unparseable, truncated, or had a
-	// mismatched checksum. Operators alert on this counter rising.
+	// process's tail line was unreadable, truncated, not JSON, or
+	// missing a well-formed checksum. Operators alert on this counter
+	// rising.
 	RecordChainRecovered()
 
 	// ObserveEmitLatency reports the wall-clock duration of a single

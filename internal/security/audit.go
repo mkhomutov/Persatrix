@@ -193,10 +193,14 @@ type fileAuditLogger struct {
 //
 //   - File missing or zero-length → seed prevChecksum = sha256("") and emit
 //     `chain.bootstrap` (security-class) as the first event.
-//   - Tail line parses and its Checksum recomputes correctly → emit
-//     `chain.restart` carrying that checksum.
-//   - Tail line is unparseable / truncated / checksum mismatch → emit
-//     `chain.recovered` with Detail.prior_tail = "unknown".
+//   - Tail line parses as JSON and its Checksum field is well-formed (64 hex
+//     characters) → emit `chain.restart` carrying that checksum.
+//   - Tail line is unreadable / truncated / not JSON / missing a well-formed
+//     Checksum → emit `chain.recovered` with Detail.prior_tail = "unknown".
+//
+// Startup recomputes no checksum, so an edited record that keeps a
+// well-formed Checksum passes as a normal restart. Only [VerifyChain]
+// recomputes the chain, and only tests call it today.
 //
 // Returns an error only on filesystem failures (open / stat). Recovery
 // outcomes are surfaced as the first synthetic event written to the file.
