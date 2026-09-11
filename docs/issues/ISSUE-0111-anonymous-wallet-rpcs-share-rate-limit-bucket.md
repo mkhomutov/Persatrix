@@ -98,3 +98,11 @@ Landed with the v0.3.11 release-prep MT-execution PR (TDD,
 > v0.3.11 MT-execution PR
 > ([#763](https://github.com/mkhomutov/Persatrix/pull/763)); `closed_pr`
 > stays unset and status stays `in_progress` until the residuals land.
+
+> 2026-09-11 — the §Residuals line above says the anonymous REST surfaces
+> "degrade gracefully today". That holds only while nothing is quarantined:
+> while any agent ID is quarantined, every call that sends no agent ID is
+> refused outright, and nothing recovers on its own. Filed as
+> [ISSUE-0152](ISSUE-0152-one-quarantine-refuses-every-anonymous-caller.md);
+> giving the agents' REST calls their agent ID, the residual above, is one of
+> its proposed steps.
