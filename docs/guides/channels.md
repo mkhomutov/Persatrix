@@ -596,7 +596,10 @@ persatrix channel config diff planning
   nested blocks edited with dotted keys: `reasoning.*` (RFC 0051) and, since
   v0.3.11, `autonomous.*` (RFC 0052) — `autonomous.enabled`, `.topic`,
   `.agenda` (a comma-separated list → a `[]string`), `.convener`, `.goal`,
-  `.max_rounds`. Each `set`/`unset` nests under its block (`set planning
+  `.max_rounds`, and the standing-schedule knobs `.schedule_interval_seconds`,
+  `.max_convenings` and `.standing_budget_tokens`
+  ([§13](#standing-channels--convening-on-a-schedule)). Each `set`/`unset` nests
+  under its block (`set planning
   autonomous.enabled=true autonomous.agenda='Cost, Coupling'`); `get` renders them
   as `autonomous.<sub>` rows. `validate` rejects an `autonomous.enabled` channel
   without a positive `interaction_budget_tokens` cap and a convener that is not a
@@ -1115,22 +1118,31 @@ web panel) plus one operator action — **convene** — that opens the discussio
 
 ```yaml
 # config/channels.yaml — an armed channel
-autonomous:
-  enabled: true
-  topic: "Should we adopt a monorepo? Lay out the tradeoffs."
-  agenda: ["Build tooling cost", "Cross-team coupling", "Migration effort"]
-  convener: nova-sparrow          # authors the opening turn; a DISTINCT role from
-                                  # escalation_chair_id (RFC 0052 OQ #1)
-  goal: "A synthesized recommendation with the strongest argument on each side."
-  interaction_budget_tokens: 200000   # MANDATORY — validate rejects uncapped autonomy
+channels:
+  - name: roundtable
+    interaction_budget_tokens: 200000   # MANDATORY — validate rejects uncapped autonomy
+    escalation_chair_id: ember-owl      # MANDATORY — the chair writes the closing synthesis
+    autonomous:
+      enabled: true
+      topic: "Should we adopt a monorepo? Lay out the tradeoffs."
+      agenda: ["Build tooling cost", "Cross-team coupling", "Migration effort"]
+      convener: nova-sparrow          # authors the opening turn; a DISTINCT role from
+                                      # escalation_chair_id (RFC 0052 OQ #1)
+      goal: "A synthesized recommendation with the strongest argument on each side."
+    members:
+      - {id: nova-sparrow, respond: participant}
+      - {id: ember-owl, respond: participant}
+      - {id: iron-fox, respond: participant}
 ```
 
-**The safety contract (enforced at config-validation, RFC 0052 PR 1).** An
-unattended channel has no human circuit-breaker, so an `autonomous.enabled`
-channel is **un-creatable** without a positive resolved `interaction_budget_tokens`
-cap; arming is **group-only** (a DM/thread cannot be made autonomous); and the
-`convener` must be a declared, floor-capable member (not an `observer`) distinct
-from `escalation_chair_id`.
+**The safety contract (enforced at config-validation).** An unattended channel
+has no human circuit-breaker, so an `autonomous.enabled` channel is
+**un-creatable** without a positive resolved `interaction_budget_tokens` cap and
+an `escalation_chair_id` to write the closing synthesis; arming is **group-only**
+(a DM/thread cannot be made autonomous); the `convener` must be a declared,
+floor-capable member (not an `observer`) distinct from `escalation_chair_id`; and
+a [standing channel](#standing-channels--convening-on-a-schedule) must also
+declare an aggregate bound.
 
 **Convening.** Convening = the convener authors the **opening turn** under a
 fresh interaction, with no human message; from that publish the ordinary
@@ -1171,7 +1183,9 @@ POST /api/v1/channels/{id}/convene      → 202 {channel_id, convener, status:"c
                                               live interaction · 409 no open-floor responder
                                               besides the convener · 409 no topic/agenda/goal
                                               to convene on
-                                          400 convener drifted out of the roster
+                                          400 convener or chair drifted out of the roster
+                                          429 max_convenings or standing_budget_tokens reached
+                                          503 convener not reachable right now (retryable)
 ```
 
 > **The audience must answer an *open-floor* opener.** The convener's opening
@@ -1184,8 +1198,9 @@ POST /api/v1/channels/{id}/convene      → 202 {channel_id, convener, status:"c
 
 Convening targets an **idle** channel: a channel that already has a live
 interaction is refused (`409`) rather than silently joined — the convener opens
-one discussion, not a second one over a running one (forcing-fresh on a standing
-re-convene is a later RFC 0052 PR). Note the convene ack is `202 Accepted` —
+one discussion, not a second one over a running one (a timer-fired convene on a
+[standing channel](#standing-channels--convening-on-a-schedule) gets the same
+`409`). Note the convene ack is `202 Accepted` —
 "the convener was woken", not "the discussion ran". Repeated convening is bounded
 by the §E aggregate ceiling: once a channel has been convened `autonomous.max_convenings`
 times, a further convene is refused with `429 Too Many Requests` (the count is
@@ -1197,11 +1212,12 @@ reaches `standing_budget_tokens` a further convene is likewise refused with `429
 — the aggregate-*spend* twin of the count ceiling, process-lifetime and
 delete-cleared in the same way (the async per-persona close summaries settle after
 the close, so the folded total tracks the discussion spend; the co-declared count
-bound caps how far it can overrun). Only the timer that fires the schedule
-automatically remains a later RFC 0052 PR, so treat convene as an
-operator-initiated, not a scripted-loop, action until the schedule lands.
+bound caps how far it can overrun). A
+[standing channel](#standing-channels--convening-on-a-schedule) must declare at
+least one of these two ceilings, and a convene fired by its timer meets them
+exactly like a manual one.
 
-How much of the aggregate allowance is spent is visible on the config **read**
+How much of the *count* allowance is spent is visible on the config **read**
 surface: `GET …/config` carries an `autonomous_runtime` block —
 `convening_count` (openers dispatched this process lifetime) and
 `convenings_remaining` (the `max_convenings` allowance left, or `null` when
@@ -1209,13 +1225,72 @@ unbounded; clamped at zero if a lowered bound sits below the spent count). The w
 *Autonomous channel* panel renders it as a **Convenings: _N_ used, _M_ remaining**
 line, and `persatrix channel config get` prints a trailing `convenings … (runtime)`
 row. It is read-only observability — the count itself is enforced by the `429`
-ceiling above.
+ceiling above. Nothing reports the `standing_budget_tokens` running total yet, so
+a channel bounded only by spend reaches its `429` with no warning.
 
 - **Web console** — a **Convene** button in the Channel-settings panel's
   *Autonomous channel* section, shown only when the channel is armed per the
   *saved* config and disabled while there are unsaved edits (convening reads the
   persisted block, so save first). See the
   [web console channel settings guide](web-console-channel-settings.md).
+
+### Standing channels — convening on a schedule
+
+A **standing** channel convenes itself on a timer instead of waiting for an
+operator. Arming one takes two steps.
+
+**1. On the channel** (armed as above), set `autonomous.schedule_interval_seconds`
+to the timer's interval in seconds, plus an aggregate bound: `max_convenings`,
+`standing_budget_tokens`, or both. The per-interaction cap limits each discussion,
+not how many the timer starts, so a positive interval with no bound is refused:
+`channel config set` answers `400`, and in `config/channels.yaml` the file fails
+to load at boot, which leaves every channel endpoint answering `503`. `0`, the
+default, means no schedule and needs no bound. The web panel does not edit these
+knobs.
+
+```bash
+# one discussion a day, at most 30 in all
+persatrix channel config set planning \
+  autonomous.schedule_interval_seconds=86400 autonomous.max_convenings=30
+```
+
+**2. On the convener**, add the timer to its entry in `config/agents.yaml`, then
+restart that persona. The channel setting does not start anything, and nothing
+writes this timer for you yet.
+
+```yaml
+# config/agents.yaml — the convener's entry
+agents:
+  - id: nova-sparrow
+    autonomy:
+      level: semi-autonomous        # or autonomous; other levels run no timers
+      timers:
+        - id: convene-planning      # "convene-" + the channel name
+          interval_seconds: 86400   # keep equal to schedule_interval_seconds
+          kind: convene
+        # Only if it already ran semi-autonomous or autonomous with no timers
+        # block, keep its ordinary heartbeat (at its tick_interval_seconds):
+        # - {id: legacy_tick, interval_seconds: 60, kind: tick}
+```
+
+The timer's `interval_seconds` is the schedule that actually runs; the channel
+setting only makes `validate` demand a bound, so keep the two equal. Adding a
+`timers` block switches off the implicit heartbeat, hence the commented `tick`
+line ([MT-AUTONOMOUS-003](../manual-tests/MT-AUTONOMOUS-003.md) Step 2 explains
+both rules). Do step 1 first: nothing checks a convene timer against its
+channel's bound, so a timer aimed at a channel without one keeps opening
+discussions, each capped but with no limit on how many.
+
+Each fire calls the same convene endpoint as the CLI and meets the same
+refusals: a fire during a running discussion gets `409` and is skipped, and once
+the bound is spent every fire gets `429` and nothing opens. A new timer first
+fires one full interval after the persona starts. Every fire opens on the
+channel's current `topic`, `agenda` and `goal`, so to vary them per fire (see
+the tuning notes below), edit the channel between fires. Both bounds reset when
+the orchestrator restarts, but the timer keeps firing, so a restart **resumes** a
+channel that had stopped at its bound. To stop a standing channel for good,
+disarm it (`autonomous.enabled=false`) and remove its timer the same way you
+added it.
 
 ### Tuning an autonomous roster — the ISSUE-0109 calibration
 
@@ -1325,8 +1400,12 @@ The convener/chair/participant turns come from the curated
 `config/offline_responses.yaml` fixtures, so the offline discussion is
 deterministic — it demonstrates the *shape* of a human-free brainstorm, not a
 live model's reasoning. Swap `provider: mock` for a keyed vendor (`make
-demo-anthropic` / `demo-openai`, or the four-vendor headline once RFC 0053
-lands) and convene the same channel for a real run. The deterministic pin that
+demo-anthropic`, `demo-openai`, `demo-gemini` or `demo-watsonx`; the four-vendor
+roster in
+[`blueprints/autonomous-multivendor`](../../blueprints/autonomous-multivendor/blueprint.yaml)
+is assembled by hand, as in
+[MT-AUTONOMOUS-MULTIPROVIDER-001](../manual-tests/MT-AUTONOMOUS-MULTIPROVIDER-001.md))
+and convene the same channel for a real run. The deterministic pin that
 the offline face yields a non-empty, on-topic synthesis at $0 is
 [`tests/integration/test_autonomous_offline_smoke.py`](../../tests/integration/test_autonomous_offline_smoke.py);
 the live acceptance is [MT-AUTONOMOUS-001](../manual-tests/MT-AUTONOMOUS-001.md).
@@ -1342,9 +1421,9 @@ the live acceptance is [MT-AUTONOMOUS-001](../manual-tests/MT-AUTONOMOUS-001.md)
 > produced (and, on the autonomous close, metered against the cost cap), and
 > the channel is left re-convenable. A chair that never replies falls back to
 > an immediate close after a timeout, so termination never waits on a model.
-> The remaining mechanisms — the anti-collapse cadence and standing/scheduled
-> convening — land in the subsequent RFC 0052 PRs (see the
-> [PR plan](../rfcs/0052-pr-plan.md)).
+> PR 6 adds the anti-collapse cadence and PR 7 standing convening
+> ([above](#standing-channels--convening-on-a-schedule)); all of them shipped in
+> v0.3.11 (see the [PR plan](../rfcs/0052-pr-plan.md)).
 
 ---
 
