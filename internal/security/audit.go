@@ -29,9 +29,9 @@ const (
 // drop in without churning call sites. The Phase 1 implementation ships a
 // JSONL file sink ([NewFileAuditLogger]).
 type AuditLogger interface {
-	// Emit records ev. The event's Timestamp and Checksum are filled by the
-	// logger if zero / empty; callers may pre-set them to override (used by
-	// the chain-recovery synthetic events).
+	// Emit records ev. The logger sets Timestamp to the current time when
+	// it is zero and keeps a Timestamp the caller set. It always computes
+	// Checksum itself, replacing any value the caller set.
 	//
 	// Security-class events are flushed (and fsync'd) before Emit returns.
 	// Telemetry-class events may be batched; see [AuditLoggerOption]s for
