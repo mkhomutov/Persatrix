@@ -648,7 +648,7 @@ gated behind the **same** `config_edit_enabled` toggle (which the shipped
 `config/ui.yaml` now sets on) and rides the same `If-Match` revision, so a value
 set in the browser is the value the
 CLI `channel config get` reads back. See the
-[web-console guide § Channel settings](web-console.md#channel-settings--edit-governance-from-the-browser).
+[web console channel settings guide](web-console-channel-settings.md).
 
 ### The interaction-summary surface (RFC 0020) — v0.3.8
 
@@ -1215,7 +1215,7 @@ ceiling above.
   *Autonomous channel* section, shown only when the channel is armed per the
   *saved* config and disabled while there are unsaved edits (convening reads the
   persisted block, so save first). See the
-  [web-console guide § Channel settings](web-console.md#channel-settings--edit-governance-from-the-browser).
+  [web console channel settings guide](web-console-channel-settings.md).
 
 ### Tuning an autonomous roster — the ISSUE-0109 calibration
 
