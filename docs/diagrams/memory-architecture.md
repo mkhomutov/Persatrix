@@ -101,7 +101,7 @@ graph TB
     PR --> CTX
     PR --> ITX
     ITX -->|on close →<br/>summarize_close.py<br/>calls MemoryFacade.compress<br/>— pure function on turn list| F
-    ITX -.->|on close →<br/>fact extractor writes<br/>(subject, predicate, object)| FCT
+    ITX -.->|"on close →<br/>fact extractor writes<br/>(subject, predicate, object)"| FCT
     CTX -.->|persona-runtime read path<br/>bypasses facade<br/>recall / recall_notes /<br/>recall_with_scope_filter| E
     CTX -.->|relationship summary<br/>— direct call| R
     CTX -.->|facts_section.py<br/>recall_facts_for_event<br/>— direct call| FCT

@@ -20,7 +20,7 @@ why it is left out.
 | [component-architecture.md](component-architecture.md) | Package-level layout across Rust, Go, Python, and the web console; shipped modules (including the chat surface: `agents/participant.py`, the chat handler in `internal/server/`, the `persatrix chat` CLI command) vs stubs reserved for later phases, plus the packages left out on purpose |
 | [workflow-execution.md](workflow-execution.md) | Two sequences: (1) end-to-end workflow run (CLI → REST → planner → scheduler → executor → agent → LLM, with cost/budget accounting); (2) chat-message path (CLI → `POST /chat` → chat executor → `SendChatMessage` gRPC → PersonaAgent → memory → LLM → reply). Sequence 2 still shows chat as it ran before v0.3.0, when it moved onto DM channels |
 | [persona-runtime.md](persona-runtime.md) | Persona agent lifecycle: event-driven dispatch and autonomous tick loop, lock protocol, action-loop termination |
-| [memory-architecture.md](memory-architecture.md) | Four memory tiers (working, episodic, relationship, notes), SQLite persistence, context assembly order |
+| [memory-architecture.md](memory-architecture.md) | Five memory tiers (working, episodic, relationship, notes, facts), SQLite persistence, context assembly order |
 | [observability-stack.md](observability-stack.md) | v0.2.3 signal flow: structured-log shipper (agents → `LogService` → ring buffer + disk store → REST/SSE → `persatrix logs` CLI) plus OTLP pipeline (orchestrator + agents → OTEL Collector → Jaeger / Prometheus / Loki), and baggage + trace-context propagation across the gRPC boundary |
 
 ## Editing conventions
