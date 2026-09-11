@@ -94,11 +94,13 @@ func renderPatterns(patterns []security.Pattern) string {
 	for _, p := range patterns {
 		fmt.Fprintf(&b, "    _Pattern(\n")
 		fmt.Fprintf(&b, "        name=%s,\n", pyRepr(p.Name))
-		// Go regex syntax (RE2) is a subset compatible with Python `re`
-		// for the patterns we actually use here (`(?i)`, `\b`, bounded
-		// `.{0,N}`). We pin the Go-source string verbatim so any future
-		// pattern that drifts surfaces in the parity test rather than
-		// silently diverging.
+		// We pin the Go-source string verbatim so a pattern edited on one
+		// side only surfaces in the parity test. Both engines accept every
+		// string in the table, but they do not match the same text: Go
+		// reads `\s` and `\b` as ASCII only, Python's `re` as Unicode, and
+		// the two fold case differently, so the sides flag different
+		// non-ASCII input. See
+		// docs/issues/ISSUE-0154-go-and-python-sanitizers-flag-different-text.md.
 		fmt.Fprintf(&b, "        regex=%s,\n", pyRepr(p.Regex.String()))
 		fmt.Fprintf(&b, "        description=%s,\n", pyRepr(p.Description))
 		fmt.Fprintf(&b, "    ),\n")

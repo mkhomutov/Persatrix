@@ -50,6 +50,11 @@ type Pattern struct {
 //   - No POSIX character classes ([[:alpha:]]): RE2-only; Python `re`
 //     would not parse them.
 //   - Named groups (?P<name>...) are fine — both engines support them.
+//   - `\s`, `\b` and `(?i)` compile on both sides but differ on non-ASCII
+//     text: Go reads `\s` and `\b` as ASCII only, Python as Unicode, and
+//     the two fold case differently. The table uses all three, so the
+//     sides already flag different input; see
+//     docs/issues/ISSUE-0154-go-and-python-sanitizers-flag-different-text.md.
 //
 // PR #253 deep-review F7 — `cmd/genpatterns` cannot detect a Python-only
 // construct because the Go side already refused to compile it; this
