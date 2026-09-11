@@ -5,7 +5,7 @@
   // (RFC 0011 chat-as-DM), so both render + poll through the shared
   // ConversationFeed; the DM-specific bits are the send path (sendChat vs
   // publishMessage) + a persona header. userId is the /ui/context principal (RFC
-  // §F), never prompted. Pure render-over-API.
+  // §F) or App.svelte's "acting as" override (slice1-ux §E). Pure render-over-API.
   import {
     listAgents,
     listChannels,

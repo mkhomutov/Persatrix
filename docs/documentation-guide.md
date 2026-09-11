@@ -114,7 +114,7 @@ One canonical document per topic. Link to it; do not copy from it.
 | Version status, RFC master index, merged PRs | `ROADMAP.md` |
 | Version scope decisions | `docs/v0.3.x-sequencing.md` (active amendment at the top) |
 | One version's plan / release-prep / checklist / evidence | `docs/vX.Y.Z-*.md` and `docs/manual-tests/vX.Y.Z-execution-report.md` |
-| Operator and user guides | `docs/guides/` (auth, channels, epochs, model providers, persona agents, sessions, web console, version bump, demo) |
+| Operator and user guides | `docs/guides/` (auth, channels, epochs, model providers, persona agents, sessions, web console and its channel settings, version bump, demo) |
 | Log schema and observability | `docs/observability.md` |
 | Golden-trace evals | `docs/evaluators-guide.md`; `evaluators/eval_sets/README.md` |
 | Prompt assets | `docs/prompt-organization.md` |

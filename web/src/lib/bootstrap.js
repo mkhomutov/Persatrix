@@ -58,13 +58,14 @@ export function selectPanels(config) {
   });
 }
 
-// deriveUserId resolves the user_id the console acts as from the /ui/context
-// principal — the single identity source (RFC §F rule 1). The console never
-// hard-codes or prompts for a user, so a missing/empty principal returns null
-// (an error state the shell surfaces) rather than a fabricated default. Today
-// the principal is the degenerate single-tenant "local"; an RFC 0039 auth
-// layer later populates it with the real authenticated principal, unchanged
-// here.
+// deriveUserId resolves the default user_id the console acts as from the
+// /ui/context principal — the single identity source (RFC §F rule 1). It never
+// hard-codes a user, so a missing/empty principal returns null (an error state
+// the shell surfaces) rather than a fabricated default. App.svelte lets a
+// tester override the result through the "acting as" box while /ui/context
+// reports authenticated:false (RFC 0048 slice1-ux amendment §E). Under the
+// default auth.mode: disabled the principal is the degenerate single-tenant
+// "local"; under enabled it is the verified account, unchanged here.
 export function deriveUserId(context) {
   const principal = context?.principal;
   return principal ? principal : null;
