@@ -31,7 +31,7 @@ func registerAuditInstruments(m metric.Meter, i *Instruments) error {
 		"orchestrator.audit.chain_recovered_total",
 		metric.WithUnit("{event}"),
 		metric.WithDescription(
-			"chain.recovered synthetic events emitted at startup when the prior tail line was unparseable, truncated, or had a mismatched checksum.",
+			"chain.recovered synthetic events emitted at startup when the prior tail line was unreadable, truncated, not JSON, or missing a well-formed checksum.",
 		),
 	); err != nil {
 		return fmt.Errorf("create audit.chain_recovered_total: %w", err)
