@@ -195,7 +195,8 @@ func TestRecordStepUsage_DoesNotFeedTokenCounter(t *testing.T) {
 	assert.Equal(t, int64(0), input, "recordStepUsage must not feed the budget TokenCounter")
 	assert.Equal(t, int64(0), output, "recordStepUsage must not feed the budget TokenCounter")
 
-	// Per-step cost still reaches the CostReporter (the /cost endpoint).
+	// Per-step cost still reaches the CostReporter. Only WorkflowSummary
+	// reads it; no endpoint serves it today.
 	summary := reporter.WorkflowSummary("wf-1")
 	require.Len(t, summary.Steps, 1)
 	assert.Equal(t, int64(1000), summary.Steps[0].InputTokens)

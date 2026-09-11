@@ -90,8 +90,11 @@ func (s *WorkflowScheduler) resolveStepLimits(ctx context.Context, step planner.
 	return limits
 }
 
-// recordStepUsage records a completed step's per-step cost entry on the
-// CostReporter — the data source for the /cost endpoint.
+// recordStepUsage records a completed step's cost entry on the
+// CostReporter, which keeps it per workflow. No endpoint reads that entry
+// today: GET /api/v1/cost/summary reports the TokenCounter that the wallet
+// fills, and the entry's only reader, CostReporter.WorkflowSummary, is
+// called only from tests.
 //
 // RFC 0023 PR 3 retired this function's former TokenCounter.RecordUsage
 // call: every workflow-task LLM call now acquires an agent-side wallet lease,
@@ -144,9 +147,10 @@ func (s *WorkflowScheduler) recordStepUsage(workflowID string, step planner.Step
 	// Reconcile to the provider actuals at settle. Re-recording it post-
 	// dispatch would count every workflow-task call twice against all three
 	// budget scopes. The wallet's Reconcile is now the single recording
-	// authority for leased calls; the scheduler keeps only the per-step
-	// CostReporter entry below, which feeds the /cost endpoint, not the
-	// budget counter. See docs/rfcs/0023-llm-call-leasing.md § D / § G.
+	// authority for leased calls. The scheduler records only the per-step
+	// CostReporter entry below, never the budget counter. That entry is kept
+	// per workflow, but no endpoint reads it today. See
+	// docs/rfcs/0023-llm-call-leasing.md § D / § G.
 	if s.costReporter != nil {
 		// PR #86 review S-04: Log when a non-empty model has no pricing entry,
 		// causing $0 cost despite non-zero tokens. Helps operators diagnose
