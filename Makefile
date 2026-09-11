@@ -535,7 +535,7 @@ merged-prs-check: ## Fail if docs/merged-prs.md is behind git log (CI)
 plan-status-check: ## Fail if a plan's progress table says "PR open" for a PR that has merged (CI)
 	$(PYTHON) scripts/checks/plan_status.py
 
-rfcs-check: ## Fail if docs/rfcs/INDEX.md is stale or front-matter is invalid (CI)
+rfcs-check: ## Fail if docs/rfcs/INDEX.md is stale, front-matter is invalid, or an RFC's **Status** header line disagrees with it (CI)
 	$(PYTHON) scripts/rfcs.py --check
 
 # ─── Version ────────────────────────────────────────────

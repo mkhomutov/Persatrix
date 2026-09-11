@@ -12,7 +12,8 @@ Checks executed:
   4. Doc links check
   5. Leaked tool-call markup check (docs)
   6. Doc status markers check
-  7. RFC index freshness (docs/rfcs/INDEX.md up to date with front-matter)
+  7. RFC index freshness (docs/rfcs/INDEX.md up to date with front-matter,
+     and each RFC's **Status** header line agrees with it)
   8. File size check (code: ≤500 lines, docs: ≤3000 words)
   9. Plan status (no "PR open" row for a PR that has merged)
  10. Methodology conformance (every artifact the manifest names exists)

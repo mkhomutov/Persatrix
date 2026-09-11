@@ -221,6 +221,13 @@ Allowed `status` values (lower-cased; the table marker is rendered from
 | **Depends on** | ⬚ | Comma-separated `RFC NNNN` references | `RFC 0001` |
 | **Superseded by** | ⬚ | Single `RFC NNNN` reference | `RFC 0008` |
 
+The **Status** line must start with the lifecycle marker for the front-matter
+`status` — `partially_implemented` → `⚠️ Partially Implemented` — and may go
+on with a qualifier: `⚠️ Partially Implemented (Phases 1–2)`. The label may
+be bold (`✅ **Implemented** — v0.3.12`). `scripts/rfcs.py` compares the first
+`**Status**:` line below the front-matter with `status:`, so `make rfcs` and
+`make rfcs-check` (pre-commit and CI) fail when the two disagree.
+
 The bold-markdown header may include free-form extra lines (e.g.
 `**Spawned from**: …`, `**Accepted**: …`, `**Implemented in**: …`) that
 do not have a YAML field. These are documentary and not parsed.
@@ -259,7 +266,7 @@ When implementation diverges from the RFC design, add a `## Divergence from RFC 
 
 ## Checklist for Updating an Existing RFC
 
-- [ ] Status marker updated to reflect current state in *both* the YAML front-matter (`status:`) and the bold-markdown header.
+- [ ] Status marker updated to reflect current state in *both* the YAML front-matter (`status:`) and the bold-markdown header — `make rfcs` fails if they disagree.
 - [ ] Divergences documented using the standard `D[N]` format.
 - [ ] Table of Contents still accurate after edits.
 - [ ] If superseded, old RFC references the new one and `superseded_by:` is set in the front-matter.
