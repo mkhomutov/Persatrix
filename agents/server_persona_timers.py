@@ -57,8 +57,8 @@ def wire_convene_clients(
     only conveners) is harmless and keeps the call site config-free: a
     ``ScheduledWake(callback_kind="convene")`` reaches only a persona whose
     ``autonomy.timers`` carries a ``convene`` entry, and an operator adds that
-    entry to the convener's ``agents.yaml`` by hand (docs/guides/channels.md
-    §13) — the PR 7c-ii-b writer
+    entry to the convener's ``agents.yaml`` by hand
+    (docs/guides/autonomous-channels.md, "Standing channels") — the PR 7c-ii-b writer
     (:func:`agents.convene_timer_writer.merge_convene_timers`) has no production
     caller. On every other persona the client is never called.
 

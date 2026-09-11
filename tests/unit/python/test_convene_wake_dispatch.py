@@ -9,7 +9,7 @@ Nothing arms a ``convene`` timer automatically — the PR 7c-ii-b ``agents.yaml`
 writer has no production caller, just as PR 7c-i's ``StandingConveneTimers``
 producer has none — so in production this branch runs only for a timer an
 operator writes by hand into the convener's ``agents.yaml``
-(docs/guides/channels.md §13).
+(docs/guides/autonomous-channels.md, "Standing channels").
 """
 
 from __future__ import annotations
