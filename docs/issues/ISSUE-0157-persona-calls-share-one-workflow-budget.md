@@ -58,7 +58,7 @@ workflow for the life of the process. RFC 0006 specified a total per run.
 
 ## Context
 
-Line numbers are at `604fab72`.
+Line numbers are at `bfb8ed1f`.
 
 ### Gap 1 — calls with no workflow id share one workflow total (medium)
 
@@ -265,9 +265,9 @@ only after v0.3.16 is tagged.
 > 2026-09-11 — filed from a code reading at `604fab72`, confirmed with a
 > throwaway `go test -overlay` run against the real `WalletService` (not
 > committed). Found in the review of
-> [#938](https://github.com/mkhomutov/Persatrix/pull/938), which files
-> ISSUE-0156: its Impact section names this shared total as what finally
-> stops a runaway convene timer, and its F-8 left the defect to an issue of
-> its own. Gap 2 turned up while tracing where a workflow's id comes from.
+> [#938](https://github.com/mkhomutov/Persatrix/pull/938), which filed
+> [ISSUE-0156](ISSUE-0156-standing-timer-unbounded.md): its Impact section
+> names this shared total as what finally stops a runaway convene timer, and
+> its F-8 left the defect to an issue of its own. Gap 2 turned up while tracing where a workflow's id comes from.
 > RFC 0023's Decision section and ISSUE-0063's notes now link here. Docs
 > only: no code changes.

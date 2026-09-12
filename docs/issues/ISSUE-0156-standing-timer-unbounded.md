@@ -223,7 +223,8 @@ a second convene inside that window.
   see `cmd/orchestrator/main.go:240`). Persona calls carry no workflow id
   (`agents/llm_client.py:196`), so all of them count against one shared
   workflow total (`wallet.go:252`–`253`, `internal/cost/cost.go:265`–`275`),
-  whose $10 limit then covers every persona's calls together. The budgets
+  whose $10 limit then covers every persona's calls together
+  ([ISSUE-0157](ISSUE-0157-persona-calls-share-one-workflow-budget.md)). The budgets
   stop the loop bluntly: once one is spent, every model call it covers is
   refused, on every channel. With unpriced local models (`mock`, `ollama`)
   they never bind.
