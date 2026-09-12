@@ -11,7 +11,23 @@ helpers:
 - :func:`render_relationship_section` runs :class:`MemoryBudget`
   admission and builds the ``"relationship_context"``
   :class:`WorkingMemory` section.  Returns ``None`` when nothing is
-  admitted so the caller can skip ``add_section``.
+  admitted so the caller can skip ``add_section``.  A successful
+  admission is paired with :meth:`MemoryBudget.record_admission`
+  under ``tier="relationship"`` (ISSUE-0122, v0.3.16 PR B1), keyed by
+  :func:`relationship_item_id` — so ``PERSATRIX_MEMORY_PROVENANCE=1``
+  sees the identity read the way it sees every other tier, and zero
+  admissions on an identity turn is a recall miss, not the expected
+  reading.
+
+Tenant axis (ISSUE-0137, stated here on purpose): this tier is
+**ambient-only**.  Unlike the episodic and facts tiers, whose write
+boundary takes ``principal_id`` explicitly, the relationship row is
+read and written under whatever ``principal_scope`` binds — there is
+no per-call tenant argument on either side, and the close path writes
+it in Phase 2 under the ``record_write_scopes`` binding.  That is a
+known and accepted shape, not an oversight; the admission record adds
+observability, not a gate decision — the tier stays outside the RFC
+0037 §D egress gate (its Non-Goals).
 
 Extracted from :mod:`agents.persona_runtime.memory_context` so the
 mixin file stays under the 500-line review cap; the tier is logically
@@ -45,6 +61,7 @@ __all__ = [
     "RELATIONSHIP_SECTION_NAME",
     "RELATIONSHIP_SECTION_PRIORITY",
     "recall_relationship_summary",
+    "relationship_item_id",
     "render_relationship_section",
 ]
 
@@ -60,6 +77,21 @@ RELATIONSHIP_SECTION_PRIORITY: int = 8
 # (PR #60 review: unnamed magic numbers in trust comparison.)
 _DEFAULT_TRUST_SCORE: float = 0.5
 _TRUST_DEVIATION_THRESHOLD: float = 0.01
+
+
+def relationship_item_id(rel: RelationshipSummary) -> str:
+    """The ``item_id`` a relationship admission is recorded under.
+
+    ``<other_participant_type>:<other_participant_id>`` — the pair the
+    relationship row is keyed by, so the provenance record names the
+    row — including the participant type the read matched, which is
+    how an admitted but mistyped row (the ISSUE-0119 class) shows up on
+    the ``tier_admitted`` line; a lookup that matches no row records
+    nothing — without carrying any of the identity text.  The provenance log is an egress
+    surface of its own; name, role, preferences and the raw tail stay in
+    the rendered section and never land on the record (ISSUE-0122).
+    """
+    return f"{rel.other_participant_type}:{rel.other_participant_id}"
 
 
 def _format_identity(identity: dict | None) -> str | None:
@@ -251,9 +283,20 @@ def render_relationship_section(
         capped_notes = truncate(rel.notes, REL_NOTES_INTERIM_CHARS)
         rel_lines.append(f"  Notes: {capped_notes}")
     rel_text = "\n".join(rel_lines)
+    remaining_before = budget.remaining
     admitted_rel = budget.try_add(rel_text, min_tokens=MIN_TOKENS_RELATIONSHIP)
     if admitted_rel is None:
         return None
+    # ISSUE-0122 (v0.3.16 PR B1) — pair the admission with the MQ-11
+    # provenance record the four other tiers already write, charged with
+    # what ``try_add`` actually took (the oversized path truncates, so the
+    # charge is measured off the budget, not off ``rel_text``).  Ids only:
+    # the record must not embed the identity line above.
+    budget.record_admission(
+        tier="relationship",
+        item_id=relationship_item_id(rel),
+        tokens_admitted=remaining_before - budget.remaining,
+    )
     if rendered_last_seen:
         instruments = try_get_instruments()
         if instruments is not None:
