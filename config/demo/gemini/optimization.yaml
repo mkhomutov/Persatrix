@@ -120,3 +120,6 @@ conversation_window:
   enabled: true
   max_turns: 20
   max_tokens: 2048
+
+# memory_budget.tokens (RFC 0017 §B; v0.3.16 K1) is unset here on purpose —
+# the built-in default applies. How to retune: config/optimization.yaml.
