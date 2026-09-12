@@ -12,9 +12,10 @@ there is no human watching a machine-only conversation, so an automated bar is t
 only thing that catches a persona that quietly started forgetting names or leaking
 another session's memory.
 
-This guide covers **Phase 1** (v0.3.11): the recipe format, the assertion
-vocabulary, and the replay/record/drift workflow. Phase 1 produces a report a
-human reads — a failed eval does **not** block merge yet (that is Phase 2). See
+This guide covers the recipe format, the assertion vocabulary and the
+replay/record/drift workflow (Phase 1, v0.3.11), and the merge gate (Phase 2,
+v0.3.16): the required Python CI job runs `make eval-replay TIER=stable`, so a
+`stable` recipe that stops replaying fails the build. See
 [RFC 0044](rfcs/0044-eval-set-golden-traces.md) for the full design.
 
 ## How replay stays deterministic
@@ -60,7 +61,7 @@ A recipe is one YAML file, validated against
 ```yaml
 id: EVAL-MEMORY-001
 title: Recall across five interactions
-tier: stable                     # stable | experimental | nightly (Phase 2 gates `stable`)
+tier: stable                     # stable | experimental | nightly (CI gates `stable`)
 
 setup:
   persona: ember-owl             # resolved against config/agents.yaml
@@ -177,8 +178,8 @@ enough to replay byte-for-byte.
 
 ## The report artifact
 
-The runner emits a structured, per-assertion JSON artifact (RFC 0044 §F) — the
-shape Phase 2 will attach to the CI run and gate the `stable` tier on:
+The runner emits a structured, per-assertion JSON artifact (RFC 0044 §F);
+`make eval-replay TIER=stable REPORT=<path>` writes it beside the gate's run:
 
 ```json
 {
@@ -201,7 +202,9 @@ shape Phase 2 will attach to the CI run and gate the `stable` tier on:
 }
 ```
 
-`passed_all` is the single merge-gate signal Phase 2 reads.
+`passed_all` is the single merge-gate signal: the runner exits non-zero when it
+is false — and when the selected tier holds no recipe at all, because a gate over
+nothing is vacuous, not green.
 
 ## Phase 1 limits
 
@@ -210,9 +213,24 @@ shape Phase 2 will attach to the CI run and gate the `stable` tier on:
   [RFC 0041](rfcs/0041-typed-event-taxonomy-lifecycle-callbacks.md) lands, so the
   event stream is empty and those assertions run against nothing. Phase 1 recipes
   assert on `final_transcript` and `terminal_state` only.
-- **No harness merge gate.** The eval harness's `passed_all` / tier gate does not
-  block merge until Phase 2. (A committed seed's own integration test still fails
-  CI on a replay regression — that is an ordinary test, not the harness gate.)
+
+## Promoting a recipe to `stable`
+
+A recipe defaults to `experimental`: the developer's full sweep (`make eval-replay`)
+runs and reports it, and the CI gate (`TIER=stable`) ignores it, so a new or
+still-flaky recipe cannot block every merge merely by existing. It enters `stable`
+— and starts gating — when all three hold:
+
+1. its golden was recorded against the offline mock (`make eval-record-offline`),
+   so replay needs no key and no network;
+2. it has replayed green on `main` after the recording commit — through the
+   sweep or the seed's own integration test;
+3. the `tier` flip lands in its own reviewed PR, naming the manual test or issue
+   the recipe stands in for.
+
+The six committed seeds were promoted together when the gate landed (v0.3.16 PR
+C2); each had replayed green on every PR since it was recorded. Demotion is the
+same edit in reverse, with the reason in the PR — never a deleted golden.
 
 ## Seed recipes
 

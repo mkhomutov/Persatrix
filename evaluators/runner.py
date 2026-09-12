@@ -17,9 +17,10 @@ imported **lazily** (only the CLI / record / drift paths need it), so
 :mod:`evaluators.replay_llm_client`. Orchestration is tested against a fake
 :class:`PersonaDriver`; the real adapter is tested in ``test_eval_persona_driver``.
 
-Phase 1 produces a report a human reads; a failed eval does not gate merge until
-Phase 2 wires ``.github/workflows/eval.yml`` (RFC 0044 §F). The CLI already
-returns a non-zero exit on failure so that gate is a one-line change later.
+Phase 2 (RFC 0044 §F, v0.3.16 PR C2) gates merge on this runner: the required
+Python CI job runs ``make eval-replay TIER=stable``, and the non-zero exit on a
+failed or missing-golden recipe is what fails the build. ``--tier`` scopes a run
+to one declared tier; an empty tier exits non-zero rather than reading as green.
 """
 
 from __future__ import annotations
@@ -144,6 +145,24 @@ def discover_recipes(eval_sets_dir: str | Path, target: str | None = None) -> li
     return recipes
 
 
+#: The RFC 0044 §F tiers — the schema's closed ``tier`` enum, mirrored here so
+#: the CLI rejects a misspelt tier instead of running an empty (vacuous) gate.
+TIERS = ("stable", "experimental", "nightly")
+
+
+def filter_recipes_by_tier(recipes: list[Path], tier: str | None) -> list[Path]:
+    """Keep the recipes whose declared ``tier`` is ``tier`` (RFC 0044 §F).
+
+    ``None`` keeps every recipe — the developer's full sweep. The CI gate runs
+    ``--tier stable``: a fresh recipe defaults to ``experimental`` and stays
+    there until its golden is promoted, so a recipe cannot block every merge
+    merely by existing. Reading the tier costs one YAML parse per recipe.
+    """
+    if tier is None:
+        return list(recipes)
+    return [p for p in recipes if load_eval_set(p).tier == tier]
+
+
 # ─── provider building per mode ──────────────────────────────────────────────
 
 
@@ -262,6 +281,9 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--mode", choices=[m.value for m in EvalMode], default=EvalMode.REPLAY.value
     )
     parser.add_argument("--target", help="run a single recipe by id (e.g. EVAL-MEMORY-001)")
+    parser.add_argument(
+        "--tier", choices=TIERS, help="run only the recipes declared in this tier (CI: stable)"
+    )
     parser.add_argument("--eval-sets-dir", default=DEFAULT_EVAL_SETS_DIR)
     parser.add_argument("--config", default=DEFAULT_CONFIG_PATH)
     parser.add_argument("--report", help="write the structured JSON artifact to this path")
@@ -299,6 +321,17 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     mode = EvalMode(args.mode)
     recipes = discover_recipes(args.eval_sets_dir, args.target)
+    if args.tier is not None:
+        recipes = filter_recipes_by_tier(recipes, args.tier)
+        if not recipes:
+            # The gate's own failure mode: a tier with no member guards nothing,
+            # and a step that passes on nothing is the vacuous green RFC 0044 §F
+            # forbids — so this is red, unlike the tier-less empty sweep below.
+            print(
+                f"no recipes in tier {args.tier!r} under {args.eval_sets_dir}/ — "
+                f"a gate over nothing is vacuous, not green (RFC 0044 §F)"
+            )
+            return 1
     if not recipes:
         which = f" matching {args.target!r}" if args.target else ""
         print(

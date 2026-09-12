@@ -291,6 +291,21 @@ jobs:
       - name: Run unit tests
         run: python -m pytest tests/unit/python/ -v --tb=short
 
+      # RFC 0044 Phase 2 (v0.3.16 PR C2): the golden-trace replay ran in no CI
+      # step. Phase 1 produced a report a human read, and a seed replayed on a
+      # PR only if it happened to have its own integration test. This is the
+      # harness gate the RFC specifies: every recipe declared `tier: stable`
+      # replays under the offline overlay ($0, deterministic, ~2 s) and a
+      # cassette miss or a failed assertion fails the build — the same target
+      # a developer runs. A step in this required job rather than a new
+      # advisory job (the C1 shape), so it gates the merge from the day it
+      # lands, and it runs ahead of the heavier test trees so a golden
+      # regression is the first red in the log. A fresh recipe defaults to
+      # `experimental` and is reported, not gating, until its golden is
+      # promoted (docs/evaluators-guide.md).
+      - name: Replay the stable golden-trace evals (RFC 0044 Phase 2)
+        run: make eval-replay TIER=stable
+
       # The agents/tests/ tree (422 tests) was executed by NO job:
       # the two pytest steps around this one cover tests/unit/python/ and
       # tests/integration/, and the only Makefile target that named it was

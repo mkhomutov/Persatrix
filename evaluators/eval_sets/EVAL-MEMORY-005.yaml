@@ -43,7 +43,7 @@ description: |
   flip — that PR re-records it under `live`. Recorded offline
   (`make eval-record-offline`).
 spawned_from: ../../docs/issues/ISSUE-0132-memory-egress-gate-blind-to-room-audience.md
-tier: experimental
+tier: stable
 
 setup:
   persona: ember-owl

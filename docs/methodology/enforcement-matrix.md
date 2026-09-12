@@ -38,6 +38,7 @@ Required, it rides inside one of the six required jobs.
 | Python types (mypy) — `agents/`, `tests/` | instructions; ISSUE-0062 | `mypy` ×2 | Required (`Python`) |
 | Python lint + types — `scripts/`, `evaluators/` | Makefile `lint-python`; ISSUE-0134 | `ruff check scripts/ evaluators/`; `mypy scripts/ evaluators/` | Required (`Python`) — since the CI-promotion PR |
 | Python unit + agents + integration suites pass | testing-strategy | three `pytest` steps | Required (`Python`) |
+| Every `stable` golden-trace eval replays green ([RFC 0044](../rfcs/0044-eval-set-golden-traces.md) §F) | RFC 0044; [evaluators guide](../evaluators-guide.md#promoting-a-recipe-to-stable) | `make eval-replay TIER=stable` — exits 1 on a failed assertion, a cassette miss or an empty tier | Required (`Python`) — since v0.3.16 PR C2; was Make-only |
 | Go and Python protobuf stubs match `proto/*.proto`; no orphans | Makefile; ISSUE-0017/0023 | `make proto-go && git diff --exit-code`; `make proto-python-check proto-orphans-check` | Required (`Proto staleness`, `Python`) |
 | MIT-candidate primitives never import BUSL code (RFC 0045 §B) | RFC 0045; CONTRIBUTING | `make imports-check` (import-linter) | Required (`Python`) |
 | Rust builds; clippy clean; `cargo test` passes (incl. lockstep guards) | instructions | `cargo build`, `cargo clippy -- -D warnings`, `cargo test` | Required (`Rust`) |
@@ -130,15 +131,15 @@ Listed here so the matrix is honest about its own gaps.
 4. ~~Decide the PR-size rule.~~ Decided in the BRANCHING rewrite: guidance,
    with the split heuristic code PRs follow; documentation-heavy release
    evidence is the exception and is named as such.
-5. **Take RFC 0044 Phase 2 (evals in CI) at v0.3.16, not cut.** `make
-   eval-replay` is $0 and deterministic; gating it turns every release's
-   paid live arc into a free regression gate for the next. Slotted cuttable;
-   the recommendation is recorded on the RFC 0044 PR plan.
+5. ~~Take RFC 0044 Phase 2 (evals in CI) at v0.3.16, not cut.~~ Taken:
+   v0.3.16 PR C2 runs `make eval-replay TIER=stable` inside the required
+   `Python` job — $0, deterministic, and every release's paid live arc
+   becomes a free regression gate for the next once its golden is promoted.
 6. **Re-audit of Make targets with no CI step (2026-09-12, ISSUE-0142
    step 4).** Every `*-check`, `lint-*`, `test-*` and `validate` target now
-   has a CI step that runs it or its tool directly, with two exceptions:
-   `notices-check` (Make-only on purpose, see its row) and `eval-replay`
-   (item 5 — v0.3.16 PR C2). `lint-go` was the third and closed with PR C1.
+   has a CI step that runs it or its tool directly, with one exception:
+   `notices-check` (Make-only on purpose, see its row). `lint-go` closed
+   with PR C1 and `eval-replay` with PR C2 (item 5).
    `eval-drift`, `eval-verdict`, `release-sweep`, `release-doc` and
    `branch-protection-show` are on-demand tools, not gates.
 

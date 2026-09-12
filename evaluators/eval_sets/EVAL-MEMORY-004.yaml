@@ -33,7 +33,7 @@ description: |
   `restricted` from the frozen-at-open capture) BEFORE the asking turn
   runs. Recorded offline (`make eval-record-offline`).
 spawned_from: ../../docs/rfcs/0037-memory-confidentiality-channel-classification.md
-tier: experimental
+tier: stable
 
 setup:
   persona: ember-owl

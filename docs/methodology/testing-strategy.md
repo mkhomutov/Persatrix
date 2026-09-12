@@ -1,6 +1,6 @@
 # Testing Strategy
 
-> **Last updated**: 2026-09-06
+> **Last updated**: 2026-09-12
 > Every test layer in the repository, what it proves, where it runs, and how
 > to add to it. Counts are from `git ls-files` on 2026-09-06 and will drift;
 > the layers and rules will not.
@@ -34,7 +34,7 @@ below.
 | 5 | Go integration | Scheduler → executor → mock agent over bufconn; rate limiter; audit logger | `tests/integration/*_test.go` (3 files) | `go test ./tests/integration/... -race` | `go` job (since the CI-promotion PR) |
 | 6 | Rust | CLI parsing, output, and the CLI↔server **lockstep guards** (knob set and wire types parsed out of the Go sources) | inline `#[cfg(test)]` modules (24 files) | `cd cli && cargo test` | `rust` job (since #813) |
 | 7 | Web console | Svelte components and stores under jsdom | `web/src/**/*.test.js` (30 files) | `make ui-test` (Vitest) | `web-console` job |
-| 8 | Golden-trace evals | Persona-quality regressions replayed deterministically against recorded goldens ([RFC 0044](../rfcs/0044-eval-set-golden-traces.md)) | `evaluators/eval_sets/*.yaml` + `.golden.yaml` (5 recipes) | `make eval-replay` | none (Phase 2 CI gate slotted v0.3.16, cuttable) |
+| 8 | Golden-trace evals | Persona-quality regressions replayed deterministically against recorded goldens ([RFC 0044](../rfcs/0044-eval-set-golden-traces.md)) | `evaluators/eval_sets/*.yaml` + `.golden.yaml` (6 recipes) | `make eval-replay` | `Python` — `make eval-replay TIER=stable`, since v0.3.16 PR C2 |
 | 9 | Cost regression | The bored-persona gate: an idle persona spends nothing ([RFC 0024](../rfcs/0024-event-driven-scheduling.md)) | `tests/integration/test_bored_persona_cost.py` | direct pytest | `cost-regression-gate` job, path-filtered on wake-path files |
 | 10 | Perf | Personal-tier recall p99/p50 against a committed baseline ([RFC 0029](../rfcs/0029-personal-society-storage-split.md)) | `tests/perf/personal_tier_latency.py` | direct | `python` job, **informational** — no baseline captured yet |
 | 11 | Manual tests + live arc | The release gate: behaviour on a real provider, evidenced verbatim | `docs/manual-tests/MT-*.md` (73) + `vX.Y.Z-execution-report.md` (20); drivers in `scripts/manual_tests/` | per release, paid, on host | never |
@@ -123,6 +123,9 @@ The eval harness ([evaluators-guide.md](../evaluators-guide.md)) records a
 conversation once (`make eval-record-offline` against the mock, or
 `make eval-record` live) and replays it deterministically
 (`make eval-replay`). `make eval-drift` reports live drift and never gates.
+The required Python CI job replays the `stable` tier on every PR (v0.3.16 PR
+C2); a recipe stays `experimental` — reported, not gating — until it meets the
+[promotion bar](../evaluators-guide.md#promoting-a-recipe-to-stable).
 Seeds: the dementia test, cross-room carry (shadow and live), the
 confidentiality gate, working memory. Replay pins the offline optimization
 overlay, so it replays only goldens recorded under that overlay — a known
