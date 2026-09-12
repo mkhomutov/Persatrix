@@ -137,3 +137,13 @@ that running them surfaced.
 > comment is retired, since none is left. Default behaviour unchanged: the
 > emission stays behind the switch; the in-memory registry fills either way
 > and nothing reads the `relationship` bucket yet.
+>
+> Review of #941, deferred as known gaps rather than widened into the PR
+> (the cycle is closing small): the fix is the fifth hand-rolled
+> `try_add` + `record_admission` pairing, so the *class* of gap — a
+> caller forgetting the second call — is pinned only by a source-level
+> test (`TestEveryKnownTierRecordsItsAdmission`) rather than removed by an
+> atomic `try_admit` helper on `MemoryBudget`; and the `item_id` format
+> is documented here and in the helper's docstring, not in the RFC 0026
+> MQ-11 record, which types it only as `str`. Either lands with the next
+> PR that touches the allocator.

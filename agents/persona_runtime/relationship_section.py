@@ -84,9 +84,10 @@ def relationship_item_id(rel: RelationshipSummary) -> str:
 
     ``<other_participant_type>:<other_participant_id>`` — the pair the
     relationship row is keyed by, so the provenance record names the
-    row (and lets an operator read a wrong participant type, the
-    ISSUE-0119 class, straight off the ``tier_admitted`` line) without
-    carrying any of the identity text.  The provenance log is an egress
+    row — including the participant type the read matched, which is
+    how an admitted but mistyped row (the ISSUE-0119 class) shows up on
+    the ``tier_admitted`` line; a lookup that matches no row records
+    nothing — without carrying any of the identity text.  The provenance log is an egress
     surface of its own; name, role, preferences and the raw tail stay in
     the rendered section and never land on the record (ISSUE-0122).
     """

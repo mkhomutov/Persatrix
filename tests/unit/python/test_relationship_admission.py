@@ -88,6 +88,18 @@ def _provenance_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRec
     ]
 
 
+def _record_text(rec: logging.LogRecord) -> str:
+    """Every string that could reach a log sink off this record — the
+    message plus each string attribute (the structured ``extra`` fields
+    land on the record as attributes) — lower-cased for the leak probe."""
+    parts = [str(v) for v in vars(rec).values() if isinstance(v, str)]
+    parts.append(rec.getMessage())
+    return " ".join(parts).lower()
+
+
+_LEAK_PROBES = ("alice", "release owner", "rust", "berlin")
+
+
 # ─── Registry pairing at the render helper ─────────────────
 
 
@@ -99,9 +111,10 @@ class TestRelationshipAdmissionRegistry:
         assert budget.admissions_by_tier("relationship") == [f"user:{_ALICE_ID}"]
 
     def test_item_id_is_the_row_key_not_the_identity_text(self) -> None:
-        """The pair the row is keyed by, in ``<type>:<id>`` form — so a
-        wrong participant type (the ISSUE-0119 class, MT-MEMORY-CROSSROOM-001
-        Leg 2b diagnosis mode 1) is readable straight off the record."""
+        """The pair the row is keyed by, in ``<type>:<id>`` form — so the
+        participant type the read matched (an admitted but mistyped row is
+        the ISSUE-0119 class, MT-MEMORY-CROSSROOM-001 Leg 2b diagnosis
+        mode 1) is on the record."""
         assert relationship_item_id(_alice()) == f"user:{_ALICE_ID}"
         peer = RelationshipSummary(
             other_participant_id="iron-fox",
@@ -173,11 +186,9 @@ class TestRelationshipProvenanceEmission:
         # The section itself carries the identity — that is its job.
         assert "Alice" in section.content
         (rec,) = _provenance_records(caplog)
-        flattened = " ".join(
-            str(v) for v in vars(rec).values() if isinstance(v, str)
-        ) + " " + rec.getMessage()
-        for leak in ("alice", "release owner", "rust", "berlin"):
-            assert leak not in flattened.lower()
+        text = _record_text(rec)
+        for leak in _LEAK_PROBES:
+            assert leak not in text
 
     def test_silent_without_the_switch(
         self,
@@ -222,7 +233,7 @@ class TestIdentityTurnIsVisibleToProvenance:
                 {"sender_participant_type": "user"},
             ):
                 res = await store_note.func(
-                    topic="contact:user-alice",
+                    topic=f"contact:{_ALICE_ID}",
                     content="Name: Alice. Role: release owner.",
                 )
             assert res.success
@@ -230,7 +241,7 @@ class TestIdentityTurnIsVisibleToProvenance:
             event = AgentEvent(
                 event_type=EventType.CHANNEL_MESSAGE,
                 payload={"content": "Morning — anything here that needs me?"},
-                sender_id="user-alice",
+                sender_id=_ALICE_ID,
                 metadata={"sender_participant_type": "user"},
             )
             with (
@@ -244,8 +255,12 @@ class TestIdentityTurnIsVisibleToProvenance:
             assert "Alice" in rel_section.content
             records = _provenance_records(caplog)
             assert len(records) == 1
-            assert getattr(records[0], "item_id", None) == "user:user-alice"
+            assert getattr(records[0], "item_id", None) == f"user:{_ALICE_ID}"
             assert getattr(records[0], "tokens_admitted", 0) > 0
-            assert "Alice" not in records[0].getMessage()
+            # Same probe as the render-level test: the structured fields
+            # are attributes, so the message alone proves nothing.
+            text = _record_text(records[0])
+            for leak in _LEAK_PROBES:
+                assert leak not in text
         finally:
             await agent.close_memory()
