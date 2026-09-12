@@ -116,14 +116,14 @@
     },
     "memory_budget": {
       "type": "object",
-      "description": "v0.3.16 PR K1 (sequencing Amendment 2026-09-12): the RFC 0017 §B per-event memory budget — the total tokens of episodic + relationship + facts + notes + channel-history context a persona injects into one turn's system prompt. Top-level block, NOT profile-scoped; read once at persona start by the Python runtime (agents/optimization.py memory_budget_tokens()). An absent block or key falls back to the MEMORY_BUDGET_TOKENS constant (1500) — the shipped config documents the key but does not set it. Separate from conversation_window.max_tokens (the replayed transcript) and from each agent's memory.facts.budget_tokens (the facts tier's slice inside this total).",
+      "description": "The RFC 0017 §B per-event memory budget (v0.3.16 PR K1): the total tokens of episodic + relationship + facts + notes + channel-history context a persona injects into one turn's system prompt. Top-level block, not profile-scoped — like models.aliases, it is a fleet-wide value with no per-profile variant; read once at persona start by the Python runtime (agents/optimization.py memory_budget_tokens()). An absent block or key means the built-in default (1500); any other key in the block is rejected at agent start, so a misspelt `token:` cannot silently run the default. Separate from conversation_window.max_tokens (the replayed transcript) and from each agent's memory.facts.budget_tokens (the facts tier's slice inside this total).",
       "additionalProperties": false,
       "properties": {
         "tokens": {
           "type": "integer",
           "minimum": 0,
           "default": 1500,
-          "description": "Total memory tokens admitted per turn across every tier, in priority order (relationship → channel history → facts → episodic → notes). 0 disables memory injection entirely (every tier dropped, memory_admitted_tokens == 0 — the RFC 0017 zero-budget retune). The EXP-001 knob and the first value a long-context operator raises."
+          "description": "Total memory tokens admitted per turn across every tier, in priority order (relationship → channel history → facts → episodic → notes). 0 disables memory injection (every recalled tier dropped, memory_admitted_tokens == 0 — the RFC 0017 zero-budget retune; the channel roster sits outside this budget and still renders) — and, because a TICK with zero admitted memory, no active goal and no pending turn skips the LLM call (RFC 0017 §F), a persona with nothing to do also goes quiet on idle ticks. The EXP-001 knob and the first value a long-context operator raises."
         }
       }
     }

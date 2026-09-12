@@ -1,7 +1,10 @@
 """Test infrastructure helpers shared by all pytest conftests.
 
-Currently provides ``daemonize_aiosqlite_workers`` — a one-shot monkeypatch
-that marks ``aiosqlite``'s per-connection worker thread as ``daemon=True``.
+Provides ``daemonize_aiosqlite_workers`` — a one-shot monkeypatch that
+marks ``aiosqlite``'s per-connection worker thread as ``daemon=True`` —
+and ``isolate_optimization_config``, the autouse fixture that starts
+every test from the shipped ``config/optimization.yaml`` (see its
+docstring).
 
 Why
 ---
@@ -28,6 +31,9 @@ connections in their own ``close()`` methods (see ``EpisodicMemory.close``,
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
+
+import pytest
 
 _logger = logging.getLogger(__name__)
 
@@ -68,3 +74,25 @@ def daemonize_aiosqlite_workers() -> None:
 
     _patched_init._persatrix_daemon_patched = True  # type: ignore[attr-defined]
     _core.Connection.__init__ = _patched_init  # type: ignore[method-assign]
+
+
+@pytest.fixture(autouse=True)
+def isolate_optimization_config(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Start every test from the shipped ``config/optimization.yaml``.
+
+    Since v0.3.16 K1 every persona construction reads that file
+    (``memory_knobs.resolve_memory_knobs`` → ``memory_budget.tokens``), so
+    a ``PERSATRIX_OPTIMIZATION_CONFIG`` exported in a developer's shell —
+    an EXP-001 arm file that sets the budget, say — would silently re-budget
+    or fail every test that builds a persona.  Drop the pin and clear the
+    process-wide parse cache before and after each test; a test that wants
+    a specific file sets the variable itself (its ``monkeypatch`` runs
+    after this one) and the seed-replay suites pass it to their subprocess
+    environment, which this fixture never touches.
+    """
+    from agents.optimization import reset_cache
+
+    monkeypatch.delenv("PERSATRIX_OPTIMIZATION_CONFIG", raising=False)
+    reset_cache()
+    yield
+    reset_cache()

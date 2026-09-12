@@ -61,6 +61,17 @@ _DEFAULT_CONFIG_PATH: Path = (
 # finding 6).
 
 
+def _config_path() -> Path:
+    """The file the accessors read: the env pin when set, else the default.
+
+    Shared by the loader and by every message that names the file, so an
+    operator editing a demo overlay (bind-mounted over the pinned path) is
+    pointed at the file they actually edited.
+    """
+    env_path = os.environ.get("PERSATRIX_OPTIMIZATION_CONFIG")
+    return Path(env_path) if env_path else _DEFAULT_CONFIG_PATH
+
+
 @lru_cache(maxsize=1)
 def _load_config() -> dict[str, Any]:
     """Read and parse ``optimization.yaml`` once per process.
@@ -77,7 +88,7 @@ def _load_config() -> dict[str, Any]:
     defaults via the missing-file handler below.
     """
     env_path = os.environ.get("PERSATRIX_OPTIMIZATION_CONFIG")
-    config_path = Path(env_path) if env_path else _DEFAULT_CONFIG_PATH
+    config_path = _config_path()
     try:
         with config_path.open("r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
@@ -372,14 +383,19 @@ def memory_budget_tokens() -> int | None:
     a long-context model, can retune it without patching code.  The persona
     reads it once at start (:mod:`agents.persona_runtime.memory_knobs`).
 
-    ``None`` means *not configured*: an absent block or key falls through
-    to the module constant (1 500), so the shipped config — which documents
-    the key but does not set it — leaves every prompt byte-identical.  A
-    present value must be a non-negative integer (``0`` disables injection,
-    the zero-budget retune); anything else raises ``ValueError``, the
-    loud-rejection contract every ``memory.*`` knob shares — a persona that
-    silently ran a different budget from the one asked for would misreport
-    what the deployment is doing.
+    ``None`` means *not configured*: an absent block, or a block with no
+    ``tokens`` key, and the caller applies the module constant (1 500) —
+    :func:`agents.persona_runtime.memory_knobs.resolve_memory_knobs` does,
+    so the shipped config, which documents the key but does not set it,
+    leaves every prompt byte-identical.  A present value must be a
+    non-negative integer (``0`` disables injection, the zero-budget
+    retune), and the block may hold no other key — a misspelt ``token:``
+    would otherwise read as "not configured" and run the default without
+    a word.  Anything else raises ``ValueError``, the loud-rejection
+    contract every ``memory.*`` knob shares: a persona that silently ran
+    a different budget from the one asked for would misreport what the
+    deployment is doing.  The message names the file that was actually
+    loaded (a demo overlay under compose, not the repo default).
     """
     cfg = _load_config()
     block = cfg.get("memory_budget")
@@ -387,8 +403,14 @@ def memory_budget_tokens() -> int | None:
         return None
     if not isinstance(block, dict):
         raise ValueError(
-            "config/optimization.yaml: memory_budget must be a mapping with a "
+            f"{_config_path()}: memory_budget must be a mapping with a "
             f"memory_budget.tokens key, got {block!r}"
+        )
+    unknown = sorted(set(block) - {"tokens"})
+    if unknown:
+        raise ValueError(
+            f"{_config_path()}: memory_budget has unknown key(s) {unknown}; "
+            "the only key is memory_budget.tokens"
         )
     if "tokens" not in block:
         return None
@@ -396,7 +418,7 @@ def memory_budget_tokens() -> int | None:
     # ``bool`` is an ``int`` subclass; ``true`` is not a token count.
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise ValueError(
-            "config/optimization.yaml: memory_budget.tokens must be a "
+            f"{_config_path()}: memory_budget.tokens must be a "
             f"non-negative integer (0 disables memory injection), got {value!r}"
         )
     return value

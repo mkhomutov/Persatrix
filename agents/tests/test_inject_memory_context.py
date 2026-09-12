@@ -76,7 +76,7 @@ class TestInjectMemoryContextTierOrdering:
 
     @pytest.mark.asyncio
     async def test_relationship_admitted_before_episodic_when_budget_tight(
-        self, monkeypatch: pytest.MonkeyPatch,
+        self,
     ) -> None:
         """When budget is tight, relationship (priority 8) wins over episodic (7)."""
         # Episode summaries are clamped to ``_MAX_EPISODE_SUMMARY_CHARS`` (200)
@@ -87,12 +87,6 @@ class TestInjectMemoryContextTierOrdering:
         # (PR #146 follow-up: prior version asserted '5/5 episodes' against an
         #  effectively-unbounded episode size; rewritten here after the
         #  per-field char cap commit to drive contention via a tight budget.)
-        from agents.persona_runtime import memory_context as mc
-
-        # 100 tokens ≈ enough for the relationship block (~17 tokens) plus
-        # at most 1–2 episode lines (~32 tokens each after token-truncation).
-        monkeypatch.setattr(mc, "MEMORY_BUDGET_TOKENS", 100)
-
         rel = _FakeRelSummary(
             other_participant_id="alice",
             other_participant_type="user",
@@ -106,6 +100,11 @@ class TestInjectMemoryContextTierOrdering:
             rel=rel,
             sender_id="alice",
         )
+        # 100 tokens ≈ enough for the relationship block (~17 tokens) plus
+        # at most 1–2 episode lines (~32 tokens each after token-truncation).
+        # The total is the mixin's resolved budget (v0.3.16 K1), not the
+        # module constant, so the harness sets it on the instance.
+        mixin._memory_budget_tokens = 100
         result = await mixin._inject_memory_context(event)
 
         # Relationship section was admitted.
@@ -276,7 +275,7 @@ class TestInjectMemoryContextReturnValue:
     async def test_memory_admitted_tokens_equals_budget_minus_remaining(
         self,
     ) -> None:
-        """memory_admitted_tokens == _MEMORY_BUDGET_TOKENS - budget.remaining."""
+        """memory_admitted_tokens == the resolved budget total - budget.remaining."""
         notes = [_FakeNote(topic="t", content="some content about topic")]
         mixin, event = _make_mixin(notes=notes)
 
@@ -378,12 +377,7 @@ class TestZeroBudgetIntegration:
     """
 
     @pytest.mark.asyncio
-    async def test_zero_budget_drops_all_sections(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        import agents.persona_runtime.memory_context as mc
-
-        monkeypatch.setattr(mc, "MEMORY_BUDGET_TOKENS", 0)
+    async def test_zero_budget_drops_all_sections(self) -> None:
         episodes = [_FakeEpisode(summary="historical context")]
         notes = [_FakeNote(topic="t", content="note content")]
         rel = _FakeRelSummary(
@@ -392,6 +386,7 @@ class TestZeroBudgetIntegration:
         mixin, event = _make_mixin(
             episodes=episodes, notes=notes, rel=rel, sender_id="peer-1",
         )
+        mixin._memory_budget_tokens = 0  # the zero-budget retune (v0.3.16 K1)
 
         result = await mixin._inject_memory_context(event)
 

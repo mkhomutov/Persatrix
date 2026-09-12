@@ -107,8 +107,10 @@ class MemoryInjectionResult:
 
     Attributes:
         memory_admitted_tokens: Total tokens admitted across all tiers for
-            this event.  Equals ``MEMORY_BUDGET_TOKENS - budget.remaining``
-            after the allocate-loop.  Used by PR 5's empty-context TICK
+            this event.  Equals the persona's resolved budget total
+            (``memory_budget.tokens``, else ``MEMORY_BUDGET_TOKENS``) minus
+            ``budget.remaining`` after the allocate-loop.  Used by PR 5's
+            empty-context TICK
             short-circuit to decide whether to suppress the LLM call.
         manifest: RFC 0037 §G's per-turn injection manifest (PR 4) — every
             §D-gated, budget-admitted entry as ``(tier, entry_id,
@@ -166,11 +168,13 @@ class _MemoryContextMixin:
     _fact_store: FactStore | None = None
     _facts_enabled: bool = True
     _facts_budget_tokens: int = DEFAULT_FACTS_BUDGET_TOKENS
-    # v0.3.16 K1 — ``memory_budget.tokens`` from ``optimization.yaml``,
-    # resolved once at persona start.  ``None`` = not configured → the
-    # ``MEMORY_BUDGET_TOKENS`` constant, read by this module's name at
-    # call time so the zero-budget harness's monkeypatch still lands.
-    _memory_budget_tokens: int | None = None
+    # v0.3.16 K1 — the per-turn budget total: ``memory_budget.tokens``
+    # from ``optimization.yaml``, resolved once at persona start
+    # (``memory_knobs``), the ``MEMORY_BUDGET_TOKENS`` constant when the
+    # key is absent.  The class-level default keeps the legacy mixin
+    # harnesses at the shipped total; one that wants a tighter budget
+    # sets this attribute on the instance.
+    _memory_budget_tokens: int = MEMORY_BUDGET_TOKENS
     # RFC 0049 PR 2/PR 3 — ``memory.{facts,episodic}.cross_room`` (off|shadow).
     _facts_cross_room: str = DEFAULT_FACTS_CROSS_ROOM
     _episodic_cross_room: str = DEFAULT_EPISODIC_CROSS_ROOM
@@ -244,8 +248,9 @@ class _MemoryContextMixin:
 
         Returns:
             :class:`MemoryInjectionResult` with ``memory_admitted_tokens``
-            equal to ``MEMORY_BUDGET_TOKENS - budget.remaining`` after the
-            allocate-loop.  PR 5 uses this value for the empty-context TICK
+            equal to the resolved budget total minus ``budget.remaining``
+            after the allocate-loop.  PR 5 uses this value for the
+            empty-context TICK
             short-circuit.  Callers that ignore the return value are
             unaffected.
         """
@@ -435,22 +440,15 @@ class _MemoryContextMixin:
         # ── Allocate-loop ──────────────────────────────────────────────────
         # Tiers are rendered in fixed priority order (relationship=8 →
         # channel history → facts → episodic=7 → notes=6); higher-priority
-        # tiers consume the budget first.  RFC 0017 §B / OQ4.
-        # v0.3.16 K1: the operator's ``memory_budget.tokens`` when set,
-        # else the constant (the shipped config leaves it unset).
-        budget_tokens = (
-            MEMORY_BUDGET_TOKENS if self._memory_budget_tokens is None
-            else self._memory_budget_tokens
-        )
-        budget = MemoryBudget(total_tokens=budget_tokens)
+        # tiers consume the budget first.  RFC 0017 §B / OQ4.  The total
+        # is the persona's resolved ``_memory_budget_tokens`` (v0.3.16 K1).
+        budget = MemoryBudget(total_tokens=self._memory_budget_tokens)
         # RFC 0021 PR 2: snapshot the temporal seam once per event.
         now = self._clock.now()
 
         # Allocate-loop proper lives in ``memory_assembly`` (v0.3.16 D1
-        # split).  The budget is constructed here, not there, because the
-        # zero-budget harness monkeypatches ``MEMORY_BUDGET_TOKENS`` by
-        # this module's name — a constructor reading the constant from
-        # ``memory_assembly`` would silently escape that patch.
+        # split); the budget is constructed here, from this instance's
+        # resolved total, and handed over.
         await inject_admitted_sections(
             working_memory=self._working_memory,
             agent_id=self.agent_id,
@@ -472,7 +470,7 @@ class _MemoryContextMixin:
         # (incl. on a later DM turn, whose roster resolves but never shows).
         inject_channel_roster(self._working_memory, roster)
 
-        memory_admitted_tokens = budget_tokens - budget.remaining
+        memory_admitted_tokens = self._memory_budget_tokens - budget.remaining
         # Consumed by ``_on_event_inner`` for the RFC 0017 §F empty-context
         # TICK short-circuit (PR 5); the §G manifest labels the admitted subset.
         return MemoryInjectionResult(

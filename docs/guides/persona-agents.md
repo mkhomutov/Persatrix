@@ -244,7 +244,8 @@ prompt
 > **v0.2.2 — bounded memory injection.** A per-event `MemoryBudget` allocator
 > (default 1500 tokens; since v0.3.16 retuned with `memory_budget.tokens` in
 > `config/optimization.yaml`, read once at persona start — `0` disables
-> injection, an absent key means the default) caps the combined episodic +
+> injection and, via the TICK skip below, silences idle ticks too; an absent
+> key means the default) caps the combined episodic +
 > relationship + notes context admitted into a single event, and `recall` /
 > `recall_notes` accept
 > a `min_score` relevance threshold that drops weak matches before truncation.

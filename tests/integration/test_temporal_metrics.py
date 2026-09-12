@@ -7,7 +7,8 @@ Pins the ``agent.temporal.recency.rendered`` counter contract:
   the counter must not overcount — operators correlating this metric against
   admitted token totals must see a consistent number.
 
-Tests use a tight ``monkeypatch`` budget so drops are deterministic, and read
+Tests set a tight budget on the built agent (its resolved
+``_memory_budget_tokens``, v0.3.16 K1) so drops are deterministic, and read
 back the emitted counter via :class:`InMemoryMetricReader` so the assertion is
 on the OTEL data plane, not on a mock call count.
 """
@@ -22,7 +23,6 @@ import pytest
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
 from agents.observability import metrics as pmetrics
-from agents.persona_runtime import memory_context as memory_context_module
 from agents.persona_types import AgentEvent, EventType
 from agents.tools.registry import clear_registry
 
@@ -104,7 +104,7 @@ class TestRecencyCounterAccuracy:
             await db.commit()
 
     async def test_episode_counter_only_counts_admitted_items(
-        self, monkeypatch: pytest.MonkeyPatch, metric_reader: InMemoryMetricReader,
+        self, metric_reader: InMemoryMetricReader,
     ) -> None:
         # Tighten the global memory budget so most episodes are dropped
         # by ``MemoryBudget.try_add``.  64 tokens leaves room for ~1
@@ -112,11 +112,8 @@ class TestRecencyCounterAccuracy:
         # summaries below render to ~50 tokens each (long enough not to
         # be admittable as a chunk smaller than the floor, short enough
         # that one fits).
-        monkeypatch.setattr(
-            memory_context_module, "MEMORY_BUDGET_TOKENS", 64,
-        )
-
         agent = await make_agent()
+        agent._memory_budget_tokens = 64  # the resolved total (v0.3.16 K1)
         try:
             for i in range(5):
                 await self._store_episode(
@@ -163,7 +160,7 @@ class TestRecencyCounterAccuracy:
             await agent.close_memory()
 
     async def test_relationship_counter_only_counts_admitted_summary(
-        self, monkeypatch: pytest.MonkeyPatch, metric_reader: InMemoryMetricReader,
+        self, metric_reader: InMemoryMetricReader,
     ) -> None:
         # The relationship tier shares the same "increment-on-attempt"
         # shape pre-fix: the counter was incremented when ``Last seen``
@@ -171,11 +168,8 @@ class TestRecencyCounterAccuracy:
         # composed ``rel_text`` was admitted.  Drop the budget below
         # ``MIN_TOKENS_RELATIONSHIP=64`` so the section is dropped
         # entirely and assert the counter stays at zero.
-        monkeypatch.setattr(
-            memory_context_module, "MEMORY_BUDGET_TOKENS", 16,
-        )
-
         agent = await make_agent()
+        agent._memory_budget_tokens = 16  # the resolved total (v0.3.16 K1)
         try:
             await agent._relationship_memory.record_interaction(
                 "alice", "chat", outcome="ok",
@@ -236,7 +230,7 @@ class TestChannelHistoryRecencyCounter:
     """
 
     async def test_channel_history_counter_only_counts_admitted_items(
-        self, monkeypatch: pytest.MonkeyPatch, metric_reader: InMemoryMetricReader,
+        self, metric_reader: InMemoryMetricReader,
     ) -> None:
         # Tighten the budget so the recall set (5 channel-scoped
         # episodes) over-fills the budget and the channel-history loop
@@ -245,11 +239,8 @@ class TestChannelHistoryRecencyCounter:
         # both the "no bump at all" failure mode and the future
         # "bump-before-admission-check" regression that would inflate the
         # counter back to recall-set size.
-        monkeypatch.setattr(
-            memory_context_module, "MEMORY_BUDGET_TOKENS", 96,
-        )
-
         agent = await make_agent()
+        agent._memory_budget_tokens = 96  # the resolved total (v0.3.16 K1)
         try:
             for i in range(5):
                 await agent._episodic_memory.store_episode(
