@@ -52,9 +52,15 @@ _IDENTITY = {
 }
 
 
+# The participant id deliberately shares no text with the identity fields
+# above, so the no-leak assertion below cannot pass by accident (an id of
+# ``user-alice`` would only fail to contain ``"Alice"`` by letter case).
+_ALICE_ID = "p-7f3a"
+
+
 def _alice(*, interaction_count: int = 0) -> RelationshipSummary:
     return RelationshipSummary(
-        other_participant_id="user-alice",
+        other_participant_id=_ALICE_ID,
         other_participant_type="user",
         trust_score=0.5,
         interaction_count=interaction_count,
@@ -90,13 +96,13 @@ class TestRelationshipAdmissionRegistry:
         budget = MemoryBudget(total_tokens=1500)
         section = _render(_alice(), budget)
         assert section is not None
-        assert budget.admissions_by_tier("relationship") == ["user:user-alice"]
+        assert budget.admissions_by_tier("relationship") == [f"user:{_ALICE_ID}"]
 
     def test_item_id_is_the_row_key_not_the_identity_text(self) -> None:
         """The pair the row is keyed by, in ``<type>:<id>`` form — so a
         wrong participant type (the ISSUE-0119 class, MT-MEMORY-CROSSROOM-001
         Leg 2b diagnosis mode 1) is readable straight off the record."""
-        assert relationship_item_id(_alice()) == "user:user-alice"
+        assert relationship_item_id(_alice()) == f"user:{_ALICE_ID}"
         peer = RelationshipSummary(
             other_participant_id="iron-fox",
             other_participant_type="agent",
@@ -149,7 +155,7 @@ class TestRelationshipProvenanceEmission:
         records = _provenance_records(caplog)
         assert len(records) == 1
         rec = records[0]
-        assert getattr(rec, "item_id", None) == "user:user-alice"
+        assert getattr(rec, "item_id", None) == f"user:{_ALICE_ID}"
         assert getattr(rec, "tokens_admitted", None) == charged
 
     def test_record_never_carries_the_identity_text(
@@ -170,8 +176,8 @@ class TestRelationshipProvenanceEmission:
         flattened = " ".join(
             str(v) for v in vars(rec).values() if isinstance(v, str)
         ) + " " + rec.getMessage()
-        for leak in ("Alice", "release owner", "Rust", "Berlin"):
-            assert leak not in flattened
+        for leak in ("alice", "release owner", "rust", "berlin"):
+            assert leak not in flattened.lower()
 
     def test_silent_without_the_switch(
         self,
@@ -184,7 +190,7 @@ class TestRelationshipProvenanceEmission:
         budget = MemoryBudget(total_tokens=1500)
         with caplog.at_level(logging.DEBUG, logger="agents.persona_runtime"):
             assert _render(_alice(), budget) is not None
-        assert budget.admissions_by_tier("relationship") == ["user:user-alice"]
+        assert budget.admissions_by_tier("relationship") == [f"user:{_ALICE_ID}"]
         assert _provenance_records(caplog) == []
 
 
