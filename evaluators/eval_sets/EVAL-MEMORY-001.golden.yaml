@@ -1,6 +1,6 @@
 3c1a9b691c636a6602cf8861e05b4f3232e54f09c3f36961f4bf1acb0e9f5a36:
   stop_reason: end_turn
-  text: That's lovely — Mira must be glad you're picking her up. Seven is a wonderful
+  text: That's lovely — REGRESSED must be glad you're picking her up. Seven is a wonderful
     age.
   usage:
     input_tokens: 537
@@ -14,7 +14,7 @@
     output_tokens: 20
 69a0982a87ac87cc879880a2ddd072f3495344d1c9280b18a0c7803a04978eb1:
   stop_reason: end_turn
-  text: For a seven-year-old like Mira, a hands-on children's museum or a short nature
+  text: For a seven-year-old like REGRESSED, a hands-on children's museum or a short nature
     walk tends to land well.
   usage:
     input_tokens: 2048
@@ -34,14 +34,14 @@
     output_tokens: 19
 b1a5b3e404607b7cadce9f3d9eee5772e8f624820fbab87b912b0e98c88b65ce:
   stop_reason: end_turn
-  text: For a seven-year-old like Mira, a hands-on children's museum or a short nature
+  text: For a seven-year-old like REGRESSED, a hands-on children's museum or a short nature
     walk tends to land well.
   usage:
     input_tokens: 458
     output_tokens: 25
 e47f7e5a2735771cc64b57e5bbf011acca4bc75a95006704e93c010b912a93bc:
   stop_reason: end_turn
-  text: That's lovely — Mira must be glad you're picking her up. Seven is a wonderful
+  text: That's lovely — REGRESSED must be glad you're picking her up. Seven is a wonderful
     age.
   usage:
     input_tokens: 2052
