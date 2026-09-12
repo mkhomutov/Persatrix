@@ -1,11 +1,14 @@
 ---
 id: ISSUE-0122
 summary: "The `relationship` tier is the only memory tier that charges the RFC 0017 budget without recording an admission: `render_relationship_section` calls `budget.try_add(...)` but never `budget.record_admission(...)`, while `episodic`/`notes`/`facts`/`channel_history` all pair the two. `relationship` IS in `KNOWN_TIERS` (reserved so future wiring lands on a known name), so `PERSATRIX_MEMORY_PROVENANCE=1` emits no `persatrix.memory.tier_admitted` line for the cross-room person-identity read (RFC 0031 F-7) even when the identity line is injected and paid for. Operator consequence: the one tier answering \"does the persona know who I am?\" is invisible to the provenance switch, so zero admissions on an identity turn is indistinguishable from a recall miss. Found live at the v0.3.13 release-prep arc, where it had already produced a wrong diagnosis note in MT-MEMORY-CROSSROOM-001 (execution report F-3)."
-status: open
+status: resolved
 severity: low
 area: agents
 created: 2026-08-05
+closed: 2026-09-12
+closed_pr: 941
 refs:
+  - tests/unit/python/test_relationship_admission.py
   - agents/persona_runtime/relationship_section.py
   - agents/persona_runtime/memory_budget.py
   - docs/rfcs/0031-amendment-cross-room-person-identity.md
@@ -105,3 +108,32 @@ that running them surfaced.
 > decision. Rides with ISSUE-0108 as the one observability workstream.
 >
 > 2026-09-08 — **Locked at the v0.3.16 plan opening** ([v0.3.16 plan](../v0.3.16-plan.md) PR B1). Also carries ISSUE-0137's one-sentence statement that the relationship tier stays ambient-only on the tenant axis, since B1 touches that tier anyway.
+>
+> 2026-09-12 — **Resolved by v0.3.16 PR B1** ([#941](https://github.com/mkhomutov/Persatrix/pull/941)).
+> `render_relationship_section` now pairs its `try_add` with
+> `record_admission(tier="relationship", …)`, charged with the tokens the
+> budget actually took (measured off `budget.remaining` around the call,
+> so the oversized-truncation path charges what it admitted). The record
+> is keyed by the pair the relationship row is keyed by —
+> `<other_participant_type>:<other_participant_id>`, e.g. `user:alex` —
+> which is what lets an operator read a wrong participant type (the
+> ISSUE-0119 class) straight off the `tier_admitted` line. **The
+> signature is not widened**: the relationship tier sits outside the RFC
+> 0037 §D gate and its entries carry no `protection_level`, so there is
+> nothing for a third field to carry, and the identity text never lands
+> on the record (pinned by a test that flattens every string attribute of
+> the emitted `LogRecord` and asserts the name, role, preferences and raw
+> tail are absent). The pin is
+> `tests/unit/python/test_relationship_admission.py`: the registry pairing
+> at the render helper, the structured record under
+> `PERSATRIX_MEMORY_PROVENANCE=1`, silence without it, and an identity turn
+> driven through `create_persona_agent` in a second room that emits exactly
+> one `relationship` admission — so zero admissions on such a turn is now a
+> recall or wiring miss, no longer the expected reading.
+> MT-MEMORY-CROSSROOM-001's Leg 2b note is flipped in the same PR; the
+> relationship tier is stated ambient-only on the tenant axis in
+> `relationship_section.py`'s module docstring (ISSUE-0137's sentence);
+> `KNOWN_TIERS`' "tiers that do not currently call `record_admission`"
+> comment is retired, since none is left. Default behaviour unchanged: the
+> emission stays behind the switch; the in-memory registry fills either way
+> and nothing reads the `relationship` bucket yet.

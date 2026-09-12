@@ -85,11 +85,12 @@ __all__ = [
 #   PREDICATE_ALLOWLIST` establishes for the storage layer.
 #
 # The membership covers all five canonical tier names appearing in
-# the RFC 0027 §F priority order, even tiers that do not currently
-# call ``record_admission`` (``relationship``, ``channel_history``) —
-# future wiring lands on a known name rather than coining a new one
-# in a follow-up PR.  Adding a tier is a deliberate amendment + test
-# update at :class:`TestKnownTierAllowlist`.
+# the RFC 0027 §F priority order.  Every one of them now calls
+# ``record_admission`` — ``relationship`` was the last to be wired
+# (ISSUE-0122, v0.3.16 PR B1); it was reserved here so that wiring
+# landed on a known name rather than coining a new one.  Adding a
+# tier is a deliberate amendment + test update at
+# :class:`TestKnownTierAllowlist`.
 KNOWN_TIERS: frozenset[str] = frozenset({
     "facts",
     "episodic",
