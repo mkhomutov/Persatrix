@@ -6,6 +6,7 @@ severity: medium
 area: ci
 created: 2026-09-06
 closed: 2026-09-12
+closed_pr: 945
 refs:
   - .github/workflows/ci.yml
   - docs/methodology/enforcement-matrix.md
