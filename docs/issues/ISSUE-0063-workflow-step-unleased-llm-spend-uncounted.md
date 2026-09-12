@@ -133,3 +133,10 @@ written to add does not cover the persona-as-workflow-step path.
 > call this issue scoped; whether to lease it or accept it as uncounted-by-design
 > is an open follow-up. [ISSUE-0072](ISSUE-0072-memory-compression-hardcoded-model-literals.md)
 > covers the same call's stale-model-identity aspect and cross-references this one.
+
+> 2026-09-11 — the lease this closure describes carries no workflow id. The
+> action loop passes the cause but not the task's `workflow_id`, so a
+> persona-served step bills the one total every persona call falls into, not
+> its workflow's own. That workflow's limit, and the scheduler's pre-dispatch
+> check, still never see the step's spend. Filed as
+> [ISSUE-0157](ISSUE-0157-persona-calls-share-one-workflow-budget.md).
