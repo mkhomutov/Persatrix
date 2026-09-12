@@ -1,6 +1,6 @@
 # RFC 0051 Amendment — The Reasoning Kernel (Extension & Extraction Contract)
 
-**Type**: amendment to [RFC 0051](0051-reasoning-before-posting.md) §C / §D / [OQ 5](0051-reasoning-before-posting.md#open-questions) — a design contract; moves no code
+**Type**: amendment to [RFC 0051](0051-reasoning-before-posting.md) §C / §D / [OQ 5](0051-reasoning-before-posting.md#open-questions) — a design contract; moves no code — **and, since 2026-09-12, the §E correction below** (ISSUE-0108)
 **Status**: 📋 **Proposed**
 **Author**: Maksim Khomutov
 **Date**: 2026-06-24
@@ -73,6 +73,18 @@ These are cheap to keep and expensive to recover; review should enforce them:
 - Building a generic `deliberate()` engine now (N=1; OQ 5).
 - Moving any code or standing up an extracted package — [RFC 0045](0045-open-core-extraction-policy.md) governs that; this amendment moves nothing.
 - Generalizing the gate. The salience gate's open-floor / size-cap / metric policy is salience-specific and stays so; a second consumer brings its own gate policy, not a shared one.
+
+## §E correction (2026-09-12) — where the `reason_note` actually egresses
+
+Appended here, not in the RFC, because RFC 0051 sits at its word cap. Recorded by v0.3.16 [PR B2](../v0.3.16-pr-plan.md#pr-b2--featurev0316-issue0108-reason-note-egress), closing [ISSUE-0108](../issues/ISSUE-0108-reasoning-reason-note-no-operator-egress.md).
+
+**What §E claimed.** The "Human operator (debug)" row says the verbatim `reason_note` egresses to the agent debug log, and the "two egress paths" bullet calls that path what MT-REASON-001 reads. **What shipped, v0.3.10 through v0.3.15:** nothing wrote the note anywhere. The parser captured it onto `SalienceDecision.reason_note`; its egress was the operator-reveal PR 7, cut from v0.3.10. The reason a persona went silent was readable only as the `deliberation.suppressed{reason_code, mode}` metric label — and, once ISSUE-0108 Gap A surfaced stdlib `extra=` payloads, as the closed-set `reason_code` on the `agent.deliberated` audit line, never the note. The wall was stronger than documented, not weaker.
+
+**What holds from v0.3.16.** On a silence verdict of a structured rung (`bid` / `plan`), [`salience_gate`](../../agents/persona_runtime/salience_gate.py) emits **one** `agent.deliberation.reason_note` record at **DEBUG** carrying the verbatim note, the `reason_code` and the agent and channel ids. It is not an audit record — its own event name, no `audit=True` — so the audit stays count-only and the two-paths contract stands. A speak verdict's note, a verdict with no note, and the scalar `off` rung emit nothing. Pinned by `tests/unit/python/test_salience_gate_reason_note_egress.py` and the no-leak extension in `tests/integration/test_deliberation_no_leak.py`: the debug log yes; a published message, the episodic store, the audit record — never.
+
+**The trade the release note states.** The agent's default level is INFO, so nothing changes until an operator runs an agent with `--log-level DEBUG` — and at that level the record is an agent-log line like any other. Two facts about that line: the RFC 0018 §F redaction hook it passes through is a **no-op in every shipped build** (`NoopRedactor`; nothing installs a scrubber), so the note leaves the process verbatim; and when the log shipper is on it is **forwarded off-host** with the rest of the agent log — but a persona channel turn carries no execution id, so the orchestrator's per-execution log buffer drops it on arrival, and the line is read in the agent's own container log, never at `GET /api/v1/executions/{id}/logs`. §E's "off in prod by default" is the level default, not a separate switch. Operators who ship agent logs off-host should know the debug level now carries the persona's private silence reasons, unredacted.
+
+**Still unbuilt.** The rendered plan has no egress at any level, and the web-console reveal (OQ 6(a), PR 7's other half) is not built; MT-REASON-001 Step 2 reads the agent log.
 
 ## Related documentation
 

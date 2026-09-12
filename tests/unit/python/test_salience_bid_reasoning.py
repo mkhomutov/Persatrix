@@ -76,8 +76,9 @@ class TestStructuredVerdict:
     async def test_reason_note_is_captured_debug_only(self):
         """``reason_note`` is the one genuinely new field — an optional free
         clause captured on the decision (its only egress is the operator-debug
-        path, wired in a later PR). It never becomes the low-cardinality
-        ``reason`` label."""
+        path — the ``agent.deliberation.reason_note`` DEBUG record
+        ``salience_gate`` emits on a silence verdict, ISSUE-0108). It never
+        becomes the low-cardinality ``reason`` label."""
         decision = await _bid(
             client=_client(
                 "should_post: no\nreason_code: only_agreeing\n"
@@ -100,7 +101,8 @@ class TestStructuredVerdict:
         """A model with nothing to justify may echo the user snippet's literal
         ``<one short clause on why — optional>`` placeholder verbatim. That is
         template noise, not a justification — it must not leak into the
-        operator-debug egress (RFC 0051 §E, wired in a later PR); it drops to
+        operator-debug egress (RFC 0051 §E, the ``salience_gate`` DEBUG record
+        since v0.3.16, ISSUE-0108); it drops to
         ``None`` like a missing note."""
         decision = await _bid(
             client=_client(

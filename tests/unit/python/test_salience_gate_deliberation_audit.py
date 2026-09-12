@@ -32,19 +32,21 @@ from __future__ import annotations
 import io
 import json
 import logging
-from collections.abc import Iterator
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
-import structlog
+from _salience_gate_helpers import (
+    _AUDIT_EVENT,
+    _BID_PATH,
+    _audit_records,
+    _event,
+    _open_floor_decision,
+    _stub_agent,
+)
 
-from agents.observability import logging as logging_mod
 from agents.observability.logging import configure_logging
-from agents.observability.redact import NoopRedactor
 from agents.persona_runtime.salience_gate import SalienceOutcome, run_salience_gate
-from agents.persona_types import AgentEvent, EventType
-from agents.response_gate import POLICY_ALWAYS, GateDecision
 from agents.salience_bid import SalienceDecision
 from agents.salience_deliberation import (
     MODE_BID,
@@ -56,67 +58,10 @@ from agents.salience_deliberation import (
 
 pytestmark = pytest.mark.asyncio
 
-_AUDIT_EVENT = "agent.deliberated"
 # A distinctive free-text justification — if it ever appears in the audit
 # record the privacy wall (RFC 0051 §E) has been breached.
 _SECRET_NOTE = "iron-fox already answered the database question two turns ago"
 
-# Patch the bid where the seam looks it up, not where it is defined.
-_BID_PATH = "agents.persona_runtime.salience_gate.evaluate_salience"
-
-
-def _open_floor_decision() -> GateDecision:
-    """The Tier-A verdict that admits an ambiguous open-floor participant —
-    the only decision :func:`is_open_floor_admit` matches (TB1)."""
-    return GateDecision(respond=True, policy=POLICY_ALWAYS, reason="policy_always")
-
-
-def _event(*, governed: bool = True, channel_size: int | None = None) -> AgentEvent:
-    payload: dict[str, Any] = {
-        "content": "What database should we pick for the cache?",
-        "respond_policy": "always",
-    }
-    if governed:
-        payload["salience_gated"] = True
-    if channel_size is not None:
-        payload["channel_size"] = channel_size
-    return AgentEvent(
-        event_type=EventType.CHANNEL_MESSAGE,
-        payload=payload,
-        channel_id="group:planning",
-        sender_id="alice",
-    )
-
-
-def _stub_agent(*, seed: list[dict[str, Any]] | None = None) -> MagicMock:
-    """A minimal stand-in for ``_LLMPersonaAgent`` exposing exactly the
-    attributes / coroutines :func:`run_salience_gate` calls. The bid itself is
-    patched, so ``_llm_client`` / ``name`` / ``role`` only need to exist."""
-    if seed is None:
-        seed = [
-            {"role": "user", "content": "We should pick a cache database."},
-            {"role": "assistant", "content": "Redis is the obvious fit."},
-            {"role": "user", "content": "What database should we pick for the cache?"},
-        ]
-    agent = MagicMock()
-    agent.agent_id = "ember-owl"
-    agent.name = "Ember Owl"
-    agent.role = "Planner"
-    agent._llm_client = MagicMock()
-    agent._format_event = MagicMock(return_value="formatted message")
-    agent._build_seed_messages = AsyncMock(return_value=seed)
-    agent._store_event_episode = AsyncMock(return_value=None)
-    return agent
-
-
-def _audit_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
-    """Every captured ``audit=True`` record naming the deliberation event."""
-    return [
-        rec
-        for rec in caplog.records
-        if getattr(rec, "audit", None) is True
-        and rec.getMessage() == _AUDIT_EVENT
-    ]
 
 
 async def _patched_bid(monkeypatch: pytest.MonkeyPatch, decision: SalienceDecision) -> AsyncMock:
@@ -321,40 +266,6 @@ class TestNoDeliberationNoAudit:
 # assert on the emitted JSON — the surface an operator actually reads.
 
 
-@pytest.fixture
-def _rendered_log(monkeypatch: pytest.MonkeyPatch) -> Iterator[io.StringIO]:
-    """Force ``configure_logging`` to rebuild its chain and render to a buffer.
-
-    Mirrors ``agents/tests/test_observability_logging.py``'s capture: reset the
-    module-global ``_configured`` flag + structlog defaults so the chain is
-    rebuilt, and swap ``sys.stderr`` (and ``logging_mod.sys``, since the
-    ``StreamHandler`` binds the module's ``sys`` reference at build time) for a
-    ``StringIO`` the handler writes into."""
-    import sys as _real_sys
-
-    structlog.contextvars.clear_contextvars()
-    logging_mod._configured = False
-    logging_mod._redactor = NoopRedactor()
-    structlog.reset_defaults()
-
-    buf = io.StringIO()
-
-    class _SysShim:
-        stderr = buf
-
-        def __getattr__(self, name: str) -> Any:  # pragma: no cover - trivial
-            return getattr(_real_sys, name)
-
-    monkeypatch.setattr("sys.stderr", buf)
-    monkeypatch.setattr(logging_mod, "sys", _SysShim())
-    yield buf
-
-    structlog.contextvars.clear_contextvars()
-    logging_mod._configured = False
-    logging_mod._redactor = NoopRedactor()
-    structlog.reset_defaults()
-
-
 def _rendered_audit_line(buf: io.StringIO) -> dict[str, Any]:
     """The single rendered ``agent.deliberated`` JSON line in the buffer."""
     lines = [
@@ -369,7 +280,7 @@ def _rendered_audit_line(buf: io.StringIO) -> dict[str, Any]:
 
 class TestDeliberatedAuditRenderedEgress:
     async def test_reason_code_and_decision_reach_the_rendered_line(
-        self, _rendered_log: io.StringIO, monkeypatch: pytest.MonkeyPatch,
+        self, rendered_log: io.StringIO, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """The payload the audit was *designed* to carry now renders: the
         operator can read the deliberation ``reason_code`` / ``should_post`` /
@@ -386,7 +297,7 @@ class TestDeliberatedAuditRenderedEgress:
             _stub_agent(), _event(), _open_floor_decision(), mode=MODE_BID,
         )
 
-        rec = _rendered_audit_line(_rendered_log)
+        rec = _rendered_audit_line(rendered_log)
         assert rec["audit"] is True
         assert rec["should_post"] is False
         assert rec["reason_code"] == REASON_ALREADY_ANSWERED
@@ -394,7 +305,7 @@ class TestDeliberatedAuditRenderedEgress:
         assert rec["agent_id"] == "ember-owl"
 
     async def test_reason_note_never_reaches_the_rendered_line(
-        self, _rendered_log: io.StringIO, monkeypatch: pytest.MonkeyPatch,
+        self, rendered_log: io.StringIO, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Surfacing the audit payload must not surface the verbatim
         ``reason_note`` — the §E wall is structural (the seam never reads it onto
@@ -411,6 +322,6 @@ class TestDeliberatedAuditRenderedEgress:
             _stub_agent(), _event(), _open_floor_decision(), mode=MODE_BID,
         )
 
-        rec = _rendered_audit_line(_rendered_log)
+        rec = _rendered_audit_line(rendered_log)
         assert "reason_note" not in rec
         assert _SECRET_NOTE not in json.dumps(rec)

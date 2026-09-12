@@ -875,7 +875,9 @@ can compose under a private *plan* so the message reads as considered rather tha
 reflexive. This is [RFC 0051](../rfcs/0051-reasoning-before-posting.md),
 generalizing the RFC 0030 Tier-B salience bid; it runs on the same leased `fast`
 model (the idle path stays free) and the private trace is **walled** — never a
-channel message, never persisted, never visible to another persona (audit-only).
+channel message, never persisted as one, never visible to another persona; the
+audit sees only the decision and its code, and the silence `reason_note` alone
+has an opt-in operator egress, the agent log at `DEBUG` (below).
 
 It is tuned per channel with the `reasoning` knob on the
 [RFC 0050](../rfcs/0050-extensible-channel-configuration.md) config surface — a
@@ -911,10 +913,16 @@ is exercised by [MT-REASON-001](../manual-tests/MT-REASON-001.md). The **reason*
 a turn went silent is observable at **`reason_code`** granularity — the closed-set
 code on the `agent.deliberated` audit log line and on the
 `deliberation.suppressed{reason_code, mode}` metric label. The free-text
-`reason_note` the model may attach is parsed but has **no operator egress** in
-v0.3.10 (the OQ 6(a) operator-reveal surface was cut;
-[ISSUE-0108](../issues/ISSUE-0108-reasoning-reason-note-no-operator-egress.md)),
-which makes the §E privacy wall *stronger* than the RFC describes, not weaker.
+`reason_note` the model may attach egresses **once**, since v0.3.16: an
+`agent.deliberation.reason_note` record at **`DEBUG`** in the agent log on each
+suppressed turn
+([ISSUE-0108](../issues/ISSUE-0108-reasoning-reason-note-no-operator-egress.md)).
+Silent at the default `INFO` level; at `DEBUG` it is an ordinary agent-log
+line — verbatim (the RFC 0018 redaction hook is a no-op in every shipped
+build) and forwarded off-host with the rest when the log shipper is on,
+though the orchestrator drops it (a channel turn carries no execution id), so
+read it in the agent's container log. From v0.3.10 to v0.3.15 it had no egress at all (the OQ 6(a)
+operator-reveal surface was cut), and the web-console reveal is still unbuilt.
 
 ### Autonomous channels — the anti-collapse cadence (v0.3.11)
 

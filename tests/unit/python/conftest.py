@@ -1,6 +1,9 @@
+import io
 import logging
 import os
 import tempfile
+from collections.abc import Iterator
+from typing import Any
 
 import pytest
 
@@ -58,6 +61,49 @@ def _no_leaked_log_handlers():
 
         _obs_logging._configured = False
 
+
+
+@pytest.fixture
+def rendered_log(monkeypatch: pytest.MonkeyPatch) -> Iterator[io.StringIO]:
+    """Rebuild ``configure_logging``'s chain and render it into a buffer.
+
+    For the rendered-egress tests (``test_salience_gate_deliberation_audit``,
+    ``test_salience_gate_reason_note_egress``), which assert on the JSON line an
+    operator actually reads: reset the module-global ``_configured`` flag +
+    structlog defaults so the chain is rebuilt, and swap ``sys.stderr`` (and
+    ``logging_mod.sys``, since the ``StreamHandler`` binds the module's ``sys``
+    reference at build time) for a ``StringIO`` the handler writes into.
+    ``configure_logging`` sets the root level, so the level is snapshotted here
+    and restored on teardown; ``_no_leaked_log_handlers`` strips the handler."""
+    import sys as _real_sys
+
+    import structlog
+
+    from agents.observability import logging as logging_mod
+    from agents.observability.redact import NoopRedactor
+
+    def _reset() -> None:
+        structlog.contextvars.clear_contextvars()
+        logging_mod._configured = False
+        logging_mod._redactor = NoopRedactor()
+        structlog.reset_defaults()
+
+    root_level = logging.getLogger().level
+    _reset()
+    buf = io.StringIO()
+
+    class _SysShim:
+        stderr = buf
+
+        def __getattr__(self, name: str) -> Any:  # pragma: no cover - trivial
+            return getattr(_real_sys, name)
+
+    monkeypatch.setattr("sys.stderr", buf)
+    monkeypatch.setattr(logging_mod, "sys", _SysShim())
+    yield buf
+
+    _reset()
+    logging.getLogger().setLevel(root_level)
 
 @pytest.fixture(autouse=True)
 def _clean_registry():
