@@ -6,6 +6,7 @@ severity: low
 area: agents
 created: 2026-06-26
 closed: 2026-09-12
+closed_pr: 943
 refs:
   - tests/unit/python/test_salience_gate_reason_note_egress.py
   - tests/integration/test_deliberation_no_leak.py
