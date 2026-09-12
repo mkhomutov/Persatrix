@@ -2,7 +2,9 @@
 
 Five values, five different RFCs, one shape: read a `memory.*` key off
 the persona config, reject a bad value **loudly** rather than degrading
-silently, and hand the result to ``_LLMPersonaAgent.__init__``. They
+silently, and hand the result to ``_LLMPersonaAgent.__init__`` — plus,
+since v0.3.16 K1, the one fleet-wide value read off ``optimization.yaml``
+(``memory_budget.tokens``), which follows the same contract. They
 were resolved inline there until v0.3.16 PR A2 needed a sixth line in a
 file already pinned at its size-cap headroom (ISSUE-0053) — and inline
 resolution was always slightly wrong for them anyway: a reader of
@@ -20,6 +22,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ..optimization import memory_budget_tokens
 from .audience import resolve_memory_audience
 from .cross_room import resolve_episodic_cross_room, resolve_facts_cross_room
 from .facts_section import resolve_facts_config
@@ -39,6 +42,10 @@ class MemoryKnobs:
     episodic_cross_room: str
     #: ISSUE-0132 (v0.3.16 A2) — ``memory.egress.audience``.
     audience: str
+    #: v0.3.16 K1 — ``memory_budget.tokens`` from ``optimization.yaml``,
+    #: the one knob here that is fleet-wide rather than per-agent.
+    #: ``None`` = not configured → the ``MEMORY_BUDGET_TOKENS`` constant.
+    budget_tokens: int | None
 
 
 def resolve_memory_knobs(config: dict) -> MemoryKnobs:
@@ -54,4 +61,5 @@ def resolve_memory_knobs(config: dict) -> MemoryKnobs:
         facts_cross_room=resolve_facts_cross_room(config),
         episodic_cross_room=resolve_episodic_cross_room(config),
         audience=resolve_memory_audience(config),
+        budget_tokens=memory_budget_tokens(),
     )

@@ -90,3 +90,11 @@ conversation_window:
   enabled: true
   max_turns: 20
   max_tokens: 2048
+
+# ─── Memory budget (RFC 0017 §B; v0.3.16 K1) ──────────────
+# Unset on purpose: an absent key means the built-in default, 1500 tokens
+# of memory context per turn. Uncomment to retune (0 disables memory
+# injection). Full note: config/optimization.yaml.
+#
+# memory_budget:
+#   tokens: 1500

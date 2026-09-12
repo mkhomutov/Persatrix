@@ -171,6 +171,7 @@ class _LLMPersonaAgent(
         self._facts_cross_room = knobs.facts_cross_room
         self._episodic_cross_room = knobs.episodic_cross_room
         self._memory_audience = knobs.audience
+        self._memory_budget_tokens = knobs.budget_tokens  # v0.3.16 K1
         self._memory_tools = memory_tools
         self._clock, self._timezone = resolve_persona_clock(config, clock)  # RFC 0021 PR 2
         self._memory_ns = MemoryNamespace(

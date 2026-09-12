@@ -363,9 +363,49 @@ def cost_pricing_models() -> dict[str, dict[str, float]]:
     return result
 
 
+def memory_budget_tokens() -> int | None:
+    """Return the top-level ``memory_budget.tokens`` key, or ``None`` when absent.
+
+    v0.3.16 PR K1 (sequencing Amendment 2026-09-12): the RFC 0017 per-event
+    memory budget — ``MEMORY_BUDGET_TOKENS``, a module constant since
+    v0.2.2 — becomes an operator key so the EXP-001 harness, and anyone on
+    a long-context model, can retune it without patching code.  The persona
+    reads it once at start (:mod:`agents.persona_runtime.memory_knobs`).
+
+    ``None`` means *not configured*: an absent block or key falls through
+    to the module constant (1 500), so the shipped config — which documents
+    the key but does not set it — leaves every prompt byte-identical.  A
+    present value must be a non-negative integer (``0`` disables injection,
+    the zero-budget retune); anything else raises ``ValueError``, the
+    loud-rejection contract every ``memory.*`` knob shares — a persona that
+    silently ran a different budget from the one asked for would misreport
+    what the deployment is doing.
+    """
+    cfg = _load_config()
+    block = cfg.get("memory_budget")
+    if block is None:
+        return None
+    if not isinstance(block, dict):
+        raise ValueError(
+            "config/optimization.yaml: memory_budget must be a mapping with a "
+            f"memory_budget.tokens key, got {block!r}"
+        )
+    if "tokens" not in block:
+        return None
+    value = block["tokens"]
+    # ``bool`` is an ``int`` subclass; ``true`` is not a token count.
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(
+            "config/optimization.yaml: memory_budget.tokens must be a "
+            f"non-negative integer (0 disables memory injection), got {value!r}"
+        )
+    return value
+
+
 __all__ = [
     "cost_pricing_models",
     "derived_cost_pricing",
+    "memory_budget_tokens",
     "model_aliases",
     "model_routing_defaults",
     "reset_cache",

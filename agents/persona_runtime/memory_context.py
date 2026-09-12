@@ -166,6 +166,11 @@ class _MemoryContextMixin:
     _fact_store: FactStore | None = None
     _facts_enabled: bool = True
     _facts_budget_tokens: int = DEFAULT_FACTS_BUDGET_TOKENS
+    # v0.3.16 K1 — ``memory_budget.tokens`` from ``optimization.yaml``,
+    # resolved once at persona start.  ``None`` = not configured → the
+    # ``MEMORY_BUDGET_TOKENS`` constant, read by this module's name at
+    # call time so the zero-budget harness's monkeypatch still lands.
+    _memory_budget_tokens: int | None = None
     # RFC 0049 PR 2/PR 3 — ``memory.{facts,episodic}.cross_room`` (off|shadow).
     _facts_cross_room: str = DEFAULT_FACTS_CROSS_ROOM
     _episodic_cross_room: str = DEFAULT_EPISODIC_CROSS_ROOM
@@ -431,7 +436,13 @@ class _MemoryContextMixin:
         # Tiers are rendered in fixed priority order (relationship=8 →
         # channel history → facts → episodic=7 → notes=6); higher-priority
         # tiers consume the budget first.  RFC 0017 §B / OQ4.
-        budget = MemoryBudget(total_tokens=MEMORY_BUDGET_TOKENS)
+        # v0.3.16 K1: the operator's ``memory_budget.tokens`` when set,
+        # else the constant (the shipped config leaves it unset).
+        budget_tokens = (
+            MEMORY_BUDGET_TOKENS if self._memory_budget_tokens is None
+            else self._memory_budget_tokens
+        )
+        budget = MemoryBudget(total_tokens=budget_tokens)
         # RFC 0021 PR 2: snapshot the temporal seam once per event.
         now = self._clock.now()
 
@@ -461,7 +472,7 @@ class _MemoryContextMixin:
         # (incl. on a later DM turn, whose roster resolves but never shows).
         inject_channel_roster(self._working_memory, roster)
 
-        memory_admitted_tokens = MEMORY_BUDGET_TOKENS - budget.remaining
+        memory_admitted_tokens = budget_tokens - budget.remaining
         # Consumed by ``_on_event_inner`` for the RFC 0017 §F empty-context
         # TICK short-circuit (PR 5); the §G manifest labels the admitted subset.
         return MemoryInjectionResult(

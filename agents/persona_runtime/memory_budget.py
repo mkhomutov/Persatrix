@@ -104,7 +104,10 @@ KNOWN_TIERS: frozenset[str] = frozenset({
 
 # Total token budget for all memory tiers injected per event.
 # RFC 0017 §B / OQ1 resolution: 1500 tokens balances detail vs. prompt size.
-# Retune by changing this single constant; no API changes required.
+# v0.3.16 K1: operators retune it with ``memory_budget.tokens`` in
+# ``config/optimization.yaml`` (read once at persona start via
+# ``agents.optimization.memory_budget_tokens``); this constant is the
+# fallback when the key is absent, and the value the schema documents.
 MEMORY_BUDGET_TOKENS: int = 1500
 
 # Per-call min_tokens floors for the MemoryBudget allocator.

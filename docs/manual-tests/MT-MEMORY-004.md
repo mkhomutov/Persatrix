@@ -227,6 +227,9 @@ within fallback precision.
   [`tests/integration/test_memory_budget_e2e.py`](../../tests/integration/test_memory_budget_e2e.py).
   This manual test focuses on the allocator's pure-function contract because it is the smallest
   reproducible surface that proves the cap holds.
-- `_MEMORY_BUDGET_TOKENS` is a module-level constant; retuning is a one-line change per
-  RFC 0017 [OQ1](../rfcs/0017-persona-memory-injection-budget.md#open-questions). If the
-  constant changes in a future release, update Step 1's expected value accordingly.
+- `_MEMORY_BUDGET_TOKENS` is a module-level constant per RFC 0017
+  [OQ1](../rfcs/0017-persona-memory-injection-budget.md#open-questions); since v0.3.16 (PR K1)
+  an operator retunes it with `memory_budget.tokens` in `config/optimization.yaml`, read once at
+  persona start, and the constant is the fallback when the key is absent. Step 1 reads the
+  constant, so a configured override does not change its expected value; if the constant itself
+  changes in a future release, update Step 1 accordingly.

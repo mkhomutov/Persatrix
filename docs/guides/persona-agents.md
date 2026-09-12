@@ -242,8 +242,11 @@ prompt
 ([agents/persona_runtime/memory_context.py:96–200](../../agents/persona_runtime/memory_context.py#L96-L200)).
 
 > **v0.2.2 — bounded memory injection.** A per-event `MemoryBudget` allocator
-> (default 1500 tokens) caps the combined episodic + relationship + notes
-> context admitted into a single event, and `recall` / `recall_notes` accept
+> (default 1500 tokens; since v0.3.16 retuned with `memory_budget.tokens` in
+> `config/optimization.yaml`, read once at persona start — `0` disables
+> injection, an absent key means the default) caps the combined episodic +
+> relationship + notes context admitted into a single event, and `recall` /
+> `recall_notes` accept
 > a `min_score` relevance threshold that drops weak matches before truncation.
 > When an autonomous TICK fires with zero admitted memory, no active goal,
 > and no pending conversation turn, the LLM call is skipped entirely and
