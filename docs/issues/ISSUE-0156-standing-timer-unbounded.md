@@ -9,7 +9,7 @@ refs:
   - https://github.com/mkhomutov/Persatrix/pull/930
   - docs/rfcs/0052-autonomous-agent-channels.md
   - docs/rfcs/0052-pr-plan.md
-  - docs/guides/channels.md
+  - docs/guides/autonomous-channels.md
   - docs/manual-tests/v0.3.11-execution-report.md
   - docs/v0.3.11-release-checklist.md
   - docs/v0.3.11-release-prep-plan.md
@@ -62,7 +62,7 @@ Three smaller gaps sit next to it and are tracked here too:
 
 ## Context
 
-Line numbers are at `604fab72`.
+Line numbers are at `7ec52ac1`.
 
 ### Gap 1 — the bound is checked on a setting that starts nothing (medium)
 
@@ -135,8 +135,8 @@ and the first two add that the timer "must never bypass" them. That holds for
 a channel that declares a bound. For one that declares none, there is nothing
 to meet. Two recent changes say so:
 [#930](https://github.com/mkhomutov/Persatrix/pull/930) added an operator
-warning to the
-[channels guide](../guides/channels.md#13-autonomous-channels-rfc-0052)
+warning, now in the
+[autonomous channels guide](../guides/autonomous-channels.md#standing-channels--convening-on-a-schedule)
 ("Do step 1 first"), and [#935](https://github.com/mkhomutov/Persatrix/pull/935)
 wrote the gap into the `standing_schedule.go` header: a hand-written timer
 "skips [deriveConveneTimer]'s bound check" (`:29`–`31`).
@@ -185,8 +185,8 @@ total the spend ceiling measures. Its comment says the config readout "does
 not include it" (`:100`–`101`), and nothing outside `internal/channels`
 calls it. So a
 channel bounded only by `standing_budget_tokens` reaches its `429` with no
-warning, as [§13 of the channels guide](../guides/channels.md#13-autonomous-channels-rfc-0052)
-now says.
+warning, as the
+[autonomous channels guide](../guides/autonomous-channels.md) now says.
 
 ### Gap 4 — force-fresh and the two-openers race (info)
 
@@ -313,7 +313,7 @@ Whichever lands:
   the `wire_convene_clients` docstring, and the `convene.go` header if
   force-fresh lands);
 - update the operator guide's
-  [standing-schedule instructions](../guides/channels.md#13-autonomous-channels-rfc-0052),
+  [standing-schedule instructions](../guides/autonomous-channels.md#standing-channels--convening-on-a-schedule),
   which today tell operators to write the timer by hand and warn about gaps 1
   and 3.
 

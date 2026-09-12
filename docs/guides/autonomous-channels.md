@@ -133,7 +133,8 @@ unbounded; clamped at zero if a lowered bound sits below the spent count). The w
 line, and `persatrix channel config get` prints a trailing `convenings … (runtime)`
 row. It is read-only observability — the count itself is enforced by the `429`
 ceiling above. Nothing reports the `standing_budget_tokens` running total yet, so
-a channel bounded only by spend reaches its `429` with no warning.
+a channel bounded only by spend reaches its `429` with no warning
+([ISSUE-0156](../issues/ISSUE-0156-standing-timer-unbounded.md)).
 
 - **Web console** — a **Convene** button in the Channel-settings panel's
   *Autonomous channel* section, shown only when the channel is armed per the
@@ -186,7 +187,8 @@ setting only makes `validate` demand a bound, so keep the two equal. Adding a
 line ([MT-AUTONOMOUS-003](../manual-tests/MT-AUTONOMOUS-003.md) Step 2 explains
 both rules). Do step 1 first: nothing checks a convene timer against its
 channel's bound, so a timer aimed at a channel without one keeps opening
-discussions, each capped but with no limit on how many.
+discussions, each capped but with no limit on how many
+([ISSUE-0156](../issues/ISSUE-0156-standing-timer-unbounded.md)).
 
 Each fire calls the same convene endpoint as the CLI and meets the same
 refusals: a fire during a running discussion gets `409` and is skipped, and once
