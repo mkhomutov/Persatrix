@@ -91,7 +91,7 @@ def _emit_deliberated_audit(
     the ``CompositionPlan`` (RFC 0051 §E privacy wall / §Security). The wall is
     structural: the payload is bool/enum/int by construction, so there is nothing
     private to leak and no free-text redaction is needed — the seam never reads
-    ``reason_note`` onto it.
+    ``reason_note`` onto it (its one egress is :func:`_emit_reason_note_debug`).
 
     Best-effort, post-commit: the deliberation has already happened, so a
     structured-log hiccup must never undo or block the turn. This applies the
@@ -108,6 +108,41 @@ def _emit_deliberated_audit(
                 "should_post": should_post,
                 "reason_code": reason_code,
                 "transcript_turns": transcript_turns,
+            },
+        )
+
+
+# ISSUE-0108 Gap B (v0.3.16 PR B2) — the verbatim ``reason_note``'s one egress.
+# RFC 0051 §E names the operator-debug agent log as its only audience; from
+# v0.3.10 to v0.3.15 nothing wrote it anywhere (the operator-reveal PR 7 was
+# cut), so the reason a persona went silent was readable only as the
+# ``deliberation.suppressed{reason_code}`` metric label. Deliberately NOT an
+# audit record — its own event name, no ``audit=True``, DEBUG level — so the
+# Go-side audit registry never sees it and the INFO default renders nothing.
+# An operator opts in with ``--log-level DEBUG``; at that level the RFC 0018
+# log shipper, when active, ships the line off-host with the rest of the log.
+_DEBUG_EVENT_REASON_NOTE: Final[str] = "agent.deliberation.reason_note"
+
+
+def _emit_reason_note_debug(
+    *, agent_id: str, channel_id: str, reason_code: str, reason_note: str,
+) -> None:
+    """Emit the verbatim silence ``reason_note`` on the operator-debug path.
+
+    Called only on the suppression path of the structured rungs — a speak
+    verdict's note is not a silence reason and egresses nowhere. Best-effort
+    like the audit emit: the verdict already happened, so a logging hiccup
+    must never undo it. The level check keeps the INFO default at zero cost."""
+    if not logger.isEnabledFor(logging.DEBUG):
+        return
+    with contextlib.suppress(Exception):
+        logger.debug(
+            _DEBUG_EVENT_REASON_NOTE,
+            extra={
+                "agent_id": agent_id,
+                "channel_id": channel_id,
+                "reason_code": reason_code,
+                "reason_note": reason_note,
             },
         )
 
@@ -278,8 +313,10 @@ async def run_salience_gate(
     explicit ``mode`` argument overrides the payload (test injection). On the
     structured rungs (``bid``/``plan``) the seam additionally emits the
     ``agent.deliberated`` audit (decision + ``reason_code`` + counts, never the
-    ``reason_note`` or plan, RFC 0051 §E). The TB6 channel-too-large *skip* is not
-    a deliberation, so it emits no audit even under reasoning.
+    ``reason_note`` or plan, RFC 0051 §E) and, on a silence verdict, the verbatim
+    ``reason_note`` as one DEBUG record — the §E operator-debug path
+    (ISSUE-0108). The TB6 channel-too-large *skip* is not a deliberation, so it
+    emits no audit even under reasoning.
     """
     if not (is_open_floor_admit(decision) and _governed(event)):
         return None
@@ -420,6 +457,16 @@ async def run_salience_gate(
             "Agent %s: Tier B salience bid suppressed turn (reason=%s, score=%s)",
             agent.agent_id, salience.reason, salience.score,
         )
+        # ISSUE-0108 Gap B — the verbatim note's one egress (RFC 0051 §E, the
+        # operator-debug audience). Structured rungs only: ``off`` carries no
+        # note and stays byte-for-byte v0.3.8.
+        if is_structured(mode) and salience.reason_note is not None:
+            _emit_reason_note_debug(
+                agent_id=agent.agent_id,
+                channel_id=event.channel_id or "",
+                reason_code=salience.reason,
+                reason_note=salience.reason_note,
+            )
         await agent._store_event_episode(event, [])
         return SalienceOutcome(silence=True)
 

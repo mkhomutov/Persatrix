@@ -35,6 +35,7 @@ and the discarded draft / critic note are never wrapped in an ``AgentAction``.
 from __future__ import annotations
 
 import json
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -342,3 +343,82 @@ class TestReflexionDraftAndCritiqueNeverLeak:
             text = _action_text(action)
             for marker in _REFLEXION_MARKERS:
                 assert marker not in text, f"reflexion intermediate must not persist: {marker}"
+
+
+# ─── ISSUE-0108 Gap B (v0.3.16 PR B2): the silence ``reason_note`` ───────────
+#
+# The verbatim ``reason_note`` now has its one §E egress — a DEBUG record in
+# the agent log on the suppression path. This class drives a real suppressed
+# turn through the action loop and pins that the note reaches the debug log
+# and nothing else: no published message (the turn is silent), no stored
+# episode (what an RFC 0034 reconstruction hands a peer), and not the
+# ``agent.deliberated`` audit record.
+
+_PRIVATE_NOTE = "WALLED-NOTE-5c1 iron-fox already settled the cache question"
+_NOTE_EVENT = "agent.deliberation.reason_note"
+_AUDIT_EVENT = "agent.deliberated"
+_BID_PATH = "agents.persona_runtime.salience_gate.evaluate_salience"
+
+
+def _governed_bid_event() -> AgentEvent:
+    """The no-leak event, on a channel whose resolved rung is ``bid`` — the
+    production shape the action loop resolves the mode from (RFC 0051 PR 6)."""
+    event = _event()
+    event.payload["reasoning_mode"] = "bid"
+    return event
+
+
+class TestSilenceReasonNoteReachesDebugLogButNeverLeaks:
+    async def test_note_is_in_the_debug_log_and_nowhere_else(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        from agents.salience_bid import SalienceDecision
+        from agents.salience_deliberation import REASON_ALREADY_ANSWERED
+
+        agent, compose = await _make_agent()
+        stored_actions: list = []
+        original_store = agent._store_event_episode
+
+        async def _capture_store(event, actions):
+            stored_actions.extend(actions)
+            return await original_store(event, actions)
+
+        silence = SalienceDecision(
+            speak=False, score=None, reason=REASON_ALREADY_ANSWERED,
+            reason_note=_PRIVATE_NOTE,
+        )
+        with caplog.at_level(logging.DEBUG, logger="agents.persona_runtime.salience_gate"), \
+                patch(_BID_PATH, new=AsyncMock(return_value=silence)), \
+                patch.object(agent, "_store_event_episode", side_effect=_capture_store):
+            actions = await agent.on_event(_governed_bid_event())
+
+        # Positive control: the note reached the debug log, verbatim.
+        notes = [r for r in caplog.records if r.getMessage() == _NOTE_EVENT]
+        assert len(notes) == 1
+        assert getattr(notes[0], "reason_note") == _PRIVATE_NOTE
+
+        # The turn was genuinely suppressed: nothing composed, nothing published.
+        compose.assert_not_awaited()
+        assert [a.action_type for a in actions] == [ActionType.DO_NOTHING]
+        for action in actions:
+            assert _PRIVATE_NOTE not in _action_text(action)
+
+        # No leak to the store: the suppressed turn is still ingested (the
+        # gate-suppress discipline), and a channel message accumulates into the
+        # open RFC 0020 interaction that the close persists — so that record,
+        # flattened whole, is the store-bound surface a peer could reconstruct
+        # from. The note must be in none of it.
+        assert stored_actions == []
+        records = agent._interaction_tracker.open_records()
+        assert records, "the suppressed turn must still be ingested into its interaction"
+        for record in records:
+            blob = json.dumps(vars(record), default=lambda o: getattr(o, "__dict__", str(o)))
+            assert _PRIVATE_NOTE not in blob
+
+        # Not the audit: the count-only record stays note-free.
+        audits = [
+            r for r in caplog.records
+            if getattr(r, "audit", None) is True and r.getMessage() == _AUDIT_EVENT
+        ]
+        assert len(audits) == 1
+        assert _PRIVATE_NOTE not in " ".join(str(v) for v in audits[0].__dict__.values())

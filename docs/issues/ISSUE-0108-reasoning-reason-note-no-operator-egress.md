@@ -1,11 +1,15 @@
 ---
 id: ISSUE-0108
-summary: "The RFC 0051 reasoning trace's verbatim `reason_note` has NO operator egress in shipped v0.3.10. It is parsed (`agents/salience_deliberation.py`) and carried on the `SalienceDecision` (`agents/salience_bid.py:469`) but no log statement ever writes it — the code/tests call its egress 'the operator-debug path, wired in a later PR' (`tests/unit/python/test_salience_bid_reasoning.py:78`), and that later PR was the operator-reveal PR 7, which was CUT from v0.3.10. Compounding it, the count-only `agent.deliberated` audit (`agents/persona_runtime/salience_gate.py:102`) attaches `reason_code`/`should_post` via stdlib `extra=`, but the structlog `ProcessorFormatter.foreign_pre_chain` (`agents/observability/logging.py`) has no `ExtraAdder`, so those fields are dropped from the rendered log line — the audit log is presence-only. Net: the deliberation REASON is observable only as the `deliberation.suppressed{reason_code,mode}` metric LABEL, never in the agent log; the verbatim `reason_note` is observable nowhere. MT-REASON-001 Step 2 and RFC 0051 §E both describe the agent log as the reason_note's egress; that description is aspirational, not wired. UPDATE: the `agent.deliberated` (and latent `fact.*`) audit-drop half — the missing `ExtraAdder` — is now FIXED; the audit payload reaches the rendered line. Remaining open scope is the verbatim `reason_note` egress + the §E/MT-REASON-001 doc correction (Gap B), deferred to its own PR."
-status: open
+summary: "The RFC 0051 reasoning trace's verbatim `reason_note` has NO operator egress in shipped v0.3.10. It is parsed (`agents/salience_deliberation.py`) and carried on the `SalienceDecision` (`agents/salience_bid.py:469`) but no log statement ever writes it — the code/tests call its egress 'the operator-debug path, wired in a later PR' (`tests/unit/python/test_salience_bid_reasoning.py:78`), and that later PR was the operator-reveal PR 7, which was CUT from v0.3.10. Compounding it, the count-only `agent.deliberated` audit (`agents/persona_runtime/salience_gate.py:102`) attaches `reason_code`/`should_post` via stdlib `extra=`, but the structlog `ProcessorFormatter.foreign_pre_chain` (`agents/observability/logging.py`) has no `ExtraAdder`, so those fields are dropped from the rendered log line — the audit log is presence-only. Net: the deliberation REASON is observable only as the `deliberation.suppressed{reason_code,mode}` metric LABEL, never in the agent log; the verbatim `reason_note` is observable nowhere. MT-REASON-001 Step 2 and RFC 0051 §E both describe the agent log as the reason_note's egress; that description is aspirational, not wired. UPDATE: the `agent.deliberated` (and latent `fact.*`) audit-drop half — the missing `ExtraAdder` — is now FIXED; the audit payload reaches the rendered line. Remaining open scope is the verbatim `reason_note` egress + the §E/MT-REASON-001 doc correction (Gap B), deferred to its own PR — RESOLVED by v0.3.16 PR B2: one `agent.deliberation.reason_note` DEBUG record on the suppression path, §E corrected in the RFC 0051 amendment file, MT-REASON-001 Step 2 flipped."
+status: resolved
 severity: low
 area: agents
 created: 2026-06-26
+closed: 2026-09-12
 refs:
+  - tests/unit/python/test_salience_gate_reason_note_egress.py
+  - tests/integration/test_deliberation_no_leak.py
+  - docs/rfcs/0051-amendment-reasoning-kernel.md
   - docs/rfcs/0051-reasoning-before-posting.md
   - docs/rfcs/0051-pr-plan.md
   - docs/manual-tests/MT-REASON-001.md
@@ -199,6 +203,23 @@ deferred.
 > ISSUE-0122.
 >
 > 2026-09-08 — **Locked at the v0.3.16 plan opening** ([v0.3.16 plan](../v0.3.16-plan.md) PR B2), as defaulted above. The release note must state that the DEBUG line is a new egress surface for operators who ship agent logs off-host — the §E correction says so.
+
+> 2026-09-12 — **Resolved (Gap B) by v0.3.16 [PR B2](../v0.3.16-pr-plan.md#pr-b2--featurev0316-issue0108-reason-note-egress).**
+> `salience_gate.py` emits one `agent.deliberation.reason_note` record at
+> DEBUG on the suppression path of the structured rungs — the verbatim note,
+> the `reason_code`, the agent and channel ids; no `audit=True`, so the audit
+> registry never sees it and the `agent.deliberated` line stays count-only.
+> Silent at the INFO default; at DEBUG it is redacted and shipped like any
+> agent-log line, which the release note states. Pinned by
+> `test_salience_gate_reason_note_egress.py` (the record; its absence on a
+> speak verdict, a note-less verdict and the `off` rung; the rendered line at
+> DEBUG and its absence at INFO) and the no-leak extension in
+> `test_deliberation_no_leak.py` (debug log yes; a published message, the
+> episodic store, the audit record — never). §E corrected by appending to the
+> [RFC 0051 amendment file](../rfcs/0051-amendment-reasoning-kernel.md);
+> MT-REASON-001 Step 2 and its v0.3.10 caveat flipped; the "wired in a later
+> PR" docstrings retired; the persona guide and the RFC 0051 PR plan's PR 7
+> row updated. Not built: the rendered-plan egress and the OQ 6(a) web reveal.
 
 [e]: ../rfcs/0051-reasoning-before-posting.md#e-privacy-boundary--the-trace-is-walled
 [mt]: ../manual-tests/MT-REASON-001.md
