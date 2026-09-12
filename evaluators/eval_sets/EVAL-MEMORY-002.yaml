@@ -22,7 +22,7 @@ description: |
   DM room BEFORE the asking turn runs. The golden is recorded offline
   (`make eval-record-offline`); a live re-record rides release-prep.
 spawned_from: ../../docs/rfcs/0049-pr-plan.md
-tier: experimental
+tier: stable
 
 setup:
   persona: ember-owl

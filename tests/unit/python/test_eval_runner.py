@@ -29,6 +29,7 @@ from evaluators.runner import (
     EvalMode,
     build_provider,
     discover_recipes,
+    filter_recipes_by_tier,
     golden_path_for,
     main,
     parse_elapsed,
@@ -301,3 +302,38 @@ async def test_run_suite_threads_shadow_traces_into_artifact(tmp_path: Path) -> 
     )
     (artifact,) = dicts
     assert artifact["shadow_traces"] == [_TRACE]
+
+
+# ─── RFC 0044 Phase 2 (v0.3.16 PR C2): the tier filter behind the CI gate ────
+
+
+def test_filter_recipes_by_tier_keeps_only_that_tier(tmp_path: Path) -> None:
+    stable = _write(tmp_path, _RECIPE)
+    experimental = _write(
+        tmp_path,
+        _RECIPE.replace("EVAL-MEMORY-001", "EVAL-MEMORY-002")
+        .replace("tier: stable", "tier: experimental"),
+        name="EVAL-MEMORY-002.yaml",
+    )
+    recipes = discover_recipes(tmp_path)
+    assert recipes == [stable, experimental]
+    assert filter_recipes_by_tier(recipes, "stable") == [stable]
+    assert filter_recipes_by_tier(recipes, "experimental") == [experimental]
+    assert filter_recipes_by_tier(recipes, None) == recipes
+
+
+def test_main_tier_with_no_member_is_a_vacuous_gate_and_exits_one(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    # An empty tier must not read as green: the CI gate runs `--tier stable`,
+    # and "nothing to run" there means the gate guards nothing.
+    _write(tmp_path, _RECIPE.replace("tier: stable", "tier: experimental"))
+    code = main(["--mode", "replay", "--eval-sets-dir", str(tmp_path), "--tier", "stable"])
+    assert code == 1
+    assert "no recipes in tier 'stable'" in capsys.readouterr().out
+
+
+def test_main_rejects_a_tier_outside_the_schema_enum(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit) as exc:
+        main(["--mode", "replay", "--eval-sets-dir", str(tmp_path), "--tier", "golden"])
+    assert exc.value.code == 2

@@ -25,7 +25,7 @@ description: |
   (`make eval-record-offline`), so it replays deterministically at $0 with no API
   key; a live re-record against the `quality` model rides release-prep.
 spawned_from: ../../docs/rfcs/0034-persona-conversational-working-memory.md
-tier: experimental
+tier: stable
 
 setup:
   persona: ember-owl

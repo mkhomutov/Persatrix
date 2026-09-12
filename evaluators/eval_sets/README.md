@@ -32,9 +32,10 @@ deterministically at $0 with no API key — the seed replay tests
 [cross-room](../../tests/integration/test_cross_room_seed_replay.py),
 [confidentiality](../../tests/integration/test_confidentiality_seed_replay.py),
 [working](../../tests/integration/test_eval_working_seed_replay.py)) run in CI on
-every PR, so a replay regression fails the build. (The eval harness's own *tiered*
-merge gate — `passed_all` blocking the `stable` tier — is the separate Phase-2
-step still deferred.)
+every PR — and so does the harness's own gate: the required Python job runs
+`make eval-replay TIER=stable` (RFC 0044 Phase 2, v0.3.16 PR C2), which replays
+every recipe declared `tier: stable` by discovery, so a seed with a golden is
+gated without an integration test of its own.
 
 `EVAL-MEMORY-001` exercises cross-interaction long-term recall; `EVAL-WORKING-001`
 exercises **within-interaction working memory** (RFC 0034) — a distinct runtime

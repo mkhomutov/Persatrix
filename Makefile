@@ -211,9 +211,13 @@ test-agents: ## Run the agents/ unit test tree
 # EVAL-MEMORY-001 bakes in the real physical models and would miss the cassette
 # here until this target resolves the overlay per recipe — a follow-up parked in
 # docs/rfcs/0044-pr-plan.md (§Notes).
-eval-replay: ## Replay golden-trace evals deterministically (RFC 0044). TARGET / REPORT optional.
+#
+# TIER=stable scopes the sweep to the recipes declared `tier: stable` — the
+# RFC 0044 §F merge gate the required Python CI job runs (v0.3.16 PR C2). An
+# empty tier exits 1: a gate over no recipes is vacuous, not green.
+eval-replay: ## Replay golden-trace evals deterministically (RFC 0044). TARGET / TIER / REPORT optional.
 	PERSATRIX_OPTIMIZATION_CONFIG=config/demo/offline/optimization.yaml \
-	$(PYTHON) -m evaluators.runner --mode replay $(if $(TARGET),--target $(TARGET),) $(if $(REPORT),--report $(REPORT),)
+	$(PYTHON) -m evaluators.runner --mode replay $(if $(TARGET),--target $(TARGET),) $(if $(TIER),--tier $(TIER),) $(if $(REPORT),--report $(REPORT),)
 
 eval-record: ## Record a golden from a live run (author-only; overwrites the sidecar). TARGET=<id>.
 	$(PYTHON) -m evaluators.runner --mode record $(if $(TARGET),--target $(TARGET),)
