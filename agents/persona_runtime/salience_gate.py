@@ -117,10 +117,12 @@ def _emit_deliberated_audit(
 # v0.3.10 to v0.3.15 nothing wrote it anywhere (the operator-reveal PR 7 was
 # cut), so the reason a persona went silent was readable only as the
 # ``deliberation.suppressed{reason_code}`` metric label. Deliberately NOT an
-# audit record — its own event name, no ``audit=True``, DEBUG level — so the
-# Go-side audit registry never sees it and the INFO default renders nothing.
-# An operator opts in with ``--log-level DEBUG``; at that level the RFC 0018
-# log shipper, when active, ships the line off-host with the rest of the log.
+# audit record — its own event name, no ``audit=True`` marker, DEBUG level;
+# nothing routes on that key (no Go audit RPC here, the shipper forwards both
+# records alike), so event name + level are the whole separation. An operator
+# opts in with ``--log-level DEBUG``; the RFC 0018 shipper then forwards the
+# line off-host, where the orchestrator drops it (a channel turn carries no
+# execution id) — so it is read in the agent's own log. INFO renders nothing.
 _DEBUG_EVENT_REASON_NOTE: Final[str] = "agent.deliberation.reason_note"
 
 
@@ -132,9 +134,7 @@ def _emit_reason_note_debug(
     Called only on the suppression path of the structured rungs — a speak
     verdict's note is not a silence reason and egresses nowhere. Best-effort
     like the audit emit: the verdict already happened, so a logging hiccup
-    must never undo it. The level check keeps the INFO default at zero cost."""
-    if not logger.isEnabledFor(logging.DEBUG):
-        return
+    must never undo it (``Logger.debug`` itself skips the INFO default)."""
     with contextlib.suppress(Exception):
         logger.debug(
             _DEBUG_EVENT_REASON_NOTE,

@@ -36,6 +36,8 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Awaitable, Callable
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -229,15 +231,23 @@ def _action_text(action) -> str:
     return json.dumps(action.payload, default=str)
 
 
+def _capturing_store(agent: _LLMPersonaAgent) -> tuple[list, Callable[..., Awaitable[Any]]]:
+    """Wrap ``agent._store_event_episode`` so every action it is handed is
+    collected for leak scanning while the real store still runs."""
+    stored_actions: list = []
+    original_store = agent._store_event_episode
+
+    async def _capture_store(event: AgentEvent, actions: list) -> Any:
+        stored_actions.extend(actions)
+        return await original_store(event, actions)
+
+    return stored_actions, _capture_store
+
+
 class TestPlanThreadsIntoComposeButNeverLeaks:
     async def test_plan_reaches_compose_prompt_but_not_messages_or_store(self):
         agent, compose = await _make_agent()
-        stored_actions: list = []
-        original_store = agent._store_event_episode
-
-        async def _capture_store(event, actions):
-            stored_actions.extend(actions)
-            return await original_store(event, actions)
+        stored_actions, _capture_store = _capturing_store(agent)
 
         outcome = SalienceOutcome(
             silence=False, user_message="formatted", seed=list(_SEED), plan=_PLAN,
@@ -299,12 +309,7 @@ class TestReflexionDraftAndCritiqueNeverLeak:
 
     async def test_discarded_draft_and_critique_never_reach_messages_or_store(self):
         agent, create_message = await _make_reflexion_agent()
-        stored_actions: list = []
-        original_store = agent._store_event_episode
-
-        async def _capture_store(event, actions):
-            stored_actions.extend(actions)
-            return await original_store(event, actions)
+        stored_actions, _capture_store = _capturing_store(agent)
 
         # ``revise=1`` arms the loop; ``plan`` is what the critic critiques against.
         outcome = SalienceOutcome(
@@ -376,12 +381,7 @@ class TestSilenceReasonNoteReachesDebugLogButNeverLeaks:
         from agents.salience_deliberation import REASON_ALREADY_ANSWERED
 
         agent, compose = await _make_agent()
-        stored_actions: list = []
-        original_store = agent._store_event_episode
-
-        async def _capture_store(event, actions):
-            stored_actions.extend(actions)
-            return await original_store(event, actions)
+        stored_actions, _capture_store = _capturing_store(agent)
 
         silence = SalienceDecision(
             speak=False, score=None, reason=REASON_ALREADY_ANSWERED,

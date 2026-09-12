@@ -13,15 +13,17 @@ metric label. This file pins the egress
   the closed-set ``reason_code`` and the agent/channel ids.
 * **Nowhere else.** A speak verdict, a verdict with no note, and the scalar
   ``off`` rung emit nothing; the ``agent.deliberated`` audit stays note-free.
-* **Not an audit record.** The line carries no ``audit=True``, so the RFC 0009
-  audit registry never sees it — the §E "two egress paths" contract.
+* **Not an audit record.** The line carries no ``audit=True`` marker, so nothing
+  that filters on it counts it — the §E "two egress paths" contract, kept by
+  event name and level (nothing routes on the key).
 * **Silent at the INFO default.** Through ``configure_logging``'s real renderer
   the note appears on the rendered JSON line only when the agent runs at
   ``DEBUG``; at the default level the audit line renders and the note does not.
 
-The bid is patched in the ``salience_gate`` namespace, as in
-``test_salience_gate_deliberation_audit.py``, so the assertions are about the
-seam alone.
+The bid is patched in the ``salience_gate`` namespace and the scaffold is the
+one ``test_salience_gate_deliberation_audit.py`` uses (``_salience_gate_helpers``,
+the ``rendered_log`` conftest fixture), so the assertions are about the seam
+alone.
 """
 
 from __future__ import annotations
@@ -29,19 +31,21 @@ from __future__ import annotations
 import io
 import json
 import logging
-from collections.abc import Iterator
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
-import structlog
+from _salience_gate_helpers import (
+    _AUDIT_EVENT,
+    _BID_PATH,
+    _audit_records,
+    _event,
+    _open_floor_decision,
+    _stub_agent,
+)
 
-from agents.observability import logging as logging_mod
 from agents.observability.logging import configure_logging
-from agents.observability.redact import NoopRedactor
 from agents.persona_runtime.salience_gate import SalienceOutcome, run_salience_gate
-from agents.persona_types import AgentEvent, EventType
-from agents.response_gate import POLICY_ALWAYS, GateDecision
 from agents.salience_bid import SalienceDecision
 from agents.salience_deliberation import (
     MODE_BID,
@@ -53,47 +57,11 @@ from agents.salience_deliberation import (
 
 pytestmark = pytest.mark.asyncio
 
-_AUDIT_EVENT = "agent.deliberated"
 _NOTE_EVENT = "agent.deliberation.reason_note"
 _LOGGER = "agents.persona_runtime.salience_gate"
 # A distinctive clause: it must appear on the DEBUG record verbatim and on
 # nothing else.
 _NOTE = "iron-fox already answered the database question two turns ago"
-
-_BID_PATH = "agents.persona_runtime.salience_gate.evaluate_salience"
-
-
-def _open_floor_decision() -> GateDecision:
-    return GateDecision(respond=True, policy=POLICY_ALWAYS, reason="policy_always")
-
-
-def _event() -> AgentEvent:
-    return AgentEvent(
-        event_type=EventType.CHANNEL_MESSAGE,
-        payload={
-            "content": "What database should we pick for the cache?",
-            "respond_policy": "always",
-            "salience_gated": True,
-        },
-        channel_id="group:planning",
-        sender_id="alice",
-    )
-
-
-def _stub_agent() -> MagicMock:
-    agent = MagicMock()
-    agent.agent_id = "ember-owl"
-    agent.name = "Ember Owl"
-    agent.role = "Planner"
-    agent._llm_client = MagicMock()
-    agent._format_event = MagicMock(return_value="formatted message")
-    agent._build_seed_messages = AsyncMock(return_value=[
-        {"role": "user", "content": "We should pick a cache database."},
-        {"role": "assistant", "content": "Redis is the obvious fit."},
-        {"role": "user", "content": "What database should we pick for the cache?"},
-    ])
-    agent._store_event_episode = AsyncMock(return_value=None)
-    return agent
 
 
 def _silence(note: str | None = _NOTE) -> SalienceDecision:
@@ -104,13 +72,6 @@ def _silence(note: str | None = _NOTE) -> SalienceDecision:
 
 def _note_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
     return [rec for rec in caplog.records if rec.getMessage() == _NOTE_EVENT]
-
-
-def _audit_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
-    return [
-        rec for rec in caplog.records
-        if getattr(rec, "audit", None) is True and rec.getMessage() == _AUDIT_EVENT
-    ]
 
 
 def _record_text(rec: logging.LogRecord) -> str:
@@ -210,37 +171,6 @@ class TestNoRecordOffTheSuppressionPath:
 # ─── The rendered line: DEBUG only ───────────────────────────────────────────
 
 
-@pytest.fixture
-def _rendered_log(monkeypatch: pytest.MonkeyPatch) -> Iterator[io.StringIO]:
-    """Rebuild ``configure_logging``'s chain and render to a buffer (mirrors
-    ``test_salience_gate_deliberation_audit.py``)."""
-    import sys as _real_sys
-
-    structlog.contextvars.clear_contextvars()
-    logging_mod._configured = False
-    logging_mod._redactor = NoopRedactor()
-    structlog.reset_defaults()
-
-    buf = io.StringIO()
-
-    class _SysShim:
-        stderr = buf
-
-        def __getattr__(self, name: str) -> Any:  # pragma: no cover - trivial
-            return getattr(_real_sys, name)
-
-    monkeypatch.setattr("sys.stderr", buf)
-    monkeypatch.setattr(logging_mod, "sys", _SysShim())
-    yield buf
-
-    structlog.contextvars.clear_contextvars()
-    logging_mod._configured = False
-    logging_mod._redactor = NoopRedactor()
-    structlog.reset_defaults()
-    # ``configure_logging`` raises the root level; put it back for the suite.
-    logging.getLogger().setLevel(logging.WARNING)
-
-
 def _rendered(buf: io.StringIO, message: str) -> list[dict[str, Any]]:
     return [
         rec for rec in (
@@ -253,12 +183,12 @@ def _rendered(buf: io.StringIO, message: str) -> list[dict[str, Any]]:
 
 class TestRenderedEgress:
     async def test_at_debug_the_note_reaches_the_rendered_line(
-        self, _rendered_log: io.StringIO, monkeypatch: pytest.MonkeyPatch,
+        self, rendered_log: io.StringIO, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         configure_logging(service_kind="agent", service_instance="ember-owl", level="DEBUG")
         await _run(monkeypatch, _silence(), mode=MODE_BID)
 
-        lines = _rendered(_rendered_log, _NOTE_EVENT)
+        lines = _rendered(rendered_log, _NOTE_EVENT)
         assert len(lines) == 1
         assert lines[0]["level"] == "DEBUG"
         assert lines[0]["reason_note"] == _NOTE
@@ -266,13 +196,13 @@ class TestRenderedEgress:
         assert "audit" not in lines[0]
 
     async def test_at_the_info_default_the_note_renders_nowhere(
-        self, _rendered_log: io.StringIO, monkeypatch: pytest.MonkeyPatch,
+        self, rendered_log: io.StringIO, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """The default agent log level is INFO: the audit line still renders,
         the note line does not, and the note text is on no rendered line."""
         configure_logging(service_kind="agent", service_instance="ember-owl")
         await _run(monkeypatch, _silence(), mode=MODE_BID)
 
-        assert len(_rendered(_rendered_log, _AUDIT_EVENT)) == 1
-        assert _rendered(_rendered_log, _NOTE_EVENT) == []
-        assert _NOTE not in _rendered_log.getvalue()
+        assert len(_rendered(rendered_log, _AUDIT_EVENT)) == 1
+        assert _rendered(rendered_log, _NOTE_EVENT) == []
+        assert _NOTE not in rendered_log.getvalue()

@@ -124,10 +124,12 @@ New tests assert at the *rendered* layer (the egress an operator reads), not the
 case, the third-party-not-surfaced scope, and the `fact.*` triple's redacted
 egress.
 
-**Still open (Gap B):** the verbatim `reason_note` (fact 1) still has **zero**
+~~**Still open (Gap B):** the verbatim `reason_note` (fact 1) still has **zero**
 egress, and the RFC 0051 §E / MT-REASON-001 Step 2 docs still describe the agent
 log as its egress. That half is intentionally deferred to its own PR (see below)
-and keeps this issue open.
+and keeps this issue open.~~ **Done (Gap B)** — v0.3.16 [PR B2](../v0.3.16-pr-plan.md#pr-b2--featurev0316-issue0108-reason-note-egress)
+([#943](https://github.com/mkhomutov/Persatrix/pull/943)); the 2026-09-12 note
+below records what shipped.
 
 ## Impact
 
@@ -162,8 +164,9 @@ v0.3.10 silence-with-a-reason evidence.
    audit drop in the same stroke, and (unlike a bare `ExtraAdder`) guarantees a
    caller's `extra` can never overwrite a chain-owned or bound-identity field.
 
-The remaining steps are **deferred — their own reviewed PR, not release-prep**
-(Gap B: wiring the cut PR 7's verbatim-`reason_note` agent-log half):
+The remaining steps were **deferred to their own reviewed PR, not release-prep**
+(Gap B: wiring the cut PR 7's verbatim-`reason_note` agent-log half) — **done as
+v0.3.16 PR B2**:
 
 2. Add a single **DEBUG**-level egress for the verbatim `reason_note` on the
    suppression path ([`salience_gate.py`][gate]), guarded to the agent log only,
@@ -208,10 +211,13 @@ deferred.
 > 2026-09-12 — **Resolved (Gap B) by v0.3.16 [PR B2](../v0.3.16-pr-plan.md#pr-b2--featurev0316-issue0108-reason-note-egress).**
 > `salience_gate.py` emits one `agent.deliberation.reason_note` record at
 > DEBUG on the suppression path of the structured rungs — the verbatim note,
-> the `reason_code`, the agent and channel ids; no `audit=True`, so the audit
-> registry never sees it and the `agent.deliberated` line stays count-only.
-> Silent at the INFO default; at DEBUG it is redacted and shipped like any
-> agent-log line, which the release note states. Pinned by
+> the `reason_code`, the agent and channel ids; no `audit=True` marker (nothing
+> routes on that key — the separation is by event name and level), and the
+> `agent.deliberated` line stays count-only. Silent at the INFO default; at
+> DEBUG it is an agent-log line like any other — unredacted (the RFC 0018 hook
+> is a no-op in every shipped build) and forwarded off-host by the log
+> shipper, which the release note states; the orchestrator drops it for want
+> of an execution id, so it is read in the agent's container log. Pinned by
 > `test_salience_gate_reason_note_egress.py` (the record; its absence on a
 > speak verdict, a note-less verdict and the `off` rung; the rendered line at
 > DEBUG and its absence at INFO) and the no-leak extension in
