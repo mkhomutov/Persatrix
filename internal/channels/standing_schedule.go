@@ -24,7 +24,7 @@ package channels
 //
 // Nothing consumes [ChannelRouter.StandingConveneTimers] yet, and nothing calls
 // that writer, so no production code arms a timer. An operator writes the
-// convener's `convene` timer by hand (docs/guides/channels.md §13 "Standing
+// convener's `convene` timer by hand (docs/guides/autonomous-channels.md "Standing
 // channels"; docs/manual-tests/MT-AUTONOMOUS-003.md Step 2) and restarts the
 // persona; that timer then fires the live path above. A hand-written timer
 // skips [deriveConveneTimer]'s bound check, so one aimed at a channel with no
@@ -51,7 +51,7 @@ package channels
 //
 // Two rules bind whoever WRITES the timer (NOT this producer's concern);
 // `merge_convene_timers` applies both, and an operator writing the entry by hand
-// must apply them too (channels.md §13 shows both). The convener persona must run
+// must apply them too (autonomous-channels.md shows both). The convener persona must run
 // at `autonomy.level` semi-autonomous/autonomous for its EventLoop scheduler to
 // exist and pick the timer up (agents/server_persona.py gates the scheduler on
 // level; a `reactive` convener silently ignores a `timers` entry), so the writer

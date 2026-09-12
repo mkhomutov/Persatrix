@@ -29,7 +29,7 @@
 - [RFC 0052 — Autonomous Agent-Only Channels](../rfcs/0052-autonomous-agent-channels.md) — [§B self-convening](../rfcs/0052-autonomous-agent-channels.md#b-self-convening--starting-without-a-human-turn), [§D termination and synthesis](../rfcs/0052-autonomous-agent-channels.md#d-termination-and-synthesis--always-produce-an-artifact).
 - [RFC 0052 PR plan](../rfcs/0052-pr-plan.md) — the 9-PR breakdown; this MT is the PR 5 (Phase 1e) acceptance artifact.
 - [v0.3.11-plan §Acceptance](../v0.3.11-plan.md#acceptance-for-v0311) — the release gate this MT anchors.
-- [Channels guide §Autonomous channels](../guides/channels.md) — the operator-facing arming/convening how-to (incl. the full convene error table).
+- [Autonomous channels guide](../guides/autonomous-channels.md) — the operator-facing arming/convening how-to (incl. the full convene error table).
 - [MT-CHANNEL-CONFIG-001](MT-CHANNEL-CONFIG-001.md) — the live-edit config-knob mechanics the `autonomous.*` legs reuse.
 
 **Related Automated Tests** — the deterministic CI backbone of this MT (mock provider, real wallet):

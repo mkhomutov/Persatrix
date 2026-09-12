@@ -58,7 +58,7 @@ revision as an `If-Match` guard:
 - Since v0.3.11 the panel renders an **Autonomous channel** section (RFC 0052) —
   the `autonomous` knobs (enable, Topic/Goal, Agenda, Convener, Max rounds) on the
   same PATCH, plus (PR 3) a **Convene** action
-  ([§13](channels.md#13-autonomous-channels-rfc-0052)).
+  ([autonomous channels guide](autonomous-channels.md)).
 - On a concurrent edit, the save returns `409`; the panel **reloads the latest
   config and replays your pending edits on top** rather than blind-overwriting,
   and asks you to review and save again.
