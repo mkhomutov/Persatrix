@@ -350,7 +350,7 @@ func TestChannelMessageEvent_SalienceFieldNumbersPinned(t *testing.T) {
 	// case interaction_id = 17 exercises.
 	blob, err = proto.Marshal(&taskpb.ChannelMessageEvent{SalienceMaxChannelMembers: 20})
 	require.NoError(t, err)
-	expectedTag := appendVarint(nil, uint64(16<<3)|0)
+	expectedTag := appendVarint(nil, uint64(16<<3)) // wire type 0 (varint) adds nothing
 	assert.Equal(t, append(expectedTag, appendVarint(nil, 20)...), blob)
 }
 

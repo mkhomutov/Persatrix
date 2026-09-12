@@ -293,7 +293,7 @@ func TestAuditLogger_ToolInvokedOnDispatch(t *testing.T) {
 	srv := grpc.NewServer()
 	taskpb.RegisterAgentServiceServer(srv, &mockAgentServer{})
 	go func() { _ = srv.Serve(lis) }()
-	t.Cleanup(func() { srv.GracefulStop(); lis.Close() })
+	t.Cleanup(func() { srv.GracefulStop(); _ = lis.Close() })
 
 	exec := executor.NewGRPCExecutor(reg, logger,
 		executor.WithDialOptions(

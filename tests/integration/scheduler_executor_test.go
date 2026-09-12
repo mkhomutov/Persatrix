@@ -62,7 +62,7 @@ func TestSchedulerExecutorIntegration(t *testing.T) {
 	}()
 	t.Cleanup(func() {
 		srv.GracefulStop()
-		lis.Close()
+		_ = lis.Close()
 	})
 
 	// Create executor with bufconn dialer.

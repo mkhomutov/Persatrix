@@ -63,6 +63,27 @@ jobs:
           unformatted="$(gofmt -l $(git ls-files '*.go'))" || exit 1
           if [ -n "$unformatted" ]; then echo "gofmt needed:"; echo "$unformatted"; exit 1; fi
 
+      # ISSUE-0142 (v0.3.16 PR C1): `make lint`'s Go leg ran in no job and
+      # pinned no version, so a lint regression could merge and "green" meant
+      # something different per machine. The pin lives in the Makefile and
+      # the linter set in .golangci.yml; this job reads the pin, installs
+      # exactly it, and runs the same `make lint-go` a developer runs. It is
+      # a step in this required job — not a new advisory job waiting on a
+      # branch-protection change — so it gates the merge from the day it
+      # lands.
+      - name: Read the golangci-lint pin from the Makefile
+        id: golangci
+        run: echo "version=$(make -s golangci-lint-version)" >> "$GITHUB_OUTPUT"
+
+      - name: Install the pinned golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: ${{ steps.golangci.outputs.version }}
+          install-only: true
+
+      - name: Run golangci-lint (the same target as `make lint`)
+        run: make lint-go
+
       - name: Run Go tests
         run: go test ./internal/... -v -race -cover
 

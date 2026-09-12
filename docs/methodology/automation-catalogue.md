@@ -66,7 +66,7 @@ dependencies.
 
 | Target / script | Does | Where it runs |
 |-----------------|------|---------------|
-| `make lint` | `lint-go` (golangci-lint) + `lint-python` (ruff + mypy on `agents/`, `tests/`, `evaluators/`; `imports-check`) + `lint-rust` (clippy `-D warnings`) | Locally; CI runs the same tools directly |
+| `make lint` | `lint-go` (golangci-lint) + `lint-python` (ruff + mypy on `agents/`, `tests/`, `evaluators/`; `imports-check`) + `lint-rust` (clippy `-D warnings`) | Locally; CI runs `make lint-go` itself (the Makefile pin + `.golangci.yml`, ISSUE-0142) and the Python/Rust tools directly |
 | `make imports-check` | import-linter forbidden contract, MIT↛BUSL (RFC 0045 §B) | CI (`Python`) |
 | `make validate` | `agents/validate.py config/` + `scripts/checks/prompt_refs.py` | CI (`Validate configs`) runs both |
 | `make ui-html-check` (`scripts/checks/ui_html_directive.py`) | Reject `{@html}` under `web/src` | CI (`Web console`) |
@@ -110,7 +110,7 @@ The hook is the fast local copy, not the only copy.
 
 | Workflow | Trigger | Does |
 |----------|---------|------|
-| `ci.yml` | push to `main`, every PR | Eleven jobs: `Go (build + test)` (incl. gofmt, Go integration tests, sanitizer sync), `Web console (build + test)`, `Dockerignore context hygiene`, `Proto staleness check`, `Python (lint + test)` (incl. ruff/mypy on `scripts/` + `evaluators/`), `Cost regression gate (bored persona)` (path-filtered), `Rust (build + clippy)` (incl. rustfmt, `cargo test`), `Validate configs` (incl. `prompt_refs` and the ROADMAP status rows), `Docs hygiene` (links, markup, markers, FILEMAP, merged-PR history, plan status, conformance), `File size check`, `Third-party license check`. Every job carries a comment naming the incident it guards. |
+| `ci.yml` | push to `main`, every PR | Eleven jobs: `Go (build + test)` (incl. gofmt, the pinned golangci-lint via `make lint-go`, Go integration tests, sanitizer sync), `Web console (build + test)`, `Dockerignore context hygiene`, `Proto staleness check`, `Python (lint + test)` (incl. ruff/mypy on `scripts/` + `evaluators/`), `Cost regression gate (bored persona)` (path-filtered), `Rust (build + clippy)` (incl. rustfmt, `cargo test`), `Validate configs` (incl. `prompt_refs` and the ROADMAP status rows), `Docs hygiene` (links, markup, markers, FILEMAP, merged-PR history, plan status, conformance), `File size check`, `Third-party license check`. Every job carries a comment naming the incident it guards. |
 | `commitlint.yml` | PR opened/edited/synchronised | Conventional Commit PR title (`Validate PR Title`) |
 | `scheduled-audit.yml` | Mondays 06:00 UTC; manual | `cargo deny check advisories bans sources licenses`; opens or comments on a `Scheduled Dependency Audit Failure` issue |
 | `perf-baseline-capture.yml` | manual (`workflow_dispatch`) | Captures the recall-latency baseline on a runner and opens a PR with it; merging arms the perf gate. Never run yet |

@@ -124,12 +124,11 @@ func initChannels(
 			zap.String("path", dbPath), zap.Error(sErr))
 		return nil, noop, nil
 	}
-
-	cleanup = func() {
-		if cErr := chanStore.Close(); cErr != nil {
-			logger.Warn("channels: store close failed", zap.Error(cErr))
-		}
-	}
+	// The store is closed by the cleanup assigned once the router exists
+	// (below). No path between here and there returns early, so an interim
+	// store-only cleanup would never be observed — golangci-lint's
+	// ineffassign said as much (ISSUE-0142). Anyone adding an early return
+	// in this stretch must close chanStore on it.
 
 	var routerMetrics *channels.RouterMetrics
 	if orchMetrics != nil {

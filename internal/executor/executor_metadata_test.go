@@ -159,7 +159,7 @@ func TestExecuteTask_Int32OverflowGuard(t *testing.T) {
 	})
 
 	go func() { _ = srv.Serve(lis) }()
-	t.Cleanup(func() { srv.GracefulStop(); lis.Close() })
+	t.Cleanup(func() { srv.GracefulStop(); _ = lis.Close() })
 
 	reg := registry.NewInMemoryRegistry(zap.NewNop())
 	exec := NewGRPCExecutor(reg, observedLogger,
