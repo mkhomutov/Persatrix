@@ -230,7 +230,10 @@ func (a AutonomousConfig) validateFields() error {
 // channel silently reads back disabled.
 func (a AutonomousConfig) FreezeOverrides() *AutonomousOverrides {
 	var ov AutonomousOverrides
-	if a.Enabled != DefaultAutonomousEnabled {
+	// The comparison is against the package default on purpose (only a
+	// non-default sub-knob is captured); staticcheck S1002 would fold it to
+	// `a.Enabled` and lose that intent if the default ever flips.
+	if a.Enabled != DefaultAutonomousEnabled { //nolint:staticcheck // S1002: compare to the named default, not to a literal
 		enabled := a.Enabled
 		ov.Enabled = &enabled
 	}

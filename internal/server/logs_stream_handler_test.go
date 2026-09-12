@@ -122,7 +122,7 @@ func TestSSE_CrossExecutionMerge_StreamsAllExecutions(t *testing.T) {
 	reader := bufio.NewReader(resp.Body)
 	var sawA, sawB bool
 	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) && !(sawA && sawB) {
+	for time.Now().Before(deadline) && (!sawA || !sawB) {
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			break

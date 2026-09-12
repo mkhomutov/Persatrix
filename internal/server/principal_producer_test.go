@@ -83,7 +83,7 @@ func newPrincipalHarness(
 
 	dispatcher := &recordingPrincipalDispatcher{}
 	router := channels.NewChannelRouter(store, dispatcher, logger, nil)
-	var restStore channels.ChannelStore = store
+	restStore := channels.ChannelStore(store)
 	for _, wrap := range wrapREST {
 		restStore = wrap(restStore)
 	}

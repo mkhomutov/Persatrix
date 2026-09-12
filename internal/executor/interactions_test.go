@@ -41,7 +41,7 @@ func setupInteractionTestEnv(t *testing.T, handler func(context.Context, *taskpb
 	}()
 	t.Cleanup(func() {
 		srv.GracefulStop()
-		lis.Close()
+		_ = lis.Close()
 	})
 
 	reg := registry.NewInMemoryRegistry(zap.NewNop())

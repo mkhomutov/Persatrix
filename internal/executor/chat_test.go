@@ -41,7 +41,7 @@ func setupChatTestEnv(t *testing.T, handler func(context.Context, *taskpb.ChatRe
 	}()
 	t.Cleanup(func() {
 		srv.GracefulStop()
-		lis.Close()
+		_ = lis.Close()
 	})
 
 	reg := registry.NewInMemoryRegistry(zap.NewNop())

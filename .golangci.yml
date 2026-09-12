@@ -1,0 +1,40 @@
+# golangci-lint configuration (ISSUE-0142, v0.3.16 PR C1).
+#
+# Why this file exists: without it the linter's enabled set is whatever the
+# installed version defaults to, so "make lint is green" meant something
+# different on every machine. The set is stated here, the version is pinned
+# in the Makefile (GOLANGCI_LINT_VERSION), and CI runs `make lint-go` with
+# that pin — one command, one answer, everywhere.
+#
+# Every exclusion below carries its reason. Add a new one the same way; a
+# bare exclusion is a finding the next review will ask about.
+version: "2"
+
+linters:
+  # Never inherit a version's default set — enable each linter by name so a
+  # version bump cannot silently widen or narrow the gate.
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+  settings:
+    errcheck:
+      # Writes to stderr (or a test sink) from the CLI's usage/error paths and
+      # the log encoder's last-resort fallback. The write's own error has no
+      # consumer: if stderr is gone there is nowhere left to report to.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+  exclusions:
+    rules:
+      # `defer x.Close()` on a handle opened for reading (an os.File read
+      # path, a sql.Rows cursor, a gRPC client conn, a listener in a test).
+      # Nothing was written through it, so the close's error carries no
+      # information the caller could act on. A write path must close
+      # explicitly and check — this rule matches the deferred form only.
+      - linters: [errcheck]
+        source: '^\s*defer .*\.Close\(\)\s*$'

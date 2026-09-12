@@ -1,4 +1,4 @@
-.PHONY: all build build-orchestrator build-orchestrator-ui ui ui-test ui-html-check build-cli build-agents proto proto-go proto-python proto-python-check proto-orphans-check proto-check clean reset test lint run run-ui validate dockerignore-check help demo-autonomous demo-offline demo-ollama generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues issues-check rfcs rfcs-check imports-check eval-replay eval-record eval-record-offline eval-drift eval-verdict
+.PHONY: all build build-orchestrator build-orchestrator-ui ui ui-test ui-html-check build-cli build-agents proto proto-go proto-python proto-python-check proto-orphans-check proto-check clean reset test lint lint-go lint-python lint-rust golangci-lint-version golangci-lint-install run run-ui validate dockerignore-check help demo-autonomous demo-offline demo-ollama generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues issues-check rfcs rfcs-check imports-check eval-replay eval-record eval-record-offline eval-drift eval-verdict
 
 # ─── Config ─────────────────────────────────────────────
 GO_MODULE     := github.com/mkhomutov/persatrix
@@ -11,6 +11,11 @@ PIP           := pip3
 CARGO         := cargo
 NPM           := npm
 WEB_DIR       := web
+# The one golangci-lint pin (ISSUE-0142). `make lint-go` refuses any other
+# version and CI reads it with `make -s golangci-lint-version`; the enabled
+# linter set is in .golangci.yml. Bump here and nowhere else.
+GOLANGCI_LINT_VERSION := v2.13.2
+GOLANGCI_LINT := golangci-lint
 # On Windows, executables require the .exe extension; EXE is empty on Unix.
 EXE           := $(if $(filter Windows_NT,$(OS)),.exe,)
 
@@ -238,8 +243,24 @@ eval-drift: ## Live drift check against recorded goldens (reports, never gates).
 # ─── Lint ───────────────────────────────────────────────
 lint: lint-go lint-python lint-rust ## Lint all code
 
-lint-go:
-	golangci-lint run ./...
+golangci-lint-version: ## Print the pinned golangci-lint version (CI reads this)
+	@echo $(GOLANGCI_LINT_VERSION)
+
+golangci-lint-install: ## Install the pinned golangci-lint into $(go env GOPATH)/bin
+	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+
+lint-go: ## Lint Go with the pinned golangci-lint and the committed .golangci.yml
+	@# ISSUE-0142: a different version means a different linter set, so an
+	@# unpinned binary is refused rather than run. CI installs this same pin
+	@# and runs this same target.
+	@installed="$$($(GOLANGCI_LINT) version --short 2>/dev/null || true)"; \
+	installed="$${installed#v}"; \
+	if [ "v$$installed" != "$(GOLANGCI_LINT_VERSION)" ]; then \
+		echo "lint-go: golangci-lint $(GOLANGCI_LINT_VERSION) is required, found '$${installed:-none}'"; \
+		echo "         run: make golangci-lint-install"; \
+		exit 1; \
+	fi
+	$(GOLANGCI_LINT) run ./...
 
 lint-python: imports-check
 	cd agents && $(PYTHON) -m ruff check . && $(PYTHON) -m mypy .

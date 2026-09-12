@@ -49,7 +49,7 @@ func setupTestEnv(t *testing.T, handler func(context.Context, *taskpb.TaskReques
 
 	t.Cleanup(func() {
 		srv.GracefulStop()
-		lis.Close()
+		_ = lis.Close()
 	})
 
 	reg := registry.NewInMemoryRegistry(zap.NewNop())

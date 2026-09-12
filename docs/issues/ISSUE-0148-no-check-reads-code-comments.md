@@ -30,9 +30,10 @@ failing any check. Found in the review of PR #903 (finding F-12).
 - **What the checks read.** The documentation checks that run in CI and in
   the pre-commit hook look only at Markdown: `scripts/checks/doc_status_markers.py`
   collects `*.md` files and `scripts/checks/doc_links.py` lists `*.md` files.
-  Ruff selects no TODO rules, and CI does not run golangci-lint
-  ([ISSUE-0142](ISSUE-0142-ci-never-runs-golangci-lint.md)). Nothing reads
-  Go, Python or Rust comments for what they claim.
+  Ruff selects no TODO rules, and the golangci-lint set CI runs since
+  v0.3.16 PR C1 ([ISSUE-0142](ISSUE-0142-ci-never-runs-golangci-lint.md))
+  reads no comments either. Nothing reads Go, Python or Rust comments for
+  what they claim.
 - **The cost so far.** The same defect took three PRs on 2026-09-10: #899
   (the glossary described the MCP bridge as if it worked), #900 (the MCP
   placeholders' comments) and #903 (five Go packages, three Python modules

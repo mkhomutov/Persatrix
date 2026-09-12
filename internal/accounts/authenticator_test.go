@@ -180,7 +180,8 @@ func TestAuthenticator_LoginPathEndsInASession(t *testing.T) {
 	ctx := context.Background()
 	acct := createPasswordAccount(t, s, "alice", "pw-1")
 
-	var auth Authenticator = NewPasswordAuthenticator(s, testParams)
+	// Through the interface on purpose: the login path is what callers see.
+	auth := Authenticator(NewPasswordAuthenticator(s, testParams))
 	id, err := auth.Authenticate(ctx, Credentials{Username: "alice", Password: "pw-1"})
 	require.NoError(t, err)
 
