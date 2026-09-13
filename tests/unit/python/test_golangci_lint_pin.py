@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any
 
 import yaml
+from _test_infra import ci_job_steps, makefile_recipe_body
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PIN_RE = re.compile(r"^GOLANGCI_LINT_VERSION\s*:=\s*(v\d+\.\d+\.\d+)\s*$", re.M)
@@ -23,12 +23,6 @@ def _makefile() -> str:
     return (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
 
 
-def _go_job_steps() -> list[dict[str, Any]]:
-    workflow = REPO_ROOT / ".github" / "workflows" / "ci.yml"
-    ci = yaml.safe_load(workflow.read_text(encoding="utf-8"))
-    return list(ci["jobs"]["go"]["steps"])
-
-
 def test_makefile_declares_exactly_one_golangci_lint_pin() -> None:
     pins = PIN_RE.findall(_makefile())
     assert len(pins) == 1, f"expected one GOLANGCI_LINT_VERSION := vX.Y.Z pin, found {pins}"
@@ -36,16 +30,14 @@ def test_makefile_declares_exactly_one_golangci_lint_pin() -> None:
 
 def test_lint_go_runs_the_pinned_binary_not_whatever_is_installed() -> None:
     """The target refuses a binary whose version differs from the pin."""
-    recipe = re.search(r"^lint-go:.*?\n((?:\t.*\n)+)", _makefile(), re.M | re.S)
-    assert recipe is not None, "no lint-go recipe"
-    body = recipe.group(1)
+    body = makefile_recipe_body("lint-go")
     assert "GOLANGCI_LINT_VERSION" in body, "lint-go does not compare against the pin"
     assert "golangci-lint-install" in body, "the mismatch message does not name the install target"
 
 
 def test_ci_go_job_installs_the_pin_and_runs_make_lint_go() -> None:
     """CI reads the Makefile pin (one source of truth) and runs the same target."""
-    steps = _go_job_steps()
+    steps = ci_job_steps("go")
     action = "golangci/golangci-lint-action@"
     install = [s for s in steps if str(s.get("uses", "")).startswith(action)]
     assert len(install) == 1, "the go job does not install golangci-lint via the action"

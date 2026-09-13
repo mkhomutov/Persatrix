@@ -31,6 +31,7 @@ deterministically at $0 with no API key — the seed replay tests
 ([memory](../../tests/integration/test_eval_seed_replay.py),
 [cross-room](../../tests/integration/test_cross_room_seed_replay.py),
 [confidentiality](../../tests/integration/test_confidentiality_seed_replay.py),
+[audience](../../tests/integration/test_audience_seed_replay.py),
 [working](../../tests/integration/test_eval_working_seed_replay.py)) run in CI on
 every PR — and so does the harness's own gate: the required Python job runs
 `make eval-replay TIER=stable` (RFC 0044 Phase 2, v0.3.16 PR C2), which replays

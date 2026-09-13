@@ -29,8 +29,8 @@ from evaluators.runner import (
     EvalMode,
     build_provider,
     discover_recipes,
-    filter_recipes_by_tier,
     golden_path_for,
+    load_recipes,
     main,
     parse_elapsed,
     run_eval,
@@ -249,12 +249,24 @@ def test_build_provider_replay_missing_golden_raises(tmp_path: Path) -> None:
 # ─── CLI ─────────────────────────────────────────────────────────────────────
 
 
-def test_main_no_recipes_exits_zero(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
-    # `make eval-replay` with an empty eval_sets/ dir (Phase 1 reality) is a
-    # no-op success, not an error.
+def test_main_no_recipes_exits_one(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    # With the seeds committed, this path is reached only by a wrong directory
+    # or a mistyped --target — the developer's own verification — and a run that
+    # replays nothing is never green (RFC 0044 §F), tier or no tier.
     code = main(["--mode", "replay", "--eval-sets-dir", str(tmp_path)])
-    assert code == 0
+    assert code == 1
     assert "no eval sets" in capsys.readouterr().out.lower()
+
+
+def test_main_target_with_no_match_names_the_target_and_exits_one(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    _write(tmp_path, _RECIPE)
+    code = main(["--mode", "replay", "--eval-sets-dir", str(tmp_path), "--target", "EVAL-NOPE"])
+    assert code == 1
+    out = capsys.readouterr().out
+    assert "matching 'EVAL-NOPE'" in out
+    assert "vacuous" in out
 
 
 # ─── RFC 0049 PR 2: shadow traces in the report artifact ─────────────────────
@@ -307,7 +319,12 @@ async def test_run_suite_threads_shadow_traces_into_artifact(tmp_path: Path) -> 
 # ─── RFC 0044 Phase 2 (v0.3.16 PR C2): the tier filter behind the CI gate ────
 
 
-def test_filter_recipes_by_tier_keeps_only_that_tier(tmp_path: Path) -> None:
+def _malformed(body: str) -> str:
+    """A recipe that fails schema validation (an unknown top-level key)."""
+    return body + "\nbogus_top_level_key: true\n"
+
+
+def test_load_recipes_keeps_only_that_tier(tmp_path: Path) -> None:
     stable = _write(tmp_path, _RECIPE)
     experimental = _write(
         tmp_path,
@@ -317,20 +334,129 @@ def test_filter_recipes_by_tier_keeps_only_that_tier(tmp_path: Path) -> None:
     )
     recipes = discover_recipes(tmp_path)
     assert recipes == [stable, experimental]
-    assert filter_recipes_by_tier(recipes, "stable") == [stable]
-    assert filter_recipes_by_tier(recipes, "experimental") == [experimental]
-    assert filter_recipes_by_tier(recipes, None) == recipes
+    loaded, failed = load_recipes(recipes, tier="stable")
+    assert failed == []
+    assert [r.path for r in loaded] == [stable]
+    assert loaded[0].eval_set.id == "EVAL-MEMORY-001"
+    loaded, failed = load_recipes(recipes, tier="experimental")
+    assert [r.path for r in loaded] == [experimental]
+    loaded, failed = load_recipes(recipes)
+    assert [r.path for r in loaded] == recipes
+
+
+def test_load_recipes_skips_a_malformed_recipe_outside_the_tier(tmp_path: Path) -> None:
+    # An experimental draft cannot block every merge merely by existing: the
+    # stable gate never validates it. It surfaces on the developer's full sweep.
+    stable = _write(tmp_path, _RECIPE)
+    draft = _write(
+        tmp_path,
+        _malformed(
+            _RECIPE.replace("EVAL-MEMORY-001", "EVAL-MEMORY-002")
+            .replace("tier: stable", "tier: experimental")
+        ),
+        name="EVAL-MEMORY-002.yaml",
+    )
+    loaded, failed = load_recipes(discover_recipes(tmp_path), tier="stable")
+    assert [r.path for r in loaded] == [stable]
+    assert failed == []
+    loaded, failed = load_recipes(discover_recipes(tmp_path))
+    assert [r.path for r in loaded] == [stable]
+    assert [f.path for f in failed] == [draft]
+    assert "bogus_top_level_key" in failed[0].detail
+    assert failed[0].tier == "experimental"
+
+
+def test_load_recipes_reports_a_malformed_recipe_inside_the_tier(tmp_path: Path) -> None:
+    # A malformed *stable* recipe is a failed recipe in the report, not a traceback.
+    bad = _write(tmp_path, _malformed(_RECIPE))
+    loaded, failed = load_recipes(discover_recipes(tmp_path), tier="stable")
+    assert loaded == []
+    assert [f.path for f in failed] == [bad]
+    assert failed[0].tier == "stable"
+
+
+def test_load_recipes_treats_an_unreadable_file_as_in_every_tier(tmp_path: Path) -> None:
+    # Not a mapping at all → its tier is unknowable, so it is never "out of scope".
+    bad = _write(tmp_path, "- just\n- a list\n")
+    loaded, failed = load_recipes(discover_recipes(tmp_path), tier="stable")
+    assert loaded == []
+    assert [f.path for f in failed] == [bad]
+    assert failed[0].tier is None
+
+
+async def test_run_suite_reports_a_missing_golden_instead_of_raising(tmp_path: Path) -> None:
+    # RFC 0044 §D: a never-recorded golden must fail loudly — but as a failed
+    # recipe in the artifact, so the summary, the report and the other recipes'
+    # verdicts survive; before, the FileNotFoundError escaped `asyncio.run`.
+    recipe = _write(tmp_path, _RECIPE)  # no .golden.yaml sidecar
+    driver = _FakeDriver(_passing_run())
+    dicts = await run_suite([recipe], mode=EvalMode.REPLAY, driver=driver)
+    (artifact,) = dicts
+    assert artifact["passed"] is False
+    assert artifact["eval_id"] == "EVAL-MEMORY-001"
+    assert artifact["tier"] == "stable"
+    (row,) = artifact["assertions"]
+    assert row["name"] == "golden.missing"
+    assert "no golden for replay" in row["detail"]
+    assert driver.seen == []  # nothing was driven without a golden
+
+
+def test_main_missing_golden_in_the_tier_is_a_failed_recipe_and_exits_one(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    _write(tmp_path, _RECIPE)
+    report = tmp_path / "report.json"
+    code = main([
+        "--mode", "replay", "--eval-sets-dir", str(tmp_path),
+        "--tier", "stable", "--report", str(report),
+    ])
+    assert code == 1
+    out = capsys.readouterr().out
+    assert "[FAIL] EVAL-MEMORY-001 (replay, stable)" in out
+    assert "golden.missing" in out
+    assert json.loads(report.read_text(encoding="utf-8"))["summary"]["passed_all"] is False
+
+
+def test_main_malformed_recipe_in_the_tier_is_a_failed_recipe_and_exits_one(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    _write(tmp_path, _malformed(_RECIPE))
+    code = main(["--mode", "replay", "--eval-sets-dir", str(tmp_path), "--tier", "stable"])
+    assert code == 1
+    out = capsys.readouterr().out
+    assert "[FAIL] EVAL-MEMORY-001 (replay, stable)" in out
+    assert "recipe.load" in out
+    assert "bogus_top_level_key" in out
 
 
 def test_main_tier_with_no_member_is_a_vacuous_gate_and_exits_one(
     tmp_path: Path, capsys: pytest.CaptureFixture
 ) -> None:
     # An empty tier must not read as green: the CI gate runs `--tier stable`,
-    # and "nothing to run" there means the gate guards nothing.
+    # and "nothing to run" there means the gate guards nothing. The message
+    # says what the discovered recipes DO declare, so a wrong tier is obvious.
     _write(tmp_path, _RECIPE.replace("tier: stable", "tier: experimental"))
     code = main(["--mode", "replay", "--eval-sets-dir", str(tmp_path), "--tier", "stable"])
     assert code == 1
-    assert "no recipes in tier 'stable'" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "no recipes in tier 'stable'" in out
+    assert "experimental" in out
+
+
+def test_main_target_outside_the_tier_names_the_target_and_its_tier(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    # `--target X --tier experimental` where X is stable: the old message said
+    # the tier was empty, which misdiagnosed a target that merely sits elsewhere.
+    _write(tmp_path, _RECIPE)
+    code = main([
+        "--mode", "replay", "--eval-sets-dir", str(tmp_path),
+        "--target", "EVAL-MEMORY-001", "--tier", "experimental",
+    ])
+    assert code == 1
+    out = capsys.readouterr().out
+    assert "matching 'EVAL-MEMORY-001'" in out
+    assert "stable" in out
 
 
 def test_main_rejects_a_tier_outside_the_schema_enum(tmp_path: Path) -> None:

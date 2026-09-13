@@ -46,10 +46,10 @@ make eval-record TARGET=EVAL-MEMORY-001   # (authors) record/refresh its golden
 make eval-drift                       # live run; report drift, never gate
 ```
 
-`evaluators/eval_sets/` is empty in v0.3.11 — the seed recipes land in
-[RFC 0044 PR 4](rfcs/0044-pr-plan.md), gated on
-[RFC 0041](rfcs/0041-typed-event-taxonomy-lifecycle-callbacks.md) typed events —
-so `make eval-replay` is a clean no-op today.
+`evaluators/eval_sets/` holds six committed seeds (see [Seed recipes](#seed-recipes)),
+so every invocation above replays something — and a run that replays *nothing*
+(a mistyped `TARGET=`, a wrong directory, a tier with no member) exits 1 rather
+than passing as a no-op: a run over nothing is vacuous, not green.
 
 ## Recipe anatomy
 
@@ -178,8 +178,10 @@ enough to replay byte-for-byte.
 
 ## The report artifact
 
-The runner emits a structured, per-assertion JSON artifact (RFC 0044 §F);
-`make eval-replay TIER=stable REPORT=<path>` writes it beside the gate's run:
+The runner emits a structured, per-assertion JSON artifact (RFC 0044 §F) when
+asked: `make eval-replay TIER=stable REPORT=<path>`. The CI step passes no
+`REPORT=`, so the artifact is a local product — attaching it to the CI run is the
+§F bullet Phase 2 left unbuilt.
 
 ```json
 {
@@ -203,8 +205,13 @@ The runner emits a structured, per-assertion JSON artifact (RFC 0044 §F);
 ```
 
 `passed_all` is the single merge-gate signal: the runner exits non-zero when it
-is false — and when the selected tier holds no recipe at all, because a gate over
-nothing is vacuous, not green.
+is false, and every way a run can come up empty-handed lands there. A stable
+recipe that fails to load (`recipe.load`) or has no recorded golden
+(`golden.missing`) is a failed recipe *in* the report, so the summary, the
+artifact and the other recipes' verdicts survive it; a selection that matches no
+recipe at all exits 1 outright, because a run over nothing is vacuous, not green.
+A malformed recipe *outside* the selected tier is skipped unread — it cannot
+block every merge merely by existing.
 
 ## Phase 1 limits
 
@@ -223,18 +230,26 @@ still-flaky recipe cannot block every merge merely by existing. It enters `stabl
 
 1. its golden was recorded against the offline mock (`make eval-record-offline`),
    so replay needs no key and no network;
-2. it has replayed green on `main` after the recording commit — through the
-   sweep or the seed's own integration test;
+2. it has replayed green after the recording commit — through the seed's own
+   integration test on `main`, or a local `make eval-replay TARGET=<id>` whose
+   summary line is pasted in the promotion PR (no CI run replays `experimental`
+   recipes, so that paste is the only evidence for a seed without a test);
 3. the `tier` flip lands in its own reviewed PR, naming the manual test or issue
    the recipe stands in for.
 
 The six committed seeds were promoted together when the gate landed (v0.3.16 PR
 C2); each had replayed green on every PR since it was recorded. Demotion is the
-same edit in reverse, with the reason in the PR — never a deleted golden.
+same edit in reverse plus a row in `DEMOTED` in
+`tests/unit/python/test_eval_gate_ci.py` naming the reason — never a deleted
+golden. That test also fails on a recipe with a golden but no `tier: stable`, so
+a seed cannot leave the gate through a deleted line: the `tier` key defaults to
+`experimental`, and without the check nothing would notice.
 
 ## Seed recipes
 
-Two pre-0041 seeds have landed:
+Six pre-0041 seeds have landed, all `tier: stable` (the
+[eval-sets README](../evaluators/eval_sets/README.md) tables them with their
+sources). The first two exercise the two memory axes:
 
 - [`EVAL-MEMORY-001`](../evaluators/eval_sets/EVAL-MEMORY-001.yaml) — the dementia
   test ([MT-MEMORY-005](manual-tests/MT-MEMORY-005-dementia-test.md)) as a
@@ -245,9 +260,15 @@ Two pre-0041 seeds have landed:
   conversation window, so its golden is load-bearing on working memory — strip the
   channel and replay goes red.
 
-Both assert only over `final_transcript` / `terminal_state`, and both replay green
-on every PR via their integration tests
-([memory](../tests/integration/test_eval_seed_replay.py),
+The other four — `EVAL-MEMORY-002`/`003` (cross-room carry, shadow and live,
+RFC 0049), `EVAL-MEMORY-004` (the RFC 0037 confidentiality gate) and
+`EVAL-MEMORY-005` (the ISSUE-0132 audience check) — pin request hashes. All six
+assert only over `final_transcript` / `terminal_state`, and all six replay green
+on every PR twice: through the `TIER=stable` gate and through their integration
+tests ([memory](../tests/integration/test_eval_seed_replay.py),
+[cross-room](../tests/integration/test_cross_room_seed_replay.py),
+[confidentiality](../tests/integration/test_confidentiality_seed_replay.py),
+[audience](../tests/integration/test_audience_seed_replay.py),
 [working](../tests/integration/test_eval_working_seed_replay.py)).
 
 Because the goldens are mock-recorded, the recorded replies are curated stand-ins,

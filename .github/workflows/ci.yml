@@ -288,23 +288,22 @@ jobs:
       - name: Check for orphan generated protobuf artifacts
         run: make proto-orphans-check
 
-      - name: Run unit tests
-        run: python -m pytest tests/unit/python/ -v --tb=short
-
       # RFC 0044 Phase 2 (v0.3.16 PR C2): the golden-trace replay ran in no CI
-      # step. Phase 1 produced a report a human read, and a seed replayed on a
-      # PR only if it happened to have its own integration test. This is the
-      # harness gate the RFC specifies: every recipe declared `tier: stable`
-      # replays under the offline overlay ($0, deterministic, ~2 s) and a
-      # cassette miss or a failed assertion fails the build — the same target
-      # a developer runs. A step in this required job rather than a new
-      # advisory job (the C1 shape), so it gates the merge from the day it
-      # lands, and it runs ahead of the heavier test trees so a golden
-      # regression is the first red in the log. A fresh recipe defaults to
-      # `experimental` and is reported, not gating, until its golden is
-      # promoted (docs/evaluators-guide.md).
+      # step — a seed replayed on a PR only if it had its own integration test.
+      # Every recipe declared `tier: stable` replays under the offline overlay
+      # ($0, deterministic, ~2 s); a failed assertion, a cassette miss, a
+      # malformed or golden-less stable recipe, or an empty selection fails the
+      # build — the same target a developer runs. A step in this required job
+      # rather than a new advisory job (the C1 shape), so it gates from the day
+      # it lands; placed BEFORE the three pytest trees (the unit tree alone is
+      # ~5.5 min) so a golden regression is the first red in the log, not the
+      # last. A fresh recipe defaults to `experimental` and is reported, not
+      # gating, until it is promoted (docs/evaluators-guide.md).
       - name: Replay the stable golden-trace evals (RFC 0044 Phase 2)
         run: make eval-replay TIER=stable
+
+      - name: Run unit tests
+        run: python -m pytest tests/unit/python/ -v --tb=short
 
       # The agents/tests/ tree (422 tests) was executed by NO job:
       # the two pytest steps around this one cover tests/unit/python/ and

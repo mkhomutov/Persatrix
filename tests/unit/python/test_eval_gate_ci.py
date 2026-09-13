@@ -3,57 +3,80 @@
 Phase 1 shipped a runner whose report a human read; nothing in CI ran
 `make eval-replay`, so a golden that stopped replaying blocked no merge
 unless a seed happened to have its own integration test. These tests pin
-the three parts of the gate: the CI step in the required Python job, the
-Makefile passing the tier through to the runner, and a `stable` tier that
-is not empty — a gate over no recipes is vacuous, not green.
+the parts of the gate: the CI step in the required Python job (placed before
+the unit suite, so a golden regression is the first red), the Makefile passing
+the tier through to the runner, a `stable` tier that is not empty, and the
+converse — every recorded golden gates unless its demotion is on record here.
+
+Membership is computed with the runner's own helpers (`discover_recipes`,
+`load_recipes`, `golden_path_for`), never a private copy of their rules, so
+the test cannot stay green while the gate runs a different set.
 """
 
 from __future__ import annotations
 
-import re
-from pathlib import Path
-from typing import Any
+from _test_infra import REPO_ROOT, ci_job_steps, makefile_recipe_body
 
-import yaml
+from evaluators.runner import discover_recipes, golden_path_for, load_recipes
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
 EVAL_SETS = REPO_ROOT / "evaluators" / "eval_sets"
 
-
-def _makefile() -> str:
-    return (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
-
-
-def _python_job_steps() -> list[dict[str, Any]]:
-    workflow = REPO_ROOT / ".github" / "workflows" / "ci.yml"
-    ci = yaml.safe_load(workflow.read_text(encoding="utf-8"))
-    return list(ci["jobs"]["python"]["steps"])
+#: Recipes that keep a recorded golden but are deliberately out of the gate.
+#: Demotion is `tier: experimental` in the recipe PLUS a row here naming the
+#: reason, so leaving the gate is a visible, reviewed diff — a deleted `tier`
+#: line alone fails `test_every_recorded_golden_gates_unless_demoted_on_record`.
+DEMOTED: dict[str, str] = {}
 
 
-def _recipes() -> list[Path]:
-    return sorted(p for p in EVAL_SETS.glob("EVAL-*.yaml") if not p.name.endswith(".golden.yaml"))
-
-
-def test_ci_python_job_replays_the_stable_tier() -> None:
-    """The required Python job runs the same target a developer runs, tier-scoped."""
+def test_ci_python_job_replays_the_stable_tier_before_the_unit_suite() -> None:
+    """The required Python job runs the same target a developer runs, tier-scoped,
+    and ahead of the ~5-minute unit tree so a golden regression is the first red."""
+    steps = ci_job_steps("python")
+    runs = [str(s.get("run", "")).strip() for s in steps]
     wanted = "make eval-replay TIER=stable"
-    runs = [s for s in _python_job_steps() if str(s.get("run", "")).strip() == wanted]
-    assert len(runs) == 1, "the python job must run exactly `make eval-replay TIER=stable`"
+    assert runs.count(wanted) == 1, "the python job must run exactly `make eval-replay TIER=stable`"
+    unit = [i for i, r in enumerate(runs) if r.startswith("python -m pytest tests/unit/python/")]
+    assert unit, "no unit-test step to order against"
+    assert runs.index(wanted) < unit[0], "the replay step must run before the unit suite"
 
 
 def test_makefile_eval_replay_passes_the_tier_to_the_runner() -> None:
-    recipe = re.search(r"^eval-replay:.*?\n((?:\t.*\n)+)", _makefile(), re.M | re.S)
-    assert recipe is not None, "no eval-replay recipe"
-    body = recipe.group(1)
+    body = makefile_recipe_body("eval-replay")
     assert "$(if $(TIER),--tier $(TIER),)" in body, "eval-replay does not pass TIER as --tier"
+
+
+def test_makefile_recipe_body_stops_at_the_recipe() -> None:
+    """The reader must not run past the target (the `re.S` bug the C1/C2 pins shared)."""
+    body = makefile_recipe_body("eval-replay")
+    lines = body.splitlines()
+    assert all(line.startswith("\t") for line in lines), body
+    assert len(lines) <= 4, f"eval-replay body is {len(lines)} lines — reader ran past it"
 
 
 def test_committed_stable_tier_is_not_empty_and_every_member_has_a_golden() -> None:
     """RFC 0044 §F: the seeds start in `stable`; a stable recipe replays a recorded golden."""
-    stable = [
-        p for p in _recipes()
-        if yaml.safe_load(p.read_text(encoding="utf-8")).get("tier") == "stable"
-    ]
+    stable, failed = load_recipes(discover_recipes(EVAL_SETS), tier="stable")
+    assert not failed, f"malformed recipes in the stable tier: {failed}"
     assert stable, "no committed recipe is in the stable tier — the CI gate would run nothing"
-    missing = [p.name for p in stable if not p.with_name(f"{p.stem}.golden.yaml").is_file()]
+    missing = [r.path.name for r in stable if not golden_path_for(r.path).is_file()]
     assert not missing, f"stable recipes without a recorded golden: {missing}"
+
+
+def test_every_recorded_golden_gates_unless_demoted_on_record() -> None:
+    """The converse: a recipe with a golden is `stable`, or its demotion is in DEMOTED.
+
+    Without this, deleting the one line `tier: stable` from a seed silently narrows
+    the gate — the tier defaults to `experimental` and nothing else notices.
+    """
+    loaded, failed = load_recipes(discover_recipes(EVAL_SETS))
+    assert not failed, f"malformed committed recipes: {failed}"
+    ungated = [
+        r.eval_set.id
+        for r in loaded
+        if golden_path_for(r.path).is_file()
+        and r.eval_set.tier != "stable"
+        and r.eval_set.id not in DEMOTED
+    ]
+    assert not ungated, f"recorded goldens outside the gate with no demotion on record: {ungated}"
+    stale = sorted(set(DEMOTED) - {r.eval_set.id for r in loaded})
+    assert not stale, f"DEMOTED names recipes that no longer exist: {stale}"

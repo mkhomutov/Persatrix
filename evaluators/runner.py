@@ -18,9 +18,14 @@ imported **lazily** (only the CLI / record / drift paths need it), so
 :class:`PersonaDriver`; the real adapter is tested in ``test_eval_persona_driver``.
 
 Phase 2 (RFC 0044 §F, v0.3.16 PR C2) gates merge on this runner: the required
-Python CI job runs ``make eval-replay TIER=stable``, and the non-zero exit on a
-failed or missing-golden recipe is what fails the build. ``--tier`` scopes a run
-to one declared tier; an empty tier exits non-zero rather than reading as green.
+Python CI job runs ``make eval-replay TIER=stable`` and the exit code is the
+gate. ``--tier`` scopes a run to one declared tier. Every way a run can be
+empty-handed is red, never green: a selection that matches no recipe exits 1,
+and a recipe in the selection that cannot be loaded or has no recorded golden
+is a *failed recipe in the report* (``recipe.load`` / ``golden.missing``), so
+the summary, the ``--report`` artifact and the other recipes' verdicts survive.
+A malformed recipe *outside* the selected tier is skipped unread — a draft
+cannot block every merge merely by existing.
 """
 
 from __future__ import annotations
@@ -29,12 +34,25 @@ import argparse
 import asyncio
 import re
 import sys
+from collections import Counter
+from collections.abc import Sequence
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
-from evaluators.assertions import EvalRun
-from evaluators.eval_set import EvalReport, EvalSet, evaluate, load_eval_set
+import yaml
+
+from evaluators.assertions import AssertionResult, EvalRun
+from evaluators.eval_set import (
+    DEFAULT_TIER,
+    TIERS,
+    EvalReport,
+    EvalSet,
+    evaluate,
+    load_eval_set,
+    parse_eval_set,
+)
 from evaluators.replay_llm_client import (
     RecordingProvider,
     ReplayProvider,
@@ -42,8 +60,8 @@ from evaluators.replay_llm_client import (
 )
 from evaluators.report import report_to_dict, suite_report, write_report
 
-#: Default eval-set recipe directory. Empty/absent in Phase 1 — the seed recipes
-#: and their ``.golden.yaml`` sidecars land in PR 4 (gated on RFC 0041 events).
+#: Default eval-set recipe directory: the committed seed recipes and their
+#: ``.golden.yaml`` sidecars (six as of v0.3.16, all ``tier: stable``).
 DEFAULT_EVAL_SETS_DIR = "evaluators/eval_sets"
 #: Default persona config the runner resolves ``setup.persona`` against.
 DEFAULT_CONFIG_PATH = "config/agents.yaml"
@@ -130,9 +148,9 @@ def discover_recipes(eval_sets_dir: str | Path, target: str | None = None) -> li
     golden sidecars (``*.golden.yaml``) and support fixtures living beside
     the recipes (``offline_responses.eval.yaml``) are excluded — the
     no-target ``make eval-replay`` sweep must not load a fixture as a
-    recipe. A missing directory yields ``[]`` — so an empty ``eval_sets/``
-    is a clean no-op rather than an error. ``target`` filters to a single
-    recipe by stem (``EVAL-MEMORY-001``).
+    recipe. A missing directory yields ``[]``; ``main`` treats an empty result
+    as red, whatever the cause. ``target`` filters to a single recipe by stem
+    (``EVAL-MEMORY-001``).
     """
     d = Path(eval_sets_dir)
     if not d.is_dir():
@@ -145,22 +163,76 @@ def discover_recipes(eval_sets_dir: str | Path, target: str | None = None) -> li
     return recipes
 
 
-#: The RFC 0044 §F tiers — the schema's closed ``tier`` enum, mirrored here so
-#: the CLI rejects a misspelt tier instead of running an empty (vacuous) gate.
-TIERS = ("stable", "experimental", "nightly")
+@dataclass(frozen=True)
+class LoadedRecipe:
+    """A recipe read from disk once: its path (for the golden sidecar) + parse."""
+
+    path: Path
+    eval_set: EvalSet
 
 
-def filter_recipes_by_tier(recipes: list[Path], tier: str | None) -> list[Path]:
-    """Keep the recipes whose declared ``tier`` is ``tier`` (RFC 0044 §F).
+@dataclass(frozen=True)
+class LoadFailure:
+    """A recipe in the selection that could not be loaded.
 
-    ``None`` keeps every recipe — the developer's full sweep. The CI gate runs
-    ``--tier stable``: a fresh recipe defaults to ``experimental`` and stays
-    there until its golden is promoted, so a recipe cannot block every merge
-    merely by existing. Reading the tier costs one YAML parse per recipe.
+    ``tier`` is what the file declares (``DEFAULT_TIER`` when it declares none),
+    or ``None`` when the file is not a YAML mapping at all — such a file has no
+    knowable tier, so it is in every selection and always fails.
     """
-    if tier is None:
-        return list(recipes)
-    return [p for p in recipes if load_eval_set(p).tier == tier]
+
+    path: Path
+    tier: str | None
+    detail: str
+
+
+def _read_mapping(path: Path) -> dict[str, Any]:
+    with path.open(encoding="utf-8") as fh:
+        data = yaml.safe_load(fh)
+    if not isinstance(data, dict):
+        raise ValueError(f"eval-set must be a mapping, got {type(data).__name__}")
+    return data
+
+
+def load_recipes(
+    recipes: Sequence[Path], tier: str | None = None
+) -> tuple[list[LoadedRecipe], list[LoadFailure]]:
+    """Load, once each, the recipes in ``tier`` (every recipe when ``None``).
+
+    RFC 0044 §F: the CI gate runs ``--tier stable``, and a fresh recipe
+    defaults to ``experimental`` — so a draft cannot block every merge merely
+    by existing. That holds even for a *malformed* draft: the tier is peeked
+    from the raw YAML and a recipe outside the selection is never validated.
+    A recipe inside it that fails to load comes back as a :class:`LoadFailure`
+    (the report's ``recipe.load`` row), never as an exception, so one bad file
+    cannot take the other recipes' verdicts and the artifact down with it.
+    """
+    loaded: list[LoadedRecipe] = []
+    failed: list[LoadFailure] = []
+    for path in recipes:
+        try:
+            data = _read_mapping(path)
+        except (OSError, ValueError, yaml.YAMLError) as exc:
+            failed.append(LoadFailure(path, None, str(exc)))
+            continue
+        declared = data.get("tier", DEFAULT_TIER)
+        if tier is not None and declared != tier:
+            continue
+        try:
+            loaded.append(LoadedRecipe(path, parse_eval_set(data)))
+        except ValueError as exc:
+            failed.append(LoadFailure(path, str(declared), str(exc)))
+    return loaded, failed
+
+
+def declared_tiers(recipes: Sequence[Path]) -> Counter[str]:
+    """How many discovered recipes declare each tier (for the empty-tier message)."""
+    tiers: Counter[str] = Counter()
+    for path in recipes:
+        try:
+            tiers[str(_read_mapping(path).get("tier", DEFAULT_TIER))] += 1
+        except (OSError, ValueError, yaml.YAMLError):
+            tiers["<unreadable>"] += 1
+    return tiers
 
 
 # ─── provider building per mode ──────────────────────────────────────────────
@@ -214,24 +286,50 @@ def _default_driver(config_path: str | Path) -> PersonaDriver:
     return PersonaRuntimeDriver(config_resolver=default_config_resolver(config_path))
 
 
+def _failed_report(eval_id: str, *, name: str, detail: str) -> EvalReport:
+    """A one-row failed report for a recipe that never ran (RFC 0044 §D: loud)."""
+    return EvalReport(eval_id=eval_id, results=[AssertionResult(name, False, detail)])
+
+
+def failed_artifact(
+    eval_id: str, *, tier: str, mode: Any, name: str, detail: str
+) -> dict[str, Any]:
+    """The artifact dict for a recipe that could not be run at all."""
+    report = _failed_report(eval_id, name=name, detail=detail)
+    return report_to_dict(report, tier=tier, mode=mode)
+
+
 async def _run_recipe(
-    recipe_path: Path,
+    recipe: Path | LoadedRecipe,
     *,
     mode: EvalMode,
     driver: PersonaDriver,
     config_path: str | Path,
 ) -> tuple[EvalReport, EvalSet, EvalRun]:
-    """Load one recipe, build the mode's provider, drive it, and evaluate.
+    """Build the mode's provider for one recipe, drive it, and evaluate.
 
-    In ``record`` mode the captured cassette is written to the sidecar golden
-    after the run (CI never overwrites a golden — this is the explicit author
-    path, RFC 0044 §C).
+    A bare ``Path`` is loaded here (raising on a malformed recipe — the
+    programmatic callers' choice); ``main`` passes :class:`LoadedRecipe` so
+    nothing is parsed twice. In ``record`` mode the captured cassette is written
+    to the sidecar golden after the run (CI never overwrites a golden — this is
+    the explicit author path, RFC 0044 §C).
     """
-    eval_set = load_eval_set(recipe_path)
-    golden = golden_path_for(recipe_path)
+    if isinstance(recipe, LoadedRecipe):
+        loaded = recipe
+    else:
+        loaded = LoadedRecipe(recipe, load_eval_set(recipe))
+    eval_set = loaded.eval_set
+    golden = golden_path_for(loaded.path)
 
     if mode is EvalMode.REPLAY:
-        provider = build_provider(EvalMode.REPLAY, golden_path=golden)
+        try:
+            provider = build_provider(EvalMode.REPLAY, golden_path=golden)
+        except FileNotFoundError as exc:
+            # A never-recorded golden fails loudly (§D) — as a failed recipe in
+            # the artifact, not an exception out of the suite: the summary, the
+            # report and the other recipes' verdicts must survive it.
+            report = _failed_report(eval_set.id, name="golden.missing", detail=str(exc))
+            return report, eval_set, EvalRun(turn_outputs=[], terminal_state={}, events=[])
         report, run = await run_eval_observed(eval_set, provider=provider, driver=driver)
         return report, eval_set, run
 
@@ -247,7 +345,7 @@ async def _run_recipe(
 
 
 async def run_suite(
-    recipes: list[Path],
+    recipes: Sequence[Path | LoadedRecipe],
     *,
     mode: EvalMode,
     driver: PersonaDriver | None = None,
@@ -283,7 +381,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--target", help="run a single recipe by id (e.g. EVAL-MEMORY-001)")
     parser.add_argument(
         "--tier", choices=TIERS, help="run only the recipes declared in this tier (CI: stable)"
-    )
+    )  # TIERS is the schema's enum — a misspelt tier is an argparse error, not a vacuous run
     parser.add_argument("--eval-sets-dir", default=DEFAULT_EVAL_SETS_DIR)
     parser.add_argument("--config", default=DEFAULT_CONFIG_PATH)
     parser.add_argument("--report", help="write the structured JSON artifact to this path")
@@ -320,27 +418,33 @@ def main(argv: list[str] | None = None) -> int:
         pass
     args = _parse_args(argv)
     mode = EvalMode(args.mode)
+    # One rule for every empty-handed run: a run that replays nothing exits 1.
+    # A step that passes on nothing is the vacuous green RFC 0044 §F forbids,
+    # and the developer's `TARGET=<typo>` is the same hole on the other side.
+    vacuous = "a run over nothing is vacuous, not green (RFC 0044 §F)"
+    which = f" matching {args.target!r}" if args.target else ""
     recipes = discover_recipes(args.eval_sets_dir, args.target)
-    if args.tier is not None:
-        recipes = filter_recipes_by_tier(recipes, args.tier)
-        if not recipes:
-            # The gate's own failure mode: a tier with no member guards nothing,
-            # and a step that passes on nothing is the vacuous green RFC 0044 §F
-            # forbids — so this is red, unlike the tier-less empty sweep below.
-            print(
-                f"no recipes in tier {args.tier!r} under {args.eval_sets_dir}/ — "
-                f"a gate over nothing is vacuous, not green (RFC 0044 §F)"
-            )
-            return 1
     if not recipes:
-        which = f" matching {args.target!r}" if args.target else ""
+        print(f"no eval sets{which} in {args.eval_sets_dir}/ — {vacuous}")
+        return 1
+    loaded, failed = load_recipes(recipes, tier=args.tier)
+    if not loaded and not failed:
+        # Say what the discovered recipes DO declare, so a target that merely
+        # sits in another tier — or a wrong tier — is diagnosed, not "empty".
+        found = ", ".join(f"{t} ×{n}" for t, n in sorted(declared_tiers(recipes).items()))
         print(
-            f"no eval sets{which} in {args.eval_sets_dir}/ — nothing to run. "
-            f"(Seed recipes land in RFC 0044 PR 4, gated on RFC 0041 typed events.)"
+            f"no recipes in tier {args.tier!r}{which} under {args.eval_sets_dir}/ — "
+            f"the {len(recipes)} found declare {found}; {vacuous}"
         )
-        return 0
+        return 1
 
-    reports = asyncio.run(run_suite(recipes, mode=mode, config_path=args.config))
+    reports = asyncio.run(run_suite(loaded, mode=mode, config_path=args.config))
+    reports += [
+        failed_artifact(
+            f.path.stem, tier=f.tier or "<unknown>", mode=mode, name="recipe.load", detail=f.detail
+        )
+        for f in failed
+    ]
     suite = suite_report(reports)
     if args.report:
         write_report(args.report, suite)
