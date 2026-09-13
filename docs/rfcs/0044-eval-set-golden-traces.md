@@ -15,7 +15,7 @@ depends_on:
 # RFC 0044 — Eval-Set Shape with Golden Traces
 
 **Type**: process
-**Status**: 🚧 Implementing (Phase 1 landed in v0.3.11 — [PR plan](0044-pr-plan.md); **Phase 2, the CI gate, landed 2026-09-12 as v0.3.16 PR C2**; Phase 3 and the typed-event seeds remain)
+**Status**: 🚧 Implementing (Phase 1 landed in v0.3.11 — [PR plan](0044-pr-plan.md); **Phase 2, the CI gate, merged 2026-09-13 as v0.3.16 [PR C2](https://github.com/mkhomutov/Persatrix/pull/947)**; Phase 3 and the typed-event seeds remain)
 **Author**: Maksim Khomutov
 **Date**: 2026-05-20
 **Target**: v0.3.11 (Phase 1 format + replay) + v0.3.16 (Phase 2 CI gate) + v0.4.0+ (typed-event goldens, gated on [RFC 0041](0041-typed-event-taxonomy-lifecycle-callbacks.md) Phase 1)
