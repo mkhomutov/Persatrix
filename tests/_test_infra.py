@@ -31,9 +31,13 @@ connections in their own ``close()`` methods (see ``EpisodicMemory.close``,
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Iterator
+from pathlib import Path
+from typing import Any
 
 import pytest
+import yaml
 
 _logger = logging.getLogger(__name__)
 
@@ -96,3 +100,37 @@ def isolate_optimization_config(monkeypatch: pytest.MonkeyPatch) -> Iterator[Non
     reset_cache()
     yield
     reset_cache()
+
+
+# ─── CI-wiring pins (shared by the gate-pin tests) ───────────────────────────
+#
+# Several unit tests pin a merge gate by reading the Makefile and ci.yml as
+# text: the golangci-lint pin (v0.3.16 PR C1) and the eval-replay gate (PR C2).
+# They each carried a private copy of the same two readers, and the copies
+# shared one bug — a recipe regex compiled with ``re.S``, under which ``.*``
+# crosses newlines and the "recipe body" ran to the end of the Makefile, so
+# an assertion on the body passed for a fragment sitting in any later
+# target. One reader here, line-anchored, so the next pin cannot re-copy it.
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def makefile_recipe_body(target: str) -> str:
+    """The tab-indented recipe lines of one Make ``target`` — nothing past them.
+
+    Anchored per line (``[^\n]*``, no ``re.S``), so the captured body ends at
+    the first line that is not a recipe line; a fragment in a later target is
+    not in it.
+    """
+    text = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+    m = re.search(rf"^{re.escape(target)}:[^\n]*\n((?:\t[^\n]*\n)+)", text, re.M)
+    if m is None:
+        raise AssertionError(f"no `{target}` recipe in the Makefile")
+    return m.group(1)
+
+
+def ci_job_steps(job: str) -> list[dict[str, Any]]:
+    """The ordered ``steps`` of one job in ``.github/workflows/ci.yml``."""
+    workflow = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+    ci = yaml.safe_load(workflow.read_text(encoding="utf-8"))
+    return list(ci["jobs"][job]["steps"])

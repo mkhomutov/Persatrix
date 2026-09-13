@@ -1,6 +1,6 @@
 # Automation Catalogue
 
-> **Last updated**: 2026-09-06
+> **Last updated**: 2026-09-12
 > Everything that runs without a human typing the steps: `make` targets,
 > scripts, the pre-commit hook, and the GitHub workflows — grouped by
 > purpose, with **when it runs**. `make help` is the live list of targets;
@@ -57,7 +57,7 @@ dependencies.
 | `cd cli && cargo test` | Rust suite incl. lockstep guards | `Rust` |
 | `make ui-test` | `npm ci && npm test` (Vitest) | `Web console` |
 | `go test ./tests/integration/... -race` | Go integration (bufconn scheduler→executor, rate limiter, audit log) | `Go` |
-| `make eval-replay [TARGET= REPORT=]` | Replay goldens deterministically under the offline overlay | none |
+| `make eval-replay [TARGET= TIER= REPORT=]` | Replay goldens deterministically under the offline overlay; `TIER=stable` is the merge gate | `Python` (since v0.3.16 PR C2) |
 | `make eval-record` / `eval-record-offline TARGET=` / `eval-drift` | Record a golden live / against the mock; report live drift (never gates) | on demand |
 | `python tests/perf/personal_tier_latency.py [--capture-baseline PATH]` | Recall latency vs baseline | `Python` (informational) |
 | `scripts/perf/wallet_p99.py` | Wallet acquire+settle p99 harness (RFC 0023) | on demand |

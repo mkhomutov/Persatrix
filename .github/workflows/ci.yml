@@ -288,6 +288,20 @@ jobs:
       - name: Check for orphan generated protobuf artifacts
         run: make proto-orphans-check
 
+      # RFC 0044 Phase 2 (v0.3.16 PR C2): the golden-trace replay ran in no CI
+      # step — a seed replayed on a PR only if it had its own integration test.
+      # Every recipe declared `tier: stable` replays under the offline overlay
+      # ($0, deterministic, ~2 s); a failed assertion, a cassette miss, a
+      # malformed or golden-less stable recipe, or an empty selection fails the
+      # build — the same target a developer runs. A step in this required job
+      # rather than a new advisory job (the C1 shape), so it gates from the day
+      # it lands; placed BEFORE the three pytest trees (the unit tree alone is
+      # ~5.5 min) so a golden regression is the first red in the log, not the
+      # last. A fresh recipe defaults to `experimental` and is reported, not
+      # gating, until it is promoted (docs/evaluators-guide.md).
+      - name: Replay the stable golden-trace evals (RFC 0044 Phase 2)
+        run: make eval-replay TIER=stable
+
       - name: Run unit tests
         run: python -m pytest tests/unit/python/ -v --tb=short
 
