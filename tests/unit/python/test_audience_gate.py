@@ -135,10 +135,11 @@ def _verdicts(gate: TurnInjectionGate) -> list[AudienceVerdict]:
 # ─── The knob ──────────────────────────────────────────────
 
 
-def test_default_mode_is_shadow_for_the_whole_cycle() -> None:
-    """Scope lock 1: the audience check ships recording, not withholding."""
-    assert DEFAULT_MEMORY_AUDIENCE == AUDIENCE_SHADOW
-    assert resolve_memory_audience({}) == AUDIENCE_SHADOW
+def test_default_mode_is_live_since_the_flip() -> None:
+    """Scope lock 1: shadow for the whole cycle, flipped to ``live`` by
+    PR A3 on the green verdict — ``shadow`` stays the rollback lever."""
+    assert DEFAULT_MEMORY_AUDIENCE == AUDIENCE_LIVE
+    assert resolve_memory_audience({}) == AUDIENCE_LIVE
     assert AUDIENCE_MODES == {AUDIENCE_OFF, AUDIENCE_SHADOW, AUDIENCE_LIVE}
 
 
@@ -146,7 +147,7 @@ def test_knob_reads_memory_egress_audience() -> None:
     cfg = {"memory": {"egress": {"audience": "live"}}}
     assert resolve_memory_audience(cfg) == AUDIENCE_LIVE
     assert resolve_memory_audience({"memory": {"egress": {"audience": None}}}) == (
-        AUDIENCE_SHADOW
+        AUDIENCE_LIVE
     )
 
 
@@ -219,6 +220,32 @@ async def test_same_room_recall_always_admits() -> None:
 
     assert _verdicts(gate) == [AudienceVerdict.ADMIT]
     assert fetcher.calls == []
+
+
+# ─── the same regression under the shipped default (PR A3) ──
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("acting", "admitted"),
+    [
+        (WITH_BOB, False),           # a room adding Bob
+        ("group:personas", False),   # a room adding a peer persona
+        ("dm:bob:iron-fox", False),  # a DM with Bob alone
+        (WITHOUT_BOB, True),         # every member was in the DM
+    ],
+)
+async def test_the_three_case_regression_under_the_default(
+    acting: str, admitted: bool,
+) -> None:
+    """PR A3: the mode is *resolved*, not named, so a default that slid
+    back to ``shadow`` fails here — the disjoint cases must actually
+    withhold and the subset room must still admit."""
+    entry = _Entry("e1", "internal", DM)
+    audience = await _audience(acting, [entry], mode=resolve_memory_audience({}))
+    gate = TurnInjectionGate(acting="internal", agent_id="iron-fox", audience=audience)
+    assert gate.filter_entries("facts", [entry]) == ([entry] if admitted else [])
+    assert gate.audience_withheld_count == (0 if admitted else 1)
 
 
 # ─── live: the disjoint verdict is the one that bites ───────

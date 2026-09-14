@@ -19,7 +19,6 @@ import pytest
 
 from agents.persona_runtime.audience import (
     AUDIENCE_LIVE,
-    AUDIENCE_SHADOW,
     resolve_memory_audience,
 )
 from agents.persona_runtime.cross_room import (
@@ -63,8 +62,8 @@ def test_the_defaults_are_the_shipped_posture() -> None:
     assert knobs.budget_tokens == MEMORY_BUDGET_TOKENS == 1500
     assert knobs.facts_cross_room == CROSS_ROOM_LIVE
     assert knobs.episodic_cross_room == CROSS_ROOM_LIVE
-    # Shadow for the whole v0.3.16 cycle (scope lock 1).
-    assert knobs.audience == AUDIENCE_SHADOW
+    # Live since v0.3.16 PR A3 flipped it on the green verdict (scope lock 1).
+    assert knobs.audience == AUDIENCE_LIVE
 
 
 def test_a_bad_value_is_still_rejected_at_construction() -> None:

@@ -28,9 +28,10 @@ modes are not the same axis:
 
 The three modes mirror ``memory.{facts,episodic}.cross_room``
 (:mod:`.cross_room`) on purpose — same vocabulary, same shadow → verdict
-→ flip pattern, same documented rollback lever.  ``shadow`` is the
-v0.3.16 default and the whole cycle's posture: the verdict is recorded,
-the entry still injects, and every prompt is byte-identical to v0.3.15.
+→ flip pattern, same documented rollback lever.  ``live`` is the shipped
+default since v0.3.16 PR A3 flipped it on the green verdict; ``shadow``
+— the whole cycle's posture until then — records the verdict, still
+injects the entry, and is the rollback lever.
 
 *Cost* (scope lock 2): K distinct source rooms among a turn's candidates
 cost K round trips — the N+1 shape :mod:`.channel_roster` was written to
@@ -97,10 +98,13 @@ AUDIENCE_TIERS: Final[frozenset[str]] = frozenset(
     {"channel_history", "facts", "episodic"},
 )
 
-#: Scope lock 1: shadow for the whole v0.3.16 cycle.  The flip to
-#: ``live`` is its own PR (A3), lands only on a green verdict, and only
-#: before release-prep PR 0 — never scheduled.
-DEFAULT_MEMORY_AUDIENCE: Final[str] = AUDIENCE_SHADOW
+#: Scope lock 1: shadow for the whole v0.3.16 cycle, flipped to ``live``
+#: by PR A3 on the green verdict — its own PR, never scheduled, and
+#: before release-prep PR 0 as the lock required.  The number it argued:
+#: ``withhold_share`` 0.5 over the audience seed (one disjoint, one
+#: admit, zero unknowns); across the whole suite one disjoint of seven
+#: judged, the other five *no-provenance* and admitted.
+DEFAULT_MEMORY_AUDIENCE: Final[str] = AUDIENCE_LIVE
 
 
 class AudienceVerdict(Enum):
@@ -125,7 +129,7 @@ class AudienceVerdict(Enum):
 
 
 #: The verdicts ``live`` mode actually acts on — see the module
-#: docstring.  ``A3`` flips the knob's *default*, not this set.
+#: docstring.  PR A3 flipped the knob's *default*, not this set.
 ENFORCED_VERDICTS: Final[frozenset[AudienceVerdict]] = frozenset(
     {AudienceVerdict.WITHHOLD_DISJOINT},
 )

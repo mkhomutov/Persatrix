@@ -1,7 +1,7 @@
 # RFC 0037 Amendment — Audience as an AND-Condition on the §D Egress Gate
 
 **Type**: amendment to [RFC 0037](0037-memory-confidentiality-channel-classification.md) §D (the gate rule), §E (composition with declassification projections) and §G (the withhold-cause vocabulary the tripwire and the manifest read)
-**Status**: 🔄 **Shadow** — v0.3.16 PR A2 ([ISSUE-0132](../issues/ISSUE-0132-memory-egress-gate-blind-to-room-audience.md); [v0.3.16 PR plan](../v0.3.16-pr-plan.md)). The check records and does not withhold; the flip to `live` is [verdict-gated](#promotion-the-verdict-gated-flip), its own PR, and lands only on a green measurement
+**Status**: ✅ Implemented — **LIVE**, v0.3.16 ([ISSUE-0132](../issues/ISSUE-0132-memory-egress-gate-blind-to-room-audience.md) resolved; [v0.3.16 PR plan](../v0.3.16-pr-plan.md)). Shadow in PR A2 (2026-09-09); promoted by PR A3 on the green verdict (2026-09-14) — see [Promotion](#promotion-the-verdict-gated-flip). `shadow` is the documented rollback lever
 **Author**: Maksim Khomutov
 **Date**: 2026-09-09
 **Target**: v0.3.16 — *The persona knows who is listening*
@@ -159,6 +159,44 @@ The flip is a separate PR, opens only on a green verdict, and states its
 own threshold for the delta. A red or absent verdict ships the release
 in `shadow` with the measured delta recorded as a Known Gap.
 
+### The verdict, and the flip (v0.3.16 PR A3, 2026-09-14)
+
+The verdict ran **green** on all five criteria — `label_integrity`,
+`bounded_volume`, `continuity` (all six goldens replay),
+`audience_delta_measured` and `audience_bounded_volume` — over the
+six-golden suite (`make eval-replay REPORT=… && make eval-verdict
+REPORT=…`), and the default is **`live`**: `DEFAULT_MEMORY_AUDIENCE`,
+the `agent.schema.json` default and the harness class-level default all
+flip. `shadow` and `off` stay configurable; `shadow` is the documented
+rollback lever, still trace-emitting.
+
+**The threshold, as argued in the PR**: the delta had to be *exactly the
+seed's disjoint half and nothing else*. Over `EVAL-MEMORY-005` — two
+judged entries, the same DM-taught `internal` fact in two rooms —
+`withhold_share` is **0.5**: one *disjoint* in the standup that adds Bob,
+one *admit* in the pair room whose every member was in the DM. Across
+the whole suite it is 1 of 7 judged: the other five are *no-provenance*
+rows from channel-less recipes (`EVAL-MEMORY-002`/`003`, whose events
+carry a room but no channel), which the flip **admits** — so `001`–`004`
+replay byte-identically under `live` with no re-record. Both unknown
+counts are zero offline; *fetch-failed* is zero by construction (the
+driver's seam cannot miss), which is why it is Leg 5's live criterion.
+A disjoint verdict on the pair room, an unknown withheld, or any shift
+in `001`–`004` would have been red.
+
+**What the flip re-recorded**: `EVAL-MEMORY-005` under
+`egress.audience: live` (pinned, so the golden states its own posture).
+One request hash moved — the standup ask, 2 129 → 2 102 input tokens,
+the withheld fact — and the fixture's standup reply is now a curated
+decline, asserted positively (a `must_not_reference` alone passes a
+cassette miss vacuously). The strip test replays the new golden
+shadow-pinned and asserts the miss, the `EVAL-MEMORY-003` precedent: the
+withhold is load-bearing at the request-hash level, not at the
+mock-authored transcript.
+
+**The trade, as shipped**: the paragraph below, in the release note in
+the same words. Leg 5's pass criterion is now the withhold itself.
+
 **The trade the flip buys, stated plainly**: RFC 0049's headline —
 "taught in a DM, known in the standup" — narrows to *the standup whose
 every member was in the DM*. In the default three-persona rooms, that is
@@ -191,8 +229,8 @@ answer to both, and is deliberately not in this release.
 
 Depends on PR A1 (roster resolution moved ahead of the gate, for every
 channel turn) and on the [RFC 0044](0044-eval-set-golden-traces.md)
-Phase 1 harness for its measurement. Blocks nothing; the flip blocks
-release-prep PR 0. The live proof is
+Phase 1 harness for its measurement. Blocks nothing; the flip (PR A3,
+landed) preceded release-prep PR 0 as required. The live proof is
 [MT-PERSONA-CONFIDENTIALITY-001](../manual-tests/MT-PERSONA-CONFIDENTIALITY-001.md)
 Leg 5, run once at release-prep PR 1.
 

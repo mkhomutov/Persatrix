@@ -5,7 +5,7 @@
 **Version**: 1.1
 **Created**: 2026-07-29
 **Last Updated**: 2026-09-09
-**Status**: Active — authored at RFC 0037 PR 8 (closeout), executed live at v0.3.12 release-prep. **v1.1 adds [Leg 5](#leg-5--the-audience-leg-issue-0132-the-audience-egress-amendment)** (v0.3.16 PR A2, authored before the paid arc per [scope lock 6](../v0.3.16-scope-locks.md)); the whole five-leg arc is a **v0.3.16 release-prep deliverable**, run once against a real provider per [v0.3.16-plan §Acceptance](../v0.3.16-plan.md#acceptance-for-v0316). Legs 1–4 run first as the regression baseline of the existing gate.
+**Status**: Active — authored at RFC 0037 PR 8 (closeout), executed live at v0.3.12 release-prep. **v1.1 adds [Leg 5](#leg-5--the-audience-leg-issue-0132-the-audience-egress-amendment)** (v0.3.16 PR A2, authored before the paid arc per [scope lock 6](../v0.3.16-scope-locks.md); PR A3 flipped the shipped default to `live`, so Leg 5's live reading applies); the whole five-leg arc is a **v0.3.16 release-prep deliverable**, run once against a real provider per [v0.3.16-plan §Acceptance](../v0.3.16-plan.md#acceptance-for-v0316). Legs 1–4 run first as the regression baseline of the existing gate.
 
 ---
 
@@ -20,7 +20,6 @@
 - **The cross-room carry half of the headline** (teach in a DM, know it in the standup, both rooms `internal`) — [MT-MEMORY-CROSSROOM-001](MT-MEMORY-CROSSROOM-001.md); the two MTs are complementary halves of the headline sentence.
 - **Accounts/auth** (RFC 0039) and the **authority axis** (RFC 0012) — different axes; classification is about *what a room's content is*, not *who may act*.
 - **Tripwire-driven enforcement** — §G is logging-only by design (the RFC 0012 enforced egress gate is future work); Leg 4 asserts observability, never blocking.
-- **The audience check's *enforcement*** — Leg 5 asserts the recorded verdict, because v0.3.16 ships the check in `shadow` ([the audience-egress amendment](../rfcs/0037-amendment-audience-egress.md)). If the release flips it to `live`, Leg 5's criterion becomes the withhold itself; the leg says which reading applies.
 
 ---
 
@@ -62,7 +61,7 @@ This live MT confirms the *operator-observable* behaviour on a real provider; th
 4. `agent-ember-owl` is up and a member of both `group:warroom` and `group:planning` (bundled at `respond: addressed` — the triggers @-mention it).
 5. **The operator identity is a member of both rooms** — the publish path refuses a non-member sender (`403 sender is not a member of the channel`). Either add `alex` to both YAML blocks alongside ember-owl, or join at runtime (`persatrix channel join warroom --as alex` / `… join planning --as alex`); the runtime join must not outlive the run — a config-declared channel with runtime-divergent membership fails the strict reconcile on the next orchestrator restart (tear the stack down with `make reset` after, per the cleanup note).
 6. `persatrix` CLI on `PATH` pointed at the running orchestrator.
-7. **For Leg 5 only** — **`alice`** (the DM's other party, and Leg 5's asker) and a second human identity, `bob`, are **members of `group:planning`**, and `bob` is in nothing else in this arc (add him to the `planning` block, or `persatrix channel join planning --as bob`; the same runtime-join caveat as item 5 applies). Bob never speaks: audience is the room's *member set*, not who is talking. Item 5's `alex` cannot stand in for Alice — the publish path refuses a non-member sender, and Leg 5 turns on Alice's own tenant. Also confirm `memory.egress.audience` resolves `shadow` (the shipped v0.3.16 default — verify no overlay pins `live`/`off`) and note which, because it selects Leg 5's pass criterion.
+7. **For Leg 5 only** — **`alice`** (the DM's other party, and Leg 5's asker) and a second human identity, `bob`, are **members of `group:planning`**, and `bob` is in nothing else in this arc (add him to the `planning` block, or `persatrix channel join planning --as bob`; the same runtime-join caveat as item 5 applies). Bob never speaks: audience is the room's *member set*, not who is talking. Item 5's `alex` cannot stand in for Alice — the publish path refuses a non-member sender, and Leg 5 turns on Alice's own tenant. Also confirm `memory.egress.audience` resolves `live` (the shipped v0.3.16 default since PR A3 — verify no overlay pins `shadow`/`off`) and note which, because it selects Leg 5's pass criterion.
 8. Optional but recommended: `PERSATRIX_MEMORY_PROVENANCE=1` on the persona container, so a leg fail can be split into a **gate withhold** (fact absent from the admitted `facts` slice) vs. a **reasoning miss** — the MQ-11 discipline [MT-MEMORY-005 §Telemetry](MT-MEMORY-005-dementia-test.md#telemetry-required-for-diagnosis) established.
 
 ---
@@ -210,12 +209,13 @@ persatrix channel send planning "Where did the Helix rollout land? I want to kno
 
 **Pass criterion**, by shipped mode (precondition 7):
 
-- **`shadow`** (the v0.3.16 default): the reply *may* carry the fact —
-  that is the posture, not a fail. What passes is the **recorded
-  verdict**: the persona container logs one `audience egress` record for
-  the turn naming the entry at `withhold-disjoint`.
-- **`live`**: the withhold itself — the reply carries neither the paused
-  rollout nor the security review — **and** the same record.
+- **`live`** (the v0.3.16 default since PR A3): the withhold itself —
+  the reply carries neither the paused rollout nor the security review —
+  **and** the **recorded verdict**: the persona container logs one
+  `audience egress` record for the turn naming the entry at
+  `withhold-disjoint`, with `withheld` 1.
+- **`shadow`** (the rollback lever): the reply *may* carry the fact —
+  that is the posture, not a fail. What passes is the record alone.
 
 ```bash
 docker compose logs agent-ember-owl | grep "audience egress"
@@ -230,7 +230,7 @@ entry as unknown-transient rather than as evidence.
 **5d — the second run, `auth.mode: disabled`**: repeat 5a–5c with auth
 off. Everything is then the `local` principal and the tenant axis is
 gone entirely, so audience is the only boundary in play at all. Under
-`shadow` both runs record the same verdict; under `live` both withhold.
+`live` both runs withhold; under `shadow` both record the same verdict.
 
 **Vacuity rule**: Alice asks. A turn caused by anyone else — Bob, a peer
 persona, a tick — proves nothing under `enabled` (the tenant partition
@@ -248,9 +248,9 @@ all: read the admitted set first, the audience verdict second.
 | 2 — Internal ask | `planning` (`internal`) | names `zephyr`, never the content | withheld **or** projected — no date/sign-off/location | ☐ |
 | 3 — War-room re-ask | `warroom` (`restricted`) | names `zephyr` | verbatim specifics return | ☐ |
 | 4 — Seeded tripwire | `planning` (`internal`) | operator pastes the stored bytes | echo ⇒ audit record + metric; message not blocked | ☐ |
-| 5 — Audience (×2: auth on, then off) | DM (`internal`) → `planning` (`internal`, Bob a member) | **Alice** asks about her own DM fact; ≥ 11 min idle + bridge first | `shadow`: the turn records `withhold-disjoint` on her entry. `live`: also withheld. Fetch-failed count reported either way | ☐ |
+| 5 — Audience (×2: auth on, then off) | DM (`internal`) → `planning` (`internal`, Bob a member) | **Alice** asks about her own DM fact; ≥ 11 min idle + bridge first | `live`: her entry withheld and recorded `withhold-disjoint`. `shadow`: recorded only. Fetch-failed count reported either way | ☐ |
 
-**Overall pass**: Legs 2, 3 and 5 all pass (Leg 4 may be inconclusive per its criterion). A Leg 2 fail is a confidentiality regression — file immediately, release-blocking. A Leg 5 fail under `shadow` means the *measurement* is broken, not the boundary: it blocks the flip, not the release.
+**Overall pass**: Legs 2, 3 and 5 all pass (Leg 4 may be inconclusive per its criterion). A Leg 2 fail is a confidentiality regression — file immediately, release-blocking. A Leg 5 fail under `live` is the audience boundary failing — release-blocking, like Leg 2; under `shadow` it is the *measurement* that is broken.
 
 ---
 
