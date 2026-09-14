@@ -194,9 +194,16 @@ def stack_up(ctx: ArcCtx) -> None:
     ctx.run(["docker", "compose", "down", "-v", "--remove-orphans"],
             why="a clean store — prior facts would steer the run (precondition 2)",
             timeout=300)
-    ctx.run(["docker", "compose", "up", "-d", "--build"],
+    # Build first, separately: a fresh checkout builds the orchestrator's Go
+    # and Node stages and three agent images from scratch, which took the
+    # first live attempt past a 900 s `up --build` bound and aborted the arc
+    # before a cent was spent. The build gets an hour; the `up` stays short.
+    ctx.run(["docker", "compose", "build"],
+            why="the images at the RC tip (a cold build takes many minutes)",
+            timeout=3600, critical=True)
+    ctx.run(["docker", "compose", "up", "-d"],
             why="the society on Anthropic with ember-owl at DEBUG",
-            timeout=900, critical=True)
+            timeout=300, critical=True)
     wait_healthy(ctx)
     wait_registered(ctx)
 
