@@ -6,6 +6,7 @@ severity: medium
 area: memory
 created: 2026-08-19
 closed: 2026-09-14
+closed_pr: 950
 refs:
   - docs/rfcs/0037-memory-confidentiality-channel-classification.md
   - docs/rfcs/0049-memory-consolidation-gradient.md

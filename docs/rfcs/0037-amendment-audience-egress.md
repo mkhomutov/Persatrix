@@ -1,7 +1,7 @@
 # RFC 0037 Amendment — Audience as an AND-Condition on the §D Egress Gate
 
 **Type**: amendment to [RFC 0037](0037-memory-confidentiality-channel-classification.md) §D (the gate rule), §E (composition with declassification projections) and §G (the withhold-cause vocabulary the tripwire and the manifest read)
-**Status**: ✅ Implemented — **LIVE**, v0.3.16 ([ISSUE-0132](../issues/ISSUE-0132-memory-egress-gate-blind-to-room-audience.md) resolved; [v0.3.16 PR plan](../v0.3.16-pr-plan.md)). Shadow in PR A2 (2026-09-09); promoted by PR A3 on the green verdict (2026-09-14) — see [Promotion](#promotion-the-verdict-gated-flip). `shadow` is the documented rollback lever
+**Status**: ✅ Implemented — **LIVE**, v0.3.16 ([ISSUE-0132](../issues/ISSUE-0132-memory-egress-gate-blind-to-room-audience.md) resolved; [v0.3.16 PR plan](../v0.3.16-pr-plan.md)). Shadow in PR A2 (2026-09-09); promoted by PR A3 ([#950](https://github.com/mkhomutov/Persatrix/pull/950)) on the green verdict (2026-09-14) — see [Promotion](#promotion-the-verdict-gated-flip). `shadow` is the documented rollback lever
 **Author**: Maksim Khomutov
 **Date**: 2026-09-09
 **Target**: v0.3.16 — *The persona knows who is listening*
