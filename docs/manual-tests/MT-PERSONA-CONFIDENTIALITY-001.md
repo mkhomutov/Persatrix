@@ -286,7 +286,7 @@ all: read the admitted set first, the audience verdict second.
 
 | Date | Tester | OS | Provider | Result | Notes |
 |------|--------|----|----------|--------|-------|
-| — | — | — | — | — | Live execution scheduled for v0.3.12 release-prep ([v0.3.12-plan §Acceptance](../v0.3.12-plan.md#acceptance-for-v0312)). |
+| 2026-09-15 | Claude (Fable 5.1) | macOS 26.6 | Anthropic | Leg 5 ✅ both modes; Legs 1–3 ✅ (seeded asks); Leg 4 ℹ️; 5d reply ❌ via [ISSUE-0158](../issues/ISSUE-0158-recall-filter-audience-blind.md) | [v0.3.16 report](v0.3.16-execution-report.md) |
 
 ---
 
