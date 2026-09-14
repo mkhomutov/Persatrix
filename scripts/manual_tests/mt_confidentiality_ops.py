@@ -381,7 +381,7 @@ def render_message(m: dict[str, Any] | None, label: str) -> str:
     if m is None:
         return f"_{label}: **no reply from {PERSONA} within the wait** — recorded, not inferred._"
     return (f"{label} — `{m.get('sender_id', '?')}` at `{m.get('timestamp', '?')}`:\n\n"
-            f"> {json.dumps(m.get('content', ''))[1:-1]}")
+            f"> {json.dumps(m.get('content', ''), ensure_ascii=False)[1:-1]}")
 
 
 def utc_now() -> str:
