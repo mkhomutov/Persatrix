@@ -205,7 +205,11 @@ for persona memory, not a recall wall. Per tier:
   not hold — in the default three-persona rooms, every group room. Knob:
   `memory.egress.audience: live | shadow | off` (default `live` since
   v0.3.16 PR A3; `shadow` records the verdict without withholding — the
-  rollback lever).
+  rollback lever). Audience compares member *ids*: a DM's members are
+  the ids that named it, so enabling `auth.mode: enabled` (or changing
+  the acting-as id) after teaching moves you into a new DM where your
+  earlier DM-taught facts are withheld until re-taught — pin `shadow`
+  while you do.
 - **Relationship** was always cross-room (trust follows the person).
 - **Notes** and the in-room conversation window stay room-scoped.
 

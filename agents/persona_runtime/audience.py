@@ -111,18 +111,23 @@ class AudienceVerdict(Enum):
     """What the audience check concluded for one §D-admitted entry.
 
     Four, because "we could not tell" is two different facts with two
-    different fixes: a roster call that missed is transient and retried
-    next turn, while a NULL ``source_channel_id`` is permanent by design
-    (pre-migration rows and tick/task-scoped records have no room).
-    Collapsing them would make the shadow measurement unable to say
-    whether the unknowns are a bug or the schema.
+    different fixes: a roster call that missed is retried next turn —
+    transient for a network blip, but *permanent* once the source room
+    has been deleted or emptied, because :mod:`.channel_roster` returns
+    ``None`` for a 404 and for an empty member list alike, so under
+    ``live`` such an entry is admitted on every later turn — while a
+    NULL ``source_channel_id`` is permanent by design (pre-migration
+    rows and tick/task-scoped records have no room).  Collapsing them
+    would make the shadow measurement unable to say whether the unknowns
+    are a bug or the schema.
     """
 
     #: Every member of the acting room was in the entry's source room.
     ADMIT = "admit"
     #: The acting room holds a member the source room does not.
     WITHHOLD_DISJOINT = "withhold-disjoint"
-    #: A roster call missed — transient; retried on the next turn.
+    #: A roster call missed — retried on the next turn; permanent once
+    #: the source room is deleted or emptied (``live`` admits either).
     WITHHOLD_UNKNOWN_FETCH_FAILED = "withhold-unknown-fetch-failed"
     #: ``source_channel_id`` is NULL by design — permanent.
     WITHHOLD_UNKNOWN_NO_PROVENANCE = "withhold-unknown-no-provenance"

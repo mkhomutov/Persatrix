@@ -8,10 +8,12 @@ is in.  This module pins the audience check that closes that: the
 ``public`` exemption, the NULL-provenance rule, and the fetch bound the
 lock's cost paragraph promises.
 
-Shadow is the shipped posture: every case below is asserted twice where
-the two modes differ — in ``shadow`` the verdict is *recorded* and the
-entry still injects (the byte-identity claim), in ``live`` the
-disjoint verdict withholds.
+``live`` is the shipped posture since PR A3 (``shadow`` the rollback
+lever); every case below is asserted twice where the two modes differ —
+in ``shadow`` (the ``_audience`` helper's default, so the verdict cases
+read the recorded verdict alone) the entry still injects, in ``live``
+the disjoint verdict withholds — and the resolved default is pinned on
+its own, so a slide back to ``shadow`` fails here.
 """
 
 from __future__ import annotations

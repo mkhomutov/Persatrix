@@ -27,14 +27,12 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
 
-import yaml
+from _test_infra import assert_cassette_miss, stage_recipe_override
 
-from evaluators.runner import golden_path_for
 from evaluators.shadow_measurement import (
     AUDIENCE_TURN_BOUND,
     promotion_verdict,
@@ -169,26 +167,18 @@ def test_the_live_withhold_is_load_bearing(tmp_path: Path) -> None:
     committed seed exactly this way; the request-hash pin, not the
     mock-authored decline, is what makes EVAL-MEMORY-005 load-bearing
     (the EVAL-MEMORY-003 precedent)."""
-    recipe_path = _EVAL_SETS / f"{_ID}.yaml"
-    recipe = yaml.safe_load(recipe_path.read_text(encoding="utf-8"))
-    assert recipe["setup"]["memory"]["egress"] == {"audience": "live"}
-    recipe["setup"]["memory"]["egress"] = {"audience": "shadow"}
-    (tmp_path / f"{_ID}.yaml").write_text(
-        yaml.safe_dump(recipe), encoding="utf-8",
-    )
-    shutil.copy(golden_path_for(recipe_path), tmp_path / f"{_ID}.golden.yaml")
+    def pin_shadow(recipe: dict) -> None:
+        assert recipe["setup"]["memory"]["egress"]["audience"] == "live"
+        recipe["setup"]["memory"]["egress"]["audience"] = "shadow"
+
+    stage_recipe_override(_EVAL_SETS / f"{_ID}.yaml", tmp_path, pin_shadow)
 
     result = _run_replay(tmp_path / "report.json", eval_sets_dir=tmp_path)
 
-    assert result.returncode != 0, (
+    assert_cassette_miss(
+        result,
         "a shadow-pinned replay of the live golden must fail — if it passes, "
-        "the live gate never actually withheld and the seed is vacuous:\n"
-        f"{result.stdout}\n{result.stderr}"
-    )
-    # The miss surfaces through the runtime's LLM-error wrapping, so match
-    # the ReplayCassetteMissError message, not the class name.
-    assert "no recorded response for request" in result.stderr, (
-        result.stdout, result.stderr,
+        "the live gate never actually withheld and the seed is vacuous",
     )
 
 

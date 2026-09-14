@@ -1,7 +1,9 @@
 """ISSUE-0132 (v0.3.16 PR A2) — the audience decision, as a trace.
 
-The audience check ships in ``shadow``: it records what it *would* have
-withheld and changes no prompt (:mod:`.audience`).  A recording that
+The audience check records every verdict whatever the mode: in ``shadow``
+what it *would* have withheld, in ``live`` — the shipped default since
+PR A3 — what it did withhold, which is what ``withheld`` counts
+(:mod:`.audience`).  A recording that
 nobody can read is not a measurement, so this module is the readable
 half — one structured INFO record per turn, on the same
 ``SHADOW_LOGGER_NAME`` / ``SHADOW_TRACE_ATTR`` contract the RFC 0049

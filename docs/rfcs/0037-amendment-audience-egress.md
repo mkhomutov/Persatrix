@@ -133,9 +133,10 @@ amendment adds one more bug class it can catch.
   question it claims to: *the share of gate-admitted entries the
   audience check would withhold*.
 - **The knob** — `memory.egress.audience: off | shadow | live`, default
-  `shadow`, mirroring `memory.{facts,episodic}.cross_room` down to the
-  loud rejection of an unknown value. `shadow` stays the documented
-  rollback lever after the flip, as it did for `cross_room`.
+  `shadow` until PR A3 flipped it to `live`, mirroring
+  `memory.{facts,episodic}.cross_room` down to the loud rejection of an
+  unknown value. `shadow` stays the documented rollback lever after the
+  flip, as it did for `cross_room`.
 - **The trace and the verdict** — [`audience_shadow.py`](../../agents/persona_runtime/audience_shadow.py)
   emits one structured record per turn (ids, levels, room ids, verdicts
   — never entry content: the process log is its own egress surface),
@@ -176,8 +177,9 @@ judged entries, the same DM-taught `internal` fact in two rooms —
 `withhold_share` is **0.5**: one *disjoint* in the standup that adds Bob,
 one *admit* in the pair room whose every member was in the DM. Across
 the whole suite it is 1 of 7 judged: the other five are *no-provenance*
-rows from channel-less recipes (`EVAL-MEMORY-002`/`003`, whose events
-carry a room but no channel), which the flip **admits** — so `001`–`004`
+rows from channel-less recipes (`EVAL-MEMORY-001`, `003` and `004`,
+whose events carry a room but no channel; `002` emits no audience trace
+at all), which the flip **admits** — so `001`–`004`
 replay byte-identically under `live` with no re-record. Both unknown
 counts are zero offline; *fetch-failed* is zero by construction (the
 driver's seam cannot miss), which is why it is Leg 5's live criterion.
@@ -215,6 +217,18 @@ membership. Someone who was in a room when a fact was taught and has
 since left still counts as audience; someone who joined the source room
 after the fact was taught counts too. RFC 0035's interval ledger is the
 answer to both, and is deliberately not in this release.
+
+Two more residuals the flip makes live, both accepted rather than fixed
+here. **A deleted or emptied source room is a permanent admit**: the
+roster fetcher returns nothing for a 404 and for an empty member list
+alike, so every entry from that room reads *fetch-failed* on every later
+turn and `live` admits it — the "transient" cause is transient only for
+a network blip. **Audience compares member ids, not people**: a DM's
+members are the two ids that named it, so enabling `auth.mode: enabled`
+(or changing the acting-as id) after teaching moves the same person into
+a new DM, and their earlier DM-taught facts are then *disjoint* there
+until re-taught; `shadow` restores them meanwhile. Neither is observable
+above the per-turn trace today.
 
 ## Consequences
 
