@@ -211,7 +211,7 @@ The **bid itself is an LLM call**, so the Layer 1 cost ceiling governs it: a bid
 ### PR 4: `feature/v038-rfc0030-tierb-chair-closeout` — `chair` facilitator (Layer-5-inert) + MT + docs + status
 
 **Depends on**: PR 3.
-**Status**: 🔀 PR open (this PR).
+**Status**: ✅ Merged ([#582](https://github.com/mkhomutov/Persatrix/pull/582)).
 **Purpose**: Light up the `chair` low-threshold behaviour, wire the inert Layer-5 hooks, and land the operator-facing surface + the acceptance record.
 
 | File | Change |

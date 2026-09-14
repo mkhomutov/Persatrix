@@ -22,7 +22,7 @@ depends_on:
 **Author**: Maksim Khomutov  
 **Date**: 2026-04-25  
 **Target**: v0.3.0 (internal channels) + v0.5.0 (external bridges)  
-**Depends on**: RFC 0005; RFC 0008 (Phase 1 for action plumbing, Phase 2 for memory integration in RFC 0011 Phase 3); RFC 0009 Phases 1–2 (Phase 1 rate limiting at REST endpoints; Phase 1 input sanitization on stored channel content); RFC 0016 (chat-as-DM — [0011-amendment-chat-as-dm.md](0011-amendment-chat-as-dm.md)); RFC 0020 (Phase 3 jointly delivered — channel messages route through `InteractionTracker.add_turn` rather than per-event episodic writes; see §E)
+**Depends on**: RFC 0005; RFC 0008 (Phase 1 for action plumbing, Phase 2 for memory integration in RFC 0011 Phase 3); RFC 0009 Phases 1–2 (Phase 1 rate limiting at REST endpoints; Phase 2 input sanitization of arriving channel messages); RFC 0016 (chat-as-DM — [0011-amendment-chat-as-dm.md](0011-amendment-chat-as-dm.md)); RFC 0020 (Phase 3 jointly delivered — channel messages route through `InteractionTracker.add_turn` rather than per-event episodic writes; see §E)
 
 ---
 
@@ -553,7 +553,7 @@ Guidance, not protocol. The three `respond` policies compose into channel-level 
 - **Sender spoofing**: The `sender_id` is set by the orchestrator from the publishing agent's registration record, not from the request body. Agents cannot forge another sender's identity.
 - **Membership enforcement**: Only agents listed in a channel's membership can publish or receive. The orchestrator checks membership on every publish attempt and returns 403 on violation. Delivery to non-registered subscribers is skipped silently (agent is offline, not unauthorized).
 - **Rate limiting**: RFC 0009 Phase 1 rate limiting applies to channel publish calls. An agent spamming a channel hits its per-agent-per-window call limit and is circuit-broken.
-- **Content injection**: Channel message content is stored in episodic memory and later injected into agent context. Adversarial content in channel messages represents the same prompt injection risk as tool output. Mitigation: RFC 0009 Phase 1 input sanitization applies to channel message content before it is stored.
+- **Content injection**: Channel message content is stored in episodic memory and later injected into agent context. Adversarial content in channel messages represents the same prompt injection risk as tool output. Mitigation: receiving agents run RFC 0009's Python sanitizer on arrival; today it only flags and logs.
 - **History amplification**: A busy channel with large messages could dominate the memory injection budget. Mitigation: channel history is admitted via the existing `MemoryBudget.try_add` greedy-priority loop (see §E) — when the budget fills, lower-priority items are simply not admitted. The per-channel recall `limit` (derived from `budget_memory_tokens // AVG_MESSAGE_TOKENS`) caps how many items the recall layer returns before the budget loop runs, so a single mega-channel cannot starve the allocator with thousands of candidates. There is deliberately no per-tier ceiling — the priority order is the contract.
 - **DM privacy**: DM channels are accessible only to the two declared participants. Membership is enforced at the store layer. DM content is stored in each participant's isolated episodic memory, not in a shared channel store visible to other agents.
 - **Store growth**: Per-channel message cap (default 10,000), global channel-count cap (default 50 named channels), and the SQLite WAL checkpoint policy prevent unbounded disk growth and bound observability cardinality.

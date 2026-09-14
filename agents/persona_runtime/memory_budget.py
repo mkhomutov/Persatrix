@@ -85,11 +85,12 @@ __all__ = [
 #   PREDICATE_ALLOWLIST` establishes for the storage layer.
 #
 # The membership covers all five canonical tier names appearing in
-# the RFC 0027 §F priority order, even tiers that do not currently
-# call ``record_admission`` (``relationship``, ``channel_history``) —
-# future wiring lands on a known name rather than coining a new one
-# in a follow-up PR.  Adding a tier is a deliberate amendment + test
-# update at :class:`TestKnownTierAllowlist`.
+# the RFC 0027 §F priority order.  Every one of them now calls
+# ``record_admission`` — ``relationship`` was the last to be wired
+# (ISSUE-0122, v0.3.16 PR B1); it was reserved here so that wiring
+# landed on a known name rather than coining a new one.  Adding a
+# tier is a deliberate amendment + test update at
+# :class:`TestKnownTierAllowlist`.
 KNOWN_TIERS: frozenset[str] = frozenset({
     "facts",
     "episodic",
@@ -103,7 +104,10 @@ KNOWN_TIERS: frozenset[str] = frozenset({
 
 # Total token budget for all memory tiers injected per event.
 # RFC 0017 §B / OQ1 resolution: 1500 tokens balances detail vs. prompt size.
-# Retune by changing this single constant; no API changes required.
+# v0.3.16 K1: operators retune it with ``memory_budget.tokens`` in
+# ``config/optimization.yaml`` (resolved once at persona start by
+# ``memory_knobs.resolve_memory_knobs``); this constant is the default
+# when the key is absent, and the value the schema documents.
 MEMORY_BUDGET_TOKENS: int = 1500
 
 # Per-call min_tokens floors for the MemoryBudget allocator.

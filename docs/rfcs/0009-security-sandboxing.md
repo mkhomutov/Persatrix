@@ -187,7 +187,7 @@ The agent's system prompt must instruct it to treat content inside `<external_da
 
 **`InputSanitizer` (Go, `internal/security/security.go`):**
 
-Detects and flags instruction-like patterns in external data before it enters the orchestrator-side context pipeline. It is not a perfect filter — it is a defense-in-depth layer.
+Detects and flags instruction-like patterns in external data before it enters the orchestrator-side context pipeline. It is not a perfect filter — it is a defense-in-depth layer. As built, it lives in `internal/security/sanitize.go`, the orchestrator never calls it, and the agents run a Python copy instead ([IN-8](#in-8-the-orchestrator-never-calls-the-go-inputsanitizer)).
 
 ```go
 type InputSanitizer struct {
@@ -605,7 +605,7 @@ These arose from RFCs 0008, 0011, and 0020 landing or partly landing during v0.3
 
 ## Decision / Next Steps
 
-**Status (2026-05-09)**: Phases 1–2 ⚠️ Partially Implemented for v0.3.0; Phases 3–4 deferred to v0.4.0. **All 4 v0.3.0 PRs merged**: PR 1 (#233) AuditLogger + SecretRedactor + PR 1b (#234) deep-review follow-ups + PR 1c (#236) audit-hardening; PR 2 (#244) per-agent RateLimiter + CircuitBreaker + REST/gRPC middleware; PR 3 (#253) InputSanitizer + ContextItem + `<external_data>` envelope; PR 4 review follow-ups + close-out (this PR). Phase 4 (agent identity tokens, HITL gates) and the rest of Phase 3 (tool argument schemas, ResourceLimiter, OutputSizeLimiter) carry forward to v0.4.0 with the unfinished RFC 0009 PR plan rewritten there.
+**Status (2026-05-09)**: Phases 1–2 ⚠️ Partially Implemented for v0.3.0; Phases 3–4 deferred to v0.4.0. **All 4 v0.3.0 PRs merged**: PR 1 (#233) AuditLogger + SecretRedactor + PR 1b (#234) deep-review follow-ups + PR 1c (#236) audit-hardening; PR 2 (#244) per-agent RateLimiter + CircuitBreaker + REST/gRPC middleware; PR 3 (#253) InputSanitizer + ContextItem + `<external_data>` envelope; PR 4 ([#306](https://github.com/mkhomutov/Persatrix/pull/306)) review follow-ups + close-out. Phase 4 (agent identity tokens, HITL gates) and the rest of Phase 3 (tool argument schemas, ResourceLimiter, OutputSizeLimiter) carry forward to v0.4.0 with the unfinished RFC 0009 PR plan rewritten there.
 
 **Phase 4 sequencing — accepted divergence**: Phase 4 (agent identity + HITL) was originally recommended *before* RFC 0011 (Channels + Bridges), as channel inputs are high-trust injection vectors. v0.3.0 ships RFC 0011 internal channels without Phase 4. The divergence is compensated by:
 - Channels REST surface emits a startup-WARN trust-boundary notice ([0011-pr-plan.md PR 2](0011-pr-plan.md)).
@@ -657,6 +657,15 @@ PR 3 (#253) did not ship the `agents/persona_runtime/__init__.py::_provenance` s
 Per the master plan, `CHANGELOG.md` is not updated in PR 4 — a single curated `[0.3.0] - YYYY-MM-DD` entry lands in v0.3.0 release-prep PR 3.
 
 **Genuinely-deferred Open Questions**: OQ #1 (proto token field) and OQ #4 (revocation list) remain open and gate Phase 4. See §Open Questions § "Genuinely open".
+
+### IN-8. The orchestrator never calls the Go `InputSanitizer`
+
+Recorded 2026-09-11. §C and Open Question 2 have the orchestrator run the Go `InputSanitizer` on outside data and write a `WARN` audit event for each flag. PR 3 (#253) built it, in `internal/security/sanitize.go`, but nothing outside its tests calls it, so the orchestrator writes no `input.flagged` audit event. Nothing reports a flag to the §H circuit breaker either: its input-flag trigger is set up (5 flags in 10 minutes, in `cmd/orchestrator/ratelimit.go`) but can never fire. The agents run a Python copy instead: `sanitize()` in `agents/security.py`, which uses the pattern list `cmd/genpatterns` copies from the Go code. It runs in two places:
+
+- On every incoming channel message, since RFC 0011 PR 5 (`agents/persona_runtime/channel_ingest.py`). The agent names the source `channel_message` itself; the orchestrator attaches none.
+- On the output of `http_request`, `file_read` and `recall_channel_messages`, before that output is wrapped in an `<external_data>` envelope (`maybe_wrap_tool_content`, called from `agents/base.py` and `agents/persona_runtime/action_loop.py`).
+
+The action is fixed at passthrough, and nothing reads the `security.sanitizer_action` setting. A flagged input reaches the model unchanged. For a channel message the only sign is an `input.flagged` warning in the agent's own log; flagged tool output also gets `flagged="true"` on its envelope. So the "`input.flagged` events" in IN-6 are that log line, not audit records. The [package comment](../../internal/security/security.go) lists what the security package builds and which parts the orchestrator calls.
 
 ## Related Documentation
 

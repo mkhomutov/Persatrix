@@ -216,7 +216,7 @@ func chatTestServerWithObserver(t *testing.T) (*Server, *registry.InMemoryRegist
 //
 // Pre-fix behaviour emitted a Warn on EVERY chat request that omitted
 // `user_id`. The cross-talk hazard the Warn signposts is structural
-// (single shared `dm:<agent>:local` for all anonymous callers) — it
+// (every anonymous caller shares the agent's one DM with `local`) — it
 // does not change between requests. At even modest chat QPS the
 // per-request Warn floods the operator's log scrape and drowns out
 // the genuinely actionable lines (the structural cross-talk hazard

@@ -432,7 +432,7 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 | 5 | 5 | Autonomous TICK + sub-agent wiring | `feature/v032-rfc0023-tick-subagent` | ✅ Merged | [#388](https://github.com/mkhomutov/Persatrix/pull/388) | 2026-05-20 |
 | 6 | 6 | Channel-message origin wiring | `feature/v032-rfc0023-channel-message` | ✅ Merged | [#389](https://github.com/mkhomutov/Persatrix/pull/389) | 2026-05-20 |
 | 7 | — | Review follow-ups | `feature/v032-rfc0023-followups` | ✅ Merged | [#391](https://github.com/mkhomutov/Persatrix/pull/391) | 2026-05-20 |
-| 8 | — | Full-RFC closeout | `feature/v032-rfc0023-close` | 🔀 PR open | — | — |
+| 8 | — | Full-RFC closeout | `feature/v032-rfc0023-close` | ✅ Merged | [#392](https://github.com/mkhomutov/Persatrix/pull/392) | 2026-05-20 |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ⏭ Deferred
 

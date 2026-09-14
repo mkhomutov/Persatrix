@@ -1,4 +1,6 @@
-// Package mcp implements the MCP client for connecting to external tool servers.
+// Package mcp is a placeholder for the planned MCP client, which will
+// connect to external tool servers over MCP (the Model Context Protocol).
+// Nothing is implemented yet: the TODOs below are the plan.
 package mcp
 
 // TODO: Implement stdio transport client

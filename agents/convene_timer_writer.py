@@ -14,7 +14,7 @@ hits (PR 7b's ``max_convenings`` / ``standing_budget_tokens`` ceilings included 
 the timer must never bypass the §E bounds built for it).
 
 Two correctness contracts the naive "append a ``timers`` entry" gets wrong, both
-flagged in ``standing_schedule.go`` (its lines 49-62) as deferred to this writer:
+spelled out in the ``standing_schedule.go`` header for whoever writes the timer:
 
   * **Level bump.** ``server_persona.initialize_persona_agents`` builds the
     ``TickScheduler`` (the ``EventLoop`` a timer arms on) ONLY when

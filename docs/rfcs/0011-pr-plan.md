@@ -2,7 +2,7 @@
 
 **RFC**: [0011-channels-bridges.md](0011-channels-bridges.md)
 **Created**: 2026-04-25
-**Last updated**: 2026-05-05 (PR 4a-ii-α merged as #249; PR 4a-ii-β-1 merged as #250; PR 4a-ii-β-2 merged as #251)
+**Last updated**: 2026-09-11 (PR 5 correction; 2026-05-05: PRs 4a-ii-α, 4a-ii-β-1 and 4a-ii-β-2 merged as #249, #250 and #251)
 **Branch prefix**: `feature/v030-rfc0011-`
 **Target**: `main`
 **Merge strategy**: Squash merge per [BRANCHING.md](../BRANCHING.md)
@@ -306,6 +306,8 @@ Deep review completed (local-only, not committed per [Status Hygiene rules](../d
 
 **Depends on**: PR 4 + [RFC 0008 PR plan](0008-pr-plan.md) PR 2 + [RFC 0020 PR plan](0020-pr-plan.md) PR 4 + [RFC 0009 PR plan](0009-pr-plan.md) PR 3.
 **Estimated size**: ~300–500 lines.
+
+> **Correction (2026-09-11).** As built, agents run the Python `sanitize()` copy (checklist below), not Go's `InputSanitizer`; it only flags and logs, and no audit event fires ([RFC 0009 IN-8](0009-security-sandboxing.md#in-8-the-orchestrator-never-calls-the-go-inputsanitizer)).
 
 #### Scope (high-level)
 

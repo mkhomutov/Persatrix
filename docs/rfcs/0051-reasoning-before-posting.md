@@ -168,7 +168,7 @@ The plan and reason are the most context-revealing artifacts a persona produces,
 | Audience | Sees the plan / reason? | Mechanism |
 |----------|-------------------------|-----------|
 | **Peer personas + channel store** | **Never** | Structural — the plan is not an `AgentAction`, is never persisted, and is unreachable by RFC 0034 reconstruction (bullets below). Load-bearing for the no-pile-on premise. |
-| **Human operator (debug)** | **Opt-in** | The verbatim `reason_note` (and, under a debug flag, the rendered plan) egress to the agent **debug log** — the same channel [MT-CHANNEL-RELEVANCE-001](../manual-tests/MT-CHANNEL-RELEVANCE-001.md) already uses to observe Tier-B silence — plus a committed web-console reveal, built as its own PR ([OQ 6](#open-questions) (a)). *Not* the audit event. |
+| **Human operator (debug)** | **Opt-in** | The verbatim `reason_note` (and, under a debug flag, the rendered plan) egress to the agent **debug log** — the same channel [MT-CHANNEL-RELEVANCE-001](../manual-tests/MT-CHANNEL-RELEVANCE-001.md) already uses to observe Tier-B silence — plus a committed web-console reveal, built as its own PR ([OQ 6](#open-questions) (a)). *Not* the audit event. *Corrected 2026-09-12 — [§E correction](0051-amendment-reasoning-kernel.md#e-correction-2026-09-12--where-the-reason_note-actually-egresses).* |
 | **End-users watching the channel** | **No (deferred)** | A "show the reasoning" product surface is a separate, explicit egress mode, not a relaxation of this wall — out of scope here ([Non-Goals](#non-goals), [OQ 6](#open-questions)). |
 
 The structural wall for the first two audiences:

@@ -325,6 +325,8 @@ Plus two non-behavioural cleanups: the dead `warning` return on `ReasoningConfig
 
 **Depends on**: PR 4 merged (needs the `reason_note` shape). **Independent of the PR 5/6 chain** — may land any time alongside Phase 3, and is **droppable** without affecting the headline.
 
+> 2026-09-12 — the agent-log half of the backend debug-egress landed as v0.3.16 [PR B2](../v0.3.16-pr-plan.md#pr-b2--featurev0316-issue0108-reason-note-egress) ([ISSUE-0108](../issues/ISSUE-0108-reasoning-reason-note-no-operator-egress.md)): one `agent.deliberation.reason_note` DEBUG record per suppressed turn. The checklist's second line below was wrong when written — nothing egressed the note until then. The web reveal and the plan egress stay unbuilt.
+
 #### Scope
 
 | File | Change |
@@ -448,7 +450,7 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 | 4 | 3a | `reasoning` config backend (capability-gated) | `feature/v0310-rfc0051-config-backend` | ✅ Merged | [#695](https://github.com/mkhomutov/Persatrix/pull/695) | ✅ |
 | 5 | 3b | CLI + web config surfaces (enum + dotted-key) | `feature/v0310-rfc0051-config-surfaces` | ✅ Merged | [#696](https://github.com/mkhomutov/Persatrix/pull/696) | ✅ |
 | 6 | 3c | Telemetry + default flip `off → bid` (GO-LIVE) | `feature/v0310-rfc0051-telemetry-golive` | ✅ Merged | [#697](https://github.com/mkhomutov/Persatrix/pull/697) | ✅ |
-| 7 | OQ 6a | Operator reasoning reveal (separate / cuttable) | `feature/v0310-rfc0051-operator-reveal` | ⏭ Cut from v0.3.10 | — | — |
+| 7 | OQ 6a | Operator reasoning reveal (separate / cuttable) | `feature/v0310-rfc0051-operator-reveal` | ⏭ Cut from v0.3.10 — the agent-log half landed as v0.3.16 PR B2 (ISSUE-0108) | — | — |
 | 8 | 5a | Reflexion loop (default `revise: 0`) | `feature/v0310-rfc0051-reflexion` | ✅ Merged | [#698](https://github.com/mkhomutov/Persatrix/pull/698) | ✅ |
 | 9 | 5b | No-leak extension + closeout | `feature/v0310-rfc0051-close` | ✅ Merged | [#699](https://github.com/mkhomutov/Persatrix/pull/699) | ✅ |
 

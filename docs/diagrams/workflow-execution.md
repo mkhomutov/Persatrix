@@ -3,101 +3,223 @@
 End-to-end sequence for a task-style workflow: from CLI submission, through
 DAG planning and stage-level scheduling, to per-step gRPC dispatch. This is
 the v0.1 surface; v0.2 layered cost accounting and budget enforcement onto
-the same path. v0.2.1 added a separate chat-message path, shown in the second
-diagram below. v0.3.11 added the autonomous-brainstorm path — a channel
-discussion that convenes, runs, terminates, and synthesizes with no human in
-the loop — shown in the third diagram.
+the same path. v0.2.1 added a chat path, and v0.3.0 moved it onto
+direct-message (DM) channels; the second diagram shows chat as it runs today.
+v0.3.11 added the autonomous-brainstorm path — a channel discussion that
+convenes, runs, terminates, and synthesizes with no human in the loop — shown
+in the third diagram.
 
 ## Workflow execution sequence
+
+A workflow run changes hands through run state (`internal/state`), the
+orchestrator's record of every run and its steps, kept in memory only, so a
+restart loses them. Nothing calls the scheduler directly. The REST server
+checks the workflow file with the planner, stores the run as pending and
+answers `201 Created` with the run ID. The scheduler checks run state every
+second and picks the run up. It reads the workflow file again, has the planner
+split it into stages, and runs the stages in order, writing each step's
+progress back to run state. `persatrix status` reads the run from there.
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant User as Operator
-    participant CLI as Rust CLI
+    participant Op as Operator<br/>(persatrix CLI)
     participant Srv as REST Server<br/>(internal/server)
-    participant Plan as YAMLPlanner
-    participant Sched as Scheduler<br/>(stage_runner)
-    participant Exec as Executor<br/>(gRPC)
-    participant Agent as Python Agent<br/>(task_agent.py)
-    participant LLM as LLM Provider
+    participant Plan as Planner<br/>(internal/planner)
+    participant State as Run state<br/>(internal/state)
+    participant Sched as Scheduler<br/>(internal/scheduler)
     participant Cost as Cost tracker<br/>(internal/cost)
+    participant Exec as Executor<br/>(internal/executor)
+    participant Agent as Task agent<br/>(agents/task_agent.py)
+    participant Wallet as Wallet<br/>(internal/wallet)
+    participant LLM as LLM Provider
 
-    User->>CLI: persatrix run workflow.yaml
-    CLI->>Srv: POST /api/v1/workflows/run
-    Srv->>Plan: parse + validate DAG
-    Plan->>Plan: cycle detection + topological sort
-    Plan-->>Srv: stages[] (parallel-ready sets)
-    Srv-->>CLI: run_id (202 Accepted)
+    Op->>Srv: persatrix run <workflow_id><br/>POST /api/v1/workflows/run<br/>{ workflow_id, inputs }
+    Srv->>Plan: Parse + ValidateDAG<br/>(<workflow_id>.yaml)
+    Plan-->>Srv: valid (else 422)
+    Srv->>State: CreateRun(status pending)
+    Srv-->>Op: 201 Created { run_id,<br/>workflow_id, status: pending }
+    Note over Op: the CLI prints the run_id and exits
 
-    loop For each stage
-        Sched->>Cost: check budget (max_tokens, max_llm_calls)
-        alt budget exhausted
-            Cost-->>Sched: BudgetExceeded
-            Sched-->>Srv: mark run failed
-        else budget ok
-            par Parallel steps in stage
-                Sched->>Exec: execute step_i
-                Exec->>Agent: ExecuteTask(task) [gRPC]
+    Note over Srv,Sched: the server never calls the scheduler ·<br/>the run waits in run state
+    Sched->>State: ListRuns (every second)
+    State-->>Sched: all runs · this one is pending
+    Sched->>Plan: Parse + ValidateDAG + Plan
+    Plan-->>Sched: stages (steps that can run side by side)
+    Sched->>State: UpdateRunStatus(running) ·<br/>SetRunTimestamps(start)
+
+    loop Each stage, in order
+        par Every step in the stage at once
+            Sched->>State: UpdateStepState(running)
+            Sched->>Plan: ResolveInputs(step, run inputs, earlier outputs)
+            Plan-->>Sched: the step's input
+            Sched->>Cost: CheckBudget(the step's<br/>worst-case cost)
+            Cost-->>Sched: allowed<br/>(a reject fails the step)
+            Sched->>Exec: ExecuteTask(step, input)
+            Exec->>Agent: ExecuteTask(task) [gRPC]
+            loop Each LLM call (at most max_llm_calls)
+                Agent->>Wallet: AcquireLease(estimated tokens) [gRPC]
+                Wallet-->>Agent: lease (a refusal fails the step)
                 Agent->>LLM: complete(prompt, tools)
                 LLM-->>Agent: output + usage
-                Agent-->>Exec: TaskResult + cost metadata
-                Exec->>Cost: record tokens/cost/cache-hit
-                Exec-->>Sched: step result
+                Agent->>Wallet: SettleLease(tokens used) [gRPC]
             end
-            Sched->>Srv: update run + step state
+            Agent-->>Exec: TaskResponse(result + usage)
+            Exec-->>Sched: step result
+            Sched->>Cost: RecordStepCost(tokens · USD)
+            Sched->>State: UpdateStepState(completed ·<br/>output · metadata)
+        end
+        break a step failed
+            Sched->>State: SetRunTimestamps(finish) ·<br/>SetRunError ·<br/>UpdateRunStatus(failed)
         end
     end
+    Sched->>State: SetRunTimestamps(finish) ·<br/>UpdateRunStatus(completed)
 
-    CLI->>Srv: GET /api/v1/workflows/{run_id}/status
-    Srv-->>CLI: run + per-step status + cost summary
-    opt Cost endpoint
-        CLI->>Srv: GET /api/v1/cost/summary
-        Srv-->>CLI: aggregated tokens · USD · cache hits
+    Op->>Srv: persatrix status <run_id><br/>GET /api/v1/workflows/{run_id}/status
+    Srv->>State: GetRun(run_id)
+    State-->>Srv: the run and its steps
+    Srv-->>Op: 200 { status, error, times, steps }<br/>(the CLI prints status, error and times)
+    opt Totals so far (persatrix cost is not built yet)
+        Op->>Srv: GET /api/v1/cost/summary
+        Srv->>Cost: GlobalSummary
+        Cost-->>Srv: tokens · USD · top agents
+        Srv-->>Op: 200 { daily_input_tokens,<br/>daily_output_tokens,<br/>daily_estimated_usd, top_agents }
     end
 ```
 
-## Chat message sequence (v0.2.1)
+How the pieces fit:
+
+- **The run waits in run state.** A new run waits there until the
+  scheduler's next check, or longer when 10 runs are already going. The
+  scheduler reads the workflow file again when it starts the run, so an edit
+  made in between is what runs, and a file that no longer parses fails the
+  run.
+- **Two budget checks.** Before each step, the scheduler asks the cost
+  tracker whether the step's worst-case cost still fits the spending limits in
+  `config/optimization.yaml`: a daily total, one per workflow and one per
+  agent. That check only stops a clearly over-budget step early. The wallet
+  is what enforces the limits: the agent takes a lease before every LLM call
+  ([RFC 0023](../rfcs/0023-llm-call-leasing.md)), and the wallet refuses one
+  that would overspend. The wallet also counts each call's tokens in the cost
+  tracker, which is what `GET /api/v1/cost/summary` reports. Nothing resets
+  those counts at midnight yet (a TODO in `cmd/orchestrator/main.go`), so the
+  daily total and the summary's `daily_*` fields count from when the
+  orchestrator started. No endpoint reads the scheduler's own per-step entry
+  (`RecordStepCost`) today.
+- **Cached steps skip the agent.** For a step marked `cacheable: true`, the
+  executor first looks in the response cache (`internal/cost`) for an earlier
+  answer to the same input, and returns it without calling the agent.
+- **A failed step stops the run.** The other steps in its stage still finish,
+  later stages never start, and the run is marked failed with the error of
+  every step that failed.
+
+## Chat message sequence (chat as a DM, since v0.3.0)
+
+Talking to a persona is a direct message (DM) on the channels subsystem
+([Chat-as-DM](../ai-glossary.md#chat-as-dm)). Since v0.3.0
+([#251](https://github.com/mkhomutov/Persatrix/pull/251)),
+`POST /api/v1/agents/{id}/chat` posts your message to your DM with the agent
+and holds the HTTP request open until the agent's reply lands in the same
+channel. The agent answers as it answers any channel message, by posting its
+reply back through the REST API. `persatrix chat` and the web console's
+timeline both use this endpoint.
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant Human as Human user
-    participant CLI as Rust CLI<br/>(persatrix chat)
+    participant CLI as Rust CLI or web console<br/>(persatrix chat · timeline)
     participant Srv as REST Server<br/>(internal/server)
-    participant ChatExec as Chat executor<br/>(internal/executor)
     participant Reg as Registry<br/>(internal/registry)
+    participant Router as Channel router + store<br/>(internal/channels)
     participant Agent as PersonaAgent<br/>(agents/persona*)
     participant Mem as Memory stores<br/>(agents/memory)
+    participant Wallet as Wallet<br/>(internal/wallet)
     participant LLM as LLM Provider
 
     Human->>CLI: persatrix chat <agent_id> [--user <user_id>]
     CLI->>Srv: POST /api/v1/agents/{id}/chat<br/>{ message, user_id, chat_session_id? }
-    Srv->>Reg: look up agent endpoint
-    Reg-->>Srv: gRPC address
-    Srv->>ChatExec: dispatch SendChatMessage
-    ChatExec->>Agent: SendChatMessage(ChatRequest) [gRPC]
+    Srv->>Reg: look up agent
+    Reg-->>Srv: registered and healthy (else 404 / 503)
+    Srv->>Router: GetOrCreateDM(user_id, agent_id)
+    Router-->>Srv: the DM channel (created on the first chat)
+    Srv->>Router: PublishAndAwait(message, reply from agent_id)
+    Router->>Router: register a reply waiter ·<br/>store the message
+    Router->>Agent: ReceiveChannelMessage(event) [gRPC]
+    Agent-->>Router: TaskAck (queued · the reply comes later)
 
-    Agent->>Mem: load working context + episodic recall
-    Mem-->>Agent: context window
-    Agent->>LLM: complete(system+context+message)
-    LLM-->>Agent: reply text + usage
-    Agent->>Mem: store episodic episode (user msg + reply)
-    Agent->>Mem: update relationship memory (trust score, interaction count)
-    Agent-->>ChatExec: ChatResponse { reply, chat_session_id, reply_status }
-    ChatExec-->>Srv: ChatResponse
-    Srv-->>CLI: 200 { reply, chat_session_id, agent_display_name }
+    Note over Agent: event loop runs process_inbound_channel_event
+    Agent->>Mem: load memory context
+    Mem-->>Agent: working memory + recalled memories
+    Agent->>Srv: GET /api/v1/channels/{id}/messages<br/>(recent DM messages)
+    Srv-->>Agent: the conversation so far
+    Agent->>Wallet: AcquireLease(estimated tokens) [gRPC]
+    alt lease granted
+        Wallet-->>Agent: lease
+        Agent->>LLM: complete(system + memory + conversation)
+        LLM-->>Agent: reply text + usage
+        Agent->>Wallet: SettleLease(tokens used) [gRPC]
+        Agent->>Mem: add the turn to the open DM conversation
+        Agent->>Srv: POST /api/v1/channels/{id}/messages<br/>(SEND_CHANNEL_MESSAGE reply)
+    else lease refused (spending limit or lease cap)
+        Wallet-->>Agent: refused
+        Agent->>Srv: POST /api/v1/channels/{id}/messages<br/>(refusal text · reply_status=error)
+    end
+    Srv->>Router: PublishAsync(reply)
+    Router->>Router: store the reply · wake the waiter
+    Router-->>Srv: PublishAndAwait returns the reply
+    Srv-->>CLI: 200 { reply, reply_status, chat_session_id, channel_id }
     CLI-->>Human: print reply
 
     loop User continues chatting
         Human->>CLI: next message
-        Note over CLI,Srv: same chat_session_id re-used
+        Note over CLI,Srv: same DM each time · chat_session_id re-used
         CLI->>Srv: POST /api/v1/agents/{id}/chat<br/>{ message, user_id, chat_session_id }
     end
 
     Human->>CLI: exit (or Ctrl-C)
     CLI-->>Human: session ended
+
+    Note over Agent,Mem: DM quiet for interaction_idle_timeout_sec (600 s)<br/>→ closed at the agent's next event
+    Agent->>LLM: summarize + extract facts (no lease)
+    LLM-->>Agent: summary + facts
+    Agent->>Mem: save one episode + facts ·<br/>update the relationship once
 ```
+
+How the pieces fit:
+
+- **One DM per person and agent.** `GetOrCreateDM` finds the channel, or
+  creates it on the first chat, so every message from you to that agent lands
+  in the same conversation, even after the CLI restarts. With auth on, the
+  handler uses the logged-in account's participant ID instead of the
+  `user_id` in the body. `chat_session_id` is stored with each message and
+  sent back, but the agent never receives it.
+- **The request waits for the reply.** `PublishAndAwait` sets up its reply
+  waiter before it stores your message, so even an instant reply is caught.
+  It waits 30 s by default; a request can ask for 1–300 s with
+  `timeout_seconds`. If no reply comes in time, the handler returns 504 and
+  your message stays stored.
+- **The agent answers later.** `ReceiveChannelMessage` only queues the
+  message and acknowledges it. The agent's event loop then handles it in
+  `process_inbound_channel_event` (`agents/chat_reply.py`), reading the
+  recent messages of the DM so the model sees the conversation so far.
+- **Every reply call is leased.** The agent asks the wallet for a lease
+  before each LLM call ([RFC 0023](../rfcs/0023-llm-call-leasing.md)). The
+  lease is labeled `CAUSE_CHANNEL_MESSAGE`, as for any channel message,
+  because the `chat_session_id` that would label it `CAUSE_CHAT` never
+  reaches the agent; the wallet only writes the label to its logs
+  ([ISSUE-0155](../issues/ISSUE-0155-rest-chat-leased-as-channel-message.md)).
+  If the wallet refuses — a spending limit is reached, or the agent already
+  holds too many leases — the agent posts the refusal as its reply, marked
+  `reply_status="error"`. The handler then returns HTTP 200 with
+  `reply_status="error"` and the refusal text in `reply`.
+- **Memory is written once per conversation.** Each turn joins the open DM
+  conversation, which the agent keeps in its own process. Once the DM has
+  been quiet for `interaction_idle_timeout_sec` (600 s by default), the agent
+  closes the conversation the next time it handles any event, such as a new
+  message. One LLM call then summarizes it and extracts facts; the agent
+  saves the summary as one episode and updates its relationship record for
+  you once ([`record_close.py`](../../agents/persona_runtime/record_close.py)).
 
 ## Autonomous brainstorm sequence (v0.3.11, RFC 0052)
 
@@ -126,12 +248,12 @@ sequenceDiagram
     Op->>Srv: persatrix channel convene / web button<br/>POST /api/v1/channels/{id}/convene
     Srv->>Router: ConveneChannel(id)
     Router->>Router: gates: armed · idle · convener valid ·<br/>open-floor audience · topic present
-    Router->>Conv: convene forced turn<br/>(synthetic sender; topic/agenda/goal in external_data)
+    Router->>Conv: convene forced turn<br/>(synthetic sender · topic/agenda/goal in external_data)
     Srv-->>Op: 202 { convener, status: convening }
 
     Conv->>LLM: author opening turn (lease resolves uncapped — pre-snapshot, §B)
     Conv->>Router: Publish(opening turn)
-    Router->>Router: mint fresh interaction_id;<br/>snapshot interaction_budget_tokens at first commit
+    Router->>Router: mint fresh interaction_id ·<br/>snapshot interaction_budget_tokens at first commit
 
     loop Governed floor rounds (InboundEventWake chain — no human)
         Router->>Roster: fan out stimulus (floor-serialized)
@@ -144,13 +266,13 @@ sequenceDiagram
     end
 
     Note over Router: bound crossed (trigger = structural | cost)
-    Router->>Chair: synthesis forced turn against autonomous.goal<br/>(claims the closing interaction_id; timeout net armed)
+    Router->>Chair: synthesis forced turn against autonomous.goal<br/>(claims the closing interaction_id · timeout net armed)
     Chair->>Wallet: AcquireLease(interaction_id)
     Wallet-->>Chair: grant — funded by the held-back reserve
     Chair->>LLM: goal-directed synthesis over the discussion
     Chair->>Router: Publish(marked synthesis reply)
     Router->>Router: close-on-reply: retire id ·<br/>interaction_closed{trigger} · no reopen
-    Router->>Roster: close notification carrying the synthesis<br/>(sole delivery; truthful trigger)
+    Router->>Roster: close notification carrying the synthesis<br/>(sole delivery · truthful trigger)
 
     par Per-persona RFC 0020 close (each member, sender included)
         Roster->>Roster: ingest synthesis as final turn ·<br/>close scope (cost | structural)
@@ -238,10 +360,27 @@ same cost tracker when they call `LLMClient.complete()`. See
 ## What v0.2.1 added on this path
 
 - `POST /api/v1/agents/{id}/chat` REST endpoint in `internal/server/chat_handler.go`.
-- `SendChatMessage` gRPC RPC in `proto/task.proto` dispatched by `internal/executor/`.
+- `SendChatMessage` gRPC RPC in `proto/task.proto` dispatched by
+  `internal/executor/` — unused since v0.3.0 (next section).
 - `agents/participant.py` — `UserParticipant` and `UserStore` for per-user
   identity persistence and relationship memory keyed on `(agent_id, user_id)`.
 - `persatrix chat <agent_id>` CLI command (interactive REPL).
+
+## What v0.3.0 changed on this path
+
+- Chat became a DM ([RFC 0011 amendment](../rfcs/0011-amendment-chat-as-dm.md)).
+  `handleChat` in `internal/server/chat_handler.go` finds the DM with
+  `GetOrCreateDM` and calls `ChannelRouter.PublishAndAwait`
+  (`internal/channels/publish_and_await.go`).
+- The agent receives chat over `ReceiveChannelMessage`
+  (`agents/server_servicers.py`), like any channel message, and replies with a
+  `SEND_CHANNEL_MESSAGE` action. `HTTPChannelPublisher`
+  (`agents/channel_publisher.py`) posts that reply to
+  `POST /api/v1/channels/{id}/messages`.
+- The v0.2.1 chat executor is still built — `cmd/orchestrator/main.go` calls
+  `executor.NewGRPCChatExecutor` — but nothing calls it or `SendChatMessage`
+  any more. [ISSUE-0035](../issues/ISSUE-0035-chat-executor-dead-but-wired-cleanup.md)
+  tracks removing them.
 
 ## Known gaps on the chat path
 
@@ -249,19 +388,22 @@ These are intentionally documented in prose rather than the sequence diagram
 above so the diagram stays a description of the *runtime* shape, not a list of
 open tickets.
 
-- **`UserStore` is not yet invoked from the chat path.** `SendChatMessage` in
-  `agents/server_servicers.py` only calls `validate_participant_type` from
-  `agents/participant.py`; relationship memory is written via
-  `agent.memory.relationship.record_interaction(...)` keyed on `user_id`
-  directly, without going through `UserStore.get_or_create()`. The store ships
-  in v0.2.1 and is exercised by its own unit tests, but wiring it into the
-  servicer is a follow-up. This is also the reason the `AGSVC --> PART` and
-  `SRV --> PART` edges are drawn dashed in [system-overview.md](system-overview.md)
-  and [component-architecture.md](component-architecture.md).
-- **Chat is not on the cost-tracking path.** The workflow sequence above
-  records tokens, USD and cache-hits via `internal/cost/` after every
-  `ExecuteTask`. The chat path does not: `internal/executor/chat.go` and
-  `agents/server_servicers.py` do not reference the cost tracker, and
-  `ChatResponse` carries no `usage` field today. Chat token spend is therefore
-  invisible to `GET /api/v1/cost/summary`. Closing this gap is tracked
-  separately from this diagram refresh.
+- **`UserStore` is not yet invoked from the chat path.** Nothing outside the
+  tests creates a `UserStore`, and only the unused `SendChatMessage` servicer
+  imports `validate_participant_type` from `agents/participant.py`.
+  Relationship memory is written when a DM conversation closes
+  ([`record_close.py`](../../agents/persona_runtime/record_close.py)), keyed on
+  the other participant in the `dm:` channel ID, without going through
+  `UserStore.get_or_create()`. The store has shipped since v0.2.1 and is
+  exercised by its own unit tests, but wiring it into the chat path is a
+  follow-up. This is also why the `AGSVC -. planned .-> PART` edge in
+  [system-overview.md](system-overview.md) and the `SRV -. planned .-> PART`
+  edge in [component-architecture.md](component-architecture.md) are dashed.
+- **The closing summary is not on the cost-tracking path.** Chat replies are.
+  Since v0.3.2 every LLM call the agent makes to answer takes a wallet lease,
+  and the wallet charges it to the same token counter (`internal/cost`) that
+  `GET /api/v1/cost/summary` reads. Chat tokens therefore count toward the
+  daily totals and appear under the persona's ID in `top_agents`. The call
+  that summarizes a DM conversation when it closes runs without a lease, so
+  the cost summary never sees its tokens. Only the autonomous brainstorm's
+  bounded close leases its summaries (above).

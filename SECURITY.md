@@ -29,7 +29,8 @@ Security fixes are applied to the latest release on the `main` branch. Older ver
 Persatrix uses deny-by-default security for agent permissions. For details on the security model, see:
 
 - [Agent Configuration](config/agents.yaml) — Agent permissions and capabilities
-- [Security Gates](internal/security/) — Go orchestrator security enforcement
+- [Tool permission checks](agents/tools/permissions.py) — deny-by-default, run in the Python agents
+- [Orchestrator security controls](internal/security/) — audit log, secret redaction, rate limiting
 
 ### Human authentication (v0.3.12+)
 

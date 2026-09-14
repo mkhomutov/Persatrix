@@ -17,7 +17,7 @@ import (
 // discriminator on the channel-receive path so wallet budget denials
 // surface as HTTP 200 + reply_status="error" instead of HTTP 504
 // DEADLINE_EXCEEDED. Companion tests for the Python-side fix in
-// agents/server_servicers.py::_dispatch_channel_event live in
+// agents/chat_reply.py (process_inbound_channel_event) live in
 // agents/tests/test_chat_path_budget_denial.py.
 
 // TestHandleChat_ReplyMetadataReplyStatusErrorSurfacedAs200 pins ISSUE-0065:
@@ -40,7 +40,7 @@ func TestHandleChat_ReplyMetadataReplyStatusErrorSurfacedAs200(t *testing.T) {
 	denialMsg := "per_agent budget exceeded: spent=0.017259, limit=0.100000, estimated=0.084555"
 
 	// Simulate the agent's error-envelope reply on the DM (what
-	// `_dispatch_channel_event` publishes after catching BudgetExceededError).
+	// `publish_chat_error_on_channel` publishes on a BudgetExceededError).
 	go func() {
 		time.Sleep(20 * time.Millisecond)
 		dm, err := store.GetOrCreateDM(context.Background(), "alice", "ember-owl")

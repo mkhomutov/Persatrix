@@ -8,9 +8,10 @@ module renders each gated tier against that budget in the canonical
 priority order and stages the admitted sections in working memory.
 
 The tier recalls and the budget construction stay behind deliberately:
-the test harnesses patch ``recall_room_ranked`` and monkeypatch the
-``MEMORY_BUDGET_TOKENS`` constant by ``memory_context``'s name, and a
-moved call would silently escape those patches.  The channel-roster
+the test harnesses patch ``recall_room_ranked`` by ``memory_context``'s
+name, and the budget total is the mixin's own resolved
+``_memory_budget_tokens`` (v0.3.16 K1) — a moved call would either
+escape that patch or need the mixin.  The channel-roster
 tier stays behind too — it is injected outside the budget, and v0.3.16
 PR A1 moves it ahead of the gate.
 

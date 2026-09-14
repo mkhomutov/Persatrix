@@ -194,7 +194,7 @@ func TestConvene_RejectsMissingChannel(t *testing.T) {
 // TestConvene_RejectsWhenInteractionOpen — convening a channel that already has
 // an open committed interaction is refused loudly (ErrChannelAlreadyConvening)
 // rather than silently joining the live discussion. Convening is "open an idle
-// channel"; the live case is PR 7's force-fresh territory.
+// channel"; no force-fresh convene exists for the live case.
 func TestConvene_RejectsWhenInteractionOpen(t *testing.T) {
 	router, disp, ch := conveneHarness(t, AutonomousConfig{
 		Enabled: true, Convener: "nova-sparrow", Topic: "Live already",

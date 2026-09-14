@@ -38,6 +38,21 @@ from evaluators.assertions import (
 _SCHEMA_PATH = Path(__file__).resolve().parents[1] / "schemas" / "eval_set.schema.json"
 
 
+def _load_schema() -> dict[str, Any]:
+    with _SCHEMA_PATH.open(encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+_TIER_SPEC = _load_schema()["properties"]["tier"]
+#: The RFC 0044 §F tiers, read from the schema's closed ``tier`` enum. The
+#: runner's ``--tier`` choices import this, so the CLI and the loader can never
+#: disagree about which tiers exist (a tier added to the schema is a valid
+#: ``--tier`` the same day).
+TIERS: tuple[str, ...] = tuple(_TIER_SPEC["enum"])
+#: The tier a recipe lands in when it declares none — outside the CI gate.
+DEFAULT_TIER: str = str(_TIER_SPEC["default"])
+
+
 # ─── Recipe model ───────────────────────────────────────────────────────────
 
 
@@ -139,7 +154,7 @@ class EvalSet:
     setup: Setup
     interactions: list[Interaction]
     assertions: Assertions
-    tier: str = "experimental"
+    tier: str = DEFAULT_TIER
     description: str | None = None
     spawned_from: str | None = None
 
@@ -162,21 +177,28 @@ class EvalReport:
 # ─── Loading ────────────────────────────────────────────────────────────────
 
 
-def _load_schema() -> dict[str, Any]:
-    with _SCHEMA_PATH.open(encoding="utf-8") as fh:
-        return json.load(fh)
-
-
 def load_eval_set(path: str | Path) -> EvalSet:
     """Parse and validate a recipe file, returning a typed :class:`EvalSet`.
 
     Raises :class:`ValueError` on any malformed recipe — schema violations and
     the RFC 0044 §D ``exact``-on-content rule alike — so a single ``except
-    ValueError`` at the call site catches every load failure.
+    ValueError`` at the call site catches every load failure (the runner's
+    ``load_recipes`` is that call site: it turns each into a failed recipe in
+    the report rather than a traceback).
     """
     with Path(path).open(encoding="utf-8") as fh:
         data = yaml.safe_load(fh)
+    return parse_eval_set(data)
 
+
+def parse_eval_set(data: Any) -> EvalSet:
+    """:func:`load_eval_set` for an already-parsed YAML mapping.
+
+    The runner reads each recipe's YAML once — to peek ``tier`` before deciding
+    whether the recipe is in the selected tier at all — and then parses that
+    same mapping here, so a recipe outside the gated tier is never validated
+    and a recipe inside it is parsed exactly once.
+    """
     if not isinstance(data, dict):
         raise ValueError(f"eval-set must be a mapping, got {type(data).__name__}")
 
@@ -196,7 +218,7 @@ def load_eval_set(path: str | Path) -> EvalSet:
         setup=setup,
         interactions=interactions,
         assertions=assertions,
-        tier=data.get("tier", "experimental"),
+        tier=data.get("tier", DEFAULT_TIER),
         description=data.get("description"),
         spawned_from=data.get("spawned_from"),
     )

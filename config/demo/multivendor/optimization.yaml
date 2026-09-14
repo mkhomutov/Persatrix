@@ -126,3 +126,6 @@ wallet:
 
 conversation_window:
   enabled: true
+
+# memory_budget.tokens (RFC 0017 §B; v0.3.16 K1) is unset here on purpose —
+# the built-in default applies. How to retune: config/optimization.yaml.

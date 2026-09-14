@@ -79,7 +79,7 @@ mechanics are covered by the RFC 0030 salience suites).
 - [RFC 0050 — Extensible Channel Configuration](../rfcs/0050-extensible-channel-configuration.md) — the truth model; the member-threshold slice it stayed open on
 - [RFC 0050 Phase 2 PR plan](../rfcs/0050-phase2-pr-plan.md) — member thresholds were the deferred slice
 - [MT-CHANNEL-CONFIG-002](MT-CHANNEL-CONFIG-002.md) — the channel-settings web sibling (panel render, sparse PATCH, G4 read-back)
-- [Web Console guide § Channel settings](../guides/web-console.md#channel-settings--edit-governance-from-the-browser) — operator-facing walkthrough
+- [Web Console — Channel Settings guide](../guides/web-console-channel-settings.md) — operator-facing walkthrough
 
 **Related Automated Tests** (the deterministic half — #660 is web-only):
 - [`api.members.test.js`](../../web/src/lib/api.members.test.js) — `updateChannelMember` wire: PATCH body `{respond, threshold}`, explicit `null` unset, error mapping

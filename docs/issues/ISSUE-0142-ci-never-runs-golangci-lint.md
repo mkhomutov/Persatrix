@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0142
 summary: "CI runs no Go linter and the repository pins no golangci-lint version or config, so `make lint`'s Go leg is both unenforced by any merge and unreproducible between machines — the same gap shape as the cargo-test omission #813 found, surviving the methodology series that was meant to close exactly this class"
-status: open
+status: resolved
 severity: medium
 area: ci
 created: 2026-09-06
+closed: 2026-09-12
+closed_pr: 945
 refs:
   - .github/workflows/ci.yml
   - docs/methodology/enforcement-matrix.md
@@ -94,3 +96,23 @@ sweep.
 > enforcement matrix for make targets with no CI job) rides the same PR.
 >
 > 2026-09-08 — **Locked at the v0.3.16 plan opening** ([v0.3.16 plan](../v0.3.16-plan.md) PR C1, paired with RFC 0044 Phase 2 as PR C2; [v0.3.16 scope locks](../v0.3.16-scope-locks.md) lock 5). The PR that adds the job also lists it in the branch-protection file — a job is a gate only once it is required.
+>
+> 2026-09-12 — **Resolved by v0.3.16 PR C1.** The pin is one Makefile
+> variable (`GOLANGCI_LINT_VERSION`, v2.13.2); `make lint-go` refuses any
+> other version and names the install target; `.golangci.yml` enables the
+> five linters by name (`errcheck`, `govet`, `ineffassign`, `staticcheck`,
+> `unused`) and inherits no version default. CI reads the pin, installs
+> exactly it and runs `make lint-go` — as a **step inside the required
+> `Go (build + test)` job**, not a new job, so the gate is required from
+> the day it lands with no branch-protection change to wait for (the
+> 2026-09-08 note's concern, answered by not adding a job). The first run's
+> 30 findings, triaged per linter: `errcheck` — `fmt.Fprint*` to stderr and
+> `defer x.Close()` on read handles excluded with reasons in the config;
+> the `lis.Close()` calls in test cleanups made explicit; `ineffassign` —
+> the dead interim `cleanup` in `cmd/orchestrator/channels.go` removed;
+> `staticcheck` — four rewritten, one `S1002` kept behind a `//nolint`
+> with its reason (the comparison is against the named default, not a
+> literal). Step 4's re-audit is recorded on the
+> [enforcement matrix](../methodology/enforcement-matrix.md#what-this-table-says-the-project-should-change):
+> only `notices-check` (deliberate) and `eval-replay` (PR C2) remain
+> without a CI step.

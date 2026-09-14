@@ -155,10 +155,11 @@ type AutonomousConfig struct {
 	// RFC 0052 §E / PR 7 standing sub-knobs (rationale in config_autonomous_standing.go).
 	// ScheduleIntervalSeconds is the RFC 0024 timer interval that makes the channel
 	// STANDING (the convener re-woken every interval_seconds); 0 is a one-shot
-	// channel, a positive value (>= 1s) arms the schedule. MaxConvenings /
+	// channel, a positive value (>= 1s) marks it standing. MaxConvenings /
 	// StandingBudgetTokens are the aggregate bound a standing channel MUST carry (0 =
-	// unset), since the per-interaction cap does not bound a recurring schedule. DARK
-	// in PR 7a apart from the aggregate-bound validate gate.
+	// unset), since the per-interaction cap does not bound a recurring schedule;
+	// [ChannelRouter.ConveneChannel] enforces both. No timer is armed from this
+	// field: the operator adds the convener's `convene` timer to agents.yaml by hand.
 	ScheduleIntervalSeconds int   `yaml:"schedule_interval_seconds"`
 	MaxConvenings           int   `yaml:"max_convenings"`
 	StandingBudgetTokens    int64 `yaml:"standing_budget_tokens"`
@@ -229,7 +230,10 @@ func (a AutonomousConfig) validateFields() error {
 // channel silently reads back disabled.
 func (a AutonomousConfig) FreezeOverrides() *AutonomousOverrides {
 	var ov AutonomousOverrides
-	if a.Enabled != DefaultAutonomousEnabled {
+	// The comparison is against the package default on purpose (only a
+	// non-default sub-knob is captured); staticcheck S1002 would fold it to
+	// `a.Enabled` and lose that intent if the default ever flips.
+	if a.Enabled != DefaultAutonomousEnabled { //nolint:staticcheck // S1002: compare to the named default, not to a literal
 		enabled := a.Enabled
 		ov.Enabled = &enabled
 	}

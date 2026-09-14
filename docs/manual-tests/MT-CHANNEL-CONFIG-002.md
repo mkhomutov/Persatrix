@@ -64,7 +64,7 @@ re-verify it); editable member thresholds and the effective-policy preview (both
 
 - [RFC 0050 — Extensible Channel Configuration](../rfcs/0050-extensible-channel-configuration.md) — the truth model and goals (G1/G4) this MT accepts
 - [RFC 0050 Phase 2 PR plan](../rfcs/0050-phase2-pr-plan.md) — the 3-PR web-only breakdown; this MT is PR 3's live arc
-- [Web Console guide § Channel settings](../guides/web-console.md#channel-settings--edit-governance-from-the-browser) — operator-facing panel walkthrough
+- [Web Console — Channel Settings guide](../guides/web-console-channel-settings.md) — operator-facing panel walkthrough
 - [Channels guide § Editing governance config at runtime](../guides/channels.md#editing-governance-config-at-runtime--channel-config-rfc-0050-phase-1) — the shared knob semantics and CLI counterpart
 - [MT-CHANNEL-CONFIG-001](MT-CHANNEL-CONFIG-001.md) — the Phase 1 CLI sibling (restart survival, YAML verbs, the cross-field chair rule)
 - [ISSUE-0103](../issues/ISSUE-0103-first-config-edit-detaches-yaml-seeded-knobs.md) — first-edit detachment of YAML-seeded knobs (the prerequisite to shipping this panel non-dark)

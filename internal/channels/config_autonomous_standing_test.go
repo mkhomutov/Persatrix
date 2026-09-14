@@ -12,9 +12,9 @@
 // (`max_convenings` and/or `standing_budget_tokens`) — the §E mirror of the
 // per-interaction cap-required gate that PR 1 landed.
 //
-// Ships DARK: nothing fires the schedule or counts convenings yet (the
-// config-round-trip timer seam + the convening counter are PR 7b). The one
-// LIVE effect of this slice is the aggregate-bound validate gate.
+// This slice (PR 7a) landed only the aggregate-bound validate gate. Convening
+// enforces the bounds (convening_counter_test.go, standing_budget_test.go), and a
+// hand-written `convene` timer fires the schedule (standing_schedule.go's header).
 package channels
 
 import (

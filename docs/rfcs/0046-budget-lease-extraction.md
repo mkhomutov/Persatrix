@@ -6,7 +6,7 @@ type: architecture
 status: proposed
 author: Maksim Khomutov
 created: 2026-05-25
-target: v0.4.0+ (gated on RFC-0045 acceptance + the MIT↛BUSL boundary CI gate)
+target: not standalone — rides the governance-core extraction, if any; decided at the first strategy review (Amendment 2026-09-12)
 depends_on:
   - RFC-0045
   - RFC-0023
@@ -19,7 +19,7 @@ depends_on:
 **Status**: 📋 Proposed  
 **Author**: Maksim Khomutov  
 **Date**: 2026-05-25  
-**Target**: v0.4.0+ (gated on RFC-0045 acceptance + the MIT↛BUSL boundary CI gate)  
+**Target**: not standalone — rides the governance-core extraction, if any; decided at the first strategy review ([sequencing Amendment 2026-09-12](../v0.3.x-sequencing.md#amendment-2026-09-12--close-v0316-small-then-measure-before-any-train-opens) ruling c, 2026-09-12; was v0.4.0+ gated on RFC-0045 acceptance + the MIT↛BUSL boundary CI gate)  
 **Depends on**: RFC 0045 (Open-Core Library Extraction Policy — the governing policy this RFC inherits and, in §H/§B, refines), RFC 0023 (LLM Call Leasing — the subsystem being extracted), RFC 0024 (Event-Driven Agent Scheduling — the idle-loop whose placement RFC 0045 deferred here)
 
 ---

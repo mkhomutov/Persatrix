@@ -24,9 +24,10 @@ package channels
 //     resets it to zero, so it bounds spend within ONE process lifetime — not
 //     across the standing window §E targets. A durable total needs persistence,
 //     which RFC 0052 rules OUT ("no new store migration"); the across-restart
-//     bound is a tracked follow-up. Latent today (manual convene only; the timer
-//     is a later slice), load-bearing once the schedule fires unattended. The
-//     count ceiling shares this exact limit (convening_counter.go).
+//     bound is a tracked follow-up. It is load-bearing whenever a standing
+//     channel's timer fires unattended: a restart refills the total while the
+//     timer keeps firing. The count ceiling shares this exact limit
+//     (convening_counter.go).
 //   - Discussion spend only; the async close-path tail is folded best-effort. The
 //     fold reads [wallet.WalletService.InteractionSpend] at the close NOTIFICATION
 //     (markInteractionClosed), by which point the DISCUSSION leases have settled
@@ -96,9 +97,9 @@ func (r *ChannelRouter) foldStandingSpendOnClose(channelID, interactionID string
 }
 
 // StandingSpend reports channelID's process-lifetime folded spend — the value the
-// §E `standing_budget_tokens` gate measures against and the web standing-budget
-// readout (a later slice) will render. Zero for a channel that has folded no
-// close.
+// §E `standing_budget_tokens` gate measures against. The `GET …/config` readout
+// does not include it (it carries the convening count only). Zero for a channel
+// that has folded no close.
 func (r *ChannelRouter) StandingSpend(channelID string) int64 {
 	r.standingMu.Lock()
 	defer r.standingMu.Unlock()

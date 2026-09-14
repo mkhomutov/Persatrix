@@ -23,7 +23,10 @@ if _tests_dir not in sys.path:
 
 # Ensure leaked aiosqlite connections cannot hang interpreter shutdown.
 # See tests/_test_infra.py for the rationale.
-from _test_infra import daemonize_aiosqlite_workers  # noqa: E402
+from _test_infra import (  # noqa: E402
+    daemonize_aiosqlite_workers,
+    isolate_optimization_config,  # noqa: F401  (autouse fixture, discovered by name)
+)
 
 daemonize_aiosqlite_workers()
 

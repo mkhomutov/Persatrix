@@ -11,7 +11,7 @@ package channels
 // `max_convenings` a live ceiling: [ChannelRouter.ConveneChannel] counts each
 // SUCCESSFUL convening and refuses once the aggregate count is reached
 // ([ErrAutonomousConveningBoundReached], 429), for BOTH the manual convene path
-// (today) and the scheduled timer-fired path (the next PR 7b slice). A convene
+// and the timer-fired path (it POSTs the same `/convene` endpoint). A convene
 // that MISSES (dispatch failure) does not consume a slot — the count reflects
 // convenings that actually happened, so a flapping convener endpoint never
 // silently burns the aggregate budget.
@@ -22,11 +22,11 @@ package channels
 // process — the conservative aggregate-safety posture (re-arming must not refill
 // the convening budget); a channel DELETE clears it (no map leak).
 //
-// `standing_budget_tokens` aggregate-spend enforcement, the config-round-trip
-// timer seam that fires the schedule, and the web convening-count readout are
-// the remaining PR 7b slices; this slice lands the count bound (the simpler,
+// `standing_budget_tokens` aggregate-spend enforcement and the web
+// convening-count readout landed in later PR 7b slices, and the convener-side
+// timer path in PR 7c; this slice landed the count bound (the simpler,
 // self-contained half of the aggregate gate) first, so the timer seam never
-// wires up auto-convening ahead of the ceiling that bounds it.
+// wired up auto-convening ahead of the ceiling that bounds it.
 
 import (
 	"context"

@@ -155,3 +155,10 @@ already has one — rather than more MT legs.
 > (`try_add`) without recording an admission, while `episodic`/`notes`/`facts`/
 > `channel_history` all pair the two. Carry-forward, not a regression — the
 > behaviour predates v0.3.13 and no change this cycle touched it.
+>
+> 2026-09-12 — **The provenance reading above is superseded.** v0.3.16 PR
+> B1 ([#941](https://github.com/mkhomutov/Persatrix/pull/941), closing
+> [ISSUE-0122](ISSUE-0122-relationship-tier-emits-no-provenance.md)) makes
+> the `relationship` tier record its admission, so on a v0.3.16 build
+> zero admissions on a Leg 2b turn is a recall or wiring miss, not the
+> expected reading. The MT's diagnosis note carries the current readings.

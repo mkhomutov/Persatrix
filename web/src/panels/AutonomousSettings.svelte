@@ -64,9 +64,9 @@
   // but it does not close the idle race: in the window before the convener's
   // first reply commits an interaction, a second POST is NOT caught by the
   // already-convening 409 — it dispatches (and burns a second convening slot) a
-  // second opener that folds into the same discussion (the force-fresh slice,
-  // still deferred). So we latch after one convene; reload (or switch channels)
-  // to convene again.
+  // second opener that folds into the same discussion (no force-fresh convene
+  // was built to stop it). So we latch after one convene; reload (or switch
+  // channels) to convene again.
   let convened = $state(false);
 
   // Reset the action state when the operator switches to a different channel — a

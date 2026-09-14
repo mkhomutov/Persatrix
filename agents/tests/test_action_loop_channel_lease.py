@@ -5,8 +5,9 @@ messages (``ReceiveChannelMessage``). PR 6 wires the
 ``CHANNEL_MESSAGE`` origin: the action loop must pass
 ``cause=CAUSE_CHANNEL_MESSAGE`` to :meth:`LLMClient.create_message`
 when the event is a real channel delivery (discriminated by the absence
-of ``metadata["chat_session_id"]`` — that key is the chat-as-DM shape
-from PR 4).
+of ``metadata["chat_session_id"]`` — that key is the shape PR 4's
+``SendChatMessage`` servicer builds; REST chat's DM events never carry
+it, so they are channel deliveries too, ISSUE-0155).
 
 Two behaviours are pinned here:
 
@@ -14,17 +15,17 @@ Two behaviours are pinned here:
    :meth:`LLMClient.create_message` with
    ``cause=CAUSE_CHANNEL_MESSAGE``. PR 4 left this arm on
    ``CAUSE_UNSPECIFIED`` so :meth:`LLMClient.create_message` skipped the
-   wallet bracket; PR 6 flips it so the wallet attributes spend to the
-   channel-message origin and the per-cause dashboards show the fifth
-   and last LLM-call origin in [RFC 0023 §Goal #1].
+   wallet bracket; PR 6 flips it so the call is leased and the wallet's
+   log lines name the channel-message origin, the fifth and last
+   LLM-call origin in [RFC 0023 §Goal #1].
 2. **Gate-precedes-lease.** The RFC 0011 response gate is evaluated
    **before** the lease is acquired — only a positive gate decision
    leads to a lease, so the wallet never holds a lease during gate
    evaluation. A suppressed event must not contact the wallet at all.
 
-Chat events (``CHANNEL_MESSAGE`` *with* ``chat_session_id``) keep
-``CAUSE_CHAT`` (PR 4 invariant); this test pins that PR 6 does not
-regress the discrimination.
+Events the ``SendChatMessage`` servicer builds (``CHANNEL_MESSAGE``
+*with* ``chat_session_id``) keep ``CAUSE_CHAT`` (PR 4 invariant); this
+test pins that PR 6 does not regress the discrimination.
 """
 
 from __future__ import annotations
@@ -170,7 +171,7 @@ class TestCauseForEventChannelMessage:
     def test_chat_event_still_maps_to_chat(self) -> None:
         """``chat_session_id`` set → still ``CAUSE_CHAT`` (PR 4 invariant)."""
         assert cause_for_event(_chat_event()) == walletpb.CAUSE_CHAT, (
-            "PR 4 invariant: chat-as-DM events must stay on CAUSE_CHAT"
+            "PR 4 invariant: SendChatMessage-shaped events must stay on CAUSE_CHAT"
         )
 
 

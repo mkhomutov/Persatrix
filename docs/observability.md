@@ -428,11 +428,11 @@ operator-visible outcome:
 
 | Origin | Operator-visible surface on lease denial |
 |--------|------------------------------------------|
-| Chat (`SendChatMessage`) | HTTP 200 with `reply_status="error"` and `error_message=<LeaseDenied.message>`. Same envelope on the channel reply for the channel-event chat path. |
+| Chat (`POST /api/v1/agents/{id}/chat`) | HTTP 200 with `reply_status="error"` and `reply=<LeaseDenied.message>`; the persona posts that text as its reply in the DM. |
 | Autonomous TICK | Action loop short-circuits to `DO_NOTHING`; `agent.persona.tick.idle{idle_reason="budget_denied"}` counter increments. No `agent.llm.call` span is emitted. |
 | Workflow task | Step fails with `error_type=budget_exceeded`; the orchestrator surfaces it through the workflow-run APIs and OTEL spans. |
 | Sub-agent spawn | Spawn aborts; the parent persona observes the failure on its turn. |
-| Channel-message reply | Reply suppressed; the orchestrator publishes a chat-error envelope on the channel under the parent persona's `agent.id` ([ISSUE-0065](issues/ISSUE-0065-chat-rest-budget-denied-no-channel-reply.md), [ISSUE-0066](issues/ISSUE-0066-chat-rest-resource-exhausted-no-channel-reply.md)). |
+| Channel-message reply | Reply suppressed; the persona posts a chat-error envelope on the channel under its own `agent.id` ([ISSUE-0065](issues/ISSUE-0065-chat-rest-budget-denied-no-channel-reply.md), [ISSUE-0066](issues/ISSUE-0066-chat-rest-resource-exhausted-no-channel-reply.md)). |
 
 **Lifecycle log messages — finalised by [RFC 0023 PR 7](https://github.com/mkhomutov/Persatrix/pull/391).**
 Emitted by [`internal/wallet/wallet.go`](../internal/wallet/wallet.go);
@@ -492,6 +492,8 @@ Configuration lives at [config/observability/otel-collector.yaml](../config/obse
 | OTEL Collector | localhost:4317 (gRPC), 4318 (HTTP) | OTLP ingest |
 
 The Prometheus host port is shifted to `9091` so it does not collide with the orchestrator gRPC port (`9090`).
+
+The stack publishes these ports on `127.0.0.1` only. None of these services checks who is calling, and traces, metrics and logs can carry conversation content, so from another machine tunnel over SSH (for example `ssh -L 16686:127.0.0.1:16686 <host>`) rather than widening the publish.
 
 > **Breaking dev-workflow change (v0.2.3):** Jaeger's OTLP ports
 > (`4317`/`4318`) are no longer published on the host. The Collector now

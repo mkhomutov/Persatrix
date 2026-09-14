@@ -1,6 +1,6 @@
 # Enforcement Matrix
 
-> **Last updated**: 2026-09-06
+> **Last updated**: 2026-09-12
 > Every rule the project states, with the document that states it, the check
 > that enforces it, and how hard the enforcement is. Read the **Enforcement**
 > column literally: a rule is only as strong as the weakest place it is
@@ -32,16 +32,18 @@ Required, it rides inside one of the six required jobs.
 | Rule | Stated in | Check | Enforcement |
 |------|-----------|-------|-------------|
 | Go builds; Go unit tests pass with `-race` | CONTRIBUTING | `go build ./cmd/orchestrator`; `go test ./internal/... -race -cover` | Required (`Go`) |
+| Go lint clean under one pinned golangci-lint and the committed linter set | [ISSUE-0142](../issues/ISSUE-0142-ci-never-runs-golangci-lint.md); `.golangci.yml`; Makefile `GOLANGCI_LINT_VERSION` | `make lint-go` — refuses any other version; CI installs the pin it reads from the Makefile and runs the same target | Required (`Go`) — since v0.3.16 PR C1; was Make-only and unpinned |
 | Committed UI embed is the placeholder, never build output | `.gitignore` comment; `ci.yml` | `grep` assert in the `go` job | Required (`Go`) |
 | Python lint (ruff) — `agents/`, `tests/` | instructions; ISSUE-0056 | `ruff check` ×2 | Required (`Python`) |
 | Python types (mypy) — `agents/`, `tests/` | instructions; ISSUE-0062 | `mypy` ×2 | Required (`Python`) |
 | Python lint + types — `scripts/`, `evaluators/` | Makefile `lint-python`; ISSUE-0134 | `ruff check scripts/ evaluators/`; `mypy scripts/ evaluators/` | Required (`Python`) — since the CI-promotion PR |
 | Python unit + agents + integration suites pass | testing-strategy | three `pytest` steps | Required (`Python`) |
+| Every `stable` golden-trace eval replays green ([RFC 0044](../rfcs/0044-eval-set-golden-traces.md) §F) | RFC 0044; [evaluators guide](../evaluators-guide.md#promoting-a-recipe-to-stable) | `make eval-replay TIER=stable` — exits 1 on a failed assertion, a cassette miss, a malformed or golden-less stable recipe, or an empty selection | Required (`Python`) — since v0.3.16 PR C2; was Make-only |
 | Go and Python protobuf stubs match `proto/*.proto`; no orphans | Makefile; ISSUE-0017/0023 | `make proto-go && git diff --exit-code`; `make proto-python-check proto-orphans-check` | Required (`Proto staleness`, `Python`) |
 | MIT-candidate primitives never import BUSL code (RFC 0045 §B) | RFC 0045; CONTRIBUTING | `make imports-check` (import-linter) | Required (`Python`) |
 | Rust builds; clippy clean; `cargo test` passes (incl. lockstep guards) | instructions | `cargo build`, `cargo clippy -- -D warnings`, `cargo test` | Required (`Rust`) |
 | YAML configs validate against `schemas/` | CLAUDE.md; instructions | `python agents/validate.py config/` | Required (`Validate configs`) |
-| RFC and issue INDEX files fresh; front-matter valid | rfcs/README, issues/README | `make rfcs-check issues-check` | Required (`Validate configs`) |
+| RFC and issue INDEX files fresh; front-matter valid; each RFC's `**Status**` header line agrees with its front-matter | rfcs/README, issues/README | `make rfcs-check issues-check` | Required (`Validate configs`) |
 | PR title is a Conventional Commit | CONTRIBUTING; BRANCHING | `commitlint.yml` | Required (`Validate PR Title`) |
 | Web console unit tests pass; bundle builds; orchestrator compiles with it | web-console guide | `make ui-test`, `make ui`, `go build` | CI-advisory |
 | No `{@html}` under `web/src` (session-riding XSS) | RFC 0039 amendment §A3 | `make ui-html-check` | CI-advisory |
@@ -80,14 +82,15 @@ Required, it rides inside one of the six required jobs.
 | No leaked tool-call markup in docs | — | `doc_leaked_markup.py` | CI-advisory (`Docs hygiene`) + Pre-commit |
 | `FILEMAP.md` matches `git ls-files` | `generate_filemap.py` | `--check` (date-insensitive; on a PR it compares against the merge tree, so a PR behind a file-adding merge fails until updated) | CI-advisory (`Docs hygiene`) + Pre-commit regenerates — closed [ISSUE-0133](../issues/ISSUE-0133-no-ci-gate-on-filemap-freshness.md) |
 | Merged-PR history (`docs/merged-prs.md`) matches the squash log, allowing only the newest merges to be missing | automation-catalogue | `scripts/merged_prs.py --check` | CI-advisory (`Docs hygiene`) + Pre-commit regenerates |
-| No plan row says "PR open" / "not started" for a PR that has merged | release-cycle §Phase 1 | `scripts/checks/plan_status.py` (`make plan-status-check`) | CI-advisory (`Docs hygiene`) + Pre-commit — first run found ten stale rows |
+| No plan row says "PR open" / "not started" for a PR that has merged | release-cycle §Phase 1 | `scripts/checks/plan_status.py` (`make plan-status-check`) | CI-advisory (`Docs hygiene`) + Pre-commit — first run found ten stale rows; judging an unlinked 🔀 row by the commit that wrote it found eight more |
 | Every artifact the methodology names exists (documents, tools, make targets, Docs-hygiene steps) | [conformance.json](conformance.json) | `make conformance-check` | CI-advisory (`Docs hygiene`) + Pre-commit |
+| No ROADMAP Component Status row says less than the RFC it names | ROADMAP §How to Update | `scripts/checks/roadmap_status.py` (`make roadmap-status-check`) | Required (`Validate configs`) + Pre-commit — its first run found `internal/security/` still "In progress" four months after RFC 0009 closed part-way |
 | Unified doc audit (links + markers + sizes) | `doc_audit.py` | — | Local convenience wrapper; its three checks run individually in CI |
 | Local-only files never referenced from committed files | CLAUDE.md; copilot-instructions; review-process | review | Convention |
 | Glossary terms mandatory; new terms added in the same change | CLAUDE.md §Terminology | review | Convention |
 | Plain English; lead with the point | documentation-guide §Writing Style | review | Convention |
-| Status hygiene before and after every task | ROADMAP §How to Update; CLAUDE.md | review | Convention |
-| Every RFC has front-matter, required sections, ToC | rfcs/README checklist | `rfcs-check` (front-matter only) | Required for front-matter; Convention for sections |
+| Status hygiene before and after every task | ROADMAP §How to Update; CLAUDE.md | review; ROADMAP's Component Status rows also by `roadmap_status.py` (above) | Convention; Required for the Component Status rows |
+| Every RFC has front-matter, required sections, ToC | rfcs/README checklist | `rfcs-check` (front-matter and its `**Status**` header line only) | Required for front-matter; Convention for sections |
 
 ## Process
 
@@ -128,10 +131,17 @@ Listed here so the matrix is honest about its own gaps.
 4. ~~Decide the PR-size rule.~~ Decided in the BRANCHING rewrite: guidance,
    with the split heuristic code PRs follow; documentation-heavy release
    evidence is the exception and is named as such.
-5. **Take RFC 0044 Phase 2 (evals in CI) at v0.3.16, not cut.** `make
-   eval-replay` is $0 and deterministic; gating it turns every release's
-   paid live arc into a free regression gate for the next. Slotted cuttable;
-   the recommendation is recorded on the RFC 0044 PR plan.
+5. ~~Take RFC 0044 Phase 2 (evals in CI) at v0.3.16, not cut.~~ Taken:
+   v0.3.16 PR C2 runs `make eval-replay TIER=stable` inside the required
+   `Python` job — $0, deterministic, and every release's paid live arc
+   becomes a free regression gate for the next once its golden is promoted.
+6. **Re-audit of Make targets with no CI step (2026-09-12, ISSUE-0142
+   step 4).** Every `*-check`, `lint-*`, `test-*` and `validate` target now
+   has a CI step that runs it or its tool directly, with one exception:
+   `notices-check` (Make-only on purpose, see its row). `lint-go` closed
+   with PR C1 and `eval-replay` with PR C2 (item 5).
+   `eval-drift`, `eval-verdict`, `release-sweep`, `release-doc` and
+   `branch-protection-show` are on-demand tools, not gates.
 
 ## Related documentation
 

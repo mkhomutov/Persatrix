@@ -1,7 +1,7 @@
 # ISSUE-0082 — PR Implementation Plan (Residuals R-1 / R-2 — the derived and relayed tenant writes)
 
 **Issues**: [ISSUE-0123](ISSUE-0123-per-speaker-interaction-scope.md) (R-1) · [ISSUE-0124](ISSUE-0124-orchestrator-hop-drops-tenant-on-agent-cascade.md) (R-2) · [ISSUE-0131](ISSUE-0131-derived-memory-has-no-speaker-attribution.md) (the speaker axis)
-**Status**: 🔄 In progress — Phase 0 resolved (both axes); workstream **A** of **v0.3.15** *Who said what*. All code merged (PRs 1–4b); only **PR 5**, the live arc, remains
+**Status**: ✅ Complete — Phase 0 resolved (both axes); workstream **A** of **v0.3.15** *Who said what*. All code merged (PRs 1–4b); **PR 5**, the live arc, merged as [#855](https://github.com/mkhomutov/Persatrix/pull/855)
 **Created**: 2026-08-07
 **Branch prefix**: `feature/v0315-issue0123-` / `feature/v0315-issue0124-` (per residual)
 **Target**: `main`

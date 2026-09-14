@@ -17,6 +17,18 @@
 <Two to four paragraphs. What the ratified decision said; what was learned;
 why the decision no longer holds as written. Cite the evidence.>
 
+## External evidence since the last amendment
+
+<Required for a sequencing amendment ([decisions.md](../methodology/decisions.md#sequencing-amendments) rule 6). One row per field, "none" where nothing happened; the amendment may not scope a version on internal correctness alone when every row is "none".>
+
+| Field | Since <date of the last amendment> |
+|-------|------------------------------------|
+| Installs by anyone other than the author | |
+| Issues or pull requests from anyone else | |
+| Demos shown, to whom, when | |
+| User conversations written up | |
+| Experiment results published | |
+
 ## What changes
 
 | # | Before | After |

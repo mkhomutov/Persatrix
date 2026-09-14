@@ -29,9 +29,9 @@ const (
 // drop in without churning call sites. The Phase 1 implementation ships a
 // JSONL file sink ([NewFileAuditLogger]).
 type AuditLogger interface {
-	// Emit records ev. The event's Timestamp and Checksum are filled by the
-	// logger if zero / empty; callers may pre-set them to override (used by
-	// the chain-recovery synthetic events).
+	// Emit records ev. The logger sets Timestamp to the current time when
+	// it is zero and keeps a Timestamp the caller set. It always computes
+	// Checksum itself, replacing any value the caller set.
 	//
 	// Security-class events are flushed (and fsync'd) before Emit returns.
 	// Telemetry-class events may be batched; see [AuditLoggerOption]s for
@@ -193,10 +193,14 @@ type fileAuditLogger struct {
 //
 //   - File missing or zero-length → seed prevChecksum = sha256("") and emit
 //     `chain.bootstrap` (security-class) as the first event.
-//   - Tail line parses and its Checksum recomputes correctly → emit
-//     `chain.restart` carrying that checksum.
-//   - Tail line is unparseable / truncated / checksum mismatch → emit
-//     `chain.recovered` with Detail.prior_tail = "unknown".
+//   - Tail line parses as JSON and its Checksum field is well-formed (64 hex
+//     characters) → emit `chain.restart` carrying that checksum.
+//   - Tail line is unreadable / truncated / not JSON / missing a well-formed
+//     Checksum → emit `chain.recovered` with Detail.prior_tail = "unknown".
+//
+// Startup recomputes no checksum, so an edited record that keeps a
+// well-formed Checksum passes as a normal restart. Only [VerifyChain]
+// recomputes the chain, and only tests call it today.
 //
 // Returns an error only on filesystem failures (open / stat). Recovery
 // outcomes are surfaced as the first synthetic event written to the file.

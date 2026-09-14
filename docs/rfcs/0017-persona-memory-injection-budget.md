@@ -142,7 +142,7 @@ Invariants:
 `_inject_memory_context` becomes a uniform allocate-loop:
 
 1. Clear the three sections (unchanged).
-2. Construct `budget = MemoryBudget(_MEMORY_BUDGET_TOKENS)`.
+2. Construct `budget = MemoryBudget(_MEMORY_BUDGET_TOKENS)` (since v0.3.16: with the persona's resolved total — `memory_budget.tokens` from `config/optimization.yaml`, else the constant; see the OQ1 note).
 3. Query relationship → if present, `budget.try_add(rel_text)`; if admitted, `add_section(priority=8)`.
 4. Query episodic with `min_score` → for each item, `budget.try_add(line)` until exhausted; if any admitted, build the section.
 5. Query notes with `min_score` → same pattern.
@@ -152,7 +152,7 @@ The `EventType.TICK` skip and `should_fall_back` heuristic are deleted. The reca
 ```mermaid
 flowchart TD
     Event[AgentEvent arrives] --> Clear[Clear 3 memory sections from WorkingMemory]
-    Clear --> Budget[Construct MemoryBudget _MEMORY_BUDGET_TOKENS]
+    Clear --> Budget[Construct MemoryBudget with the resolved total]
     Budget --> Rel{Sender present?}
     Rel -->|yes| RelQ[get_relationship_summary]
     Rel -->|no| Epi
@@ -216,7 +216,7 @@ Char-only callers (none in tree, but the function is exported in `__all__`) keep
 
 The two interfaces this RFC adds — `MemoryBudget` and `min_score` — are explicitly designed so RFC 0008 can compose with them rather than replace them.
 
-- **`MemoryBudget` composes under a scheduler budget.** RFC 0008 introduces a per-step context budget owned by the scheduler. In that model, `_inject_memory_context` will receive its `_MEMORY_BUDGET_TOKENS` slice from the scheduler instead of a module-level constant. The allocator API stays unchanged; only the constructor argument's source moves.
+- **`MemoryBudget` composes under a scheduler budget.** RFC 0008 introduces a per-step context budget owned by the scheduler. In that model, `_inject_memory_context` will receive its `_MEMORY_BUDGET_TOKENS` slice from the scheduler instead of a module-level constant. The allocator API stays unchanged; only the constructor argument's source moves. *(2026-09-12: the source has already moved once — since v0.3.16 PR K1 the total comes from `memory_budget.tokens` in `config/optimization.yaml`, resolved at persona start; RFC 0008 would move it again, from the file to the scheduler.)*
 - **`min_score` is retrieval-mechanism agnostic.** The parameter is a normalised float in `[0, 1]`. For FTS5 it normalises BM25; for a future cosine-similarity vector recall it's the cosine value directly; for a hybrid scorer it's the fused score. The persona runtime never sees the underlying mechanism. This locks the answer to what would otherwise be a v0.3 open question (per-mechanism struct vs single float — single float, normalised, recall implementation owns normalisation).
 
 The forward-compatibility commitment is: code written against `MemoryBudget` and `min_score` in v0.2.2 will not need API changes when RFC 0008 lands.
@@ -365,6 +365,7 @@ No changes to: protos, Go orchestrator, Rust CLI, configs, schemas, JSON schemas
 
 1. **Default value for `_MEMORY_BUDGET_TOKENS`.** ✅ **Resolved at acceptance.**
    The committed default is **1500 tokens** for Phase 1. Rationale: ~6× the current 300-char relationship cap and ~3× the 500-char note cap when converted at ~4 chars/token, leaving headroom for typical 3-tier worst-case while staying well under any production model's context window. The smoke-test step in Phase 1's manual test plan may propose a tuned value before Phase 1 merges; any retune is a one-line constant change and does not require re-acceptance of the RFC.
+   > **2026-09-12 (v0.3.16 PR K1):** a retune is now a config edit, not a code change — `memory_budget.tokens` in `config/optimization.yaml`, resolved once at persona start ([sequencing Amendment 2026-09-12](../v0.3.x-sequencing.md#amendment-2026-09-12--close-v0316-small-then-measure-before-any-train-opens)). The constant (`MEMORY_BUDGET_TOKENS`, now in `memory_budget.py`) is the default when the key is absent; `0` disables injection.
 
 2. **Default value for `min_score` in `recall*`.** ⏳ **Deferred to Phase 2 (empirical).**
    Depends on FTS5 BM25 score distribution in a representative populated DB. Resolved by the throwaway calibration script in Phase 2. The committed default is the calibrated value; the script is not committed. Acceptance does not gate on this — the API contract (`min_score: float | None` in `[0, 1]`, `None` = current behaviour) is what's stable and forward-compatible per [Section E](#e-forward-compatibility-with-rfc-0008).

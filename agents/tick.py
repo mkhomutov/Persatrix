@@ -128,9 +128,9 @@ class TickScheduler:
         # ``ScheduledWake(callback_kind="convene")`` calls back into. ``None``
         # until the post-session ``wire_convene_clients`` injection runs
         # (mirrors ``executor``'s channel-publisher, set after the session
-        # opens), and always ``None`` on a non-convener scheduler — a convene
-        # wake never arrives on one because nothing registers a convene timer
-        # in its config. See :meth:`set_convene_client`.
+        # opens), which sets it on every scheduler. Only a persona whose config
+        # carries a ``convene`` timer (the convener; operators add it by hand)
+        # ever receives a convene wake. See :meth:`set_convene_client`.
         self._convene_client = convene_client
         self._idle_count = 0
         # RFC 0024 PR 2: when ``autonomy.timers`` is configured the

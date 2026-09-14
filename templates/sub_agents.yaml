@@ -1,5 +1,6 @@
-# Reusable Sub-Agent Templates
-# Reference in code: SubAgentRequest(template="researcher", ...)
+# Reusable Sub-Agent Templates — a partial draft that nothing loads yet.
+# The planned loader, agents/sub_agents/templates.py, is a placeholder;
+# the plan is sketched in docs/persatrix-extension-spec.md §E3.2.5.
 
 sub_agent_templates:
   researcher:

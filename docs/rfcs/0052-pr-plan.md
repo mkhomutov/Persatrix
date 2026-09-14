@@ -134,6 +134,7 @@ Items surfaced by the deep reviews that are **deliberately deferred** to the PR 
 - **Resolved (PR 4b-ii, PR #718 review).** Redelivery ingest-skip co-gated on `bounded`; operator-directive framing + the by-id member lookup single-sourced (`operator_directive.py`, `memberByID`); the `…Timeout` typo fixed.
 - **[PR 6 / altitude] Generalize the fanout withhold seam vs the armed-chair carve-out** *(PR #718 review)*. `fanout.go` special-cases sparing the armed synthesis chair's presence mark (`armedSynthesisChair`); the deeper fix clears marks by what was actually dispatched this fanout, not a per-lane exception.
 - **[follow-up] Floor turns burn `turnTimeout` on a known delivery miss** *(PR #718 follow-up review)*. `runFloorTurn` records the delivery-miss return yet still parks on the reply timer, mislabeled `floor_turn{timeout}`. A fix must skip only provably-no-reply classes (`registry.ErrAgentNotFound`, refused-ack nack) and settle the CE1 stall-tally semantics.
+- **[future §E hardening] Nothing arms the standing timer, and nothing stops a hand-written one aimed at an unbounded channel** *(PR #930 review)*. `StandingConveneTimers` (7c-i) and `merge_convene_timers` (7c-ii-b) have no production caller, so every standing schedule is a hand edit to the convener's `agents.yaml` plus a restart. `ConveneChannel` never reads `schedule_interval_seconds` and cannot tell a timer from a person, so a timer aimed at an armed channel with no aggregate bound keeps re-convening it: each discussion is capped, the total is not. Tracked, with the missing spend readout and the force-fresh race, as [ISSUE-0156](../issues/ISSUE-0156-standing-timer-unbounded.md).
 
 ---
 
@@ -378,7 +379,7 @@ A new channel *mode* + CLI/web surfaces needs real doc + diagram **edits**, not 
 
 | Artifact | Change | Owning PR |
 |----------|--------|-----------|
-| [`docs/guides/channels.md`](../guides/channels.md) | New **§Autonomous channels** — `autonomous.enabled`, the mandatory cost cap, convener vs. chair ([OQ #1](0052-autonomous-agent-channels.md#open-questions)), standing schedule, the "no human in the loop" contract; CLI + web how-to. | PR 3 (once convene is demoable) |
+| [`docs/guides/channels.md`](../guides/channels.md) | New **§Autonomous channels** — `autonomous.enabled`, the mandatory cost cap, convener vs. chair ([OQ #1](0052-autonomous-agent-channels.md#open-questions)), standing schedule, the "no human in the loop" contract; CLI + web how-to. Since moved to its own [autonomous channels guide](../guides/autonomous-channels.md) (2026-09-12). | PR 3 (once convene is demoable) |
 | [`docs/guides/persona-agents.md`](../guides/persona-agents.md) | New **§Autonomous channels** (persona side) — anti-collapse scoping, semantic-silence-still-applies, the convener's agenda role. | PR 6 (anti-collapse) |
 | [`docs/guides/web-console.md`](../guides/web-console.md) | Note the Channel-settings panel now renders the `autonomous` block + a Convene action. | PR 2 (web surfaces) |
 | [`docs/diagrams/workflow-execution.md`](../diagrams/workflow-execution.md) | A **third sequence** — autonomous brainstorm: convene (or timer-fire) → discussion loop with anti-collapse → metered bounded close → synthesis. | PR 5 (full flow exists) |

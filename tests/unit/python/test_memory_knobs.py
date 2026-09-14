@@ -1,10 +1,16 @@
 """The persona's memory-knob resolution seam (v0.3.16 PR A2).
 
-Five knobs from three RFCs, resolved once at agent construction. The
+Six knobs — five per-agent ``memory.*`` keys from three RFCs plus, since
+v0.3.16 K1, the fleet-wide ``memory_budget.tokens`` off
+``optimization.yaml`` — resolved once at agent construction. The
 extraction is pure structure — what this module pins is that the
 aggregate agrees with each individual resolver, that a bad value is
 still rejected **loudly** (silent degradation is what every one of these
 knobs exists to prevent), and that the defaults are the shipped posture.
+The suite-wide ``isolate_optimization_config`` fixture (``tests/_test_infra``)
+unsets ``PERSATRIX_OPTIMIZATION_CONFIG`` first, so the budget here is
+always the shipped one; the configured path is pinned in
+``test_optimization_memory_budget.py``.
 """
 
 from __future__ import annotations
@@ -23,6 +29,7 @@ from agents.persona_runtime.cross_room import (
     resolve_facts_cross_room,
 )
 from agents.persona_runtime.facts_section import resolve_facts_config
+from agents.persona_runtime.memory_budget import MEMORY_BUDGET_TOKENS
 from agents.persona_runtime.memory_knobs import resolve_memory_knobs
 
 _CONFIGS: list[dict] = [
@@ -46,11 +53,14 @@ def test_the_aggregate_agrees_with_every_individual_resolver(
     assert knobs.facts_cross_room == resolve_facts_cross_room(config)
     assert knobs.episodic_cross_room == resolve_episodic_cross_room(config)
     assert knobs.audience == resolve_memory_audience(config)
+    # The fleet-wide value is not a function of the persona config.
+    assert knobs.budget_tokens == MEMORY_BUDGET_TOKENS
 
 
 def test_the_defaults_are_the_shipped_posture() -> None:
     knobs = resolve_memory_knobs({})
     assert knobs.facts_enabled is True
+    assert knobs.budget_tokens == MEMORY_BUDGET_TOKENS == 1500
     assert knobs.facts_cross_room == CROSS_ROOM_LIVE
     assert knobs.episodic_cross_room == CROSS_ROOM_LIVE
     # Shadow for the whole v0.3.16 cycle (scope lock 1).
