@@ -29,6 +29,7 @@ import sys
 from pathlib import Path
 
 import yaml
+from _test_infra import assert_cassette_miss, stage_recipe_override
 
 from evaluators.runner import golden_path_for
 
@@ -91,28 +92,19 @@ def test_classification_stamp_is_load_bearing(tmp_path: Path) -> None:
     prompt gains the fact the recorded request was gated NOT to contain
     (the restricted close also loses its §E projection request). This is the
     leak direction made observable at the request-hash level."""
-    recipe = yaml.safe_load(_recipe_path(_GATE_ID).read_text(encoding="utf-8"))
-    for interaction in recipe["interactions"]:
-        interaction.pop("classification", None)
-    (tmp_path / f"{_GATE_ID}.yaml").write_text(
-        yaml.safe_dump(recipe), encoding="utf-8",
-    )
-    shutil.copy(
-        golden_path_for(_recipe_path(_GATE_ID)),
-        tmp_path / f"{_GATE_ID}.golden.yaml",
-    )
+    def strip_classification(recipe: dict) -> None:
+        for interaction in recipe["interactions"]:
+            interaction.pop("classification", None)
+
+    stage_recipe_override(_recipe_path(_GATE_ID), tmp_path, strip_classification)
 
     result = _run_runner("replay", _GATE_ID, eval_sets_dir=tmp_path)
 
-    assert result.returncode != 0, (
+    assert_cassette_miss(
+        result,
         "a classification-stripped replay of the gate golden must fail — if "
         "it passes, the declared levels never reached the wire stamp and the "
-        f"seed is vacuous:\n{result.stdout}\n{result.stderr}"
-    )
-    # The miss surfaces through the runtime's LLM-error wrapping, so match the
-    # ReplayCassetteMissError message, not the class name.
-    assert "no recorded response for request" in result.stderr, (
-        result.stdout, result.stderr,
+        "seed is vacuous",
     )
 
 

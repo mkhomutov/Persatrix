@@ -178,11 +178,12 @@ class _MemoryContextMixin:
     # RFC 0049 PR 2/PR 3 — ``memory.{facts,episodic}.cross_room`` (off|shadow).
     _facts_cross_room: str = DEFAULT_FACTS_CROSS_ROOM
     _episodic_cross_room: str = DEFAULT_EPISODIC_CROSS_ROOM
-    # ISSUE-0132 (v0.3.16 A2) — ``memory.egress.audience`` (off|shadow|live).
-    # ``shadow`` for the whole cycle: the verdict is recorded, the prompt
-    # does not move.  The class-level default keeps the legacy mixin
-    # harnesses (assembled without ``create_persona_agent``) on the same
-    # posture as production.
+    # ISSUE-0132 (v0.3.16 A2/A3) — ``memory.egress.audience``
+    # (off|shadow|live).  ``live`` since A3's flip: a *disjoint* verdict
+    # withholds, both unknown causes admit.  The class-level default
+    # keeps the legacy mixin harnesses (assembled without
+    # ``create_persona_agent``) on the same posture as production — with
+    # no roster wired, every verdict there is unknown, which admits.
     _memory_audience: str = DEFAULT_MEMORY_AUDIENCE
     # F-4: channel-roster fetcher, wired in ``server_persona`` like the
     # history fetcher. ``None`` (default) → no roster section, so the

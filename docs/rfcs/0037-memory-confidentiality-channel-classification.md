@@ -453,7 +453,7 @@ cite it rather than restating it:
 
 ### D. The hard gate at memory injection
 
-> **Amended** (v0.3.16, shadow-first): ANDed with the acting room's
+> **Amended** (v0.3.16, live): ANDed with the acting room's
 > audience — [audience-egress amendment](0037-amendment-audience-egress.md),
 > which also amends §E and §G.
 

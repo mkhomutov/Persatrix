@@ -118,16 +118,19 @@ responses:
     # entry above: no other recipe's turns mention Helix, "the board" or
     # "just us", and the bridge turn deliberately avoids "plate" /
     # "need from" (the 002/003 and 004 bridge keys) so it does not
-    # all-match theirs. The i3 and i4 replies are BOTH answers on
-    # purpose: the audience check ships in shadow, so the standup ask
-    # still has the fact in its prompt — a scripted decline there would
-    # bake a posture this release does not ship. The load-bearing pin is
-    # the request hash and the run's shadow traces (see the recipe).
+    # all-match theirs. The i3 reply is a DECLINE and the i4 reply an
+    # answer — the posture PR A3 shipped: under `live` the standup ask's
+    # prompt carries no Helix fact, so a scripted answer there would
+    # contradict its own request. (Until A3 both were answers; the
+    # golden was re-recorded with the flip.) The mock keys on the user
+    # turn alone and never sees the prompt's memory section, which is
+    # why the load-bearing pin stays the request hash and the strip test
+    # in test_audience_seed_replay.py, not this transcript.
     - match: ["helix rollout", "security review"]   # 005 i1 — the DM teach turn
       reply: "Understood — the Helix rollout is paused until the security review clears. I'll keep that between us."
     - match: ["quick round", "this morning"]        # 005 i2 — the standup bridge turn
       reply: "Morning! Nothing blocking from me — go ahead with the round."
     - match: ["helix", "the board"]                 # 005 i3 — the ask in front of Bob
-      reply: "Helix is paused until the security review clears — that's where the rollout stands."
+      reply: "I don't have anything on where the Helix rollout landed, I'm afraid — tell me what you've heard and I'll help shape the board note."
     - match: ["helix", "just us"]                   # 005 i4 — the ask without him
       reply: "Same picture: the Helix rollout is paused until the security review clears."

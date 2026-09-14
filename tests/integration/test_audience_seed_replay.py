@@ -1,6 +1,7 @@
-"""ISSUE-0132 (v0.3.16 PR A2) — the audience seed replays and the delta is real.
+"""ISSUE-0132 (v0.3.16 PR A2, flipped by A3) — the audience seed replays,
+the delta is real, and the withhold is load-bearing.
 
-``EVAL-MEMORY-005`` is the offline sample the audience shadow verdict is
+``EVAL-MEMORY-005`` is the offline sample the audience shadow verdict was
 measured over: Alice teaches in her DM, the interaction closes, and she
 asks twice — once in a room Bob is in (*disjoint*), once in a room whose
 every member was in the DM (*admit*). This file is the committed,
@@ -11,8 +12,10 @@ properties a reader of the verdict has to be able to trust:
 * the sample is **not vacuous** — a disjoint audience actually occurred,
   which is exactly what the fourth criterion asserts and what a
   same-room-only run would fail;
-* the check is **shadow** — the entry was still injected, which is the
-  byte-identity claim this release ships on.
+* the check is **live** (PR A3 re-recorded the golden under the flipped
+  default) — the disjoint entry was actually withheld, and the strip
+  test below makes that withhold load-bearing at the request-hash level,
+  the `EVAL-MEMORY-003` precedent.
 
 Subprocess replays for the same reason as the sibling seed-replay
 suites: request hashes are sensitive to process-global runtime state,
@@ -27,6 +30,8 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+
+from _test_infra import assert_cassette_miss, stage_recipe_override
 
 from evaluators.shadow_measurement import (
     AUDIENCE_TURN_BOUND,
@@ -44,12 +49,17 @@ _WITH_BOB = "group:standup"
 _WITHOUT_BOB = "group:pair"
 
 
-def _run_replay(report_path: Path) -> subprocess.CompletedProcess[str]:
+def _run_replay(
+    report_path: Path, *, eval_sets_dir: Path | None = None,
+) -> subprocess.CompletedProcess[str]:
+    cmd = [
+        sys.executable, "-m", "evaluators.runner",
+        "--mode", "replay", "--target", _ID, "--report", str(report_path),
+    ]
+    if eval_sets_dir is not None:
+        cmd += ["--eval-sets-dir", str(eval_sets_dir)]
     return subprocess.run(
-        [
-            sys.executable, "-m", "evaluators.runner",
-            "--mode", "replay", "--target", _ID, "--report", str(report_path),
-        ],
+        cmd,
         cwd=_REPO,
         env={
             **os.environ,
@@ -138,12 +148,38 @@ def test_both_halves_of_the_regression_are_exercised(tmp_path: Path) -> None:
             assert candidate["protection_level"] == "internal", candidate
 
 
-def test_shadow_withheld_nothing(tmp_path: Path) -> None:
-    """The byte-identity claim, from the trace side: a *disjoint* verdict
-    was recorded and the entry was injected anyway."""
-    traces = _traces(tmp_path)
-    assert all(t["mode"] == "shadow" for t in traces), traces
-    assert all(t["withheld"] == 0 for t in traces), traces
+def test_live_withholds_the_disjoint_entry_and_nothing_else(tmp_path: Path) -> None:
+    """The enforcement, from the trace side (PR A3): the standup turn's
+    trace shows the *disjoint* entry actually withheld, the pair turn's
+    shows nothing withheld.  Unknown verdicts admit, so ``withheld`` can
+    only ever count disjoint."""
+    by_room = {t["acting_channel_id"]: t for t in _traces(tmp_path)}
+    assert all(t["mode"] == "live" for t in by_room.values()), by_room
+    assert by_room[_WITH_BOB]["withheld"] == 1, by_room[_WITH_BOB]
+    assert by_room[_WITHOUT_BOB]["withheld"] == 0, by_room[_WITHOUT_BOB]
+
+
+def test_the_live_withhold_is_load_bearing(tmp_path: Path) -> None:
+    """Replaying the LIVE golden under a shadow-pinned override must MISS
+    the cassette: the recorded standup request carries no Helix fact,
+    and a shadow run — which injects the disjoint entry — cannot
+    reproduce it.  A regression that re-admits the entry fails the
+    committed seed exactly this way; the request-hash pin, not the
+    mock-authored decline, is what makes EVAL-MEMORY-005 load-bearing
+    (the EVAL-MEMORY-003 precedent)."""
+    def pin_shadow(recipe: dict) -> None:
+        assert recipe["setup"]["memory"]["egress"]["audience"] == "live"
+        recipe["setup"]["memory"]["egress"]["audience"] = "shadow"
+
+    stage_recipe_override(_EVAL_SETS / f"{_ID}.yaml", tmp_path, pin_shadow)
+
+    result = _run_replay(tmp_path / "report.json", eval_sets_dir=tmp_path)
+
+    assert_cassette_miss(
+        result,
+        "a shadow-pinned replay of the live golden must fail — if it passes, "
+        "the live gate never actually withheld and the seed is vacuous",
+    )
 
 
 def test_no_unknown_verdicts_and_the_fetch_bound_holds(tmp_path: Path) -> None:
