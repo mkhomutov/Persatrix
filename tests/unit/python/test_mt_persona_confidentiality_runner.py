@@ -10,6 +10,8 @@ same class of check for the v0.3.16 driver.
 
 from __future__ import annotations
 
+from typing import Any
+
 import yaml
 
 from scripts.manual_tests import mt_confidentiality_evidence as ev
@@ -18,7 +20,7 @@ from scripts.manual_tests.mt_persona_confidentiality_001 import LEGS, expand_leg
 
 # ── evidence: the audience egress record ────────────────────────────────────
 
-_RECORD = {
+_RECORD: dict[str, Any] = {
     "event": "Agent ember-owl: audience egress (live) — 2 entries judged at "
              "acting='group:planning': 1 admit, 1 disjoint, 0 unknown "
              "(0 fetch-failed, 0 no-provenance); 1 withheld",
@@ -76,10 +78,10 @@ def test_audience_records_read_the_message_key_the_live_log_uses() -> None:
 
 def test_fetch_failed_total_sums_the_cause_over_every_record() -> None:
     a = dict(_RECORD)
+    trace: dict[str, Any] = _RECORD["audience_shadow"]
     b = {**_RECORD, "audience_shadow": {
-        **_RECORD["audience_shadow"],
-        "verdicts": {**_RECORD["audience_shadow"]["verdicts"],
-                     "withhold-unknown-fetch-failed": 2},
+        **trace,
+        "verdicts": {**trace["verdicts"], "withhold-unknown-fetch-failed": 2},
     }}
     records = ev.audience_records("\n".join(_compose_line(r) for r in (a, b)))
     assert ev.fetch_failed_total(records) == 2
