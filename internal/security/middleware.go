@@ -1,4 +1,6 @@
-// Package security: REST + gRPC rate-limit middleware (RFC 0009 PR 2).
+// Rate-limit middleware for REST and gRPC (RFC 0009 PR 2). The blank line
+// below keeps this out of the package comment, which is in security.go.
+
 package security
 
 import (

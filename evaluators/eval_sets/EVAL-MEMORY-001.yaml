@@ -16,7 +16,7 @@ description: |
   (`make eval-record-offline`), so it replays deterministically at $0 with no API
   key; a live re-record against the `quality` model rides release-prep.
 spawned_from: ../../docs/manual-tests/MT-MEMORY-005-dementia-test.md
-tier: experimental
+tier: stable
 
 setup:
   persona: ember-owl

@@ -270,3 +270,13 @@ removes the legacy `chatExecutor` per [ISSUE-0035](ISSUE-0035-chat-executor-dead
 > showed no provider spend trace for the denied turn — the budget gate fires
 > *before* the provider is contacted, so the structural enforcement is intact.
 > The miss is purely the operator-visible error envelope on the REST surface.
+
+> 2026-09-11 — the "compounding" gap in the Context section above is still
+> open: Path B was never taken, so REST chat is still leased as
+> `CAUSE_CHANNEL_MESSAGE`, never `CAUSE_CHAT`. Filed as
+> [ISSUE-0155](ISSUE-0155-rest-chat-leased-as-channel-message.md).
+
+> 2026-09-11 — ISSUE-0155 is resolved by keeping that label, so Path B's
+> proto change is not planned, and
+> [ISSUE-0035](ISSUE-0035-chat-executor-dead-but-wired-cleanup.md) removes
+> `SendChatMessage` rather than routing chat through it.

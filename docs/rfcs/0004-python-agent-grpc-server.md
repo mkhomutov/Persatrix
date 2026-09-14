@@ -37,6 +37,7 @@ depends_on:
 - [Test Strategy](#test-strategy)
 - [Open Questions](#open-questions)
 - [Decision / Next Steps](#decision--next-steps)
+- [Divergence from RFC 0004](#divergence-from-rfc-0004)
 - [Related Documentation](#related-documentation)
 
 ---
@@ -98,6 +99,7 @@ If we do nothing, the project has a well-tested orchestrator that orchestrates n
 - **Persona agents.** `PersonaAgent` with `on_event()` and `on_tick()` is v0.2+. Only task agents are implemented.
 - **Streaming execution.** `ExecuteTaskStream` RPC returns `stream TaskProgress` — deferred to v0.2. The servicer method returns `UNIMPLEMENTED`.
 - **MCP tool bridge.** `agents/tools/mcp_bridge.py` is v0.2+. The `mcp:github` tool references in `config/agents.yaml` are parsed but produce a warning at startup ("MCP tools not yet available").
+  > **Divergence ([D1](#d1-mcp-tool-entries-are-dropped-without-a-warning)):** no such warning exists; the entries are dropped silently.
 - **Memory tiers.** `agents/memory/` (episodic, relationship, working) is v0.2+. Agents are stateless within a single task execution.
 - **Sub-agent spawning.** `agents/sub_agents/` is v0.2+.
 - **Multi-agent process.** v0.1 runs one agent per process. Multi-agent hosting (loading multiple agents into a single gRPC server) is deferred.
@@ -1211,6 +1213,15 @@ Once this RFC is accepted:
 2. Implement in phase order (Proto Gen → Permissions/Sandbox → Tools → Agents → Server).
 3. PR < 500 lines per phase; squash merge to `main`.
 4. **Next RFC**: v0.1 integration testing and end-to-end smoke test workflow, or Rust CLI implementation to complete the v0.1 MVP path.
+
+## Divergence from RFC 0004
+
+### D1. `mcp:` tool entries are dropped without a warning
+
+- **RFC expectation**: [Non-Goals](#non-goals) says the `mcp:github` entries in `config/agents.yaml` produce a startup warning, "MCP tools not yet available".
+- **Current behavior**: No such warning exists anywhere in the code. When an agent builds the list of tools it offers the LLM, it keeps only names found in the tool registry — `_build_tool_definitions` in `agents/base.py` for task agents, and its counterpart in `agents/persona_runtime/action_loop.py` for persona agents. Nothing registers `mcp:github`, because the MCP bridge (`agents/tools/mcp_bridge.py`) is still a placeholder. So the entry is dropped and nothing is logged.
+- **Impact**: code-writer, code-reviewer and ember-owl each list `mcp:github` but get no tools from it, and nothing tells the operator. Low severity: nothing breaks, but the config names tools the agents never receive.
+- **Resolution**: Accepted divergence. The bridge itself, deferred to v0.2 in [Items Deferred to v0.2](#tool-system), has not shipped; ROADMAP now lists it under [Planned Components (v0.4.0)](../../ROADMAP.md#planned-components-v040). Adding the promised warning would change behaviour, so it is out of scope for this note.
 
 ## Related Documentation
 

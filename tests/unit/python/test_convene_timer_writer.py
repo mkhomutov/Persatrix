@@ -1,7 +1,7 @@
 """RFC 0052 §E — the agents.yaml convene-timer WRITER (v0.3.11 PR 7c-ii-b).
 
 TDD-first. Pins the two correctness contracts the Go producer's
-``standing_schedule.go`` deferred to the consumer (its lines 49-62), each of
+``standing_schedule.go`` header sets for whoever writes the timer, each of
 which the naive "just append a ``timers`` entry" gets wrong:
 
   * **Level bump** — ``server_persona.initialize_persona_agents`` only builds the

@@ -10,8 +10,9 @@ Two behaviours are pinned here:
 
 1. **Cause tagging.** A TICK event reaches
    :meth:`LLMClient.create_message` with ``cause=CAUSE_AUTONOMOUS_TICK``
-   so the wallet attributes spend to the autonomous-tick origin and
-   the per-cause dashboards stop collapsing TICK into "unspecified".
+   so the call is leased (``CAUSE_UNSPECIFIED`` skips the wallet) and the
+   wallet's log lines name the autonomous-tick origin. No dashboard
+   splits spend by cause (ISSUE-0155).
 2. **Budget-denied → idle short-circuit.** Unlike chat (where the
    handler surfaces the denial to the caller as
    ``reply_status="error"``), an autonomous TICK has no caller to

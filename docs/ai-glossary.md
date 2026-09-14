@@ -192,20 +192,25 @@ Process vocabulary (scope lock, cuttable, live arc, finding, …) lives in the
   "adapter" (when meaning channel bridge), "integration"
 - **Definition:** A v0.5.0 component that connects an internal channel to an
   external service (Slack, Discord, email, Telegram). Always qualified as
-  "channel bridge" to disambiguate from **MCP Bridge** (a separate, existing
-  concept — see below).
+  "channel bridge" to disambiguate from **MCP Bridge** (a separate component,
+  also not built yet — see below).
 - **Example:** "The Slack channel bridge mirrors `#ops` into a Slack workspace."
 
 ### MCP Bridge
 - **Aliases:** —
 - **Disallowed:** "bridge" (unqualified, when meaning the MCP integration);
   "MCP connector"
-- **Definition:** The Python component in
-  [`agents/tools/mcp_bridge.py`](../agents/tools/mcp_bridge.py) that connects to
-  external Model Context Protocol (MCP) servers and exposes their tools to
-  agents over stdio or SSE. Distinct from **Channel Bridge** above. Configured
-  via `config/mcp-servers.yaml`.
-- **Example:** "The MCP bridge surfaces filesystem tools from a stdio MCP server."
+- **Definition:** 📋 **Planned** — the component that will let agents use tools
+  from external Model Context Protocol (MCP) servers, configured in
+  `config/mcp-servers.yaml` (design:
+  [orchestration spec §5.2](ai-agents-orchestration-spec.md#52-mcp-model-context-protocol-support);
+  ROADMAP: [v0.4.0](../ROADMAP.md#planned-components-v040)). Nothing connects
+  to an MCP server today: [`agents/tools/mcp_bridge.py`](../agents/tools/mcp_bridge.py)
+  and [`internal/mcp/mcp.go`](../internal/mcp/mcp.go) are TODO placeholders,
+  nothing reads the config file, and an `mcp:` entry in an agent's `tools`
+  list gives that agent no tools. Distinct from **Channel Bridge** above.
+- **Example:** "When the MCP bridge ships, agents that list `mcp:github` will
+  get the GitHub MCP server's tools; today they get none."
 
 ### Message Bus
 - **Aliases:** —
@@ -445,16 +450,17 @@ Process vocabulary (scope lock, cuttable, live arc, finding, …) lives in the
   "DM-chat bridge".
 - **Definition:** v0.3.0 unification ([RFC 0011 amendment](rfcs/0011-amendment-chat-as-dm.md), amending RFC 0016)
   modelling every user–agent chat as a `dm` channel
-  `dm:<user>:<agent>` in the RFC 0011 channel store. The
-  `POST /api/v1/agents/{id}/chat` REST endpoint, the `SendChatMessage`
-  gRPC RPC, and the `persatrix chat` REPL are preserved as
-  synchronous-reply façades — they publish on the DM channel, await one
-  `SEND_CHANNEL_MESSAGE` reply on the same channel, and return it to the
-  caller. Eliminates the parallel chat transport that v0.2.1 introduced
-  and is the reason `EventType.MESSAGE_RECEIVED` /
+  (`dm:<a>:<b>`, IDs sorted) in the channel store. The
+  `POST /api/v1/agents/{id}/chat` REST endpoint and the `persatrix chat`
+  REPL are preserved as synchronous-reply façades — they publish on the
+  DM channel, await one `SEND_CHANNEL_MESSAGE` reply there, and return it
+  to the caller. Eliminates the parallel chat transport that v0.2.1
+  introduced and is the reason `EventType.MESSAGE_RECEIVED` /
   `ActionType.SEND_MESSAGE` were renamed (not just superseded) to
   `CHANNEL_MESSAGE` / `SEND_CHANNEL_MESSAGE` in PR 4a-ii-α
-  (RFC 0011, v0.3.0). The chat-as-DM façade lands in PR 4b.
+  (RFC 0011, v0.3.0). The chat-as-DM façade landed in PR 4a-ii-β-2; the
+  `SendChatMessage` RPC is now unused
+  ([ISSUE-0035](issues/ISSUE-0035-chat-executor-dead-but-wired-cleanup.md)).
 - **Example:** "Under chat-as-DM, the chat REST handler is a thin
   publish-and-await wrapper over `ChannelRouter.Publish` — no separate
   ingest path."
@@ -1013,13 +1019,19 @@ verbatim) are defined now (PR #232 review SF-5).
   `AuditLogger` startup based on the state of `audit.jsonl`:
   - `chain.bootstrap` — file missing or zero-length; chain seeded from
     `sha256("")`.
-  - `chain.restart` — tail line parses and its checksum recomputes;
-    event carries the prior tail checksum so external tooling can
-    detect the process-boundary discontinuity.
-  - `chain.recovered` — tail line is unparseable / truncated /
-    checksum-mismatch; carries `Detail.prior_tail = "unknown"` and a
-    WARN log. Operators must acknowledge — the log is **not** silently
-    continued from a fresh chain.
+  - `chain.restart` — tail line parses as JSON and its checksum field is
+    well-formed (64 hex characters); event carries the prior tail
+    checksum so external tooling can detect the process-boundary
+    discontinuity.
+  - `chain.recovered` — tail line is unreadable / truncated / not JSON /
+    missing a well-formed checksum; carries `Detail.prior_tail = "unknown"`
+    and `Outcome = "warn"`. Operators must acknowledge — the log is
+    **not** silently continued from a fresh chain.
+
+  Startup recomputes no checksum, so an edited record that keeps a
+  well-formed checksum passes as a normal restart. Only
+  `security.VerifyChain` recomputes the chain, and only tests call it
+  today.
 
 ### `SanitizerAction.Passthrough` / `SanitizerAction.Quarantine`
 - **Disallowed:** "sanitizer mode", "drop-on-flag".
@@ -1043,9 +1055,14 @@ verbatim) are defined now (PR #232 review SF-5).
 - **Definition:** New `ContextSource` enum variant (Phase 2) tagging
   inputs that arrive through the RFC 0011 channel-publish path.
   Treated as `external`-equivalent for sanitization but kept distinct
-  in the audit trail so forensics can distinguish "agent posted to
-  channel" from "scraped webpage". The orchestrator is the authority on
-  this tagging — agents cannot self-report `source` values.
+  so forensics can distinguish "agent posted to channel" from "scraped
+  webpage". The persona agent sets this tag itself: it runs
+  `sanitize(content, source=CONTEXT_SOURCE_CHANNEL_MESSAGE)` on each
+  incoming channel message (`agents/persona_runtime/channel_ingest.py`),
+  and a flagged message shows up only as an `input.flagged` warning in
+  the agent's log, not in the audit log. The orchestrator neither tags
+  nor checks channel messages: no Go code outside `internal/security`
+  runs the Go `InputSanitizer`.
 
 ### Audit `CorrelationID` (4-segment form)
 - **Disallowed:** "correlation tuple", "audit trace ID".

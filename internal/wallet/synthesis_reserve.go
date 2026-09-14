@@ -146,7 +146,7 @@ package wallet
 //     quiet one: 73 500 reserve, 126 500 for the discussion — still above the
 //     peak, but down from the 186 000 the `1 + N` sizing left it, with no
 //     counter, because an unclamped reserve is the honest full sizing. The
-//     operator-facing form of both is in the channels guide's sizing table.
+//     operator-facing form of both is in the autonomous channels guide's sizing table.
 //
 // ISSUE-0138 owns the re-soak.
 const DefaultSynthesisCallReserveTokens int64 = 3500

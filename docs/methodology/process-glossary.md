@@ -1,6 +1,6 @@
 # Process Glossary
 
-> **Last updated**: 2026-09-06
+> **Last updated**: 2026-09-12
 > Terms used to run the project. Product and architecture terms live in the
 > [AI glossary](../ai-glossary.md); this file covers the process vocabulary
 > that appears in plans, PR bodies, and reports. Same authoring rules: use the
@@ -11,6 +11,14 @@ A dated section appended to [v0.3.x-sequencing.md](../v0.3.x-sequencing.md)
 that assigns issues and RFC phases to concrete versions and names the next
 version. The citation for "why is this in scope". Never edited; superseded by
 a later amendment. See [decisions.md](decisions.md#sequencing-amendments).
+
+### External evidence section
+The section every sequencing amendment opens with from 2026-09-12 on:
+installs by anyone other than the author, issues or PRs from anyone else,
+demos shown, user conversations written up, experiment results published.
+When every row is "none", the amendment may not scope a version on internal
+correctness alone. See [decisions.md](decisions.md#sequencing-amendments)
+rule 6.
 
 ### Version-train gate
 The rule that work slotted for a later version does not merge while the

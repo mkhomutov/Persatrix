@@ -29,10 +29,43 @@ test surface for the facts-tier reinforcement path stays narrow.
 from __future__ import annotations
 
 import logging
+import re
+from pathlib import Path
 
 import pytest
 
 from agents.persona_runtime.memory_budget import KNOWN_TIERS, MemoryBudget
+
+# ─── Every tier pairs its admission ────────────────────────────
+
+_PERSONA_RUNTIME = Path(__file__).resolve().parents[3] / "agents" / "persona_runtime"
+
+
+class TestEveryKnownTierRecordsItsAdmission:
+    """The class of gap ISSUE-0122 named — a tier that charges the budget
+    through ``try_add`` and never calls ``record_admission`` — lived for
+    a year because nothing pinned the pairing.  This does, at the source
+    level: every :data:`KNOWN_TIERS` name must appear as the ``tier=``
+    argument of a ``record_admission`` call somewhere under
+    ``agents/persona_runtime/``.  A sixth tier lands on this list by
+    adding its name to the allowlist, and then has to pair its admission
+    before this goes green again.
+    """
+
+    @pytest.mark.parametrize("tier", sorted(KNOWN_TIERS))
+    def test_tier_has_a_record_admission_call_site(self, tier: str) -> None:
+        pattern = re.compile(r"record_admission\(\s*tier=\"" + re.escape(tier) + r"\"")
+        sources = sorted(_PERSONA_RUNTIME.glob("*.py"))
+        assert sources, f"no sources found under {_PERSONA_RUNTIME}"
+        callers = [
+            path.name for path in sources
+            if pattern.search(path.read_text(encoding="utf-8"))
+        ]
+        assert callers, (
+            f"tier {tier!r} is in KNOWN_TIERS but no module under "
+            f"agents/persona_runtime/ records an admission for it"
+        )
+
 
 # ─── Registry shape ────────────────────────────────────────────
 
@@ -114,9 +147,11 @@ class TestKnownTierAllowlist:
         review touch-point rather than slipping through silently.
         """
         # All five tier names appearing in the canonical RFC 0027 §F
-        # priority order, plus the relationship tier that does not
-        # currently call ``record_admission`` but is part of the same
-        # vocab so future wiring lands on a known name.
+        # priority order.  Every one of them now calls
+        # ``record_admission`` — ``relationship`` was reserved here
+        # ahead of its wiring (ISSUE-0122, v0.3.16 PR B1) so that
+        # wiring landed on a known name; the pairing itself is pinned
+        # by :class:`TestEveryKnownTierRecordsItsAdmission`.
         assert KNOWN_TIERS == frozenset({
             "facts",
             "episodic",

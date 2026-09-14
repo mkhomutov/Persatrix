@@ -58,10 +58,22 @@ On load the app boots off two read-only endpoints:
   `{"principal":"local","tenant":"local","authenticated":false}`; under
   `enabled` it reports the **verified** logged-in account (and the console
   shows a login form on the first `401` — see the [auth guide](auth.md)). The
-  conversation panel derives its `user_id` from this `principal` — it is **never**
-  hard-coded or free-text typed (the [RFC §F](../rfcs/0048-operator-tester-web-console.md#f-auth--multi-tenancy-forward-compatibility)
+  conversation panel's `user_id` starts from this `principal` and is never
+  hard-coded (the [RFC §F](../rfcs/0048-operator-tester-web-console.md#f-auth--multi-tenancy-forward-compatibility)
   single-identity-source rule, which is what let RFC 0039 auth compose in
   with no panel changes).
+
+**The "acting as" box is a testing control, not identity.** While `/ui/context`
+reports `authenticated: false` — always, under `auth.mode: disabled` — the
+topbar shows an **acting as** box beside the principal. It starts out holding
+the principal; type another user id and press Enter, and the console acts as
+that user: chat, channel posts, and your membership in a channel you create all
+use it. That is how a tester shows a persona remembering each user separately —
+greet it as one user, switch, and it no longer knows you. The box grants no new
+access, because with auth disabled the REST API already accepts any `user_id`,
+and it disappears once you sign in, so a verified identity can never be
+overridden from the browser. It is the one deliberate exception to the §F rule
+([amendment §E](../rfcs/0048-amendment-slice1-ux.md#e-tester-identity-override-closes-context-5--the-one-decision-that-bends-rfc-0048-f)).
 
 A panel renders only when it is **both** `enabled` (operator toggle) **and**
 `available` (subsystem wired). Unknown panels are ignored, so an older binary
@@ -113,7 +125,8 @@ make demo-offline          # or demo-ollama / docker compose up --build
 # open http://localhost:8080/ui
 ```
 
-The compose stack publishes `:8080` for local use only. See
+The compose stack publishes `:8080` on `127.0.0.1` only, so the console answers
+on this machine and not to the rest of your network. See
 [§ Security](#security--exposure-beyond-localhost) before changing that
 publish or the bind address.
 
@@ -135,7 +148,8 @@ The hero moment — talk to a persona over the synchronous chat API:
    message** section (`GET /api/v1/agents`). The conversation opens with a persona header
    (name — role — capabilities); a reload resumes the persisted history.
 2. Type a message and send it (`POST /api/v1/agents/{id}/chat` with
-   `participant_type:"user"` and the `user_id` derived from `/ui/context`). A
+   `participant_type:"user"` and the console's `user_id` — the `/ui/context`
+   principal, or the [acting as](#what-it-is) value). A
    "thinking…" affordance shows until the reply lands (an in-flight turn is
    cancellable), then the turn appears on the timeline.
 
@@ -225,10 +239,10 @@ optional description, and pick members — **only persona agents** are listed
 (`when_mentioned` (default) / `always` / `never`). On success the picker
 reloads and selects the channel you made.
 
-   **You are added automatically.** The acting user (the `/ui/context` principal)
-   joins the new channel with `respond: never` — a poster must be a member, and
-   `never` means you can publish immediately without ever being dispatched a
-   turn.
+   **You are added automatically.** The acting user (the `/ui/context` principal,
+   or the [acting as](#what-it-is) value) joins the new channel with
+   `respond: never` — a poster must be a member, and `never` means you can
+   publish immediately without ever being dispatched a turn.
 
 > **Group channels only.** To start a **DM**, use the **persona picker**
 > ([Direct-message a persona](#direct-message-a-persona)) — DMs and threads are
@@ -254,73 +268,12 @@ Both must be `true` for the affordance to render — the same
 ## Channel settings — edit governance from the browser
 
 A selected **group channel** can have its governance knobs read and edited from
-the console — the browser counterpart to the CLI
+the console's **Channel settings** card — the browser counterpart to the CLI
 [`channel config`](channels.md#editing-governance-config-at-runtime--channel-config-rfc-0050-phase-1)
-verb group (RFC 0050 Phase 2). Both surfaces ride the **same**
-`GET`/`PATCH /api/v1/channels/{id}/config` endpoint and the **same** per-channel
-revision, so a value set in one is what the other reads back — one source of
-truth, the store. It is a **Channel settings** card in the management rail,
-beside the **Members** card, shown only for a watched **group** channel
-(not DMs).
-
-**It ships on.** The schema default is `false`, but the delivered
-[`config/ui.yaml`](../../config/ui.yaml) sets `config_edit_enabled: true` (RFC
-0050) — set it back to `false` under the `channel_timeline` panel to disable it:
-
-```yaml
-panels:
-  channel_timeline:
-    enabled: true
-    config_edit_enabled: true   # shipped on (schema default false) — gates BOTH the web panel and CLI uniformly
-```
-
-The **same toggle** gates the CLI `channel config` verbs — the whole `/config`
-endpoint, read *and* write: on exposes both surfaces; off returns `403` to both.
-The panel renders under the usual `enabled && available` rule; `available` is
-**runtime-derived** (channel store + router wired, mirroring the endpoint's
-`503`) and never authored — an `available:` key in the YAML is a
-`make validate` error. Verify with:
-
-```bash
-curl -s http://localhost:8080/api/v1/ui/config | jq '.panels.channel_timeline.config_edit'
-# want: { "enabled": true, "available": true }
-```
-
-**Using it.** Each knob shows its effective value and a provenance badge —
-**Overridden on this channel** or **Inherited default**. To change one, untick
-**Inherit fleet default** and set the value; to revert, re-tick it. **Save
-settings** sends only the knobs you touched (a sparse patch), carrying the loaded
-revision as an `If-Match` guard:
-
-- A reverted knob sends an explicit "unset → inherit"; an override left blank is
-  skipped, not sent as `0` (a no-op save sends nothing).
-- The **escalation chair** picker offers only floor-capable members (an observer
-  cannot chair); a chair needs `floor_control` on, else the save `400`s (a
-  cross-field conflict the picker cannot prevent).
-- `interaction_budget_tokens` is **router-wired and live-enforced** (RFC 0050
-  amendment), so an inherited value resolves to a concrete number, not empty.
-- Since v0.3.11 the panel renders an **Autonomous channel** section (RFC 0052) —
-  the `autonomous` knobs (enable, Topic/Goal, Agenda, Convener, Max rounds) on the
-  same PATCH, plus (PR 3) a **Convene** action
-  ([§13](channels.md#13-autonomous-channels-rfc-0052)).
-- On a concurrent edit, the save returns `409`; the panel **reloads the latest
-  config and replays your pending edits on top** rather than blind-overwriting,
-  and asks you to review and save again.
-
-> **First-edit behavior (✅ ISSUE-0103 resolved 2026-06-15).** Editing one knob on
-> a YAML-seeded channel **preserves** its other knobs (including the YAML chair):
-> the first edit seeds its merge base from the channel's resolved governance
-> ([ISSUE-0103](../issues/ISSUE-0103-first-config-edit-detaches-yaml-seeded-knobs.md)).
-> Expect the channel to become **store-canonical** (previously-inherited knobs now
-> read source `channel`), and a lone `floor_control: false` on a chaired channel to
-> be **rejected** — clear the chair in the same save. Still a governance write
-> that is anonymous under the default `auth.mode: disabled` (`operator`-gated
-> under `enabled`) — see
-> [Security](#security--exposure-beyond-localhost) before exposing the
-> console beyond localhost.
-
-For the live cross-surface acceptance walkthrough, see
-[MT-CHANNEL-CONFIG-002](../manual-tests/MT-CHANNEL-CONFIG-002.md).
+verbs, on the same endpoint and revision. It ships on
+(`config_edit_enabled: true`) and, like channel creation, is a write that is
+anonymous under the default `auth.mode: disabled`. How to use it:
+[Web Console — Channel Settings](web-console-channel-settings.md).
 
 ---
 
@@ -396,6 +349,13 @@ a browser*. The mitigations it ships with:
 
 - **`--enable-ui` defaults off.** You opt in explicitly.
 - **The orchestrator binds `127.0.0.1` by default** (`--http-bind 127.0.0.1`).
+- **The Docker demo stack publishes `:8080` on `127.0.0.1` only.** Inside its
+  container the orchestrator has to listen on `0.0.0.0` so the agents can reach
+  it over the compose network, which makes the host-side publish —
+  `127.0.0.1:8080:8080` in `docker-compose.yaml` — the part that keeps it off
+  your network. Docker publishes a mapping without an address (`8080:8080`) on
+  every interface. `docker compose port orchestrator 8080` should print
+  `127.0.0.1:8080`.
 - **The console is read-mostly.** Slice 1's writes are chat, the optional channel
   publish, and [group-channel creation](#creating-a-channel), all against existing
   endpoints. Channel creation is a deliberate, signed-off
@@ -407,8 +367,12 @@ a browser*. The mitigations it ships with:
 
 **The rule under `disabled`:** exposing the console (or the `:8080` REST
 surface at all) beyond localhost requires an authenticating reverse proxy —
-or flipping `auth.mode: enabled` (over HTTPS) instead. Do not bind `0.0.0.0`,
-and do not publish `:8080` on a routable interface, with neither in place.
+or flipping `auth.mode: enabled` (over HTTPS) instead. Do not start the binary
+on a host with `--http-bind 0.0.0.0` (the compose container needs it; its
+loopback publish is the boundary), and do not publish `:8080` on a routable
+interface, with neither in place. A proxy on the same host reaches the Docker
+stack at `127.0.0.1:8080` (or at `orchestrator:8080` from inside the compose
+network), so the publish itself never needs widening.
 
 ---
 
@@ -433,6 +397,7 @@ Deferred by RFC decision (2026-06-02); each is its own later slice
 | Symptom | Cause / fix |
 |---------|-------------|
 | `/ui/` returns 404 | `--enable-ui` is off (the default), or you reached a non-existent path. Run with `--enable-ui` (or `make run-ui`). |
+| The console opens on this machine but not from another device | Expected: the binary binds `127.0.0.1`, and the Docker stack publishes `:8080` on `127.0.0.1` only. Read [§ Security](#security--exposure-beyond-localhost) before widening either — under `auth.mode: disabled` that also exposes the unauthenticated REST API. |
 | The console shows a "run `make ui`" placeholder | The binary was built without the real bundle (`go build` / `make build-orchestrator` alone embeds the placeholder). Run `make ui` first, or use `make run-ui` / the Docker image. |
 | Every asset 404s under `/ui/` | A bundle built without Vite's `base: "/ui/"`. Use `make ui` (configured correctly); do not hand-build. |
 | The Channel-timeline panel is missing | `channel_timeline.available` is false — channels are not wired. Check the channel config; the panel hides itself when its subsystem is absent. |

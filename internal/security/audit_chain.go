@@ -278,27 +278,31 @@ func canonicalEventJSON(ev AuditEvent, prevChecksum string) ([]byte, error) {
 	return buf, nil
 }
 
-// VerifyChain re-reads path and recomputes the per-event sha256
-// checksum chain, returning the first error that breaks the chain. A
-// nil return means every event's recorded Checksum matches the value
-// computed from canonicalEventJSON(prev, ev). Used by external
-// auditors and the future `persatrix audit verify` CLI subcommand
-// (PR #233 review Nice-to-have #1) so callers do not re-implement
-// [canonicalEventJSON].
+// VerifyChain re-reads the audit log at path and recomputes its checksum
+// chain. It takes sha256("") as the checksum before line 1, recomputes
+// each line's checksum from its contents and the checksum recorded on
+// the line before (see [canonicalEventJSON]), and returns an error at
+// the first line that fails: the line does not decode as JSON, its
+// Checksum is missing or malformed, or the recomputed value differs
+// from the recorded one. The error names the line, counting from 1.
 //
-// Errors surface the line number (1-indexed) and the underlying
-// reason: malformed JSON, missing/short Checksum, or a recomputed
-// hash that disagrees with the recorded one. Empty / missing files
-// are reported via a typed [os.PathError]-class error from
-// [os.Open] — callers running the verifier against a wrong path see
-// the failure rather than a false-positive "clean" verdict.
+// A nil return means every line matched. An empty file also returns
+// nil, because it has nothing to check; a missing file returns an
+// error wrapping the one from [os.Open].
 //
-// Synthetic chain.bootstrap / chain.restart / chain.recovered events
-// participate in the chain like any other event; truncated files
-// produce a chain.recovered written by the next [NewFileAuditLogger]
-// open, so a verifier run shortly after restart should validate clean
-// against the post-restart prefix even when the pre-restart suffix
-// was corrupt.
+// It is exported so a future `persatrix audit verify` command can reuse
+// it rather than copy [canonicalEventJSON] (PR #233 review
+// Nice-to-have #1). Only tests call it today.
+//
+// chain.bootstrap and chain.restart events continue the chain like any
+// other event. chain.recovered does not: when [NewFileAuditLogger]
+// writes it, the logger starts a new chain from sha256(""), but
+// VerifyChain keeps chaining from the line before. So a file that has
+// been through a recovery cannot verify clean. VerifyChain stops at the
+// damaged line that caused the recovery or, when that line is intact
+// (for example, a record too long for the startup check to read), at
+// the chain.recovered line. A copy of the file that starts at the last
+// chain.recovered line passes on its own if nothing after it is damaged.
 func VerifyChain(path string) error {
 	f, err := os.Open(path)
 	if err != nil {

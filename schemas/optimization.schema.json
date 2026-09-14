@@ -113,6 +113,19 @@
           "description": "Token budget for the replayed transcript, separate from the RFC 0017 system-prompt memory budget. Oldest turns drop first (FIFO) once the budget is exceeded; the tighter of max_turns / max_tokens binds per turn."
         }
       }
+    },
+    "memory_budget": {
+      "type": "object",
+      "description": "The RFC 0017 §B per-event memory budget (v0.3.16 PR K1): the total tokens of episodic + relationship + facts + notes + channel-history context a persona injects into one turn's system prompt. Top-level block, not profile-scoped — like models.aliases, it is a fleet-wide value with no per-profile variant; read once at persona start by the Python runtime (agents/optimization.py memory_budget_tokens()). An absent block or key means the built-in default (1500); any other key in the block is rejected at agent start, so a misspelt `token:` cannot silently run the default. Separate from conversation_window.max_tokens (the replayed transcript) and from each agent's memory.facts.budget_tokens (the facts tier's slice inside this total).",
+      "additionalProperties": false,
+      "properties": {
+        "tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 1500,
+          "description": "Total memory tokens admitted per turn across every tier, in priority order (relationship → channel history → facts → episodic → notes). 0 disables memory injection (every recalled tier dropped, memory_admitted_tokens == 0 — the RFC 0017 zero-budget retune; the channel roster sits outside this budget and still renders) — and, because a TICK with zero admitted memory, no active goal and no pending turn skips the LLM call (RFC 0017 §F), a persona with nothing to do also goes quiet on idle ticks. The EXP-001 knob and the first value a long-context operator raises."
+        }
+      }
     }
   }
 }

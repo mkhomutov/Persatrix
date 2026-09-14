@@ -1,4 +1,21 @@
-// Package state manages execution state, checkpoints, and persistence.
+// Package state keeps track of workflow runs: each run's status, inputs,
+// errors and timing, and each step's result and cost.
+//
+// Built: the [Store] interface and one implementation, [InMemoryStore],
+// which the orchestrator uses. Runs are kept in memory only, so a restart
+// loses them. (Channels, user accounts and agent memory are saved to
+// SQLite, but by other parts of Persatrix, not through this package.)
+//
+// Planned, as the TODOs at the end of state.go: a SQLite-backed Store that
+// survives a restart, periodic checkpoints (snapshots that can be restored),
+// and export and import of saved state. RFC 0001, which built this package,
+// left saving runs to disk out of scope but shaped [Store] so a SQLite
+// version could be added later; docs/ai-agents-orchestration-spec.md §12.8
+// sketches the design. Three RFCs also plan additions to this file: a
+// "skipped" step status and a record of how each loop ran and why it
+// stopped (RFC 0007), actions held until a person approves them (RFC 0009
+// Phase 4), and skills granted to an agent for a single task (RFC 0014
+// Phase 3). ROADMAP.md tracks the status.
 package state
 
 import (
@@ -85,9 +102,9 @@ type StepState struct {
 }
 
 // Store defines the interface for workflow run state persistence.
-// All methods accept context.Context for forward compatibility with
-// persistent backends (SQLite in v0.2). In-memory implementations
-// may ignore the context parameter.
+// All methods accept context.Context for forward compatibility with a
+// persistent backend, such as the planned SQLite store. In-memory
+// implementations may ignore the context parameter.
 type Store interface {
 	CreateRun(ctx context.Context, run *WorkflowRun) error
 	GetRun(ctx context.Context, runID string) (*WorkflowRun, error)
@@ -333,6 +350,6 @@ func (s RunStatus) String() string {
 	}
 }
 
-// TODO: Implement SQLiteStore (v0.2+)
+// TODO: Implement SQLiteStore, a Store that keeps runs across restarts
 // TODO: Implement checkpoint/restore
 // TODO: Implement export/import

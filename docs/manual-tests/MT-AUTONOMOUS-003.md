@@ -31,7 +31,7 @@ MT-AUTONOMOUS-001 proved one convening runs and terminates with artifacts; this 
 
 - [RFC 0052 §E — Standing and scheduled discussions](../rfcs/0052-autonomous-agent-channels.md#e-standing-and-scheduled-discussions); [OQ #4](../rfcs/0052-autonomous-agent-channels.md#open-questions) (the config-round-trip resolution).
 - [RFC 0052 PR plan §PR 7](../rfcs/0052-pr-plan.md#pr-7-featurev0311-rfc0052-standing--phase-3-standing--scheduled-convening--aggregate-bound) — this MT is the Phase-3 acceptance artifact.
-- [Channels guide §Autonomous channels](../guides/channels.md#13-autonomous-channels-rfc-0052) — the operator arming/convening how-to.
+- [Autonomous channels guide](../guides/autonomous-channels.md) — the operator arming/convening how-to.
 - [MT-AUTONOMOUS-001](MT-AUTONOMOUS-001.md) — the one-shot backbone each scheduled convening reuses.
 
 **Related Automated Tests** — the deterministic CI backbone of this MT (no provider needed; the timer/id/bound machinery is provider-agnostic):

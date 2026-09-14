@@ -182,8 +182,9 @@ def _channel_event(
 ) -> AgentEvent:
     """A ``CHANNEL_MESSAGE`` event shaped like ``ReceiveChannelMessage`` builds.
 
-    No ``chat_session_id`` metadata — that is the chat-as-DM
-    discriminator from PR 4, and would route to ``CAUSE_CHAT`` instead.
+    No ``chat_session_id`` metadata — that key is the ``SendChatMessage``
+    servicer's shape from PR 4 and would route to ``CAUSE_CHAT`` instead.
+    REST chat's DM events never carry it (ISSUE-0155).
     """
     return AgentEvent(
         event_type=EventType.CHANNEL_MESSAGE,

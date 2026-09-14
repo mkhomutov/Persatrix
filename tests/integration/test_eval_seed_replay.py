@@ -40,7 +40,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
 import yaml
 
 from evaluators.eval_set import load_eval_set
@@ -201,17 +200,23 @@ def test_replay_summary_survives_non_utf8_stdout(tmp_path: Path) -> None:
 
 async def test_missing_golden_fails_loud(tmp_path: Path) -> None:
     """A recipe whose golden was never recorded must fail loudly, never silently
-    pass (RFC 0044 §D) — replay builds the provider from the sidecar and raises.
+    pass (RFC 0044 §D) — as a failed recipe *in the artifact* (``golden.missing``),
+    not an exception out of the suite, so the summary, the ``--report`` file and
+    the other recipes' verdicts survive it (v0.3.16 PR C2 review).
 
-    In-process: this leg raises in ``build_provider`` before any prompt is built,
-    so it is order-immune and needs no fresh process."""
+    In-process: ``build_provider`` fails before any prompt is built, so this leg
+    is order-immune and needs no fresh process."""
     shutil.copy(_recipe_path(), tmp_path / f"{_RECIPE_ID}.yaml")  # recipe, no golden
     recipes = discover_recipes(tmp_path, target=_RECIPE_ID)
     agents_cfg = str(_REPO / "config" / "agents.yaml")
-    # match= pins this to the golden-missing raise (build_provider), not an
-    # unrelated FileNotFoundError (e.g. a resolver reading a missing config).
-    with pytest.raises(FileNotFoundError, match="no golden"):
-        await run_suite(recipes, mode=EvalMode.REPLAY, config_path=agents_cfg)
+    (artifact,) = await run_suite(recipes, mode=EvalMode.REPLAY, config_path=agents_cfg)
+    assert artifact["passed"] is False
+    assert artifact["eval_id"] == _RECIPE_ID
+    (row,) = artifact["assertions"]
+    # pinned to the golden-missing failure (build_provider), not an unrelated
+    # FileNotFoundError (e.g. a resolver reading a missing config).
+    assert row["name"] == "golden.missing"
+    assert "no golden" in row["detail"]
 
 
 # ─── the offline record is byte-deterministic (portability guard) ────────────

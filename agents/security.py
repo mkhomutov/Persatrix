@@ -1,16 +1,18 @@
 """Python-side input sanitisation surface (RFC 0009 PR 3).
 
-The orchestrator runs the canonical [InputSanitizer] in Go
-(`internal/security/sanitize.go`). The Python side is the consumer-facing
-boundary for tool results and bridge inputs that originate inside the
-agent process — every external bytestream that re-enters the LLM context
-runs through `sanitize` here and is wrapped by `wrap_external` before it
-becomes part of the prompt.
+The canonical [InputSanitizer] lives in Go
+(`internal/security/sanitize.go`), but no orchestrator code calls it yet,
+so this module is the only sanitizer that runs. The Python side is the
+consumer-facing boundary for tool results and bridge inputs that originate
+inside the agent process — every external bytestream that re-enters the
+LLM context runs through `sanitize` here and is wrapped by `wrap_external`
+before it becomes part of the prompt.
 
-Why two implementations: the Go orchestrator sees only a subset of
-inbound content (REST/gRPC traffic, channel publishes, planner-injected
-context). Tool results assembled inside the Python agent process never
-cross the Go boundary, so a Go-only sanitizer would miss them.
+Why two implementations: RFC 0009 has the Go orchestrator sanitize the
+subset of inbound content it sees (REST/gRPC traffic, channel publishes,
+planner-injected context), though that call is not wired yet. Tool results
+assembled inside the Python agent process never cross the Go boundary, so
+a Go-only sanitizer would miss them.
 
 Pattern parity is enforced by `tests/unit/python/test_pattern_parity.py`
 which re-runs the `cmd/genpatterns` generator and diffs against the

@@ -6,11 +6,12 @@ package channels
 // into the RFC 0024 convener timer entry the round-trip seam must register in the
 // convener's `agents.yaml` `autonomy.timers` set.
 //
-// This slice is DARK: nothing FIRES these specs yet. It lands the producer half
-// (deriving + encoding the timer entry) first, so the PR 7c-ii consumer — the
-// `agents.yaml` writer + the convener-side ScheduledWake→POST /convene handler —
-// has a tested, drift-guarded contract to build against, exactly as PR 7b-i
-// landed the convening-count ceiling before the timer that fires into it.
+// Nothing in production calls this producer yet: operators hand-write the timer
+// entry it derives (standing_schedule.go's header). It landed first so the PR
+// 7c-ii pieces — the `agents.yaml` writer + the convener-side ScheduledWake→POST
+// /convene handler — had a tested, drift-guarded contract to build against,
+// exactly as PR 7b-i landed the convening-count ceiling before the timer that
+// fires into it.
 //
 // The two load-bearing invariants under test:
 //   - the derived timer id is BOTH agent.schema-valid AND reversible (the fired

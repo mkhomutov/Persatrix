@@ -346,7 +346,7 @@ Tracking pointers only; each is its own design pass + PR plan ([RFC §E](0048-op
 | 4 | Chat panel | `feature/v036-rfc0048p1-chat-panel` | ✅ Merged | [#501](https://github.com/mkhomutov/Persatrix/pull/501) | 2026-06-02 |
 | 5 | Channel timeline panel | `feature/v036-rfc0048p1-channel-timeline` | ✅ Merged | [#502](https://github.com/mkhomutov/Persatrix/pull/502) | 2026-06-02 |
 | — | Docker/demo enablement + in-image bundle (fold-in, beyond the original 6) | `feature/v036-rfc0048p1-docker-enable-ui` | ✅ Merged | [#503](https://github.com/mkhomutov/Persatrix/pull/503) | 2026-06-02 |
-| 6 | Docs + status closeout | `feature/v036-rfc0048p1-docs-closeout` | 🔀 PR open | — (this PR) | — |
+| 6 | Docs + status closeout | `feature/v036-rfc0048p1-docs-closeout` | ✅ Merged | [#504](https://github.com/mkhomutov/Persatrix/pull/504) | 2026-06-03 |
 
 ---
 

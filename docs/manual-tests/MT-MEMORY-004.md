@@ -14,7 +14,7 @@
 **Purpose**: Verify that the per-event memory-injection token budget introduced by RFC 0017
 ([Section B](../rfcs/0017-persona-memory-injection-budget.md#b-memory-budget-allocator)) is
 enforced at the allocator layer and that an oversized content payload cannot exceed
-`_MEMORY_BUDGET_TOKENS = 1500`.
+`MEMORY_BUDGET_TOKENS = 1500`.
 
 **Scope**: `agents.persona_runtime.memory_budget.MemoryBudget` allocator behaviour, token-aware
 truncation, greedy in-priority-order admission, and the `MemoryInjectionResult.memory_admitted_tokens`
@@ -31,7 +31,8 @@ contract that RFC 0017 §F's TICK short-circuit consumes.
 **Feature Documentation**:
 - [docs/rfcs/0017-persona-memory-injection-budget.md](../rfcs/0017-persona-memory-injection-budget.md) — §B Memory Budget Allocator
 - [agents/persona_runtime/memory_budget.py](../../agents/persona_runtime/memory_budget.py)
-- [agents/persona_runtime/memory_context.py](../../agents/persona_runtime/memory_context.py) — `_MEMORY_BUDGET_TOKENS`, `_inject_memory_context`
+- [agents/persona_runtime/memory_budget.py](../../agents/persona_runtime/memory_budget.py) — `MEMORY_BUDGET_TOKENS` (the built-in default)
+- [agents/persona_runtime/memory_context.py](../../agents/persona_runtime/memory_context.py) — `_inject_memory_context`
 
 **Related Automated Tests**:
 - Unit tests: `agents/tests/test_memory_budget.py`
@@ -69,11 +70,10 @@ contract that RFC 0017 §F's TICK short-circuit consumes.
 
 ```bash
 python3 - <<'EOF'
-from persatrix_agents.persona_runtime.memory_budget import MemoryBudget
-from persatrix_agents.persona_runtime.memory_context import _MEMORY_BUDGET_TOKENS
+from persatrix_agents.persona_runtime.memory_budget import MEMORY_BUDGET_TOKENS, MemoryBudget
 
-print(f"_MEMORY_BUDGET_TOKENS = {_MEMORY_BUDGET_TOKENS}")
-budget = MemoryBudget(total_tokens=_MEMORY_BUDGET_TOKENS)
+print(f"MEMORY_BUDGET_TOKENS = {MEMORY_BUDGET_TOKENS}")
+budget = MemoryBudget(total_tokens=MEMORY_BUDGET_TOKENS)
 
 # Build five oversized items, each ~600 tokens (~2 400 chars).
 filler = "The quick brown fox jumps over the lazy dog. " * 54  # ~600 tokens
@@ -89,10 +89,10 @@ for i, item in enumerate(items):
         admitted.append(result)
 
 assert budget.remaining >= 0, "Budget cannot go negative"
-assert budget.remaining <= _MEMORY_BUDGET_TOKENS, "Budget cannot exceed initial total"
-total_admitted_tokens = _MEMORY_BUDGET_TOKENS - budget.remaining
+assert budget.remaining <= MEMORY_BUDGET_TOKENS, "Budget cannot exceed initial total"
+total_admitted_tokens = MEMORY_BUDGET_TOKENS - budget.remaining
 print(f"Total admitted tokens: {total_admitted_tokens} "
-      f"(<= {_MEMORY_BUDGET_TOKENS})")
+      f"(<= {MEMORY_BUDGET_TOKENS})")
 print(f"Items admitted: {len(admitted)} / {len(items)} "
       f"(later items expected to be dropped)")
 print("PASS")
@@ -100,10 +100,10 @@ EOF
 ```
 
 **Expected Result**: Earlier items admitted; later items dropped once the budget is exhausted;
-total admitted tokens never exceed `_MEMORY_BUDGET_TOKENS`.
+total admitted tokens never exceed `MEMORY_BUDGET_TOKENS`.
 
 **Verification**:
-- [ ] `_MEMORY_BUDGET_TOKENS = 1500` printed
+- [ ] `MEMORY_BUDGET_TOKENS = 1500` printed
 - [ ] At least one `admitted` and at least one `DROPPED` line
 - [ ] Final line `PASS` printed (no `AssertionError` raised)
 - [ ] `Total admitted tokens` value is `<= 1500`
@@ -200,7 +200,7 @@ EOF
 **Scenario**: `tiktoken` package absent from the environment.
 
 **Expected Behavior**: Allocator falls back to the `chars // 4 ≈ tokens` approximation. Token
-bound becomes approximate but never panics. The `_MEMORY_BUDGET_TOKENS` ceiling continues to hold
+bound becomes approximate but never panics. The `MEMORY_BUDGET_TOKENS` ceiling continues to hold
 within fallback precision.
 
 ### Edge Case 2: `total_tokens=0` Initial Budget
@@ -227,6 +227,10 @@ within fallback precision.
   [`tests/integration/test_memory_budget_e2e.py`](../../tests/integration/test_memory_budget_e2e.py).
   This manual test focuses on the allocator's pure-function contract because it is the smallest
   reproducible surface that proves the cap holds.
-- `_MEMORY_BUDGET_TOKENS` is a module-level constant; retuning is a one-line change per
-  RFC 0017 [OQ1](../rfcs/0017-persona-memory-injection-budget.md#open-questions). If the
-  constant changes in a future release, update Step 1's expected value accordingly.
+- `MEMORY_BUDGET_TOKENS` (in `agents/persona_runtime/memory_budget.py`) is the built-in default
+  per RFC 0017 [OQ1](../rfcs/0017-persona-memory-injection-budget.md#open-questions), which
+  carries a dated note on the change: since v0.3.16 (PR K1) an operator retunes the budget with
+  `memory_budget.tokens` in `config/optimization.yaml`, resolved once at persona start, and the
+  constant applies when the key is absent. Step 1 imports the constant, so a configured override
+  does not change its expected value; if the constant itself changes in a future release, update
+  Step 1 accordingly.

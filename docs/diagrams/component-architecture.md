@@ -1,18 +1,42 @@
 # Component Architecture
 
-Package-level view across the three languages. Shipped packages are shown
-as solid boxes; intentional TODO stubs reserved for later phases are shown
-with dashed borders.
+Package-level view of the four source trees: the Rust CLI, the web console,
+the Go orchestrator and the Python agents. Every directory directly under
+`internal/` is either drawn or listed under
+[Packages without a box](#packages-without-a-box); the other trees show their
+main modules only. Shipped packages are shown as solid boxes; intentional TODO
+stubs reserved for later phases are shown with dashed borders.
+
+Inside the Go and Python groups, an arrow follows a request: the box at its
+tail hands part of the work to the box at its head. The arrows are not the
+import graph. A package used only for its types, constants, or logging,
+metrics and tracing helpers gets no arrow, and neither does a class that is
+built on another: `task_agent.py → base.py` is there because a task agent
+runs the LLM and tool loop in `base.py`. Every such hand-off between two Go
+packages is drawn, except the ones under [Arrows left out](#arrows-left-out).
+In the Rust and web groups, an arrow means one module uses the next. Dotted
+arrows between the language groups are network calls; the other dotted
+arrows are planned links.
 
 ```mermaid
 graph TB
     subgraph Rust["Rust CLI — cli/"]
         direction TB
         MAIN["main.rs"]
-        CMD["commands/<br/>agent · workflow · logs · validate · chat"]
+        CMD["commands/<br/>agent · workflow · logs · validate · chat<br/>channel · session · interactions · auth"]
         TYPES["types.rs"]
         MAIN --> CMD
         CMD --> TYPES
+    end
+
+    subgraph Web["Web console — web/ (Svelte)"]
+        direction TB
+        WAPP["App.svelte<br/>boot · login gate · tabs"]
+        WPANELS["panels/<br/>conversation panel · login · settings"]
+        WLIB["lib/<br/>api.js · auth.js · bootstrap.js"]
+        WAPP --> WPANELS
+        WAPP --> WLIB
+        WPANELS --> WLIB
     end
 
     subgraph Go["Go orchestrator — cmd/orchestrator + internal/"]
@@ -20,44 +44,64 @@ graph TB
         SERVER["server/<br/>REST API + SSE<br/>+ POST /api/v1/agents/{id}/chat"]
         PLANNER["planner/<br/>YAML → DAG"]
         SCHEDULER["scheduler/<br/>stage runner + budget"]
-        EXECUTOR["executor/<br/>gRPC ExecuteTask + SendChatMessage"]
+        EXECUTOR["executor/<br/>gRPC ExecuteTask · GetClosedInteractions"]
         REGISTRY["registry/"]
         STATE["state/"]
         COST["cost/<br/>tokens · cache · reporter"]
         WALLET["wallet/<br/>LLM-call leasing"]
-        TELE["telemetry/<br/>OTEL"]
-        MCPG["mcp/"]
-        PROTOS["protocols/"]
+        TELE["observability/<br/>logs · metrics · traces"]
         CHAN["channels/"]
-        SEC["security/"]
+        SEC["security/<br/>rate limiter · audit log · redactor"]
+        ACCOUNTS["accounts/<br/>accounts.db · password hashes · auth sessions"]
+        UI["ui/<br/>embedded web console files"]
 
         A2A["a2a/ (stub)"]:::stub
         BRIDGES["bridges/ (stub)"]:::stub
         RES["resilience/ (stub)"]:::stub
         MESH["mesh/ (stub)"]:::stub
+        MCPG["mcp/ (stub)"]:::stub
+        PROTOS["protocols/ (stub)"]:::stub
 
+        SERVER -->|logs| TELE
+        SERVER -->|serves /ui/| UI
+        SERVER -->|auth| ACCOUNTS
+        SERVER --> SEC
+        SERVER --> COST
+        SERVER -->|channels · chat as a DM| CHAN
+        SERVER --> REGISTRY
+        SERVER -->|closed interactions| EXECUTOR
         SERVER --> PLANNER
         SERVER --> STATE
-        SERVER --> COST
-        SERVER -->|chat dispatch| EXECUTOR
-        PLANNER --> SCHEDULER
-        SCHEDULER --> EXECUTOR
-        SCHEDULER --> COST
+        CHAN -->|conversation spend| WALLET
+        CHAN --> REGISTRY
         WALLET --> COST
         EXECUTOR --> REGISTRY
-        EXECUTOR --> PROTOS
-        EXECUTOR --> MCPG
+        EXECUTOR -->|response cache| COST
+        EXECUTOR -. planned .-> PROTOS
+        EXECUTOR -. planned .-> MCPG
+        SCHEDULER -->|pending runs| STATE
+        SCHEDULER --> PLANNER
+        SCHEDULER --> EXECUTOR
+        SCHEDULER --> COST
+
+        %% Layout only: a ~~~ link is invisible. These keep the packages that
+        %% several boxes call on rows of their own and the stubs at the bottom,
+        %% so the Go arrows do not cross. The order of the arrows above matters too.
+        STATE ~~~ PLANNER
+        PLANNER ~~~ EXECUTOR
+        REGISTRY ~~~ COST
+        COST ~~~ A2A & BRIDGES & RES & MESH
     end
 
     subgraph Py["Python agents — agents/ (persatrix_agents)"]
         direction TB
         SRV["server.py<br/>+ server_persona.py<br/>+ server_servicers.py"]
-        BASE["base.py"]
         TASK["task_agent.py"]
         PERSONA["persona.py"]
-        PART["participant.py<br/>UserParticipant · UserStore"]
+        DISPATCH["dispatch.py · tick.py<br/>event_loop.py · action_executor.py"]
+        BASE["base.py<br/>LLM and tool loop"]
         PRUNTIME["persona_runtime/<br/>memory_context · action_loop · state_persistence"]
-        DISPATCH["dispatch.py · tick.py"]
+        PART["participant.py<br/>UserParticipant · UserStore"]
         LLM["llm_client.py"]
         SUB["sub_agents/"]
 
@@ -74,25 +118,28 @@ graph TB
             TBI["builtin.py"]
             TPERM["permissions.py"]
             TSB["sandbox.py"]
-            TMCP["mcp_bridge.py"]
+            TMCP["mcp_bridge.py (stub)"]:::stub
         end
 
-        SRV --> BASE
+        SRV -->|ExecuteTask| TASK
+        SRV -->|ExecuteTask| PERSONA
+        SRV -->|ReceiveChannelMessage| DISPATCH
+        SRV -->|GetClosedInteractions| MEM
         SRV -. planned .-> PART
-        BASE --> TASK
-        BASE --> PERSONA
+        TASK --> BASE
         PERSONA --> PRUNTIME
-        PRUNTIME --> DISPATCH
-        PRUNTIME --> MEM
-        TASK --> LLM
+        DISPATCH --> PRUNTIME
+        DISPATCH -. planned .-> SUB
+        BASE --> LLM
+        BASE --> TOOLS
         PRUNTIME --> LLM
-        TASK --> TOOLS
         PRUNTIME --> TOOLS
-        PERSONA --> SUB
+        PRUNTIME --> MEM
     end
 
     Rust -.->|REST/JSON| Go
-    Go -.->|gRPC| Py
+    Web -.->|REST/JSON| Go
+    Go <-.->|gRPC · REST| Py
 
     classDef stub stroke-dasharray: 4 4,fill:#f7f7f7,color:#666
 ```
@@ -101,25 +148,85 @@ graph TB
 
 | Phase | Shipped components |
 |-------|--------------------|
-| v0.1 | `planner/`, `scheduler/`, `executor/`, `registry/`, `state/`, `server/`, `mcp/`, `protocols/`, `agents/task_agent.py`, `agents/tools/` |
-| v0.2 | `cost/`, `telemetry/`, `agents/persona*`, `agents/persona_runtime/`, `agents/memory/`, `agents/sub_agents/` |
+| v0.1 | `planner/`, `scheduler/`, `executor/`, `registry/`, `state/`, `server/`, `agents/tools/` |
+| v0.2 | `cost/`, `agents/task_agent.py`, `agents/persona*`, `agents/persona_runtime/`, `agents/memory/` |
 | v0.2.1 | `agents/participant.py` (`UserParticipant`, `UserStore`), `internal/server/chat_handler.go` (`POST /api/v1/agents/{id}/chat`), `internal/executor/` chat path (`SendChatMessage` gRPC), `cli/src/commands/chat` (`persatrix chat`) |
-| v0.3.0 | `internal/channels/` (RFC 0011 — internal agent-to-agent messaging), `internal/security/` (RFC 0009 Phases 1–2 — redactor, audit log, rate limiter) |
+| v0.2.3 | `internal/observability/` (RFC 0018 + RFC 0019 — telemetry: structured logs, metrics and traces; renamed from `internal/telemetry/`, which had OpenTelemetry tracing since v0.2) |
+| v0.3.0 | `internal/channels/` (RFC 0011 — internal agent-to-agent messaging), `internal/security/` (RFC 0009 Phases 1–2 — redactor, audit log, rate limiter), `agents/sub_agents/` (RFC 0008 — delegation contract and result merge), `cli/src/commands/channel` (`persatrix channel`) |
 | v0.3.2 | `internal/wallet/` (RFC 0023 — LLM-call leasing `WalletService`; Phases 1–6 implemented: enforcement + TTL reaper + per-agent active-lease cap composed over `cost/`, with the Python `WalletClient` wired into all five LLM-call origins — workflow task, chat, autonomous TICK, sub-agent, channel-message) |
-| v0.3+ (stubs) | `a2a/`, `bridges/`, `resilience/`, `mesh/` |
+| v0.3.5 | `cli/src/commands/session` (`persatrix session` — RFC 0031 persona-memory sessions) |
+| v0.3.6 | `web/` and `internal/ui/` (RFC 0048 — the web console, compiled into the orchestrator and served at `/ui/` when it starts with `--enable-ui`) |
+| v0.3.8 | `cli/src/commands/interactions` (`persatrix agent interactions` — RFC 0020 summaries of closed interactions) |
+| v0.3.12 | `internal/accounts/` (RFC 0039 — accounts, password hashes and auth sessions in `accounts.db`), `cli/src/commands/auth` (`persatrix login` · `logout` · `whoami`) |
+| v0.3+ (stubs) | `a2a/`, `bridges/`, `resilience/`, `mesh/`, `mcp/`, `protocols/`, `agents/tools/mcp_bridge.py` |
 
-The labeled `SERVER -->|chat dispatch| EXECUTOR` edge represents the chat
-path (`POST /api/v1/agents/{id}/chat` → `GRPCChatExecutor.SendChatMessage`);
-the workflow path still flows `SERVER → PLANNER → SCHEDULER → EXECUTOR` and
-is unaffected by the chat surface.
+The `SERVER -->|channels · chat as a DM| CHAN` edge carries chat as well as
+the channel routes: since v0.3.0, `POST /api/v1/agents/{id}/chat` posts the
+message to the caller's DM channel and waits for the agent's reply, and the
+channel router reaches the agent over `ReceiveChannelMessage` gRPC. The
+executor's v0.2.1 `SendChatMessage` path is still built but never called
+([ISSUE-0035](../issues/ISSUE-0035-chat-executor-dead-but-wired-cleanup.md)).
+The `SERVER -->|closed interactions| EXECUTOR` edge is
+`persatrix agent interactions` fetching an agent's closed-conversation
+summaries (`GetClosedInteractions` gRPC).
+
+A workflow run changes hands through `state/`, which is why no arrow joins
+`server/` to `scheduler/`: neither calls the other. The server checks the
+workflow file with the planner and stores the run as pending
+(`SERVER --> STATE`). The scheduler looks in `state/` every second, picks the
+run up and records each step's progress there
+(`SCHEDULER -->|pending runs| STATE`). It has the planner work out each step's
+inputs, checks the step against its budget in `cost/`, and hands it to the
+executor.
+
+`SERVER --> REGISTRY` is agents registering themselves when they start
+(`POST /api/v1/agents/register`) and callers listing them. `SERVER --> SEC`
+is the per-agent rate limiter that REST calls go through, and the audit log
+that records registrations and refused permission checks. `SERVER -->|logs| TELE`
+is `persatrix logs` reading the log buffer that the agents' log streams fill.
+
+`EXECUTOR -->|response cache| COST` looks for an earlier answer to a
+cacheable step before calling the agent, and stores the new one afterwards.
+`CHAN --> REGISTRY` finds each member agent's address before the router sends
+it `ReceiveChannelMessage`. `CHAN -->|conversation spend| WALLET` reads how
+many tokens a conversation has used, so the router can close an autonomous
+channel's conversation before its budget runs out
+([RFC 0052](../rfcs/0052-autonomous-agent-channels.md)).
+
+In the Python group, the orchestrator's calls arrive at
+`server_servicers.py`. `ExecuteTask` goes to the agent's `handle`: a task
+agent runs the LLM and tool loop in `base.py`, and a persona agent turns the
+task into an event for its runtime. `ReceiveChannelMessage` is queued for the
+persona's event loop (`dispatch.py`, `event_loop.py`), which passes each
+event, like each timer tick from `tick.py`, to `persona_runtime/`.
+`GetClosedInteractions` reads the stored summaries from `memory/`. When a
+persona decides to post in a channel, `action_executor.py` sends the message
+back over REST.
+
+The `Go <-.->|gRPC · REST| Py` edge runs both ways. The orchestrator calls
+agents over gRPC (`ExecuteTask`, `ReceiveChannelMessage`,
+`GetClosedInteractions`). Agents call back over gRPC to lease LLM calls from
+`wallet/` and to stream their logs to the server, which keeps them in the
+`observability/` log buffer. They also call the REST API like any other
+client: to register when they start, to post channel messages, and to read
+channel history and members.
 
 The `SRV -. planned .-> PART` edge is dashed because `agents/server.py` /
 `agents/server_servicers.py` ship `participant.py` in v0.2.1 but do not yet
 route chat traffic through `UserStore`. Only the pure validator
 `validate_participant_type` is imported today; relationship memory is keyed on
-`(agent_id, user_id)` and written directly. The dashed edge mirrors the
-`AGSVC -. planned .-> PART` treatment in [system-overview.md](system-overview.md)
-so the two diagrams agree about the v0.2.1 wiring gap.
+`(agent_id, user_id)` and written when a DM conversation closes. The dashed
+edge mirrors the `AGSVC -. planned .-> PART` treatment in
+[system-overview.md](system-overview.md) so the two diagrams agree about the
+v0.2.1 wiring gap.
+
+The `DISPATCH -. planned .-> SUB` edge is dashed for a similar reason.
+`agents/sub_agents/` holds tested code for handing a task to a
+[sub-agent](../ai-glossary.md#sub-agent) and merging its result back
+(RFC 0008), so the box is solid. But nothing starts a sub-agent yet: when a
+persona picks the `SPAWN_SUB_AGENT` action, `action_executor.py` answers
+`not_implemented`, and ROADMAP plans spawning for
+[v0.4.0](../../ROADMAP.md#planned-components-v040).
 
 The `WALLET --> COST` edge is solid: RFC 0023 PR 2 ([#384](https://github.com/mkhomutov/Persatrix/pull/384))
 composes `cost.BudgetEnforcer` and `cost.TokenCounter` into the
@@ -130,9 +237,75 @@ task → PR 3 #385, chat → PR 4 #387, autonomous TICK + sub-agent → PR 5
 #388, channel-message → PR 6 #389); the chat-error publish path for
 budget denial + RESOURCE_EXHAUSTED is finalised by [#395](https://github.com/mkhomutov/Persatrix/pull/395) / [#396](https://github.com/mkhomutov/Persatrix/pull/396) / [#398](https://github.com/mkhomutov/Persatrix/pull/398).
 
+The `SERVER -->|auth| ACCOUNTS` edge is the REST server checking passwords
+and auth sessions against `accounts.db`
+([RFC 0039](../rfcs/0039-user-accounts-authentication.md)); auth ships
+switched off, so the server only turns callers away once
+`config/security.yaml` sets `auth.mode: enabled`
+([auth guide](../guides/auth.md#the-switch-authmode)).
+
+The `SERVER -->|serves /ui/| UI` edge is how the web console reaches a
+browser: `make ui` builds `web/` into `internal/ui/assets/`, those files are
+compiled into the orchestrator binary, and the server hands them out at `/ui/`
+only when the orchestrator starts with `--enable-ui`. The flag is off by
+default, but the Docker demo stack turns it on and builds the console inside
+the orchestrator image, so it needs no `make ui`
+([web console guide](../guides/web-console.md#quick-start-docker-demo)).
+
+The `Web -.->|REST/JSON| Go` edge is the console, once loaded in the browser,
+calling the same `/api/v1` REST API as the CLI, plus two read-only routes that
+exist only under `--enable-ui` (`/api/v1/ui/config` and `/api/v1/ui/context`).
+It polls for new messages rather than streaming them.
+
+The `EXECUTOR -. planned .-> MCPG` and `EXECUTOR -. planned .-> PROTOS` edges
+are dashed, and those two boxes and `mcp_bridge.py` are stubs, because none of
+them is built. The [MCP bridge](../ai-glossary.md#mcp-bridge) is planned, and
+`protocols/` holds only `TODO` comments that no Go code imports yet. ROADMAP
+lists both among the
+[v0.4.0 planned components](../../ROADMAP.md#planned-components-v040).
+
 The stub packages are placeholders with `TODO` comments that compile but do not
 implement behaviour. They are intentional — removing them is a policy violation
 per [CLAUDE.md](../../CLAUDE.md).
+
+## Arrows left out
+
+Three real hand-offs have no arrow. Drawing them made other arrows cross or
+run through boxes, so they are listed here instead:
+
+- `scheduler/ → registry/` — for each step, the scheduler reads the agent's
+  own call and token limits, and the model it uses to estimate the step's
+  cost, from the registry.
+- `executor/ → security/` — the executor writes an audit record for every step
+  it sends to an agent.
+- `base.py → memory/` — a task agent's LLM loop reads memory, but only when
+  `memory.enabled` is set for that agent in `config/agents.yaml`; it is off by
+  default.
+
+## Packages without a box
+
+Three directories under `internal/` hold real code but have no box on purpose:
+
+- `internal/generated/` — three packages (`logpb`, `taskpb`, `walletpb`)
+  generated from the `.proto` files; see the import rules below.
+- `internal/defaults/` (since v0.2.0) — shared default limits, such as how many
+  LLM calls one workflow step may make and how long it may run. It holds
+  constants only, which `scheduler/`, `executor/` and `channels/` read.
+- `internal/archpolicy/` (since v0.3.10) — a licence check that runs as a Go
+  test. It fails if a package meant to be published on its own under the MIT
+  licence imports orchestrator code that stays under the stricter Business
+  Source License 1.1
+  ([RFC 0045](../rfcs/0045-open-core-extraction-policy.md#b-the-dependency-direction-invariant)).
+  Nothing imports it at run time;
+  [open-core-reserved-seams.md](../open-core-reserved-seams.md#the-mechanical-half)
+  says which packages it guards.
+
+Outside `internal/`, three more have no box: `cmd/genpatterns`, a build-time
+tool that writes the Python copies of the orchestrator's security patterns and
+enums, and the Python packages `agents/observability/` (including the log
+shipper — see [observability-stack.md](observability-stack.md)) and
+`agents/temporal/` (time-awareness helpers, RFC 0021). The Python group shows
+selected modules, not every file.
 
 ## Package import rules
 

@@ -64,8 +64,8 @@ make generate-persona-nickname COUNT=3 SEED=42
 
 ### A worked example
 
-The repository ships with `ember-owl`, a "VP of Engineering" persona
-([config/agents.yaml:133–192](../../config/agents.yaml#L133-L192)):
+The repository ships with `ember-owl`, a "VP of Engineering" persona (the
+`ember-owl` entry in [config/agents.yaml](../../config/agents.yaml)):
 
 ```yaml
 - id: "ember-owl"
@@ -120,6 +120,13 @@ The repository ships with `ember-owl`, a "VP of Engineering" persona
       type: "reports_to_me"
       trust_level: 0.9
 ```
+
+Neither tool on that `tools` line works for ember-owl yet. `mcp:github` gives
+it no tools: the [MCP bridge](../ai-glossary.md#mcp-bridge) is planned but not
+built. `file_read` is offered to the model, but every call returns
+"Permission denied: filesystem:read": permissions are deny-by-default, and
+ember-owl's `permissions` block (not shown above) grants memory and channel
+recall, not `filesystem` access.
 
 Launch it once the orchestrator is running:
 
@@ -235,8 +242,12 @@ prompt
 ([agents/persona_runtime/memory_context.py:96–200](../../agents/persona_runtime/memory_context.py#L96-L200)).
 
 > **v0.2.2 — bounded memory injection.** A per-event `MemoryBudget` allocator
-> (default 1500 tokens) caps the combined episodic + relationship + notes
-> context admitted into a single event, and `recall` / `recall_notes` accept
+> (default 1500 tokens; since v0.3.16 retuned with `memory_budget.tokens` in
+> `config/optimization.yaml`, read once at persona start — `0` disables
+> injection and, via the TICK skip below, silences idle ticks too; an absent
+> key means the default) caps the combined episodic +
+> relationship + notes context admitted into a single event, and `recall` /
+> `recall_notes` accept
 > a `min_score` relevance threshold that drops weak matches before truncation.
 > When an autonomous TICK fires with zero admitted memory, no active goal,
 > and no pending conversation turn, the LLM call is skipped entirely and
@@ -661,9 +672,10 @@ is visible through the workflow-run APIs and OTEL spans
 
 v0.2.1 adds a synchronous human-to-agent chat surface so you can talk to a
 persona agent from a terminal instead of authoring a workflow. The CLI
-command is `persatrix chat <agent_id>`; under the hood it calls the new
-REST endpoint `POST /api/v1/agents/{id}/chat` on the orchestrator, which
-dispatches a `SendChatMessage` gRPC call to the agent.
+command is `persatrix chat <agent_id>`. It calls the orchestrator's
+`POST /api/v1/agents/{id}/chat` endpoint, which posts your message to your
+[DM channel](../ai-glossary.md#chat-as-dm) with the agent and returns the
+agent's reply.
 
 > **Spec-level detail** for the chat surface lives in
 > [RFC 0016](../rfcs/0016-human-participant-chat-interface.md). The
@@ -824,26 +836,33 @@ SQLite database via `UserStore`
 
 ### Known limitations
 
-The v0.2.1 chat surface is intentionally minimal. The following are
-deferred (matched against
-[RFC 0016 §Non-goals](../rfcs/0016-human-participant-chat-interface.md)):
+The v0.2.1 chat surface was deliberately small. The table lists what it
+left out (matched against
+[RFC 0016 §Non-goals](../rfcs/0016-human-participant-chat-interface.md#non-goals))
+and what has happened to each since:
 
-| Area | v0.2.1 behaviour | Deferred to |
-|------|------------------|-------------|
-| Concurrency | Single `UserParticipant` per session | v0.3.0 (RFC 0011) |
-| Authentication | Sessions are local; `--user` is caller-supplied | v0.3.0 (RFC 0009) |
-| Streaming | Synchronous request-response, no SSE | future RFC |
-| Agent-initiated messages | No notification path; agents can only reply within an active session | future RFC |
-| Channel routing | Point-to-point user ↔ agent only | v0.3.0 (RFC 0011) |
-| Chat history API | No `GET /chat/history` endpoint; inspect via memory tools | v0.2.2 candidate |
-| Rate limiting | No per-user rate limit on the chat endpoint | v0.3.0 (RFC 0009) |
-| Web / GUI | CLI only | future RFC |
+| Area | v0.2.1 behaviour | What happened since |
+|------|------------------|---------------------|
+| Concurrency | Single `UserParticipant` per session | Shipped in v0.3.0 (RFC 0011): a group channel can hold several people and agents at once. `persatrix chat` is still one person talking to one agent |
+| Authentication | Sessions are local; `--user` is caller-supplied | Human logins: v0.3.12 ([RFC 0039](../rfcs/0039-user-accounts-authentication.md), off by default). Agent identity tokens: RFC 0009 Phase 4, slotted for v0.4.0 |
+| Streaming | Synchronous request-response, no SSE | Not built. The chat endpoint still returns the whole reply at once. `persatrix channel watch` (v0.3.0) and the web console (v0.3.6) check for new messages every few seconds instead |
+| Agent-initiated messages | No notification path; agents can only reply within an active session | Partly. Since v0.3.0 a persona with a timer can post on its own in its channels; the shipped personas have had no timers since v0.3.3. Since v0.3.11 personas can also hold a whole discussion with no person present (RFC 0052), started by an operator ([how to convene](autonomous-channels.md)) or by a timer ([setup](autonomous-channels.md#standing-channels--convening-on-a-schedule)). Nothing notifies anyone of a new message; people see it when they next read the channel. Channel bridges to Slack, Discord and email are planned for v0.5.0 (RFC 0011) |
+| Channel routing | Point-to-point user ↔ agent only | Shipped in v0.3.0 (RFC 0011): group channels, DMs and threads. `persatrix chat` now runs over a DM channel between you and the agent |
+| Chat history API | No `GET /chat/history` endpoint; inspect via memory tools | Shipped in v0.3.6 with the web console (RFC 0048): `GET /api/v1/agents/{id}/chat/history` returns a user's saved conversation with an agent. The CLI has no command for it, but `persatrix channel history dm:<a>:<b>` (your ID and the agent's, in alphabetical order) shows the same messages. With logins off (the default `auth.mode: disabled`), anyone who can reach the orchestrator can read any user's history |
+| Rate limiting | No per-user rate limit on the chat endpoint | Still none. Since v0.3.0 (RFC 0009) the limit is per agent ID; `persatrix chat` sends none, so it shares one limit with every other caller that sends none |
+| Web / GUI | CLI only | Shipped in v0.3.6: the [web console](web-console.md) (RFC 0048). It is off unless the orchestrator is started with `--enable-ui`; the Docker demo turns it on |
 
-> **Operational warning — no authentication.** Because `--user` is
-> caller-supplied and the chat endpoint performs no authentication in
-> v0.2.1, do not expose the orchestrator chat endpoint on a network shared
-> with untrusted callers. Treat `persatrix chat` as a local-developer
-> surface until RFC 0009 lands.
+> **Operational warning — no authentication by default.** Under the
+> default `auth.mode: disabled`, `--user` is caller-supplied and the chat
+> endpoint checks no identity, so do not expose the orchestrator on a
+> network shared with untrusted callers. `auth.mode: enabled` (RFC 0039,
+> v0.3.12) makes people log in, and the chat endpoint then uses the
+> logged-in account instead of `--user`. That alone does not make
+> exposure safe: the routes agents use
+> [stay open](auth.md#what-stays-open-under-enabled--the-agent-ingress),
+> and beyond localhost you need
+> [HTTPS](auth.md#https-is-required-beyond-localhost). See the
+> [auth guide](auth.md#the-switch-authmode).
 
 The chat endpoint enforces a 4000-character message ceiling (counted in
 runes, not bytes, so emoji and CJK text are measured consistently) and
@@ -860,7 +879,9 @@ can compose under a private *plan* so the message reads as considered rather tha
 reflexive. This is [RFC 0051](../rfcs/0051-reasoning-before-posting.md),
 generalizing the RFC 0030 Tier-B salience bid; it runs on the same leased `fast`
 model (the idle path stays free) and the private trace is **walled** — never a
-channel message, never persisted, never visible to another persona (audit-only).
+channel message, never persisted as one, never visible to another persona; the
+audit sees only the decision and its code, and the silence `reason_note` alone
+has an opt-in operator egress, the agent log at `DEBUG` (below).
 
 It is tuned per channel with the `reasoning` knob on the
 [RFC 0050](../rfcs/0050-extensible-channel-configuration.md) config surface — a
@@ -896,20 +917,26 @@ is exercised by [MT-REASON-001](../manual-tests/MT-REASON-001.md). The **reason*
 a turn went silent is observable at **`reason_code`** granularity — the closed-set
 code on the `agent.deliberated` audit log line and on the
 `deliberation.suppressed{reason_code, mode}` metric label. The free-text
-`reason_note` the model may attach is parsed but has **no operator egress** in
-v0.3.10 (the OQ 6(a) operator-reveal surface was cut;
-[ISSUE-0108](../issues/ISSUE-0108-reasoning-reason-note-no-operator-egress.md)),
-which makes the §E privacy wall *stronger* than the RFC describes, not weaker.
+`reason_note` the model may attach egresses **once**, since v0.3.16: an
+`agent.deliberation.reason_note` record at **`DEBUG`** in the agent log on each
+suppressed turn
+([ISSUE-0108](../issues/ISSUE-0108-reasoning-reason-note-no-operator-egress.md)).
+Silent at the default `INFO` level; at `DEBUG` it is an ordinary agent-log
+line — verbatim (the RFC 0018 redaction hook is a no-op in every shipped
+build) and forwarded off-host with the rest when the log shipper is on,
+though the orchestrator drops it (a channel turn carries no execution id), so
+read it in the agent's container log. From v0.3.10 to v0.3.15 it had no egress at all (the OQ 6(a)
+operator-reveal surface was cut), and the web-console reveal is still unbuilt.
 
 ### Autonomous channels — the anti-collapse cadence (v0.3.11)
 
 The bias-to-silence above is exactly right *with a human in the loop* — but a
 channel can also run **with no human at all** ([RFC 0052](../rfcs/0052-autonomous-agent-channels.md);
-the operator-facing arming/convening how-to is [Channels guide §Autonomous
-channels](channels.md#13-autonomous-channels-rfc-0052)). There the same
-think-before-you-speak pressure has a failure mode: every persona reasons "the
-others can cover this", all stay silent, and an unattended discussion dies to a
-near-empty transcript. From the **persona side**, two things are worth knowing:
+the operator-facing arming/convening how-to is the [autonomous channels
+guide](autonomous-channels.md)). There the same think-before-you-speak pressure
+has a failure mode: every persona reasons "the others can cover this", all stay
+silent, and an unattended discussion dies to a near-empty transcript. From the
+**persona side**, two things are worth knowing:
 
 - **Semantic silence is not weakened.** An autonomous channel does **not** lower
   your silence threshold — a turn with nothing to add still ends in silence *with

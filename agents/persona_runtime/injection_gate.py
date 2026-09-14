@@ -416,9 +416,12 @@ class TurnInjectionGate:
         budget actually admitted, labeled with its protection level.
 
         Reads the RFC 0026 MQ-11 admission registry so the manifest names
-        what reached the prompt, not what recall returned; the
-        relationship tier records no admissions and is not §D-gated, so
-        it is absent by construction.
+        what reached the prompt, not what recall returned.  The
+        relationship tier is not §D-gated (RFC 0037 Non-Goals) and is not
+        in :data:`_MANIFEST_TIERS`, so it is absent by construction even
+        though it records admissions since ISSUE-0122 (v0.3.16 PR B1) —
+        its ``tier_admitted`` line is the provenance log's, not the
+        manifest's.
         """
         entries: list[InjectionManifestEntry] = []
         for tier in _MANIFEST_TIERS:

@@ -1,10 +1,12 @@
 """
 Persatrix Tool System.
 
-Tools are typed functions that agents can invoke. Three tiers:
+Tools are typed functions that agents can invoke. Two tiers work today,
+and a third is planned:
   - Built-in: bundled with the framework (see builtin.py)
   - Custom: user-defined via @tool decorator (this module)
-  - MCP: external MCP server tools (see mcp_bridge.py)
+  - MCP (planned, not built): tools from external MCP servers
+    (mcp_bridge.py is a placeholder)
 """
 
 import functools

@@ -115,10 +115,10 @@ func TestEmit_DoesNotMutateCallerDetail(t *testing.T) {
 
 // TestVerifyChain_HappyPath pins PR #233 review Nice-to-have #1: an
 // exported [VerifyChain] helper recomputes the per-event sha256 chain
-// and surfaces tamper / truncation errors. External auditors and a
-// future `persatrix audit verify` CLI consume this rather than
-// reimplementing [canonicalEventJSON]. Happy-path: a freshly-written
-// log validates clean.
+// and surfaces tamper / truncation errors, so a future
+// `persatrix audit verify` command can reuse it rather than copy
+// [canonicalEventJSON]. Happy-path: a freshly-written log validates
+// clean.
 func TestVerifyChain_HappyPath(t *testing.T) {
 	l, path := newTestLogger(t)
 	for i := 0; i < 5; i++ {

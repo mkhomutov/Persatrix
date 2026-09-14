@@ -3,8 +3,8 @@
 // `autonomous.{schedule_interval_seconds,max_convenings,standing_budget_tokens}`.
 // These pin the nested merge of the new sub-knobs, their provenance, and the
 // mandatory aggregate-bound 400 — the operator-facing half of the standing
-// config backend. Ships dark (the timer wiring + convening counter are PR 7b);
-// the one live effect is the aggregate-bound gate.
+// config backend (PR 7a). Convene-time enforcement of the bounds (PR 7b) is
+// pinned in the channels package.
 package server
 
 import (

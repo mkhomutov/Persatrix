@@ -22,17 +22,22 @@ __all__ = [
 def cause_for_event(event: AgentEvent) -> walletpb.Cause.ValueType:
     """Pick the RFC 0023 lease ``cause`` for an event handled by the loop.
 
-    The persona action loop is the LLM-call site for chat
-    (``SendChatMessage``), receiver-side channel messages
-    (``ReceiveChannelMessage``), autonomous ticks, and workflow-step
+    The persona action loop is the LLM-call site for channel messages
+    (``ReceiveChannelMessage`` — REST chat included, since v0.3.0 routes
+    each chat through a DM channel), autonomous ticks, and workflow-step
     dispatch to a persona agent. They route through different wallet
     causes:
 
-    * ``CHANNEL_MESSAGE`` with ``metadata["chat_session_id"]`` set is
-      the chat servicer's shape (RFC 0016 OQ 9) → ``CAUSE_CHAT``.
-    * ``CHANNEL_MESSAGE`` without that key is the receiver-side
-      ``ReceiveChannelMessage`` delivery → ``CAUSE_CHANNEL_MESSAGE``
-      (PR 6). The RFC 0011 response gate runs ahead of the LLM call in
+    * ``CHANNEL_MESSAGE`` with ``metadata["chat_session_id"]`` (the RFC 0016
+      OQ 9 chat-session token) set → ``CAUSE_CHAT``. Only the gRPC
+      ``SendChatMessage`` servicer builds that shape, and that RPC is unused
+      (ISSUE-0035). REST chat does stamp ``chat_session_id`` on its DM
+      publish, but ``ChannelMessageEvent`` has no field for it, so the key
+      stops at the orchestrator and REST chat takes the next arm (recorded
+      in ISSUE-0065).
+    * ``CHANNEL_MESSAGE`` without that key — every ``ReceiveChannelMessage``
+      delivery, REST chat included → ``CAUSE_CHANNEL_MESSAGE`` (PR 6). The
+      RFC 0011 response gate runs ahead of the LLM call in
       :meth:`_ActionLoopMixin._on_event_inner`, so a gated-out event
       returns ``DO_NOTHING`` before this discriminator is reached and
       the wallet never sees a lease for a suppressed message.

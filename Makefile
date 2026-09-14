@@ -1,4 +1,4 @@
-.PHONY: all build build-orchestrator build-orchestrator-ui ui ui-test ui-html-check build-cli build-agents proto proto-go proto-python proto-python-check proto-orphans-check proto-check clean reset test lint run run-ui validate dockerignore-check help demo-autonomous demo-offline demo-ollama generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues issues-check rfcs rfcs-check imports-check eval-replay eval-record eval-record-offline eval-drift eval-verdict
+.PHONY: all build build-orchestrator build-orchestrator-ui ui ui-test ui-html-check build-cli build-agents proto proto-go proto-python proto-python-check proto-orphans-check proto-check clean reset test lint lint-go lint-python lint-rust golangci-lint-version golangci-lint-install run run-ui validate dockerignore-check help demo-autonomous demo-offline demo-ollama generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues issues-check rfcs rfcs-check imports-check eval-replay eval-record eval-record-offline eval-drift eval-verdict
 
 # ─── Config ─────────────────────────────────────────────
 GO_MODULE     := github.com/mkhomutov/persatrix
@@ -11,6 +11,11 @@ PIP           := pip3
 CARGO         := cargo
 NPM           := npm
 WEB_DIR       := web
+# The one golangci-lint pin (ISSUE-0142). `make lint-go` refuses any other
+# version and CI reads it with `make -s golangci-lint-version`; the enabled
+# linter set is in .golangci.yml. Bump here and nowhere else.
+GOLANGCI_LINT_VERSION := v2.13.2
+GOLANGCI_LINT := golangci-lint
 # On Windows, executables require the .exe extension; EXE is empty on Unix.
 EXE           := $(if $(filter Windows_NT,$(OS)),.exe,)
 
@@ -206,9 +211,13 @@ test-agents: ## Run the agents/ unit test tree
 # EVAL-MEMORY-001 bakes in the real physical models and would miss the cassette
 # here until this target resolves the overlay per recipe — a follow-up parked in
 # docs/rfcs/0044-pr-plan.md (§Notes).
-eval-replay: ## Replay golden-trace evals deterministically (RFC 0044). TARGET / REPORT optional.
+#
+# TIER=stable scopes the sweep to the recipes declared `tier: stable` — the
+# RFC 0044 §F merge gate the required Python CI job runs (v0.3.16 PR C2). An
+# empty tier exits 1: a gate over no recipes is vacuous, not green.
+eval-replay: ## Replay golden-trace evals deterministically (RFC 0044). TARGET / TIER / REPORT optional.
 	PERSATRIX_OPTIMIZATION_CONFIG=config/demo/offline/optimization.yaml \
-	$(PYTHON) -m evaluators.runner --mode replay $(if $(TARGET),--target $(TARGET),) $(if $(REPORT),--report $(REPORT),)
+	$(PYTHON) -m evaluators.runner --mode replay $(if $(TARGET),--target $(TARGET),) $(if $(TIER),--tier $(TIER),) $(if $(REPORT),--report $(REPORT),)
 
 eval-record: ## Record a golden from a live run (author-only; overwrites the sidecar). TARGET=<id>.
 	$(PYTHON) -m evaluators.runner --mode record $(if $(TARGET),--target $(TARGET),)
@@ -238,8 +247,24 @@ eval-drift: ## Live drift check against recorded goldens (reports, never gates).
 # ─── Lint ───────────────────────────────────────────────
 lint: lint-go lint-python lint-rust ## Lint all code
 
-lint-go:
-	golangci-lint run ./...
+golangci-lint-version: ## Print the pinned golangci-lint version (CI reads this)
+	@echo $(GOLANGCI_LINT_VERSION)
+
+golangci-lint-install: ## Install the pinned golangci-lint into $(go env GOPATH)/bin
+	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+
+lint-go: ## Lint Go with the pinned golangci-lint and the committed .golangci.yml
+	@# ISSUE-0142: a different version means a different linter set, so an
+	@# unpinned binary is refused rather than run. CI installs this same pin
+	@# and runs this same target.
+	@installed="$$($(GOLANGCI_LINT) version --short 2>/dev/null || true)"; \
+	installed="$${installed#v}"; \
+	if [ "v$$installed" != "$(GOLANGCI_LINT_VERSION)" ]; then \
+		echo "lint-go: golangci-lint $(GOLANGCI_LINT_VERSION) is required, found '$${installed:-none}'"; \
+		echo "         run: make golangci-lint-install"; \
+		exit 1; \
+	fi
+	$(GOLANGCI_LINT) run ./...
 
 lint-python: imports-check
 	cd agents && $(PYTHON) -m ruff check . && $(PYTHON) -m mypy .
@@ -535,8 +560,11 @@ merged-prs-check: ## Fail if docs/merged-prs.md is behind git log (CI)
 plan-status-check: ## Fail if a plan's progress table says "PR open" for a PR that has merged (CI)
 	$(PYTHON) scripts/checks/plan_status.py
 
-rfcs-check: ## Fail if docs/rfcs/INDEX.md is stale or front-matter is invalid (CI)
+rfcs-check: ## Fail if docs/rfcs/INDEX.md is stale, front-matter is invalid, or an RFC's **Status** header line disagrees with it (CI)
 	$(PYTHON) scripts/rfcs.py --check
+
+roadmap-status-check: ## Fail if a ROADMAP Component Status row says less than the RFC it names (CI)
+	$(PYTHON) scripts/checks/roadmap_status.py
 
 # ─── Version ────────────────────────────────────────────
 release-sweep: ## Print the release checklist §1 gate sweep (dry run); RUN=1 executes, REPORT=path writes the table, ONLY=/SKIP= filter, OPTIONAL=1 adds the Docker smoke, TIMEOUT=secs

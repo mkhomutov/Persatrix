@@ -1,6 +1,6 @@
 # Automation Catalogue
 
-> **Last updated**: 2026-09-06
+> **Last updated**: 2026-09-12
 > Everything that runs without a human typing the steps: `make` targets,
 > scripts, the pre-commit hook, and the GitHub workflows — grouped by
 > purpose, with **when it runs**. `make help` is the live list of targets;
@@ -35,7 +35,7 @@ dependencies.
 | `make proto` (`proto-go`, `proto-python`) | Regenerate Go and Python gRPC stubs, incl. `.pyi` via mypy-protobuf. Pinned toolchain: protoc 34.1, protoc-gen-go 1.36.11, protoc-gen-go-grpc 1.6.1 (local brew tools are newer and fail the gate) | `make proto-check` = `proto-python-check` + `proto-orphans-check`; Go side is `make proto-go && git diff --exit-code internal/generated/` | CI (`Proto staleness`, `Python`) |
 | `make generate-sanitizer-patterns` | Regenerate `agents/security_patterns.py` + `security_enums.py` from the Go canonical sources | `generate-sanitizer-patterns-check` | CI (`Go`) |
 | `make notices` (`scripts/generate_third_party_notices.py`) | Regenerate `THIRD_PARTY_NOTICES.md` from the three dependency graphs | `notices-check` | Make-only; release-prep PR 4 |
-| `make rfcs` (`scripts/rfcs.py`) | Regenerate `docs/rfcs/INDEX.md` from RFC YAML front-matter | `rfcs-check` | CI (`Validate configs`) + pre-commit |
+| `make rfcs` (`scripts/rfcs.py`) | Regenerate `docs/rfcs/INDEX.md` from RFC YAML front-matter; fail when an RFC's `**Status**` header line disagrees with it | `rfcs-check` | CI (`Validate configs`) + pre-commit |
 | `make issues` (`scripts/issues.py`) | Regenerate `docs/issues/INDEX.md` from issue front-matter | `issues-check` | CI (`Validate configs`) |
 | `make merged-prs` (`scripts/merged_prs.py`) | Regenerate `docs/merged-prs.md` from the first-parent squash subjects on `main` (Area column derived from the title). Replaced ROADMAP's hand-kept table, which had stopped at #708 | `merged-prs-check` — passes when behind by the newest merges only | Pre-commit regenerates + stages it; CI (`Docs hygiene`) checks it |
 | `scripts/generate_filemap.py` | Regenerate `FILEMAP.md` from `git ls-files` (tracked files only — `git add` new files first). **Kept on purpose** (decision 2026-09-06): it is the one-read index assistants load before touching the tree, and the writer now leaves the date alone so it no longer churns on every commit | `--check` (ignores the header date) | Pre-commit regenerates and stages it; CI (`Docs hygiene`) checks it |
@@ -57,7 +57,7 @@ dependencies.
 | `cd cli && cargo test` | Rust suite incl. lockstep guards | `Rust` |
 | `make ui-test` | `npm ci && npm test` (Vitest) | `Web console` |
 | `go test ./tests/integration/... -race` | Go integration (bufconn scheduler→executor, rate limiter, audit log) | `Go` |
-| `make eval-replay [TARGET= REPORT=]` | Replay goldens deterministically under the offline overlay | none |
+| `make eval-replay [TARGET= TIER= REPORT=]` | Replay goldens deterministically under the offline overlay; `TIER=stable` is the merge gate | `Python` (since v0.3.16 PR C2) |
 | `make eval-record` / `eval-record-offline TARGET=` / `eval-drift` | Record a golden live / against the mock; report live drift (never gates) | on demand |
 | `python tests/perf/personal_tier_latency.py [--capture-baseline PATH]` | Recall latency vs baseline | `Python` (informational) |
 | `scripts/perf/wallet_p99.py` | Wallet acquire+settle p99 harness (RFC 0023) | on demand |
@@ -66,7 +66,7 @@ dependencies.
 
 | Target / script | Does | Where it runs |
 |-----------------|------|---------------|
-| `make lint` | `lint-go` (golangci-lint) + `lint-python` (ruff + mypy on `agents/`, `tests/`, `evaluators/`; `imports-check`) + `lint-rust` (clippy `-D warnings`) | Locally; CI runs the same tools directly |
+| `make lint` | `lint-go` (golangci-lint) + `lint-python` (ruff + mypy on `agents/`, `tests/`, `evaluators/`; `imports-check`) + `lint-rust` (clippy `-D warnings`) | Locally; CI runs `make lint-go` itself (the Makefile pin + `.golangci.yml`, ISSUE-0142) and the Python/Rust tools directly |
 | `make imports-check` | import-linter forbidden contract, MIT↛BUSL (RFC 0045 §B) | CI (`Python`) |
 | `make validate` | `agents/validate.py config/` + `scripts/checks/prompt_refs.py` | CI (`Validate configs`) runs both |
 | `make ui-html-check` (`scripts/checks/ui_html_directive.py`) | Reject `{@html}` under `web/src` | CI (`Web console`) |
@@ -76,8 +76,9 @@ dependencies.
 | `scripts/checks/doc_links.py` | Relative links and `#anchors` in every tracked `.md` | CI (`Docs hygiene`) + pre-commit |
 | `scripts/checks/doc_status_markers.py` | Only the standard status markers | CI (`Docs hygiene`) + pre-commit |
 | `scripts/checks/doc_leaked_markup.py` | No tool-call markup fragments in docs | CI (`Docs hygiene`) + pre-commit |
-| `scripts/checks/plan_status.py` (`make plan-status-check`) | A 🔀 / ⬜ progress row whose linked PRs have all merged is stale; released versions' plans are skipped, 🔄 rows are not judged | CI (`Docs hygiene`) + pre-commit |
+| `scripts/checks/plan_status.py` (`make plan-status-check`) | A 🔀 / ⬜ progress row whose linked PRs have all merged is stale; a 🔀 row that links no PR — a PR's own row, written before its number existed — is stale once the squash-merge that wrote it is on `main` (`git blame --first-parent`); released versions' plans are skipped, 🔄 rows are not judged | CI (`Docs hygiene`) + pre-commit |
 | `scripts/checks/methodology_conformance.py` (`make conformance-check`) | The checkout has every document, tool, make target and Docs-hygiene step `docs/methodology/conformance.json` names; the manifest names the checker itself | CI (`Docs hygiene`) + pre-commit |
+| `scripts/checks/roadmap_status.py` (`make roadmap-status-check`) | A ROADMAP Component Status row that says less than the RFCs its Status cell names: 🚧 once they have all shipped, even in part; anything short of ✅ once all are implemented. It knows ROADMAP's layout, so the manifest lists it as Persatrix-specific | CI (`Validate configs`) + pre-commit |
 | `scripts/checks/released.py` | Shared: which versions shipped (dated CHANGELOG headings) and which version-cycle docs are therefore frozen — used by the size checker and the plan-status checker | library |
 | `scripts/_git.py` | The one read-only git call (ISSUE-0135); new call sites use it | library |
 | `scripts/checks/doc_audit.py [--format text\|json\|markdown]` | Runs links + markers + size warnings in one report | Local convenience; used by hand in PR bodies |
@@ -89,26 +90,27 @@ dependencies.
 directory `git rev-parse --git-path hooks` names (so linked worktrees and
 `core.hooksPath` both work). The hook runs `scripts/pre_commit.py`, which is
 **version-controlled** and warns when the installed hook has drifted from the
-installer. Twelve steps, target under 10 s:
+installer. Thirteen steps, target under 10 s:
 
 0. regenerate `FILEMAP.md` and `docs/merged-prs.md` and `git add` them ·
 1. `gofmt -l` on staged Go blobs (CRLF-safe) · 2. `ruff check agents/` ·
 3. `cargo fmt --check` · 4. doc links · 5. leaked markup · 6. status markers ·
-7. RFC index freshness · 8. file sizes (`--strict`) · 9. plan status (no
-"PR open" row for a merged PR) · 10. methodology conformance.
+7. RFC index freshness · 8. ROADMAP status rows · 9. file sizes (`--strict`) ·
+10. plan status (no "PR open" row for a merged PR) · 11. methodology
+conformance.
 
 Because the hook is outside version control it is absent for anyone who did
 not run the installer. Since the CI-promotion PR every step has a CI
 counterpart: gofmt and cargo fmt in the `Go` / `Rust` jobs, ruff in `Python`,
-the doc checks and FILEMAP freshness in `Docs hygiene`, the RFC index and file
-sizes in `Validate configs` / `File size check`. The hook is the fast local
-copy, not the only copy.
+the doc checks and FILEMAP freshness in `Docs hygiene`, the RFC index, the
+ROADMAP status rows and file sizes in `Validate configs` / `File size check`.
+The hook is the fast local copy, not the only copy.
 
 ## GitHub workflows
 
 | Workflow | Trigger | Does |
 |----------|---------|------|
-| `ci.yml` | push to `main`, every PR | Eleven jobs: `Go (build + test)` (incl. gofmt, Go integration tests, sanitizer sync), `Web console (build + test)`, `Dockerignore context hygiene`, `Proto staleness check`, `Python (lint + test)` (incl. ruff/mypy on `scripts/` + `evaluators/`), `Cost regression gate (bored persona)` (path-filtered), `Rust (build + clippy)` (incl. rustfmt, `cargo test`), `Validate configs` (incl. `prompt_refs`), `Docs hygiene` (links, markup, markers, FILEMAP, merged-PR history, plan status, conformance), `File size check`, `Third-party license check`. Every job carries a comment naming the incident it guards. |
+| `ci.yml` | push to `main`, every PR | Eleven jobs: `Go (build + test)` (incl. gofmt, the pinned golangci-lint via `make lint-go`, Go integration tests, sanitizer sync), `Web console (build + test)`, `Dockerignore context hygiene`, `Proto staleness check`, `Python (lint + test)` (incl. ruff/mypy on `scripts/` + `evaluators/`), `Cost regression gate (bored persona)` (path-filtered), `Rust (build + clippy)` (incl. rustfmt, `cargo test`), `Validate configs` (incl. `prompt_refs` and the ROADMAP status rows), `Docs hygiene` (links, markup, markers, FILEMAP, merged-PR history, plan status, conformance), `File size check`, `Third-party license check`. Every job carries a comment naming the incident it guards. |
 | `commitlint.yml` | PR opened/edited/synchronised | Conventional Commit PR title (`Validate PR Title`) |
 | `scheduled-audit.yml` | Mondays 06:00 UTC; manual | `cargo deny check advisories bans sources licenses`; opens or comments on a `Scheduled Dependency Audit Failure` issue |
 | `perf-baseline-capture.yml` | manual (`workflow_dispatch`) | Captures the recall-latency baseline on a runner and opens a PR with it; merging arms the perf gate. Never run yet |

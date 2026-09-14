@@ -20,6 +20,9 @@ _repo_tests = Path(__file__).resolve().parent.parent.parent / "tests"
 if str(_repo_tests) not in sys.path:
     sys.path.insert(0, str(_repo_tests))
 
-from _test_infra import daemonize_aiosqlite_workers  # type: ignore[import-not-found]  # noqa: E402
+from _test_infra import (  # type: ignore[import-not-found]  # noqa: E402
+    daemonize_aiosqlite_workers,
+    isolate_optimization_config,  # noqa: F401  (autouse fixture, discovered by name)
+)
 
 daemonize_aiosqlite_workers()

@@ -26,7 +26,7 @@ description: |
   recorded offline (`make eval-record-offline`); a live re-record rides
   release-prep.
 spawned_from: ../../docs/rfcs/0049-amendment-l1-cross-room-availability.md
-tier: experimental
+tier: stable
 
 setup:
   persona: ember-owl

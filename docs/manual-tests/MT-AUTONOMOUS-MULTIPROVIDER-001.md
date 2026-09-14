@@ -32,7 +32,7 @@
 - [MT-AUTONOMOUS-001] — the single-provider autonomous contract this MT crosses with cross-vendor routing (arm/convene/converge/synthesize/spend mechanics are identical; reuse its Step-by-step).
 - [MT-PROVIDER-GEMINI-001] / [MT-PROVIDER-WATSONX-001] — the per-vendor live smokes; their `gen_ai.system` telemetry check is reused here per seat.
 - [Model-providers guide](../guides/model-providers.md) — the combined `providers` extra (`pip install 'persatrix-agents[providers]'`) + the four-cloud-vendor install path.
-- [Channels guide §Autonomous channels](../guides/channels.md) — the operator arming/convening how-to.
+- [Autonomous channels guide](../guides/autonomous-channels.md) — the operator arming/convening how-to.
 
 **Related Automated Tests**:
 

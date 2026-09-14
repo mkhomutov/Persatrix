@@ -25,14 +25,16 @@ package channels
 // §E aggregate bound (PR 7) bounds the count of openers. PR 3 convenes a
 // one-shot brainstorm on an IDLE channel: [ChannelRouter.ConveneChannel]
 // refuses a channel that already has an open committed interaction
-// ([ErrChannelAlreadyConvening]) rather than silently joining it — a loud
-// refusal is the safe interim posture until PR 7's force-fresh + aggregate
-// bound land. (This guards the standing/already-live case; the narrow
-// idle-race where two convenes both land before the convener's first reply
-// commits an interaction is still not fully bounded: PR 7b's convening counter
-// caps the COUNT fail-closed — two racing convenes cannot exceed max_convenings
-// — but does NOT stop both openers dispatching into one folded interaction; that
-// two-openers race is the force-fresh slice's, still deferred.)
+// ([ErrChannelAlreadyConvening]) rather than silently joining it. PR 7 landed
+// the aggregate bound but never built a force-fresh convene (one that opens a
+// new interaction on a live channel), and no plan tracks one, so this loud
+// refusal stays: a standing channel's timer that fires during a running
+// discussion gets 409 and skips that fire. (The narrow idle-race where two
+// convenes both land before the convener's first reply commits an interaction
+// is still not fully bounded: PR 7b's convening counter caps the COUNT
+// fail-closed — two racing convenes cannot exceed max_convenings — but does NOT
+// stop both openers dispatching into one folded interaction, and nothing closes
+// that two-openers race.)
 //
 // `channel.go` (at the 500-line review cap) is untouched: the convene publish
 // logic lives here, mirroring how `router_autonomous.go` carved off the RFC
@@ -80,9 +82,9 @@ var ErrChannelNotArmed = errors.New("channels: channel is not autonomous-enabled
 // ErrChannelAlreadyConvening — [ChannelRouter.ConveneChannel] against a channel
 // that already has an open committed interaction (a live discussion). Convening
 // is "open an IDLE channel"; re-convening a live one would silently join the
-// running interaction (the pre-PR-7 join semantics), so PR 3 refuses it loudly
-// instead. The REST layer maps it to 409 Conflict — a precondition on the
-// channel's current state, the sibling of [ErrChannelNotArmed].
+// running interaction (no force-fresh convene exists — see the file header), so
+// PR 3 refuses it loudly instead. The REST layer maps it to 409 Conflict — a
+// precondition on the channel's current state, the sibling of [ErrChannelNotArmed].
 var ErrChannelAlreadyConvening = errors.New("channels: channel already has an open interaction")
 
 // ErrAutonomousNoAudience — [ChannelRouter.ConveneChannel] against an armed
@@ -149,7 +151,7 @@ func (r *ChannelRouter) ConveneChannel(ctx context.Context, channelID string) (s
 	// One-shot-on-idle: refuse a channel with a live discussion rather than
 	// silently joining its open interaction (a pure state precondition, checked
 	// before the convener/roster validation so a live channel short-circuits
-	// regardless of convener drift). See the file header for the PR 7 deferral.
+	// regardless of convener drift). See the file header for why this refusal stays.
 	if _, _, tracked := r.openInteractionEscalationState(channelID); tracked {
 		return "", fmt.Errorf("channels: convene %s: %w", channelID, ErrChannelAlreadyConvening)
 	}

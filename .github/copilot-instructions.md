@@ -35,7 +35,7 @@ Component boundaries:
 - **Rust CLI** (`cli/`): thin REST client; all business logic is server-side.
 - **Protos** (`proto/`): cross-language gRPC contract — change carefully.
 
-Phased stubs: many `internal/` packages are intentional TODO stubs for v0.2/v0.3. Do not remove them — implement when the phase is active.
+Phased stubs: several `internal/` packages are intentional TODO stubs; ROADMAP.md shows when each is planned. Do not remove them — implement one only when ROADMAP.md schedules it for the release in progress.
 
 ## Build and Test
 

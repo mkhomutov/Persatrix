@@ -65,6 +65,9 @@ When updating:
 When updating:
 - Validate against JSON schemas in `schemas/`
 - Run `make validate` after changes
+- `config/mcp-servers.yaml` has no schema yet, so `make validate` skips it;
+  check it by hand. Nothing reads it until the
+  [MCP bridge](ai-glossary.md#mcp-bridge) ships.
 - Document permission changes carefully (deny-by-default model)
 
 ## Status Markers
@@ -111,11 +114,12 @@ One canonical document per topic. Link to it; do not copy from it.
 | Version status, RFC master index, merged PRs | `ROADMAP.md` |
 | Version scope decisions | `docs/v0.3.x-sequencing.md` (active amendment at the top) |
 | One version's plan / release-prep / checklist / evidence | `docs/vX.Y.Z-*.md` and `docs/manual-tests/vX.Y.Z-execution-report.md` |
-| Operator and user guides | `docs/guides/` (auth, channels, epochs, model providers, persona agents, sessions, web console, version bump, demo) |
+| Operator and user guides | `docs/guides/` (auth, autonomous channels, channels, epochs, model providers, persona agents, sessions, web console and its channel settings, version bump, demo) |
 | Log schema and observability | `docs/observability.md` |
 | Golden-trace evals | `docs/evaluators-guide.md`; `evaluators/eval_sets/README.md` |
 | Prompt assets | `docs/prompt-organization.md` |
 | Open-core licence tiers | `docs/open-core-reserved-seams.md` (policy in RFC 0045) |
+| Project strategy — standing review (direction, decision rules, review log) | `docs/project-strategy.md`; numbers and commands in `docs/project-strategy-evidence.md` |
 | Companion discussion documents (spawn RFCs, own no code) | `docs/memory-quality-roadmap.md`, `docs/storage-architecture-roadmap.md`, `docs/agent-runtime-vocabulary-roadmap.md`, `docs/memory-scope-axes.md` |
 | Branching, commits, PR titles | `docs/BRANCHING.md` |
 | Agent configuration | `config/agents.yaml` |

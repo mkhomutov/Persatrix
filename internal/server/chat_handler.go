@@ -50,7 +50,7 @@ var chatHandlerTracer = otel.Tracer("persatrix/server/chat")
 // chatLocalFallbackWarnOnce guards the once-per-process Warn emitted
 // by [Server.handleChat] when a chat request omits `user_id` and
 // falls back to the shared `"local"` pseudo-user. The hazard the Warn
-// signposts (cross-talk via a shared `dm:<agent>:local` channel) is
+// signposts (cross-talk via the one DM between the agent and `local`) is
 // structural, not per-request — gating the line behind sync.Once
 // prevents the warn from flooding logs at chat QPS while preserving
 // the visibility intent. Mirrors the `channelFallbackWarnOnce`
@@ -142,8 +142,8 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	//
 	// WARNING: the `"local"` fallback is a SHARED
 	// pseudo-user. In any deployment where >1 unauthenticated caller can
-	// hit this endpoint, all such callers transparently share the same
-	// canonical DM (`dm:<agent>:local`) and therefore the same persisted
+	// hit this endpoint, all such callers transparently share one canonical
+	// DM (the agent's DM with `local`) and therefore the same persisted
 	// chat history. This is acceptable only for single-user development
 	// (the `persatrix chat` REPL); the v0.3.0 release notes call this
 	// out as a known limitation. The proper fix lands with RFC 0009
@@ -234,7 +234,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	// ISSUE-0068: reject an *explicit* `participant_type` outside the
 	// `{"agent","user"}` vocabulary, here — before GetOrCreateDM — for the
 	// same reject-before-side-effect reason as the session/epoch overrides
-	// above, and for parity with the gRPC SendChatMessage servicer's
+	// above, and for parity with the unused gRPC SendChatMessage servicer's
 	// `validate_participant_type` guard. An out-of-vocabulary value is a
 	// caller bug: left unchecked it rides the wire verbatim and the agent's
 	// allowlist clamp silently degrades it to "agent", re-introducing the
@@ -242,7 +242,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	// omitted field is NOT a caller bug — it defaults to "user" below.
 	if req.ParticipantType != "" && !channels.IsValidParticipantType(req.ParticipantType) {
 		// Echo the offending value (`%q` quotes + escapes control chars) so
-		// the caller sees *which* value was rejected — parity with the gRPC
+		// the caller sees *which* value was rejected — parity with the unused
 		// SendChatMessage guard, whose `validate_participant_type` ValueError
 		// renders the rejected value (`Invalid participant_type 'robot': …`).
 		writeError(w, "BAD_REQUEST", fmt.Sprintf("participant_type %q must be one of [agent, user]", req.ParticipantType), http.StatusBadRequest)
@@ -335,7 +335,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		"chat_session_id": sessionID,
 	}
 	// ISSUE-0068: REST chat is always a human talking to a persona, so an
-	// omitted `participant_type` defaults to "user" — matching the gRPC
+	// omitted `participant_type` defaults to "user" — matching the unused gRPC
 	// SendChatMessage servicer's OQ-3 default. Without this default the
 	// field rides the wire empty and the agent's relationship tier records
 	// the human peer as `other_participant_type=agent`. An explicit value
@@ -440,16 +440,17 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		replyTimestamp = time.Now().UTC()
 	}
 
-	// ISSUE-0065: the agent-side channel-receive arm
-	// (`agents/server_servicers.py::_dispatch_channel_event`) publishes
-	// a structured-error reply tagged with
-	// `Metadata["reply_status"]="error"` when the dispatch raised
-	// `BudgetExceededError`. The waiter delivers that reply here just
-	// like a successful one; honour the discriminator so the JSON
-	// envelope mirrors the gRPC `SendChatMessage` error shape (HTTP 200
-	// + `reply_status="error"` + denial message in `reply`) instead of
-	// the pre-fix HTTP 504 timeout under wallet budget pressure. See
-	// MT-COST-003 Step 2 for the acceptance contract.
+	// ISSUE-0065 / ISSUE-0066: when the agent cannot get a wallet lease for
+	// its LLM call (over budget, or at its lease or rate limit —
+	// `RESOURCE_EXHAUSTED`), it still answers on the DM, with an error reply
+	// tagged `Metadata["reply_status"]="error"`. `agents/chat_reply.py`
+	// builds that reply: `process_inbound_channel_event` →
+	// `dispatch_channel_event_with_chat_error_recovery` →
+	// `publish_chat_error_on_channel`. The waiter delivers it here like a
+	// successful reply; honour the tag so the caller gets HTTP 200 +
+	// `reply_status="error"` + the error text in `reply`, instead of the
+	// pre-fix HTTP 504 timeout. See MT-COST-003 Step 2 for the acceptance
+	// contract.
 	replyStatus := "ok"
 	if reply.Metadata != nil {
 		if rs, ok := reply.Metadata["reply_status"].(string); ok && rs == "error" {
