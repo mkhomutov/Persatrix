@@ -111,8 +111,11 @@ def audience_records(text: str) -> list[AudienceRecord]:
     """The ``audience egress`` records in *text*, oldest first."""
     records: list[AudienceRecord] = []
     for obj in json_lines(text):
+        # The container log renders a stdlib record's text under ``message``
+        # (``event`` is the structlog-native spelling); read both.
+        text = str(obj.get("message") or obj.get("event") or "")
         trace = obj.get(_TRACE_KEY)
-        if not isinstance(trace, dict) or _EVENT_NEEDLE not in str(obj.get("event", "")):
+        if not isinstance(trace, dict) or _EVENT_NEEDLE not in text:
             continue
         raw_verdicts = trace.get("verdicts") or {}
         verdicts = {v: int(raw_verdicts.get(v, 0)) for v in VERDICTS}
@@ -124,7 +127,7 @@ def audience_records(text: str) -> list[AudienceRecord]:
             withheld=int(trace.get("withheld", 0)),
             fetches=int(trace.get("fetches", 0)),
             candidates=[c for c in (trace.get("candidates") or []) if isinstance(c, dict)],
-            event=str(obj.get("event", "")),
+            event=text,
             timestamp=str(obj.get("timestamp", "")),
         ))
     return records

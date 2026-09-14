@@ -93,6 +93,9 @@ class ArcCtx(Ctx):
     overlay: Path | None = None
     #: Leg 4's seed — the `restricted` episode summary Leg 1 stored.
     seed: str = ""
+    #: Legs 2-4 phrased so the stored entries are recall candidates
+    #: (`--seeded-triggers`); see the driver's `triggers`.
+    seeded: bool = False
 
 
 # ── run knob 1: the channel config ──────────────────────────────────────────

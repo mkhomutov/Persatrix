@@ -63,6 +63,17 @@ def test_audience_records_are_read_off_compose_prefixed_json_lines() -> None:
     assert [c["entry_id"] for c in records[0].candidates] == ["f-1", "f-2"]
 
 
+def test_audience_records_read_the_message_key_the_live_log_uses() -> None:
+    """The container log renders a stdlib record's text under ``message``,
+    not ``event`` — the first live read returned nothing for that reason."""
+    live = {k: v for k, v in _RECORD.items() if k != "event"}
+    live["message"] = _RECORD["event"]
+    live["timestamp"] = "2026-09-14T20:29:46.481938Z"
+    [record] = ev.audience_records(_compose_line(live))
+    assert record.withheld == 1
+    assert record.timestamp.startswith("2026-09-14T20:29:46")
+
+
 def test_fetch_failed_total_sums_the_cause_over_every_record() -> None:
     a = dict(_RECORD)
     b = {**_RECORD, "audience_shadow": {
@@ -224,3 +235,27 @@ def test_expand_legs_accepts_ranges_and_rejects_the_unknown() -> None:
         except ValueError:
             continue
         raise AssertionError(f"{bad!r} must be rejected")
+
+
+# ── driver: the seeded triggers ─────────────────────────────────────────────
+
+def test_seeded_triggers_reach_the_store_where_the_literal_ones_did_not() -> None:
+    """Found on the first live run: the extractor stores the subject
+    `zephyr acquisition`, the topic seeder matches the WHOLE canonical
+    subject at a word boundary, and episodic FTS is an implicit AND over
+    every stimulus term — so the MT's literal asks ("…on Zephyr…") never
+    made the restricted entries recall candidates, and the §D gate was
+    never exercised. The seeded variant names the stored subject verbatim
+    and, for Leg 4, sends the stored bytes and nothing else."""
+    from scripts.manual_tests import mt_persona_confidentiality_001 as drv
+
+    literal, seeded = drv.triggers(seeded=False), drv.triggers(seeded=True)
+    assert "zephyr acquisition" not in literal.ask_internal.lower()
+    assert "zephyr acquisition" in seeded.ask_internal.lower()
+    assert "zephyr acquisition" in seeded.ask_restricted.lower()
+    # Leg 2's content words never appear in either variant (MT trigger rule).
+    for ask in (literal.ask_internal, seeded.ask_internal):
+        assert ev.leak_scan(ask, ("March 3", "Geneva", "board")) == []
+    seed = "Alex posted a war-room note (Zephyr) closes March 3."
+    assert drv.leg4_body(seed, seeded=False).startswith("Proofread")
+    assert drv.leg4_body(seed, seeded=True) == seed
