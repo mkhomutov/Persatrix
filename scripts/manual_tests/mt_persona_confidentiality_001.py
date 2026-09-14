@@ -344,6 +344,10 @@ def leg5(ctx: ArcCtx) -> None:
     ops.set_auth_mode(ctx, "enabled")
     ops.bootstrap_account(ctx, ALICE, ALICE)   # participant == the DM's key
     ops.login(ctx, ALICE)
+    # Every orchestrator restart empties the in-memory registry; the fleet
+    # re-registers itself (ISSUE-0125) but not instantly. The first live
+    # run lost Leg 6 to a gate read a second after the flip's restart.
+    ops.wait_registered(ctx)
     check_gates(ctx, auth_mode="enabled")
     audience_leg(ctx, "enabled")
 
@@ -353,6 +357,7 @@ def leg6(ctx: ArcCtx) -> None:
     ctx.say("\nLeg 6 — the audience leg again, auth.mode: disabled (the MT's 5d)")
     ctx.run(ops.cli_cmd(ctx, "logout"), why="drop alice's session before auth goes off")
     ops.set_auth_mode(ctx, "disabled")
+    ops.wait_registered(ctx)
     check_gates(ctx, auth_mode="disabled")
     audience_leg(ctx, "disabled")
 
@@ -421,6 +426,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if not args.skip_setup:
             setup(ctx)
+        else:
+            # A resume against a running stack: the previous run restored
+            # channels.yaml on its way out while the store still holds the
+            # run-knob rooms, so any restart in this run (an auth flip, an
+            # account rotation) would FATAL on reconcile. Put the knob back.
+            ops.apply_channels(ctx, tolerate_applied=True)
         for number in args.legs:
             LEGS[number](ctx)
         if args.execute:

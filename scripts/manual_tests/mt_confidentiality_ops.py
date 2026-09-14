@@ -123,18 +123,28 @@ def apply_channel_run_knobs(text: str) -> str:
     return out + WARROOM_BLOCK
 
 
-def apply_channels(ctx: ArcCtx) -> None:
+def apply_channels(ctx: ArcCtx, tolerate_applied: bool = False) -> None:
+    """Apply run knob 1, stashing the original for :func:`restore_channels`.
+
+    ``tolerate_applied`` is for a resume: the file may already carry the
+    knob (a previous run that did not restore it), in which case nothing is
+    written and nothing is stashed — the file is left exactly as found.
+    """
     if not ctx.execute:
         ctx.say("    [dry-run] declare group:warroom (restricted; ember-owl, alex) and "
                 "alex/alice/bob as observers in planning — config/channels.yaml")
         return
     original = CHANNELS_CONFIG.read_text(encoding="utf-8")
+    try:
+        edited = apply_channel_run_knobs(original)
+    except ValueError as exc:
+        if tolerate_applied and "already" in str(exc):
+            ctx.say("    ~ config/channels.yaml already carries the run knob")
+            return
+        raise ArcAbortedError(str(exc)) from exc
     if ctx.channels_backup is None:
         ctx.channels_backup = original
-    try:
-        CHANNELS_CONFIG.write_text(apply_channel_run_knobs(original), encoding="utf-8")
-    except ValueError as exc:
-        raise ArcAbortedError(str(exc)) from exc
+    CHANNELS_CONFIG.write_text(edited, encoding="utf-8")
     ctx.say("    ~ config/channels.yaml -> war room + three humans declared")
 
 
