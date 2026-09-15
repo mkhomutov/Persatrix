@@ -37,6 +37,16 @@ synthesize_channel_reply` then promotes that text into a channel publish,
 so both the chat-as-DM and channel paths work without the mock needing to
 know channel IDs or emit the JSON action format.
 
+**Open-floor bids.** A group channel asks each participant first whether to
+post at all (:mod:`agents.salience_bid`), and parses the answer — so that one
+call gets a verdict in its grammar, never a reply (ISSUE-0160: answering it
+with a discussion paragraph silenced every participant as ``parse_failure``).
+The verdict is *speak* when the persona has a scripted point for the new
+message that it has not already made in the window, and *silent* otherwise;
+the catch-all (``match: []``) answers a direct message but is never a reason
+to join a room. The reply turn that follows makes that same unmade point, so
+a persona walks through its scripted points instead of repeating the first.
+
 **Cost / observability.** No provider SDK is imported and no request is
 issued, so real spend is zero. The provider reports *synthetic* token
 usage (derived from text length) so the OTel ``gen_ai.usage.*`` spans,
@@ -78,6 +88,18 @@ _DEFAULT_RESPONSES_PATH: Path = (
 # :func:`agents.chat_reply.extract_chat_reply`.
 _USER_MSG_DELIM_RE = re.compile(r"<\|/?user_message[^|]*\|>")
 
+# The open-floor bid prompt (``agents.salience_bid._build_bid_messages``) is ONE
+# user message: the round's transcript, the new message, then the instruction,
+# which ends in the answer form its parser reads — ``should_post: yes|no`` for
+# ``reasoning.mode`` bid/plan (``agents.salience_deliberation``), ``speak: yes|no``
+# for ``off``. The three ``salience-bid-*user.md`` snippets all open with the
+# instruction marker below; ``tests/unit/python/test_llm_offline_bid.py`` drives
+# the real gate in every mode, so a reworded snippet fails there, not in a demo.
+_BID_HEAD = "Conversation so far this round:\n"
+_BID_NEW_MESSAGE = "\n\nNew message:\n"
+_BID_INSTRUCTION = "\n\nDecide whether you have something genuinely new"
+_STRUCTURED_FORM_RE = re.compile(r"^should_post:\s*yes\|no\s*$", re.MULTILINE)
+_SCALAR_FORM_RE = re.compile(r"^speak:\s*yes\|no\s*$", re.MULTILINE)
 
 @lru_cache(maxsize=1)
 def _load_responses() -> dict[str, list[dict[str, Any]]]:
@@ -118,6 +140,17 @@ def reset_cache() -> None:
     _load_responses.cache_clear()
 
 
+def _closing_replies() -> frozenset[str]:
+    """Every persona's reply marked ``closes: true`` — the lines that end a
+    discussion (the chair's closing synthesis), normalised for comparison."""
+    return frozenset(
+        _normalised(entry["reply"])
+        for entries in _load_responses().values()
+        for entry in entries
+        if entry.get("closes") is True and isinstance(entry.get("reply"), str)
+    )
+
+
 def _content_to_text(content: Any) -> str:
     """Flatten an Anthropic-style message ``content`` to plain text.
 
@@ -154,6 +187,59 @@ def _snippet(text: str, limit: int = 160) -> str:
     if len(cleaned) > limit:
         return cleaned[:limit].rstrip() + "…"
     return cleaned
+
+
+def _normalised(text: str) -> str:
+    """Whitespace-collapsed, lower-cased text, for "was this point already made"."""
+    return " ".join(text.split()).lower()
+
+
+def _window_turns(messages: list[Any]) -> list[tuple[bool, str]]:
+    """``(own, text)`` for every turn before the current one (the last)."""
+    return [
+        (m.get("role") == "assistant", _content_to_text(m.get("content")))
+        for m in (messages or [])[:-1]
+        if isinstance(m, dict)
+    ]
+
+
+_BID_TURN_RE = re.compile(r"^(Me|Thread): ", re.MULTILINE)
+
+# The speaker prefix a replayed or dispatched peer turn carries ahead of its
+# text: ``[iron-fox]: `` (conversation window) or ``Message from iron-fox: ``.
+_PEER_PREFIX_RE = re.compile(
+    r"^\s*(?:<\|user_message[^|]*\|>\s*)?(?:\[[a-z0-9-]+\]:|Message from [a-z0-9-]+:)\s*",
+)
+
+
+def _split_bid(text: str) -> tuple[list[tuple[bool, str]], str, bool] | None:
+    """``(turns, new_message, structured)`` when ``text`` is an open-floor bid
+    prompt, else ``None``. The transcript renders the persona's own posts as
+    ``Me:`` lines and everyone else's as ``Thread:`` lines."""
+    structured = _STRUCTURED_FORM_RE.search(text) is not None
+    if not structured and _SCALAR_FORM_RE.search(text) is None:
+        return None
+    cut = text.rfind(_BID_INSTRUCTION)
+    if not text.startswith(_BID_HEAD) or cut < 0 or _BID_NEW_MESSAGE not in text[:cut]:
+        return None
+    transcript, _, new_message = text[len(_BID_HEAD):cut].rpartition(_BID_NEW_MESSAGE)
+    parts = _BID_TURN_RE.split(transcript)
+    speakers, bodies = parts[1::2], parts[2::2]
+    turns = [(speaker == "Me", body) for speaker, body in zip(speakers, bodies, strict=True)]
+    return turns, new_message, structured
+
+
+def _verdict(*, speak: bool, already_made: bool, structured: bool) -> str:
+    """The bid answer in the form the gate parses."""
+    if not structured:
+        return "speak: yes\nscore: 1.0" if speak else "speak: no\nscore: 0.0"
+    if speak:
+        return (
+            "should_post: yes\nreason_code: adds_substance\n"
+            "reason_note: a scripted point not yet made"
+        )
+    code = "already_answered" if already_made else "nothing_to_add"
+    return f"should_post: no\nreason_code: {code}\nreason_note: no scripted point left to make"
 
 
 class MockProvider:
@@ -203,9 +289,12 @@ class MockProvider:
         temperature: float,
     ) -> LLMResponse:
         user_text = _latest_user_text(messages)
-        reply = self._scripted_reply(user_text)
-        if reply is None:
-            reply = self._fallback_reply(user_text)
+        bid = _split_bid(user_text)
+        if bid is not None:
+            reply = self._bid_verdict(*bid)
+        else:
+            scripted = self._scripted_reply(user_text, made=self._made(_window_turns(messages)))
+            reply = scripted if scripted is not None else self._fallback_reply(user_text)
 
         # Synthetic usage so OTel token spans/metrics and the wallet-lease
         # settle path stay populated — no real spend occurs.
@@ -224,23 +313,84 @@ class MockProvider:
             usage=usage,
         )
 
-    def _scripted_reply(self, user_text: str) -> str | None:
-        """Return the first curated reply whose keywords all match, else None.
+    def _points(self, user_text: str, made: str) -> tuple[list[str], list[str], str | None]:
+        """The curated replies for ``user_text``: ``(unmade, made, catch_all)``.
 
         An entry matches when every keyword in its ``match`` list is a
-        case-insensitive substring of the user message. An empty ``match``
-        list is a catch-all (use it last as a per-agent default). Entries
-        are tried in file order, so list specific scenarios first.
+        case-insensitive substring of the message; an empty ``match`` list is
+        the catch-all. A specific reply counts as *made* when the persona's own
+        earlier turns (``made``) already contain it. File order is kept, so
+        list specific scenarios first.
         """
         haystack = _clean(user_text).lower()
+        said = _normalised(made)
+        unmade: list[str] = []
+        repeats: list[str] = []
+        catch_all: str | None = None
         for entry in _load_responses().get(self._agent_id, []):
             reply = entry.get("reply")
             keywords = entry.get("match", [])
             if not isinstance(reply, str) or not isinstance(keywords, list):
                 continue
-            if all(isinstance(k, str) and k.lower() in haystack for k in keywords):
-                return reply.strip()
-        return None
+            if not all(isinstance(k, str) and k.lower() in haystack for k in keywords):
+                continue
+            if not keywords:
+                catch_all = catch_all or reply.strip()
+            elif said and _normalised(reply) in said:
+                repeats.append(reply.strip())
+            else:
+                unmade.append(reply.strip())
+        return unmade, repeats, catch_all
+
+    def _made(self, turns: list[tuple[bool, str]]) -> str:
+        """The points this persona has made — or answered — in the window.
+
+        Its own turns count, and so does the point it would have made on each
+        earlier peer turn: it bid on every message it saw. The replay is what
+        stops a repeat the window alone would allow — a message handled after
+        the persona's own reply was published does not carry that reply, since
+        the runtime drops rows newer than the message being answered. A closing
+        line (``closes: true``) ends a discussion, so the replay starts over
+        after it: the channel window outlives the discussion, and a re-convened
+        room would otherwise find every point already made.
+        """
+        closing = _closing_replies()
+        made: list[str] = []
+        for own, text in turns:
+            if _normalised(_clean(_PEER_PREFIX_RE.sub("", text))) in closing:
+                made = []
+                continue
+            if not own:
+                unmade, _, _ = self._points(text, "\n".join(made))
+                text = unmade[0] if unmade else ""
+            made.append(text)
+        return "\n".join(made)
+
+    def _scripted_reply(self, user_text: str, *, made: str = "") -> str | None:
+        """The first scripted point not yet made; else the catch-all once; else
+        the first matching point again (the last resort, and the pre-ISSUE-0160
+        behaviour a question asked a third time still gets).
+
+        The middle step serves a turn the persona is handed without a bid — a
+        reply that @-mentions it, or the floor re-fanning a round's last reply
+        — when its scripted points are spent: it answers with its generic line
+        rather than re-posting a paragraph. It does not stay silent: a silent
+        reply on such a turn left a booted roundtable open with nothing further
+        dispatched (ISSUE-0160, Notes).
+        """
+        unmade, repeats, catch_all = self._points(user_text, made)
+        if unmade:
+            return unmade[0]
+        if catch_all is not None and _normalised(catch_all) not in _normalised(made):
+            return catch_all
+        return repeats[0] if repeats else catch_all
+
+    def _bid_verdict(
+        self, turns: list[tuple[bool, str]], new_message: str, structured: bool,
+    ) -> str:
+        """Speak only with a scripted point for the new message not yet made."""
+        unmade, repeats, _ = self._points(new_message, self._made(turns))
+        return _verdict(speak=bool(unmade), already_made=bool(repeats), structured=structured)
 
     def _fallback_reply(self, user_text: str) -> str:
         """Deterministic, honest, lightly in-character placeholder.

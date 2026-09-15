@@ -13,27 +13,50 @@
 #                                 # [] is a catch-all — list it LAST.
 #         reply: |
 #           Multi-line persona reply text.
+#         closes: true            # optional — this reply ENDS a discussion
+#                                 # (the chair's closing synthesis): points
+#                                 # made before it count as fresh again.
 #
-# Entries are tried in file order; the first whose keywords all match wins.
+# Entries are tried in file order; the first whose keywords all match wins —
+# except that a persona does not repeat itself: an entry it already posted in
+# the conversation window is skipped for the next match (a question asked twice
+# in a DM still gets its answer twice).
 # Path override: PERSATRIX_OFFLINE_RESPONSES=/path/to/file.yaml
+#
+# Group channels ask each participant first whether to post at all; the mock
+# says yes only when a SPECIFIC entry (not the `[]` catch-all) matches the new
+# message and has not been posted yet (agents/llm_offline.py, ISSUE-0160). So in
+# a group, a persona speaks exactly when it has a scripted point left — which is
+# why the `roundtable` entries below key on a phrase that appears in ONE peer
+# post: each point answers the message it was written for, and the discussion
+# walks the agenda instead of every persona re-posting its first paragraph.
 #
 # The agent IDs below match the demo personas in config/agents.yaml. Edit
 # freely — unmatched turns degrade gracefully to a generated placeholder.
 
 responses:
   # ─── Ember Owl — VP of Engineering (direct, big-picture) ───────────
-  # RFC 0052 `roundtable` demo (chair): the `synthes*` entry is the §D
-  # closing synthesis the chair authors at the bounded close; the `monorepo`
-  # entry is its ordinary discussion contribution. `synthes*` is listed
-  # first so a synthesis directive never matches the discussion entry.
+  # RFC 0052 `roundtable` demo (chair): the `[chair escalation` entry answers
+  # the stall escalation with an interim read (its framing also says
+  # "synthesis", so it is listed first); the `synthes*` entry is the §D closing
+  # synthesis the chair authors at the bounded close; `monorepo` is its opening
+  # take; the last three answer Iron Fox's three posts.
   ember-owl:
+    - match: ["[chair escalation"]
+      reply: |
+        Before we close, here is where I think the room is: a monorepo is worth
+        it only if we stage it — per-package CI first, coupling held in check by
+        tooling rather than good intentions, and a small pilot we can roll back.
+        The open question is how much of the migration we commit to up front,
+        and I will carry that into the final recommendation.
     - match: ["synthes"]
+      closes: true
       reply: |
         Synthesis: adopt the monorepo, but stage it. The strongest case FOR is
         that our most valuable changes are cross-cutting, and today they cost
         us days of cross-repo coordination — one repo collapses that to a single
         review. The strongest case AGAINST is Iron Fox's: a shared pipeline
-        turns any flaky build into a company-wide stall, and a big-bang cutover
+        turns any red build into a company-wide stall, and a big-bang cutover
         is unbounded risk. So the recommendation is a PHASED adoption — start
         with the two services that change together most, land per-package CI
         selection before anything else, and keep every step reversible. Adopt
@@ -46,6 +69,26 @@ responses:
         radius if the migration stalls halfway, and which teams are blocked while
         it does. "Everyone, indefinitely" is a no; "two teams for two sprints" is
         a plan.
+    - match: ["whole ballgame"]
+      reply: |
+        Agreed — and if per-package selection is the whole ballgame, it is also
+        the first milestone. Nothing moves repos until CI can tell which
+        packages a change actually touches.
+    - match: ["rollback path"]
+      reply: |
+        Iron Fox's incremental path is the one I would fund. A big-bang cutover
+        asks me to bet the quarter on one weekend; moving a service at a time
+        lets us stop the moment the numbers go the wrong way.
+    - match: ["codeowners"]
+      reply: |
+        CODEOWNERS plus the import lint is governance I can sign. Without it a
+        monorepo does not remove coupling — it just hides it where nobody
+        reviews it.
+    - match: ["billing and invoicing"]
+      reply: |
+        Then that is the plan: billing and invoicing first, one sprint with the
+        old repos as the fallback, and we decide on everything else from what
+        that pilot actually costs us.
     - match: ["flaky"]
       reply: |
         First question: is it actually flaky, or is the underlying system
@@ -72,16 +115,35 @@ responses:
         two minutes than schedule a meeting about it.
 
   # ─── Iron Fox — Staff Engineer / Reliability (cautious, detailed) ──
+  # RFC 0052 `roundtable` demo: `monorepo` is its opening take; the next two
+  # answer Nova Sparrow's coupling and migration agenda items.
   iron-fox:
     - match: ["monorepo"]
       reply: |
         On a monorepo I care about two failure modes before any upside. First,
-        CI: one repo means one pipeline everyone waits on, so a flaky build
+        CI: one repo means one pipeline everyone waits on, so a red build
         blocks every team, not one — we'd need per-package test selection from
         day one. Second, the migration itself: a big-bang cutover is exactly the
         3am-Saturday scenario I won't sign off on. If we do this, it's
         incremental — move one service, prove the tooling, keep a rollback path
         — not a weekend rewrite.
+    - match: ["release date"]
+      reply: |
+        Then let's put a number on it: per-package test selection is about two
+        weeks of build work, and it lands before the first service moves. I
+        would rather slip the migration two weeks than slip a customer release
+        once.
+    - match: ["tangled"]
+      reply: |
+        Coupling is a tooling problem, not a repo problem. CODEOWNERS on every
+        package, and an import lint in CI that refuses any reach into another
+        team's internal packages — enforced on every merge, not by convention.
+    - match: ["smallest first step"]
+      reply: |
+        Smallest first step: move the two services that change together most —
+        billing and invoicing — dry-run the cutover in staging, and keep their
+        old repos read-only for one sprint so we can roll back. If that sprint
+        hurts, we stop there.
     - match: ["q3"]
       reply: |
         Agreed on the auth migration being the long pole — and the staging env
@@ -104,9 +166,28 @@ responses:
         those three, it's not ready — it's just not broken yet.
 
   # ─── Nova Sparrow — Senior Product Manager (customer-first) ────────
-  # RFC 0052 `roundtable` demo (convener): opens the human-free brainstorm by
-  # posing the topic + agenda to the room.
+  # RFC 0052 `roundtable` demo (convener): `monorepo` opens the human-free
+  # brainstorm by posing the topic + agenda to the room. The three `next agenda
+  # item` entries are the convener's cadence turns when the floor goes quiet
+  # (they carry the topic too, so they are listed before `monorepo`); the last
+  # three are its customer read on Iron Fox's three posts.
   nova-sparrow:
+    - match: ["next agenda item", "coupling"]
+      reply: |
+        Next on the agenda: cross-team coupling risk. One repo makes it trivially
+        easy to import another team's internals, and every shortcut like that is
+        a future outage a customer feels. What stops a monorepo from quietly
+        becoming one tangled codebase?
+    - match: ["next agenda item", "migration effort"]
+      reply: |
+        Last item: migration effort. What is the smallest first step that proves
+        this works — and what does a customer notice while we take it? My bar is
+        nothing at all.
+    - match: ["next agenda item", "build tooling"]
+      reply: |
+        Let me come back to build tooling and CI cost, since that is where a
+        monorepo bites first. What does one shared pipeline cost us per change,
+        and what would keep it fast?
     - match: ["monorepo"]
       reply: |
         Let me put the monorepo question on the table plainly: does one repo help
@@ -116,6 +197,26 @@ responses:
         actually feel. Faster cross-cutting changes are worth real money to R.K.
         and the Meridian team; a six-month migration they never see is not.
         Ember Owl, Iron Fox — where do you each land?
+    - match: ["per-package"]
+      reply: |
+        From the customer side, per-package test selection is the whole ballgame.
+        Our accounts never see the pipeline; they see the release date. If CI
+        stays fast, a monorepo is invisible to them — if it doesn't, it is a
+        slipped release.
+    - match: ["two weeks"]
+      reply: |
+        Two weeks to protect every release date is an easy yes from product.
+        Ember Owl, that sounds like the shape of a recommendation: CI first,
+        then a small pilot.
+    - match: ["import lint"]
+      reply: |
+        Good — an import lint is a cost only engineers pay, and it protects the
+        thing customers do feel: one team's change never breaking another team's
+        feature.
+    - match: ["read-only"]
+      reply: |
+        And for customers that pilot is invisible, which is exactly the bar. I
+        would rather we prove it on two services than promise it for twenty.
     - match: ["q3"]
       reply: |
         Before we sequence this purely around the migration: two of our top
