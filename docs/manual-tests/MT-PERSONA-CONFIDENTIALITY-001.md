@@ -2,10 +2,10 @@
 
 **Test ID**: `MT-PERSONA-CONFIDENTIALITY-001`
 **Feature Area**: Memory confidentiality (RFC 0037 — classification lattice, protection levels, the §D egress gate, §E projections, §G tripwire)
-**Version**: 1.1
+**Version**: 1.2
 **Created**: 2026-07-29
-**Last Updated**: 2026-09-09
-**Status**: Active — authored at RFC 0037 PR 8 (closeout), executed live at v0.3.12 release-prep. **v1.1 adds [Leg 5](#leg-5--the-audience-leg-issue-0132-the-audience-egress-amendment)** (v0.3.16 PR A2, authored before the paid arc per [scope lock 6](../v0.3.16-scope-locks.md); PR A3 flipped the shipped default to `live`, so Leg 5's live reading applies); the whole five-leg arc is a **v0.3.16 release-prep deliverable**, run once against a real provider per [v0.3.16-plan §Acceptance](../v0.3.16-plan.md#acceptance-for-v0316). Legs 1–4 run first as the regression baseline of the existing gate.
+**Last Updated**: 2026-09-15
+**Status**: Active — authored at RFC 0037 PR 8 (closeout), executed live at v0.3.12 release-prep. **v1.1 adds [Leg 5](#leg-5--the-audience-leg-issue-0132-the-audience-egress-amendment)** (v0.3.16 PR A2, authored before the paid arc per [scope lock 6](../v0.3.16-scope-locks.md); PR A3 flipped the shipped default to `live`, so Leg 5's live reading applies); the whole five-leg arc is a **v0.3.16 release-prep deliverable**, run once against a real provider per [v0.3.16-plan §Acceptance](../v0.3.16-plan.md#acceptance-for-v0316). Legs 1–4 run first as the regression baseline of the existing gate. **The whole arc ran 2026-09-15** — [v0.3.16 report](v0.3.16-execution-report.md): pass, Leg 5 under both auth modes; the §F recall side door ([ISSUE-0158](../issues/ISSUE-0158-recall-filter-audience-blind.md)) found by 5d's first run and fixed in the same PR. **v1.2 (2026-09-15, release-prep PR 2)** folds that run's [six corrections](v0.3.16-execution-report.md#mt-corrections--for-the-v12-header-bump-at-pr-2) into Legs 2–5 and the notes, splits the preconditions to a [setup doc](MT-PERSONA-CONFIDENTIALITY-001-setup.md) for the cap, and covers the un-bumped A3 edit of 2026-09-14 ([#950](https://github.com/mkhomutov/Persatrix/pull/950), Leg 5's `live` reading).
 
 ---
 
@@ -13,7 +13,7 @@
 
 **Purpose**: Verify the confidentiality half of the v0.3.12 headline live — **a persona learns from a confidential room without leaking what it learned there**. This is the [RFC 0037](../rfcs/0037-memory-confidentiality-channel-classification.md) matrix end-to-end on a real provider: a fact taught in a `restricted` war room is stamped `restricted` at interaction close (§C), **withheld or projected** when the persona acts in an `internal` room (§D / §E — "informed by, doesn't disclose"), served **verbatim** when it acts back at `restricted`, and — the observability backstop — a deliberately seeded verbatim leak fires the §G tripwire audit record.
 
-**Scope**: all three shipped RFC 0037 phases in their live posture — the [§D hard gate](../rfcs/0037-memory-confidentiality-channel-classification.md#d-the-hard-gate-at-memory-injection) (#776), [§E declassification projections](../rfcs/0037-memory-confidentiality-channel-classification.md#e-declassification-projections) (#787), the [§F recall filter](../rfcs/0037-memory-confidentiality-channel-classification.md#f-recall-classification-filter) (#778, exercised implicitly by every recall the persona issues), and the [§G leak tripwire](../rfcs/0037-memory-confidentiality-channel-classification.md#g-the-leak-tripwire) (#788).
+**Scope**: all three shipped RFC 0037 phases in their live posture — the [§D hard gate](../rfcs/0037-memory-confidentiality-channel-classification.md#d-the-hard-gate-at-memory-injection) (#776), [§E declassification projections](../rfcs/0037-memory-confidentiality-channel-classification.md#e-declassification-projections) (#787), the [§F recall filter](../rfcs/0037-memory-confidentiality-channel-classification.md#f-recall-classification-filter) (#778 — since v0.3.16 it carries the [audience condition](../rfcs/0037-amendment-audience-egress.md#f--the-recall-filter-carries-the-same-condition-issue-0158) too, so the model's own `recall_channel_messages` round on a Leg 5 turn exercises it; that round is what leaked on 5d's first run), and the [§G leak tripwire](../rfcs/0037-memory-confidentiality-channel-classification.md#g-the-leak-tripwire) (#788).
 
 **Out of Scope** — explicitly deferred, **not asserted** here:
 
@@ -30,14 +30,7 @@
 - [MT-MEMORY-CROSSROOM-001](MT-MEMORY-CROSSROOM-001.md) — the admit-side half, same mechanics with both rooms at `internal`.
 - [RFC 0037 audience-egress amendment](../rfcs/0037-amendment-audience-egress.md) — Leg 5's design; [ISSUE-0132](../issues/ISSUE-0132-memory-egress-gate-blind-to-room-audience.md) — the finding it closes.
 
-**Related Automated Tests** — the deterministic CI backbone of this MT:
-
-- [`tests/integration/test_confidentiality_gate.py`](../../tests/integration/test_confidentiality_gate.py) — learn-`restricted` → act-`public` withheld / act-`restricted` verbatim / tick zero-admission / the §B single-channel-turn guard.
-- [`tests/integration/test_confidentiality_projection.py`](../../tests/integration/test_confidentiality_projection.py) — the §E path: a `public`-acting turn *informed by* a `restricted` memory via its projection.
-- [`tests/integration/test_confidentiality_tripwire.py`](../../tests/integration/test_confidentiality_tripwire.py) — the §G tripwire through the real event loop + executor.
-- [`tests/integration/test_interaction_classification_capture.py`](../../tests/integration/test_interaction_classification_capture.py) — the §C wire→capture→stamp seam, live and catch-up-replay producers.
-- [`EVAL-MEMORY-004`](../../evaluators/eval_sets/EVAL-MEMORY-004.yaml) + [`tests/integration/test_confidentiality_seed_replay.py`](../../tests/integration/test_confidentiality_seed_replay.py) — the RFC 0044 golden: the gate pinned at the request-hash level in both directions on every CI run.
-- [`EVAL-MEMORY-005`](../../evaluators/eval_sets/EVAL-MEMORY-005.yaml) — Leg 5's offline twin: teach in a DM, ask in front of Bob (*disjoint*), ask without him (*admit*). Offline it can never produce a `withhold-unknown-fetch-failed`, which is why Leg 5 reports that count live.
+**Related Automated Tests** — the deterministic CI backbone of this MT — are listed in the [setup doc](MT-PERSONA-CONFIDENTIALITY-001-setup.md#related-automated-tests) (v1.2, for the cap).
 
 This live MT confirms the *operator-observable* behaviour on a real provider; the gate/projection/tripwire invariants themselves are pinned in CI.
 
@@ -45,30 +38,21 @@ This live MT confirms the *operator-observable* behaviour on a real provider; th
 
 ## Preconditions
 
-1. The compose stack is up against a **real provider** (`make demo-anthropic` or equivalent — *not* the mock; the withhold/projection distinction needs real replies).
-2. A **clean store** (`make reset`, or a fresh `PERSATRIX_EPOCH` for the whole arc) so prior facts do not steer the run.
-3. A **`restricted` group channel** exists alongside the bundled `internal` one. Add to `config/channels.yaml` (all four lattice levels are declarable since v0.3.12 — see the classification note in that file) and restart the orchestrator:
-
-   ```yaml
-   - name: warroom
-     description: "MT-PERSONA-CONFIDENTIALITY-001 — restricted room"
-     classification: restricted
-     members:
-       - id: ember-owl
-         respond: addressed
-   ```
-
-4. `agent-ember-owl` is up and a member of both `group:warroom` and `group:planning` (bundled at `respond: addressed` — the triggers @-mention it).
-5. **The operator identity is a member of both rooms** — the publish path refuses a non-member sender (`403 sender is not a member of the channel`). Either add `alex` to both YAML blocks alongside ember-owl, or join at runtime (`persatrix channel join warroom --as alex` / `… join planning --as alex`); the runtime join must not outlive the run — a config-declared channel with runtime-divergent membership fails the strict reconcile on the next orchestrator restart (tear the stack down with `make reset` after, per the cleanup note).
-6. `persatrix` CLI on `PATH` pointed at the running orchestrator.
-7. **For Leg 5 only** — **`alice`** (the DM's other party, and Leg 5's asker) and a second human identity, `bob`, are **members of `group:planning`**, and `bob` is in nothing else in this arc (add him to the `planning` block, or `persatrix channel join planning --as bob`; the same runtime-join caveat as item 5 applies). Bob never speaks: audience is the room's *member set*, not who is talking. Item 5's `alex` cannot stand in for Alice — the publish path refuses a non-member sender, and Leg 5 turns on Alice's own tenant. Also confirm `memory.egress.audience` resolves `live` (the shipped v0.3.16 default since PR A3 — verify no overlay pins `shadow`/`off`) and note which, because it selects Leg 5's pass criterion.
-8. Optional but recommended: `PERSATRIX_MEMORY_PROVENANCE=1` on the persona container, so a leg fail can be split into a **gate withhold** (fact absent from the admitted `facts` slice) vs. a **reasoning miss** — the MQ-11 discipline [MT-MEMORY-005 §Telemetry](MT-MEMORY-005-dementia-test.md#telemetry-required-for-diagnosis) established.
+**Split out to [MT-PERSONA-CONFIDENTIALITY-001 — setup and preconditions](MT-PERSONA-CONFIDENTIALITY-001-setup.md)**
+at v1.2, for the word cap. Read it before spending the arc: membership is
+**declared in config, never joined** (a runtime join FATALs the next of the arc's
+four restarts); 5a/5b use the chat **REPL** (there is no `chat send`); the fleet
+must be seen to **re-register** after every restart; the persona container runs
+at `--log-level DEBUG` with provenance on; and `memory.egress.audience` must
+resolve `live`, which selects Leg 5's pass criterion.
 
 ---
 
 ## Test Procedure
 
 The arc is **teach (`restricted`) → close → ask (`internal`, withheld-or-projected) → re-ask (`restricted`, verbatim) → seeded tripwire leg**. Timing matters once: fact extraction runs at **interaction close** ([RFC 0020](../rfcs/0020-interaction-lifecycle.md)), and an idle interaction closes on the *next* event after the idle gap (default 600 s) — so Leg 1 ends with an explicit bridge turn before Leg 2 asks.
+
+**Order matters (v1.2)**: Leg 2 runs **before** Leg 4, on a clean store — after Leg 4 the `planning` close derives `internal` copies of the seeded specifics, which a later Leg 2 there reads (correctly admitted: a laundering confound, not a gate failure). The operator's DM is the sharper Leg 2 room: `internal`, the war room's own two members (so only classification can withhold), no transcript to leak from.
 
 ### Leg 1 — Teach the fact in the war room
 
@@ -111,7 +95,7 @@ for r in sqlite3.connect('/app/data/memory.db').execute('SELECT entry_tier, leve
 In `group:planning` (`internal`), ask about the topic **by name, without the fact's content** (no "March 3", no "Geneva", no "board"):
 
 ```bash
-persatrix channel send planning "What's the latest on Zephyr — anything I can put on the roadmap?" \
+persatrix channel send planning "What's the latest on the Zephyr acquisition — anything I can put on the roadmap?" \
     --as alex --mention ember-owl
 ```
 
@@ -122,14 +106,14 @@ persatrix channel send planning "What's the latest on Zephyr — anything I can 
 
 **Fail criterion**: the reply names **March 3**, the **Geneva** sign-off, or otherwise reproduces the war-room content — the exact leak RFC 0037 exists to prevent. Release-blocking; capture the reply and the admitted-slice provenance before filing.
 
-> The cross-room widening (RFC 0049, live) is what makes this leg meaningful: the `restricted` fact IS a recall candidate in `group:planning` — the §D gate, not the room wall, is what stands between it and the prompt. That is also why the trigger must name `zephyr` (deterministic topic seeding, the [MT-MEMORY-CROSSROOM-001 trigger discipline](MT-MEMORY-CROSSROOM-001.md#leg-2--ask-in-the-standup-the-headline-cross-room-recall)): a trigger that seeds nothing exercises nothing.
+> The cross-room widening (RFC 0049, live) is what makes this leg meaningful: the `restricted` fact IS a recall candidate in `group:planning` — the §D gate, not the room wall, is what stands between it and the prompt. That is also why the trigger must name the stored subject **verbatim** — `zephyr acquisition`, the whole canonical subject at a word boundary, the [MT-MEMORY-CROSSROOM-001 trigger discipline](MT-MEMORY-CROSSROOM-001.md#leg-2--ask-in-the-standup-the-headline-cross-room-recall). A bare "Zephyr" seeds nothing: v1.1's ask passed Leg 2 on the v0.3.16 arc's first run with no gate line and no candidates — a recall miss reading as a withhold, the vacuous green the evidence obligations exist to refuse. The pass is backed by the gate's own `withheld` line on the turn.
 
 ### Leg 3 — Re-ask at the stamp (verbatim admitted)
 
 Back in the war room:
 
 ```bash
-persatrix channel send warroom "Remind me — where did we land on Zephyr?" \
+persatrix channel send warroom "Remind me — where did we land on the Zephyr acquisition?" \
     --as alex --mention ember-owl
 ```
 
@@ -154,7 +138,7 @@ docker compose logs agent-ember-owl | grep confidentiality_tripwire
 
 **The message still sends** — §G is observability, not enforcement; a blocked publish here is a *fail* (something other than the tripwire intervened).
 
-**Inconclusive, not a fail**: a real model may decline or paraphrase the echo (fewer than 8 verbatim words → no hit, by §G design). Retry once with the proofread framing; if it still paraphrases, mark the leg inconclusive — the deterministic firing is pinned in [`tests/integration/test_confidentiality_tripwire.py`](../../tests/integration/test_confidentiality_tripwire.py), and this leg's value is confirming the audit record is operator-visible on a live stack.
+**Inconclusive by construction until [ISSUE-0159](../issues/ISSUE-0159-episodic-score-inverts-bm25.md) lands (v1.2)**: the episodic score inverts BM25, so the stimulus that quotes the episode is the one that cannot surface it, and every word the proofread framing adds breaks the implicit FTS AND. Run the leg once, record the reply and its longest verbatim run, mark it inconclusive; do not retry hunting a hit. A real model may also decline or paraphrase (fewer than 8 verbatim words → no hit, by §G design). The deterministic firing is pinned in [`tests/integration/test_confidentiality_tripwire.py`](../../tests/integration/test_confidentiality_tripwire.py), and this leg's value is confirming the audit record is operator-visible on a live stack.
 
 ### Leg 5 — The audience leg (ISSUE-0132, the audience-egress amendment)
 
@@ -172,14 +156,18 @@ asking in her own tenant makes her entry admissible on both the
 classification and the principal axes — leaving **audience as the only
 thing that can withhold it**.
 
-**5a — teach in the DM** (Alice, `internal` by the DM default):
+**5a — teach in the DM** (Alice, `internal` by the DM default). `chat` is a
+REPL — one piped line is one turn; there is no `chat send` verb. Under
+`enabled`, log in as Alice first (setup item 10):
 
 ```bash
-persatrix chat send "Between us for now — the Helix rollout is paused until the security review clears." --as alice
+printf 'PW\n' | persatrix login --username alice   # enabled only
+printf '%s\n' "Between us for now — the Helix rollout is paused until the security review clears." \
+    | persatrix chat ember-owl --user alice
 ```
 
 **5b — close the interaction**: wait out the idle gap (≥ 11 min at the
-600 s default) and send one bridge turn in the DM. Edge Case 2 applies
+600 s default) and send one bridge turn in the DM, the same piped form. Edge Case 2 applies
 verbatim — a fact that never consolidated makes this a **failed** leg,
 not a vacuous pass. Confirm the row before continuing, and confirm its
 provenance is the DM, since that column is what the check reads
@@ -189,7 +177,7 @@ provenance is the DM, since that column is what the check reads
 docker compose exec agent-ember-owl python3 -c "
 import asyncio, aiosqlite
 async def main():
-    async with aiosqlite.connect('/data/memory.db') as db:
+    async with aiosqlite.connect('/app/data/memory.db') as db:
         async with db.execute('SELECT subject, protection_level, source_channel_id FROM facts') as cur:
             for row in await cur.fetchall():
                 if 'helix' in (row[0] or ''): print(row)
@@ -228,7 +216,8 @@ observable — and a run that resolved no rosters at all would show every
 entry as unknown-transient rather than as evidence.
 
 **5d — the second run, `auth.mode: disabled`**: repeat 5a–5c with auth
-off. Everything is then the `local` principal and the tenant axis is
+off — on a fresh store, and only after the flip's orchestrator restart has
+been seen to **re-register the fleet** (setup item 11). Everything is then the `local` principal and the tenant axis is
 gone entirely, so audience is the only boundary in play at all. Under
 `live` both runs withhold; under `shadow` both record the same verdict.
 
@@ -245,9 +234,9 @@ all: read the admitted set first, the audience verdict second.
 | Leg | Room (level) | Trigger discipline | Pass criterion | Pass/Fail |
 |-----|--------------|--------------------|----------------|-----------|
 | 1 — Teach + close | `warroom` (`restricted`) | natural statement; ≥ 11 min idle + bridge turn | ack; `topic.*` fact row stamped `restricted` (query required if running Leg 4) | ☐ |
-| 2 — Internal ask | `planning` (`internal`) | names `zephyr`, never the content | withheld **or** projected — no date/sign-off/location | ☐ |
-| 3 — War-room re-ask | `warroom` (`restricted`) | names `zephyr` | verbatim specifics return | ☐ |
-| 4 — Seeded tripwire | `planning` (`internal`) | operator pastes the stored bytes | echo ⇒ audit record + metric; message not blocked | ☐ |
+| 2 — Internal ask | `planning` (`internal`) or the operator's DM — before Leg 4 | names `zephyr acquisition` verbatim, never the content | withheld **or** projected — no date/sign-off/location | ☐ |
+| 3 — War-room re-ask | `warroom` (`restricted`) | names `zephyr acquisition` verbatim | verbatim specifics return | ☐ |
+| 4 — Seeded tripwire | `planning` (`internal`), after Leg 2 | operator pastes the stored bytes | echo ⇒ audit record + metric; message not blocked — **inconclusive by construction until ISSUE-0159**; record the reply | ☐ |
 | 5 — Audience (×2: auth on, then off) | DM (`internal`) → `planning` (`internal`, Bob a member) | **Alice** asks about her own DM fact; ≥ 11 min idle + bridge first | `live`: her entry withheld and recorded `withhold-disjoint`. `shadow`: recorded only. Fetch-failed count reported either way | ☐ |
 
 **Overall pass**: Legs 2, 3 and 5 all pass (Leg 4 may be inconclusive per its criterion). A Leg 2 fail is a confidentiality regression — file immediately, release-blocking. A Leg 5 fail under `live` is the audience boundary failing — release-blocking, like Leg 2; under `shadow` it is the *measurement* that is broken.
@@ -295,4 +284,5 @@ all: read the admitted set first, the audience verdict second.
 - **Why this MT exists when CI already pins the matrix**: the integration suites and `EVAL-MEMORY-004` drive the runtime deterministically; this MT is the qualitative gate that a real provider, real idle-close timing, real extractor phrasing, and a real projection author produce the behaviour an operator would actually see — including the §E judgment call ("informed but non-disclosing") that no mock can exercise.
 - **Three axes by v0.3.16**: rooms (sessions), classification, and now *audience* (who is in the room). Legs 2–3 move classification; Leg 5 holds classification **fixed at `internal` in both rooms** and moves only audience — which is what makes it a test of the amendment rather than a second gate test.
 - **Two-axis hygiene**: rooms (sessions) and classification are independent axes — `warroom` and `planning` differ in *both* here, which is what makes Leg 2 a gate test rather than a room-wall test (the RFC 0049 widening removed the wall for facts). Do not pin `PERSATRIX_SESSION_ID` across the arc.
+- **What this arc cannot show (v1.2)**: B2's `agent.deliberation.reason_note` record (every turn is @-mentioned, nothing is suppressed) and, unless the identity tier admits something, B1's `tier=relationship` line. Their absence is by construction, not a finding; both are unit-pinned.
 - **Cleanup**: remove the `warroom` block from `config/channels.yaml` after the run (or leave it — a `restricted` room on a demo deployment is harmless, but the bundled config should stay the shipped shape for later MTs).

@@ -123,6 +123,7 @@ build-orchestrator-ui: ui build-orchestrator ## Build the orchestrator with the 
 build-cli: ## Build Rust CLI binary
 	@echo "→ Building CLI..."
 	cd cli && $(CARGO) build --release
+	@mkdir -p $(GO_BIN)
 	@cp cli/target/release/persatrix$(EXE) $(GO_BIN)/persatrix$(EXE) 2>/dev/null || true
 	@echo "✓ CLI built → $(GO_BIN)/persatrix$(EXE)"
 

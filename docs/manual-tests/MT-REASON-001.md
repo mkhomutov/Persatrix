@@ -2,10 +2,10 @@
 
 **Test ID**: `MT-REASON-001`
 **Feature Area**: Channels (conversation governance — RFC 0051 reasoning before posting, on top of RFC 0030 Tier B / RFC 0050 config / RFC 0034 working memory)
-**Version**: 1.0
+**Version**: 1.1
 **Created**: 2026-06-25
-**Last Updated**: 2026-06-25
-**Status**: Active — authored at RFC 0051 PR 9 closeout; **live execution is a v0.3.10 release-prep (Phase 3) deliverable** (run against a real provider per [v0.3.10-plan §Phase 3](../v0.3.10-plan.md#phase-3--v0310-release-prep-execution)).
+**Last Updated**: 2026-09-15
+**Status**: Active — authored at RFC 0051 PR 9 closeout; executed live at v0.3.10 release-prep (Phase 3, per [v0.3.10-plan §Phase 3](../v0.3.10-plan.md#phase-3--v0310-release-prep-execution)) — see [Test Results](#test-results). **v1.1 (2026-09-15)**: the v0.3.16 PR B2 edit ([ISSUE-0108](../issues/ISSUE-0108-reasoning-reason-note-no-operator-egress.md) — Purpose, Scope, precondition 4, Step 2 and the summary row now read the verbatim `reason_note` from the `agent.deliberation.reason_note` record at `--log-level DEBUG`, and the Step 2 caveat is marked resolved) landed at [#943](https://github.com/mkhomutov/Persatrix/pull/943) without a header bump; recorded here at v0.3.16 release-prep PR 2, with the edited paragraphs verified against the shipped code. Not re-run: the v0.3.10 result stands, and the B2 record is unit-pinned.
 
 ---
 
