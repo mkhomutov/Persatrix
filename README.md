@@ -297,9 +297,9 @@ Persatrix is BUSL-1.1 licensed with no warranty. Use at your own risk
 
 ## Roadmap
 
-Every released line from v0.2.x to v0.3.13 — what each let you do, and when —
-is in [ROADMAP.md's Version Map](ROADMAP.md#version-map); this table keeps the
-current line and what is next.
+Every released line from v0.2.x to v0.3.13 — what each let you do — is in
+[ROADMAP.md's Version Map](ROADMAP.md#version-map); this table keeps the two most
+recent releases, the line in progress, and what is planned.
 
 | Version | What you can do | Status |
 |---------|------------------|--------|

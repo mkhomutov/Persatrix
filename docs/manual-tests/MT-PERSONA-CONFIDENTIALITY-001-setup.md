@@ -30,12 +30,14 @@ reverts the knobs after; the procedure in the MT is what it executes.
      members:
        - id: ember-owl
          respond: addressed
+       - id: alex
+         respond: observer
    ```
 
 4. `agent-ember-owl` is up and a member of both `group:warroom` and `group:planning` (bundled at `respond: addressed` — the triggers @-mention it).
-5. **The operator identity is a member of both rooms** — the publish path refuses a non-member sender (`403 sender is not a member of the channel`). Either add `alex` to both YAML blocks alongside ember-owl, or join at runtime (`persatrix channel join warroom --as alex` / `… join planning --as alex`); the runtime join must not outlive the run — a config-declared channel with runtime-divergent membership fails the strict reconcile on the next orchestrator restart (tear the stack down with `make reset` after, per the cleanup note).
+5. **The operator identity is a member of both rooms** — the publish path refuses a non-member sender (`403 sender is not a member of the channel`). Declare `alex` in both YAML blocks alongside ember-owl (item 3's block already does for `warroom`) — **not** `persatrix channel join` at runtime, per item 9.
 6. `persatrix` CLI on `PATH` pointed at the running orchestrator.
-7. **For Leg 5 only** — **`alice`** (the DM's other party, and Leg 5's asker) and a second human identity, `bob`, are **members of `group:planning`**, and `bob` is in nothing else in this arc (add him to the `planning` block, or `persatrix channel join planning --as bob`; the same runtime-join caveat as item 5 applies). Bob never speaks: audience is the room's *member set*, not who is talking. Item 5's `alex` cannot stand in for Alice — the publish path refuses a non-member sender, and Leg 5 turns on Alice's own tenant. Also confirm `memory.egress.audience` resolves `live` (the shipped v0.3.16 default since PR A3 — verify no overlay pins `shadow`/`off`) and note which, because it selects Leg 5's pass criterion.
+7. **For Leg 5 only** — **`alice`** (the DM's other party, and Leg 5's asker) and a second human identity, `bob`, are **members of `group:planning`**, and `bob` is in nothing else in this arc (declare both in the `planning` block — never a runtime join, per item 9). Bob never speaks: audience is the room's *member set*, not who is talking. Item 5's `alex` cannot stand in for Alice — the publish path refuses a non-member sender, and Leg 5 turns on Alice's own tenant. Also confirm `memory.egress.audience` resolves `live` (the shipped v0.3.16 default since PR A3 — verify no overlay pins `shadow`/`off`) and note which, because it selects Leg 5's pass criterion.
 8. Optional but recommended: `PERSATRIX_MEMORY_PROVENANCE=1` on the persona container, so a leg fail can be split into a **gate withhold** (fact absent from the admitted `facts` slice) vs. a **reasoning miss** — the MQ-11 discipline [MT-MEMORY-005 §Telemetry](MT-MEMORY-005-dementia-test.md#telemetry-required-for-diagnosis) established.
 
 9. **(v1.2) Membership is declared, never joined.** Add `alex` to both rooms and
@@ -43,8 +45,8 @@ reverts the knobs after; the procedure in the MT is what it executes.
    `channel join` at runtime: this arc restarts the orchestrator **four times**
    (two auth flips, two account rotations), and a config-declared channel whose
    store membership has diverged **FATALs** the strict reconcile on the next
-   restart. Items 5 and 7's runtime-join alternative is for a single-restart
-   run only.
+   restart. There is no safe runtime-join variant of this arc: the first
+   restart after a join FATALs, and Leg 5's auth flips alone need two.
 10. **(v1.2) The chat REPL, not `chat send`.** There is no `chat send` verb:
     `persatrix chat <agent> --user <id>` is a REPL that reads stdin line by line,
     so one piped line is one turn and EOF ends the session. Under
@@ -53,7 +55,12 @@ reverts the knobs after; the procedure in the MT is what it executes.
     account with participant `alice` — in-container, on the accounts volume
     (`/var/lib/persatrix/accounts.db`), removing `-wal`/`-shm` sidecars with the
     database when rotating — exactly as the
-    [GROUP-TENANT setup](MT-MEMORY-GROUP-TENANT-001-setup.md) describes.
+    [GROUP-TENANT setup](MT-MEMORY-GROUP-TENANT-001-setup.md) describes. **Then log
+    the CLI in as Alice** (`printf 'PW\n' | persatrix login --username alice`,
+    after `/healthz` answers) before 5a: `chat` and `channel send` carry the
+    CLI's stored session. Without one both 401; with one left over from
+    Legs 1–4 the claim is `alex`, Alice never asks, and Leg 5 is vacuous. Under
+    `disabled` (5d) the session is ignored.
 11. **(v1.2) After every orchestrator restart, wait for re-registration** before
     reading any gate or sending a turn: the fleet re-registers itself
     ([ISSUE-0125](../issues/ISSUE-0125-agents-never-reregister-after-orchestrator-restart.md)'s

@@ -157,11 +157,11 @@ classification and the principal axes — leaving **audience as the only
 thing that can withhold it**.
 
 **5a — teach in the DM** (Alice, `internal` by the DM default). `chat` is a
-REPL — one piped line is one turn, EOF ends the session; there is no
-`chat send` verb, and under `enabled` the verified claim replaces `--user`
-(setup item 10):
+REPL — one piped line is one turn; there is no `chat send` verb. Under
+`enabled`, log in as Alice first (setup item 10):
 
 ```bash
+printf 'PW\n' | persatrix login --username alice   # enabled only
 printf '%s\n' "Between us for now — the Helix rollout is paused until the security review clears." \
     | persatrix chat ember-owl --user alice
 ```
@@ -177,7 +177,7 @@ provenance is the DM, since that column is what the check reads
 docker compose exec agent-ember-owl python3 -c "
 import asyncio, aiosqlite
 async def main():
-    async with aiosqlite.connect('/data/memory.db') as db:
+    async with aiosqlite.connect('/app/data/memory.db') as db:
         async with db.execute('SELECT subject, protection_level, source_channel_id FROM facts') as cur:
             for row in await cur.fetchall():
                 if 'helix' in (row[0] or ''): print(row)

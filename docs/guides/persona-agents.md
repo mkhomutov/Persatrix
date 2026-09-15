@@ -239,7 +239,7 @@ On each event, `_inject_memory_context` clears stale sections, queries each
 tier, truncates content to per-tier character caps, and writes the result
 into working memory at a priority that controls how it's included in the
 prompt
-([agents/persona_runtime/memory_assembly.py:68–69](../../agents/persona_runtime/memory_assembly.py#L68-L69) — the assembly half of the v0.3.16 D1 split; `memory_context.py` keeps the recall half).
+([agents/persona_runtime/memory_context.py:221](../../agents/persona_runtime/memory_context.py#L221) recalls and gates the tiers; since the v0.3.16 D1 split, [memory_assembly.py:51](../../agents/persona_runtime/memory_assembly.py#L51) stages the admitted sections in priority order).
 
 > **v0.2.2 — bounded memory injection.** A per-event `MemoryBudget` allocator
 > (default 1500 tokens; since v0.3.16 retuned with `memory_budget.tokens` in
