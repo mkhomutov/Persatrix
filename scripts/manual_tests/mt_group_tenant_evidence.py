@@ -249,6 +249,24 @@ def _agent_query(persona: str, sql: str, timeout: int = 40) -> QueryResult:
     return QueryResult(rows=[tuple(row) for row in raw])
 
 
+def render_rows(headers: tuple[str, ...], result: QueryResult) -> str:
+    """A query as a markdown table — or, loudly, as a query that did not run.
+
+    The failed-read banner is the instrument's whole point (see the module
+    header): an unread store and an empty one must never render the same.
+    Shared by every arc's evidence module.
+    """
+    if result.failed:
+        return (f"> ⚠️ **QUERY FAILED — this is not a finding.** "
+                f"`{_cell(result.error)}`\n>\n> Nothing was measured here.")
+    if not result.rows:
+        return "_No rows._"
+    lines = ["| " + " | ".join(headers) + " |", "|" + "---|" * len(headers)]
+    for row in result.rows:
+        lines.append("| " + " | ".join(_cell(v if v is not None else "NULL") for v in row) + " |")
+    return "\n".join(lines)
+
+
 # The MT's Leg 4 query filters `WHERE turn_count > 1`, and that filter is a
 # PRE-FIX lens: it was written to find the single merged multi-speaker
 # aggregate the defect produced. Post-fix the record is keyed
