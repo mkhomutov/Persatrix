@@ -100,6 +100,30 @@ that Alice raised a rollout decision. So an audience withhold serves
 nothing in its place, and §E's selection branch skips those entries
 rather than looking them up.
 
+### §F — the recall filter carries the same condition (ISSUE-0158)
+
+§F is the other place stored room text leaves storage: the persona's
+`recall_channel_messages` tool asks the orchestrator for verbatim
+messages across every room it is a member of, capped at the acting
+classification. That cap is the classification axis only. The v0.3.16
+release-prep arc found the gap the moment §D closed the injection path:
+with both DM-taught entries withheld at *withhold-disjoint*, the model
+elected a recall round and the tool handed it the DM transcript in
+`planning` ([ISSUE-0158](../issues/ISSUE-0158-recall-filter-audience-blind.md)).
+
+So the recall request carries the **acting channel id** — bound from the
+turn the same way the acting classification is, never an LLM argument —
+and the orchestrator admits a message only when every current member of
+the acting channel is also a member of the message's channel: the same
+"the acting room adds nobody the source room did not hold" comparison
+§D makes, applied server-side on the current member set. The tool sends
+the id only when `memory.egress.audience` resolves `live`; under
+`shadow` and `off` the recall read is byte-identical to v0.3.15, so the
+rollback lever covers both paths. An acting id with no members admits
+everything, as `live` admits an unresolved roster; no acting id (a
+channel-less turn, an older caller) applies no condition. The `channel.recall`
+audit names the acting room the read was scoped to.
+
 ### §G — the withhold vocabulary widens
 
 The §G tripwire watch is the *withheld* set, and the §G manifest is the

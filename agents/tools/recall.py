@@ -41,6 +41,7 @@ from urllib.parse import quote
 
 import aiohttp
 
+from ..acting_channel import current_acting_channel_id
 from ..acting_classification import current_acting_classification
 from ..epoch_id import current_epoch_id, resolve_world_epoch_id
 from ..prompt_safety import escape_prompt_delimiters
@@ -101,6 +102,7 @@ class RecallClient(Protocol):
         channel_id: str = "",
         sender: str = "",
         limit: int = 10,
+        acting_channel_id: str = "",
     ) -> list[dict[str, Any]] | None:
         """Return the in-scope matches for ``participant_id`` capped at
         ``acting_classification`` (RFC 0037 §F), or ``None`` on a best-effort
@@ -149,6 +151,7 @@ class HttpRecallClient:
         channel_id: str = "",
         sender: str = "",
         limit: int = 10,
+        acting_channel_id: str = "",
     ) -> list[dict[str, Any]] | None:
         """``POST /api/v1/personas/{participant_id}/recall`` → message list,
         or ``None`` on error.
@@ -180,6 +183,11 @@ class HttpRecallClient:
                 "sender": sender,
                 "limit": int(limit),
             }
+            # ISSUE-0158: the acting room rides only when the tool bound one
+            # (the knob is `live` and the turn is channel-anchored), so an
+            # unscoped body is byte-identical to the pre-0158 request.
+            if acting_channel_id:
+                body["acting_channel_id"] = acting_channel_id
             async with self._session.post(
                 url, json=body, timeout=self._timeout,
             ) as resp:
@@ -207,6 +215,7 @@ def create_recall_tool(
     gate: PermissionGate,
     *,
     agent_id: str,
+    audience_live: bool = False,
 ) -> ToolDefinition:
     """Create the closure-bound ``recall_channel_messages`` tool.
 
@@ -222,6 +231,14 @@ def create_recall_tool(
     memory tools it lives there rather than only in the global registry,
     because the closure-bound ``agent_id`` makes it per-agent state the
     single-slot global registry cannot hold.
+
+    ``audience_live`` (ISSUE-0158) says whether this persona's
+    ``memory.egress.audience`` resolves ``live``. Only then does the tool
+    send the acting channel id it binds from the turn, so the orchestrator
+    can apply the §F audience condition; under ``shadow`` / ``off`` the
+    recall read stays exactly the v0.3.15 one — the rollback lever's
+    promise. Resolved by :func:`wire_recall_tools`; the default keeps every
+    direct caller on the pre-0158 call shape.
     """
     # ISSUE-0118: the process's own epoch — the single world every row in
     # the channel store belongs to.  Since ISSUE-0106 direction (b) the
@@ -300,6 +317,15 @@ def create_recall_tool(
         # time the persona runtime is fully imported.
         from ..persona_runtime.classification import normalize_acting
 
+        # ISSUE-0158: the ACTING room, from the same trusted task-local seam
+        # (:mod:`agents.acting_channel`, bound from the event's channel id),
+        # never an LLM argument. Passed only when bound AND the knob is
+        # live, as a keyword the older duck-typed clients need not accept.
+        extra: dict[str, str] = {}
+        acting_channel = current_acting_channel_id() if audience_live else None
+        if acting_channel:
+            extra["acting_channel_id"] = acting_channel
+
         rows = await http_client.recall(
             participant_id=agent_id,
             acting_classification=normalize_acting(
@@ -309,6 +335,7 @@ def create_recall_tool(
             channel_id=channel_id,
             sender=sender,
             limit=limit,
+            **extra,
         )
         # ``None`` is the best-effort failure signal (HTTP/transport error,
         # already logged in the client). Surface it as a failed ToolResult so
@@ -381,10 +408,18 @@ def wire_recall_tools(
     deny-by-default check is per-agent. Agents without the ``add_recall_tool``
     setter (task agents) are skipped.
     """
+    # ISSUE-0158: the audience knob is a persona-runtime concern; imported
+    # lazily so this executor-side module keeps no module-scope dependency
+    # on the persona subpackage (the classification precedent above).
+    from ..persona_runtime.audience import AUDIENCE_LIVE, resolve_memory_audience
+
     client = HttpRecallClient(session=session, orchestrator_url=orchestrator_url)
     for agent in agents.values():
         add_recall_tool = getattr(agent, "add_recall_tool", None)
         if add_recall_tool is None:
             continue  # task agents and any non-persona host
         gate = PermissionGate(agent.config.get("permissions", {}))
-        add_recall_tool(create_recall_tool(client, gate, agent_id=agent.agent_id))
+        add_recall_tool(create_recall_tool(
+            client, gate, agent_id=agent.agent_id,
+            audience_live=resolve_memory_audience(agent.config) == AUDIENCE_LIVE,
+        ))

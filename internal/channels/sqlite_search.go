@@ -142,6 +142,31 @@ func classificationScope(acting Classification) (string, []any) {
 // `before` predicates, each emitted only when supplied, plus their bound args in
 // the same order. `after` is an inclusive lower bound and `before` an exclusive
 // upper bound (matching [ChannelStore.GetHistory]'s `before`).
+// audienceScope is the ISSUE-0158 audience condition on recall: the message's
+// channel must hold every current member of the acting channel. Written as
+// "no acting member is missing from the source" so an acting channel with no
+// members (unknown id) admits everything, mirroring the §D gate's posture
+// that an unresolved audience admits under `live`. Reads `memberships` — the
+// current member set, the same set the persona's audience check resolves via
+// GET /api/v1/channels/{id} — not the RFC 0035 interval ledger, which is the
+// participant's own access scope and already applied above.
+func audienceScope(actingChannelID string) (string, []any) {
+	if actingChannelID == "" {
+		return "", nil
+	}
+	clause := `
+          AND NOT EXISTS (
+              SELECT 1 FROM memberships a
+               WHERE a.channel_id = ?
+                 AND NOT EXISTS (
+                     SELECT 1 FROM memberships s
+                      WHERE s.channel_id = m.channel_id
+                        AND s.participant_id = a.participant_id
+                 )
+          )`
+	return clause, []any{actingChannelID}
+}
+
 func recallNarrowing(p RecallParams) (string, []any) {
 	var b strings.Builder
 	var args []any
@@ -184,6 +209,10 @@ func (s *sqliteStore) RecallMessages(ctx context.Context, params RecallParams) (
 	class, classArgs := classificationScope(params.ActingClassification)
 	scope += class
 	scopeArgs = append(scopeArgs, classArgs...)
+	if aud, audArgs := audienceScope(params.ActingChannelID); aud != "" {
+		scope += aud
+		scopeArgs = append(scopeArgs, audArgs...)
+	}
 	narrow, narrowArgs := recallNarrowing(params)
 	match := buildFTS5Match(params.Query)
 

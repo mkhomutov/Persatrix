@@ -61,6 +61,20 @@ type RecallParams struct {
 	// (the tool binds it from the turn's classification scope).
 	ActingClassification Classification
 
+	// ActingChannelID is the canonical id of the channel the persona is ACTING
+	// in — the audience half of RFC 0037 §F (ISSUE-0158, the audience-egress
+	// amendment applied to recall). When non-empty the store admits a message
+	// only if every CURRENT member of this channel is also a member of the
+	// message's channel: the acting room adds nobody the source room did not
+	// hold, the same comparison the §D injection gate makes
+	// (agents/persona_runtime/audience.py). Empty — a channel-less turn, or a
+	// persona whose `memory.egress.audience` is not `live` — applies no
+	// audience condition, so every pre-0158 caller recalls exactly as before.
+	// An acting id with no members is an empty set every source contains:
+	// unknown admits, as `live` admits an unresolved roster. Trusted request
+	// context, never LLM-supplied (the tool binds it from the turn's channel).
+	ActingChannelID string
+
 	// ChannelID, when non-empty, narrows to a single channel.
 	ChannelID string
 

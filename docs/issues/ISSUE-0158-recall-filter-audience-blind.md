@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0158
 summary: "The RFC 0037 §F recall filter is audience-blind: the persona's recall_channel_messages tool (POST /api/v1/personas/{id}/recall) binds the acting channel's classification but nothing about who is in the acting room, so on a group-room turn it returns a DM's transcript verbatim — the very entries the §D audience gate (ISSUE-0132, v0.3.16) just withheld from the same turn. Observed live at the v0.3.16 release-prep arc under the shipped auth.mode: disabled: Alice asked in planning, with Bob a member, about a fact she taught in her DM; the injection gate recorded both DM-taught facts withhold-disjoint and injected nothing, the model elected a recall round, the tool returned her two DM messages, and the reply repeated the fact in front of Bob while declining to. Under auth.mode: enabled the same tool 401s (ISSUE-0140), which is the only reason the enabled run did not leak."
-status: open
+status: resolved
 severity: high
 area: memory
 created: 2026-09-15
+closed: 2026-09-15
+closed_pr: 954
 refs:
   - docs/manual-tests/v0.3.16-execution-report.md
   - docs/manual-tests/MT-PERSONA-CONFIDENTIALITY-001.md
@@ -101,3 +103,15 @@ the maintainer's call, flagged on release-prep PR 1.
 > 2026-09-15 — filed from the v0.3.16 release-prep arc (F-2 in the execution
 > report). Not a regression — the tool predates the audience gate — but until
 > v0.3.16 the injection path leaked the same fact, so the side door was moot.
+>
+> 2026-09-15 — **Resolved in release-prep PR 1** ([#954](https://github.com/mkhomutov/Persatrix/pull/954)),
+> the in-release fix the maintainer chose over a Known Gap. The recall
+> request carries `acting_channel_id`, bound by the tool from the turn's
+> channel (`agents/acting_channel.py`, the acting-classification seam's
+> twin) and sent only when `memory.egress.audience` resolves `live`; the
+> orchestrator's recall query gains the member-subset clause
+> (`audienceScope` in `internal/channels/sqlite_search.go`) and the audit
+> names the acting room. TDD both sides: `sqlite_search_audience_test.go`,
+> `persona_recall_handlers_audience_test.go`, `test_recall_tool_audience.py`.
+> The [amendment](../rfcs/0037-amendment-audience-egress.md#f--the-recall-filter-carries-the-same-condition-issue-0158)
+> gains its §F section; Leg 5d re-ran on the fixed image — see the report.
