@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -40,6 +41,7 @@ from scripts.manual_tests.mt_group_tenant_evidence import (  # noqa: F401
     _agent_query,
     _cell,
     collect_cost,
+    render_rows,
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -276,6 +278,37 @@ def grep_lines(text: str, needle: str) -> list[str]:
     return [ln for ln in text.splitlines() if needle in ln]
 
 
+#: How far back a log snapshot reaches. The snapshot/delta pair below is
+#: clock-independent (the turn's lines are whatever the second read holds
+#: that the first did not), so the margin only has to cover the turn itself.
+SNAPSHOT_MARGIN_SECONDS = 600
+
+
+def new_lines(before: str, after: str) -> list[str]:
+    """The lines *after* holds that *before* did not, in order.
+
+    A `--since` stamp taken on the host is compared against timestamps the
+    Docker daemon wrote — two clocks, and Docker Desktop's VM clock lags the
+    host after a sleep. Diffing two reads taken with the SAME stamp sidesteps
+    the skew: whatever the clocks say, the turn's lines are the new ones.
+    """
+    seen = set(before.splitlines())
+    return [ln for ln in after.splitlines() if ln not in seen]
+
+
+def log_snapshot(service: str = AGENT_SERVICE) -> tuple[str, str]:
+    """Read the log once BEFORE a turn; pair with :func:`log_delta` after."""
+    since = time.strftime(
+        "%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - SNAPSHOT_MARGIN_SECONDS))
+    return since, agent_log(since, service)
+
+
+def log_delta(snapshot: tuple[str, str], service: str = AGENT_SERVICE) -> str:
+    """The lines written since :func:`log_snapshot`, as one text."""
+    since, before = snapshot
+    return "\n".join(new_lines(before, agent_log(since, service)))
+
+
 def scrape_metrics(url: str = METRICS_URL) -> str:
     try:
         with urllib.request.urlopen(url, timeout=10) as resp:  # noqa: S310
@@ -307,16 +340,3 @@ def restricted_episodes(persona: str = PERSONA) -> QueryResult:
 
 def projections(persona: str = PERSONA) -> QueryResult:
     return _agent_query(persona, PROJECTIONS)
-
-
-def render_rows(headers: tuple[str, ...], result: QueryResult) -> str:
-    """A query as a markdown table — or, loudly, as a query that did not run."""
-    if result.failed:
-        return (f"> ⚠️ **QUERY FAILED — this is not a finding.** "
-                f"`{_cell(result.error)}`\n>\n> Nothing was measured here.")
-    if not result.rows:
-        return "_No rows._"
-    lines = ["| " + " | ".join(headers) + " |", "|" + "---|" * len(headers)]
-    for row in result.rows:
-        lines.append("| " + " | ".join(_cell(v if v is not None else "NULL") for v in row) + " |")
-    return "\n".join(lines)

@@ -90,8 +90,8 @@ same class as ISSUE-0132, on the shipped default posture.
 Give §F the audience condition §D has, server-side: the recall request carries
 the **acting channel id** (the persona knows it from the event; the tool
 already binds the participant and the acting classification), and the handler
-admits a message only if its channel's current member set is a subset of the
-acting channel's — the same comparison [`audience.py`](../../agents/persona_runtime/audience.py)
+admits a message only if the acting channel's current member set is a subset of
+the message's channel's — the same comparison [`audience.py`](../../agents/persona_runtime/audience.py)
 makes, computed from the two member lists the channel store already holds.
 Narrowing-only, like the existing membership filter. The
 [amendment](../rfcs/0037-amendment-audience-egress.md) gains a §F paragraph.

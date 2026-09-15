@@ -116,13 +116,19 @@ turn the same way the acting classification is, never an LLM argument —
 and the orchestrator admits a message only when every current member of
 the acting channel is also a member of the message's channel: the same
 "the acting room adds nobody the source room did not hold" comparison
-§D makes, applied server-side on the current member set. The tool sends
-the id only when `memory.egress.audience` resolves `live`; under
-`shadow` and `off` the recall read is byte-identical to v0.3.15, so the
-rollback lever covers both paths. An acting id with no members admits
-everything, as `live` admits an unresolved roster; no acting id (a
-channel-less turn, an older caller) applies no condition. The `channel.recall`
-audit names the acting room the read was scoped to.
+§D makes, applied server-side on the current member set — with §D's
+`public` exemption (a message in a `public` channel is shareable by
+definition and is always admitted). The tool sends the id only when
+`memory.egress.audience` resolves `live`; under `shadow` and `off` the
+recall read is byte-identical to v0.3.15, so the rollback lever covers
+both paths. An acting id with no members admits everything, as `live`
+admits an unresolved roster; no acting id (a channel-less turn, an older
+caller) applies no condition. One deliberate difference from §D: a
+*source* room every member has left is read by §D as unknown and
+admitted, while recall fails closed and withholds its transcript — an
+emptied room has no audience to compare, and stored text is the more
+verbatim of the two surfaces. The `channel.recall` audit names the
+acting room the read was scoped to.
 
 ### §G — the withhold vocabulary widens
 

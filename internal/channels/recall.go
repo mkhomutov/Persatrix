@@ -67,12 +67,16 @@ type RecallParams struct {
 	// only if every CURRENT member of this channel is also a member of the
 	// message's channel: the acting room adds nobody the source room did not
 	// hold, the same comparison the §D injection gate makes
-	// (agents/persona_runtime/audience.py). Empty — a channel-less turn, or a
-	// persona whose `memory.egress.audience` is not `live` — applies no
-	// audience condition, so every pre-0158 caller recalls exactly as before.
-	// An acting id with no members is an empty set every source contains:
-	// unknown admits, as `live` admits an unresolved roster. Trusted request
-	// context, never LLM-supplied (the tool binds it from the turn's channel).
+	// (agents/persona_runtime/audience.py), with §D's `public` exemption (a
+	// public channel's message is always admitted). Empty — a channel-less
+	// turn, or a persona whose `memory.egress.audience` is not `live` —
+	// applies no audience condition, so every pre-0158 caller recalls exactly
+	// as before. An acting id with no members is an empty set every source
+	// contains: unknown admits, as `live` admits an unresolved roster. A
+	// SOURCE channel with no members withholds — the one deliberate
+	// difference from §D, which admits an emptied roster as unknown; see
+	// audienceScope. Trusted request context, never LLM-supplied (the tool
+	// binds it from the turn's channel).
 	ActingChannelID string
 
 	// ChannelID, when non-empty, narrows to a single channel.

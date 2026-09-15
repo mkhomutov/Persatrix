@@ -58,6 +58,7 @@ func audienceRecallFixture(t *testing.T) ChannelStore {
 				require.NoError(t, err)
 			}
 			seedInterval(t, db, id, "ember-owl", mins(0), nil)
+			seedInterval(t, db, id, "alice", mins(0), nil)
 		}
 		seedMsg(t, db, msgSeed{id: "m-dm", channelID: audienceDM, sender: "alice",
 			content: "the helix rollout is paused", ts: mins(5)})
@@ -65,6 +66,77 @@ func audienceRecallFixture(t *testing.T) ChannelStore {
 			content: "where did the helix rollout land", ts: mins(6)})
 	})
 	return store
+}
+
+const audienceLobby = "group:lobby"
+
+// audienceRecallFixtureWithPublic adds a PUBLIC room whose members are a strict
+// subset of planning's, holding one message — the §D gate exempts public
+// entries from the audience check (scope lock 1: shareable by definition), and
+// recall must too.
+func audienceRecallFixtureWithPublic(t *testing.T) (ChannelStore, string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "channels.db")
+	store, err := NewSQLiteStore(path, SQLiteOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	ctx := context.Background()
+	require.NoError(t, store.CreateChannel(ctx, Channel{
+		ID: audiencePlanning, Name: "planning", Type: ChannelTypeGroup, Classification: ClassificationInternal,
+	}))
+	require.NoError(t, store.CreateChannel(ctx, Channel{
+		ID: audienceLobby, Name: "lobby", Type: ChannelTypeGroup, Classification: ClassificationPublic,
+	}))
+	withDB(t, path, func(db *sql.DB) {
+		for _, row := range [][2]string{
+			{audiencePlanning, "alice"}, {audiencePlanning, "bob"}, {audiencePlanning, "ember-owl"},
+			{audienceLobby, "alice"}, {audienceLobby, "ember-owl"},
+		} {
+			_, err := db.Exec(`INSERT INTO memberships (channel_id, participant_id, respond_policy, joined_at)
+			                   VALUES (?, ?, 'when_mentioned', ?)`, row[0], row[1], mins(0))
+			require.NoError(t, err)
+		}
+		seedInterval(t, db, audiencePlanning, "ember-owl", mins(0), nil)
+		seedInterval(t, db, audienceLobby, "ember-owl", mins(0), nil)
+		seedMsg(t, db, msgSeed{id: "m-lobby", channelID: audienceLobby, sender: "alice",
+			content: "helix is public knowledge", ts: mins(5)})
+	})
+	return store, path
+}
+
+func TestRecallMessages_AudienceScope_PublicSourceIsExempt(t *testing.T) {
+	store, _ := audienceRecallFixtureWithPublic(t)
+	got, err := store.RecallMessages(context.Background(), RecallParams{
+		ParticipantID: "ember-owl", Query: "helix",
+		ActingClassification: ClassificationInternal,
+		ActingChannelID:      audiencePlanning,
+	})
+	require.NoError(t, err)
+	assert.Contains(t, idSlice(got), "m-lobby",
+		"a public room's message is shareable by definition — the audience condition does not apply (§D exempts public)")
+}
+
+func TestRecallMessages_AudienceScope_EmptiedSourceRoomWithholds(t *testing.T) {
+	// A source room every member has left keeps its messages (RemoveMember
+	// deletes only the membership row). §D reads that roster as unknown and
+	// ADMITS under live; recall deliberately fails closed here — an emptied
+	// room has no audience to compare, and its transcript should not travel.
+	store := audienceRecallFixture(t)
+	ctx := context.Background()
+	require.NoError(t, store.RemoveMember(ctx, audienceDM, "alice"))
+	require.NoError(t, store.RemoveMember(ctx, audienceDM, "ember-owl"))
+	got, err := store.RecallMessages(ctx, RecallParams{
+		ParticipantID: "ember-owl", Query: "helix",
+		ActingClassification: ClassificationInternal,
+		ActingChannelID:      audiencePair,
+	})
+	require.NoError(t, err)
+	assert.NotContains(t, idSlice(got), "m-dm", "an emptied source room withholds (fail-closed on recall)")
+	got, err = store.RecallMessages(ctx, RecallParams{
+		ParticipantID: "ember-owl", Query: "helix", ActingClassification: ClassificationInternal,
+	})
+	require.NoError(t, err)
+	assert.Contains(t, idSlice(got), "m-dm", "control: the message is still inside the participant's own scope")
 }
 
 func TestRecallMessages_AudienceScope(t *testing.T) {

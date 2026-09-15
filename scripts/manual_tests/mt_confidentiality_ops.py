@@ -287,29 +287,6 @@ def wait_for_reply(ctx: ArcCtx, channel_id: str, before: set[str],
     return None
 
 
-def run_capture(ctx: ArcCtx, cmd: list[str], *, why: str,
-                timeout: int = 120) -> subprocess.CompletedProcess[str] | None:
-    """Like ``Ctx.run`` but hands back the whole process, stderr included.
-
-    ``Ctx.run`` returns stdout only, and the CLI reports a refused publish
-    on stderr — so a caller that needs to tell a 429 from a 403 cannot use it.
-    ``None`` in a dry run.
-    """
-    printable = " ".join(cmd)
-    if not ctx.execute:
-        ctx.say(f"    [dry-run] {printable}")
-        ctx.say(f"              ({why})")
-        return None
-    ctx.say(f"    $ {printable}")
-    try:
-        return subprocess.run(  # noqa: S603
-            cmd, cwd=REPO_ROOT, capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=timeout, check=False,
-        )
-    except (subprocess.SubprocessError, OSError) as exc:
-        raise ArcAbortedError(f"{printable} -> {type(exc).__name__}: {exc}") from exc
-
-
 def send_mention(ctx: ArcCtx, sender: str, room: str, body: str,
                  mention: str = PERSONA, critical: bool = True) -> str:
     """Publish as *sender* with an @-mention, retrying a post-restart 429.
@@ -321,11 +298,10 @@ def send_mention(ctx: ArcCtx, sender: str, room: str, body: str,
     cmd = cli_cmd(ctx, "channel", "send", room, body, "--as", sender, "--mention", mention)
     detail = ""
     for attempt in range(6):
-        proc = run_capture(ctx, cmd, why=f"publish as {sender} in {room}")
+        proc = ctx.run(cmd, why=f"publish as {sender} in {room}", proc=True)
         if proc is None or proc.returncode == 0:
             return proc.stdout if proc else ""
         detail = (proc.stderr.strip() or proc.stdout.strip())[:400]
-        ctx.say(f"    ! exit {proc.returncode}: {detail}")
         if "429" not in detail:
             break
         ctx.pause(20, f"rate limited — retry {attempt + 1}/5")

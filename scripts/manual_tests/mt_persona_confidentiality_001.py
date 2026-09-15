@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -38,6 +39,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from scripts.manual_tests import mt_confidentiality_evidence as ev  # noqa: E402
 from scripts.manual_tests import mt_confidentiality_ops as ops  # noqa: E402
+from scripts.manual_tests import mt_gate  # noqa: E402
 from scripts.manual_tests import mt_group_tenant_preflight as pf  # noqa: E402
 from scripts.manual_tests.mt_confidentiality_ops import (  # noqa: E402
     ALICE,
@@ -205,14 +207,29 @@ def _schema_default(schema: dict) -> str | None:
 # ── legs ────────────────────────────────────────────────────────────────────
 
 def _close_and_read(ctx: ArcCtx, needle: str) -> ev.QueryResult:
-    """After the bridge turn, read the facts until the close path has written."""
+    """After the bridge turn, read the facts until the close path has written.
+
+    A dry run reads nothing: the store readers shell into the containers,
+    and "no side effects" includes no `docker compose exec`.
+    """
+    if not ctx.execute:
+        ctx.say(f"    [dry-run] read the `facts` rows naming {needle!r} (up to 3 tries)")
+        return ev.QueryResult()
     result = ev.facts_like(needle)
     for _ in range(2):
-        if ctx.execute and not result.failed and result.rows:
+        if not result.failed and result.rows:
             break
         ctx.pause(20, "close path still writing — re-read")
         result = ev.facts_like(needle)
     return result
+
+
+def _read(ctx: ArcCtx, what: str, reader: Callable[[], Any], dry: Any) -> Any:
+    """Run a live reader, or in a dry run say what it would read and return *dry*."""
+    if not ctx.execute:
+        ctx.say(f"    [dry-run] read {what}")
+        return dry
+    return reader()
 
 
 def leg1(ctx: ArcCtx) -> None:
@@ -228,20 +245,21 @@ def leg1(ctx: ArcCtx) -> None:
     ctx.record("Leg 1 — `facts` rows naming zephyr (expect `restricted`)",
                ev.render_rows(("subject", "predicate", "object", "protection_level",
                                "source_channel_id", "principal_id"), facts))
-    episodes = ev.restricted_episodes()
+    episodes = _read(ctx, "the `restricted` episodes", ev.restricted_episodes, ev.QueryResult())
     ctx.record("Leg 1 — `restricted` episodes (Leg 4's seed is the summary)",
                ev.render_rows(("id", "protection_level", "source_channel_id", "summary"),
                               episodes))
     if ctx.execute and not episodes.failed and episodes.rows:
         ctx.seed = str(episodes.rows[0][3] or "")
     ctx.record("Leg 1 — §E projections",
-               ev.render_rows(("entry_tier", "level", "text"), ev.projections()))
+               ev.render_rows(("entry_tier", "level", "text"),
+                              _read(ctx, "the §E projections", ev.projections, ev.QueryResult())))
 
 
 def leg2(ctx: ArcCtx) -> None:
     """Ask below the stamp — withheld or projected, never the specifics."""
     ctx.say("\nLeg 2 — ask below the stamp (internal)")
-    since = ops.utc_now()
+    snapshot = _read(ctx, "a log snapshot before the turn", ev.log_snapshot, ("", ""))
     ask = triggers(ctx.seeded).ask_internal
     if ctx.seeded:
         # A clean `internal` room: after Leg 4's echo, planning's own
@@ -258,7 +276,7 @@ def leg2(ctx: ArcCtx) -> None:
                ops.render_message(reply, "Reply")
                + f"\n\nLeak scan for {ZEPHYR_LEAK}: **{leaked or 'none'}** "
                "(any hit is the release-blocking fail).")
-    log = ev.agent_log(since)
+    log = _read(ctx, "the turn's log lines", lambda: ev.log_delta(snapshot), "")
     ctx.record("Leg 2 — admitted set and §D withholds (provenance lines)",
                "```\n" + "\n".join(ev.grep_lines(log, "tier_admitted")
                                    + ev.grep_lines(log, "gate withheld"))[:4000] + "\n```")
@@ -286,13 +304,14 @@ def leg4(ctx: ArcCtx) -> None:
                    "— Leg 1's close never wrote one. Inconclusive, not a pass._")
         return
     seed = ctx.seed or "<the restricted episode summary>"
-    since = ops.utc_now()
+    snapshot = _read(ctx, "a log snapshot before the turn", ev.log_snapshot, ("", ""))
     _, reply = ops.turn(ctx, OPERATOR, PLANNING, leg4_body(seed, ctx.seeded))
     run = ev.verbatim_run(seed, str((reply or {}).get("content", "")))
-    log = ev.agent_log(since)
+    log = _read(ctx, "the turn's log lines", lambda: ev.log_delta(snapshot), "")
     hits = ev.grep_lines(log, "confidentiality_tripwire")
     withheld = ev.grep_lines(log, "gate withheld")
-    metric = ev.metric_total(ev.scrape_metrics(), "channel_confidentiality_tripwire_hits")
+    metric = _read(ctx, "the tripwire metric", lambda: ev.metric_total(
+        ev.scrape_metrics(), "channel_confidentiality_tripwire_hits"), None)
     ctx.record("Leg 4 — the seeded echo",
                f"Seed (stored bytes): `{seed}`\n\n" + ops.render_message(reply, "Reply")
                + f"\n\nLongest verbatim run: **{run} words** (§G fires at 8+).\n\n"
@@ -323,10 +342,10 @@ def audience_leg(ctx: ArcCtx, mode: str) -> None:
                    "not a vacuous pass. Redo 5a/5b before asking._")
         return
     ctx.say(f"    5c — Alice asks in planning, Bob present (auth.mode: {mode})")
-    since = ops.utc_now()
+    snapshot = _read(ctx, "a log snapshot before the turn", ev.log_snapshot, ("", ""))
     _, ask = ops.turn(ctx, ALICE, PLANNING, HELIX_ASK)
     leaked = ev.leak_scan(str((ask or {}).get("content", "")), HELIX_LEAK)
-    log = ev.agent_log(since)
+    log = _read(ctx, "the turn's log lines", lambda: ev.log_delta(snapshot), "")
     records = ev.audience_records(log)
     ctx.record(f"Leg 5 ({mode}) — 5c the ask in front of Bob",
                ops.render_message(ask, "Reply")
@@ -365,29 +384,6 @@ def leg6(ctx: ArcCtx) -> None:
 LEGS = {1: leg1, 2: leg2, 3: leg3, 4: leg4, 5: leg5, 6: leg6}
 
 
-def expand_legs(spec: str, known: dict) -> list[int]:
-    """Expand ``1-4`` / ``5,6``; reject anything that would run nothing."""
-    chosen: set[int] = set()
-    for part in spec.split(","):
-        part = part.strip()
-        if not part:
-            continue
-        lo_raw, hi_raw = part.split("-", 1) if "-" in part else (part, part)
-        try:
-            lo, hi = int(lo_raw), int(hi_raw)
-        except ValueError:
-            raise ValueError(f"{part!r} is not a leg number or range") from None
-        if hi < lo:
-            raise ValueError(f"range {part!r} runs backwards")
-        unknown = [n for n in range(lo, hi + 1) if n not in known]
-        if unknown:
-            raise ValueError(f"no leg {unknown} (legs {min(known)}-{max(known)})")
-        chosen.update(range(lo, hi + 1))
-    if not chosen:
-        raise ValueError(f"{spec!r} selects no legs")
-    return sorted(chosen)
-
-
 def _write_artifacts(ctx: ArcCtx, partial: bool) -> None:
     if not ctx.execute or not ctx.artifacts:
         return
@@ -405,7 +401,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--execute", action="store_true",
                         help="actually drive the arc (default is a dry run)")
     parser.add_argument("--legs", default="1-6",
-                        type=lambda s: expand_legs(s, LEGS), help="e.g. 1-4, 5-6")
+                        type=lambda s: mt_gate.parse_legs(s, LEGS), help="e.g. 1-4, 5-6")
     parser.add_argument("--skip-setup", action="store_true",
                         help="the stack is already up with the run knobs applied")
     parser.add_argument("--seeded-triggers", action="store_true",

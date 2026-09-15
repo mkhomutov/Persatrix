@@ -23,6 +23,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 if str(Path(__file__).resolve().parent.parent.parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
@@ -87,8 +88,13 @@ class Ctx:
 
     def run(self, cmd: list[str], *, why: str, timeout: int = 120,
             stdin: str | None = None, secret: bool = False,
-            critical: bool = False) -> str:
+            critical: bool = False,
+            proc: bool = False) -> Any:
         """Run a command, or describe it in a dry run.
+
+        ``proc=True`` hands back the ``CompletedProcess`` (``None`` in a dry
+        run) instead of stdout, for a caller that must read stderr — a 429
+        to retry versus a 403 to abort. One runner, not two.
 
         ``stdin`` feeds the provisioning pipe that both credential verbs
         support (`promptPassword` in `cmd/orchestrator/bootstrap.go` and
@@ -102,10 +108,10 @@ class Ctx:
         if not self.execute:
             self.say(f"    [dry-run] {printable}{piped}")
             self.say(f"              ({why})")
-            return ""
+            return None if proc else ""
         self.say(f"    $ {printable}{piped}")
         try:
-            proc = subprocess.run(  # noqa: S603
+            completed = subprocess.run(  # noqa: S603
                 cmd, cwd=REPO_ROOT, capture_output=True, text=True,
                 encoding="utf-8", errors="replace",
                 timeout=timeout, check=False, input=stdin,
@@ -122,12 +128,12 @@ class Ctx:
             raise ArcAbortedError(
                 f"{printable} -> {type(exc).__name__}: {exc}"
             ) from exc
-        if proc.returncode != 0:
-            detail = (proc.stderr.strip() or proc.stdout.strip())[:400]
-            self.say(f"    ! exit {proc.returncode}: {detail}")
+        if completed.returncode != 0:
+            detail = (completed.stderr.strip() or completed.stdout.strip())[:400]
+            self.say(f"    ! exit {completed.returncode}: {detail}")
             if critical:
-                raise ArcAbortedError(f"{printable} -> exit {proc.returncode}: {detail}")
-        return proc.stdout
+                raise ArcAbortedError(f"{printable} -> exit {completed.returncode}: {detail}")
+        return completed if proc else completed.stdout
 
     def pause(self, seconds: int, why: str) -> None:
         if not self.execute:

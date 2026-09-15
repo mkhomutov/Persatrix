@@ -9,7 +9,7 @@ refs:
   - docs/manual-tests/v0.3.16-execution-report.md
   - docs/manual-tests/MT-PERSONA-CONFIDENTIALITY-001.md
   - docs/manual-tests/MT-MEMORY-CROSSROOM-001.md
-  - docs/rfcs/0017-persona-memory-quality.md
+  - docs/rfcs/0017-persona-memory-injection-budget.md
   - agents/memory/episodic_queries.py
   - agents/memory/episodic_room_ranked.py
   - agents/persona_runtime/memory_context.py

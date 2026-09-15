@@ -10,13 +10,16 @@ same class of check for the v0.3.16 driver.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
 
 from scripts.manual_tests import mt_confidentiality_evidence as ev
 from scripts.manual_tests import mt_confidentiality_ops as ops
-from scripts.manual_tests.mt_persona_confidentiality_001 import LEGS, expand_legs
+from scripts.manual_tests.mt_gate import parse_legs
+from scripts.manual_tests.mt_persona_confidentiality_001 import LEGS
 
 # ── evidence: the audience egress record ────────────────────────────────────
 
@@ -228,15 +231,12 @@ def test_compose_overlay_adds_debug_and_provenance_to_ember_owl_only() -> None:
 
 # ── driver: the leg spec ────────────────────────────────────────────────────
 
-def test_expand_legs_accepts_ranges_and_rejects_the_unknown() -> None:
-    assert expand_legs("1-4", LEGS) == [1, 2, 3, 4]
-    assert expand_legs("6,5", LEGS) == [5, 6]
+def test_parse_legs_accepts_ranges_and_rejects_the_unknown() -> None:
+    assert parse_legs("1-4", LEGS) == [1, 2, 3, 4]
+    assert parse_legs("6,5", LEGS) == [5, 6]
     for bad in ("7", "", "4-2", "x"):
-        try:
-            expand_legs(bad, LEGS)
-        except ValueError:
-            continue
-        raise AssertionError(f"{bad!r} must be rejected")
+        with pytest.raises(ValueError):
+            parse_legs(bad, LEGS)
 
 
 # ── driver: the seeded triggers ─────────────────────────────────────────────
@@ -261,3 +261,74 @@ def test_seeded_triggers_reach_the_store_where_the_literal_ones_did_not() -> Non
     seed = "Alex posted a war-room note (Zephyr) closes March 3."
     assert drv.leg4_body(seed, seeded=False).startswith("Proofread")
     assert drv.leg4_body(seed, seeded=True) == seed
+
+
+# ── review fixes (PR #954): dry run stays offline; log reads are clock-free ──
+
+def test_dry_run_readers_never_touch_docker(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A dry run must not shell out: every store/log/metrics reader is
+    short-circuited on ``ctx.execute`` (the first review found five docker
+    invocations and one HTTP GET in a "no side effects" dry run)."""
+    from scripts.manual_tests import mt_persona_confidentiality_001 as drv
+
+    def boom(*_a: object, **_k: object) -> object:
+        raise AssertionError("a dry run reached a live reader")
+
+    for name in ("facts_like", "restricted_episodes", "projections", "agent_log",
+                 "scrape_metrics", "collect_cost"):
+        monkeypatch.setattr(ev, name, boom)
+    monkeypatch.setattr(ops, "chat_as", lambda ctx, *a, **k: None)
+    ctx = ops.ArcCtx(execute=False, server="http://x", jaeger="http://j",
+                     out=Path("/dev/null"), artifacts=[], password="p")
+    for leg in (drv.leg1, drv.leg2, drv.leg3, drv.leg4):
+        leg(ctx)
+    drv.audience_leg(ctx, "disabled")
+
+
+def test_new_log_lines_are_the_delta_between_two_snapshots() -> None:
+    """The turn's lines are whatever the second read holds that the first did
+    not — independent of the host/daemon clock skew a `--since` stamp has."""
+    before = "svc | {\"a\": 1}\nsvc | {\"b\": 2}\n"
+    after = before + "svc | {\"c\": 3}\nsvc | {\"b\": 2}\n"
+    assert ev.new_lines(before, after) == ['svc | {"c": 3}']
+    assert ev.new_lines("", "x\ny") == ["x", "y"]
+    assert ev.new_lines("x\ny", "x\ny") == []
+
+
+def test_parse_legs_lives_in_the_shared_gate_module() -> None:
+    """One leg-spec parser for every driver (the GROUP-TENANT one wraps it)."""
+    from scripts.manual_tests import mt_group_tenant_001 as gt
+    from scripts.manual_tests.mt_gate import parse_legs
+
+    assert parse_legs("1-3,5", {1: 0, 2: 0, 3: 0, 5: 0}) == [1, 2, 3, 5]
+    assert gt.parse_legs("0-1") == [0, 1]
+    with pytest.raises(ValueError):
+        parse_legs("9", {1: 0})
+
+
+def test_render_rows_is_shared_with_the_group_tenant_evidence() -> None:
+    from scripts.manual_tests import mt_group_tenant_evidence as gte
+
+    assert ev.render_rows is gte.render_rows
+    assert "QUERY FAILED" in gte.render_rows(("a",), gte.QueryResult(error="boom"))
+    assert gte.render_rows(("a",), gte.QueryResult()) == "_No rows._"
+    assert "| x |" in gte.render_rows(("a",), gte.QueryResult(rows=[("x",)]))
+
+
+def test_ctx_run_can_hand_back_the_process(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`send_mention` needs stderr to tell a 429 from a 403; `Ctx.run(proc=True)`
+    returns the CompletedProcess instead of a second copy of the runner."""
+    import subprocess as sp
+
+    from scripts.manual_tests import mt_group_tenant_ops as gto
+
+    def fake_run(cmd: list[str], **_k: object) -> sp.CompletedProcess[str]:
+        return sp.CompletedProcess(cmd, 1, stdout="", stderr="429 Too Many Requests")
+
+    monkeypatch.setattr(gto.subprocess, "run", fake_run)
+    ctx = ops.ArcCtx(execute=True, server="http://x", jaeger="http://j",
+                     out=Path("/dev/null"), artifacts=[], password="p")
+    proc = ctx.run(["echo"], why="test", proc=True)
+    assert proc is not None and proc.returncode == 1 and "429" in proc.stderr
+    assert ctx.run(["echo"], why="test") == ""
+    assert not hasattr(ops, "run_capture")
