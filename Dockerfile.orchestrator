@@ -10,7 +10,13 @@
 # D2; only this image build overrides it with the real bundle.)
 
 # ─── Stage 1: web console bundle (Svelte/Vite) ──────────────
-FROM node:22-alpine AS ui-builder
+# Pinned to the lowest Node that web/package.json's engines range admits, the
+# same version CI's web-console job uses. A floating `node:22-alpine` means
+# whatever copy the host has cached, and `docker compose build` does not fetch
+# a newer one, so an older cached 22.x refuses the `npm ci` below (web/.npmrc
+# sets engine-strict). tests/unit/python/test_web_node_engines_floor.py keeps
+# this tag on that version.
+FROM node:22.22.2-alpine AS ui-builder
 WORKDIR /build/web
 # Copy manifests first so the `npm ci` layer caches on the lockfile and is
 # skipped on rebuilds that only touch source.

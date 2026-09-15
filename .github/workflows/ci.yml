@@ -114,9 +114,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # The lowest Node web/package.json's engines range admits, not a floating
+      # "22": a dependency bump that raises the requirement then fails `npm ci`
+      # here (web/.npmrc sets engine-strict) instead of only on a contributor's
+      # older Node. tests/unit/python/test_web_node_engines_floor.py pins both.
       - uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version: "22.22.2"
           cache: npm
           cache-dependency-path: web/package-lock.json
 
