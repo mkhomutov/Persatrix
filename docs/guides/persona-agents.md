@@ -239,14 +239,15 @@ On each event, `_inject_memory_context` clears stale sections, queries each
 tier, truncates content to per-tier character caps, and writes the result
 into working memory at a priority that controls how it's included in the
 prompt
-([agents/persona_runtime/memory_context.py:96–200](../../agents/persona_runtime/memory_context.py#L96-L200)).
+([agents/persona_runtime/memory_assembly.py:68–69](../../agents/persona_runtime/memory_assembly.py#L68-L69) — the assembly half of the v0.3.16 D1 split; `memory_context.py` keeps the recall half).
 
 > **v0.2.2 — bounded memory injection.** A per-event `MemoryBudget` allocator
 > (default 1500 tokens; since v0.3.16 retuned with `memory_budget.tokens` in
 > `config/optimization.yaml`, read once at persona start — `0` disables
 > injection and, via the TICK skip below, silences idle ticks too; an absent
-> key means the default) caps the combined episodic +
-> relationship + notes context admitted into a single event, and `recall` /
+> key means the default) caps the combined relationship + channel-history +
+> facts + episodic + notes context (admitted in that priority order) into a
+> single event, and `recall` /
 > `recall_notes` accept
 > a `min_score` relevance threshold that drops weak matches before truncation.
 > When an autonomous TICK fires with zero admitted memory, no active goal,
@@ -485,7 +486,7 @@ two agents.
 Relationship context is only injected into working memory when trust has
 moved at least 0.01 away from neutral — if the trust is effectively 0.5,
 the LLM wouldn't learn anything from seeing it, so the section is skipped
-([agents/persona_runtime/memory_context.py:41–42](../../agents/persona_runtime/memory_context.py#L41-L42)).
+([agents/persona_runtime/relationship_section.py:79](../../agents/persona_runtime/relationship_section.py#L79)).
 
 ### Working memory
 
@@ -507,7 +508,7 @@ longer) and a rough `token_count`.
 Priorities used by the runtime for the `ContextSection` entries injected
 into working memory: relationship context = 8, episodic recall = 7, notes
 = 6
-([agents/persona_runtime/memory_context.py:185,233,274](../../agents/persona_runtime/memory_context.py#L185)).
+([agents/persona_runtime/memory_assembly.py:68–69](../../agents/persona_runtime/memory_assembly.py#L68-L69); channel history and facts sit at 7 beside episodic).
 The system prompt and persona description are assembled as a plain string
 by `_build_system_prompt()` in
 [action_loop.py:327–345](../../agents/persona_runtime/action_loop.py#L327-L345)
