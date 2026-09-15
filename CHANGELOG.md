@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.3.16] - 2026-09-15
+## [0.3.16] - 2026-09-16
 
 > **Codename:** The persona knows who is listening
 
