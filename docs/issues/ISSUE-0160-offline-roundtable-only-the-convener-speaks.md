@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0160
 summary: "make demo-autonomous convened the roundtable and only the convener spoke: the mock provider answered every participant's open-floor bid with its canned discussion paragraph, the gate found no should_post:/speak: line in it and resolved each bid to silence as parse_failure, so ember-owl and iron-fox never posted; the convener re-posted its identical opener at every stall (the advance directive still carries the topic keyword), and the chair's stall escalation matched the synthesis fixture and posted the closing synthesis early, then again at the close. CI stayed green because its offline test fed participants the opener directly, skipping the gate."
-status: in_progress
+status: resolved
 severity: medium
 area: persona
 created: 2026-09-15
+closed: 2026-09-15
+closed_pr: 959
 refs:
   - agents/llm_offline.py
   - config/offline_responses.yaml
