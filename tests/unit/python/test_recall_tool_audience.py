@@ -70,6 +70,16 @@ def test_acting_channel_scope_ignores_a_blank_id() -> None:
         assert current_acting_channel_id() is None
 
 
+def test_request_scope_binds_the_acting_channel_beside_the_other_axes() -> None:
+    """The persona runtime enters one scope per event; the channel rides it."""
+    from agents.request_scope import request_scope_from_metadata
+
+    with request_scope_from_metadata({}, channel_id="group:planning"):
+        assert current_acting_channel_id() == "group:planning"
+    with request_scope_from_metadata({}):
+        assert current_acting_channel_id() is None
+
+
 # ── the tool ────────────────────────────────────────────────────────────────
 
 async def test_tool_sends_the_acting_channel_when_live_and_bound() -> None:

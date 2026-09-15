@@ -42,7 +42,6 @@ from typing import Any, Final, Protocol, runtime_checkable
 from opentelemetry import trace
 from opentelemetry.trace import Link, Status, StatusCode
 
-from ..acting_channel import acting_channel_scope
 from ..clock import Clock, resolve_persona_clock
 from ..llm_client import LLMClient
 from ..memory.episodic import EpisodicMemory
@@ -372,10 +371,7 @@ class _LLMPersonaAgent(
                 # tenant AND epoch for the handler's lifetime (``wait_for``'s child
                 # task copies these scopes; see ``request_scope_from_metadata``).
                 try:
-                    with (
-                        request_scope_from_metadata(event.metadata),
-                        acting_channel_scope(event.channel_id),
-                    ):
+                    with request_scope_from_metadata(event.metadata, channel_id=event.channel_id):
                         actions = await asyncio.wait_for(
                             self._on_event_inner(event), timeout=timeout,
                         )
