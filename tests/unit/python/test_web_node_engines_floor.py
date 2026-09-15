@@ -7,23 +7,21 @@ jsdom 30, which needs Node `^22.22.2 || ^24.15.0 || >=26.0.0`, while
 `package.json` still said `>=20`. A contributor on Node 20, or on Node 22.16,
 was told they were supported and then `make ui` refused before building.
 
-These tests hold the declared range to the strictest one in the lockfile, and
-keep CI, `.npmrc` and the contributor docs on that same range. The small range
-reader below understands only the forms the lockfile uses and raises on
-anything else, so a new form fails loudly instead of being skipped.
+These tests keep the declared range inside every locked package's own range.
+They also keep CI, the Docker image, `.npmrc` and the contributor docs on it.
+The small range reader below understands only the forms the lockfile uses and
+raises on anything else, so a new form fails loudly instead of being skipped.
 """
 
 from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
 from typing import Any
 
 import pytest
-from _test_infra import ci_job_steps
+from _test_infra import REPO_ROOT, ci_job_steps
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
 WEB = REPO_ROOT / "web"
 
 Version = tuple[int, int, int]
@@ -207,17 +205,32 @@ def test_declared_range_is_no_looser_than_jsdom() -> None:
         assert not admits(declared, refused), f"declared range still admits Node {refused}"
 
 
-def test_declared_range_is_no_looser_than_any_locked_package() -> None:
-    declared = _declared()
+def _looser_locked_packages(
+    declared: str, packages: dict[str, dict[str, Any]]
+) -> tuple[int, list[str]]:
+    """Count the locked packages that state ``engines.node``, and list the ones
+    that refuse a Node ``declared`` admits. A range the reader cannot read
+    raises, naming the package that brought it."""
     checked = 0
     looser: list[str] = []
-    for path, meta in _locked_packages().items():
+    for path, meta in packages.items():
         node = (meta.get("engines") or {}).get("node")
         if path == "" or node is None:
             continue  # "" is web/package.json itself, mirrored into the lock
         checked += 1
+        name = f"{path.split('node_modules/')[-1]}@{meta.get('version')}"
+        try:
+            parse_node_range(node)
+        except ValueError as err:
+            raise ValueError(f"{name}: {err}") from err
         if not no_looser_than(declared, node):
-            looser.append(f"{path.split('node_modules/')[-1]}@{meta.get('version')}: {node}")
+            looser.append(f"{name}: {node}")
+    return checked, looser
+
+
+def test_declared_range_is_no_looser_than_any_locked_package() -> None:
+    declared = _declared()
+    checked, looser = _looser_locked_packages(declared, _locked_packages())
     assert checked > 20, f"only {checked} locked packages declare engines.node — lockfile misread?"
     assert not looser, (
         f"web/package.json engines.node {declared!r} admits Node versions these "
@@ -232,10 +245,34 @@ def test_lockfile_root_mirrors_package_json_engines() -> None:
     )
 
 
-@pytest.mark.parametrize("relpath", ["web/.npmrc", "CONTRIBUTING.md"])
+def test_an_unreadable_locked_range_names_its_package() -> None:
+    """A dependency bump can bring a range form the reader does not know.
+
+    The failure then says which package brought it, so nobody has to search
+    the lockfile for the range text.
+    """
+    packages = {"node_modules/old-pkg": {"version": "1.0.0", "engines": {"node": "0.10.x"}}}
+    with pytest.raises(ValueError, match=r"old-pkg@1\.0\.0: unreadable"):
+        _looser_locked_packages(JSDOM_30, packages)
+
+
+@pytest.mark.parametrize(
+    "relpath",
+    [
+        "web/.npmrc",
+        "CONTRIBUTING.md",
+        "docs/manual-tests/MT-CONSOLE-001.md",
+        "docs/manual-tests/MT-CONSOLE-002.md",
+    ],
+)
 def test_contributor_facing_text_states_the_declared_range(relpath: str) -> None:
     text = (REPO_ROOT / relpath).read_text(encoding="utf-8")
     assert _declared() in text, f"{relpath} does not state the Node range {_declared()!r}"
+
+
+def _floor() -> str:
+    """The lowest Node version the declared range admits, as ``X.Y.Z``."""
+    return ".".join(map(str, min(low for low, _ in parse_node_range(_declared()))))
 
 
 def test_ci_web_console_job_installs_on_the_declared_floor() -> None:
@@ -244,8 +281,27 @@ def test_ci_web_console_job_installs_on_the_declared_floor() -> None:
     A dependency bump that raises the requirement past it then fails `npm ci`
     in that job too, not only on a contributor's machine.
     """
-    floor = min(low for low, _ in parse_node_range(_declared()))
     steps = ci_job_steps("web-console")
     setup = [s for s in steps if str(s.get("uses", "")).startswith("actions/setup-node@")]
     assert len(setup) == 1, "the web-console job must set up Node exactly once"
-    assert str(setup[0]["with"]["node-version"]) == ".".join(map(str, floor))
+    assert str(setup[0]["with"]["node-version"]) == _floor()
+
+
+_UI_BUILDER = re.compile(r"^FROM\s+node:(\S+?)-alpine\s+AS\s+ui-builder\s*$", re.M)
+
+
+def test_docker_ui_builder_installs_on_the_declared_floor() -> None:
+    """The image's own `npm ci` runs on the same Node as CI.
+
+    A floating `node:22-alpine` means whatever copy the host has cached, and
+    `docker compose build` does not fetch a newer one. A copy older than the
+    floor refuses the install, and the Docker path is the one the web console
+    guide says needs no Node on the host.
+    """
+    text = (REPO_ROOT / "Dockerfile.orchestrator").read_text(encoding="utf-8")
+    m = _UI_BUILDER.search(text)
+    assert m, "Dockerfile.orchestrator has no `FROM node:<version>-alpine AS ui-builder` stage"
+    assert m.group(1) == _floor(), (
+        f"the ui-builder stage builds on node:{m.group(1)}-alpine, not the declared "
+        f"floor node:{_floor()}-alpine"
+    )

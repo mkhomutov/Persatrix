@@ -93,7 +93,9 @@ make run-ui
 ```
 
 `make run-ui` builds the UI bundle (`make ui`) and the orchestrator, then runs
-it with `--enable-ui`. To wire the flag onto your own invocation instead:
+it with `--enable-ui`. Building the bundle needs a Node version from
+[CONTRIBUTING](../../CONTRIBUTING.md#prerequisites). To wire the flag onto your
+own invocation instead:
 
 ```bash
 make ui                                   # build web/ → internal/ui/assets/
