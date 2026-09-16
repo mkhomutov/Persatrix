@@ -79,10 +79,69 @@ def test_the_template_copied_without_filling_it_in_fails_on_every_field() -> Non
     ]
 
 
-@pytest.mark.parametrize("value", ["<fill in>", "…", "...", "  "])
+@pytest.mark.parametrize(
+    "value",
+    ["<fill in>", "…", "...", "  ", "TBD", "TODO: after the demo", "?", "-", "—", "**"],
+)
 def test_a_placeholder_counts_as_blank(value: str) -> None:
     rows = {**FILLED, "Demos shown, to whom, when": value}
     assert _problems(_amendment(_evidence(rows))) == ["'Demos shown, to whom, when' is blank"]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "<https://github.com/mkhomutov/Persatrix/issues/970>",
+        '<a href="https://github.com/mkhomutov/Persatrix/issues/970">#970</a>',
+        "[#970](https://github.com/mkhomutov/Persatrix/issues/970)",
+    ],
+)
+def test_a_link_is_evidence_not_a_placeholder(value: str) -> None:
+    """The first outside issue is the entry rule 6 exists for; it must not read as blank."""
+    rows = {**FILLED, "Issues or pull requests from anyone else": value}
+    assert _problems(_amendment(_evidence(rows))) == []
+
+
+def test_a_row_without_a_closing_pipe_still_counts() -> None:
+    """GitHub renders a row with no trailing ``|``; the row after it is not a header."""
+    table = _table(FILLED).replace("| none known |", "| none known")
+    section = f"### External evidence since the last amendment\n\n{table}"
+    assert _problems(_amendment(section)) == []
+
+
+def test_pipe_lines_with_no_divider_under_the_header_are_not_a_table() -> None:
+    """GitHub shows them as a paragraph, so they record nothing."""
+    table = _table(FILLED).replace("|-------|------------------|\n", "")
+    section = f"### External evidence since the last amendment\n\n{table}"
+    assert _problems(_amendment(section)) == [f"no row for {field!r}" for field in REQUIRED_FIELDS]
+
+
+def test_a_field_given_twice_fails() -> None:
+    """Which of two rows counts would depend on their order, so neither is picked."""
+    section = _evidence(FILLED) + "| Demos shown, to whom, when | |\n"
+    assert _problems(_amendment(section)) == ["'Demos shown, to whom, when' has 2 rows; keep one"]
+
+
+@pytest.mark.parametrize(("opening", "closing"), [("```markdown\n", "```\n"), ("<!--\n", "-->\n")])
+def test_a_table_that_does_not_render_does_not_fill_the_section(opening: str, closing: str) -> None:
+    section = (
+        "### External evidence since the last amendment\n\nThe format is:\n\n"
+        f"{opening}{_table(FILLED)}{closing}"
+    )
+    assert _problems(_amendment(section)) == [f"no row for {field!r}" for field in REQUIRED_FIELDS]
+
+
+@pytest.mark.parametrize(
+    "heading",
+    [
+        "## External evidence since the last amendment",
+        "### **External evidence since the last amendment**",
+    ],
+)
+def test_the_section_heading_may_keep_the_templates_level_or_be_bold(heading: str) -> None:
+    """The template's heading is ``##``; pasted as it is, it still belongs to the amendment."""
+    section = f"{heading}\n\n{_table(FILLED)}"
+    assert _problems(_amendment(section)) == []
 
 
 def test_a_missing_field_row_fails() -> None:
@@ -117,6 +176,23 @@ def test_a_hash_line_inside_a_code_fence_is_not_a_heading() -> None:
     assert _problems(text) == []
 
 
+def test_a_fence_closes_only_on_its_own_marker_at_least_as_long() -> None:
+    """A ```` block that shows a ``` line, or a ~~~ block that holds one, stays one block."""
+    fences = (
+        "````markdown\n```bash\n# regenerate\n````\n\n"
+        "~~~\n```\n## Amendment 2099-01-01 — not real\n~~~\n\n"
+    )
+    text = (
+        _amendment(fences + _evidence(FILLED), "2026-09-12")
+        + "\n---\n\n"
+        + _amendment("", "2026-11-30")
+    )
+    assert [(a.date.isoformat(), evidence_problems(a)) for a in amendments(text)] == [
+        ("2026-09-12", []),
+        ("2026-11-30", ["no External evidence since the last amendment section"]),
+    ]
+
+
 def test_amendments_are_split_at_each_level_two_heading() -> None:
     text = (
         "# Sequencing\n\n## Original decision\n\n"
@@ -135,16 +211,15 @@ def test_amendments_are_split_at_each_level_two_heading() -> None:
 
 
 def test_evidence_rows_reads_the_section_of_any_document() -> None:
-    assert evidence_rows("# Doc\n\n" + _evidence(FILLED).replace("###", "##")) == {
-        k.lower(): v for k, v in FILLED.items()
-    }
-    assert evidence_rows("# Doc\n\nNo section.\n") is None
+    doc = "# Doc\n\n" + _evidence(FILLED).replace("###", "##")
+    assert evidence_rows(doc.splitlines()) == {k.lower(): [v] for k, v in FILLED.items()}
+    assert evidence_rows("# Doc\n\nNo section.\n".splitlines()) is None
 
 
 def test_the_required_fields_are_the_amendment_templates_rows() -> None:
     """The template is what an author copies; the check must ask for the same rows."""
     template = REPO_ROOT / "docs" / "templates" / "PLAN_AMENDMENT_TEMPLATE.md"
-    rows = evidence_rows(template.read_text(encoding="utf-8"))
+    rows = evidence_rows(template.read_text(encoding="utf-8").splitlines())
     assert rows is not None
     assert list(rows) == [field.lower() for field in REQUIRED_FIELDS]
 
@@ -204,3 +279,91 @@ def test_reading_no_amendment_under_the_rule_fails_instead_of_passing_empty(
     )
     assert amendment_evidence.main([]) == 1
     assert "no amendment dated 2026-09-12 or later" in capsys.readouterr().out
+
+
+def _with_first_amendment(docs: Path) -> None:
+    """The filled 2026-09-12 amendment every checkout carries from now on."""
+    (docs / "v0.3.x-sequencing.md").write_text(
+        "# Seq\n\n" + _amendment(_evidence(FILLED), "2026-09-12"), encoding="utf-8"
+    )
+
+
+@pytest.mark.parametrize(
+    "heading",
+    [
+        "## Amendment — 2026-11-30 — open the next thing",
+        "## AMENDMENT 2026-11-30 — open the next thing",
+        "### Amendment 2026-11-30 — open the next thing",
+        "## 2026-11-30 amendment — open the next thing",
+    ],
+)
+def test_an_amendment_heading_in_another_form_fails_instead_of_being_skipped(
+    docs: Path, capsys: pytest.CaptureFixture[str], heading: str
+) -> None:
+    """The 2026-09-12 amendment always counts, so a skipped new one would pass unseen."""
+    _with_first_amendment(docs)
+    (docs / "v0.4.x-sequencing.md").write_text(f"# Seq\n\n{heading}\n\nIntro.\n", encoding="utf-8")
+    assert amendment_evidence.main([]) == 1
+    out = capsys.readouterr().out
+    assert f"v0.4.x-sequencing.md:3: {heading.lstrip('#').strip()} — " in out
+    assert "not in the `## Amendment YYYY-MM-DD — <title>` form" in out
+
+
+def test_an_older_heading_in_another_form_is_left_alone(docs: Path) -> None:
+    _with_first_amendment(docs)
+    (docs / "v0.2.x-sequencing.md").write_text(
+        "# Seq\n\n### Amendment 2026-05-01 — old\n\nKept verbatim.\n", encoding="utf-8"
+    )
+    assert amendment_evidence.main([]) == 0
+
+
+def test_an_impossible_date_is_reported_not_raised(
+    docs: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _with_first_amendment(docs)
+    (docs / "v0.4.x-sequencing.md").write_text(
+        "# Seq\n\n" + _amendment(_evidence(FILLED), "2026-11-31"), encoding="utf-8"
+    )
+    assert amendment_evidence.main([]) == 1
+    out = capsys.readouterr().out
+    assert "v0.4.x-sequencing.md:3: Amendment 2026-11-31 — open the next thing —" in out
+    assert "2026-11-31 is not a date" in out
+
+
+def test_a_sequencing_doc_in_a_subdirectory_is_read(
+    docs: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _with_first_amendment(docs)
+    (docs / "sequencing").mkdir()
+    (docs / "sequencing" / "v0.4.x.md").write_text(
+        "# Seq\n\n" + _amendment("", "2026-12-01"), encoding="utf-8"
+    )
+    assert amendment_evidence.main([]) == 1
+    assert "sequencing/v0.4.x.md:3: Amendment 2026-12-01 —" in capsys.readouterr().out
+
+
+def test_a_local_only_review_report_is_not_read(docs: Path) -> None:
+    """docs/pr-reviews/ is gitignored; a quoted amendment there is not the record."""
+    _with_first_amendment(docs)
+    (docs / "pr-reviews").mkdir()
+    (docs / "pr-reviews" / "pr-999-sequencing.md").write_text(
+        "# Review\n\n" + _amendment("", "2026-12-01"), encoding="utf-8"
+    )
+    assert amendment_evidence.main([]) == 0
+
+
+def test_a_fence_that_never_closes_fails_instead_of_hiding_what_follows(
+    docs: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Every line after an unclosed fence is code, so a new amendment there would go unread."""
+    (docs / "v0.3.x-sequencing.md").write_text(
+        "# Seq\n\n"
+        + _amendment(_evidence(FILLED) + "\n````markdown\n```bash\n```\n", "2026-09-12")
+        + _amendment("", "2026-11-30"),
+        encoding="utf-8",
+    )
+    assert amendment_evidence.main([]) == 1
+    assert (
+        "v0.3.x-sequencing.md:19: a code fence or HTML comment opened here never closes"
+        in capsys.readouterr().out
+    )

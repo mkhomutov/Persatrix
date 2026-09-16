@@ -1,6 +1,6 @@
 # Decisions — how scope is frozen, changed, and shrunk
 
-> **Last updated**: 2026-09-06
+> **Last updated**: 2026-09-16
 > Companion to [release-cycle.md](release-cycle.md). Terms are defined in the
 > [process glossary](process-glossary.md).
 

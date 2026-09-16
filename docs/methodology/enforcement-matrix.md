@@ -1,6 +1,6 @@
 # Enforcement Matrix
 
-> **Last updated**: 2026-09-15
+> **Last updated**: 2026-09-16
 > Every rule the project states, with the document that states it, the check
 > that enforces it, and how hard the enforcement is. Read the **Enforcement**
 > column literally: a rule is only as strong as the weakest place it is

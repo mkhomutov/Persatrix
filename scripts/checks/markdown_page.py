@@ -1,7 +1,8 @@
 """What a Markdown page shows once rendered: its lines, headings and table cells.
 
 Shared by the doc checks that read Markdown structure: doc links (heading
-anchors), plan status and ROADMAP status (table rows). Each used to parse
+anchors), plan status and ROADMAP status (table rows), and amendment evidence
+(headings and table rows). Each used to parse
 Markdown its own way, and they disagreed with the page GitHub renders and with
 each other: one closed a code fence on any line starting with three
 backticks, so a ```` block that shows a ``` line hid the headings after it.

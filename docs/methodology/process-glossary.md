@@ -1,6 +1,6 @@
 # Process Glossary
 
-> **Last updated**: 2026-09-12
+> **Last updated**: 2026-09-16
 > Terms used to run the project. Product and architecture terms live in the
 > [AI glossary](../ai-glossary.md); this file covers the process vocabulary
 > that appears in plans, PR bodies, and reports. Same authoring rules: use the
