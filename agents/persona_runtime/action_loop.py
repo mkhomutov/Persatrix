@@ -26,7 +26,8 @@ from ..persona_types import (
 )
 from ..response_gate import evaluate_response_gate
 from ..security import maybe_wrap_tool_content
-from ..tools.registry import ToolDefinition, get_tool, list_tools
+from ..tools.registry import ToolDefinition
+from ..tools.tool_list import offered_tools, refuse_call
 from .action_parser import parse_actions
 from .channel_ingest import sanitize_inbound_event
 from .channel_reply import synthesize_channel_reply
@@ -116,17 +117,16 @@ class _ActionLoopMixin:
         over registry tools with the same name (F-5a-2: defense-in-depth,
         memory tools should shadow any same-named registry tools).
         """
-        # Start with agent-configured tools from the global registry
-        allowed = set(self.config.get("tools", []))
+        # Start with agent-configured tools from the global registry, by the
+        # rule task agents share (ISSUE-0151: agents.tools.tool_list).
         defs_by_name: dict[str, dict[str, Any]] = {}
 
-        for td in list_tools():
-            if td.name in allowed:
-                defs_by_name[td.name] = {
-                    "name": td.name,
-                    "description": td.description,
-                    "parameters": td.parameters,
-                }
+        for td in offered_tools(self.agent_id, self.config):
+            defs_by_name[td.name] = {
+                "name": td.name,
+                "description": td.description,
+                "parameters": td.parameters,
+            }
 
         # Memory tools override registry tools with the same name,
         # consistent with _execute_tools() which checks memory tools first.
@@ -146,22 +146,16 @@ class _ActionLoopMixin:
         (F-5a-2: defense-in-depth against LLM hallucinating tool names
         that exist in the global registry but weren't offered to this agent).
         """
-        memory_tool_map = {td.name: td for td in self._memory_tools}
-        allowed_tools = set(self.config.get("tools", []))
+        # Offered registry tools, then memory tools (always allowed) shadowing
+        # any of the same name, exactly as _build_tool_definitions() offers them.
+        tool_map = {td.name: td for td in offered_tools(self.agent_id, self.config)}
+        tool_map.update({td.name: td for td in self._memory_tools})
         results: list[LLMToolResult] = []
 
         for call in tool_calls:
-            # Check memory tools first (always allowed)
-            tool_def = memory_tool_map.get(call.name)
-            if tool_def is None and call.name in allowed_tools:
-                tool_def = get_tool(call.name)
-
+            tool_def = tool_map.get(call.name)
             if tool_def is None or tool_def.func is None:
-                results.append(LLMToolResult(
-                    tool_call_id=call.id,
-                    content=f"Unknown tool: {call.name}",
-                    is_error=True,
-                ))
+                results.append(refuse_call(self.agent_id, call))
                 continue
 
             try:

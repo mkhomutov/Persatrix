@@ -266,6 +266,56 @@ class TestBuildToolDefinitionsWithRegistry:
         assert "Unknown tool" in results[0].content
         await agent.close_memory()
 
+    @pytest.mark.parametrize(
+        "tools", [None, [{"name": "code_search"}]], ids=["no-value", "mapping-entry"],
+    )
+    async def test_malformed_tools_list_names_nothing(self, tools):
+        """A ``tools:`` key with no value, or a mapping entry, names no registry
+        tool instead of raising TypeError on every turn: personas share the
+        task agent's list rule (ISSUE-0151). Memory tools are unaffected."""
+        from agents.tools.builtin import ToolResult
+        from agents.tools.registry import tool
+
+        @tool(name="code_search", description="Search codebase")
+        async def code_search() -> ToolResult:
+            return ToolResult(success=True, data="results")
+
+        cfg = {**_PERSONA_CONFIG, "tools": tools}
+        agent = create_persona_agent(
+            agent_id="ember-owl", config=cfg, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        names = {d["name"] for d in agent._build_tool_definitions()}
+        results = await agent._execute_tools([
+            ToolCall(id="tc1", name="code_search", input={}),
+        ])
+
+        assert "store_note" in names
+        assert "code_search" not in names
+        assert results[0].content == "Unknown tool: code_search"
+        await agent.close_memory()
+
+    async def test_refused_call_is_logged(self, caplog):
+        """The persona logs a refused call the same way a task agent does."""
+        import logging
+
+        agent = create_persona_agent(
+            agent_id="ember-owl", config=_PERSONA_CONFIG, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        with caplog.at_level(logging.WARNING):
+            await agent._execute_tools([
+                ToolCall(id="tc1", name="secret_admin_tool", input={}),
+            ])
+
+        assert any(
+            "'ember-owl'" in r.getMessage() and "'secret_admin_tool'" in r.getMessage()
+            for r in caplog.records if r.levelno == logging.WARNING
+        )
+        await agent.close_memory()
+
 
 # ─── Review finding: handle() without COMPLETE_TASK ──────────
 

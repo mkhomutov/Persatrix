@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0151
 summary: "A task agent runs any registered tool the model names, even one missing from its `tools` list: `_execute_tools` in `agents/base.py` never checks the list, while personas refuse such calls — so a valid config whose permissions cover an unlisted tool lets the model use it today, and once ISSUE-0150 lands the shipped planner, code-writer and code-reviewer can each make `http_request` calls they were never offered; proposes that a task agent answer such a call with the persona's `Unknown tool` error, from one rule in `agents/tools/` shared with the offer"
-status: open
+status: resolved
 severity: medium
 area: agents/tools
 created: 2026-09-11
+closed: 2026-09-16
+closed_pr: 913
 refs:
   - agents/base.py
   - agents/persona_runtime/action_loop.py
@@ -207,3 +209,18 @@ blocks.
 > The probe in Context was run for this issue. ISSUE-0150 is drafted but not yet
 > on `main`; link it here once it lands. Proposed slot v0.4.0; not v0.3.16
 > scope.
+>
+> 2026-09-16 — **resolved by [#913](https://github.com/mkhomutov/Persatrix/pull/913)**,
+> rebased onto `main` after the v0.3.16 tag, which is the hold the slot above
+> set. A task agent is now offered and runs only the registered tools its
+> `tools` list names, both decided by `agents/tools/tool_list.py`; any other
+> call gets the persona's `Unknown tool` error. #913's review brought in two
+> items listed above as out of scope. Personas now call the same module: their
+> own copy raised `TypeError` on every turn for a `tools:` key with no value
+> or a mapping entry. And both agent kinds log a refused call as a WARNING,
+> because a refused tool never runs and so records no tool span or metric,
+> while before this fix a task agent's unlisted call did. It lands before any train
+> opens: the [Amendment 2026-09-12](../v0.3.x-sequencing.md#amendment-2026-09-12--close-v0316-small-then-measure-before-any-train-opens)
+> holds the v0.4.0 plan until EXP-001 reports, and this fix needs no plan.
+> ISSUE-0150 is still not on `main`, so the two are still not linked, and its
+> fix must still merge after this one.
