@@ -24,7 +24,9 @@ Usage::
 
     python scripts/checks/plan_status.py [--verbose]
 
-Exit code: 0 clean, 1 if any stale row.
+Exit code: 0 clean, 1 if any stale row, or if a plan opens a code fence or
+HTML comment that never closes — every row after it is off the page, so
+none of them would be judged.
 """
 
 from __future__ import annotations
@@ -42,7 +44,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts._git import git_output  # noqa: E402
-from scripts.checks import ensure_utf8_stdout, markdown  # noqa: E402
+from scripts.checks import ensure_utf8_stdout, markdown_page  # noqa: E402
 from scripts.checks.released import is_released_version_doc, released_versions  # noqa: E402
 
 _PR_LINK_RE = re.compile(r"\[#(\d+)\]\(")
@@ -113,8 +115,8 @@ def find_stale_rows(
     """
     stale: list[StaleRow] = []
     # Split on "\n" alone, as git does, so line n here is line n to git blame.
-    for lineno, line in enumerate(markdown.rendered(text.split("\n")), start=1):
-        cells = markdown.cells(line)
+    for lineno, line in enumerate(markdown_page.rendered(text.split("\n")), start=1):
+        cells = markdown_page.cells(line)
         if not cells:
             continue
         status = next((c for c in cells if c.startswith(_STALE_LEADERS)), None)
@@ -158,15 +160,24 @@ def check_plan_status(repo_root: Path, verbose: bool = False) -> int:
         return 0
     stale: list[StaleRow] = []
     docs = target_docs(repo_root)
+    hidden: list[str] = []
     for p in docs:
         rel = p.relative_to(repo_root).as_posix()
         # Not read_text(): it turns a lone "\r" into a line end git blame does not count.
         text = p.read_bytes().decode("utf-8", errors="replace")
+        opened = markdown_page.unclosed(text.split("\n"))
+        if opened is not None:
+            hidden.append(f"{rel}:{opened + 1}")
         written_by = partial(pr_that_wrote, repo_root, rel)
         stale += [s._replace(file=rel) for s in find_stale_rows(text, merged, written_by)]
         if verbose:
             print(f"  scanned {rel}")
     print(f"[SCAN] Checked progress tables in {len(docs)} plan(s) against {len(merged)} merged PRs")
+    if hidden:
+        print(f"\n[FAIL] {len(hidden)} plan(s) hide every row after a code fence or HTML comment"
+              " that never closes:")
+        for where in hidden:
+            print(f"  {where}: opened here — close it")
     if stale:
         print(f"\n[FAIL] {len(stale)} stale row(s) — the PR merged but the row still says open:")
         for s in stale:
@@ -176,6 +187,7 @@ def check_plan_status(repo_root: Path, verbose: bool = False) -> int:
                       " merged — flip the row and link its PR")
             else:
                 print(f"  {s.file}:{s.line}: {s.cell!r} links {prs}, all merged — flip the row")
+    if stale or hidden:
         return 1
     print("[OK] No plan row announces an open PR that has already merged.")
     return 0

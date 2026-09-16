@@ -33,7 +33,8 @@ Usage::
     python scripts/checks/roadmap_status.py
 
 Exit code: 0 clean; 1 if a row is behind its RFC, or if ROADMAP.md has no
-Component Status table — a renamed heading must not leave a check that reads
+Component Status table, or opens a code fence or HTML comment that never
+closes — a renamed heading or a stray fence must not leave a check that reads
 nothing and passes.
 """
 
@@ -51,7 +52,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts import rfcs  # noqa: E402
-from scripts.checks import ensure_utf8_stdout, markdown  # noqa: E402
+from scripts.checks import ensure_utf8_stdout, markdown_page  # noqa: E402
 
 ROADMAP_FILE = REPO_ROOT / "ROADMAP.md"
 
@@ -93,15 +94,15 @@ def component_status_rows(text: str) -> list[StatusRow]:
     rows: list[StatusRow] = []
     in_section = False
     status_col: int | None = None  # None until the current table's header is read
-    for lineno, line in enumerate(markdown.rendered(text.splitlines()), start=1):
-        heading = markdown.heading(line)
+    for lineno, line in enumerate(markdown_page.rendered(text.splitlines()), start=1):
+        heading = markdown_page.heading(line)
         if heading:
             level, title = heading
             if level <= 3:
                 in_section = title.startswith("Component Status")
             status_col = None
             continue
-        cells = markdown.cells(line)
+        cells = markdown_page.cells(line)
         if not cells:
             status_col = None  # a table ends at the first line that is not a row
             continue
@@ -110,7 +111,7 @@ def component_status_rows(text: str) -> list[StatusRow]:
         if status_col is None:
             status_col = cells.index("Status") if "Status" in cells else -1
             continue
-        if not 0 <= status_col < len(cells) or not cells[status_col].strip("-: "):
+        if not 0 <= status_col < len(cells) or markdown_page.is_divider(cells):
             continue  # no Status column, a short row, or the |---| divider
         rows.append(StatusRow(lineno, cells[0], cells[status_col]))
     return rows
@@ -156,7 +157,15 @@ def main(argv: list[str] | None = None) -> int:
         description="Flag a ROADMAP Component Status row that is behind the RFC it names.",
     ).parse_args(argv)
     name = ROADMAP_FILE.name
-    rows = component_status_rows(ROADMAP_FILE.read_text(encoding="utf-8"))
+    text = ROADMAP_FILE.read_text(encoding="utf-8")
+    opened = markdown_page.unclosed(text.splitlines())
+    if opened is not None:
+        print(
+            f"[FAIL] {name}:{opened + 1}: a code fence or HTML comment opened here never closes,"
+            " so no row after it is checked — close it."
+        )
+        return 1
+    rows = component_status_rows(text)
     if not rows:
         print(
             f"[FAIL] {name} has no Component Status table, so this check read nothing —"

@@ -201,6 +201,17 @@ def test_a_prs_own_unlinked_row_passes_while_open_and_fails_once_squash_merged(
     assert f"{REL}:4" in out and "#2" in out
 
 
+def test_a_plan_that_leaves_an_html_comment_open_fails(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Every row after an unclosed ``<!--`` or ``` is hidden, so none of them would be judged."""
+    _plan_repo(tmp_path, "<!-- draft\n" + PLAN + OWN_ROW, "docs(rfc0099): closeout (#2)")
+    capsys.readouterr()
+
+    assert check_plan_status(tmp_path) == 1
+    assert f"{REL}:1:" in capsys.readouterr().out
+
+
 def test_the_blamed_line_is_the_row_past_characters_python_would_split_on(tmp_path: Path) -> None:
     """git ends a line only at "\\n"; U+2028 and a lone "\\r" are ordinary text to it."""
     odd = PLAN.replace("| leaf |", "| leaf\u2028and\rmore |")

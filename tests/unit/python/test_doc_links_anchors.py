@@ -189,6 +189,54 @@ def test_a_link_to_the_heading_after_a_four_backtick_block_resolves(tmp_path: Pa
     assert check_doc_links(tmp_path) == []
 
 
+@pytest.mark.parametrize(
+    "hidden",
+    [
+        pytest.param("<!--\n## Draft\nSee [draft](#draft).\n-->\n", id="html-comment"),
+        pytest.param(
+            "````md\n```\n## Example\nSee [example](#example).\n```\n````\n",
+            id="four-backtick-example",
+        ),
+        pytest.param("~~~md\nSee [a page](missing.md).\n~~~\n", id="tilde-fence"),
+    ],
+)
+def test_a_link_the_page_does_not_show_is_not_checked(tmp_path: Path, hidden: str) -> None:
+    """A link in a code fence or an HTML comment is hidden, like a heading there."""
+    _init_git_repo(tmp_path)
+    (tmp_path / "doc.md").write_text(f"# Doc\n\n{hidden}", encoding="utf-8")
+    _git_add_commit(tmp_path, ".", "seed")
+
+    assert check_doc_links(tmp_path) == []
+
+
+def test_a_link_after_a_hidden_block_is_still_checked(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path)
+    (tmp_path / "doc.md").write_text(
+        "# Doc\n\n<!-- a note -->\n~~~\ncode\n~~~\n\nSee [gone](#nowhere).\n", encoding="utf-8",
+    )
+    _git_add_commit(tmp_path, ".", "seed")
+
+    assert [f.link for f in check_doc_links(tmp_path)] == ["#nowhere"]
+
+
+def test_inline_code_spans_one_paragraph_or_table_row_at_most(tmp_path: Path) -> None:
+    """An odd backtick (a quoted fence, a lone ``` in a cell) cannot hide the links after its block.
+
+    A code span wrapped over two lines of one paragraph still closes where it
+    does on the page, so the link after it is read.
+    """
+    _init_git_repo(tmp_path)
+    (tmp_path / "doc.md").write_text(
+        "# Doc\n\n> ```bash\n> make\n> ```\n\nSee [gone](#nowhere).\n\n`code` here.\n\n"
+        "| a | b |\n|---|---|\n| lone ``` here | x |\n| [gone](#elsewhere) | `code` |\n\n"
+        "The CLI prints `budget …\nnot enforced` ([`cli`](#wrapped)).\n",
+        encoding="utf-8",
+    )
+    _git_add_commit(tmp_path, ".", "seed")
+
+    assert [f.link for f in check_doc_links(tmp_path)] == ["#nowhere", "#elsewhere", "#wrapped"]
+
+
 def test_explicit_html_anchor_resolves(tmp_path: Path) -> None:
     _init_git_repo(tmp_path)
     (tmp_path / "doc.md").write_text(

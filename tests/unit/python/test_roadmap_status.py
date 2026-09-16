@@ -147,7 +147,10 @@ def test_a_row_without_its_closing_pipe_is_read() -> None:
 def test_a_code_fence_neither_ends_the_section_nor_adds_rows() -> None:
     """A fenced example's ``##`` line is not a heading, and its ``|`` lines are not rows."""
     row = "| `pkg0/` | Does a thing | 🚧 In progress (RFC 0009) |"
-    fence = "```md\n## Another section\n| `x/` | Example | 🚧 In progress (RFC 0009) |\n```\n\n"
+    fence = (
+        "```md\n## Another section\n| Package | Purpose | Status |\n|---|---|---|\n"
+        "| `x/` | Example | 🚧 In progress (RFC 0009) |\n```\n\n"
+    )
     text = _roadmap("🚧 In progress (RFC 0009)").replace("#### Go", fence + "#### Go")
     behind = find_behind_rows(component_status_rows(text), STATUSES)
     assert [b.line for b in behind] == [text.splitlines().index(row) + 1]
@@ -244,3 +247,13 @@ def test_a_roadmap_with_no_component_status_table_fails_instead_of_passing_empty
     (repo / "ROADMAP.md").write_text("# Roadmap\n\n## Version Map\n", encoding="utf-8")
     assert roadmap_status.main([]) == 1
     assert "no Component Status table" in capsys.readouterr().out
+
+
+def test_a_roadmap_that_leaves_a_code_fence_open_fails(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Every row after an unclosed fence is hidden, so the rows before it must not pass alone."""
+    cell = "⚠️ Partially Implemented (RFC 0009 Phases 1–2)"
+    (repo / "ROADMAP.md").write_text(_roadmap(cell) + "\n```\n", encoding="utf-8")
+    assert roadmap_status.main([]) == 1
+    assert f"ROADMAP.md:{FIRST_ROW + 2}:" in capsys.readouterr().out

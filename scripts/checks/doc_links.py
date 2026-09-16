@@ -21,6 +21,7 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from typing import NamedTuple
 
@@ -30,14 +31,13 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.checks import ensure_utf8_stdout, markdown  # noqa: E402
+from scripts.checks import ensure_utf8_stdout, markdown_page  # noqa: E402
 
 # Markdown link pattern: [text](path) or [text](path#anchor)
 _LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)#]*)(#[^)]+)?\)")
 
-# Patterns to strip before scanning for links (code blocks and inline code
-# can contain bracket/paren sequences that look like markdown links).
-_CODE_BLOCK_RE = re.compile(r"```.*?```", re.DOTALL)
+# Inline code to strip before scanning for links: it can contain bracket/paren
+# sequences that look like markdown links.
 _INLINE_CODE_RE = re.compile(r"``[^`]+``|`[^`]+`")
 
 # --- anchor (#fragment) validation -----------------------------------------
@@ -89,7 +89,7 @@ def _extract_anchors(content: str) -> set[str]:
     """Return every anchor a markdown document exposes to GitHub.
 
     That is the slug of each heading the page shows (not one inside a code
-    fence or an HTML comment, read by :mod:`scripts.checks.markdown`), with
+    fence or an HTML comment, read by :mod:`scripts.checks.markdown_page`), with
     ``github-slugger``'s duplicate ``-1``/``-2`` disambiguation, plus any
     explicit ``<a id=…>`` / ``<a name=…>`` HTML anchors.
     """
@@ -108,7 +108,7 @@ def _extract_anchors(content: str) -> set[str]:
         occurrences[slug] = 0
         anchors.add(slug)
 
-    for _, _, text in markdown.headings(content.splitlines()):
+    for _, _, text in markdown_page.headings(content.splitlines()):
         _add_heading(text)
 
     for match in _HTML_ANCHOR_RE.finditer(content):
@@ -137,6 +137,28 @@ def _strip_inline_code_outside_links(text: str) -> str:
         last = cm.end()
     result.append(text[last:])
     return "".join(result)
+
+
+def _code_span_blocks(lines: list[str]) -> Iterator[str]:
+    """*lines* joined into the stretches an inline code span can cross.
+
+    A span may wrap across a paragraph's lines, but never past a blank line,
+    a table row or a heading. Stripping code one stretch at a time keeps an
+    odd backtick (a quoted fence, a lone ``` in a table cell) from pairing
+    with one further down the page and hiding the links between them.
+    """
+    paragraph: list[str] = []
+    for line in lines:
+        own_block = markdown_page.cells(line) is not None or markdown_page.heading(line) is not None
+        if line.strip() and not own_block:
+            paragraph.append(line)
+            continue
+        if paragraph:
+            yield "\n".join(paragraph)
+            paragraph = []
+        yield line
+    if paragraph:
+        yield "\n".join(paragraph)
 
 
 class BrokenLink(NamedTuple):
@@ -320,11 +342,13 @@ def check_doc_links(repo_root: Path, verbose: bool = False) -> list[BrokenLink]:
         if not content.strip():
             continue
 
-        # Strip code blocks and inline code to avoid false positives
-        # from regex patterns like [a-z0-9] being parsed as links.
-        # Only strip backtick content OUTSIDE of markdown link text brackets.
-        stripped = _CODE_BLOCK_RE.sub("", content)
-        stripped = _strip_inline_code_outside_links(stripped)
+        # Read only what the page shows, as the anchors are: a link in a code
+        # fence or an HTML comment is not on the page. Then strip inline code
+        # (outside link text) so a pattern like [a-z0-9] is not taken for a link.
+        stripped = "\n".join(
+            _strip_inline_code_outside_links(block)
+            for block in _code_span_blocks(markdown_page.rendered(content.splitlines()))
+        )
 
         file_dir = md_file.parent
 

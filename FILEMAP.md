@@ -1748,7 +1748,7 @@
 │   │   ├── dockerignore_context.py
 │   │   ├── file_size.py
 │   │   ├── file_size_allowlist.py
-│   │   ├── markdown.py
+│   │   ├── markdown_page.py
 │   │   ├── methodology_conformance.py
 │   │   ├── patterns.py
 │   │   ├── plan_status.py
@@ -1946,7 +1946,7 @@
 │           ├── test_channel_validation.py
 │           ├── test_channel_validation_dispatch_senders.py
 │           ├── test_channel_validation_floor_mentions.py
-│           ├── test_checks_markdown.py
+│           ├── test_checks_markdown_page.py
 │           ├── test_classification.py
 │           ├── test_clock.py
 │           ├── test_close_notification_action_loop.py
