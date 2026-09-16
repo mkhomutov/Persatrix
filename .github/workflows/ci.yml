@@ -486,7 +486,8 @@ jobs:
     # hook — or a `--no-verify` — could merge a broken link or a stale file map
     # (ISSUE-0133: the #840 worktree corruption would have merged a wrong
     # FILEMAP.md unnoticed). All are stdlib-only; the runner's system python3
-    # suffices. Full history is fetched because the last two read `git log`.
+    # suffices. Full history is fetched because merged-prs and plan-status
+    # read `git log`.
     name: Docs hygiene
     runs-on: ubuntu-latest
     steps:
@@ -532,6 +533,14 @@ jobs:
       # status-hygiene defect in the history. Checked against the same log.
       - name: Check no plan row announces an already-merged PR as open
         run: python scripts/checks/plan_status.py
+
+      # The Amendment 2026-09-12 made every sequencing amendment record what
+      # happened outside the project first (decisions.md rule 6), and asked
+      # for a check rather than intention: the 2026-06-04 decision to order
+      # releases by what would attract users was reversed seven weeks later
+      # with no word from any user, and nothing in the cycle noticed.
+      - name: Check each sequencing amendment records its external evidence
+        run: python scripts/checks/amendment_evidence.py
 
       # The methodology's contract (docs/methodology/conformance.json): the
       # documents, tools, make targets and CI steps it consists of. A PR that

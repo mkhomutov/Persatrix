@@ -57,6 +57,7 @@
     "scripts/checks/doc_status_markers.py",
     "scripts/checks/doc_leaked_markup.py",
     "scripts/checks/plan_status.py",
+    "scripts/checks/amendment_evidence.py",
     "scripts/checks/methodology_conformance.py",
     "scripts/release/sweep.py",
     "scripts/release/open_doc.py",
@@ -73,6 +74,7 @@
     "merged-prs",
     "merged-prs-check",
     "plan-status-check",
+    "amendment-evidence-check",
     "release-sweep",
     "release-doc",
     "branch-protection-show",
@@ -89,6 +91,7 @@
     "scripts/generate_filemap.py --check",
     "scripts/merged_prs.py --check",
     "scripts/checks/plan_status.py",
+    "scripts/checks/amendment_evidence.py",
     "scripts/checks/methodology_conformance.py"
   ],
   "persatrix_specific": [

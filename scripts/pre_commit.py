@@ -117,6 +117,7 @@ _CHECKS: list[tuple[str, list[str]]] = [
     ("roadmap status", ["{python}", "scripts/checks/roadmap_status.py"]),
     ("file size", ["{python}", "scripts/checks/file_size.py", "--strict"]),
     ("plan status", ["{python}", "scripts/checks/plan_status.py"]),
+    ("amendment evidence", ["{python}", "scripts/checks/amendment_evidence.py"]),
     ("conformance", ["{python}", "scripts/checks/methodology_conformance.py"]),
 ]
 

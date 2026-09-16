@@ -555,6 +555,9 @@ rfcs: ## Regenerate docs/rfcs/INDEX.md from per-RFC YAML front-matter
 merged-prs: ## Regenerate docs/merged-prs.md from the squash-merge subjects on main
 	$(PYTHON) scripts/merged_prs.py
 
+amendment-evidence-check: ## Fail if a sequencing amendment since 2026-09-12 has no filled-in External evidence section (CI)
+	$(PYTHON) scripts/checks/amendment_evidence.py
+
 merged-prs-check: ## Fail if docs/merged-prs.md is behind git log (CI)
 	$(PYTHON) scripts/merged_prs.py --check
 

@@ -18,7 +18,8 @@ installs by anyone other than the author, issues or PRs from anyone else,
 demos shown, user conversations written up, experiment results published.
 When every row is "none", the amendment may not scope a version on internal
 correctness alone. See [decisions.md](decisions.md#sequencing-amendments)
-rule 6.
+rule 6; `scripts/checks/amendment_evidence.py` fails when a row is missing
+or blank.
 
 ### Version-train gate
 The rule that work slotted for a later version does not merge while the

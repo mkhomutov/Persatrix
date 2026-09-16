@@ -77,6 +77,7 @@ dependencies.
 | `scripts/checks/doc_status_markers.py` | Only the standard status markers | CI (`Docs hygiene`) + pre-commit |
 | `scripts/checks/doc_leaked_markup.py` | No tool-call markup fragments in docs | CI (`Docs hygiene`) + pre-commit |
 | `scripts/checks/plan_status.py` (`make plan-status-check`) | A 🔀 / ⬜ progress row whose linked PRs have all merged is stale; a 🔀 row that links no PR — a PR's own row, written before its number existed — is stale once the squash-merge that wrote it is on `main` (`git blame --first-parent`); released versions' plans are skipped, 🔄 rows are not judged | CI (`Docs hygiene`) + pre-commit |
+| `scripts/checks/amendment_evidence.py` (`make amendment-evidence-check`) | Every `## Amendment YYYY-MM-DD` in a `docs/v*-sequencing.md` dated 2026-09-12 or later has an External evidence section whose five rows (installs, outside issues/PRs, demos, conversations, experiment results) are present and not blank — "none" counts; the rows are pinned to the amendment template's by a test. Earlier amendments stay verbatim and are not judged; finding none from that date fails | CI (`Docs hygiene`) + pre-commit |
 | `scripts/checks/methodology_conformance.py` (`make conformance-check`) | The checkout has every document, tool, make target and Docs-hygiene step `docs/methodology/conformance.json` names; the manifest names the checker itself | CI (`Docs hygiene`) + pre-commit |
 | `scripts/checks/roadmap_status.py` (`make roadmap-status-check`) | A ROADMAP Component Status row that says less than the RFCs its Status cell names: 🚧 once they have all shipped, even in part; anything short of ✅ once all are implemented. It knows ROADMAP's layout, so the manifest lists it as Persatrix-specific | CI (`Validate configs`) + pre-commit |
 | `scripts/checks/released.py` | Shared: which versions shipped (dated CHANGELOG headings) and which version-cycle docs are therefore frozen — used by the size checker and the plan-status checker | library |
@@ -90,14 +91,14 @@ dependencies.
 directory `git rev-parse --git-path hooks` names (so linked worktrees and
 `core.hooksPath` both work). The hook runs `scripts/pre_commit.py`, which is
 **version-controlled** and warns when the installed hook has drifted from the
-installer. Thirteen steps, target under 10 s:
+installer. Fourteen steps, target under 10 s:
 
 0. regenerate `FILEMAP.md` and `docs/merged-prs.md` and `git add` them ·
 1. `gofmt -l` on staged Go blobs (CRLF-safe) · 2. `ruff check agents/` ·
 3. `cargo fmt --check` · 4. doc links · 5. leaked markup · 6. status markers ·
 7. RFC index freshness · 8. ROADMAP status rows · 9. file sizes (`--strict`) ·
-10. plan status (no "PR open" row for a merged PR) · 11. methodology
-conformance.
+10. plan status (no "PR open" row for a merged PR) · 11. amendment
+evidence · 12. methodology conformance.
 
 Because the hook is outside version control it is absent for anyone who did
 not run the installer. Since the CI-promotion PR every step has a CI
@@ -110,7 +111,7 @@ The hook is the fast local copy, not the only copy.
 
 | Workflow | Trigger | Does |
 |----------|---------|------|
-| `ci.yml` | push to `main`, every PR | Eleven jobs: `Go (build + test)` (incl. gofmt, the pinned golangci-lint via `make lint-go`, Go integration tests, sanitizer sync), `Web console (build + test)`, `Dockerignore context hygiene`, `Proto staleness check`, `Python (lint + test)` (incl. ruff/mypy on `scripts/` + `evaluators/`), `Cost regression gate (bored persona)` (path-filtered), `Rust (build + clippy)` (incl. rustfmt, `cargo test`), `Validate configs` (incl. `prompt_refs` and the ROADMAP status rows), `Docs hygiene` (links, markup, markers, FILEMAP, merged-PR history, plan status, conformance), `File size check`, `Third-party license check`. Every job carries a comment naming the incident it guards. |
+| `ci.yml` | push to `main`, every PR | Eleven jobs: `Go (build + test)` (incl. gofmt, the pinned golangci-lint via `make lint-go`, Go integration tests, sanitizer sync), `Web console (build + test)`, `Dockerignore context hygiene`, `Proto staleness check`, `Python (lint + test)` (incl. ruff/mypy on `scripts/` + `evaluators/`), `Cost regression gate (bored persona)` (path-filtered), `Rust (build + clippy)` (incl. rustfmt, `cargo test`), `Validate configs` (incl. `prompt_refs` and the ROADMAP status rows), `Docs hygiene` (links, markup, markers, FILEMAP, merged-PR history, plan status, amendment evidence, conformance), `File size check`, `Third-party license check`. Every job carries a comment naming the incident it guards. |
 | `commitlint.yml` | PR opened/edited/synchronised | Conventional Commit PR title (`Validate PR Title`) |
 | `scheduled-audit.yml` | Mondays 06:00 UTC; manual | `cargo deny check advisories bans sources licenses`; opens or comments on a `Scheduled Dependency Audit Failure` issue |
 | `perf-baseline-capture.yml` | manual (`workflow_dispatch`) | Captures the recall-latency baseline on a runner and opens a PR with it; merging arms the perf gate. Never run yet |

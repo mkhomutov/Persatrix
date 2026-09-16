@@ -102,6 +102,7 @@ the twelve, and the job is named where it is not one of the original six.
 | Every PR reviewed; findings dispositioned | review-process | — | Convention (0 GitHub approvals required) |
 | Migrations land ahead of their consumer, one store per PR | release-cycle | review | Convention |
 | Scope locks change only by amendment | decisions | review | Convention |
+| Every sequencing amendment since 2026-09-12 records its external evidence | decisions rule 6 | `scripts/checks/amendment_evidence.py` (`make amendment-evidence-check`): the section and its five rows are present and filled; what the amendment concludes from them is review's call | Required (`Docs hygiene`) + Pre-commit |
 | Live arc runs once, live, before the tag | release-cycle | release checklist §4 | Convention, evidenced in the report |
 | Version strings aligned across five files | version-bump guide | `make bump-version` + checklist §2 | Manual at release-prep PR 3 |
 | TDD for new unit-level code | CLAUDE.md §TDD | review | Convention |
