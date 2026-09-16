@@ -74,6 +74,23 @@ def test_extract_anchors_skips_fenced_code_blocks() -> None:
     assert _extract_anchors(content) == {"real-heading", "also-real"}
 
 
+def test_extract_anchors_keeps_a_four_backtick_block_open_past_a_three_backtick_line() -> None:
+    """A ```` block that shows a ``` line ends only at a bare ```` line.
+
+    Closing on any line starting with three backticks got the fences out of
+    step with the page: the code inside became a heading, and the real heading
+    after the block was lost.
+    """
+    content = "# Top\n\n````md\n```bash\n# shown as code\n````\n\n## After The Block\n"
+    assert _extract_anchors(content) == {"top", "after-the-block"}
+
+
+def test_extract_anchors_skips_headings_inside_html_comments() -> None:
+    """GitHub renders nothing inside ``<!-- … -->``, so a heading there has no anchor."""
+    content = "# Shown\n\n<!--\n## Hidden Draft\n-->\n"
+    assert _extract_anchors(content) == {"shown"}
+
+
 def test_extract_anchors_renders_inline_markdown() -> None:
     """Code-span backticks drop; links collapse to their text."""
     anchors = _extract_anchors("# The `foo` [bar](https://example.com) baz\n")
@@ -158,6 +175,18 @@ def test_duplicate_heading_suffix_resolves_end_to_end(tmp_path: Path) -> None:
     failures = check_doc_links(tmp_path)
     assert len(failures) == 1
     assert "scope-2" in failures[0].reason
+
+
+def test_a_link_to_the_heading_after_a_four_backtick_block_resolves(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path)
+    (tmp_path / "doc.md").write_text(
+        "# Example\n\nOpen a shell block like this:\n\n````md\n```bash\n````\n\n## Next Step\n\n"
+        "Go to the [next step](#next-step).\n",
+        encoding="utf-8",
+    )
+    _git_add_commit(tmp_path, ".", "seed")
+
+    assert check_doc_links(tmp_path) == []
 
 
 def test_explicit_html_anchor_resolves(tmp_path: Path) -> None:

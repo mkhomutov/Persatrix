@@ -137,6 +137,22 @@ def test_a_table_without_a_status_column_is_skipped() -> None:
     assert component_status_rows(text) == []
 
 
+def test_a_row_without_its_closing_pipe_is_read() -> None:
+    text = _roadmap("✅ Complete (RFC 0006 PR 1a)").replace("PR 1a) |\n", "PR 1a)\n")
+    assert component_status_rows(text) == [
+        StatusRow(FIRST_ROW, "`pkg0/`", "✅ Complete (RFC 0006 PR 1a)")
+    ]
+
+
+def test_a_code_fence_neither_ends_the_section_nor_adds_rows() -> None:
+    """A fenced example's ``##`` line is not a heading, and its ``|`` lines are not rows."""
+    row = "| `pkg0/` | Does a thing | 🚧 In progress (RFC 0009) |"
+    fence = "```md\n## Another section\n| `x/` | Example | 🚧 In progress (RFC 0009) |\n```\n\n"
+    text = _roadmap("🚧 In progress (RFC 0009)").replace("#### Go", fence + "#### Go")
+    behind = find_behind_rows(component_status_rows(text), STATUSES)
+    assert [b.line for b in behind] == [text.splitlines().index(row) + 1]
+
+
 def test_only_component_status_tables_are_compared() -> None:
     """RFC Scope and Planned Components rows track one phase, not the whole RFC."""
     stale = "🚧 In progress (RFC 0009)"

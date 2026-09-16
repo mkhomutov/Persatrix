@@ -51,11 +51,10 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts import rfcs  # noqa: E402
-from scripts.checks import ensure_utf8_stdout  # noqa: E402
+from scripts.checks import ensure_utf8_stdout, markdown  # noqa: E402
 
 ROADMAP_FILE = REPO_ROOT / "ROADMAP.md"
 
-_HEADING_RE = re.compile(r"^(#{1,6})\s+(.*?)\s*$")
 _RFC_REF_RE = re.compile(r"\bRFC[ -](\d{4})\b")
 _RFC_ID_RE = re.compile(r"^RFC-(\d{4})$")
 
@@ -82,31 +81,27 @@ class BehindRow(NamedTuple):
     fix: str
 
 
-def _cells(line: str) -> list[str]:
-    inner = line.strip()
-    if not (inner.startswith("|") and inner.endswith("|")):
-        return []
-    return [c.strip() for c in inner[1:-1].split("|")]
-
-
 def component_status_rows(text: str) -> list[StatusRow]:
     """Every data row of a table under a ``Component Status`` heading.
 
     The section ends at the next heading of level 3 or above; its ``####``
     sub-headings (Go Orchestrator, Python Agents, …) stay inside it. The
     Status column is found by its header, so a table without one is skipped.
+    A heading or row inside a code fence or an HTML comment is not on the
+    page, so it is not read.
     """
     rows: list[StatusRow] = []
     in_section = False
     status_col: int | None = None  # None until the current table's header is read
-    for lineno, line in enumerate(text.splitlines(), start=1):
-        heading = _HEADING_RE.match(line)
+    for lineno, line in enumerate(markdown.rendered(text.splitlines()), start=1):
+        heading = markdown.heading(line)
         if heading:
-            if len(heading.group(1)) <= 3:
-                in_section = heading.group(2).startswith("Component Status")
+            level, title = heading
+            if level <= 3:
+                in_section = title.startswith("Component Status")
             status_col = None
             continue
-        cells = _cells(line)
+        cells = markdown.cells(line)
         if not cells:
             status_col = None  # a table ends at the first line that is not a row
             continue

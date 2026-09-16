@@ -131,6 +131,18 @@ def test_the_writer_only_stands_in_for_a_missing_link_on_a_pr_open_row() -> None
     assert lines == {6, 8, 12}
 
 
+def test_a_row_without_its_closing_pipe_is_judged_as_github_renders_it() -> None:
+    doc = "| PR | Status |\n|----|--------|\n| 1 | 🔀 PR open [#855](https://github.com/x/pull/855)\n"
+    assert [s.line for s in find_stale_rows(doc, MERGED)] == [3]
+
+
+def test_a_row_inside_a_code_fence_or_an_html_comment_is_not_judged() -> None:
+    """A fenced or commented-out example is not a row; the lines it hides still count."""
+    row = "| 1 | 🔀 PR open | [#855](https://github.com/x/pull/855) |"
+    doc = "\n".join(["```md", row, "```", "<!--", row, "-->", row])
+    assert [s.line for s in find_stale_rows(doc, MERGED)] == [7]
+
+
 #: Fixture commits carry a fixed identity and nothing from the caller's git
 #: setup — no hooks, signing or templates, no GIT_DIR pointing elsewhere.
 _GIT_ENV = {

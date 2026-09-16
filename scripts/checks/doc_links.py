@@ -30,7 +30,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.checks import ensure_utf8_stdout  # noqa: E402
+from scripts.checks import ensure_utf8_stdout, markdown  # noqa: E402
 
 # Markdown link pattern: [text](path) or [text](path#anchor)
 _LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)#]*)(#[^)]+)?\)")
@@ -45,14 +45,6 @@ _INLINE_CODE_RE = re.compile(r"``[^`]+``|`[^`]+`")
 # including markdown blobs; they are not heading slugs, so they are exempt
 # from heading validation.
 _LINE_ANCHOR_RE = re.compile(r"^L\d+(-L\d+)?$")
-
-# ATX heading, e.g. ``## Section title`` (setext ``===``/``---`` underlines
-# are intentionally ignored — no anchor link in the doc set targets one, and
-# a setext detector would misfire on YAML front-matter / thematic breaks).
-_ATX_HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.*?)[ \t]*$")
-
-# Fenced code-block delimiter (``` or ~~~), possibly indented.
-_FENCE_RE = re.compile(r"^\s*(```|~~~)")
 
 # Explicit HTML anchors GitHub honours as link targets: <a id="…"> / <a name="…">.
 _HTML_ANCHOR_RE = re.compile(r"""<a\s+(?:id|name)\s*=\s*["']([^"']+)["']""", re.IGNORECASE)
@@ -85,7 +77,6 @@ def _render_heading_text(raw: str) -> str:
     no underscore-emphasis headings (underscores are load-bearing in
     identifiers, so they are preserved).
     """
-    raw = re.sub(r"[ \t]+#+[ \t]*$", "", raw)             # ATX closing ###
     raw = re.sub(r"!\[([^\]]*)\]\([^)]*\)", r"\1", raw)   # image  -> alt text
     raw = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", raw)     # inline link -> text
     raw = re.sub(r"\[([^\]]+)\]\[[^\]]*\]", r"\1", raw)    # reference link -> text
@@ -97,8 +88,9 @@ def _render_heading_text(raw: str) -> str:
 def _extract_anchors(content: str) -> set[str]:
     """Return every anchor a markdown document exposes to GitHub.
 
-    That is the slug of each ATX heading (outside fenced code blocks, with
-    ``github-slugger``'s duplicate ``-1``/``-2`` disambiguation) plus any
+    That is the slug of each heading the page shows (not one inside a code
+    fence or an HTML comment, read by :mod:`scripts.checks.markdown`), with
+    ``github-slugger``'s duplicate ``-1``/``-2`` disambiguation, plus any
     explicit ``<a id=…>`` / ``<a name=…>`` HTML anchors.
     """
     anchors: set[str] = set()
@@ -116,22 +108,8 @@ def _extract_anchors(content: str) -> set[str]:
         occurrences[slug] = 0
         anchors.add(slug)
 
-    in_fence = False
-    fence_marker = ""
-    for line in content.splitlines():
-        fence = _FENCE_RE.match(line)
-        if fence:
-            marker = fence.group(1)
-            if not in_fence:
-                in_fence, fence_marker = True, marker
-            elif line.strip().startswith(fence_marker):
-                in_fence, fence_marker = False, ""
-            continue
-        if in_fence:
-            continue
-        heading = _ATX_HEADING_RE.match(line)
-        if heading:
-            _add_heading(heading.group(2))
+    for _, _, text in markdown.headings(content.splitlines()):
+        _add_heading(text)
 
     for match in _HTML_ANCHOR_RE.finditer(content):
         anchors.add(match.group(1))
