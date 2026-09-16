@@ -35,7 +35,7 @@ from .task_types import (
     TaskOutput,
     TaskStatus,
 )
-from .tools.tool_list import offered_tool, offered_tools
+from .tools.tool_list import offered_tools, refuse_call
 
 logger = logging.getLogger(__name__)
 
@@ -202,7 +202,7 @@ class BaseAgent(ABC):
                 "description": td.description,
                 "parameters": td.parameters,
             }
-            for td in offered_tools(self.config)
+            for td in offered_tools(self.agent_id, self.config)
         ]
 
     async def _execute_tools(self, tool_calls: list[ToolCall]) -> list[LLMToolResult]:
@@ -213,16 +213,11 @@ class BaseAgent(ABC):
         not exist and never runs, as personas already do.
         """
         results: list[LLMToolResult] = []
+        offered = {td.name: td for td in offered_tools(self.agent_id, self.config)}
         for call in tool_calls:
-            tool_def = offered_tool(self.config, call.name)
+            tool_def = offered.get(call.name)
             if tool_def is None or tool_def.func is None:
-                results.append(
-                    LLMToolResult(
-                        tool_call_id=call.id,
-                        content=f"Unknown tool: {call.name}",
-                        is_error=True,
-                    )
-                )
+                results.append(refuse_call(self.agent_id, call))
                 continue
             try:
                 result = await tool_def.func(**call.input)

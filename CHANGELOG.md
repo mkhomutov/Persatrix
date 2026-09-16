@@ -6,7 +6,15 @@ All notable changes to this project will be documented in this file.
 
 ### 🐛 Fixes
 
-- **A task agent now runs only the tools on its `tools` list** ([ISSUE-0151](docs/issues/ISSUE-0151-task-agents-run-tools-missing-from-their-list.md)): it used to run any registered tool the model named, so a config whose permissions covered a tool it did not list let the model use that tool anyway. Such a call now gets the same `Unknown tool` error a persona gives, and one rule in `agents/tools/tool_list.py` decides both what a task agent is offered and what it may run. The shipped task agents were not exposed — the permission gate refused every unlisted call they could make — but a config that relied on running a tool it does not list must now add that tool to `tools`.
+- **A task agent now runs only the tools on its `tools` list** ([ISSUE-0151](docs/issues/ISSUE-0151-task-agents-run-tools-missing-from-their-list.md)): it used to run any registered tool the model named, so a config whose permissions covered a tool it did not list let the model use that tool anyway. Such a call now gets the same `Unknown tool` error a persona gives, and one rule in `agents/tools/tool_list.py` decides what a task agent or a persona is offered and what it may run. The shipped task agents were not exposed — the permission gate refused every unlisted call they could make — but a config that relied on running a tool it does not list must now add that tool to `tools`.
+- **A persona no longer fails every turn on a malformed `tools` list**: a `tools:` key with no value, or an entry that is a mapping rather than a name, raised `TypeError` whenever the persona built or ran its tools. Such an entry now names no tool, as it already did for a task agent ([ISSUE-0151](docs/issues/ISSUE-0151-task-agents-run-tools-missing-from-their-list.md)).
+
+### ⬆️ Upgrade Notes
+
+| Notable change | Detail |
+|----------------|--------|
+| **[Behaviour] a task agent refuses tools it does not list** | A custom task agent whose permissions cover a tool its `tools` list leaves out could run that tool before; it now gets `Unknown tool`. Add every tool the agent should run to `tools`. |
+| **[New log lines at `WARNING`] refused calls and malformed lists** | Every agent logs a WARNING naming itself and the tool when it refuses a model's tool call, and one when its `tools` setting is not a list or has entries that are not names — each time it offers or runs tools, until the config is fixed. |
 
 ## [0.3.16] - 2026-09-16
 

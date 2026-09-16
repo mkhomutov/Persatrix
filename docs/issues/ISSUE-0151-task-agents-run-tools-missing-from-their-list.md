@@ -214,7 +214,12 @@ blocks.
 > rebased onto `main` after the v0.3.16 tag, which is the hold the slot above
 > set. A task agent is now offered and runs only the registered tools its
 > `tools` list names, both decided by `agents/tools/tool_list.py`; any other
-> call gets the persona's `Unknown tool` error. It lands before any train
+> call gets the persona's `Unknown tool` error. #913's review brought in two
+> items listed above as out of scope. Personas now call the same module: their
+> own copy raised `TypeError` on every turn for a `tools:` key with no value
+> or a mapping entry. And both agent kinds log a refused call as a WARNING,
+> because a refused tool never runs and so records no tool span or metric,
+> while before this fix a task agent's unlisted call did. It lands before any train
 > opens: the [Amendment 2026-09-12](../v0.3.x-sequencing.md#amendment-2026-09-12--close-v0316-small-then-measure-before-any-train-opens)
 > holds the v0.4.0 plan until EXP-001 reports, and this fix needs no plan.
 > ISSUE-0150 is still not on `main`, so the two are still not linked, and its

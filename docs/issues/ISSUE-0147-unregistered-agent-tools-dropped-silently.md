@@ -46,11 +46,12 @@ Neither logs a skipped name, and nothing else checks the list: the agent schema
 (`schemas/agent.schema.json`) accepts any string, and the Go orchestrator does
 not read the list at all.
 
-The two copies already differ in a related way. When the model asks to run a
-tool, a persona runs it only if the tool is on its list, but a task agent runs
-any registered tool the model names (`_execute_tools` in `agents/base.py`).
+When this was filed, the two copies also differed in a related way. When the
+model asked to run a tool, a persona ran it only if the tool was on its list,
+but a task agent ran any registered tool the model named (`_execute_tools` in
+`agents/base.py`).
 [ISSUE-0151](ISSUE-0151-task-agents-run-tools-missing-from-their-list.md)
-proposes closing that gap.
+closed that gap; see the 2026-09-16 note.
 
 **What gets dropped today.** A probe on 2026-09-10 (at `f52e7ff6`) loaded every
 agent in the shipped `config/agents.yaml` through `load_agent`, with the model
@@ -245,3 +246,13 @@ after `wire_recall_tools`.
 > also proposed for v0.4.0. Its fix puts the offer rule in a small module under
 > `agents/tools/`, the kind of function point 2 asks for; whichever of the two
 > fixes lands second extends that module rather than writing another.
+>
+> 2026-09-16 — ISSUE-0151 is resolved by
+> [#913](https://github.com/mkhomutov/Persatrix/pull/913). Task agents and
+> personas now both call `offered_tools` in `agents/tools/tool_list.py`, both
+> to offer tools and to run them, so the gap between the two copies in Context
+> is closed. That function is point 2's shared function, but only half of it:
+> it returns the tools a list gives, not the entries that give none, so this
+> issue's warning is still unwritten and extends that module. #913 does log a
+> `tools` value that is not a list, and entries that are not strings, as
+> warnings; an entry that names no registered tool is still dropped silently.

@@ -66,7 +66,9 @@ def _make_agent(
     )
     client = LLMClient(mock_provider)
     # ISSUE-0151: a task agent runs only the tools on its list, so the default
-    # agent lists every tool the loop tests below register.
+    # agent lists every tool the loop tests below register. Each of those tests
+    # also asserts its tool ran: an unlisted tool is answered `Unknown tool`,
+    # which the status and count assertions alone would not notice.
     agent_config = config or {
         "model": "test-model", "max_llm_calls": 10, "max_tokens": 4096,
         "tools": ["echo_tool", "restricted_tool", "failing_tool", "err_tool", "acc_tool"],
@@ -129,8 +131,11 @@ class TestRunLlmLoopMaxTokens:
 
 class TestRunLlmLoopToolUse:
     async def test_tool_then_end_turn(self):
+        ran: list[str] = []
+
         @tool(name="echo_tool", description="Echo input")
         async def echo_tool(text: str) -> ToolResult:
+            ran.append(text)
             return ToolResult(success=True, data=f"echoed: {text}")
 
         tool_call = ToolCall(id="tc1", name="echo_tool", input={"text": "hello"})
@@ -153,6 +158,7 @@ class TestRunLlmLoopToolUse:
         assert output.result == "Done! I echoed your message."
         assert output.metadata["tokens_used"] == "55"
         assert output.metadata["tool_calls"] == "1"
+        assert ran == ["hello"]
 
     async def test_unknown_tool(self):
         tool_call = ToolCall(id="tc1", name="nonexistent_tool", input={})
@@ -174,8 +180,11 @@ class TestRunLlmLoopToolUse:
         assert output.status == TaskStatus.COMPLETED
 
     async def test_tool_permission_error(self):
+        ran: list[str] = []
+
         @tool(name="restricted_tool", description="Restricted")
         async def restricted_tool() -> ToolResult:
+            ran.append("restricted_tool")
             raise PermissionError("Access denied")
 
         tool_call = ToolCall(id="tc1", name="restricted_tool", input={})
@@ -195,10 +204,14 @@ class TestRunLlmLoopToolUse:
         agent = _make_agent(responses=responses)
         output = await agent.handle(_task())
         assert output.status == TaskStatus.COMPLETED
+        assert ran == ["restricted_tool"]
 
     async def test_tool_generic_exception(self):
+        ran: list[str] = []
+
         @tool(name="failing_tool", description="Fails")
         async def failing_tool() -> ToolResult:
+            ran.append("failing_tool")
             raise RuntimeError("Something broke")
 
         tool_call = ToolCall(id="tc1", name="failing_tool", input={})
@@ -214,6 +227,7 @@ class TestRunLlmLoopToolUse:
         agent = _make_agent(responses=responses)
         output = await agent.handle(_task())
         assert output.status == TaskStatus.COMPLETED
+        assert ran == ["failing_tool"]
 
 
 class TestRunLlmLoopMaxIterations:
@@ -306,8 +320,11 @@ class TestLlmProviderError:
         assert "rate limited" not in output.result
 
     async def test_provider_error_preserves_partial_tokens(self):
+        ran: list[str] = []
+
         @tool(name="err_tool", description="Tool for error test")
         async def err_tool() -> ToolResult:
+            ran.append("err_tool")
             return ToolResult(success=True, data="ok")
 
         tool_call = ToolCall(id="tc1", name="err_tool", input={})
@@ -326,12 +343,16 @@ class TestLlmProviderError:
         assert output.result == "LLM provider error"
         # Partial token count from first successful round
         assert int(output.metadata["tokens_used"]) == 75
+        assert ran == ["err_tool"]
 
 
 class TestTokenAccumulation:
     async def test_tokens_accumulate_across_rounds(self):
+        ran: list[str] = []
+
         @tool(name="acc_tool", description="Accumulation tool")
         async def acc_tool() -> ToolResult:
+            ran.append("acc_tool")
             return ToolResult(success=True, data="ok")
 
         tool_call = ToolCall(id="tc1", name="acc_tool", input={})
@@ -356,6 +377,7 @@ class TestTokenAccumulation:
         # 150 + 300 + 450 = 900
         assert output.metadata["tokens_used"] == "900"
         assert output.metadata["tool_calls"] == "2"
+        assert ran == ["acc_tool", "acc_tool"]
 
 
 # ─── Capabilities Property ──────────────────────────────────

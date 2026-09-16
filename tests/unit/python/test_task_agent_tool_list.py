@@ -19,6 +19,7 @@ The model is mocked at the ``LLMClient`` boundary: a real
 
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -100,6 +101,11 @@ def _task() -> TaskInput:
     )
 
 
+def _warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
+    """The rendered text of every WARNING record *caplog* captured."""
+    return [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+
+
 class TestUnlistedToolRefused:
     async def test_unlisted_registered_tool_is_refused_and_not_run(self) -> None:
         ran: list[str] = []
@@ -152,6 +158,40 @@ class TestUnlistedToolRefused:
         await store_note.func(topic="t", content="c")
         assert await memory.count_notes() == 1
 
+    async def test_refusal_is_logged_for_the_operator(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # The model hears only `Unknown tool`. The operator gets a WARNING naming
+        # the agent and the tool: a refused tool never runs, so no tool span or
+        # metric records that the model reached for a tool it was not given.
+        _register("unlisted", [])
+        agent = TaskAgent(agent_id="code-reviewer", config={"tools": []})
+
+        with caplog.at_level(logging.WARNING):
+            [result] = await agent._execute_tools([
+                ToolCall(id="c1", name="unlisted", input={}),
+            ])
+
+        assert result.content == "Unknown tool: unlisted"
+        [message] = _warnings(caplog)
+        assert "'code-reviewer'" in message
+        assert "'unlisted'" in message
+
+    async def test_a_forged_line_in_the_tool_name_stays_on_one_log_line(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # The model picks the name, so the log quotes it with escapes (CWE-117).
+        agent = TaskAgent(agent_id="t", config={"tools": []})
+
+        with caplog.at_level(logging.WARNING):
+            await agent._execute_tools([
+                ToolCall(id="c1", name="x\nERROR forged record", input={}),
+            ])
+
+        [message] = _warnings(caplog)
+        assert "\n" not in message
+        assert "'x\\nERROR forged record'" in message
+
 
 class TestToolListShapes:
     @pytest.mark.parametrize(
@@ -188,6 +228,58 @@ class TestToolListShapes:
 
         assert (result.content, result.is_error) == ("listed ran", False)
         assert ran == ["listed"]
+
+    @pytest.mark.parametrize(
+        ("config", "expected"),
+        [
+            ({"tools": "listed"}, "is a str, not a list"),
+            ({"tools": [{"name": "listed"}, "listed", 7]}, "skipped 2 entries"),
+        ],
+        ids=["scalar", "non-strings"],
+    )
+    def test_a_malformed_list_is_logged_not_silent(
+        self, config: dict[str, Any], expected: str, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # The agent schema wants a list of names, but nothing checks it at
+        # start-up, so a YAML slip must not silently leave the agent toolless.
+        _register("listed", [])
+        agent = TaskAgent(agent_id="code-writer", config=config)
+
+        with caplog.at_level(logging.WARNING):
+            agent._build_tool_definitions()
+
+        [message] = _warnings(caplog)
+        assert "'code-writer'" in message
+        assert expected in message
+
+    @pytest.mark.parametrize(
+        "config",
+        [{}, {"tools": []}, {"tools": None}, {"tools": ["listed", "mcp:github"]}],
+        ids=["no-key", "empty", "no-value", "names"],
+    )
+    def test_a_well_formed_list_logs_nothing(
+        self, config: dict[str, Any], caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        _register("listed", [])
+        agent = TaskAgent(agent_id="t", config=config)
+
+        with caplog.at_level(logging.WARNING):
+            agent._build_tool_definitions()
+
+        assert _warnings(caplog) == []
+
+    async def test_a_tool_round_reads_the_list_once(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # One lookup table per round, not one list parse per call.
+        agent = TaskAgent(agent_id="t", config={"tools": "listed"})
+
+        with caplog.at_level(logging.WARNING):
+            await agent._execute_tools(
+                [ToolCall(id=f"c{i}", name="listed", input={}) for i in range(3)],
+            )
+
+        assert sum("not a list" in m for m in _warnings(caplog)) == 1
 
 
 class TestOfferMatchesRun:
