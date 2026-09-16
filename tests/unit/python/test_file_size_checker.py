@@ -1,8 +1,9 @@
 """Pin the contract of ``scripts.checks.file_size`` — the repo size gate.
 
-The checker enforces three caps (500 lines for code, 3 000 words for docs,
+The checker enforces three caps (800 lines for code, 3 000 words for docs,
 8 000 for ``docs/rfcs/``) with two escape hatches that are easy to get
-subtly wrong, and until now had no test:
+subtly wrong, and until now had no test (the warning for code past 500
+lines is pinned in ``test_file_size_code_warning.py``):
 
     * ``GRANDFATHERED_FILES`` — an *allowlist*: the file is still scanned
       and measured, it just does not raise. Entries are expected to go
@@ -275,24 +276,24 @@ def _notice_files(**kw: object) -> set[str]:
 def test_a_file_exactly_at_the_limit_is_flagged() -> None:
     """The state the tier exists for.  A file ON the limit passes the gate
     silently, and is also the one where the next edit costs a split or a
-    rationale-deleting trim — 29 code files were sitting here when the
-    tier was added."""
-    notices = _near_cap_notices([("a.py", 500)], [])
+    rationale-deleting trim — 29 code files were sitting on the old
+    500-line limit when the tier was added."""
+    notices = _near_cap_notices([("a.py", 800)], [])
 
     assert [n.file for n in notices] == ["a.py"]
     assert notices[0].headroom == 0
 
 
 def test_a_file_over_the_limit_is_not_a_near_cap_notice() -> None:
-    """It is a WARNING, and reporting it twice would blur the one
-    distinction the output has to keep: passing versus failing."""
-    assert _notice_files(code=[("a.py", 501)]) == set()
+    """It FAILS, and reporting it twice would blur the one distinction
+    the output has to keep: passing versus failing."""
+    assert _notice_files(code=[("a.py", 801)]) == set()
 
 
 def test_the_band_is_proportional_to_each_limit() -> None:
-    """One percentage means the same thing to all three caps: 3% is 15
+    """One percentage means the same thing to all three caps: 3% is 24
     lines of a code file, 90 words of a doc, 240 of an RFC."""
-    assert _notice_files(code=[("near.py", 485), ("far.py", 484)]) == {"near.py"}
+    assert _notice_files(code=[("near.py", 776), ("far.py", 775)]) == {"near.py"}
     assert _notice_files(
         docs=[("docs/d.md", 2910), ("docs/far.md", 2909)],
     ) == {"docs/d.md"}
@@ -302,8 +303,8 @@ def test_the_band_is_proportional_to_each_limit() -> None:
 
 
 def test_a_tighter_band_narrows_the_report() -> None:
-    assert _notice_files(code=[("a.py", 490)], pct=3) == {"a.py"}
-    assert _notice_files(code=[("a.py", 490)], pct=1) == set()
+    assert _notice_files(code=[("a.py", 790)], pct=3) == {"a.py"}
+    assert _notice_files(code=[("a.py", 790)], pct=1) == set()
 
 
 def test_allowlisted_files_are_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -311,12 +312,12 @@ def test_allowlisted_files_are_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
     — and they are mostly already far past it."""
     monkeypatch.setattr(file_size, "GRANDFATHERED_FILES", frozenset({"waived.py"}))
 
-    assert _notice_files(code=[("waived.py", 500), ("live.py", 500)]) == {"live.py"}
+    assert _notice_files(code=[("waived.py", 800), ("live.py", 800)]) == {"live.py"}
 
 
 def test_notices_sort_tightest_first() -> None:
     notices = _near_cap_notices(
-        [("roomy.py", 490), ("at.py", 500), ("tight.py", 499)], [],
+        [("roomy.py", 790), ("at.py", 800), ("tight.py", 799)], [],
     )
 
     assert [n.file for n in notices] == ["at.py", "tight.py", "roomy.py"]
@@ -328,10 +329,11 @@ def test_tightest_first_holds_across_units() -> None:
     Every file here has *more* absolute headroom than the one after it and
     *less* room proportionally, so a sort on ``headroom`` returns this list
     exactly reversed.  That was the old behaviour: an RFC 2.5% from its cap
-    printed below a code file with the full 3% still free, because 200 > 14.
+    printed below a code file with nearly the full 3% still free, because
+    200 > 22.
     """
     notices = _near_cap_notices(
-        [("alpha.py", 486)],                        # 14 lines  = 2.8%
+        [("alpha.py", 778)],                        # 22 lines  = 2.75%
         [("docs/beta.md", 2980),                    # 20 words  = 0.667%
          ("docs/rfcs/0099-r.md", 7800)],            # 200 words = 2.5%
     )
@@ -339,7 +341,7 @@ def test_tightest_first_holds_across_units() -> None:
     assert [n.file for n in notices] == [
         "docs/beta.md", "docs/rfcs/0099-r.md", "alpha.py",
     ]
-    assert [n.headroom for n in notices] == [20, 200, 14], "absolute order differs"
+    assert [n.headroom for n in notices] == [20, 200, 22], "absolute order differs"
 
 
 def test_near_cap_never_changes_the_exit_code(

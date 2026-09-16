@@ -7,18 +7,21 @@ splitting opportunities.
 
 **Thresholds (defaults):**
 
-- Code files: 500 lines
-- Documentation files: 3 000 words
+- Code files: a warning over 500 lines, a failure over 800
+- Documentation files: 3 000 words (8 000 under ``docs/rfcs/``)
 
 The limits are a cliff: a file one line under passes and one line over
-fails, with no signal in between.  ``--near-cap`` adds that signal — see
-:func:`_near_cap_notices` for why a file sitting exactly ON the limit is
-the expensive state, and for the measurement that motivated it.
+fails, with no signal in between.  Code gets a warning well before its
+cliff (:func:`_code_warnings`), and ``--near-cap`` signals the last few
+percent under every limit — see :func:`_near_cap_notices` for why a file
+sitting exactly ON a limit is the expensive state, and for the measurement
+that motivated it.
 
 Usage::
 
-    python scripts/checks/file_size.py [--max-code-lines 500]
-        [--max-doc-words 3000] [--strict] [--verbose] [--near-cap [PCT]]
+    python scripts/checks/file_size.py [--warn-code-lines 500]
+        [--max-code-lines 800] [--max-doc-words 3000] [--strict] [--verbose]
+        [--near-cap [PCT]]
 """
 
 from __future__ import annotations
@@ -37,12 +40,16 @@ from scripts.checks import DEFAULT_EXCLUDES, ensure_utf8_stdout, walk_files  # n
 from scripts.checks.file_size_allowlist import GRANDFATHERED_FILES  # noqa: E402
 from scripts.checks.released import is_released_version_doc, released_versions  # noqa: E402
 
-DEFAULT_MAX_CODE_LINES = 500
+#: A code file over the warning is listed and never failed; one over the
+#: limit fails ``--strict``.  Both numbers are ruling (e) of the sequencing
+#: Amendment 2026-09-12 — see :func:`_code_warnings`.
+DEFAULT_WARN_CODE_LINES = 500
+DEFAULT_MAX_CODE_LINES = 800
 DEFAULT_MAX_DOC_WORDS = 3000
 DEFAULT_MAX_RFC_WORDS = 8000
 
 #: Default ``--near-cap`` band, as a percentage of each file's own limit —
-#: 15 lines of a 500-line code file, 90 words of a 3 000-word doc, 240 of
+#: 24 lines of an 800-line code file, 90 words of a 3 000-word doc, 240 of
 #: an 8 000-word RFC.  Proportional rather than absolute so one number
 #: means the same thing to all three limits.
 DEFAULT_NEAR_CAP_PCT = 3.0
@@ -82,7 +89,7 @@ _EXTRA_EXCLUDES = [
     # The grandfather allowlist (scripts/checks/file_size_allowlist.py) is pure
     # reference data — a frozenset of path strings, one per release artifact,
     # each with an inline rationale. Its length scales with release history, not
-    # with authored logic, so the 500-line *code* cap would punish it for doing
+    # with authored logic, so the *code* line limit would punish it for doing
     # its job. Excluded for the same "size scales with data, not prose" reason
     # as THIRD_PARTY_NOTICES.md and docs/issues/INDEX.md above. This keeps
     # file_size.py itself honestly under the code cap (the logic, not the data).
@@ -136,6 +143,8 @@ def _stale_allowlist_entries(released: frozenset[str]) -> list[str]:
 
 
 class FileSizeWarning(NamedTuple):
+    """A file over its limit: what ``--strict`` fails on, printed as ``[OVER]``."""
+
     file: str
     kind: str
     measured: int
@@ -246,6 +255,32 @@ def _scan_files(
     return warnings, code_results, doc_results
 
 
+def _code_warnings(
+    code_results: list[tuple[str, int]],
+    *,
+    warn_code_lines: int = DEFAULT_WARN_CODE_LINES,
+    max_code_lines: int = DEFAULT_MAX_CODE_LINES,
+) -> list[tuple[str, int]]:
+    """Code files over the warning but not over the limit, longest first.
+
+    Why a warning and not the gate.  500 lines used to be both the size
+    worth splitting and the limit, so files piled up on it (see
+    :func:`_near_cap_notices`), and a pre-release sweep that split them
+    by line count only refilled the pile.  Ruling (e) of the sequencing
+    Amendment 2026-09-12 keeps 500 as the signal and moves the failure to
+    800: a file listed here is split at a real seam when a change edits it
+    for another reason — never trimmed to fit, never swept.
+
+    A file over the limit is left out: it already fails, and listing it
+    twice would blur passing and failing.  Never affects the exit code.
+    """
+    warned = [
+        (rel, lines) for rel, lines in code_results
+        if warn_code_lines < lines <= max_code_lines
+    ]
+    return sorted(warned, key=lambda item: (-item[1], item[0]))
+
+
 def _near_cap_notices(
     code_results: list[tuple[str, int]],
     doc_results: list[tuple[str, int]],
@@ -274,7 +309,11 @@ def _near_cap_notices(
     pile up on a round number; that shape is what trimming-to-fit leaves
     behind.  Warning before the cliff turns the surprise into notice, and
     changes nothing about what blocks CI: these are notices, never
-    warnings, and they never affect the exit code.
+    failures, and they never affect the exit code.
+
+    The code cliff has been 800 lines since ruling (e) of the sequencing
+    Amendment 2026-09-12, so the code band sits under 800.  A file at 500
+    can take a one-line fix now; past 500 it gets :func:`_code_warnings`.
 
     Grandfathered files are skipped — they are exempt from the limit, so
     "approaching" it does not apply to them.
@@ -310,7 +349,7 @@ def get_warnings(
     max_code_lines: int = DEFAULT_MAX_CODE_LINES,
     max_doc_words: int = DEFAULT_MAX_DOC_WORDS,
 ) -> list[FileSizeWarning]:
-    """Programmatic API — returns warnings without printing."""
+    """Programmatic API — returns the files over their limit without printing."""
     root = repo_root or REPO_ROOT
     warnings, _, _ = _scan_files(root, max_code_lines, max_doc_words)
     return warnings
@@ -324,19 +363,23 @@ def check_file_size(
     verbose: bool = False,
     near_cap: bool = False,
     near_cap_pct: float = DEFAULT_NEAR_CAP_PCT,
+    warn_code_lines: int = DEFAULT_WARN_CODE_LINES,
 ) -> int:
     """Run the file size audit. Returns 0/1 depending on findings and mode.
+
+    Code files over ``warn_code_lines`` but within their limit are always
+    listed in full as a warning (:func:`_code_warnings`).
 
     ``near_cap`` lists the files approaching their limit
     (:func:`_near_cap_notices`); without it their COUNT is still reported
     on one line, so the tier is discoverable from ordinary output instead
-    of only from ``--help``.  Neither affects the exit code — a file that
-    is merely close is passing, and making it fail would just move the
-    cliff.
+    of only from ``--help``.  Neither the warning nor this tier affects the
+    exit code — a file that is merely long or close is passing, and making
+    it fail would just move the cliff.
 
     Both print on every run, the failing ``--strict`` ones included: CI
-    runs ``--strict``, so returning early on a warning would have hidden
-    the tier from the one audience already reading size output.
+    runs ``--strict``, so returning early on a failure would have hidden
+    them from the one audience already reading size output.
     """
     warnings, code_results, doc_results = _scan_files(repo_root, max_code_lines, max_doc_words)
     for rel in _stale_allowlist_entries(_released_versions(repo_root)):
@@ -358,11 +401,23 @@ def check_file_size(
             print(f"  {words:>5} words  {rel}{flag}")
 
     if warnings:
-        print(f"\n[WARN] {len(warnings)} file(s) exceed size limits:")
+        print(f"\n[OVER] {len(warnings)} file(s) exceed size limits:")
         for w in warnings:
             print(f"  {w.file}: {w.measured} {w.unit} (limit: {w.limit})")
     else:
         print("[OK] All files within size limits.")
+
+    long_code = _code_warnings(
+        code_results, warn_code_lines=warn_code_lines, max_code_lines=max_code_lines,
+    )
+    if long_code:
+        print(
+            f"\n[WARN] {len(long_code)} code file(s) over {warn_code_lines} lines "
+            f"(only over {max_code_lines} fails) — split one at a real seam when a "
+            "change edits it for another reason; never trim it to fit:",
+        )
+        for rel, lines in long_code:
+            print(f"  {rel}: {lines} lines")
 
     notices = _near_cap_notices(
         code_results, doc_results,
@@ -393,7 +448,7 @@ def check_file_size(
             f"limit ({at_limit} exactly AT it) — run with --near-cap to list.",
         )
 
-    # Decided last, so the tier above prints on every run — including the
+    # Decided last, so the tiers above print on every run — including the
     # failing ``--strict`` runs, which is when someone is already reading
     # this output.  Only an over-cap file can fail the gate.
     return 1 if warnings and strict else 0
@@ -403,9 +458,16 @@ def main(argv: list[str] | None = None) -> int:
     ensure_utf8_stdout()
 
     parser = argparse.ArgumentParser(description="Check file sizes against review-friendly limits.")
-    parser.add_argument("--max-code-lines", type=int, default=DEFAULT_MAX_CODE_LINES)
+    parser.add_argument(
+        "--warn-code-lines", type=int, default=DEFAULT_WARN_CODE_LINES,
+        help="List code files over this many lines. Never changes the exit code.",
+    )
+    parser.add_argument(
+        "--max-code-lines", type=int, default=DEFAULT_MAX_CODE_LINES,
+        help="The code limit: a file over this many lines fails --strict.",
+    )
     parser.add_argument("--max-doc-words", type=int, default=DEFAULT_MAX_DOC_WORDS)
-    parser.add_argument("--strict", action="store_true", help="Exit 1 on warnings")
+    parser.add_argument("--strict", action="store_true", help="Exit 1 if a file is over its limit")
     parser.add_argument("--verbose", action="store_true", help="Show all scanned files")
     parser.add_argument(
         "--near-cap", nargs="?", type=float, const=DEFAULT_NEAR_CAP_PCT,
@@ -427,6 +489,7 @@ def main(argv: list[str] | None = None) -> int:
         near_cap_pct=(
             args.near_cap if args.near_cap is not None else DEFAULT_NEAR_CAP_PCT
         ),
+        warn_code_lines=args.warn_code_lines,
     )
 
 

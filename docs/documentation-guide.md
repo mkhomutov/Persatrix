@@ -167,15 +167,25 @@ expires by itself at the release.
 
 | Scope | Limit | Rationale |
 |-------|-------|-----------|
-| **Code files** (`.go`, `.py`, `.rs`, `.toml`, `.yaml`) | **≤ 500 lines** | Effective code review |
+| **Code files** (`.go`, `.py`, `.rs`, `.js`, `.ts`, `.svelte`, `.css`, `.toml`, `.yaml`) | **A warning over 500 lines; fails over 800** | Effective code review, with no cliff at the size worth splitting |
 | **Documentation files** (`.md`) | **≤ 3 000 words** | Thorough doc review |
 | **RFCs** (`docs/rfcs/*.md`) | **≤ 8 000 words** | Design documents carry required sections the prose cap would punish |
 
-When a file approaches or exceeds its limit, **split it** into focused,
-single-responsibility modules — move a stable half to its own file rather
-than deleting rationale to make room ("split, don't trim"). Split at about
-485 lines or 2 900 words, before the cap arrives: a file *at* the cap turns
-every later fix into deleted context.
+When a file grows too long, **split it** into focused, single-responsibility
+modules — move a stable half to its own file rather than deleting rationale
+to make room ("split, don't trim").
+
+- **A code file over 500 lines** is listed as a warning on every run and
+  fails only over 800. Split it at a real seam — a part that makes sense on
+  its own — when a change edits it for another reason. Never trim it back
+  under 500, and never split files in a sweep before a release. Until ruling
+  (e) of the [sequencing Amendment 2026-09-12](v0.3.x-sequencing.md#amendment-2026-09-12--close-v0316-small-then-measure-before-any-train-opens),
+  500 lines was the failure itself: files piled up on it, every fix to one of
+  them cost a split or a deleted comment, and splitting them by line count
+  only refilled the pile.
+- **A document** still fails one word over its cap. Split it before the cap
+  arrives — at about 2 900 words for a 3 000-word cap: a document *at* the
+  cap turns every later fix into deleted context.
 
 **How words are counted.** `scripts/checks/file_size.py` strips YAML
 front-matter and fenced code blocks before counting, so `wc -w` over-reports.
@@ -186,9 +196,10 @@ python -c "from scripts.checks.file_size import _count_words; print(_count_words
 ```
 
 The checker also prints a **near-cap** notice for files within 3 % of their
-limit. Files that already exceeded a cap when the gate was introduced are
-listed in `scripts/checks/file_size_allowlist.py`, each with a reason and an
-exit condition; execution reports, checklists, generated indexes, and the
+limit — for code, the last 24 lines under 800. Files that already exceeded a
+cap when the gate was introduced are listed in
+`scripts/checks/file_size_allowlist.py`, each with a reason and an exit
+condition; execution reports, checklists, generated indexes, and the
 notices file are excluded by pattern because their length is data, not prose.
 Which of these rules are enforced, and where, is in the
 [enforcement matrix](methodology/enforcement-matrix.md).

@@ -1,6 +1,6 @@
 # The Release Cycle
 
-> **Last updated**: 2026-09-06
+> **Last updated**: 2026-09-17
 > Describes the cycle every release since v0.3.0 has followed. Evidence: the
 > `docs/v0.3.*-plan.md` and `docs/v0.3.*-release-prep-plan.md` files, and the
 > commit log — fifteen release-prep plans, fifteen "release-prep PR 1" merges,
@@ -302,22 +302,25 @@ still says the release is pending. PR body from
   reason, so the next cycle does not inherit a promise that cannot be kept
   (precedent: the allowlist exit condition at
   [#838](https://github.com/mkhomutov/Persatrix/pull/838)).
-- **Read the near-cap list** (`python scripts/checks/file_size.py --near-cap`)
-  and decide the **debt sweep** (below).
 
 ### The debt sweep
 
-The size caps are a cliff, and a sweep on 2026-08-29 found 29 code files
-sitting at exactly 500 lines against a background of ~3.5 per line-count
-bucket — the shape trimming-to-fit leaves behind. The RFC-level cycle has a
-refactoring assessment ([development-workflow.md §Phase 6](../development-workflow.md#phase-6--refactoring-assessment));
-the release cycle had none. Rule: at every post-release follow-up, if the
-near-cap list shows **twenty or more files at their cap**, or two releases
-have passed since the last sweep, the follow-up files a `debt-sweep` issue
-and the next master plan carries a cuttable **Workstream D — debt sweep**
-that splits the at-cap files first (pure structural PRs, no behaviour
-change, under 500 lines each). Below the threshold, the follow-up records the
-count and moves on.
+**Retired** by ruling (e) of the
+[sequencing Amendment 2026-09-12](../v0.3.x-sequencing.md#amendment-2026-09-12--close-v0316-small-then-measure-before-any-train-opens):
+no follow-up reads the near-cap list to schedule splits, and no plan carries
+a sweep.
+
+The rule it replaced: when twenty or more files sat exactly at their size
+cap, the post-release follow-up filed a `debt-sweep` issue and the next
+master plan carried a cuttable Workstream D that split them. v0.3.16 ran it,
+and after its two splits 24 files were still at their cap: a seam chosen by
+line count refills the pile
+([ISSUE-0143](../issues/ISSUE-0143-debt-sweep-26-files-at-size-cap.md)).
+
+Now a code file gets a warning over 500 lines and fails only over 800
+([documentation-guide §Size Limits](../documentation-guide.md#size-limits)).
+A long file is split at a real seam when a change edits it for another
+reason, never in a sweep.
 
 ---
 
@@ -332,7 +335,7 @@ count and moves on.
   A test that passed without exercising the contested surface is recorded as
   vacuous and re-run, not counted.
 - **Word caps apply to plans.** Master plans and release-prep plans are on the
-  size allowlist for the open cycle only; split at 485+ lines or ~2 900 words
-  rather than trimming a record.
+  size allowlist for the open cycle only; split at ~2 900 words rather than
+  trimming a record.
 - **Local-only artifacts are never linked** from committed files
   ([review-process.md](review-process.md#the-paraphrase-rule)).

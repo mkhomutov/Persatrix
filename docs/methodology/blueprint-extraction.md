@@ -1,6 +1,6 @@
 # Blueprint Extraction — the plan
 
-> **Last updated**: 2026-09-06
+> **Last updated**: 2026-09-17
 > How the methodology leaves this repository and comes back as a pinned
 > dependency. This is a plan, not a record: the blueprint repository does
 > not exist yet, and creating it is the owner's call.
@@ -45,7 +45,7 @@ version. The extraction replaces:
 | PR and issue citations (`#858`, `ISSUE-0139`) | kept as *examples* in a clearly marked "worked example" section, or dropped |
 | Version names (`v0.3.15`, codenames) | `vX.Y.Z`, `<Codename>` — the templates already do this |
 | The four languages and their gates (`cargo test`, `make ui-test`) | a `gates:` list in the consumer's `conformance.json`, rendered into the checklist template |
-| The 500-line / 3 000-word caps | defaults in `file_size.py`, overridable by flag (already true) |
+| The 500-line code warning, the 800-line code cap and the 3 000-word cap | defaults in `file_size.py`, overridable by flag (already true) |
 
 ## The vendoring model (one-way)
 
