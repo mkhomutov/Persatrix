@@ -40,8 +40,10 @@ the next version after it.
    conversations written up, experiment results published. An amendment
    whose section holds no positive entry may not scope a version on
    internal correctness alone. Ratified by the
-   [Amendment 2026-09-12](../v0.3.x-sequencing.md#amendment-2026-09-12--close-v0316-small-then-measure-before-any-train-opens);
-   the check that enforces it is its own PR.
+   [Amendment 2026-09-12](../v0.3.x-sequencing.md#amendment-2026-09-12--close-v0316-small-then-measure-before-any-train-opens).
+   `make amendment-evidence-check` fails when an amendment from that date on
+   lacks the section or leaves one of those rows blank; "none" is an answer.
+   Whether the amendment then obeys the rule is left to review.
 7. An amendment that **adds a release** to a train names the release it
    removes, or the train closes and the remainder moves to the next minor.
    Same ratification.
