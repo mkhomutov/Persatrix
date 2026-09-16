@@ -24,9 +24,11 @@ CommonMark rules these checks need:
   closing run of ``#`` is not part of its text. Setext underlines (``===`` /
   ``---``) are not read: no check needs them, and they would misfire on
   front-matter and thematic breaks.
-- A table row starts or ends with ``|``. GitHub needs neither outer pipe
-  inside a table, but a line with neither is not read: telling it from prose
-  takes the table around it, which this does not track.
+- A table row starts or ends with ``|``, and an escaped ``\\|`` stays inside
+  its cell. GitHub needs neither outer pipe inside a table, but a line with
+  neither is not read: telling it from prose takes the table around it, which
+  this does not track. A divider (``---|---``) is the exception — nothing
+  else looks like it.
 """
 
 from __future__ import annotations
@@ -37,6 +39,9 @@ from collections.abc import Iterator, Sequence
 _FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
 _HEADING_RE = re.compile(r"^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$")
 _DIVIDER_CELL_RE = re.compile(r"^:?-+:?$")
+# A divider needs no outer pipe (``---|:--:``); a lone ``---`` is a thematic break.
+_DIVIDER_LINE_RE = re.compile(r"^:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)+$")
+_PIPE_RE = re.compile(r"(?<!\\)\|")
 # A list item's first line; its content starts after the marker and the spaces after it.
 _ITEM_RE = re.compile(r"^(\s*(?:[-+*]|\d{1,9}[.)])\s+)\S")
 
@@ -114,11 +119,19 @@ def headings(lines: Sequence[str]) -> Iterator[tuple[int, int, str]]:
 
 
 def cells(line: str) -> list[str] | None:
-    """A table row's cells, stripped, or None when *line* is not a row."""
+    """A table row's cells, stripped, or None when *line* is not a row.
+
+    An escaped ``\\|`` stays in its cell as ``|``, as GitHub shows it.
+    """
     inner = line.strip()
-    if len(inner) < 2 or not (inner.startswith("|") or inner.endswith("|")):
+    if _DIVIDER_LINE_RE.match(inner):
+        return [c.strip() for c in inner.split("|")]
+    opens = inner.startswith("|")
+    closes = inner.endswith("|") and not inner.endswith("\\|")
+    if len(inner) < 2 or not (opens or closes):
         return None
-    return [c.strip() for c in inner.removeprefix("|").removesuffix("|").split("|")]
+    inner = inner[1 if opens else 0 : -1 if closes else None]
+    return [c.strip().replace("\\|", "|") for c in _PIPE_RE.split(inner)]
 
 
 def is_divider(row: Sequence[str]) -> bool:

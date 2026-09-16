@@ -19,7 +19,7 @@ why the decision no longer holds as written. Cite the evidence.>
 
 ## External evidence since the last amendment
 
-<Required for a sequencing amendment ([decisions.md](../methodology/decisions.md#sequencing-amendments) rule 6). One row per field, "none" where nothing happened; the amendment may not scope a version on internal correctness alone when every row is "none". Extra rows are welcome; `make amendment-evidence-check` fails while one of these five is missing or blank.>
+<Required for a sequencing amendment ([decisions.md](../methodology/decisions.md#sequencing-amendments) rule 6). One row per field, "none" where nothing happened; the amendment may not scope a version on internal correctness alone when every row is "none". Extra rows are welcome; a repository that checks the section (in Persatrix, `make amendment-evidence-check`) fails while one of these five is missing or blank.>
 
 | Field | Since <date of the last amendment> |
 |-------|------------------------------------|
