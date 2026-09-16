@@ -480,10 +480,11 @@ jobs:
         run: make roadmap-status-check
 
   docs-hygiene:
-    # The documentation checks the pre-commit hook runs (links + anchors,
+    # The documentation checks the pre-commit hook runs: links + anchors,
     # leaked tool-call markup, status markers, FILEMAP freshness, merged-PR
-    # history, plan status) had no CI counterpart, so a checkout without the
-    # hook — or a `--no-verify` — could merge a broken link or a stale file map
+    # history, plan status, amendment evidence and methodology conformance.
+    # The first six had no CI counterpart, so a checkout without the hook — or
+    # a `--no-verify` — could merge a broken link or a stale file map
     # (ISSUE-0133: the #840 worktree corruption would have merged a wrong
     # FILEMAP.md unnoticed). All are stdlib-only; the runner's system python3
     # suffices. Full history is fetched because merged-prs and plan-status
