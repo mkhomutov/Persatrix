@@ -1,7 +1,7 @@
 # RFC 0051 Amendment — The Reasoning Kernel (Extension & Extraction Contract)
 
 **Type**: amendment to [RFC 0051](0051-reasoning-before-posting.md) §C / §D / [OQ 5](0051-reasoning-before-posting.md#open-questions) — a design contract; moves no code — **and, since 2026-09-12, the §E correction below** (ISSUE-0108)
-**Status**: 📋 **Proposed**
+**Status**: 📋 **Proposed** (the kernel contract — no code moved); the **§E correction is ✅ Implemented** in v0.3.16 ([ISSUE-0108](../issues/ISSUE-0108-reasoning-reason-note-no-operator-egress.md), [#943](https://github.com/mkhomutov/Persatrix/pull/943))
 **Author**: Maksim Khomutov
 **Date**: 2026-06-24
 **Target**: v0.3.10 (contract recorded alongside PR 3); the extraction it governs is *conditional*, not scheduled

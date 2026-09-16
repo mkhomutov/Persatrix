@@ -1,29 +1,32 @@
 # Enforcement Matrix
 
-> **Last updated**: 2026-09-12
+> **Last updated**: 2026-09-17
 > Every rule the project states, with the document that states it, the check
 > that enforces it, and how hard the enforcement is. Read the **Enforcement**
 > column literally: a rule is only as strong as the weakest place it is
-> checked. Branch protection was read with `gh api` on 2026-09-06.
+> checked. Branch protection was read with `gh api` on 2026-09-15.
 
 ## Enforcement levels
 
 | Level | Meaning |
 |-------|---------|
 | **Required** | A CI status check branch protection requires. A red check blocks the merge. |
-| **CI-advisory** | Runs in CI on every PR, but branch protection does not require it. A red check is visible and mergeable. |
+| **CI-advisory** | Runs in CI on every PR, but branch protection does not require it. A red check is visible and mergeable. No row uses it since 2026-09-15 (every job is required); kept for the next job added before it is made required. |
 | **Pre-commit** | Runs only in the local hook (`scripts/pre_commit.py`). Skipped by any contributor without the hook installed, and by `--no-verify`. |
 | **Make-only** | A `make` target exists; nothing calls it automatically. |
 | **Convention** | Stated in a document; no check. |
 
 Branch protection on `main` today: linear history required, force-push
-blocked, **0 approving reviews required**, and six required contexts —
-`Go (build + test)`, `Proto staleness check`, `Python (lint + test)`,
-`Rust (build + clippy)`, `Validate configs`, `Validate PR Title`. The other
-CI jobs (`File size check`, `Third-party license check`, `Web console (build
-+ test)`, `Dockerignore context hygiene`, `Cost regression gate`, and the new
-`Docs hygiene`) run but are not required. Where a check below says
-Required, it rides inside one of the six required jobs.
+blocked, **0 approving reviews required**, and **twelve required contexts** —
+every CI job, exactly the set versioned in
+[`branch-protection.json`](branch-protection.json): `Go (build + test)`,
+`Proto staleness check`, `Python (lint + test)`, `Rust (build + clippy)`,
+`Validate configs`, `Validate PR Title`, `File size check`, `Third-party
+license check`, `Web console (build + test)`, `Dockerignore context hygiene`,
+`Cost regression gate (bored persona)` and `Docs hygiene` (`make
+branch-protection-show` reported no diff on 2026-09-15). No CI job is
+advisory any more: where a row below says Required, it rides inside one of
+the twelve, and the job is named where it is not one of the original six.
 
 ---
 
@@ -45,17 +48,17 @@ Required, it rides inside one of the six required jobs.
 | YAML configs validate against `schemas/` | CLAUDE.md; instructions | `python agents/validate.py config/` | Required (`Validate configs`) |
 | RFC and issue INDEX files fresh; front-matter valid; each RFC's `**Status**` header line agrees with its front-matter | rfcs/README, issues/README | `make rfcs-check issues-check` | Required (`Validate configs`) |
 | PR title is a Conventional Commit | CONTRIBUTING; BRANCHING | `commitlint.yml` | Required (`Validate PR Title`) |
-| Web console unit tests pass; bundle builds; orchestrator compiles with it | web-console guide | `make ui-test`, `make ui`, `go build` | CI-advisory |
-| No `{@html}` under `web/src` (session-riding XSS) | RFC 0039 amendment §A3 | `make ui-html-check` | CI-advisory |
-| `.dockerignore` excludes nested `node_modules` | ISSUE-0104 | `make dockerignore-check` | CI-advisory |
-| Third-party licences on the allow-list (Go, Python, Rust) | Makefile; `allowed_licenses.txt`; `deny.toml` | `make check-licenses` | CI-advisory |
-| Idle persona spends nothing (RFC 0024) | RFC 0024 §Test Strategy | `test_bored_persona_cost.py`, path-filtered | CI-advisory |
+| Web console unit tests pass; bundle builds; orchestrator compiles with it | web-console guide | `make ui-test`, `make ui`, `go build` | Required (`Web console (build + test)`) |
+| No `{@html}` under `web/src` (session-riding XSS) | RFC 0039 amendment §A3 | `make ui-html-check` | Required (`Web console (build + test)`) |
+| `.dockerignore` excludes nested `node_modules` | ISSUE-0104 | `make dockerignore-check` | Required (`Dockerignore context hygiene`) |
+| Third-party licences on the allow-list (Go, Python, Rust) | Makefile; `allowed_licenses.txt`; `deny.toml` | `make check-licenses` | Required (`Third-party license check`) |
+| Idle persona spends nothing (RFC 0024) | RFC 0024 §Test Strategy | `test_bored_persona_cost.py`, path-filtered | Required (`Cost regression gate (bored persona)`) |
 | `gofmt` / `cargo fmt` clean | instructions | `gofmt -l` over every tracked `.go` file; `cargo fmt -- --check` | Required (`Go`, `Rust`) + Pre-commit (hook covers `internal/`, `cmd/` only) |
 | Go integration tests pass | testing-strategy | `go test ./tests/integration/... -race` | Required (`Go`) |
 | Python sanitizer patterns/enums match the Go canonical source | Makefile (RFC 0009 PR 3) | `make generate-sanitizer-patterns-check` | Required (`Go`) |
 | `THIRD_PARTY_NOTICES.md` matches the dependency graphs | Makefile | `make notices-check` | Make-only — deliberately: the notices file is regenerated at release-prep PR 4, so it is legitimately stale between a dependency bump and the next release (it is stale today) |
 | `agents.yaml` `instructions_file` references resolve | prompt-organization | `scripts/checks/prompt_refs.py` | Required (`Validate configs`) |
-| Personal-tier recall latency within 20 % of baseline | RFC 0029 | `tests/perf/personal_tier_latency.py` | CI-advisory, **informational** until a baseline exists |
+| Personal-tier recall latency within 20 % of baseline | RFC 0029 | `tests/perf/personal_tier_latency.py` | Required job, **informational** until a baseline exists |
 | Weekly Rust advisory / bans / sources audit | CONTRIBUTING | `scheduled-audit.yml` (cargo-deny, Mondays; files an issue on failure) | Scheduled |
 | Dependencies bumped monthly, one grouped PR per ecosystem (Go, pip, Cargo, npm, Actions), `chore(deps)` titles | `.github/dependabot.yml` | Dependabot | Scheduled (security updates run on their own cadence) |
 | Required status checks on `main` match the versioned set | `branch-protection.json` | `make branch-protection-show`; `test_branch_protection_config.py` pins the file to the CI job list | Owner applies; file is reviewed |
@@ -64,8 +67,8 @@ Required, it rides inside one of the six required jobs.
 
 | Rule | Stated in | Check | Enforcement |
 |------|-----------|-------|-------------|
-| Code files ≤ 500 lines | documentation-guide §Size Limits | `file_size.py --strict` | CI-advisory (`File size check`) + Pre-commit |
-| Docs ≤ 3 000 words; RFCs ≤ 8 000 words | documentation-guide | same | CI-advisory + Pre-commit |
+| Code files ≤ 500 lines | documentation-guide §Size Limits | `file_size.py --strict` | Required (`File size check`) + Pre-commit |
+| Docs ≤ 3 000 words; RFCs ≤ 8 000 words | documentation-guide | same | Required (`File size check`) + Pre-commit |
 | Grandfathered files carry a reason and an exit condition | `file_size_allowlist.py` docstring | review; `test_allowlist_has_no_dead_entries`, `test_allowlist_holds_no_released_version_docs` | Convention + unit tests |
 | Released version-cycle docs are frozen evidence, exempt from the cap | documentation-guide §Where Documents Live | `file_size.py` excludes them once `CHANGELOG.md` has the version's dated heading (ISSUE-0139; read from the tree, not `git tag`, so a depth-1 checkout agrees with a full clone); a still-allowlisted released doc prints `[STALE-ALLOWLIST]` (advisory, retired at the post-release follow-up) | Required (`Python` unit tests pin it) |
 | Near-cap warning at 3 % | `file_size.py` | `--near-cap` output on every run | Advisory output |
@@ -77,13 +80,13 @@ Required, it rides inside one of the six required jobs.
 
 | Rule | Stated in | Check | Enforcement |
 |------|-----------|-------|-------------|
-| No broken relative links or anchors in tracked markdown | documentation-guide; consistency checklist | `doc_links.py` | CI-advisory (`Docs hygiene`) + Pre-commit |
-| Only the standard status markers | documentation-guide §Status Markers | `doc_status_markers.py` | CI-advisory (`Docs hygiene`) + Pre-commit |
-| No leaked tool-call markup in docs | — | `doc_leaked_markup.py` | CI-advisory (`Docs hygiene`) + Pre-commit |
-| `FILEMAP.md` matches `git ls-files` | `generate_filemap.py` | `--check` (date-insensitive; on a PR it compares against the merge tree, so a PR behind a file-adding merge fails until updated) | CI-advisory (`Docs hygiene`) + Pre-commit regenerates — closed [ISSUE-0133](../issues/ISSUE-0133-no-ci-gate-on-filemap-freshness.md) |
-| Merged-PR history (`docs/merged-prs.md`) matches the squash log, allowing only the newest merges to be missing | automation-catalogue | `scripts/merged_prs.py --check` | CI-advisory (`Docs hygiene`) + Pre-commit regenerates |
-| No plan row says "PR open" / "not started" for a PR that has merged | release-cycle §Phase 1 | `scripts/checks/plan_status.py` (`make plan-status-check`) | CI-advisory (`Docs hygiene`) + Pre-commit — first run found ten stale rows; judging an unlinked 🔀 row by the commit that wrote it found eight more |
-| Every artifact the methodology names exists (documents, tools, make targets, Docs-hygiene steps) | [conformance.json](conformance.json) | `make conformance-check` | CI-advisory (`Docs hygiene`) + Pre-commit |
+| No broken relative links or anchors in tracked markdown | documentation-guide; consistency checklist | `doc_links.py` | Required (`Docs hygiene`) + Pre-commit |
+| Only the standard status markers | documentation-guide §Status Markers | `doc_status_markers.py` | Required (`Docs hygiene`) + Pre-commit |
+| No leaked tool-call markup in docs | — | `doc_leaked_markup.py` | Required (`Docs hygiene`) + Pre-commit |
+| `FILEMAP.md` matches `git ls-files` | `generate_filemap.py` | `--check` (date-insensitive; on a PR it compares against the merge tree, so a PR behind a file-adding merge fails until updated) | Required (`Docs hygiene`) + Pre-commit regenerates — closed [ISSUE-0133](../issues/ISSUE-0133-no-ci-gate-on-filemap-freshness.md) |
+| Merged-PR history (`docs/merged-prs.md`) matches the squash log, allowing only the newest merges to be missing | automation-catalogue | `scripts/merged_prs.py --check` | Required (`Docs hygiene`) + Pre-commit regenerates |
+| No plan row says "PR open" / "not started" for a PR that has merged | release-cycle §Phase 1 | `scripts/checks/plan_status.py` (`make plan-status-check`) | Required (`Docs hygiene`) + Pre-commit — first run found ten stale rows; judging an unlinked 🔀 row by the commit that wrote it found eight more |
+| Every artifact the methodology names exists (documents, tools, make targets, Docs-hygiene steps) | [conformance.json](conformance.json) | `make conformance-check` | Required (`Docs hygiene`) + Pre-commit |
 | No ROADMAP Component Status row says less than the RFC it names | ROADMAP §How to Update | `scripts/checks/roadmap_status.py` (`make roadmap-status-check`) | Required (`Validate configs`) + Pre-commit — its first run found `internal/security/` still "In progress" four months after RFC 0009 closed part-way |
 | Unified doc audit (links + markers + sizes) | `doc_audit.py` | — | Local convenience wrapper; its three checks run individually in CI |
 | Local-only files never referenced from committed files | CLAUDE.md; copilot-instructions; review-process | review | Convention |
@@ -99,6 +102,7 @@ Required, it rides inside one of the six required jobs.
 | Every PR reviewed; findings dispositioned | review-process | — | Convention (0 GitHub approvals required) |
 | Migrations land ahead of their consumer, one store per PR | release-cycle | review | Convention |
 | Scope locks change only by amendment | decisions | review | Convention |
+| Every sequencing amendment since 2026-09-12 records its external evidence | decisions rule 6 | `scripts/checks/amendment_evidence.py` (`make amendment-evidence-check`): the section and its five rows are present, filled and given once, and no heading from that date names an amendment in another form (a unit test pins the CI step and the make target, which the conformance manifest no longer does); what the amendment concludes from them is review's call | Required (`Docs hygiene`) + Pre-commit |
 | Live arc runs once, live, before the tag | release-cycle | release checklist §4 | Convention, evidenced in the report |
 | Version strings aligned across five files | version-bump guide | `make bump-version` + checklist §2 | Manual at release-prep PR 3 |
 | TDD for new unit-level code | CLAUDE.md §TDD | review | Convention |
@@ -112,13 +116,12 @@ Required, it rides inside one of the six required jobs.
 
 Listed here so the matrix is honest about its own gaps.
 
-1. **Make the six advisory CI jobs required.** The intended set is now
-   versioned in [`branch-protection.json`](branch-protection.json) (all
-   twelve contexts; a test keeps it equal to the CI job list) and applied
-   with `make branch-protection-apply` — a repository setting that needs the
-   owner's admin token, so it is still the one step in this list that is
-   run by hand. `make branch-protection-show` says whether the live setting
-   matches the file.
+1. ~~Make the six advisory CI jobs required.~~ Done: the owner applied the
+   set versioned in [`branch-protection.json`](branch-protection.json) (all
+   twelve contexts; a test keeps it equal to the CI job list), and
+   `make branch-protection-show` reported the live setting equal to the
+   file on 2026-09-15. It stays the one step in this list that is run by
+   hand, because it needs the owner's admin token.
 2. ~~Move the pre-commit-only and make-only checks into CI.~~ Done in the
    CI-promotion PR of the methodology series: gofmt, cargo fmt, ruff + mypy
    on `scripts/` and `evaluators/`, the Go integration tests, the sanitizer

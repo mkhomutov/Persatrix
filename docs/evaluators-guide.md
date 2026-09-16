@@ -262,7 +262,7 @@ sources). The first two exercise the two memory axes:
 
 The other four — `EVAL-MEMORY-002`/`003` (cross-room carry, shadow and live,
 RFC 0049), `EVAL-MEMORY-004` (the RFC 0037 confidentiality gate) and
-`EVAL-MEMORY-005` (the ISSUE-0132 audience check) — pin request hashes. All six
+`EVAL-MEMORY-005` (the ISSUE-0132 audience check, `live` since PR A3) — pin request hashes. All six
 assert only over `final_transcript` / `terminal_state`, and all six replay green
 on every PR twice: through the `TIER=stable` gate and through their integration
 tests ([memory](../tests/integration/test_eval_seed_replay.py),

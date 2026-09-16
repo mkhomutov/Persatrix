@@ -2,9 +2,9 @@
 
 **Test ID**: `MT-CONSOLE-002`
 **Feature Area**: Web Console (RFC 0048) — `@`-mentions over the channel composer (RFC 0011)
-**Version**: 1.0
+**Version**: 1.1
 **Created**: 2026-06-04
-**Last Updated**: 2026-06-04
+**Last Updated**: 2026-09-15
 **Status**: Active
 
 ---
@@ -61,7 +61,7 @@ suite), the `when_mentioned`/`always` response-policy semantics themselves
 - ☐ Linux (Ubuntu 22.04+)
 
 **Dependencies Installed**:
-- Node 22+ for the local `make ui` build path (the Docker path builds in-image)
+- Node `^22.22.2 || ^24.15.0 || >=26.0.0` for the local `make ui` build path (`npm ci` refuses any other Node; the Docker path builds in-image)
 - A browser with dev tools (to inspect the publish request body)
 - `ANTHROPIC_API_KEY` set for a live fan-out, **or** `make demo-offline` (the mock
   provider still fans out to the mentioned member; the reply text is canned)

@@ -114,9 +114,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # The lowest Node web/package.json's engines range admits, not a floating
+      # "22": a dependency bump that raises the requirement then fails `npm ci`
+      # here (web/.npmrc sets engine-strict) instead of only on a contributor's
+      # older Node. tests/unit/python/test_web_node_engines_floor.py pins both.
       - uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version: "22.22.2"
           cache: npm
           cache-dependency-path: web/package-lock.json
 
@@ -476,13 +480,15 @@ jobs:
         run: make roadmap-status-check
 
   docs-hygiene:
-    # The documentation checks the pre-commit hook runs (links + anchors,
+    # The documentation checks the pre-commit hook runs: links + anchors,
     # leaked tool-call markup, status markers, FILEMAP freshness, merged-PR
-    # history, plan status) had no CI counterpart, so a checkout without the
-    # hook — or a `--no-verify` — could merge a broken link or a stale file map
+    # history, plan status, amendment evidence and methodology conformance.
+    # The first six had no CI counterpart, so a checkout without the hook — or
+    # a `--no-verify` — could merge a broken link or a stale file map
     # (ISSUE-0133: the #840 worktree corruption would have merged a wrong
     # FILEMAP.md unnoticed). All are stdlib-only; the runner's system python3
-    # suffices. Full history is fetched because the last two read `git log`.
+    # suffices. Full history is fetched because merged-prs and plan-status
+    # read `git log`.
     name: Docs hygiene
     runs-on: ubuntu-latest
     steps:
@@ -528,6 +534,14 @@ jobs:
       # status-hygiene defect in the history. Checked against the same log.
       - name: Check no plan row announces an already-merged PR as open
         run: python scripts/checks/plan_status.py
+
+      # The Amendment 2026-09-12 made every sequencing amendment record what
+      # happened outside the project first (decisions.md rule 6), and asked
+      # for a check rather than intention: the 2026-06-04 decision to order
+      # releases by what would attract users was reversed seven weeks later
+      # with no word from any user, and nothing in the cycle noticed.
+      - name: Check each sequencing amendment records its external evidence
+        run: python scripts/checks/amendment_evidence.py
 
       # The methodology's contract (docs/methodology/conformance.json): the
       # documents, tools, make targets and CI steps it consists of. A PR that

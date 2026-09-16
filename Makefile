@@ -123,6 +123,7 @@ build-orchestrator-ui: ui build-orchestrator ## Build the orchestrator with the 
 build-cli: ## Build Rust CLI binary
 	@echo "→ Building CLI..."
 	cd cli && $(CARGO) build --release
+	@mkdir -p $(GO_BIN)
 	@cp cli/target/release/persatrix$(EXE) $(GO_BIN)/persatrix$(EXE) 2>/dev/null || true
 	@echo "✓ CLI built → $(GO_BIN)/persatrix$(EXE)"
 
@@ -553,6 +554,9 @@ rfcs: ## Regenerate docs/rfcs/INDEX.md from per-RFC YAML front-matter
 
 merged-prs: ## Regenerate docs/merged-prs.md from the squash-merge subjects on main
 	$(PYTHON) scripts/merged_prs.py
+
+amendment-evidence-check: ## Fail if a sequencing amendment since 2026-09-12 has no filled-in External evidence section (CI)
+	$(PYTHON) scripts/checks/amendment_evidence.py
 
 merged-prs-check: ## Fail if docs/merged-prs.md is behind git log (CI)
 	$(PYTHON) scripts/merged_prs.py --check

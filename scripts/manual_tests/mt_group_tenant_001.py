@@ -39,6 +39,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from scripts.manual_tests import mt_gate  # noqa: E402
 from scripts.manual_tests import mt_group_tenant_evidence as ev  # noqa: E402
 from scripts.manual_tests import mt_group_tenant_preflight as pf  # noqa: E402
 from scripts.manual_tests.mt_group_tenant_ops import (  # noqa: E402
@@ -321,40 +322,13 @@ def _write_artifacts(ctx: Ctx, execute: bool, partial: bool = False) -> None:
 
 
 def parse_legs(spec: str) -> list[int]:
-    """Expand a leg spec, rejecting anything that would run nothing.
+    """This MT's leg spec — the shared parser bound to its legs.
 
-    Wired as argparse's ``type=`` so every rejection below surfaces as a usage
-    error. Silence here was a live hazard: `--legs 10` filtered to the empty
-    set and `--legs 5-3` expanded to an empty range, and a zero-leg `--execute`
-    run still captured cost, wrote an evidence file headed "collected
-    evidence", and exited **0** — a paid arc that drove nothing and reported
-    success. That is precisely the vacuous pass this toolchain exists to stop.
-    A non-numeric spec used to raise a bare `ValueError` traceback.
+    Wired as argparse's ``type=``; the shared parser raises ``ValueError``,
+    which argparse renders as a usage error, so a zero-leg ``--execute`` run
+    can never spend and report success (the hazard this guard exists for).
     """
-    chosen: set[int] = set()
-    for part in spec.split(","):
-        part = part.strip()
-        if not part:
-            continue
-        lo_raw, hi_raw = part.split("-", 1) if "-" in part else (part, part)
-        try:
-            lo, hi = int(lo_raw), int(hi_raw)
-        except ValueError:
-            raise argparse.ArgumentTypeError(
-                f"{part!r} is not a leg number or range"
-            ) from None
-        if hi < lo:
-            raise argparse.ArgumentTypeError(f"range {part!r} runs backwards")
-        unknown = [str(n) for n in range(lo, hi + 1) if n not in LEGS]
-        if unknown:
-            raise argparse.ArgumentTypeError(
-                f"no leg {', '.join(unknown)} "
-                f"(this MT has legs {min(LEGS)}-{max(LEGS)})"
-            )
-        chosen.update(range(lo, hi + 1))
-    if not chosen:
-        raise argparse.ArgumentTypeError(f"{spec!r} selects no legs")
-    return sorted(chosen)
+    return mt_gate.parse_legs(spec, LEGS)
 
 
 def main(argv: list[str] | None = None) -> int:

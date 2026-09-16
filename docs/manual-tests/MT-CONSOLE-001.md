@@ -2,9 +2,9 @@
 
 **Test ID**: `MT-CONSOLE-001`
 **Feature Area**: Web Console (RFC 0048 Slice 1 — Interactions)
-**Version**: 1.0
+**Version**: 1.1
 **Created**: 2026-06-03
-**Last Updated**: 2026-06-03
+**Last Updated**: 2026-09-15
 **Status**: Active
 
 ---
@@ -60,7 +60,7 @@ into this script once Slice 2 lands (per [RFC §Test Strategy](../rfcs/0048-oper
 **Dependencies Installed**:
 - Go 1.24+: `go version`
 - Python 3.11+: `python3 --version`
-- Node 22+: `node --version` (only for the local `make ui` build path; the Docker path builds the bundle in-image)
+- Node `^22.22.2 || ^24.15.0 || >=26.0.0`: `node --version` (only for the local `make ui` build path, where `npm ci` refuses any other Node; the Docker path builds the bundle in-image)
 - `curl` and a browser available
 
 ### Application State

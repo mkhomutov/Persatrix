@@ -308,7 +308,13 @@ Stop with `make docker-down`.
 The convener/chair/participant turns come from the curated
 `config/offline_responses.yaml` fixtures, so the offline discussion is
 deterministic — it demonstrates the *shape* of a human-free brainstorm, not a
-live model's reasoning. Swap `provider: mock` for a keyed vendor (`make
+live model's reasoning. The mock answers each participant's open-floor bid, so
+all three personas take part; before v0.3.16 it could not, and only the
+convener spoke ([ISSUE-0160](../issues/ISSUE-0160-offline-roundtable-only-the-convener-speaks.md)).
+Give a re-run a minute: the agents' REST calls share one rate-limit bucket
+([ISSUE-0111](../issues/ISSUE-0111-anonymous-wallet-rpcs-share-rate-limit-bucket.md)),
+and a convene inside the minute a discussion just used can see its opener
+refused, so nothing starts. Swap `provider: mock` for a keyed vendor (`make
 demo-anthropic`, `demo-openai`, `demo-gemini` or `demo-watsonx`; the four-vendor
 roster in
 [`blueprints/autonomous-multivendor`](../../blueprints/autonomous-multivendor/blueprint.yaml)

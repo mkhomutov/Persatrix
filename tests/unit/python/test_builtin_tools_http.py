@@ -48,13 +48,11 @@ def _setup_tools(tmp_path: Path, permissions: dict | None = None) -> None:
             "write": [str(tmp_path / "**")],
         },
         "shell": {
-            "exec": True,
             "allowed_commands": ["echo", "python", "cat"],
         },
         "network": {
             "allow": ["api.example.com"],
             "deny": ["*"],
-            "http": True,
         },
     }
     builtin.permission_gate = PermissionGate(perms)

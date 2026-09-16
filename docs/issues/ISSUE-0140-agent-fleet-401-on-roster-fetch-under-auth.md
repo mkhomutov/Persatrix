@@ -88,3 +88,15 @@ attribution axes — and is carried as a Known Gap on the
 > is decided with RFC 0009, not at a patch-release plan opening.
 >
 > 2026-09-08 — **Confirmed out of scope at the v0.3.16 plan opening** ([v0.3.16 scope locks](../v0.3.16-scope-locks.md) lock 3); the ROADMAP row that called this load-bearing for the audience gate is corrected in the same PR.
+>
+> 2026-09-15 — **Observed live at the v0.3.16 release-prep arc**
+> ([execution report](../manual-tests/v0.3.16-execution-report.md), Leg 5
+> under `auth.mode: enabled`): on the same persona turn the fleet drew the
+> directory `401` described here **and** a second one on the persona's
+> `channels:recall` tool (`POST /api/v1/personas/{id}/recall`, also
+> `policyAuthenticated`), so the persona told the asker "channel history is
+> unreachable right now". The audience gate was unaffected, as the
+> plan-opening default intended: its channel-members fetch answered (one
+> fetch, zero *fetch-failed*) and both DM-taught entries were withheld at
+> *withhold-disjoint*. The recall route is one more caller of the fix shape
+> decided with RFC 0009; nothing changes here for v0.3.16.

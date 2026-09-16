@@ -10,6 +10,16 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# A tool whose config scopes it with a list is granted by that list being
+# non-empty, as ``filesystem.read`` and ``filesystem.write`` already are
+# under their own names. ``shell_exec`` and ``http_request`` ask for
+# ``shell:exec`` and ``network:http``, but the agent schema has no ``exec``
+# or ``http`` key, so their grant is the list that scopes them (ISSUE-0150).
+_GRANTED_BY_LIST: dict[str, str] = {
+    "shell:exec": "allowed_commands",
+    "network:http": "allow",
+}
+
 
 class PermissionGate:
     """Deny-by-default permission checker for agent tool invocations.
@@ -26,8 +36,10 @@ class PermissionGate:
         """Check if a dotted permission string is granted.
 
         Format: ``"category:action"`` (e.g. ``"filesystem:read"``).
-        Returns True only if the category exists in config and the action
-        key is present with a truthy value (non-empty list or True).
+        Returns True only if the category exists in config and the key
+        that grants the action holds a truthy value (non-empty list or
+        True). That key is the action's own name, except for the
+        list-scoped tools in ``_GRANTED_BY_LIST``.
         """
         parts = permission.split(":", 1)
         if len(parts) != 2:
@@ -40,7 +52,7 @@ class PermissionGate:
             logger.debug("Permission denied (no config for category): %s", permission)
             return False
 
-        value = cat_config.get(action)
+        value = cat_config.get(_GRANTED_BY_LIST.get(permission, action))
         if not value:
             logger.debug("Permission denied (action not configured): %s", permission)
             return False
@@ -78,6 +90,18 @@ class PermissionGate:
 
         logger.debug("Command denied (no matching pattern): %s", args)
         return False
+
+    def shell_time_limit(self) -> int | None:
+        """The most seconds one shell command may run for this agent.
+
+        Read from ``shell.max_execution_seconds``. None when it is unset or
+        not a positive whole number; the caller's own ceiling applies then.
+        """
+        shell_config = self._permissions.get("shell") or {}
+        limit = shell_config.get("max_execution_seconds")
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+            return None
+        return limit
 
     def is_domain_allowed(self, domain: str) -> bool:
         """Check if a network domain is allowed.

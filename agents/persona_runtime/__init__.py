@@ -371,7 +371,7 @@ class _LLMPersonaAgent(
                 # tenant AND epoch for the handler's lifetime (``wait_for``'s child
                 # task copies these scopes; see ``request_scope_from_metadata``).
                 try:
-                    with request_scope_from_metadata(event.metadata):
+                    with request_scope_from_metadata(event.metadata, channel_id=event.channel_id):
                         actions = await asyncio.wait_for(
                             self._on_event_inner(event), timeout=timeout,
                         )

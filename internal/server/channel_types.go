@@ -412,7 +412,11 @@ type recallRequest struct {
 	Before               time.Time `json:"before"`
 	Limit                int       `json:"limit,omitempty"`
 	ActingClassification string    `json:"acting_classification"`
-	EpochID              *string   `json:"epoch_id,omitempty"`
+	// ActingChannelID (ISSUE-0158) is the acting room's id, sent by the
+	// persona tool only when its `memory.egress.audience` resolves `live`;
+	// absent means no audience condition (the pre-0158 read).
+	ActingChannelID string  `json:"acting_channel_id,omitempty"`
+	EpochID         *string `json:"epoch_id,omitempty"`
 }
 
 // recallMessageResponse is one recalled message in the RFC 0036 PR 3 payload.

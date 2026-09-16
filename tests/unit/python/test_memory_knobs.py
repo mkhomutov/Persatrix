@@ -15,11 +15,13 @@ always the shipped one; the configured path is pinned in
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from agents.persona_runtime.audience import (
     AUDIENCE_LIVE,
-    AUDIENCE_SHADOW,
     resolve_memory_audience,
 )
 from agents.persona_runtime.cross_room import (
@@ -63,8 +65,26 @@ def test_the_defaults_are_the_shipped_posture() -> None:
     assert knobs.budget_tokens == MEMORY_BUDGET_TOKENS == 1500
     assert knobs.facts_cross_room == CROSS_ROOM_LIVE
     assert knobs.episodic_cross_room == CROSS_ROOM_LIVE
-    # Shadow for the whole v0.3.16 cycle (scope lock 1).
-    assert knobs.audience == AUDIENCE_SHADOW
+    # Live since v0.3.16 PR A3 flipped it on the green verdict (scope lock 1).
+    assert knobs.audience == AUDIENCE_LIVE
+
+
+def test_the_schema_defaults_say_the_same_posture() -> None:
+    """``schemas/agent.schema.json`` carries a documentation-only
+    ``default`` per knob that nothing reads at runtime, so this is the
+    only pin keeping the schema and the resolvers in step — a flip (or a
+    rollback) that edits one and forgets the other fails here."""
+    schema = json.loads(
+        (Path(__file__).resolve().parents[3] / "schemas" / "agent.schema.json")
+        .read_text(encoding="utf-8")
+    )
+    memory = schema["definitions"]["memory"]["properties"]
+    knobs = resolve_memory_knobs({})
+    assert memory["facts"]["properties"]["cross_room"]["default"] == knobs.facts_cross_room
+    assert memory["episodic"]["properties"]["cross_room"]["default"] == (
+        knobs.episodic_cross_room
+    )
+    assert memory["egress"]["properties"]["audience"]["default"] == knobs.audience
 
 
 def test_a_bad_value_is_still_rejected_at_construction() -> None:

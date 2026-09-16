@@ -32,7 +32,9 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Iterator
+import shutil
+import subprocess
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +42,44 @@ import pytest
 import yaml
 
 _logger = logging.getLogger(__name__)
+
+
+# ─── golden-trace strip tests (RFC 0044) ─────────────────────────────────────
+#
+# A "strip test" replays a committed golden under a changed posture and
+# expects the cassette to MISS: that is what makes the golden's request-hash
+# pin load-bearing rather than the mock-authored transcript. Every seed
+# suite stages the same way, so the staging and the verdict live here.
+
+
+def stage_recipe_override(
+    recipe_path: Path, tmp_path: Path, mutate: Callable[[dict[str, Any]], None],
+) -> Path:
+    """Copy one eval recipe into ``tmp_path`` with ``mutate`` applied to the
+    loaded document, and its golden sidecar beside it unchanged. Returns
+    ``tmp_path`` — pass it as the runner's ``--eval-sets-dir``."""
+    from evaluators.runner import golden_path_for  # pulls ``agents``; keep lazy
+
+    recipe = yaml.safe_load(recipe_path.read_text(encoding="utf-8"))
+    mutate(recipe)
+    (tmp_path / recipe_path.name).write_text(
+        yaml.safe_dump(recipe), encoding="utf-8",
+    )
+    golden = golden_path_for(recipe_path)
+    shutil.copy(golden, tmp_path / golden.name)
+    return tmp_path
+
+
+def assert_cassette_miss(
+    result: subprocess.CompletedProcess[str], why: str,
+) -> None:
+    """The strip-test verdict: the replay failed, and failed on a cassette
+    miss. The miss surfaces through the runtime's LLM-error wrapping, so
+    this matches the ``ReplayCassetteMissError`` message, not the class."""
+    assert result.returncode != 0, f"{why}:\n{result.stdout}\n{result.stderr}"
+    assert "no recorded response for request" in result.stderr, (
+        result.stdout, result.stderr,
+    )
 
 
 def daemonize_aiosqlite_workers() -> None:

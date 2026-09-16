@@ -141,7 +141,19 @@ async def file_write(path: str, content: str) -> ToolResult:
 
 # Maximum timeout in seconds for shell commands. Prevents LLM from
 # requesting effectively infinite timeouts via the exposed parameter.
+# An agent's ``shell.max_execution_seconds`` can lower it, never raise it.
 MAX_TIMEOUT_SECONDS = 300
+
+
+def _shell_timeout(requested: int, limit: int | None) -> int:
+    """Clamp the model's timeout to [1, cap] to prevent resource abuse.
+
+    The cap is the agent's ``shell.max_execution_seconds`` (``limit``),
+    never above ``MAX_TIMEOUT_SECONDS``. timeout=0 wastes a process spawn;
+    large values create runaway processes.
+    """
+    cap = min(limit or MAX_TIMEOUT_SECONDS, MAX_TIMEOUT_SECONDS)
+    return max(1, min(requested, cap))
 
 
 @tool(
@@ -158,9 +170,7 @@ async def shell_exec(command: str, timeout: int = 30) -> ToolResult:
     if not gate.check("shell:exec"):
         return ToolResult(success=False, error="Permission denied: shell:exec")
 
-    # Clamp timeout to [1, MAX_TIMEOUT_SECONDS] to prevent resource abuse.
-    # timeout=0 wastes a process spawn; large values create runaway processes.
-    timeout = max(1, min(timeout, MAX_TIMEOUT_SECONDS))
+    timeout = _shell_timeout(timeout, gate.shell_time_limit())
 
     try:
         args = shlex.split(command)

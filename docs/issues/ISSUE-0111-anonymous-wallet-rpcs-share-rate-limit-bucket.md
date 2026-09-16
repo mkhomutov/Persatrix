@@ -106,3 +106,13 @@ Landed with the v0.3.11 release-prep MT-execution PR (TDD,
 > [ISSUE-0152](ISSUE-0152-one-quarantine-refuses-every-anonymous-caller.md);
 > giving the agents' REST calls their agent ID, the residual above, is one of
 > its proposed steps.
+
+> 2026-09-15 — the anonymous REST bucket now bites the offline demo. With the
+> [ISSUE-0160](ISSUE-0160-offline-roundtable-only-the-convener-speaks.md) fix
+> the `roundtable` actually discusses, and the mock replies instantly, so a
+> booted `make demo-autonomous` spends 58 of the shared 60 calls in its first
+> minute (boot, arm, convene and the whole discussion). A convene inside that
+> minute returns `202`, the convener's opener `POST` gets `429`, and nothing
+> starts; a minute later the same convene runs the full discussion. The web
+> console is not part of it — it sends its own `X-Agent-ID`. The guide tells a
+> demo user to wait a minute; the residual above is the fix.
