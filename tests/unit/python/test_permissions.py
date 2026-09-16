@@ -42,8 +42,25 @@ class TestCheck:
         assert gate.check("no-colon") is False
 
     def test_truthy_boolean_action(self):
-        gate = PermissionGate({"shell": {"exec": True}})
-        assert gate.check("shell:exec") is True
+        gate = PermissionGate({"memory": {"read": True}})
+        assert gate.check("memory:read") is True
+
+    @pytest.mark.parametrize(
+        ("permissions", "permission", "granted"),
+        [
+            ({"shell": {"allowed_commands": ["pytest"]}}, "shell:exec", True),
+            ({"shell": {"allowed_commands": []}}, "shell:exec", False),
+            ({"shell": {"exec": True}}, "shell:exec", False),
+            ({"network": {"allow": ["api.example.com"]}}, "network:http", True),
+            ({"network": {"allow": [], "deny": ["*"]}}, "network:http", False),
+            ({"network": {"http": True}}, "network:http", False),
+        ],
+    )
+    def test_list_scoped_tool_is_granted_by_its_list(self, permissions, permission, granted):
+        """ISSUE-0150: the agent schema has no ``shell.exec`` or
+        ``network.http`` key, so the allowlist that scopes each tool is its
+        grant — and a key the schema forbids grants nothing."""
+        assert PermissionGate(permissions).check(permission) is granted
 
 
 class TestIsCommandAllowed:
@@ -176,6 +193,27 @@ class TestIsDomainAllowed:
         assert gate.is_domain_allowed("example.com") is False
 
 
+class TestShellTimeLimit:
+    """``shell.max_execution_seconds``: the most seconds one shell command
+    may run for this agent (ISSUE-0150)."""
+
+    @pytest.mark.parametrize(
+        ("permissions", "limit"),
+        [
+            ({"shell": {"max_execution_seconds": 30}}, 30),
+            ({"shell": {"allowed_commands": ["ls"]}}, None),
+            ({}, None),
+            # Not a positive whole number, so ignored and the tool's own
+            # ceiling applies. The schema rejects all three.
+            ({"shell": {"max_execution_seconds": 0}}, None),
+            ({"shell": {"max_execution_seconds": True}}, None),
+            ({"shell": {"max_execution_seconds": "30"}}, None),
+        ],
+    )
+    def test_reads_the_configured_limit(self, permissions, limit):
+        assert PermissionGate(permissions).shell_time_limit() == limit
+
+
 class TestCodeWriterPermissions:
     """Integration-style tests using the code-writer agent config from agents.yaml."""
 
@@ -204,7 +242,7 @@ class TestCodeWriterPermissions:
         assert gate.check("filesystem:write") is True
 
     def test_shell_exec_granted(self, gate):
-        assert gate.check("shell:allowed_commands") is True
+        assert gate.check("shell:exec") is True
 
     def test_python_command_allowed(self, gate):
         assert gate.is_command_allowed(["python", "test.py"]) is True
