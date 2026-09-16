@@ -189,7 +189,11 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "allow": { "type": "array", "items": { "type": "string" } },
+            "allow": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Domains the http_request tool may call, matched exactly and case-insensitively; an entry here wins over 'deny'. A non-empty list is also what turns the tool on: there is no separate switch (ISSUE-0150)."
+            },
             "deny": { "type": "array", "items": { "type": "string" } }
           }
         },
@@ -197,8 +201,17 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "allowed_commands": { "type": "array", "items": { "type": "string" } },
-            "max_execution_seconds": { "type": "integer" }
+            "allowed_commands": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Commands the shell_exec tool may run, matched word by word from the start: 'git diff' admits 'git diff main' but not 'git push'. A non-empty list is also what turns the tool on: there is no separate switch (ISSUE-0150)."
+            },
+            "max_execution_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 300,
+              "description": "The most seconds one shell_exec command may run for this agent. The model picks a timeout (30 unless it asks otherwise) and gets at most this; unset, the tool's own ceiling applies. 300 is that ceiling (MAX_TIMEOUT_SECONDS in agents/tools/builtin.py): a limit can lower it, never raise it."
+            }
           }
         },
         "memory": {

@@ -22,6 +22,7 @@ refs:
   - docs/rfcs/0004-python-agent-grpc-server.md
   - docs/issues/ISSUE-0143-debt-sweep-26-files-at-size-cap.md
   - docs/issues/ISSUE-0147-unregistered-agent-tools-dropped-silently.md
+  - docs/issues/ISSUE-0150-schema-valid-config-cannot-enable-shell-exec-or-http-request.md
   - tests/unit/python/test_base_handle.py
   - tests/unit/python/test_external_tool_wrapping.py
   - tests/unit/python/test_agents.py
@@ -35,7 +36,8 @@ runs any registered tool the model names, listed or not. For a task agent the
 list only decides which tools the model is told about. Today the permission
 gate happens to refuse every tool the shipped task agents leave off their
 lists, so nothing is exposed yet. That stops being true for `http_request` once
-ISSUE-0150 lands.
+[ISSUE-0150](ISSUE-0150-schema-valid-config-cannot-enable-shell-exec-or-http-request.md)
+lands.
 
 ## Context
 

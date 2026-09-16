@@ -68,6 +68,9 @@ agents:
         write: ["/workspace", "/workspace/src/**", "/workspace/src", "/workspace/tests/**", "/workspace/tests", "/workspace/*.py", "/workspace/*.md"]
         deny: ["/workspace/.env", "**/.git/**"]
       shell:
+        # A non-empty list turns shell_exec on and limits what it runs;
+        # max_execution_seconds caps each command (300 at most) —
+        # docs/issues/ISSUE-0150-schema-valid-config-cannot-enable-shell-exec-or-http-request.md
         allowed_commands: ["python", "pytest", "ruff", "git diff"]
         max_execution_seconds: 30
       network:

@@ -522,7 +522,7 @@ Deliverables:
 2. Tool registry validation step: schema-check before `PermissionGate` check.
 3. `ResourceLimiter` (CPU + wall time for `shell_exec`).
 4. `OutputSizeLimiter` (byte cap, truncation with notice).
-5. Configurable defaults in agents.yaml (`resource_limits:` block per agent).
+5. Configurable defaults in agents.yaml (`resource_limits:` block per agent). The shell wall-time limit already has a per-agent key, `permissions.shell.max_execution_seconds` ([ISSUE-0150](../issues/ISSUE-0150-schema-valid-config-cannot-enable-shell-exec-or-http-request.md)): adopt it or migrate it rather than add a second.
 6. Emit audit events for schema validation failures and resource limit hits.
 
 Dependencies: Phase 1.
