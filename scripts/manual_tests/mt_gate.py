@@ -24,6 +24,7 @@ import json
 import os
 import urllib.error
 import urllib.request
+from collections.abc import Collection
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -164,3 +165,34 @@ def deferred_gate(name: str, leg: str) -> Gate:
     )
 
 
+def parse_legs(spec: str, known: Collection[int]) -> list[int]:
+    """Expand a leg spec (``1-4``, ``5,6``) against the driver's known legs.
+
+    Rejects anything that would run nothing — a spec selecting no legs, a
+    range that runs backwards, a leg the driver does not have. Silence here
+    was a live hazard: a zero-leg ``--execute`` run once captured cost, wrote
+    an evidence file and exited 0 — a paid arc that drove nothing. Raises
+    ``ValueError``, which argparse renders as a usage error under ``type=``.
+    Shared by every arc driver.
+    """
+    chosen: set[int] = set()
+    for part in spec.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        lo_raw, hi_raw = part.split("-", 1) if "-" in part else (part, part)
+        try:
+            lo, hi = int(lo_raw), int(hi_raw)
+        except ValueError:
+            raise ValueError(f"{part!r} is not a leg number or range") from None
+        if hi < lo:
+            raise ValueError(f"range {part!r} runs backwards")
+        unknown = [str(n) for n in range(lo, hi + 1) if n not in known]
+        if unknown:
+            raise ValueError(
+                f"no leg {', '.join(unknown)} (this MT has legs {min(known)}-{max(known)})"
+            )
+        chosen.update(range(lo, hi + 1))
+    if not chosen:
+        raise ValueError(f"{spec!r} selects no legs")
+    return sorted(chosen)

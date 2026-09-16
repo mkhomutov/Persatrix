@@ -138,6 +138,51 @@ func classificationScope(acting Classification) (string, []any) {
 	return clause, args
 }
 
+// audienceScope is the ISSUE-0158 audience condition on recall: a message is
+// admitted when its channel holds every current member of the acting channel
+// (the acting room adds nobody the source room did not hold — the comparison
+// the §D injection gate makes, agents/persona_runtime/audience.py), with the
+// two exemptions §D has and one deliberate difference:
+//
+//   - a message in a `public` channel is always admitted — shareable by
+//     definition (scope lock 1), exactly as §D exempts public entries;
+//   - an acting channel with no members admits everything: unknown admits,
+//     as `live` admits an unresolved roster;
+//   - a SOURCE channel with no members withholds. §D reads an emptied roster
+//     as unknown and admits; recall fails closed instead — an emptied room has
+//     no audience to compare and its transcript should not travel. Pinned by
+//     TestRecallMessages_AudienceScope_EmptiedSourceRoomWithholds.
+//
+// Written uncorrelated on purpose: the admitted channel set depends only on
+// the acting channel, so it is computed once per query (a one-shot list
+// subquery) rather than re-probed per candidate row — on the recency / LIKE
+// path that is a full scan of `messages`, on the store's single connection.
+// Reads `memberships`, the current member set the persona's audience check
+// resolves via GET /api/v1/channels/{id}, not the RFC 0035 interval ledger,
+// which is the participant's own access scope and already applied above.
+func audienceScope(actingChannelID string) (string, []any) {
+	if actingChannelID == "" {
+		return "", nil
+	}
+	clause := `
+          AND (
+              EXISTS (
+                  SELECT 1 FROM channels pc
+                   WHERE pc.id = m.channel_id AND pc.classification = ?
+              )
+              OR NOT EXISTS (SELECT 1 FROM memberships WHERE channel_id = ?)
+              OR m.channel_id IN (
+                  SELECT s.channel_id FROM memberships s
+                   WHERE s.participant_id IN (
+                       SELECT participant_id FROM memberships WHERE channel_id = ?
+                   )
+                   GROUP BY s.channel_id
+                  HAVING COUNT(*) = (SELECT COUNT(*) FROM memberships WHERE channel_id = ?)
+              )
+          )`
+	return clause, []any{string(ClassificationPublic), actingChannelID, actingChannelID, actingChannelID}
+}
+
 // recallNarrowing builds the optional `channel_id` / `sender` / `after` /
 // `before` predicates, each emitted only when supplied, plus their bound args in
 // the same order. `after` is an inclusive lower bound and `before` an exclusive
@@ -184,6 +229,10 @@ func (s *sqliteStore) RecallMessages(ctx context.Context, params RecallParams) (
 	class, classArgs := classificationScope(params.ActingClassification)
 	scope += class
 	scopeArgs = append(scopeArgs, classArgs...)
+	if aud, audArgs := audienceScope(params.ActingChannelID); aud != "" {
+		scope += aud
+		scopeArgs = append(scopeArgs, audArgs...)
+	}
 	narrow, narrowArgs := recallNarrowing(params)
 	match := buildFTS5Match(params.Query)
 

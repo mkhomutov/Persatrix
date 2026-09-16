@@ -46,6 +46,7 @@ class _FakeRecallClient:
     async def recall(
         self, *, participant_id: str, acting_classification: str, query: str,
         channel_id: str = "", sender: str = "", limit: int = 10,
+        acting_channel_id: str = "",
     ) -> list[dict[str, Any]] | None:
         self.calls.append({"participant_id": participant_id, "query": query})
         return self._result

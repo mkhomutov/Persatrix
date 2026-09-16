@@ -117,10 +117,13 @@ func (s *Server) handleRecallMessages(w http.ResponseWriter, r *http.Request) {
 		// context matches the same rows as the canonical id. `sender` is NOT
 		// namespaced, so it is bound raw.
 		ChannelID: canonicalNarrowChannelID(req.ChannelID),
-		Sender:    req.Sender,
-		After:     req.After,
-		Before:    req.Before,
-		Limit:     req.Limit, // forwarded unmodified — the store clamps to MaxRecallLimit
+		// ISSUE-0158: the acting room, canonicalized the same way, so a bare
+		// name and a canonical id scope identically.
+		ActingChannelID: canonicalNarrowChannelID(req.ActingChannelID),
+		Sender:          req.Sender,
+		After:           req.After,
+		Before:          req.Before,
+		Limit:           req.Limit, // forwarded unmodified — the store clamps to MaxRecallLimit
 	}
 
 	msgs, err := s.channelStore.RecallMessages(ctx, params)
@@ -237,6 +240,9 @@ func (s *Server) emitRecallAudit(ctx context.Context, participantID string, p ch
 	// request form (ISSUE-0107). Pinned by TestRecallEndpoint_BareChannelNarrowMatchesCanonical.
 	if p.ChannelID != "" {
 		detail["channel_id"] = p.ChannelID
+	}
+	if p.ActingChannelID != "" {
+		detail["acting_channel_id"] = p.ActingChannelID
 	}
 	if p.Sender != "" {
 		detail["sender"] = p.Sender

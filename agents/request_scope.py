@@ -24,6 +24,7 @@ from __future__ import annotations
 from collections.abc import Iterator, Mapping
 from contextlib import ExitStack, contextmanager
 
+from .acting_channel import acting_channel_scope
 from .acting_classification import acting_classification_scope_from_metadata
 from .epoch_id import epoch_scope_from_metadata
 from .principal_id import principal_scope_from_metadata
@@ -34,6 +35,8 @@ from .session_id import session_scope_from_metadata
 @contextmanager
 def request_scope_from_metadata(
     metadata: Mapping[str, object],
+    *,
+    channel_id: str | None = None,
 ) -> Iterator[None]:
     """Bind the session, principal, epoch, sender-type **and**
     acting-classification scopes for an event's life.
@@ -58,8 +61,15 @@ def request_scope_from_metadata(
     ≤-``internal`` write-through rule; an unbound axis resolves to the
     rule-(b) ``public`` floor at the read site, leaving every
     pre-classification path unchanged.
+
+    ``channel_id`` (ISSUE-0158) binds the acting CHANNEL beside the acting
+    classification — from the event's own channel id, which is not a
+    metadata key — so the ``recall_channel_messages`` tool can scope its
+    read to the room the persona is acting in. ``None`` or blank binds
+    nothing, exactly like an absent metadata key.
     """
     with ExitStack() as stack:
+        stack.enter_context(acting_channel_scope(channel_id))
         stack.enter_context(session_scope_from_metadata(metadata))
         stack.enter_context(principal_scope_from_metadata(metadata))
         stack.enter_context(epoch_scope_from_metadata(metadata))

@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from agents.tools import builtin
-from agents.tools.builtin import MAX_OUTPUT_BYTES
+from agents.tools.builtin import MAX_OUTPUT_BYTES, MAX_TIMEOUT_SECONDS
 from agents.tools.permissions import PermissionGate
 from agents.tools.registry import clear_registry
 from agents.tools.sandbox import PathValidator
@@ -66,13 +66,11 @@ def _setup_tools(tmp_path: Path, permissions: dict | None = None) -> None:
             "write": [str(tmp_path / "**")],
         },
         "shell": {
-            "exec": True,
             "allowed_commands": ["echo", _PY, "cat"],
         },
         "network": {
             "allow": ["api.example.com"],
             "deny": ["*"],
-            "http": True,
         },
     }
     builtin.permission_gate = PermissionGate(perms)
@@ -230,7 +228,6 @@ class TestShellExec:
     async def test_command_not_found(self, tmp_path):
         _setup_tools(tmp_path, permissions={
             "shell": {
-                "exec": True,
                 "allowed_commands": ["nonexistent_binary_xyz"],
             },
         })
@@ -291,6 +288,24 @@ class TestShellExec:
         result = await builtin.shell_exec(f'{_PY_CMD} -c "print(\'ok\')"', timeout=0)
         assert result.success is True
         assert "ok" in result.data["stdout"]
+
+    @pytest.mark.parametrize(
+        ("requested", "limit", "expected"),
+        [
+            (30, None, 30),  # no limit configured
+            (10_000, None, MAX_TIMEOUT_SECONDS),  # the tool's own ceiling
+            (0, None, 1),  # at least one second
+            (30, 10, 10),  # the agent's limit caps the request
+            (5, 10, 5),  # a request under the limit stands
+            (10_000, 10_000, MAX_TIMEOUT_SECONDS),  # a limit cannot lift the ceiling
+        ],
+    )
+    def test_shell_timeout_clamp(self, requested, limit, expected):
+        """ISSUE-0150: ``shell.max_execution_seconds`` caps the timeout the
+        model asks for, and never lifts ``MAX_TIMEOUT_SECONDS``."""
+        from agents.tools.builtin import _shell_timeout
+
+        assert _shell_timeout(requested, limit) == expected
 
 
 # ─── Output truncation ──────────────────────────────────────

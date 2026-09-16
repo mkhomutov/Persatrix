@@ -21,6 +21,7 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from typing import NamedTuple
 
@@ -30,14 +31,13 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.checks import ensure_utf8_stdout  # noqa: E402
+from scripts.checks import ensure_utf8_stdout, markdown_page  # noqa: E402
 
 # Markdown link pattern: [text](path) or [text](path#anchor)
 _LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)#]*)(#[^)]+)?\)")
 
-# Patterns to strip before scanning for links (code blocks and inline code
-# can contain bracket/paren sequences that look like markdown links).
-_CODE_BLOCK_RE = re.compile(r"```.*?```", re.DOTALL)
+# Inline code to strip before scanning for links: it can contain bracket/paren
+# sequences that look like markdown links.
 _INLINE_CODE_RE = re.compile(r"``[^`]+``|`[^`]+`")
 
 # --- anchor (#fragment) validation -----------------------------------------
@@ -45,14 +45,6 @@ _INLINE_CODE_RE = re.compile(r"``[^`]+``|`[^`]+`")
 # including markdown blobs; they are not heading slugs, so they are exempt
 # from heading validation.
 _LINE_ANCHOR_RE = re.compile(r"^L\d+(-L\d+)?$")
-
-# ATX heading, e.g. ``## Section title`` (setext ``===``/``---`` underlines
-# are intentionally ignored — no anchor link in the doc set targets one, and
-# a setext detector would misfire on YAML front-matter / thematic breaks).
-_ATX_HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.*?)[ \t]*$")
-
-# Fenced code-block delimiter (``` or ~~~), possibly indented.
-_FENCE_RE = re.compile(r"^\s*(```|~~~)")
 
 # Explicit HTML anchors GitHub honours as link targets: <a id="…"> / <a name="…">.
 _HTML_ANCHOR_RE = re.compile(r"""<a\s+(?:id|name)\s*=\s*["']([^"']+)["']""", re.IGNORECASE)
@@ -85,7 +77,6 @@ def _render_heading_text(raw: str) -> str:
     no underscore-emphasis headings (underscores are load-bearing in
     identifiers, so they are preserved).
     """
-    raw = re.sub(r"[ \t]+#+[ \t]*$", "", raw)             # ATX closing ###
     raw = re.sub(r"!\[([^\]]*)\]\([^)]*\)", r"\1", raw)   # image  -> alt text
     raw = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", raw)     # inline link -> text
     raw = re.sub(r"\[([^\]]+)\]\[[^\]]*\]", r"\1", raw)    # reference link -> text
@@ -97,8 +88,9 @@ def _render_heading_text(raw: str) -> str:
 def _extract_anchors(content: str) -> set[str]:
     """Return every anchor a markdown document exposes to GitHub.
 
-    That is the slug of each ATX heading (outside fenced code blocks, with
-    ``github-slugger``'s duplicate ``-1``/``-2`` disambiguation) plus any
+    That is the slug of each heading the page shows (not one inside a code
+    fence or an HTML comment, read by :mod:`scripts.checks.markdown_page`), with
+    ``github-slugger``'s duplicate ``-1``/``-2`` disambiguation, plus any
     explicit ``<a id=…>`` / ``<a name=…>`` HTML anchors.
     """
     anchors: set[str] = set()
@@ -116,22 +108,8 @@ def _extract_anchors(content: str) -> set[str]:
         occurrences[slug] = 0
         anchors.add(slug)
 
-    in_fence = False
-    fence_marker = ""
-    for line in content.splitlines():
-        fence = _FENCE_RE.match(line)
-        if fence:
-            marker = fence.group(1)
-            if not in_fence:
-                in_fence, fence_marker = True, marker
-            elif line.strip().startswith(fence_marker):
-                in_fence, fence_marker = False, ""
-            continue
-        if in_fence:
-            continue
-        heading = _ATX_HEADING_RE.match(line)
-        if heading:
-            _add_heading(heading.group(2))
+    for _, _, text in markdown_page.headings(content.splitlines()):
+        _add_heading(text)
 
     for match in _HTML_ANCHOR_RE.finditer(content):
         anchors.add(match.group(1))
@@ -159,6 +137,28 @@ def _strip_inline_code_outside_links(text: str) -> str:
         last = cm.end()
     result.append(text[last:])
     return "".join(result)
+
+
+def _code_span_blocks(lines: list[str]) -> Iterator[str]:
+    """*lines* joined into the stretches an inline code span can cross.
+
+    A span may wrap across a paragraph's lines, but never past a blank line,
+    a table row or a heading. Stripping code one stretch at a time keeps an
+    odd backtick (a quoted fence, a lone ``` in a table cell) from pairing
+    with one further down the page and hiding the links between them.
+    """
+    paragraph: list[str] = []
+    for line in lines:
+        own_block = markdown_page.cells(line) is not None or markdown_page.heading(line) is not None
+        if line.strip() and not own_block:
+            paragraph.append(line)
+            continue
+        if paragraph:
+            yield "\n".join(paragraph)
+            paragraph = []
+        yield line
+    if paragraph:
+        yield "\n".join(paragraph)
 
 
 class BrokenLink(NamedTuple):
@@ -342,11 +342,13 @@ def check_doc_links(repo_root: Path, verbose: bool = False) -> list[BrokenLink]:
         if not content.strip():
             continue
 
-        # Strip code blocks and inline code to avoid false positives
-        # from regex patterns like [a-z0-9] being parsed as links.
-        # Only strip backtick content OUTSIDE of markdown link text brackets.
-        stripped = _CODE_BLOCK_RE.sub("", content)
-        stripped = _strip_inline_code_outside_links(stripped)
+        # Read only what the page shows, as the anchors are: a link in a code
+        # fence or an HTML comment is not on the page. Then strip inline code
+        # (outside link text) so a pattern like [a-z0-9] is not taken for a link.
+        stripped = "\n".join(
+            _strip_inline_code_outside_links(block)
+            for block in _code_span_blocks(markdown_page.rendered(content.splitlines()))
+        )
 
         file_dir = md_file.parent
 

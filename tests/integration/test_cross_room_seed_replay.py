@@ -31,6 +31,7 @@ import sys
 from pathlib import Path
 
 import yaml
+from _test_infra import assert_cassette_miss, stage_recipe_override
 
 from evaluators.runner import golden_path_for
 from evaluators.shadow_measurement import promotion_verdict
@@ -137,30 +138,20 @@ def test_live_widening_is_load_bearing(tmp_path: Path) -> None:
     re-walls the live recall fails the committed seed exactly this way —
     the request-hash pin, not the (mock-authored) transcript, is what makes
     EVAL-MEMORY-003 load-bearing."""
-    recipe = yaml.safe_load(_recipe_path(_LIVE_ID).read_text(encoding="utf-8"))
-    recipe["setup"]["memory"] = {
-        "facts": {"cross_room": "shadow"},
-        "episodic": {"cross_room": "shadow"},
-    }
-    (tmp_path / f"{_LIVE_ID}.yaml").write_text(
-        yaml.safe_dump(recipe), encoding="utf-8",
-    )
-    shutil.copy(
-        golden_path_for(_recipe_path(_LIVE_ID)),
-        tmp_path / f"{_LIVE_ID}.golden.yaml",
-    )
+    def pin_shadow(recipe: dict) -> None:
+        recipe["setup"]["memory"] = {
+            "facts": {"cross_room": "shadow"},
+            "episodic": {"cross_room": "shadow"},
+        }
+
+    stage_recipe_override(_recipe_path(_LIVE_ID), tmp_path, pin_shadow)
 
     result = _run_replay(_LIVE_ID, eval_sets_dir=tmp_path)
 
-    assert result.returncode != 0, (
+    assert_cassette_miss(
+        result,
         "a shadow-pinned replay of the live golden must fail — if it passes, "
-        "the live prompt never actually widened and the seed is vacuous:\n"
-        f"{result.stdout}\n{result.stderr}"
-    )
-    # The miss surfaces through the runtime's LLM-error wrapping, so match the
-    # ReplayCassetteMissError message, not the class name.
-    assert "no recorded response for request" in result.stderr, (
-        result.stdout, result.stderr,
+        "the live prompt never actually widened and the seed is vacuous",
     )
 
 

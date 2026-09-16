@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0132
 summary: "The RFC 0037 §D memory-injection egress gate decides admissibility from the acting CHANNEL's classification alone (`agents/persona_runtime/injection_gate.py` ranks each entry's `protection_level` against the acting level); who is actually in the room at injection time is not an input. Since RFC 0049 Phase 1 made facts cross-room by default and the §A stamping default is `internal` for both a DM and an ordinary group channel, a fact the persona learned from Alice in a DM is admissible in any equally-classified room — including one where Bob is present. The control that exists is coarser than it looks: there is no per-DM classification lever, only the fleet-wide creation-time `dm_default_classification` — raising it raises EVERY DM the fleet opens, an already-open DM keeps its creation-time stamp, and `SetChannelClassification` reclassifies config-declared GROUP channels only (its second caller, the audited reclassification surface, is unbuilt). There is no per-person dimension, so the persona cannot distinguish 'this room' from 'this room WITH BOB IN IT', and the natural human→persona→human expectation — the persona does not repeat what I told it in front of someone I did not tell — has no mechanism behind it."
-status: open
+status: resolved
 severity: medium
 area: memory
 created: 2026-08-19
+closed: 2026-09-14
+closed_pr: 950
 refs:
   - docs/rfcs/0037-memory-confidentiality-channel-classification.md
   - docs/rfcs/0049-memory-consolidation-gradient.md
@@ -195,3 +197,21 @@ this composes with the §E declassification-projection branch.
 > 2026-09-08 — **Locked at the v0.3.16 plan opening** ([v0.3.16 plan](../v0.3.16-plan.md) Workstream A, [v0.3.16 scope locks](../v0.3.16-scope-locks.md) locks 1–3): the defaults above are now decisions. Three PRs — A1 the roster split moved ahead of the gate, A2 the audience input in shadow with the RFC 0037 amendment file, the audience eval seed and MT Leg 5, A3 the verdict-gated flip (green only, before release-prep PR 0). The audience seed needs an in-process roster seam on the eval driver, the way PR 4c added the history fetcher. If the verdict is red or absent this issue stays open at the tag with the measured delta recorded here.
 
 > 2026-09-09 — **The check is in, in shadow** (v0.3.16 PR A2). The §D gate takes the audience as a second ANDed condition and records one of four verdicts per §D-admitted, `internal`-and-above entry; `memory.egress.audience` defaults to `shadow`, so nothing is withheld and every prompt is byte-identical. Design: the new [RFC 0037 audience-egress amendment](../rfcs/0037-amendment-audience-egress.md) (separate file — the RFC had 27 words of headroom). Also landed: the per-turn source-room cache with the acting room pre-seeded from the A1 rail, the structured shadow trace, the fourth verdict criterion in `evaluators/shadow_measurement.py` (a *measured*, non-vacuous delta — not a threshold; that is A3's argument), the `EVAL-MEMORY-005` offline seed with the eval driver's in-process roster seam, and [MT-PERSONA-CONFIDENTIALITY-001](../manual-tests/MT-PERSONA-CONFIDENTIALITY-001.md) Leg 5. **First offline reading: `withhold_share` 0.5** over the seed's two judged entries (one *disjoint* in the room with Bob, one *admit* in the room without him), zero unknowns of either cause. This issue stays `open` until A3 flips the default on a green verdict — or, if the verdict is red or absent, until the release records the measured delta here as a Known Gap.
+
+> 2026-09-14 — **Resolved: the default is `live`** (v0.3.16 PR A3). The verdict ran green on all five criteria over the six-golden suite, and the flip landed the way lock 1 required — its own PR, on the measurement, before release-prep PR 0. The number argued: `withhold_share` **0.5** over `EVAL-MEMORY-005` (the DM fact withheld in the standup that adds Bob, admitted in the pair room whose every member was in the DM), 1 of 7 across the suite, where the other five are *no-provenance* rows from channel-less recipes and **admit**; zero unknowns of either cause offline. The threshold was that the delta be exactly the seed's disjoint half and nothing else. `EVAL-MEMORY-005` is re-recorded under `live` — one request hash moved, the standup ask, and a strip test pins the withhold at the request-hash level — while `001`–`004` replay byte-identically. The trade, in the release note: "taught in a DM, known in the standup" now holds only for a standup whose every member was in the DM — in the default three-persona rooms, none; `memory.egress.audience: shadow` is the rollback lever. Left open by design, as the [amendment](../rfcs/0037-amendment-audience-egress.md) states: injection-time membership (RFC 0035's ledger is the refinement) and a person-only audience (ISSUE-0140 returns only if asked for). MT-PERSONA-CONFIDENTIALITY-001 Leg 5 — its pass criterion now the withhold itself, and the only place the *fetch-failed* count is observable — runs at release-prep.
+
+> 2026-09-15 — **Live proof** ([v0.3.16 execution report](../manual-tests/v0.3.16-execution-report.md),
+> MT-PERSONA-CONFIDENTIALITY-001 Leg 5, both auth modes, on Anthropic). Alice
+> taught "the Helix rollout is paused until the security review clears" in her
+> DM; the close consolidated two `internal` facts with `source_channel_id =
+> dm:alice:ember-owl`; Alice then asked in `planning`, where Bob is a member.
+> The persona's per-entry `audience egress` record, both runs: her two entries
+> judged at `acting='internal'`, both **`withhold-disjoint`**, `withheld` 2,
+> one roster fetch, **fetch-failed 0** — under `enabled` (her tenant, so
+> audience was the only thing that could withhold) and under `disabled` (no
+> tenant axis at all). The injection path is proven. The end-to-end reply
+> held under `enabled` and **did not under `disabled`**: the model elected a
+> `recall_channel_messages` round and the §F recall filter, which has no
+> audience condition, returned her DM messages verbatim —
+> [ISSUE-0158](ISSUE-0158-recall-filter-audience-blind.md), the same defect one
+> axis over. This issue stays resolved on its own scope; 0158 carries the rest.

@@ -28,9 +28,10 @@ modes are not the same axis:
 
 The three modes mirror ``memory.{facts,episodic}.cross_room``
 (:mod:`.cross_room`) on purpose — same vocabulary, same shadow → verdict
-→ flip pattern, same documented rollback lever.  ``shadow`` is the
-v0.3.16 default and the whole cycle's posture: the verdict is recorded,
-the entry still injects, and every prompt is byte-identical to v0.3.15.
+→ flip pattern, same documented rollback lever.  ``live`` is the shipped
+default since v0.3.16 PR A3 flipped it on the green verdict; ``shadow``
+— the whole cycle's posture until then — records the verdict, still
+injects the entry, and is the rollback lever.
 
 *Cost* (scope lock 2): K distinct source rooms among a turn's candidates
 cost K round trips — the N+1 shape :mod:`.channel_roster` was written to
@@ -97,35 +98,43 @@ AUDIENCE_TIERS: Final[frozenset[str]] = frozenset(
     {"channel_history", "facts", "episodic"},
 )
 
-#: Scope lock 1: shadow for the whole v0.3.16 cycle.  The flip to
-#: ``live`` is its own PR (A3), lands only on a green verdict, and only
-#: before release-prep PR 0 — never scheduled.
-DEFAULT_MEMORY_AUDIENCE: Final[str] = AUDIENCE_SHADOW
+#: Scope lock 1: shadow for the whole v0.3.16 cycle, flipped to ``live``
+#: by PR A3 on the green verdict — its own PR, never scheduled, and
+#: before release-prep PR 0 as the lock required.  The number it argued:
+#: ``withhold_share`` 0.5 over the audience seed (one disjoint, one
+#: admit, zero unknowns); across the whole suite one disjoint of seven
+#: judged, the other five *no-provenance* and admitted.
+DEFAULT_MEMORY_AUDIENCE: Final[str] = AUDIENCE_LIVE
 
 
 class AudienceVerdict(Enum):
     """What the audience check concluded for one §D-admitted entry.
 
     Four, because "we could not tell" is two different facts with two
-    different fixes: a roster call that missed is transient and retried
-    next turn, while a NULL ``source_channel_id`` is permanent by design
-    (pre-migration rows and tick/task-scoped records have no room).
-    Collapsing them would make the shadow measurement unable to say
-    whether the unknowns are a bug or the schema.
+    different fixes: a roster call that missed is retried next turn —
+    transient for a network blip, but *permanent* once the source room
+    has been deleted or emptied, because :mod:`.channel_roster` returns
+    ``None`` for a 404 and for an empty member list alike, so under
+    ``live`` such an entry is admitted on every later turn — while a
+    NULL ``source_channel_id`` is permanent by design (pre-migration
+    rows and tick/task-scoped records have no room).  Collapsing them
+    would make the shadow measurement unable to say whether the unknowns
+    are a bug or the schema.
     """
 
     #: Every member of the acting room was in the entry's source room.
     ADMIT = "admit"
     #: The acting room holds a member the source room does not.
     WITHHOLD_DISJOINT = "withhold-disjoint"
-    #: A roster call missed — transient; retried on the next turn.
+    #: A roster call missed — retried on the next turn; permanent once
+    #: the source room is deleted or emptied (``live`` admits either).
     WITHHOLD_UNKNOWN_FETCH_FAILED = "withhold-unknown-fetch-failed"
     #: ``source_channel_id`` is NULL by design — permanent.
     WITHHOLD_UNKNOWN_NO_PROVENANCE = "withhold-unknown-no-provenance"
 
 
 #: The verdicts ``live`` mode actually acts on — see the module
-#: docstring.  ``A3`` flips the knob's *default*, not this set.
+#: docstring.  PR A3 flipped the knob's *default*, not this set.
 ENFORCED_VERDICTS: Final[frozenset[AudienceVerdict]] = frozenset(
     {AudienceVerdict.WITHHOLD_DISJOINT},
 )

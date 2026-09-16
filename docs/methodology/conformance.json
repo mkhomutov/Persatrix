@@ -53,6 +53,7 @@
     "scripts/checks/file_size.py",
     "scripts/checks/file_size_allowlist.py",
     "scripts/checks/released.py",
+    "scripts/checks/markdown_page.py",
     "scripts/checks/doc_links.py",
     "scripts/checks/doc_status_markers.py",
     "scripts/checks/doc_leaked_markup.py",
@@ -96,6 +97,7 @@
     "docs/v0.3.x-sequencing.md",
     "ROADMAP.md",
     "scripts/checks/roadmap_status.py",
+    "scripts/checks/amendment_evidence.py",
     "CLAUDE.md",
     ".github/copilot-instructions.md"
   ]

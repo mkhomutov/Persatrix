@@ -1,7 +1,7 @@
 # RFC 0037 Amendment — Audience as an AND-Condition on the §D Egress Gate
 
 **Type**: amendment to [RFC 0037](0037-memory-confidentiality-channel-classification.md) §D (the gate rule), §E (composition with declassification projections) and §G (the withhold-cause vocabulary the tripwire and the manifest read)
-**Status**: 🔄 **Shadow** — v0.3.16 PR A2 ([ISSUE-0132](../issues/ISSUE-0132-memory-egress-gate-blind-to-room-audience.md); [v0.3.16 PR plan](../v0.3.16-pr-plan.md)). The check records and does not withhold; the flip to `live` is [verdict-gated](#promotion-the-verdict-gated-flip), its own PR, and lands only on a green measurement
+**Status**: ✅ Implemented — **LIVE**, v0.3.16 ([ISSUE-0132](../issues/ISSUE-0132-memory-egress-gate-blind-to-room-audience.md) resolved; [v0.3.16 PR plan](../v0.3.16-pr-plan.md)). Shadow in PR A2 (2026-09-09); promoted by PR A3 ([#950](https://github.com/mkhomutov/Persatrix/pull/950)) on the green verdict (2026-09-14) — see [Promotion](#promotion-the-verdict-gated-flip). `shadow` is the documented rollback lever
 **Author**: Maksim Khomutov
 **Date**: 2026-09-09
 **Target**: v0.3.16 — *The persona knows who is listening*
@@ -100,6 +100,36 @@ that Alice raised a rollout decision. So an audience withhold serves
 nothing in its place, and §E's selection branch skips those entries
 rather than looking them up.
 
+### §F — the recall filter carries the same condition (ISSUE-0158)
+
+§F is the other place stored room text leaves storage: the persona's
+`recall_channel_messages` tool asks the orchestrator for verbatim
+messages across every room it is a member of, capped at the acting
+classification. That cap is the classification axis only. The v0.3.16
+release-prep arc found the gap the moment §D closed the injection path:
+with both DM-taught entries withheld at *withhold-disjoint*, the model
+elected a recall round and the tool handed it the DM transcript in
+`planning` ([ISSUE-0158](../issues/ISSUE-0158-recall-filter-audience-blind.md)).
+
+So the recall request carries the **acting channel id** — bound from the
+turn the same way the acting classification is, never an LLM argument —
+and the orchestrator admits a message only when every current member of
+the acting channel is also a member of the message's channel: the same
+"the acting room adds nobody the source room did not hold" comparison
+§D makes, applied server-side on the current member set — with §D's
+`public` exemption (a message in a `public` channel is shareable by
+definition and is always admitted). The tool sends the id only when
+`memory.egress.audience` resolves `live`; under `shadow` and `off` the
+recall read is byte-identical to v0.3.15, so the rollback lever covers
+both paths. An acting id with no members admits everything, as `live`
+admits an unresolved roster; no acting id (a channel-less turn, an older
+caller) applies no condition. One deliberate difference from §D: a
+*source* room every member has left is read by §D as unknown and
+admitted, while recall fails closed and withholds its transcript — an
+emptied room has no audience to compare, and stored text is the more
+verbatim of the two surfaces. The `channel.recall` audit names the
+acting room the read was scoped to.
+
 ### §G — the withhold vocabulary widens
 
 The §G tripwire watch is the *withheld* set, and the §G manifest is the
@@ -133,9 +163,10 @@ amendment adds one more bug class it can catch.
   question it claims to: *the share of gate-admitted entries the
   audience check would withhold*.
 - **The knob** — `memory.egress.audience: off | shadow | live`, default
-  `shadow`, mirroring `memory.{facts,episodic}.cross_room` down to the
-  loud rejection of an unknown value. `shadow` stays the documented
-  rollback lever after the flip, as it did for `cross_room`.
+  `shadow` until PR A3 flipped it to `live`, mirroring
+  `memory.{facts,episodic}.cross_room` down to the loud rejection of an
+  unknown value. `shadow` stays the documented rollback lever after the
+  flip, as it did for `cross_room`.
 - **The trace and the verdict** — [`audience_shadow.py`](../../agents/persona_runtime/audience_shadow.py)
   emits one structured record per turn (ids, levels, room ids, verdicts
   — never entry content: the process log is its own egress surface),
@@ -159,6 +190,45 @@ The flip is a separate PR, opens only on a green verdict, and states its
 own threshold for the delta. A red or absent verdict ships the release
 in `shadow` with the measured delta recorded as a Known Gap.
 
+### The verdict, and the flip (v0.3.16 PR A3, 2026-09-14)
+
+The verdict ran **green** on all five criteria — `label_integrity`,
+`bounded_volume`, `continuity` (all six goldens replay),
+`audience_delta_measured` and `audience_bounded_volume` — over the
+six-golden suite (`make eval-replay REPORT=… && make eval-verdict
+REPORT=…`), and the default is **`live`**: `DEFAULT_MEMORY_AUDIENCE`,
+the `agent.schema.json` default and the harness class-level default all
+flip. `shadow` and `off` stay configurable; `shadow` is the documented
+rollback lever, still trace-emitting.
+
+**The threshold, as argued in the PR**: the delta had to be *exactly the
+seed's disjoint half and nothing else*. Over `EVAL-MEMORY-005` — two
+judged entries, the same DM-taught `internal` fact in two rooms —
+`withhold_share` is **0.5**: one *disjoint* in the standup that adds Bob,
+one *admit* in the pair room whose every member was in the DM. Across
+the whole suite it is 1 of 7 judged: the other five are *no-provenance*
+rows from channel-less recipes (`EVAL-MEMORY-001`, `003` and `004`,
+whose events carry a room but no channel; `002` emits no audience trace
+at all), which the flip **admits** — so `001`–`004`
+replay byte-identically under `live` with no re-record. Both unknown
+counts are zero offline; *fetch-failed* is zero by construction (the
+driver's seam cannot miss), which is why it is Leg 5's live criterion.
+A disjoint verdict on the pair room, an unknown withheld, or any shift
+in `001`–`004` would have been red.
+
+**What the flip re-recorded**: `EVAL-MEMORY-005` under
+`egress.audience: live` (pinned, so the golden states its own posture).
+One request hash moved — the standup ask, 2 129 → 2 102 input tokens,
+the withheld fact — and the fixture's standup reply is now a curated
+decline, asserted positively (a `must_not_reference` alone passes a
+cassette miss vacuously). The strip test replays the new golden
+shadow-pinned and asserts the miss, the `EVAL-MEMORY-003` precedent: the
+withhold is load-bearing at the request-hash level, not at the
+mock-authored transcript.
+
+**The trade, as shipped**: the paragraph below, in the release note in
+the same words. Leg 5's pass criterion is now the withhold itself.
+
 **The trade the flip buys, stated plainly**: RFC 0049's headline —
 "taught in a DM, known in the standup" — narrows to *the standup whose
 every member was in the DM*. In the default three-persona rooms, that is
@@ -178,6 +248,18 @@ since left still counts as audience; someone who joined the source room
 after the fact was taught counts too. RFC 0035's interval ledger is the
 answer to both, and is deliberately not in this release.
 
+Two more residuals the flip makes live, both accepted rather than fixed
+here. **A deleted or emptied source room is a permanent admit**: the
+roster fetcher returns nothing for a 404 and for an empty member list
+alike, so every entry from that room reads *fetch-failed* on every later
+turn and `live` admits it — the "transient" cause is transient only for
+a network blip. **Audience compares member ids, not people**: a DM's
+members are the two ids that named it, so enabling `auth.mode: enabled`
+(or changing the acting-as id) after teaching moves the same person into
+a new DM, and their earlier DM-taught facts are then *disjoint* there
+until re-taught; `shadow` restores them meanwhile. Neither is observable
+above the per-turn trace today.
+
 ## Consequences
 
 - One roster round trip per distinct source room per turn, deduplicated,
@@ -191,8 +273,8 @@ answer to both, and is deliberately not in this release.
 
 Depends on PR A1 (roster resolution moved ahead of the gate, for every
 channel turn) and on the [RFC 0044](0044-eval-set-golden-traces.md)
-Phase 1 harness for its measurement. Blocks nothing; the flip blocks
-release-prep PR 0. The live proof is
+Phase 1 harness for its measurement. Blocks nothing; the flip (PR A3,
+landed) preceded release-prep PR 0 as required. The live proof is
 [MT-PERSONA-CONFIDENTIALITY-001](../manual-tests/MT-PERSONA-CONFIDENTIALITY-001.md)
 Leg 5, run once at release-prep PR 1.
 

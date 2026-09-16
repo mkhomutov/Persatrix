@@ -32,6 +32,16 @@ synthesis-turn dispatch) and the per-persona close-summary contract are
 pinned separately by ``internal/channels/autonomous_acceptance_test.go`` and
 ``tests/unit/python/test_autonomous_phase1_acceptance.py``; what this adds is
 the offline face — that the curated ``mock`` replies make that arc *read*.
+
+**The floor, not just the replies (ISSUE-0160).** The first two classes feed
+each participant the opener directly, so they passed while the booted demo
+showed the convener talking to an empty room: in the real arc a participant
+only replies after its open-floor bid says so, and the mock answered every bid
+with prose the gate could not parse. ``TestOfflineRoundtableFloor`` therefore
+plays the floor through the real gate (:func:`agents.salience_bid.evaluate_salience`,
+``reasoning.mode: bid`` as the roundtable resolves it): who bids, what they say,
+whether anyone repeats themselves, and whether the convener's agenda advances
+and the chair's escalation read as their own turns.
 """
 
 from __future__ import annotations
@@ -42,10 +52,14 @@ from typing import Any
 import pytest
 import yaml
 
+from agents.llm_client import LLMClient
 from agents.llm_offline import MockProvider, reset_cache
 from agents.llm_types import StopReason
+from agents.model_aliases import use_alias_map
 from agents.persona_runtime.convener import format_convener_opening
+from agents.persona_runtime.prompt_assembly import format_chair_escalation
 from agents.persona_runtime.synthesis_turn import format_synthesis_turn
+from agents.salience_bid import evaluate_salience
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _CHANNELS_YAML = _REPO_ROOT / "config" / "channels.yaml"
@@ -241,4 +255,199 @@ class TestRoundtableDemoRoster:
         )
         assert rt["interaction_budget_tokens"] > 0, (
             "cap-required: an armed autonomous channel must carry a positive cost cap"
+        )
+
+
+# ─── The floor, played through the real open-floor gate (ISSUE-0160) ─────────
+
+_AGENTS_YAML = _REPO_ROOT / "config" / "agents.yaml"
+
+# The `fast` alias the bid resolves, pointed at the mock the demo runs on.
+_FAST_MOCK: dict[str, dict[str, Any]] = {
+    "fast": {"provider": "mock", "model": "offline", "input_per_1m_tokens": 0.0,
+             "output_per_1m_tokens": 0.0},
+}
+
+# A runaway guard for the floor loop, far above any scripted discussion: the
+# real bound (`autonomous.max_rounds`) closes the arc long before this.
+_FLOOR_CAP = 40
+
+
+def _persona(agent_id: str) -> tuple[str, str]:
+    data = yaml.safe_load(_AGENTS_YAML.read_text(encoding="utf-8"))
+    for agent in data["agents"]:
+        if agent["id"] == agent_id:
+            return agent["name"], (agent.get("persona") or {}).get("title", "")
+    raise AssertionError(f"{agent_id} is missing from config/agents.yaml")
+
+
+def _window(posts: list[tuple[str, str]], agent_id: str) -> list[dict[str, Any]]:
+    """The conversation window as the runtime replays it to ``agent_id``: its
+    own posts as ``assistant`` turns, every peer's as a ``[peer]:`` user turn
+    (``conversation_window.py`` §C)."""
+    return [
+        {"role": "assistant", "content": text} if sender == agent_id
+        else {"role": "user", "content": f"[{sender}]: {text}"}
+        for sender, text in posts
+    ]
+
+
+async def _floor(
+    rt: dict[str, Any], posts: list[tuple[str, str]], answered: dict[int, int] | None = None,
+) -> list[tuple[str, str]]:
+    """Fan the last post out to the open floor until every bid is silent.
+
+    Each member other than the sender bids on each new post through the real
+    gate; a member that bids to speak composes against the same window, and
+    its post fans out in turn. The window is the posts *before* the one being
+    answered, as the runtime replays it — a reply published after that post is
+    newer than it, so it is not there. Returns the posts the floor added, and
+    records in ``answered`` which post each of them replied to."""
+    floor = [m["id"] for m in rt["members"] if m.get("respond") in _OPEN_FLOOR]
+    start = len(posts)
+    pending = [len(posts) - 1]
+    while pending and len(posts) < _FLOOR_CAP:
+        index = pending.pop(0)
+        sender, text = posts[index]
+        for agent_id in floor:
+            if agent_id == sender:
+                continue
+            name, title = _persona(agent_id)
+            history = _window(posts[:index], agent_id)
+            with use_alias_map(_FAST_MOCK):
+                decision = await evaluate_salience(
+                    llm_client=LLMClient(MockProvider(agent_id=agent_id)),
+                    content=f"[{sender}]: {text}", transcript=history, agent_id=agent_id,
+                    persona_name=name, persona_role=title, threshold=None, mode="bid",
+                )
+            assert decision.reason != "parse_failure", f"{agent_id}'s bid did not parse"
+            if not decision.speak:
+                continue
+            turn = [*history, {"role": "user", "content": f"[{sender}]: {text}"}]
+            response = await MockProvider(agent_id=agent_id).create_message(
+                model="offline", messages=turn, system="", tools=[],
+                max_tokens=512, temperature=0.2,
+            )
+            reply = (response.text or "").strip()
+            posts.append((agent_id, reply))
+            pending.append(len(posts) - 1)
+            if answered is not None:
+                answered[len(posts) - 1] = index
+    return posts[start:]
+
+
+def _advance_directive(rt: dict[str, Any], item: int) -> str:
+    """The convener's agenda-advance stimulus — ``convener_cadence.go``
+    ``composeAgendaAdvanceDirective`` rendered through the same convene framing."""
+    auto = rt["autonomous"]
+    directive = (
+        f"Topic: {auto['topic']}\n\nNext agenda item:\n1. {auto['agenda'][item]}\n\n"
+        f"Goal: {auto['goal']}"
+    )
+    return format_convener_opening(directive)
+
+
+class TestOfflineRoundtableFloor:
+    """The booted demo's floor: the room answers the convener, nobody repeats
+    themselves, and the convener's and chair's forced turns read as their own."""
+
+    async def _opened(self) -> tuple[dict[str, Any], list[tuple[str, str]]]:
+        rt = _roundtable()
+        convener = rt["autonomous"]["convener"]
+        opener = (await _reply(MockProvider(agent_id=convener), _convene_directive(rt))).text
+        posts = [(convener, opener.strip())]
+        await _floor(rt, posts)
+        return rt, posts
+
+    async def test_the_open_floor_answers_the_convener(self) -> None:
+        rt, posts = await self._opened()
+        convener = rt["autonomous"]["convener"]
+        speakers = {sender for sender, _ in posts if sender != convener}
+        assert len(speakers) >= 2, f"only {speakers or 'nobody'} answered the opener"
+
+    async def test_nobody_repeats_themselves_and_the_floor_goes_quiet(self) -> None:
+        _, posts = await self._opened()
+        assert len(posts) < _FLOOR_CAP, "the scripted floor never went quiet"
+        assert len(set(posts)) == len(posts), "a persona posted the same text twice"
+
+    async def test_each_agenda_advance_poses_its_own_item_and_draws_a_reply(self) -> None:
+        rt, posts = await self._opened()
+        convener = rt["autonomous"]["convener"]
+        seen = {text for _, text in posts}
+        for item, keyword in ((1, "coupling"), (2, "migration")):
+            directive = _advance_directive(rt, item)
+            advance = (await _reply(MockProvider(agent_id=convener), directive)).text.strip()
+            assert advance not in seen, f"agenda item {item} re-posted an earlier turn"
+            assert keyword in advance.lower(), f"agenda item {item} does not pose {keyword!r}"
+            posts.append((convener, advance))
+            seen.add(advance)
+            added = await _floor(rt, posts)
+            assert added, f"nobody answered agenda item {item}"
+            seen.update(text for _, text in added)
+        assert len(set(posts)) == len(posts), "a persona posted the same text twice"
+
+    async def test_a_turn_handed_over_without_a_bid_never_reposts(self) -> None:
+        """A reply @-mentions the persona it answers, and under floor control
+        the orchestrator re-fans a round's last reply — both hand a member a
+        turn with no bid. On the booted demo that turn re-posted each persona's
+        first paragraph; it must make a new point instead. A point counts as
+        already made when the member posted it in answer to a *different* post
+        — including one its window cannot show."""
+        rt = _roundtable()
+        convener = rt["autonomous"]["convener"]
+        opener = (await _reply(MockProvider(agent_id=convener), _convene_directive(rt))).text
+        posts = [(convener, (opener or "").strip())]
+        answered: dict[int, int] = {}
+        await _floor(rt, posts, answered)
+        floor = [m["id"] for m in rt["members"] if m.get("respond") in _OPEN_FLOOR]
+        for index, (sender, text) in enumerate(posts):
+            for agent_id in floor:
+                if agent_id == sender:
+                    continue
+                turn = [*_window(posts[:index], agent_id),
+                        {"role": "user", "content": f"Message from {sender}: {text}"}]
+                response = await MockProvider(agent_id=agent_id).create_message(
+                    model="offline", messages=turn, system="", tools=[],
+                    max_tokens=512, temperature=0.2,
+                )
+                reply = (response.text or "").strip()
+                made_elsewhere = {
+                    t for i, (s, t) in enumerate(posts)
+                    if s == agent_id and answered.get(i) != index
+                }
+                assert reply not in made_elsewhere, (
+                    f"{agent_id} re-posted its own earlier point on {sender}'s post #{index}"
+                )
+
+    async def test_a_second_convening_holds_the_discussion_again(self) -> None:
+        """The console's Convene button re-runs the demo on the same channel,
+        whose history still holds the first discussion. The chair's closing
+        synthesis ends that discussion, so the room answers the opener again."""
+        rt, posts = await self._opened()
+        chair, convener = rt["escalation_chair_id"], rt["autonomous"]["convener"]
+        synthesis = (await _reply(MockProvider(agent_id=chair), _synthesis_directive(rt))).text
+        posts.append((chair, (synthesis or "").strip()))
+        first = len(posts)
+        convene = {"role": "user", "content": _convene_directive(rt)}
+        response = await MockProvider(agent_id=convener).create_message(
+            model="offline", system="", tools=[], max_tokens=512, temperature=0.2,
+            messages=[*_window(posts, convener), convene],
+        )
+        assert (response.text or "").strip() == posts[0][1], "the second opener is not the opener"
+        posts.append((convener, (response.text or "").strip()))
+        await _floor(rt, posts)
+        speakers = {sender for sender, _ in posts[first + 1:]}
+        assert len(speakers) >= 2, f"only {speakers or 'nobody'} answered the second opener"
+
+    async def test_the_chair_escalation_is_not_the_closing_synthesis(self) -> None:
+        rt = _roundtable()
+        chair = MockProvider(agent_id=rt["escalation_chair_id"])
+        convener = rt["autonomous"]["convener"]
+        opener = (await _reply(MockProvider(agent_id=convener), _convene_directive(rt))).text
+        stalled = format_chair_escalation(f"Message from {convener}:\n\n{opener}")
+        escalation = (await _reply(chair, stalled)).text
+        synthesis = (await _reply(chair, _synthesis_directive(rt))).text
+        assert escalation.strip() != synthesis.strip()
+        assert not escalation.lower().startswith("synthesis"), (
+            "the stall escalation posted the closing synthesis early"
         )

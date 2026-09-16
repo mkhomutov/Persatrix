@@ -2,11 +2,12 @@
 
 **Test ID**: `MT-MEMORY-CROSSROOM-001`
 **Feature Area**: Memory (cross-room persona experience — RFC 0049 Phases 0–1 × the RFC 0037 confidentiality gate, plus the RFC 0031 F-7 person-identity tier)
-**Version**: 1.1
+**Version**: 1.2
 **Created**: 2026-07-28
-**Last Updated**: 2026-08-01
+**Last Updated**: 2026-09-15
 **Status**: Active — authored at RFC 0049 PR 5. **Legs 1–4 (the facts half) executed live 2026-07-30** at v0.3.12 release-prep: ✅ pass, Leg 4 Accepted-with-known-gap ([ISSUE-0118](../issues/ISSUE-0118-tool-recall-bypasses-epoch-session-scopes.md)) — see the [execution report](v0.3.12-execution-report.md#mt-memory-crossroom-001--memory-that-travels-live-anthropic).
 **✅ Legs 1b/2b (the person half) ran live for the first time 2026-08-04** at v0.3.13 release-prep — both pass; ISSUE-0121 is resolved on their recorded results, and Leg 2b gained a run rule (an untainted room) plus a corrected diagnosis note off that run. The history below is kept because it is why the legs exist. Added at v1.1 after [ISSUE-0119](../issues/ISSUE-0119-channel-publish-drops-human-participant-type.md) reached a release candidate on that green run; v0.3.12 shipped on the v1.0 bar by maintainer call ([#801](https://github.com/mkhomutov/Persatrix/pull/801) — the wiring half is CI-pinned, so what these add is the qualitative half). **They are the standing deliverable for the next memory-touching release: run the whole arc, and record 1b/2b explicitly** — tracked as [ISSUE-0121](../issues/ISSUE-0121-crossroom-person-identity-legs-never-run-live.md).
+**v1.2 (2026-09-15)**: the v0.3.16 PR B1 edit ([ISSUE-0122](../issues/ISSUE-0122-relationship-tier-emits-no-provenance.md) — Leg 2b's "provenance does not see this leg" note replaced by the three readings the `tier=relationship` admission line gives) landed at [#941](https://github.com/mkhomutov/Persatrix/pull/941) without a header bump, as did the 2026-08-04 results row; recorded here at v0.3.16 release-prep PR 2, the edited paragraph verified against the shipped code, and the summary rows for Legs 2b and 4 corrected to the fresh probe channels the procedure actually names. Not re-run this cycle (lock 6 spends the arc on MT-PERSONA-CONFIDENTIALITY-001).
 
 ---
 
@@ -195,9 +196,9 @@ persatrix channel send epoch-probe "What's the latest on Atlas?" \
 | 1 — Teach + close | DM | natural statement; ≥ 11 min idle + bridge turn | ack; (optional) `topic.*` fact row stamped `internal` with the DM session id | ☐ |
 | 1b — Introduce yourself | DM | natural statement; **no idle window needed** | ack; (optional) an `alex` relationship row typed **`user`** carrying the identity JSON | ☐ |
 | 2 — Standup ask | `group:planning` | names `atlas`, never the content | reply surfaces the Friday ship date, cross-room | ☐ |
-| 2b — Be recognised | `group:planning` | names **neither** you nor the content | reply addresses you by the name/role given in the DM; the bare `alex` id is a fail | ☐ |
+| 2b — Be recognised | `recognition-probe` (fresh, never named you) | names **neither** you nor the content | reply addresses you by the name/role given in the DM; the bare `alex` id is a fail | ☐ |
 | 3 — DM re-ask | DM | names `atlas`, never the content | Friday recalled again in the original room | ☐ |
-| 4 — Fresh epoch | `group:planning`, `--epoch` override | same ask, fresh epoch | **no** recall — the epoch wall holds | ☐ |
+| 4 — Fresh epoch | `epoch-probe` (fresh — not `group:planning`), `--epoch` override | same ask, fresh epoch | **no** recall — the epoch wall holds | ☐ |
 
 **Overall pass**: Legs 2, 2b, 3, and 4 all pass. A Leg 2/3 fail is diagnosed with provenance (recall vs. reasoning miss) before filing. A Leg 2b fail is triaged **wiring vs. reasoning first** (see its diagnosis note): a wrong participant type is a release-blocking regression of the ISSUE-0119 fix, while an admitted-but-unused identity line is a quality finding. A Leg 4 fail is a confidentiality/isolation regression — file immediately, release-blocking.
 
