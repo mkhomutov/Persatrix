@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### 🐛 Fixes
+
+- **A task agent now runs only the tools on its `tools` list** ([ISSUE-0151](docs/issues/ISSUE-0151-task-agents-run-tools-missing-from-their-list.md)): it used to run any registered tool the model named, so a config whose permissions covered a tool it did not list let the model use that tool anyway. Such a call now gets the same `Unknown tool` error a persona gives, and one rule in `agents/tools/tool_list.py` decides both what a task agent is offered and what it may run. The shipped task agents were not exposed — the permission gate refused every unlisted call they could make — but a config that relied on running a tool it does not list must now add that tool to `tools`.
+
 ## [0.3.16] - 2026-09-16
 
 > **Codename:** The persona knows who is listening
