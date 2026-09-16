@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0150
 summary: "No agent config that passes `make validate` can turn on `shell_exec` or `http_request`: the permission gate looks for `shell.exec` and `network.http` keys that the agent schema forbids, and the tool tests hand the gate those keys directly — and `shell.max_execution_seconds`, set to 30 on the shipped code-writer, is read by nothing; proposes that each tool's allowlist be its grant and that the limit cap each command"
-status: open
+status: resolved
 severity: medium
 area: agents/tools
 created: 2026-09-10
+closed: 2026-09-16
+closed_pr: 963
 refs:
   - agents/tools/permissions.py
   - agents/tools/builtin.py
@@ -186,3 +188,16 @@ cuttable).
 > implementation drafted test-first. Against `d0c5675a`, the new and updated
 > tests gave 48 failures; with the gate change alone, 8, all on the time limit;
 > with the limit wired in, none. Proposed slot v0.4.0; not v0.3.16 scope.
+>
+> 2026-09-16 — **resolved by [#963](https://github.com/mkhomutov/Persatrix/pull/963)**,
+> rebased onto `main` after the v0.3.16 tag, which is the hold the slot above
+> set. The fix is sections 1–4 as proposed. Against `db7cf9d9` the new and
+> updated tests again gave 48 failures. Section 5 took its first option:
+> [#913](https://github.com/mkhomutov/Persatrix/pull/913) had already made a
+> task agent run only the tools on its list
+> ([ISSUE-0151](ISSUE-0151-task-agents-run-tools-missing-from-their-list.md)),
+> so the three example `network` blocks stay. A test on the shipped config
+> pins that planner, code-writer and code-reviewer are granted `network:http`
+> and that none of them is offered `http_request`. Like #913, this lands before
+> any train opens: the [Amendment 2026-09-12](../v0.3.x-sequencing.md#amendment-2026-09-12--close-v0316-small-then-measure-before-any-train-opens)
+> holds the v0.4.0 plan until EXP-001 reports, and this fix needs no plan.

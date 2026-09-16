@@ -226,3 +226,10 @@ blocks.
 > holds the v0.4.0 plan until EXP-001 reports, and this fix needs no plan.
 > ISSUE-0150 is still not on `main`, so the two are still not linked, and its
 > fix must still merge after this one.
+>
+> 2026-09-16 — [ISSUE-0150](ISSUE-0150-schema-valid-config-cannot-enable-shell-exec-or-http-request.md)
+> is filed and resolved by [#963](https://github.com/mkhomutov/Persatrix/pull/963),
+> which merges after #913 as planned, and the two issues now link each other.
+> Its grant reaches planner, code-writer and code-reviewer, and none of them is
+> offered `http_request`, as section 5 above expected. A test on the shipped
+> config pins that.
