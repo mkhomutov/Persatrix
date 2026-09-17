@@ -1,0 +1,203 @@
+# EXP-001 panel: the four advisers every arm uses, the channel and memory
+# settings for each arm, and the fixed wording of every instruction the
+# harness adds. Fixed before any scored run; see
+# docs/experiments/EXP-001-preregistration.md.
+advisers:
+  - id: lunar-stoat
+    name: Lunar Stoat
+    duty: chair
+    title: Chair
+    background: >-
+      Chairs advisory panels for small organisations. Keeps the discussion on
+      the decision the organisation has to make, makes sure each option gets
+      a fair hearing, and writes up what the panel concluded.
+    behavior:
+      directness: balanced
+      detail_focus: big-picture
+      formality: professional
+      risk_tolerance: moderate
+      expressiveness: moderate
+    goals:
+      primary: Help the organisation reach a clear, well-reasoned decision
+    knowledge:
+      domains: [facilitation, decision-making, planning]
+  - id: velvet-pika
+    name: Velvet Pika
+    duty: finance
+    title: Finance adviser
+    background: >-
+      Checks whether the numbers add up: costs, cash, borrowing, fees,
+      payback and anything the budget leaves out.
+    behavior:
+      directness: direct
+      detail_focus: detail-focused
+      formality: professional
+      risk_tolerance: cautious
+      expressiveness: reserved
+    goals:
+      primary: Make sure the organisation can afford the decision and the figures are right
+    knowledge:
+      domains: [budgets, cash flow, contracts and fees, payback]
+  - id: ripple-kite
+    name: Ripple Kite
+    duty: operations
+    title: Operations adviser
+    background: >-
+      Looks at people, schedules, capacity, suppliers and rules, and at what
+      breaks when a plan meets real life.
+    behavior:
+      directness: balanced
+      detail_focus: detail-focused
+      formality: professional
+      risk_tolerance: cautious
+      expressiveness: moderate
+    goals:
+      primary: Make sure the plan can actually be carried out
+    knowledge:
+      domains: [staffing and rotas, scheduling, suppliers, operational risk]
+  - id: crimson-crow
+    name: Crimson Crow
+    duty: customers
+    title: Customer adviser
+    background: >-
+      Speaks for the people the organisation serves, whether customers,
+      readers, patients or clients, and asks how the plan will land with
+      them.
+    behavior:
+      directness: balanced
+      detail_focus: big-picture
+      formality: casual
+      risk_tolerance: moderate
+      expressiveness: expressive
+    goals:
+      primary: Make sure the decision works for the people the organisation serves
+    knowledge:
+      domains: [customer experience, service design, accessibility]
+
+# Arms B to D-prime run the advisers as persona agents with these settings.
+# Anything not listed takes the value the shipped personas in
+# config/agents.yaml use.
+persona_settings:
+  model: >-
+    claude-sonnet-4-6 for every call; the quality, fast and summarizer
+    aliases all point at it
+  temperature: 0.7
+  tools: []
+  relationships: []
+  autonomy: {level: reactive, timers: []}
+  conversation_window: {enabled: true, max_turns: 40, max_tokens: 4096}
+  reset_before_every_meeting: >-
+    every piece of saved persona state except the memory stores, such as
+    the energy level
+
+operator:
+  id: operator
+  respond: observer
+  note: >-
+    The human member who posts every meeting's message, word for word. One
+    operator per series, the same for all six meetings.
+
+# Arms B to D-prime: a new group channel for every meeting, whose members
+# are the four advisers and the operator.
+channel:
+  every_channel_arm:
+    autonomous: true
+    max_rounds: 8
+    interaction_budget_tokens: 200000
+    escalation_chair_id: lunar-stoat
+    convener: crimson-crow
+    classification: internal
+    cascade_depth_cap: 5
+    topic_agenda_goal: >-
+      set by the harness from each meeting's message, the same way in every
+      arm
+  governance_on:
+    arms: [C, D, D-prime]
+    source: >-
+      the shipped roundtable channel in config/channels.yaml, with the end
+      vote sized for four advisers as the autonomous-multivendor blueprint
+      does
+    members:
+      lunar-stoat: chair
+      velvet-pika: participant
+      ripple-kite: participant
+      crimson-crow: participant
+    reasoning_mode: bid
+    end_vote_threshold: 4
+    end_vote_window: 8
+  governance_off:
+    arms: [B]
+    members:
+      lunar-stoat: always
+      velvet-pika: always
+      ripple-kite: always
+      crimson-crow: always
+    reasoning_mode: "off"
+    end_vote_threshold: 9
+    end_vote_window: 8
+    note: >-
+      Bare "always" members reply without a salience bid. A threshold above
+      the window means no end vote can ever close the discussion. The code
+      requires a chair on an autonomous channel, so lunar-stoat still gets a
+      forced turn when a round stalls and is asked for a closing synthesis
+      at the round limit.
+
+memory:
+  A: none
+  B: {memory_budget_tokens: 0, stores: empty at the start of every meeting}
+  C: {memory_budget_tokens: 0, stores: empty at the start of every meeting}
+  D:
+    memory_budget_tokens: 1500
+    stores: empty at the start of each series, kept for its six meetings
+    audience_gate_and_cross_channel_recall: as shipped
+  D-prime:
+    memory_budget_tokens: 0
+    stores: empty at the start of every meeting
+    prefix: >-
+      the full transcripts of the series' earlier meetings, oldest first, in
+      the prompts that receive recalled memory in D, placed before anything
+      that changes between calls and marked for the provider's cache
+  memory_writing: >-
+    Where memory is off (B, C, D-prime), the harness switches memory writing
+    off if the runtime allows it; otherwise those calls are recorded but not
+    counted in the arm's dollars, because nothing reads what they write.
+
+instructions:
+  memo_format: |
+    Write a decision memo for the person who asked. Use exactly these four
+    headings, in this order:
+    Recommendation
+    Problems with the plan
+    Options weighed
+    What would change this recommendation
+    Name exactly one of the lettered options as the recommendation. Keep the
+    memo under 400 words. Do not name the advisers or describe how the advice
+    was reached.
+  recall_format: |
+    Answer each question, numbered to match. If the panel does not know an
+    answer, say so rather than guess.
+  arm_a_system: |
+    You are an advisory panel of four working for {organisation}:
+    - a chair, who keeps the discussion on the decision to be made;
+    - a finance adviser, who checks whether the numbers add up;
+    - an operations adviser, who checks whether the plan can actually be
+      carried out;
+    - a customer adviser, who speaks for the people the organisation serves.
+    Consider the message from each adviser's point of view, then reply once,
+    as the panel.
+  arm_a_by_meeting:
+    briefing: Reply briefly.
+    plan: "{memo_format}"
+    recall: "{recall_format}"
+  memo_turn:
+    note: >-
+      Arms B to D-prime only. After the discussion closes, however it closes,
+      the chair takes one more turn in the same channel and sees the whole
+      discussion of that meeting. There is no memo turn after a briefing.
+    plan: |
+      The discussion has ended. As chair, write the panel's decision memo from
+      what was said.
+      {memo_format}
+    recall: |
+      The discussion has ended. As chair, give the panel's answers.
+      {recall_format}

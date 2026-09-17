@@ -1,0 +1,255 @@
+# EXP-001 materials — series 2 of 5: Eastvale Libraries.
+# Fixed before any scored run. How the files are used, and how a change
+# is recorded, is in docs/experiments/EXP-001-preregistration.md.
+# The panel sees only each meeting's `message`; `facts` and `key` are
+# for the harness and the scorers.
+id: series-2
+organisation: Eastvale Libraries, a city library service with five branches
+facts:
+  F1: >-
+    Staffing is frozen at 42 posts until next April; no new posts of any
+    kind, full-time or part-time.
+  F2: >-
+    The Northgate branch closes for fire-safety works from 1 December, for
+    about nine months.
+  F3: >-
+    The Pageway e-book contract renews automatically on 1 November each
+    year unless cancelled at least 90 days before.
+  F4: >-
+    Riverside is the busiest branch at weekends, with twice the visitors of
+    any other branch.
+  F5: >-
+    A one-off $60 000 foundation grant may only be spent on digital-skills
+    classes, within 12 months.
+  F6: The staff union agreement requires 60 days' notice of any rota change.
+meetings:
+  - id: series-2-briefing
+    kind: briefing
+    message: |
+      Today is 6 October.
+
+      Hello panel. I'm the service manager for Eastvale Libraries, the
+      city's library service with five branches. Over the next few weeks
+      I'll bring you plans to critique. Please keep these facts in mind:
+
+      - The city council has frozen our staffing at 42 posts until next
+        April. No new posts of any kind, full-time or part-time.
+      - Our Northgate branch failed a fire-safety inspection. The council
+        will close it for works from 1 December, for about nine months.
+      - Our e-book contract with Pageway renews automatically on
+        1 November each year unless we cancel at least 90 days before.
+      - Riverside is our busiest branch at weekends, with twice the
+        visitors of any other branch.
+      - A local foundation has given us a one-off grant of $60 000. It may
+        only be spent on digital-skills classes, within 12 months.
+      - Our agreement with the staff union requires 60 days' notice before
+        any change to staff rotas.
+
+      There is no plan today. Please just confirm you have this.
+
+  - id: series-2-plan-1
+    kind: plan
+    message: |
+      Today is 13 October.
+
+      Plan to critique: evening opening.
+
+      Library users have asked for later opening. The plan opens all five
+      branches until 9pm on weekdays from 3 November, three hours later
+      than now.
+
+      Evidence: 30 comment cards asking for evening hours. The plan
+      expects evening visits to match daytime visits.
+
+      Staffing: current staff move onto a new rota that includes late
+      shifts, and we hire four part-time evening assistants at 20 hours a
+      week each.
+
+      Cost: the plan says the only extra cost is the assistants' pay: four
+      assistants × 20 hours × $23 = $1 840 a week, budgeted at $46 000 a
+      year.
+
+      Decision needed: (A) open all five branches until 9pm as planned,
+      (B) open only the two busiest branches until 9pm, or (C) run a
+      three-month pilot at one branch.
+
+      Please critique the plan and recommend one option.
+    key:
+      problems:
+        K1: >-
+          Thirty comment cards cannot show that evening visits will match
+          daytime visits across five branches.
+        K2: >-
+          $1 840 a week is about $95 700 a year, not $46 000.
+        K3: >-
+          Pay is not the only extra cost: heating, lighting and security
+          for three more hours a day are left out.
+      earlier_facts:
+        F1: >-
+          Staffing is frozen with no new posts of any kind, so the four
+          part-time assistants cannot be hired.
+        F6: >-
+          A new rota needs 60 days' notice, so it cannot start on
+          3 November.
+      unsound_options: [A]
+
+  - id: series-2-plan-2
+    kind: plan
+    message: |
+      Today is 20 October.
+
+      Plan to critique: study space for exam season.
+
+      Last year about 140 students a day used our study spaces during exam
+      season. The plan runs next year's exam-season programme, April to
+      June, in the Northgate branch's reading room, our largest room, with
+      80 seats.
+
+      Opening: 9am to 5pm, the branch's normal hours. In last year's
+      student survey, most students said they need study space after 5pm.
+
+      Staffing: two staff move from Riverside to Northgate every Saturday
+      and Sunday.
+
+      Extras: free printing for students, budgeted at $400, based on 40
+      students printing 10 pages once.
+
+      Decision needed: (A) run the programme at Northgate as planned,
+      (B) spread study space across the other branches with online seat
+      booking, or (C) partner with the city college to use its hall.
+
+      Please critique the plan and recommend one option.
+    key:
+      problems:
+        K1: Eighty seats cannot hold about 140 students a day.
+        K2: >-
+          The opening hours, 9am to 5pm, miss the time students said they
+          need space: after 5pm.
+        K3: >-
+          The printing budget assumes 40 students printing once, far below
+          140 students a day over three months.
+      earlier_facts:
+        F2: >-
+          Northgate is closed for works from 1 December for about nine
+          months, so it is not open from April to June.
+        F4: >-
+          Riverside is busiest at weekends, so moving two staff away on
+          Saturdays and Sundays hurts the busiest branch.
+      unsound_options: [A]
+
+  - id: series-2-plan-3
+    kind: control
+    message: |
+      Today is 27 October.
+
+      Plan to critique: self-service kiosks.
+
+      Our eight self-service kiosks are nine years old and break down
+      often. The options:
+
+      (A) buy eight new kiosks at $7 500 each, $60 000, plus a software
+      licence of $600 a year per kiosk;
+      (B) lease eight kiosks at $210 a month each, software included;
+      (C) repair the current kiosks for $9 000 and replace them in two
+      years.
+
+      The plan recommends leasing. It compares three years of leasing,
+      $60 480, with buying at $60 000, calls the costs about the same, and
+      prefers leasing for its flexibility. We expect kiosks to last five
+      years. The plan also expects 90% of loans to go through the kiosks
+      within a year, the figure in the supplier's brochure; today 55% do.
+      On that basis it says counter queues will halve.
+
+      Decision needed: choose (A), (B) or (C).
+
+      Please critique the plan and recommend one option.
+    key:
+      problems:
+        K1: >-
+          It compares three years of leasing with buying kiosks that last
+          five years; over five years leasing costs $100 800.
+        K2: >-
+          The buying cost leaves out the licence, $24 000 over five years;
+          buying still costs less, $84 000 in all.
+        K3: >-
+          The 90% figure comes from the supplier's brochure and today's
+          rate is 55%, so the claim that queues halve is unsupported.
+      earlier_facts: {}
+      unsound_options: []
+
+  - id: series-2-plan-4
+    kind: plan
+    message: |
+      Today is 3 November.
+
+      Plan to critique: changing our e-book supplier.
+
+      Pageway raised its prices by 18% this year. The plan moves us to a
+      new supplier, Lumen Reads, from 1 January, and cancels Pageway in
+      December.
+
+      Money: Lumen's first-year licence of $58 000 would be paid from the
+      foundation grant.
+
+      Price comparison: Pageway charges $1.10 per loan, and we made 40 000
+      loans last year, $44 000. Lumen charges a flat $58 000 a year, which
+      the plan says is cheaper per loan, based on 60 000 expected loans.
+
+      Catalogue: the plan assumes Lumen carries every title Pageway does.
+      Readers' holds and reading lists will be moved "as needed".
+
+      Decision needed: (A) switch to Lumen Reads as planned, (B) stay with
+      Pageway for another year and plan a switch properly, or (C)
+      negotiate a price cap with Pageway.
+
+      Please critique the plan and recommend one option.
+    key:
+      problems:
+        K1: >-
+          The per-loan comparison uses 60 000 expected loans for Lumen but
+          last year's 40 000 for Pageway; at 40 000 loans Lumen costs $1.45
+          a loan, more than Pageway.
+        K2: It assumes Lumen carries every Pageway title without checking.
+        K3: There is no real plan for moving readers' holds and reading lists.
+      earlier_facts:
+        F3: >-
+          Pageway renewed automatically on 1 November because nobody
+          cancelled 90 days before, so cancelling in December is too late.
+        F5: >-
+          The foundation grant may only be spent on digital-skills
+          classes, not on an e-book licence.
+      unsound_options: [A]
+
+  - id: series-2-recall
+    kind: recall
+    message: |
+      Today is 10 November.
+
+      That's the last plan for now. Before we finish, please answer these
+      from memory:
+
+      1. Can we take on more people this winter?
+      2. Which of our libraries will soon be out of action, and for how
+         long?
+      3. If we ever want to drop our digital lending supplier, what
+         deadline do we have to watch?
+      4. What strings are attached to the gift money we received?
+    key:
+      R1:
+        fact: F1
+        answer: No; staffing is frozen at 42 posts, with no new posts, until next April.
+        must_include: [42 posts, next April]
+      R2:
+        fact: F2
+        answer: Northgate, closed for fire-safety works from 1 December for about nine months.
+        must_include: [Northgate, 1 December, nine months]
+      R3:
+        fact: F3
+        answer: >-
+          Cancel the Pageway contract at least 90 days before 1 November, or
+          it renews automatically.
+        must_include: [90 days, 1 November]
+      R4:
+        fact: F5
+        answer: It may only be spent on digital-skills classes, within 12 months.
+        must_include: [digital-skills classes, 12 months]

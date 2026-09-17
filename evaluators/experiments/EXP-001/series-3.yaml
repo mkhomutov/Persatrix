@@ -1,0 +1,267 @@
+# EXP-001 materials — series 3 of 5: Ledgerline, a software company.
+# Fixed before any scored run. How the files are used, and how a change
+# is recorded, is in docs/experiments/EXP-001-preregistration.md.
+# The panel sees only each meeting's `message`; `facts` and `key` are
+# for the harness and the scorers.
+id: series-3
+organisation: Ledgerline, a 40-person company selling invoicing software
+facts:
+  F1: >-
+    Harlow Group brings 18% of revenue; its contract requires its data to
+    stay in EU data centres and lets it leave on 60 days' notice if not.
+  F2: >-
+    There are 11 months of cash; the board wants 18 months before any new
+    hires.
+  F3: >-
+    The Paystride contract is exclusive until 30 April; leaving earlier
+    costs three months of processing fees.
+  F4: >-
+    Most customers who cancelled last quarter cited missing links to
+    accounting tools, not price.
+  F5: >-
+    Both engineers who built the billing engine have resigned; their last
+    day is 14 November.
+  F6: >-
+    The SOC 2 audit starts on 1 March; no major infrastructure change is
+    allowed in the 60 days before.
+meetings:
+  - id: series-3-briefing
+    kind: briefing
+    message: |
+      Today is 6 October.
+
+      Hello panel. I'm chief of staff at Ledgerline, a 40-person company
+      selling invoicing software to small businesses. Over the next few
+      weeks I'll bring you plans to critique. Please keep these facts in
+      mind:
+
+      - Our largest customer, Harlow Group, brings in 18% of our revenue.
+        Their contract requires all their data to stay in EU data centres,
+        and lets them leave on 60 days' notice if it does not.
+      - We have 11 months of cash at our current spending. The board wants
+        at least 18 months of cash before we add any new hires.
+      - Our payment-processing contract with Paystride is exclusive until
+        30 April. Leaving before then costs a fee equal to three months of
+        processing fees.
+      - Last quarter, most customers who cancelled said the reason was
+        missing links to their accounting tools, not price.
+      - The two engineers who built our billing engine have both resigned.
+        Their last day is 14 November.
+      - Our SOC 2 audit starts on 1 March, and the auditors require no
+        major infrastructure changes in the 60 days before it.
+
+      There is no plan today. Please just confirm you have this.
+
+  - id: series-3-plan-1
+    kind: plan
+    message: |
+      Today is 13 October.
+
+      Plan to critique: cutting hosting costs.
+
+      We pay $31 000 a month for hosting across two EU regions. The plan
+      moves everything to a single US region with a cheaper provider,
+      Northbeam Cloud, which quotes $20 000 a month: a saving of 35%.
+
+      Timing: one cut-over weekend in mid-February.
+
+      The move: our main database is 2.4 terabytes. The plan expects one
+      hour of downtime and has no practice run scheduled. If problems
+      appear during the cut-over, the team will fix them on the new
+      platform.
+
+      Data charges: Northbeam charges $0.08 per gigabyte for data sent
+      out, and we send customers about 60 terabytes a month. The saving is
+      based on the two monthly quotes.
+
+      Decision needed: (A) move everything to Northbeam as planned,
+      (B) move a quarter of our customers first as a trial, or (C) stay with
+      our current provider and cut costs there.
+
+      Please critique the plan and recommend one option.
+    key:
+      problems:
+        K1: >-
+          One hour of downtime to move a 2.4-terabyte database, with no
+          practice run, is not credible.
+        K2: >-
+          There is no way back if the cut-over fails; fixing problems on
+          the new platform is not a rollback plan.
+        K3: >-
+          Northbeam's charge for data sent out, about $4 800 a month for
+          60 terabytes, is left out; it cuts the saving from $11 000 to
+          about $6 200 a month.
+      earlier_facts:
+        F1: >-
+          Harlow Group, 18% of revenue, requires EU data centres and can
+          leave on 60 days' notice, so moving all data to the US risks
+          losing it.
+        F6: >-
+          The SOC 2 audit starts on 1 March and forbids major
+          infrastructure changes in the 60 days before, so a mid-February
+          cut-over breaks that rule.
+      unsound_options: [A]
+
+  - id: series-3-plan-2
+    kind: plan
+    message: |
+      Today is 20 October.
+
+      Plan to critique: reducing cancellations.
+
+      We lost 9% of our customers last quarter. The plan cuts prices by
+      20% for all customers, new and existing, and hires three salespeople
+      to win back customers who left.
+
+      Evidence: a competitor's blog post says a price cut halved their
+      cancellations; the plan expects the same for us.
+
+      Revenue model: the plan models the price cut's effect on new
+      sign-ups, and expects the three salespeople to reach full sales
+      targets in their first month.
+
+      Decision needed: (A) cut prices and hire three salespeople, (B) build
+      links to three popular accounting tools, or (C) change nothing until
+      next quarter's figures are in.
+
+      Please critique the plan and recommend one option.
+    key:
+      problems:
+        K1: >-
+          A competitor's blog post is not evidence that our cancellations
+          will halve.
+        K2: >-
+          The price cut also applies to existing customers, but the revenue
+          lost on them is not modelled.
+        K3: >-
+          New salespeople rarely reach full targets in their first month;
+          the time they take to ramp up is ignored.
+      earlier_facts:
+        F4: >-
+          Customers who cancelled mostly cited missing accounting-tool
+          links, not price, which points to B.
+        F2: >-
+          There are 11 months of cash and the board wants 18 before any
+          new hires, so hiring three salespeople goes against the board.
+      unsound_options: [A]
+
+  - id: series-3-plan-3
+    kind: plan
+    message: |
+      Today is 27 October.
+
+      Plan to critique: rebuilding billing.
+
+      Our billing engine is old and hard to change. The plan has our
+      billing team rebuild it in eight weeks, starting 3 November, and
+      then switch to a cheaper payment processor, Coinvale Pay, on
+      15 April.
+
+      Testing: the eight weeks cover design and building; testing will
+      happen "carefully, in production".
+
+      Cards: Paystride holds 12 000 customers' saved cards. The plan has
+      customers re-enter their card details when prompted.
+
+      Saving: Coinvale charges 2.1% per payment plus $0.30, and we pay
+      Paystride 2.9%. The plan calls this a 28% saving. Our average payment
+      is $40.
+
+      Decision needed: (A) rebuild billing and switch processors as
+      planned, (B) freeze billing changes, document the engine and plan
+      any switch for next summer, or (C) rebuild billing now and switch
+      processors later.
+
+      Please critique the plan and recommend one option.
+    key:
+      problems:
+        K1: >-
+          Testing billing only in production risks charging customers
+          wrongly; there is no test phase.
+        K2: >-
+          Asking 12 000 customers to re-enter card details will lose
+          payments; there is no plan to move the saved cards.
+        K3: >-
+          The 28% saving ignores Coinvale's $0.30 per payment; on a $40
+          payment Coinvale costs 2.85%, almost the same as 2.9%.
+      earlier_facts:
+        F5: >-
+          The two engineers who built billing leave on 14 November, less
+          than two weeks into an eight-week rebuild.
+        F3: >-
+          Paystride is exclusive until 30 April, so switching on 15 April
+          triggers a fee of three months' processing fees.
+      unsound_options: [A]
+
+  - id: series-3-plan-4
+    kind: control
+    message: |
+      Today is 3 November.
+
+      Plan to critique: a four-day week for support.
+
+      Our five-person support team would work four days a week, Monday to
+      Thursday, on the same pay, starting next month. Our customer
+      contracts promise a reply within 24 hours on business days, Monday
+      to Friday. The plan expects the team to handle the same number of
+      tickets in four days, because rested people work better. Success
+      will be judged by the team's satisfaction survey after three months.
+
+      Decision needed: (A) adopt the four-day week for support now,
+      (B) run a three-month pilot with staggered days off, or (C) reject
+      the idea.
+
+      Please critique the plan and recommend one option.
+    key:
+      problems:
+        K1: >-
+          With everyone off on Fridays, tickets sent on Thursday or Friday
+          get no reply within 24 hours, breaking the business-day promise.
+        K2: >-
+          Success is judged only by staff satisfaction, not by reply times
+          or customer satisfaction.
+        K3: >-
+          The claim that the team will handle the same tickets in four days
+          has no evidence and no measure.
+      earlier_facts: {}
+      unsound_options: []
+
+  - id: series-3-recall
+    kind: recall
+    message: |
+      Today is 10 November.
+
+      That's the last plan for now. Before we finish, please answer these
+      from memory:
+
+      1. Which client could walk away if we changed where we keep their
+         information, and how much of our income would go with them?
+      2. How long will our money last, and what do our directors want to
+         see before we grow the team?
+      3. What would it cost us to move to a different company for handling
+         card charges this winter?
+      4. Is there a period when big work on our systems is off limits, and
+         why?
+    key:
+      R1:
+        fact: F1
+        answer: >-
+          Harlow Group, which brings 18% of revenue and requires its data to
+          stay in EU data centres.
+        must_include: [Harlow Group, 18%]
+      R2:
+        fact: F2
+        answer: About 11 months; the board wants 18 months before any new hires.
+        must_include: [11 months, 18 months]
+      R3:
+        fact: F3
+        answer: >-
+          A fee of three months of processing fees, because Paystride is
+          exclusive until 30 April.
+        must_include: [three months of processing fees]
+      R4:
+        fact: F6
+        answer: >-
+          Yes: the 60 days before the SOC 2 audit starts on 1 March, when
+          the auditors allow no major infrastructure change.
+        must_include: [60 days, 1 March]
