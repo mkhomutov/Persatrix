@@ -91,9 +91,10 @@ What those words mean in the code:
 - **One model and one runtime.** Every call in every arm uses
   `claude-sonnet-4-6`, salience bids and memory summaries included: the
   `quality`, `fast` and `summarizer` aliases all point at it. Every live arc
-  so far has run on it, and the shipped Anthropic adapter sends a temperature,
-  which newer models reject. Every arm runs the one build that teaches the
-  adapter prompt caching; only D′ uses it.
+  so far has run it as the quality lane, though their bids and summaries ran
+  on the cheaper shipped lane, and the shipped Anthropic adapter sends a
+  temperature, which newer models reject. Every arm runs the one build that
+  teaches the adapter prompt caching; only D′ uses it.
 - **A new channel for every meeting.** Its members are the four advisers and
   the operator. The operator posts each message as an ordinary channel
   message; convene is never used. The topic and goal are fixed and the agenda
@@ -140,8 +141,9 @@ practice run must show that:
    from D′'s transcript prefix;
 2. in D, a briefing fact can reach a later meeting's prompt through the shipped
    memory path, and a restart leaves the memory stores exactly as they were;
-3. in D′, the second model call of a meeting reads the prefix from the cache,
-   and no other arm sets a cache breakpoint;
+3. in D′, the first call of a meeting that carries the prefix writes it to the
+   cache and every later call of that meeting reads it, and no other arm sets
+   a cache breakpoint;
 4. every model call is recorded with its arm, meeting, adviser, purpose, time
    and token counts, cache reads and writes included;
 5. the memo turn's prompt contains every message of its meeting, the plan
@@ -154,17 +156,20 @@ practice run must show that:
 
 **Order.** The practice series runs first, as often as needed. The scored
 series then run in order, 1 to 5. Within a series the five arms run one at a
-time, in an order drawn with seed 2026 and recorded. Every scored meeting
-happens within seven days of the first.
+time, in an order drawn for that series from one random stream seeded 2026, so
+the series do not share an order, and recorded. Every scored meeting happens
+within seven days of the first.
 
 **Attempts and failures.**
 
 - **Provider errors.** An error from the model provider (a rate limit, a
-  server error, a timeout) is retried up to three times. If the meeting still
-  fails, that arm's series starts again from its briefing, once. If it fails
-  again, that series is dropped from every arm's comparisons. With fewer than
-  four series left, the run is incomplete. A failed attempt's spend is
-  reported, but not counted in dollars per plan.
+  server error, a timeout) is retried up to three times. The harness reads
+  them from the runtime's own records: a persona turn that ends in a provider
+  error publishes nothing to the channel, so it looks like silence. If the
+  meeting still fails, that arm's series starts again from its briefing, once.
+  If it fails again, that series is dropped from every arm's comparisons. With
+  fewer than four series left, the run is incomplete. A failed attempt's spend
+  is reported, but not counted in dollars per plan.
 - **Failures the system causes.** Examples are a discussion that never
   closes, an adviser that goes silent, or a missing memo. These are not
   retried. The memo is scored as written, or 0 on every criterion if there is

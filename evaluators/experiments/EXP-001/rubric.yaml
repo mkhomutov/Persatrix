@@ -7,6 +7,12 @@ packet: >-
   operator message of that series up to and including the one the memo
   answers (the briefing, earlier plans and this plan), the answer key, and
   the memo. The rater never sees who or what wrote the memo.
+templating: >-
+  The harness fills {criteria} and {rule} below, and {memo_format},
+  {recall_format}, {organisation}, {current_time_line} and
+  {adviser_identity_blocks} in panel.yaml, by replacing those exact strings.
+  Every other brace in these files, such as the JSON the judge is asked for,
+  is literal text, so a str.format-style filling would reject it.
 memo:
   scale: >-
     Five criteria, each scored 0, 1 or 2, for a total out of 10. On the five

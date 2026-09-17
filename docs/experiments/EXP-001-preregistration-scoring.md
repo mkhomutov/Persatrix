@@ -60,14 +60,21 @@ counts as right when at least two raters mark it right.
 
 ## 4. Agreement
 
-For each pair of raters, the harness ranks the memos by each rater's total and
-measures how closely the two rankings agree (a Spearman correlation, with tied
-totals sharing their average rank). Memos the harness scored 0 because none
-existed are left out. The decision uses the average of three raters, and how
-reliable that average is depends on how well the raters agree on average. So
-if the three correlations average below 0.4, the scores cannot carry a
-decision, and the result is **inconclusive**. All three correlations are
-reported.
+Every rule reads the difference between two arms on the same plan, so that is
+where the raters have to agree. Ranking all 100 memos at once would hide a
+disagreement there: two raters who only agree on which plans are hard, or on
+which memos used the earlier facts, would still look like they agree.
+
+For each pair of raters and each plan, the harness ranks that plan's five memos
+by each rater's total and measures how closely the two rankings agree (a
+Spearman correlation, with tied totals sharing their average rank). The pair's
+figure is the average over the 20 plans. Memos the harness scored 0 because
+none existed are left out, and a plan with fewer than three memos left is
+skipped. The decision uses the average of three raters, and how reliable that
+average is depends on how well they agree. So if the three pairs' figures
+average below 0.4, the scores cannot carry a decision, and the result is
+**inconclusive**. All three figures are reported, and so are the three
+correlations over all 100 memos at once.
 
 The result is also inconclusive if scoring is not finished within 21 days of
 the last scored meeting, or if the judge's spend reaches its cap first.
