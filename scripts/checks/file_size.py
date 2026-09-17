@@ -136,8 +136,8 @@ def _stale_allowlist_entries(released: frozenset[str]) -> list[str]:
     Such an entry is dead weight: the file is excluded before the allowlist is
     consulted. It is reported as a notice, not a failure — the entry for the
     open cycle's plan becomes stale the moment the changelog is dated, and
-    turning ``main`` red between that and the post-release follow-up that
-    retires it would punish every unrelated PR in between.
+    turning ``main`` red between that and the follow-up that retires it (the
+    next plan's first section) would punish every unrelated PR in between.
     """
     return sorted(rel for rel in GRANDFATHERED_FILES if _is_released_version_doc(rel, released))
 
@@ -386,7 +386,7 @@ def check_file_size(
     for rel in _stale_allowlist_entries(_released_versions(repo_root)):
         print(
             f"[STALE-ALLOWLIST] {rel} is a released version-cycle doc, already excluded — "
-            "drop its entry from scripts/checks/file_size_allowlist.py (post-release follow-up)."
+            "drop its entry from scripts/checks/file_size_allowlist.py (the next plan's follow-up)."
         )
 
     print(f"[SCAN] Scanned {len(code_results)} code files and {len(doc_results)} doc files")

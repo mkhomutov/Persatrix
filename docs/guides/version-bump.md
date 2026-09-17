@@ -41,10 +41,10 @@ After running the script, complete these steps in order:
 - [ ] **Run linters**: `make lint`
 - [ ] **Update CHANGELOG.md**: `git-cliff --tag vX.Y.Z --unreleased --prepend CHANGELOG.md`
 - [ ] **Review changelog** — ensure curated content is preserved, not overwritten
-- [ ] **Check release checklist** — execute the relevant `docs/vX.Y-release-checklist.md`
+- [ ] **Tick the tag PR's boxes** in the release checklist of `docs/vX.Y.Z-plan.md` (`make release-sweep RUN=1` runs the gates)
 - [ ] **Commit version bump**: `git add -A && git commit -m "chore: bump version to X.Y.Z"`
-- [ ] **Tag release**: `git tag -a vX.Y.Z -m "vX.Y.Z — <release name>"`
-- [ ] **Push**: `git push origin main --tags`
+- [ ] **Tag release** once the tag PR merges, on its merge commit: `git tag -a vX.Y.Z -m "vX.Y.Z — <release name>" <merge commit>`
+- [ ] **Push the tag**: `git push origin vX.Y.Z`
 
 ## Adding a New Versioned File
 
@@ -52,7 +52,6 @@ If a new component is added that carries its own version string:
 
 1. Add an entry to `VERSION_FILES` in `scripts/bump_version.py`
 2. Add a row to the table in this document
-3. Add a row to the Version Alignment section of the release checklist template
 
 ## Notes
 

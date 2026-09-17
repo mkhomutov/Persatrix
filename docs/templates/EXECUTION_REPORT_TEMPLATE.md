@@ -4,7 +4,7 @@
 **Report status**: ⬜ Pending — <flips to `✅ Complete — <verdict in one sentence>` when every row is Pass / Accepted-with-known-gap; zero Fail, zero Pending>
 **Tester**: <name / agent + model> — <live Docker stack (provider + model) | host structural gates>
 **Execution date**: YYYY-MM-DD
-**Target commit**: `main` tip `<sha>` (<PR>) <plus any in-PR fix re-verified live>. This is PR 1 of `docs/vX.Y.Z-release-prep-plan.md`.
+**Target commit**: `main` tip `<sha>` (<PR>) <plus any in-PR fix re-verified live>. Landed by the last implementation PR of `docs/vX.Y.Z-plan.md`.
 
 > **Environment note.** Structural gates ran on host against the RC tip working
 > tree; the arc ran on a freshly `make reset` Docker stack rebuilt at the RC tip
@@ -19,7 +19,7 @@
 
 ## Scope
 
-Per `docs/vX.Y.Z-release-prep-plan.md` §PR 1: <the arc, the substrate re-runs,
+Per `docs/vX.Y.Z-plan.md` §Release checklist: <the arc, the substrate re-runs,
 the eval replay, the offline smoke>.
 
 ## Environment
@@ -103,9 +103,9 @@ surface was exercised>.
 
 ---
 
-## Final Pre-Tag Verification (release-prep PR 4)
+## Final Pre-Tag Verification (the tag PR)
 
-> Filled by PR 4 on the post-bump tip; left Pending until then.
+> Filled by the tag PR on its post-bump head; left Pending until then.
 
 ### Automated gates
 | Gate | Result |

@@ -6,7 +6,7 @@ does useful work then — and *frozen* once the version's tag exists. Frozen
 release documents are release evidence, the same category ``file_size.py``
 already excludes by pattern for execution reports and checklists, so the
 checker treats a version-cycle doc as excluded **once its version has a dated
-CHANGELOG section** (written one PR before the tag) and as an ordinary capped
+CHANGELOG section** (written by the tag PR, before the tag) and as an ordinary capped
 doc otherwise. The changelog, not ``git tag``, is the source so the answer is
 the same in a depth-1 CI checkout, a worktree, and a tarball.
 
@@ -176,7 +176,7 @@ def test_stale_allowlist_is_a_notice_not_a_gate(
 ) -> None:
     """A release dated while the plan is still allowlisted must not turn CI red.
 
-    The entry is retired by the post-release follow-up; until then every
+    The entry is retired by the next plan's follow-up section; until then every
     unrelated PR would otherwise fail on it. So: printed, exit code untouched.
     """
     monkeypatch.setattr(file_size, "_released_versions", lambda _root: RELEASED)

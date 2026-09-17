@@ -113,7 +113,7 @@ One canonical document per topic. Link to it; do not copy from it.
 | Manual tests index and conventions | `docs/manual-tests/README.md` |
 | Version status, RFC master index, merged PRs | `ROADMAP.md` |
 | Version scope decisions | `docs/v0.3.x-sequencing.md` (active amendment at the top) |
-| One version's plan / release-prep / checklist / evidence | `docs/vX.Y.Z-*.md` and `docs/manual-tests/vX.Y.Z-execution-report.md` |
+| One version's plan (scope locks and release checklist inside) and its evidence | `docs/vX.Y.Z-plan.md` and `docs/manual-tests/vX.Y.Z-execution-report.md` |
 | Operator and user guides | `docs/guides/` (auth, autonomous channels, channels, epochs, model providers, persona agents, sessions, web console and its channel settings, version bump, demo) |
 | Log schema and observability | `docs/observability.md` |
 | Golden-trace evals | `docs/evaluators-guide.md`; `evaluators/eval_sets/README.md` |
@@ -137,22 +137,22 @@ One canonical document per topic. Link to it; do not copy from it.
 | RFCs and their PR plans | `docs/rfcs/NNNN-*.md`, `docs/rfcs/NNNN-pr-plan.md` | Live until `✅ Implemented`; then edited only for divergence notes and status | `rfcs/RFC_TEMPLATE.md`, `templates/PR_PLAN_TEMPLATE.md` |
 | Issues | `docs/issues/ISSUE-NNNN-*.md` | Live until `resolved`; resolved files stay for `grep` | `issues/ISSUE-TEMPLATE.md` |
 | Manual tests | `docs/manual-tests/MT-*.md` | Live; versioned (`v1.1`, `v1.2`) when a leg changes | `templates/MANUAL_TEST_TEMPLATE.md` |
-| Version-cycle documents | `docs/vX.Y.Z-plan.md`, `-scope-locks.md`, `-plan-amendment-*.md`, `-release-prep-plan.md`, `-release-baseline.md`, `-release-checklist.md` | Edited during the cycle; **frozen at the post-release follow-up** except for the Released stamp | one each in [`docs/templates/`](templates/README.md) |
+| Version-cycle documents | `docs/vX.Y.Z-plan.md`, the one document of a patch release since ruling (e) of the sequencing Amendment 2026-09-12; v0.3.16 and earlier also wrote `-scope-locks.md`, `-plan-amendment-*.md`, `-release-prep-plan.md`, `-release-baseline.md`, `-release-checklist.md` | Edited during the cycle; **frozen once the tag PR dates the changelog**, except for the Released stamp | `templates/VERSION_PLAN_TEMPLATE.md` |
 | Release evidence | `docs/manual-tests/vX.Y.Z-execution-report.md` | Written once against the tag; never edited after | `templates/EXECUTION_REPORT_TEMPLATE.md` |
 
 **Archival rule.** A version-cycle document is *archived* when its version has
-shipped — the changelog carries its dated section and the post-release
-follow-up has stamped it Released. Archived
+shipped — the changelog carries its dated section and the tag PR has
+stamped it Released. Archived
 documents are not moved (every plan is linked from ROADMAP, issues, and later
 plans, and moving them would break those links); they are frozen in place.
 Frozen release documents are **release evidence**, so they are exempt from the
 word cap: execution reports and checklists are excluded by pattern in
 `scripts/checks/file_size.py`, and plans, scope locks, amendments,
 release-prep plans and baselines are excluded **once `CHANGELOG.md` carries
-their version's dated heading** — written at release-prep PR 3, one PR before
-the tag ([ISSUE-0139](issues/ISSUE-0139-released-plans-have-no-archival-mechanism.md)).
-Only the **open** cycle's plan can need an allowlist entry, and that entry
-expires by itself at the release.
+their version's dated heading** — written by the tag PR, before the tag
+([ISSUE-0139](issues/ISSUE-0139-released-plans-have-no-archival-mechanism.md)).
+No plan needs an allowlist entry any more: a patch release's plan holds the
+release under the cap. An older plan's entry expired at its release.
 
 ## Historical Artifacts Policy
 

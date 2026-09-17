@@ -1,10 +1,11 @@
 # The Release Cycle
 
 > **Last updated**: 2026-09-17
-> Describes the cycle every release since v0.3.0 has followed. Evidence: the
-> `docs/v0.3.*-plan.md` and `docs/v0.3.*-release-prep-plan.md` files, and the
-> commit log — fifteen release-prep plans, fifteen "release-prep PR 1" merges,
-> eighteen post-release follow-ups, all in the same shape.
+> Describes the cycle a patch release follows since ruling (e) of the
+> [sequencing Amendment 2026-09-12](../v0.3.x-sequencing.md#amendment-2026-09-12--close-v0316-small-then-measure-before-any-train-opens):
+> **one document**, the plan. v0.3.0–v0.3.16 ran the same steps across five
+> documents and five release-prep PRs; [§Before ruling (e)](#before-ruling-e)
+> maps them onto the phases below.
 
 A release is one **version** with one **user-facing story**: "a version is
 ready when a developer can do something meaningful they could not do before"
@@ -15,22 +16,18 @@ Everything below exists to ship that story with evidence and without surprise.
 Sequencing amendment  ──► Planning-readiness audit
    │
    ▼
-Phase 0  Master plan PR            docs/vX.Y.Z-plan.md (+ scope locks)
-Phase 1  Implementation PRs        one branch prefix, review findings folded in
-Phase 2  Release-prep plan         release-prep PR 0
-Phase 3  Release-prep PRs 1–4      live arc → docs + checklist → bump + changelog → final verification
-         Tag + GitHub Release
-Phase 4  Post-release follow-up PR statuses → Released, ROADMAP repointed, backfills
+Phase 0  Plan PR               docs/vX.Y.Z-plan.md: the previous release's follow-up,
+                               scope locks, acceptance, PRs, release checklist
+Phase 1  Implementation PRs    the last one also runs the live arc and checks the docs
+Phase 2  Tag PR                version bump, changelog, gate sweep, statuses → Released
+         Tag + GitHub Release  on the tag PR's merge commit
 ```
 
 Each phase below states its **entry**, **exit**, **artifacts**, and **failure
 path**. The vocabulary is defined in the [process glossary](process-glossary.md).
-
-> **Numbering note.** The phase numbers above have been stable since v0.3.8.
-> Earlier plans numbered the same steps differently — the release-prep plan
-> was "Phase 3" in v0.3.2 and v0.3.4 and "Phase 4" in v0.3.5 — because those
-> plans counted their implementation sub-phases separately. Read an older
-> plan by its section titles, not its numbers; the steps are the same.
+Ruling (e) sets this shape for a **patch release**. No minor release has
+opened since; the amendment that opens one says whether it keeps the one
+document.
 
 ---
 
@@ -55,71 +52,95 @@ Before the plan opens, every issue the amendment slots gets a dated note
 recording its slotting and any plan-opening default the plan will rely on
 (precedent: [#807](https://github.com/mkhomutov/Persatrix/pull/807)). The goal
 is that the plan can open "with no dangling questions". No status or severity
-changes; the index does not change — except to file an issue a prior cycle's
-Phase 4 promised and did not (precedent: the ISSUE-0146 re-file in
+changes; the index does not change — except to file an issue a prior cycle
+promised and did not (precedent: the ISSUE-0146 re-file in
 [#885](https://github.com/mkhomutov/Persatrix/pull/885)).
 
 ---
 
-## Phase 0 — the master plan PR
+## Phase 0 — the plan PR
 
 **Entry**: amendment ratified; readiness audit merged.
-**Exit**: `docs/vX.Y.Z-plan.md` merged; ROADMAP Version-Map row carries the plan link.
+**Exit**: `docs/vX.Y.Z-plan.md` merged, its follow-up section ticked; ROADMAP
+Version-Map row carries the plan link.
 
-The plan is a **thin orchestration overlay**: it owns sequencing, the live
-arc, and whatever no RFC or issue-owned PR plan already owns. It does not
-restate designs that live elsewhere. Start from
-[`VERSION_PLAN_TEMPLATE.md`](../templates/VERSION_PLAN_TEMPLATE.md) (locks:
-[`SCOPE_LOCKS_TEMPLATE.md`](../templates/SCOPE_LOCKS_TEMPLATE.md)). Its fixed
+The plan is the release's **one document**: plan, scope locks and release
+checklist in one file under the 3 000-word cap. It owns sequencing, the
+release gate, and whatever no RFC or issue-owned PR plan already owns. It does
+not restate designs, the gate list (`scripts/release/sweep.py` owns that) or
+evidence (the execution report owns that). Open it with `make release-doc
+KIND=plan VERSION=X.Y.Z CODENAME="…"` from
+[`VERSION_PLAN_TEMPLATE.md`](../templates/VERSION_PLAN_TEMPLATE.md). Its
 sections, in order:
 
 1. **Header** — status, target version, created date, branch prefix
-   (`feature/v0315-`), target `main`, squash merge, codename, goal.
-2. **Scope decisions locked at plan opening** — the [scope locks](decisions.md#scope-locks),
-   each a decision plus its binding consequence, with an explicit **out of
+   (`feature/v0316-`), target `main`, squash merge, codename, goal, and the
+   amendment step it executes.
+2. **The previous release's follow-up** — [below](#the-follow-up-section).
+3. **Scope locks** — each a decision plus its binding consequence
+   ([decisions.md](decisions.md#scope-locks)), with an explicit **out of
    scope** list "deferred explicitly so they do not pressure the cut".
-3. **Acceptance** — "the release ships when **all** hold": one bullet per
-   evidenced claim, including the coherence trades the release notes must
-   state and the gate sweep that must be green.
-4. **Master Progress Overview** — one row per workstream with owner and status
-   (⬜ · 🔄 · 🔀 · ✅ · ✂️ Cut); a final row for release-prep + tag.
-5. **Dependency graph** — ASCII, with the hard edges called out in prose.
-6. **Phase 0 — this planning PR** — what the PR itself changes (this doc,
-   ROADMAP hygiene, plan-opening notes on issues, FILEMAP regen).
-7. **Phase 1 — implementation PRs** — per workstream, per PR: branch, scope,
-   tests, acceptance. Review findings for these PRs are recorded in the PR
-   body and, when deferred, as issues — the per-PR findings *table* is the
-   RFC PR plan's pattern, not the master plan's
+4. **Acceptance** — "the release ships when **all** hold": one bullet per
+   evidenced claim, including the live arc's evidence obligations, the
+   coherence trades the release notes must state, and the gate sweep.
+5. **Progress** — one row per implementation PR and one for the tag PR
+   (⬜ · 🔄 · 🔀 · ✅ · ✂️ Cut).
+6. **Implementation PRs** — per PR: branch, scope, tests, acceptance,
+   migration; the hard ordering edges in one line. Review findings are
+   recorded in the PR body and, when deferred, as issues
    ([review-process.md](review-process.md#where-findings-are-recorded)).
-8. **Phase 2 / 3 / 4** — one paragraph each, naming the release-prep plan,
-   the live deliverable, and the tag + follow-up obligations.
-9. **ROADMAP hygiene** — which row flips at which event.
-10. **Risk and mitigations** — a table; each row names a risk and the
-    mechanism (test, MT leg, lock, or stated Known Gap) that bounds it.
-11. **Decision / next steps** — a numbered list that is struck through as it
-    completes.
-12. **Related documentation**.
+7. **Release checklist** — the boxes the last implementation PR and the tag PR
+   tick, the Upgrade Notes, and the Known Gaps.
+8. **Risks** — a table; each row names a risk and the mechanism (test, MT
+   leg, lock, or stated Known Gap) that bounds it.
+9. **Related documentation**.
 
-When the plan nears the 3 000-word cap the **stable half** (scope locks) is
-split into `docs/vX.Y.Z-scope-locks.md` so status flips never pay for
-themselves by deleting a lock (precedent: v0.3.15).
+**A release that does not fit** under the cap is bigger than a patch release:
+cut a cuttable item under its clause, or ask for an amendment that splits the
+release. It never grows a second file — `make plan-status-check` fails a
+scope-locks, plan-amendment, release-prep-plan, release-baseline or
+release-checklist file beside an unreleased patch release's plan. A mid-cycle
+change to a lock is a dated **§Amendment** section inside the plan
+([decisions.md](decisions.md#amendments)).
 
 **Failure path**: a review finding at plan opening that changes a lock is
 folded in before merge as a second commit and recorded in the lock's text
 (precedent: [#818](https://github.com/mkhomutov/Persatrix/pull/818) F-1/F-2).
 After merge, a lock changes only by amendment.
 
+### The follow-up section
+
+The plan's first section is the previous release's post-release follow-up,
+done by the plan PR rather than a PR of its own:
+
+- the previous tag sits on its tag PR's merge commit, and its GitHub Release
+  is published;
+- nothing in the tree still says the previous release is pending — README
+  roadmap row, ROADMAP Version Map and header, that plan's status line, the
+  execution-report index row;
+- issue closures are reflected, and `make issues` / `make rfcs` are clean;
+- any new issue the release surfaced is filed with a dated note and a slot
+  (precedent: ISSUE-0122 at [#817](https://github.com/mkhomutov/Persatrix/pull/817));
+- anything the previous plan promised that **cannot** be done is recorded as
+  "NOT done, and recorded rather than forced", with the reason, so this cycle
+  does not inherit a promise it cannot keep (precedent: the allowlist exit
+  condition at [#838](https://github.com/mkhomutov/Persatrix/pull/838)).
+
+Between a tag and the next plan the tag PR's statuses stand. Under ruling (a)
+of the same amendment that gap can be months, which is why the tag PR writes
+them rather than leaving them to this section.
+
 ---
 
 ## Phase 1 — implementation PRs
 
 **Entry**: plan merged.
-**Exit**: every non-cut workstream row in the Master Progress Overview is ✅;
-`main` is a usable release-candidate tip.
+**Exit**: every non-cut implementation row in Progress is ✅; the execution
+report is ✅ Complete; `main` is a usable release-candidate tip.
 
 Rules that hold for every PR:
 
-- **One branch prefix per version** (`feature/v0315-…`), Conventional Commit
+- **One branch prefix per version** (`feature/v0316-…`), Conventional Commit
   title, squash merge, target under 500 changed lines.
 - **Migrations land ahead of their consumer**, in their own PR, never two
   stores in one PR. A repair migration that must ship *with* its consumer is
@@ -127,14 +148,50 @@ Rules that hold for every PR:
 - **Every PR is reviewed** ([review-process.md](review-process.md)); findings
   are fixed in-PR, deferred to a named follow-up PR, or filed as an issue.
   A finding is never left unrecorded.
-- **The plan row flips at PR open and at merge**, and the Master Progress
-  Overview is reconciled at every PR open. Merged PRs leaving their own rows
-  stale is the most common hygiene defect in the history.
+- **The plan row flips at PR open and at merge**, and Progress is reconciled
+  at every PR open. Merged PRs leaving their own rows stale is the most common
+  hygiene defect in the history; `make plan-status-check` fails one.
 - **Large residual work gets its own PR plan** owned by the issue
-  (`docs/issues/ISSUE-NNNN-…-pr-plan.md`); the master plan links it rather
-  than duplicating its PR table.
+  (`docs/issues/ISSUE-NNNN-…-pr-plan.md`); the plan links it rather than
+  duplicating its PR table.
 - **RFC work inside a version** follows the RFC sub-cycle in
   [development-workflow.md](../development-workflow.md).
+
+### The last implementation PR — the release gate
+
+The implementation PR that merges last before the tag PR also runs the
+release gate, once its review findings are fixed, so the arc runs on the head
+that merges:
+
+- Run the designated manual-test arc **once**, **live**, on a real (paid)
+  provider, **machine-paced in one script** so governance windows (600 s
+  end-vote timers, floor-control rounds) never expire while the operator is
+  reading — the pacing rules are in the arc's setup document
+  ([MT-MEMORY-GROUP-TENANT-001-setup.md](../manual-tests/MT-MEMORY-GROUP-TENANT-001-setup.md))
+  and the driver under `scripts/manual_tests/`.
+- Run the offline smoke (`make demo-autonomous`, $0) and `make eval-replay`.
+- Record every evidence obligation **verbatim** — tables, triples, counts —
+  and the cost in `docs/manual-tests/vX.Y.Z-execution-report.md` (from
+  [`EXECUTION_REPORT_TEMPLATE.md`](../templates/EXECUTION_REPORT_TEMPLATE.md)),
+  at ✅ Complete with zero `Fail` and zero `Pending`, with its row in the
+  [execution-report index](../manual-tests/README.md).
+- Preflight the run for **vacuity**: a leg that can pass while exercising
+  nothing (an absence bar satisfied by an empty read, a fan-out suppressed by
+  a room setting, a sampler that drops the spans) is not run until the
+  preflight says it can be answered. `scripts/manual_tests/` holds the
+  drivers and three-state (pass / fail / skipped) gates.
+- **Findings** are labelled F-1, F-2, … and dispositioned in the same PR: a
+  red leg is fixed before the tag, in this PR or an in-release fix PR
+  (precedent: PR 1a [#834](https://github.com/mkhomutov/Persatrix/pull/834)),
+  never re-deferred; capture or reasoning misses become
+  `Accepted-with-known-gap` rows citing a tracked issue.
+- **Verify**, against shipped behaviour, every guide, RFC section, and diagram
+  this release edited, and fix stale spots here.
+- Every scoped issue closes here (`status: resolved`, `closed_pr`,
+  `make issues`), citing the report.
+
+A fix that lands after the arc re-runs, in its own PR, the legs its change can
+reach, before the tag PR opens.
 
 **Failure paths**:
 
@@ -148,101 +205,22 @@ Rules that hold for every PR:
   gap explained in a comment where the fix lives (precedents:
   [#848](https://github.com/mkhomutov/Persatrix/pull/848),
   [#813](https://github.com/mkhomutov/Persatrix/pull/813) F-2).
+- **Release gate not met**: the report merges as-is, titled "release gate not
+  met" (precedent: v0.3.2 [#394](https://github.com/mkhomutov/Persatrix/pull/394));
+  fix PRs follow; a **re-execution** report ("release gate met",
+  [#397](https://github.com/mkhomutov/Persatrix/pull/397)) comes before the
+  tag PR opens. The tag never moves ahead of the evidence.
 
 ---
 
-## Phase 2 — the release-prep plan (release-prep PR 0)
+## Phase 2 — the tag PR
 
-**Entry**: Phase 1 exit.
-**Exit**: `docs/vX.Y.Z-release-prep-plan.md` merged.
+**Entry**: every implementation row ✅ or ✂️; the execution report ✅ Complete.
+**Exit**: every version string at X.Y.Z; a dated `[X.Y.Z]` section in
+`CHANGELOG.md`, prior sections untouched; the sweep green on the PR's head;
+statuses read Released.
 
-The release-prep plan owns Phase 3's sequencing. Start from
-[`RELEASE_PREP_PLAN_TEMPLATE.md`](../templates/RELEASE_PREP_PLAN_TEMPLATE.md).
-Its sections:
-
-- **Header** as in the master plan, plus branch prefix `feature/v0315-release-prep-`
-  and a link to the master plan's Phase 2 anchor.
-- **Scope** — what PRs 1–4 will do; **out of scope** — new feature work, the
-  next version's bundle, and the issues that are "Known Gaps to state, not
-  work to do".
-- **The release gate** — the live arc, and its **evidence obligations**: for
-  each claim the release makes, the artifact that proves it and why a green
-  leg without that artifact is not proof.
-- **Documentation timing policy** — public docs before the tag; tag links and
-  "Released" stamps after it, in Phase 4.
-- **Progress Overview** — PRs 0–4, branch, status, GitHub PR, merged SHA.
-- **Current state (baseline)** — the facts the PRs act on: issue roll-up,
-  version strings, schema/migration state, wire compatibility, manual-test
-  state, eval/golden state, changelog state, dependency-notices state. When
-  this section would push the plan over the cap it is split into
-  `docs/vX.Y.Z-release-baseline.md`. It must name **every fact that differs
-  from the previous release's checklist**, so PR 2 does not copy a wrong row
-  forward.
-- **Track A** (PRs 1–2) and **Track B** (PRs 3–4), each PR with branch,
-  scope, acceptance.
-- **Status hygiene** and **Related documentation**.
-
----
-
-## Phase 3 — release-prep PRs 1–4, then the tag
-
-### PR 1 — the live arc and its execution report
-
-**Entry**: PR 0 merged. **Exit**: `docs/manual-tests/vX.Y.Z-execution-report.md`
-(from [`EXECUTION_REPORT_TEMPLATE.md`](../templates/EXECUTION_REPORT_TEMPLATE.md))
-at ✅ Complete with zero `Fail` and zero `Pending`.
-
-- Run the designated manual-test arc **once**, **live**, on a real (paid)
-  provider, **machine-paced in one script** so governance windows (600 s
-  end-vote timers, floor-control rounds) never expire while the operator is
-  reading — the pacing rules are in the arc's setup document
-  ([MT-MEMORY-GROUP-TENANT-001-setup.md](../manual-tests/MT-MEMORY-GROUP-TENANT-001-setup.md))
-  and the driver under `scripts/manual_tests/`.
-- Run the offline smoke (`make demo-autonomous`, $0) and `make eval-replay`.
-- Record every evidence obligation **verbatim** — tables, triples, counts —
-  and the cost.
-- Preflight the run for **vacuity**: a leg that can pass while exercising
-  nothing (an absence bar satisfied by an empty read, a fan-out suppressed by
-  a room setting, a sampler that drops the spans) is not run until the
-  preflight says it can be answered. `scripts/manual_tests/` holds the
-  drivers and three-state (pass / fail / skipped) gates.
-- **Findings** are labelled F-1, F-2, … and dispositioned in the same PR:
-  red legs become **in-release fix PRs** (precedent: PR 1a
-  [#834](https://github.com/mkhomutov/Persatrix/pull/834)), never
-  re-deferrals; capture or reasoning misses become `Accepted-with-known-gap`
-  rows citing a tracked issue.
-- Every scoped issue closes here (`status: resolved`, `closed_pr`,
-  `make issues`), citing the report.
-
-**Failure path — release gate not met**: the report merges as-is, titled
-"release gate not met" (precedent: v0.3.2
-[#394](https://github.com/mkhomutov/Persatrix/pull/394)); fix PRs follow;
-a **re-execution** report ("release gate met",
-[#397](https://github.com/mkhomutov/Persatrix/pull/397)) reopens Phase 3.
-The tag never moves ahead of the evidence.
-
-### PR 2 — documentation verification and the release checklist
-
-**Entry**: PR 1 merged. **Exit**: `docs/vX.Y.Z-release-checklist.md` merged;
-README Roadmap row and ROADMAP Version Map read "release prep".
-
-- **Verify**, against shipped behaviour, every guide, RFC section, and diagram
-  this release edited. Fix stale spots in this PR.
-- Create the checklist with `make release-doc KIND=release-checklist
-  VERSION=X.Y.Z CODENAME="…"` (fills the template's placeholders), then
-  reconcile it against the previous one **and the baseline's list of
-  differing facts**. Sections: §1 pre-release verification (every gate as a
-  command), §2 version alignment, §3 changelog with §3.1 upgrade notes, §4
-  manual-test sign-off (cites the report), §5 tag + GitHub Release procedure,
-  §6 Known Gaps to state in release notes, §7 summary checklist.
-- Enumerate the test targets; never let `make test` read as comprehensive
-  (Rust is `cargo test`, the console is `make ui-test`, evals are
-  `make eval-replay`).
-
-### PR 3 — version bump and changelog curation
-
-**Entry**: PR 2 merged. **Exit**: every version string at X.Y.Z; a dated
-`[X.Y.Z]` section in `CHANGELOG.md`; prior sections untouched.
+Branch `feature/vXYZ-release`. In order:
 
 - `make bump-version VERSION=X.Y.Z`, then `cd cli && cargo update --workspace`
   ([version-bump guide](../guides/version-bump.md)).
@@ -251,57 +229,71 @@ README Roadmap row and ROADMAP Version Map read "release prep".
 - Write the **Upgrade Notes** whose obligations the plan fixed in Phase 0 —
   migrations by store and direction, coherence trades, metric-shape changes,
   anything an operator must know before upgrading.
-
-### PR 4 — final pre-tag verification
-
-**Entry**: PR 3 merged. **Exit**: every §1 gate green **live on host** on the
-post-bump tip; ROADMAP reads `✅ All pre-tag gates green`; release notes drafted.
-
-- Run the full sweep on a clean checkout: `make release-sweep RUN=1
-  REPORT=/tmp/sweep.md` runs the checklist §1 list — all four `make test`
+- Run the full sweep on a clean checkout of the PR's head: `make release-sweep
+  RUN=1 REPORT=/tmp/sweep.md` runs every standing gate — all four `make test`
   legs, `cargo test`, `make lint`, `make validate`, proto sync, sanitizer
   sync, `make ui` + `make ui-test` + `make ui-html-check`, `make eval-replay`,
   licences, notices (state whether a delta is expected), sizes, doc gates,
   indexes, and the separate `mypy tests/` leg — and prints the results table
-  for the report; add the offline Docker smoke with `OPTIONAL=1`.
-- Do **not** write "Released". The tag does not exist yet.
+  for the report's Final Pre-Tag Verification; add the offline Docker smoke
+  with `OPTIONAL=1`, and run the plan's named suites by hand.
+- Flip the statuses to **✅ Released** with the tag link: the plan's status
+  line and every Progress row, this PR's own included; the README roadmap
+  row; the ROADMAP Version Map row and header, whose Current phase moves to
+  the **next ratified version** (not the next major train, if an amendment
+  has placed a version in between). The tag lands on this PR's merge commit
+  minutes later; the next plan's follow-up section checks that it did.
+- Draft the release notes.
+
+Dating the changelog also freezes the plan: `scripts/checks/released.py`
+reads the dated heading, and the size and plan-status checks stop judging the
+plan from this PR on. That is why this PR flips every row itself — no check
+will catch one left saying "PR open".
+
+**Failure path**: a gate that goes red on the post-bump head is fixed here
+when the fix is release engineering, or by a fix PR that re-runs the legs it
+reaches (Phase 1); the tag PR then re-runs the sweep. If the tag cannot follow
+the merge, the fix PR that unblocks it corrects the Released date.
 
 ### Tag and GitHub Release
 
 ```bash
-git tag -a vX.Y.Z -m "vX.Y.Z — <codename>"
-git push origin main --tags
+git tag -a vX.Y.Z -m "vX.Y.Z — <codename>" "$TAG_PR_MERGE_COMMIT"
+git push origin vX.Y.Z
 ```
 
-(the same commands the [version-bump guide](../guides/version-bump.md) lists;
-the guide owns the pre-tag bump steps, this section owns what follows).
+(the [version-bump guide](../guides/version-bump.md) owns the bump steps; this
+section owns what follows).
 
 Release body = curated changelog + Upgrade Notes + Known Gaps + the closing
-evidence quoted from the PR 1 report. Links in the body must be re-rooted to
-absolute GitHub URLs; relative doc links do not resolve from a release page.
+evidence quoted from the execution report. Links in the body must be
+re-rooted to absolute GitHub URLs; relative doc links do not resolve from a
+release page.
 
 ---
 
-## Phase 4 — post-release follow-up PR
+## Before ruling (e)
 
-**Entry**: tag pushed and Release published. **Exit**: nothing in the tree
-still says the release is pending. PR body from
-[`POST_RELEASE_FOLLOWUP_TEMPLATE.md`](../templates/POST_RELEASE_FOLLOWUP_TEMPLATE.md).
+v0.3.0–v0.3.16 ran the same steps across more documents and PRs. Their files
+stay where they are as release evidence; read them with this map.
 
-- Statuses → **Released** with the tag link: README roadmap row, ROADMAP
-  Version Map + `Last updated` + Current phase, the checklist, the prep plan,
-  the master plan's release-prep row.
-- ROADMAP forward pointer → the **next ratified version**, not the next
-  major train, if an amendment has placed a version in between.
-- Issue closures reflected; `make issues` / `make rfcs` clean.
-- Backfills for anything Phase 3 deliberately left open, and any new issue
-  the release surfaced (precedent: ISSUE-0122 at
-  [#817](https://github.com/mkhomutov/Persatrix/pull/817)).
-- Anything the plan promised for Phase 4 that **cannot** be done is recorded
-  in the PR body as "NOT done, and recorded rather than forced", with the
-  reason, so the next cycle does not inherit a promise that cannot be kept
-  (precedent: the allowlist exit condition at
-  [#838](https://github.com/mkhomutov/Persatrix/pull/838)).
+| Then | Now |
+|------|-----|
+| Master plan `docs/vX.Y.Z-plan.md`; scope locks split into `-scope-locks.md` near the cap (v0.3.15, v0.3.16) | The plan, locks inside |
+| Plan amendment `docs/vX.Y.Z-plan-amendment-YYYY-MM-DD.md` (v0.3.1, v0.3.4) | A dated §Amendment section in the plan |
+| Phase 2: release-prep plan (release-prep PR 0); its current-state facts split into `-release-baseline.md` near the cap | The plan's Acceptance and release checklist, written at Phase 0 |
+| Phase 3: release-prep PR 1 (live arc + report), PR 2 (docs check + `-release-checklist.md`) | The last implementation PR |
+| Phase 3: release-prep PR 3 (bump + changelog), PR 4 (final sweep) | The tag PR |
+| Phase 4: post-release follow-up PR (Released stamps, backfills) | The tag PR's statuses, and the next plan's follow-up section |
+
+The release checklist was copied forward from the previous release, which is
+why the baseline had to name every fact that differed. The plan's checklist
+is filled from the template instead, so nothing is copied forward.
+
+Phase numbers were stable from v0.3.8 to v0.3.16. Earlier plans numbered the
+same steps differently — the release-prep plan was "Phase 3" in v0.3.2 and
+v0.3.4 and "Phase 4" in v0.3.5 — because they counted implementation
+sub-phases separately. Read an older plan by its section titles.
 
 ### The debt sweep
 
@@ -335,8 +327,8 @@ reason, never in a sweep.
 - **Every claim is evidenced.** "Green" means the artifact is in the report.
   A test that passed without exercising the contested surface is recorded as
   vacuous and re-run, not counted.
-- **Word caps apply to plans.** Master plans and release-prep plans are on the
-  size allowlist for the open cycle only; split at ~2 900 words rather than
-  trimming a record.
+- **The word cap applies to the plan.** It holds its release under 3 000
+  words while the cycle is open — no allowlist entry, no split, no trimmed
+  record — and the tag PR's dated changelog heading frees it.
 - **Local-only artifacts are never linked** from committed files
   ([review-process.md](review-process.md#the-paraphrase-rule)).

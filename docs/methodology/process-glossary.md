@@ -31,10 +31,12 @@ A PR before Phase 0 that gives every issue the amendment slots a dated note
 recording its slotting and any plan-opening default, so the plan opens with no
 dangling questions.
 
-### Master plan
-`docs/vX.Y.Z-plan.md`. The version's orchestration overlay: locks, acceptance,
-progress table, dependency graph, Phases 0–4, risks. See
-[release-cycle.md](release-cycle.md#phase-0--the-master-plan-pr).
+### Version plan
+`docs/vX.Y.Z-plan.md`, the release's **one document**: the previous release's
+follow-up, scope locks, acceptance, progress, implementation PRs, release
+checklist, risks — under the 3 000-word cap. Called the *master plan* until
+v0.3.16, when a release-prep plan, a baseline and a checklist sat beside it.
+See [release-cycle.md](release-cycle.md#phase-0--the-plan-pr).
 
 ### Codename
 The version's short name ("Who said what", "Memory that travels"). Used in the
@@ -47,8 +49,8 @@ release or a batch.
 
 ### Scope lock
 A decision fixed at plan opening with its binding consequence. Re-opened only
-by amendment. Lives in the plan or, once the plan nears the cap, in
-`docs/vX.Y.Z-scope-locks.md`. See [decisions.md](decisions.md#scope-locks).
+by amendment. Lives in the version plan (v0.3.15 and v0.3.16 split theirs
+into `docs/vX.Y.Z-scope-locks.md`). See [decisions.md](decisions.md#scope-locks).
 
 ### Plan-opening default
 The answer a lock assumes where the true answer is not yet known, together
@@ -68,33 +70,39 @@ A small item taken into a release late because its fix is on the critical path
 anyway. Always cuttable, always named in the amendment or the locks.
 
 ### Amendment
-The only way a ratified decision changes: a dated, appended section (or
-file) stating the driver, the before/after, and the ratification PR. See
-[decisions.md](decisions.md#amendments).
+The only way a ratified decision changes: a dated, appended section stating
+the driver, the before/after, and the ratification PR (v0.3.1 and v0.3.4 wrote
+plan amendments as separate files). See [decisions.md](decisions.md#amendments).
 
 ### Workstream
-A group of PRs in the master plan with one owner and one row in the Master
-Progress Overview (A, B, C …).
+A group of PRs in the version plan with one owner (A, B, C …); each of its PRs
+is a row in the plan's Progress table.
 
 ### Issue-owned PR plan
 `docs/issues/ISSUE-NNNN-…-pr-plan.md`: the PR breakdown for residual work large
-enough to need its own sequencing. The master plan links it instead of
+enough to need its own sequencing. The version plan links it instead of
 duplicating it.
 
-### Release-prep plan
-`docs/vX.Y.Z-release-prep-plan.md`, landed as **release-prep PR 0**. Owns the
-sequencing of release-prep PRs 1–4 and the release gate's evidence
-obligations. See [release-cycle.md](release-cycle.md#phase-2--the-release-prep-plan-release-prep-pr-0).
+### Last implementation PR
+The implementation PR that merges last before the tag PR. It also runs the
+live arc, lands the execution report, checks the docs the release edited
+against shipped behaviour, and closes the scoped issues. See
+[release-cycle.md](release-cycle.md#the-last-implementation-pr--the-release-gate).
 
-### Release baseline
-`docs/vX.Y.Z-release-baseline.md`: the "current state" facts split out of the
-release-prep plan when it nears the cap — and the list of facts that differ
-from the previous release's checklist.
+### Tag PR
+The release's final PR, whose merge commit is tagged: version bump, dated
+changelog with Upgrade Notes, the gate sweep on its head, statuses → Released,
+release notes drafted. See [release-cycle.md](release-cycle.md#phase-2--the-tag-pr).
 
-### Release-prep PRs 1–4
-The fixed sequence: **PR 1** live arc + execution report; **PR 2** docs
-verification + release checklist; **PR 3** version bump + changelog curation;
-**PR 4** final pre-tag verification. Then the tag.
+### Release-prep PRs 0–4
+How v0.3.0–v0.3.16 got from the last implementation PR to the tag: **PR 0**
+the release-prep plan (`docs/vX.Y.Z-release-prep-plan.md`, its current-state
+facts split into `-release-baseline.md` near the cap); **PR 1** live arc +
+execution report; **PR 2** docs verification + release checklist; **PR 3**
+version bump + changelog curation; **PR 4** final pre-tag verification.
+Retired by ruling (e) of the sequencing Amendment 2026-09-12: PRs 1–2 fold into
+the last implementation PR, PRs 3–4 into the tag PR, PR 0 into the version
+plan. See [release-cycle.md](release-cycle.md#before-ruling-e).
 
 ### Live arc
 The designated manual-test sequence run once, live, on a paid provider, as
@@ -135,7 +143,7 @@ owns it, and the release notes state it.
 
 ### Release gate not met
 The execution-report outcome when a leg fails. The report merges as-is; fix
-PRs follow; a re-execution report reopens Phase 3.
+PRs follow; a re-execution report comes before the tag PR opens.
 
 ### Finding (F-n / P-n)
 A numbered review result with a severity and one of four dispositions:
@@ -152,9 +160,10 @@ The final PR of an RFC or workstream: status flips, plan checklist complete,
 divergences recorded, nothing else.
 
 ### Release checklist
-`docs/vX.Y.Z-release-checklist.md`, landed at release-prep PR 2. Every pre-tag
-gate as a command, version alignment, upgrade notes, MT sign-off, tag
-procedure, Known Gaps. Frozen after the tag.
+The version plan's checklist section: the boxes the last implementation PR
+and the tag PR tick, the Upgrade Notes, the Known Gaps. The gate list itself
+lives in `scripts/release/sweep.py`. Until v0.3.16 its own file,
+`docs/vX.Y.Z-release-checklist.md`, landed at release-prep PR 2.
 
 ### Upgrade notes
 The changelog subsection an operator must read before upgrading: migrations
@@ -169,9 +178,11 @@ A deliberate behaviour change whose cost the release notes state rather than
 hide (for example per-speaker fragmentation of group memory).
 
 ### Post-release follow-up
-The Phase 4 PR: statuses → Released with tag links, ROADMAP repointed,
-backfills, and any promise that cannot be kept recorded as "NOT done, and
-recorded rather than forced".
+The first section of the next version plan: the previous tag and Release
+checked, anything still saying the release is pending fixed, closures
+reflected, new issues filed, and any promise that cannot be kept recorded as
+"NOT done, and recorded rather than forced". Until v0.3.16 its own PR after
+the tag, which also wrote the Released stamps the tag PR writes now.
 
 ### Status hygiene
 Verifying, before and after every task, that RFC files, plan rows, issue
@@ -179,12 +190,14 @@ notes, and ROADMAP agree. [ROADMAP §How to Update](../../ROADMAP.md#how-to-upda
 
 ### Grandfathered
 A file on the size allowlist (`scripts/checks/file_size_allowlist.py`) with an
-inline reason and an exit condition. Master plans are grandfathered for their
-open cycle only.
+inline reason and an exit condition. A version plan never is: it holds its
+release under the cap. Master plans were grandfathered for their open cycle
+only.
 
 ### Split, don't trim
 The rule for a document at its word cap: move a stable half to its own file
-rather than deleting rationale to make room for a status flip.
+rather than deleting rationale to make room for a status flip. A version plan
+is the exception: a release that does not fit is cut or re-scoped, not split.
 
 ### Companion discussion document
 A ratified planning document that spawns RFCs but owns no implementation

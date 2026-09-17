@@ -7,6 +7,11 @@ and flags a row whose status cell says *open* or *not started* while every
 PR it links to is already squash-merged on ``main``. A PR writes its own row
 before its number exists, so a 🔀 row that links nothing is judged by the
 squash-merge that wrote the line instead.
+
+The same check holds a patch release to one document: a scope-locks,
+plan-amendment, release-prep-plan, release-baseline or release-checklist file
+beside an unreleased patch release's plan fails (sequencing Amendment
+2026-09-12, ruling (e)).
 """
 
 from __future__ import annotations
@@ -21,6 +26,7 @@ from scripts.checks.plan_status import (
     check_plan_status,
     find_stale_rows,
     pr_that_wrote,
+    second_release_documents,
     target_docs,
 )
 
@@ -111,6 +117,71 @@ def test_target_docs_skips_released_test_findings_plans(tmp_path: Path) -> None:
     found = {p.relative_to(tmp_path).as_posix() for p in target_docs(tmp_path)}
 
     assert found == {"docs/v0.3.15-test-findings-pr-plan.md"}
+
+
+def _touch(root: Path, *rels: str) -> None:
+    for rel in rels:
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# x\n", encoding="utf-8")
+
+
+def test_an_open_patch_release_keeps_one_document(tmp_path: Path) -> None:
+    """Scope locks, amendments, the prep plan, its baseline and the checklist belong in the plan."""
+    _touch(
+        tmp_path,
+        "docs/v0.3.17-plan.md",
+        "docs/v0.3.17-scope-locks.md",
+        "docs/v0.3.17-plan-amendment-2026-10-01.md",
+        "docs/v0.3.17-release-prep-plan.md",
+        "docs/v0.3.17-release-baseline.md",
+        "docs/v0.3.17-release-checklist.md",
+    )
+    (tmp_path / "CHANGELOG.md").write_text("## [0.3.16] - 2026-09-16\n", encoding="utf-8")
+
+    assert second_release_documents(tmp_path) == [
+        "docs/v0.3.17-plan-amendment-2026-10-01.md",
+        "docs/v0.3.17-release-baseline.md",
+        "docs/v0.3.17-release-checklist.md",
+        "docs/v0.3.17-release-prep-plan.md",
+        "docs/v0.3.17-scope-locks.md",
+    ]
+
+
+def test_released_files_the_report_and_a_findings_plan_are_not_second_documents(
+    tmp_path: Path,
+) -> None:
+    """Releases before the ruling keep their files; the report and PR plans are not release docs."""
+    _touch(
+        tmp_path,
+        "docs/v0.3.16-scope-locks.md",
+        "docs/v0.3.16-release-checklist.md",
+        "docs/v0.2-release-prep-plan.md",
+        "docs/v0.3.17-plan.md",
+        "docs/v0.3.17-test-findings-pr-plan.md",
+        "docs/manual-tests/v0.3.17-execution-report.md",
+    )
+    (tmp_path / "CHANGELOG.md").write_text(
+        "## [0.3.16] - 2026-09-16\n## [0.2.0] - 2026-04-18\n", encoding="utf-8",
+    )
+    assert second_release_documents(tmp_path) == []
+
+
+def test_a_minor_release_is_not_judged(tmp_path: Path) -> None:
+    """The ruling names patch releases; the amendment opening a minor release decides its shape."""
+    _touch(tmp_path, "docs/v0.4.0-plan.md", "docs/v0.4.0-scope-locks.md")
+    assert second_release_documents(tmp_path) == []
+
+
+def test_a_second_document_fails_the_check_even_without_git_history(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The document rule reads the tree, so it still holds where no squash-merge history exists."""
+    _touch(tmp_path, "docs/v0.3.17-plan.md", "docs/v0.3.17-release-checklist.md")
+
+    assert check_plan_status(tmp_path) == 1
+    out = capsys.readouterr().out
+    assert "docs/v0.3.17-release-checklist.md" in out and "docs/v0.3.17-plan.md" in out
 
 
 def test_an_unlinked_pr_open_row_is_stale_once_the_pr_that_wrote_it_has_merged() -> None:
@@ -210,6 +281,20 @@ def test_a_plan_that_leaves_an_html_comment_open_fails(
 
     assert check_plan_status(tmp_path) == 1
     assert f"{REL}:1:" in capsys.readouterr().out
+
+
+def test_a_second_document_fails_the_check_where_every_plan_row_is_current(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """With merge history and no stale row, a second release document still fails on its own."""
+    _plan_repo(tmp_path, PLAN, "docs(rfc0099): the plan (#1)")
+    _touch(tmp_path, "docs/v0.3.17-plan.md", "docs/v0.3.17-scope-locks.md")
+    capsys.readouterr()
+
+    assert check_plan_status(tmp_path) == 1
+    assert "docs/v0.3.17-scope-locks.md: fold it into docs/v0.3.17-plan.md" in (
+        capsys.readouterr().out
+    )
 
 
 def test_the_blamed_line_is_the_row_past_characters_python_would_split_on(tmp_path: Path) -> None:

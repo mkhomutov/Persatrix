@@ -1,6 +1,6 @@
 # Testing Strategy
 
-> **Last updated**: 2026-09-12
+> **Last updated**: 2026-09-17
 > Every test layer in the repository, what it proves, where it runs, and how
 > to add to it. Counts are from `git ls-files` on 2026-09-06 and will drift;
 > the layers and rules will not.
@@ -38,12 +38,12 @@ below.
 | 9 | Cost regression | The bored-persona gate: an idle persona spends nothing ([RFC 0024](../rfcs/0024-event-driven-scheduling.md)) | `tests/integration/test_bored_persona_cost.py` | direct pytest | `cost-regression-gate` job, path-filtered on wake-path files |
 | 10 | Perf | Personal-tier recall p99/p50 against a committed baseline ([RFC 0029](../rfcs/0029-personal-society-storage-split.md)) | `tests/perf/personal_tier_latency.py` | direct | `python` job, **informational** — no baseline captured yet |
 | 11 | Manual tests + live arc | The release gate: behaviour on a real provider, evidenced verbatim | `docs/manual-tests/MT-*.md` (73) + `vX.Y.Z-execution-report.md` (20); drivers in `scripts/manual_tests/` | per release, paid, on host | never |
-| 12 | Offline smoke | The whole stack round-trips at $0 on the mock provider | `make demo-autonomous` / `make demo-offline` | Docker | never (release-prep PR 1 and PR 4) |
+| 12 | Offline smoke | The whole stack round-trips at $0 on the mock provider | `make demo-autonomous` / `make demo-offline` | Docker | never (the last implementation PR and the tag PR) |
 | 13 | Structural gates | The repository's own invariants: proto sync, import direction, sizes, doc links, generated indexes | `scripts/checks/`, `make *-check` | see [enforcement matrix](enforcement-matrix.md) | mixed |
 
 `make test` runs layers **1–4 only**. Rust, web, evals, and Go integration are
-separate commands. Release checklists enumerate every target rather than
-leaning on `make test` reading as comprehensive.
+separate commands. The tag PR's `make release-sweep` enumerates every target
+rather than leaning on `make test` reading as comprehensive.
 
 ---
 
@@ -96,7 +96,7 @@ Per language:
 
 Automated layers prove mechanisms. The **live arc** proves the release's
 story on a real model, once, with evidence. Its rules are in
-[release-cycle.md](release-cycle.md#pr-1--the-live-arc-and-its-execution-report);
+[release-cycle.md](release-cycle.md#the-last-implementation-pr--the-release-gate);
 the testing-specific ones:
 
 - **Three-state preflight before spending.** Each leg has a gate that can

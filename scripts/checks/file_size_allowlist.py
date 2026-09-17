@@ -19,7 +19,7 @@ ones back; add the *pattern* if a genuinely new write-once category appears.
 **Scope (narrowed again 2026-09-06, ISSUE-0139).** Version-cycle documents
 of *released* versions — master plans, scope locks, plan amendments,
 release-prep plans, release baselines — are also gone from here. They are
-frozen at the post-release follow-up, so ``file_size.py`` now excludes them
+frozen once their version ships, so ``file_size.py`` now excludes them
 once ``CHANGELOG.md`` carries the version's dated release heading
 (``_is_released_version_doc``; read from the tree, not ``git tag``, so a
 depth-1 CI checkout answers the same as a full clone).

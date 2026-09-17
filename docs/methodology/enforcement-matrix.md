@@ -56,7 +56,7 @@ the twelve, and the job is named where it is not one of the original six.
 | `gofmt` / `cargo fmt` clean | instructions | `gofmt -l` over every tracked `.go` file; `cargo fmt -- --check` | Required (`Go`, `Rust`) + Pre-commit (hook covers `internal/`, `cmd/` only) |
 | Go integration tests pass | testing-strategy | `go test ./tests/integration/... -race` | Required (`Go`) |
 | Python sanitizer patterns/enums match the Go canonical source | Makefile (RFC 0009 PR 3) | `make generate-sanitizer-patterns-check` | Required (`Go`) |
-| `THIRD_PARTY_NOTICES.md` matches the dependency graphs | Makefile | `make notices-check` | Make-only — deliberately: the notices file is regenerated at release-prep PR 4, so it is legitimately stale between a dependency bump and the next release (it is stale today) |
+| `THIRD_PARTY_NOTICES.md` matches the dependency graphs | Makefile | `make notices-check` | Make-only — deliberately: the notices file is regenerated in the tag PR, so it is legitimately stale between a dependency bump and the next release (it is stale today) |
 | `agents.yaml` `instructions_file` references resolve | prompt-organization | `scripts/checks/prompt_refs.py` | Required (`Validate configs`) |
 | Personal-tier recall latency within 20 % of baseline | RFC 0029 | `tests/perf/personal_tier_latency.py` | Required job, **informational** until a baseline exists |
 | Weekly Rust advisory / bans / sources audit | CONTRIBUTING | `scheduled-audit.yml` (cargo-deny, Mondays; files an issue on failure) | Scheduled |
@@ -71,7 +71,7 @@ the twelve, and the job is named where it is not one of the original six.
 | A code file over 500 lines is warned, and split at a real seam when a change edits it for another reason — never trimmed to fit, never in a sweep (sequencing Amendment 2026-09-12, ruling (e)) | documentation-guide §Size Limits; release-cycle §The debt sweep (retired) | `file_size.py` lists it under `[WARN]` on every run; the split is review's call | Advisory output + Convention |
 | Docs ≤ 3 000 words; RFCs ≤ 8 000 words | documentation-guide | same | Required (`File size check`) + Pre-commit |
 | Grandfathered files carry a reason and an exit condition | `file_size_allowlist.py` docstring | review; `test_allowlist_has_no_dead_entries`, `test_allowlist_holds_no_released_version_docs` | Convention + unit tests |
-| Released version-cycle docs are frozen evidence, exempt from the cap | documentation-guide §Where Documents Live | `file_size.py` excludes them once `CHANGELOG.md` has the version's dated heading (ISSUE-0139; read from the tree, not `git tag`, so a depth-1 checkout agrees with a full clone); a still-allowlisted released doc prints `[STALE-ALLOWLIST]` (advisory, retired at the post-release follow-up) | Required (`Python` unit tests pin it) |
+| Released version-cycle docs are frozen evidence, exempt from the cap | documentation-guide §Where Documents Live | `file_size.py` excludes them once `CHANGELOG.md` has the version's dated heading (ISSUE-0139; read from the tree, not `git tag`, so a depth-1 checkout agrees with a full clone); a still-allowlisted released doc prints `[STALE-ALLOWLIST]` (advisory, retired by the next plan's follow-up section) | Required (`Python` unit tests pin it) |
 | Near-cap notice at 3 % of each limit | `file_size.py` | `--near-cap` output on every run | Advisory output |
 | PRs under 500 changed lines | CONTRIBUTING; BRANCHING; copilot-instructions | — | **Guidance, stated as such** since the BRANCHING rewrite — a third of merges exceed it, almost all docs-heavy; code PRs split |
 | Squash merge; linear history | BRANCHING | branch protection | Required |
@@ -87,6 +87,7 @@ the twelve, and the job is named where it is not one of the original six.
 | `FILEMAP.md` matches `git ls-files` | `generate_filemap.py` | `--check` (date-insensitive; on a PR it compares against the merge tree, so a PR behind a file-adding merge fails until updated) | Required (`Docs hygiene`) + Pre-commit regenerates — closed [ISSUE-0133](../issues/ISSUE-0133-no-ci-gate-on-filemap-freshness.md) |
 | Merged-PR history (`docs/merged-prs.md`) matches the squash log, allowing only the newest merges to be missing | automation-catalogue | `scripts/merged_prs.py --check` | Required (`Docs hygiene`) + Pre-commit regenerates |
 | No plan row says "PR open" / "not started" for a PR that has merged | release-cycle §Phase 1 | `scripts/checks/plan_status.py` (`make plan-status-check`) | Required (`Docs hygiene`) + Pre-commit — first run found ten stale rows; judging an unlinked 🔀 row by the commit that wrote it found eight more |
+| A patch release keeps one document: no scope-locks, plan-amendment, release-prep-plan, release-baseline or release-checklist file beside its plan | release-cycle §Phase 0 (sequencing Amendment 2026-09-12, ruling (e)) | `scripts/checks/plan_status.py` (`make plan-status-check`) fails one for an unreleased `X.Y.Z` with `Z` above 0; released versions keep their files, a minor release is not judged | Required (`Docs hygiene`) + Pre-commit |
 | Every artifact the methodology names exists (documents, tools, make targets, Docs-hygiene steps) | [conformance.json](conformance.json) | `make conformance-check` | Required (`Docs hygiene`) + Pre-commit |
 | No ROADMAP Component Status row says less than the RFC it names | ROADMAP §How to Update | `scripts/checks/roadmap_status.py` (`make roadmap-status-check`) | Required (`Validate configs`) + Pre-commit — its first run found `internal/security/` still "In progress" four months after RFC 0009 closed part-way |
 | Unified doc audit (links + markers + sizes) | `doc_audit.py` | — | Local convenience wrapper; its three checks run individually in CI |
@@ -104,8 +105,8 @@ the twelve, and the job is named where it is not one of the original six.
 | Migrations land ahead of their consumer, one store per PR | release-cycle | review | Convention |
 | Scope locks change only by amendment | decisions | review | Convention |
 | Every sequencing amendment since 2026-09-12 records its external evidence | decisions rule 6 | `scripts/checks/amendment_evidence.py` (`make amendment-evidence-check`): the section and its five rows are present, filled and given once, and no heading from that date names an amendment in another form (a unit test pins the CI step and the make target, which the conformance manifest no longer does); what the amendment concludes from them is review's call | Required (`Docs hygiene`) + Pre-commit |
-| Live arc runs once, live, before the tag | release-cycle | release checklist §4 | Convention, evidenced in the report |
-| Version strings aligned across five files | version-bump guide | `make bump-version` + checklist §2 | Manual at release-prep PR 3 |
+| Live arc runs once, live, before the tag | release-cycle | the plan's release checklist | Convention, evidenced in the report |
+| Version strings aligned across five files | version-bump guide | `make bump-version` | Manual in the tag PR |
 | TDD for new unit-level code | CLAUDE.md §TDD | review | Convention |
 | Version-train gate | release-cycle | review | Convention |
 | PR body follows What / Why / How / Not in this PR / Gates / Review | BRANCHING §Pull requests | `.github/PULL_REQUEST_TEMPLATE.md` pre-fills it | Template (GitHub applies it to every new PR) |

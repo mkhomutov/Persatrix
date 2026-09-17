@@ -3,9 +3,9 @@
 
 The most common status-hygiene defect in this repository's history: a PR
 merges and the plan row that announced it — ``🔀 PR open ([#855](…))`` — is
-never flipped to ``✅ Merged``. Every open cycle's master plan and
-release-prep plan, plus every RFC and issue-owned PR plan, carries such a
-table. This check reads those tables and reports a row whose status cell
+never flipped to ``✅ Merged``. Every open cycle's plan, plus every RFC and
+issue-owned PR plan, carries such a table. This check reads those tables and
+reports a row whose status cell
 starts with 🔀 (PR open) or ⬜ (not started) while **every** PR it links to
 is already a squash-merge subject on ``main``.
 
@@ -20,13 +20,20 @@ PRs ("PR 0 merged (#854), PR 1 open (#855)"). Released versions' plans are
 frozen evidence and are skipped; which versions are released is read from
 ``CHANGELOG.md`` the same way the size checker does.
 
+The check also holds a patch release to one document. Since ruling (e) of the
+sequencing Amendment 2026-09-12 a patch release keeps its plan, scope locks
+and release checklist in ``docs/vX.Y.Z-plan.md``, so a scope-locks,
+plan-amendment, release-prep-plan, release-baseline or release-checklist file
+for an unreleased patch version fails. Released versions keep the files they
+shipped with, and a minor release (``X.Y.0``) is not judged.
+
 Usage::
 
     python scripts/checks/plan_status.py [--verbose]
 
-Exit code: 0 clean, 1 if any stale row, or if a plan opens a code fence or
-HTML comment that never closes — every row after it is off the page, so
-none of them would be judged.
+Exit code: 0 clean, 1 if any stale row, if a plan opens a code fence or HTML
+comment that never closes — every row after it is off the page, so none of
+them would be judged — or if an open patch release has a second document.
 """
 
 from __future__ import annotations
@@ -47,6 +54,15 @@ from scripts._git import git_output  # noqa: E402
 from scripts.checks import ensure_utf8_stdout, markdown_page  # noqa: E402
 from scripts.checks.released import is_released_version_doc, released_versions  # noqa: E402
 
+#: What a patch release no longer writes beside its plan (sequencing Amendment
+#: 2026-09-12, ruling (e)): scope locks, a plan amendment, the release-prep plan,
+#: its baseline and the release checklist all live in ``docs/vX.Y.Z-plan.md``.
+#: The execution report is evidence and a test-findings PR plan is a PR plan, so
+#: neither is a release document. Group 1 is the version, group 2 its patch number.
+_SECOND_DOCUMENT_RE = re.compile(
+    r"^docs/v(\d+\.\d+\.(\d+))-(?:scope-locks|plan-amendment-[0-9-]+|release-prep-plan"
+    r"|release-baseline|release-checklist)\.md$"
+)
 _PR_LINK_RE = re.compile(r"\[#(\d+)\]\(")
 _LINK_ONLY_CELL_RE = re.compile(r"^\[#(\d+)\]\([^)]+\)$")
 _SUBJECT_RE = re.compile(r"\(#(\d+)\)$")
@@ -153,11 +169,38 @@ def target_docs(repo_root: Path) -> list[Path]:
     return docs
 
 
+def second_release_documents(repo_root: Path) -> list[str]:
+    """Release documents beside an unreleased patch release's plan.
+
+    Only a patch release (``X.Y.Z`` with ``Z`` above 0) is held to one document:
+    the ruling names patch releases, and the amendment that opens a minor
+    release decides its shape. A version with a dated CHANGELOG heading keeps
+    the files it shipped with — v0.3.16 and every release before it wrote
+    several.
+    """
+    released = released_versions(repo_root)
+    found = []
+    for path in (repo_root / "docs").glob("v*.md"):
+        rel = path.relative_to(repo_root).as_posix()
+        match = _SECOND_DOCUMENT_RE.match(rel)
+        if match and int(match.group(2)) > 0 and match.group(1) not in released:
+            found.append(rel)
+    return sorted(found)
+
+
 def check_plan_status(repo_root: Path, verbose: bool = False) -> int:
+    extra = second_release_documents(repo_root)
+    if extra:
+        print(f"[FAIL] {len(extra)} release document(s) beside an unreleased patch release's plan"
+              " — a patch release keeps one document (sequencing Amendment 2026-09-12,"
+              " ruling (e)):")
+        for rel in extra:
+            # The version holds no hyphen, so the first one ends it: docs/vX.Y.Z-plan.md.
+            print(f"  {rel}: fold it into {rel.split('-', 1)[0]}-plan.md")
     merged = merged_pr_numbers(repo_root)
     if not merged:
-        print("[WARN] no squash-merge subjects found in git log — skipping plan-status check")
-        return 0
+        print("[WARN] no squash-merge subjects found in git log — skipping the stale-row check")
+        return 1 if extra else 0
     stale: list[StaleRow] = []
     docs = target_docs(repo_root)
     hidden: list[str] = []
@@ -187,15 +230,18 @@ def check_plan_status(repo_root: Path, verbose: bool = False) -> int:
                       " merged — flip the row and link its PR")
             else:
                 print(f"  {s.file}:{s.line}: {s.cell!r} links {prs}, all merged — flip the row")
-    if stale or hidden:
+    if stale or hidden or extra:
         return 1
-    print("[OK] No plan row announces an open PR that has already merged.")
+    print("[OK] No plan row announces an open PR that has already merged, and no open patch"
+          " release has a second release document.")
     return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     ensure_utf8_stdout()
-    parser = argparse.ArgumentParser(description="Flag stale 'PR open' rows in plan tables.")
+    parser = argparse.ArgumentParser(
+        description="Flag stale 'PR open' rows in plan tables and a second release document.",
+    )
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args(argv)
     return check_plan_status(REPO_ROOT, verbose=args.verbose)
