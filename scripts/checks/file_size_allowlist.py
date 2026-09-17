@@ -5,7 +5,7 @@ This module holds *only* the ``GRANDFATHERED_FILES`` frozenset consumed by
 ``scripts/checks/file_size.py``. It is split out for one structural reason:
 the allowlist is **reference data whose length scales with release history**,
 not authored logic, so the list grows and would eventually push the *checker
-itself* over its own 500-line code cap.
+itself* over its own code line limit.
 
 **Scope (narrowed 2026-07-25).** The two write-once release-evidence
 categories — manual-test execution reports and release checklists — are no

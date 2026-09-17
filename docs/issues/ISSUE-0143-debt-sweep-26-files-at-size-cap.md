@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0143
 summary: "Twenty-six files sit at exactly their size cap at the v0.3.15 post-release follow-up, over the release-cycle threshold of twenty — the next edit to any of them is a split or a trim rather than a one-liner, and one of them is the file ISSUE-0137 needs to grow a test"
-status: open
+status: resolved
 severity: low
 area: repo
 created: 2026-09-06
+closed: 2026-09-17
+closed_pr: 967
 refs:
   - docs/methodology/release-cycle.md
   - docs/methodology/enforcement-matrix.md
@@ -112,3 +114,5 @@ filing: **26 at cap, 102 within 3%**.
 > 2026-09-12 — **D3… cut by the [sequencing Amendment 2026-09-12](../v0.3.x-sequencing.md#amendment-2026-09-12--close-v0316-small-then-measure-before-any-train-opens)** under the PR plan's own clause. After D1 and D2 the count is **24 at cap, 100 within 3 %** — unchanged from filing minus the two splits — because seams chosen by line count refill the band. The remaining 24 stay recorded here; ruling (e) moves the gate to a warning at 500 and a hard fail at 800 in its own PR, and this issue's premise is re-examined when that lands.
 >
 > 2026-09-16 — **Re-read at the v0.3.16 post-release follow-up: 24 at cap, 100 within 3 %** (`file_size.py --near-cap` on the tagged tree, `49be654e`) — the same count as 2026-09-12. The sweep that ran moved the number by its two splits and no further, which is step 4's signal that the cap is the question rather than the files. That question already has an owner, ruling (e) of the [Amendment 2026-09-12](../v0.3.x-sequencing.md#amendment-2026-09-12--close-v0316-small-then-measure-before-any-train-opens). **Decision: the issue stays open and unslotted, and no sweep is scheduled.** The PR that lands ruling (e) closes or rewrites it; until then a file is split only at a real seam, when it is edited for another reason.
+>
+> 2026-09-17 — **Resolved by moving the gate, not by a sweep** ([#967](https://github.com/mkhomutov/Persatrix/pull/967), ruling (e) of the [Amendment 2026-09-12](../v0.3.x-sequencing.md#amendment-2026-09-12--close-v0316-small-then-measure-before-any-train-opens)). A code file now gets a warning over 500 lines and fails only over 800, so a file at 500/500 can take a one-line fix again, and the near-cap band for code sits under 800. Re-read with `file_size.py --near-cap`: before the change (`be1892b1`), **22 at a limit** (21 of them code files at 500/500) and **98 within 3 %**; after it, **1 at a limit and 14 within 3 %**, all documents, and no code file over 500. The [debt-sweep rule](../methodology/release-cycle.md#the-debt-sweep) is retired, so nothing here is scheduled: a file is split at a real seam when a change edits it for another reason. The one file still at its cap, `docs/memory-quality-roadmap.md` (3 000/3 000 words), keeps its word cap and is split when it is next edited.
