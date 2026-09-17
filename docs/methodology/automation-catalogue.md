@@ -83,7 +83,7 @@ dependencies.
 | `scripts/checks/released.py` | Shared: which versions shipped (dated CHANGELOG headings) and which version-cycle docs are therefore frozen — used by the size checker and the plan-status checker | library |
 | `scripts/checks/markdown_page.py` | Shared: what a Markdown page shows once rendered — its lines outside code fences and HTML comments (a fence closes only on a bare line of its own character at least as long as the opener, as in CommonMark, so a four-backtick block may show a three-backtick line; a fence in a list item ends with the item), the first line of a fence or comment the page never closes, its ATX headings, and its table cells (a row starts or ends with `\|`, or is a `---\|---` divider; an escaped pipe stays inside its cell) — used by the doc-links check for its links and its heading anchors alike, and by the plan-status, ROADMAP-status and amendment-evidence checks, which fail on a fence or comment that never closes rather than pass on rows they cannot see | library |
 | `scripts/_git.py` | The one read-only git call (ISSUE-0135); new call sites use it | library |
-| `scripts/checks/doc_audit.py [--format text\|json\|markdown]` | Runs links + markers + size warnings in one report | Local convenience; used by hand in PR bodies |
+| `scripts/checks/doc_audit.py [--format text\|json\|markdown]` | Runs links + markers + file sizes in one report | Local convenience; used by hand in PR bodies |
 | `scripts/checks/proto_drift.py` | Orphan generated protobuf artifacts (backs `proto-orphans-check`) | CI |
 
 ## The pre-commit hook

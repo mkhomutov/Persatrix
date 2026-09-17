@@ -328,20 +328,19 @@ def test_tightest_first_holds_across_units() -> None:
 
     Every file here has *more* absolute headroom than the one after it and
     *less* room proportionally, so a sort on ``headroom`` returns this list
-    exactly reversed.  That was the old behaviour: an RFC 2.5% from its cap
-    printed below a code file with nearly the full 3% still free, because
-    200 > 22.
+    exactly reversed.  That was the old behaviour: an RFC 1.25% from its cap
+    printed below a code file with 2.5% still free, because 100 > 20.
     """
     notices = _near_cap_notices(
-        [("alpha.py", 778)],                        # 22 lines  = 2.75%
-        [("docs/beta.md", 2980),                    # 20 words  = 0.667%
-         ("docs/rfcs/0099-r.md", 7800)],            # 200 words = 2.5%
+        [("alpha.py", 780)],                        # 20 lines  = 2.5%
+        [("docs/beta.md", 2950),                    # 50 words  = 1.667%
+         ("docs/rfcs/0099-r.md", 7900)],            # 100 words = 1.25%
     )
 
     assert [n.file for n in notices] == [
-        "docs/beta.md", "docs/rfcs/0099-r.md", "alpha.py",
+        "docs/rfcs/0099-r.md", "docs/beta.md", "alpha.py",
     ]
-    assert [n.headroom for n in notices] == [20, 200, 22], "absolute order differs"
+    assert [n.headroom for n in notices] == [100, 50, 20], "absolute order differs"
 
 
 def test_near_cap_never_changes_the_exit_code(
@@ -414,7 +413,7 @@ def test_the_count_is_reported_without_the_flag(
     tmp_path: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Discoverable from ordinary output, not just from ``--help`` — but
-    one line, so it cannot drown the warnings that do gate."""
+    one line, so it cannot drown the failures that do gate."""
     _write(tmp_path, "docs/close.md", DEFAULT_MAX_DOC_WORDS)
 
     file_size.check_file_size(tmp_path, strict=True)

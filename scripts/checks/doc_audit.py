@@ -31,7 +31,10 @@ if str(REPO_ROOT) not in sys.path:
 from scripts.checks import ensure_utf8_stdout  # noqa: E402
 from scripts.checks.doc_links import check_doc_links  # noqa: E402
 from scripts.checks.doc_status_markers import check_status_markers  # noqa: E402
-from scripts.checks.file_size import get_warnings as get_file_size_warnings  # noqa: E402
+from scripts.checks.file_size import (  # noqa: E402
+    DEFAULT_WARN_CODE_LINES,
+    get_failures_and_warnings,
+)
 
 
 @dataclass
@@ -126,23 +129,33 @@ def _run_doc_status_markers(verbose: bool = False) -> CheckResult:
 
 def _run_file_size(verbose: bool = False) -> CheckResult:
     t0 = time.monotonic()
-    warnings = get_file_size_warnings(REPO_ROOT)
+    failures, long_code = get_failures_and_warnings(REPO_ROOT)
     elapsed = time.monotonic() - t0
 
-    warn_violations = [
+    violations = [
         AuditViolation(
-            file=w.file,
-            detail=f"{w.measured} {w.unit} (limit: {w.limit})",
-            reason=f"{w.kind} file exceeds size limit",
+            file=f.file,
+            detail=f"{f.measured} {f.unit} (limit: {f.limit})",
+            reason=f"{f.kind} file exceeds size limit",
         )
-        for w in warnings
+        for f in failures
+    ]
+    warnings = [
+        AuditViolation(
+            file=rel,
+            detail=f"{lines} lines",
+            reason=f"code file over {DEFAULT_WARN_CODE_LINES} lines: split it at a real seam "
+            "when a change edits it for another reason",
+        )
+        for rel, lines in long_code
     ]
     return CheckResult(
         name="file-size",
-        passed=True,  # file size is advisory, not blocking
-        violation_count=0,
+        passed=not failures,  # the same verdict as CI's `file_size.py --strict`
+        violation_count=len(failures),
         warning_count=len(warnings),
-        warnings=warn_violations,
+        violations=violations,
+        warnings=warnings,
         elapsed_secs=round(elapsed, 2),
     )
 

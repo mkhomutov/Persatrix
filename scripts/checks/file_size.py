@@ -142,7 +142,7 @@ def _stale_allowlist_entries(released: frozenset[str]) -> list[str]:
     return sorted(rel for rel in GRANDFATHERED_FILES if _is_released_version_doc(rel, released))
 
 
-class FileSizeWarning(NamedTuple):
+class FileSizeFailure(NamedTuple):
     """A file over its limit: what ``--strict`` fails on, printed as ``[OVER]``."""
 
     file: str
@@ -167,9 +167,9 @@ class NearCapNotice(NamedTuple):
         """Headroom as a fraction of this file's own limit.
 
         The report mixes three units against three caps, so raw headroom
-        does not rank them against each other: 15 lines left is 3% of a
-        code file's cap — the loosest a notice can be — while 15 words
-        left is 0.5% of a doc's, which is nearly out of room.  Sorting on
+        does not rank them against each other: 24 lines left is 3% of a
+        code file's cap — the loosest a notice can be — while 24 words
+        left is 0.8% of a doc's, which is nearly out of room.  Sorting on
         the fraction is the same choice the *band* already makes, and for
         the same reason (see :data:`DEFAULT_NEAR_CAP_PCT`); ranking on the
         raw number instead put every code file above every doc that was
@@ -210,9 +210,9 @@ def _scan_files(
     max_code_lines: int = DEFAULT_MAX_CODE_LINES,
     max_doc_words: int = DEFAULT_MAX_DOC_WORDS,
     max_rfc_words: int = DEFAULT_MAX_RFC_WORDS,
-) -> tuple[list[FileSizeWarning], list[tuple[str, int]], list[tuple[str, int]]]:
-    """Single-pass scan — returns warnings plus all file measurements."""
-    warnings: list[FileSizeWarning] = []
+) -> tuple[list[FileSizeFailure], list[tuple[str, int]], list[tuple[str, int]]]:
+    """Single-pass scan — returns the failures plus all file measurements."""
+    failures: list[FileSizeFailure] = []
     code_results: list[tuple[str, int]] = []
     doc_results: list[tuple[str, int]] = []
     released = _released_versions(repo_root)
@@ -228,7 +228,7 @@ def _scan_files(
         rel = fpath.relative_to(repo_root).as_posix()
         code_results.append((rel, line_count))
         if line_count > max_code_lines and rel not in GRANDFATHERED_FILES:
-            warnings.append(FileSizeWarning(
+            failures.append(FileSizeFailure(
                 file=rel, kind="code", measured=line_count,
                 limit=max_code_lines, unit="lines",
             ))
@@ -247,12 +247,12 @@ def _scan_files(
         doc_results.append((rel, word_count))
         effective_limit = max_rfc_words if rel.startswith(_RFC_PREFIX) else max_doc_words
         if word_count > effective_limit and rel not in GRANDFATHERED_FILES:
-            warnings.append(FileSizeWarning(
+            failures.append(FileSizeFailure(
                 file=rel, kind="doc", measured=word_count,
                 limit=effective_limit, unit="words",
             ))
 
-    return warnings, code_results, doc_results
+    return failures, code_results, doc_results
 
 
 def _code_warnings(
@@ -272,11 +272,12 @@ def _code_warnings(
     for another reason — never trimmed to fit, never swept.
 
     A file over the limit is left out: it already fails, and listing it
-    twice would blur passing and failing.  Never affects the exit code.
+    twice would blur passing and failing.  An allowlisted file is left out
+    too, as in the other tiers.  Never affects the exit code.
     """
     warned = [
         (rel, lines) for rel, lines in code_results
-        if warn_code_lines < lines <= max_code_lines
+        if warn_code_lines < lines <= max_code_lines and rel not in GRANDFATHERED_FILES
     ]
     return sorted(warned, key=lambda item: (-item[1], item[0]))
 
@@ -293,7 +294,7 @@ def _near_cap_notices(
     """Files within ``pct`` of their limit but not yet over it.
 
     Why this exists.  The limits are a cliff, so the state just below one
-    is *invisible* — and it is also the expensive one.  A file sitting
+    is easy to miss — and it is also the expensive one.  A file sitting
     exactly ON the limit cannot take a one-line fix: the next change to it
     is either a split, or a trim that deletes existing rationale to make
     room, and the trim is the tempting option because it is local.  That
@@ -344,15 +345,12 @@ def _near_cap_notices(
     return notices
 
 
-def get_warnings(
+def get_failures_and_warnings(
     repo_root: Path | None = None,
-    max_code_lines: int = DEFAULT_MAX_CODE_LINES,
-    max_doc_words: int = DEFAULT_MAX_DOC_WORDS,
-) -> list[FileSizeWarning]:
-    """Programmatic API — returns the files over their limit without printing."""
-    root = repo_root or REPO_ROOT
-    warnings, _, _ = _scan_files(root, max_code_lines, max_doc_words)
-    return warnings
+) -> tuple[list[FileSizeFailure], list[tuple[str, int]]]:
+    """Programmatic API — the ``[OVER]`` and ``[WARN]`` lists, without printing."""
+    failures, code_results, _ = _scan_files(repo_root or REPO_ROOT)
+    return failures, _code_warnings(code_results)
 
 
 def check_file_size(
@@ -381,7 +379,10 @@ def check_file_size(
     runs ``--strict``, so returning early on a failure would have hidden
     them from the one audience already reading size output.
     """
-    warnings, code_results, doc_results = _scan_files(repo_root, max_code_lines, max_doc_words)
+    failures, code_results, doc_results = _scan_files(repo_root, max_code_lines, max_doc_words)
+    long_code = _code_warnings(
+        code_results, warn_code_lines=warn_code_lines, max_code_lines=max_code_lines,
+    )
     for rel in _stale_allowlist_entries(_released_versions(repo_root)):
         print(
             f"[STALE-ALLOWLIST] {rel} is a released version-cycle doc, already excluded — "
@@ -391,25 +392,16 @@ def check_file_size(
     print(f"[SCAN] Scanned {len(code_results)} code files and {len(doc_results)} doc files")
 
     if verbose:
+        tags = {rel: " [WARN]" for rel, _ in long_code} | {f.file: " [OVER]" for f in failures}
         print("\n--- Code files ---")
         for rel, lines in sorted(code_results, key=lambda x: -x[1])[:20]:
-            flag = " ⚠" if lines > max_code_lines else ""
-            print(f"  {lines:>5} lines  {rel}{flag}")
+            print(f"  {lines:>5} lines  {rel}{tags.get(rel, '')}")
         print("\n--- Doc files ---")
         for rel, words in sorted(doc_results, key=lambda x: -x[1])[:20]:
-            flag = " ⚠" if words > max_doc_words else ""
-            print(f"  {words:>5} words  {rel}{flag}")
+            print(f"  {words:>5} words  {rel}{tags.get(rel, '')}")
 
-    if warnings:
-        print(f"\n[OVER] {len(warnings)} file(s) exceed size limits:")
-        for w in warnings:
-            print(f"  {w.file}: {w.measured} {w.unit} (limit: {w.limit})")
-    else:
+    if not failures:
         print("[OK] All files within size limits.")
-
-    long_code = _code_warnings(
-        code_results, warn_code_lines=warn_code_lines, max_code_lines=max_code_lines,
-    )
     if long_code:
         print(
             f"\n[WARN] {len(long_code)} code file(s) over {warn_code_lines} lines "
@@ -418,6 +410,12 @@ def check_file_size(
         )
         for rel, lines in long_code:
             print(f"  {rel}: {lines} lines")
+    # The failures print after the warning, so a reader that keeps only the
+    # end of a failing run (the release sweep keeps 15 lines) still sees them.
+    if failures:
+        print(f"\n[OVER] {len(failures)} file(s) exceed size limits:")
+        for f in failures:
+            print(f"  {f.file}: {f.measured} {f.unit} (limit: {f.limit})")
 
     notices = _near_cap_notices(
         code_results, doc_results,
@@ -432,8 +430,8 @@ def check_file_size(
     elif near_cap:
         print(
             f"\n[NEAR] {len(notices)} file(s) within {near_cap_pct:g}% of "
-            f"their limit — the next edit to one of these is a split or a "
-            f"trim, not a one-liner:",
+            f"their limit — little room is left: split one at a real seam, "
+            f"never trim it to fit:",
         )
         for n in notices:
             room = "AT THE LIMIT" if n.headroom == 0 else f"{n.headroom} {n.unit} left"
@@ -451,7 +449,7 @@ def check_file_size(
     # Decided last, so the tiers above print on every run — including the
     # failing ``--strict`` runs, which is when someone is already reading
     # this output.  Only an over-cap file can fail the gate.
-    return 1 if warnings and strict else 0
+    return 1 if failures and strict else 0
 
 
 def main(argv: list[str] | None = None) -> int:

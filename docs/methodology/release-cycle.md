@@ -311,8 +311,9 @@ no follow-up reads the near-cap list to schedule splits, and no plan carries
 a sweep.
 
 The rule it replaced: when twenty or more files sat exactly at their size
-cap, the post-release follow-up filed a `debt-sweep` issue and the next
-master plan carried a cuttable Workstream D that split them. v0.3.16 ran it,
+cap, or two releases had passed since the last sweep, the post-release
+follow-up filed a `debt-sweep` issue and the next master plan carried a
+cuttable Workstream D that split them. v0.3.16 ran it,
 and after its two splits 24 files were still at their cap: a seam chosen by
 line count refills the pile
 ([ISSUE-0143](../issues/ISSUE-0143-debt-sweep-26-files-at-size-cap.md)).
