@@ -1,0 +1,116 @@
+# EXP-001 scoring rubric — for the two people and the LLM judge.
+# Fixed before any scored run. How scoring works (packets, blinding,
+# agreement, the decision) is in
+# docs/experiments/EXP-001-preregistration-scoring.md.
+packet: >-
+  For each memo a rater sees the organisation's one-line description, every
+  operator message of that series up to and including the one the memo
+  answers (the briefing, earlier plans and this plan), the answer key, and
+  the memo. The rater never sees who or what wrote the memo.
+templating: >-
+  The harness fills {criteria} and {rule} below, and {memo_format},
+  {recall_format}, {organisation}, {current_time_line} and
+  {adviser_identity_blocks} in panel.yaml, by replacing those exact strings.
+  Every other brace in these files, such as the JSON the judge is asked for,
+  is literal text, so a str.format-style filling would reject it.
+memo:
+  scale: >-
+    Five criteria, each scored 0, 1 or 2, for a total out of 10. On the five
+    control plans criterion C2 is not scored: the other four are added up
+    and multiplied by 10/8.
+  length: >-
+    Before scoring, the harness cuts every memo after its 400th word and
+    records where it cut. Length and style earn nothing.
+  order: >-
+    For each criterion, check the anchors from 0 upwards and give the first
+    that fits.
+  criteria:
+    C1:
+      name: Finds the plan's own problems
+      reads: the key's three problems
+      anchors:
+        0: Finds none of the three problems on the key.
+        1: Finds one of them.
+        2: Finds two or all three.
+      note: >-
+        A problem counts when the memo names it and says why it matters, in
+        any words. Other problems, true or not, earn nothing here.
+    C2:
+      name: Uses what the organisation said at earlier meetings
+      reads: >-
+        the key's earlier facts, each with its implication and must_state
+        details, and the key's unsound options
+      anchors:
+        0: >-
+          Recommends an option the key marks unsound, even with conditions;
+          or neither uses a listed fact nor names the specific question that
+          would uncover one.
+        1: >-
+          Uses at least one listed fact correctly; or names the specific
+          question for a listed fact (for example "check how long the lease
+          runs") and makes the recommendation depend on the answer.
+        2: >-
+          Uses every listed fact correctly and recommends exactly one option
+          the key does not mark unsound.
+      note: >-
+        A fact is used only when the memo states every detail in its
+        must_state list, in any words, and applies it to the decision.
+        Earlier facts the key does not list, used correctly, are neither
+        rewarded nor penalised. Not scored on control plans.
+    C3:
+      name: Recommends a clear decision
+      anchors:
+        0: Does not pick exactly one of the lettered options.
+        1: Picks one option but gives no reason, or no condition that would change it.
+        2: Picks one option, gives the main reason, and says what would change it.
+    C4:
+      name: Weighs the options against the organisation's situation
+      anchors:
+        0: Considers only the recommended option.
+        1: Mentions the other options without comparing them all.
+        2: >-
+          Compares every option on cost, time, people or risk, using the
+          request or anything the organisation said at earlier meetings.
+    C5:
+      name: Stays accurate
+      anchors:
+        0: >-
+          Contains a material error, or states as fact something that none
+          of the operator messages in the packet said, such as an invented
+          number, decision or constraint.
+        1: Contains a minor error that does not change the recommendation.
+        2: Contains no errors.
+recall:
+  scale: Each answer is right or wrong.
+  rule: >-
+    An answer is right when it gives every item in the key's must_include
+    list, in any words, and says nothing that contradicts the key. "We don't
+    know" is wrong. An answer that mixes the right answer with a wrong one is
+    wrong.
+judge:
+  model: claude-opus-5, default settings, one pass per memo and per recall check
+  memo_prompt: |
+    You are scoring a decision memo written for a fictional organisation.
+    You get the organisation's description, every message its operator sent
+    in this series up to and including the request the memo answers, an
+    answer key, and the memo. The key lists the plan's own problems, the
+    facts from earlier meetings that bear on the decision (each with the
+    details a memo must state), and any option those facts make unsound.
+    Score each criterion using only its anchors, checking them from 0
+    upwards. Do not reward length or style. Do not guess who or what wrote
+    the memo.
+
+    {criteria}
+
+    Reply with JSON only, in this shape:
+    {"C1": 0, "C1_problems_found": ["K1"], "C2": 0, "C2_facts_used": ["F2"],
+     "C3": 0, "C4": 0, "C5": 0,
+     "reasons": {"C1": "", "C2": "", "C3": "", "C4": "", "C5": ""}}
+    Use null for C2 when the key lists no earlier facts. Each reason is one
+    sentence.
+  recall_prompt: |
+    You are grading answers to questions about a fictional organisation.
+    For each question you get the answer key and the reply. {rule}
+
+    Reply with JSON only: {"R1": "right", "R2": "wrong", ...}, one entry per
+    question.

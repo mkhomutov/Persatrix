@@ -1,0 +1,272 @@
+# EXP-001 materials — series 4 of 5: Brookside Health Centre, a clinic.
+# Fixed before any scored run. How the files are used, and how a change
+# is recorded, is in docs/experiments/EXP-001-preregistration.md.
+# The panel sees only each meeting's `message`; `facts` and `key` are
+# for the harness and the scorers. A listed earlier fact counts as used
+# only when the memo states every detail in its `must_state`.
+id: series-4
+organisation: Brookside Health Centre, a community clinic with four doctors and five nurses
+facts:
+  F1: >-
+    The replacement vaccine fridge arrives on 12 January; until then the
+    partner pharmacy can hand over at most 50 doses a day.
+  F2: >-
+    The health authority pays for video appointments at 60% of the
+    in-person rate.
+  F3: >-
+    Two of the five nurses are on fixed-term contracts ending on
+    31 December, with no funding yet to renew them.
+  F4: >-
+    Patients over 70 make up 45% of appointments, and many say they do not
+    use smartphones.
+  F5: >-
+    The lease forbids building work without the landlord's written
+    approval, and the landlord takes about three months to reply.
+  F6: The top complaint is the 8am phone line, with a 25-minute average wait.
+meetings:
+  - id: series-4-briefing
+    kind: briefing
+    message: |
+      Today is Monday 6 October 2036.
+
+      Hello panel. I'm the practice manager at Brookside Health Centre, a
+      community clinic with four doctors and five nurses. Over the next
+      few weeks I'll bring you plans to critique. Please keep these facts
+      in mind:
+
+      - Our vaccine fridge failed its inspection. The replacement arrives
+        on 12 January. Until then our vaccines are stored at the partner
+        pharmacy two streets away, which can hand over at most 50 doses a
+        day.
+      - The regional health authority pays for video appointments at 60%
+        of the rate for in-person ones.
+      - Two of our five nurses are on fixed-term contracts that end on
+        31 December. There is no funding yet to renew them.
+      - Patients over 70 make up 45% of our appointments, and in last
+        year's survey many of them said they do not use smartphones.
+      - Our lease forbids any building work without the landlord's written
+        approval, and the landlord usually takes about three months to
+        reply.
+      - Our most common complaint is the phone line: at 8am, callers wait
+        25 minutes on average.
+
+      There is no plan today. Please just confirm you have this.
+
+  - id: series-4-plan-1
+    kind: control
+    message: |
+      Today is Monday 13 October 2036.
+
+      Plan to critique: our cleaning contractor.
+
+      Our current contractor charges $4 200 a month, including
+      clinical-waste collection, and its staff hold infection-control
+      certificates. A new contractor, Spotless Partners, quotes $3 400 a
+      month.
+
+      The plan switches to Spotless on 1 November, saving $800 a month, or
+      $9 600 a year. Spotless's quote lists clinical-waste collection as an
+      optional extra at $650 a month. The plan chose Spotless on price,
+      after one phone call.
+
+      A third option is to employ two cleaners ourselves, for $2 900 a
+      month in total. The plan rules this out as "too cheap to be
+      realistic".
+
+      Decision needed: (A) switch to Spotless Partners, (B) keep our
+      current contractor, or (C) employ our own cleaners.
+
+      Please critique the plan and recommend one option.
+    key:
+      problems:
+        K1: >-
+          The saving ignores Spotless's $650-a-month clinical-waste charge;
+          the real saving is $150 a month, $1 800 a year.
+        K2: >-
+          Nobody checked Spotless's infection-control training or
+          references; the choice rests on one phone call.
+        K3: >-
+          The in-house option is dismissed without being examined: cover
+          for sickness and holidays, supplies and employer costs.
+      earlier_facts: {}
+      unsound_options: []
+
+  - id: series-4-plan-2
+    kind: plan
+    message: |
+      Today is Monday 20 October 2036.
+
+      Plan to critique: online booking.
+
+      The plan replaces phone booking with app-only booking from
+      1 December, to end the 8am rush on the phones.
+
+      Take-up: the plan expects 85% of patients to book through the app
+      within a month, the figure reported by a university health service
+      where most patients are students.
+
+      Systems: the app supplier says the link to our patient-records
+      system is "to be confirmed". The launch date is fixed.
+
+      Money: the supplier charges $1 200 a month. The plan's budget is
+      $2 000 for posters and leaflets.
+
+      Decision needed: (A) app-only booking as planned, (B) the app plus a
+      call-back service on the phone line at peak times, or (C) extra
+      reception staff on the phones from 8 to 10am.
+
+      Please critique the plan and recommend one option.
+    key:
+      problems:
+        K1: >-
+          The 85% take-up comes from a student health service, whose
+          patients are not like ours.
+        K2: >-
+          The launch date is fixed although the link to the records system
+          is not confirmed.
+        K3: >-
+          The supplier's $1 200 a month, $14 400 a year, is not in the
+          budget.
+      earlier_facts:
+        F4:
+          implication: >-
+            Patients over 70 make up 45% of appointments and many do not use
+            smartphones, so app-only booking shuts many of them out.
+          must_state: [45% of appointments are patients over 70]
+        F6:
+          implication: >-
+            The 25-minute wait at 8am is the most common complaint, so
+            fixing the phone line, as B or C does, addresses it directly.
+          must_state: [the 8am phone wait of 25 minutes is the top complaint]
+      unsound_options: [A]
+
+  - id: series-4-plan-3
+    kind: plan
+    message: |
+      Today is Monday 27 October 2036.
+
+      Plan to critique: a flu vaccination drive.
+
+      The plan vaccinates 1 200 patients in five weeks, from 10 November
+      to 12 December: three evening clinics a week, with 80 patients at
+      each.
+
+      Staff: all five nurses work every evening clinic as overtime. A nurse
+      vaccinates about 12 patients an hour. After each clinic, nurses
+      record every vaccination in the patient records, which takes about
+      3 minutes per patient. The overtime budget covers the clinic hours,
+      6pm to 9pm, for all five nurses.
+
+      Bookings: the plan books exactly 1 200 appointments. Last year 15% of
+      booked patients did not attend.
+
+      Decision needed: (A) run the drive as planned, (B) run smaller
+      daytime clinics spread over eight weeks, or (C) postpone the drive to
+      January.
+
+      Please critique the plan and recommend one option.
+    key:
+      problems:
+        K1: >-
+          Recording 80 vaccinations at 3 minutes each adds 4 hours of work
+          per clinic that the overtime budget does not cover.
+        K2: >-
+          With 15% not attending, 1 200 bookings give about 1 020
+          vaccinations, short of the target.
+        K3: >-
+          Five nurses at 12 an hour can vaccinate 180 patients in a
+          three-hour clinic; 80 patients need only three nurses, so the plan
+          pays two nurses' overtime it does not need.
+      earlier_facts:
+        F1:
+          implication: >-
+            Until the new fridge arrives on 12 January, the pharmacy can hand
+            over at most 50 doses a day, fewer than the 80 each clinic needs.
+          must_state: [at most 50 doses a day until 12 January]
+      unsound_options: [A]
+
+  - id: series-4-plan-4
+    kind: plan
+    message: |
+      Today is Monday 3 November 2036.
+
+      Plan to critique: a second treatment room.
+
+      The plan turns our storage room into a second treatment room so that
+      we can see 20% more patients.
+
+      Works: building work starts on 1 December and costs $30 000.
+
+      Staffing: from 1 February, our five nurses take on the extra
+      appointments in the new room, within the days they already work.
+
+      Storage: the medical supplies in the storage room move to the
+      corridor cupboards, which hold about a third as much.
+
+      Decision needed: (A) convert the room as planned, (B) keep one
+      treatment room and open it two evenings a week from January, staffed
+      by our five nurses, or (C) delay the conversion until later in the
+      year.
+
+      Please critique the plan and recommend one option.
+    key:
+      problems:
+        K1: >-
+          It adds 20% more appointments but no clinician hours: the same
+          nurses must fit them into the days they already work.
+        K2: >-
+          The $30 000 covers building work only; a treatment room also
+          needs equipment.
+        K3: >-
+          The corridor cupboards hold a third of the supplies; the rest has
+          nowhere to go.
+      earlier_facts:
+        F5:
+          implication: >-
+            Building work needs the landlord's written approval, which takes
+            about three months, so works cannot start on 1 December.
+          must_state: [the landlord's written approval takes about three months]
+        F3:
+          implication: >-
+            Two nurses' contracts end on 31 December with no funding to renew
+            them, so from January there may be only three nurses, for A's new
+            room or for B's evenings.
+          must_state: [two nurses' contracts end on 31 December]
+      unsound_options: [A, B]
+
+  - id: series-4-recall
+    kind: recall
+    message: |
+      Today is Monday 10 November 2036.
+
+      That's the last plan for now. Before we finish, please answer these
+      from memory:
+
+      1. How many jabs can we give daily right now, and when does that
+         change?
+      2. How are we paid when we see patients over a screen rather than
+         face to face?
+      3. Will the clinical team still be at full strength after New Year?
+      4. Before we change anything about the rooms, who do we need a yes
+         from, and how long does that take?
+    key:
+      R1:
+        fact: F1
+        answer: >-
+          At most 50 doses a day from the partner pharmacy, until the new
+          fridge arrives on 12 January.
+        must_include: [50 doses a day, 12 January]
+      R2:
+        fact: F2
+        answer: At 60% of the rate for in-person appointments.
+        must_include: [60%]
+      R3:
+        fact: F3
+        answer: >-
+          Not necessarily: two nurses' fixed-term contracts end on
+          31 December, with no funding yet to renew them.
+        must_include: [two nurses, 31 December]
+      R4:
+        fact: F5
+        answer: The landlord's written approval, which takes about three months.
+        must_include: [landlord, three months]

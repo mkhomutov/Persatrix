@@ -1,0 +1,268 @@
+# EXP-001 materials — series 2 of 5: Eastvale Libraries.
+# Fixed before any scored run. How the files are used, and how a change
+# is recorded, is in docs/experiments/EXP-001-preregistration.md.
+# The panel sees only each meeting's `message`; `facts` and `key` are
+# for the harness and the scorers. A listed earlier fact counts as used
+# only when the memo states every detail in its `must_state`.
+id: series-2
+organisation: Eastvale Libraries, a city library service with five branches
+facts:
+  F1: >-
+    Staffing is frozen at 42 posts until next April; no new posts of any
+    kind, full-time or part-time.
+  F2: >-
+    The Northgate branch closes for fire-safety works from 1 December, for
+    about nine months.
+  F3: >-
+    The Pageway e-book contract renews automatically on 1 November each
+    year unless cancelled at least 90 days before.
+  F4: >-
+    Riverside is the busiest branch at weekends, with twice the visitors of
+    any other branch.
+  F5: >-
+    A one-off $60 000 foundation grant may only be spent on digital-skills
+    classes, within 12 months.
+  F6: The staff union agreement requires 60 days' notice of any rota change.
+meetings:
+  - id: series-2-briefing
+    kind: briefing
+    message: |
+      Today is Monday 6 October 2036.
+
+      Hello panel. I'm the service manager for Eastvale Libraries, the
+      city's library service with five branches. Over the next few weeks
+      I'll bring you plans to critique. Please keep these facts in mind:
+
+      - The city council has frozen our staffing at 42 posts until next
+        April. No new posts of any kind, full-time or part-time.
+      - Our Northgate branch failed a fire-safety inspection. The council
+        will close it for works from 1 December, for about nine months.
+      - Our e-book contract with Pageway renews automatically on
+        1 November each year unless we cancel at least 90 days before.
+      - Riverside is our busiest branch at weekends, with twice the
+        visitors of any other branch.
+      - A local foundation has given us a one-off grant of $60 000. It may
+        only be spent on digital-skills classes, within 12 months.
+      - Our agreement with the staff union requires 60 days' notice before
+        any change to staff rotas.
+
+      There is no plan today. Please just confirm you have this.
+
+  - id: series-2-plan-1
+    kind: plan
+    message: |
+      Today is Monday 13 October 2036.
+
+      Plan to critique: evening opening.
+
+      Library users have asked for later opening. The plan opens all five
+      branches until 9pm on weekdays from 3 November, three hours later
+      than now.
+
+      Evidence: 30 comment cards asking for evening hours. The plan
+      expects evening visits to match daytime visits.
+
+      Staffing: current staff move onto a new rota that includes late
+      shifts, and we hire four part-time evening assistants at 20 hours a
+      week each.
+
+      Cost: the plan says the only extra cost is the assistants' pay: four
+      assistants × 20 hours × $23 = $1 840 a week, budgeted at $46 000 a
+      year.
+
+      Decision needed: (A) open all five branches until 9pm from
+      3 November as planned, (B) open our two busiest branches until 9pm
+      from February, with current staff on a new rota, or (C) run a
+      three-month pilot at one branch from 3 November, with two new
+      part-time evening assistants.
+
+      Please critique the plan and recommend one option.
+    key:
+      problems:
+        K1: >-
+          Thirty comment cards cannot show that evening visits will match
+          daytime visits across five branches.
+        K2: >-
+          $1 840 a week is about $95 700 a year, not $46 000.
+        K3: >-
+          Pay is not the only extra cost: heating, lighting and security
+          for three more hours a day are left out.
+      earlier_facts:
+        F1:
+          implication: >-
+            Staffing is frozen with no new posts of any kind, so neither
+            the four assistants in A nor the two in C can be hired.
+          must_state: [no new posts can be created]
+        F6:
+          implication: >-
+            A rota change needs 60 days' notice, so a new rota cannot start
+            on 3 November; February allows it.
+          must_state: [rota changes need 60 days' notice]
+      unsound_options: [A, C]
+
+  - id: series-2-plan-2
+    kind: plan
+    message: |
+      Today is Monday 20 October 2036.
+
+      Plan to critique: study space for exam season.
+
+      Last year about 140 students a day used our study spaces during exam
+      season, and up to 210 on the busiest days. The plan runs next year's
+      exam-season programme, April to June, in the Northgate branch's
+      reading room, our largest room, with 150 seats.
+
+      Opening: 9am to 5pm, the branch's normal hours. In last year's
+      student survey, most students said they need study space after 5pm.
+
+      Staffing: two staff move from Riverside to Northgate every Saturday
+      and Sunday, when Northgate is normally closed.
+
+      Extras: free printing for students, budgeted at $400, based on 40
+      students printing 10 pages once.
+
+      Decision needed: (A) run the programme at Northgate as planned,
+      (B) spread study space across the other branches with online seat
+      booking, or (C) partner with the city college to use its hall.
+
+      Please critique the plan and recommend one option.
+    key:
+      problems:
+        K1: >-
+          150 seats cover the average of 140 students but not the busiest
+          days, when up to 210 came.
+        K2: >-
+          The opening hours, 9am to 5pm, miss the time students said they
+          need space: after 5pm.
+        K3: >-
+          The printing budget assumes 40 students printing once, far below
+          140 students a day over three months.
+      earlier_facts:
+        F2:
+          implication: >-
+            Northgate is closed for works from 1 December for about nine
+            months, so it is shut from April to June.
+          must_state: [Northgate closes from 1 December]
+        F4:
+          implication: >-
+            Riverside is busiest at weekends, so moving two staff away on
+            Saturdays and Sundays hurts the busiest branch.
+          must_state: [Riverside is busiest at weekends]
+      unsound_options: [A]
+
+  - id: series-2-plan-3
+    kind: control
+    message: |
+      Today is Monday 27 October 2036.
+
+      Plan to critique: our payroll software.
+
+      Our payroll software costs $9 000 a year, and its supplier stops
+      supporting it next year. The options:
+
+      (A) switch to CloudPay at $6 000 a year, plus a $4 500 set-up fee, on
+      a three-year contract with no early exit;
+      (B) join the city council's shared payroll service, free to us, with
+      a two-month waiting list;
+      (C) move to the supplier's new version at $12 000 a year.
+
+      The plan recommends CloudPay: it saves $3 000 a year, and the set-up
+      fee is a one-off. It expects the switch to take two weeks, the figure
+      from CloudPay's sales demonstration.
+
+      Decision needed: choose (A), (B) or (C).
+
+      Please critique the plan and recommend one option.
+    key:
+      problems:
+        K1: >-
+          In the first year the $4 500 set-up fee turns the $3 000 saving
+          into a $1 500 extra cost; the fee takes 18 months to earn back.
+        K2: >-
+          Two weeks comes from a sales demonstration, not from a tested move
+          of our own payroll.
+        K3: >-
+          The three-year contract with no early exit is not weighed, although
+          option B costs nothing once the waiting list clears.
+      earlier_facts: {}
+      unsound_options: []
+
+  - id: series-2-plan-4
+    kind: plan
+    message: |
+      Today is Monday 3 November 2036.
+
+      Plan to critique: changing our e-book supplier.
+
+      Pageway raised its prices by 18% this year. The plan moves us to a
+      new supplier, Lumen Reads, from 1 January, and cancels Pageway in
+      December.
+
+      Money: Lumen's first-year licence of $40 000 would be paid from the
+      foundation grant.
+
+      Price comparison: Pageway charges $1.10 per loan, and we made 40 000
+      loans last year, $44 000. Lumen charges a flat $40 000 a year, which
+      covers up to 35 000 loans.
+
+      Catalogue: the plan assumes Lumen carries every title Pageway does.
+      Readers' holds and reading lists will be moved "as needed".
+
+      Decision needed: (A) switch to Lumen Reads as planned, (B) stay with
+      Pageway for another year and plan a switch properly, or (C)
+      negotiate a price cap with Pageway.
+
+      Please critique the plan and recommend one option.
+    key:
+      problems:
+        K1: >-
+          Lumen's flat fee covers only 35 000 loans, but we made 40 000 last
+          year; the comparison ignores the cap.
+        K2: It assumes Lumen carries every Pageway title without checking.
+        K3: There is no real plan for moving readers' holds and reading lists.
+      earlier_facts:
+        F3:
+          implication: >-
+            Pageway renewed automatically on 1 November because nobody
+            cancelled 90 days before, so cancelling in December is too late.
+          must_state: [Pageway has already renewed on 1 November]
+        F5:
+          implication: >-
+            The foundation grant may only be spent on digital-skills
+            classes, not on an e-book licence.
+          must_state: [the grant is only for digital-skills classes]
+      unsound_options: [A]
+
+  - id: series-2-recall
+    kind: recall
+    message: |
+      Today is Monday 10 November 2036.
+
+      That's the last plan for now. Before we finish, please answer these
+      from memory:
+
+      1. Can we take on more people this winter?
+      2. Which of our libraries will soon be out of action, and for how
+         long?
+      3. If we ever want to drop our digital lending supplier, what
+         deadline do we have to watch?
+      4. What strings are attached to the gift money we received?
+    key:
+      R1:
+        fact: F1
+        answer: No; staffing is frozen at 42 posts, with no new posts, until next April.
+        must_include: [no new posts, until next April]
+      R2:
+        fact: F2
+        answer: Northgate, closed for fire-safety works from 1 December for about nine months.
+        must_include: [Northgate, about nine months]
+      R3:
+        fact: F3
+        answer: >-
+          Cancel the Pageway contract at least 90 days before 1 November, or
+          it renews automatically.
+        must_include: [90 days, 1 November]
+      R4:
+        fact: F5
+        answer: It may only be spent on digital-skills classes, within 12 months.
+        must_include: [digital-skills classes, 12 months]

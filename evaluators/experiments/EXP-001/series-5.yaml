@@ -1,0 +1,272 @@
+# EXP-001 materials — series 5 of 5: Kestrel Freight, a haulier.
+# Fixed before any scored run. How the files are used, and how a change
+# is recorded, is in docs/experiments/EXP-001-preregistration.md.
+# The panel sees only each meeting's `message`; `facts` and `key` are
+# for the harness and the scorers. A listed earlier fact counts as used
+# only when the memo states every detail in its `must_state`.
+id: series-5
+organisation: Kestrel Freight, a regional haulier with two warehouses and 60 trucks
+facts:
+  F1: >-
+    The Westfield warehouse roof cannot carry any extra load; nothing can
+    be mounted on it or hung from it.
+  F2: The drivers' union agreement caps a shift at 10 hours, including loading.
+  F3: >-
+    The Fresco grocery chain needs every delivery before 6am and charges
+    $500 for each late drop.
+  F4: >-
+    The city pays 30% of the price of any electric truck bought before
+    30 June next year.
+  F5: >-
+    From 1 July next year, diesel trucks over 12 tonnes are banned from the
+    city centre.
+  F6: >-
+    Support for our version of the warehouse management system ends in 14
+    months.
+meetings:
+  - id: series-5-briefing
+    kind: briefing
+    message: |
+      Today is Monday 6 October 2036.
+
+      Hello panel. I'm head of planning at Kestrel Freight, a regional
+      haulier with two warehouses and 60 trucks. Over the next few weeks
+      I'll bring you plans to critique. Please keep these facts in mind:
+
+      - The structural survey of our Westfield warehouse says its roof
+        cannot carry any extra load. Nothing can be mounted on it or hung
+        from it.
+      - Our agreement with the drivers' union caps a shift at 10 hours,
+        including loading.
+      - Our biggest client, the Fresco grocery chain, needs every delivery
+        before 6am and charges us $500 for each late drop.
+      - The city will pay 30% of the price of any electric truck we buy
+        before 30 June next year.
+      - From 1 July next year, the city will ban diesel trucks over 12
+        tonnes from the city centre.
+      - The supplier of our warehouse management system ends support for
+        our version in 14 months.
+
+      There is no plan today. Please just confirm you have this.
+
+  - id: series-5-plan-1
+    kind: plan
+    message: |
+      Today is Monday 13 October 2036.
+
+      Plan to critique: merging two night routes.
+
+      Routes 7 and 9 each use one truck and one driver overnight. The plan
+      merges them into one route, saving a truck and a driver: about
+      $95 000 a year.
+
+      Schedule: loading at Westfield from 12:30am, departure at 1:30am, 14
+      drops, back at the depot at 11am. The last Fresco drop is at 6:40am.
+      Westfield's loading dock opens at 2am.
+
+      The saving is the cost of the truck and the driver we no longer
+      need.
+
+      Decision needed: (A) merge the routes as planned, (B) keep both
+      routes, or (C) merge them with a relay: a second driver takes over
+      halfway, and the drops stay in the same order.
+
+      Please critique the plan and recommend one option.
+    key:
+      problems:
+        K1: Loading starts at 12:30am, but the Westfield dock opens at 2am.
+        K2: >-
+          The schedule has no slack for traffic, breakdowns or late
+          loading.
+        K3: >-
+          The saving counts the truck and driver removed but not the extra
+          fuel and mileage of the longer route.
+      earlier_facts:
+        F2:
+          implication: >-
+            12:30am to 11am is 10.5 hours, over the union's 10-hour cap
+            including loading.
+          must_state: [the union caps a shift at 10 hours]
+        F3:
+          implication: >-
+            Fresco needs every delivery before 6am, so a 6:40am drop costs
+            $500 each time, and a relay that keeps the drop order still
+            reaches Fresco at 6:40am.
+          must_state: [Fresco needs deliveries before 6am]
+      unsound_options: [A, C]
+
+  - id: series-5-plan-2
+    kind: plan
+    message: |
+      Today is Monday 20 October 2036.
+
+      Plan to critique: replacing trucks.
+
+      Twenty of our 18-tonne diesel trucks are more than ten years old.
+      The plan buys 20 new 18-tonne diesel trucks next spring at $145 000
+      each, financed over seven years, mainly for our city-centre routes.
+
+      Savings: 12% less fuel, the manufacturer's figure, applied to this
+      year's fuel bill.
+
+      Policy: our new policy is to replace trucks after six years.
+
+      Insurance: the insurer quotes $2 000 a year more per new truck. The
+      plan's figures cover the purchase, the finance costs and the fuel
+      savings.
+
+      Decision needed: (A) buy 20 diesel trucks as planned, (B) buy a
+      mixed fleet of diesel and electric trucks, or (C) lease 20 new
+      18-tonne diesel trucks for two years while we test electric models.
+
+      Please critique the plan and recommend one option.
+    key:
+      problems:
+        K1: >-
+          The 12% fuel saving is the manufacturer's figure, not tested on
+          our routes.
+        K2: >-
+          Seven-year finance on trucks our policy replaces after six years
+          leaves a year of payments on trucks we no longer use.
+        K3: >-
+          The extra insurance, $2 000 a year per truck or $40 000 a year,
+          is left out.
+      earlier_facts:
+        F5:
+          implication: >-
+            From 1 July next year diesel trucks over 12 tonnes are banned
+            from the city centre, so new 18-tonne diesel trucks, bought or
+            leased, cannot serve those routes.
+          must_state: [diesel trucks over 12 tonnes are banned from 1 July]
+        F4:
+          implication: >-
+            The city pays 30% of the price of electric trucks bought before
+            30 June next year, which favours buying electric trucks now, as
+            B does.
+          must_state: [the city pays 30% for electric trucks bought before 30 June]
+      unsound_options: [A, C]
+
+  - id: series-5-plan-3
+    kind: control
+    message: |
+      Today is Monday 27 October 2036.
+
+      Plan to critique: a driver safety bonus.
+
+      Accidents cost us $260 000 last year. The plan pays each of our 72
+      drivers a $1 200 bonus at the end of the year if they have no
+      incidents: up to $86 400 in total.
+
+      Evidence: a trucking magazine article reports that a similar bonus
+      halved accidents at another firm.
+
+      Rules: an incident is any accident, or any near miss the driver
+      reports. One incident cancels that driver's bonus for the year.
+
+      Decision needed: (A) introduce the bonus as planned, (B) spend the
+      money on driver-assist cameras and training instead, or (C) run a
+      six-month trial of a bonus that rewards reporting near misses.
+
+      Please critique the plan and recommend one option.
+    key:
+      problems:
+        K1: >-
+          One magazine article about another firm does not show that
+          accidents will halve here.
+        K2: >-
+          Counting reported near misses as incidents punishes drivers for
+          reporting them, so fewer will be reported.
+        K3: >-
+          One incident cancels the whole year's bonus, so after an early
+          incident the bonus gives that driver no reason to take care.
+      earlier_facts: {}
+      unsound_options: []
+
+  - id: series-5-plan-4
+    kind: plan
+    message: |
+      Today is Monday 3 November 2036.
+
+      Plan to critique: automated racking at Westfield.
+
+      Westfield's picking floor works two shifts, 6am to 10pm. The plan
+      installs an automated high-density racking system there, with its
+      shuttle rails hung from the roof beams.
+
+      Capacity: picking capacity rises by 60%, the supplier's figure for a
+      site that runs 24 hours a day.
+
+      Systems: the racking connects to our current warehouse management
+      system. Go-live is in 18 months.
+
+      Money: the supplier quotes $2.1 million, plus a maintenance contract
+      of $140 000 a year. Labour savings are $525 000 a year, so the plan
+      puts payback at four years.
+
+      Installation: ten weeks, during which the plan expects the warehouse
+      to work normally.
+
+      Decision needed: (A) install the system at Westfield as planned,
+      (B) install floor-standing racking at our other warehouse first, or
+      (C) postpone the decision for a year and re-plan.
+
+      Please critique the plan and recommend one option.
+    key:
+      problems:
+        K1: >-
+          The 60% gain is for a site running 24 hours a day; Westfield's
+          picking floor works two shifts, so the gain will be smaller.
+        K2: >-
+          The payback ignores the $140 000-a-year maintenance contract;
+          with it, payback is about five and a half years.
+        K3: >-
+          Expecting normal work during a ten-week installation is not
+          realistic.
+      earlier_facts:
+        F1:
+          implication: >-
+            The Westfield roof cannot carry any extra load, so rails cannot
+            be hung from its beams.
+          must_state: [the Westfield roof cannot carry extra load]
+        F6:
+          implication: >-
+            Support for our warehouse system version ends in 14 months,
+            before the 18-month go-live, so connecting to it is a dead end.
+          must_state: [support for the warehouse system ends in 14 months]
+      unsound_options: [A]
+
+  - id: series-5-recall
+    kind: recall
+    message: |
+      Today is Monday 10 November 2036.
+
+      That's the last plan for now. Before we finish, please answer these
+      from memory:
+
+      1. Is there anything we must not attach overhead at any of our sites?
+      2. How long can someone behind the wheel work in one go?
+      3. What happens if our supermarket customer's goods do not arrive in
+         time, and what counts as in time?
+      4. Is there public money on offer for greener vehicles, and is there
+         a deadline?
+    key:
+      R1:
+        fact: F1
+        answer: >-
+          Yes: nothing can be mounted on or hung from the Westfield roof,
+          which cannot carry any extra load.
+        must_include: [Westfield roof]
+      R2:
+        fact: F2
+        answer: 10 hours, including loading.
+        must_include: [10 hours]
+      R3:
+        fact: F3
+        answer: Fresco charges $500 for each drop that arrives after 6am.
+        must_include: [$500, 6am]
+      R4:
+        fact: F4
+        answer: >-
+          The city pays 30% of the price of electric trucks bought before
+          30 June next year.
+        must_include: [the city pays towards electric trucks, 30 June]
