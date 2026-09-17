@@ -1,14 +1,23 @@
 # EXP-001 scoring rubric — for the two people and the LLM judge.
-# Fixed before any scored run. How scoring works (blinding, packets,
-# agreement, the result) is in docs/experiments/EXP-001-preregistration.md.
+# Fixed before any scored run. How scoring works (packets, blinding,
+# agreement, the decision) is in
+# docs/experiments/EXP-001-preregistration-scoring.md.
+packet: >-
+  For each memo a rater sees the organisation's one-line description, every
+  operator message of that series up to and including the one the memo
+  answers (the briefing, earlier plans and this plan), the answer key, and
+  the memo. The rater never sees who or what wrote the memo.
 memo:
   scale: >-
     Five criteria, each scored 0, 1 or 2, for a total out of 10. On the five
     control plans criterion C2 is not scored: the other four are added up
     and multiplied by 10/8.
   length: >-
-    Length and style earn nothing. A memo over 400 words is scored as
-    written.
+    Before scoring, the harness cuts every memo after its 400th word and
+    records where it cut. Length and style earn nothing.
+  order: >-
+    For each criterion, check the anchors from 0 upwards and give the first
+    that fits.
   criteria:
     C1:
       name: Finds the plan's own problems
@@ -19,23 +28,29 @@ memo:
         2: Finds two or all three.
       note: >-
         A problem counts when the memo names it and says why it matters, in
-        any words. Problems that are not on the key earn nothing here.
+        any words. Other problems, true or not, earn nothing here.
     C2:
       name: Uses what the organisation said at earlier meetings
-      reads: the key's earlier facts, what each implies, and any unsound option
+      reads: >-
+        the key's earlier facts, each with its implication and must_state
+        details, and the key's unsound options
       anchors:
         0: >-
-          Uses none of the listed facts, or recommends an option the key
-          marks as unsound.
+          Recommends an option the key marks unsound, even with conditions;
+          or neither uses a listed fact nor names the specific question that
+          would uncover one.
         1: >-
-          Uses one of two listed facts correctly; or, without knowing a
-          fact, names the question that would uncover it (for example
-          "check how long the lease runs") and makes the recommendation
-          depend on the answer.
+          Uses at least one listed fact correctly; or names the specific
+          question for a listed fact (for example "check how long the lease
+          runs") and makes the recommendation depend on the answer.
         2: >-
-          Uses every listed fact correctly and recommends an option the key
-          does not mark as unsound.
-      note: Not scored on control plans, which have no listed facts.
+          Uses every listed fact correctly and recommends exactly one option
+          the key does not mark unsound.
+      note: >-
+        A fact is used only when the memo states every detail in its
+        must_state list, in any words, and applies it to the decision.
+        Earlier facts the key does not list, used correctly, are neither
+        rewarded nor penalised. Not scored on control plans.
     C3:
       name: Recommends a clear decision
       anchors:
@@ -46,15 +61,17 @@ memo:
       name: Weighs the options against the organisation's situation
       anchors:
         0: Considers only the recommended option.
-        1: Mentions the other options without comparing them.
-        2: Compares the options on cost, time, people or risk, as the request states them.
+        1: Mentions the other options without comparing them all.
+        2: >-
+          Compares every option on cost, time, people or risk, using the
+          request or anything the organisation said at earlier meetings.
     C5:
       name: Stays accurate
       anchors:
         0: >-
-          Contains a material error, or states as fact something neither the
-          request nor an earlier meeting said, such as an invented number,
-          decision or constraint.
+          Contains a material error, or states as fact something that none
+          of the operator messages in the packet said, such as an invented
+          number, decision or constraint.
         1: Contains a minor error that does not change the recommendation.
         2: Contains no errors.
 recall:
@@ -68,17 +85,21 @@ judge:
   model: claude-opus-5, default settings, one pass per memo and per recall check
   memo_prompt: |
     You are scoring a decision memo written for a fictional organisation.
-    You get three things: the request the memo answers, an answer key, and
-    the memo. The key lists the plan's own problems, the facts from earlier
-    meetings that bear on the decision, and any option those facts make
-    unsound. Score each criterion using only its anchors. Do not reward
-    length or style. Do not guess who or what wrote the memo.
+    You get the organisation's description, every message its operator sent
+    in this series up to and including the request the memo answers, an
+    answer key, and the memo. The key lists the plan's own problems, the
+    facts from earlier meetings that bear on the decision (each with the
+    details a memo must state), and any option those facts make unsound.
+    Score each criterion using only its anchors, checking them from 0
+    upwards. Do not reward length or style. Do not guess who or what wrote
+    the memo.
 
     {criteria}
 
     Reply with JSON only, in this shape:
-    {"C1": 0, "C1_problems_found": ["K1"], "C2": 0, "C3": 0, "C4": 0,
-     "C5": 0, "reasons": {"C1": "", "C2": "", "C3": "", "C4": "", "C5": ""}}
+    {"C1": 0, "C1_problems_found": ["K1"], "C2": 0, "C2_facts_used": ["F2"],
+     "C3": 0, "C4": 0, "C5": 0,
+     "reasons": {"C1": "", "C2": "", "C3": "", "C4": "", "C5": ""}}
     Use null for C2 when the key lists no earlier facts. Each reason is one
     sentence.
   recall_prompt: |

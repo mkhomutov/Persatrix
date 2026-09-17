@@ -2,9 +2,10 @@
 # Fixed before any scored run. How the files are used, and how a change
 # is recorded, is in docs/experiments/EXP-001-preregistration.md.
 # The panel sees only each meeting's `message`; `facts` and `key` are
-# for the harness and the scorers.
+# for the harness and the scorers. A listed earlier fact counts as used
+# only when the memo states every detail in its `must_state`.
 id: series-4
-organisation: Brookside Health Centre, a community clinic
+organisation: Brookside Health Centre, a community clinic with four doctors and five nurses
 facts:
   F1: >-
     The replacement vaccine fridge arrives on 12 January; until then the
@@ -26,7 +27,7 @@ meetings:
   - id: series-4-briefing
     kind: briefing
     message: |
-      Today is 6 October.
+      Today is Monday 6 October 2036.
 
       Hello panel. I'm the practice manager at Brookside Health Centre, a
       community clinic with four doctors and five nurses. Over the next
@@ -54,7 +55,7 @@ meetings:
   - id: series-4-plan-1
     kind: control
     message: |
-      Today is 13 October.
+      Today is Monday 13 October 2036.
 
       Plan to critique: our cleaning contractor.
 
@@ -93,7 +94,7 @@ meetings:
   - id: series-4-plan-2
     kind: plan
     message: |
-      Today is 20 October.
+      Today is Monday 20 October 2036.
 
       Plan to critique: online booking.
 
@@ -127,18 +128,22 @@ meetings:
           The supplier's $1 200 a month, $14 400 a year, is not in the
           budget.
       earlier_facts:
-        F4: >-
-          45% of appointments are patients over 70, many without
-          smartphones, so app-only booking shuts many of them out.
-        F6: >-
-          The 8am phone wait is the top complaint, so fixing the phone line,
-          as B or C does, addresses it directly.
+        F4:
+          implication: >-
+            Patients over 70 make up 45% of appointments and many do not use
+            smartphones, so app-only booking shuts many of them out.
+          must_state: [45% of appointments are patients over 70]
+        F6:
+          implication: >-
+            The 25-minute wait at 8am is the most common complaint, so
+            fixing the phone line, as B or C does, addresses it directly.
+          must_state: [the 8am phone wait of 25 minutes is the top complaint]
       unsound_options: [A]
 
   - id: series-4-plan-3
     kind: plan
     message: |
-      Today is 27 October.
+      Today is Monday 27 October 2036.
 
       Plan to critique: a flu vaccination drive.
 
@@ -146,11 +151,11 @@ meetings:
       to 12 December: three evening clinics a week, with 80 patients at
       each.
 
-      Staff: all five nurses work the evening clinics as overtime, on top
-      of their normal full-time days. A nurse vaccinates about 12 patients
-      an hour. After each clinic, nurses record every vaccination in the
-      patient records, which takes about 3 minutes per patient. The
-      overtime budget covers the clinic hours, 6pm to 9pm.
+      Staff: all five nurses work every evening clinic as overtime. A nurse
+      vaccinates about 12 patients an hour. After each clinic, nurses
+      record every vaccination in the patient records, which takes about
+      3 minutes per patient. The overtime budget covers the clinic hours,
+      6pm to 9pm, for all five nurses.
 
       Bookings: the plan books exactly 1 200 appointments. Last year 15% of
       booked patients did not attend.
@@ -169,18 +174,21 @@ meetings:
           With 15% not attending, 1 200 bookings give about 1 020
           vaccinations, short of the target.
         K3: >-
-          Three overtime evenings a week for five weeks, on top of full
-          days, risks exhausting the nurses and leaves no cover.
+          Five nurses at 12 an hour can vaccinate 180 patients in a
+          three-hour clinic; 80 patients need only three nurses, so the plan
+          pays two nurses' overtime it does not need.
       earlier_facts:
-        F1: >-
-          Until the new fridge arrives on 12 January, the pharmacy can hand
-          over at most 50 doses a day, fewer than the 80 each clinic needs.
+        F1:
+          implication: >-
+            Until the new fridge arrives on 12 January, the pharmacy can hand
+            over at most 50 doses a day, fewer than the 80 each clinic needs.
+          must_state: [at most 50 doses a day until 12 January]
       unsound_options: [A]
 
   - id: series-4-plan-4
     kind: plan
     message: |
-      Today is 3 November.
+      Today is Monday 3 November 2036.
 
       Plan to critique: a second treatment room.
 
@@ -190,21 +198,22 @@ meetings:
       Works: building work starts on 1 December and costs $30 000.
 
       Staffing: from 1 February, our five nurses take on the extra
-      appointments. Doctors' hours stay as they are.
+      appointments in the new room, within the days they already work.
 
       Storage: the medical supplies in the storage room move to the
       corridor cupboards, which hold about a third as much.
 
-      Decision needed: (A) convert the room as planned, (B) extend the
-      hours of our existing treatment room instead, or (C) delay the
-      conversion until later in the year.
+      Decision needed: (A) convert the room as planned, (B) keep one
+      treatment room and open it two evenings a week from January, staffed
+      by our five nurses, or (C) delay the conversion until later in the
+      year.
 
       Please critique the plan and recommend one option.
     key:
       problems:
         K1: >-
-          It plans 20% more patients with no extra doctor time, although
-          many appointments need a doctor.
+          It adds 20% more appointments but no clinician hours: the same
+          nurses must fit them into the days they already work.
         K2: >-
           The $30 000 covers building work only; a treatment room also
           needs equipment.
@@ -212,19 +221,23 @@ meetings:
           The corridor cupboards hold a third of the supplies; the rest has
           nowhere to go.
       earlier_facts:
-        F5: >-
-          The lease requires the landlord's written approval before
-          building work, and replies take about three months, so works
-          cannot start on 1 December.
-        F3: >-
-          Two nurses' contracts end on 31 December with no funding to renew
-          them, so there may be only three nurses from 1 February.
-      unsound_options: [A]
+        F5:
+          implication: >-
+            Building work needs the landlord's written approval, which takes
+            about three months, so works cannot start on 1 December.
+          must_state: [the landlord's written approval takes about three months]
+        F3:
+          implication: >-
+            Two nurses' contracts end on 31 December with no funding to renew
+            them, so from January there may be only three nurses, for A's new
+            room or for B's evenings.
+          must_state: [two nurses' contracts end on 31 December]
+      unsound_options: [A, B]
 
   - id: series-4-recall
     kind: recall
     message: |
-      Today is 10 November.
+      Today is Monday 10 November 2036.
 
       That's the last plan for now. Before we finish, please answer these
       from memory:

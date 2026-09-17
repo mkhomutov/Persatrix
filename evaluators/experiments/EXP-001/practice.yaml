@@ -3,7 +3,7 @@
 # scorers use its memos to practise with the rubric. How the files are
 # used is in docs/experiments/EXP-001-preregistration.md.
 id: practice
-organisation: Harbour Players, a volunteer community theatre
+organisation: Harbour Players, a volunteer community theatre with a 180-seat hall
 facts:
   F1: The school district has booked the hall every Saturday in May.
   F2: The board will not approve any ticket price above $25.
@@ -12,7 +12,7 @@ meetings:
   - id: practice-briefing
     kind: briefing
     message: |
-      Today is 6 October.
+      Today is Monday 6 October 2036.
 
       Hello panel. I look after operations at Harbour Players, a
       volunteer community theatre with a 180-seat hall. Over the next few
@@ -28,12 +28,12 @@ meetings:
   - id: practice-plan-1
     kind: plan
     message: |
-      Today is 13 October.
+      Today is Monday 13 October 2036.
 
       Plan to critique: a spring gala.
 
-      The plan holds a gala on Saturday 9 May: a revue of well-known show
-      tunes with a cast of 30.
+      The plan holds a gala on Saturday 9 May 2037: a revue of well-known
+      show tunes with a cast of 30.
 
       Income: 180 seats at $40 each, $7 200, as we expect to sell out;
       $3 000 pledged by sponsors; and the same sponsors' $3 000 again as a
@@ -55,16 +55,20 @@ meetings:
           There is no cost for the performing rights to well-known show
           tunes.
       earlier_facts:
-        F1: >-
-          The hall is booked every Saturday in May, so 9 May is not
-          available.
-        F2: The board will not approve $40 tickets; the cap is $25.
+        F1:
+          implication: >-
+            The hall is booked every Saturday in May, so 9 May is not
+            available.
+          must_state: [the hall is booked every Saturday in May]
+        F2:
+          implication: The board will not approve $40 tickets; the cap is $25.
+          must_state: [ticket prices are capped at $25]
       unsound_options: [A]
 
   - id: practice-plan-2
     kind: control
     message: |
-      Today is 20 October.
+      Today is Monday 20 October 2036.
 
       Plan to critique: our printed programmes.
 
@@ -96,7 +100,7 @@ meetings:
   - id: practice-recall
     kind: recall
     message: |
-      Today is 27 October.
+      Today is Monday 27 October 2036.
 
       That's the last plan for now. Before we finish, please answer these
       from memory:

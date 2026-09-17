@@ -1,5 +1,5 @@
-# EXP-001 panel: the four advisers every arm uses, the channel and memory
-# settings for each arm, and the fixed wording of every instruction the
+# EXP-001 panel: the four advisers every arm uses, how each arm is
+# deployed and configured, and the fixed wording of every instruction the
 # harness adds. Fixed before any scored run; see
 # docs/experiments/EXP-001-preregistration.md.
 advisers:
@@ -7,6 +7,7 @@ advisers:
     name: Lunar Stoat
     duty: chair
     title: Chair
+    role: Chairs the panel and writes up its advice
     background: >-
       Chairs advisory panels for small organisations. Keeps the discussion on
       the decision the organisation has to make, makes sure each option gets
@@ -25,6 +26,7 @@ advisers:
     name: Velvet Pika
     duty: finance
     title: Finance adviser
+    role: Checks the money side of every plan
     background: >-
       Checks whether the numbers add up: costs, cash, borrowing, fees,
       payback and anything the budget leaves out.
@@ -42,6 +44,7 @@ advisers:
     name: Ripple Kite
     duty: operations
     title: Operations adviser
+    role: Checks whether a plan can be carried out
     background: >-
       Looks at people, schedules, capacity, suppliers and rules, and at what
       breaks when a plan meets real life.
@@ -59,6 +62,7 @@ advisers:
     name: Crimson Crow
     duty: customers
     title: Customer adviser
+    role: Speaks for the people the organisation serves
     background: >-
       Speaks for the people the organisation serves, whether customers,
       readers, patients or clients, and asks how the plan will land with
@@ -82,35 +86,75 @@ persona_settings:
     claude-sonnet-4-6 for every call; the quality, fast and summarizer
     aliases all point at it
   temperature: 0.7
-  tools: []
+  tools: >-
+    none configured; the built-in note tools remain, and verbatim channel
+    recall is denied (no channels permission)
+  permissions: {memory: {read: true, write: true}}
   relationships: []
   autonomy: {level: reactive, timers: []}
-  conversation_window: {enabled: true, max_turns: 40, max_tokens: 4096}
-  reset_before_every_meeting: >-
-    every piece of saved persona state except the memory stores, such as
-    the energy level
+  conversation_window:
+    enabled: true
+    max_turns: 200
+    max_tokens: 32000
+    why: >-
+      large enough that every adviser keeps the operator's message and the
+      whole meeting in view; the shipped 4 096 tokens drop the plan first
+  clock: >-
+    pinned to 10:00 on the meeting's date (the "Today is" line), so every
+    date an adviser sees, and every memory's age in D, follows the story
+    calendar
+
+deployment:
+  runtime: >-
+    Every arm, A included, runs one build of the runtime: the build that
+    adds prompt-cache markers to the Anthropic adapter and returns cache
+    reads and writes. Only D-prime sets a cache breakpoint.
+  fresh_stores:
+    B: every meeting starts on a new deployment with empty stores
+    C: every meeting starts on a new deployment with empty stores
+    D-prime: every meeting starts on a new deployment with empty stores
+    D: >-
+      every series starts on a new deployment with empty stores and keeps it
+      for its six meetings; no other arm or series ever touches it
+  between_meetings_in_D: >-
+    The harness resets each adviser's saved state other than memory (its
+    energy level, for example) and restarts the agents. A restart must leave
+    the memory stores exactly as they were: nothing added by replaying
+    messages, nothing removed.
+  spending_limits: >-
+    cost.budgets.global.max_daily_usd, per_workflow.default_max_usd and
+    per_agent.default_max_usd are 0, which turns each off; the harness
+    enforces the experiment's own spend cap
+  channel_cap: >-
+    max_channels stays as shipped; no deployment ever holds more than six
+    channels
 
 operator:
   id: operator
   respond: observer
   note: >-
-    The human member who posts every meeting's message, word for word. One
-    operator per series, the same for all six meetings.
+    The human member who posts every meeting's message, word for word, as an
+    ordinary channel message. One operator per series, the same for all six
+    meetings. Convene is never used.
 
 # Arms B to D-prime: a new group channel for every meeting, whose members
 # are the four advisers and the operator.
 channel:
   every_channel_arm:
     autonomous: true
+    topic: Advice for {organisation}
+    goal: Answer the operator's latest message.
+    agenda: []
     max_rounds: 8
-    interaction_budget_tokens: 200000
+    interaction_budget_tokens: 2000000
+    why_budget: >-
+      high enough that the cost bound never closes a discussion, so D-prime's
+      transcript prefix cannot cut its discussions short; the experiment's
+      spend cap limits money instead
     escalation_chair_id: lunar-stoat
     convener: crimson-crow
     classification: internal
     cascade_depth_cap: 5
-    topic_agenda_goal: >-
-      set by the harness from each meeting's message, the same way in every
-      arm
   governance_on:
     arms: [C, D, D-prime]
     source: >-
@@ -136,31 +180,28 @@ channel:
     end_vote_threshold: 9
     end_vote_window: 8
     note: >-
-      Bare "always" members reply without a salience bid. A threshold above
-      the window means no end vote can ever close the discussion. The code
-      requires a chair on an autonomous channel, so lunar-stoat still gets a
-      forced turn when a round stalls and is asked for a closing synthesis
-      at the round limit.
+      Bare "always" members reply without a salience bid, and a threshold
+      above the window means no end vote can close the discussion. The
+      advisers keep the shipped instructions that allow silence and voting.
+      A discussion ends at the depth cap or the round limit, each with a
+      chair synthesis; the chair also gets one forced turn when a round
+      stalls.
 
 memory:
   A: none
-  B: {memory_budget_tokens: 0, stores: empty at the start of every meeting}
-  C: {memory_budget_tokens: 0, stores: empty at the start of every meeting}
-  D:
-    memory_budget_tokens: 1500
-    stores: empty at the start of each series, kept for its six meetings
-    audience_gate_and_cross_channel_recall: as shipped
+  B: {memory_budget_tokens: 0}
+  C: {memory_budget_tokens: 0}
+  D: {memory_budget_tokens: 1500, audience_gate_and_cross_channel_recall: as shipped}
   D-prime:
     memory_budget_tokens: 0
-    stores: empty at the start of every meeting
     prefix: >-
       the full transcripts of the series' earlier meetings, oldest first, in
       the prompts that receive recalled memory in D, placed before anything
       that changes between calls and marked for the provider's cache
   memory_writing: >-
-    Where memory is off (B, C, D-prime), the harness switches memory writing
-    off if the runtime allows it; otherwise those calls are recorded but not
-    counted in the arm's dollars, because nothing reads what they write.
+    Where memory is not part of an arm's design (B, C, D-prime), the harness
+    switches memory writing off if the runtime allows it; otherwise those
+    calls are recorded but not counted in the arm's dollars.
 
 instructions:
   memo_format: |
@@ -176,24 +217,32 @@ instructions:
   recall_format: |
     Answer each question, numbered to match. If the panel does not know an
     answer, say so rather than guess.
-  arm_a_system: |
-    You are an advisory panel of four working for {organisation}:
-    - a chair, who keeps the discussion on the decision to be made;
-    - a finance adviser, who checks whether the numbers add up;
-    - an operations adviser, who checks whether the plan can actually be
-      carried out;
-    - a customer adviser, who speaks for the people the organisation serves.
-    Consider the message from each adviser's point of view, then reply once,
-    as the panel.
+  arm_a_system:
+    how: >-
+      The harness renders each adviser's identity (name, title, role,
+      background, behaviour and goals) with the persona runtime's own prompt
+      code, so arm A reads the same words the persona agents read, and adds
+      the same "Current time" line an adviser gets for that meeting.
+    template: |
+      {current_time_line}
+      You are an advisory panel of four working for {organisation}. The
+      advisers are:
+      {adviser_identity_blocks}
+      Consider the message from each adviser's point of view, then reply
+      once, as the panel.
   arm_a_by_meeting:
     briefing: Reply briefly.
     plan: "{memo_format}"
     recall: "{recall_format}"
   memo_turn:
-    note: >-
-      Arms B to D-prime only. After the discussion closes, however it closes,
-      the chair takes one more turn in the same channel and sees the whole
-      discussion of that meeting. There is no memo turn after a briefing.
+    how: >-
+      Arms B to D-prime only, after every plan meeting and recall check.
+      Once the discussion closes, however it closes, the harness switches
+      the channel's autonomous mode off, sets the other three advisers to
+      observer, and posts the instruction below as the operator, mentioning
+      only the chair. The memo is the chair's first message after that post.
+      Another method is allowed only if its PR shows it leaves the
+      discussion itself untouched.
     plan: |
       The discussion has ended. As chair, write the panel's decision memo from
       what was said.

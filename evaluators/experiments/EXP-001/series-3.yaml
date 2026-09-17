@@ -2,9 +2,10 @@
 # Fixed before any scored run. How the files are used, and how a change
 # is recorded, is in docs/experiments/EXP-001-preregistration.md.
 # The panel sees only each meeting's `message`; `facts` and `key` are
-# for the harness and the scorers.
+# for the harness and the scorers. A listed earlier fact counts as used
+# only when the memo states every detail in its `must_state`.
 id: series-3
-organisation: Ledgerline, a 40-person company selling invoicing software
+organisation: Ledgerline, a 40-person company selling invoicing software to small businesses
 facts:
   F1: >-
     Harlow Group brings 18% of revenue; its contract requires its data to
@@ -28,7 +29,7 @@ meetings:
   - id: series-3-briefing
     kind: briefing
     message: |
-      Today is 6 October.
+      Today is Monday 6 October 2036.
 
       Hello panel. I'm chief of staff at Ledgerline, a 40-person company
       selling invoicing software to small businesses. Over the next few
@@ -55,7 +56,7 @@ meetings:
   - id: series-3-plan-1
     kind: plan
     message: |
-      Today is 13 October.
+      Today is Monday 13 October 2036.
 
       Plan to critique: cutting hosting costs.
 
@@ -75,8 +76,9 @@ meetings:
       based on the two monthly quotes.
 
       Decision needed: (A) move everything to Northbeam as planned,
-      (B) move a quarter of our customers first as a trial, or (C) stay with
-      our current provider and cut costs there.
+      (B) move our ten largest customers to Northbeam first, as a trial in
+      mid-January, or (C) stay with our current provider and cut costs
+      there.
 
       Please critique the plan and recommend one option.
     key:
@@ -92,20 +94,24 @@ meetings:
           60 terabytes, is left out; it cuts the saving from $11 000 to
           about $6 200 a month.
       earlier_facts:
-        F1: >-
-          Harlow Group, 18% of revenue, requires EU data centres and can
-          leave on 60 days' notice, so moving all data to the US risks
-          losing it.
-        F6: >-
-          The SOC 2 audit starts on 1 March and forbids major
-          infrastructure changes in the 60 days before, so a mid-February
-          cut-over breaks that rule.
-      unsound_options: [A]
+        F1:
+          implication: >-
+            Harlow Group, our largest customer at 18% of revenue, requires
+            EU data centres and can leave on 60 days' notice; A moves every
+            customer to the US and B moves the largest ones first.
+          must_state: [Harlow Group requires EU data centres]
+        F6:
+          implication: >-
+            The SOC 2 audit starts on 1 March and forbids major
+            infrastructure changes in the 60 days before, so neither a
+            mid-February cut-over nor a mid-January trial fits.
+          must_state: [no major changes in the 60 days before the 1 March audit]
+      unsound_options: [A, B]
 
   - id: series-3-plan-2
     kind: plan
     message: |
-      Today is 20 October.
+      Today is Monday 20 October 2036.
 
       Plan to critique: reducing cancellations.
 
@@ -137,18 +143,22 @@ meetings:
           New salespeople rarely reach full targets in their first month;
           the time they take to ramp up is ignored.
       earlier_facts:
-        F4: >-
-          Customers who cancelled mostly cited missing accounting-tool
-          links, not price, which points to B.
-        F2: >-
-          There are 11 months of cash and the board wants 18 before any
-          new hires, so hiring three salespeople goes against the board.
+        F4:
+          implication: >-
+            Customers who cancelled mostly cited missing accounting-tool
+            links, not price, which points to B.
+          must_state: [customers who cancelled cited missing accounting links]
+        F2:
+          implication: >-
+            There are 11 months of cash and the board wants 18 before any
+            new hires, so hiring three salespeople goes against the board.
+          must_state: [the board wants 18 months of cash before hiring]
       unsound_options: [A]
 
   - id: series-3-plan-3
     kind: plan
     message: |
-      Today is 27 October.
+      Today is Monday 27 October 2036.
 
       Plan to critique: rebuilding billing.
 
@@ -185,18 +195,24 @@ meetings:
           The 28% saving ignores Coinvale's $0.30 per payment; on a $40
           payment Coinvale costs 2.85%, almost the same as 2.9%.
       earlier_facts:
-        F5: >-
-          The two engineers who built billing leave on 14 November, less
-          than two weeks into an eight-week rebuild.
-        F3: >-
-          Paystride is exclusive until 30 April, so switching on 15 April
-          triggers a fee of three months' processing fees.
-      unsound_options: [A]
+        F5:
+          implication: >-
+            The two engineers who built billing leave on 14 November, less
+            than two weeks into a rebuild starting 3 November, so neither A
+            nor C can rebuild now; their knowledge has to be written down
+            first, as B does.
+          must_state: [the billing engineers leave on 14 November]
+        F3:
+          implication: >-
+            Paystride is exclusive until 30 April, so switching on 15 April
+            triggers a fee of three months' processing fees.
+          must_state: [Paystride is exclusive until 30 April]
+      unsound_options: [A, C]
 
   - id: series-3-plan-4
     kind: control
     message: |
-      Today is 3 November.
+      Today is Monday 3 November 2036.
 
       Plan to critique: a four-day week for support.
 
@@ -229,7 +245,7 @@ meetings:
   - id: series-3-recall
     kind: recall
     message: |
-      Today is 10 November.
+      Today is Monday 10 November 2036.
 
       That's the last plan for now. Before we finish, please answer these
       from memory:

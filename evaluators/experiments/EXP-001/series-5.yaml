@@ -2,9 +2,10 @@
 # Fixed before any scored run. How the files are used, and how a change
 # is recorded, is in docs/experiments/EXP-001-preregistration.md.
 # The panel sees only each meeting's `message`; `facts` and `key` are
-# for the harness and the scorers.
+# for the harness and the scorers. A listed earlier fact counts as used
+# only when the memo states every detail in its `must_state`.
 id: series-5
-organisation: Kestrel Freight, a regional haulier with two warehouses
+organisation: Kestrel Freight, a regional haulier with two warehouses and 60 trucks
 facts:
   F1: >-
     The Westfield warehouse roof cannot carry any extra load; nothing can
@@ -26,7 +27,7 @@ meetings:
   - id: series-5-briefing
     kind: briefing
     message: |
-      Today is 6 October.
+      Today is Monday 6 October 2036.
 
       Hello panel. I'm head of planning at Kestrel Freight, a regional
       haulier with two warehouses and 60 trucks. Over the next few weeks
@@ -51,7 +52,7 @@ meetings:
   - id: series-5-plan-1
     kind: plan
     message: |
-      Today is 13 October.
+      Today is Monday 13 October 2036.
 
       Plan to critique: merging two night routes.
 
@@ -67,8 +68,8 @@ meetings:
       need.
 
       Decision needed: (A) merge the routes as planned, (B) keep both
-      routes, or (C) merge them with a relay, where a second driver takes
-      over halfway.
+      routes, or (C) merge them with a relay: a second driver takes over
+      halfway, and the drops stay in the same order.
 
       Please critique the plan and recommend one option.
     key:
@@ -81,18 +82,23 @@ meetings:
           The saving counts the truck and driver removed but not the extra
           fuel and mileage of the longer route.
       earlier_facts:
-        F2: >-
-          12:30am to 11am is 10.5 hours, over the union's 10-hour cap
-          including loading.
-        F3: >-
-          Fresco needs deliveries before 6am, so a 6:40am drop costs $500
-          every time.
-      unsound_options: [A]
+        F2:
+          implication: >-
+            12:30am to 11am is 10.5 hours, over the union's 10-hour cap
+            including loading.
+          must_state: [the union caps a shift at 10 hours]
+        F3:
+          implication: >-
+            Fresco needs every delivery before 6am, so a 6:40am drop costs
+            $500 each time, and a relay that keeps the drop order still
+            reaches Fresco at 6:40am.
+          must_state: [Fresco needs deliveries before 6am]
+      unsound_options: [A, C]
 
   - id: series-5-plan-2
     kind: plan
     message: |
-      Today is 20 October.
+      Today is Monday 20 October 2036.
 
       Plan to critique: replacing trucks.
 
@@ -110,8 +116,8 @@ meetings:
       savings.
 
       Decision needed: (A) buy 20 diesel trucks as planned, (B) buy a
-      mixed fleet of diesel and electric trucks, or (C) lease trucks for two
-      years while we test electric models.
+      mixed fleet of diesel and electric trucks, or (C) lease 20 new
+      18-tonne diesel trucks for two years while we test electric models.
 
       Please critique the plan and recommend one option.
     key:
@@ -126,19 +132,24 @@ meetings:
           The extra insurance, $2 000 a year per truck or $40 000 a year,
           is left out.
       earlier_facts:
-        F5: >-
-          From 1 July next year diesel trucks over 12 tonnes are banned
-          from the city centre, so new 18-tonne diesel trucks cannot serve
-          those routes.
-        F4: >-
-          The city pays 30% of the price of electric trucks bought before
-          30 June next year, which strengthens B.
-      unsound_options: [A]
+        F5:
+          implication: >-
+            From 1 July next year diesel trucks over 12 tonnes are banned
+            from the city centre, so new 18-tonne diesel trucks, bought or
+            leased, cannot serve those routes.
+          must_state: [diesel trucks over 12 tonnes are banned from 1 July]
+        F4:
+          implication: >-
+            The city pays 30% of the price of electric trucks bought before
+            30 June next year, which favours buying electric trucks now, as
+            B does.
+          must_state: [the city pays 30% for electric trucks bought before 30 June]
+      unsound_options: [A, C]
 
   - id: series-5-plan-3
     kind: control
     message: |
-      Today is 27 October.
+      Today is Monday 27 October 2036.
 
       Plan to critique: a driver safety bonus.
 
@@ -174,13 +185,13 @@ meetings:
   - id: series-5-plan-4
     kind: plan
     message: |
-      Today is 3 November.
+      Today is Monday 3 November 2036.
 
       Plan to critique: automated racking at Westfield.
 
-      Westfield works two shifts, 6am to 10pm. The plan installs an
-      automated high-density racking system there, with its shuttle rails
-      hung from the roof beams.
+      Westfield's picking floor works two shifts, 6am to 10pm. The plan
+      installs an automated high-density racking system there, with its
+      shuttle rails hung from the roof beams.
 
       Capacity: picking capacity rises by 60%, the supplier's figure for a
       site that runs 24 hours a day.
@@ -203,8 +214,8 @@ meetings:
     key:
       problems:
         K1: >-
-          The 60% gain is for a site running 24 hours a day; Westfield
-          works two shifts, so the gain will be smaller.
+          The 60% gain is for a site running 24 hours a day; Westfield's
+          picking floor works two shifts, so the gain will be smaller.
         K2: >-
           The payback ignores the $140 000-a-year maintenance contract;
           with it, payback is about five and a half years.
@@ -212,18 +223,22 @@ meetings:
           Expecting normal work during a ten-week installation is not
           realistic.
       earlier_facts:
-        F1: >-
-          The Westfield roof cannot carry any extra load, so rails cannot
-          be hung from its beams.
-        F6: >-
-          Support for our warehouse system version ends in 14 months,
-          before the 18-month go-live, so connecting to it is a dead end.
+        F1:
+          implication: >-
+            The Westfield roof cannot carry any extra load, so rails cannot
+            be hung from its beams.
+          must_state: [the Westfield roof cannot carry extra load]
+        F6:
+          implication: >-
+            Support for our warehouse system version ends in 14 months,
+            before the 18-month go-live, so connecting to it is a dead end.
+          must_state: [support for the warehouse system ends in 14 months]
       unsound_options: [A]
 
   - id: series-5-recall
     kind: recall
     message: |
-      Today is 10 November.
+      Today is Monday 10 November 2036.
 
       That's the last plan for now. Before we finish, please answer these
       from memory:
