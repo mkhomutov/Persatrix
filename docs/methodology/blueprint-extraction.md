@@ -24,7 +24,7 @@ The [conformance manifest](conformance.json) is the split, kept as data:
 
 | Section | Travels to the blueprint | Notes |
 |---|---|---|
-| `documents` | yes, with project names replaced by placeholders | The nine methodology docs, the documentation guide, BRANCHING, CONTRIBUTING skeleton, the RFC / issue / manual-test conventions and templates, the ten document templates, the PR template, `dependabot.yml`, and the generated files' *shapes* (FILEMAP, merged-prs, the two indexes) |
+| `documents` | yes, with project names replaced by placeholders | The nine methodology docs, the documentation guide, BRANCHING, CONTRIBUTING skeleton, the RFC / issue / manual-test conventions and templates, the five document templates, the PR template, `dependabot.yml`, and the generated files' *shapes* (FILEMAP, merged-prs, the two indexes) |
 | `tooling` | yes, unchanged | Everything under `scripts/checks/`, the generators, the hook, the release tooling. All stdlib-only and path-relative by design |
 | `make_targets` | yes, as a `Makefile.methodology` include | A consumer's Makefile includes it and keeps its own build targets |
 | `ci_jobs`, `ci_steps_in_docs_hygiene` | yes, as a reusable workflow | `Docs hygiene` and `File size check` become `uses: <blueprint>/.github/workflows/methodology.yml@vN` |
@@ -44,7 +44,7 @@ version. The extraction replaces:
 | `Persatrix`, `mkhomutov/Persatrix` | `{{project}}`, `{{repo}}` |
 | PR and issue citations (`#858`, `ISSUE-0139`) | kept as *examples* in a clearly marked "worked example" section, or dropped |
 | Version names (`v0.3.15`, codenames) | `vX.Y.Z`, `<Codename>` — the templates already do this |
-| The four languages and their gates (`cargo test`, `make ui-test`) | a `gates:` list in the consumer's `conformance.json`, rendered into the checklist template |
+| The four languages and their gates (`cargo test`, `make ui-test`) | a `gates:` list in the consumer's `conformance.json`, rendered into the release sweep's gate list |
 | The 500-line code warning, the 800-line code cap and the 3 000-word cap | defaults in `file_size.py`, overridable by flag (already true) |
 
 ## The vendoring model (one-way)

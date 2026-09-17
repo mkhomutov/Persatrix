@@ -82,9 +82,10 @@ Examples from v0.3.15 ([scope locks](../v0.3.15-scope-locks.md)):
    that will confirm or overturn it ("plan-opening default … revisitable at
    review"). A deviation from the amendment's wording is allowed when the
    lock says so and gives the reason.
-3. Locks are the **stable half** of the plan. When the plan nears the word
-   cap they move to `docs/vX.Y.Z-scope-locks.md` and the plan links them;
-   the moving half (status, progress, next steps) stays in the plan.
+3. Locks live **in the version plan**, the release's one document (ruling (e)
+   of the sequencing Amendment 2026-09-12). v0.3.15 and v0.3.16 moved theirs
+   to `docs/vX.Y.Z-scope-locks.md` near the word cap; a plan now makes room
+   by cutting or re-scoping the release, not by splitting.
 4. Every lock carries an **out of scope** counterpart — what is deferred and
    to where — "so it does not pressure the cut".
 5. Locks are **citable**. PR bodies reference a lock by name instead of
@@ -104,7 +105,7 @@ mitigated (v0.3.14's activation-day reset is the precedent for
 ## Cuttable items and cut clauses
 
 **What**: a workstream the release would rather ship without than slip for.
-It is marked *(cuttable)* in the plan's Master Progress Overview and PR list,
+It is marked *(cuttable)* in the plan's Progress table and PR list,
 and the amendment that slotted it states the **cut clause** — the condition
 under which it is dropped.
 
@@ -140,7 +141,7 @@ entry, a scope lock, an RFC's phased plan, or a plan's own structure. Shape:
 | What is being changed | Where the amendment goes |
 |---|---|
 | Version scope, ordering, next version | New dated section in [v0.3.x-sequencing.md](../v0.3.x-sequencing.md) |
-| A master plan's locks or PR list, mid-cycle | `docs/vX.Y.Z-plan-amendment-YYYY-MM-DD.md` (v0.3.1, v0.3.4 precedents) or a dated **§Amendment** section in the plan when it fits under the cap |
+| A version plan's locks or PR list, mid-cycle | A dated **§Amendment** section in the plan — never a second file (ruling (e); v0.3.1 and v0.3.4 wrote `docs/vX.Y.Z-plan-amendment-YYYY-MM-DD.md` before it) |
 | An RFC's design or phase table | A dated **§Amendment** section in the RFC; the RFC's status marker and the ROADMAP RFC Master Index reflect it |
 | An issue's disposition | A dated **Notes** entry on the issue (`> YYYY-MM-DD — …`) |
 
@@ -154,7 +155,7 @@ entry, a scope lock, an RFC's phased plan, or a plan's own structure. Shape:
    check the implementation against it.
 4. **Ratification is the merge.** The header records the date and the PR.
 5. **Downstream pointers move in the same PR.** ROADMAP rows, the plan's
-   Master Progress Overview, and the issues' notes are updated together, so
+   Progress table, and the issues' notes are updated together, so
    no document reads the pre-amendment state after the merge.
 
 ---

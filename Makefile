@@ -571,10 +571,10 @@ roadmap-status-check: ## Fail if a ROADMAP Component Status row says less than t
 	$(PYTHON) scripts/checks/roadmap_status.py
 
 # ─── Version ────────────────────────────────────────────
-release-sweep: ## Print the release checklist §1 gate sweep (dry run); RUN=1 executes, REPORT=path writes the table, ONLY=/SKIP= filter, OPTIONAL=1 adds the Docker smoke, TIMEOUT=secs
+release-sweep: ## Print the pre-tag gate sweep (dry run); RUN=1 executes, REPORT=path writes the table, ONLY=/SKIP= filter, OPTIONAL=1 adds the Docker smoke, TIMEOUT=secs
 	$(PYTHON) scripts/release/sweep.py $(if $(RUN),--execute,) $(if $(REPORT),--report $(REPORT),) $(if $(ONLY),--only "$(ONLY)",) $(if $(SKIP),--skip "$(SKIP)",) $(if $(OPTIONAL),--include-optional,) $(if $(TIMEOUT),--timeout $(TIMEOUT),)
 
-release-doc: ## Open a version-cycle doc from its template (KIND=plan|scope-locks|release-prep-plan|release-baseline|release-checklist|execution-report VERSION=X.Y.Z CODENAME="…" [PREVIOUS=X.Y.Z] [FORCE=1])
+release-doc: ## Open a version-cycle doc from its template (KIND=plan|execution-report VERSION=X.Y.Z CODENAME="…" [PREVIOUS=X.Y.Z] [FORCE=1])
 	@test -n "$(KIND)" -a -n "$(VERSION)" -a -n "$(CODENAME)" || (echo "error: KIND, VERSION and CODENAME are required" && exit 1)
 	$(PYTHON) scripts/release/open_doc.py --kind $(KIND) --version $(VERSION) --codename "$(CODENAME)" $(if $(PREVIOUS),--previous $(PREVIOUS),) $(if $(FORCE),--force,)
 
