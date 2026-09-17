@@ -72,7 +72,7 @@ dependencies.
 | `make ui-html-check` (`scripts/checks/ui_html_directive.py`) | Reject `{@html}` under `web/src` | CI (`Web console`) |
 | `make dockerignore-check` (`scripts/checks/dockerignore_context.py`) | Seed a sentinel, run a real `docker build`, prove the context excludes nested `node_modules` | CI (`Dockerignore`) |
 | `make check-licenses` (`-go`/`-python`/`-rust`) | go-licenses, `scripts/checks/python_licenses.py`, cargo-deny against `scripts/checks/allowed_licenses.txt` / `deny.toml` | CI (`Third-party license check`) |
-| `scripts/checks/file_size.py [--strict] [--near-cap]` | Code ≤ 500 lines, docs ≤ 3 000 words, RFCs ≤ 8 000; allowlist in `file_size_allowlist.py`; near-cap band 3 %; version-cycle docs of released versions (dated CHANGELOG heading) excluded (ISSUE-0139) | CI (`File size check`) + pre-commit |
+| `scripts/checks/file_size.py [--strict] [--near-cap]` | Code ≤ 800 lines, with a code file over 500 listed as a warning that never fails; docs ≤ 3 000 words, RFCs ≤ 8 000; allowlist in `file_size_allowlist.py`; near-cap band 3 % of each limit; version-cycle docs of released versions (dated CHANGELOG heading) excluded (ISSUE-0139) | CI (`File size check`) + pre-commit |
 | `scripts/checks/doc_links.py` | Relative links and `#anchors` in every tracked `.md` | CI (`Docs hygiene`) + pre-commit |
 | `scripts/checks/doc_status_markers.py` | Only the standard status markers | CI (`Docs hygiene`) + pre-commit |
 | `scripts/checks/doc_leaked_markup.py` | No tool-call markup fragments in docs | CI (`Docs hygiene`) + pre-commit |
@@ -83,7 +83,7 @@ dependencies.
 | `scripts/checks/released.py` | Shared: which versions shipped (dated CHANGELOG headings) and which version-cycle docs are therefore frozen — used by the size checker and the plan-status checker | library |
 | `scripts/checks/markdown_page.py` | Shared: what a Markdown page shows once rendered — its lines outside code fences and HTML comments (a fence closes only on a bare line of its own character at least as long as the opener, as in CommonMark, so a four-backtick block may show a three-backtick line; a fence in a list item ends with the item), the first line of a fence or comment the page never closes, its ATX headings, and its table cells (a row starts or ends with `\|`, or is a `---\|---` divider; an escaped pipe stays inside its cell) — used by the doc-links check for its links and its heading anchors alike, and by the plan-status, ROADMAP-status and amendment-evidence checks, which fail on a fence or comment that never closes rather than pass on rows they cannot see | library |
 | `scripts/_git.py` | The one read-only git call (ISSUE-0135); new call sites use it | library |
-| `scripts/checks/doc_audit.py [--format text\|json\|markdown]` | Runs links + markers + size warnings in one report | Local convenience; used by hand in PR bodies |
+| `scripts/checks/doc_audit.py [--format text\|json\|markdown]` | Runs links + markers + file sizes in one report | Local convenience; used by hand in PR bodies |
 | `scripts/checks/proto_drift.py` | Orphan generated protobuf artifacts (backs `proto-orphans-check`) | CI |
 
 ## The pre-commit hook

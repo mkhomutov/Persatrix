@@ -110,9 +110,10 @@ class TestInitHeadroomRestored:
 
     def test_init_is_under_cap_with_margin(self) -> None:
         line_count = len(_INIT_PATH.read_text(encoding="utf-8").splitlines())
-        # Not merely <= 500 (which the file already satisfied at the
-        # ceiling) — the point of the extraction is genuine headroom so the
-        # next contributor does not trip --strict on a one-line addition.
+        # Not merely <= DEFAULT_MAX_CODE_LINES (the file sat at the 500-line
+        # ceiling when ISSUE-0053 was filed) — the point of the extraction is
+        # genuine headroom so the next contributor does not trip --strict on
+        # a one-line addition.
         assert line_count <= DEFAULT_MAX_CODE_LINES - 15, (
             f"persona_runtime/__init__.py is {line_count} lines; "
             f"expected <= {DEFAULT_MAX_CODE_LINES - 15} after the "

@@ -1,6 +1,6 @@
 # The Review Process
 
-> **Last updated**: 2026-09-06
+> **Last updated**: 2026-09-17
 > Every PR in this repository is reviewed before merge. This document says how,
 > because until now the only committed trace of a review was its findings.
 
@@ -43,7 +43,9 @@ In order of weight:
 5. **Security** — deny-by-default, no `{@html}`, no credential in a log line.
 6. **Documentation and status hygiene** — plan rows, ROADMAP, issue notes,
    glossary terms, FILEMAP, all moved together.
-7. **Size and shape** — files under the caps, PR under 500 lines or split.
+7. **Size and shape** — no file over its cap; a code file over 500 lines
+   that the change edits is split where it has a real seam, never trimmed to
+   fit; PR under 500 lines or split.
 
 Style comments are made only where they would change a reader's
 understanding.
