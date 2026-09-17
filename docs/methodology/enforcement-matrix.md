@@ -67,11 +67,12 @@ the twelve, and the job is named where it is not one of the original six.
 
 | Rule | Stated in | Check | Enforcement |
 |------|-----------|-------|-------------|
-| Code files ≤ 500 lines | documentation-guide §Size Limits | `file_size.py --strict` | Required (`File size check`) + Pre-commit |
+| Code files ≤ 800 lines | documentation-guide §Size Limits | `file_size.py --strict` | Required (`File size check`) + Pre-commit |
+| A code file over 500 lines is warned, and split at a real seam when a change edits it for another reason — never trimmed to fit, never in a sweep (sequencing Amendment 2026-09-12, ruling (e)) | documentation-guide §Size Limits; release-cycle §The debt sweep (retired) | `file_size.py` lists it under `[WARN]` on every run; the split is review's call | Advisory output + Convention |
 | Docs ≤ 3 000 words; RFCs ≤ 8 000 words | documentation-guide | same | Required (`File size check`) + Pre-commit |
 | Grandfathered files carry a reason and an exit condition | `file_size_allowlist.py` docstring | review; `test_allowlist_has_no_dead_entries`, `test_allowlist_holds_no_released_version_docs` | Convention + unit tests |
 | Released version-cycle docs are frozen evidence, exempt from the cap | documentation-guide §Where Documents Live | `file_size.py` excludes them once `CHANGELOG.md` has the version's dated heading (ISSUE-0139; read from the tree, not `git tag`, so a depth-1 checkout agrees with a full clone); a still-allowlisted released doc prints `[STALE-ALLOWLIST]` (advisory, retired at the post-release follow-up) | Required (`Python` unit tests pin it) |
-| Near-cap warning at 3 % | `file_size.py` | `--near-cap` output on every run | Advisory output |
+| Near-cap notice at 3 % of each limit | `file_size.py` | `--near-cap` output on every run | Advisory output |
 | PRs under 500 changed lines | CONTRIBUTING; BRANCHING; copilot-instructions | — | **Guidance, stated as such** since the BRANCHING rewrite — a third of merges exceed it, almost all docs-heavy; code PRs split |
 | Squash merge; linear history | BRANCHING | branch protection | Required |
 | Branch naming (`feature/vNNN-…`, `docs/`, `fix/`, `ci/`) | BRANCHING; each plan's header | — | Convention |
@@ -107,7 +108,6 @@ the twelve, and the job is named where it is not one of the original six.
 | Version strings aligned across five files | version-bump guide | `make bump-version` + checklist §2 | Manual at release-prep PR 3 |
 | TDD for new unit-level code | CLAUDE.md §TDD | review | Convention |
 | Version-train gate | release-cycle | review | Convention |
-| Debt sweep when ≥ 20 files sit at their cap or two releases have passed | release-cycle §The debt sweep | `file_size.py --near-cap` read at the post-release follow-up | Convention, with the count recorded in the follow-up PR |
 | PR body follows What / Why / How / Not in this PR / Gates / Review | BRANCHING §Pull requests | `.github/PULL_REQUEST_TEMPLATE.md` pre-fills it | Template (GitHub applies it to every new PR) |
 
 ---

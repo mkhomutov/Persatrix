@@ -2068,6 +2068,7 @@
 │           ├── test_facts_session_scope.py
 │           ├── test_facts_shadow.py
 │           ├── test_file_size_checker.py
+│           ├── test_file_size_code_warning.py
 │           ├── test_file_size_released_docs.py
 │           ├── test_generate_filemap_check.py
 │           ├── test_golangci_lint_pin.py

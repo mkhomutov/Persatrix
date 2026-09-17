@@ -15,9 +15,10 @@ Checks executed:
   7. RFC index freshness (docs/rfcs/INDEX.md up to date with front-matter,
      and each RFC's **Status** header line agrees with it)
   8. ROADMAP status (no Component Status row says less than the RFC it names)
-  9. File size check (code: ≤500 lines, docs: ≤3000 words)
+  9. File size check (code: ≤800 lines, a warning over 500; docs: ≤3000 words)
  10. Plan status (no "PR open" row for a PR that has merged)
- 11. Methodology conformance (every artifact the manifest names exists)
+ 11. Amendment evidence (each sequencing amendment records its external evidence)
+ 12. Methodology conformance (every artifact the manifest names exists)
 
 Usage::
 

@@ -1,6 +1,6 @@
 # Persatrix — Development Workflow
 
-> **Last updated**: 2026-09-06
+> **Last updated**: 2026-09-17
 
 > **Scope note (2026-09-06).** This document describes the **RFC-level** cycle: how one RFC goes from authoring to closure. It is still accurate for that. The **release-level** cycle that has run every version since v0.3.0 — sequencing amendment → master plan with scope locks → implementation PRs → release-prep plan → release-prep PRs 1–4 → tag → post-release follow-up — is described in [docs/methodology/release-cycle.md](methodology/release-cycle.md); this document nests inside its Phase 1. The review discipline the phases below rely on is in [methodology/review-process.md](methodology/review-process.md), and the process vocabulary in the [process glossary](methodology/process-glossary.md).
 
@@ -234,10 +234,10 @@ The follow-up PR scope is often larger than initially expected. RFC 0005's singl
 
    | Trigger | Threshold | Action |
    |---------|-----------|--------|
-   | File size | > 800 LOC | Split into focused modules |
    | Class responsibilities | > 2 distinct concerns | Extract into separate classes/modules |
    | Repeated patterns | Same logic in 3+ places | Extract shared utility |
-   | Test file size | > 600 LOC | Split by test category |
+
+   File size alone is not a trigger: a long file is split at a real seam when a change edits it for another reason ([documentation guide § Size Limits](documentation-guide.md#size-limits)).
 
 3. If refactoring is needed, add refactoring PRs to the PR plan.
 4. Implement refactoring PRs — each should be a pure structural change (no behavior changes) for easy review.
