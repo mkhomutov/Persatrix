@@ -1,0 +1,260 @@
+# EXP-001 materials — series 1 of 5: Linden Loaf, a bakery.
+# Fixed before any scored run. How the files are used, and how a change
+# is recorded, is in docs/experiments/EXP-001-preregistration.md.
+# The panel sees only each meeting's `message`; `facts` and `key` are
+# for the harness and the scorers. A listed earlier fact counts as used
+# only when the memo states every detail in its `must_state`.
+id: series-1
+organisation: Linden Loaf, a family bakery with four shops and a central bakehouse
+facts:
+  F1: Wholesale prices to the cafés are fixed by contract until next September.
+  F2: The Quay Lane shop's lease ends next June and will not be renewed.
+  F3: The head baker will leave if overnight shifts come back.
+  F4: >-
+    The Millbrook Mills flour contract is exclusive and fixes the price
+    until 31 March; buying flour elsewhere before then costs $18 000.
+  F5: Café wholesale brings 30% of revenue but only 8% of profit.
+  F6: Customers' top complaint in the survey is morning-rush queues, not prices.
+meetings:
+  - id: series-1-briefing
+    kind: briefing
+    message: |
+      Today is Monday 6 October 2036.
+
+      Hello panel. I'm the operations manager at Linden Loaf, a family
+      bakery with four shops and a central bakehouse. Over the next few
+      weeks I'll bring you plans to critique. First, some things you
+      should know:
+
+      - Our contracts with the cafés we supply fix our wholesale prices
+        until next September.
+      - The lease on our Quay Lane shop ends next June, and the landlord
+        has told us it will not be renewed.
+      - Our head baker has said they will leave if overnight shifts come
+        back. We stopped overnight baking two years ago.
+      - Our flour contract with Millbrook Mills is exclusive and fixes the
+        price until 31 March. Buying flour anywhere else before then
+        breaks the contract, which costs $18 000.
+      - Last quarter, wholesale orders to cafés brought in 30% of our
+        revenue but only 8% of our profit.
+      - In our customer survey, the top complaint was queues during the
+        morning rush, not prices.
+
+      There is no plan today. Please just confirm you have this.
+
+  - id: series-1-plan-1
+    kind: plan
+    message: |
+      Today is Monday 13 October 2036.
+
+      Plan to critique: refitting the Quay Lane shop.
+
+      Quay Lane is our busiest shop. About 80% of its sales are takeaway
+      coffee and pastries before 9am. The plan adds a second oven line and
+      20 seats so that customers stay and spend more.
+
+      Costs: building works $70 000, the oven line $25 000 and a
+      contingency of $15 000, a total of $110 000. We would borrow
+      $120 000 so that a contingency is covered. The works close the shop
+      for six weeks.
+
+      Forecast: the seats add $9 000 a month in sales, mostly during the
+      morning rush. At our usual 50% margin that is $4 500 a month in
+      profit, so the refit pays for itself in about 24 months.
+
+      Decision needed: (A) refit Quay Lane as planned, (B) do a smaller
+      refit of Market Street, our quietest shop, or (C) postpone any refit
+      until next year.
+
+      Please critique the plan and recommend one option.
+    key:
+      problems:
+        K1: >-
+          Borrowing $120 000 counts the contingency twice: the $110 000
+          total already includes $15 000 of contingency.
+        K2: >-
+          The six weeks the shop is closed for works appear nowhere: no lost
+          sales in the forecast or the payback.
+        K3: >-
+          The extra sales are expected in the morning rush, when 80% of
+          sales are takeaway, so the seats are unlikely to fill then.
+      earlier_facts:
+        F2:
+          implication: >-
+            The lease ends next June and will not be renewed, so a refit
+            that needs about 24 months to pay back has about eight.
+          must_state: [the lease ends next June, it will not be renewed]
+        F6:
+          implication: >-
+            The survey's top complaint is morning-rush queues; seats and a
+            second oven line do nothing for queues.
+          must_state: [queues are the top complaint in the survey]
+      unsound_options: [A]
+
+  - id: series-1-plan-2
+    kind: control
+    message: |
+      Today is Monday 20 October 2036.
+
+      Plan to critique: our electricity contract.
+
+      Our electricity contract ends on 30 November. The plan compares
+      three options:
+
+      (A) a two-year fixed price of $0.24 per kWh;
+      (B) a variable tariff, currently $0.21 per kWh;
+      (C) solar panels on the bakehouse roof for $48 000, paid from cash,
+      saving about $9 000 a year, with the variable tariff for the rest.
+
+      The plan recommends (A). It says the fixed price saves $18 480 a
+      year compared with last winter, when the variable price peaked at
+      $0.38 per kWh. We used 11 000 kWh in January, our busiest month, so
+      the plan assumes 132 000 kWh a year. It puts the payback on solar at
+      just over five years. A surveyor's report says the bakehouse roof
+      needs $20 000 of repairs before panels can be fitted.
+
+      Decision needed: choose (A), (B) or (C).
+
+      Please critique the plan and recommend one option.
+    key:
+      problems:
+        K1: >-
+          The saving is measured against last winter's peak price of
+          $0.38; against today's variable price of $0.21 the fixed price
+          costs more.
+        K2: >-
+          Yearly use is January, the busiest month, times twelve, which
+          overstates use and any saving.
+        K3: >-
+          The solar payback leaves out the $20 000 of roof repairs; with
+          them it is about seven and a half years.
+      earlier_facts: {}
+      unsound_options: []
+
+  - id: series-1-plan-3
+    kind: plan
+    message: |
+      Today is Monday 27 October 2036.
+
+      Plan to critique: the morning rush.
+
+      Our tills show customers waiting up to 12 minutes between 7 and 9am
+      at our two busiest shops. The plan brings back overnight baking so
+      that every shop can open at 6am with full shelves.
+
+      Staffing: a night shift of two bakers, 8 hours a night, 6 nights a
+      week, at $22 an hour, which the plan costs at $1 056 a week.
+
+      Sales: the plan expects $2 000 a week of extra sales between 6 and
+      7am. We have never opened before 7am.
+
+      Decision needed: (A) bring back overnight baking and open at 6am,
+      (B) add pre-ordering on our website with a pick-up shelf in each
+      shop, or (C) add a third counter assistant at the two busiest shops
+      from 7 to 9am.
+
+      Please critique the plan and recommend one option.
+    key:
+      problems:
+        K1: >-
+          The wage cost counts one baker: two bakers cost $2 112 a week,
+          not $1 056.
+        K2: >-
+          The $2 000 of early sales is a guess; there is no data for 6 to
+          7am.
+        K3: >-
+          Opening at 6am does not shorten the queues between 7 and 9am,
+          which is the problem the plan starts from.
+      earlier_facts:
+        F3:
+          implication: >-
+            The head baker will leave if overnight shifts return, so option
+            A risks losing them.
+          must_state: [the head baker will leave if overnight shifts return]
+        F6:
+          implication: >-
+            Customers named morning-rush queues, not prices, as their top
+            complaint, which points to B or C.
+          must_state: [queues are the top complaint in the survey]
+      unsound_options: [A]
+
+  - id: series-1-plan-4
+    kind: plan
+    message: |
+      Today is Monday 3 November 2036.
+
+      Plan to critique: growing our café wholesale.
+
+      We supply 25 cafés. The plan grows wholesale by 40% within six
+      months.
+
+      Steps: buy a second delivery van for $38 000 with borrowed money,
+      and hire a driver at $42 000 a year; launch an organic sourdough
+      loaf for cafés on 1 January; sign up 10 new cafés. The plan expects
+      all 25 current cafés to add the sourdough.
+
+      Result: wholesale revenue rises from $300 000 to $420 000 a year,
+      which the plan counts as a gain of $120 000 a year.
+
+      Decision needed: (A) expand wholesale as planned, (B) keep wholesale
+      at its current size and raise wholesale prices by 10% from January,
+      or (C) phase wholesale out over a year.
+
+      Please critique the plan and recommend one option.
+    key:
+      problems:
+        K1: >-
+          It assumes all 25 current cafés will buy the new loaf, with no
+          evidence.
+        K2: >-
+          The van's running costs, such as fuel, insurance and upkeep, are
+          missing.
+        K3: >-
+          It counts $120 000 of extra revenue as a gain; after
+          ingredients, the driver and the van, the profit is far smaller.
+      earlier_facts:
+        F5:
+          implication: >-
+            Wholesale earns 30% of revenue but only 8% of profit, so
+            growing it is a weak use of money.
+          must_state: [wholesale earns only 8% of profit]
+        F1:
+          implication: >-
+            Wholesale prices are fixed by contract until next September, so
+            option B's price rise from January is not possible.
+          must_state: [wholesale prices are fixed until next September]
+      unsound_options: [B]
+
+  - id: series-1-recall
+    kind: recall
+    message: |
+      Today is Monday 10 November 2036.
+
+      That's the last plan for now. Before we finish, please answer these
+      from memory:
+
+      1. Can we charge the coffee shops more before autumn?
+      2. Is there one of our sites we should not invest in for the long
+         term, and why?
+      3. What would it cost us to change who supplies our main ingredient
+         before spring?
+      4. What do shoppers grumble about most?
+    key:
+      R1:
+        fact: F1
+        answer: No; wholesale prices to the cafés are fixed by contract until next September.
+        must_include: [prices fixed until next September]
+      R2:
+        fact: F2
+        answer: Quay Lane, because its lease ends next June and will not be renewed.
+        must_include: [Quay Lane, lease not renewed]
+      R3:
+        fact: F4
+        answer: >-
+          $18 000, for breaking the exclusive Millbrook Mills flour contract
+          before 31 March.
+        must_include: [$18 000]
+      R4:
+        fact: F6
+        answer: Queues during the morning rush, not prices.
+        must_include: [queues in the morning rush]

@@ -1,0 +1,123 @@
+# EXP-001 materials — the practice series: Harbour Players, a theatre.
+# Never scored. The harness may run it as often as needed, and the
+# scorers use its memos to practise with the rubric. How the files are
+# used is in docs/experiments/EXP-001-preregistration.md.
+id: practice
+organisation: Harbour Players, a volunteer community theatre with a 180-seat hall
+facts:
+  F1: The school district has booked the hall every Saturday in May.
+  F2: The board will not approve any ticket price above $25.
+  F3: The volunteer lighting crew is down to two people.
+meetings:
+  - id: practice-briefing
+    kind: briefing
+    message: |
+      Today is Monday 6 October 2036.
+
+      Hello panel. I look after operations at Harbour Players, a
+      volunteer community theatre with a 180-seat hall. Over the next few
+      weeks I'll bring you plans to critique. Please keep these facts in
+      mind:
+
+      - The school district has booked our hall every Saturday in May.
+      - The board will not approve any ticket price above $25.
+      - Our volunteer lighting crew is down to two people.
+
+      There is no plan today. Please just confirm you have this.
+
+  - id: practice-plan-1
+    kind: plan
+    message: |
+      Today is Monday 13 October 2036.
+
+      Plan to critique: a spring gala.
+
+      The plan holds a gala on Saturday 9 May 2037: a revue of well-known
+      show tunes with a cast of 30.
+
+      Income: 180 seats at $40 each, $7 200, as we expect to sell out;
+      $3 000 pledged by sponsors; and the same sponsors' $3 000 again as a
+      "matching gift". Total: $13 200.
+
+      Costs: set $2 500, costumes $1 800, hall $0 as it is ours. Net for
+      the roof fund: $8 900.
+
+      Decision needed: (A) run the gala as planned, (B) hold a smaller
+      cabaret evening instead, or (C) skip the gala and run an online
+      appeal.
+
+      Please critique the plan and recommend one option.
+    key:
+      problems:
+        K1: The sponsors' $3 000 is counted twice.
+        K2: A sell-out is assumed with no evidence.
+        K3: >-
+          There is no cost for the performing rights to well-known show
+          tunes.
+      earlier_facts:
+        F1:
+          implication: >-
+            The hall is booked every Saturday in May, so 9 May is not
+            available.
+          must_state: [the hall is booked every Saturday in May]
+        F2:
+          implication: The board will not approve $40 tickets; the cap is $25.
+          must_state: [ticket prices are capped at $25]
+      unsound_options: [A]
+
+  - id: practice-plan-2
+    kind: control
+    message: |
+      Today is Monday 20 October 2036.
+
+      Plan to critique: our printed programmes.
+
+      We print 2 000 programmes a season at $0.60 each, $1 200 in all. The
+      plan replaces them with a web page reached by a QR code on each seat,
+      built with a free website builder that shows its own adverts, and
+      spends the $1 200 on marketing instead. It expects every audience
+      member to scan the code. Local businesses pay us $900 a season for
+      adverts in the printed programme; the plan counts on the same $900
+      for adverts on the web page.
+
+      Decision needed: (A) go fully digital, (B) print a shorter programme
+      with a QR code for extras, or (C) keep the printed programme as it
+      is.
+
+      Please critique the plan and recommend one option.
+    key:
+      problems:
+        K1: Expecting every audience member to scan the code is unrealistic.
+        K2: >-
+          Advertisers' $900 is assumed to carry over to a web page nobody
+          has measured.
+        K3: >-
+          The free builder shows its own adverts, which compete with the
+          paying advertisers.
+      earlier_facts: {}
+      unsound_options: []
+
+  - id: practice-recall
+    kind: recall
+    message: |
+      Today is Monday 27 October 2036.
+
+      That's the last plan for now. Before we finish, please answer these
+      from memory:
+
+      1. Are there dates when we cannot use our own stage?
+      2. What is the most we can charge for a seat?
+      3. How many hands do we have to run the lamps during shows?
+    key:
+      R1:
+        fact: F1
+        answer: Every Saturday in May, which the school district has booked.
+        must_include: [Saturdays in May]
+      R2:
+        fact: F2
+        answer: $25.
+        must_include: [$25]
+      R3:
+        fact: F3
+        answer: Two.
+        must_include: [two]
