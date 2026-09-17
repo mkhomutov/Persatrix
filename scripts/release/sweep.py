@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Run the release checklist's §1 gates as one command and print the results table.
+"""Run the pre-tag gates as one command and print the results table.
 
-Release-prep PR 4 (final pre-tag verification) runs fifteen commands by hand
-and types their outcomes into the execution report's "Structural / Automated
-Gates" table. This script runs the same list, records pass/fail and duration,
-and prints that table ready to paste — the judgement stays human, the typing
-stops. The list is the checklist template's §1
-(``docs/templates/RELEASE_CHECKLIST_TEMPLATE.md``); keep the two in step.
+The tag PR's final verification would otherwise run fifteen commands by hand
+and type their outcomes into the execution report's gate tables. This script
+runs the same list, records pass/fail and duration, and prints that table
+ready to paste — the judgement stays human, the typing stops. The list below
+is the only copy: the plan's release checklist names ``make release-sweep``
+rather than repeating it, since ruling (e) of the sequencing Amendment
+2026-09-12 folded the separate checklist into the plan.
 
 Usage::
 
@@ -27,8 +28,11 @@ The repo ``.venv`` interpreter reaches the ``make`` targets through
 overrides a plain environment variable, and a command-line variable is the
 one form that wins.
 
-Not covered, by design: "this release's named suites" (the checklist's
-per-release line — run them by hand) and the live arc.
+Not covered, by design: "this release's named suites" (the plan's
+Acceptance names them — run them by hand), the live arc, and the steps that
+run only in CI and the hook — gofmt, cargo fmt, the Go integration tests and
+the dockerignore, ROADMAP-status, amendment-evidence and conformance checks —
+which the tag PR's required checks run on the same head.
 """
 
 from __future__ import annotations
@@ -68,7 +72,7 @@ class GateResult:
     tail: str
 
 
-#: The checklist §1 list, in order. ``command`` is a shell line run from the repo root.
+#: The pre-tag gates, in order. ``command`` is a shell line run from the repo root.
 GATES: tuple[Gate, ...] = (
     Gate("make test", "make test", "four legs: go, python, agents, integration"),
     Gate("cargo test", "cd cli && cargo test", "incl. the CLI↔server lockstep guards"),
@@ -205,7 +209,7 @@ def exit_code(results: list[GateResult]) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     ensure_utf8_streams()
-    parser = argparse.ArgumentParser(description="Run the release checklist §1 gates.")
+    parser = argparse.ArgumentParser(description="Run the pre-tag gates.")
     parser.add_argument(
         "--execute", action="store_true", help="run the gates (default: print the plan)",
     )

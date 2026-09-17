@@ -20,7 +20,7 @@ A review has three inputs and one output:
 | Input | Where it comes from |
 |---|---|
 | The diff | `gh pr diff N` or the branch against `main` |
-| The scope | The PR's row in the master plan, RFC PR plan, or issue-owned PR plan, and the acceptance line it claims to meet |
+| The scope | The PR's row in the version plan, RFC PR plan, or issue-owned PR plan, and the acceptance line it claims to meet |
 | The gates | The checks the PR's body says it ran; the reviewer re-runs them rather than trusting the claim |
 
 The output is a **findings list**, each finding numbered `F-1`, `F-2`, … in
@@ -81,7 +81,7 @@ Every finding takes exactly one. None is "ignored".
    and stating it is the right call. Allowed only with a tracked issue and a
    line in the release's Known Gaps.
 
-A fifth wording appears in Phase 4 follow-ups: **"NOT done, and recorded
+A fifth wording appears in a plan's follow-up section: **"NOT done, and recorded
 rather than forced"** — an obligation the plan set that turned out impossible
 as written. It is a disposition for plan promises, not for code findings.
 
@@ -90,8 +90,8 @@ as written. It is a disposition for plan promises, not for code findings.
 | PR type | Findings go to |
 |---|---|
 | RFC implementation PR | The RFC's PR plan: a "Review findings" table in the PR's section, and a "From PR N review" subsection in the follow-up PR's section (24 PR plans carry these) |
-| Version-plan or issue-plan PR | The PR body (`F-n` lines with dispositions); deferred findings become issues, and the plan row links the issue. Master plans do **not** carry per-PR findings tables |
-| Release-prep PR 1 (the live arc) | The execution report's **Findings & follow-ups** section, and the PR body |
+| Version-plan or issue-plan PR | The PR body (`F-n` lines with dispositions); deferred findings become issues, and the plan row links the issue. Version plans do **not** carry per-PR findings tables |
+| The last implementation PR's live arc | The execution report's **Findings & follow-ups** section, and the PR body |
 | Any PR | The PR body, as `F-n <one line> — <disposition>` |
 
 The table shape the existing PR plans use:

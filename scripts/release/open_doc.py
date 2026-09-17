@@ -1,21 +1,24 @@
 #!/usr/bin/env python3
 """Open a version-cycle document from its template with the placeholders filled.
 
-Each release produces the same documents in the same order (the release
-cycle, ``docs/methodology/release-cycle.md``); each starts as a copy of a
-template under ``docs/templates/`` with ``vX.Y.Z``, ``<Codename>``, the
-previous version and the date typed in, and the ``> Guidance:`` blockquotes
-deleted. This script does that copy. It never overwrites.
+A patch release writes one document, its plan, and one record of evidence, the
+execution report (the release cycle, ``docs/methodology/release-cycle.md``).
+Each starts as a copy of a template under ``docs/templates/`` with ``vX.Y.Z``,
+``<Codename>``, the previous version and the date typed in, and the
+``> Guidance:`` blockquotes deleted. This script does that copy. It never
+overwrites.
 
 Usage::
 
-    python scripts/release/open_doc.py --kind release-checklist --version 0.3.16 \\
-        --codename "Who is listening"
-    python scripts/release/open_doc.py --kind plan --version 0.4.0 --codename "Agent Organizations"
+    python scripts/release/open_doc.py --kind plan --version 0.3.17 --codename "<Codename>"
+    python scripts/release/open_doc.py --kind execution-report --version 0.3.17 \\
+        --codename "<Codename>"
 
-Kinds: plan, scope-locks, release-prep-plan, release-baseline,
-release-checklist, execution-report. The previous version is read from
-``CHANGELOG.md``'s newest dated heading unless ``--previous`` is given.
+Kinds: plan, execution-report. Scope locks, the release-prep plan, its
+baseline and the release checklist live in the plan since ruling (e) of the
+sequencing Amendment 2026-09-12, so they have no template left. The previous
+version is read from ``CHANGELOG.md``'s newest dated heading unless
+``--previous`` is given.
 """
 
 from __future__ import annotations
@@ -38,19 +41,6 @@ _VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 #: kind → (template path, output path pattern)
 KINDS: dict[str, tuple[str, str]] = {
     "plan": ("docs/templates/VERSION_PLAN_TEMPLATE.md", "docs/v{version}-plan.md"),
-    "scope-locks": ("docs/templates/SCOPE_LOCKS_TEMPLATE.md", "docs/v{version}-scope-locks.md"),
-    "release-prep-plan": (
-        "docs/templates/RELEASE_PREP_PLAN_TEMPLATE.md",
-        "docs/v{version}-release-prep-plan.md",
-    ),
-    "release-baseline": (
-        "docs/templates/RELEASE_BASELINE_TEMPLATE.md",
-        "docs/v{version}-release-baseline.md",
-    ),
-    "release-checklist": (
-        "docs/templates/RELEASE_CHECKLIST_TEMPLATE.md",
-        "docs/v{version}-release-checklist.md",
-    ),
     "execution-report": (
         "docs/templates/EXECUTION_REPORT_TEMPLATE.md",
         "docs/manual-tests/v{version}-execution-report.md",
@@ -103,7 +93,6 @@ def fill(text: str, *, version: str, codename: str, previous: str, today: str) -
     )
     out = out.replace("<Codename>", codename)
     out = out.replace("**Created**: YYYY-MM-DD", f"**Created**: {today}")
-    out = out.replace("(baseline, YYYY-MM-DD)", f"(baseline, {today})")
     out = out.replace("plan opening (YYYY-MM-DD)", f"plan opening ({today})")
     return _strip_guidance(out)
 

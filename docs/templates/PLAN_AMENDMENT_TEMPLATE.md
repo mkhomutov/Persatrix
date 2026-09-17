@@ -7,7 +7,8 @@
 > Ratified: <merge date and PR of this amendment>.
 
 > Guidance: the text being amended stays verbatim; this document says what
-> changes and why. When the amended document is a sequencing doc or an RFC,
+> changes and why. When the amended document is a sequencing doc, an RFC or
+> a version plan (a patch release's plan keeps one document, ruling (e)),
 > this becomes a dated `## Amendment YYYY-MM-DD — <title>` section appended
 > to it instead of a separate file, and the document's reading-order note at
 > the top is repointed at it.
