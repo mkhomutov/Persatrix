@@ -21,6 +21,29 @@ correctness alone. See [decisions.md](decisions.md#sequencing-amendments)
 rule 6; `scripts/checks/amendment_evidence.py` fails when a row is missing,
 given twice, blank or "TBD", or when an amendment heading is in another form.
 
+### Pre-registered experiment
+An experiment whose materials, arms, scoring and decision rules are merged
+before any scored run, so nobody can choose the outcome afterwards; the result
+is published whichever way it falls. EXP-001 is the first: its
+[pre-registration](../experiments/EXP-001-preregistration.md) applies the
+rules in [strategy §4](../project-strategy.md#4-the-decision-framework).
+
+### Arm
+One of the setups a pre-registered experiment compares, run on the same
+materials and the same model as the others. EXP-001 has five, from one model
+call (arm A) to a governed discussion with memory (arm D).
+
+### Decision rule
+A rule, fixed before an experiment runs, that names what the project does for
+each outcome, such as "if C does not clearly beat A, stop adding society
+features for this job". It changes only through a strategy review and the
+sequencing amendment that ratifies it.
+
+### LLM judge
+A model call that scores an experiment's outputs with the same rubric, anchors
+and answer keys as the human raters, without knowing which arm produced each
+output. It is one rater among several, never the only one.
+
 ### Version-train gate
 The rule that work slotted for a later version does not merge while the
 current release is uncut, even when requested — the sequencing is flagged

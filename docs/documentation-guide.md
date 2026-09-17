@@ -120,6 +120,7 @@ One canonical document per topic. Link to it; do not copy from it.
 | Prompt assets | `docs/prompt-organization.md` |
 | Open-core licence tiers | `docs/open-core-reserved-seams.md` (policy in RFC 0045) |
 | Project strategy — standing review (direction, decision rules, review log) | `docs/project-strategy.md`; numbers and commands in `docs/project-strategy-evidence.md` |
+| Pre-registered experiments (materials, arms, scoring, result) | `docs/experiments/EXP-NNN-*.md`; materials in `evaluators/experiments/EXP-NNN/` |
 | Companion discussion documents (spawn RFCs, own no code) | `docs/memory-quality-roadmap.md`, `docs/storage-architecture-roadmap.md`, `docs/agent-runtime-vocabulary-roadmap.md`, `docs/memory-scope-axes.md` |
 | Branching, commits, PR titles | `docs/BRANCHING.md` |
 | Agent configuration | `config/agents.yaml` |
@@ -139,6 +140,7 @@ One canonical document per topic. Link to it; do not copy from it.
 | Manual tests | `docs/manual-tests/MT-*.md` | Live; versioned (`v1.1`, `v1.2`) when a leg changes | `templates/MANUAL_TEST_TEMPLATE.md` |
 | Version-cycle documents | `docs/vX.Y.Z-plan.md`, the one document of a patch release since ruling (e) of the sequencing Amendment 2026-09-12; v0.3.16 and earlier also wrote `-scope-locks.md`, `-plan-amendment-*.md`, `-release-prep-plan.md`, `-release-baseline.md`, `-release-checklist.md` | Edited during the cycle; **frozen once the tag PR dates the changelog**, except for the Released stamp | `templates/VERSION_PLAN_TEMPLATE.md` |
 | Release evidence | `docs/manual-tests/vX.Y.Z-execution-report.md` | Written once against the tag; never edited after | `templates/EXECUTION_REPORT_TEMPLATE.md` |
+| Experiments | `docs/experiments/EXP-NNN-preregistration*.md` and `EXP-NNN-result.md`, the path strategy §4 names | The arms, the scoring and the decision arithmetic freeze when the pre-registration merges; the materials, the harness mechanics and the spend caps change only through a PR that says why, until the first scored meeting; the result is written once | — |
 
 **Archival rule.** A version-cycle document is *archived* when its version has
 shipped — the changelog carries its dated section and the tag PR has
