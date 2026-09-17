@@ -15,8 +15,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-#: The version-cycle documents that freeze once their version ships. All but the plan
-#: are kinds v0.3.16 and earlier wrote; a patch release now writes the plan alone.
+#: The version-cycle documents that freeze once their version ships. Scope locks,
+#: plan amendments, release-prep plans and baselines are kinds only v0.3.16 and
+#: earlier wrote; a patch release now keeps the plan and, rarely, a test-findings PR plan.
 VERSION_DOC_RE = re.compile(
     r"^docs/v(\d+\.\d+(?:\.\d+)?)-"
     r"(?:plan|scope-locks|plan-amendment-[0-9-]+|release-prep-plan|release-baseline"

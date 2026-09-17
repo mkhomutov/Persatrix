@@ -190,14 +190,15 @@ notes, and ROADMAP agree. [ROADMAP §How to Update](../../ROADMAP.md#how-to-upda
 
 ### Grandfathered
 A file on the size allowlist (`scripts/checks/file_size_allowlist.py`) with an
-inline reason and an exit condition. A version plan never is: it holds its
-release under the cap. Master plans were grandfathered for their open cycle
-only.
+inline reason and an exit condition. A version plan is grandfathered only as
+the last resort at the cap, and its tag PR drops the entry. Master plans were
+grandfathered for their whole open cycle.
 
 ### Split, don't trim
 The rule for a document at its word cap: move a stable half to its own file
 rather than deleting rationale to make room for a status flip. A version plan
-is the exception: a release that does not fit is cut or re-scoped, not split.
+is the exception: a release that does not fit is cut or re-scoped, or as a
+last resort allowlisted until its tag PR — not split.
 
 ### Companion discussion document
 A ratified planning document that spawns RFCs but owns no implementation

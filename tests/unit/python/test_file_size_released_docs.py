@@ -176,8 +176,8 @@ def test_stale_allowlist_is_a_notice_not_a_gate(
 ) -> None:
     """A release dated while the plan is still allowlisted must not turn CI red.
 
-    The entry is retired by the next plan's follow-up section; until then every
-    unrelated PR would otherwise fail on it. So: printed, exit code untouched.
+    The tag PR drops the entry; if it is missed, every unrelated PR would
+    otherwise fail on it. So: printed, exit code untouched.
     """
     monkeypatch.setattr(file_size, "_released_versions", lambda _root: RELEASED)
     monkeypatch.setattr(file_size, "GRANDFATHERED_FILES", frozenset({"docs/v0.3.14-plan.md"}))

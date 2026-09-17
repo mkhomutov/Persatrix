@@ -41,7 +41,7 @@ After running the script, complete these steps in order:
 - [ ] **Run linters**: `make lint`
 - [ ] **Update CHANGELOG.md**: `git-cliff --tag vX.Y.Z --unreleased --prepend CHANGELOG.md`
 - [ ] **Review changelog** — ensure curated content is preserved, not overwritten
-- [ ] **Tick the tag PR's boxes** in the release checklist of `docs/vX.Y.Z-plan.md` (`make release-sweep RUN=1` runs the gates)
+- [ ] **Tick the tag PR's boxes** in the release checklist of `docs/vX.Y.Z-plan.md` (`make release-sweep RUN=1 OPTIONAL=1` runs the host gates)
 - [ ] **Commit version bump**: `git add -A && git commit -m "chore: bump version to X.Y.Z"`
 - [ ] **Tag release** once the tag PR merges, on its merge commit: `git tag -a vX.Y.Z -m "vX.Y.Z — <release name>" <merge commit>`
 - [ ] **Push the tag**: `git push origin vX.Y.Z`

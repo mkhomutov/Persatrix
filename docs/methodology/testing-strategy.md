@@ -42,8 +42,9 @@ below.
 | 13 | Structural gates | The repository's own invariants: proto sync, import direction, sizes, doc links, generated indexes | `scripts/checks/`, `make *-check` | see [enforcement matrix](enforcement-matrix.md) | mixed |
 
 `make test` runs layers **1–4 only**. Rust, web, evals, and Go integration are
-separate commands. The tag PR's `make release-sweep` enumerates every target
-rather than leaning on `make test` reading as comprehensive.
+separate commands. The tag PR's `make release-sweep` enumerates the host gates
+rather than leaning on `make test` reading as comprehensive; the steps that run
+only in CI, Go integration among them, run in that PR's required checks.
 
 ---
 

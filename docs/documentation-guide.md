@@ -151,8 +151,8 @@ word cap: execution reports and checklists are excluded by pattern in
 release-prep plans and baselines are excluded **once `CHANGELOG.md` carries
 their version's dated heading** — written by the tag PR, before the tag
 ([ISSUE-0139](issues/ISSUE-0139-released-plans-have-no-archival-mechanism.md)).
-No plan needs an allowlist entry any more: a patch release's plan holds the
-release under the cap. An older plan's entry expired at its release.
+Only an open patch release's plan may hold an allowlist entry, as the last
+resort at the cap, and the tag PR that dates its changelog drops it.
 
 ## Historical Artifacts Policy
 
@@ -185,7 +185,10 @@ to make room ("split, don't trim").
   only refilled the pile.
 - **A document** still fails one word over its cap. Split it before the cap
   arrives — at about 2 900 words for a 3 000-word cap: a document *at* the
-  cap turns every later fix into deleted context.
+  cap turns every later fix into deleted context. A patch release's version
+  plan is the exception: it is never split, and at the cap it cuts scope or,
+  as a last resort, takes an allowlist entry its tag PR drops
+  ([release cycle §Phase 0](methodology/release-cycle.md#phase-0--the-plan-pr)).
 
 **How words are counted.** `scripts/checks/file_size.py` strips YAML
 front-matter and fenced code blocks before counting, so `wc -w` over-reports.

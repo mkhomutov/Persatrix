@@ -29,7 +29,10 @@ overrides a plain environment variable, and a command-line variable is the
 one form that wins.
 
 Not covered, by design: "this release's named suites" (the plan's
-Acceptance names them — run them by hand) and the live arc.
+Acceptance names them — run them by hand), the live arc, and the steps that
+run only in CI and the hook — gofmt, cargo fmt, the Go integration tests and
+the dockerignore, ROADMAP-status, amendment-evidence and conformance checks —
+which the tag PR's required checks run on the same head.
 """
 
 from __future__ import annotations

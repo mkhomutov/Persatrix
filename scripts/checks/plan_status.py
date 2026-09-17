@@ -22,10 +22,10 @@ frozen evidence and are skipped; which versions are released is read from
 
 The check also holds a patch release to one document. Since ruling (e) of the
 sequencing Amendment 2026-09-12 a patch release keeps its plan, scope locks
-and release checklist in ``docs/vX.Y.Z-plan.md``, so a scope-locks,
-plan-amendment, release-prep-plan, release-baseline or release-checklist file
-for an unreleased patch version fails. Released versions keep the files they
-shipped with, and a minor release (``X.Y.0``) is not judged.
+and release checklist in ``docs/vX.Y.Z-plan.md``, so any other
+``docs/vX.Y.Z-*.md`` file for a patch version after v0.3.16 fails, except a
+test-findings PR plan. v0.3.16 and earlier keep the files they shipped with,
+and a minor release (``X.Y.0``) is not judged.
 
 Usage::
 
@@ -33,7 +33,7 @@ Usage::
 
 Exit code: 0 clean, 1 if any stale row, if a plan opens a code fence or HTML
 comment that never closes — every row after it is off the page, so none of
-them would be judged — or if an open patch release has a second document.
+them would be judged — or if a patch release has a second document.
 """
 
 from __future__ import annotations
@@ -54,15 +54,18 @@ from scripts._git import git_output  # noqa: E402
 from scripts.checks import ensure_utf8_stdout, markdown_page  # noqa: E402
 from scripts.checks.released import is_released_version_doc, released_versions  # noqa: E402
 
-#: What a patch release no longer writes beside its plan (sequencing Amendment
-#: 2026-09-12, ruling (e)): scope locks, a plan amendment, the release-prep plan,
-#: its baseline and the release checklist all live in ``docs/vX.Y.Z-plan.md``.
-#: The execution report is evidence and a test-findings PR plan is a PR plan, so
-#: neither is a release document. Group 1 is the version, group 2 its patch number.
-_SECOND_DOCUMENT_RE = re.compile(
-    r"^docs/v(\d+\.\d+\.(\d+))-(?:scope-locks|plan-amendment-[0-9-]+|release-prep-plan"
-    r"|release-baseline|release-checklist)\.md$"
-)
+#: A version-cycle file: groups 1-3 are the version's numbers, group 4 its kind.
+_VERSION_DOC_NAME_RE = re.compile(r"^docs/v(\d+)\.(\d+)\.(\d+)-(.+)\.md$")
+#: The only kinds a patch release may keep (sequencing Amendment 2026-09-12,
+#: ruling (e)): the plan, which holds the scope locks and the release
+#: checklist, and a test-findings PR plan, which is a PR plan. The execution
+#: report lives under ``docs/manual-tests/``, so it is never read here. Any other
+#: kind (scope locks, a checklist, a split-out PR plan or risks table) is a
+#: second document — an allowlist, so a new name cannot slip past.
+_ONE_DOCUMENT_KINDS = frozenset({"plan", "test-findings-pr-plan"})
+#: The last release that wrote several documents. A fixed version, not a dated
+#: CHANGELOG heading, so the tag PR that dates a release is still judged.
+_LAST_RELEASE_BEFORE_THE_RULING = (0, 3, 16)
 _PR_LINK_RE = re.compile(r"\[#(\d+)\]\(")
 _LINK_ONLY_CELL_RE = re.compile(r"^\[#(\d+)\]\([^)]+\)$")
 _SUBJECT_RE = re.compile(r"\(#(\d+)\)$")
@@ -170,20 +173,21 @@ def target_docs(repo_root: Path) -> list[Path]:
 
 
 def second_release_documents(repo_root: Path) -> list[str]:
-    """Release documents beside an unreleased patch release's plan.
+    """Release documents beside a patch release's plan, for a version after v0.3.16.
 
     Only a patch release (``X.Y.Z`` with ``Z`` above 0) is held to one document:
     the ruling names patch releases, and the amendment that opens a minor
-    release decides its shape. A version with a dated CHANGELOG heading keeps
-    the files it shipped with — v0.3.16 and every release before it wrote
-    several.
+    release decides its shape. v0.3.16 and every release before it wrote
+    several and keep them.
     """
-    released = released_versions(repo_root)
     found = []
     for path in (repo_root / "docs").glob("v*.md"):
         rel = path.relative_to(repo_root).as_posix()
-        match = _SECOND_DOCUMENT_RE.match(rel)
-        if match and int(match.group(2)) > 0 and match.group(1) not in released:
+        match = _VERSION_DOC_NAME_RE.match(rel)
+        if not match or match.group(4) in _ONE_DOCUMENT_KINDS:
+            continue
+        version = (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+        if version[2] > 0 and version > _LAST_RELEASE_BEFORE_THE_RULING:
             found.append(rel)
     return sorted(found)
 
@@ -191,7 +195,7 @@ def second_release_documents(repo_root: Path) -> list[str]:
 def check_plan_status(repo_root: Path, verbose: bool = False) -> int:
     extra = second_release_documents(repo_root)
     if extra:
-        print(f"[FAIL] {len(extra)} release document(s) beside an unreleased patch release's plan"
+        print(f"[FAIL] {len(extra)} release document(s) beside a patch release's plan"
               " — a patch release keeps one document (sequencing Amendment 2026-09-12,"
               " ruling (e)):")
         for rel in extra:
@@ -232,7 +236,7 @@ def check_plan_status(repo_root: Path, verbose: bool = False) -> int:
                 print(f"  {s.file}:{s.line}: {s.cell!r} links {prs}, all merged — flip the row")
     if stale or hidden or extra:
         return 1
-    print("[OK] No plan row announces an open PR that has already merged, and no open patch"
+    print("[OK] No plan row announces an open PR that has already merged, and no patch"
           " release has a second release document.")
     return 0
 

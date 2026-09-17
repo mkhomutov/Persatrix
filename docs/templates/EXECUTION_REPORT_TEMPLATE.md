@@ -4,7 +4,7 @@
 **Report status**: ⬜ Pending — <flips to `✅ Complete — <verdict in one sentence>` when every row is Pass / Accepted-with-known-gap; zero Fail, zero Pending>
 **Tester**: <name / agent + model> — <live Docker stack (provider + model) | host structural gates>
 **Execution date**: YYYY-MM-DD
-**Target commit**: `main` tip `<sha>` (<PR>) <plus any in-PR fix re-verified live>. Landed by the last implementation PR of `docs/vX.Y.Z-plan.md`.
+**Target commit**: `<sha>`, the head of <PR> — the last implementation PR of `docs/vX.Y.Z-plan.md` — based on `main` `<sha>` <plus any in-PR fix re-verified live>. That PR lands this report.
 
 > **Environment note.** Structural gates ran on host against the RC tip working
 > tree; the arc ran on a freshly `make reset` Docker stack rebuilt at the RC tip

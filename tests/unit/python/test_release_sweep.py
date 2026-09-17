@@ -19,7 +19,7 @@ def _fake_runner(fail: frozenset[str] = frozenset(), slow: frozenset[str] = froz
     return run
 
 
-def test_the_gate_list_holds_every_standing_gate() -> None:
+def test_the_gate_list_holds_the_host_gates() -> None:
     names = {g.name for g in GATES}
     for expected in ("make test", "cargo test", "make lint", "mypy trees", "make validate",
                      "proto", "sanitizer", "ui", "eval-replay", "licenses", "file size",

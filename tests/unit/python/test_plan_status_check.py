@@ -8,10 +8,9 @@ PR it links to is already squash-merged on ``main``. A PR writes its own row
 before its number exists, so a 🔀 row that links nothing is judged by the
 squash-merge that wrote the line instead.
 
-The same check holds a patch release to one document: a scope-locks,
-plan-amendment, release-prep-plan, release-baseline or release-checklist file
-beside an unreleased patch release's plan fails (sequencing Amendment
-2026-09-12, ruling (e)).
+The same check holds a patch release after v0.3.16 to one document: any
+``docs/vX.Y.Z-*.md`` file beside its plan other than a test-findings PR plan
+fails (sequencing Amendment 2026-09-12, ruling (e)).
 """
 
 from __future__ import annotations
@@ -146,6 +145,31 @@ def test_an_open_patch_release_keeps_one_document(tmp_path: Path) -> None:
         "docs/v0.3.17-release-prep-plan.md",
         "docs/v0.3.17-scope-locks.md",
     ]
+
+
+def test_any_other_file_beside_an_open_patch_plan_is_a_second_document(tmp_path: Path) -> None:
+    """v0.3.16 split its plan into a PR plan and a risks table; neither name may pass."""
+    _touch(
+        tmp_path,
+        "docs/v0.3.17-plan.md",
+        "docs/v0.3.17-pr-plan.md",
+        "docs/v0.3.17-risks.md",
+        "docs/v0.3.17-checklist.md",
+    )
+
+    assert second_release_documents(tmp_path) == [
+        "docs/v0.3.17-checklist.md",
+        "docs/v0.3.17-pr-plan.md",
+        "docs/v0.3.17-risks.md",
+    ]
+
+
+def test_a_dated_changelog_does_not_exempt_a_release_after_the_ruling(tmp_path: Path) -> None:
+    """The tag PR dates the heading; it, and every PR after it, is still held to one document."""
+    _touch(tmp_path, "docs/v0.3.17-plan.md", "docs/v0.3.17-release-checklist.md")
+    (tmp_path / "CHANGELOG.md").write_text("## [0.3.17] - 2026-12-01\n", encoding="utf-8")
+
+    assert second_release_documents(tmp_path) == ["docs/v0.3.17-release-checklist.md"]
 
 
 def test_released_files_the_report_and_a_findings_plan_are_not_second_documents(
