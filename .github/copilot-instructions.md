@@ -106,7 +106,7 @@ default in outputs, edits, plans, and reviews.
 
 ## Methodology
 
-How releases are planned, reviewed, and shipped: [docs/methodology/README.md](../docs/methodology/README.md) — the release cycle (Phases 0–4, release-prep PRs 0–4), scope locks / cuttable items / amendments, the review process, and the process glossary. The RFC-level sub-cycle stays in [docs/development-workflow.md](../docs/development-workflow.md).
+How releases are planned, reviewed, and shipped: [docs/methodology/README.md](../docs/methodology/README.md) — the release cycle (Phases 0–2: one version plan, implementation PRs, the tag PR), scope locks / cuttable items / amendments, the review process, and the process glossary. The RFC-level sub-cycle stays in [docs/development-workflow.md](../docs/development-workflow.md).
 
 ## Status Hygiene
 

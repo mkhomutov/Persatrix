@@ -1,6 +1,6 @@
 """Pin ``scripts/release/sweep.py`` — the pre-tag gate sweep as one command.
 
-Release-prep PR 4 runs the checklist's §1 gates by hand — fifteen commands —
+The tag PR's final verification runs the pre-tag gates — fifteen commands —
 and types the results table into the execution report. The sweep runs the
 list, records pass/fail and duration, and prints the table ready to paste.
 The judgement stays human; the typing stops. Dry-run by default.
@@ -19,7 +19,7 @@ def _fake_runner(fail: frozenset[str] = frozenset(), slow: frozenset[str] = froz
     return run
 
 
-def test_the_gate_list_mirrors_the_checklist() -> None:
+def test_the_gate_list_holds_the_host_gates() -> None:
     names = {g.name for g in GATES}
     for expected in ("make test", "cargo test", "make lint", "mypy trees", "make validate",
                      "proto", "sanitizer", "ui", "eval-replay", "licenses", "file size",

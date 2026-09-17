@@ -19,7 +19,7 @@ ones back; add the *pattern* if a genuinely new write-once category appears.
 **Scope (narrowed again 2026-09-06, ISSUE-0139).** Version-cycle documents
 of *released* versions — master plans, scope locks, plan amendments,
 release-prep plans, release baselines — are also gone from here. They are
-frozen at the post-release follow-up, so ``file_size.py`` now excludes them
+frozen once their version ships, so ``file_size.py`` now excludes them
 once ``CHANGELOG.md`` carries the version's dated release heading
 (``_is_released_version_doc``; read from the tree, not ``git tag``, so a
 depth-1 CI checkout answers the same as a full clone).
@@ -29,9 +29,9 @@ attempt.
 
 What remains here is the honest case for an allowlist: files that are still
 edited, where the cap continues to do useful work and the entry really is
-expected to go away — the OPEN cycle's plan (its entry now expires by itself
-at the tag), living specs/guides (removable once a topic split lands), and
-long-form RFC PR plans (removable at RFC seal).
+expected to go away — an open patch release's plan, as the last resort at the
+cap (its tag PR drops the entry), living specs/guides (removable once a topic
+split lands), and long-form RFC PR plans (removable at RFC seal).
 
 Separating the data from the logic keeps ``file_size.py`` honestly under the
 code-line cap (it measures complexity, which should not grow just because the
@@ -63,8 +63,8 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # plans, scope locks, amendments, baselines) are no longer listed here:
     # file_size.py treats them as frozen release evidence once CHANGELOG.md
     # carries the version's dated heading (ISSUE-0139 — the archival mechanism
-    # #838 found missing). Only the OPEN cycle's documents may appear below,
-    # and each such entry expires on its own at the release.
+    # #838 found missing). Only the OPEN cycle's plan may appear below, as the
+    # last resort at the cap, and its tag PR drops the entry.
     # docs/v0.3.x-sequencing.md is the LIVING sequencing record for the whole
     # v0.3.x line: the original 2026-05-10 decision is preserved verbatim and
     # every later scope decision lands as a dated amendment appended below it
@@ -190,7 +190,7 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # ones must NOT be added back here. Master plans and release-prep plans of
     # RELEASED versions are likewise excluded, by their dated CHANGELOG heading
     # (_is_released_version_doc, ISSUE-0139); only the open cycle's plan may
-    # still need an entry.
+    # still need an entry, as the last resort, until its tag PR.
     # docs/manual-tests/MT-MEMORY-005-dementia-test.md — the qualitative
     # memory acceptance gate; gains a Test Results row every memory-touching
     # release (v0.3.1 ×2, v0.3.5 ×2), so it sits at the 3 000-word prose cap

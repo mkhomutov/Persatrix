@@ -1,6 +1,7 @@
 # Persatrix — Git Branching Strategy
 
-> **Last updated**: 2026-09-06 — rewritten to describe what the repository
+> **Last updated**: 2026-09-17 — a tag now follows the tag PR, not release-prep
+> PR 4. Rewritten 2026-09-06 to describe what the repository
 > actually does. The 2026-04 version prescribed `release/*` and `hotfix/*`
 > branches, a stabilisation period, and artifact publishing; none of that was
 > ever used (twenty tags, all cut from `main`, zero release branches). How a
@@ -23,7 +24,7 @@ release-branch ceremony.
 - Required status checks are listed in the
   [enforcement matrix](methodology/enforcement-matrix.md#enforcement-levels);
   `strict` mode means a branch must be current with `main` before it can merge.
-- Release tags (`vX.Y.Z`) are cut from `main` after release-prep PR 4 merges.
+- Release tags (`vX.Y.Z`) are cut from `main`, on the tag PR's merge commit.
 - No direct pushes.
 
 ### Short-lived branches
@@ -100,11 +101,12 @@ a disposition. Pull `main`, flip the plan row, check ROADMAP.
 ## Tags and releases
 
 Semantic versioning `vX.Y.Z`. Tags are annotated (`git tag -a vX.Y.Z -m
-"vX.Y.Z — <codename>"`) and pushed with `git push origin main --tags` after
-release-prep PR 4 merges; the GitHub Release body is the curated changelog
+"vX.Y.Z — <codename>"`), placed on the tag PR's merge commit and pushed with
+`git push origin vX.Y.Z`; the GitHub Release body is the curated changelog
 plus Upgrade Notes and Known Gaps. Releases carry no binary assets today.
-The whole sequence — master plan, implementation PRs, release-prep PRs 0–4,
-tag, post-release follow-up — is in
+The whole sequence — the version plan, implementation PRs (the last one runs
+the live arc), the tag PR, the tag, and the follow-up as the next plan's
+first section — is in
 [methodology/release-cycle.md](methodology/release-cycle.md).
 
 Breaking changes to config schemas or the agent interface happen at MINOR

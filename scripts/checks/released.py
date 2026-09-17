@@ -3,8 +3,8 @@
 Shared by the size checker (frozen plans are exempt from the word cap) and the
 plan-status checker (frozen plans are not judged for stale rows). "Shipped" is
 read from the tree, not from git: ``CHANGELOG.md`` carries one dated
-``## [X.Y.Z] - YYYY-MM-DD`` heading per release (written at release-prep PR 3,
-one PR before the tag), so the answer is the same in a full clone, a depth-1
+``## [X.Y.Z] - YYYY-MM-DD`` heading per release (written by the tag PR, before
+the tag), so the answer is the same in a full clone, a depth-1
 CI checkout, a worktree, and a tarball. ``git tag`` was the first design and
 failed in CI: actions/checkout fetches a pull_request ref with ``--depth=1``
 and no tags, and ignores the fetch-tags input in that mode (ISSUE-0139).
@@ -15,7 +15,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-#: The version-cycle documents that freeze at the post-release follow-up.
+#: The version-cycle documents that freeze once their version ships. Scope locks,
+#: plan amendments, release-prep plans and baselines are kinds only v0.3.16 and
+#: earlier wrote; a patch release now keeps the plan and, rarely, a test-findings PR plan.
 VERSION_DOC_RE = re.compile(
     r"^docs/v(\d+\.\d+(?:\.\d+)?)-"
     r"(?:plan|scope-locks|plan-amendment-[0-9-]+|release-prep-plan|release-baseline"
