@@ -146,10 +146,14 @@ async def topic_subject_seeds(
     events never reach here), so the empty-context cost guard for TICK
     events is preserved one layer up.
 
-    ``sessions`` forwards to :meth:`FactStore.topic_subjects` — the
-    live path leaves it ``None`` (§D default scope); the L2 cross-room
-    SHADOW pass (:mod:`.facts_shadow`, RFC 0049 PR 2) widens it so a
-    topic taught in another room can seed the shadow read.
+    ``sessions`` forwards to :meth:`FactStore.topic_subjects`.  Under
+    ``memory.facts.cross_room: live`` — the default,
+    :data:`~agents.persona_runtime.cross_room.DEFAULT_FACTS_CROSS_ROOM`
+    — the live path passes ``"*"`` so a topic taught in another room
+    can seed the recall.  Under ``shadow`` and ``off`` it passes
+    ``None`` (§D default scope); under ``shadow`` the L2 cross-room
+    shadow pass (:mod:`.facts_shadow`) also runs and passes ``"*"`` for
+    its own read.
     """
     if (
         fact_store is None

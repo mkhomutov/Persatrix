@@ -175,7 +175,11 @@ class _MemoryContextMixin:
     # harnesses at the shipped total; one that wants a tighter budget
     # sets this attribute on the instance.
     _memory_budget_tokens: int = MEMORY_BUDGET_TOKENS
-    # RFC 0049 PR 2/PR 3 — ``memory.{facts,episodic}.cross_room`` (off|shadow).
+    # RFC 0049 PR 2/PR 3 — ``memory.{facts,episodic}.cross_room``
+    # (off|shadow|live).  ``live`` is the default since the PR 4
+    # promotion: both tiers recall across rooms (episodes from the
+    # current room get a ranking boost), and every entry still goes
+    # through the §D gate.
     _facts_cross_room: str = DEFAULT_FACTS_CROSS_ROOM
     _episodic_cross_room: str = DEFAULT_EPISODIC_CROSS_ROOM
     # ISSUE-0132 (v0.3.16 A2/A3) — ``memory.egress.audience``

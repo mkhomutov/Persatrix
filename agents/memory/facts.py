@@ -338,10 +338,13 @@ class FactStore:
         The recall-seeding enumeration (RFC 0026 topic amendment /
         RFC 0049 P1) — scoped exactly like :meth:`recall`, adding no
         scope of its own.  ``sessions`` takes the same four-mode §D
-        shape as :meth:`recall`; the L2 cross-room SHADOW pass (RFC
-        0049 PR 2) passes ``"*"`` so a topic taught in another room can
-        seed the widened read — epoch/principal equality still applies
-        unconditionally.  See :mod:`agents.memory._facts_topics`.
+        shape as :meth:`recall`.  The live path passes ``"*"`` when
+        ``memory.facts.cross_room`` is ``live`` — the default,
+        :data:`~agents.persona_runtime.cross_room.DEFAULT_FACTS_CROSS_ROOM`
+        — and the L2 shadow pass does when it is ``shadow``, so a topic
+        taught in another room can seed the widened read.  Epoch/principal
+        equality still applies unconditionally.  See
+        :mod:`agents.memory._facts_topics`.
         """
         return await _topic_subjects_for_agent(
             self._ensure_db(),

@@ -18,8 +18,10 @@ whether the acting room adds anyone the entry's source room did not
 hold, and is applied here rather than in front of the gate on purpose:
 the §G watch, the §G manifest and the shadow trace all read this one
 decision record, and an entry filtered out upstream would be invisible
-to all three ([ISSUE-0132] scope lock 3).  It ships in ``shadow``, where
-the verdict is recorded and the entry still injects.
+to all three ([ISSUE-0132] scope lock 3).  Its default mode,
+:data:`~agents.persona_runtime.audience.DEFAULT_MEMORY_AUDIENCE`, is
+``live``: a *disjoint* verdict — the acting room adds someone — withholds
+the entry, and both *unknown* causes admit it.
 
 Two deliberately ungated surfaces, recorded here so the review trail does
 not re-litigate them:
