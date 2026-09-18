@@ -27,13 +27,18 @@ Scope invariants (what the widening does and does not touch):
   subject-reachability bound.
 
 F-3 posture (the ``sessions="*"`` security pin): the RFC 0031 §D pin
-says the persona-runtime *prompt-context* path never reaches ``"*"``.
-This module deliberately reads all-sessions but is NOT a prompt-context
-path — nothing here touches :class:`WorkingMemory`, the RFC 0017
-budget, the §G manifest, or the reinforcement write; the sole output is
-a log record.  ``test_facts_shadow.py`` pins the no-prompt-leak
-property; ``test_session_recall_default_path.py`` documents the
-carve-out.
+said the persona-runtime *prompt-context* path never reaches ``"*"``.
+RFC 0049 PR 4 changed it to "no *ungated* widening".  Under
+``memory.facts.cross_room: live`` — the default,
+:data:`~agents.persona_runtime.cross_room.DEFAULT_FACTS_CROSS_ROOM` —
+the live facts recall passes ``"*"``, and every fact it returns goes
+through the RFC 0037 §D gate before the RFC 0017 budget
+(``test_cross_room_live.py`` pins this).  This module is still not a
+prompt-context path — nothing here touches :class:`WorkingMemory`, the
+RFC 0017 budget, the §G manifest, or the reinforcement write; the sole
+output is a log record.  ``test_facts_shadow.py`` pins the
+no-prompt-leak property; ``test_session_recall_default_path.py`` states
+the new pin and documents this module's carve-out.
 
 Log-egress bound: the trace names each candidate's ``fact_id`` /
 ``subject`` / ``predicate`` / ``protection_level`` / provenance
@@ -166,12 +171,15 @@ async def emit_facts_shadow(
 ) -> None:
     """Compute and record the turn's L2 cross-room shadow trace.
 
-    One structured INFO record per turn with a non-empty cross-room
-    delta; quiet turns (no delta, sender-less events, ``mode="off"``,
-    missing store) emit nothing, so single-room deployments see zero
-    log volume.  Runs OUTSIDE the live tier pipeline and never raises —
-    a shadow failure degrades to a WARNING, honouring
-    ``_inject_memory_context``'s "never fail the event" contract.
+    Does nothing unless ``mode`` is ``"shadow"``.  Under ``"live"``, the
+    default, the live facts recall already reads every session; under
+    ``"off"`` there is no cross-room pass at all.  In shadow mode: one
+    structured INFO record per turn with a non-empty cross-room delta;
+    quiet turns (no delta, sender-less events, missing store) emit
+    nothing, so single-room deployments see zero log volume.  Runs
+    OUTSIDE the live tier pipeline and never raises — a shadow failure
+    degrades to a WARNING, honouring ``_inject_memory_context``'s "never
+    fail the event" contract.
 
     The §D gate application uses a dedicated :class:`TurnInjectionGate`
     instance whose aggregated log emission is intentionally **not**

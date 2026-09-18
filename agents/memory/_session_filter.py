@@ -70,10 +70,18 @@ __all__ = [
     "session_in_predicate",
 ]
 
-#: The ``sessions="*"`` sentinel — CLI/debug mode only.  The
-#: persona-runtime default context path is pinned in PR 4 never to
-#: reach this value (`RFC 0031 §Security Considerations
-#: <../../docs/rfcs/0031-per-session-namespacing-channels.md#security-considerations>`_).
+#: The ``sessions="*"`` sentinel: no session filter, so a read returns
+#: rows from every session.  Epoch and principal filters still apply.
+#: RFC 0031 reserved it for CLI/debug use (`§Security Considerations
+#: <../../docs/rfcs/0031-per-session-namespacing-channels.md#security-considerations>`_);
+#: the operator recall verb that would use it is still unbuilt
+#: (ISSUE-0086).  Today the live facts recall passes it when
+#: ``memory.facts.cross_room`` is ``live`` — the default since RFC 0049
+#: PR 4 — and every fact it returns goes through the RFC 0037 §D gate
+#: before it can reach the prompt.  The facts shadow pass uses it when
+#: the knob is ``shadow``, and it is the default for shared-pool reads.
+#: So the persona prompt path does reach this value; the rule now is
+#: "no *ungated* widening" (see ``test_session_recall_default_path.py``).
 SESSIONS_ALL: Final[str] = "*"
 
 

@@ -20,9 +20,10 @@ Two functions:
 Why this follows :mod:`_principal_filter`, **not** :mod:`_session_filter`:
 
 * The session helper returns ``None`` for the ``"*"`` sentinel (no
-  filter — CLI/debug only) and always unions :data:`LEGACY_SESSION_ID`
-  so pre-RFC rows stay visible from every session — the carve-out exists
-  *for* continuity.
+  filter; :data:`~agents.memory._session_filter.SESSIONS_ALL` says who
+  passes it) and always unions :data:`LEGACY_SESSION_ID` so pre-RFC
+  rows stay visible from every session — the carve-out exists *for*
+  continuity.
 * The epoch helper has **no** ``"*"`` bypass and **no** carve-out: the
   predicate is unconditional strict equality.  A row written by one
   run/test epoch must never be visible to another, so there is

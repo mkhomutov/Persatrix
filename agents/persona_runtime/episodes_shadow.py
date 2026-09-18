@@ -109,13 +109,16 @@ async def emit_episodes_shadow(
 ) -> None:
     """Compute and record the turn's L1 cross-room shadow trace.
 
-    One structured INFO record per channel-anchored turn with a
-    non-empty cross-room delta; quiet turns (empty delta, tick-shaped
-    events, ``mode="off"``, missing store) emit nothing, so single-room
-    deployments see zero log volume.  Runs OUTSIDE the live tier
-    pipeline and never raises — a shadow failure degrades to a WARNING,
-    honouring ``_inject_memory_context``'s "never fail the event"
-    contract.
+    Does nothing unless ``mode`` is ``"shadow"``.  Under ``"live"``, the
+    default, the live episodic recall already reads every session, with
+    a ranking boost for the current one; under ``"off"`` there is no
+    cross-room pass at all.  In shadow mode: one structured INFO record
+    per channel-anchored turn with a non-empty cross-room delta; quiet
+    turns (empty delta, tick-shaped events, missing store) emit nothing,
+    so single-room deployments see zero log volume.  Runs OUTSIDE the
+    live tier pipeline and never raises — a shadow failure degrades to a
+    WARNING, honouring ``_inject_memory_context``'s "never fail the
+    event" contract.
 
     The delta preserves the widened read's boosted-rank ORDER, and each
     candidate carries its ``rank`` (0-based position in the widened
