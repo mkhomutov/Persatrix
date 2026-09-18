@@ -67,8 +67,8 @@ from agents.memory.shared_pool import (
 # F-3 is REDEFINED, not dropped — the bar is now "no UNGATED widening":
 # every widened row passes the RFC 0037 §D gate before the budget
 # (``test_cross_room_live.py::TestLiveCrossRoomInjection``), and
-# epoch/principal stay absolute walls on every widened branch.  The
-# tiers that stay room-walled keep their source pins below.
+# epoch/principal stay absolute walls on every widened branch.  No module
+# below may pick ``"*"`` itself; facts_section.py takes its caller's width.
 PROMPT_CONTEXT_RECALL_MODULES = (
     Path("agents/persona_runtime/channel_history.py"),
     # ``facts_section.py`` issues ``FactStore.recall(subject=...)`` at
@@ -467,8 +467,8 @@ class TestPersonaRuntimeCallSitesDoNotPassAllSentinel:
         self, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         # Use the leaf module's recall directly with a spy.  This is the
-        # path :class:`_MemoryContextMixin._inject_memory_context` takes
-        # (it imports ``EpisodicMemory`` and calls ``.recall`` directly).
+        # walled (off/shadow) branch of ``_inject_memory_context``; under
+        # ``live`` its episodic tier reads through ``recall_room_ranked``.
         from agents.memory.episodic import EpisodicMemory
 
         mem = EpisodicMemory(agent_id="t", db_path=":memory:")
@@ -483,9 +483,9 @@ class TestPersonaRuntimeCallSitesDoNotPassAllSentinel:
 
             monkeypatch.setattr(mem, "recall", spy)
 
-            # Run the same call shape ``memory_context._inject_memory_context``
+            # Run the call shape the walled branch of ``_inject_memory_context``
             # uses (sessions kwarg either absent — implicit ``None`` —
-            # or explicitly ``None``).  Both are the default path.
+            # or explicitly ``None``).  Both are the §D default scope.
             await mem.recall("hello", limit=5, min_score=0.2)
             await mem.recall("hi", limit=5, min_score=0.2, sessions=None)
 

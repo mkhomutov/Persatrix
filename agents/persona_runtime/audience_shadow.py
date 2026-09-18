@@ -33,11 +33,11 @@ invented:
   recall limits, ~40× the rest of the record, and read by no consumer
   of the measurement — is attached only when this logger is enabled for
   DEBUG.  The eval harness lowers it there, so the seeds keep their
-  per-entry evidence; a production deployment on the shipped ``shadow``
-  default does not pay for it on every turn.
+  per-entry evidence; a production deployment does not pay for it on
+  every turn.
 
-Emitted in ``live`` too, not only in ``shadow``: an operator who has
-flipped the knob needs the per-entry record more, not less, and
+Emitted in ``live`` too, not only in ``shadow``: when the check really
+withholds, the operator needs the per-entry record more, not less, and
 ``withheld`` then reports what the turn actually withheld rather than
 zero.
 """

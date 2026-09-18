@@ -393,9 +393,13 @@ class EpisodicMemory(
                 # closing rows at this chokepoint so the facade, persona
                 # prompt assembly, and shared-pool callers are all
                 # covered by one filter (the persona path bypasses the
-                # facade and reads ``recall`` directly). The janitor's
-                # ``SUMMARY_UNAVAILABLE_TEXT`` fallback stays visible —
-                # it is the operator's signal that summarisation failed.
+                # facade and reads ``recall`` directly).  The persona's
+                # episodic tier under ``cross_room: live`` reads through
+                # ``episodic_room_ranked.recall_room_ranked`` instead,
+                # which repeats this filter: change both together.  The
+                # janitor's ``SUMMARY_UNAVAILABLE_TEXT`` fallback stays
+                # visible — it is the operator's signal that
+                # summarisation failed.
                 # Full rationale + race-window analysis lives in the
                 # test docstring at
                 # tests/unit/python/test_episodic_memory_pending_filter.py.
