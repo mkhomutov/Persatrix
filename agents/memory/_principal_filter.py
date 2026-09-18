@@ -23,8 +23,8 @@ Three functions:
 Why this is **not** :mod:`_session_filter`'s shape:
 
 * The session helper returns ``None`` for the ``"*"`` sentinel (no
-  filter — CLI/debug only) and always unions :data:`LEGACY_SESSION_ID`
-  so pre-RFC rows stay visible from every session.
+  filter) and always unions :data:`LEGACY_SESSION_ID` so pre-RFC rows
+  stay visible from every session.
 * The principal helper has **no** ``"*"`` bypass and **no** carve-out:
   the predicate is unconditional strict equality.  A row owned by one
   tenant must never be visible to another, so there is deliberately no
