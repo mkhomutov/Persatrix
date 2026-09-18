@@ -12,9 +12,10 @@ Deterministic by construction — no LLM in the recall path (the
 extractor's LLM proposes subjects at *write* time; the read side is a
 bounded string match).  That keeps the seeding surface out of the
 prompt-injection blast radius: a hostile stimulus can at most cause
-recall of facts the store already holds for this agent, in this
-session scope, and every recalled row still passes the RFC 0037 §D
-injection gate downstream.
+recall of facts the store already holds for this agent in its epoch
+and principal — from any room when ``memory.facts.cross_room`` is
+``live``, from the current room otherwise — and every recalled row
+still passes the RFC 0037 §D injection gate downstream.
 
 Bounds (amendment §Security):
 
@@ -146,14 +147,16 @@ async def topic_subject_seeds(
     events never reach here), so the empty-context cost guard for TICK
     events is preserved one layer up.
 
-    ``sessions`` forwards to :meth:`FactStore.topic_subjects`.  Under
-    ``memory.facts.cross_room: live`` — the default,
-    :data:`~agents.persona_runtime.cross_room.DEFAULT_FACTS_CROSS_ROOM`
-    — the live path passes ``"*"`` so a topic taught in another room
-    can seed the recall.  Under ``shadow`` and ``off`` it passes
-    ``None`` (§D default scope); under ``shadow`` the L2 cross-room
-    shadow pass (:mod:`.facts_shadow`) also runs and passes ``"*"`` for
-    its own read.
+    ``sessions`` is forwarded unchanged to
+    :meth:`FactStore.topic_subjects`: ``None`` keeps the §D default
+    scope (the current room), and ``"*"`` lets a topic taught in another
+    room seed the recall.  The callers choose.  The prompt path
+    (``recall_facts_for_event``) passes ``"*"`` when
+    ``memory.facts.cross_room`` is ``live`` and ``None`` under
+    ``shadow`` or ``off``; the L2 cross-room shadow pass
+    (:mod:`.facts_shadow`) runs only under ``shadow`` and passes
+    ``"*"`` for its own read.  The mode's default is
+    :data:`~agents.persona_runtime.cross_room.DEFAULT_FACTS_CROSS_ROOM`.
     """
     if (
         fact_store is None

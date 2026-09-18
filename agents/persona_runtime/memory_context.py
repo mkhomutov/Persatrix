@@ -176,10 +176,10 @@ class _MemoryContextMixin:
     # sets this attribute on the instance.
     _memory_budget_tokens: int = MEMORY_BUDGET_TOKENS
     # RFC 0049 PR 2/PR 3 — ``memory.{facts,episodic}.cross_room``
-    # (off|shadow|live).  ``live`` is the default since the PR 4
-    # promotion: both tiers recall across rooms (episodes from the
-    # current room get a ranking boost), and every entry still goes
-    # through the §D gate.
+    # (off|shadow|live; each tier's default is in :mod:`.cross_room`).
+    # A tier set to ``live`` (RFC 0049 PR 4) recalls across rooms
+    # (episodes from the current room get a ranking boost), and every
+    # entry still goes through the §D gate.
     _facts_cross_room: str = DEFAULT_FACTS_CROSS_ROOM
     _episodic_cross_room: str = DEFAULT_EPISODIC_CROSS_ROOM
     # ISSUE-0132 (v0.3.16 A2/A3) — ``memory.egress.audience``
@@ -274,15 +274,17 @@ class _MemoryContextMixin:
         self._working_memory.remove_section(CHANNEL_HISTORY_SECTION_NAME)
         self._working_memory.remove_section(FACTS_SECTION_NAME)
 
-        # The roster fetch is the one HTTP call in this method: the tiers
-        # below share a single aiosqlite connection and serialise anyway,
-        # so it is also the only work that can overlap them.  Issued here
-        # and awaited just before the gate (v0.3.16 PR A1) — it MUST
-        # precede the gate, but it need not sit on the turn's critical
-        # path, and a DM turn now pays for it where before it fetched no
-        # roster at all.  ``resolve_channel_roster`` never raises; the
-        # ``finally`` is what keeps a failing tier recall from leaving the
-        # task orphaned (asyncio logs a pending task destroyed at GC).
+        # The roster fetch is the only HTTP call that can overlap the
+        # tiers below, which share a single aiosqlite connection and
+        # serialise anyway.  (The audience resolution after them adds one
+        # GET per other source room, on the turn's critical path — see
+        # ``resolve_turn_audience``.)  Issued here and awaited just before
+        # the gate (v0.3.16 PR A1) — it MUST precede the gate, but it need
+        # not sit on the turn's critical path, and a DM turn now pays for
+        # it where before it fetched no roster at all.
+        # ``resolve_channel_roster`` never raises; the ``finally`` is what
+        # keeps a failing tier recall from leaving the task orphaned
+        # (asyncio logs a pending task destroyed at GC).
         roster_task = asyncio.create_task(
             resolve_channel_roster(self._roster_fetcher, event, self.agent_id),
         )
@@ -333,10 +335,12 @@ class _MemoryContextMixin:
             # RFC 0017 §D min_score + the PR 5 empty-context short-circuit).
             # ``cross_room: live`` (RFC 0049 PR 4, the promoted default) =
             # room-first-RANKED recall in ONE widened, reinforcing query
-            # (the shadow pass does not run in live mode, so the episodic
-            # tier costs one read per turn in every mode); otherwise the
-            # RFC 0031 §D wall (``sessions=None``; ``"*"`` pinned
-            # unreachable) with shadow mode logging the widened delta.
+            # (the shadow pass does not run in live mode, so live costs
+            # one episodic read per turn, like ``off``; ``shadow`` costs
+            # two on a channel turn: this walled read plus the widened
+            # shadow read); otherwise the RFC 0031 §D wall
+            # (``sessions=None``; ``"*"`` pinned unreachable) with shadow
+            # mode logging the widened delta.
             try:
                 if self._episodic_cross_room == CROSS_ROOM_LIVE:
                     episodes = await recall_room_ranked(

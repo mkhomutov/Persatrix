@@ -18,10 +18,16 @@ whether the acting room adds anyone the entry's source room did not
 hold, and is applied here rather than in front of the gate on purpose:
 the §G watch, the §G manifest and the shadow trace all read this one
 decision record, and an entry filtered out upstream would be invisible
-to all three ([ISSUE-0132] scope lock 3).  Its default mode,
-:data:`~agents.persona_runtime.audience.DEFAULT_MEMORY_AUDIENCE`, is
-``live``: a *disjoint* verdict — the acting room adds someone — withholds
-the entry, and both *unknown* causes admit it.
+to all three ([ISSUE-0132] scope lock 3).  Its mode defaults to
+:data:`~agents.persona_runtime.audience.DEFAULT_MEMORY_AUDIENCE`.  In
+``live``, a verdict in
+:data:`~agents.persona_runtime.audience.ENFORCED_VERDICTS` withholds the
+entry (today only *disjoint*: the acting room adds someone the source
+room did not hold).  Every other verdict is recorded and admitted,
+including both *unknown* ones: a room's member list could not be
+fetched, or the entry names no source room.  In ``shadow`` every verdict
+is only recorded.  (An unreadable protection label is a different
+unknown: rule (c), below, withholds it in every mode.)
 
 Two deliberately ungated surfaces, recorded here so the review trail does
 not re-litigate them:
@@ -144,11 +150,14 @@ _MANIFEST_TIERS: Final[tuple[str, ...]] = (
 class TurnInjectionGate:
     """The §D filter for one turn, at acting classification ``acting``.
 
-    ``admit`` applies the rank comparison per entry; ``filter_entries``
-    maps it over a tier's candidate list.  Withheld/unknown entries are
-    tallied for the one aggregated log emission (:meth:`emit_log`), and
-    gate-passed entries' levels are retained so :meth:`manifest` can label
-    the budget-admitted subset afterwards.
+    ``admit`` applies the rank comparison, then the audience condition,
+    per entry; ``filter_entries`` maps it over a tier's candidate list.
+    Rank withholds and unknown-label entries are tallied for the one
+    aggregated log emission (:meth:`emit_log`); audience withholds are
+    counted apart (:attr:`audience_withheld_count`) and logged by
+    :func:`~agents.persona_runtime.audience_shadow.emit_audience_shadow`.
+    Gate-passed entries' levels are retained so :meth:`manifest` can
+    label the budget-admitted subset afterwards.
     """
 
     def __init__(
@@ -162,9 +171,11 @@ class TurnInjectionGate:
         self._acting_rank = acting_rank(acting)
         self._agent_id = agent_id
         # ISSUE-0132: the audience AND-condition.  ``None`` — the mode is
-        # ``off``, or the turn has no acting channel — restores the pure
-        # v0.3.15 §D gate exactly, which is what every pre-A2 caller
-        # (the two shadow passes among them) keeps getting.
+        # ``off``, or the turn acts at the §D ``public`` floor — restores
+        # the pure v0.3.15 §D gate exactly, which is what every pre-A2
+        # caller (the two shadow passes among them) keeps getting.  A
+        # stamped turn with no channel is not ``None``: it gets an
+        # unknown audience (``resolve_turn_audience``).
         self._audience = audience
         self._audience_records: list[AudienceRecord] = []
         self._audience_terminal: set[tuple[str, str]] = set()
@@ -194,7 +205,8 @@ class TurnInjectionGate:
         protection_level: str | None,
         source_channel_id: str | None = None,
     ) -> bool:
-        """§D per-entry decision: ``rank(P) <= rank(L)`` → inject."""
+        """§D per-entry decision: inject when ``rank(P) <= rank(L)`` and
+        the audience condition (:meth:`_judge_audience`) does not withhold."""
         rank = entry_rank_or_withhold(protection_level)
         if rank is None:
             # Rule (c): unknown/unparseable → withheld, logged (aggregated).
@@ -231,8 +243,9 @@ class TurnInjectionGate:
         """The ISSUE-0132 check for one entry, recording its verdict.
 
         Returns whether the entry may still reach the prompt: ``True``
-        when the check is not running, the entry is out of its scope, or
-        the mode is not enforcing.  The verdict is recorded either way —
+        when the check is not running, the entry is out of its scope,
+        the mode is not enforcing, or the verdict is not in
+        :data:`ENFORCED_VERDICTS`.  The verdict is recorded either way —
         that recording IS the shadow measurement.
 
         Shared by the two ways an entry reaches the prompt (scope lock 3
