@@ -22,14 +22,16 @@ What this file pins:
   facade default.
 * The ``legacy`` carve-out is preserved through the facade — a row
   tagged ``session_id='legacy'`` is visible from every session.
-* The ``sessions="*"`` debug sentinel surfaces every session via the
-  facade (CLI / debug-only path).
+* ``sessions="*"`` (``SESSIONS_ALL``) surfaces every session via the
+  facade when a caller asks for it; the facade default never does.
 
-The complementary call-site / spy pins live in
-:file:`tests/unit/python/test_session_recall_default_path.py`;
-together they cover (a) source-level absence of ``"*"`` on the persona
-prompt-assembly path, (b) runtime threading of the kwarg from facade
-to tier, and (c) the end-to-end isolation property here.
+The complementary pins live in
+:file:`tests/unit/python/test_session_recall_default_path.py` and
+:file:`test_prompt_path_sessions.py`; together they cover (a) a source
+scan of the prompt-path modules that must never pick ``"*"`` themselves,
+(b) runtime threading of the kwarg from facade to tier, (c) which reads
+a real persona turn widens, each behind the §D gate, and (d) the
+end-to-end isolation property here.
 """
 
 from __future__ import annotations
