@@ -126,8 +126,8 @@ This RFC **owns the event type-name vocabulary** (`ModelOutput`, `ToolCallEvent`
 
 @dataclass(frozen=True)
 class TurnEvent:
-    event_id: str           # ULID, unique per event within the worker process
-    turn_id: str            # ULID, monotonic within an interaction
+    event_id: str           # opaque uuid4 hex, unique per event (see new_event_id)
+    turn_id: str            # opaque token, stable across a turn's model-call retries
     seq: int                # 0-indexed position within the turn
     occurred_at: datetime   # UTC
 
@@ -139,7 +139,7 @@ class ModelOutput(TurnEvent):
                              # (END_TURN | TOOL_USE | MAX_TOKENS); error
                              # conditions are a separate Error event, not a
                              # stop_reason value
-    token_usage: TokenUsage
+    token_usage: Usage        # agents.llm_types.Usage
 
 @dataclass(frozen=True)
 class ToolCallEvent(TurnEvent):   # renamed from ToolCall to avoid colliding
@@ -180,7 +180,7 @@ class Control(TurnEvent):
 class CallbackModelOutput(TurnEvent):   # a callback's own model call (e.g. a
     callback_name: str                  # moderation LLM). Distinct from
     content: str                        # ModelOutput so channel-publish never
-    token_usage: TokenUsage             # mistakes it for the assistant's turn
+    token_usage: Usage                  # mistakes it for the assistant's turn
                                         # output. (Resolves Open Q #3.)
 
 
@@ -201,7 +201,7 @@ class ToolErrorKind(StrEnum):
     INTERNAL = "internal"
 ```
 
-**Event identity.** Every event carries an `event_id` (ULID, unique within the worker process). `(turn_id, seq)` is the ordering key within a turn; `event_id` is the *reference* key — `Error.cause_event_id` and the redaction transform ([§B](#b-event-stream-contract)) address events by `event_id`, not by position.
+**Event identity.** Every event carries an `event_id` (an opaque `uuid4().hex` token, unique within the worker process — the repo already made this call for the RFC 0020 `interaction_id`, "an opaque uuid4 token, not a ULID despite RFC 0020 §D's wording"; sortability is unnecessary because ordering is carried by `seq`). `(turn_id, seq)` is the ordering key within a turn; `event_id` is the *reference* key — `Error.cause_event_id` and the redaction transform ([§B](#b-event-stream-contract)) address events by `event_id`, not by position.
 
 **Name collisions (implementers must observe).** The event dataclasses `ToolCallEvent` / `ToolResultEvent` are deliberately *not* named `ToolCall` / `ToolResult`: the agent runtime already defines [`agents/llm_types.ToolCall`](../../agents/llm_types.py) (imported into `agents/base.py`) and [`agents/tools/registry.ToolResult`](../../agents/tools/registry.py) — the very module that emits the `ToolResultEvent`. Do **not** `from .events import ToolCall`.
 
