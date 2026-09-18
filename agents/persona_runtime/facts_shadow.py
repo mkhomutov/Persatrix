@@ -5,12 +5,13 @@ The `RFC 0031 fact-scope amendment
 drops the room (session) wall from the L2 facts tier: a consolidated
 fact is cross-room regardless of subject, with visibility owned by the
 RFC 0037 protection level.  This module is the amendment's **shadow**
-implementation: each sender-bearing turn computes what the widened
-recall *would* have injected — the cross-room delta, passed through the
-same §D gate as the live tiers — and records it as a structured log
-trace, WITHOUT any of it entering the live prompt.  The RFC 0044
+implementation: in ``shadow`` mode each sender-bearing turn computes
+what the widened recall *would* have injected — the cross-room delta,
+passed through the §D gate at the turn's acting classification but
+without the live gate's audience check — and records it as a structured
+log trace, WITHOUT any of it entering the live prompt.  The RFC 0044
 harness captures these traces (``evaluators/persona_driver.py``); the
-PR 4 measurement gate reads them to decide the shadow → live flip.
+PR 4 measurement gate read them to decide the shadow → live flip.
 
 Scope invariants (what the widening does and does not touch):
 
@@ -26,19 +27,14 @@ Scope invariants (what the widening does and does not touch):
   like the live path — the widened read must not weaken the PR 1
   subject-reachability bound.
 
-F-3 posture (the ``sessions="*"`` security pin): the RFC 0031 §D pin
-said the persona-runtime *prompt-context* path never reaches ``"*"``.
-RFC 0049 PR 4 changed it to "no *ungated* widening".  Under
-``memory.facts.cross_room: live`` — the default,
-:data:`~agents.persona_runtime.cross_room.DEFAULT_FACTS_CROSS_ROOM` —
-the live facts recall passes ``"*"``, and every fact it returns goes
-through the RFC 0037 §D gate before the RFC 0017 budget
-(``test_cross_room_live.py`` pins this).  This module is still not a
-prompt-context path — nothing here touches :class:`WorkingMemory`, the
-RFC 0017 budget, the §G manifest, or the reinforcement write; the sole
-output is a log record.  ``test_facts_shadow.py`` pins the
-no-prompt-leak property; ``test_session_recall_default_path.py`` states
-the new pin and documents this module's carve-out.
+F-3 posture (the ``sessions="*"`` security pin): the pin is "no
+*ungated* widening" (see
+:data:`~agents.memory._session_filter.SESSIONS_ALL`).  This module
+deliberately reads all-sessions but is NOT a prompt-context path —
+nothing here touches :class:`WorkingMemory`, the RFC 0017 budget, the
+§G manifest, or the reinforcement write; the sole output is a log
+record.  ``test_facts_shadow.py`` pins the no-prompt-leak property;
+``test_session_recall_default_path.py`` documents the carve-out.
 
 Log-egress bound: the trace names each candidate's ``fact_id`` /
 ``subject`` / ``predicate`` / ``protection_level`` / provenance
@@ -171,15 +167,14 @@ async def emit_facts_shadow(
 ) -> None:
     """Compute and record the turn's L2 cross-room shadow trace.
 
-    Does nothing unless ``mode`` is ``"shadow"``.  Under ``"live"``, the
-    default, the live facts recall already reads every session; under
-    ``"off"`` there is no cross-room pass at all.  In shadow mode: one
-    structured INFO record per turn with a non-empty cross-room delta;
-    quiet turns (no delta, sender-less events, missing store) emit
-    nothing, so single-room deployments see zero log volume.  Runs
-    OUTSIDE the live tier pipeline and never raises — a shadow failure
-    degrades to a WARNING, honouring ``_inject_memory_context``'s "never
-    fail the event" contract.
+    Does nothing unless ``mode`` is ``"shadow"`` (:mod:`.cross_room`
+    says what the other modes do).  In shadow mode: one structured INFO
+    record per turn with a non-empty cross-room delta; quiet turns (no
+    delta, sender-less events, missing store) emit nothing, so
+    single-room deployments see zero log volume.  Runs OUTSIDE the live
+    tier pipeline and never raises — a shadow failure degrades to a
+    WARNING, honouring ``_inject_memory_context``'s "never fail the
+    event" contract.
 
     The §D gate application uses a dedicated :class:`TurnInjectionGate`
     instance whose aggregated log emission is intentionally **not**
