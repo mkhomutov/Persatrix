@@ -12,6 +12,9 @@ widening**:
 * every widened candidate still passes the RFC 0037 §D gate BEFORE the
   RFC 0017 budget — a ``restricted``-stamped row on an internal-acting
   turn is withheld from prompt and manifest alike;
+* only the episodes that reach the prompt are reinforced: one the gate
+  withholds or the budget drops keeps its ``access_count``, so it cannot
+  climb the ranking and hold a recall slot it never fills (ISSUE-0163);
 * live mode emits NO shadow trace — the widened read happens once, on
   the live path (the #783 "fold live+widened into one query"
   follow-up: shadow mode's doubled episodic read is gone in live); and
@@ -48,6 +51,18 @@ _asyncio = pytest.mark.asyncio
 #: Every event in this file acts from room B; rows seeded in ``room-a``
 #: are cross-room relative to it.
 ROOM_A = "room-a"
+ROOM_B = "group:room-b"
+#: A DM the agent held with Alice alone.  Room B adds Bob, so the
+#: audience check withholds a row that came from this DM on a room-B turn.
+DM = "dm:alice:live-test-agent"
+
+#: ISSUE-0163 — the two ways the gate withholds an episode on a room-B
+#: turn: its classification ranks above the turn's, or its source room did
+#: not hold everyone in room B.
+WITHHOLD_CAUSES: dict[str, dict[str, Any]] = {
+    "classification": {"protection_level": "restricted"},
+    "audience": {"source_channel_id": DM},
+}
 
 
 def _channel_event(
@@ -55,14 +70,39 @@ def _channel_event(
     *,
     sender: str = "bob",
     classification: str = "internal",
+    event_type: EventType = EventType.CHANNEL_MESSAGE,
 ) -> AgentEvent:
     return AgentEvent(
-        event_type=EventType.CHANNEL_MESSAGE,
+        event_type=event_type,
         payload={"content": content},
-        channel_id="group:room-b",
+        channel_id=ROOM_B,
         sender_id=sender,
         metadata={"channel_classification": classification},
     )
+
+
+class _Rooms:
+    """A channel-roster fetcher over fixed memberships: room B holds Alice
+    and Bob, the DM holds Alice alone.  Without one, every audience verdict
+    is unknown, and ``live`` admits unknowns."""
+
+    _MEMBERS: dict[str, list[str]] = {
+        ROOM_B: ["alice", "bob", "live-test-agent"],
+        DM: ["alice", "live-test-agent"],
+    }
+
+    async def fetch_members(self, channel_id: str) -> dict[str, Any] | None:
+        members = self._MEMBERS.get(channel_id)
+        if members is None:
+            return None
+        return {
+            "id": channel_id,
+            "name": channel_id,
+            "members": [{"id": member} for member in members],
+        }
+
+    async def fetch_directory(self) -> list[dict[str, Any]] | None:
+        return None
 
 
 @pytest.fixture
@@ -164,7 +204,7 @@ class TestLiveCrossRoomInjection:
         self, fact_store: FactStore, episodic: EpisodicMemory, shadow_logs,
     ):
         """A room-A episode is admissible on a room-B turn (ranked, not
-        walled), reinforced exactly like the pre-promotion live recall."""
+        walled), and reinforced once because it reached the prompt."""
         ep_id = await episodic.store_episode(
             "atlas deployment retro", {"k": "v"},
             importance=0.5, session_id=ROOM_A,
@@ -175,7 +215,9 @@ class TestLiveCrossRoomInjection:
         assert "atlas deployment retro" in _rendered(mixin)
         assert ep_id in {e.entry_id for e in result.manifest}
         row = await episodic.get_episode(ep_id)
-        assert row is not None and row.access_count >= 1
+        assert row is not None
+        assert row.access_count == 1
+        assert row.last_accessed_at is not None
         assert _shadow_traces(shadow_logs) == []
 
     async def test_gate_withholds_restricted_on_internal_turn(
@@ -245,3 +287,107 @@ class TestLiveCrossRoomInjection:
         assert "atlas deployment retro" not in rendered
         assert result.manifest == ()
         assert _shadow_traces(shadow_logs) == []
+
+
+@_asyncio
+class TestOnlyWhatReachedThePromptIsReinforced:
+    """ISSUE-0163.  ``access_count`` multiplies an episode's ranking score,
+    so reinforcing a row it did not use would let the persona rank it
+    higher on every later turn.  The live read used to bump every row it
+    returned before the §D gate and the audience check ran; now the rows
+    the budget admits are bumped after the prompt is assembled, the rule
+    the facts tier already follows."""
+
+    @pytest.mark.parametrize("cause", sorted(WITHHOLD_CAUSES))
+    async def test_withheld_episode_is_not_reinforced(
+        self, fact_store: FactStore, episodic: EpisodicMemory, cause: str,
+    ):
+        """A row the gate withholds, for either reason, stays unreinforced
+        after a turn it ranked into."""
+        withheld = await episodic.store_episode(
+            "atlas deployment retro", {"k": "v"}, importance=0.5,
+            session_id=ROOM_A, **WITHHOLD_CAUSES[cause],
+        )
+        mixin = _build_mixin(fact_store, episodic)
+        mixin.set_roster_fetcher(_Rooms())
+        result = await mixin._inject_memory_context(_channel_event())
+
+        assert "atlas deployment retro" not in _rendered(mixin)
+        assert withheld not in {e.entry_id for e in result.manifest}
+        row = await episodic.get_episode(withheld)
+        assert row is not None
+        assert row.access_count == 0
+        assert row.last_accessed_at is None
+
+    async def test_episode_the_budget_drops_is_not_reinforced(
+        self, fact_store: FactStore, episodic: EpisodicMemory,
+    ):
+        """Passing the gate is not enough: the budget has room for the
+        first line (8 tokens) but not the second (18), and only the first
+        is reinforced."""
+        kept = await episodic.store_episode(
+            "atlas deployment retro", {"k": "v"}, importance=0.9,
+            session_id=ROOM_A,
+        )
+        dropped = await episodic.store_episode(
+            "atlas deployment retro follow-up: owners, dates and the "
+            "rollback plan", {"k": "v"}, importance=0.1, session_id=ROOM_A,
+        )
+        mixin = _build_mixin(fact_store, episodic)
+        mixin._memory_budget_tokens = 12
+        result = await mixin._inject_memory_context(_channel_event())
+
+        assert [e.entry_id for e in result.manifest] == [kept]
+        kept_row = await episodic.get_episode(kept)
+        dropped_row = await episodic.get_episode(dropped)
+        assert kept_row is not None and kept_row.access_count == 1
+        assert dropped_row is not None and dropped_row.access_count == 0
+
+    async def test_withheld_episode_does_not_hold_a_recall_slot(
+        self, fact_store: FactStore, episodic: EpisodicMemory,
+    ):
+        """What the unearned bumps cost.  The withheld row is the only
+        match on two turns; if those turns reinforced it, its score
+        (importance 0.4, ×(1 + ln 3) ≈ 2.1) would beat the five admissible
+        rows' (importance 0.5, ×1) on the third turn, and it would take one
+        of the five recall slots while never reaching the prompt."""
+        withheld = await episodic.store_episode(
+            "atlas zephyr retro", {"k": "v"}, importance=0.4,
+            session_id=ROOM_A, protection_level="restricted",
+        )
+        admissible = [
+            await episodic.store_episode(
+                f"atlas retro note-{i}", {"k": "v"}, importance=0.5,
+                session_id="room-c",
+            )
+            for i in range(5)
+        ]
+        mixin = _build_mixin(fact_store, episodic)
+        for _ in range(2):
+            await mixin._inject_memory_context(_channel_event("zephyr"))
+        result = await mixin._inject_memory_context(_channel_event("atlas"))
+
+        episodic_ids = {e.entry_id for e in result.manifest if e.tier == "episodic"}
+        assert episodic_ids == set(admissible)
+        row = await episodic.get_episode(withheld)
+        assert row is not None and row.access_count == 0
+
+    async def test_walled_recall_still_reinforces_once(
+        self, fact_store: FactStore, episodic: EpisodicMemory,
+    ):
+        """``off`` keeps the walled read, which bumps what it returns; the
+        post-budget bump is for the live read only, so an admitted row is
+        not counted twice.  A mention turn, because on a channel message
+        the channel-history recall bumps the same row as well."""
+        ep_id = await episodic.store_episode(
+            "atlas deployment retro", {"k": "v"}, importance=0.5,
+        )
+        mixin = _build_mixin(fact_store, episodic)
+        mixin._episodic_cross_room = CROSS_ROOM_OFF
+        result = await mixin._inject_memory_context(
+            _channel_event(event_type=EventType.MENTION),
+        )
+
+        assert ep_id in {e.entry_id for e in result.manifest}
+        row = await episodic.get_episode(ep_id)
+        assert row is not None and row.access_count == 1
