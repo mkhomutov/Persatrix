@@ -6,15 +6,15 @@ the RFC 0031 §D session filter, as the episodic default, from hard wall
 to **room-first ranking** — same-room episodes boosted, other-room
 episodes admissible but demoted, every cross-room candidate behind the
 RFC 0037 §D gate.  This module is the amendment's **shadow**
-implementation, the L1 sibling of :mod:`.facts_shadow`: each
-channel-anchored turn re-runs the live episodic recall through the
-room-first-RANKED mode (:func:`~agents.memory.episodic_room_ranked
+implementation, the L1 sibling of :mod:`.facts_shadow`: in ``shadow``
+mode each channel-anchored turn re-runs the live episodic recall through
+the room-first-RANKED mode (:func:`~agents.memory.episodic_room_ranked
 .recall_room_ranked`, same query/limit/``min_score`` as the live call),
 takes the cross-room DELTA (ranked rows the live room-walled recall did
 not return), §D-gates every candidate at the turn's acting
 classification, and records ONE structured log trace — nothing enters
 the live prompt.  The RFC 0044 harness captures the traces
-(``evaluators/persona_driver.py``); the PR 4 measurement gate reads them
+(``evaluators/persona_driver.py``); the PR 4 measurement gate read them
 to decide the shadow → live flip.
 
 Scope invariants:
@@ -109,13 +109,14 @@ async def emit_episodes_shadow(
 ) -> None:
     """Compute and record the turn's L1 cross-room shadow trace.
 
-    One structured INFO record per channel-anchored turn with a
-    non-empty cross-room delta; quiet turns (empty delta, tick-shaped
-    events, ``mode="off"``, missing store) emit nothing, so single-room
-    deployments see zero log volume.  Runs OUTSIDE the live tier
-    pipeline and never raises — a shadow failure degrades to a WARNING,
-    honouring ``_inject_memory_context``'s "never fail the event"
-    contract.
+    Does nothing unless ``mode`` is ``"shadow"`` (:mod:`.cross_room`
+    says what the other modes do).  In shadow mode: one structured INFO
+    record per channel-anchored turn with a non-empty cross-room delta;
+    quiet turns (empty delta, tick-shaped events, missing store) emit
+    nothing, so single-room deployments see zero log volume.  Runs
+    OUTSIDE the live tier pipeline and never raises — a shadow failure
+    degrades to a WARNING, honouring ``_inject_memory_context``'s "never
+    fail the event" contract.
 
     The delta preserves the widened read's boosted-rank ORDER, and each
     candidate carries its ``rank`` (0-based position in the widened

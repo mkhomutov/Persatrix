@@ -339,8 +339,10 @@ class _MemoryContextMixin:
             # one episodic read per turn, like ``off``; ``shadow`` costs
             # two on a channel turn: this walled read plus the widened
             # shadow read); otherwise the RFC 0031 §D wall
-            # (``sessions=None``; ``"*"`` pinned unreachable) with shadow
-            # mode logging the widened delta.
+            # (``sessions=None``; pinned by ``test_off_mode_keeps_the_wall``
+            # in ``test_cross_room_live.py`` and ``TestShadowNeverEntersPrompt``
+            # in ``test_episodes_shadow.py``) with shadow mode logging the
+            # widened delta.
             try:
                 if self._episodic_cross_room == CROSS_ROOM_LIVE:
                     episodes = await recall_room_ranked(
