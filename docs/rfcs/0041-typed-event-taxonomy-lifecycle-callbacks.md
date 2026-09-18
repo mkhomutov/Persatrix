@@ -3,7 +3,7 @@ id: RFC-0041
 title: Typed Event Taxonomy and Lifecycle Callbacks
 summary: Introduce a single ordered stream of typed events per agent turn (ModelOutput / ToolCallEvent / ToolResultEvent / StateDelta / Error / Control) and four named lifecycle callbacks (before_model / after_model / before_tool / after_tool), giving every consumer (channel publish, tracer, structured logger, eval harness, dead-letter) one auditable handle on what happened and giving cross-cutting concerns (recall filtering, wallet leases, prompt redaction, persona quality bar) one place to plug in.
 type: architecture
-status: proposed
+status: implementing
 author: Maksim Khomutov
 created: 2026-05-20
 target: v0.4.0+
@@ -21,7 +21,7 @@ relates_to:
 # RFC 0041 — Typed Event Taxonomy and Lifecycle Callbacks
 
 **Type**: architecture
-**Status**: 📋 Proposed
+**Status**: 🚧 Implementing (Phase 1 — [PR plan](0041-pr-plan.md))
 **Author**: Maksim Khomutov
 **Date**: 2026-05-20
 **Target**: v0.4.0+
@@ -184,7 +184,7 @@ class CallbackModelOutput(TurnEvent):   # a callback's own model call (e.g. a
                                         # output. (Resolves Open Q #3.)
 
 
-class ErrorKind(str, Enum):
+class ErrorKind(StrEnum):
     WALLET_DENIED = "wallet_denied"
     LEASE_CAP = "lease_cap"
     RATE_LIMIT = "rate_limit"
@@ -193,7 +193,7 @@ class ErrorKind(str, Enum):
     INTERNAL = "internal"
 
 
-class ToolErrorKind(str, Enum):
+class ToolErrorKind(StrEnum):
     DENIED = "denied"          # a before_tool veto (maps to Error.kind=tool_denied)
     TIMEOUT = "timeout"
     NOT_FOUND = "not_found"    # unknown tool name
