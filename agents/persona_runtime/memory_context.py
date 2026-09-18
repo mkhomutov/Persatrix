@@ -52,7 +52,10 @@ from .injection_gate import (
     TurnInjectionGate,
     acting_classification_for_event,
 )
-from .memory_assembly import inject_admitted_sections
+from .memory_assembly import (
+    inject_admitted_sections,
+    reinforce_admitted_episodes,
+)
 from .memory_budget import (
     MEMORY_BUDGET_TOKENS,
     MemoryBudget,
@@ -328,18 +331,21 @@ class _MemoryContextMixin:
             # Tier 2 (priority 7): Episodic recall (TICK skip removed —
             # RFC 0017 §D min_score + the PR 5 empty-context short-circuit).
             # ``cross_room: live`` (RFC 0049 PR 4, the promoted default) =
-            # room-first-RANKED recall in ONE widened, reinforcing query
+            # room-first-RANKED recall in ONE widened query
             # (the shadow pass does not run in live mode, so the episodic
             # tier costs one read per turn in every mode); otherwise the
             # RFC 0031 §D wall (``sessions=None``; ``"*"`` pinned
             # unreachable) with shadow mode logging the widened delta.
+            # The live read counts no use: it runs before the §D gate, so
+            # the episodes the budget admits are reinforced after the
+            # allocate-loop instead (ISSUE-0163).
             try:
                 if self._episodic_cross_room == CROSS_ROOM_LIVE:
                     episodes = await recall_room_ranked(
                         self._episodic_memory, query,
                         limit=EPISODIC_RECALL_LIMIT,
                         min_score=DEFAULT_EPISODIC_MIN_SCORE,
-                        reinforce=True,
+                        reinforce=False,
                     )
                 else:
                     episodes = await self._episodic_memory.recall(
@@ -460,6 +466,13 @@ class _MemoryContextMixin:
             rel=rel, channel_episodes=channel_episodes, facts=facts,
             episodes=episodes, notes=notes,
         )
+        # ISSUE-0163: the live read counted no use, so count one for each
+        # episode that reached the prompt.  The walled read (``off`` /
+        # ``shadow``) already counted one for every row it returned.
+        if self._episodic_cross_room == CROSS_ROOM_LIVE:
+            await reinforce_admitted_episodes(
+                self._episodic_memory, budget, agent_id=self.agent_id,
+            )
 
         # Channel-roster tier (F-4, priority 9 — highest). Injected from the
         # roster resolved above, in this position and for group channels
