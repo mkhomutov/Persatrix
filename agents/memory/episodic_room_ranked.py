@@ -29,9 +29,11 @@ Two deliberate differences from :meth:`EpisodicMemory.recall`:
   off their cassettes.  The PR 4 decision (deferred here by PR 3): the
   **promoted live read reinforces**, preserving the pre-promotion
   live-recall contract that access strengthens memory — same UPDATE
-  shape as :meth:`EpisodicMemory.recall`, cross-room rows included
-  (a recalled-and-used episode is a used episode wherever it was
-  formed).
+  shape as :meth:`EpisodicMemory.recall`, cross-room rows included.
+  It counts a use of every row it returns, before the caller's §D gate,
+  audience check and budget choose what the prompt carries, so an
+  episode the gate withholds is counted as used too and climbs the
+  ranking (ISSUE-0163).
 * **Wall → boost.**  ``sessions``/``boost_sessions`` are mutually
   exclusive — enforced at the query helpers themselves since PR 4
   (``_reject_wall_and_boost``); this function always passes
