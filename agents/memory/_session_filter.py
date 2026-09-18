@@ -7,7 +7,7 @@ the predicate across tiers — when each tier owned its own predicate
 the F-3 risk was that one tier silently lost the ``legacy`` carve-out
 or the empty-list guard while the others kept it.
 
-Two functions:
+Four functions:
 
 * :func:`_resolve_session_list` — validate ``sessions``, extend with
   the always-visible ``legacy`` carve-out, and return either a
@@ -17,6 +17,9 @@ Two functions:
 * :func:`session_in_clause` — given a resolved list (or ``None``) and
   a column reference, return the ``" AND col IN (?, ?, ...)"`` SQL
   fragment + params to append to a query.  ``None`` → empty fragment.
+* :func:`session_in_predicate` and :func:`session_boost_expr` — the
+  same list as a bare ``col IN (...)`` predicate, and as the ranking
+  boost the room-first-ranked episodic read uses instead of a filter.
 
 The carve-out (``legacy`` always visible in modes ``None`` / list) is
 load-bearing for the "ship Phase 2 with no backfill" property: pre-RFC
@@ -47,7 +50,7 @@ Both shapes produce equivalent behaviour today because
 into its ``_session_id`` and into the embedded
 :attr:`EpisodicMemory._active_session_id` from the same env-var with
 no intervening await — pinned by
-``test_session_recall_default_path.py::TestFacadeAndTierSessionSnapshotsAgreeOnConstruction``.
+``test_session_id_facade_surfaces.py::TestFacadeAndTierSessionSnapshotsAgreeOnConstruction``.
 A future fifth read method should pick the shape that matches whether
 its leaf recall holds its own snapshot; both are correct.
 
@@ -70,10 +73,19 @@ __all__ = [
     "session_in_predicate",
 ]
 
-#: The ``sessions="*"`` sentinel — CLI/debug mode only.  The
-#: persona-runtime default context path is pinned in PR 4 never to
-#: reach this value (`RFC 0031 §Security Considerations
-#: <../../docs/rfcs/0031-per-session-namespacing-channels.md#security-considerations>`_).
+#: The ``sessions="*"`` sentinel: no session filter, so a read returns
+#: rows from every session.  Epoch and principal filters still apply.
+#: The rule is "no *ungated* widening": the facts recall passes it when
+#: ``memory.facts.cross_room`` is ``live``, and every fact it returns
+#: goes through the RFC 0037 §D gate before the prompt
+#: (``test_cross_room_live.py``).  Of the persona recall tiers only facts
+#: and episodes read across sessions; the others stay session-scoped,
+#: notes above all, because a note carries no source channel for the
+#: audience check to judge.  ``test_cross_session_read_sites.py`` lists
+#: every caller and what guards it.  The operator debug verb RFC 0031
+#: planned for it (`§Security Considerations
+#: <../../docs/rfcs/0031-per-session-namespacing-channels.md#security-considerations>`_)
+#: is still unbuilt (ISSUE-0086).
 SESSIONS_ALL: Final[str] = "*"
 
 
