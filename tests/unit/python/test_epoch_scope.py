@@ -8,8 +8,9 @@ long-lived tier object.
 
 Every read uses ``sessions="*"`` to neutralise the *session* axis so the
 *epoch* axis is the only discriminator under test — proving the two
-scopes are independent and that epoch isolation holds even on the
-CLI/debug "all sessions" path (epoch has no ``"*"`` of its own).
+scopes are independent and that epoch isolation holds even on an
+all-sessions read, like the live facts recall's (epoch has no ``"*"`` of
+its own).
 
 The load-bearing property (same as the principal axis, vs. the session
 axis): **strict equality, no carve-out**.  A row written under one epoch
