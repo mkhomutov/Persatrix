@@ -13,7 +13,7 @@ already exists since migration v8 (RFC 0026); PR 3 is recall-only.
   surface — pre-RFC fact rows persist with ``session_id='legacy'`` and
   must stay visible after the persona upgrades into v0.3.5).
 * ``sessions=["a", "b"]`` → named list, plus the ``legacy`` carve-out.
-* ``sessions="*"`` → no filter (CLI / debug sentinel).
+* ``sessions="*"`` → no filter (``SESSIONS_ALL``).
 * ``sessions=[]`` → ``ValueError`` (§D guard).
 
 Active session resolved once at tier construction via

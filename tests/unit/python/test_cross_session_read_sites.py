@@ -33,7 +33,8 @@ CROSS_SESSION_READ_SITES: dict[tuple[str, str], str] = {
     ("agents/persona_runtime/memory_context.py",
      "_MemoryContextMixin._inject_memory_context"):
         "the live facts recall, §D-gated before the budget — "
-        "test_cross_room_live.py::TestLiveCrossRoomInjection",
+        "test_cross_room_live.py::TestLiveCrossRoomInjection and "
+        "tests/integration/test_prompt_path_sessions.py",
     ("agents/memory/episodic_room_ranked.py", "recall_room_ranked"):
         "live: test_cross_room_live.py::TestLiveCrossRoomInjection; "
         "shadow: test_episodes_shadow.py::TestShadowNeverEntersPrompt",
