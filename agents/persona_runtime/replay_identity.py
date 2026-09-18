@@ -121,11 +121,15 @@ def replay_span_identity(
       ambient instead of off the record.
     * ``session_id`` — same shape, one axis over, and missed the same way
       (PR B2 review).  It is written from ``interaction.session_id`` and
-      walled by ``session_in_clause`` on every episodic read, with a
-      carve-out for ``legacy`` only.  An operator rotating
-      ``PERSATRIX_SESSION_ID`` between boots would otherwise recompute an
-      identical digest, skip the derivation, and never be able to read the
-      row the earlier session wrote.
+      walled by ``session_in_clause`` on the channel-history read, and on
+      episodic recall when ``memory.episodic.cross_room`` is ``off`` or
+      ``shadow``, with a carve-out for ``legacy`` only.  Under ``live``,
+      episodic recall reads every session and only ranks the current one
+      first.  An operator rotating ``PERSATRIX_SESSION_ID`` between boots
+      would otherwise recompute an identical digest, skip the derivation,
+      and the walled reads would never see the row the earlier session
+      wrote.  (Under ``live`` that earlier row stays recallable, so after
+      a rotation it can be recalled beside the re-derived copy.)
     * ``protection_level`` — the RFC 0037 §C capture the row is stamped
       with, gating readability at the §D wall.  Handed in by the close
       path rather than derived here, so the value in the digest is
