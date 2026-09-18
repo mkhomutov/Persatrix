@@ -14,14 +14,17 @@ retrieval leg of the RFC 0049 scenario-2 capture path.
 
 Scope discipline (PR 1 vs PR 2)
 -------------------------------
-The query applies the SAME agent / session §D-default / principal /
-epoch filters as :meth:`FactStore.recall` — it adds no scope of its
-own.  Note what this does **not** say: the facts tier has never
-carried a room filter (``source_channel_id`` is provenance, not a
-predicate, on either path), so same-level cross-room fact visibility
-is the pre-existing behaviour governed by the RFC 0037 §D egress gate,
-not something this module opens or closes.  RFC 0049 PR 2 owns the
-explicit L2 widening and its shadow-mode plumbing.
+The query applies the SAME agent / session / principal / epoch
+filters as :meth:`FactStore.recall` — the session filter follows the
+caller's ``sessions`` (the §D default, a list, or ``"*"`` for none) —
+and adds no scope of its own.  Note what this does **not** say: the
+facts tier has never carried a room filter (``source_channel_id`` is
+provenance, not a predicate, on either path), so same-level cross-room
+fact visibility is the pre-existing behaviour governed by the RFC 0037
+§D egress gate, not something this module opens or closes.  RFC 0049
+PR 2 added the explicit L2 widening (``"*"``) as a shadow pass; PR 4
+made it the prompt path's read under ``memory.facts.cross_room: live``
+(see :mod:`agents.persona_runtime.cross_room`).
 
 The predicate filter enumerates :data:`TOPIC_PREDICATES` as an IN-list
 (closed allowlist ⇒ equality set, no LIKE pattern) so the SQL cannot

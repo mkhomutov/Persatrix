@@ -345,36 +345,38 @@ class TestCrossSessionContinuityByOptIn:
         )
 
 
-# ─── L5 follow-up: real _inject_memory_context never sees "*" ──
+# ─── L5 follow-up: the walled recall call shape never sees "*" ──
 
 
 class TestInjectMemoryContextDefaultPath:
-    """End-to-end runtime pin: a real ``_inject_memory_context``
-    invocation on the default path never carries ``sessions="*"`` into
-    any tier recall — the L5 follow-up from PR 451 deep-review.
+    """Runtime pin on the room-walled recall call shape — the L5
+    follow-up from PR 451 deep-review.
 
-    Replaces the synthetic spy in
-    :file:`tests/unit/python/test_session_recall_default_path.py::TestPersonaRuntimeCallSitesDoNotPassAllSentinel::test_episodic_recall_default_path_never_sees_star`
-    which drove ``EpisodicMemory.recall`` directly with the same kwarg
-    shape ``_inject_memory_context`` uses, rather than the mixin itself.
-    A future edit to the prompt-assembly pipeline that wires
-    ``sessions="*"`` into the mixin would not have tripped the synthetic
-    test if it bypassed the spied recall.  This integration test drives
-    the real mixin through its public boundary and spies on the leaf-
-    module recall.
+    It does not build the mixin.  It replays, against a real
+    ``EpisodicMemory``, the tier calls the walled branch of
+    ``_inject_memory_context`` makes (``cross_room`` ``off`` or
+    ``shadow``) and asserts the spied ``recall`` never sees
+    ``sessions="*"``.  The stand-in event's ``event_type`` is a plain
+    string, so the channel-history helper returns before it recalls,
+    and ``recall_notes`` is not spied: the one call checked is the
+    walled episodic recall with ``sessions=None``.
+
+    Under ``cross_room: live`` the mixin itself passes ``"*"`` to the
+    facts recall and room-ranks episodes, both behind the RFC 0037 §D
+    gate by design; that path, and the wall under ``off``, are pinned
+    in ``tests/unit/python/test_cross_room_live.py``.
     """
 
     async def test_real_inject_memory_context_never_passes_star(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         # The persona-runtime mixin lives on _LLMPersonaAgent; building
-        # the full agent takes a config + LLM client.  We exercise the
-        # mixin's recall calls directly via the EpisodicMemory tier and
-        # the prompt-assembly free functions
-        # (``recall_channel_episodes`` etc.) that the mixin dispatches
-        # through — same call shape, no agent harness needed.  The
-        # source-level scan in test_session_recall_default_path.py is
-        # the cheap defence; this is the runtime defence.
+        # the full agent takes a config + LLM client, so this replays the
+        # walled branch's recall calls on the EpisodicMemory tier and the
+        # prompt-assembly free functions (``recall_channel_episodes``
+        # etc.) instead — no agent harness needed.  The source-level scan
+        # in test_session_recall_default_path.py covers the prompt-path
+        # modules; test_cross_room_live.py covers the live branch.
         from agents.memory.episodic import EpisodicMemory
         from agents.persona_runtime.channel_history import (
             recall_channel_episodes,
@@ -394,10 +396,10 @@ class TestInjectMemoryContextDefaultPath:
 
             monkeypatch.setattr(mem, "recall", spy)
 
-            # Drive recall through the persona-runtime free function
-            # (the channel_history.py boundary _inject_memory_context
-            # uses).  A synthetic ``AgentEvent``-shaped object exercises
-            # the same kwarg shape.
+            # Call the channel-history helper _inject_memory_context uses.
+            # The stand-in's ``event_type`` is a plain string, not
+            # ``EventType.CHANNEL_MESSAGE``, so the helper returns before
+            # it recalls.
             class _Evt:
                 event_type = "CHANNEL_MESSAGE"
                 channel_name = "lake"
@@ -411,8 +413,8 @@ class TestInjectMemoryContextDefaultPath:
                 mem, cast(AgentEvent, _Evt()), agent_id="ember",
             )
 
-            # Also exercise the direct mixin call paths from
-            # memory_context.py (the episodic + notes recalls).
+            # The walled branch's episodic recall (the call the spy sees)
+            # and the notes recall (``recall_notes``, not spied).
             await mem.recall("hello", limit=5, min_score=0.2, sessions=None)
             await mem.recall_notes(
                 "hello", limit=5, min_score=0.2, sessions=None,
