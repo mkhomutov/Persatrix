@@ -122,6 +122,22 @@ async def _seed_fact(store: FactStore, **kwargs: Any) -> str:
     return await store.store(**params)
 
 
+#: The restricted room-A episode the two gate tests share.  Its summary
+#: holds every word of the turn's query (``_channel_event``'s default):
+#: the full-text search needs all of them, so an episode missing one is
+#: never recalled, and "not in the prompt" would pass with no gate at all.
+SECRET_EPISODE_SUMMARY = "atlas deployment retro sealed minutes"
+#: The words only that episode carries — what the gate tests look for.
+SECRET_EPISODE_FRAGMENT = "sealed minutes"
+
+
+async def _seed_secret_episode(episodic: EpisodicMemory) -> str:
+    return await episodic.store_episode(
+        SECRET_EPISODE_SUMMARY, {"k": "v"}, importance=0.9,
+        session_id=ROOM_A, protection_level="restricted",
+    )
+
+
 def _rendered(mixin) -> str:
     return "\n".join(s.content for s in mixin._working_memory._sections)
 
@@ -188,10 +204,7 @@ class TestLiveCrossRoomInjection:
             fact_store, object="secret-cross-room-fact",
             protection_level="restricted",
         )
-        secret_ep = await episodic.store_episode(
-            "atlas secret retro", {"k": "v"}, importance=0.9,
-            session_id=ROOM_A, protection_level="restricted",
-        )
+        secret_ep = await _seed_secret_episode(episodic)
         open_fact = await _seed_fact(
             fact_store, predicate="prefers", object="open-cross-room-fact",
         )
@@ -203,7 +216,7 @@ class TestLiveCrossRoomInjection:
         rendered = _rendered(mixin)
         assert "open-cross-room-fact" in rendered
         assert "secret-cross-room-fact" not in rendered
-        assert "atlas secret retro" not in rendered
+        assert SECRET_EPISODE_FRAGMENT not in rendered
         manifest_ids = {e.entry_id for e in result.manifest}
         assert open_fact in manifest_ids
         assert secret_fact not in manifest_ids
@@ -212,18 +225,25 @@ class TestLiveCrossRoomInjection:
     async def test_restricted_turn_receives_restricted_rows(
         self, fact_store: FactStore, episodic: EpisodicMemory,
     ):
-        """The withhold above is the gate working, not the wall coming
-        back: the same rows inject on a turn acting at their level."""
+        """The withhold above is the gate working — not the wall coming
+        back, and not a row the recall never returned: the same fact and
+        episode inject on a turn acting at their level."""
         secret_fact = await _seed_fact(
             fact_store, object="secret-cross-room-fact",
             protection_level="restricted",
         )
+        secret_ep = await _seed_secret_episode(episodic)
         mixin = _build_mixin(fact_store, episodic)
         result = await mixin._inject_memory_context(
             _channel_event(classification="restricted"),
         )
-        assert "secret-cross-room-fact" in _rendered(mixin)
-        assert secret_fact in {e.entry_id for e in result.manifest}
+
+        rendered = _rendered(mixin)
+        assert "secret-cross-room-fact" in rendered
+        assert SECRET_EPISODE_FRAGMENT in rendered
+        manifest_ids = {e.entry_id for e in result.manifest}
+        assert secret_fact in manifest_ids
+        assert secret_ep in manifest_ids
 
     async def test_off_mode_keeps_the_wall(
         self, fact_store: FactStore, episodic: EpisodicMemory, shadow_logs,
