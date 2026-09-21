@@ -16,7 +16,8 @@ RFC 0031 §D session filter becomes a ranking cue instead of a wall:
 * the read is SIDE-EFFECT-FREE by default — no ``access_count`` bump —
   which is what lets the shadow pass observe without perturbing live
   ranking, while ``reinforce=True`` (the PR 4 live prompt path) applies
-  exactly the :meth:`EpisodicMemory.recall` bump; and
+  exactly the :meth:`EpisodicMemory.recall` bump — on every row it
+  returns, before the caller gates it (ISSUE-0163); and
 * ``sessions`` / ``boost_sessions`` are mutually exclusive at the query
   helpers themselves (the #783 either-wall-or-boost follow-up).
 """
@@ -196,8 +197,9 @@ class TestRecallContract:
     ):
         """``reinforce=True`` (the PR 4 live prompt path) applies the
         :meth:`EpisodicMemory.recall` access bump to every returned row
-        — cross-room included (a used episode is a used episode
-        wherever it was formed) — and refreshes the in-memory objects."""
+        — cross-room included, and before the caller's §D gate, audience
+        check and budget choose what the prompt carries (ISSUE-0163) —
+        and refreshes the in-memory objects."""
         same = await _seed(memory, session_id=ROOM)
         cross = await _seed(memory, session_id=OTHER_ROOM)
         with session_scope(ROOM):
