@@ -23,7 +23,10 @@ What this file pins:
 * The ``legacy`` carve-out is preserved through the facade — a row
   tagged ``session_id='legacy'`` is visible from every session.
 * ``sessions="*"`` (``SESSIONS_ALL``) surfaces every session via the
-  facade when a caller asks for it; the facade default never does.
+  facade when a caller asks for it; the ``retrieve_relevant`` /
+  ``retrieve_procedures`` default never does.  (``read_from_pool``
+  defaults to ``"*"`` by design, ISSUE-0078, and is pinned in the
+  default-path file below.)
 
 The complementary pins live in
 :file:`tests/unit/python/test_session_recall_default_path.py` and

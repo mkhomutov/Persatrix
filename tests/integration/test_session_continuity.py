@@ -16,8 +16,9 @@ goal:
   default single-session recall **is** the dementia-test recall path).
 * **Cross-session continuity by opt-in** — an explicit
   ``sessions=[arc1, arc2]`` reads across both arcs (the bridge for
-  long-arc personas that span multiple sessions; the operator
-  ``persatrix memory recall`` verb planned for it is unbuilt, ISSUE-0086).
+  long-arc personas that span multiple sessions).  It has no operator
+  verb: the one RFC 0031 planned, ``persatrix memory recall
+  --all-sessions``, is for ``"*"`` and is unbuilt (ISSUE-0086).
 
 Complements the unit-level §D tier pins:
 
@@ -43,75 +44,8 @@ gate — pinned by :mod:`tests.integration.test_prompt_path_sessions`.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from pathlib import Path
-
-import pytest
-
-from agents.memory.facade import MemoryStore
-from agents.memory.facts import FactStore
-from agents.memory.notes import NoteStore
-from agents.memory.relationship import RelationshipMemory
-
-
-class _Bundle:
-    """Construction-time snapshot of every persona-memory tier for one
-    operator session.  Mirrors how :class:`agents.base.BaseAgent` /
-    persona-runtime ``initialize_memory`` wire the tiers under a single
-    resolved ``PERSATRIX_SESSION_ID``.
-    """
-
-    def __init__(self, facade, rels, facts, notes):
-        self.facade: MemoryStore = facade
-        self.rels: RelationshipMemory = rels
-        self.facts: FactStore = facts
-        self.notes: NoteStore = notes
-
-
-@pytest.fixture
-async def facade_factory(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> AsyncIterator:
-    """Build a :class:`_Bundle` keyed to a named ``PERSATRIX_SESSION_ID``.
-
-    Every tier shares the same ``db_path`` — the cross-run state-bleed
-    surface this test exists to close.  The env-var snapshot is
-    captured at construction; a subsequent ``_build`` call overrides
-    the env var but already-built bundles keep their snapshot.
-
-    The facade (:class:`MemoryStore`) is exercised for the
-    :meth:`retrieve_relevant` / :meth:`store_observation` surface only;
-    relationships / facts / notes are constructed alongside it because
-    the RFC 0029 facade does not expose those tiers — persona-runtime
-    ``initialize_memory`` wires them through the agent harness, but
-    the recall semantics under test are tier-level and the parallel
-    construction is the lightest fixture that exercises them.
-    """
-    db_path = tmp_path / "shared.db"
-    bundles: list[_Bundle] = []
-
-    async def _build(session_id: str, agent_id: str = "ember-owl") -> _Bundle:
-        monkeypatch.setenv("PERSATRIX_SESSION_ID", session_id)
-        fac = MemoryStore(agent_id=agent_id, db_path=str(db_path))
-        await fac.initialize()
-        rels = RelationshipMemory(agent_id=agent_id, db_path=str(db_path))
-        await rels.initialize()
-        facts = FactStore(agent_id=agent_id, db_path=str(db_path))
-        await facts.initialize()
-        # The notes tier rides on EpisodicMemory's connection; reuse
-        # the facade's underlying tier rather than building a parallel
-        # NoteStore that would race on the shared DB file.
-        notes = fac._episodic._note_store
-        assert notes is not None
-        bundles.append(_Bundle(fac, rels, facts, notes))
-        return bundles[-1]
-
-    yield _build
-    for b in bundles:
-        await b.facade.close()
-        await b.rels.close()
-        await b.facts.close()
-
+# ``facade_factory`` (one session's tiers on a shared database) comes from
+# ``_session_tiers_helpers.py`` through ``conftest.py``.
 
 # ─── Single-session arc: continuity within the session ──────
 

@@ -84,8 +84,15 @@ PROMPT_CONTEXT_RECALL_MODULES = (
     # note carries no source channel (``source_channel_id`` is always
     # NULL), so the ISSUE-0132 audience check has nothing to judge it by
     # (``AUDIENCE_TIERS`` leaves notes out).  Widened, a note written in
-    # a DM would pass the rank gate into a group room's prompt.
+    # a DM would pass the rank gate into a group room's prompt.  This
+    # scan sees only a ``"*"`` written in the file; a width handed down
+    # from ``memory_context.py`` is caught at runtime, by
+    # ``tests/integration/test_prompt_path_sessions.py``.
     Path("agents/persona_runtime/notes_section.py"),
+    # ``memory_tools.py`` holds the persona's other notes read, the
+    # always-dispatchable ``recall_notes`` tool.  Its rows reach the LLM
+    # as a tool result, so the same notes rule holds there.
+    Path("agents/tools/memory_tools.py"),
     # ``agents/base.py`` is the task-agent recall site
     # (``_augment_system_prompt_with_memory`` at the
     # ``self.memory.retrieve_relevant`` call): the integration test
@@ -140,7 +147,9 @@ class TestPersonaRuntimeNeverReachesAllSessions:
             "re-introduces F-3.  No module listed here may pick ``\"*\"`` "
             "itself; the prompt path's gated widenings are decided in "
             "memory_context.py, and test_cross_session_read_sites.py lists "
-            "each cross-session read with the test that guards it."
+            "each cross-session read with the test that guards it.  Notes "
+            "are the exception: no gate makes a widened note safe, so a "
+            "notes read stays session-scoped wherever the width is chosen."
         )
 
 
