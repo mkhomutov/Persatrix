@@ -335,7 +335,10 @@ class _MemoryContextMixin:
             # RFC 0017 §D min_score + the PR 5 empty-context short-circuit).
             # ``cross_room: live`` (RFC 0049 PR 4, the promoted default) =
             # room-first-RANKED recall in ONE widened, reinforcing query
-            # (the shadow pass does not run in live mode, so live costs
+            # (it counts a use of every row it returns, before the gate
+            # and the budget below choose what the prompt carries —
+            # ISSUE-0163;
+            # the shadow pass does not run in live mode, so live costs
             # one episodic read per turn, like ``off``; ``shadow`` costs
             # two on a channel turn: this walled read plus the widened
             # shadow read); otherwise the RFC 0031 §D wall

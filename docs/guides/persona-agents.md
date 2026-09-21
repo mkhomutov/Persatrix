@@ -528,7 +528,10 @@ A single wake of `ember-owl` after receiving a pull-request event from
 2. **Episodic recall** — `_inject_memory_context` queries
    `episodic_memory.recall("code review iron-fox", limit=10)`.
    BM25 returns the top matches; their `access_count` is incremented so
-   frequently-used memories outrank stale ones on later queries.
+   frequently-recalled memories outrank stale ones on later queries. The
+   bump lands on every row the read returns, before the gate and the budget
+   below decide what the prompt carries — including rows they drop
+   ([ISSUE-0163](../issues/ISSUE-0163-withheld-episodes-reinforced-before-the-gate.md)).
 3. **Relationship context** — `relationship_memory.get_relationship_summary("iron-fox")`
    returns `trust_score=0.9` plus recent interactions. Because 0.9 is well
    away from neutral, the section is injected at priority 8.
