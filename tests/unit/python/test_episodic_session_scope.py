@@ -13,8 +13,8 @@ but every read still surfaces every session's rows.  PR 2 closes that:
   visible ``legacy`` carve-out (the §D shape the persona-runtime gets
   with no explicit kwarg — this is the F-3 closer).
 * ``sessions=["a", "b"]`` → named list, plus the ``legacy`` carve-out.
-* ``sessions="*"`` → no filter (CLI / debug sentinel; the
-  persona-runtime context path is pinned in PR 4 not to reach this).
+* ``sessions="*"`` → no filter (``SESSIONS_ALL``).  No prompt-path read
+  of these tiers passes it; the live episodic read ranks by room instead.
 * ``sessions=[]`` → ``ValueError`` (§D guard against the silent
   legacy-only collapse — an empty list is never "no constraint").
 
@@ -140,7 +140,7 @@ class TestActiveSessionResolution:
 
     Why on the tier and not only on the facade: the persona-runtime
     memory-context path reads ``EpisodicMemory.recall`` directly
-    (the explicit comment at :file:`agents/memory/episodic.py:335`),
+    (the explicit comment in :meth:`EpisodicMemory.recall`),
     bypassing :class:`agents.memory.MemoryStore`.  If the active session
     were resolved only on the facade, the ``sessions=None`` default
     on the persona-direct path would collapse to legacy-only and F-3
@@ -292,8 +292,8 @@ class TestEpisodicRecallSpanSessionAttribute:
 class TestNotesRecallSessionFilter:
     """Mirrors :class:`TestEpisodicRecallSessionFilter` on the notes tier.
 
-    Notes are recalled into the persona prompt at
-    :file:`agents/persona_runtime/memory_context.py:331`; with no
+    Notes are recalled into the persona prompt by
+    :func:`agents.persona_runtime.notes_section.recall_notes_for_event`; with no
     session filter on the notes tier, F-3 stays open on the notes
     surface even after the episodic tier is fixed.
     """

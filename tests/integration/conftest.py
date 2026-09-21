@@ -1,5 +1,10 @@
 import pytest
 
+# Re-exported so test files can request ``facade_factory`` without
+# importing it; a by-name import in a test file trips ruff F811 on every
+# fixture parameter (the ``tests/unit/python/conftest.py`` precedent).
+from ._session_tiers_helpers import facade_factory  # noqa: F401
+
 
 @pytest.fixture(autouse=True)
 def _resolvable_summarization_model(monkeypatch: pytest.MonkeyPatch) -> None:
