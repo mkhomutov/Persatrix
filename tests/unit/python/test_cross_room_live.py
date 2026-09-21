@@ -34,6 +34,7 @@ from agents.memory.facts import FactStore
 from agents.persona_runtime.cross_room import (
     CROSS_ROOM_LIVE,
     CROSS_ROOM_OFF,
+    CROSS_ROOM_SHADOW,
 )
 from agents.persona_runtime.episodes_shadow import (
     SHADOW_LOGGER_NAME as EPISODES_SHADOW_LOGGER,
@@ -45,13 +46,16 @@ from agents.persona_types import AgentEvent, EventType
 
 _asyncio = pytest.mark.asyncio
 
+#: Every turn's query: the harness renders an event as its content.
+_QUERY = "atlas deployment retro"
+
 #: Every event in this file acts from room B; rows seeded in ``room-a``
 #: are cross-room relative to it.
 ROOM_A = "room-a"
 
 
 def _channel_event(
-    content: str = "atlas deployment retro",
+    content: str = _QUERY,
     *,
     sender: str = "bob",
     classification: str = "internal",
@@ -122,6 +126,69 @@ async def _seed_fact(store: FactStore, **kwargs: Any) -> str:
     return await store.store(**params)
 
 
+#: The words only the restricted room-A episode carries — what the gate
+#: tests look for in the prompt.
+RESTRICTED_EPISODE_FRAGMENT = "sealed minutes"
+
+
+async def _seed_gate_rows(
+    fact_store: FactStore, episodic: EpisodicMemory,
+) -> tuple[str, str, str]:
+    """Seed the rows both gate tests share, so their two turns differ only
+    in the acting classification.  Returns the ids of a restricted fact, a
+    restricted episode and an open fact, all from room A."""
+    restricted_fact = await _seed_fact(
+        fact_store, object="secret-cross-room-fact",
+        protection_level="restricted",
+    )
+    # The summary opens with the whole query: the full-text search needs
+    # every query word, and the fallback used without it needs the query
+    # as one unbroken run of text.  The score floor also drops as the
+    # store grows (ISSUE-0159), so the gate test checks the gate judged
+    # the episode.  Real restricted episodes carry an interaction id (the
+    # close path sets one); without it, a withheld episode skips the §E
+    # projection lookup.
+    restricted_ep = await episodic.store_episode(
+        f"{_QUERY} {RESTRICTED_EPISODE_FRAGMENT}", {"k": "v"},
+        importance=0.9, session_id=ROOM_A, protection_level="restricted",
+        interaction_id="ix-restricted",
+    )
+    # Not ``works_at``: with the restricted fact's subject, predicate and
+    # room it would supersede that fact, which would then never be recalled.
+    open_fact = await _seed_fact(
+        fact_store, predicate="prefers", object="open-cross-room-fact",
+    )
+    return restricted_fact, restricted_ep, open_fact
+
+
+@pytest.fixture
+def gates(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
+    """Every §D gate a turn builds, kept so a test can read what it judged.
+
+    A row missing from the prompt proves nothing alone: the recall may
+    never have returned it.  The gate's decisions show it was a candidate
+    on that very turn, and whether the gate let it through."""
+    from agents.persona_runtime import memory_context
+
+    built: list[Any] = []
+
+    class _Recording(memory_context.TurnInjectionGate):
+        def __init__(self, **kwargs: Any) -> None:
+            super().__init__(**kwargs)
+            built.append(self)
+
+    monkeypatch.setattr(memory_context, "TurnInjectionGate", _Recording)
+    return built
+
+
+def _judged(
+    gates: list[Any], tier: str, id_attr: str = "id",
+) -> dict[str, bool]:
+    """The turn's one gate: each ``tier`` candidate's id → admitted."""
+    (gate,) = gates
+    return {getattr(e, id_attr): ok for e, ok in gate.decisions(tier)}
+
+
 def _rendered(mixin) -> str:
     return "\n".join(s.content for s in mixin._working_memory._sections)
 
@@ -179,31 +246,27 @@ class TestLiveCrossRoomInjection:
         assert _shadow_traces(shadow_logs) == []
 
     async def test_gate_withholds_restricted_on_internal_turn(
-        self, fact_store: FactStore, episodic: EpisodicMemory,
+        self, fact_store: FactStore, episodic: EpisodicMemory, gates,
     ):
         """No ungated widening: a ``restricted``-stamped cross-room fact
         and episode are withheld from an internal-acting turn — prompt
         AND manifest — while same-level rows inject."""
-        secret_fact = await _seed_fact(
-            fact_store, object="secret-cross-room-fact",
-            protection_level="restricted",
-        )
-        secret_ep = await episodic.store_episode(
-            "atlas secret retro", {"k": "v"}, importance=0.9,
-            session_id=ROOM_A, protection_level="restricted",
-        )
-        open_fact = await _seed_fact(
-            fact_store, predicate="prefers", object="open-cross-room-fact",
+        secret_fact, secret_ep, open_fact = await _seed_gate_rows(
+            fact_store, episodic,
         )
         mixin = _build_mixin(fact_store, episodic)
         result = await mixin._inject_memory_context(
             _channel_event(classification="internal"),
         )
 
+        # Both were recalled and withheld on this very turn, so the
+        # absences below are the gate's doing, whatever the store holds.
+        assert _judged(gates, "facts", "fact_id").get(secret_fact) is False
+        assert _judged(gates, "episodic").get(secret_ep) is False
         rendered = _rendered(mixin)
         assert "open-cross-room-fact" in rendered
         assert "secret-cross-room-fact" not in rendered
-        assert "atlas secret retro" not in rendered
+        assert RESTRICTED_EPISODE_FRAGMENT not in rendered
         manifest_ids = {e.entry_id for e in result.manifest}
         assert open_fact in manifest_ids
         assert secret_fact not in manifest_ids
@@ -212,18 +275,50 @@ class TestLiveCrossRoomInjection:
     async def test_restricted_turn_receives_restricted_rows(
         self, fact_store: FactStore, episodic: EpisodicMemory,
     ):
-        """The withhold above is the gate working, not the wall coming
-        back: the same rows inject on a turn acting at their level."""
-        secret_fact = await _seed_fact(
-            fact_store, object="secret-cross-room-fact",
-            protection_level="restricted",
-        )
+        """The withhold above is the gate working — not the wall coming
+        back, and not a row the recall never returned: the same fact and
+        episode inject on a turn acting at their level."""
+        secret_fact, secret_ep, _ = await _seed_gate_rows(fact_store, episodic)
         mixin = _build_mixin(fact_store, episodic)
         result = await mixin._inject_memory_context(
             _channel_event(classification="restricted"),
         )
-        assert "secret-cross-room-fact" in _rendered(mixin)
-        assert secret_fact in {e.entry_id for e in result.manifest}
+
+        rendered = _rendered(mixin)
+        manifest_ids = {e.entry_id for e in result.manifest}
+        # One comparison, so a failure reports all four at once.
+        seen = {
+            "fact in prompt": "secret-cross-room-fact" in rendered,
+            "episode in prompt": RESTRICTED_EPISODE_FRAGMENT in rendered,
+            "fact in manifest": secret_fact in manifest_ids,
+            "episode in manifest": secret_ep in manifest_ids,
+        }
+        assert seen == dict.fromkeys(seen, True)
+
+    @pytest.mark.parametrize(
+        ("mode", "reads"), [(CROSS_ROOM_LIVE, 0), (CROSS_ROOM_SHADOW, 1)],
+    )
+    async def test_live_mode_skips_the_shadow_episode_read(
+        self, fact_store: FactStore, episodic: EpisodicMemory,
+        monkeypatch: pytest.MonkeyPatch, mode: str, reads: int,
+    ):
+        """Live mode reads the widened episodes once, on the live path.  The
+        no-trace checks above cannot see a second read — in live mode the
+        shadow pass finds nothing new to log — so this counts the shadow
+        pass's own reads; ``shadow`` mode shows the count moves."""
+        from agents.persona_runtime import episodes_shadow
+
+        calls: list[str] = []
+
+        async def _spy(*args: Any, **kwargs: Any) -> list[Any]:
+            calls.append("widened read")
+            return []
+
+        monkeypatch.setattr(episodes_shadow, "recall_room_ranked", _spy)
+        mixin = _build_mixin(fact_store, episodic)
+        mixin._episodic_cross_room = mode
+        await mixin._inject_memory_context(_channel_event())
+        assert len(calls) == reads
 
     async def test_off_mode_keeps_the_wall(
         self, fact_store: FactStore, episodic: EpisodicMemory, shadow_logs,
