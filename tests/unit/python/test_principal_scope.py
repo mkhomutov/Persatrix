@@ -8,8 +8,8 @@ long-lived tier object.
 
 Every read uses ``sessions="*"`` to neutralise the *session* axis so the
 *principal* axis is the only discriminator under test — proving the two
-scopes are independent and that principal isolation holds even on the
-CLI/debug "all sessions" path.
+scopes are independent and that principal isolation holds even on an
+all-sessions read, like the live facts recall's.
 
 The load-bearing property (vs. the session axis): **strict equality, no
 carve-out**.  A row owned by one principal is invisible to every other,

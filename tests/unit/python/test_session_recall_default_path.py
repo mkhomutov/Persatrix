@@ -2,16 +2,16 @@
 
 The §D security guarantee this file pins: the persona-runtime default
 context path **must never reach** ``sessions="*"`` (the all-sessions
-debug mode) *ungated* — wiring ``"*"`` into a prompt context
-re-introduces F-3.  (Since the RFC 0049 PR 4 promotion the
+sentinel, ``SESSIONS_ALL``) *ungated* — wiring ``"*"`` into a prompt
+context re-introduces F-3.  (Since the RFC 0049 PR 4 promotion the
 facts/episodic tiers widen the room axis behind the RFC 0037 §D gate —
 see the ``memory_context.py`` carve-out note below.)
 
 The pins are split into two halves so a regression cannot bypass both:
 
 * **Source-level** — :class:`TestPersonaRuntimeNeverReachesAllSessions`
-  scans every persona-runtime module that reaches a memory recall and
-  asserts the ``"*"`` literal (and the
+  scans the prompt-path modules that must never pick ``"*"`` themselves
+  and asserts the ``"*"`` literal (and the
   :data:`agents.memory._session_filter.SESSIONS_ALL` import) does not
   appear.  Cheap, catches the obvious mistake at review time, runs
   without DB setup.
@@ -24,10 +24,13 @@ The pins are split into two halves so a regression cannot bypass both:
   the tier-layer recall so the assertion is on the value actually
   reaching the SQL layer, not just the surface the facade exposes.
 
-The carved-out exception is the CLI / debug path (Phase 3's
-``persatrix memory recall --all-sessions`` will surface ``"*"``
-explicitly).  That path is not pinned here because it is not the
-persona-runtime context path.
+The runtime pin on the prompt path itself drives a real
+``_inject_memory_context`` turn in every ``cross_room`` mode:
+``tests/integration/test_prompt_path_sessions.py``.  The operator verb
+RFC 0031 planned for ``"*"`` (``persatrix memory recall
+--all-sessions``) is unbuilt (ISSUE-0086); the code that does read
+across sessions, and what guards each read, is listed in
+``test_cross_session_read_sites.py``.
 """
 
 from __future__ import annotations
@@ -50,17 +53,17 @@ from agents.memory.shared_pool import (
 # Modules on the agent-default *prompt-context* recall path.  Adding a
 # new recall call site that feeds the LLM prompt means extending this
 # list — the source-level scan is the regression bar against a new site
-# silently wiring ``"*"``.  CLI / debug surfaces (``persatrix memory
-# recall --all-sessions``, Phase 3) are NOT on this list; they are
-# allowed to pass ``"*"`` explicitly.
+# silently wiring ``"*"``.
 #
-# ``facts_shadow.py`` (RFC 0049 PR 2) and ``episodes_shadow.py`` +
-# ``episodic_room_ranked.py`` (PR 3) are deliberate carve-outs: they
-# read all-sessions for the cross-room SHADOW passes but are NOT
-# prompt-context paths — nothing they compute touches WorkingMemory,
-# the RFC 0017 budget, the §G manifest, or any reinforcement write
-# (sole output: a log trace).  F-3 is held for them by the two
-# ``TestShadowNeverEntersPrompt`` suites instead of this source scan.
+# ``facts_shadow.py`` (RFC 0049 PR 2) and ``episodes_shadow.py`` (PR 3)
+# are deliberate carve-outs: they read all-sessions for the cross-room
+# SHADOW passes but are NOT prompt-context paths — nothing they compute
+# touches WorkingMemory, the RFC 0017 budget, the §G manifest, or any
+# reinforcement write (sole output: a log trace).  F-3 is held for them
+# by the two ``TestShadowNeverEntersPrompt`` suites instead of this
+# source scan.  ``episodic_room_ranked.py`` (PR 3) widens by ranking
+# (``sessions=None`` plus a same-room boost), never with ``"*"``; since
+# PR 4 the live prompt path reads through it too, reinforcing.
 # ``memory_context.py`` came OFF this list at the RFC 0049 PR 4
 # promotion: ``cross_room: live`` (the shipped default) legitimately
 # widens the facts recall (``SESSIONS_ALL``) and room-ranks episodes.
@@ -77,6 +80,19 @@ PROMPT_CONTEXT_RECALL_MODULES = (
     # adding ``sessions="*"`` to the facts recall slips past the pin.
     # (PR #451 deep-review H1 carry-forward.)
     Path("agents/persona_runtime/facts_section.py"),
+    # ``notes_section.py`` must stay session-scoped, not merely gated: a
+    # note carries no source channel (``source_channel_id`` is always
+    # NULL), so the ISSUE-0132 audience check has nothing to judge it by
+    # (``AUDIENCE_TIERS`` leaves notes out).  Widened, a note written in
+    # a DM would pass the rank gate into a group room's prompt.  This
+    # scan sees only a ``"*"`` written in the file; a width handed down
+    # from ``memory_context.py`` is caught at runtime, by
+    # ``tests/integration/test_prompt_path_sessions.py``.
+    Path("agents/persona_runtime/notes_section.py"),
+    # ``memory_tools.py`` holds the persona's other notes read, the
+    # always-dispatchable ``recall_notes`` tool.  Its rows reach the LLM
+    # as a tool result, so the same notes rule holds there.
+    Path("agents/tools/memory_tools.py"),
     # ``agents/base.py`` is the task-agent recall site
     # (``_augment_system_prompt_with_memory`` at the
     # ``self.memory.retrieve_relevant`` call): the integration test
@@ -128,8 +144,12 @@ class TestPersonaRuntimeNeverReachesAllSessions:
         assert not offenders, (
             f"{module_path} references {offenders!r} on the persona-runtime "
             "default recall path — wiring ``\"*\"`` into a prompt context "
-            "re-introduces F-3.  Surface this explicitly via the Phase 3 "
-            "CLI flag instead."
+            "re-introduces F-3.  No module listed here may pick ``\"*\"`` "
+            "itself; the prompt path's gated widenings are decided in "
+            "memory_context.py, and test_cross_session_read_sites.py lists "
+            "each cross-session read with the test that guards it.  Notes "
+            "are the exception: no gate makes a widened note safe, so a "
+            "notes read stays session-scoped wherever the width is chosen."
         )
 
 
@@ -443,58 +463,3 @@ class TestPoolReadTierDefaultIsCrossSession:
             "must be a synonym for the cross-session default, not narrow "
             f"to the tier's _active_session_id; got {contents!r}."
         )
-
-
-# ─── Runtime pin: spy on EpisodicMemory.recall reachability ─
-
-
-class TestPersonaRuntimeCallSitesDoNotPassAllSentinel:
-    """End-to-end runtime pin: when ``_inject_memory_context`` runs on
-    the default path, the ``EpisodicMemory.recall`` call never carries
-    ``sessions="*"``.  Complements the source-level scan above so a
-    contributor introducing a ``recall(sessions=…)`` argument computed
-    at runtime cannot smuggle ``"*"`` through.
-
-    TODO (PR 5 — L5 follow-up): harness is synthetic (calls
-    ``recall`` directly with the same kwarg shape ``_inject_memory_context``
-    uses, not the mixin itself).  Rewrite against a real
-    ``_inject_memory_context`` invocation once PR 5's dementia-test
-    bridge wires the full persona pipeline.  Source-level scan above
-    stays as cheap defence either way.
-    """
-
-    async def test_episodic_recall_default_path_never_sees_star(
-        self, monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        # Use the leaf module's recall directly with a spy.  This is the
-        # walled (off/shadow) branch of ``_inject_memory_context``; under
-        # ``live`` its episodic tier reads through ``recall_room_ranked``.
-        from agents.memory.episodic import EpisodicMemory
-
-        mem = EpisodicMemory(agent_id="t", db_path=":memory:")
-        await mem.initialize()
-        try:
-            original = mem.recall
-            seen_sessions: list[Any] = []
-
-            async def spy(query: str = "", **kwargs: Any):
-                seen_sessions.append(kwargs.get("sessions"))
-                return await original(query, **kwargs)
-
-            monkeypatch.setattr(mem, "recall", spy)
-
-            # Run the call shape the walled branch of ``_inject_memory_context``
-            # uses (sessions kwarg either absent — implicit ``None`` —
-            # or explicitly ``None``).  Both are the §D default scope.
-            await mem.recall("hello", limit=5, min_score=0.2)
-            await mem.recall("hi", limit=5, min_score=0.2, sessions=None)
-
-            assert "*" not in seen_sessions
-            for s in seen_sessions:
-                # Default mode accepts either implicit ``None`` (kwarg
-                # absent) or explicit ``sessions=None``; both resolve to
-                # the active-session-plus-legacy branch in
-                # ``_resolve_session_list``.
-                assert s is None
-        finally:
-            await mem.close()

@@ -8,16 +8,17 @@ goal:
 
 * **Isolation by default** — a second run under a new
   ``PERSATRIX_SESSION_ID`` does not surface the prior run's persona
-  memory (the F-3 closer).
+  memory through a tier's default ``sessions=None`` recall (the F-3 closer).
 * **Continuity within a session** — a multi-event arc that shares a
   session id reads back the full arc from every tier (the dementia-test
   bridge — `OQ #1 resolution 1a
   <../../docs/rfcs/0031-per-session-namespacing-channels.md#open-questions>`_:
   default single-session recall **is** the dementia-test recall path).
 * **Cross-session continuity by opt-in** — an explicit
-  ``sessions=[arc1, arc2]`` reads across both arcs (the operator-facing
-  bridge for long-arc personas that span multiple sessions —
-  Phase 3's ``persatrix memory recall --sessions=…``).
+  ``sessions=[arc1, arc2]`` reads across both arcs (the bridge for
+  long-arc personas that span multiple sessions).  It has no operator
+  verb: the one RFC 0031 planned, ``persatrix memory recall
+  --all-sessions``, is for ``"*"`` and is unbuilt (ISSUE-0086).
 
 Complements the unit-level §D tier pins:
 
@@ -27,87 +28,24 @@ Complements the unit-level §D tier pins:
   relationship tier (including PR 5 / ISSUE-0080 interactions fix).
 * :mod:`tests.unit.python.test_facts_session_scope` — facts tier
   (including PR 5 / ISSUE-0079 supersede fix).
-* :mod:`tests.unit.python.test_session_recall_default_path` — source-
-  level + facade-layer ``"*"``-unreachability pins.
+* :mod:`tests.unit.python.test_session_recall_default_path` — a source
+  scan of the prompt-path modules that must never pick ``"*"``
+  themselves, and the facade forwarding pins.
 
 What this file adds is the **end-to-end** proof: every tier, every
 mode, single ``MemoryStore`` facade — the operator-visible contract
 the Phase 2 RFC promises.  A future plan author cannot regress F-3
 without tripping at least one of these tests.
+
+The persona prompt path reads wider than a tier's default: since RFC 0049
+PR 4 a ``cross_room: live`` turn widens facts and episodes behind the §D
+gate — pinned by :mod:`tests.integration.test_prompt_path_sessions`.
 """
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from pathlib import Path
-from typing import cast
-
-import pytest
-
-from agents.memory.facade import MemoryStore
-from agents.memory.facts import FactStore
-from agents.memory.notes import NoteStore
-from agents.memory.relationship import RelationshipMemory
-
-
-class _Bundle:
-    """Construction-time snapshot of every persona-memory tier for one
-    operator session.  Mirrors how :class:`agents.base.BaseAgent` /
-    persona-runtime ``initialize_memory`` wire the tiers under a single
-    resolved ``PERSATRIX_SESSION_ID``.
-    """
-
-    def __init__(self, facade, rels, facts, notes):
-        self.facade: MemoryStore = facade
-        self.rels: RelationshipMemory = rels
-        self.facts: FactStore = facts
-        self.notes: NoteStore = notes
-
-
-@pytest.fixture
-async def facade_factory(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> AsyncIterator:
-    """Build a :class:`_Bundle` keyed to a named ``PERSATRIX_SESSION_ID``.
-
-    Every tier shares the same ``db_path`` — the cross-run state-bleed
-    surface this test exists to close.  The env-var snapshot is
-    captured at construction; a subsequent ``_build`` call overrides
-    the env var but already-built bundles keep their snapshot.
-
-    The facade (:class:`MemoryStore`) is exercised for the
-    :meth:`retrieve_relevant` / :meth:`store_observation` surface only;
-    relationships / facts / notes are constructed alongside it because
-    the RFC 0029 facade does not expose those tiers — persona-runtime
-    ``initialize_memory`` wires them through the agent harness, but
-    the recall semantics under test are tier-level and the parallel
-    construction is the lightest fixture that exercises them.
-    """
-    db_path = tmp_path / "shared.db"
-    bundles: list[_Bundle] = []
-
-    async def _build(session_id: str, agent_id: str = "ember-owl") -> _Bundle:
-        monkeypatch.setenv("PERSATRIX_SESSION_ID", session_id)
-        fac = MemoryStore(agent_id=agent_id, db_path=str(db_path))
-        await fac.initialize()
-        rels = RelationshipMemory(agent_id=agent_id, db_path=str(db_path))
-        await rels.initialize()
-        facts = FactStore(agent_id=agent_id, db_path=str(db_path))
-        await facts.initialize()
-        # The notes tier rides on EpisodicMemory's connection; reuse
-        # the facade's underlying tier rather than building a parallel
-        # NoteStore that would race on the shared DB file.
-        notes = fac._episodic._note_store
-        assert notes is not None
-        bundles.append(_Bundle(fac, rels, facts, notes))
-        return bundles[-1]
-
-    yield _build
-    for b in bundles:
-        await b.facade.close()
-        await b.rels.close()
-        await b.facts.close()
-
+# ``facade_factory`` (one session's tiers on a shared database) comes from
+# ``_session_tiers_helpers.py`` through ``conftest.py``.
 
 # ─── Single-session arc: continuity within the session ──────
 
@@ -343,88 +281,3 @@ class TestCrossSessionContinuityByOptIn:
         assert any("met alice" in c for c in cross_contents), (
             "explicit sessions=[arc1, arc2] must surface arc-1's row in arc-2"
         )
-
-
-# ─── L5 follow-up: the walled recall call shape never sees "*" ──
-
-
-class TestInjectMemoryContextDefaultPath:
-    """Runtime pin on the room-walled recall call shape — the L5
-    follow-up from PR 451 deep-review.
-
-    It does not build the mixin.  It replays, against a real
-    ``EpisodicMemory``, the tier calls the walled branch of
-    ``_inject_memory_context`` makes (``cross_room`` ``off`` or
-    ``shadow``) and asserts the spied ``recall`` never sees
-    ``sessions="*"``.  The stand-in event's ``event_type`` is a plain
-    string, so the channel-history helper returns before it recalls,
-    and ``recall_notes`` is not spied: the one call checked is the
-    walled episodic recall with ``sessions=None``.
-
-    Under ``cross_room: live`` the mixin itself passes ``"*"`` to the
-    facts recall and room-ranks episodes, both behind the RFC 0037 §D
-    gate by design; that path, and the wall under ``off``, are pinned
-    in ``tests/unit/python/test_cross_room_live.py``.
-    """
-
-    async def test_real_inject_memory_context_never_passes_star(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        # The persona-runtime mixin lives on _LLMPersonaAgent; building
-        # the full agent takes a config + LLM client, so this replays the
-        # walled branch's recall calls on the EpisodicMemory tier and the
-        # prompt-assembly free functions (``recall_channel_episodes``
-        # etc.) instead — no agent harness needed.  The source-level scan
-        # in test_session_recall_default_path.py covers the prompt-path
-        # modules; test_cross_room_live.py covers the live branch.
-        from agents.memory.episodic import EpisodicMemory
-        from agents.persona_runtime.channel_history import (
-            recall_channel_episodes,
-        )
-        from agents.persona_types import AgentEvent
-
-        monkeypatch.setenv("PERSATRIX_SESSION_ID", "run-a")
-        mem = EpisodicMemory(agent_id="ember", db_path=str(tmp_path / "m.db"))
-        await mem.initialize()
-        try:
-            seen: list[object] = []
-            original = mem.recall
-
-            async def spy(query: str = "", **kwargs):
-                seen.append(kwargs.get("sessions"))
-                return await original(query, **kwargs)
-
-            monkeypatch.setattr(mem, "recall", spy)
-
-            # Call the channel-history helper _inject_memory_context uses.
-            # The stand-in's ``event_type`` is a plain string, not
-            # ``EventType.CHANNEL_MESSAGE``, so the helper returns before
-            # it recalls.
-            class _Evt:
-                event_type = "CHANNEL_MESSAGE"
-                channel_name = "lake"
-                sender = None
-                payload = "hello"
-
-                def model_dump(self):
-                    return {}
-
-            await recall_channel_episodes(
-                mem, cast(AgentEvent, _Evt()), agent_id="ember",
-            )
-
-            # The walled branch's episodic recall (the call the spy sees)
-            # and the notes recall (``recall_notes``, not spied).
-            await mem.recall("hello", limit=5, min_score=0.2, sessions=None)
-            await mem.recall_notes(
-                "hello", limit=5, min_score=0.2, sessions=None,
-            )
-
-            # No call carried "*".  Every call passed either ``None``
-            # (explicit or implicit) — the §D default.
-            assert "*" not in seen, (
-                f"L5 pin: persona-runtime recall path passed sessions='*' "
-                f"({seen}) — re-introduces F-3"
-            )
-        finally:
-            await mem.close()
