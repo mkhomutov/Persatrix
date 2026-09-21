@@ -69,7 +69,8 @@ from agents.memory.shared_pool import (
 # widens the facts recall (``SESSIONS_ALL``) and room-ranks episodes.
 # F-3 is REDEFINED, not dropped — the bar is now "no UNGATED widening":
 # every widened row passes the RFC 0037 §D gate before the budget
-# (``test_cross_room_live.py::TestLiveCrossRoomInjection``), and
+# (``test_cross_room_live.py::TestLiveCrossRoomInjection`` and
+# ``tests/integration/test_prompt_path_sessions.py``), and
 # epoch/principal stay absolute walls on every widened branch.  No module
 # below may pick ``"*"`` itself; facts_section.py takes its caller's width.
 PROMPT_CONTEXT_RECALL_MODULES = (

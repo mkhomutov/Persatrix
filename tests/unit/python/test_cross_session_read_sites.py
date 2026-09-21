@@ -36,7 +36,8 @@ CROSS_SESSION_READ_SITES: dict[tuple[str, str], str] = {
         "test_cross_room_live.py::TestLiveCrossRoomInjection and "
         "tests/integration/test_prompt_path_sessions.py",
     ("agents/memory/episodic_room_ranked.py", "recall_room_ranked"):
-        "live: test_cross_room_live.py::TestLiveCrossRoomInjection; "
+        "live: test_cross_room_live.py::TestLiveCrossRoomInjection and "
+        "tests/integration/test_prompt_path_sessions.py; "
         "shadow: test_episodes_shadow.py::TestShadowNeverEntersPrompt",
     ("agents/persona_runtime/facts_shadow.py", "_widened_candidates"):
         "log-only — test_facts_shadow.py::TestShadowNeverEntersPrompt",
