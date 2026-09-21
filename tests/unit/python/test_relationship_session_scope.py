@@ -10,7 +10,7 @@ to the relationship reads (``get_trust`` / ``get_relationship_summary``
 * ``sessions=None`` (default) → active session only, plus the always-
   visible ``legacy`` carve-out.
 * ``sessions=["a", "b"]`` → named list, plus the ``legacy`` carve-out.
-* ``sessions="*"`` → no filter (CLI / debug sentinel).
+* ``sessions="*"`` → no filter (``SESSIONS_ALL``).
 * ``sessions=[]`` → ``ValueError`` (§D guard against silent
   legacy-only collapse).
 
