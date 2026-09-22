@@ -140,7 +140,10 @@ class RelationshipMemory:
         newly-inserted seed rows.  Persona-runtime threads the resolved
         ``PERSATRIX_SESSION_ID`` here so a peer pre-declared in YAML
         config takes the active session's tag rather than the column
-        default (RFC 0031 PR plan PR 4 finding #2).
+        default (RFC 0031 PR plan PR 4 finding #2).  The tag only records
+        where the row was first written: no read filters on it
+        (ISSUE-0165), so the seeded trust reads the same under every
+        channel's session.
         """
         # Guard against double-initialize: close any existing connection
         # to prevent file descriptor and SQLite connection leaks.
@@ -180,27 +183,21 @@ class RelationshipMemory:
         *,
         participant_type: str = "agent",
         other_participant_type: str = "agent",
-        sessions: list[str] | str | None = None,
     ) -> float:
         """Get current trust score for another participant (0.0–1.0).
 
         Returns the default (0.5) if no relationship exists.
 
-        ``sessions`` (RFC 0031 Phase 2 PR 3) — see
-        :func:`agents.memory._session_filter._resolve_session_list` for
-        the four-mode contract.  Default ``None`` resolves to the
-        tier's active session plus the always-visible ``legacy``
-        carve-out; a row in another session yields the neutral default
-        so a foreign-session trust value cannot leak into the prompt.
+        Trust is one value per pair, the same from every session
+        (ISSUE-0165): the relationship row's key has no session, so this
+        read takes no ``sessions`` argument — see
+        :func:`agents.memory.relationship_queries.get_trust`.  The tenant
+        and epoch still bind with strict equality.
         """
-        session_list = _resolve_session_list(
-            sessions, self._active_session_id,
-        )
         return await _get_trust(
             self._ensure_db(), self._agent_id, other_id,
             participant_type=participant_type,
             other_participant_type=other_participant_type,
-            sessions=session_list,
             principal_id=resolve_active_principal(self._active_principal_id),
             epoch_id=resolve_active_epoch(self._active_epoch_id),
         )
@@ -366,9 +363,14 @@ class RelationshipMemory:
     ) -> RelationshipSummary:
         """Get full relationship context for injection into LLM prompt.
 
-        ``sessions`` (RFC 0031 Phase 2 PR 3) — see :meth:`get_trust`.
-        A row in a non-active non-legacy session yields the "no
-        relationship" summary, matching :meth:`get_trust`.
+        Trust and notes come from the one row for the pair, whichever
+        session wrote it first (ISSUE-0165).  ``sessions`` (RFC 0031
+        Phase 2) scopes the interaction history only — the count, recent
+        interactions and first / last seen — with the four-mode contract
+        of :func:`agents.memory._session_filter._resolve_session_list`.
+        Default ``None`` resolves to the active session (a bound
+        ``session_scope`` first, else the construction snapshot) plus the
+        always-visible ``legacy`` carve-out.
         """
         session_list = _resolve_session_list(
             sessions, self._active_session_id,
@@ -397,7 +399,9 @@ class RelationshipMemory:
            ``get_relationship_summary()`` for individual relationships
            with full interaction history.
 
-        ``sessions`` (RFC 0031 Phase 2 PR 3) — see :meth:`get_trust`.
+        Lists every relationship row of the agent (ISSUE-0165);
+        ``sessions`` scopes each row's interaction count and last seen —
+        see :meth:`get_relationship_summary`.
         """
         session_list = _resolve_session_list(
             sessions, self._active_session_id,

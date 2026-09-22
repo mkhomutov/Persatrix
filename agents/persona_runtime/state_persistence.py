@@ -118,7 +118,10 @@ class _StatePersistenceMixin:
         peer row carries the active session's tag from the start.
         Without this, the seed inserted ``"legacy"`` and the
         first-seen-wins contract on ``record_interaction`` prevented a
-        later overwrite — MT-SESSION-001 Step 7 silently failed.
+        later overwrite — MT-SESSION-001 Step 7 silently failed.  The tag
+        is only a record: channel turns run under the orchestrator's
+        per-channel session, not this one, so the relationship reads do
+        not filter on it (ISSUE-0165).
         """
         await self._episodic_memory.initialize()
         await self._relationship_memory.initialize(

@@ -210,7 +210,13 @@ for persona memory, not a recall wall. Per tier:
   the acting-as id) after teaching moves you into a new DM where your
   earlier DM-taught facts are withheld until re-taught — pin `shadow`
   while you do.
-- **Relationship** was always cross-room (trust follows the person).
+- **Relationship** trust and identity follow the person into every session.
+  Trust comes from the `relationships:` block in `config/agents.yaml`; the
+  interaction history (count, last seen) stays per session. Until
+  [ISSUE-0165](../issues/ISSUE-0165-relationship-hidden-outside-its-first-session.md)
+  (2026-09-22) the trust read was filtered on the session that first wrote
+  the relationship, so a configured peer read as a stranger in every channel
+  whenever `PERSATRIX_SESSION_ID` was set.
 - **Notes** and the in-room conversation window stay room-scoped.
 
 Every cross-room candidate passes the deterministic

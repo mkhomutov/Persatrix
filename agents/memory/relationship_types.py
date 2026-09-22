@@ -170,8 +170,8 @@ class RelationshipSummary:
     # relationship row's ``identity`` column.  Attached by
     # :func:`agents.persona_runtime.relationship_section.recall_relationship_summary`
     # via the dedicated, session-filter-free
-    # :meth:`RelationshipMemory.get_identity` read — *not* the
-    # session-filtered ``get_relationship_summary`` row read above — which is
-    # what makes identity cross-room while the rest of the summary stays
-    # room-scoped.  ``None`` when no identity is recorded for the pair.
+    # :meth:`RelationshipMemory.get_identity` read.  Since ISSUE-0165 the
+    # summary's own row read (trust, notes) is session-filter-free too; what
+    # stays session-scoped is the interaction history (count, recent, first /
+    # last seen).  ``None`` when no identity is recorded for the pair.
     identity: dict[str, Any] | None = None

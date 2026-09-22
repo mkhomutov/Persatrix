@@ -214,7 +214,7 @@ class TestRelationshipPrincipalIsolation:
 
         # tenant-b sees the neutral default + an empty summary.
         with principal_scope("tenant-b"):
-            assert await rel.get_trust("peer", sessions="*") == 0.5
+            assert await rel.get_trust("peer") == 0.5
             summary_b = await rel.get_relationship_summary(
                 "peer", sessions="*",
             )
@@ -245,9 +245,9 @@ class TestRelationshipPrincipalIsolation:
         with principal_scope("tenant-a"):
             await rel.update_trust("peer", 0.2, "warmed up")
             # tenant-a reads back the value it just wrote.
-            assert await rel.get_trust("peer", sessions="*") == pytest.approx(0.7)
+            assert await rel.get_trust("peer") == pytest.approx(0.7)
         # The default ``local`` principal must NOT see tenant-a's trust.
-        assert await rel.get_trust("peer", sessions="*") == _DEFAULT_TRUST
+        assert await rel.get_trust("peer") == _DEFAULT_TRUST
 
     async def test_record_interaction_two_writers_isolated(
         self, rel: RelationshipMemory,
@@ -264,19 +264,19 @@ class TestRelationshipPrincipalIsolation:
                 "peer", "chat", outcome="ok", sentiment=0.5, session_id="legacy",
             )
             await rel.update_trust("peer", 0.2, "a-warmed")
-            a_trust = await rel.get_trust("peer", sessions="*")
+            a_trust = await rel.get_trust("peer")
         with principal_scope("tenant-b"):
             await rel.record_interaction(
                 "peer", "chat", outcome="bad", sentiment=-0.5, session_id="legacy",
             )
             await rel.update_trust("peer", -0.2, "b-cooled")
-            b_trust = await rel.get_trust("peer", sessions="*")
+            b_trust = await rel.get_trust("peer")
         # tenant-b sees its own (independent) row, not the neutral default.
         assert b_trust == pytest.approx(0.3)
         # tenant-a's trust is untouched by tenant-b's write.
         with principal_scope("tenant-a"):
-            assert await rel.get_trust("peer", sessions="*") == pytest.approx(a_trust)
-            assert await rel.get_trust("peer", sessions="*") == pytest.approx(0.7)
+            assert await rel.get_trust("peer") == pytest.approx(a_trust)
+            assert await rel.get_trust("peer") == pytest.approx(0.7)
 
     async def test_apply_decay_is_principal_scoped(
         self, rel: RelationshipMemory,
@@ -289,9 +289,9 @@ class TestRelationshipPrincipalIsolation:
         with principal_scope("tenant-b"):
             await rel.update_trust("peer", 0.2, "b")  # → 0.7
             await rel.apply_decay(decay_rate=0.5)      # tenant-b only
-            b_after = await rel.get_trust("peer", sessions="*")
+            b_after = await rel.get_trust("peer")
         with principal_scope("tenant-a"):
-            a_after = await rel.get_trust("peer", sessions="*")
+            a_after = await rel.get_trust("peer")
         assert b_after < 0.7  # tenant-b decayed toward neutral
         assert a_after == pytest.approx(0.7)  # tenant-a untouched
 

@@ -329,9 +329,9 @@ async def record_interaction(
     first-seen value — the relationships row is a stable per-pair
     identity, so we treat ``session_id`` like ``trust_score`` (write on
     INSERT, preserved by the conflict path) rather than like
-    ``last_interaction_at`` (refreshed on every interaction).  Phase 1
-    ships no recall-side filtering; the column exists so Phase 2 has a
-    column + index to filter on.
+    ``last_interaction_at`` (refreshed on every interaction).  The tag
+    only records where the row began; no read filters on it (ISSUE-0165).
+    The per-session view reads the ``interactions`` rows instead.
 
     Returns the generated interaction ID.
     """
@@ -447,9 +447,9 @@ async def seed_trust(
     ``session_id`` (RFC 0031 Phase 1; default ``"legacy"``) tags every
     newly-inserted seed row.  The caller (persona-runtime
     ``initialize_memory``) passes its resolved ``PERSATRIX_SESSION_ID``
-    so MT-SESSION-001 Step 7 sees ``run-a`` on a config-seeded row
-    rather than the column-default ``legacy``.  Existing rows are still
-    untouched — INSERT OR IGNORE preserves the first-seen contract.
+    so MT-SESSION-001 Step 7 sees ``run-a`` on a config-seeded row, not
+    ``legacy`` — a record only; no read filters on it (ISSUE-0165).
+    Existing rows are untouched — INSERT OR IGNORE keeps the first seen.
 
     ``principal_id`` (ISSUE-0081 PR 3; default
     :data:`DEFAULT_PRINCIPAL_ID`) tags the same seed rows with the active

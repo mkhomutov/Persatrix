@@ -83,7 +83,6 @@ async def get_trust(
     *,
     participant_type: str = "agent",
     other_participant_type: str = "agent",
-    sessions: list[str] | None = None,
     principal_id: str = DEFAULT_PRINCIPAL_ID,
     epoch_id: str = DEFAULT_EPOCH_ID,
 ) -> float:
@@ -91,15 +90,17 @@ async def get_trust(
 
     Returns the default (0.5) if no relationship exists.
 
-    ``sessions`` (RFC 0031 Phase 2 PR 3) is a resolved list from
-    :func:`agents.memory._session_filter._resolve_session_list` —
-    ``None`` is the ``"*"`` no-filter mode.  ``principal_id``
-    (ISSUE-0081 PR 3) / ``epoch_id`` (ISSUE-0085 PR 3) are the resolved
-    active tenant + run/test epoch — each unconditional strict equality,
-    no carve-out — so a foreign-tenant or prior-run trust value cannot
-    leak into the prompt.
+    **No session filter** (ISSUE-0165).  There is one ``relationships``
+    row per pair — its primary key has no session — so trust is the same
+    from every session, the way :func:`get_identity` reads identity.  The
+    row's ``session_id`` only records where the row was first written;
+    filtering on it hid a peer seeded from config under the boot session,
+    or first met in another channel, from every other session.
+    ``principal_id`` (ISSUE-0081 PR 3) / ``epoch_id`` (ISSUE-0085 PR 3)
+    are the resolved active tenant + run/test epoch — each unconditional
+    strict equality, no carve-out — so a foreign-tenant or prior-run
+    trust value cannot leak into the prompt.
     """
-    sess_clause, sess_params = session_in_clause(sessions, column="session_id")
     princ_clause, princ_params = principal_eq_clause(
         principal_id, column="principal_id",
     )
@@ -112,9 +113,9 @@ async def get_trust(
             "SELECT trust_score FROM relationships "
             "WHERE participant_id = ? AND participant_type = ? "
             "AND other_participant_id = ? AND other_participant_type = ?"
-            f"{sess_clause}{princ_clause}{epoch_clause}",
+            f"{princ_clause}{epoch_clause}",
             (agent_id, participant_type, other_id, other_participant_type,
-             *sess_params, *princ_params, *epoch_params),
+             *princ_params, *epoch_params),
         ) as cursor:
             row = await cursor.fetchone()
         return row[0] if row is not None else _DEFAULT_TRUST
@@ -135,16 +136,16 @@ async def get_identity(
     RFC 0031 amendment (F-7 Option D, ISSUE-0093) — the cross-room read for
     person identity (name / role / stable preferences).
 
-    **No session filter, by design.**  Unlike :func:`get_trust` /
-    :func:`get_relationship_summary` (which apply the §D
-    :func:`session_in_clause` to the relationship row), identity recall
-    omits the session predicate entirely.  The relationship primary key
+    **No session filter, by design.**  The relationship primary key
     excludes ``session_id`` — there is exactly one row per ``(participant
     tuple, principal, epoch)`` — so leaving the session axis out of the
     query is precisely what makes identity *cross-room by construction*:
     identity stated in room A surfaces in room B.  This is strictly narrower
     than the Option-A ``contact:*`` carve-out (no ``sessions="*"`` sentinel
-    anywhere) — the room axis simply is not part of the tier's key.
+    anywhere) — the room axis simply is not part of the tier's key.  Since
+    ISSUE-0165 the trust and notes reads on the same row
+    (:func:`get_trust`, :func:`get_relationship_summary`) leave it out too;
+    only the interaction history stays per-session.
 
     ``principal_id`` / ``epoch_id`` remain strict equality (each part of the
     PK), so cross-room is never cross-tenant or cross-epoch.
@@ -187,15 +188,25 @@ async def get_relationship_summary(
 ) -> RelationshipSummary:
     """Get full relationship context for injection into LLM prompt.
 
-    ``sessions`` — see :func:`get_trust`.  The §D filter applies to
-    every fetch in this function:
+    ``sessions`` (RFC 0031 Phase 2) is a resolved list from
+    :func:`agents.memory._session_filter._resolve_session_list` —
+    ``None`` is the ``"*"`` no-filter mode.  It scopes the interaction
+    history, and only that — the §D filter applies to these fetches:
 
-    * the ``relationships`` row (PR 3 — visibility of the row itself),
     * the ``interactions`` recent-history page (PR 5, migration v10 —
       `ISSUE-0080
       <../../docs/issues/ISSUE-0080-relationship-recent-interactions-cross-session-leak.md>`_),
+    * the per-session ``COUNT(*)`` behind ``interaction_count``,
     * the ``MIN(created_at)`` / ``MAX(created_at)`` first/last-
       interaction-at span lookup (PR 5, same).
+
+    The ``relationships`` row itself (trust and notes) is read with **no
+    session filter** (ISSUE-0165) — see :func:`get_trust`.  PR 3 filtered
+    it, so a row first written in another session returned the "no
+    relationship" summary before the history below was even read: a peer
+    seeded from config under the boot session, or first met in another
+    channel, read as a stranger in every other session, together with
+    that session's own interactions with them.
 
     ``interaction_count`` on the returned summary is the **per-session
     count derived from the filtered ``interactions`` subquery** (Policy
@@ -213,11 +224,8 @@ async def get_relationship_summary(
     "Last seen" (and skew the RFC 0021 cadence upper bound) — the same
     leak class as ``recent_interactions`` / ``first_interaction_at``.
     """
-    rel_sess_clause, rel_sess_params = session_in_clause(
-        sessions, column="session_id",
-    )
     # ISSUE-0081 PR 3 — strict tenant equality on every fetch in this
-    # function (``relationships`` row + both ``interactions`` subqueries).
+    # function (``relationships`` row + the three ``interactions`` subqueries).
     # The ``relationships`` and ``interactions`` SELECTs here are
     # single-table (unaliased), so one ``principal_id`` clause is reused.
     princ_clause, princ_params = principal_eq_clause(
@@ -229,7 +237,8 @@ async def get_relationship_summary(
     epoch_clause, epoch_params = epoch_eq_clause(
         epoch_id, column="epoch_id",
     )
-    # Fetch relationship row.  ``interaction_count`` and
+    # Fetch relationship row — one per pair, so no session predicate
+    # (ISSUE-0165; see the docstring).  ``interaction_count`` and
     # ``last_interaction_at`` from this row are not surfaced to the
     # prompt; we derive per-session values below from the filtered
     # ``interactions`` subquery instead (PR 5 ISSUE-0080 Policy C — the
@@ -239,9 +248,9 @@ async def get_relationship_summary(
         "FROM relationships "
         "WHERE participant_id = ? AND participant_type = ? "
         "AND other_participant_id = ? AND other_participant_type = ?"
-        f"{rel_sess_clause}{princ_clause}{epoch_clause}",
+        f"{princ_clause}{epoch_clause}",
         (agent_id, participant_type, other_id, other_participant_type,
-         *rel_sess_params, *princ_params, *epoch_params),
+         *princ_params, *epoch_params),
     ) as cursor:
         row = await cursor.fetchone()
 
@@ -257,10 +266,11 @@ async def get_relationship_summary(
 
     trust_score, notes = row
 
-    # Both ``interactions`` SELECTs below carry the §D filter — PR 5 /
+    # All three ``interactions`` SELECTs below carry the §D filter — PR 5 /
     # ISSUE-0080 fix.  ``interactions`` rows now carry ``session_id``
     # (migration v10) and ``record_interaction`` threads the active
-    # session id onto every INSERT.
+    # session id onto every INSERT.  This is the session-scoped half of
+    # the summary; the row read above is the cross-session half.
     int_sess_clause, int_sess_params = session_in_clause(
         sessions, column="session_id",
     )
@@ -370,7 +380,9 @@ async def get_all_relationships(
        ``get_relationship_summary()`` for individual relationships
        with full interaction history.
 
-    ``sessions`` — see :func:`get_trust`.
+    ``sessions`` — see :func:`get_relationship_summary`: it scopes the
+    interaction history only.  Every relationship row of the agent is
+    listed, whichever session it was first written in (ISSUE-0165).
 
     ``interaction_count`` and ``last_interaction_at`` are derived
     per-session from the filtered ``interactions`` subquery — Policy (C)
@@ -381,9 +393,6 @@ async def get_all_relationships(
     cross-session ``last_interaction_at`` bump on the ``relationships``
     column.
     """
-    rel_sess_clause, rel_sess_params = session_in_clause(
-        sessions, column="r.session_id",
-    )
     int_sess_clause, int_sess_params = session_in_clause(
         sessions, column="i.session_id",
     )
@@ -402,10 +411,11 @@ async def get_all_relationships(
         epoch_id, column="i.epoch_id",
     )
     # LEFT JOIN aggregates the per-session count + last-interaction
-    # timestamp from ``interactions`` onto each visible relationship row.
-    # Same predicate shape on both sides; ``COUNT(i.id)`` yields 0 and
-    # ``MAX(i.created_at)`` yields NULL for relationships with no
-    # in-session interactions (a row tagged ``legacy`` that has only
+    # timestamp from ``interactions`` onto each relationship row.  The
+    # session predicate sits on the ``interactions`` side only
+    # (ISSUE-0165); principal and epoch bind both sides.
+    # ``COUNT(i.id)`` yields 0 and ``MAX(i.created_at)`` yields NULL for
+    # relationships with no in-session interactions (a row that has only
     # been seeded via config, for instance).  ``MAX(i.created_at)``
     # replaces ``r.last_interaction_at`` so list-mode reads do not
     # surface the cross-session ON-CONFLICT bump on the column (PR 5 /
@@ -422,7 +432,7 @@ async def get_all_relationships(
         "  AND i.other_participant_type = r.other_participant_type"
         f"{int_sess_clause}{int_princ_clause}{int_epoch_clause} "
         "WHERE r.participant_id = ? AND r.participant_type = ?"
-        f"{rel_sess_clause}{rel_princ_clause}{rel_epoch_clause} "
+        f"{rel_princ_clause}{rel_epoch_clause} "
         "GROUP BY r.participant_id, r.participant_type, "
         "  r.other_participant_id, r.other_participant_type, "
         "  r.trust_score, r.notes "
@@ -441,7 +451,7 @@ async def get_all_relationships(
         (
             *int_sess_params, *int_princ_params, *int_epoch_params,
             agent_id, participant_type,
-            *rel_sess_params, *rel_princ_params, *rel_epoch_params,
+            *rel_princ_params, *rel_epoch_params,
         ),
     ) as cursor:
         rows = await cursor.fetchall()

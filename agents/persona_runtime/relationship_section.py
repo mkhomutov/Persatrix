@@ -29,6 +29,16 @@ known and accepted shape, not an oversight; the admission record adds
 observability, not a gate decision — the tier stays outside the RFC
 0037 §D egress gate (its Non-Goals).
 
+Session axis (ISSUE-0165): the relationship row reads the same from
+every session; only its interaction history (count, last seen, cadence)
+is per-session.  Identity crossed sessions before that, by design (F-7
+Option D).  Trust and notes crossing too is safe without the gate only
+while nothing said in a channel reaches them: in production trust comes
+from the config ``relationships:`` seeds alone, and ``update_trust``
+(the only writer of notes) and ``apply_decay`` have no production
+caller.  A production writer of either must take the §D gate into
+account first.
+
 Extracted from :mod:`agents.persona_runtime.memory_context` so the
 mixin file stays under the 500-line review cap; the tier is logically
 independent and parallels :mod:`agents.persona_runtime.channel_history`.
@@ -176,16 +186,16 @@ async def recall_relationship_summary(
     # cross-room person identity.  This is a *separate* read
     # (:meth:`get_identity`) that omits the §D session filter, so identity
     # stated in one room surfaces in every room for the same
-    # ``(principal, epoch)`` — unlike ``get_relationship_summary`` above,
-    # whose relationship-row read is session-scoped.  Same participant type
-    # as the summary read, so both resolve to the one relationship row.
+    # ``(principal, epoch)``.  Same participant type as the summary read, so
+    # both resolve to the one relationship row.
     # Best-effort: an identity-read failure must not sink the relationship
     # tier, so it is logged and the summary returns without identity.
     # Cost: this is an unconditional second indexed lookup per sender per
-    # event (including agent peers that will never have identity); it cannot
-    # fold into the summary row read above because that read is §D
-    # session-filtered and identity must not be — the separate, filter-free
-    # query is what makes identity cross-room.
+    # event (including agent peers that will never have identity).  It was
+    # kept apart because the summary's row read was §D session-filtered and
+    # identity must not be; since ISSUE-0165 that read carries no session
+    # filter either, so the two could now share one query — kept separate
+    # here, which also keeps a bad stored identity from sinking the summary.
     try:
         summary.identity = await rel_memory.get_identity(
             sender_id,

@@ -19,6 +19,13 @@ where the call itself spells it: a width worked out elsewhere and passed
 in under another name does not show here.  On the prompt path
 ``tests/integration/test_prompt_path_sessions.py`` checks the width each
 tier read actually gets.
+
+A read of a row whose key has no session is not a widening and is not
+listed: the relationship row (trust, notes, identity) reads the same
+from every session with no session predicate at all (ISSUE-0165), and
+only its interaction history takes ``sessions``.  The module docstring
+of ``agents/persona_runtime/relationship_section.py`` says why that row
+needs no gate today, and what would change that.
 """
 
 from __future__ import annotations

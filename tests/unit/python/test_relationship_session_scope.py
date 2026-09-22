@@ -1,10 +1,15 @@
 """
 Tests for RFC 0031 Phase 2 PR 3 — session-scoped recall on the
-``relationships`` tier.
+``relationships`` tier, as ISSUE-0165 narrowed it.
 
-PR 2 closed F-3 on episodes + notes; PR 3 extends the same §D contract
-to the relationship reads (``get_trust`` / ``get_relationship_summary``
-/ ``get_all_relationships``).  Same four-mode shape as
+PR 2 closed F-3 on episodes + notes; PR 3 extended the same §D contract
+to the relationship reads.  ISSUE-0165 took the relationship *row* back
+out of it: the row (trust, notes, identity) is one per pair and reads
+the same from every session, so ``get_trust`` takes no ``sessions`` and
+``get_all_relationships`` lists every row.  What stays session-scoped is
+the interaction history — the count, recent interactions and first /
+last seen on ``get_relationship_summary`` and ``get_all_relationships``
+— with the same four-mode shape as
 :mod:`tests.unit.python.test_episodic_session_scope`:
 
 * ``sessions=None`` (default) → active session only, plus the always-
@@ -13,6 +18,10 @@ to the relationship reads (``get_trust`` / ``get_relationship_summary``
 * ``sessions="*"`` → no filter (``SESSIONS_ALL``).
 * ``sessions=[]`` → ``ValueError`` (§D guard against silent
   legacy-only collapse).
+
+The cross-session cases themselves, including the reported
+seeded-peer one, are in
+:mod:`tests.unit.python.test_relationship_row_cross_session`.
 
 Active session is resolved once at tier construction via
 :func:`agents.session_id.resolve_session_id_silent` — mirrors
@@ -123,53 +132,56 @@ class TestActiveSessionResolution:
 
 
 class TestGetAllRelationshipsSessionFilter:
-    """The four §D modes on ``get_all_relationships``."""
+    """The four §D modes on ``get_all_relationships``: every row is
+    listed, and ``sessions`` picks whose interactions each row counts."""
 
-    async def test_default_returns_active_plus_legacy_only(
+    async def test_default_counts_active_plus_legacy_only(
         self, memory_at_run_a: RelationshipMemory,
     ) -> None:
         ids = await _seed_three_session_relationships(memory_at_run_a)
         rels = await memory_at_run_a.get_all_relationships()
-        other_ids = {r.other_participant_id for r in rels}
-        assert ids["run-a"] in other_ids
-        assert ids["legacy"] in other_ids
-        # F-3 closer assertion: a run-b row never surfaces under
-        # default recall on a run-a tier.
-        assert ids["run-b"] not in other_ids
+        counts = {r.other_participant_id: r.interaction_count for r in rels}
+        # Every row is listed (ISSUE-0165) ...
+        assert set(counts) == set(ids.values())
+        # ... but a run-b interaction never counts under default recall
+        # on a run-a tier.
+        assert counts == {ids["run-a"]: 1, ids["run-b"]: 0, ids["legacy"]: 1}
 
-    async def test_default_excludes_other_session_even_when_only_match(
+    async def test_row_from_another_session_is_listed_without_history(
         self, memory_at_run_a: RelationshipMemory,
     ) -> None:
-        """If the only row is in a non-active non-legacy session, the
-        default recall returns an empty list — not a fallback.  Mirrors
-        the episodic "no-op filter would silently pass" guard.
+        """If the only row was first written in a non-active non-legacy
+        session, the default read still lists it — the row is one per
+        pair — with none of that session's interactions.  Before
+        ISSUE-0165 this returned an empty list.
         """
         await memory_at_run_a.record_interaction(
             "trampolinist", "task_delegation",
             session_id="run-b",
         )
         rels = await memory_at_run_a.get_all_relationships()
-        assert rels == []
+        assert [(r.other_participant_id, r.interaction_count) for r in rels] == [
+            ("trampolinist", 0),
+        ]
+        assert rels[0].last_interaction_at is None
 
-    async def test_explicit_list_returns_named_plus_legacy(
+    async def test_explicit_list_counts_named_plus_legacy(
         self, memory_at_run_a: RelationshipMemory,
     ) -> None:
         ids = await _seed_three_session_relationships(memory_at_run_a)
         rels = await memory_at_run_a.get_all_relationships(
             sessions=["run-b"],
         )
-        other_ids = {r.other_participant_id for r in rels}
-        assert ids["run-b"] in other_ids
-        assert ids["legacy"] in other_ids
-        assert ids["run-a"] not in other_ids
+        counts = {r.other_participant_id: r.interaction_count for r in rels}
+        assert counts == {ids["run-a"]: 0, ids["run-b"]: 1, ids["legacy"]: 1}
 
-    async def test_star_returns_all_sessions(
+    async def test_star_counts_all_sessions(
         self, memory_at_run_a: RelationshipMemory,
     ) -> None:
         ids = await _seed_three_session_relationships(memory_at_run_a)
         rels = await memory_at_run_a.get_all_relationships(sessions="*")
-        other_ids = {r.other_participant_id for r in rels}
-        assert other_ids == set(ids.values())
+        counts = {r.other_participant_id: r.interaction_count for r in rels}
+        assert counts == dict.fromkeys(ids.values(), 1)
 
     async def test_empty_list_raises_value_error(
         self, memory_at_run_a: RelationshipMemory,
@@ -178,44 +190,31 @@ class TestGetAllRelationshipsSessionFilter:
             await memory_at_run_a.get_all_relationships(sessions=[])
 
 
-# ─── get_trust — sessions parameter ─────────────────────────
+# ─── get_trust — one value per pair ─────────────────────────
 
 
-class TestGetTrustSessionFilter:
-    """:meth:`get_trust` consults the §D predicate.
+class TestGetTrustIsPerPair:
+    """:meth:`get_trust` reads the one row for the pair, with no session
+    filter and no ``sessions`` argument (ISSUE-0165).
 
-    A trust query for a peer in a non-active non-legacy session returns
-    the neutral default (0.5) — the row is invisible from this tier's
-    active session, so it must not influence trust-driven prompting.
+    PR 3 filtered it, so a peer whose row was first written in a
+    non-active non-legacy session read as the neutral default (0.5).  A
+    peer seeded from config under the boot session therefore never
+    reached a channel's prompt.
     """
 
-    async def test_default_excludes_other_session_row(
+    async def test_row_first_written_in_another_session_is_read(
         self, memory_at_run_a: RelationshipMemory,
     ) -> None:
-        # Bump peer-b's trust under run-b.
+        # Bump peer-b's trust on a row first written under run-b.
         await memory_at_run_a.record_interaction(
             "peer-b", "task_delegation", session_id="run-b",
         )
         await memory_at_run_a.update_trust(
             "peer-b", 0.2, "ran a task",
         )
-        # Default tier recall is run-a + legacy; peer-b lives in run-b.
+        # 0.5 default + 0.2 delta = 0.7, read from run-a.
         trust = await memory_at_run_a.get_trust("peer-b")
-        assert trust == 0.5  # neutral default — row invisible
-
-    async def test_explicit_list_surfaces_named_session(
-        self, memory_at_run_a: RelationshipMemory,
-    ) -> None:
-        await memory_at_run_a.record_interaction(
-            "peer-b", "task_delegation", session_id="run-b",
-        )
-        await memory_at_run_a.update_trust(
-            "peer-b", 0.2, "ran a task",
-        )
-        trust = await memory_at_run_a.get_trust(
-            "peer-b", sessions=["run-b"],
-        )
-        # 0.5 default + 0.2 delta = 0.7 — the row IS visible here.
         assert trust == pytest.approx(0.7)
 
     async def test_legacy_carve_out_visible_by_default(
@@ -230,42 +229,30 @@ class TestGetTrustSessionFilter:
         trust = await memory_at_run_a.get_trust("ancient-peer")
         assert trust == pytest.approx(0.6)
 
-    async def test_star_returns_any_session(
-        self, memory_at_run_a: RelationshipMemory,
-    ) -> None:
-        await memory_at_run_a.record_interaction(
-            "peer-b", "task_delegation", session_id="run-b",
-        )
-        await memory_at_run_a.update_trust(
-            "peer-b", 0.2, "ran a task",
-        )
-        trust = await memory_at_run_a.get_trust("peer-b", sessions="*")
-        assert trust == pytest.approx(0.7)
-
-    async def test_empty_list_raises_value_error(
-        self, memory_at_run_a: RelationshipMemory,
-    ) -> None:
-        with pytest.raises(ValueError, match="non-empty list"):
-            await memory_at_run_a.get_trust("peer-a", sessions=[])
-
 
 # ─── get_relationship_summary — sessions parameter ──────────
 
 
 class TestGetRelationshipSummarySessionFilter:
-    async def test_default_returns_empty_summary_for_foreign_session_row(
+    async def test_default_reads_the_row_but_not_foreign_history(
         self, memory_at_run_a: RelationshipMemory,
     ) -> None:
-        """A row in another non-legacy session yields the "no relationship"
-        summary under default recall, matching :meth:`get_trust`.
+        """A row first written in another non-legacy session gives its
+        trust and notes under default recall, matching :meth:`get_trust`,
+        but none of that session's interactions.  PR 3 returned the "no
+        relationship" summary here (ISSUE-0165).
         """
         await memory_at_run_a.record_interaction(
             "peer-b", "task_delegation", session_id="run-b",
         )
+        await memory_at_run_a.update_trust("peer-b", 0.2, "ran a task")
         summary = await memory_at_run_a.get_relationship_summary("peer-b")
-        # The "no row" branch returns default trust + zero interactions.
+        assert summary.trust_score == pytest.approx(0.7)
+        assert summary.notes == "ran a task"
         assert summary.interaction_count == 0
-        assert summary.trust_score == 0.5
+        assert summary.recent_interactions == []
+        assert summary.first_interaction_at is None
+        assert summary.last_interaction_at is None
 
     async def test_explicit_list_returns_full_summary(
         self, memory_at_run_a: RelationshipMemory,
@@ -315,14 +302,17 @@ class TestGetRelationshipSummarySessionFilter:
 
 class TestCrossRelationshipMemoryInstanceIsolation:
     """Two :class:`RelationshipMemory` instances on the same DB with
-    distinct active sessions see only their own session + legacy.
+    distinct active sessions share the relationship row but see only
+    their own session's + legacy interactions.
 
-    Canonical F-3 reproduction for the relationship surface.  Uses
+    This was the canonical F-3 reproduction for the relationship
+    surface; F-3 now lives on the epoch axis (``docs/memory-scope-axes.md``
+    Decision 5), and the row is one per pair (ISSUE-0165).  Uses
     :class:`tempfile.TemporaryDirectory` to clean up the WAL companion
     files alongside the main ``.db`` on Windows (PR 449 carry-forward).
     """
 
-    async def test_two_instances_isolated_by_active_session(
+    async def test_two_instances_share_the_row_not_the_history(
         self, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -344,9 +334,16 @@ class TestCrossRelationshipMemoryInstanceIsolation:
             await mem_b.initialize()
             try:
                 rels = await mem_b.get_all_relationships()
-                # Pre-PR-3: this returned the run-a row → F-3 reproduction.
-                # Post-PR-3: empty — the run-a row is invisible to run-b.
-                assert rels == []
+                summary = await mem_b.get_relationship_summary(
+                    "fingerprint-peer",
+                )
+                # PR 3 made this empty; since ISSUE-0165 the run-a row is
+                # listed, with none of run-a's interactions.
+                assert [
+                    (r.other_participant_id, r.interaction_count) for r in rels
+                ] == [("fingerprint-peer", 0)]
+                assert summary.interaction_count == 0
+                assert summary.recent_interactions == []
             finally:
                 await mem_b.close()
 
