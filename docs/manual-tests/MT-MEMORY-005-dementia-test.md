@@ -2,10 +2,19 @@
 
 **Test ID**: `MT-MEMORY-005`
 **Feature Area**: Memory (qualitative acceptance gate)
-**Version**: 1.1
+**Version**: 1.2
 **Created**: 2026-05-01
-**Last Updated**: 2026-07-28
+**Last Updated**: 2026-09-22
 **Status**: Active (promoted from Draft scaffold after the v0.3.1 release-prep PR 4 re-run — RFC 0026 Phase 1 landed). **From v0.3.12 every run is a V6 run** — the V5 multi-session no-bleed extension is re-anchored to the epoch axis (see §V6; RFC 0049 cross-room recall is live).
+
+**v1.2 (2026-09-22)**: Setup step 2 keeps the same `export`, with the reason
+corrected. It works because the CLI sends the variable with every message, not
+because the orchestrator and the persona read it when they start: since
+[#459](https://github.com/mkhomutov/Persatrix/pull/459) (2026-05-29) every
+channel message carries a session, and the persona uses its start-up value only
+when none is bound ([ISSUE-0165](../issues/ISSUE-0165-relationship-hidden-outside-its-first-session.md)
+Notes). A window run without it goes to one other session, not a new one per
+interaction. Not re-run under v1.2.
 
 ---
 
@@ -72,7 +81,7 @@ For each turn, capture the per-tier provenance of what the [`MemoryBudget` alloc
 ### Setup
 
 1. Start the orchestrator and a persona named `dementia-test-bob`.
-2. **Pin the operator session id for the whole arc** (RFC 0031 Phase 2 — v0.3.5): `export PERSATRIX_SESSION_ID=dementia-arc-$(date +%Y%m%d)` (PowerShell: `$env:PERSATRIX_SESSION_ID = "dementia-arc-$(Get-Date -Format yyyyMMdd)"`). Re-export it before *every* interaction window — the orchestrator + persona-runtime both snapshot the value at start; under v0.3.5's §D recall default, single-session recall is the dementia-test recall path ([OQ #1 resolution 1a](../rfcs/0031-per-session-namespacing-channels.md#open-questions)). Forgetting to pin the value causes spurious recall misses on every leg because each interaction would resolve a different session id.
+2. **Pin the operator session id for the whole arc** (RFC 0031 Phase 2 — v0.3.5): in the shell you run the CLI from, `export PERSATRIX_SESSION_ID=dementia-arc-$(date +%Y%m%d)` (PowerShell: `$env:PERSATRIX_SESSION_ID = "dementia-arc-$(Get-Date -Format yyyyMMdd)"`). The CLI sends it with every message, and the persona writes each interaction under the session its first turn carried ([sessions guide §4](../guides/sessions.md#4-how-the-active-session-is-resolved)). Export it in *every* shell you open for an interaction window; setting it where the orchestrator or the persona starts does not scope the arc. Under v0.3.5's §D recall default, single-session recall is the dementia-test recall path ([OQ #1 resolution 1a](../rfcs/0031-per-session-namespacing-channels.md#open-questions)). A window run without it goes to another session — the `session use` pointer, or else the orchestrator's own session for the DM — which splits the arc and can cause spurious recall misses.
 3. From the CLI, open a chat session: `persatrix chat dementia-test-bob`.
 4. Note the session start time. Plan to leave ≥ 11 minutes of idle time between Interaction 2 and Interaction 3 (forces RFC 0020 idle-gap closure).
 5. Plan to leave ≥ 11 minutes between Interaction 4 and Interaction 5.

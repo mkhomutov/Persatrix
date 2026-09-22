@@ -113,41 +113,68 @@ auto-binding for one invocation; absent it, the auto-binding stands.
 
 ## 4. How the active session is resolved
 
-Three mechanisms can set the process-lifetime session. They resolve in this
-**precedence order** (RFC 0031 OQ #6):
+For each `chat`, `channel send` and `channel reply` call, the CLI picks the
+session to send. It uses the first of these that is set, in this **precedence
+order** (RFC 0031 OQ #6):
 
 | Precedence | Mechanism | Set by |
 |------------|-----------|--------|
 | 1 (highest) | `--session <id-or-label>` flag on `chat` / `channel send` / `channel reply` | per invocation |
-| 2 | `PERSATRIX_SESSION_ID` env var | operator, at boot |
+| 2 | `PERSATRIX_SESSION_ID` env var | the shell the CLI runs in |
 | 3 | `~/.persatrix/active-session` pointer file | `session use` / `new --activate` |
-| 4 (fallback) | built-in `legacy` | — |
+| 4 (fallback) | none sent: the orchestrator's session for the channel (§3) | — |
 
 - The **`--session` flag** wins for the one invocation it accompanies, *above*
   the per-request auto-binding (§3). It accepts an id or a label; a label that
   resolves to an archived session warns but proceeds (you named it explicitly).
+  The variable and the pointer file are sent as they are, with no registry
+  check, so the variable can hold an id that `session new` never registered.
 - The **active-session pointer file** lives at `~/.persatrix/active-session`,
   overridable with `PERSATRIX_ACTIVE_SESSION_FILE` (handy for tests and
-  multiple parallel checkouts). It is **CLI-local**: writing it changes which
-  session the CLI defaults `--session` to and which the *next* orchestrator boot
-  seeds from. It does **not** live-rebind in-flight processes — they continue
-  under the session they started with.
+  multiple parallel checkouts). It is **CLI-local**: the orchestrator never
+  reads it. Writing it changes the session the CLI sends on its next call; a
+  `chat` already running keeps the session it started with.
 
-> **Scoping a whole arc vs. a single call.** A `--session` (or `--epoch`) on one
-> `chat` / `channel send` call governs the *recall query* and channel-binding for
-> that invocation. But a persona's episode is written asynchronously at
-> *interaction close* in its background loop, tagged with the session the
-> persona-runtime **snapshotted at boot** — so a per-invocation override does
-> **not** retag that close-path write in a long-running persona. To scope an
-> entire arc (e.g. a dementia-test run across calls), set the session at the
-> persona's boot (`PERSATRIX_SESSION_ID`), not per invocation. The structural
-> isolation itself is intact either way; this is a write-attribution nuance, not
-> a recall leak.
+> **Scoping a whole arc, not a single call.** An arc is a run of turns over
+> several calls, such as a dementia-test run. To keep an arc in one session,
+> send the same session on every call: pass the same `--session` each time, or
+> export `PERSATRIX_SESSION_ID` (or `session use` a session) where you run the
+> CLI. The web console sends no session with a channel post, so the
+> orchestrator's session for that channel applies; in a DM it sends the session
+> you pick under **Scope**, if any, as `--session` does. A DM driven from both
+> the CLI and the console splits across two sessions unless both send the same
+> one.
+>
+> A persona writes what it keeps from an *interaction* (one stretch of
+> conversation, which closes when it goes quiet or ends — RFC 0020) when the
+> interaction closes: the episode, the facts drawn from it and, in a DM, the
+> relationship history — all under the session its first turn carried. So a
+> `--session` call does tag what the interaction it opens writes. Two things do
+> not work as they look:
+>
+> - **Switching mid-interaction.** A turn that joins an interaction still open
+>   under another session keeps that session. Let the interaction close before
+>   you switch.
+> - **Setting `PERSATRIX_SESSION_ID` where the orchestrator or the persona
+>   starts.** The orchestrator uses its copy only to tag the channel and
+>   message rows it stores. It sends the persona a session with every channel
+>   message (§3), so the persona uses its copy only when no session is bound,
+>   such as a tick (its own timer) or a relationship seeded from config.
+>   Neither copy scopes a channel turn.
+>
+> This note said the opposite until 2026-09-22: that the persona tags these
+> writes with its start-up session, so an arc is scoped where the persona
+> starts. That stopped being true when
+> [#459](https://github.com/mkhomutov/Persatrix/pull/459) (2026-05-29) made the
+> orchestrator send a session with every channel message; the Notes of
+> [ISSUE-0165](../issues/ISSUE-0165-relationship-hidden-outside-its-first-session.md)
+> record the finding.
 
 ## 5. The `legacy` carve-out
 
-Rows written before this RFC shipped (and any row whose session resolves to the
-fallback) carry `session_id = 'legacy'`. Legacy rows are **always visible**,
+Rows written before this RFC shipped, and any row written with no session given
+while `PERSATRIX_SESSION_ID` is unset (a tick's episode, say), carry
+`session_id = 'legacy'`. Legacy rows are **always visible**,
 from every session — the carve-out that let sessions ship without backfilling
 old data. Two consequences:
 
@@ -253,7 +280,8 @@ dump verb would be neither).
   traces (the session id is treated as a low-cardinality, non-sensitive
   dimension). Keep credentials, tokens, and PII out of session labels.
 - **Stale pointers misroute.** A `~/.persatrix/active-session` pointing at an
-  archived session makes new channels attach to a session you thought was done.
+  archived session sends every CLI `chat` or channel post that names no other
+  session into a session you thought was done, with no warning.
   `use` validates the target before writing, and activation echoes the active
   id — check `session current` when a run surfaces unexpected memory.
 
