@@ -319,7 +319,12 @@ def test_artifacts_merged_via_json_merge_patch_when_existing_supplied() -> None:
 
 @pytest.mark.parametrize(
     "spoof_tag",
-    ["source:legitimate", "tier:procedural", "key:override", "channel:admin"],
+    [
+        "source:legitimate", "tier:procedural", "key:override", "channel:admin",
+        # The procedural tier finds its rows by this tag, and RFC 0008
+        # keeps that tier out of delegation.
+        "procedure:deploy",
+    ],
 )
 def test_reserved_tag_prefix_rejected(spoof_tag: str) -> None:
     """Sub-agent-supplied tags must not collide with framework
