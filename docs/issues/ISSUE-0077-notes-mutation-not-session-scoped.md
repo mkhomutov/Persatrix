@@ -11,6 +11,7 @@ refs:
   - docs/rfcs/0031-per-session-namespacing-channels.md
   - docs/rfcs/0031-phase2-pr-plan.md
   - agents/memory/notes.py
+  - agents/memory/_notes_mutations.py
   - tests/unit/python/test_notes_mutation_session_scope.py
 ---
 
@@ -111,3 +112,13 @@ misleading number. Cosmetic, not corrupting.
 > UUIDs through normal channels). Track for Phase 2 PR 5
 > (dementia-test bridge + review follow-ups) or a dedicated PR if
 > the mutation tests reveal more surface than expected.
+
+> 2026-09-22 — **The mirror broke the same day.** "Active" here was the
+> note store's start-up snapshot (`self._active_session_id`). #453
+> (ISSUE-0081 PR 1) moved every recall path to the session bound at call
+> time but left these three methods on the snapshot. So once the orchestrator
+> sent a session with each channel message, a persona could not edit or delete
+> a note it stored in a channel. Filed as
+> [ISSUE-0164](ISSUE-0164-persona-cannot-edit-or-delete-its-channel-notes.md)
+> and fixed in [#979](https://github.com/mkhomutov/Persatrix/pull/979); the
+> three methods now live in `agents/memory/_notes_mutations.py`.
