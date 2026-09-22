@@ -173,8 +173,8 @@ class ProceduralFacadeMixin:
         if expires_at is not None:
             context["expires_at"] = expires_at
         # RFC 0031 Phase 1: thread session_id; caller passes ``None`` to
-        # inherit the facade's construction-time default (see
-        # ``MemoryStore.__init__``).  Procedural rows live in the same
+        # inherit the active session (the ISSUE-0081 call-time default
+        # below).  Procedural rows live in the same
         # ``episodes`` table as observations, so the session-tag column
         # is shared.
         episode_id = await self._episodic.store_episode(
@@ -235,9 +235,10 @@ class ProceduralFacadeMixin:
         ``sessions`` (RFC 0031 Phase 2 PR 4 — OQ #4 back-compat
         extension): same §D shape as
         :meth:`MemoryStore.retrieve_relevant`.  ``None`` resolves to the
-        facade's construction-time ``_session_id`` plus the ``legacy``
+        active session (a per-request ``session_scope`` wins over the
+        facade's construction-time ``_session_id``) plus the ``legacy``
         carve-out; an explicit list still includes ``legacy``; ``"*"``
-        bypasses the filter (CLI / debug); ``[]`` is :class:`ValueError`.
+        → no filter (``SESSIONS_ALL``); ``[]`` is :class:`ValueError`.
         Procedural rows live in the same ``episodes`` table as
         observations, so the §D predicate is applied verbatim.
         """
