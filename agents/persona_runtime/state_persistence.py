@@ -118,7 +118,9 @@ class _StatePersistenceMixin:
         peer row carries the active session's tag from the start.
         Without this, the seed inserted ``"legacy"`` and the
         first-seen-wins contract on ``record_interaction`` prevented a
-        later overwrite — MT-SESSION-001 Step 7 silently failed.
+        later overwrite — MT-SESSION-001 Step 7 silently failed.  Nothing
+        reads the tag (ISSUE-0165); see
+        :func:`agents.memory.relationship_mutations.seed_trust`.
         """
         await self._episodic_memory.initialize()
         await self._relationship_memory.initialize(

@@ -8,7 +8,10 @@ goal:
 
 * **Isolation by default** — a second run under a new
   ``PERSATRIX_SESSION_ID`` does not surface the prior run's persona
-  memory through a tier's default ``sessions=None`` recall (the F-3 closer).
+  memory through a tier's default ``sessions=None`` recall (the F-3
+  closer).  The relationship *row* is outside that rule since
+  ISSUE-0165: it is one row per peer, so its trust and trust note read
+  the same everywhere and only its interaction history is per session.
 * **Continuity within a session** — a multi-event arc that shares a
   session id reads back the full arc from every tier (the dementia-test
   bridge — `OQ #1 resolution 1a
@@ -43,6 +46,8 @@ gate — pinned by :mod:`tests.integration.test_prompt_path_sessions`.
 """
 
 from __future__ import annotations
+
+import pytest
 
 # ``facade_factory`` (one session's tiers on a shared database) comes from
 # ``_session_tiers_helpers.py`` through ``conftest.py``.
@@ -116,6 +121,10 @@ class TestSingleSessionArcContinuity:
 class TestMultiSessionDefaultIsolation:
     """A second arc under a new session id does NOT surface the first
     arc's content via the §D default — the F-3 closer, end to end.
+
+    One exception, pinned below: the relationship row is one per peer and
+    has no session in its key, so its trust and trust note read the same
+    in arc 2 (ISSUE-0165); only the interaction history stays per arc.
     """
 
     async def test_arc_2_default_recall_excludes_arc_1(
@@ -131,6 +140,7 @@ class TestMultiSessionDefaultIsolation:
             "alice", "task_delegation", outcome="arc1-outcome",
             session_id="arc-1",
         )
+        await b1.rels.update_trust("alice", 0.2, "arc1-trust-note")
         await b1.facts.store(
             subject="alice", predicate="works_at", object="lakeshore",
             source_interaction_id="ix-1", asserted_at=1000.0,
@@ -150,9 +160,12 @@ class TestMultiSessionDefaultIsolation:
             "F-3 read-side leak: arc-1 notes row surfaced in arc-2"
         )
 
-        # The relationship row is tagged arc-1; default summary in
-        # arc-2 collapses to the no-relationship branch.
+        # The relationship row is one per peer and reads the same from
+        # every session (ISSUE-0165), so arc-2 gets arc-1's trust and its
+        # trust note.  What stays behind is the interaction history.
         summary = await b2.rels.get_relationship_summary("alice")
+        assert summary.trust_score == pytest.approx(0.7)
+        assert summary.notes == "arc1-trust-note"
         assert summary.interaction_count == 0, (
             f"F-3 read-side leak: arc-1 interaction surfaced via summary "
             f"({summary.interaction_count})"

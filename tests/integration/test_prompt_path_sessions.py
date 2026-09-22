@@ -121,8 +121,10 @@ class TestInjectMemoryContextDefaultPath:
       ``FactStore.topic_subjects``) receive ``"*"``: the prompt's under
       ``live``, and under ``shadow`` only the log-only shadow pass's.
     * Every other spied read keeps the §D default (``sessions=None``, or
-      no ``sessions`` at all), so the other session's note, relationship
-      row and channel turn never reach the prompt in any mode.
+      no ``sessions`` at all), so the other session's note, channel turn
+      and interaction history never reach the prompt in any mode.  The
+      relationship row itself is one per pair and reads the same from
+      every session (ISSUE-0165), so its trust note does.
     * A widened row reaches the prompt only through the RFC 0037 §D
       gate: the ``"*"`` read returns the ``restricted`` fact, the live
       episodic read the ``restricted`` episode, and the gate withholds
@@ -154,7 +156,7 @@ class TestInjectMemoryContextDefaultPath:
         await other.facade._episodic.store_note(
             "alice", "alice hides the lake boathouse key", session_id="arc-1",
         )
-        # The first write tags the relationship row, and it defaults to ``legacy``.
+        # The first write tags the relationship row ``arc-1``.
         await other.rels.record_interaction("alice", "chat", session_id="arc-1")
         await other.rels.update_trust("alice", 0.1, "alice owes the ferry toll")
         lakeshore = await other.facts.store(
@@ -174,6 +176,7 @@ class TestInjectMemoryContextDefaultPath:
         await here.facade._episodic.store_note(
             "alice", "alice guides lake tours", session_id="arc-2",
         )
+        await here.rels.record_interaction("alice", "chat", session_id="arc-2")
         reads = _spy_tier_reads(monkeypatch, here)
         host = _prompt_host(here, facts_mode, episodic_mode)
 
@@ -225,11 +228,14 @@ class TestInjectMemoryContextDefaultPath:
         assert sealed not in manifest
         assert "lake ledger" not in rendered
         # This session's rows arrive in every mode; the other session's
-        # note, channel turn and relationship row never do.
+        # note and channel turn never do.
         assert "picnic by the lake" in rendered
         assert "cato moored the skiff" in rendered
         assert "guides lake tours" in rendered
         assert "boathouse" not in rendered
         assert "pier lantern" not in rendered
-        assert "ferry toll" in ((await other.rels.get_relationship_summary("alice")).notes or "")
-        assert "ferry toll" not in rendered
+        # The relationship row is one per pair (ISSUE-0165): the trust note
+        # written with arc-1's interaction arrives, but only this session's
+        # interaction is counted.
+        assert "ferry toll" in rendered
+        assert "Interactions: 1" in rendered

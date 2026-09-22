@@ -418,9 +418,19 @@ async def _snapshot_state(agent: Any, persona: str) -> dict[str, Any]:
     ``persona:<id>:trust.scores.<peer>``); the ``persona:<id>:...`` flattening is a
     convention the runner owns (no runtime scope uses that prefix). Other tiers are
     added here as recipes come to reference them (PR 4+).
+
+    A key holds a peer id but no participant type, so one id can name two
+    rows: the agent-typed row a ``trust.scores.<peer>`` seed writes, and a
+    user-typed row the close path writes when a person of the same id DMs
+    the persona.  The seeded row wins, so a seed still reads back as
+    itself.  Both rows became visible here with ISSUE-0165, which stopped
+    the list read filtering rows by session.
     """
     snapshot: dict[str, Any] = {}
     relationships = await agent.memory.relationship.get_all_relationships()
     for rel in relationships:
-        snapshot[f"persona:{persona}:trust.scores.{rel.other_participant_id}"] = rel.trust_score
+        key = f"persona:{persona}:trust.scores.{rel.other_participant_id}"
+        if key in snapshot and rel.other_participant_type != "agent":
+            continue
+        snapshot[key] = rel.trust_score
     return snapshot

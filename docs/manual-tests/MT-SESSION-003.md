@@ -28,7 +28,13 @@
 recall is scoped to the active session, so a run under a *fresh*
 `PERSATRIX_SESSION_ID` surfaces **none** of a prior session's memory across all
 four tiers (episodes, relationships, facts, notes), **while** a within-session
-arc still continues normally. This is the F-3 cross-run state-bleed fix at the
+arc still continues normally. Two exceptions have accrued since v0.3.5: facts
+and episodes read across sessions behind the RFC 0037 §D gate (the v0.3.12
+re-anchor below), and the relationship *row* — one row per peer, so its trust
+and trust note read the same in a fresh session, and only its interaction
+history is per session
+([ISSUE-0165](../issues/ISSUE-0165-relationship-hidden-outside-its-first-session.md),
+2026-09-22; Edge Case 1 already said a fresh session does not reset trust). This is the F-3 cross-run state-bleed fix at the
 recall surface, and the OQ #1 tension made concrete: single-session default
 recall *is* the dementia-test continuity path
 ([OQ #1 1a](../rfcs/0031-per-session-namespacing-channels.md#open-questions)).
