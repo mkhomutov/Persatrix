@@ -126,9 +126,13 @@ class _EpisodicNotesAPIMixin:
         )
 
     async def delete_note(self, note_id: str) -> bool:
-        """Delete a note by ID (agent-scoped). Returns True if found."""
+        """Delete a note by ID. Returns True if found.  Scoped like
+        :meth:`NoteStore.update_note`: the call-time session plus
+        ``legacy``, this tenant and epoch."""
         return await self._ensure_note_store().delete_note(note_id)
 
     async def count_notes(self) -> int:
-        """Return the number of notes for this agent."""
+        """Return the number of notes in the call-time session plus
+        ``legacy``, for this tenant and epoch (see
+        :meth:`NoteStore.count_notes`)."""
         return await self._ensure_note_store().count_notes()

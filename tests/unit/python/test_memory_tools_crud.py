@@ -182,6 +182,36 @@ class TestUpdateNote:
             await memory.update_note(note_id, big)
 
 
+# "é" is two bytes in UTF-8: this fills the byte limit exactly while
+# staying at half of it in characters.
+_TWO_BYTE_FILL = "é" * (_MAX_NOTE_CONTENT_BYTES // 2)
+
+
+class TestNoteContentCheck:
+    """``store_note`` and ``update_note`` accept and reject the same
+    content: whitespace alone counts as empty, and the size limit counts
+    UTF-8 bytes, not characters."""
+
+    @staticmethod
+    async def _write(memory, path, content):
+        if path == "store":
+            await memory.store_note("topic", content)
+        else:
+            note_id = await memory.store_note("topic", "original")
+            await memory.update_note(note_id, content)
+
+    @pytest.mark.parametrize("path", ["store", "update"])
+    async def test_whitespace_only_is_empty(self, memory, path):
+        with pytest.raises(ValueError, match="content must not be empty"):
+            await self._write(memory, path, " \n\t ")
+
+    @pytest.mark.parametrize("path", ["store", "update"])
+    async def test_limit_counts_bytes(self, memory, path):
+        await self._write(memory, path, _TWO_BYTE_FILL)  # exactly at the limit
+        with pytest.raises(ValueError, match="exceeds.*byte limit"):
+            await self._write(memory, path, _TWO_BYTE_FILL + "é")
+
+
 class TestDeleteNote:
     async def test_delete_existing(self, memory):
         note_id = await memory.store_note("topic", "content")
