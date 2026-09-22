@@ -8,10 +8,12 @@ in that module stays under the 500-line repo soft cap (see
 ``procedure:KEY`` tag in ``tags_json`` and populate the ``confidence`` /
 ``last_validated_at`` columns added by migration v6.
 
-The helpers are plain coroutines (not methods) so the dispatching
-:class:`EpisodicMemory` class can keep its own surface tight; the
-public façade is still ``EpisodicMemory.recall_procedures`` /
-``EpisodicMemory.refresh_confidence``, which delegate here.
+The helpers are plain coroutines that take the connection, so
+:class:`EpisodicMemory` carries no procedural methods.  The public
+surface is :meth:`MemoryStore.store_procedure` /
+:meth:`MemoryStore.retrieve_procedures`
+(:class:`~agents.memory.facade_procedural.ProceduralFacadeMixin`), which
+calls these helpers with the facade's connection.
 """
 
 from __future__ import annotations
@@ -35,6 +37,7 @@ from .decay import (
     DEFAULT_LAMBDA_PER_DAY,
     compute_decayed_confidence,
 )
+from .episodic_queries import MAX_RECALL_LIMIT
 
 # PR 6b review Should-Fix #1: defence-in-depth log-safety on the
 # ``stale_memory_injection`` warn-log ``key`` field.  Procedural rows
@@ -144,9 +147,10 @@ async def recall_procedures(
 ) -> list[ProcedureRecallEntry]:
     """Return procedural entries with read-time confidence decay applied.
 
-    See :meth:`EpisodicMemory.recall_procedures` for full parameter
-    documentation — this helper exists only to keep the SQL out of
-    ``episodic.py``.
+    The facade entry point is
+    :meth:`~agents.memory.facade_procedural.ProceduralFacadeMixin.retrieve_procedures`,
+    which documents ``query``, ``limit``, ``now`` and ``sessions`` and fills
+    the other arguments from the agent's config; this helper holds the SQL.
 
     Procedural rows are identified by the ``procedure:`` tag prefix
     written by :meth:`MemoryStore.store_procedure`.  Each row's decayed
@@ -156,27 +160,35 @@ async def recall_procedures(
     validated).  Rows whose decayed value is below ``c_min`` are
     filtered out before the ``limit`` slice.
 
-    PR 6b (PR 5 R1 S3 + Info-3): the SQL WHERE now pre-filters rows
-    whose anchor age exceeds ``t_max = -ln(c_min) / lambda_per_day``
-    seconds-equivalent so the application-side decay loop does not have
-    to walk obviously-stale rows.  When ``lambda_per_day == 0`` (decay
-    disabled) ``t_max`` is infinite so the cutoff is omitted.  The SQL
-    ``LIMIT`` is also applied: the in-Python decay can still reduce the
-    set further (a row's decayed confidence may dip below ``c_min``
-    even though its anchor is within ``t_max`` due to a non-1.0 base
-    confidence), but the SQL bound is a generous over-fetch
-    (``2 * limit``) so the loop terminates in O(limit) rows for
-    typical workloads while preserving correctness in the edge case.
+    ``limit`` below 1 raises :class:`ValueError`, and a larger one is
+    capped at ``MAX_RECALL_LIMIT`` (100), as the episodic and notes reads do.
+
+    PR 6b (PR 5 R1 S3 + Info-3): the SQL WHERE pre-filters rows whose
+    anchor is older than ``t_max = -ln(c_min) / lambda_per_day`` days, the
+    age at which even a base of 1.0 has decayed below ``c_min``, so the
+    decay loop does not walk rows that cannot pass.  When
+    ``lambda_per_day == 0`` (decay disabled) ``t_max`` is infinite and the
+    cutoff is omitted.  A row younger than ``t_max`` can still fail, because
+    its base may be below 1.0, so the rows are read newest first,
+    ``2 * limit`` at a time, until ``limit`` of them pass or none are left.
+    Typical workloads stop after the first read.
 
     PR 6b (PR 5 R2 Mi2): when ``stale_threshold`` is supplied, this
     helper emits a ``stale_memory_injection`` structured log for each
     admitted entry whose decayed confidence falls in
     ``[c_min, stale_threshold)``.  The log lives next to the decayed
     value that triggers it; the facade mixin no longer wraps the
-    return value to do this.  ``stale_threshold == None`` disables
-    the alert (used by callers like the eviction pass that do not
-    want a warn-log per row).
+    return value to do this.  ``stale_threshold=None`` (the default)
+    turns the alert off; the facade always passes its configured
+    threshold.
     """
+    if limit < 1:
+        raise ValueError(f"limit must be >= 1, got {limit}")
+    if limit > MAX_RECALL_LIMIT:
+        logger.warning(
+            "limit=%d exceeds maximum (%d), capping", limit, MAX_RECALL_LIMIT,
+        )
+        limit = MAX_RECALL_LIMIT
     timestamp = now if now is not None else time.time()
     # Compute the SQL-side cutoff (PR 5 R1 S3).  When ``lambda_per_day``
     # is zero, the closed-form ``t_max`` is undefined (division by
@@ -204,7 +216,7 @@ async def recall_procedures(
     # carry-forward clarified the wording.
     sql_base = (
         "SELECT id, summary, tags_json, confidence, "
-        "last_validated_at, created_at, importance "
+        "last_validated_at, created_at, importance, rowid "
         "FROM episodes WHERE agent_id = ? "
         "AND tags_json LIKE '%\"procedure:%'"
     )
@@ -244,91 +256,138 @@ async def recall_procedures(
             " AND (? - COALESCE(last_validated_at, created_at)) <= ?"
         )
         params.extend([timestamp, sql_cutoff_seconds])
-    # Deterministic tiebreak (issue #740; follows #739 / #742) on BOTH
-    # branches below. `created_at` can tie — several procedures stored in one
-    # instant under the eval driver's FrozenClock — and this recall over-fetches
-    # `limit*2` then decay-filters in Python, so a tie at the SQL `LIMIT` cutoff
-    # changes *which* rows reach the filter, not just their order — a
-    # non-portable RFC 0044 golden-trace gap. `rowid` (insertion order) is the
-    # tiebreak: `episodes.id` is a random uuid4 (`insert_episode`), so it is NOT
-    # a portable tiebreak; `rowid` is identical across record and replay, which
-    # INSERT the same episodes in the same order, and the table is not WITHOUT
-    # ROWID. This is a plain row SELECT, so `rowid` is unambiguous (one per row).
     if query:
         # PR #225 review S1: escape LIKE meta-chars in ``query`` so a
         # ``%`` / ``_`` in caller-supplied search text does not widen
         # the match.  Pair with ``ESCAPE '\\'``.
-        sql = (
-            sql_base + " AND summary LIKE ? ESCAPE '\\'"
-            " ORDER BY created_at DESC, rowid DESC LIMIT ?"
-        )
-        params.extend([f"%{_escape_like(query)}%", max(limit * 2, limit)])
-    else:
-        sql = sql_base + " ORDER BY created_at DESC, rowid DESC LIMIT ?"
-        params.append(max(limit * 2, limit))
-    async with db.execute(sql, tuple(params)) as cursor:
-        rows = list(await cursor.fetchall())
+        sql_base += " AND summary LIKE ? ESCAPE '\\'"
+        params.append(f"%{_escape_like(query)}%")
+    # Read the rows newest first, ``2 * limit`` at a time, until ``limit``
+    # of them pass the decay filter or none are left.  Decay is computed in
+    # Python, so one SQL LIMIT would cut before the filter: newer rows that
+    # decay below ``c_min`` could fill it and hide older rows that pass.
+    # Each read resumes just past the last row of the one before, by its
+    # place in the sort order rather than an OFFSET, so a row written or
+    # evicted between two reads cannot make the next one skip or repeat a row.
+    #
+    # Deterministic tiebreak (issue #740; follows #739 / #742). `created_at`
+    # can tie — several procedures stored in one instant under the eval
+    # driver's FrozenClock — so `rowid` (insertion order) completes the sort
+    # key. Without it SQLite may order tied rows either way, which changes
+    # *which* rows a read returns, not just their order — a non-portable
+    # RFC 0044 golden-trace gap. `episodes.id` is a random uuid4
+    # (`insert_episode`), so it is NOT a portable tiebreak; `rowid` is
+    # identical across record and replay, which INSERT the same episodes in
+    # the same order, and the table is not WITHOUT ROWID. This is a plain row
+    # SELECT, so `rowid` is unambiguous (one per row).
+    read_size = limit * 2
     out: list[ProcedureRecallEntry] = []
-    for row in rows:
-        row_id, summary, tags_json, confidence, last_val, created_at, importance = row
-        base_conf = resolve_base_confidence(confidence, importance)
-        anchor = last_val if last_val is not None else created_at
-        age = timestamp - float(anchor)
-        decayed = compute_decayed_confidence(
-            base_conf, age, lambda_per_day=lambda_per_day,
-        )
-        if decayed < c_min:
-            continue
-        tags = json.loads(tags_json) if tags_json else []
-        entry = ProcedureRecallEntry(
-            id=row_id,
-            key=extract_procedure_key(tags),
-            content=summary,
-            decayed_confidence=decayed,
-            base_confidence=base_conf,
-            last_validated_at=(
-                float(last_val) if last_val is not None else None
-            ),
-            created_at=float(created_at),
-        )
-        if (
-            stale_threshold is not None
-            and decayed < stale_threshold
-        ):
-            # Structured log — the orchestrator-side log ingestion
-            # path (RFC 0019 PR 4 LogServiceServer) increments the
-            # ``orchestrator.memory.stale_memory_injection`` counter
-            # when it sees this event.  Field names are part of the
-            # log contract and must match the Go-side parser.
-            #
-            # PR 6b review Should-Fix #1: lazy-import ``_bounded`` to
-            # avoid a circular import via ``agents.sub_agents`` at
-            # module load time (see module-level comment above).
-            from ..sub_agents._log_safety import bounded as _bounded
-            logger.warning(
-                "stale_memory_injection",
-                extra={
-                    "metric": "stale_memory_injection",
-                    "agent_id": agent_id,
-                    # PR 6b review Should-Fix #1: ``entry.key`` is
-                    # extracted from ``tags_json`` and may carry
-                    # control characters on rows written before the
-                    # facade-side regex validator landed.  Pipe through
-                    # ``_bounded`` to neutralise CWE-117 log-injection
-                    # vectors on legacy rows; new rows pass through
-                    # unchanged because the facade regex already
-                    # rejects control chars.
-                    "key": _bounded(entry.key) if entry.key else None,
-                    "decayed_confidence": entry.decayed_confidence,
-                    "base_confidence": entry.base_confidence,
-                    "c_min": c_min,
-                    "stale_threshold": stale_threshold,
-                },
+    resume_after: tuple[float, int] | None = None
+    while True:
+        sql = sql_base
+        read_params = list(params)
+        if resume_after is not None:
+            last_created_at, last_rowid = resume_after
+            sql += " AND (created_at < ? OR (created_at = ? AND rowid < ?))"
+            read_params.extend([last_created_at, last_created_at, last_rowid])
+        sql += " ORDER BY created_at DESC, rowid DESC LIMIT ?"
+        read_params.append(read_size)
+        async with db.execute(sql, tuple(read_params)) as cursor:
+            rows = list(await cursor.fetchall())
+        for row in rows:
+            entry = _admit(
+                row,
+                agent_id=agent_id,
+                timestamp=timestamp,
+                lambda_per_day=lambda_per_day,
+                c_min=c_min,
+                stale_threshold=stale_threshold,
             )
-        out.append(entry)
-        if len(out) >= limit:
-            break
-    return out
+            if entry is not None:
+                out.append(entry)
+                if len(out) == limit:
+                    return out
+        if len(rows) < read_size:
+            return out
+        # The next read starts after this one's last row, keyed on its
+        # ``created_at`` and ``rowid`` (columns 5 and 7 of the SELECT).
+        resume_after = (float(rows[-1][5]), int(rows[-1][7]))
+
+
+def _admit(
+    row: Any,
+    *,
+    agent_id: str,
+    timestamp: float,
+    lambda_per_day: float,
+    c_min: float,
+    stale_threshold: float | None,
+) -> ProcedureRecallEntry | None:
+    """Decay one :func:`recall_procedures` row and return its entry.
+
+    Returns ``None`` when the decayed confidence is below ``c_min``, and
+    logs ``stale_memory_injection`` for an entry that passes but sits
+    below ``stale_threshold``.
+    """
+    (
+        row_id, summary, tags_json, confidence, last_val, created_at,
+        importance, _rowid,
+    ) = row
+    base_conf = resolve_base_confidence(confidence, importance)
+    anchor = last_val if last_val is not None else created_at
+    age = timestamp - float(anchor)
+    decayed = compute_decayed_confidence(
+        base_conf, age, lambda_per_day=lambda_per_day,
+    )
+    if decayed < c_min:
+        return None
+    tags = json.loads(tags_json) if tags_json else []
+    entry = ProcedureRecallEntry(
+        id=row_id,
+        key=extract_procedure_key(tags),
+        content=summary,
+        decayed_confidence=decayed,
+        base_confidence=base_conf,
+        last_validated_at=(
+            float(last_val) if last_val is not None else None
+        ),
+        created_at=float(created_at),
+    )
+    if (
+        stale_threshold is not None
+        and decayed < stale_threshold
+    ):
+        # Structured log — the orchestrator-side log ingestion
+        # path (RFC 0019 PR 4 LogServiceServer) increments the
+        # ``orchestrator.memory.stale_memory_injection`` counter
+        # when it sees this event.  Field names are part of the
+        # log contract and must match the Go-side parser.
+        #
+        # PR 6b review Should-Fix #1: lazy-import ``_bounded`` to
+        # avoid a circular import via ``agents.sub_agents`` at
+        # module load time (see module-level comment above).
+        from ..sub_agents._log_safety import bounded as _bounded
+        logger.warning(
+            "stale_memory_injection",
+            extra={
+                "metric": "stale_memory_injection",
+                "agent_id": agent_id,
+                # PR 6b review Should-Fix #1: ``entry.key`` is
+                # extracted from ``tags_json`` and may carry
+                # control characters on rows written before the
+                # facade-side regex validator landed.  Pipe through
+                # ``_bounded`` to neutralise CWE-117 log-injection
+                # vectors on legacy rows; new rows pass through
+                # unchanged because the facade regex already
+                # rejects control chars.
+                "key": _bounded(entry.key) if entry.key else None,
+                "decayed_confidence": entry.decayed_confidence,
+                "base_confidence": entry.base_confidence,
+                "c_min": c_min,
+                "stale_threshold": stale_threshold,
+            },
+        )
+    return entry
 
 
 async def refresh_confidence(
@@ -336,27 +395,37 @@ async def refresh_confidence(
     agent_id: str,
     key: str,
     *,
+    session_list: list[str] | None = None,
     principal_id: str = DEFAULT_PRINCIPAL_ID,
     epoch_id: str = DEFAULT_EPOCH_ID,
 ) -> bool:
     """Mark every procedure row tagged ``procedure:{key}`` as freshly validated.
 
-    Sets ``confidence = 1.0`` and ``last_validated_at = time.time()`` on
-    the matching rows for ``agent_id``.  Returns ``True`` when at least
-    one row was updated.
+    Sets ``confidence`` and ``importance`` to ``1.0`` and
+    ``last_validated_at`` to ``time.time()`` on the matching rows for
+    ``agent_id``.  Returns ``True`` when at least one row was updated.
 
     Implements the "Confidence refresh on successful reuse" contract
     from RFC 0008 §G — :meth:`MemoryStore.store_procedure` invokes it
-    automatically when a re-store hits an existing key.
+    automatically when a re-store hits an existing key.  ``importance``
+    is reset too because :func:`resolve_base_confidence` reads it whenever
+    ``confidence`` is 1.0 (the legacy-row shim): resetting ``confidence``
+    alone left a procedure stored at 0.4 decaying from 0.4, so neither
+    recall nor eviction saw the refresh.
 
-    ``principal_id`` (ISSUE-0081 PR 3; default :data:`DEFAULT_PRINCIPAL_ID`)
-    scopes the refresh to the active tenant with the same strict equality
-    the recall path uses.  Without it the UPDATE matched on
-    ``(agent_id, key)`` only, so a second tenant re-storing the same key
-    refreshed the *first* tenant's row (cross-tenant write-bleed) and —
-    because ``store_procedure`` short-circuits on a non-zero rowcount — its
-    own write was silently dropped.  The predicate is now symmetric with
-    :func:`recall_procedures` (review follow-up).
+    The match is the one :func:`recall_procedures` applies, so a refresh
+    touches only rows a recall in the same scope could return:
+
+    * ``session_list`` filters on ``session_id`` with the same resolved
+      list, ``legacy`` carve-out included; ``None`` matches every session,
+      as ``"*"`` does for recall.  :meth:`MemoryStore.store_procedure`
+      passes its write session plus ``legacy``.
+    * ``principal_id`` (ISSUE-0081 PR 3; default :data:`DEFAULT_PRINCIPAL_ID`)
+      and ``epoch_id`` (ISSUE-0085 PR 3) use the same strict equality.
+
+    Without one of these clauses, a re-store under another session, tenant
+    or epoch refreshed that scope's row, and because ``store_procedure``
+    skips the insert when a refresh matches, its own write was dropped.
     """
     if not key or not key.strip():
         raise ValueError("key must not be empty")
@@ -368,6 +437,9 @@ async def refresh_confidence(
     # because ``json.dumps`` quotes every list element) still anchor the
     # match to a single tag-array element.
     pattern = f'%"procedure:{_escape_like(key)}"%'
+    session_clause, session_params = _session_in_clause(
+        session_list, column="session_id",
+    )
     principal_clause, principal_params = _principal_eq_clause(
         principal_id, column="principal_id",
     )
@@ -378,10 +450,14 @@ async def refresh_confidence(
         epoch_id, column="epoch_id",
     )
     cursor = await db.execute(
-        "UPDATE episodes SET confidence = 1.0, last_validated_at = ? "
+        "UPDATE episodes SET confidence = 1.0, importance = 1.0, "
+        "last_validated_at = ? "
         "WHERE agent_id = ? AND tags_json LIKE ? ESCAPE '\\'"
-        f"{principal_clause}{epoch_clause}",
-        (time.time(), agent_id, pattern, *principal_params, *epoch_params),
+        f"{session_clause}{principal_clause}{epoch_clause}",
+        (
+            time.time(), agent_id, pattern,
+            *session_params, *principal_params, *epoch_params,
+        ),
     )
     await db.commit()
     return (cursor.rowcount or 0) > 0

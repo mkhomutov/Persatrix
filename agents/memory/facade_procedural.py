@@ -23,7 +23,7 @@ import re
 import time
 from typing import TYPE_CHECKING, Any
 
-from ..session_id import current_session_id
+from ..session_id import current_session_id, normalize_session_id
 from ._epoch_filter import resolve_active_epoch
 from ._principal_filter import resolve_active_principal
 from ._session_filter import _resolve_session_list
@@ -128,25 +128,34 @@ class ProceduralFacadeMixin:
         the read-time decay clock has a stable base value independent
         of importance).
 
-        PR 5: when an entry with the same ``key`` already exists for
-        this agent, this method calls
-        ``episodic_procedural.refresh_confidence`` to reset
-        ``confidence = 1.0`` and stamp ``last_validated_at = now`` on
-        the existing rows — implementing the RFC 0008 §G "Confidence
-        refresh on successful reuse" contract.
+        PR 5: when an entry with the same ``key`` already exists, this
+        method calls ``episodic_procedural.refresh_confidence`` to reset
+        ``confidence`` and ``importance`` to 1.0 and stamp
+        ``last_validated_at = now`` on the existing rows, so decay starts
+        again from 1.0 — the RFC 0008 §G "Confidence refresh on
+        successful reuse" contract.
+
+        "Already exists" means a recall in the write session would return
+        it: same tenant, same epoch, and a row in the write session or in
+        ``legacy``.  The write session is ``session_id`` when given, else
+        the per-request ``session_scope``, else the construction-time
+        default.  A re-store in another named session therefore writes
+        its own row and leaves the first one alone.  A ``legacy`` row is
+        refreshed rather than joined by a second row, and because every
+        session recalls ``legacy`` rows, that refresh shows in all of
+        them — the trade the facts tier's supersede chain makes for
+        ``legacy`` (ISSUE-0079).
 
         Refresh-path discards (PR #225 review S4): on the refresh path
         **both** the supplied ``content`` *and* the supplied
         ``confidence`` arguments are silently discarded — the existing
         row's body is preserved and confidence is unconditionally
-        reset to ``1.0``.  This is intentional for PR 5: the procedural
-        tier does not yet have an UPDATE path, and "successful reuse"
-        per RFC 0008 §G is defined as a full revalidation
-        (``c_t = 1.0``).  Callers who need to *downgrade* an existing
-        procedure's confidence (e.g. failure-driven decay) must call
-        ``refresh_confidence`` directly, or wait for the procedural
-        UPDATE path landing in PR 6+.  The signature still accepts
-        ``confidence`` because it is required on the insert path.
+        reset to ``1.0``.  This is intentional: "successful reuse" per
+        RFC 0008 §G is defined as a full revalidation (``c_t = 1.0``).
+        Nothing can yet lower a stored procedure's confidence or replace
+        its body; ``refresh_confidence`` only resets to 1.0.  The
+        signature still accepts ``confidence`` because it is required on
+        the insert path.
         ``expires_at`` is similarly only honoured on insert (PR #225
         review L1: no consumer reads it yet — vestige of PR 2 stub).
         """
@@ -157,13 +166,28 @@ class ProceduralFacadeMixin:
                 f"confidence must be in [0.0, 1.0], got {confidence}"
             )
         db = self._episodic._ensure_db()  # noqa: SLF001 — facade owns the connection
+        # The session this call writes to: an explicit ``session_id``, else
+        # the per-request ``session_scope`` (ISSUE-0081), else the
+        # construction-time default.  Resolved once, so the refresh and the
+        # insert below agree on it.  Procedural rows live in the same
+        # ``episodes`` table as observations, so the session-tag column is
+        # shared.
+        write_session = normalize_session_id(
+            session_id
+            if session_id is not None
+            else (current_session_id() or self._session_id),
+        )
         # Refresh path: existing key → reset confidence + last_validated.
-        # ISSUE-0081 PR 3: scope the refresh to the active tenant (symmetric
-        # with ``retrieve_procedures``) so a second tenant re-storing the
-        # same key neither refreshes the first tenant's row nor loses its
-        # own write to the refresh short-circuit (review follow-up).
+        # Scoped like ``retrieve_procedures`` on every axis: tenant
+        # (ISSUE-0081 PR 3), epoch (ISSUE-0085 PR 3) and session, the write
+        # session plus ``legacy``.  So a re-store under another tenant, epoch
+        # or named session neither refreshes that one's row nor loses its
+        # own write to the refresh short-circuit.
         refreshed = await _refresh_confidence(
             db, self._agent_id, key,
+            session_list=_resolve_session_list(
+                [write_session], self._session_id,
+            ),
             principal_id=resolve_active_principal(self._principal_id),
             epoch_id=resolve_active_epoch(self._epoch_id),
         )
@@ -172,23 +196,12 @@ class ProceduralFacadeMixin:
         context: dict[str, Any] = {"procedure_key": key}
         if expires_at is not None:
             context["expires_at"] = expires_at
-        # RFC 0031 Phase 1: thread session_id; caller passes ``None`` to
-        # inherit the active session (the ISSUE-0081 call-time default
-        # below).  Procedural rows live in the same
-        # ``episodes`` table as observations, so the session-tag column
-        # is shared.
         episode_id = await self._episodic.store_episode(
             summary=content,
             context=context,
             importance=confidence,
             tags=[f"procedure:{key}"],
-            # ISSUE-0081: call-time default — a per-request
-            # ``session_scope`` wins over the construction snapshot.
-            session_id=(
-                session_id
-                if session_id is not None
-                else (current_session_id() or self._session_id)
-            ),
+            session_id=write_session,
             # RFC 0031 PR 4 follow-up F2: procedural rows live in the
             # same ``episodes`` table as observations; pin the counter
             # surface so dashboards can split the two write kinds.
