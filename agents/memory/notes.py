@@ -30,7 +30,7 @@ from ._notes_recall import (
 )
 from ._principal_filter import resolve_active_principal
 from ._salience import NOTES_APPEND_SALIENCE, emit_for_tier, emit_session_write
-from ._session_filter import _resolve_session_list
+from ._session_filter import _resolve_session_list, session_in_clause
 from .note_types import _NOTE_COLS, _NOTE_SELECT, Note  # noqa: F401 — re-export
 
 if TYPE_CHECKING:
@@ -84,7 +84,9 @@ class NoteStore:
         # :meth:`EpisodicMemory.initialize`'s ``resolve_session_id_silent``
         # so ``recall_notes(sessions=None)`` resolves without an env
         # read per call.  Defaults to legacy so a hand-built test
-        # fixture does not have to opt in.
+        # fixture does not have to opt in.  Only the fallback: recall and
+        # the mutation surface both prefer a bound ``session_scope``
+        # (ISSUE-0081, ISSUE-0164).
         self._active_session_id = active_session_id
         # ISSUE-0081 PR 3 — tenant snapshot, threaded the same way; the
         # call-time ``principal_scope`` wins via ``resolve_active_principal``.
@@ -330,6 +332,12 @@ class NoteStore:
         scoped to ``(agent_id, session_id IN (active, legacy))`` so a
         ``run-b`` caller cannot mutate a ``run-a`` row; the ``legacy``
         carve-out matches the recall surface (permissive policy).
+        `ISSUE-0164
+        <../../docs/issues/ISSUE-0164-persona-cannot-edit-or-delete-its-channel-notes.md>`_:
+        "active" is read at call time, the way :meth:`recall_notes` reads
+        it — the channel session the runtime bound for this event, else
+        the construction snapshot — so a turn can edit exactly the notes
+        it can recall.
 
         RFC 0037 §C re-stamp (PR 4): an edit re-stamps the row to
         ``max(existing protection_level, acting L)`` — never lowers.  The
@@ -371,15 +379,15 @@ class NoteStore:
                 f"IN ({placeholders}) THEN ? ELSE protection_level END"
             )
             restamp_params = (*restamp_below, restamp_protection_level)
+        sess_clause, sess_params = self._mutation_session_clause()
         cursor = await self._db.execute(
             f"UPDATE notes SET content = ?, updated_at = ?{restamp_sql} "
-            "WHERE id = ? AND agent_id = ? "
-            "AND session_id IN (?, ?) "
+            f"WHERE id = ? AND agent_id = ?{sess_clause} "
             "AND principal_id = ? "
             "AND epoch_id = ?",
             (
                 content, now, *restamp_params, note_id, self._agent_id,
-                self._active_session_id, LEGACY_SESSION_ID,
+                *sess_params,
                 principal_id, epoch_id,
             ),
         )
@@ -391,15 +399,15 @@ class NoteStore:
         principal-, and epoch-scoped per :meth:`update_note`."""
         principal_id = resolve_active_principal(self._active_principal_id)
         epoch_id = resolve_active_epoch(self._active_epoch_id)
+        sess_clause, sess_params = self._mutation_session_clause()
         cursor = await self._db.execute(
             "DELETE FROM notes "
-            "WHERE id = ? AND agent_id = ? "
-            "AND session_id IN (?, ?) "
+            f"WHERE id = ? AND agent_id = ?{sess_clause} "
             "AND principal_id = ? "
             "AND epoch_id = ?",
             (
                 note_id, self._agent_id,
-                self._active_session_id, LEGACY_SESSION_ID,
+                *sess_params,
                 principal_id, epoch_id,
             ),
         )
@@ -411,15 +419,15 @@ class NoteStore:
         (per :meth:`update_note`'s scope)."""
         principal_id = resolve_active_principal(self._active_principal_id)
         epoch_id = resolve_active_epoch(self._active_epoch_id)
+        sess_clause, sess_params = self._mutation_session_clause()
         async with self._db.execute(
             "SELECT COUNT(*) FROM notes "
-            "WHERE agent_id = ? "
-            "AND session_id IN (?, ?) "
+            f"WHERE agent_id = ?{sess_clause} "
             "AND principal_id = ? "
             "AND epoch_id = ?",
             (
                 self._agent_id,
-                self._active_session_id, LEGACY_SESSION_ID,
+                *sess_params,
                 principal_id, epoch_id,
             ),
         ) as cursor:
@@ -427,6 +435,19 @@ class NoteStore:
         return row[0] if row else 0
 
     # ─── Internal helpers ──────────────────────────────────
+
+    def _mutation_session_clause(self) -> tuple[str, list[str]]:
+        """The ``" AND session_id IN (…)"`` clause of the three methods
+        above, built by the same helpers :meth:`recall_notes` uses: the
+        active session read at call time (a bound ``session_scope``, else
+        this store's snapshot) plus the ``legacy`` carve-out.  Sharing
+        them keeps what a turn can change equal to what it can recall
+        (ISSUE-0164).
+        """
+        return session_in_clause(
+            _resolve_session_list(None, self._active_session_id),
+            column="session_id",
+        )
 
     async def _prune_notes(
         self, max_notes: int, session_id: str, principal_id: str,

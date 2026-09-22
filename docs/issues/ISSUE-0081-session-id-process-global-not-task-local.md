@@ -307,3 +307,11 @@ final PR.
 > the catch-up replay re-deriving under the default principal), whose
 > leak-stopper lands inside v0.3.14.
 
+> 2026-09-22 — **PR 1 missed the notes mutation surface.** It moved every
+> recall path to call time, but `NoteStore.update_note`, `delete_note` and
+> `count_notes` kept the start-up snapshot, so since the orchestrator began
+> sending a session per channel a persona has been unable to edit or delete a
+> note it stored in a channel. Filed as
+> [ISSUE-0164](ISSUE-0164-persona-cannot-edit-or-delete-its-channel-notes.md),
+> with the fix drafted test-first.
+
