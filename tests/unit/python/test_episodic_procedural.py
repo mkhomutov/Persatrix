@@ -25,21 +25,29 @@ The max review of PR #977 found them:
    as ``LIMIT -1``, which means no limit, and ``0`` returned nothing.  The
    episodic and notes reads raise ``ValueError`` below 1 and cap at 100.
 
-Every test here failed before the fix except
+Every test in sections 1-4 failed before the fix except
 ``test_restore_in_a_named_session_refreshes_the_legacy_row_it_recalls``,
 which passes on both sides: it pins the ``legacy`` half of the session
-rule so the fix cannot tighten into a duplicate row.
+rule so the fix cannot tighten into a duplicate row.  Section 5 pins what
+the review of that fix found: an exact, case-sensitive key match, a reuse
+that leaves ``importance`` alone, a required session list on the refresh,
+one statement per recall, a non-integral ``limit``, and stores that run
+alongside each other or the eviction pass.
 """
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import json
 import time
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
+from typing import Any
 
 import pytest
 
 from agents.memory.decay import SECONDS_PER_DAY
-from agents.memory.episodic_procedural import recall_procedures
+from agents.memory.episodic_procedural import recall_procedures, refresh_confidence
 from agents.memory.eviction import EvictionPass
 from agents.memory.facade import MemoryStore
 from agents.session_id import session_scope
@@ -60,9 +68,10 @@ async def facade() -> AsyncGenerator[MemoryStore, None]:
         await fac.close()
 
 
-def _tag_pattern(key: str) -> str:
-    """The LIKE pattern that matches one procedure's tag."""
-    return f'%"procedure:{key}"%'
+def _tag_needle(key: str) -> str:
+    """The exact JSON text of one procedure's tag, for ``instr``: ``LIKE``
+    would read ``_`` in a key as a wildcard and ignore case."""
+    return json.dumps(f"procedure:{key}")
 
 
 async def _forge(
@@ -73,9 +82,9 @@ async def _forge(
     assignments = ", ".join(f"{name} = ?" for name in cols)
     sql = (
         f"UPDATE episodes SET {assignments} "  # noqa: S608 — names from this file
-        "WHERE agent_id = ? AND tags_json LIKE ?"
+        "WHERE agent_id = ? AND instr(tags_json, ?) > 0"
     )
-    params: list[object] = [*cols.values(), AGENT, _tag_pattern(key)]
+    params: list[object] = [*cols.values(), AGENT, _tag_needle(key)]
     if session_id is not None:
         sql += " AND session_id = ?"
         params.append(session_id)
@@ -90,8 +99,8 @@ async def _row_state(
     db = facade.episodic._ensure_db()  # noqa: SLF001
     async with db.execute(
         "SELECT confidence, importance, last_validated_at FROM episodes "
-        "WHERE agent_id = ? AND tags_json LIKE ? AND session_id = ?",
-        (AGENT, _tag_pattern(key), session_id),
+        "WHERE agent_id = ? AND instr(tags_json, ?) > 0 AND session_id = ?",
+        (AGENT, _tag_needle(key), session_id),
     ) as cursor:
         rows = list(await cursor.fetchall())
     assert len(rows) == 1, f"expected one {key!r} row in {session_id!r}"
@@ -101,8 +110,8 @@ async def _row_state(
 async def _count_rows(facade: MemoryStore, key: str) -> int:
     db = facade.episodic._ensure_db()  # noqa: SLF001
     async with db.execute(
-        "SELECT COUNT(*) FROM episodes WHERE agent_id = ? AND tags_json LIKE ?",
-        (AGENT, _tag_pattern(key)),
+        "SELECT COUNT(*) FROM episodes WHERE agent_id = ? AND instr(tags_json, ?) > 0",
+        (AGENT, _tag_needle(key)),
     ) as cursor:
         row = await cursor.fetchone()
     assert row is not None
@@ -148,12 +157,18 @@ async def test_restore_in_legacy_does_not_refresh_a_named_session_row(
 ) -> None:
     """The same rule from the other side: a store with no session scope
     writes to ``legacy``, which cannot see room-a's rows, so it must write
-    its own row instead of refreshing room-a's."""
+    its own row instead of refreshing room-a's.  room-a then recalls both
+    rows, newest first: the ``legacy`` rule below avoids a second row only
+    when the ``legacy`` row comes first.  The facts tier leaves the same
+    pair in this order."""
     with session_scope("room-a"):
         await facade.store_procedure("deploy", "a", confidence=0.9)
     await facade.store_procedure("deploy", "shared", confidence=0.9)
     got = await facade.retrieve_procedures()
     assert [e.content for e in got] == ["shared"]
+    with session_scope("room-a"):
+        room_a = await facade.retrieve_procedures()
+    assert [e.content for e in room_a] == ["shared", "a"]
 
 
 async def test_restore_with_explicit_session_id_writes_to_that_session(
@@ -175,8 +190,10 @@ async def test_restore_in_a_named_session_refreshes_the_legacy_row_it_recalls(
 ) -> None:
     """Every session recalls ``legacy`` rows, so a named session re-storing a
     key held only by a ``legacy`` row refreshes that row rather than adding a
-    second one it would recall next to it.  (The facts tier's supersede chain
-    treats ``legacy`` the same way — ISSUE-0079.)"""
+    second one it would recall next to it.  Its own body is dropped, as on
+    every refresh, and every session sees the refresh.  (The facts tier's
+    supersede chain differs: there the named write replaces the ``legacy``
+    row — ISSUE-0079.)"""
     await facade.store_procedure("deploy", "shared", confidence=0.9)
     with session_scope("room-a"):
         await facade.store_procedure("deploy", "a", confidence=0.9)
@@ -312,3 +329,122 @@ async def test_retrieve_procedures_caps_limit_at_100(facade: MemoryStore) -> Non
         await facade.store_procedure(f"k{i:03d}", "body", confidence=0.9)
     got = await facade.retrieve_procedures(limit=500)
     assert len(got) == 100
+
+
+# ─── 5. What the review of the fix found ──────────────────────
+
+
+async def test_restore_of_a_key_differing_only_in_case_writes_its_own_row(
+    facade: MemoryStore,
+) -> None:
+    """Keys are case-sensitive but SQLite ``LIKE`` is not, so storing
+    ``deploy`` must not refresh, and so revive, a hidden ``Deploy``."""
+    await facade.store_procedure("Deploy", "capital", confidence=0.05)
+    await facade.store_procedure("deploy", "lower", confidence=0.9)
+    got = await facade.retrieve_procedures()
+    assert [(e.key, e.content) for e in got] == [("deploy", "lower")]
+
+
+async def test_restore_leaves_importance_for_ordinary_recall(
+    facade: MemoryStore,
+) -> None:
+    """Ordinary episodic recall ranks and filters on ``importance`` and returns
+    procedure rows too, so a reuse must restart decay without raising it:
+    stored at 0.4, the procedure stays under a 0.5 floor."""
+    await facade.store_procedure("deploy", "body", confidence=0.4)
+    await facade.store_procedure("deploy", "body", confidence=0.4)
+    assert await facade.episodic.recall(min_importance=0.5) == []
+    got = await facade.retrieve_procedures()
+    assert [e.base_confidence for e in got] == [pytest.approx(1.0)]
+
+
+async def test_refresh_confidence_needs_an_explicit_session_list(
+    facade: MemoryStore,
+) -> None:
+    """Leaving the list out used to mean every session: the unscoped refresh
+    of section 1.  A caller must spell it out, ``None`` included."""
+    db = facade.episodic._ensure_db()  # noqa: SLF001
+    with pytest.raises(TypeError, match="session_list"):
+        await refresh_confidence(db, AGENT, "deploy")  # type: ignore[call-arg]
+
+
+async def test_recall_reads_its_rows_in_one_statement(facade: MemoryStore) -> None:
+    """Rows that fail decay must not cost a statement per window: however
+    many sit ahead of the rows that pass, a recall runs one SELECT."""
+    now = time.time()
+    await facade.store_procedure("valid", "body", confidence=1.0)
+    await _forge(facade, "valid", created_at=now - 60.0)
+    for i in range(10):
+        await facade.store_procedure(f"weak-{i}", "body", confidence=0.05)
+    db = facade.episodic._ensure_db()  # noqa: SLF001
+    statements: list[str] = []
+    await db.set_trace_callback(statements.append)
+    try:
+        got = await facade.retrieve_procedures(limit=1, now=now)
+    finally:
+        await db.set_trace_callback(None)  # type: ignore[arg-type]
+    assert [e.key for e in got] == ["valid"]
+    assert sum(s.startswith("SELECT") for s in statements) == 1
+
+
+async def test_retrieve_procedures_stops_at_a_non_integral_limit(
+    facade: MemoryStore,
+) -> None:
+    """The read must stop once ``limit`` rows pass: ``len(out) == 1.5`` is
+    never true, so an exact-equality exit returned every passing row."""
+    for i in range(5):
+        await facade.store_procedure(f"k{i}", "body", confidence=0.9)
+    got = await facade.retrieve_procedures(limit=1.5)  # type: ignore[arg-type]
+    assert len(got) == 2
+
+
+async def test_concurrent_stores_of_one_key_write_one_row(
+    facade: MemoryStore,
+) -> None:
+    """The refresh check and the insert are separate statements, so two
+    stores of a new key running at once must not both insert."""
+    await asyncio.gather(
+        facade.store_procedure("deploy", "one", confidence=0.9),
+        facade.store_procedure("deploy", "two", confidence=0.9),
+    )
+    assert await _count_rows(facade, "deploy") == 1
+
+
+class _StoreAfterProceduralSelect:
+    """The connection :class:`EvictionPass` gets, except that *store* runs
+    right after the procedural pass's SELECT, as a concurrent call can."""
+
+    def __init__(self, db: Any, store: Callable[[], Awaitable[None]]) -> None:
+        self._db, self._store = db, store
+
+    def execute(self, sql: str, params: Any = ()) -> Any:
+        if sql.startswith("SELECT id, confidence, last_validated_at"):
+            return self._select_then_store(sql, params)
+        return self._db.execute(sql, params)
+
+    @contextlib.asynccontextmanager
+    async def _select_then_store(self, sql: str, params: Any) -> AsyncIterator[Any]:
+        async with self._db.execute(sql, params) as cursor:
+            yield cursor
+        await self._store()
+
+    async def commit(self) -> None:
+        await self._db.commit()
+
+
+async def test_eviction_keeps_a_procedure_reused_during_its_pass(
+    facade: MemoryStore,
+) -> None:
+    """The pass picks its victims, then deletes them after more awaits on the
+    shared connection.  A reuse that lands in between restarts decay, so the
+    DELETE must spare that row instead of dropping the procedure the store
+    has just reported as kept."""
+    await facade.store_procedure("deploy", "body", confidence=0.05)
+    db = facade.episodic._ensure_db()  # noqa: SLF001
+    proxy = _StoreAfterProceduralSelect(
+        db, lambda: facade.store_procedure("deploy", "body", confidence=0.05),
+    )
+    runner = EvictionPass(AGENT, episodic_cap=100, ttl_low_importance_days=30)
+    stats = await runner.run(proxy)  # type: ignore[arg-type]
+    assert stats.procedural_evicted == 0
+    assert await _count_rows(facade, "deploy") == 1

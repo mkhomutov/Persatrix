@@ -223,6 +223,9 @@ class EvictionPass:
         from its creation, while a refreshed procedure restarts the
         clock at 1.0 — see ``episodic_procedural.refresh_confidence``).
         """
+        # Taken before the SELECT: a refresh that lands after it stamps a
+        # later ``last_validated_at``, which the DELETE below spares.
+        now = time.time()
         async with db.execute(
             # PR #225 review S2: select ``importance`` alongside
             # ``confidence`` so the legacy-row shim
@@ -242,10 +245,9 @@ class EvictionPass:
             rows = list(await cur.fetchall())
         if not rows:
             return 0
-        now = time.time()
         victims: list[str] = []
         for r in rows:
-            base = resolve_base_confidence(r[1], r[4])
+            base = resolve_base_confidence(r[1], r[4], r[2])
             anchor = r[2] if r[2] is not None else r[3]
             age_seconds = max(0.0, now - float(anchor))
             decayed = compute_decayed_confidence(
@@ -256,12 +258,16 @@ class EvictionPass:
         if not victims:
             return 0
         placeholders = ",".join("?" for _ in victims)
-        await db.execute(
-            f"DELETE FROM episodes WHERE agent_id = ? AND id IN ({placeholders})",
-            (self._agent_id, *victims),
+        # The awaits since the SELECT let a store on this shared connection
+        # refresh a victim; its fresh stamp means the reuse keeps it.
+        cursor = await db.execute(
+            f"DELETE FROM episodes WHERE agent_id = ? AND id IN ({placeholders}) "
+            "AND (last_validated_at IS NULL OR last_validated_at < ?)",
+            (self._agent_id, *victims, now),
         )
+        deleted = cursor.rowcount or 0
         await db.commit()
-        return len(victims)
+        return deleted
 
     # ─── Helpers ────────────────────────────────────────────────
 
