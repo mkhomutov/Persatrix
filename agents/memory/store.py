@@ -289,8 +289,8 @@ class MemoryStore(ProceduralFacadeMixin, SharedPoolFacadeMixin, SocietyFacadeMix
         ``sessions`` (RFC 0031 §D / PR 4 — OQ #4 back-compat): ``None``
         → the tier's ``_active_session_id`` + ``legacy`` carve-out;
         list → those sessions + carve-out; ``"*"`` → no filter
-        (CLI/debug); ``[]`` → :class:`ValueError`.  PR 451 review M2
-        carry-forward: pass-through to the tier so
+        (``SESSIONS_ALL``); ``[]`` → :class:`ValueError`.  PR 451 review
+        M2 carry-forward: pass-through to the tier so
         :func:`agents.memory._session_filter._resolve_session_list` is
         the single source of truth for the §D default; the facade's own
         ``_session_id`` snapshot is read from the same env var as the

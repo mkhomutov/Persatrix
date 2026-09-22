@@ -237,7 +237,7 @@ class ProceduralFacadeMixin:
         :meth:`MemoryStore.retrieve_relevant`.  ``None`` resolves to the
         facade's construction-time ``_session_id`` plus the ``legacy``
         carve-out; an explicit list still includes ``legacy``; ``"*"``
-        bypasses the filter (CLI / debug); ``[]`` is :class:`ValueError`.
+        → no filter (``SESSIONS_ALL``); ``[]`` is :class:`ValueError`.
         Procedural rows live in the same ``episodes`` table as
         observations, so the §D predicate is applied verbatim.
         """

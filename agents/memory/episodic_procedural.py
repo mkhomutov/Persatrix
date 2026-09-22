@@ -222,7 +222,7 @@ async def recall_procedures(
         params.extend(session_params)
     # ISSUE-0081 PR 3: strict tenant equality is unconditional (no "*"
     # bypass) — a procedure row owned by another tenant must never be
-    # admitted even on the CLI/debug ``sessions="*"`` path.
+    # admitted even on a ``sessions="*"`` read (``SESSIONS_ALL``).
     principal_clause, principal_params = _principal_eq_clause(
         principal_id, column="principal_id",
     )
@@ -230,7 +230,7 @@ async def recall_procedures(
     params.extend(principal_params)
     # ISSUE-0085 PR 3: strict epoch equality is unconditional (no "*"
     # bypass) — a procedure row written under another epoch must never be
-    # admitted even on the CLI/debug ``sessions="*"`` path.
+    # admitted even on a ``sessions="*"`` read (``SESSIONS_ALL``).
     epoch_clause, epoch_params = _epoch_eq_clause(
         epoch_id, column="epoch_id",
     )

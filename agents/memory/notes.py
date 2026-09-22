@@ -227,8 +227,8 @@ class NoteStore:
         sessions:
             RFC 0031 §D recall filter.  ``None`` (default) → active
             session plus the ``legacy`` carve-out; a non-empty list →
-            those sessions plus the carve-out; ``"*"`` → all sessions
-            (CLI / debug only); ``[]`` → :class:`ValueError`.  See
+            those sessions plus the carve-out; ``"*"`` → no filter
+            (``SESSIONS_ALL``); ``[]`` → :class:`ValueError`.  See
             :func:`agents.memory._session_filter.session_in_clause`
             for the SQL shape and the carve-out rationale.
         allowed_protection_levels:
