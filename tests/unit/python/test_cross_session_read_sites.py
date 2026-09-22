@@ -32,7 +32,9 @@ import pytest
 # the name of that parameter; ``None`` (or leaving it out) means "no filter".
 # The relationship query helpers are left out: they share their names with
 # the scoped ``RelationshipMemory`` methods, where leaving it out is the
-# §D default.
+# §D default.  ``refresh_confidence`` is a write, not a read, but ``None``
+# widens it the same way, and an unscoped refresh drops the caller's own
+# procedure write.
 RESOLVED_LIST_HELPERS: dict[str, str] = {
     "recall_fts5": "sessions",
     "recall_like": "sessions",
@@ -42,6 +44,8 @@ RESOLVED_LIST_HELPERS: dict[str, str] = {
     "_recall_notes_recency": "sessions",
     "recall_procedures": "session_list",
     "_recall_procedures": "session_list",
+    "refresh_confidence": "session_list",
+    "_refresh_confidence": "session_list",
     "topic_subjects_for_agent": "session_list",
     "_topic_subjects_for_agent": "session_list",
 }
@@ -214,6 +218,8 @@ class TestSiteFinder:
             '    return store.recall(sessions="*" if all_rooms else None)\n',
             "async def f(db):\n    return await recall_procedures(db, 'a')\n",
             "async def f(db):\n    return await _recall_procedures(db, 'a', session_list=None)\n",
+            "async def f(db):\n"
+            "    return await _refresh_confidence(db, 'a', 'k', session_list=None)\n",
             "async def f(db):\n    return await _recall_notes_recency(db, sessions=None)\n",
             "async def f(db):\n    return await _topic_subjects_for_agent(db, session_list=None)\n",
         ],

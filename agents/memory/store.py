@@ -90,8 +90,9 @@ class MemoryStore(ProceduralFacadeMixin, SharedPoolFacadeMixin, SocietyFacadeMix
     concurrent gRPC calls **and** the periodic eviction loop scheduled
     by :meth:`initialize`.  Both callers share one ``aiosqlite``
     connection; serialisation is provided by aiosqlite's worker-thread
-    queue (no extra ``asyncio.Lock`` is introduced — the queue handles
-    the dispatch/eviction interleave correctly).  ``initialize()`` opens
+    queue (it handles the dispatch/eviction interleave correctly; the one
+    extra ``asyncio.Lock`` serialises :meth:`store_procedure`, whose
+    refresh-or-insert spans several statements).  ``initialize()`` opens
     the DB and starts the eviction loop; ``close()`` cancels the loop
     and closes the DB.  The lifecycle satisfies
     :class:`~agents.memory.MemoryLifecycle` structurally.
@@ -146,6 +147,7 @@ class MemoryStore(ProceduralFacadeMixin, SharedPoolFacadeMixin, SocietyFacadeMix
         self._episodic = EpisodicMemory(agent_id=agent_id, db_path=db_path)
         self._initialized = False
         self._eviction_task: asyncio.Task[None] | None = None
+        self._procedure_lock = asyncio.Lock()
         self._shared_pools = shared_pools
         # RFC 0029 Phase 1: society backend is configured (DSN) but never
         # consumed — single-agent mode is the only mode.  Stored so the

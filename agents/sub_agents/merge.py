@@ -63,17 +63,21 @@ REASON_PROCEDURAL_TIER_REJECTED = "procedural_tier_rejected"
 REASON_RESERVED_TAG_PREFIX = "reserved_tag_prefix"
 """Reason label for sub-agent-supplied tags whose prefix collides with
 framework-prefixed provenance carriers (``tier:``, ``key:``, ``source:``,
-``channel:``).  See PR #222 deep review S3 — same trust-boundary
-semantics as :data:`REASON_SOURCE_AGENT_SET`, just for tags rather than
-the ``source_agent`` field."""
+``channel:``) or with the procedural tier's ``procedure:`` tag.  See PR
+#222 deep review S3 — same trust-boundary semantics as
+:data:`REASON_SOURCE_AGENT_SET`, just for tags rather than the
+``source_agent`` field."""
 REASON_CONFLICT = "conflict"
 
 # Tag prefixes the framework reserves for its own provenance carriers.
 # Sub-agents that emit tags with these prefixes are rejected so they
 # cannot spoof tier / key / source / channel metadata that downstream
 # tag-prefix consumers (e.g. RFC 0011 channel-scoped recall) trust.
+# ``procedure:`` is how the procedural tier finds its rows, so a
+# sub-agent row with it would read as a procedure, which RFC 0008 keeps
+# out of delegation, and a parent's re-store of the key would refresh it.
 RESERVED_TAG_PREFIXES: frozenset[str] = frozenset({
-    "tier:", "key:", "source:", "channel:",
+    "tier:", "key:", "source:", "channel:", "procedure:",
 })
 
 
