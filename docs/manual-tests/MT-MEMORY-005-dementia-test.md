@@ -4,10 +4,10 @@
 **Feature Area**: Memory (qualitative acceptance gate)
 **Version**: 1.2
 **Created**: 2026-05-01
-**Last Updated**: 2026-09-22
+**Last Updated**: 2026-09-23
 **Status**: Active (promoted from Draft scaffold after the v0.3.1 release-prep PR 4 re-run — RFC 0026 Phase 1 landed). **From v0.3.12 every run is a V6 run** — the V5 multi-session no-bleed extension is re-anchored to the epoch axis (see §V6; RFC 0049 cross-room recall is live).
 
-**v1.2 (2026-09-22)**: Setup step 2 keeps the same `export`, with the reason
+**v1.2 (2026-09-23)**: Setup step 2 keeps the same `export`, with the reason
 corrected. It works because the CLI sends the variable with every message, not
 because the orchestrator and the persona read it when they start: since
 [#459](https://github.com/mkhomutov/Persatrix/pull/459) (2026-05-29) every

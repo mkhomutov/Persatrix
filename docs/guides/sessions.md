@@ -162,7 +162,7 @@ order** (RFC 0031 OQ #6):
 >   such as a tick (its own timer) or a relationship seeded from config.
 >   Neither copy scopes a channel turn.
 >
-> This note said the opposite until 2026-09-22: that the persona tags these
+> This note said the opposite until 2026-09-23: that the persona tags these
 > writes with its start-up session, so an arc is scoped where the persona
 > starts. That stopped being true when
 > [#459](https://github.com/mkhomutov/Persatrix/pull/459) (2026-05-29) made the
@@ -172,9 +172,12 @@ order** (RFC 0031 OQ #6):
 
 ## 5. The `legacy` carve-out
 
-Rows written before this RFC shipped, and any row written with no session given
-while `PERSATRIX_SESSION_ID` is unset (a tick's episode, say), carry
-`session_id = 'legacy'`. Legacy rows are **always visible**,
+Rows written before this RFC shipped, and any row a persona writes for a turn
+that carries **no session at all** (a tick's episode, say) while the *persona
+process* runs with `PERSATRIX_SESSION_ID` unset, carry `session_id = 'legacy'`.
+A CLI call that sends no session is **not** one of these — it still gets the
+orchestrator's session for the channel (§4 row 4). Legacy rows are **always
+visible**,
 from every session — the carve-out that let sessions ship without backfilling
 old data. Two consequences:
 

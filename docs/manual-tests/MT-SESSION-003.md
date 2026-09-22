@@ -4,10 +4,10 @@
 **Feature Area**: Sessions (RFC 0031 Phase 2 — per-session recall filtering)
 **Version**: 1.2
 **Created**: 2026-06-01
-**Last Updated**: 2026-09-22
+**Last Updated**: 2026-09-23
 **Status**: Active — **re-anchored for v0.3.12** (see the note below): the Step-3 absence bar moved to the **epoch** axis; facts + episodic absence across sessions is no longer asserted (RFC 0049 cross-room recall is live, classification-gated).
 
-**v1.2 (2026-09-22)**: each arc is now scoped by exporting `PERSATRIX_SESSION_ID`
+**v1.2 (2026-09-23)**: each arc is now scoped by exporting `PERSATRIX_SESSION_ID`
 in the shell the CLI runs in, not by starting the persona under it
 (Preconditions, Steps 1–3). Since [#459](https://github.com/mkhomutov/Persatrix/pull/459)
 (2026-05-29) the orchestrator sends a session with every channel message, and
