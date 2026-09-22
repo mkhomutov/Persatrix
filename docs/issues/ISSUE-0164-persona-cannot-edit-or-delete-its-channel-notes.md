@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0164
 summary: "A persona cannot edit or delete a note it stored in a channel. `NoteStore.update_note`, `delete_note` and `count_notes` scope their SQL to the session the note store was given at start-up (`PERSATRIX_SESSION_ID`, or `legacy` when unset), while the `store_note` tool tags a note with the channel's session and `recall_notes` reads that session when called. The orchestrator gives each persona one session per channel and every channel turn runs under it, so a note the persona has just stored and recalled answers 'Note not found' to an edit or a delete, and `count_notes` leaves it out. The reverse holds when `PERSATRIX_SESSION_ID` is set: a note tagged with it is recalled in no channel but can be changed by id from every channel. The fix reads the session at call time with the recall path's own helpers."
-status: in_progress
+status: resolved
 severity: medium
 area: memory
 created: 2026-09-22
+closed: 2026-09-22
+closed_pr: 979
 refs:
   - agents/memory/notes.py
   - agents/memory/_notes_mutations.py
@@ -150,3 +152,7 @@ drive the `store_note`, `update_note` and `delete_note` tools inside
 > case and the tool path); with the fix, none. The other 3 guard against
 > widening too far: the two cross-session tests fail when the session clause
 > is removed, and the carve-out test fails when `legacy` is dropped from it.
+>
+> 2026-09-22 — **resolved by [#979](https://github.com/mkhomutov/Persatrix/pull/979)**,
+> which carries the fix, the `notes.py` split and this file. It merges before
+> the EXP-001 run, by the maintainer's call recorded under Slot.

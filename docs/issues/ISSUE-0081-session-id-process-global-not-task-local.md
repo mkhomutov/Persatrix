@@ -312,6 +312,6 @@ final PR.
 > `count_notes` kept the start-up snapshot, so since the orchestrator began
 > sending a session per channel a persona has been unable to edit or delete a
 > note it stored in a channel. Filed as
-> [ISSUE-0164](ISSUE-0164-persona-cannot-edit-or-delete-its-channel-notes.md),
-> with the fix drafted test-first.
+> [ISSUE-0164](ISSUE-0164-persona-cannot-edit-or-delete-its-channel-notes.md)
+> and fixed in [#979](https://github.com/mkhomutov/Persatrix/pull/979).
 
