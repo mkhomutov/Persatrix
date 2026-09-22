@@ -159,7 +159,9 @@ async def test_refresh_confidence_does_not_widen_match_on_percent_in_key(
 
     # Refresh the sibling under the literal target key — only the
     # target's row should reset to 1.0.
-    refreshed = await refresh_confidence(db, "proc-test", "50% off_promo")
+    refreshed = await refresh_confidence(
+        db, "proc-test", "50% off_promo", session_list=None,
+    )
     assert refreshed is True
 
     async with db.execute(

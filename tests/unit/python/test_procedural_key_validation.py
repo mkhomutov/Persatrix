@@ -101,12 +101,8 @@ async def test_store_procedure_idempotent_re_store_for_canonical_key(
     """
     await facade.store_procedure("dep.deploy", "v1 body", confidence=1.0)
     # Forge a stale ``last_validated_at`` so the refresh effect is
-    # observable as a fresh timestamp on the row.  We do not assert
-    # the decayed-confidence value because the legacy-row
-    # compatibility shim in :func:`resolve_base_confidence` would
-    # surface ``importance`` (set on insert) rather than the post-
-    # refresh ``confidence`` for non-1.0 authored values — that
-    # interaction is pinned separately by the PR 5 review tests.
+    # observable as a fresh timestamp on the row.  The decay base a
+    # refresh leaves behind is pinned in ``test_episodic_procedural.py``.
     db = facade.episodic._ensure_db()  # noqa: SLF001
     await db.execute(
         "UPDATE episodes SET last_validated_at = 0 WHERE agent_id = ?",

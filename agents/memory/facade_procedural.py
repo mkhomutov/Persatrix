@@ -18,12 +18,13 @@ with the row that triggers it).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import time
 from typing import TYPE_CHECKING, Any
 
-from ..session_id import current_session_id
+from ..session_id import current_session_id, normalize_session_id
 from ._epoch_filter import resolve_active_epoch
 from ._principal_filter import resolve_active_principal
 from ._session_filter import _resolve_session_list
@@ -107,6 +108,8 @@ class ProceduralFacadeMixin:
     _principal_id: str
     # ISSUE-0085 PR 3: facade-level epoch snapshot (same source).
     _epoch_id: str
+    # Serialises :meth:`store_procedure`'s refresh-or-insert.
+    _procedure_lock: asyncio.Lock
 
     def _require_initialised(self) -> None: ...  # pragma: no cover — host
 
@@ -123,29 +126,43 @@ class ProceduralFacadeMixin:
 
         Procedural rows are stored as episodes tagged
         ``procedure:{key}`` with the supplied ``confidence`` mapped onto
-        both ``importance`` (so the eviction hybrid score sees it) and
-        the dedicated ``confidence`` column added by migration v6 (so
-        the read-time decay clock has a stable base value independent
-        of importance).
+        both ``importance`` (which ordinary episodic recall ranks on; the
+        eviction passes skip procedure rows) and the dedicated
+        ``confidence`` column added by migration v6 (so the read-time
+        decay clock has a stable base value independent of importance).
 
-        PR 5: when an entry with the same ``key`` already exists for
-        this agent, this method calls
-        ``episodic_procedural.refresh_confidence`` to reset
-        ``confidence = 1.0`` and stamp ``last_validated_at = now`` on
-        the existing rows — implementing the RFC 0008 §G "Confidence
-        refresh on successful reuse" contract.
+        PR 5: when an entry with the same ``key`` already exists, this
+        method calls ``episodic_procedural.refresh_confidence`` to reset
+        ``confidence`` to 1.0 and stamp ``last_validated_at = now`` on the
+        existing rows, so decay starts again from 1.0 — the RFC 0008 §G
+        "Confidence refresh on successful reuse" contract.
+
+        "Already exists" means a row with the same key, compared with its
+        case, in the scope a recall in the write session reads: same
+        tenant, same epoch, and the write session or ``legacy``.  The match
+        ignores decay, so a row that recall hides (below ``c_min``, or past
+        the age cutoff) is refreshed and comes back with its old body until
+        eviction deletes it.  The write session is ``session_id`` when
+        given, else the per-request ``session_scope``, else the
+        construction-time default.  A re-store in another named session
+        therefore writes its own row and leaves the first one alone.  A
+        ``legacy`` row is refreshed rather than joined by a second row, so
+        the refresh shows in every session and this session's body is
+        dropped; the facts tier's supersede chain instead lets the named
+        write replace the ``legacy`` row (ISSUE-0079).  The rule is one-way:
+        a ``legacy`` write cannot see a named session's row, so it inserts,
+        and that session then recalls both rows.
 
         Refresh-path discards (PR #225 review S4): on the refresh path
         **both** the supplied ``content`` *and* the supplied
         ``confidence`` arguments are silently discarded — the existing
         row's body is preserved and confidence is unconditionally
-        reset to ``1.0``.  This is intentional for PR 5: the procedural
-        tier does not yet have an UPDATE path, and "successful reuse"
-        per RFC 0008 §G is defined as a full revalidation
-        (``c_t = 1.0``).  Callers who need to *downgrade* an existing
-        procedure's confidence (e.g. failure-driven decay) must call
-        ``refresh_confidence`` directly, or wait for the procedural
-        UPDATE path landing in PR 6+.  The signature still accepts
+        reset to ``1.0``.  This is intentional: "successful reuse" per
+        RFC 0008 §G is defined as a full revalidation (``c_t = 1.0``).
+        No procedural call lowers a stored procedure's confidence or
+        replaces its body; ``refresh_confidence`` only resets to 1.0.  (The
+        episodic retention pass has no procedure guard, so it can summarise
+        and then delete an old procedure row.)  The signature still accepts
         ``confidence`` because it is required on the insert path.
         ``expires_at`` is similarly only honoured on insert (PR #225
         review L1: no consumer reads it yet — vestige of PR 2 stub).
@@ -157,51 +174,59 @@ class ProceduralFacadeMixin:
                 f"confidence must be in [0.0, 1.0], got {confidence}"
             )
         db = self._episodic._ensure_db()  # noqa: SLF001 — facade owns the connection
-        # Refresh path: existing key → reset confidence + last_validated.
-        # ISSUE-0081 PR 3: scope the refresh to the active tenant (symmetric
-        # with ``retrieve_procedures``) so a second tenant re-storing the
-        # same key neither refreshes the first tenant's row nor loses its
-        # own write to the refresh short-circuit (review follow-up).
-        refreshed = await _refresh_confidence(
-            db, self._agent_id, key,
-            principal_id=resolve_active_principal(self._principal_id),
-            epoch_id=resolve_active_epoch(self._epoch_id),
+        # The session this call writes to: an explicit ``session_id``, else
+        # the per-request ``session_scope`` (ISSUE-0081), else the
+        # construction-time default.  Resolved once, so the refresh and the
+        # insert below agree on it.  Procedural rows live in the same
+        # ``episodes`` table as observations, so the session-tag column is
+        # shared.
+        write_session = normalize_session_id(
+            session_id
+            if session_id is not None
+            else (current_session_id() or self._session_id),
         )
-        if refreshed:
-            return
-        context: dict[str, Any] = {"procedure_key": key}
-        if expires_at is not None:
-            context["expires_at"] = expires_at
-        # RFC 0031 Phase 1: thread session_id; caller passes ``None`` to
-        # inherit the active session (the ISSUE-0081 call-time default
-        # below).  Procedural rows live in the same
-        # ``episodes`` table as observations, so the session-tag column
-        # is shared.
-        episode_id = await self._episodic.store_episode(
-            summary=content,
-            context=context,
-            importance=confidence,
-            tags=[f"procedure:{key}"],
-            # ISSUE-0081: call-time default — a per-request
-            # ``session_scope`` wins over the construction snapshot.
-            session_id=(
-                session_id
-                if session_id is not None
-                else (current_session_id() or self._session_id)
-            ),
-            # RFC 0031 PR 4 follow-up F2: procedural rows live in the
-            # same ``episodes`` table as observations; pin the counter
-            # surface so dashboards can split the two write kinds.
-            surface="procedure",
-        )
-        # Stamp the dedicated confidence column on the freshly-inserted
-        # row so the decay clock has a base value below 1.0 when needed.
-        await db.execute(
-            "UPDATE episodes SET confidence = ?, last_validated_at = ? "
-            "WHERE id = ? AND agent_id = ?",
-            (confidence, time.time(), episode_id, self._agent_id),
-        )
-        await db.commit()
+        # The refresh, the insert and the stamp are separate statements, so
+        # two stores of one key running at once could both miss the refresh
+        # and insert, or one's stamp could undo the other's refresh.
+        async with self._procedure_lock:
+            # Refresh path: existing key → reset confidence + last_validated.
+            # Scoped like ``retrieve_procedures`` on every axis: tenant
+            # (ISSUE-0081 PR 3), epoch (ISSUE-0085 PR 3) and session, the
+            # write session plus ``legacy``.  So a re-store under another
+            # tenant, epoch or named session neither refreshes that one's row
+            # nor loses its own write to the refresh short-circuit.
+            refreshed = await _refresh_confidence(
+                db, self._agent_id, key,
+                session_list=_resolve_session_list(
+                    [write_session], self._session_id,
+                ),
+                principal_id=resolve_active_principal(self._principal_id),
+                epoch_id=resolve_active_epoch(self._epoch_id),
+            )
+            if refreshed:
+                return
+            context: dict[str, Any] = {"procedure_key": key}
+            if expires_at is not None:
+                context["expires_at"] = expires_at
+            episode_id = await self._episodic.store_episode(
+                summary=content,
+                context=context,
+                importance=confidence,
+                tags=[f"procedure:{key}"],
+                session_id=write_session,
+                # RFC 0031 PR 4 follow-up F2: procedural rows live in the
+                # same ``episodes`` table as observations; pin the counter
+                # surface so dashboards can split the two write kinds.
+                surface="procedure",
+            )
+            # Stamp the dedicated confidence column on the freshly-inserted
+            # row so the decay clock has a base value below 1.0 when needed.
+            await db.execute(
+                "UPDATE episodes SET confidence = ?, last_validated_at = ? "
+                "WHERE id = ? AND agent_id = ?",
+                (confidence, time.time(), episode_id, self._agent_id),
+            )
+            await db.commit()
 
     async def retrieve_procedures(
         self,
@@ -227,6 +252,11 @@ class ProceduralFacadeMixin:
         emitted from inside ``recall_procedures`` itself so the
         decision lives next to the decayed-confidence value that
         triggers it.
+
+        ``query`` keeps entries whose body contains it, ignoring ASCII
+        case; ``%`` and ``_`` in it match literally.  ``limit`` below 1
+        raises :class:`ValueError`, and one above 100 is capped at 100
+        with a warning.
 
         ``now`` (PR 6b, PR 5 R1 L4): override the read-time clock for
         deterministic tests.  When ``None`` (the default) the helper

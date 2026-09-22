@@ -210,7 +210,7 @@ async def test_refresh_confidence_resets_to_one_and_stamps_now(
     await db.commit()
 
     before = time.time()
-    refreshed = await refresh_confidence(db, "proc-test", "k")
+    refreshed = await refresh_confidence(db, "proc-test", "k", session_list=None)
     after = time.time()
     assert refreshed is True
 
@@ -229,7 +229,9 @@ async def test_refresh_confidence_returns_false_when_no_match(
     facade: MemoryStore,
 ) -> None:
     db = facade.episodic._ensure_db()  # noqa: SLF001
-    assert await refresh_confidence(db, "proc-test", "nonexistent") is False
+    assert await refresh_confidence(
+        db, "proc-test", "nonexistent", session_list=None,
+    ) is False
 
 
 async def test_refresh_confidence_rejects_empty_key(
@@ -237,7 +239,7 @@ async def test_refresh_confidence_rejects_empty_key(
 ) -> None:
     db = facade.episodic._ensure_db()  # noqa: SLF001
     with pytest.raises(ValueError, match="key"):
-        await refresh_confidence(db, "proc-test", "")
+        await refresh_confidence(db, "proc-test", "", session_list=None)
 
 
 # ─── store_procedure refresh path ─────────────────────────────
