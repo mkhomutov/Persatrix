@@ -237,5 +237,5 @@ drop `sessions="*"`.
 > interaction takes the epoch bound when it opens, so the persona's own
 > copy tags no channel turn. MT-SESSION-001 said the start-up session is
 > stamped on every row both processes write, and expected a chat turn's
-> episode to carry it. Both are fixed, docs only, in the PR stacked on
-> #981.
+> episode to carry it. Both are fixed, docs only, by
+> [#982](https://github.com/mkhomutov/Persatrix/pull/982), stacked on #981.

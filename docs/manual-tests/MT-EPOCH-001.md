@@ -7,10 +7,10 @@
 **Last Updated**: 2026-09-23
 **Status**: Active
 
-**v1.1 (2026-09-23)**: a run is now scoped from the shell the CLI runs in —
-`--epoch` on each call, or `PERSATRIX_EPOCH` exported there — not by starting
-the persona under it (Preconditions and Step 3; Step 1 now names whose default
-`live` is). The orchestrator sends an epoch with every channel message, and the
+**v1.1 (2026-09-23)**: a run is now scoped per CLI call — `--epoch` on each
+call, or `PERSATRIX_EPOCH` exported in the shell the CLI runs in — not by
+starting the persona under it (Preconditions and Step 3; Step 1 now names whose
+default `live` is). The orchestrator sends an epoch with every channel message, and the
 persona writes an interaction under the epoch its first turn carried, so the
 persona's own start-up epoch tags no channel turn: it reaches only the rows no
 turn drove, such as a tick's episode or a peer relationship seeded from config.
