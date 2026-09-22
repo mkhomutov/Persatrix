@@ -1,4 +1,4 @@
-"""Data model + column constants for the notes tier.
+"""Data model, column constants and content check for the notes tier.
 
 Split out of :mod:`agents.memory.notes` when the RFC 0037 PR 4 §C/§D
 columns pushed that module past the project's 500-line review-friendly
@@ -17,7 +17,29 @@ from dataclasses import dataclass, field
 from ..session_id import LEGACY_SESSION_ID
 from ._migration_protection import PROTECTION_LEVEL_DEFAULT
 
-__all__ = ["Note", "_NOTE_COLS", "_NOTE_SELECT"]
+__all__ = [
+    "Note", "_MAX_NOTE_CONTENT_BYTES", "_NOTE_COLS", "_NOTE_SELECT",
+    "_check_note_content",
+]
+
+# Maximum content size for a single note (10 KB).
+_MAX_NOTE_CONTENT_BYTES = 10_240
+
+
+def _check_note_content(content: str) -> None:
+    """Reject empty or whitespace-only content, and content over
+    :data:`_MAX_NOTE_CONTENT_BYTES` in UTF-8.  Both ``store_note``
+    (:mod:`agents.memory.notes`) and ``update_note``
+    (:mod:`agents.memory._notes_mutations`) call it, so the two cannot
+    disagree on what a note may hold."""
+    if not content or not content.strip():
+        raise ValueError("content must not be empty")
+    content_bytes = content.encode("utf-8")
+    if len(content_bytes) > _MAX_NOTE_CONTENT_BYTES:
+        raise ValueError(
+            f"content exceeds {_MAX_NOTE_CONTENT_BYTES} byte limit "
+            f"({len(content_bytes)} bytes)"
+        )
 
 
 @dataclass
