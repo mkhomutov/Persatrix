@@ -227,10 +227,13 @@ class NoteStore:
         sessions:
             RFC 0031 §D recall filter.  ``None`` (default) → active
             session plus the ``legacy`` carve-out; a non-empty list →
-            those sessions plus the carve-out; ``"*"`` → no filter
-            (``SESSIONS_ALL``); ``[]`` → :class:`ValueError`.  See
-            :func:`agents.memory._session_filter.session_in_clause`
-            for the SQL shape and the carve-out rationale.
+            those sessions plus the carve-out; ``"*"`` → no session
+            filter (``SESSIONS_ALL``), which no persona path may pass,
+            because notes stay session-scoped; ``[]`` →
+            :class:`ValueError`.  See
+            :func:`agents.memory._session_filter._resolve_session_list`
+            for the modes, and that module's docstring for the
+            carve-out rationale.
         allowed_protection_levels:
             RFC 0037 §D read-surface gating (PR 4) — the entry protection
             levels injectable at the caller's acting classification, as

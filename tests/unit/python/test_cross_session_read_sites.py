@@ -2,18 +2,23 @@
 
 A persona's memory is split by session.  Two things lift that split:
 the ``sessions="*"`` sentinel
-(:data:`agents.memory._session_filter.SESSIONS_ALL`) and the episodic
-query helpers called with ``sessions=None``, which is how the
-room-first-ranked episodic read works.  Since RFC 0049 PR 4 the persona
-prompt path uses both, so the F-3 rule is "no *ungated* widening": each
-such read must be listed below with the test that holds the rule for it.
+(:data:`agents.memory._session_filter.SESSIONS_ALL`) and the query
+helpers that take an already resolved session list, called with none
+(:data:`RESOLVED_LIST_HELPERS`), which is how the room-first-ranked
+episodic read works.  Since RFC 0049 PR 4 the persona prompt path uses
+both, so the F-3 rule is "no *ungated* widening": each such read must be
+listed below with the test that holds the rule for it.
 
 The scan reads the syntax tree of every module under ``agents/`` except
 ``agents/tests/``.  A new cross-session read fails
 :class:`TestCrossSessionReadSites` until it is added to
 :data:`CROSS_SESSION_READ_SITES` — the moment to name its gate.  A
 listed site that no longer reads across sessions fails it too, so the
-list cannot go stale.
+list cannot go stale.  It sees the sentinel, or a missing list, only
+where the call itself spells it: a width worked out elsewhere and passed
+in under another name does not show here.  On the prompt path
+``tests/integration/test_prompt_path_sessions.py`` checks the width each
+tier read actually gets.
 """
 
 from __future__ import annotations
@@ -23,9 +28,23 @@ from pathlib import Path
 
 import pytest
 
-# The episodic query helpers whose ``sessions`` argument is an already
-# resolved list, where ``None`` (or leaving it out) means "no filter".
-EPISODIC_QUERY_HELPERS = frozenset({"recall_fts5", "recall_like", "recall_recency"})
+# The query helpers that take an already resolved session list, keyed by
+# the name of that parameter; ``None`` (or leaving it out) means "no filter".
+# The relationship query helpers are left out: they share their names with
+# the scoped ``RelationshipMemory`` methods, where leaving it out is the
+# §D default.
+RESOLVED_LIST_HELPERS: dict[str, str] = {
+    "recall_fts5": "sessions",
+    "recall_like": "sessions",
+    "recall_recency": "sessions",
+    "_recall_notes_fts5": "sessions",
+    "_recall_notes_like": "sessions",
+    "_recall_notes_recency": "sessions",
+    "recall_procedures": "session_list",
+    "_recall_procedures": "session_list",
+    "topic_subjects_for_agent": "session_list",
+    "_topic_subjects_for_agent": "session_list",
+}
 
 # (module, function) -> the test or policy that keeps its widened read
 # out of an ungated prompt.
@@ -58,6 +77,10 @@ _SKIPPED = frozenset({"agents/memory/_session_filter.py"})
 
 def _is_star(node: ast.AST | None) -> bool:
     return isinstance(node, ast.Constant) and node.value == "*"
+
+
+def _contains_star(node: ast.AST | None) -> bool:
+    return node is not None and any(_is_star(n) for n in ast.walk(node))
 
 
 def _is_none_or_absent(node: ast.expr | None) -> bool:
@@ -117,11 +140,11 @@ class _SiteFinder(ast.NodeVisitor):
 
     def visit_Call(self, node: ast.Call) -> None:
         keywords = {kw.arg: kw.value for kw in node.keywords}
-        if _is_star(keywords.get("sessions")):
+        if _contains_star(keywords.get("sessions")):
             self._hit()
-        if _callee_name(node) in EPISODIC_QUERY_HELPERS and _is_none_or_absent(
-            keywords.get("sessions"),
-        ):
+        callee = _callee_name(node)
+        param = RESOLVED_LIST_HELPERS.get(callee) if callee else None
+        if param is not None and _is_none_or_absent(keywords.get(param)):
             self._hit()
         self.generic_visit(node)
 
@@ -187,6 +210,12 @@ class TestSiteFinder:
             "def f(store):\n    return store.recall(sessions=sf.SESSIONS_ALL)\n",
             "async def f(db):\n    return await recall_fts5(db, sessions=None)\n",
             "async def f(db):\n    return await recall_recency(db)\n",
+            "def f(store, all_rooms):\n"
+            '    return store.recall(sessions="*" if all_rooms else None)\n',
+            "async def f(db):\n    return await recall_procedures(db, 'a')\n",
+            "async def f(db):\n    return await _recall_procedures(db, 'a', session_list=None)\n",
+            "async def f(db):\n    return await _recall_notes_recency(db, sessions=None)\n",
+            "async def f(db):\n    return await _topic_subjects_for_agent(db, session_list=None)\n",
         ],
     )
     def test_flags_a_cross_session_read(self, source: str) -> None:
@@ -198,6 +227,8 @@ class TestSiteFinder:
             "def f(store):\n    return store.recall(sessions=None)\n",
             "async def f(db, session_list):\n"
             "    return await recall_like(db, sessions=session_list)\n",
+            "async def f(db, session_list):\n"
+            "    return await recall_procedures(db, 'a', session_list=session_list)\n",
             "from agents.memory._session_filter import SESSIONS_ALL\n",
         ],
     )
