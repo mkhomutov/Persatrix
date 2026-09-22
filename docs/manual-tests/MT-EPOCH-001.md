@@ -2,10 +2,26 @@
 
 **Test ID**: `MT-EPOCH-001`
 **Feature Area**: Epochs (RFC 0031 epoch axis — ISSUE-0085)
-**Version**: 1.0
+**Version**: 1.1
 **Created**: 2026-06-01
-**Last Updated**: 2026-06-01
+**Last Updated**: 2026-09-23
 **Status**: Active
+
+**v1.1 (2026-09-23)**: a run is now scoped from the shell the CLI runs in —
+`--epoch` on each call, or `PERSATRIX_EPOCH` exported there — not by starting
+the persona under it (Preconditions and Step 3; Step 1 now names whose default
+`live` is). The orchestrator sends an epoch with every channel message, and the
+persona writes an interaction under the epoch its first turn carried, so the
+persona's own start-up epoch tags no channel turn: it reaches only the rows no
+turn drove, such as a tick's episode or a peer relationship seeded from config.
+This is the epoch twin of the session correction in
+[#981](https://github.com/mkhomutov/Persatrix/pull/981); both are recorded in
+the Notes of
+[ISSUE-0165](../issues/ISSUE-0165-relationship-hidden-outside-its-first-session.md).
+The 2026-06-01 result row stays as the v1.0 record, but its "persona epoch-boot
+confirmed" reading no longer follows: a `relationships` row tagged `trial-7` is
+what a config seed under that start-up epoch writes, and so is a turn that
+carried `trial-7` itself. Not re-run under v1.1.
 
 ---
 
@@ -71,16 +87,37 @@ so the `live` baseline is empty.
 > isolates the run. Do **not** vary the user or room between Step 1 and Step 3,
 > or you are testing the session axis instead.
 
-> **Set the epoch at the persona's boot for write-scope.** As with the session
-> axis ([MT-SESSION-003](MT-SESSION-003.md) Preconditions), the persona writes
-> its episodes/facts at *interaction close* in its background loop. To land a
-> run's rows under a given epoch, boot the persona under `PERSATRIX_EPOCH`
-> (Docker: thread it into the agent service env; local:
-> `PERSATRIX_EPOCH=trial-7 python -m persatrix_agents.server …`). The
-> per-invocation `--epoch` governs the dispatch/recall binding for that call;
-> start a *fresh* interaction (don't append to one opened under the prior epoch)
-> when switching epochs, or the close-path write follows the interaction's
-> original epoch. The authoritative structural-isolation proof is
+> **Scope each run from the CLI's shell, not where the persona starts.** As on
+> the session axis ([MT-SESSION-003](MT-SESSION-003.md) Preconditions), the
+> persona writes a conversation's episodes and facts when the interaction
+> closes (RFC 0020), in its background loop — under the epoch the
+> interaction's first turn carried. Each CLI call sends `--epoch`, else
+> `PERSATRIX_EPOCH` from the shell it runs in; with neither set the
+> orchestrator's own epoch applies, `live` unless its environment named
+> another when it started
+> ([epochs guide](../guides/epochs.md#the-process-knob-persatrix_epoch)). So
+> pass `--epoch trial-7` on every turn of a run, as Step 3 does — or export it
+> in a shell you open for that run alone:
+>
+> ```bash
+> export PERSATRIX_EPOCH=trial-7
+> ```
+>
+> Either way, set nothing for Steps 1–2: they have to land under `live`.
+>
+> Two things do not scope a run:
+>
+> - **Starting the persona under `PERSATRIX_EPOCH`.** Every channel message
+>   carries an epoch from the orchestrator, so the persona uses its own copy
+>   only when none is bound — a tick, or a peer relationship seeded from
+>   config. The stack needs no restart between runs, and the stock compose
+>   needs no change.
+> - **Switching while an interaction is open.** A turn that joins an
+>   interaction still open under `live` becomes part of that interaction, and
+>   its close-path rows keep `live` whatever the turn carried. Let the
+>   interaction close before Step 3.
+>
+> The authoritative structural-isolation proof is
 > [`test_epoch_run_isolation.py`](../../tests/integration/test_epoch_run_isolation.py).
 
 ---
@@ -92,7 +129,8 @@ so the `live` baseline is empty.
 **Action**:
 
 Drive two or three turns so a relationship row accrues trust and a person-fact
-lands, all under the `live` epoch (the boot default), same room + user:
+lands, all under the `live` epoch (the orchestrator's default), same room +
+user:
 
 ```bash
 echo "Hey, I'm Alice — I lead the platform team. I trust your read on incidents." \
@@ -134,8 +172,11 @@ normal accumulation a `live` deployment relies on.
 
 **Action**:
 
+Wait out the idle window after Step 2 so the `live` interaction closes first
+(see Preconditions), then send the turn under the fresh epoch — same stack, no
+restart:
+
 ```bash
-# Persona booted under PERSATRIX_EPOCH=trial-7 (see Preconditions), or per-call:
 echo "Where did we land on that incident process?" \
   | ./bin/persatrix chat ember-owl --user alice --epoch trial-7
 ```

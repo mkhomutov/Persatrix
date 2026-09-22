@@ -229,3 +229,13 @@ drop `sessions="*"`.
 > preconditions and the MT-MEMORY-005 rationale to scope an arc by sending
 > the session on every CLI call. Nothing else from the #980 review is left
 > open: its findings were applied in the PR.
+>
+> 2026-09-23 — the **epoch** axis carried the same stale advice, and one
+> more manual test carried the session half. MT-EPOCH-001 told operators
+> to start the persona under `PERSATRIX_EPOCH` for write-scope; the
+> orchestrator sends an epoch with every channel message, and an
+> interaction takes the epoch bound when it opens, so the persona's own
+> copy tags no channel turn. MT-SESSION-001 said the start-up session is
+> stamped on every row both processes write, and expected a chat turn's
+> episode to carry it. Both are fixed, docs only, in the PR stacked on
+> #981.

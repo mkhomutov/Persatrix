@@ -2,10 +2,24 @@
 
 **Test ID**: `MT-SESSION-001`
 **Feature Area**: Sessions (RFC 0031 Phase 1 — namespace + env-var threading)
-**Version**: 1.1
+**Version**: 1.2
 **Created**: 2026-05-13
-**Last Updated**: 2026-09-22
+**Last Updated**: 2026-09-23
 **Status**: Active
+
+**v1.2 (2026-09-23)**: the Purpose and Step 4 no longer say the persona's
+start-up `PERSATRIX_SESSION_ID` tags every row it writes. Since
+[#459](https://github.com/mkhomutov/Persatrix/pull/459) (2026-05-29) a chat
+turn's rows carry the session the CLI sent, so Step 4 sets the value in the
+CLI's own shell too; the start-up value still tags the orchestrator's channels.db
+rows (Steps 2–3, 6 and 8) and the peer relationships the persona seeds from
+config. Step 7 still holds: the first-seen row it reads is the one Step 4's
+turn wrote, under the session that turn carried. Steps 4 and 7 also dropped
+`--agent` / `--message`, which the `chat` command has never had. The finding
+is in the Notes of
+[ISSUE-0165](../issues/ISSUE-0165-relationship-hidden-outside-its-first-session.md);
+[#981](https://github.com/mkhomutov/Persatrix/pull/981) made the same
+correction in the sessions guide and MT-SESSION-003. Not re-run under v1.2.
 
 **v1.1 (2026-09-22)**: Edge Case 2 notes that the relationship row now reads
 the same from every session ([ISSUE-0165](../issues/ISSUE-0165-relationship-hidden-outside-its-first-session.md)).
@@ -17,10 +31,13 @@ session, so Step 7 still holds.
 ## Overview
 
 **Purpose**: Verify that `PERSATRIX_SESSION_ID` set in the operator's
-environment is read at orchestrator + persona-runtime boot and stamped on
-every storage row those processes write — channels.db on the Go side
-(`channels.session_id`, `messages.session_id`) and memory.db on the
-Python side (`episodes.session_id`, `relationships.session_id`).
+environment is read at orchestrator + persona-runtime boot and stamped on the
+storage rows each process writes on its own account — channels.db on the Go
+side (`channels.session_id`, `messages.session_id`) and, on the Python side, a
+`relationships.session_id` seeded from config. The rows a **chat turn** writes
+(`episodes.session_id`, and a peer's first-seen `relationships.session_id`)
+carry the session that turn sent instead, so Step 4 exports the same value in
+the shell it runs the CLI from.
 
 This is the Phase 1 acceptance walkthrough for RFC 0031 — the storage
 half of per-session namespacing. Phase 1 ships **no recall-side
@@ -180,11 +197,21 @@ sqlite3 data/channels.db "SELECT sender_id, content, session_id FROM messages WH
 ### Step 4: Trigger a persona episode under `run-a` (optional, needs API key)
 
 If `ANTHROPIC_API_KEY` is set, drive a chat turn via the CLI so the
-persona-runtime writes a `relationships` row + an `episodes` row:
+persona-runtime writes a `relationships` row + an `episodes` row. A chat turn
+carries the session the **CLI** resolves — `--session`, else
+`PERSATRIX_SESSION_ID` from the shell the CLI runs in, else the `session use`
+pointer ([sessions guide §4](../guides/sessions.md#4-how-the-active-session-is-resolved))
+— not the value the persona read when it started. So set it in this shell too.
+(`--session run-a` would not do: the flag resolves against the session
+registry, and `run-a` was never registered.)
 
 ```pwsh
-./bin/persatrix.exe chat --agent ember-owl --message "what's on fire?"
+$env:PERSATRIX_SESSION_ID = "run-a"
+echo "what's on fire?" | ./bin/persatrix.exe chat ember-owl
 ```
+
+The `chat` command takes the agent id as its first argument and reads one turn
+per line from stdin, so piping a single line runs one turn and exits.
 
 Otherwise skip to Step 5; the cross-process automated test
 (`tests/integration/test_session_id_cross_process.py`) already covers
@@ -256,10 +283,12 @@ sqlite3 data/channels.db "SELECT content, session_id FROM messages WHERE channel
 ### Step 7: Confirm per-row first-seen contract on the Python side
 
 If Step 4 ran under `run-a`, repeat it under `run-b` with the *same*
-peer participant ID:
+peer participant ID — again in the shell the CLI runs in, since the turn
+carries the session the CLI sends (Step 4):
 
 ```pwsh
-./bin/persatrix.exe chat --agent ember-owl --message "different session, same peer"
+$env:PERSATRIX_SESSION_ID = "run-b"
+echo "different session, same peer" | ./bin/persatrix.exe chat ember-owl
 
 sqlite3 data/memory.db "SELECT other_participant_id, session_id FROM relationships WHERE participant_id='ember-owl';"
 ```
