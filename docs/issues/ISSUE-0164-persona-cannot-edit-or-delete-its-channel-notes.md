@@ -110,7 +110,7 @@ bound; a `legacy` note can still be changed under a bound session. Two more
 drive the `store_note`, `update_note` and `delete_note` tools inside
 `session_scope`, as a channel turn does.
 
-## Slot: not slotted; whether it waits for EXP-001 is the maintainer's call
+## Slot: merges before EXP-001, by the maintainer's call of 2026-09-22
 
 - **No plan is needed.** Ruling (a) of the
   [sequencing Amendment 2026-09-12](../v0.3.x-sequencing.md#amendment-2026-09-12--close-v0316-small-then-measure-before-any-train-opens)
@@ -130,12 +130,16 @@ drive the `store_note`, `update_note` and `delete_note` tools inside
   and every meeting is a new channel, so a new session. With the fix, an
   adviser that edits or deletes a note it stored earlier in the same meeting
   succeeds instead of reading "Note not found". That changes arm D, and arms
-  B, C and D′ too unless the harness switches their memory writing off. The
-  fix for [ISSUE-0163](ISSUE-0163-withheld-episodes-reinforced-before-the-gate.md),
-  [#972](https://github.com/mkhomutov/Persatrix/pull/972), is held because it
-  changes arm D.
-- **So the maintainer decides** whether this merges before the EXP-001 run or
-  waits with #972 for the amendment that follows the first strategy review.
+  B, C and D′ too unless the harness switches their memory writing off. It
+  does not change what arm D carries from one meeting to the next: a note
+  stays in its channel's session, so none crosses a meeting, with or without
+  the fix. That is the difference from the fix for
+  [ISSUE-0163](ISSUE-0163-withheld-episodes-reinforced-before-the-gate.md),
+  [#972](https://github.com/mkhomutov/Persatrix/pull/972), which changes the
+  ranking of what does carry and stays held.
+- **Decision, 2026-09-22.** The maintainer chose to merge this before the
+  EXP-001 run rather than hold it with #972, so every arm runs note tools
+  that work in their own channel.
 
 ## Notes
 
