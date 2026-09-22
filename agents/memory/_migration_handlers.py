@@ -405,7 +405,11 @@ async def _apply_migration_7(db: aiosqlite.Connection) -> None:
     Adds ``session_id TEXT NOT NULL DEFAULT 'legacy'`` to both tables and
     creates per-table indexes (``idx_episodes_session``,
     ``idx_rel_session``) so Phase 2 per-session recall has a column +
-    index pair to filter on without a follow-up migration.
+    index pair to filter on without a follow-up migration.  That came
+    true for episodes only: since ISSUE-0165 no read filters the
+    relationship row on its session, so ``idx_rel_session`` serves no
+    query — see
+    :func:`agents.memory.relationship_mutations.seed_trust`.
 
     The ``'legacy'`` default is the synthetic carve-out described by RFC
     0031 OQ #2 — Phase 3 CLI's ``persatrix session new --label legacy``

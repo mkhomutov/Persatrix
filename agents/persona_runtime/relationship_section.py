@@ -29,6 +29,21 @@ known and accepted shape, not an oversight; the admission record adds
 observability, not a gate decision — the tier stays outside the RFC
 0037 §D egress gate (its Non-Goals).
 
+Session axis (ISSUE-0165): the relationship row reads the same from
+every session; only its interaction history (count, last seen, cadence)
+is per-session.  Identity crossed sessions before that, by design (F-7
+Option D).  Trust and the trust note crossing too is safe only while
+nothing said in a channel reaches them: in production trust comes from
+the config ``relationships:`` seeds alone, and ``update_trust`` (the
+only writer of notes) and ``apply_decay`` have no production caller.
+``test_cross_session_read_sites.py`` fails when one gains a caller,
+because the RFC 0037 Non-Goals exempt only the *numeric* score from
+classification: this tier's text is covered instead by the §C
+write-side rule — write it only when the acting channel is ``internal``
+or below, as :mod:`agents.tools.identity_write_through` does for
+identity.  ``update_trust`` does not implement that rule, so a
+production writer of the note must add it (or gate the read) first.
+
 Extracted from :mod:`agents.persona_runtime.memory_context` so the
 mixin file stays under the 500-line review cap; the tier is logically
 independent and parallels :mod:`agents.persona_runtime.channel_history`.
@@ -176,16 +191,16 @@ async def recall_relationship_summary(
     # cross-room person identity.  This is a *separate* read
     # (:meth:`get_identity`) that omits the §D session filter, so identity
     # stated in one room surfaces in every room for the same
-    # ``(principal, epoch)`` — unlike ``get_relationship_summary`` above,
-    # whose relationship-row read is session-scoped.  Same participant type
-    # as the summary read, so both resolve to the one relationship row.
+    # ``(principal, epoch)``.  Same participant type as the summary read, so
+    # both resolve to the one relationship row.
     # Best-effort: an identity-read failure must not sink the relationship
     # tier, so it is logged and the summary returns without identity.
     # Cost: this is an unconditional second indexed lookup per sender per
-    # event (including agent peers that will never have identity); it cannot
-    # fold into the summary row read above because that read is §D
-    # session-filtered and identity must not be — the separate, filter-free
-    # query is what makes identity cross-room.
+    # event (including agent peers that will never have identity).  It was
+    # kept apart because the summary's row read was §D session-filtered and
+    # identity must not be; since ISSUE-0165 that read carries no session
+    # filter either, so the two could now share one query — kept separate
+    # here, which also keeps a bad stored identity from sinking the summary.
     try:
         summary.identity = await rel_memory.get_identity(
             sender_id,
@@ -209,8 +224,11 @@ def render_relationship_section(
 ) -> ContextSection | None:
     """Build the ``relationship_context`` :class:`WorkingMemory` section.
 
-    Returns ``None`` for empty relationships (no recorded interactions)
-    or when the budget admits nothing.
+    Returns ``None`` when the budget admits nothing, and when this
+    session has no recorded interaction with the peer and no identity is
+    stored — a configured peer the persona has not talked to in *this*
+    session therefore renders nothing, trust included (see the gate
+    below).
 
     Increments ``agent.temporal.recency.rendered`` with
     ``source="relationship"`` after a successful admission when the
@@ -247,10 +265,17 @@ def render_relationship_section(
     # truncate; mirror the rel.notes sanitize when that lands.
     if identity_line is not None:
         rel_lines.append(f"  Identity: {truncate(identity_line, REL_NOTES_INTERIM_CHARS)}")
-    # The interaction-derived lines (trust / count / last seen / cadence)
-    # are all per-session and meaningless for an identity-only row, so they
-    # render only when there is at least one in-session interaction —
-    # avoiding a noisy "Interactions: 0" on the immediacy path.
+    # Count, last seen and cadence are per-session and meaningless for an
+    # identity-only row, so they render only when there is at least one
+    # in-session interaction — avoiding a noisy "Interactions: 0" on the
+    # immediacy path.  Trust rides with them although it is a row value
+    # that reads the same in every session since ISSUE-0165: PR #60's rule
+    # is that a configured trust score means nothing until the persona has
+    # actually interacted (pinned by
+    # ``test_memory_injection.py::test_zero_interaction_relationship_skips_injection``),
+    # and only a closed DM records an interaction.  So a config seed does
+    # not reach a group-channel prompt; changing that means revisiting that
+    # rule.  ``Notes`` below sits outside the gate, beside identity.
     rendered_last_seen = False
     if rel.interaction_count > 0:
         # F-60-4: skip default trust injection — a score equal to the

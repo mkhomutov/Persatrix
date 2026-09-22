@@ -81,7 +81,10 @@ __all__ = [
 #: (``test_cross_room_live.py``).  Of the persona recall tiers only facts
 #: and episodes read across sessions; the others stay session-scoped,
 #: notes above all, because a note carries no source channel for the
-#: audience check to judge.  ``test_cross_session_read_sites.py`` lists
+#: audience check to judge.  The relationship row is not a recall: its
+#: key has no session, so it reads the same everywhere without this
+#: sentinel, and only its interaction history takes ``sessions``
+#: (ISSUE-0165).  ``test_cross_session_read_sites.py`` lists
 #: every caller and what guards it.  The operator debug verb RFC 0031
 #: planned for it (`§Security Considerations
 #: <../../docs/rfcs/0031-per-session-namespacing-channels.md#security-considerations>`_)

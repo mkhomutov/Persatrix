@@ -2,10 +2,15 @@
 
 **Test ID**: `MT-SESSION-001`
 **Feature Area**: Sessions (RFC 0031 Phase 1 — namespace + env-var threading)
-**Version**: 1.0
+**Version**: 1.1
 **Created**: 2026-05-13
-**Last Updated**: 2026-05-13
+**Last Updated**: 2026-09-22
 **Status**: Active
+
+**v1.1 (2026-09-22)**: Edge Case 2 notes that the relationship row now reads
+the same from every session ([ISSUE-0165](../issues/ISSUE-0165-relationship-hidden-outside-its-first-session.md)).
+The steps are unchanged: a config-seeded row still carries the start-up
+session, so Step 7 still holds.
 
 ---
 
@@ -356,6 +361,13 @@ Default recall is scoped to the active session plus the always-visible
 `legacy` carve-out; cross-session recall is an explicit opt-in via the
 `sessions=` parameter on the public read methods (and the Phase 3
 operator path `persatrix memory recall --sessions=…`).
+
+> **Updated 2026-09-22 ([ISSUE-0165](../issues/ISSUE-0165-relationship-hidden-outside-its-first-session.md)).**
+> The relationship row has left that list: it is one row per peer and reads
+> the same from every session, so a peer's trust carries into a new session.
+> What stays per session is its interaction history (count, recent
+> interactions, last seen). Facts and episodes have read across sessions
+> since v0.3.12; [MT-SESSION-003](MT-SESSION-003.md) records that re-anchor.
 
 The Phase 2 PR sequence closed F-3 on every persona-memory recall
 surface:
