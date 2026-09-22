@@ -1,6 +1,6 @@
 ---
 id: ISSUE-0164
-summary: "A persona cannot edit or delete a note it stored in a channel. `NoteStore.update_note`, `delete_note` and `count_notes` scope their SQL to the session the note store was given at start-up (`PERSATRIX_SESSION_ID`, or `legacy` when unset), while the `store_note` tool tags a note with the channel's session and `recall_notes` reads that session when called. The orchestrator gives each persona one session per channel and every channel turn runs under it, so a note the persona has just stored and recalled answers 'Note not found' to an edit or a delete, and `count_notes` leaves it out. The reverse holds when `PERSATRIX_SESSION_ID` is set: a note tagged with it is recalled in no channel but can be changed by id from every channel. The fix reads the session at call time with the recall path's own helpers."
+summary: "A persona cannot edit or delete a note it stored in a channel. `NoteStore.update_note`, `delete_note` and `count_notes` scope their SQL to the session the note store was given at start-up (`PERSATRIX_SESSION_ID`, or `legacy` when unset), while the `store_note` tool tags a note with the channel's session and `recall_notes` reads that session when called. The orchestrator gives each persona one session per channel and every channel turn runs under it, so a note the persona has just stored and recalled answers 'Note not found' to an edit or a delete (and `count_notes`, which no persona tool calls, leaves it out under a bound session). The reverse holds when `PERSATRIX_SESSION_ID` is set: a note tagged with it is recalled in no channel but can be changed by id from every channel. The fix reads the session at call time with the recall path's own helpers."
 status: resolved
 severity: medium
 area: memory
@@ -17,6 +17,7 @@ refs:
   - agents/session_id.py
   - internal/channels/session_binding.go
   - tests/unit/python/test_notes_mutation_session_scope.py
+  - tests/unit/python/test_scope_snapshot_reads.py
   - docs/issues/ISSUE-0077-notes-mutation-not-session-scoped.md
   - docs/issues/ISSUE-0081-session-id-process-global-not-task-local.md
   - docs/experiments/EXP-001-preregistration.md
@@ -74,43 +75,64 @@ only `PERSATRIX_SESSION_ID` between two stores. None of its tests bound a
 - **A persona's own notes are read-only in every channel.** `update_note` and
   `delete_note` answer "Note not found: <id>" for any note stored during a
   channel turn, including one the persona recalled a moment earlier. It cannot
-  correct a note, or remove one a person asked it to forget; the note stays
-  until the channel's 500-note cap prunes it.
-- **`count_notes` leaves them out.** Nothing in the runtime calls it today;
-  operator and test callers get a count without the channel's notes.
+  correct a note, or remove one a person asked it to forget. The 500-note cap
+  does not clear it either: the cap prunes the least-recalled notes first, and
+  every recall counts, including the one that puts a note into the prompt, so
+  a note that keeps being recalled stays for good.
+- **`count_notes` leaves them out, but only under a bound session.** No
+  persona tool, runtime path or operator surface calls it. A caller with no
+  session bound gets the same count before and after the fix; only one inside
+  a `session_scope` (today, a test) missed the channel's notes.
 - **The reverse, when `PERSATRIX_SESSION_ID` is set.** A note stored with no
   session bound (a tick turn, say) is tagged with the start-up session. No
   channel recalls it, yet `update_note` and `delete_note` reach it by id from
   every channel. The id has to reach the channel some other way first, since
   recall will not show it, so this is ISSUE-0077's defence-in-depth gap again,
-  not a leak. With the variable unset, such a note is tagged `legacy`, which
-  every channel may read and change by design.
-- **Medium, not high.** Nothing reaches a prompt that should not. A shipped
-  pair of persona tools fails on the path every channel turn takes.
+  not a leak. With the variable unset, such a note is tagged `legacy`: every
+  channel may change it by design, and every channel reads it unless the
+  note's protection level is above the channel's.
+- **Medium, not high.** No note reaches another channel's prompt, or one its
+  protection level bars. A shipped pair of persona tools fails on the path
+  every channel turn takes, and a note a person asked the persona to forget
+  stays in that channel's memory.
 
 ## Fix
 
-The three methods build their session clause with the helpers `recall_notes`
-uses, `_resolve_session_list(None, self._active_session_id)` and then
-`session_in_clause`, through one private method, `_mutation_session_clause`.
-A bound session wins; the start-up snapshot applies only when none is bound;
-the `legacy` carve-out and the strict principal and epoch clauses are
-unchanged. A turn can now change and count exactly the notes it can recall.
+The three methods build their scope with the helpers `recall_notes` uses,
+through one private function, `_mutation_scope_clause`:
+`_resolve_session_list(None, snapshot)` and `session_in_clause` for the
+session, then `principal_eq_clause` and `epoch_eq_clause`. A bound session
+wins; the start-up snapshot applies only when none is bound; the `legacy`
+carve-out and the strict principal and epoch equality are unchanged. A turn
+now changes and counts the notes its recall reaches on the session, tenant
+and epoch axes.
+
+The methods still ignore the RFC 0037 protection level, as they always have.
+An edit re-stamps a note upward (§C). A delete, which the RFC does not cover,
+removes a note whatever its level. The fix extends that reach to the
+channel's own notes: if a channel is classified down, a turn acting below a
+note's level can delete it by id, though its recall withholds the note.
+Whether deletes should respect the level is for the maintainer to rule on,
+since ruling (b) keeps the §D gate as built.
 
 The fix took `notes.py` past 500 lines, so the same PR moves the three methods
-and the clause, unchanged, into a mixin in `agents/memory/_notes_mutations.py`,
-beside the read queries in `_notes_recall.py`. They are one concern: the rule
-that a turn changes only what it can recall. `NoteStore` keeps them as its
-own methods, so no caller changes. The 10 KB note size limit moves to
-`note_types.py`, because `store_note` and `update_note` both check it.
+and their scope into a mixin in `agents/memory/_notes_mutations.py`, beside the
+read queries in `_notes_recall.py`. They are one concern: a turn changes only
+notes in the scope it recalls from. `NoteStore` keeps them as its own methods,
+so no caller changes. The content check and its 10 KB limit move to
+`note_types.py`, because `store_note` and `update_note` both call it.
 
 Tests first, in `tests/unit/python/test_notes_mutation_session_scope.py`. With
 `PERSATRIX_SESSION_ID=run-boot`, a note stored under `session_scope("sess-abc")`
 can be updated, deleted and counted there, and `sess-xyz` can do none of it; a
 `run-boot` note cannot be changed under `sess-abc` but still can with nothing
 bound; a `legacy` note can still be changed under a bound session. Two more
-drive the `store_note`, `update_note` and `delete_note` tools inside
-`session_scope`, as a channel turn does.
+call the `store_note`, `update_note` and `delete_note` tools directly inside
+`session_scope`. One drives two real channel turns through `on_event`: the
+first stores, recalls, edits and deletes its notes, and the second channel
+gets "Note not found". `tests/unit/python/test_scope_snapshot_reads.py` scans
+`agents/` so that no other surface puts a start-up snapshot straight into a
+query.
 
 ## Slot: merges before EXP-001, by the maintainer's call of 2026-09-22
 
@@ -122,11 +144,14 @@ drive the `store_note`, `update_note` and `delete_note` tools inside
   the v0.3.16 tag, this is a standalone fix: no store migration, no RFC, no new
   setting.
 - **Ruling (b)** keeps further memory isolation work off every release after
-  v0.3.16 unless an outside ask is recorded. This fix adds no boundary: it makes
-  the notes mutation methods use the session ISSUE-0077 and ISSUE-0081 already
-  promised and the recall path already uses, and leaves the RFC 0037 §D gate
-  and the audience check alone. It is in ruling (b)'s neighbourhood all the
-  same, because it changes which session a memory tier's writes reach.
+  v0.3.16 unless an outside ask is recorded. This fix does narrow one live
+  path: with `PERSATRIX_SESSION_ID` set, a channel turn could change a
+  start-up-session note by id, and now cannot. It narrows it to the boundary
+  ISSUE-0077 promised and the recall path already keeps, and adds none of its
+  own. It also widens the delete reach noted under Fix, and leaves the
+  RFC 0037 §D gate and the audience check alone. That is still memory
+  isolation work in ruling (b)'s terms, so it merges as an exception, on the
+  maintainer's call below.
 - **EXP-001.** The advisers keep the built-in note tools
   ([pre-registration §2](../experiments/EXP-001-preregistration.md#2-the-arms)),
   and every meeting is a new channel, so a new session. With the fix, an
@@ -149,8 +174,8 @@ drive the `store_note`, `update_note` and `delete_note` tools inside
 > [#977](https://github.com/mkhomutov/Persatrix/pull/977), outside that PR's
 > docstring-only scope, and filed with the fix drafted test-first. Against
 > `4e84f5ab`, 5 of the 8 new tests failed (update, delete, count, the reverse
-> case and the tool path); with the fix, none. The other 3 guard against
-> widening too far: the two cross-session tests fail when the session clause
+> case and the tool path); with the fix, none. The other 3 guard the scope in
+> both directions: the two cross-session tests fail when the session clause
 > is removed, and the carve-out test fails when `legacy` is dropped from it.
 >
 > 2026-09-22 — **resolved by [#979](https://github.com/mkhomutov/Persatrix/pull/979)**,

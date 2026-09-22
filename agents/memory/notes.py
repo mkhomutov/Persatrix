@@ -37,6 +37,7 @@ from .note_types import (  # noqa: F401 — re-export
     _NOTE_COLS,
     _NOTE_SELECT,
     Note,
+    _check_note_content,
 )
 
 if TYPE_CHECKING:
@@ -48,8 +49,8 @@ if TYPE_CHECKING:
 # in :mod:`agents.memory._notes_recall`).  ``Note`` / the column constants
 # moved to :mod:`agents.memory.note_types` (RFC 0037 PR 4 — 500-line cap)
 # and are re-exported the same way, as is the note size limit (moved
-# there with the ISSUE-0164 split, since :mod:`._notes_mutations` needs
-# it too).
+# there with the ISSUE-0164 split, beside the content check that
+# ``store_note`` and :mod:`._notes_mutations` both call).
 __all__ = ["Note", "NoteStore", "_FTS5_SPECIAL"]
 
 logger = logging.getLogger(__name__)
@@ -148,14 +149,7 @@ class NoteStore(_NoteMutationsMixin):
             raise ValueError(f"max_notes must be >= 1, got {max_notes}")
         if not topic or not topic.strip():
             raise ValueError("topic must not be empty")
-        if not content or not content.strip():
-            raise ValueError("content must not be empty")
-        content_bytes = content.encode("utf-8")
-        if len(content_bytes) > _MAX_NOTE_CONTENT_BYTES:
-            raise ValueError(
-                f"content exceeds {_MAX_NOTE_CONTENT_BYTES} byte limit "
-                f"({len(content_bytes)} bytes)"
-            )
+        _check_note_content(content)
         # Normalise session_id at the storage boundary via the shared
         # helper (RFC 0031 Phase 2 PR 4, PR 1 F16 carry-forward — same
         # invariant now applied uniformly across the four persona-memory

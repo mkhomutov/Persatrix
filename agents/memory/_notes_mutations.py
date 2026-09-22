@@ -2,24 +2,27 @@
 
 Moved out of :mod:`agents.memory.notes` when the ISSUE-0164 fix took that
 module past 500 lines.  The three methods are one concern: each reaches
-exactly the notes a default recall returns in the same turn — this agent,
-the active session read at call time plus the ``legacy`` carve-out, and
-strict tenant and epoch equality — and that rule is easiest to keep when
-they sit together.  Same idiom as :mod:`agents.memory.episodic_notes_api`:
-a mixin, not free functions, so the methods keep their public call sites
-on :class:`~agents.memory.notes.NoteStore`.  The read queries live in
+the same notes a recall does on the session, tenant and epoch axes — this
+agent, the active session read at call time plus the ``legacy``
+carve-out, and strict tenant and epoch equality — and that rule is
+easiest to keep when they sit together.  Unlike the persona's recall they
+do not filter by RFC 0037 protection level: an edit re-stamps upward
+instead (§C), and a delete or a count ignores the level.  Same idiom as
+:mod:`agents.memory.episodic_notes_api`: a mixin, not free functions, so
+the methods keep their public call sites on
+:class:`~agents.memory.notes.NoteStore`.  The read queries live in
 :mod:`agents.memory._notes_recall`.
 """
 
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
-from ._epoch_filter import resolve_active_epoch
-from ._principal_filter import resolve_active_principal
+from ._epoch_filter import epoch_eq_clause, resolve_active_epoch
+from ._principal_filter import principal_eq_clause, resolve_active_principal
 from ._session_filter import _resolve_session_list, session_in_clause
-from .note_types import _MAX_NOTE_CONTENT_BYTES
+from .note_types import _check_note_content
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -27,24 +30,32 @@ if TYPE_CHECKING:
     import aiosqlite
 
 
+class _NoteStoreState(Protocol):
+    """What the mixin reads from :class:`~agents.memory.notes.NoteStore`.
+
+    Typing ``self`` with this protocol, rather than declaring the
+    attributes on the mixin, keeps mypy checking that ``NoteStore`` really
+    sets each one.
+    """
+
+    _db: aiosqlite.Connection
+    _agent_id: str
+    _active_session_id: str
+    _active_principal_id: str
+    _active_epoch_id: str
+
+
 class _NoteMutationsMixin:
     """``update_note`` / ``delete_note`` / ``count_notes`` for
     :class:`~agents.memory.notes.NoteStore`.
 
-    Expects the connection, the agent id and the three scope snapshots
-    from the concrete class; private (leading underscore) because it is
-    not a public extension point.
+    Reads the connection, the agent id and the three scope snapshots
+    through :class:`_NoteStoreState`; private (leading underscore)
+    because it is not a public extension point.
     """
 
-    if TYPE_CHECKING:
-        _db: aiosqlite.Connection
-        _agent_id: str
-        _active_session_id: str
-        _active_principal_id: str
-        _active_epoch_id: str
-
     async def update_note(
-        self,
+        self: _NoteStoreState,
         note_id: str,
         content: str,
         *,
@@ -63,8 +74,11 @@ class _NoteMutationsMixin:
         "active" is read at call time, the way
         :meth:`~agents.memory.notes.NoteStore.recall_notes` reads it — the
         channel session the runtime bound for this event, else the
-        construction snapshot — so a turn can edit exactly the notes it
-        can recall.
+        construction snapshot — so a turn reaches the session, tenant and
+        epoch its recall does (:func:`_mutation_scope_clause`).  It does
+        not share recall's protection-level filter: a turn can edit a note
+        above its acting level that its recall withholds, and the
+        re-stamp below keeps that note's level.
 
         RFC 0037 §C re-stamp (PR 4): an edit re-stamps the row to
         ``max(existing protection_level, acting L)`` — never lowers.  The
@@ -79,22 +93,8 @@ class _NoteMutationsMixin:
         non-persona operator/CLI surface, and any pre-RFC caller) →
         content-only update, exactly the prior behaviour.
         """
-        if not content or not content.strip():
-            raise ValueError("content must not be empty")
-        content_bytes = content.encode("utf-8")
-        if len(content_bytes) > _MAX_NOTE_CONTENT_BYTES:
-            raise ValueError(
-                f"content exceeds {_MAX_NOTE_CONTENT_BYTES} byte limit "
-                f"({len(content_bytes)} bytes)"
-            )
+        _check_note_content(content)
         now = time.time()
-        # ISSUE-0081 PR 3: strict tenant equality in addition to the
-        # session carve-out — a foreign principal cannot mutate this row
-        # even if it knows the UUID and shares the session/legacy scope.
-        # ISSUE-0085 PR 3: strict epoch equality, same reasoning — a fresh
-        # epoch cannot mutate a prior run's row through the session carve-out.
-        principal_id = resolve_active_principal(self._active_principal_id)
-        epoch_id = resolve_active_epoch(self._active_epoch_id)
         restamp_sql = ""
         restamp_params: tuple[str, ...] = ()
         if restamp_protection_level is not None and restamp_below:
@@ -106,71 +106,69 @@ class _NoteMutationsMixin:
                 f"IN ({placeholders}) THEN ? ELSE protection_level END"
             )
             restamp_params = (*restamp_below, restamp_protection_level)
-        sess_clause, sess_params = self._mutation_session_clause()
+        scope_sql, scope_params = _mutation_scope_clause(self)
         cursor = await self._db.execute(
             f"UPDATE notes SET content = ?, updated_at = ?{restamp_sql} "
-            f"WHERE id = ? AND agent_id = ?{sess_clause} "
-            "AND principal_id = ? "
-            "AND epoch_id = ?",
+            f"WHERE id = ? AND agent_id = ?{scope_sql}",
             (
                 content, now, *restamp_params, note_id, self._agent_id,
-                *sess_params,
-                principal_id, epoch_id,
+                *scope_params,
             ),
         )
         await self._db.commit()
         return cursor.rowcount > 0
 
-    async def delete_note(self, note_id: str) -> bool:
+    async def delete_note(self: _NoteStoreState, note_id: str) -> bool:
         """Delete a note by ID. Returns True if found.  Session-,
-        principal-, and epoch-scoped per :meth:`update_note`."""
-        principal_id = resolve_active_principal(self._active_principal_id)
-        epoch_id = resolve_active_epoch(self._active_epoch_id)
-        sess_clause, sess_params = self._mutation_session_clause()
+        principal- and epoch-scoped per :meth:`update_note`, and like it
+        blind to protection level: RFC 0037 §C covers edits and says
+        nothing about deletes, so a turn can delete a note above its
+        acting level that its recall withholds."""
+        scope_sql, scope_params = _mutation_scope_clause(self)
         cursor = await self._db.execute(
-            "DELETE FROM notes "
-            f"WHERE id = ? AND agent_id = ?{sess_clause} "
-            "AND principal_id = ? "
-            "AND epoch_id = ?",
-            (
-                note_id, self._agent_id,
-                *sess_params,
-                principal_id, epoch_id,
-            ),
+            f"DELETE FROM notes WHERE id = ? AND agent_id = ?{scope_sql}",
+            (note_id, self._agent_id, *scope_params),
         )
         await self._db.commit()
         return cursor.rowcount > 0
 
-    async def count_notes(self) -> int:
-        """Number of notes visible to the active session + tenant + epoch
-        (per :meth:`update_note`'s scope)."""
-        principal_id = resolve_active_principal(self._active_principal_id)
-        epoch_id = resolve_active_epoch(self._active_epoch_id)
-        sess_clause, sess_params = self._mutation_session_clause()
+    async def count_notes(self: _NoteStoreState) -> int:
+        """Number of notes in :meth:`update_note`'s scope — the active
+        session plus ``legacy``, for this tenant and epoch — at every
+        protection level."""
+        scope_sql, scope_params = _mutation_scope_clause(self)
         async with self._db.execute(
-            "SELECT COUNT(*) FROM notes "
-            f"WHERE agent_id = ?{sess_clause} "
-            "AND principal_id = ? "
-            "AND epoch_id = ?",
-            (
-                self._agent_id,
-                *sess_params,
-                principal_id, epoch_id,
-            ),
+            f"SELECT COUNT(*) FROM notes WHERE agent_id = ?{scope_sql}",
+            (self._agent_id, *scope_params),
         ) as cursor:
             row = await cursor.fetchone()
         return row[0] if row else 0
 
-    def _mutation_session_clause(self) -> tuple[str, list[str]]:
-        """The ``" AND session_id IN (…)"`` clause of the three methods
-        above, built by the same helpers
-        :meth:`~agents.memory.notes.NoteStore.recall_notes` uses: the
-        active session read at call time (a bound ``session_scope``, else
-        this store's snapshot) plus the ``legacy`` carve-out.  Sharing
-        them keeps what a turn can change equal to what it can recall
-        (ISSUE-0164).
-        """
-        return session_in_clause(
-            _resolve_session_list(None, self._active_session_id),
-            column="session_id",
-        )
+
+def _mutation_scope_clause(store: _NoteStoreState) -> tuple[str, list[str]]:
+    """The ``" AND session_id IN (…) AND principal_id = ? AND epoch_id =
+    ?"`` scope of the three methods above, built by the helpers
+    :meth:`~agents.memory.notes.NoteStore.recall_notes` uses, so these
+    three axes cannot drift from recall's.
+
+    The session is read at call time (a bound ``session_scope``, else the
+    store's snapshot) plus the ``legacy`` carve-out (ISSUE-0164).  Tenant
+    and epoch are strict equality (ISSUE-0081 PR 3, ISSUE-0085 PR 3): a
+    foreign principal, or a fresh epoch, cannot mutate a row even if it
+    knows the UUID and shares the session or ``legacy`` scope.
+    """
+    session_sql, session_params = session_in_clause(
+        _resolve_session_list(None, store._active_session_id),
+        column="session_id",
+    )
+    principal_sql, principal_params = principal_eq_clause(
+        resolve_active_principal(store._active_principal_id),
+        column="principal_id",
+    )
+    epoch_sql, epoch_params = epoch_eq_clause(
+        resolve_active_epoch(store._active_epoch_id), column="epoch_id",
+    )
+    return (
+        session_sql + principal_sql + epoch_sql,
+        [*session_params, *principal_params, *epoch_params],
+    )
