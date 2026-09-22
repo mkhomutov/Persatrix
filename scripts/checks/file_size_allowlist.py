@@ -162,6 +162,14 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # offset it trades fidelity for an arbitrary line. Remove this entry at RFC
     # seal (Phase 4 closeout) or if a maintenance PR moves the amendment
     # history into a separate changelog.
+    # 2026-09-23: measured 8 733. Later amendments carried it from ~8 090 to
+    # ~8 650 before this line was refreshed. The ISSUE-0165 amendment went
+    # into its own file (0031-amendment-relationship-row-cross-session.md,
+    # the pattern the identity and fact-scope amendments already use), leaving
+    # a one-line pointer in §D; the rest of the rise is accuracy fixes to
+    # statements the same change made stale. The separate-file route is the
+    # one that works here — use it for the next amendment too, and the
+    # "separate changelog" exit above is now overdue.
     "docs/rfcs/0031-per-session-namespacing-channels.md",
     # docs/observability.md tipped over the 3 000-word prose limit when
     # RFC 0009 PR 1c added the audit-logger metric inventory + SLO alert

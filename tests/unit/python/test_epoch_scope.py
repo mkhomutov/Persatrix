@@ -217,7 +217,7 @@ class TestRelationshipEpochIsolation:
 
         # run-b sees the neutral default + an empty summary.
         with epoch_scope("run-b"):
-            assert await rel.get_trust("peer", sessions="*") == 0.5
+            assert await rel.get_trust("peer") == 0.5
             summary_b = await rel.get_relationship_summary(
                 "peer", sessions="*",
             )
@@ -243,9 +243,9 @@ class TestRelationshipEpochIsolation:
         """
         with epoch_scope("run-a"):
             await rel.update_trust("peer", 0.2, "warmed up")
-            assert await rel.get_trust("peer", sessions="*") == pytest.approx(0.7)
+            assert await rel.get_trust("peer") == pytest.approx(0.7)
         # The default ``live`` epoch must NOT see run-a's trust.
-        assert await rel.get_trust("peer", sessions="*") == _DEFAULT_TRUST
+        assert await rel.get_trust("peer") == _DEFAULT_TRUST
 
     async def test_record_interaction_two_writers_isolated(
         self, rel: RelationshipMemory,
@@ -260,19 +260,19 @@ class TestRelationshipEpochIsolation:
                 "peer", "chat", outcome="ok", sentiment=0.5, session_id="legacy",
             )
             await rel.update_trust("peer", 0.2, "a-warmed")
-            a_trust = await rel.get_trust("peer", sessions="*")
+            a_trust = await rel.get_trust("peer")
         with epoch_scope("run-b"):
             await rel.record_interaction(
                 "peer", "chat", outcome="bad", sentiment=-0.5, session_id="legacy",
             )
             await rel.update_trust("peer", -0.2, "b-cooled")
-            b_trust = await rel.get_trust("peer", sessions="*")
+            b_trust = await rel.get_trust("peer")
         # run-b sees its own (independent) row, not the neutral default.
         assert b_trust == pytest.approx(0.3)
         # run-a's trust is untouched by run-b's write.
         with epoch_scope("run-a"):
-            assert await rel.get_trust("peer", sessions="*") == pytest.approx(a_trust)
-            assert await rel.get_trust("peer", sessions="*") == pytest.approx(0.7)
+            assert await rel.get_trust("peer") == pytest.approx(a_trust)
+            assert await rel.get_trust("peer") == pytest.approx(0.7)
 
     async def test_apply_decay_is_epoch_scoped(
         self, rel: RelationshipMemory,
@@ -285,9 +285,9 @@ class TestRelationshipEpochIsolation:
         with epoch_scope("run-b"):
             await rel.update_trust("peer", 0.2, "b")  # → 0.7
             await rel.apply_decay(decay_rate=0.5)      # run-b only
-            b_after = await rel.get_trust("peer", sessions="*")
+            b_after = await rel.get_trust("peer")
         with epoch_scope("run-a"):
-            a_after = await rel.get_trust("peer", sessions="*")
+            a_after = await rel.get_trust("peer")
         assert b_after < 0.7  # run-b decayed toward neutral
         assert a_after == pytest.approx(0.7)  # run-a untouched
 

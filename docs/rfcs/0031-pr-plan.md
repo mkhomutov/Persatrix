@@ -266,6 +266,13 @@ file remains an honest record of what was flagged at review time.
    reproduces the MT-SESSION-001 Step 7 sequence and asserts the row tag is
    `run-a`, not `legacy`.
 
+   **Note (2026-09-22, [ISSUE-0165](../issues/ISSUE-0165-relationship-hidden-outside-its-first-session.md))**:
+   the tag stays, but no read filters on it any more. Once
+   [#459](https://github.com/mkhomutov/Persatrix/pull/459) gave each channel its
+   own session, the Phase 2 row filter hid every seed tagged this way from every
+   channel whenever `PERSATRIX_SESSION_ID` was set. The relationship row is now
+   read with no session filter; only its interaction history is per-session.
+
 3. **[✅ Addressed]** **Python side does not WARN on non-canonical `PERSATRIX_SESSION_ID`; Go side does**
    ([agents/persona_runtime/session_id.py](../../agents/persona_runtime/session_id.py)). The
    Go-side [cmd/orchestrator/startup.go::resolveSessionID](../../cmd/orchestrator/startup.go) emits

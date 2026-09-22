@@ -19,6 +19,17 @@ where the call itself spells it: a width worked out elsewhere and passed
 in under another name does not show here.  On the prompt path
 ``tests/integration/test_prompt_path_sessions.py`` checks the width each
 tier read actually gets.
+
+A read of a row whose key has no session is not a widening and is not
+listed: the relationship row (trust, notes, identity) reads the same
+from every session with no session predicate at all (ISSUE-0165), and
+only its interaction history takes ``sessions``.  That row needs no gate
+only while nothing said in a channel reaches the trust score or the
+trust note, so :class:`TestTrustWriteSites` below holds the other half
+of the rule: it fails when ``update_trust`` or ``apply_decay`` gains a
+caller in ``agents/``.  The module docstring of
+``agents/persona_runtime/relationship_section.py`` says what such a
+caller has to do first.
 """
 
 from __future__ import annotations
@@ -78,6 +89,28 @@ CROSS_SESSION_READ_SITES: dict[tuple[str, str], str] = {
 # The sentinel's own definition and resolver are not callers.
 _SKIPPED = frozenset({"agents/memory/_session_filter.py"})
 
+# The two writers of the relationship row's trust score and trust note.
+# The row reads across sessions with no §D gate, which is safe only while
+# nothing said in a channel reaches either field — that is, while these
+# have no caller outside the tier itself (ISSUE-0165).  The aliases are
+# the ``as _name`` imports the facade delegates through.
+TRUST_WRITERS = frozenset({
+    "update_trust", "_update_trust", "apply_decay", "_apply_decay",
+})
+
+# The tier's own definition + facade modules are not callers.
+_TRUST_WRITER_HOMES = frozenset({
+    "agents/memory/relationship.py",
+    "agents/memory/relationship_mutations.py",
+})
+
+# (module, function) -> what keeps that writer's text out of another
+# session's prompt.  Empty today.  Adding an entry is the moment to name
+# the RFC 0037 §C write-side rule it follows (write only when the acting
+# channel is ``internal`` or below, as the identity write-through does),
+# or the read gate that covers the row.
+TRUST_WRITE_SITES: dict[tuple[str, str], str] = {}
+
 
 def _is_star(node: ast.AST | None) -> bool:
     return isinstance(node, ast.Constant) and node.value == "*"
@@ -104,6 +137,8 @@ class _SiteFinder(ast.NodeVisitor):
 
     def __init__(self) -> None:
         self.sites: set[str] = set()
+        #: Functions that call a writer of trust / the trust note.
+        self.writer_sites: set[str] = set()
         self._scope: list[str] = []
 
     def _hit(self) -> None:
@@ -150,6 +185,8 @@ class _SiteFinder(ast.NodeVisitor):
         param = RESOLVED_LIST_HELPERS.get(callee) if callee else None
         if param is not None and _is_none_or_absent(keywords.get(param)):
             self._hit()
+        if callee in TRUST_WRITERS:
+            self.writer_sites.add(".".join(self._scope) or "<module>")
         self.generic_visit(node)
 
     def visit_Assign(self, node: ast.Assign) -> None:
@@ -178,10 +215,34 @@ def _scan_agents(repo_root: Path) -> set[tuple[str, str]]:
     return found
 
 
+def _writer_sites_in(source: str) -> set[str]:
+    finder = _SiteFinder()
+    finder.visit(ast.parse(source))
+    return finder.writer_sites
+
+
+def _scan_trust_writers(repo_root: Path) -> set[tuple[str, str]]:
+    found: set[tuple[str, str]] = set()
+    for path in sorted((repo_root / "agents").rglob("*.py")):
+        rel = path.relative_to(repo_root).as_posix()
+        if rel.startswith("agents/tests/") or rel in _TRUST_WRITER_HOMES:
+            continue
+        found |= {
+            (rel, site)
+            for site in _writer_sites_in(path.read_text(encoding="utf-8"))
+        }
+    return found
+
+
 @pytest.fixture(scope="module")
 def found() -> set[tuple[str, str]]:
     # ``tests/unit/python/<this>`` → repo root is three parents up.
     return _scan_agents(Path(__file__).resolve().parents[3])
+
+
+@pytest.fixture(scope="module")
+def found_writers() -> set[tuple[str, str]]:
+    return _scan_trust_writers(Path(__file__).resolve().parents[3])
 
 
 class TestCrossSessionReadSites:
@@ -198,6 +259,46 @@ class TestCrossSessionReadSites:
     def test_no_stale_entry(self, found: set[tuple[str, str]]) -> None:
         stale = sorted(CROSS_SESSION_READ_SITES.keys() - found)
         assert not stale, f"{stale} no longer read across sessions — remove them."
+
+
+class TestTrustWriteSites:
+    """Nothing said in a channel reaches trust or the trust note.
+
+    That is what lets the relationship row read across sessions without
+    the RFC 0037 §D gate (ISSUE-0165).  It is a property of the *writers*,
+    so it is checked here rather than left to a docstring.
+    """
+
+    def test_no_unlisted_writer(self, found_writers: set[tuple[str, str]]) -> None:
+        unlisted = sorted(found_writers - TRUST_WRITE_SITES.keys())
+        assert not unlisted, (
+            f"{unlisted} write the relationship row's trust or trust note. "
+            "That row reads across sessions with no §D gate, so add each to "
+            "TRUST_WRITE_SITES with the RFC 0037 §C write-side rule it "
+            "follows (write only when the acting channel is 'internal' or "
+            "below), or gate the read first — see the module docstring of "
+            "agents/persona_runtime/relationship_section.py."
+        )
+
+    def test_no_stale_writer_entry(
+        self, found_writers: set[tuple[str, str]],
+    ) -> None:
+        stale = sorted(TRUST_WRITE_SITES.keys() - found_writers)
+        assert not stale, f"{stale} no longer write trust — remove them."
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "async def f(rel):\n    await rel.update_trust('a', 0.1, 'why')\n",
+            "async def f(db):\n    await _update_trust(db, 'a', 'b', 0.1, 'why')\n",
+            "async def f(rel):\n    await rel.apply_decay(decay_rate=0.01)\n",
+        ],
+    )
+    def test_finder_flags_a_writer(self, source: str) -> None:
+        assert _writer_sites_in(source) == {"f"}
+
+    def test_finder_ignores_a_read(self) -> None:
+        assert _writer_sites_in("async def f(rel):\n    await rel.get_trust('a')\n") == set()
 
 
 class TestSiteFinder:

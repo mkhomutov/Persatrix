@@ -182,7 +182,7 @@ Findings deferred from the PR 1 deep review because they exceed PR 1's "pure wri
 
 #### Key implementation details
 
-- The relationship first-seen contract (Phase 1: stamp on INSERT, preserve on UPDATE — [MT-SESSION-001 Step 7](../manual-tests/MT-SESSION-001.md)) is unchanged; PR 3 is recall-side only.
+- The relationship first-seen contract (Phase 1: stamp on INSERT, preserve on UPDATE — [MT-SESSION-001 Step 7](../manual-tests/MT-SESSION-001.md)) is unchanged; PR 3 is recall-side only. *Updated 2026-09-22: [ISSUE-0165](../issues/ISSUE-0165-relationship-hidden-outside-its-first-session.md) took the relationship **row** back out of the filter. The row is one per pair, so a filter on its first-seen tag hid it, with the active session's own interactions, from every other session. `get_trust` now takes no `sessions`; the interaction history keeps the filter.*
 - Facts recall feeds the **primary dementia-test surface** ([MT-MEMORY-005](../manual-tests/MT-MEMORY-005-dementia-test.md) Legs 1/2/5). The `legacy` carve-out means pre-RFC fact rows stay visible — a persona upgraded into v0.3.5 does not "forget" facts asserted before sessions existed.
 - Reuse the exact predicate helper from PR 2 (extract it to a shared `agents/memory/_session_filter.py` if PR 2 did not already) so the four tiers cannot drift.
 
