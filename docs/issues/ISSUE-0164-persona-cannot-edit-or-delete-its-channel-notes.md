@@ -7,6 +7,8 @@ area: memory
 created: 2026-09-22
 refs:
   - agents/memory/notes.py
+  - agents/memory/_notes_mutations.py
+  - agents/memory/note_types.py
   - agents/memory/_session_filter.py
   - agents/tools/memory_tools.py
   - agents/request_scope.py
@@ -88,11 +90,17 @@ only `PERSATRIX_SESSION_ID` between two stores. None of its tests bound a
 
 The three methods build their session clause with the helpers `recall_notes`
 uses, `_resolve_session_list(None, self._active_session_id)` and then
-`session_in_clause`, through one private method,
-`NoteStore._mutation_session_clause`. A bound session wins; the start-up
-snapshot applies only when none is bound; the `legacy` carve-out and the strict
-principal and epoch clauses are unchanged. A turn can now change and count
-exactly the notes it can recall.
+`session_in_clause`, through one private method, `_mutation_session_clause`.
+A bound session wins; the start-up snapshot applies only when none is bound;
+the `legacy` carve-out and the strict principal and epoch clauses are
+unchanged. A turn can now change and count exactly the notes it can recall.
+
+The fix took `notes.py` past 500 lines, so the same PR moves the three methods
+and the clause, unchanged, into a mixin in `agents/memory/_notes_mutations.py`,
+beside the read queries in `_notes_recall.py`. They are one concern: the rule
+that a turn changes only what it can recall. `NoteStore` keeps them as its
+own methods, so no caller changes. The 10 KB note size limit moves to
+`note_types.py`, because `store_note` and `update_note` both check it.
 
 Tests first, in `tests/unit/python/test_notes_mutation_session_scope.py`. With
 `PERSATRIX_SESSION_ID=run-boot`, a note stored under `session_scope("sess-abc")`

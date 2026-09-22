@@ -17,7 +17,12 @@ from dataclasses import dataclass, field
 from ..session_id import LEGACY_SESSION_ID
 from ._migration_protection import PROTECTION_LEVEL_DEFAULT
 
-__all__ = ["Note", "_NOTE_COLS", "_NOTE_SELECT"]
+__all__ = ["Note", "_MAX_NOTE_CONTENT_BYTES", "_NOTE_COLS", "_NOTE_SELECT"]
+
+# Maximum content size for a single note (10 KB).  Both ``store_note``
+# (:mod:`agents.memory.notes`) and ``update_note``
+# (:mod:`agents.memory._notes_mutations`) enforce it, so it lives here.
+_MAX_NOTE_CONTENT_BYTES = 10_240
 
 
 @dataclass
