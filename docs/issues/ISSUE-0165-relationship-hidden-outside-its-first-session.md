@@ -181,11 +181,20 @@ drop `sessions="*"`.
   opens no plan before EXP-001 reports. Like
   [#979](https://github.com/mkhomutov/Persatrix/pull/979), this is a
   standalone fix: no store migration, no new setting.
-- **Ruling (b)** keeps further memory isolation work off every release after
-  v0.3.16 unless an outside ask is recorded. Taking a session filter off a
-  read is memory isolation work in its terms, even though it only makes the
-  code do what Decision 3 and the RFC 0031 amendments already say. It
-  merges as an exception, on the maintainer's call below.
+- **Ruling (b)**, word for word: "No further memory isolation, attribution
+  or audience work boards any release after v0.3.16 unless an amendment's
+  External evidence section records an outside ask for it." Taking a
+  session filter off a read is memory isolation work in its terms, even
+  though it only makes the code do what Decision 3 and the RFC 0031
+  amendments already say. No amendment records an ask for it, so this
+  merges as an exception on the maintainer's call below, and the exception
+  itself is not yet ratified: per
+  [decisions.md](../methodology/decisions.md), only an amendment changes a
+  ratified ruling, so the next amendment to
+  [the sequencing doc](../v0.3.x-sequencing.md) has to record this
+  exception — and the one #979 took on 2026-09-22 — or replace ruling (b)
+  with wording that carves out fixes making the code match a decision the
+  project already ratified.
 - **EXP-001.** The fix changes nothing any arm sees.
   [`panel.yaml`](../../evaluators/experiments/EXP-001/panel.yaml) sets
   `relationships: []`, so no adviser has a seed. Every meeting is a new
@@ -213,3 +222,10 @@ drop `sessions="*"`.
 > 2026-09-22 — **resolved by [#980](https://github.com/mkhomutov/Persatrix/pull/980)**,
 > which carries the fix, the tests and this file. It merges before the
 > EXP-001 run, by the maintainer's call recorded under Slot.
+>
+> 2026-09-23 — the stale advice above is **fixed by
+> [#981](https://github.com/mkhomutov/Persatrix/pull/981)**, stacked on
+> #980: it rewrites the sessions guide §4, the MT-SESSION-003
+> preconditions and the MT-MEMORY-005 rationale to scope an arc by sending
+> the session on every CLI call. Nothing else from the #980 review is left
+> open: its findings were applied in the PR.

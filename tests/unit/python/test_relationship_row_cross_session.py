@@ -151,19 +151,38 @@ class TestPeerFirstMetInAnotherSession:
         assert readings == pytest.approx([0.7] * 6)
 
 
-class TestOnlyTheSessionAxisIsDropped:
-    """Epoch and principal are still strict on the row read."""
+class TestSeededRowStaysInsideItsEpochAndTenant:
+    """Only the session axis came off the row read.
+
+    The seed is tagged with a boot session here, not ``legacy``, so the
+    reads inside ``session_scope`` really are foreign-session reads: they
+    find the row (that is ISSUE-0165) while a foreign epoch or tenant
+    still finds nothing.  These are also the only tests that a config
+    seed is tagged with the *active* epoch and principal rather than the
+    column defaults.
+
+    Each read that the prompt path uses is checked, ``get_relationship_summary``
+    above all: it is the one row read a persona turn makes, and since
+    ISSUE-0165 the epoch and principal predicates are all that bind it.
+    """
 
     async def test_another_epoch_reads_neutral_trust(self) -> None:
         mem = RelationshipMemory(agent_id="ember-owl", db_path=":memory:")
         try:
             with epoch_scope("run-1"):
-                await mem.initialize(config_relationships=_SEEDS)
+                await mem.initialize(
+                    config_relationships=_SEEDS, session_id="run-boot",
+                )
             with epoch_scope("run-2"), session_scope(CHANNEL_SESSION):
                 assert await mem.get_trust("iron-fox") == 0.5
+                foreign = await mem.get_relationship_summary("iron-fox")
+                assert foreign.trust_score == 0.5
+                assert foreign.notes is None
                 assert (await mem.get_all_relationships()) == []
             with epoch_scope("run-1"), session_scope(CHANNEL_SESSION):
                 assert await mem.get_trust("iron-fox") == pytest.approx(0.9)
+                own = await mem.get_relationship_summary("iron-fox")
+                assert own.trust_score == pytest.approx(0.9)
         finally:
             await mem.close()
 
@@ -171,12 +190,22 @@ class TestOnlyTheSessionAxisIsDropped:
         mem = RelationshipMemory(agent_id="ember-owl", db_path=":memory:")
         try:
             with principal_scope("tenant-a"):
-                await mem.initialize(config_relationships=_SEEDS)
+                await mem.initialize(
+                    config_relationships=_SEEDS, session_id="run-boot",
+                )
+                await mem.update_trust("iron-fox", -0.2, "missed the handover")
             with principal_scope("tenant-b"), session_scope(CHANNEL_SESSION):
                 assert await mem.get_trust("iron-fox") == 0.5
+                foreign = await mem.get_relationship_summary("iron-fox")
+                assert foreign.trust_score == 0.5
+                # tenant-a's trust note must not cross the tenant wall.
+                assert foreign.notes is None
                 assert (await mem.get_all_relationships()) == []
             with principal_scope("tenant-a"), session_scope(CHANNEL_SESSION):
-                assert await mem.get_trust("iron-fox") == pytest.approx(0.9)
+                assert await mem.get_trust("iron-fox") == pytest.approx(0.7)
+                own = await mem.get_relationship_summary("iron-fox")
+                assert own.trust_score == pytest.approx(0.7)
+                assert own.notes == "missed the handover"
         finally:
             await mem.close()
 

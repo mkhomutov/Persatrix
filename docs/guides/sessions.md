@@ -210,19 +210,28 @@ for persona memory, not a recall wall. Per tier:
   the acting-as id) after teaching moves you into a new DM where your
   earlier DM-taught facts are withheld until re-taught — pin `shadow`
   while you do.
-- **Relationship** trust and identity follow the person into every session.
-  Trust comes from the `relationships:` block in `config/agents.yaml`; the
-  interaction history (count, last seen) stays per session. Until
+- **Relationship** trust and identity read the same from every session.
+  Trust comes from the `relationships:` block in `config/agents.yaml` and
+  names agent peers only; the interaction history (count, last seen) stays
+  per session. Until
   [ISSUE-0165](../issues/ISSUE-0165-relationship-hidden-outside-its-first-session.md)
   (2026-09-22) the trust read was filtered on the session that first wrote
   the relationship, so a configured peer read as a stranger in every channel
-  whenever `PERSATRIX_SESSION_ID` was set.
+  whenever `PERSATRIX_SESSION_ID` was set. What the persona *sees* is
+  narrower than what it can read: the relationship block reaches a prompt
+  only where the persona has a closed interaction with that peer in that
+  channel, which today means a DM, so a configured trust level never shows
+  in a group channel.
 - **Notes** and the in-room conversation window stay room-scoped.
 
-Every cross-room candidate passes the deterministic
+Every cross-room candidate from the gated tiers — episodes, channel history,
+facts and notes — passes the deterministic
 [RFC 0037 §D classification gate](../rfcs/0037-memory-confidentiality-channel-classification.md#d-the-hard-gate-at-memory-injection)
 before injection — a fact learned in a `restricted` room never surfaces in an
-`internal` one. What stays absolute: the **epoch** (run/test) and **principal**
+`internal` one. The relationship tier sits outside that gate by the RFC's
+Non-Goals: its trust score is unclassified, and its text (identity, and the
+note a trust change leaves) is held to the §C write-side rule instead —
+written only from a room at `internal` or below. What stays absolute: the **epoch** (run/test) and **principal**
 (tenant) walls; cross-room recall ranges over rooms, never across those.
 [MT-MEMORY-CROSSROOM-001](../manual-tests/MT-MEMORY-CROSSROOM-001.md) is the
 live acceptance arc for the carry half;

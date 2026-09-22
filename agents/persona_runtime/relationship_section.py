@@ -32,12 +32,17 @@ observability, not a gate decision — the tier stays outside the RFC
 Session axis (ISSUE-0165): the relationship row reads the same from
 every session; only its interaction history (count, last seen, cadence)
 is per-session.  Identity crossed sessions before that, by design (F-7
-Option D).  Trust and notes crossing too is safe without the gate only
-while nothing said in a channel reaches them: in production trust comes
-from the config ``relationships:`` seeds alone, and ``update_trust``
-(the only writer of notes) and ``apply_decay`` have no production
-caller.  A production writer of either must take the §D gate into
-account first.
+Option D).  Trust and the trust note crossing too is safe only while
+nothing said in a channel reaches them: in production trust comes from
+the config ``relationships:`` seeds alone, and ``update_trust`` (the
+only writer of notes) and ``apply_decay`` have no production caller.
+``test_cross_session_read_sites.py`` fails when one gains a caller,
+because the RFC 0037 Non-Goals exempt only the *numeric* score from
+classification: this tier's text is covered instead by the §C
+write-side rule — write it only when the acting channel is ``internal``
+or below, as :mod:`agents.tools.identity_write_through` does for
+identity.  ``update_trust`` does not implement that rule, so a
+production writer of the note must add it (or gate the read) first.
 
 Extracted from :mod:`agents.persona_runtime.memory_context` so the
 mixin file stays under the 500-line review cap; the tier is logically
@@ -219,8 +224,11 @@ def render_relationship_section(
 ) -> ContextSection | None:
     """Build the ``relationship_context`` :class:`WorkingMemory` section.
 
-    Returns ``None`` for empty relationships (no recorded interactions)
-    or when the budget admits nothing.
+    Returns ``None`` when the budget admits nothing, and when this
+    session has no recorded interaction with the peer and no identity is
+    stored — a configured peer the persona has not talked to in *this*
+    session therefore renders nothing, trust included (see the gate
+    below).
 
     Increments ``agent.temporal.recency.rendered`` with
     ``source="relationship"`` after a successful admission when the
@@ -257,10 +265,17 @@ def render_relationship_section(
     # truncate; mirror the rel.notes sanitize when that lands.
     if identity_line is not None:
         rel_lines.append(f"  Identity: {truncate(identity_line, REL_NOTES_INTERIM_CHARS)}")
-    # The interaction-derived lines (trust / count / last seen / cadence)
-    # are all per-session and meaningless for an identity-only row, so they
-    # render only when there is at least one in-session interaction —
-    # avoiding a noisy "Interactions: 0" on the immediacy path.
+    # Count, last seen and cadence are per-session and meaningless for an
+    # identity-only row, so they render only when there is at least one
+    # in-session interaction — avoiding a noisy "Interactions: 0" on the
+    # immediacy path.  Trust rides with them although it is a row value
+    # that reads the same in every session since ISSUE-0165: PR #60's rule
+    # is that a configured trust score means nothing until the persona has
+    # actually interacted (pinned by
+    # ``test_memory_injection.py::test_zero_interaction_relationship_skips_injection``),
+    # and only a closed DM records an interaction.  So a config seed does
+    # not reach a group-channel prompt; changing that means revisiting that
+    # rule.  ``Notes`` below sits outside the gate, beside identity.
     rendered_last_seen = False
     if rel.interaction_count > 0:
         # F-60-4: skip default trust injection — a score equal to the

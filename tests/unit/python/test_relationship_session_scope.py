@@ -19,9 +19,11 @@ last seen on ``get_relationship_summary`` and ``get_all_relationships``
 * ``sessions=[]`` → ``ValueError`` (§D guard against silent
   legacy-only collapse).
 
-The cross-session cases themselves, including the reported
-seeded-peer one, are in
-:mod:`tests.unit.python.test_relationship_row_cross_session`.
+This file keeps the ``sessions`` modes and the row pins that sit beside
+them; the reported seeded-peer case, the persona prompt path and the
+epoch / principal guards on the row are in
+:mod:`tests.unit.python.test_relationship_row_cross_session`.  Both
+files pin the shared row, so a change to that rule fails tests in each.
 
 Active session is resolved once at tier construction via
 :func:`agents.session_id.resolve_session_id_silent` — mirrors
@@ -53,10 +55,11 @@ async def _seed_three_session_relationships(
 ) -> dict[str, str]:
     """Record one interaction in each of ``run-a`` / ``run-b`` / ``legacy``.
 
-    The relationship row is first-seen tagged with the session id of
-    the interaction that created it, so seeding distinct ``other_id``
-    per session gives three rows tagged ``run-a`` / ``run-b`` / ``legacy``
-    respectively.  Returns ``{session_id: other_id}``.
+    A distinct ``other_id`` per session gives three rows, each with one
+    interaction in that session.  Every read lists all three rows; what
+    the ``sessions`` modes decide is whose interactions each row counts.
+    (The rows also carry that session as their first-seen tag, which no
+    read looks at.)  Returns ``{session_id: other_id}``.
     """
     await mem.record_interaction(
         "peer-a", "task_delegation", outcome="success",
@@ -200,7 +203,9 @@ class TestGetTrustIsPerPair:
     PR 3 filtered it, so a peer whose row was first written in a
     non-active non-legacy session read as the neutral default (0.5).  A
     peer seeded from config under the boot session therefore never
-    reached a channel's prompt.
+    reached a channel's prompt.  There is no ``legacy`` case to pin any
+    more: with no filter on the read, a ``legacy``-tagged row is read
+    like any other, which is what the test below shows for ``run-b``.
     """
 
     async def test_row_first_written_in_another_session_is_read(
@@ -216,18 +221,6 @@ class TestGetTrustIsPerPair:
         # 0.5 default + 0.2 delta = 0.7, read from run-a.
         trust = await memory_at_run_a.get_trust("peer-b")
         assert trust == pytest.approx(0.7)
-
-    async def test_legacy_carve_out_visible_by_default(
-        self, memory_at_run_a: RelationshipMemory,
-    ) -> None:
-        await memory_at_run_a.record_interaction(
-            "ancient-peer", "task_delegation", session_id="legacy",
-        )
-        await memory_at_run_a.update_trust(
-            "ancient-peer", 0.1, "trust-bump",
-        )
-        trust = await memory_at_run_a.get_trust("ancient-peer")
-        assert trust == pytest.approx(0.6)
 
 
 # ─── get_relationship_summary — sessions parameter ──────────
@@ -300,7 +293,7 @@ class TestGetRelationshipSummarySessionFilter:
 # ─── Cross-tier file-share regression ──────────────────────
 
 
-class TestCrossRelationshipMemoryInstanceIsolation:
+class TestCrossRelationshipMemoryInstanceSharing:
     """Two :class:`RelationshipMemory` instances on the same DB with
     distinct active sessions share the relationship row but see only
     their own session's + legacy interactions.
@@ -326,6 +319,12 @@ class TestCrossRelationshipMemoryInstanceIsolation:
                     "fingerprint-peer", "task_delegation",
                     session_id="run-a",
                 )
+                # Give the row something only a shared read can return:
+                # the "no relationship" summary PR 3 returned here carries
+                # the default trust and no notes.
+                await mem_a.update_trust(
+                    "fingerprint-peer", 0.2, "ran the migration",
+                )
             finally:
                 await mem_a.close()
 
@@ -340,10 +339,18 @@ class TestCrossRelationshipMemoryInstanceIsolation:
                 # PR 3 made this empty; since ISSUE-0165 the run-a row is
                 # listed, with none of run-a's interactions.
                 assert [
-                    (r.other_participant_id, r.interaction_count) for r in rels
-                ] == [("fingerprint-peer", 0)]
+                    (r.other_participant_id, r.interaction_count, r.trust_score)
+                    for r in rels
+                ] == [("fingerprint-peer", 0, pytest.approx(0.7))]
+                # The row's own fields cross: run-b reads run-a's trust and
+                # its trust note ...
+                assert summary.trust_score == pytest.approx(0.7)
+                assert summary.notes == "ran the migration"
+                assert await mem_b.get_trust("fingerprint-peer") == pytest.approx(0.7)
+                # ... while run-a's interactions stay in run-a.
                 assert summary.interaction_count == 0
                 assert summary.recent_interactions == []
+                assert summary.last_interaction_at is None
             finally:
                 await mem_b.close()
 
@@ -402,11 +409,9 @@ class TestRecordInteractionMetricFailureIsolated:
             "record_interaction must return a non-empty id even when the "
             "metric backend raised (commit already succeeded)"
         )
-        # The row really committed — surface it via the explicit-list
-        # path so the active-session filter doesn't hide it.
-        rels = await memory_at_run_a.get_all_relationships(
-            sessions=["run-a"],
-        )
+        # The row really committed — the list read shows every row of the
+        # agent, so the default read finds it.
+        rels = await memory_at_run_a.get_all_relationships()
         assert any(r.other_participant_id == "peer-x" for r in rels), (
             "the relationship row was not persisted, contradicting the "
             "commit-before-metric ordering F17 assumes"
@@ -428,10 +433,10 @@ class TestRecentInteractionsAreSessionScoped:
 
     Migration v10 (PR 5) added ``session_id`` to the ``interactions``
     table; :func:`record_interaction` threads the active session id onto
-    every INSERT; both ``interactions`` SELECTs in
-    :func:`get_relationship_summary` (the recent-history page and the
-    ``MIN(created_at)`` first-interaction-at lookup) now carry the §D
-    predicate.  ``interaction_count`` is derived at read time from the
+    every INSERT; all three ``interactions`` SELECTs in
+    :func:`get_relationship_summary` (the recent-history page, the
+    ``COUNT(*)`` and the ``MIN(created_at)`` first-interaction-at lookup)
+    now carry the §D predicate.  ``interaction_count`` is derived at read time from the
     filtered ``interactions`` subquery — policy (C) in `ISSUE-0080
     <../../../docs/issues/ISSUE-0080-relationship-recent-interactions-cross-session-leak.md>`_:
     the column survives for the unfiltered admin / debug path, but the

@@ -140,10 +140,8 @@ class RelationshipMemory:
         newly-inserted seed rows.  Persona-runtime threads the resolved
         ``PERSATRIX_SESSION_ID`` here so a peer pre-declared in YAML
         config takes the active session's tag rather than the column
-        default (RFC 0031 PR plan PR 4 finding #2).  The tag only records
-        where the row was first written: no read filters on it
-        (ISSUE-0165), so the seeded trust reads the same under every
-        channel's session.
+        default (RFC 0031 PR plan PR 4 finding #2).  Nothing reads the
+        tag — see :func:`agents.memory.relationship_queries.get_trust`.
         """
         # Guard against double-initialize: close any existing connection
         # to prevent file descriptor and SQLite connection leaks.
@@ -188,11 +186,10 @@ class RelationshipMemory:
 
         Returns the default (0.5) if no relationship exists.
 
-        Trust is one value per pair, the same from every session
-        (ISSUE-0165): the relationship row's key has no session, so this
-        read takes no ``sessions`` argument — see
-        :func:`agents.memory.relationship_queries.get_trust`.  The tenant
-        and epoch still bind with strict equality.
+        Trust is one value per pair, so this read takes no ``sessions``
+        argument — :func:`agents.memory.relationship_queries.get_trust`
+        states the session rule and what keeps it safe (ISSUE-0165).  The
+        tenant and epoch still bind with strict equality.
         """
         return await _get_trust(
             self._ensure_db(), self._agent_id, other_id,
@@ -363,10 +360,10 @@ class RelationshipMemory:
     ) -> RelationshipSummary:
         """Get full relationship context for injection into LLM prompt.
 
-        Trust and notes come from the one row for the pair, whichever
-        session wrote it first (ISSUE-0165).  ``sessions`` (RFC 0031
-        Phase 2) scopes the interaction history only — the count, recent
-        interactions and first / last seen — with the four-mode contract
+        Trust and notes come from the one row for the pair (see
+        :meth:`get_trust`).  ``sessions`` (RFC 0031 Phase 2) scopes the
+        interaction history only — the count, recent interactions and
+        first / last seen — with the four-mode contract
         of :func:`agents.memory._session_filter._resolve_session_list`.
         Default ``None`` resolves to the active session (a bound
         ``session_scope`` first, else the construction snapshot) plus the
