@@ -160,7 +160,7 @@ Plus two doc-level reconciliations:
 
 ## Open follow-ons
 
-- **Cross-room recall surface** — the operator/persona-facing path for "look across my rooms" (RFC 0031 §D `sessions=[…]/"*"`) needs a deliberate UX once it is a first-class persona capability rather than a debug flag.
+- **Cross-room recall surface** — the operator/persona-facing path for "look across my rooms" (RFC 0031 §D `sessions=[…]/"*"`) needs a deliberate UX; since RFC 0049 PR 4 the facts and episodic recalls already cross rooms, behind the RFC 0037 §D gate.
 - **Relationship contextual facets** — the room-scoped behavioral-observation layer beneath the cross-room core.
 - **Group-as-participant** — relationship and addressing for a group entity (intersects RFC 0011 / RFC 0012).
 - **Consent-gated anonymized retention** — the principal-axis split between deletable raw data and retained anonymized experience (intersects RFC 0013 / RFC 0039).

@@ -216,7 +216,7 @@ class MemoryStore(ProceduralFacadeMixin, SharedPoolFacadeMixin, SocietyFacadeMix
         """Read-only access to the underlying episodic tier.
 
         Exposed so RFC 0020's ``InteractionTracker`` can keep its current
-        direct-write code path; the facade gains full ownership in PR 5.
+        direct-write code path.
         Raises :class:`MemoryDisabledError` if not initialised.
         """
         self._require_initialised()
@@ -281,16 +281,21 @@ class MemoryStore(ProceduralFacadeMixin, SharedPoolFacadeMixin, SocietyFacadeMix
     ) -> list[MemoryEntry]:
         """Return relevant memory entries for *query* (RFC 0008 §B).
 
-        ``scope`` filters in Python after recall (SQL-side lands in PR 5).
+        ``scope`` filters in Python after recall (the SQL-side filter
+        RFC 0008 planned was never built), so rows it drops still count
+        as accessed; ISSUE-0163 records the channel-history case.
         ``tags`` is AND-semantic — entry tags must be a superset of the
         requested set (RFC 0011 PR 5 contract; do not change to OR).
         ``min_score`` is the FTS5 BM25 relevance floor in ``[0, 1]``;
         ``None`` falls back to the facade's ``default_min_score``.
+        Every entry comes back with ``score=0.0``: the tier does not
+        surface its per-row score.
         ``sessions`` (RFC 0031 §D / PR 4 — OQ #4 back-compat): ``None``
-        → the tier's ``_active_session_id`` + ``legacy`` carve-out;
+        → the active session (a per-request ``session_scope`` wins over
+        the tier's ``_active_session_id``) + ``legacy`` carve-out;
         list → those sessions + carve-out; ``"*"`` → no filter
-        (CLI/debug); ``[]`` → :class:`ValueError`.  PR 451 review M2
-        carry-forward: pass-through to the tier so
+        (``SESSIONS_ALL``); ``[]`` → :class:`ValueError`.  PR 451 review
+        M2 carry-forward: pass-through to the tier so
         :func:`agents.memory._session_filter._resolve_session_list` is
         the single source of truth for the §D default; the facade's own
         ``_session_id`` snapshot is read from the same env var as the
@@ -325,9 +330,9 @@ class MemoryStore(ProceduralFacadeMixin, SharedPoolFacadeMixin, SocietyFacadeMix
                     tags=tuple(ep.tags or ()),
                     created_at=ep.created_at,
                     # EpisodicMemory.recall does not surface the per-row
-                    # normalised score on the Episode dataclass today; the
-                    # facade returns 0.0 as the unranked sentinel — PR 5
-                    # promotes the score onto Episode so it can pass through.
+                    # normalised score on the Episode dataclass, so the
+                    # facade returns 0.0 as the unranked sentinel (the
+                    # RFC 0008 plan to carry it through was never built).
                     score=0.0,
                     scope=entry_scope,
                 )
@@ -337,7 +342,8 @@ class MemoryStore(ProceduralFacadeMixin, SharedPoolFacadeMixin, SocietyFacadeMix
     async def list_candidates(self, task_context: dict[str, Any]) -> list[Candidate]:
         """Return facade-level candidates for context-package admission (Phase 2 stub).
 
-        PR 5 wires this into the orchestrator-side packaging pipeline.
+        Nothing calls it: the RFC 0008 plan to wire it into the
+        orchestrator-side packaging pipeline was never built.
         Returns ``[]`` in Phase 2 — the orchestrator builds the package
         from upstream step outputs without consulting the agent.
         """
@@ -379,7 +385,8 @@ class MemoryStore(ProceduralFacadeMixin, SharedPoolFacadeMixin, SocietyFacadeMix
             underlying episode (RFC 0008 §B); not ranked separately.
         session_id:
             RFC 0031 Phase 1 operator-namespace tag.  ``None`` falls
-            back to the facade's construction-time default (resolved
+            back to the active session: a per-request ``session_scope``
+            wins, else the facade's construction-time default (resolved
             from ``PERSATRIX_SESSION_ID``); pass an explicit value to
             override on a per-call basis.
         """
