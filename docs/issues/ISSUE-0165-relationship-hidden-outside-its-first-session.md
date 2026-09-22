@@ -6,7 +6,7 @@ severity: medium
 area: memory
 created: 2026-09-22
 closed: 2026-09-22
-closed_pr:
+closed_pr: 980
 refs:
   - agents/memory/relationship.py
   - agents/memory/relationship_queries.py
@@ -209,3 +209,7 @@ drop `sessions="*"`.
 > interaction takes the session bound when it opens, so the override does
 > tag them, and the start-up variable applies only to turns with no session
 > bound, such as ticks.
+>
+> 2026-09-22 — **resolved by [#980](https://github.com/mkhomutov/Persatrix/pull/980)**,
+> which carries the fix, the tests and this file. It merges before the
+> EXP-001 run, by the maintainer's call recorded under Slot.
