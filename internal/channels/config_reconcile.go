@@ -82,9 +82,11 @@ var ErrInvalidConfigRevision = errors.New("channels: invalid revision")
 //     capture would make every re-resolved YAML snapshot hash differently from
 //     its stored row — a spurious equal-revision drift warning on every adopted
 //     channel at first post-upgrade boot.
-//   - the RFC 0051 reasoning block ([ReasoningConfig.FreezeOverrides]): a default-off
-//     rung stays nil (inherit, responsive to the PR 6 flip) and a non-default rung is
-//     snapshotted per-sub-knob, so only the committed sub-knobs survive into the row.
+//   - the RFC 0051 reasoning block ([ReasoningConfig.FreezeOverrides]): a rung at
+//     its default (`mode: bid` on a governed channel, `off` otherwise) stays nil
+//     (inherit), and a non-default rung is snapshotted per-sub-knob, so only the
+//     committed sub-knobs survive into the row — including an explicit `mode: off`
+//     kill switch on a governed channel.
 //   - the RFC 0052 autonomous block ([AutonomousConfig.FreezeOverrides]): a disabled
 //     default rung stays nil (inherit), an armed/customized rung is snapshotted
 //     per-sub-knob, so only the committed sub-knobs survive into the row.

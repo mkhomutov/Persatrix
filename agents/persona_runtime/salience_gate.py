@@ -14,7 +14,7 @@ The seam is invoked **only** on the open-floor admit
 that before calling :func:`run_salience_gate`, so a directed ``@``-mention, a
 DM, an ``observer``, and the self-sender never reach the bid (TB1). Of that
 remainder, the bid runs only when the inbound event is **Tier-B-governed**
-(the channel-level ``salience_gated`` flag).
+(the recipient's ``salience_gated`` flag).
 
 **Activation (PR 2b, landed):** the bid inputs (``salience_gated``, per-member
 ``threshold``, ``channel_size``) now cross the store/wire boundary end-to-end —
@@ -396,8 +396,9 @@ async def run_salience_gate(
         # RFC 0030 producer plan PR 2: same interaction attribution as the
         # quality turn — see evaluate_salience's interaction_id contract.
         interaction_id=lease_interaction_id_for_event(event),
-        # RFC 0051 PR 2 — dark by default (action_loop passes nothing): ``off``
-        # is the scalar score gate; ``bid``/``plan`` is the structured verdict.
+        # RFC 0051: the rung resolved above (the channel's ``reasoning.mode`` from
+        # the wire, unless a test pinned one — see the docstring). ``off`` is the
+        # scalar score gate; ``bid``/``plan`` is the structured verdict.
         mode=mode,
         # RFC 0051 PR 3 — under ``plan`` the bid hands its raw verdict text back
         # here so the seam can parse the CompositionPlan (keeps the pure bid's

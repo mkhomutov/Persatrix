@@ -131,10 +131,10 @@ const (
 
 // DefaultChairThreshold is the low salience `threshold` applied to a `chair`
 // member when its config omits an explicit value (RFC 0030 Tier B, v0.3.8).
-// A low bar means the chair clears the cheap relevance bid readily and keeps
-// an open-floor discussion moving — the facilitator behaviour. On the wire a
-// chair is just a `participant`, so this low default is its whole identity
-// (see [RespondChair]).
+// Under `reasoning.mode: off` the low bar lets the chair clear the score gate
+// readily and keep a discussion moving. On the wire a chair is just a
+// `participant`, so this is its whole identity ([RespondChair]); the default
+// `bid` rung ignores `threshold`, so there a chair acts as a participant.
 //
 // Deliberately low-but-nonzero — both extremes are wrong for a facilitator,
 // and the two are distinct values under the nil-vs-&0.0 tri-state (see
@@ -148,8 +148,7 @@ const (
 //
 // 0.15 sits just above zero: the chair speaks readily but still respects a
 // minimal salience floor. The exact value is calibration-post-soak per RFC
-// 0030 amendment OQ #3. PR 1 only parses/normalizes the knob; the Tier B bid
-// (a later PR) is the first reader.
+// 0030 amendment OQ #3. Only the `reasoning.mode: off` score gate reads it.
 const DefaultChairThreshold = 0.15
 
 // ChannelConfig is a single declared group channel.
@@ -290,9 +289,9 @@ type ChannelConfig struct {
 	// Reasoning is the RFC 0051 (v0.3.10) reasoning-before-posting block for this
 	// channel — the deliberation rung (`mode`), the leased model, the depth, and
 	// the reflexion round count. A value type: an absent block is the zero value,
-	// normalized to the shipped default rung (off / fast / shallow / 0) at load
-	// ([ReasoningConfig.normalized]) and validated by [Config.Validate]. Definition
-	// + capability-gated validation live in config_reasoning.go.
+	// filled at load ([ReasoningConfig.normalizedForGovernance]) with mode `bid` on
+	// a governed channel or `off` otherwise, then validated by [Config.Validate].
+	// Definition + capability-gated validation live in config_reasoning.go.
 	Reasoning ReasoningConfig `yaml:"reasoning"`
 	// Autonomous is the RFC 0052 (v0.3.11) opt-in human-free convening block (absent
 	// = disabled); definition + validation live in config_autonomous.go.

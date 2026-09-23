@@ -113,8 +113,10 @@ Tier A + Tier B):
   On an open-floor message a `participant` then runs the **Tier B salience bid**
   (below) and stays out unless it has something genuinely new to add.
 - **`chair`** *(v0.3.8)* — a `participant` with a **low salience `threshold`**
-  (the facilitator). It clears the salience bid readily and so keeps a
-  discussion moving, where a default `participant` would more often stay silent.
+  (the facilitator). Under `reasoning.mode: off` it clears the salience bid
+  readily and so keeps a discussion moving, where a default `participant` would
+  more often stay silent. The default `bid` rung does not use `threshold`, so
+  there a `chair` behaves like a `participant`.
   A `chair` is **not a moderator** in v0.3.8: it *cannot* close, wrap up, or
   terminate a conversation — that is Layer 5, deferred to v0.4.0. Convergence
   comes from the governance layers (§4), not the chair.
@@ -123,21 +125,27 @@ Tier A + Tier B):
 **Tier B — the salience bid (v0.3.8, opt-in).** On the open-floor remainder Tier
 A leaves, a `participant`/`chair` runs one cheap `fast`-model bid ("do I have
 something worth adding that hasn't already been said?", reading the in-round
-transcript) and speaks only if the score clears its `threshold`
-([`agents/salience_bid.py`](../../agents/salience_bid.py)). This is the
-**no-pile-on** win — a redundant follow-up draws silence instead of every
-`participant` repeating the point.
+transcript). Under `reasoning.mode: off` it speaks only if the score clears its
+`threshold` ([`agents/salience_bid.py`](../../agents/salience_bid.py)). Since
+v0.3.10 a channel where any member runs the bid defaults to
+`reasoning.mode: bid`: the bid answers yes or no with a reason, and
+`threshold` is not used
+([reasoning before posting](persona-agents.md#reasoning-before-posting-v0310)).
+This is the **no-pile-on** win — a redundant follow-up draws silence instead of
+every `participant` repeating the point.
 
 - **`threshold`** *(per-member, `[0, 1]`, now live in v0.3.8)* — the salience
-  score floor. **Unset → bias-to-silence**: only a *decisive* score speaks
-  (conservative by default). A `chair` with no explicit value picks up the low
+  score floor, used only under `reasoning.mode: off`.
+  **Unset → bias-to-silence**: only a *decisive* score speaks (conservative by
+  default). A `chair` with no explicit value picks up the low
   default (~`0.15`). A `threshold` on a non-open-floor disposition
   (`addressed`/`observer`) is a config error (`ErrThresholdNotApplicable`) — the
   bid never runs there. A bid that fails (parse failure, denied/exhausted wallet
   lease, unresolvable `fast` alias) **fails closed** to silence.
 - **Natural-language addressing** — a free-text invitation ("let's hear from
-  Iron Fox") *biases* the bid (lowers the bar for the named persona, raises it
-  for others). It is a **signal, never a hard filter**: only structured
+  Iron Fox") *biases* the bid: a note in the bid prompt, and under
+  `reasoning.mode: off` a lower bar for the named persona and a higher one for
+  others. It is a **signal, never a hard filter**: only structured
   `@`-mentions deterministically drop a member (Tier A).
 - **`salience_max_channel_members`** *(channel-level, default `20`)* — above this
   member count the bid is skipped and the channel falls back to `addressed`-only,
@@ -153,7 +161,8 @@ transcript) and speaks only if the score clears its `threshold`
 > never bid-governed (it opts into the bid only if you also give it an explicit
 > `threshold`). So a config that never adopted the disposition vocabulary
 > behaves exactly as before; one that uses `participant` gets no-pile-on
-> dampening, biased to silence until you tune the `threshold`. Acceptance:
+> dampening (under `reasoning.mode: off`, biased to silence until you tune the
+> `threshold`). Acceptance:
 > [MT-CHANNEL-RELEVANCE-001](../manual-tests/MT-CHANNEL-RELEVANCE-001.md) (Tier A)
 > and [MT-CHANNEL-RELEVANCE-002](../manual-tests/MT-CHANNEL-RELEVANCE-002.md)
 > (Tier B salience + `chair`).

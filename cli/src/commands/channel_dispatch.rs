@@ -43,7 +43,7 @@ pub(crate) enum RespondPolicy {
     /// Open-floor participant: runs the v0.3.8 salience bid, biased to silence.
     Participant,
     /// Low-threshold facilitator (a `participant` that clears the bid more
-    /// readily); cannot close interactions in v0.3.8.
+    /// readily under `reasoning.mode: off`); cannot close interactions.
     Chair,
     /// Responds only when directly addressed.
     Addressed,
