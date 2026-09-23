@@ -56,6 +56,7 @@ import grpc.aio
 
 from . import salience_deliberation as deliberation
 from .generated import wallet_pb2 as walletpb
+from .llm_types import LLMCallPurpose
 from .model_aliases import resolve as resolve_model
 from .prompt_loader import load_snippet
 from .salience_addressing import NLAddressing, detect_nl_addressing
@@ -400,6 +401,7 @@ async def evaluate_salience(
         response = await llm_client.create_message(
             model=resolved.model,
             model_alias=resolved.alias,
+            purpose=LLMCallPurpose.BID,
             messages=_build_bid_messages(
                 content=content, transcript=transcript, addressing=addressing,
                 mode=mode,
