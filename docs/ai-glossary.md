@@ -274,6 +274,19 @@ Process vocabulary (scope lock, cuttable, live arc, finding, …) lives in the
 - **Example:** "With `PERSATRIX_CLOCK_START=2036-10-06T10:00:00+00:00`, a
   note written a minute after startup is stamped 10:01 on 6 October 2036."
 
+### Call Log
+- **Aliases:** —
+- **Disallowed:** "cost ledger", "spend log" (the orchestrator's ledger prices calls; the call log only records them)
+- **Definition:** A file an agent appends one JSON line to for every model
+  call, failed ones included, when `PERSATRIX_CALL_LOG` names it
+  ([`agents/call_log.py`](../agents/call_log.py)). Each line holds the
+  labels from `PERSATRIX_CALL_TAGS`, the agent's ID, the call's purpose
+  (turn, bid, critic, revise, summary or compress, named by the code that
+  makes the call), the start in real time, the model and the token counts,
+  cache writes and reads apart. Without the setting nothing is written.
+- **Example:** "EXP-001 gives every adviser the same call log, tagged with
+  the arm and meeting, and prices each line with its fixed table."
+
 ### Trust Level
 - **Aliases:** "trust score"
 - **Disallowed:** "rapport", "affinity", "reputation"

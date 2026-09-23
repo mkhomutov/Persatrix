@@ -46,12 +46,35 @@ class ToolCall:
     signature: bytes | None = None
 
 
+class CallPurpose(Enum):
+    """What a model call is for, named by the code that makes it.
+
+    The model alias cannot tell the calls apart: a salience bid and the
+    reflexion critic both use ``fast``. The call log records the purpose,
+    and EXP-001 prices each purpose separately.
+    """
+
+    TURN = "turn"  # an agent's or persona's own turn
+    BID = "bid"  # a salience bid
+    CRITIC = "critic"  # the reflexion critic reading a draft
+    REVISE = "revise"  # the reflexion rewrite of a draft
+    SUMMARY = "summary"  # an episode summary, with fact extraction at close
+    COMPRESS = "compress"  # working-memory compression
+
+
 @dataclass
 class Usage:
-    """Token usage from LLM response."""
+    """Token usage from LLM response.
+
+    ``input_tokens`` counts only the uncached input. Tokens written to or
+    read from a provider's prompt cache are counted apart, since they are
+    priced apart; providers without a cache leave both at zero.
+    """
 
     input_tokens: int
     output_tokens: int
+    cache_write_tokens: int = 0
+    cache_read_tokens: int = 0
 
 
 @dataclass

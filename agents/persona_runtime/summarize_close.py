@@ -29,6 +29,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from ..generated import wallet_pb2 as walletpb
+from ..llm_types import CallPurpose
 from ..memory.interactions import SUMMARY_UNAVAILABLE_TEXT
 from ..memory.store import CompressedView, MemoryStore
 from ..model_aliases import resolve as resolve_model
@@ -272,6 +273,7 @@ async def summarize_closed_interaction(
                 # (e.g. ``summarizer``) on the span. Since Phase 3 retired the
                 # raw-ID pass-through, a resolved reference is always an alias.
                 model_alias=resolved_summarization.alias,
+                purpose=CallPurpose.SUMMARY,
                 messages=[{"role": "user", "content": prompt}],
                 system=load_snippet("episode-summarizer"),
                 tools=[],

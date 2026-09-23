@@ -16,13 +16,20 @@ from typing import Any
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
+from .call_log import record_call
 from .generated import wallet_pb2 as walletpb
+from .llm_call_support import (
+    _classify_llm_error,
+    _current_trace_id,
+    _estimate_input_tokens,
+)
 from .llm_factory import LaneProviderError, create_provider, provider_for_resolved
 from .llm_gemini import GeminiProvider
 from .llm_offline import MockProvider
 from .llm_ollama import OllamaProvider
 from .llm_providers import AnthropicProvider, OpenAIProvider
 from .llm_types import (
+    CallPurpose,
     LLMProvider,
     LLMResponse,
     LLMToolResult,
@@ -63,6 +70,7 @@ _tracer = trace.get_tracer(__name__)
 __all__ = [
     "AnthropicProvider",
     "BudgetExceededError",
+    "CallPurpose",
     "GeminiProvider",
     "LLMClient",
     "LaneProviderError",
@@ -79,79 +87,6 @@ __all__ = [
     "WatsonxProvider",
     "create_provider",
 ]
-
-
-# ─── LLM error classification (PR-170 S1) ─────────────────
-
-
-def _classify_llm_error(exc: BaseException) -> str:
-    """Classify an LLM exception into a low-cardinality ``error.type`` bucket.
-
-    Provider SDKs (anthropic, openai) raise their own error types; the
-    agent runtime deliberately avoids importing them to stay provider-
-    agnostic.  Keyword-match on the exception class name + message instead:
-    the resulting buckets are coarse but stable across provider-SDK
-    updates and remain within the metric-attribute cardinality budget.
-    """
-    name = type(exc).__name__.lower()
-    msg = str(exc).lower()
-    if "ratelimit" in name or "rate_limit" in name or "rate limit" in msg or "429" in msg:
-        return "rate_limit"
-    if "timeout" in name or "timeout" in msg or isinstance(exc, TimeoutError):
-        return "timeout"
-    return "provider_error"
-
-
-# ─── Wallet-lease helpers (RFC 0023 PR 3) ───────────────────
-
-
-def _current_trace_id() -> str:
-    """Return the active OTEL trace ID as a 32-hex string, or ``""``.
-
-    Threaded onto the ``LeaseRequest`` as ``trace_id`` so the wallet-side
-    lease logs correlate with the agent's LLM-call span (RFC 0023 § C)."""
-    ctx = trace.get_current_span().get_span_context()
-    if not ctx.is_valid:
-        return ""
-    return trace.format_trace_id(ctx.trace_id)
-
-
-def _estimate_input_tokens(kwargs: dict[str, Any]) -> int:
-    """Estimate the prompt's input-token count for the lease request.
-
-    Reuses the project-wide ``cl100k_base`` tokeniser (RFC 0023 Open
-    Question §5 — a single tokeniser path system-wide). The estimate
-    funds the lease's *provisional* charge only; ``SettleLease``
-    reconciles it to the provider-reported actuals, so a best-effort
-    flatten of the system prompt + message text is sufficient. Tool
-    definitions (``kwargs["tools"]``) are deliberately *not* counted:
-    serialising every tool schema would add complexity for no
-    enforcement benefit — settle reconciles to actuals, so an estimate
-    that under-counts only shrinks the provisional hold, never the
-    final charge. A tokeniser import failure degrades to the chars/4
-    fallback rather than blocking the call."""
-    parts: list[str] = []
-    system = kwargs.get("system")
-    if isinstance(system, str) and system:
-        parts.append(system)
-    for msg in kwargs.get("messages") or []:
-        content = msg.get("content") if isinstance(msg, dict) else None
-        if isinstance(content, str):
-            parts.append(content)
-        elif isinstance(content, list):
-            for block in content:
-                if not isinstance(block, dict):
-                    continue
-                text = block.get("text")
-                parts.append(text if isinstance(text, str) else str(block.get("content") or ""))
-    text = "\n".join(p for p in parts if p)
-    try:
-        from .persona_runtime.memory_budget import _count_tokens
-
-        return _count_tokens(text)
-    except Exception:  # pragma: no cover — estimation must never block a call
-        logger.debug("token estimate fell back to chars/4", exc_info=True)
-        return max(0, len(text) // 4)
 
 
 # ─── LLM Client Facade ──────────────────────────────────────
@@ -197,6 +132,8 @@ class LLMClient:
         agent_id: str = "",
         interaction_id: str = "",
         model_alias: str | None = None,
+        purpose: CallPurpose | None = None,
+        cache_prefix: str = "",
         **kwargs: Any,
     ) -> LLMResponse:
         """Invoke the provider, optionally bracketed by an RFC 0023 wallet lease.
@@ -233,11 +170,26 @@ class LLMClient:
         through a provider built from that record (see
         :meth:`_provider_for_alias`), so shared role lanes work on
         mixed-vendor rosters.
+
+        *purpose* says what the call is for; it goes to the call log (see
+        :mod:`agents.call_log`) and never to the provider.
+
+        *cache_prefix* is stable system text the provider should cache, such
+        as EXP-001 arm D′'s earlier transcripts. A provider that can cache
+        (``supports_prompt_cache is True``) sends it marked for the cache,
+        ahead of *system*; any other gets it joined onto the front of
+        *system*, so the model reads the same words either way.
         """
         provider = self._provider_for_alias(model_alias)
+        if cache_prefix:
+            if getattr(provider, "supports_prompt_cache", False) is True:
+                kwargs["cache_prefix"] = cache_prefix
+            else:
+                system = kwargs.get("system") or ""
+                kwargs["system"] = f"{cache_prefix}\n\n{system}" if system else cache_prefix
         if self._wallet is None or cause == walletpb.CAUSE_UNSPECIFIED:
             return await self._invoke_provider(
-                kwargs, provider=provider, model_alias=model_alias,
+                kwargs, provider=provider, model_alias=model_alias, purpose=purpose,
             )
         async with self._wallet.lease(
             agent_id=agent_id,
@@ -251,6 +203,7 @@ class LLMClient:
         ) as lease:
             response = await self._invoke_provider(
                 kwargs, provider=provider, lease=lease, model_alias=model_alias,
+                purpose=purpose,
             )
             await lease.settle(
                 input_tokens=response.usage.input_tokens,
@@ -317,6 +270,7 @@ class LLMClient:
         provider: LLMProvider | None = None,
         lease: Lease | None = None,
         model_alias: str | None = None,
+        purpose: CallPurpose | None = None,
     ) -> LLMResponse:
         """Invoke the underlying provider, wrapped in an ``agent.llm.call`` span.
 
@@ -340,6 +294,9 @@ class LLMClient:
         the primary one, or a cross-vendor lane client picked by
         :meth:`_provider_for_alias` — so the span's ``gen_ai.system``
         reports the vendor actually contacted. ``None`` means the primary.
+
+        Every call, finished or failed, ends with one call-log line
+        (:func:`agents.call_log.record_call`), written only when the log is on.
         """
         if provider is None:
             provider = self._provider
@@ -368,6 +325,14 @@ class LLMClient:
             if model_alias:
                 span.set_attribute(LLM_MODEL_ALIAS_ATTR, model_alias)
             call_started = time.monotonic()
+            call_started_wall = time.time()
+
+            def _log(usage: Usage | None, error: BaseException | None) -> None:
+                record_call(
+                    started_at=call_started_wall, purpose=purpose, provider=system_name,
+                    model=model, model_alias=model_alias, usage=usage, error=error,
+                )
+
             agent_id = current_agent_id()
             inst = try_get_instruments()
             if inst is not None:
@@ -387,6 +352,7 @@ class LLMClient:
                     lease.mark_call_started()
                 response = await provider.create_message(**kwargs)
             except Exception as exc:
+                _log(None, exc)
                 span.record_exception(exc)
                 span.set_status(Status(StatusCode.ERROR, str(exc)))
                 if inst is not None:
@@ -408,6 +374,11 @@ class LLMClient:
                         ),
                     )
                 raise
+            except BaseException as exc:
+                # A cancelled call (asyncio.wait_for) may still have been billed.
+                _log(None, exc)
+                raise
+            _log(response.usage, None)
             # Translate Persatrix-internal StopReason values to the OTEL
             # Gen-AI canonical vocabulary so vendor backends render the
             # ``gen_ai.response.finish_reasons`` attribute correctly.
