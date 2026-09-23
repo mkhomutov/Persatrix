@@ -8,10 +8,11 @@ Extracted from ``persona.py`` for modularity — no logic changes.
 from __future__ import annotations
 
 import logging
-import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Protocol, runtime_checkable
+
+from .clock import agent_now
 
 logger = logging.getLogger(__name__)
 __all__ = [
@@ -62,9 +63,11 @@ class AgentEvent:
     # in PR 4b can branch on thread context without a payload lookup. Stays
     # additive — existing callers default to None and need no change.
     thread_id: str | None = None
-    # default_factory=time.time ensures each event gets the current timestamp
-    # rather than a sentinel 0.0 that callers might forget to override.
-    timestamp: float = field(default_factory=time.time)
+    # default_factory=agent_now ensures each event gets the current timestamp
+    # rather than a sentinel 0.0 that callers might forget to override. Agent
+    # time, not real time, so memory stamped from it matches the persona's
+    # clock (see agents.clock).
+    timestamp: float = field(default_factory=agent_now)
     # Extensible metadata for cross-cutting concerns (e.g. cascade_depth
     # tracking from Q4 decision, tracing correlation IDs). Using a dict
     # avoids adding a new field for every framework-level concern.

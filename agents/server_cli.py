@@ -19,6 +19,7 @@ import sys
 
 from opentelemetry.instrumentation.grpc import GrpcAioInstrumentorServer
 
+from .clock import agent_clock_offset
 from .model_aliases import validate_alias_pricing
 from .observability.logging import configure_logging
 from .observability.metrics import (
@@ -48,8 +49,16 @@ def _validate_startup_config() -> None:
     offending alias, regardless of which provider mode is active. A clean
     map (the shipped config) returns ``None``; ``SystemExit`` propagates so
     boot aborts with the actionable message.
+
+    It also reads the agent clock's start (``PERSATRIX_CLOCK_START``, see
+    :mod:`agents.clock`), so a malformed value stops the agent here rather
+    than at its first memory write.
     """
     validate_alias_pricing()
+    try:
+        agent_clock_offset()
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
 
 
 def main() -> None:

@@ -22,6 +22,7 @@ from typing import Any
 from .channel_event_classification import seed_channel_classification
 from .channel_validation import parse_channel_timestamp
 from .channel_wire_metadata import seed_replay_metadata
+from .clock import to_agent_time
 from .persona_types import AgentEvent, EventType
 from .principal_id import seed_principal_metadata
 
@@ -128,5 +129,6 @@ def build_replay_event(
         "metadata": metadata,
     }
     if parsed_ts is not None:
-        event_kwargs["timestamp"] = parsed_ts
+        # The orchestrator stamped it in real time; memory reads agent time.
+        event_kwargs["timestamp"] = to_agent_time(parsed_ts)
     return AgentEvent(**event_kwargs)

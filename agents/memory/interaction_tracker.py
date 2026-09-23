@@ -25,10 +25,10 @@ RECORD, so a room close increments them by N (see
 
 from __future__ import annotations
 
-import time
 import uuid
 from typing import TYPE_CHECKING, Protocol
 
+from ..clock import agent_now
 from ..epoch_id import resolve_epoch_id_silent
 from ..session_id import LEGACY_SESSION_ID
 from ._replay_bookkeeping import _ReplayBookkeepingMixin
@@ -70,7 +70,7 @@ class Clock(Protocol):
     def __call__(self) -> float: ...
 
 
-_DEFAULT_CLOCK: Clock = time.time
+_DEFAULT_CLOCK: Clock = agent_now
 
 
 class InteractionTracker(_ReplayBookkeepingMixin):

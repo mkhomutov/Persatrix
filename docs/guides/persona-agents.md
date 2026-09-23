@@ -277,9 +277,12 @@ prompt
 > and renders episode and relationship timestamps as relative time
 > ("yesterday", "3 days ago", "just now") instead of raw epoch seconds.
 > Wall-clock reads route through the [`Clock`](../../agents/clock.py)
-> Protocol — `WallClock` in production, `FrozenClock` in tests — and the
+> Protocol — `AgentClock` in production, `FrozenClock` in tests — and the
 > rendering helpers ([agents/temporal/rendering.py](../../agents/temporal/rendering.py))
-> are pure functions. This is Phase 1 only; structured commitment tracking,
+> are pure functions. The persona's clock and its memory stamps both read
+> [agent time](../ai-glossary.md#agent-time): real time, unless
+> `PERSATRIX_CLOCK_START=<ISO-8601 instant with a zone>` starts the agent at
+> another moment, as EXP-001 does to put each adviser on its meeting's date. This is Phase 1 only; structured commitment tracking,
 > scheduled callbacks, and conversation-thread temporal grounding land in
 > Phases 2–4 ([RFC 0021](../rfcs/0021-persona-temporal-awareness.md);
 > v0.4.0).

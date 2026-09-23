@@ -46,7 +46,7 @@ class Fact:
     ``asserted_at`` is ``float`` (epoch seconds) rather than the RFC's
     ``datetime`` — matches the codebase convention (``episodes.created_at``,
     ``interactions.started_at`` are both REAL epoch-seconds) so a single
-    conversion seam (``time.time()``) covers every tier.  Tracked as a
+    conversion seam (``agent_now()``, see :mod:`agents.clock`) covers every tier.  Tracked as a
     RFC §A amendment in PR 6.
 
     ``certainty`` is seeded by the extractor (PR 2) and decayed /

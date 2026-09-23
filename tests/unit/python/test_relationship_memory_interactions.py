@@ -151,10 +151,8 @@ class TestGetRelationshipSummary:
         also change *which* interactions surface, not just their order, making a
         recorded RFC 0044 golden non-portable. The clock is frozen here so both
         rows share ``created_at``; distinct-timestamp order is covered above."""
-        from types import SimpleNamespace
-
         import agents.memory.relationship_mutations as rm
-        monkeypatch.setattr(rm, "time", SimpleNamespace(time=lambda: 1000.0))
+        monkeypatch.setattr(rm, "agent_now", lambda: 1000.0)
 
         first = await memory.record_interaction("bob", "first")
         second = await memory.record_interaction("bob", "second")  # same instant

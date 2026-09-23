@@ -21,9 +21,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-import time
 from typing import TYPE_CHECKING, Any
 
+from ..clock import agent_now
 from ..session_id import current_session_id, normalize_session_id
 from ._epoch_filter import resolve_active_epoch
 from ._principal_filter import resolve_active_principal
@@ -224,7 +224,7 @@ class ProceduralFacadeMixin:
             await db.execute(
                 "UPDATE episodes SET confidence = ?, last_validated_at = ? "
                 "WHERE id = ? AND agent_id = ?",
-                (confidence, time.time(), episode_id, self._agent_id),
+                (confidence, agent_now(), episode_id, self._agent_id),
             )
             await db.commit()
 
@@ -260,7 +260,7 @@ class ProceduralFacadeMixin:
 
         ``now`` (PR 6b, PR 5 R1 L4): override the read-time clock for
         deterministic tests.  When ``None`` (the default) the helper
-        uses :func:`time.time`.
+        uses :func:`agents.clock.agent_now`.
 
         ``sessions`` (RFC 0031 Phase 2 PR 4 — OQ #4 back-compat
         extension): same §D shape as

@@ -15,12 +15,12 @@ import json
 import logging
 import re
 import sqlite3
-import time
 import uuid
 from typing import Any
 
 import aiosqlite
 
+from ..clock import agent_now
 from ..epoch_id import DEFAULT_EPOCH_ID
 from ..principal_id import DEFAULT_PRINCIPAL_ID
 from ._episodic_agent_state import (
@@ -234,7 +234,7 @@ async def recall_fts5(
             """,
             (
                 safe_query, agent_id, min_importance, effective_min_score,
-                *sess_params, *princ_params, *epoch_params, time.time(),
+                *sess_params, *princ_params, *epoch_params, agent_now(),
                 *boost_params, limit,
             ),
         ) as cursor:
@@ -300,7 +300,7 @@ async def recall_like(
         """,
         (
             agent_id, min_importance, pattern, pattern,
-            *sess_params, *princ_params, *epoch_params, time.time(),
+            *sess_params, *princ_params, *epoch_params, agent_now(),
             *boost_params, limit,
         ),
     ) as cursor:
@@ -353,7 +353,7 @@ async def recall_recency(
         """,
         (
             agent_id, min_importance, *sess_params, *princ_params,
-            *epoch_params, time.time(), *boost_params, limit,
+            *epoch_params, agent_now(), *boost_params, limit,
         ),
     ) as cursor:
         return list(await cursor.fetchall())
@@ -419,7 +419,7 @@ async def insert_episode(
     # keeps their intent readable; this line makes it structural.
     speaker_id = speaker_id or None
     episode_id = str(uuid.uuid4())
-    now = time.time()
+    now = agent_now()
     await db.execute(
         """
         INSERT INTO episodes

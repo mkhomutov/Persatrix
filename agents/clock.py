@@ -9,10 +9,25 @@ as '3 days ago'" becomes flaky against the real wall clock.
 This module provides:
 
 * :class:`Clock` — Protocol with ``now()`` and ``now_iso()`` methods.
-* :class:`WallClock` — production implementation; thin wrapper around
-  :func:`time.time` that renders the configured timezone for ISO-8601.
+* :class:`AgentClock` — production implementation; reads agent time
+  (below) and renders the configured timezone for ISO-8601.
+* :class:`WallClock` — thin wrapper around :func:`time.time`, for callers
+  that need real time whatever the agent's clock says.
 * :class:`FrozenClock` — test implementation with ``advance(seconds)``
   and ``set(epoch)`` for deterministic boundary testing.
+
+**Agent time.** An agent process normally lives on real time. Setting
+``PERSATRIX_CLOCK_START`` to an ISO-8601 instant with a zone shifts the
+whole agent: its time starts at that instant and moves with the real clock.
+EXP-001 uses it to put each adviser on the meeting's story date.
+``PERSATRIX_CLOCK_ANCHOR``, also an instant with a zone, names the real
+moment the start belongs to; without it that moment is the process's first
+clock read. A restart must pass the same anchor, or its clock would begin
+at the start again, earlier than what the last run wrote. Memory
+stamps, recency and new events all read :func:`agent_now`; a timestamp the
+orchestrator wrote is moved into agent time with :func:`to_agent_time`.
+Timers, deadlines, telemetry and anything sent back to the orchestrator
+stay on real time.
 
 RFC 0020 PR 3 introduced a sibling ``Clock`` Protocol in
 :mod:`agents.memory.interactions` to inject ``time.time``-shaped
@@ -25,12 +40,84 @@ referenced by all new code.
 
 from __future__ import annotations
 
+import os
 import time
 from datetime import datetime
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
 DEFAULT_TIMEZONE: str = "UTC"
+CLOCK_START_ENV: str = "PERSATRIX_CLOCK_START"
+CLOCK_ANCHOR_ENV: str = "PERSATRIX_CLOCK_ANCHOR"
+
+# Seconds added to real time, and the real instant agent time began at, read
+# from the settings on first use and then fixed for the life of the process;
+# None until then. The anchor stays None on an unshifted clock.
+_agent_offset: float | None = None
+_agent_anchor: float | None = None
+
+
+def agent_clock_offset() -> float:
+    """How far agent time runs ahead of real time, in seconds (0 unshifted)."""
+    global _agent_offset, _agent_anchor
+    if _agent_offset is None:
+        _agent_offset, _agent_anchor = _read_clock_settings()
+    return _agent_offset
+
+
+def _read_clock_settings() -> tuple[float, float | None]:
+    start = _read_instant(CLOCK_START_ENV)
+    anchor = _read_instant(CLOCK_ANCHOR_ENV)
+    if start is None:
+        if anchor is not None:
+            raise ValueError(f"{CLOCK_ANCHOR_ENV} is set but {CLOCK_START_ENV} is not")
+        return 0.0, None
+    if anchor is None:
+        anchor = time.time()
+    return start - anchor, anchor
+
+
+def _read_instant(env: str) -> float | None:
+    raw = os.environ.get(env, "").strip()
+    if not raw:
+        return None
+    try:
+        instant = datetime.fromisoformat(raw)
+    except ValueError:
+        instant = None
+    if instant is None or instant.tzinfo is None:
+        raise ValueError(
+            f"{env} must be an ISO-8601 instant with a zone, "
+            f"such as 2036-10-06T10:00:00+00:00; got {raw!r}"
+        )
+    return instant.timestamp()
+
+
+def predates_agent_clock(wall: float) -> bool:
+    """Whether a real-time timestamp comes from before this clock began.
+
+    Such a timestamp belongs to an earlier run whose offset is unknown, so
+    :func:`to_agent_time` cannot place it. Always False on real time.
+    """
+    agent_clock_offset()
+    return _agent_anchor is not None and wall < _agent_anchor
+
+
+def agent_now() -> float:
+    """The agent's current time, in epoch seconds."""
+    return time.time() + agent_clock_offset()
+
+
+def to_agent_time(wall: float) -> float:
+    """Move a real-time timestamp, such as the orchestrator's, into agent time."""
+    return wall + agent_clock_offset()
+
+
+def reset_agent_clock() -> None:
+    """Forget the offset, so the next read takes the setting again (tests)."""
+    global _agent_offset, _agent_anchor
+    _agent_offset = None
+    _agent_anchor = None
 
 
 class Clock(Protocol):
@@ -68,6 +155,19 @@ class WallClock:
 
     def now(self) -> float:
         return time.time()
+
+    def now_iso(self) -> str:
+        return _format_iso(self.now(), self._tz)
+
+
+class AgentClock:
+    """The persona's clock in production: agent time, rendered in ``tz``."""
+
+    def __init__(self, tz: str | None = None) -> None:
+        self._tz: ZoneInfo = ZoneInfo(tz or DEFAULT_TIMEZONE)
+
+    def now(self) -> float:
+        return agent_now()
 
     def now_iso(self) -> str:
         return _format_iso(self.now(), self._tz)
@@ -130,7 +230,8 @@ def resolve_persona_clock(
     Reads ``config["persona"]["timezone"]``, defaulting to
     :data:`DEFAULT_TIMEZONE` when absent or blank.  When ``clock`` is
     provided (typically a :class:`FrozenClock` from tests) it is returned
-    verbatim; otherwise a :class:`WallClock` against the resolved zone.
+    verbatim; otherwise an :class:`AgentClock` against the resolved zone, so
+    the prompt's time and the memory stamps it is compared with agree.
 
     Returning the rendered timezone alongside the clock lets callers thread
     the same string into recency-rendering helpers without re-parsing the
@@ -138,13 +239,21 @@ def resolve_persona_clock(
     persona-runtime constructor.
     """
     tz = ((config.get("persona") or {}).get("timezone") or "").strip() or DEFAULT_TIMEZONE
-    return clock if clock is not None else WallClock(tz), tz
+    return clock if clock is not None else AgentClock(tz), tz
 
 
 __all__ = [
+    "CLOCK_ANCHOR_ENV",
+    "CLOCK_START_ENV",
     "DEFAULT_TIMEZONE",
+    "AgentClock",
     "Clock",
     "FrozenClock",
     "WallClock",
+    "agent_clock_offset",
+    "agent_now",
+    "predates_agent_clock",
+    "reset_agent_clock",
     "resolve_persona_clock",
+    "to_agent_time",
 ]
