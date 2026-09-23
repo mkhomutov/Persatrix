@@ -254,8 +254,10 @@ func (c *Config) Validate() error {
 		// without one). The governed signal mirrors the per-member salience-bid
 		// opt-in derived at unmarshal ([ResolveSalienceSignal]); a bare legacy
 		// `always` is open-floor but NOT salience-gated and so does not arm it.
-		// `make validate` checks the enum vocabulary; the capability gate
-		// (deep / revise≥1) and the governance cross-field are Go-only.
+		// `make validate` checks the enum vocabulary and that revise is not
+		// negative; the capability gate (`depth: deep`), the revise cap, the rule
+		// that `revise >= 1` needs `mode: plan`, and the governance cross-field
+		// are Go-only.
 		governed := ch.governed()
 		// Validate the NORMALIZED rung so a direct Validate() on a hand-built
 		// Config (bypassing LoadConfig's normalize pass) does not trip the enum
