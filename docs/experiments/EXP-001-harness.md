@@ -50,7 +50,7 @@ the evidence that the eight checks pass before any scored meeting.
 | t | 2.776 for five series and 3.182 for four, as part 2 states them | 2 |
 | Price range | Prices p from zero up; the verdict can change only where the interval's low end, or its mean less p, crosses zero, and those points are solved exactly | 2 |
 | Cheaper-model repricing | Every `bid` and `summary` call moves to `claude-haiku-4-5` at $1.00 input and $5.00 output; its cache tokens keep the fixed table's ratio to input, $1.25 to write and $0.10 to read. That model is never in the run's own price table | 2 |
-| Blinding | Every adviser's ID and name from `panel.yaml`, in any case and joined by a space, hyphen or line break, becomes `[adviser]`. A packet ID is 8 hex characters from the operating system's random source, so no seed can rebuild it. Each rater's order is a fresh shuffle from that source, drawn again if another rater already has it. A missing memo scores 0 and never reaches the raters | 2 |
+| Blinding | Every adviser's ID and name from `panel.yaml`, in any case and joined by a space, hyphen, underscore or line break, becomes `[adviser]`; so does any one word of a name written capitalised, such as `Stoat`. A packet ID is 8 hex characters from the operating system's random source, so no seed can rebuild it. Each rater's order is a fresh shuffle from that source, drawn again if another rater already has it. A missing memo scores 0 and never reaches the raters | 2 |
 
 The arm order each series runs in:
 

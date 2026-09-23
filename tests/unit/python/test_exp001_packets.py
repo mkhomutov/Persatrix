@@ -54,10 +54,20 @@ def test_load_adviser_names_reads_every_id_and_name_from_the_panel() -> None:
         "LUNAR STOAT recommends B.",
         "Lunar-Stoat recommends B.",
         "Lunar\nStoat recommends B.",
+        "lunar_stoat recommends B.",
+        "Stoat recommends B.",
     ],
 )
 def test_redact_removes_an_adviser_name_however_it_is_written(text: str) -> None:
     assert redact(text, NAMES) == f"{ADVISER_PLACEHOLDER} recommends B."
+
+
+def test_redact_replaces_each_capitalised_word_of_a_name_on_its_own() -> None:
+    text = "Stoat and Pika disagreed; Lunar Stoat's view won."
+    assert redact(text, NAMES) == (
+        f"{ADVISER_PLACEHOLDER} and {ADVISER_PLACEHOLDER} disagreed; "
+        f"{ADVISER_PLACEHOLDER}'s view won."
+    )
 
 
 def test_redact_leaves_other_words_alone() -> None:

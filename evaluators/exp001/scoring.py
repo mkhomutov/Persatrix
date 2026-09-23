@@ -70,7 +70,8 @@ def rater_total(scores: Mapping[str, int | None], kind: MeetingKind) -> float:
             if score is not None:
                 raise ValueError(f"{criterion} is not scored on a control plan")
             continue
-        if score not in (0, 1, 2):
+        # type() rather than isinstance(): True and False are ints in Python.
+        if type(score) is not int or score not in (0, 1, 2):
             raise ValueError(f"{criterion} must be 0, 1 or 2, not {score!r}")
         total += score
     return total * 10 / 8 if control else float(total)

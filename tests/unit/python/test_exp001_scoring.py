@@ -78,6 +78,8 @@ def test_rater_total_scales_four_criteria_to_ten_on_a_control_plan() -> None:
         (_scores(1, None, 1, 1, 1), MeetingKind.PLAN, "C2"),
         (_scores(1, 1, 1, 1, 1), MeetingKind.CONTROL, "C2"),
         ({"C1": 1, "C2": 1, "C3": 1, "C4": 1}, MeetingKind.PLAN, "C5"),
+        ({"C1": True, "C2": 2, "C3": 2, "C4": 2, "C5": 2}, MeetingKind.PLAN, "C1"),
+        ({"C1": 2, "C2": 2, "C3": 2, "C4": 2, "C5": 1.0}, MeetingKind.PLAN, "C5"),
     ],
 )
 def test_rater_total_refuses_scores_the_rubric_does_not_allow(

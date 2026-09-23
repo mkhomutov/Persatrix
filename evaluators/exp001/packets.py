@@ -68,12 +68,26 @@ def load_adviser_names(panel: Path) -> tuple[str, ...]:
 
 
 def redact(text: str, names: Sequence[str]) -> str:
-    """Replace each name however it is cased or joined: space, hyphen or line break."""
+    """Replace each name however it is cased or joined, then each word of it alone.
+
+    A whole name matches in any case, joined by a space, hyphen, underscore or
+    line break. A single word of a name ("Stoat") matches only capitalised, so
+    an ordinary word such as "lunar" is left alone.
+    """
+    words: set[str] = set()
     for name in names:
-        parts = [re.escape(p) for p in re.split(r"[\s-]+", name.strip()) if p]
-        pattern = re.compile(r"\b" + r"[\s-]*".join(parts) + r"\b", re.IGNORECASE)
-        text = pattern.sub(ADVISER_PLACEHOLDER, text)
+        parts = [p for p in re.split(r"[\s_-]+", name.strip()) if p]
+        words.update(p.capitalize() for p in parts)
+        joined = r"[\s_-]*".join(re.escape(p) for p in parts)
+        text = re.sub(_bounded(joined), ADVISER_PLACEHOLDER, text, flags=re.IGNORECASE)
+    for word in words:
+        text = re.sub(_bounded(re.escape(word)), ADVISER_PLACEHOLDER, text)
     return text
+
+
+def _bounded(pattern: str) -> str:
+    # Not \b, which counts "_" as part of a word and so misses "lunar_stoat".
+    return r"(?<![^\W_])" + pattern + r"(?![^\W_])"
 
 
 def blind(
