@@ -184,8 +184,12 @@ channels:
     # `mode: "plan"` to opt one rung up into the considered, plan-threaded compose.
     # `model: fast` keeps the deliberation on the cheap leased model (quality is
     # accepted but defeats the cheap-pass economics). `depth: deep` (native extended
-    # thinking) and `revise >= 1` (the reflexion loop) are not yet deployed and are
-    # rejected at load rather than silently degraded.
+    # thinking) is not yet deployed and is rejected at load rather than silently
+    # degraded. `revise: 1` or `2` turns on the reflexion loop: a cheap critic checks
+    # the finished reply against the private plan and, if it finds it weak, the
+    # persona rewrites it, at most that many times. It needs `mode: "plan"` (with
+    # no plan the critic has nothing to check against), so the loader rejects it on
+    # any other mode. `revise: 0` (the default) skips the loop.
     # `mode` is quoted because YAML 1.1 (PyYAML, used by `make validate`) parses a
     # bare `off`/`on` as a boolean — the schema and loader want the string.
     reasoning:

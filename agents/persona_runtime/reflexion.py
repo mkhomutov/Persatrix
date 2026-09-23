@@ -69,7 +69,7 @@ __all__ = [
 ]
 
 # The hard ceiling on revise rounds (RFC 0051 §Phase 5 — ``revise: 0 | 1 | 2``).
-# The config ``validate`` rejects a request above this (Go-side, capability gate);
+# The config ``validate`` rejects a request above this (a Go-side range check);
 # the loop clamps as defense-in-depth so a wire/test value can never run away.
 MAX_REVISE_ROUNDS: Final[int] = 2
 

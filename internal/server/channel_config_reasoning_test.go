@@ -1,8 +1,9 @@
 // RFC 0051 Phase 3a (PR 4) — the REST surface for the nested `reasoning` knob on
 // the RFC 0050 GET/PATCH config endpoint. These pin the nested merge (sub-key
-// tri-state), the per-sub-knob provenance, the capability-gated 400s (deep /
-// revise≥1), and the cross-field governance 400 (mode != off on an ungoverned
-// channel) — the operator-facing half of the config backend.
+// tri-state), the per-sub-knob provenance, the 400s for the unbacked `depth: deep`
+// and for `revise >= 1` without `mode: plan`, and the cross-field governance 400
+// (mode != off on an ungoverned channel) — the operator-facing half of the config
+// backend.
 package server
 
 import (

@@ -168,7 +168,7 @@
               "type": "integer",
               "minimum": 0,
               "default": 0,
-              "description": "Reflexion round count (RFC 0051 Phase 5). `0` is single-pass (the default). `>= 1` is REJECTED at load by the Go capability gate until the critic→revise loop is deployed (Phase 5); the schema permits the integer space, the loader is the deployment gate. Meaningful only under `mode: plan` (the critic checks the draft against the plan)."
+              "description": "Reflexion round count (RFC 0051 Phase 5). `0` is single-pass (the default). `1` or `2` turns on the reflexion loop: a cheap critic checks the composed reply against the private plan and, if it finds it weak, the persona rewrites it, at most that many times. Accepted only with `mode: plan` (the critic checks the draft against the plan): the Go loader rejects `>= 1` on any other mode, and any value above 2. The schema checks only that the value is not negative."
             }
           }
         },

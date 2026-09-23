@@ -81,10 +81,12 @@ func (o ChannelConfigOverrides) Validate() error {
 		return fmt.Errorf("%w: %d (must be >= 0)",
 			ErrInvalidInteractionIdleTimeout, *o.InteractionIdleTimeoutSeconds)
 	}
-	// RFC 0051 reasoning block: per-field enum + capability gate (deep / revise≥1
-	// rejected as unbacked). The mode↔governance cross-field rule needs the
-	// channel's membership and so lives in [ChannelRouter.validateReasoningGoverned]
-	// (alongside the escalation-chair rule), not in this pure per-field Validate.
+	// RFC 0051 reasoning block: per-field enum, the capability gate that rejects the
+	// unbacked `depth: deep`, and the revise range. The two cross-field rules — a
+	// non-off mode needs a salience-gated member, and `revise >= 1` needs
+	// `mode: plan` — need the channel's membership or its merged mode, so they live
+	// in [ChannelRouter.validateReasoningGoverned] (alongside the escalation-chair
+	// rule), not in this pure per-field Validate.
 	if o.Reasoning != nil {
 		if err := o.Reasoning.validate(); err != nil {
 			return err
