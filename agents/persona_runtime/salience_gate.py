@@ -396,8 +396,11 @@ async def run_salience_gate(
         # RFC 0030 producer plan PR 2: same interaction attribution as the
         # quality turn — see evaluate_salience's interaction_id contract.
         interaction_id=lease_interaction_id_for_event(event),
-        # RFC 0051 PR 2 — dark by default (action_loop passes nothing): ``off``
-        # is the scalar score gate; ``bid``/``plan`` is the structured verdict.
+        # RFC 0051: the rung resolved above (the channel's ``reasoning.mode`` from
+        # the wire, unless a test pinned one). This path runs only for a
+        # salience-gated member, so the channel is governed and the default is
+        # ``bid``. ``off`` is the scalar score gate; ``bid``/``plan`` is the
+        # structured verdict.
         mode=mode,
         # RFC 0051 PR 3 — under ``plan`` the bid hands its raw verdict text back
         # here so the seam can parse the CompositionPlan (keeps the pure bid's

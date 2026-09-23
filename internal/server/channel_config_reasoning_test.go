@@ -44,8 +44,9 @@ func decodeReasoning(t *testing.T, raw []byte) map[string]struct {
 	return env.Reasoning
 }
 
-// TestChannelConfig_ReasoningDefaults: a never-edited channel reports the default
-// rung (off / fast / shallow / 0), every sub-knob sourced from the default.
+// TestChannelConfig_ReasoningDefaults: a never-edited governed channel reports the
+// governed default rung (bid / fast / shallow / 0), every sub-knob sourced from
+// the default.
 func TestChannelConfig_ReasoningDefaults(t *testing.T) {
 	srv, id := reasoningTestServer(t, true) // governed roster
 	rec := doRequest(srv.Handler(), http.MethodGet, "/api/v1/channels/"+id+"/config", nil)

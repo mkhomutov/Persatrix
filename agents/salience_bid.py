@@ -362,9 +362,9 @@ async def evaluate_salience(
     alias (TB3); a lease denial, the wallet active-lease cap
     (``RESOURCE_EXHAUSTED``), or any provider error all fail closed.
 
-    ``mode`` (RFC 0051 §C/§G) selects the verdict grammar and ships **dark** —
-    the seam passes nothing but the ``off`` default until the Phase-3 config knob
-    wires it. ``off`` is the scalar ``speak:``/``score:`` bid against the
+    ``mode`` (RFC 0051 §C/§G) selects the verdict grammar. The seam passes the
+    channel's rung, ``bid`` by default on a governed channel; direct callers default
+    to ``off``. ``off`` is the scalar ``speak:``/``score:`` bid against the
     per-member ``threshold`` (byte-for-byte v0.3.8); ``bid``/``plan`` is the
     structured ``should_post``/``reason_code`` verdict that **supersedes the
     score gate** (``threshold`` inert, no ``score``), delegated to

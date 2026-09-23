@@ -219,9 +219,11 @@ func (r *ChannelRouter) validateEscalationChair(ctx context.Context, channelID s
 // channel-level governed check ([Config.Validate]) against the store's live
 // membership, and runs before the write so a bad mode never persists.
 //
-// An override that does not set `mode` (or sets it to `off`) resolves to the
-// default `off` and needs no membership — so an unrelated first edit on an
-// ungoverned channel is never blocked by a mode the operator did not touch.
+// An override that sets `mode: off`, or sets no `mode` at all, needs no
+// membership check. An unset `mode` inherits the channel's default — `bid` on a
+// governed channel, which passes the check anyway, and `off` on an ungoverned
+// one — so an unrelated first edit on an ungoverned channel is never blocked by
+// a mode the operator did not touch.
 //
 // It ALSO enforces the RFC 0051 Phase 5 cross-field rule that `reasoning.revise
 // >= 1` requires `mode: plan` (the reflexion critic re-reads the draft against

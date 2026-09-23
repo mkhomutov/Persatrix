@@ -290,9 +290,9 @@ type ChannelConfig struct {
 	// Reasoning is the RFC 0051 (v0.3.10) reasoning-before-posting block for this
 	// channel — the deliberation rung (`mode`), the leased model, the depth, and
 	// the reflexion round count. A value type: an absent block is the zero value,
-	// normalized to the shipped default rung (off / fast / shallow / 0) at load
-	// ([ReasoningConfig.normalized]) and validated by [Config.Validate]. Definition
-	// + capability-gated validation live in config_reasoning.go.
+	// filled at load ([ReasoningConfig.normalizedForGovernance]) with mode `bid` on
+	// a governed channel or `off` otherwise, then validated by [Config.Validate].
+	// Definition + capability-gated validation live in config_reasoning.go.
 	Reasoning ReasoningConfig `yaml:"reasoning"`
 	// Autonomous is the RFC 0052 (v0.3.11) opt-in human-free convening block (absent
 	// = disabled); definition + validation live in config_autonomous.go.

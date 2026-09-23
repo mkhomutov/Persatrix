@@ -19,11 +19,13 @@ import (
 // channel at an open-floor admit — so `mode != off` on a channel with no
 // salience-gated member is rejected rather than left silently inert.
 //
-// Phases 1–2 shipped the mechanism dark behind an internal `mode` parameter
-// (default `off` = byte-for-byte today's score gate). This file is the Phase 3a
-// config backend: the operator-editable knob on the RFC 0050 surface. The
-// governed-channel default stays `off` here — the flip to `bid` is PR 6, in
-// lockstep with the kill switch and telemetry.
+// This file is the Phase 3a config backend: the operator-editable knob on the
+// RFC 0050 surface. When a channel sets no `mode`, its members decide the
+// default (RFC 0051 PR 6, v0.3.10): a governed channel — one with at least one
+// salience-gated `participant`/`chair` member — gets `bid`, and an ungoverned
+// channel keeps `off`. An explicit `mode: off` is the one-flip kill switch: the
+// channel goes back to the scalar score gate, and the setting survives a
+// restart ([GovernedDefaultReasoningMode]).
 
 // Reasoning mode rungs (RFC 0051 §C). The ladder is a strict superset chain
 // `off ⊂ bid ⊂ plan`, so a channel is promoted/demoted one rung at a time.
@@ -144,10 +146,12 @@ var (
 
 // ReasoningConfig is the per-channel RFC 0051 reasoning-before-posting block, the
 // `reasoning:` mapping in a `config/channels.yaml` channel. A value type (not a
-// pointer like floor_control): an absent block is the zero value, normalized to
-// the shipped default rung at load ([ReasoningConfig.normalized]). The resolved
-// value is stamped onto the router so the REST surface can report it; the
-// agent-side seam reads `mode`/`model` (the dispatch wiring rides the go-live).
+// pointer like floor_control): an absent block is the zero value, filled in at
+// load ([ReasoningConfig.normalizedForGovernance]) — `bid` / fast / shallow / 0 on
+// a governed channel, `off` / fast / shallow / 0 on an ungoverned one. The
+// resolved value is stamped onto the router so the REST surface can report it,
+// and fanout copies its `mode` and `revise` onto every dispatch for the
+// agent-side seam.
 type ReasoningConfig struct {
 	// Mode is the deliberation rung — off / bid / plan (RFC 0051 §C).
 	Mode string `yaml:"mode"`
@@ -162,8 +166,9 @@ type ReasoningConfig struct {
 	Revise int `yaml:"revise"`
 }
 
-// DefaultReasoningConfig is the shipped default rung — the value an un-configured
-// channel resolves to (off / fast / shallow / 0).
+// DefaultReasoningConfig is the package default rung (off / fast / shallow / 0):
+// the value an ungoverned channel with no `reasoning` block resolves to. A
+// governed channel gets the same rung with `mode: bid` ([governedDefaultMode]).
 func DefaultReasoningConfig() ReasoningConfig {
 	return ReasoningConfig{
 		Mode:   DefaultReasoningMode,
@@ -372,9 +377,10 @@ func (o ReasoningOverrides) validate() error {
 	return nil
 }
 
-// resolve overlays the set sub-knobs onto a base config (normally the package
-// default) — the inherit-or-override resolution the apply path stamps onto the
-// router. A nil sub-knob leaves the base value; a set one wins.
+// resolve overlays the set sub-knobs onto a base config — the inherit-or-override
+// resolution the apply path stamps onto the router, over the base
+// [governedReasoningBase] (`mode: bid` on a governed channel, `off` otherwise). A
+// nil sub-knob leaves the base value; a set one wins.
 func (o *ReasoningOverrides) resolve(base ReasoningConfig) ReasoningConfig {
 	if o == nil {
 		return base
@@ -394,9 +400,12 @@ func (o *ReasoningOverrides) resolve(base ReasoningConfig) ReasoningConfig {
 	return base
 }
 
-// effectiveMode reports the mode this override resolves to — the set `mode` or, if
-// absent, the inherited default (`off`). Used by the cross-field governance check
-// so an override that does not touch `mode` never trips the rule.
+// effectiveMode reports the mode this override sets, or `off` when it sets none.
+// On a governed channel an unset `mode` really resolves to `bid`, but the
+// cross-field checks in [ChannelRouter.validateReasoningGoverned] treat `off` and
+// `bid` alike there: the membership rule passes a governed channel either way, and
+// the `revise >= 1` rule rejects both, since neither is `plan`. So an override that
+// does not touch `mode` never trips the membership rule.
 func (o *ReasoningOverrides) effectiveMode() string {
 	if o != nil && o.Mode != nil {
 		return *o.Mode

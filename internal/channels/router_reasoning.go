@@ -18,8 +18,9 @@ import (
 //
 // PR 4 makes the resolved value router-held so the RFC 0050 GET surface can report
 // each channel's effective `reasoning.{mode,model,depth,revise}` with provenance.
-// The agent-side seam's consumption of `mode`/`model` (the dispatch-envelope
-// wiring to the Python persona runtime) rides the go-live, not this dark backend.
+// Fanout reads the same value ([ChannelRouter.ReasoningFor]) and stamps `mode`
+// and `revise` onto every dispatch envelope, which is how the Python persona
+// runtime learns each channel's rung.
 
 // SetReasoning stamps the resolved RFC 0051 reasoning block for `channelID`. The
 // value is normalized first ([ReasoningConfig.normalized]) so a partially-set
@@ -36,9 +37,10 @@ func (r *ChannelRouter) SetReasoning(channelID string, rc ReasoningConfig) {
 }
 
 // ReasoningFor returns the resolved RFC 0051 reasoning block for `channelID`. A
-// channel with no resolved entry falls back to [DefaultReasoningConfig] — the same
-// off / fast / shallow / 0 rung an un-configured channel ships with — so the read
-// is always a complete, sensible value.
+// channel with no resolved entry (for example a DM, which the startup resolver
+// skips) falls back to [DefaultReasoningConfig] — off / fast / shallow / 0, the
+// rung an ungoverned channel gets — so the read is always a complete, sensible
+// value.
 func (r *ChannelRouter) ReasoningFor(channelID string) ReasoningConfig {
 	r.reasoningMu.Lock()
 	defer r.reasoningMu.Unlock()
