@@ -1,6 +1,6 @@
 # EXP-001 — The harness
 
-> **Status**: 🚧 **In Progress** — PRs 1 and 2 of 6 merged ([#984](https://github.com/mkhomutov/Persatrix/pull/984), [#986](https://github.com/mkhomutov/Persatrix/pull/986)); PR 3a open; no practice run yet.
+> **Status**: 🚧 **In Progress** — PRs 1 and 2 of 6 merged ([#984](https://github.com/mkhomutov/Persatrix/pull/984), [#986](https://github.com/mkhomutov/Persatrix/pull/986)); PR 3a open ([#987](https://github.com/mkhomutov/Persatrix/pull/987)); no practice run yet.
 > **Last updated**: 2026-09-23
 > **Carries out**: the [EXP-001 pre-registration](EXP-001-preregistration.md) and its [part 2](EXP-001-preregistration-scoring.md)
 > **Code**: [`evaluators/exp001/`](../../evaluators/exp001/)
@@ -22,7 +22,7 @@ result can cite them.
 |---|---|---|
 | 1 ([#984](https://github.com/mkhomutov/Persatrix/pull/984)) | Reads and checks the materials; records each model call; prices it with the fixed table; draws each series' arm order | 4 (the record's fields) |
 | 2 ([#986](https://github.com/mkhomutov/Persatrix/pull/986)) | Scoring and the decision: the 400-word cut, memo quality, recall majority, per-plan agreement, the interval, the verdicts and the rule that fires, the price range and the cheaper-model repricing; blinded rater packets | — (part 2) |
-| 3a | Agent time: memory stamps, recall ages and the orchestrator's timestamps all read one clock that `PERSATRIX_CLOCK_START` can shift, so the adviser's clock and arm D's memories agree on the story date | 2 and 7, in part |
+| 3a ([#987](https://github.com/mkhomutov/Persatrix/pull/987)) | Agent time: memory stamps, recall ages and the orchestrator's timestamps all read one clock that `PERSATRIX_CLOCK_START` can shift, so the adviser's clock and arm D's memories agree on the story date | 2 and 7, in part |
 | 3 | Runtime: the Anthropic adapter's prompt-cache markers and cache token counts; a pinned clock; a hook that tags each call with its arm, meeting, adviser and purpose | 3, 4, 7 |
 | 4 | Arm A: the advisers' identities rendered by the persona runtime's own prompt code, one call per meeting | 7, 8 |
 | 5 | Arms B, C, D and D′: deployments, channels, the memo turn, restarts in D, D′'s transcript prefix, retries and failure detection | 1, 2, 3, 5, 6 |
