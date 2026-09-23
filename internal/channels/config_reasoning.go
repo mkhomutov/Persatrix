@@ -157,8 +157,8 @@ type ReasoningConfig struct {
 	Depth string `yaml:"depth"`
 	// Revise is the reflexion round count — 0 (single pass, the default) up to
 	// MaxReasoningRevise. `>= 1` runs the RFC 0051 Phase 5 critic→revise loop on
-	// the composed reply and is accepted only with `mode: plan`, because the
-	// critic checks the draft against the plan.
+	// a reply composed under a plan, and is accepted only with `mode: plan`
+	// because the critic checks the draft against that plan.
 	Revise int `yaml:"revise"`
 }
 

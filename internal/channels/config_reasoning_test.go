@@ -1,8 +1,8 @@
 // RFC 0051 Phase 3a (PR 4) — the per-channel `reasoning` config block on the RFC
 // 0050 surface. These tests pin (a) the YAML load/normalize/validate path for the
-// `reasoning.{mode,model,depth,revise}` knob, including the capability gate that
-// rejects the unbacked `depth: deep`, the `revise` range, the rule that
-// `revise >= 1` needs `mode: plan`, and the cross-field rule
+// `reasoning.{mode,model,depth,revise}` knob, including the `depth: deep`
+// capability gate, the `revise` range, the rule that `revise >= 1` needs
+// `mode: plan`, and the cross-field rule
 // that `mode != off` requires a salience-gated channel, and (b) the runtime
 // override apply path (validate → persist → bump revision → stamp router), with
 // the governed-channel default held at `off` (the flip is PR 6).
