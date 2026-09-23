@@ -83,13 +83,15 @@ class TestMidJitterRestart:
         schedulers: dict = {}
         caches: dict[str, ScheduledWakesCache] = {}
 
-        # Spy on register_timer to capture initial_delay.
+        # Spy on register_timer to capture initial_delay together with
+        # the monotonic reading at the moment of the call — the two
+        # readings bracket the loader's own clock read (see below).
         from agents.event_loop import EventLoop
-        captured_kwargs: list[dict[str, Any]] = []
+        captured: list[tuple[dict[str, Any], int]] = []
         real_register = EventLoop.register_timer
 
         def _spy(self, **kwargs):  # type: ignore[no-untyped-def]
-            captured_kwargs.append(dict(kwargs))
+            captured.append((dict(kwargs), time.monotonic_ns() // 1_000_000))
             return real_register(self, **kwargs)
 
         monkeypatch.setattr(EventLoop, "register_timer", _spy)
@@ -100,21 +102,42 @@ class TestMidJitterRestart:
         )
 
         restored = [
-            kw for kw in captured_kwargs
-            if kw.get("timer_id") == "memory_consolidation"
+            entry for entry in captured
+            if entry[0].get("timer_id") == "memory_consolidation"
         ]
         assert restored, (
             f"expected register_timer to be called for memory_consolidation; "
-            f"captured: {captured_kwargs}"
+            f"captured: {[kw for kw, _ in captured]}"
         )
-        initial_delay = restored[0].get("initial_delay")
+        register_kwargs, registered_at_ms = restored[0]
+        initial_delay = register_kwargs.get("initial_delay")
         assert initial_delay is not None, (
-            "expected initial_delay to be set when a future anchor is restored"
+            "expected initial_delay to be set when a future anchor is "
+            "restored (None would also mean the seeded 10s anchor expired "
+            "during setup, which took "
+            f"{(registered_at_ms - now_ms) / 1000.0}s here)"
         )
-        # The seed-anchor was now+10s; elapsed since seed is <1s for a
-        # CI worker, so the captured delay sits in [9s, 10s].
-        assert 9.0 <= initial_delay <= 10.0, (
-            f"initial_delay {initial_delay}s should approximate saved 10s anchor"
+        # The loader reads its own "now" somewhere between the seed
+        # above and this register_timer call, and arms the timer at
+        # ``saved_anchor - that_now``.  Both ends of that window are
+        # readings this test holds, so the delay is bracketed exactly
+        # and the bound says nothing about how fast the runner is.
+        # (A fixed "setup takes under 1s" budget lived here until a slow
+        # CI worker spent 1.013s on it and failed the lower bound.)
+        #
+        # Upper bound: the whole seeded 10s — still the guard that the
+        # saved anchor was used and not a fresh 30s interval.  Lower
+        # bound: whatever is left of the anchor once the timer is armed,
+        # which rises back toward the full 10s as the runner gets
+        # faster.  Both sides divide integer monotonic milliseconds by
+        # 1000 and ``registered_at_ms`` is read after the loader's own
+        # reading, so the comparison needs no tolerance.
+        min_remaining_s = (saved_anchor_ms - registered_at_ms) / 1000.0
+        assert min_remaining_s <= initial_delay <= 10.0, (
+            f"initial_delay {initial_delay}s should be what was left of the "
+            f"seeded anchor: between {min_remaining_s}s (the anchor minus "
+            f"the clock read when the timer was armed) and 10.0s (the whole "
+            f"anchor)"
         )
 
         await schedulers["ember-owl"].stop()
