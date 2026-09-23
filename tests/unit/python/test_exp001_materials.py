@@ -72,6 +72,15 @@ def _series(**overrides: Any) -> dict[str, Any]:
     return doc
 
 
+def _shift_one_week(doc: dict[str, Any]) -> None:
+    """Move every meeting one week later, keeping them a week apart."""
+    for m in doc["meetings"]:
+        first, rest = m["message"].split("\n", 1)
+        date = dt.datetime.strptime(first, "Today is %A %d %B %Y.").date() + dt.timedelta(days=7)
+        day = f"{date.strftime('%A')} {date.day} {date.strftime('%B %Y')}"
+        m["message"] = f"Today is {day}.\n{rest}"
+
+
 def _write(tmp_path: Path, doc: dict[str, Any], name: str = "series-9.yaml") -> Path:
     path = tmp_path / name
     path.write_text(yaml.safe_dump(doc, sort_keys=False))
@@ -136,6 +145,20 @@ def test_loads_a_well_formed_series(tmp_path: Path) -> None:
             "one week",
         ),
         (lambda d: d["meetings"][4].update(id="series-9-plan-3"), "duplicate"),
+        (lambda d: d["meetings"][1]["key"].update(unsound_options=[]), "unsound"),
+        (
+            lambda d: d["meetings"][3].update(message="Today is Monday 31 Sept 2036.\n"),
+            "series-9-plan-3",
+        ),
+        (lambda d: d["meetings"][1].pop("key"), "series-9-plan-1: .*key"),
+        (lambda d: d["meetings"][-1].pop("key"), "series-9-recall: .*key"),
+        (
+            lambda d: [
+                m.update(message=m["message"].replace("October", "Octobre")) for m in d["meetings"]
+            ],
+            "Octobre",
+        ),
+        (lambda d: _shift_one_week(d), "6 October 2036"),
     ],
 )
 def test_rejects_a_series_the_run_could_not_use(tmp_path: Path, mutate: Any, needle: str) -> None:

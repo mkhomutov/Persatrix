@@ -7,7 +7,9 @@ summaries. Two totals matter:
 
 - an arm's **dollars per plan**: what it spent on one series' briefing and
   four plans, in the attempt that finished, divided by four;
-- **real spend**: every call made, counted or not, which the $150 cap reads.
+- **real spend**: every call the arms made in the scored run, counted or not,
+  which the $150 cap reads. Practice calls and the judge are left out; the
+  judge has its own $25 cap, read from **judging spend**.
 
 This module also draws the order the five arms run in within each series.
 """
@@ -20,7 +22,7 @@ import random
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from evaluators.exp001.materials import PLANS_PER_SCORED_SERIES, MeetingKind
+from evaluators.exp001.materials import PLANS_PER_SCORED_SERIES, PRACTICE_SERIES, MeetingKind
 
 ARMS = ("A", "B", "C", "D", "D-prime")
 ORDER_SEED = 2026
@@ -97,13 +99,23 @@ def dollars_per_plan(
         and r.series == series
         and r.attempt == attempt
         and r.counts_in_arm
+        and r.purpose is not CallPurpose.JUDGE
         and r.meeting_kind is not MeetingKind.RECALL
     )
     return total / PLANS_PER_SCORED_SERIES
 
 
 def real_spend(records: Iterable[CallRecord]) -> float:
-    return sum(price_call(r) for r in records)
+    """Every arm call in the scored series, any attempt, counted or not."""
+    return sum(
+        price_call(r)
+        for r in records
+        if r.purpose is not CallPurpose.JUDGE and r.series != PRACTICE_SERIES
+    )
+
+
+def judging_spend(records: Iterable[CallRecord]) -> float:
+    return sum(price_call(r) for r in records if r.purpose is CallPurpose.JUDGE)
 
 
 def arm_orders(n_series: int, seed: int = ORDER_SEED) -> list[tuple[str, ...]]:

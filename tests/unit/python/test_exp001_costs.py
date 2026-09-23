@@ -20,6 +20,7 @@ from evaluators.exp001.costs import (
     CallRecord,
     arm_orders,
     dollars_per_plan,
+    judging_spend,
     price_call,
     real_spend,
 )
@@ -100,6 +101,7 @@ def test_dollars_per_plan_counts_briefing_and_plans_of_the_given_attempt_only() 
         _call(arm="D"),  # not counted: another arm
         _call(series="series-2"),  # not counted: another series
         _call(counts_in_arm=False),  # not counted: memory write outside the arm's design
+        _call(purpose=CallPurpose.JUDGE, model="claude-opus-5"),  # not counted: the judge
     ]
     assert dollars_per_plan(records, arm="C", series="series-1", attempt=1) == pytest.approx(
         9.0 / 4
@@ -112,8 +114,18 @@ def test_real_spend_counts_every_call_made() -> None:
         _call(attempt=2),
         _call(counts_in_arm=False),
         _call(arm="A"),
+        _call(series="practice"),  # not counted: practice is not the scored run
+        _call(purpose=CallPurpose.JUDGE, model="claude-opus-5"),  # judging has its own cap
     ]
     assert real_spend(records) == pytest.approx(12.0)
+
+
+def test_judging_spend_counts_only_judge_calls() -> None:
+    records = [
+        _call(),
+        _call(purpose=CallPurpose.JUDGE, model="claude-opus-5"),  # $5
+    ]
+    assert judging_spend(records) == pytest.approx(5.0)
 
 
 def test_arm_orders_are_drawn_from_one_stream_seeded_2026() -> None:

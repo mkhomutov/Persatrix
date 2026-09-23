@@ -20,6 +20,8 @@ from typing import Any
 import yaml
 
 SCORED_SERIES = tuple(f"series-{n}" for n in range(1, 6))
+PRACTICE_SERIES = "practice"
+STORY_START = dt.date(2036, 10, 6)
 PLANS_PER_SCORED_SERIES = 4
 OPTION_LETTERS = frozenset("ABC")
 
@@ -125,6 +127,8 @@ def _meeting(raw: dict[str, Any], facts: dict[str, str]) -> Meeting:
     message = str(raw["message"])
     story_date = _story_date(mid, message)
     key = raw.get("key")
+    if (kind.scored or kind is MeetingKind.RECALL) and not isinstance(key, dict):
+        raise MaterialsError(f"{mid}: a {kind.value} meeting needs a key")
     if kind.scored:
         return Meeting(mid, kind, message, story_date, plan_key=_plan_key(mid, kind, key, facts))
     if kind is MeetingKind.RECALL:
@@ -137,7 +141,10 @@ def _story_date(mid: str, message: str) -> dt.date:
     if match is None:
         raise MaterialsError(f"{mid}: the message must start with 'Today is <weekday> <date>.'")
     weekday, text = match.groups()
-    date = dt.datetime.strptime(text, "%d %B %Y").date()
+    try:
+        date = dt.datetime.strptime(text, "%d %B %Y").date()
+    except ValueError:
+        raise MaterialsError(f"{mid}: {text!r} is not a real date") from None
     if date.strftime("%A") != weekday:
         raise MaterialsError(f"{mid}: {text} is a {date.strftime('%A')}, not the weekday {weekday}")
     return date
@@ -159,6 +166,8 @@ def _plan_key(mid: str, kind: MeetingKind, raw: Any, facts: dict[str, str]) -> P
         raise MaterialsError(f"{mid}: a control plan lists no earlier facts and no unsound options")
     if kind is MeetingKind.PLAN and not uses:
         raise MaterialsError(f"{mid}: a plan meeting must list the earlier facts that bear on it")
+    if kind is MeetingKind.PLAN and not unsound:
+        raise MaterialsError(f"{mid}: a plan meeting must name the option its facts make unsound")
     problems = {str(k): str(v) for k, v in raw["problems"].items()}
     return PlanKey(problems=problems, earlier_facts=uses, unsound_options=unsound)
 
@@ -198,6 +207,8 @@ def _check_calendar(sid: str, meetings: tuple[Meeting, ...]) -> None:
     ids = [m.id for m in meetings]
     if len(set(ids)) != len(ids):
         raise MaterialsError(f"{sid}: duplicate meeting id")
+    if meetings[0].story_date != STORY_START:
+        raise MaterialsError(f"{sid}: the briefing must fall on Monday 6 October 2036")
     for before, after in zip(meetings, meetings[1:], strict=False):
         if after.story_date - before.story_date != dt.timedelta(days=7):
             raise MaterialsError(f"{after.id}: must be one week after {before.id}")

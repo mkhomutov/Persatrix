@@ -34,13 +34,14 @@ the evidence that the eight checks pass before any scored meeting.
 
 | Choice | What the harness does | PR |
 |---|---|---|
-| Story date | Read from each message's first line, "Today is Monday 6 October 2036."; the weekday must match the date, and meetings must be exactly one week apart | 1 |
+| Story date | Read from each message's first line, "Today is Monday 6 October 2036."; the weekday must match the date, every briefing falls on Monday 6 October 2036, and meetings must be exactly one week apart | 1 |
 | Arm names | `A`, `B`, `C`, `D`, `D-prime`, in that order | 1 |
 | Arm order | Python's `random.Random(2026)`; for each series in turn, series 1 first, one `sample` of all five arm names. The recorded orders are below; a test pins them | 1 |
 | Call purposes | `reply` (an adviser's turn, or arm A's one call), `bid`, `memo`, `summary` (memory summaries and fact extraction), `judge` | 1 |
 | Dollars | The table in pre-registration §3, per million tokens; a call on a model the table does not list, or with cache tokens on a model with no cache price, is refused rather than priced at zero | 1 |
-| Dollars per plan | Counted calls of the series' briefing and plan meetings, in the attempt that finished, divided by four | 1 |
-| Real spend | Every call made, in every attempt, counted or not | 1 |
+| Dollars per plan | Counted calls of the series' briefing and plan meetings, in the attempt that finished, divided by four; judge calls never count | 1 |
+| Real spend | Every arm call in the scored series, in every attempt, counted or not; practice and judge calls are left out | 1 |
+| Judging spend | Every `judge` call, for the $25 judging cap | 1 |
 
 The arm order each series runs in:
 
