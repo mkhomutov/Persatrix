@@ -19,7 +19,11 @@ This module provides:
 **Agent time.** An agent process normally lives on real time. Setting
 ``PERSATRIX_CLOCK_START`` to an ISO-8601 instant with a zone shifts the
 whole agent: its time starts at that instant and moves with the real clock.
-EXP-001 uses it to put each adviser on the meeting's story date. Memory
+EXP-001 uses it to put each adviser on the meeting's story date.
+``PERSATRIX_CLOCK_ANCHOR``, also an instant with a zone, names the real
+moment the start belongs to; without it that moment is the process's first
+clock read. A restart must pass the same anchor, or its clock would begin
+at the start again, earlier than what the last run wrote. Memory
 stamps, recency and new events all read :func:`agent_now`; a timestamp the
 orchestrator wrote is moved into agent time with :func:`to_agent_time`.
 Timers, deadlines, telemetry and anything sent back to the orchestrator
@@ -44,34 +48,59 @@ from zoneinfo import ZoneInfo
 
 DEFAULT_TIMEZONE: str = "UTC"
 CLOCK_START_ENV: str = "PERSATRIX_CLOCK_START"
+CLOCK_ANCHOR_ENV: str = "PERSATRIX_CLOCK_ANCHOR"
 
-# Seconds added to real time, read from CLOCK_START_ENV on first use and then
-# fixed for the life of the process; None until then.
+# Seconds added to real time, and the real instant agent time began at, read
+# from the settings on first use and then fixed for the life of the process;
+# None until then. The anchor stays None on an unshifted clock.
 _agent_offset: float | None = None
+_agent_anchor: float | None = None
 
 
 def agent_clock_offset() -> float:
     """How far agent time runs ahead of real time, in seconds (0 unshifted)."""
-    global _agent_offset
+    global _agent_offset, _agent_anchor
     if _agent_offset is None:
-        _agent_offset = _read_clock_start()
+        _agent_offset, _agent_anchor = _read_clock_settings()
     return _agent_offset
 
 
-def _read_clock_start() -> float:
-    raw = os.environ.get(CLOCK_START_ENV, "").strip()
+def _read_clock_settings() -> tuple[float, float | None]:
+    start = _read_instant(CLOCK_START_ENV)
+    anchor = _read_instant(CLOCK_ANCHOR_ENV)
+    if start is None:
+        if anchor is not None:
+            raise ValueError(f"{CLOCK_ANCHOR_ENV} is set but {CLOCK_START_ENV} is not")
+        return 0.0, None
+    if anchor is None:
+        anchor = time.time()
+    return start - anchor, anchor
+
+
+def _read_instant(env: str) -> float | None:
+    raw = os.environ.get(env, "").strip()
     if not raw:
-        return 0.0
+        return None
     try:
-        start = datetime.fromisoformat(raw)
+        instant = datetime.fromisoformat(raw)
     except ValueError:
-        start = None
-    if start is None or start.tzinfo is None:
+        instant = None
+    if instant is None or instant.tzinfo is None:
         raise ValueError(
-            f"{CLOCK_START_ENV} must be an ISO-8601 instant with a zone, "
+            f"{env} must be an ISO-8601 instant with a zone, "
             f"such as 2036-10-06T10:00:00+00:00; got {raw!r}"
         )
-    return start.timestamp() - time.time()
+    return instant.timestamp()
+
+
+def predates_agent_clock(wall: float) -> bool:
+    """Whether a real-time timestamp comes from before this clock began.
+
+    Such a timestamp belongs to an earlier run whose offset is unknown, so
+    :func:`to_agent_time` cannot place it. Always False on real time.
+    """
+    agent_clock_offset()
+    return _agent_anchor is not None and wall < _agent_anchor
 
 
 def agent_now() -> float:
@@ -86,8 +115,9 @@ def to_agent_time(wall: float) -> float:
 
 def reset_agent_clock() -> None:
     """Forget the offset, so the next read takes the setting again (tests)."""
-    global _agent_offset
+    global _agent_offset, _agent_anchor
     _agent_offset = None
+    _agent_anchor = None
 
 
 class Clock(Protocol):
@@ -213,6 +243,7 @@ def resolve_persona_clock(
 
 
 __all__ = [
+    "CLOCK_ANCHOR_ENV",
     "CLOCK_START_ENV",
     "DEFAULT_TIMEZONE",
     "AgentClock",
@@ -221,6 +252,7 @@ __all__ = [
     "WallClock",
     "agent_clock_offset",
     "agent_now",
+    "predates_agent_clock",
     "reset_agent_clock",
     "resolve_persona_clock",
     "to_agent_time",

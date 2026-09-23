@@ -20,9 +20,11 @@ import pytest
 
 from agents import clock as clock_mod
 from agents.clock import (
+    CLOCK_ANCHOR_ENV,
     CLOCK_START_ENV,
     agent_clock_offset,
     agent_now,
+    predates_agent_clock,
     reset_agent_clock,
     resolve_persona_clock,
     to_agent_time,
@@ -39,6 +41,7 @@ _REPO = Path(__file__).resolve().parents[3]
 @pytest.fixture(autouse=True)
 def _fresh_agent_clock(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv(CLOCK_START_ENV, raising=False)
+    monkeypatch.delenv(CLOCK_ANCHOR_ENV, raising=False)
     reset_agent_clock()
     yield
     reset_agent_clock()
@@ -148,6 +151,82 @@ class TestShifted:
             channel_event(timestamp=published), MagicMock(spec=grpc.aio.ServicerContext),
         )
         assert enqueued_event(dispatcher).timestamp == pytest.approx(_STORY_EPOCH - 30.0)
+
+
+class TestAnchored:
+    """A restart must not wind the clock back, and a replayed message from
+    an earlier clock must not be moved by this one's offset."""
+
+    def test_the_anchor_keeps_the_clock_across_a_restart(
+        self, monkeypatch: pytest.MonkeyPatch, real_time: list[float],
+    ) -> None:
+        monkeypatch.setenv(CLOCK_START_ENV, _STORY_START)
+        anchor = datetime.fromtimestamp(_REAL).astimezone().isoformat()
+        monkeypatch.setenv(CLOCK_ANCHOR_ENV, anchor)
+        real_time[0] += 2_400.0  # the restarted process boots 40 minutes later
+        assert agent_now() == _STORY_EPOCH + 2_400.0
+
+    def test_without_an_anchor_the_clock_starts_at_first_read(
+        self, monkeypatch: pytest.MonkeyPatch, real_time: list[float],
+    ) -> None:
+        monkeypatch.setenv(CLOCK_START_ENV, _STORY_START)
+        assert agent_now() == _STORY_EPOCH
+
+    @pytest.mark.parametrize("value", ["2026-09-23T10:00:00", "soon"])
+    def test_an_anchor_without_a_zone_or_unparseable_is_refused(
+        self, monkeypatch: pytest.MonkeyPatch, value: str,
+    ) -> None:
+        monkeypatch.setenv(CLOCK_START_ENV, _STORY_START)
+        monkeypatch.setenv(CLOCK_ANCHOR_ENV, value)
+        with pytest.raises(ValueError, match=CLOCK_ANCHOR_ENV):
+            agent_now()
+
+    def test_an_anchor_without_a_start_is_refused(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv(CLOCK_ANCHOR_ENV, "2026-09-23T10:00:00+00:00")
+        with pytest.raises(ValueError, match=CLOCK_START_ENV):
+            agent_now()
+
+    def test_only_a_shifted_clock_has_an_earlier_era(
+        self, monkeypatch: pytest.MonkeyPatch, real_time: list[float],
+    ) -> None:
+        assert not predates_agent_clock(_REAL - 60.0)
+        reset_agent_clock()
+        monkeypatch.setenv(CLOCK_START_ENV, _STORY_START)
+        assert predates_agent_clock(_REAL - 60.0)
+        assert not predates_agent_clock(_REAL)
+
+    async def test_catch_up_skips_messages_from_an_earlier_clock(
+        self, monkeypatch: pytest.MonkeyPatch, real_time: list[float], orchestrator,
+    ) -> None:
+        import aiohttp
+
+        from agents.channel_catchup import replay_channel_history
+
+        from ._catchup_test_helpers import _channel, _msg, _SpyAgent
+
+        monkeypatch.setenv(CLOCK_START_ENV, _STORY_START)
+        monkeypatch.setenv(
+            CLOCK_ANCHOR_ENV, datetime.fromtimestamp(_REAL - 60.0).astimezone().isoformat(),
+        )
+        base_url, state = orchestrator
+        state["channels"] = [_channel(channel_id="group:board")]
+        state["members"]["group:board"] = [
+            {"id": "ember-owl", "respond": "when_mentioned",
+             "joined_at": "2026-05-01T00:00:00+00:00"},
+        ]
+        state["history"]["group:board"] = [  # newest first, as the orchestrator sends
+            _msg(msg_id="now", channel_id="group:board", sender_id="op", content="this meeting",
+                 ts=datetime.fromtimestamp(_REAL - 30.0).astimezone()),
+            _msg(msg_id="old", channel_id="group:board", sender_id="op", content="last meeting",
+                 ts=datetime.fromtimestamp(_REAL - 7 * 86_400.0).astimezone()),
+        ]
+        agent = _SpyAgent("ember-owl")
+        async with aiohttp.ClientSession() as session:
+            await replay_channel_history(agent=agent, orchestrator_url=base_url, session=session)
+        assert [e.message_id for e in agent.events] == ["now"]
+        assert agent.events[0].timestamp == pytest.approx(_STORY_EPOCH - 30.0 + 60.0)
 
 
 async def test_a_note_is_stamped_in_agent_time(

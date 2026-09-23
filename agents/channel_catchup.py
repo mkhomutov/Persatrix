@@ -74,6 +74,7 @@ from .channel_history_fetcher import HttpChannelHistoryFetcher
 from .channel_replay_event import build_replay_event
 from .channel_replay_outcome import ReplayPassOutcome
 from .channel_validation import validate_channel_message_dict
+from .clock import predates_agent_clock
 from .persona_types import AgentEvent
 
 if TYPE_CHECKING:
@@ -298,7 +299,7 @@ async def _replay_channel_history_inner(
             # validation) could drive malformed payloads through this
             # seam. Per-row WARN + skip is "best-effort with
             # bounds-checking", not "all-or-nothing".
-            err, _parsed_ts = validate_channel_message_dict(
+            err, parsed_ts = validate_channel_message_dict(
                 msg, channel_type=channel_type,
             )
             if err is not None:
@@ -307,6 +308,11 @@ async def _replay_channel_history_inner(
                     "agent=%s channel=%s msg=%s reason=%s",
                     agent.agent_id, channel_id, msg.get("id", ""), err,
                 )
+                continue
+            # Published before this agent's clock began: an earlier run with
+            # its own offset ingested it, and this clock cannot place it.
+            # Dropped like a malformed row — the next boot drops it too.
+            if parsed_ts is not None and predates_agent_clock(parsed_ts):
                 continue
             event = build_replay_event(msg, channel_id, respond_policy, ch)
             try:
