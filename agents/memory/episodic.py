@@ -13,13 +13,13 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-import time
 from typing import TYPE_CHECKING, Any
 
 import aiosqlite
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
+from ..clock import agent_now
 from ..epoch_id import resolve_epoch_id_silent
 from ..observability.spans import (
     EPISODIC_RECALL_SPAN,
@@ -412,7 +412,7 @@ class EpisodicMemory(
 
                 # Increment access_count and update last_accessed_at
                 if episodes:
-                    now = time.time()
+                    now = agent_now()
                     ids = [e.id for e in episodes]
                     placeholders = ",".join("?" for _ in ids)
                     await db.execute(

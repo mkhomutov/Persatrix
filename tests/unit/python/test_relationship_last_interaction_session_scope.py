@@ -33,17 +33,17 @@ from agents.session_id import SESSION_ID_ENV_VAR
 class _SeqClock:
     """Deterministic clock so ``record_interaction`` timestamps are distinct.
 
-    ``record_interaction`` stamps each row with ``time.time()``.  Two
+    ``record_interaction`` stamps each row with ``agent_now()``.  Two
     rapid real-clock calls can return equal floats, which would make a
     ``last_interaction_at`` assertion non-deterministic — patch
-    :mod:`agents.memory.relationship_mutations`'s ``time`` reference with
-    this monotonic stub instead.
+    :mod:`agents.memory.relationship_mutations`'s ``agent_now`` reference
+    with this monotonic stub instead.
     """
 
     def __init__(self, *values: float) -> None:
         self._it = iter(values)
 
-    def time(self) -> float:
+    def __call__(self) -> float:
         return next(self._it)
 
 
@@ -72,7 +72,7 @@ class TestLastInteractionAtIsSessionScoped:
         """
         from agents.memory import relationship_mutations as _rm_mod
 
-        monkeypatch.setattr(_rm_mod, "time", _SeqClock(100.0, 200.0))
+        monkeypatch.setattr(_rm_mod, "agent_now", _SeqClock(100.0, 200.0))
         # First-seen under run-a → relationships row tagged "run-a".
         await memory_at_run_a.record_interaction(
             "peer-a", "task_delegation", session_id="run-a",
@@ -106,7 +106,7 @@ class TestLastInteractionAtIsSessionScoped:
         # and last_interaction_at = NULL.
         await memory_at_run_a.update_trust("peer-seed", 0.2, "seed")
         # A foreign-session interaction bumps the legacy row's column.
-        monkeypatch.setattr(_rm_mod, "time", _SeqClock(500.0))
+        monkeypatch.setattr(_rm_mod, "agent_now", _SeqClock(500.0))
         await memory_at_run_a.record_interaction(
             "peer-seed", "task_delegation", session_id="run-b",
         )  # t=500.0 — invisible to run-a
@@ -123,7 +123,7 @@ class TestLastInteractionAtIsSessionScoped:
         """
         from agents.memory import relationship_mutations as _rm_mod
 
-        monkeypatch.setattr(_rm_mod, "time", _SeqClock(100.0, 200.0))
+        monkeypatch.setattr(_rm_mod, "agent_now", _SeqClock(100.0, 200.0))
         await memory_at_run_a.record_interaction(
             "peer-a", "task_delegation", session_id="run-a",
         )  # t=100.0

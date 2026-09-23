@@ -11,11 +11,11 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 from typing import TYPE_CHECKING
 
 import aiosqlite
 
+from ..clock import agent_now
 from ..model_aliases import resolve
 from ..prompt_loader import load_snippet
 from .episodic_queries import EPISODE_SELECT, row_to_episode
@@ -67,7 +67,7 @@ async def summarize_old_episodes(
     if older_than_days < 0:
         raise ValueError(f"older_than_days must be >= 0, got {older_than_days}")
 
-    cutoff = time.time() - older_than_days * 86400.0
+    cutoff = agent_now() - older_than_days * 86400.0
 
     # NOTE: compression_level < 1 intentionally limits selection to raw
     # (level-0) episodes.  The 1→2 ("distilled") transition defined in
@@ -151,7 +151,7 @@ async def summarize_old_episodes(
             # Strip leading/trailing whitespace from LLM output (F-3c-1).
             summary = summary.strip()
 
-            now = time.time()
+            now = agent_now()
             new_level = episode.compression_level + 1
             update_cursor = await db.execute(
                 "UPDATE episodes SET summary = ?, compression_level = ?, "
@@ -193,7 +193,7 @@ async def delete_old_episodes(
     if older_than_days < 0:
         raise ValueError(f"older_than_days must be >= 0, got {older_than_days}")
 
-    cutoff = time.time() - older_than_days * 86400.0
+    cutoff = agent_now() - older_than_days * 86400.0
 
     cursor = await db.execute(
         "DELETE FROM episodes "

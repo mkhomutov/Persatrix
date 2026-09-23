@@ -11,13 +11,13 @@ from __future__ import annotations
 import json
 import logging
 import math
-import time
 import uuid
 from typing import Any
 
 import aiosqlite
 from opentelemetry import trace
 
+from ..clock import agent_now
 from ..epoch_id import DEFAULT_EPOCH_ID
 from ..observability.spans import RELATIONSHIP_UPDATE_SPAN
 from ..principal_id import DEFAULT_PRINCIPAL_ID
@@ -351,7 +351,7 @@ async def record_interaction(
         outcome = truncate_field(agent_id, outcome, other_id, "outcome")
 
     interaction_id = str(uuid.uuid4())
-    now = time.time()
+    now = agent_now()
 
     await db.execute(
         """

@@ -35,11 +35,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from dataclasses import dataclass
 
 import aiosqlite
 
+from ..clock import agent_now
 from .decay import (
     DEFAULT_C_MIN,
     DEFAULT_LAMBDA_PER_DAY,
@@ -149,7 +149,7 @@ class EvictionPass:
 
         Procedure rows are excluded — see ``_NOT_PROCEDURE_PREDICATE``.
         """
-        cutoff = time.time() - self._ttl_seconds
+        cutoff = agent_now() - self._ttl_seconds
         cursor = await db.execute(
             "DELETE FROM episodes "
             "WHERE agent_id = ? AND importance < ? AND created_at < ? "
@@ -225,7 +225,7 @@ class EvictionPass:
         """
         # Taken before the SELECT: a refresh that lands after it stamps a
         # later ``last_validated_at``, which the DELETE below spares.
-        now = time.time()
+        now = agent_now()
         async with db.execute(
             # PR #225 review S2: select ``importance`` alongside
             # ``confidence`` so the legacy-row shim

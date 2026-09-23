@@ -30,6 +30,7 @@ from .channel_wire_metadata import (
 )
 from .chat_reply import chat_error_response as _chat_error_response
 from .chat_reply import extract_chat_reply as _extract_chat_reply
+from .clock import to_agent_time
 from .closed_interactions_read import handle_get_closed_interactions
 from .dispatch import EventDispatcher
 from .epoch_id import EVENT_EPOCH_METADATA_KEY
@@ -432,7 +433,8 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
             sender_id=request.sender_id,
             message_id=request.message_id,
             thread_id=request.thread_id or None,
-            timestamp=publish_ts,
+            # Moved into agent time, which memory reads (agents.clock).
+            timestamp=to_agent_time(publish_ts),
             # Seed cascade_depth from the typed proto field (RFC 0011
             # cascade-depth wire-propagation amendment, PR 3) so the dispatcher
             # sees the wire value instead of resetting to zero on every hop.
