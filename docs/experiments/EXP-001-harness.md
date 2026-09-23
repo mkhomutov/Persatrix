@@ -26,10 +26,19 @@ result can cite them.
 | 3b ([#988](https://github.com/mkhomutov/Persatrix/pull/988)) | Runtime: the Anthropic adapter's prompt-cache marker and cache token counts; each meeting's clock settings; a [call log](../ai-glossary.md#call-log) that tags each call with its arm, meeting, adviser and purpose, and the reader that turns it into call records | 3, 4 and 7, in part |
 | 4 | Arm A: the advisers' identities rendered by the persona runtime's own prompt code, one call per meeting | 7, 8 |
 | 5 | Arms B, C, D and D′: deployments, channels, the memo turn, restarts in D, D′'s transcript prefix, retries and failure detection | 1, 2, 3, 5, 6 |
-| 6 | The judge and the practice run | all eight, on the practice series |
+| 6 | The judge, with a call purpose of its own, and the practice run, which also checks the call log's total against the provider's usage report | all eight, on the practice series |
 
 Each PR is test-first, like all unit-level code here. PR 6's practice run is
 the evidence that the eight checks pass before any scored meeting.
+
+PR 3b leaves two constraints for PR 5. Anthropic can read a cache entry only
+once the response that wrote it has begun, and it keys the entry on the tool
+list as well as the prefix. So every call that carries D′'s prefix must share
+one tool list, and a meeting's first such call must be under way before the
+next one starts; otherwise each writes its own entry and check 3 fails. And a
+close summary that runs past its 30-second limit is cancelled: in D that
+adviser loses its summary and facts of the meeting, and the call may still be
+billed, so PR 5's failure detection must catch it.
 
 ## Frozen choices
 
@@ -52,13 +61,13 @@ the evidence that the eight checks pass before any scored meeting.
 | Price range | Prices p from zero up; the verdict can change only where the interval's low end, or its mean less p, crosses zero, and those points are solved exactly | 2 |
 | Cheaper-model repricing | Every `bid` and `summary` call moves to `claude-haiku-4-5` at $1.00 input and $5.00 output; its cache tokens keep the fixed table's ratio to input, $1.25 to write and $0.10 to read. That model is never in the run's own price table | 2 |
 | Blinding | Every adviser's ID and name from `panel.yaml`, in any case and joined by a space, hyphen, underscore or line break, becomes `[adviser]`; so does any one word of a name written capitalised, such as `Stoat`. A packet ID is 8 hex characters from the operating system's random source, so no seed can rebuild it. Each rater's order is a fresh shuffle from that source, drawn again if another rater already has it. A missing memo scores 0 and never reaches the raters | 2 |
-| Story clock | An adviser's [agent time](../ai-glossary.md#agent-time) starts at 10:00 UTC on the meeting's story date and then runs with the real clock; it is not frozen. The harness also sets `PERSATRIX_CLOCK_ANCHOR` to the real moment the meeting began, so a restart inside a meeting resumes the clock rather than winding it back; at boot, messages sent before that moment are not replayed, because they belong to an earlier meeting's clock. Memory stamps, recall ages and incoming messages all read it, so in arm D a fact from the last meeting is a week old. Timers, deadlines and the orchestrator's records stay on real time | 3a; the zone in 3b |
-| Cache marker | A caller hands the stable text to the model client as a cache prefix. The Anthropic adapter sends it as the first system block, marked `ephemeral`, before the system prompt; a call without one carries no marker anywhere. A provider that cannot cache reads the prefix joined onto the front of its system prompt | 3b |
-| Call log | Every adviser appends to one file named by `PERSATRIX_CALL_LOG`, one line per call, failed calls included, with its tags in `PERSATRIX_CALL_TAGS`: arm, series, meeting, meeting kind and attempt. Calls the harness makes itself (arm A, the judge) carry the same tags through a scope around each meeting's calls. A line's time is when the call began, in real time, never agent time. A line the reader cannot place (no purpose, a missing tag, an unknown arm) is refused, never guessed at | 3b |
-| Call purposes, mapped | The runtime names each call `turn`, `bid`, `critic`, `revise`, `summary` or `compress`. A turn, critic or revise call is `reply`; `compress` is `summary`. Arm A's call has no adviser | 3b |
-| The memo's calls | A call is `memo` when it is the chair's turn, critic or revise, in that meeting and attempt, begun at or after the moment the harness asked for the memo. The chair's memory summary after that stays `summary` | 3b |
-| Memory writes in B, C and D′ | The runtime cannot switch memory writing off, so those arms' `summary` calls are kept and priced in real spend but not counted in the arm's dollars per plan | 3b |
-| Failed calls | A call that raised is logged with its error and no tokens, and read back apart from the records, so a failed call is never priced | 3b |
+| Story clock | An adviser's [agent time](../ai-glossary.md#agent-time) starts at 10:00 UTC on the meeting's story date and then runs with the real clock; it is not frozen. The advisers set no timezone, so they render UTC and their clock line reads 10:00. The harness also sets `PERSATRIX_CLOCK_ANCHOR` to the real moment the meeting began, so a restart inside a meeting resumes the clock rather than winding it back; at boot, messages sent before that moment are not replayed, because they belong to an earlier meeting's clock. Memory stamps, recall ages and incoming messages all read it, so in arm D a fact from the last meeting is a week old. Timers, deadlines and the orchestrator's records stay on real time | 3a; the zone in 3b |
+| Cache marker | A caller hands the stable text to the model client as a cache prefix. The Anthropic adapter sends it as the first system block, before the system prompt, marked `ephemeral` with no TTL: the five-minute cache, whose write price of 1.25 times input is the one in pre-registration §3's table. A call without a prefix carries no marker anywhere. A provider that cannot cache reads the prefix joined onto the front of its system prompt | 3b |
+| Call log | Every adviser appends to the file named by `PERSATRIX_CALL_LOG`, one line per call, failed calls included, with its tags in `PERSATRIX_CALL_TAGS`: arm, series, meeting, meeting kind and attempt. Calls the harness makes itself, such as arm A's, carry the same tags through a scope around each meeting's calls; how the judge's calls are logged is PR 6's choice. A line's time is when the call began, in real time, never agent time. A line the reader cannot place (no purpose, a missing tag, an unknown arm) is refused, never guessed at | 3b |
+| Call purposes, mapped | The runtime names each call `turn`, `bid`, `critic`, `revise`, `summary` or `compress`. A turn, critic or revise call is `reply`; `compress` is `summary`. Arm A's call has no adviser. Neither the reflexion loop (critic, revise) nor working-memory compression runs in EXP-001: reflexion needs `mode: plan` and `revise` of 1 or more, which the shipped `roundtable` channel leaves at `bid` and 0, and nothing calls compression. Those mappings only keep every line readable | 3b |
+| The memo's calls | A call is `memo` when it is the chair's turn, critic or revise, in that meeting and attempt, begun at or after the moment the harness asked for the memo; both times are real time, and the harness asks only once the discussion has closed. A bid the chair makes before answering stays `bid`, and its memory summary after that stays `summary` | 3b |
+| Memory writes in B, C and D′ | The runtime has no setting that stops memory writing: nothing turns off the summary written when an interaction closes. So those arms' `summary` calls are kept and priced in real spend but not counted in the arm's dollars per plan | 3b |
+| Failed calls | A call that raised is logged with its error and no tokens, and read back apart from the records, so a failed call is never priced. A call cancelled after the provider began work, or retried inside the provider's library, may be billed for more than the log shows; the practice run compares the two | 3b |
 
 The arm order each series runs in:
 

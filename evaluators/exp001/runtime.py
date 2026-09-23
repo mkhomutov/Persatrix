@@ -6,7 +6,7 @@ its agent time starts at 10:00 UTC that day and runs on with the real clock
 (check 7). The **call log** names the file the adviser appends a line to for
 every model call, and the tags that say which arm, series, meeting and
 attempt the process is serving (check 4). Calls the harness makes itself,
-arm A's and the judge's, are tagged per meeting with :func:`call_log_scope`.
+such as arm A's, are tagged per meeting with :func:`call_log_scope`.
 
 After the run, :func:`read_call_log` turns those lines into the
 :class:`~evaluators.exp001.costs.CallRecord` values ``costs`` prices. It
