@@ -2,9 +2,9 @@
 
 **Test ID**: `MT-SESSION-002`
 **Feature Area**: Sessions (RFC 0031 Phase 3 — `persatrix session` operator verbs + the resolution chain)
-**Version**: 1.0
+**Version**: 1.1
 **Created**: 2026-06-01
-**Last Updated**: 2026-06-01
+**Last Updated**: 2026-09-23
 **Status**: Active
 
 ---
@@ -14,9 +14,11 @@
 **Purpose**: Verify the `persatrix session new / use / list / archive / current`
 operator verbs round-trip live against the orchestrator `/api/v1/sessions`
 registry, and that the **four-level resolution chain** (`--session` flag >
-`PERSATRIX_SESSION_ID` env > `~/.persatrix/active-session` pointer file >
-built-in `legacy`, RFC 0031 [OQ #6](../rfcs/0031-per-session-namespacing-channels.md#open-questions))
-resolves end-to-end in the documented precedence order.
+`PERSATRIX_SESSION_ID` env > `~/.persatrix/active-session` pointer file > none
+sent, RFC 0031 [OQ #6](../rfcs/0031-per-session-namespacing-channels.md#open-questions))
+resolves end-to-end in the documented precedence order. The fourth level sends
+no session, so the orchestrator's own session for the channel applies — not
+`legacy`, which the original OQ #6 prose named ([sessions guide §4](../guides/sessions.md#4-how-the-active-session-is-resolved)).
 
 This is the **primary v0.3.5 operator-surface gate** — the live counterpart to
 the `test_session_operator_surface.py` integration gate (which is skipped
@@ -182,8 +184,9 @@ PERSATRIX_SESSION_ID=mt-session-002-a ./bin/persatrix session current   # still 
 To observe the dispatch-path chain (`--session` flag > `PERSATRIX_SESSION_ID`
 env > pointer), run a dispatch verb and read back the `session_id` the resulting
 memory/channel row carries — that observation is the substance of
-[MT-SESSION-003](MT-SESSION-003.md) (it boots the persona under
-`PERSATRIX_SESSION_ID` and reads `episodes.session_id`). Note `--session`
+[MT-SESSION-003](MT-SESSION-003.md) (it exports `PERSATRIX_SESSION_ID` in the
+shell it runs the CLI from — no persona restart — and reads
+`episodes.session_id`). Note `--session`
 resolves its argument against the registry first, so it only accepts a
 **registered** id/label; an ad-hoc string must come via `PERSATRIX_SESSION_ID`
 (which passes through unresolved — [`session_resolve.rs`](../../cli/src/session_resolve.rs)).
