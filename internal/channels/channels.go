@@ -64,9 +64,11 @@ const (
 	RespondObserver    RespondPolicy = "observer"
 
 	// RespondChair is the v0.3.8 Tier B facilitator disposition: a
-	// `participant` carrying a low default salience `threshold` so it clears
-	// the cheap relevance bid readily and keeps an open-floor discussion
-	// moving. It normalizes to the legacy `always` wire value (so every
+	// `participant` carrying a low default salience `threshold` so, under
+	// `reasoning.mode: off`, it clears the cheap relevance bid readily and keeps
+	// an open-floor discussion moving. The default `bid` rung ignores
+	// `threshold`, so there a chair acts as a plain participant (RFC 0051
+	// OQ 7). It normalizes to the legacy `always` wire value (so every
 	// downstream reader of `respond_policy` is unchanged); its "chair-ness"
 	// rides instead on the low [MemberConfig.Threshold]
 	// ([DefaultChairThreshold]) plus [MemberConfig.SalienceGated], both derived
@@ -185,7 +187,8 @@ func canonicalRespondPolicy(p RespondPolicy) (RespondPolicy, error) {
 //   - threshold defaults to `explicit` (the operator's value, possibly nil for
 //     unset → bias-to-silence). A `chair` with no explicit value picks up the
 //     low [DefaultChairThreshold] — its whole facilitator identity, since on
-//     the wire a chair is just a participant.
+//     the wire a chair is just a participant. Only the `reasoning.mode: off`
+//     score gate reads `threshold`.
 //
 // `explicit` lets a caller that already parsed an operator-supplied threshold
 // (the config object form) thread it through; pass nil where no explicit value

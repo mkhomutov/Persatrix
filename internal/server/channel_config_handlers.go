@@ -321,8 +321,9 @@ func (s *Server) resolvedConfigBaseline(ctx context.Context, id string) channels
 	// RFC 0051: freeze the resolved reasoning rung too, but CONDITIONALLY (like the
 	// escalation chair, not the unconditional flat knobs): a rung at its default
 	// (`bid` on a governed channel, `off` otherwise) stays inherit, and a non-off
-	// mode whose governance has drifted away is dropped so it cannot block an
-	// unrelated first edit — see [Server.reasoningBaseline].
+	// mode whose governance has drifted away is dropped — see
+	// [Server.reasoningBaseline], which also names two cases it gets wrong
+	// (ISSUE-0168).
 	base.Reasoning = s.reasoningBaseline(ctx, id)
 	// RFC 0052: freeze the resolved autonomous rung too, CONDITIONALLY (like the
 	// chair / reasoning, not the unconditional flat knobs): a disabled default stays

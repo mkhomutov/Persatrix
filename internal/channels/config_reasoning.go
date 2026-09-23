@@ -20,12 +20,13 @@ import (
 // salience-gated member is rejected rather than left silently inert.
 //
 // This file is the Phase 3a config backend: the operator-editable knob on the
-// RFC 0050 surface. When a channel sets no `mode`, its members decide the
-// default (RFC 0051 PR 6, v0.3.10): a governed channel — one with at least one
-// salience-gated `participant`/`chair` member — gets `bid`, and an ungoverned
-// channel keeps `off`. An explicit `mode: off` is the one-flip kill switch: the
-// channel goes back to the scalar score gate, and the setting survives a
-// restart ([GovernedDefaultReasoningMode]).
+// RFC 0050 surface. A channel that sets no `mode` gets a default that depends on
+// its members (RFC 0051 PR 6, v0.3.10): `bid` on a governed channel — one with at
+// least one salience-gated `participant`/`chair` member — and `off` on an
+// ungoverned one ([GovernedDefaultReasoningMode]). An explicit `mode: off` is the
+// one-flip kill switch: the channel goes back to the scalar score gate. The
+// default is worked out at startup, on a config change and when a group is
+// created; a later member change does not redo it (ISSUE-0168).
 
 // Reasoning mode rungs (RFC 0051 §C). The ladder is a strict superset chain
 // `off ⊂ bid ⊂ plan`, so a channel is promoted/demoted one rung at a time.
@@ -92,8 +93,10 @@ const MaxReasoningRevise = 2
 // `off` remains a true one-flip kill switch (an explicit `off` override is
 // preserved across the flip, [ReasoningConfig.FreezeOverrides]). An ungoverned
 // channel keeps the package `off` default — the knob is inert there and
-// `validate` forbids a non-off mode anyway — so the `bid` default takes effect at
-// the moment a channel becomes governed (RFC 0051 §G / OQ 2).
+// `validate` forbids a non-off mode anyway — so the `bid` default applies once a
+// channel is governed (RFC 0051 §G / OQ 2): at startup, on a config change or when
+// a group is created, but not yet when a member change makes it governed
+// (ISSUE-0168).
 const GovernedDefaultReasoningMode = ReasoningModeBid
 
 // governedDefaultMode is the default `mode` for a channel given its live

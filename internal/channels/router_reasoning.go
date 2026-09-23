@@ -83,8 +83,9 @@ func (r *ChannelRouter) ResolveReasoning(ctx context.Context, cfg *Config) error
 		}
 		// PR 6 go-live: a store-only group channel (e.g. runtime-created, no YAML
 		// block) picks up the GOVERNED default — `bid` if it has a salience-gated
-		// member, else `off`. So a channel becomes `bid`-by-default the moment it
-		// is governed, without an explicit reasoning block (RFC 0051 §G / OQ 2).
+		// member, else `off` — without an explicit reasoning block (RFC 0051 §G /
+		// OQ 2). This runs at startup only: a member change later does not re-stamp
+		// the rung (ISSUE-0168).
 		r.SetReasoning(ch.ID, governedReasoningBase(r.channelGoverned(ctx, ch.ID)))
 	}
 	return nil

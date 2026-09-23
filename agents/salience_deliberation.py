@@ -25,10 +25,9 @@ agreeing" nor rescue a low-scored turn that would add real substance.
 **Live since RFC 0051 PR 6 (v0.3.10).** The structured path runs when
 :func:`agents.salience_bid.evaluate_salience` gets ``mode="bid"``/``"plan"``.
 The salience seam (:func:`agents.persona_runtime.salience_gate.run_salience_gate`)
-passes the channel's ``reasoning.mode``, which arrives with each message:
-``bid`` by default on a governed channel (one with a salience-gated
-``participant``/``chair`` member), unless an operator set the ``off`` kill
-switch or promoted the channel to ``plan``.
+passes the channel's ``reasoning.mode``, which arrives with each message. The
+orchestrator chooses it; a governed channel that sets no ``mode`` gets ``bid``
+(``GovernedDefaultReasoningMode`` in ``internal/channels/config_reasoning.go``).
 """
 
 from __future__ import annotations
@@ -163,9 +162,11 @@ def warn_if_unknown_mode(mode: str, *, agent_id: str) -> None:
 
     The bid then degrades to the scalar score gate (``is_structured`` is
     ``False`` for any unknown value), so the fallback is *fail-safe* — but
-    without this a typo'd ``reasoning.mode`` would silently disable the
-    structured verdict with no signal until the Phase-3 config ``validate``
-    (PR 4) rejects an unbacked value outright.
+    without this an unknown ``mode`` would silently disable the structured
+    verdict with no signal. The orchestrator's config ``validate`` rejects an
+    unknown ``reasoning.mode``, so in production one arrives only from a newer
+    orchestrator (version skew). The salience seam calls this and clamps the
+    value to ``off`` before the bid; the bid's own call covers direct callers.
 
     Deduped on the value (see :data:`_WARNED_UNKNOWN_MODES`): the typo is a
     standing config fact, so one warning per distinct bad value is enough and

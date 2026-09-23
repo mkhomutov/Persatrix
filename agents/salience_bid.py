@@ -363,8 +363,8 @@ async def evaluate_salience(
     (``RESOURCE_EXHAUSTED``), or any provider error all fail closed.
 
     ``mode`` (RFC 0051 §C/§G) selects the verdict grammar. The seam passes the
-    channel's rung, ``bid`` by default on a governed channel; direct callers default
-    to ``off``. ``off`` is the scalar ``speak:``/``score:`` bid against the
+    channel's resolved ``reasoning.mode``; a caller that omits ``mode`` gets
+    ``off``. ``off`` is the scalar ``speak:``/``score:`` bid against the
     per-member ``threshold`` (byte-for-byte v0.3.8); ``bid``/``plan`` is the
     structured ``should_post``/``reason_code`` verdict that **supersedes the
     score gate** (``threshold`` inert, no ``score``), delegated to

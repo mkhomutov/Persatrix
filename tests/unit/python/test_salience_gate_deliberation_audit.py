@@ -195,8 +195,9 @@ class TestScalarPathStaysDark:
     async def test_default_mode_is_off_and_dark(
         self, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """The ``mode`` parameter defaults to ``off`` — the action-loop call site
-        passes nothing, so production stays on the scalar path (no audit)."""
+        """With no ``mode`` argument the seam reads the rung off the wire. This
+        event carries none (a pre-v0.3.10 producer), so it resolves to ``off``:
+        the scalar path, which emits no audit."""
         await _patched_bid(
             monkeypatch,
             SalienceDecision(speak=True, score=0.9, reason="salient"),

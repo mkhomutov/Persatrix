@@ -2,9 +2,9 @@
 
 **Test ID**: `MT-CHANNEL-RELEVANCE-002`
 **Feature Area**: Channels (conversation governance — RFC 0030 Layer 3, relevance amendment **Tier B**)
-**Version**: 1.0
+**Version**: 1.1
 **Created**: 2026-06-08
-**Last Updated**: 2026-06-08
+**Last Updated**: 2026-09-24
 **Status**: Active
 
 ---
@@ -75,10 +75,13 @@ personas up on the default compose stack; orchestrator started with
 `--enable-ui`; clean state via `make reset` or a fresh `PERSATRIX_EPOCH`),
 **plus** a small edit to make the `planning` channel a three-open-floor-member
 room with one `chair` (the default ships `ember-owl: addressed`, so only two
-members reach the open floor — too few to show pile-on):
+members reach the open floor — too few to show pile-on), and set its
+`reasoning.mode` to `"off"` (the default ships `"bid"`):
 
 ```yaml
-# config/channels.yaml — planning.members
+# config/channels.yaml — planning
+reasoning:
+  mode: "off"                   # was: "bid" — this MT exercises the score gate
 members:
   - id: ember-owl
     respond: participant        # was: addressed
@@ -88,6 +91,10 @@ members:
     respond: chair              # was: participant — the low-threshold facilitator
 ```
 
+- ☐ `reasoning.mode` is `"off"`. Since v0.3.10 a channel with a `participant`
+  or `chair` defaults to `bid`, which ignores `threshold`: no `below_threshold`
+  code would appear and the `chair` would act as a `participant`. The `bid`
+  rung is covered by [MT-REASON-001](MT-REASON-001.md).
 - ☐ `ember-owl` and `iron-fox` are `participant`; `nova-sparrow` is `chair`. No
   explicit `threshold` on the two `participant`s (so they bias to silence on
   ambiguous traffic, TB2); the `chair` inherits the low default.

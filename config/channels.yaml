@@ -11,9 +11,11 @@
 #                   (subject to the v0.3.8 Tier B salience bid)
 #   - chair       — a low-threshold facilitator: a `participant` that clears
 #                   the salience bid readily and keeps the discussion moving
-#                   (v0.3.8). A chair CANNOT close an interaction — convergence
-#                   is owned by the governance layers — and its Layer 5
-#                   moderator hooks are reserved/inert until v0.4.0.
+#                   (v0.3.8) under `reasoning.mode: "off"`; the default `bid`
+#                   ignores the threshold, so there a chair acts as a
+#                   participant. A chair CANNOT close an interaction —
+#                   convergence is owned by the governance layers — and its
+#                   Layer 5 moderator hooks are reserved/inert until v0.4.0.
 #   - addressed   — speaks only when @-mentioned (or replied to in-thread)
 #   - observer    — never speaks
 # The legacy values `always` / `when_mentioned` / `never` still load and map
@@ -22,9 +24,12 @@
 #
 # Per-disposition `threshold` (v0.3.8 Tier B): an optional salience bar in
 # [0, 1] that an open-floor `participant`'s cheap relevance bid must clear to
-# reach the (expensive) quality turn. Bias-to-silence — omit it and the member
-# stays conservative on ambiguous open-floor traffic. A `chair` gets a low
-# default (0.15) so it speaks readily; override per member if desired:
+# reach the (expensive) quality turn. It applies only under
+# `reasoning.mode: "off"`: a channel with a `participant` or `chair` defaults
+# to `bid`, which ignores it (see the `planning` channel's `reasoning:` note).
+# Bias-to-silence — omit it and the member stays conservative on ambiguous
+# open-floor traffic. A `chair` gets a low default (0.15) so it speaks
+# readily; override per member if desired:
 #   - id: facilitator
 #     respond: chair
 #   - id: specialist

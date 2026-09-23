@@ -3,10 +3,12 @@
 The ``chair`` disposition ships in **v0.3.8** as a low-threshold *facilitator*
 only (RFC 0030 Tier B): on the wire a ``chair`` is just a ``participant`` whose
 salience ``threshold`` is the low ``DefaultChairThreshold``
-(:mod:`internal/channels/config.go`), so it clears the cheap relevance bid
-(:func:`agents.salience_bid.evaluate_salience`) readily and keeps a discussion
-moving. That active facilitator half needs **no code here** — it is entirely the
-low threshold delivered over the ``ChannelMessageEvent.threshold`` wire field.
+(:mod:`internal/channels/config.go`), so under ``reasoning.mode: off`` it clears
+the cheap relevance bid (:func:`agents.salience_bid.evaluate_salience`) readily
+and keeps a discussion moving. The default ``bid`` rung ignores ``threshold``, so
+there a chair acts as a plain participant (RFC 0051 OQ 7). That active
+facilitator half needs **no code here** — it is entirely the low threshold
+delivered over the ``ChannelMessageEvent.threshold`` wire field.
 
 This module is the chair's *other* half — the **moderator** that reads the
 transcript and decides whether the conversation should continue, wrap up, or
