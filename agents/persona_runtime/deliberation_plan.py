@@ -30,9 +30,9 @@ than blocking the post — the bias is the **opposite** of the gate's
 bias-to-silence: by the time a plan is parsed the gate has already decided the
 persona *should* post (RFC 0051 §Phase 2).
 
-**Dark until Phase 3.** The plan path is reached only under ``mode: plan``,
-which the action-loop seam does not pass until PR 4 wires the ``reasoning``
-config knob and PR 6 flips the governed default.
+**Opt-in per channel.** The plan path runs only under ``mode: plan``. A
+governed channel defaults to ``bid`` (since RFC 0051 PR 6), so a channel
+reaches this module only after an operator promotes it to ``plan``.
 """
 
 from __future__ import annotations

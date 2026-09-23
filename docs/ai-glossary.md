@@ -153,7 +153,10 @@ Process vocabulary (scope lock, cuttable, live arc, finding, …) lives in the
   already been said?" It reads the in-round transcript and stays **silent**
   unless its score clears the member's **disposition threshold** — the
   no-pile-on mechanism. Bias-to-silence by default; fails closed to silence on a
-  parse/lease error.
+  parse/lease error. Since v0.3.10 (RFC 0051) a channel where the bid runs
+  defaults to `reasoning.mode: bid`: the bid returns a yes-or-no verdict with a
+  reason instead of a score, and the threshold is not used; `reasoning.mode: off`
+  restores the score.
 - **Example:** "On the open-floor question the salience bid kept three of the
   four participants silent — only the one with something new spoke."
 
@@ -164,7 +167,8 @@ Process vocabulary (scope lock, cuttable, live arc, finding, …) lives in the
 - **Definition:** The per-member salience-score floor (`[0, 1]`) the **salience
   bid** must clear to speak (v0.3.8). **Unset → bias-to-silence** (only a decisive
   score speaks); a `chair` defaults to a low value so it clears readily. A
-  threshold on a non-open-floor disposition is a config error.
+  threshold on a non-open-floor disposition is a config error. Read only under
+  `reasoning.mode: off`; the default `bid` rung ignores it (RFC 0051 OQ 7).
 - **Example:** "Lower the chair's disposition threshold so it facilitates more
   actively."
 
@@ -177,6 +181,8 @@ Process vocabulary (scope lock, cuttable, live arc, finding, …) lives in the
   discussion moving. In v0.3.8 a chair is a *facilitator only* — it **cannot**
   close, wrap up, or terminate an interaction (that is the Layer 5 moderator,
   v0.4.0). Convergence comes from the governance layers, not the chair.
+  Under the default `reasoning.mode: bid` the threshold is not read, so a chair
+  acts as a plain `participant`.
   **v0.3.11 (RFC 0052 §D)** adds one bounded exception on *autonomous* channels:
   when a bounded close fires, the **escalation chair** authors the goal-directed
   [Closing Synthesis](#closing-synthesis) (its [Synthesis Turn](#synthesis-turn))

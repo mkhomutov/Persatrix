@@ -26,8 +26,9 @@ Load-bearing invariants:
 * **Silence-side veto (TB2).** An explicit silence ``reason_code`` on a
   ``should_post: yes`` resolves to silence (parity with the scalar ``speak: no``
   one-way veto), and the silence code is preserved, not laundered.
-* **Dark.** The structured path is reachable only when a caller passes
-  ``mode="bid"``/``"plan"``; the seam does not yet (PR 4 wires the config knob).
+* **Opt-in per call.** ``evaluate_salience`` defaults to ``mode="off"``; the
+  structured path runs only when a caller passes ``mode="bid"``/``"plan"``, as the
+  salience seam does with the channel's resolved ``reasoning.mode``.
 """
 
 from __future__ import annotations
