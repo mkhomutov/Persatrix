@@ -256,6 +256,8 @@ a problem found then is reported in the result, not fixed.
 
 - [EXP-001 pre-registration, part 2](EXP-001-preregistration-scoring.md) —
   scoring, agreement and how a rule fires.
+- [EXP-001 harness](EXP-001-harness.md) — the harness PRs and the choices
+  each one freezes.
 - [Project strategy §4](../project-strategy.md#4-the-decision-framework) — the
   arms and decision rules this document applies.
 - [Sequencing Amendment 2026-09-12](../v0.3.x-sequencing.md#amendment-2026-09-12--close-v0316-small-then-measure-before-any-train-opens)
