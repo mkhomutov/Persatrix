@@ -155,8 +155,10 @@ type ReasoningConfig struct {
 	Model string `yaml:"model"`
 	// Depth is the deliberation depth — shallow (deep is Phase 4, capability-gated).
 	Depth string `yaml:"depth"`
-	// Revise is the reflexion round count — 0 (single pass). `>= 1` is Phase 5,
-	// capability-gated until the critic→revise loop is deployed.
+	// Revise is the reflexion round count — 0 (single pass, the default) up to
+	// MaxReasoningRevise. `>= 1` runs the RFC 0051 Phase 5 critic→revise loop on
+	// a reply composed under a plan, and is accepted only with `mode: plan`
+	// because the critic checks the draft against that plan.
 	Revise int `yaml:"revise"`
 }
 
@@ -204,12 +206,14 @@ func (rc ReasoningConfig) normalized() ReasoningConfig {
 	return rc.normalizedForGovernance(false)
 }
 
-// validate enforces the per-field reasoning invariants — the enum vocabulary plus
-// the v0.3.10 capability gate (deep / revise≥1 rejected as unbacked). It runs on
-// the NORMALIZED value, so an empty field has already been filled and is never
-// the rejection cause. `governed` reports whether the channel has a salience-gated
-// member; a non-off mode on an ungoverned channel is rejected because the
-// deliberation rides the Tier B seam and would otherwise be silently inert.
+// validate enforces the per-field reasoning invariants — the enum vocabulary, the
+// capability gate that rejects the unbacked `depth: deep`, and the revise range
+// 0..MaxReasoningRevise — plus the cross-field rule that `revise >= 1` needs
+// `mode: plan`. It runs on the NORMALIZED value, so an empty field has already
+// been filled and is never the rejection cause. `governed` reports whether the
+// channel has a salience-gated member; a non-off mode on an ungoverned channel is
+// rejected because the deliberation rides the Tier B seam and would otherwise be
+// silently inert.
 //
 // `model: quality` is accepted (not an error) — it is merely discouraged. The
 // discouraged-economics WARNING is not surfaced here (validation has no logger and
