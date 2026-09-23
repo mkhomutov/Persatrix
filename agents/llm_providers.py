@@ -37,6 +37,8 @@ class AnthropicProvider:
     """Wraps anthropic.AsyncAnthropic, translates to LLMResponse."""
 
     name = "anthropic"
+    # LLMClient hands ``cache_prefix`` only to a provider that says True here.
+    supports_prompt_cache = True
 
     def __init__(self, api_key: str | None = None):
         import anthropic
@@ -52,14 +54,28 @@ class AnthropicProvider:
         tools: list,
         max_tokens: int,
         temperature: float,
+        cache_prefix: str = "",
     ) -> LLMResponse:
+        """Send one request. A ``cache_prefix`` goes first in the system
+        prompt, marked so Anthropic caches everything up to its end; the
+        first call writes the cache and later ones with the same prefix read
+        it. Without one the request carries no cache marker at all."""
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": messages,
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
-        if system:
+        if cache_prefix:
+            blocks: list[dict[str, Any]] = [{
+                "type": "text",
+                "text": cache_prefix,
+                "cache_control": {"type": "ephemeral"},
+            }]
+            if system:
+                blocks.append({"type": "text", "text": system})
+            kwargs["system"] = blocks
+        elif system:
             kwargs["system"] = system
         if tools:
             kwargs["tools"] = tools
@@ -86,13 +102,17 @@ class AnthropicProvider:
             )
             stop_reason = StopReason.END_TURN
 
+        usage = response.usage
         return LLMResponse(
             text="\n".join(text_parts) if text_parts else None,
             tool_calls=tool_calls,
             stop_reason=stop_reason,
             usage=Usage(
-                input_tokens=response.usage.input_tokens,
-                output_tokens=response.usage.output_tokens,
+                input_tokens=usage.input_tokens,
+                output_tokens=usage.output_tokens,
+                # Absent on older SDKs and null when nothing was cached.
+                cache_write_tokens=getattr(usage, "cache_creation_input_tokens", None) or 0,
+                cache_read_tokens=getattr(usage, "cache_read_input_tokens", None) or 0,
             ),
         )
 

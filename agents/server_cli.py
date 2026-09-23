@@ -19,6 +19,7 @@ import sys
 
 from opentelemetry.instrumentation.grpc import GrpcAioInstrumentorServer
 
+from .call_log import call_tags
 from .clock import agent_clock_offset
 from .model_aliases import validate_alias_pricing
 from .observability.logging import configure_logging
@@ -52,11 +53,13 @@ def _validate_startup_config() -> None:
 
     It also reads the agent clock's start (``PERSATRIX_CLOCK_START``, see
     :mod:`agents.clock`), so a malformed value stops the agent here rather
-    than at its first memory write.
+    than at its first memory write. The call log's tags
+    (``PERSATRIX_CALL_TAGS``, see :mod:`agents.call_log`) are read here too.
     """
     validate_alias_pricing()
     try:
         agent_clock_offset()
+        call_tags()
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
 

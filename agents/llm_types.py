@@ -46,12 +46,37 @@ class ToolCall:
     signature: bytes | None = None
 
 
+class LLMCallPurpose(Enum):
+    """What a model call is for, named by the code that makes it.
+
+    The model alias cannot tell the calls apart: a salience bid and the
+    reflexion critic both use ``fast``. The call log records the purpose,
+    and EXP-001 prices each purpose separately.
+    """
+
+    TURN = "turn"  # an agent's or persona's own turn
+    BID = "bid"  # a salience bid
+    CRITIC = "critic"  # the reflexion critic reading a draft
+    REVISE = "revise"  # the reflexion rewrite of a draft
+    SUMMARY = "summary"  # an episode summary, with fact extraction at close
+    COMPRESS = "compress"  # working-memory compression
+
+
 @dataclass
 class Usage:
-    """Token usage from LLM response."""
+    """Token usage from LLM response.
+
+    Only the Anthropic adapter fills the two cache counts. There,
+    ``input_tokens`` is the uncached input, and tokens written to or read
+    from the prompt cache are counted apart, since they are priced apart.
+    Every other adapter leaves both at zero, and its ``input_tokens`` is
+    the provider's whole prompt count, whatever that provider cached.
+    """
 
     input_tokens: int
     output_tokens: int
+    cache_write_tokens: int = 0
+    cache_read_tokens: int = 0
 
 
 @dataclass

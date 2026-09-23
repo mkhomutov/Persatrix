@@ -21,6 +21,7 @@ from .llm_client import (
     StopReason,
     ToolCall,
 )
+from .llm_types import LLMCallPurpose
 from .memory import MemoryStore, SharedPoolRegistry, budget_to_limit
 from .memory.facade_procedural import procedural_kwargs_from_config
 from .prompt_loader import load_snippet
@@ -410,6 +411,7 @@ class BaseAgent(ABC):
                 response: LLMResponse = await self._llm_client.create_message(
                     model=self.config["model"],
                     model_alias=self.config.get("model_alias"),
+                    purpose=LLMCallPurpose.TURN,
                     messages=messages,
                     system=system_prompt,
                     tools=tool_defs,
