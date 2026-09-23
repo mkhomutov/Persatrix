@@ -284,9 +284,9 @@ class TestPlanThreadsIntoComposeButNeverLeaks:
                 assert marker not in text
 
     async def test_no_plan_outcome_composes_without_a_plan_section(self):
-        """The dark default: a speak outcome with ``plan=None`` (today's
-        production path, since the seam passes ``mode: off``) composes exactly as
-        before — no private section, nothing to leak."""
+        """A speak outcome with ``plan=None`` (production on every rung but
+        ``plan``: ``off`` and ``bid`` thread no plan) composes exactly as before —
+        no private section, nothing to leak."""
         agent, compose = await _make_agent()
         outcome = SalienceOutcome(
             silence=False, user_message="formatted", seed=list(_SEED), plan=None,

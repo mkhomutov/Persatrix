@@ -4,8 +4,10 @@
 // capability gate, the `revise` range, the rule that `revise >= 1` needs
 // `mode: plan`, and the cross-field rule
 // that `mode != off` requires a salience-gated channel, and (b) the runtime
-// override apply path (validate → persist → bump revision → stamp router), with
-// the governed-channel default held at `off` (the flip is PR 6).
+// override apply path (validate → persist → bump revision → stamp router). They
+// also pin the default `mode`: `bid` on a governed channel with no override,
+// `off` on an ungoverned one, and an explicit `mode: off` kept as the one-flip
+// kill switch, including across a restart.
 package channels
 
 import (
@@ -290,8 +292,8 @@ func TestReasoningOverridesValidate_CapabilityGate(t *testing.T) {
 // --- apply path -----------------------------------------------------------
 
 // TestApplyChannelConfig_ReasoningModeRoundTrips: a `mode: bid` then `mode: plan`
-// override persists, bumps the revision, and is stamped onto the router — while a
-// channel with no override resolves to the default `off`.
+// override persists, bumps the revision, and is stamped onto the router — while
+// the governed channel, before any override, resolves to the default `bid`.
 func TestApplyChannelConfig_ReasoningModeRoundTrips(t *testing.T) {
 	router, store, ctx := newApplyRouter(t)
 	id := mustCreateGovernedGroup(t, store, "planning")

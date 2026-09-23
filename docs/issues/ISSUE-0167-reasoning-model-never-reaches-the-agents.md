@@ -135,8 +135,11 @@ Either send the value or stop promising it. In the order worth trying:
 Not slotted. No release plan is open: ruling (a) of the
 [sequencing Amendment 2026-09-12](../v0.3.x-sequencing.md#amendment-2026-09-12--close-v0316-small-then-measure-before-any-train-opens)
 opens none before EXP-001 reports and the first strategy review logs its result.
-The [EXP-001](../experiments/EXP-001-preregistration.md) harness sets no
-`reasoning` block, so neither fix touches a frozen arm.
+The [EXP-001](../experiments/EXP-001-preregistration.md) harness sets each
+channel's reasoning mode in [`panel.yaml`](../../evaluators/experiments/EXP-001/panel.yaml)
+(`bid`, and `off` for arm B) but never `model`, and it points the `quality`,
+`fast` and `summarizer` aliases at one model. So neither fix changes what a
+frozen arm runs.
 
 ## Notes
 
@@ -146,3 +149,7 @@ The [EXP-001](../experiments/EXP-001-preregistration.md) harness sets no
 > noticed the same gap while checking what fanout sends and left it for an
 > issue. Confirmed by reading the dispatch, the proto and every agent call site
 > that resolves a model; no code was changed.
+>
+> 2026-09-24 — corrected the Slot paragraph, which said the EXP-001 harness
+> sets no `reasoning` block. Its panel sets a reasoning mode per arm; it never
+> sets `model`, so the conclusion stands.

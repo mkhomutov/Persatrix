@@ -18,11 +18,11 @@ issues a leased LLM call and so lives in the action-loop caller, not inside
 
 Load-bearing invariants (amendment OQs / master-plan §Open-question status):
 
-* **TB2 — bias-to-silence.** An unset (``None``) ``threshold`` requires a
-  *decisively* high score (:data:`_DECISIVE_SCORE`). A parse failure, a
-  lease denial, an unresolvable ``fast`` alias, or ``score < threshold`` all
-  resolve to ``speak=False``. Conservative by construction; calibration is a
-  post-soak concern (amendment OQ #3).
+* **TB2 — bias-to-silence.** A parse failure, a lease denial or an
+  unresolvable ``fast`` alias resolves to ``speak=False``. On the ``off`` score
+  gate an unset (``None``) ``threshold`` also demands a *decisively* high score
+  (:data:`_DECISIVE_SCORE`) and ``score < threshold`` is silence; ``bid``/``plan``
+  ignore ``threshold``. Calibration is post-soak (amendment OQ #3).
 * **TB3 — every bid is leased + attributable.** The call carries the
   resolving ``agent_id`` and a wallet ``cause`` *derived from the inbound
   event* (defaulting to ``CAUSE_CHANNEL_MESSAGE``) so the bid bills the same
@@ -362,9 +362,9 @@ async def evaluate_salience(
     alias (TB3); a lease denial, the wallet active-lease cap
     (``RESOURCE_EXHAUSTED``), or any provider error all fail closed.
 
-    ``mode`` (RFC 0051 §C/§G) selects the verdict grammar and ships **dark** —
-    the seam passes nothing but the ``off`` default until the Phase-3 config knob
-    wires it. ``off`` is the scalar ``speak:``/``score:`` bid against the
+    ``mode`` (RFC 0051 §C/§G) selects the verdict grammar. The seam passes the
+    channel's resolved ``reasoning.mode``; a caller that omits ``mode`` gets
+    ``off``. ``off`` is the scalar ``speak:``/``score:`` bid against the
     per-member ``threshold`` (byte-for-byte v0.3.8); ``bid``/``plan`` is the
     structured ``should_post``/``reason_code`` verdict that **supersedes the
     score gate** (``threshold`` inert, no ``score``), delegated to

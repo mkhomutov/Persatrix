@@ -345,11 +345,11 @@ func initChannels(
 	// RFC 0051 (v0.3.10): resolve the per-channel reasoning-before-posting block
 	// the same way as the salience cap — config channels use their declared (or
 	// load-normalized default) `reasoning` rung, store-resident channels pick up
-	// the default (off). Same non-fatal posture: an enumeration failure leaves the
-	// config channels resolved and any un-resolved channel falls back to the
-	// default rung at read time ([ChannelRouter.ReasoningFor]). Surfacing makes the
-	// rung live in the router and resolves the GET /config value; the agent-side
-	// seam's consumption of `mode`/`model` rides the go-live, not this dark backend.
+	// the governed default (`bid` with a salience-gated member, else `off`). Same
+	// non-fatal posture: an enumeration failure leaves the config channels resolved
+	// and any un-resolved channel falls back to the `off` rung at read time
+	// ([ChannelRouter.ReasoningFor]). The router then answers GET /config, and
+	// fanout stamps the rung's `mode` and `revise` onto every dispatch.
 	if rsErr := router.ResolveReasoning(context.Background(), chanCfg); rsErr != nil {
 		logger.Warn("channels: reasoning resolution incomplete; config channels resolved, store-resident channels fall back to the default rung until next create/restart",
 			zap.Error(rsErr))

@@ -22,11 +22,12 @@ the per-member ``threshold`` is inert (it governs ``mode: off`` only). That is
 the whole point — a numeric threshold can neither articulate "I'd only be
 agreeing" nor rescue a low-scored turn that would add real substance.
 
-**Dark until Phase 3.** The structured path is reachable only when a caller
-passes ``mode="bid"``/``"plan"`` to :func:`agents.salience_bid.evaluate_salience`;
-the action-loop seam does not, so deploying Phases 1–2 is behaviourally inert in
-production until [PR 4](../docs/rfcs/0051-pr-plan.md) wires the ``reasoning``
-config knob and [PR 6](../docs/rfcs/0051-pr-plan.md) flips the governed default.
+**Live since RFC 0051 PR 6 (v0.3.10).** The structured path runs when
+:func:`agents.salience_bid.evaluate_salience` gets ``mode="bid"``/``"plan"``.
+The salience seam (:func:`agents.persona_runtime.salience_gate.run_salience_gate`)
+passes the channel's ``reasoning.mode``, which arrives with each message. The
+orchestrator chooses it; a governed channel that sets no ``mode`` gets ``bid``
+(``GovernedDefaultReasoningMode`` in ``internal/channels/config_reasoning.go``).
 """
 
 from __future__ import annotations
@@ -161,9 +162,11 @@ def warn_if_unknown_mode(mode: str, *, agent_id: str) -> None:
 
     The bid then degrades to the scalar score gate (``is_structured`` is
     ``False`` for any unknown value), so the fallback is *fail-safe* — but
-    without this a typo'd ``reasoning.mode`` would silently disable the
-    structured verdict with no signal until the Phase-3 config ``validate``
-    (PR 4) rejects an unbacked value outright.
+    without this an unknown ``mode`` would silently disable the structured
+    verdict with no signal. The orchestrator's config ``validate`` rejects an
+    unknown ``reasoning.mode``, so in production one arrives only from a newer
+    orchestrator (version skew). The salience seam calls this and clamps the
+    value to ``off`` before the bid; the bid's own call covers direct callers.
 
     Deduped on the value (see :data:`_WARNED_UNKNOWN_MODES`): the typo is a
     standing config fact, so one warning per distinct bad value is enough and

@@ -131,6 +131,12 @@ func reasoningResponse(rc channels.ReasoningConfig, ov *channels.ReasoningOverri
 //     store-canonical (revision > 0) the merge base is the stored blob, so a
 //     persisted non-off mode whose member later leaves will still block a subsequent
 //     edit until cleared — the same accepted limitation the chair has.
+//
+// Two cases this gets wrong (ISSUE-0168). A member change does not re-stamp the
+// router's rung, so a channel that became governed after its rung was set still
+// reads `off` here, and point 1 freezes that `off` as an explicit kill switch no
+// one set. And a committed `revise >= 1` still freezes after its drifted `mode` is
+// dropped, so the `revise >= 1 needs mode: plan` rule rejects the first edit anyway.
 func (s *Server) reasoningBaseline(ctx context.Context, id string) *channels.ReasoningOverrides {
 	governed := s.channelHasSalienceGatedMember(ctx, id)
 	froze := s.channelRouter.ReasoningFor(id).FreezeOverrides(governed)

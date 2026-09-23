@@ -25,6 +25,7 @@ type MemberConfig struct {
 	// Tier B relevance bid (v0.3.8). It is a `*float64` tri-state on purpose:
 	//   - nil   → unset → bias-to-silence (the conservative default)
 	//   - &0..1 → explicit salience bar the bid must clear to reach the turn
+	//     (read only under `reasoning.mode: off`; the default `bid` ignores it)
 	// A `chair` member with no explicit value picks up [DefaultChairThreshold]
 	// at load (see [MemberConfig.UnmarshalYAML]).
 	//
