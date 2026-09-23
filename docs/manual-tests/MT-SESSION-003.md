@@ -2,10 +2,22 @@
 
 **Test ID**: `MT-SESSION-003`
 **Feature Area**: Sessions (RFC 0031 Phase 2 — per-session recall filtering)
-**Version**: 1.1
+**Version**: 1.2
 **Created**: 2026-06-01
-**Last Updated**: 2026-07-28
+**Last Updated**: 2026-09-23
 **Status**: Active — **re-anchored for v0.3.12** (see the note below): the Step-3 absence bar moved to the **epoch** axis; facts + episodic absence across sessions is no longer asserted (RFC 0049 cross-room recall is live, classification-gated).
+
+**v1.2 (2026-09-23)**: each arc is now scoped by exporting `PERSATRIX_SESSION_ID`
+in the shell the CLI runs in, not by starting the persona under it
+(Preconditions, Steps 1–3). Since [#459](https://github.com/mkhomutov/Persatrix/pull/459)
+(2026-05-29) the orchestrator sends a session with every channel message, and
+the persona writes an interaction under the session its first turn carried, so
+the persona's start-up value tags no channel turn — the finding is in the Notes
+of [ISSUE-0165](../issues/ISSUE-0165-relationship-hidden-outside-its-first-session.md).
+Step 3 now waits for arc one's interaction to close before it switches, and
+Step 4 and Edge Case 2 name the session a row gets when the arc's own is
+missing. Not re-run under v1.2; the 2026-06-01 result below used the v1.1
+procedure.
 
 > **v0.3.12 re-anchor ([RFC 0049](../rfcs/0049-memory-consolidation-gradient.md) Phases 0–1 live).** From v0.3.12, fact recall is
 > **cross-room by default** and episodic recall is **room-first-ranked** (other-room
@@ -91,23 +103,29 @@ volume set (`make reset` then bring the stack up) is cleanest. The arcs below us
 **ember-owl** with a distinct named fact ("Mira") that has no keyword overlap
 with the trigger turn, mirroring the dementia-test discipline.
 
-> **Scope an arc at the persona's boot, not per CLI invocation.** The persona
-> writes its episodes/facts at *interaction close* (RFC 0020), in its background
-> loop — outside any single chat request. That close-path write is tagged with
-> the session the **persona-runtime snapshotted at boot** from `PERSATRIX_SESSION_ID`
-> (the MT-SESSION-001 contract; the [dementia-test Setup](MT-MEMORY-005-dementia-test.md#setup)
-> states the same — "the orchestrator + persona-runtime both snapshot the value
-> at start"). A per-invocation `--session`/`PERSATRIX_SESSION_ID` on the CLI
-> governs the *recall query* and the channel-dispatch binding for that call, but
-> in a long-running persona it does **not** retag the asynchronous close-path
-> write. So to land an arc's rows under `arc-one`, **boot the persona under that
-> session**:
+> **Scope each arc from the CLI's shell, not where the persona starts.** The
+> persona writes an interaction's episode and facts when the interaction closes
+> (RFC 0020), under the session the interaction's first turn carried. Each CLI
+> call sends `--session`, else `PERSATRIX_SESSION_ID` from the shell it runs
+> in, else the `session use` pointer; with none of them set, the orchestrator's
+> own session for the DM applies
+> ([sessions guide §4](../guides/sessions.md#4-how-the-active-session-is-resolved)).
+> So run every turn of an arc from a shell that exports the arc's session:
 >
-> - **Local**: `PERSATRIX_SESSION_ID=arc-one python -m persatrix_agents.server …`
->   (and the orchestrator likewise), as in [MT-SESSION-001](MT-SESSION-001.md).
-> - **Docker**: thread `PERSATRIX_SESSION_ID` into the agent service env (the
->   stock compose does not) and `up` the agent under it, then switch the env and
->   bring it up again for `arc-two`.
+> ```bash
+> export PERSATRIX_SESSION_ID=arc-one
+> ```
+>
+> Two things do not scope an arc:
+>
+> - **Setting `PERSATRIX_SESSION_ID` where the orchestrator or the persona
+>   starts.** The orchestrator's copy only tags its own channel and message
+>   rows. Every channel message carries a session from the orchestrator, so the
+>   persona uses its copy only when none is bound, such as a tick. The stack
+>   needs no restart between arcs, and the stock compose needs no change.
+> - **Switching while an interaction is open.** A turn that joins an interaction
+>   still open under `arc-one` becomes part of arc one's episode, whatever
+>   session it carried. Let arc one's interaction close before Step 3.
 >
 > Also note `--session <label>` resolves against the registry first, so it only
 > accepts a **registered** session ([cli/src/session_resolve.rs](../../cli/src/session_resolve.rs));
@@ -118,11 +136,12 @@ with the trigger turn, mirroring the dementia-test discipline.
 
 ## Test Procedure
 
-### Step 1: Arc 1 — boot the persona under `arc-one`, establish a named fact
+### Step 1: Arc 1 — run under `arc-one`, establish a named fact
 
 **Action**:
 
-Boot ember-owl under `PERSATRIX_SESSION_ID=arc-one` (see Preconditions), then:
+In the shell you run the CLI from, `export PERSATRIX_SESSION_ID=arc-one` (see
+Preconditions), then:
 
 ```bash
 echo "I'm picking up my daughter Mira from school later — she's seven." \
@@ -148,7 +167,7 @@ ideally a `facts` row `(<alex>, has_child_named, "Mira")`) lands tagged
 
 **Action**:
 
-Still booted under `arc-one`:
+In the same shell, with `PERSATRIX_SESSION_ID=arc-one` still exported:
 
 ```bash
 echo "What's a good weekend activity for a kid that age?" \
@@ -169,7 +188,9 @@ single-session continuity guarantee (the dementia-test recall path).
 
 **Action**:
 
-Re-boot the persona under a fresh `PERSATRIX_SESSION_ID=arc-two`, same user, then:
+Wait out the idle window after Step 2, as in Step 1, so arc one's interaction
+closes first (see Preconditions). Then, in the CLI's shell,
+`export PERSATRIX_SESSION_ID=arc-two` — same user, no restart — and run:
 
 ```bash
 echo "What's a good weekend activity for a kid that age?" \
@@ -194,8 +215,9 @@ the v0.3.5 promise; a reference here would be the F-3 reproduction.
 
 **Action**:
 
-A row written while the persona booted with `PERSATRIX_SESSION_ID` **unset**
-lands under `legacy` and stays visible from *every* session — the always-visible
+A row written with no session given while the persona runs with
+`PERSATRIX_SESSION_ID` **unset** (a tick's episode, say) lands under `legacy`
+and stays visible from *every* session — the always-visible
 carve-out that let sessions ship without a backfill. Confirm a `legacy`-tagged
 row is in the default-recall set under a named session:
 
@@ -243,9 +265,10 @@ to reset participant-keyed trust.
 ### Edge Case 2: Forgetting to pin the session id mid-arc
 
 If `--session` / `PERSATRIX_SESSION_ID` is dropped between turns of an arc, the
-turn resolves a *different* session (the pointer, or `legacy`), producing a
-spurious continuity miss in Step 2. Re-pin before every turn — this is the most
-common false-fail (called out in [MT-MEMORY-005 Setup](MT-MEMORY-005-dementia-test.md#setup)).
+turn runs under a *different* session (the `session use` pointer if one is set,
+else the orchestrator's own session for the DM), producing a spurious
+continuity miss in Step 2. Export it in every shell you run a turn from — this
+is the most common false-fail (called out in [MT-MEMORY-005 Setup](MT-MEMORY-005-dementia-test.md#setup)).
 
 ### Edge Case 3: Cross-session opt-in has no operator verb
 
