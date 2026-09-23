@@ -1,6 +1,6 @@
 # EXP-001 — The harness
 
-> **Status**: 🚧 **In Progress** — PR 1 of 6 open; no practice run yet.
+> **Status**: 🚧 **In Progress** — PR 1 of 6 open ([#984](https://github.com/mkhomutov/Persatrix/pull/984)); no practice run yet.
 > **Last updated**: 2026-09-23
 > **Carries out**: the [EXP-001 pre-registration](EXP-001-preregistration.md) and its [part 2](EXP-001-preregistration-scoring.md)
 > **Code**: [`evaluators/exp001/`](../../evaluators/exp001/)
@@ -20,7 +20,7 @@ result can cite them.
 
 | PR | What it adds | Pre-registration checks it proves |
 |---|---|---|
-| 1 | Reads and checks the materials; records each model call; prices it with the fixed table; draws each series' arm order | 4 (the record's fields) |
+| 1 ([#984](https://github.com/mkhomutov/Persatrix/pull/984)) | Reads and checks the materials; records each model call; prices it with the fixed table; draws each series' arm order | 4 (the record's fields) |
 | 2 | Scoring and the decision: the 400-word cut, memo quality, recall majority, per-plan agreement, the interval, the verdicts and the rule that fires, the price range and the cheaper-model repricing; blinded rater packets | — (part 2) |
 | 3 | Runtime: the Anthropic adapter's prompt-cache markers and cache token counts; a pinned clock; a hook that tags each call with its arm, meeting, adviser and purpose | 3, 4, 7 |
 | 4 | Arm A: the advisers' identities rendered by the persona runtime's own prompt code, one call per meeting | 7, 8 |
