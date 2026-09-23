@@ -16,6 +16,8 @@ import pytest
 from evaluators.exp001.costs import (
     ARMS,
     PRICES,
+    REPRICE_MODEL,
+    REPRICING_PRICES,
     CallPurpose,
     CallRecord,
     arm_orders,
@@ -23,6 +25,7 @@ from evaluators.exp001.costs import (
     judging_spend,
     price_call,
     real_spend,
+    repriced,
 )
 from evaluators.exp001.materials import MeetingKind
 
@@ -152,3 +155,52 @@ def test_arm_orders_are_the_recorded_ones() -> None:
 
 def test_arms_are_the_five_preregistered_arms() -> None:
     assert ARMS == ("A", "B", "C", "D", "D-prime")
+
+
+def test_repricing_uses_the_fast_models_list_price() -> None:
+    """Part 2 §7: bids and summaries repriced at claude-haiku-4-5's list price."""
+    haiku = REPRICING_PRICES[REPRICE_MODEL]
+    assert REPRICE_MODEL == "claude-haiku-4-5"
+    assert (haiku.input, haiku.output) == (1.00, 5.00)
+    # Cache tokens keep the fixed table's ratio to input: 1.25x to write, 0.1x to read.
+    assert (haiku.cache_write, haiku.cache_read) == pytest.approx((1.25, 0.10))
+    assert REPRICING_PRICES["claude-sonnet-4-6"] == PRICES["claude-sonnet-4-6"]
+
+
+def test_repriced_moves_only_bids_and_summaries_to_the_fast_model() -> None:
+    records = [
+        _call(purpose=CallPurpose.BID),
+        _call(purpose=CallPurpose.SUMMARY),
+        _call(purpose=CallPurpose.REPLY),
+        _call(purpose=CallPurpose.MEMO),
+    ]
+    assert [r.model for r in repriced(records)] == [
+        REPRICE_MODEL,
+        REPRICE_MODEL,
+        "claude-sonnet-4-6",
+        "claude-sonnet-4-6",
+    ]
+
+
+def test_repriced_dollars_per_plan() -> None:
+    records = [
+        _call(
+            purpose=CallPurpose.BID,
+            input_tokens=1_000_000,
+            output_tokens=1_000_000,
+            cache_write=1_000_000,
+            cache_read=1_000_000,
+        ),  # 1 + 5 + 1.25 + 0.10 at the fast model's price
+        _call(purpose=CallPurpose.REPLY),  # $3 at the arms' price
+    ]
+    got = dollars_per_plan(
+        repriced(records), arm="C", series="series-1", attempt=1, prices=REPRICING_PRICES
+    )
+    assert got == pytest.approx((7.35 + 3.0) / 4)
+
+
+def test_the_run_itself_never_prices_a_call_at_the_fast_models_rate() -> None:
+    with pytest.raises(KeyError):
+        dollars_per_plan(
+            repriced([_call(purpose=CallPurpose.BID)]), arm="C", series="series-1", attempt=1
+        )
