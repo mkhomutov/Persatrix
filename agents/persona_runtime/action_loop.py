@@ -13,6 +13,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from ..llm_client import LLMClient, LLMResponse, LLMToolResult, StopReason, ToolCall
+from ..llm_types import LLMCallPurpose
 from ..memory.episodic import EpisodicMemory
 from ..memory.working import WorkingMemory
 from ..observability._metrics_persona_tick import tick_idle_attrs
@@ -381,6 +382,7 @@ class _ActionLoopMixin:
                 response = await self._llm_client.create_message(
                     model=self.config["model"],
                     model_alias=self.config.get("model_alias"),
+                    purpose=LLMCallPurpose.TURN,
                     messages=messages,
                     system=system_prompt,
                     tools=tool_defs,

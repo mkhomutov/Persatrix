@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 import aiosqlite
 
 from ..clock import agent_now
+from ..llm_types import LLMCallPurpose
 from ..model_aliases import resolve
 from ..prompt_loader import load_snippet
 from .episodic_queries import EPISODE_SELECT, row_to_episode
@@ -126,6 +127,7 @@ async def summarize_old_episodes(
             response = await llm_client.create_message(
                 model=resolved.model,
                 model_alias=resolved.alias,
+                purpose=LLMCallPurpose.SUMMARY,
                 messages=[{"role": "user", "content": prompt}],
                 system=load_snippet("episode-summarizer"),
                 tools=[],
