@@ -2,9 +2,9 @@
 
 **Test ID**: `MT-CHANNEL-RELEVANCE-001`
 **Feature Area**: Channels (conversation governance — RFC 0030 Layer 3, relevance amendment Tier A)
-**Version**: 1.1 (Step 6: the v0.3.8 floor-capable-directedness trigger scenario)
+**Version**: 1.2 (Step 3: why the bid can stay silent now that `planning` runs `reasoning.mode: bid`)
 **Created**: 2026-06-06
-**Last Updated**: 2026-06-10
+**Last Updated**: 2026-09-24
 **Status**: Active
 
 ---
@@ -166,8 +166,8 @@ unconditionally — see the v0.3.8 note under **Expected**.)
   message does not mention it.
 - **On a v0.3.8 stack** (the baseline Step 6 requires) **the Tier B bid is
   live** for `planning`'s `participant` members — they are declared with the
-  disposition vocabulary and carry no explicit `threshold`, so the bid biases
-  to silence. This step can therefore legitimately draw *fewer* than two
+  disposition vocabulary, and since v0.3.10 the channel runs `reasoning.mode:
+  bid`, whose verdict can choose silence. This step can therefore legitimately draw *fewer* than two
   replies. The two silences are distinguishable in the agent debug logs: a
   Tier B silence logs `Tier B salience bid suppressed turn` (and rides
   `channel.messages.gated{policy=low_salience}`); a directedness failure logs

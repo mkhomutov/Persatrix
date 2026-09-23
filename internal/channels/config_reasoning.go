@@ -22,7 +22,8 @@ import (
 // This file is the Phase 3a config backend: the operator-editable knob on the
 // RFC 0050 surface. A channel that sets no `mode` gets a default that depends on
 // its members (RFC 0051 PR 6, v0.3.10): `bid` on a governed channel — one with at
-// least one salience-gated `participant`/`chair` member — and `off` on an
+// least one salience-gated member, that is a `participant`, a `chair`, or a
+// legacy `always` member given an explicit `threshold` — and `off` on an
 // ungoverned one ([GovernedDefaultReasoningMode]). An explicit `mode: off` is the
 // one-flip kill switch: the channel goes back to the scalar score gate. The
 // default is worked out at startup, on a config change and when a group is

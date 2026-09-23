@@ -14,7 +14,7 @@ The seam is invoked **only** on the open-floor admit
 that before calling :func:`run_salience_gate`, so a directed ``@``-mention, a
 DM, an ``observer``, and the self-sender never reach the bid (TB1). Of that
 remainder, the bid runs only when the inbound event is **Tier-B-governed**
-(the channel-level ``salience_gated`` flag).
+(the recipient's ``salience_gated`` flag).
 
 **Activation (PR 2b, landed):** the bid inputs (``salience_gated``, per-member
 ``threshold``, ``channel_size``) now cross the store/wire boundary end-to-end —

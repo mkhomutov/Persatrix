@@ -91,8 +91,8 @@ members:
     respond: chair              # was: participant — the low-threshold facilitator
 ```
 
-- ☐ `reasoning.mode` is `"off"`. Since v0.3.10 a channel with a `participant`
-  or `chair` defaults to `bid`, which ignores `threshold`: no `below_threshold`
+- ☐ `reasoning.mode` is `"off"`. Since v0.3.10 a channel where any member runs
+  the salience bid defaults to `bid`, which ignores `threshold`: no `below_threshold`
   code would appear and the `chair` would act as a `participant`. The `bid`
   rung is covered by [MT-REASON-001](MT-REASON-001.md).
 - ☐ `ember-owl` and `iron-fox` are `participant`; `nova-sparrow` is `chair`. No

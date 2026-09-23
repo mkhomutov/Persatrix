@@ -25,8 +25,9 @@
 # Per-disposition `threshold` (v0.3.8 Tier B): an optional salience bar in
 # [0, 1] that an open-floor `participant`'s cheap relevance bid must clear to
 # reach the (expensive) quality turn. It applies only under
-# `reasoning.mode: "off"`: a channel with a `participant` or `chair` defaults
-# to `bid`, which ignores it (see the `planning` channel's `reasoning:` note).
+# `reasoning.mode: "off"`: a channel where any member runs the salience bid
+# defaults to `bid`, which ignores it (see the `planning` channel's
+# `reasoning:` note).
 # Bias-to-silence — omit it and the member stays conservative on ambiguous
 # open-floor traffic. A `chair` gets a low default (0.15) so it speaks
 # readily; override per member if desired:

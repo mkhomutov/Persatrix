@@ -26,8 +26,8 @@ refs:
 
 A channel's `reasoning.mode` picks how its personas decide whether to speak.
 When a channel sets no `mode`, its members decide the default. If at least one
-member is a salience-gated `participant` or `chair`, the channel is *governed*
-and gets `bid`: the persona privately asks whether a reply adds anything.
+member runs the salience bid (a `participant` or `chair`, or a legacy `always`
+member given an explicit `threshold`), the channel is *governed* and gets `bid`: the persona privately asks whether a reply adds anything.
 Otherwise the channel gets `off`, the older numeric score gate. The orchestrator
 works this out only at startup, when a config change is applied, and when a
 group is created. A member added or promoted through the member API does not

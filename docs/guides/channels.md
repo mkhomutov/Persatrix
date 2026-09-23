@@ -127,7 +127,7 @@ A leaves, a `participant`/`chair` runs one cheap `fast`-model bid ("do I have
 something worth adding that hasn't already been said?", reading the in-round
 transcript). Under `reasoning.mode: off` it speaks only if the score clears its
 `threshold` ([`agents/salience_bid.py`](../../agents/salience_bid.py)). Since
-v0.3.10 a channel with a `participant` or `chair` member defaults to
+v0.3.10 a channel where any member runs the bid defaults to
 `reasoning.mode: bid`: the bid answers yes or no with a reason, and
 `threshold` is not used
 ([reasoning before posting](persona-agents.md#reasoning-before-posting-v0310)).
