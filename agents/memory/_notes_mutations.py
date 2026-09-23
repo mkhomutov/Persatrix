@@ -16,9 +16,9 @@ the methods keep their public call sites on
 
 from __future__ import annotations
 
-import time
 from typing import TYPE_CHECKING, Protocol
 
+from ..clock import agent_now
 from ._epoch_filter import epoch_eq_clause, resolve_active_epoch
 from ._principal_filter import principal_eq_clause, resolve_active_principal
 from ._session_filter import _resolve_session_list, session_in_clause
@@ -94,7 +94,7 @@ class _NoteMutationsMixin:
         content-only update, exactly the prior behaviour.
         """
         _check_note_content(content)
-        now = time.time()
+        now = agent_now()
         restamp_sql = ""
         restamp_params: tuple[str, ...] = ()
         if restamp_protection_level is not None and restamp_below:

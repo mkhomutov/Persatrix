@@ -18,9 +18,9 @@ connection a concurrent ``COMMIT`` in that gap previously raised
 
 from __future__ import annotations
 
-import time
-
 import aiosqlite
+
+from ..clock import agent_now
 
 __all__ = [
     "get_interaction_count",
@@ -53,7 +53,7 @@ async def increment_interaction_count(
     suspends across an ``await`` (ISSUE-0055; see module docstring).
     Requires SQLite >= 3.35 (Python 3.11+ ships >= 3.39).
     """
-    now = time.time()
+    now = agent_now()
     rows = list(await db.execute_fetchall(
         """
         INSERT INTO agent_state (agent_id, interaction_count, updated_at)
@@ -73,7 +73,7 @@ async def reset_interaction_count(
     db: aiosqlite.Connection, agent_id: str,
 ) -> None:
     """Reset the interaction counter to zero."""
-    now = time.time()
+    now = agent_now()
     await db.execute(
         """
         INSERT INTO agent_state (agent_id, interaction_count, updated_at)
@@ -99,7 +99,7 @@ async def persist_agent_state(
 
     Preserves interaction_count managed by the interaction counter helpers.
     """
-    now = time.time()
+    now = agent_now()
     await db.execute(
         """
         INSERT INTO agent_state

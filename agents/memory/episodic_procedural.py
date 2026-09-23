@@ -21,12 +21,12 @@ from __future__ import annotations
 import json
 import logging
 import math
-import time
 from dataclasses import dataclass
 from typing import Any
 
 import aiosqlite
 
+from ..clock import agent_now
 from ..epoch_id import DEFAULT_EPOCH_ID
 from ..principal_id import DEFAULT_PRINCIPAL_ID
 from ._epoch_filter import epoch_eq_clause as _epoch_eq_clause
@@ -188,7 +188,7 @@ async def recall_procedures(
             "limit=%d exceeds maximum (%d), capping", limit, MAX_RECALL_LIMIT,
         )
         limit = MAX_RECALL_LIMIT
-    timestamp = now if now is not None else time.time()
+    timestamp = now if now is not None else agent_now()
     # Compute the SQL-side cutoff (PR 5 R1 S3).  When ``lambda_per_day``
     # is zero, the closed-form ``t_max`` is undefined (division by
     # zero) — fall back to "no SQL cutoff" so legacy decay-disabled
@@ -389,7 +389,7 @@ async def refresh_confidence(
     """Mark every procedure row tagged ``procedure:{key}`` as freshly validated.
 
     Sets ``confidence`` to ``1.0`` and ``last_validated_at`` to
-    ``time.time()`` on the matching rows for ``agent_id``.  Returns
+    ``agent_now()`` on the matching rows for ``agent_id``.  Returns
     ``True`` when at least one row was updated.
 
     Implements the "Confidence refresh on successful reuse" contract
@@ -438,7 +438,7 @@ async def refresh_confidence(
         "WHERE agent_id = ? AND tags_json LIKE ? ESCAPE '\\' "
         f"AND instr(tags_json, ?) > 0{scope_clause}",
         (
-            time.time(), agent_id, pattern, json.dumps(f"procedure:{key}"),
+            agent_now(), agent_id, pattern, json.dumps(f"procedure:{key}"),
             *scope_params,
         ),
     )

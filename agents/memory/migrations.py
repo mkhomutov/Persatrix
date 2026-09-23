@@ -24,9 +24,10 @@ this module.
 from __future__ import annotations
 
 import logging
-import time
 
 import aiosqlite
+
+from ..clock import agent_now
 
 # Re-export the callable migration handlers + registry from the helper
 # module.  Pulled out to keep this file under the 500-line repo cap.
@@ -100,7 +101,7 @@ logger = logging.getLogger(__name__)
 _SCORE_TEMPLATE = (
     "(0.1 + {p}importance * 0.9)"
     " * (1.0 + ln(1 + {p}access_count))"
-    " * (1.0 / (1 + (? - {p}created_at) / 86400.0))"  # ? = time.time()
+    " * (1.0 / (1 + (? - {p}created_at) / 86400.0))"  # ? = agent_now()
 )
 _SCORE_EXPR = _SCORE_TEMPLATE.format(p="e.")
 _SCORE_EXPR_BARE = _SCORE_TEMPLATE.format(p="")
@@ -211,7 +212,7 @@ async def _apply_migrations(db: aiosqlite.Connection) -> None:
                 )
             await db.execute(
                 "INSERT INTO schema_version VALUES (?, ?, ?)",
-                (version, time.time(), desc),
+                (version, agent_now(), desc),
             )
             logger.info("Applied migration v%d: %s", version, desc)
     await db.commit()

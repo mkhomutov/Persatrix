@@ -20,10 +20,10 @@ the column write.
 
 from __future__ import annotations
 
-import time
 from collections.abc import Iterable, Iterator
 from typing import TYPE_CHECKING
 
+from ..clock import agent_now
 from ._facts_audit import emit_audit as _emit_audit
 
 if TYPE_CHECKING:
@@ -65,7 +65,7 @@ async def mark_recalled_for_agent(
     so a stray fact_id from another tenant's store is silently
     skipped.  Empty / missing fact_ids no-op without a DB round-trip;
     the recall-time reinforcement path must never raise.  ``at``
-    defaults to :func:`time.time`.
+    defaults to :func:`agents.clock.agent_now`.
 
     Monotonicity (PR #342 review N-1)
     ---------------------------------
@@ -114,7 +114,7 @@ async def mark_recalled_for_agent(
     ids = list(fact_ids)
     if not ids:
         return
-    timestamp = at if at is not None else time.time()
+    timestamp = at if at is not None else agent_now()
     for chunk in _chunked(ids, _MAX_IDS_PER_UPDATE):
         placeholders = ",".join("?" for _ in chunk)
         await db.execute(

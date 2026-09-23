@@ -43,10 +43,11 @@ from __future__ import annotations
 
 import logging
 import math
-import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
+
+from ..clock import agent_now
 
 logger = logging.getLogger(__name__)
 
@@ -196,7 +197,7 @@ def emit_memory_write(
             tier=tier,
             salience=salience,
             source_span_id=source_span_id,
-            written_at=written_at if written_at is not None else time.time(),
+            written_at=written_at if written_at is not None else agent_now(),
         ),
     )
 
