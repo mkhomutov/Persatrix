@@ -1,6 +1,6 @@
 # EXP-001 — The harness
 
-> **Status**: 🚧 **In Progress** — PR 1 of 6 merged ([#984](https://github.com/mkhomutov/Persatrix/pull/984)), PR 2 open ([#986](https://github.com/mkhomutov/Persatrix/pull/986)); no practice run yet.
+> **Status**: 🚧 **In Progress** — PRs 1 and 2 of 6 merged ([#984](https://github.com/mkhomutov/Persatrix/pull/984), [#986](https://github.com/mkhomutov/Persatrix/pull/986)); PR 3a open; no practice run yet.
 > **Last updated**: 2026-09-23
 > **Carries out**: the [EXP-001 pre-registration](EXP-001-preregistration.md) and its [part 2](EXP-001-preregistration-scoring.md)
 > **Code**: [`evaluators/exp001/`](../../evaluators/exp001/)
@@ -22,6 +22,7 @@ result can cite them.
 |---|---|---|
 | 1 ([#984](https://github.com/mkhomutov/Persatrix/pull/984)) | Reads and checks the materials; records each model call; prices it with the fixed table; draws each series' arm order | 4 (the record's fields) |
 | 2 ([#986](https://github.com/mkhomutov/Persatrix/pull/986)) | Scoring and the decision: the 400-word cut, memo quality, recall majority, per-plan agreement, the interval, the verdicts and the rule that fires, the price range and the cheaper-model repricing; blinded rater packets | — (part 2) |
+| 3a | Agent time: memory stamps, recall ages and the orchestrator's timestamps all read one clock that `PERSATRIX_CLOCK_START` can shift, so the adviser's clock and arm D's memories agree on the story date | 2 and 7, in part |
 | 3 | Runtime: the Anthropic adapter's prompt-cache markers and cache token counts; a pinned clock; a hook that tags each call with its arm, meeting, adviser and purpose | 3, 4, 7 |
 | 4 | Arm A: the advisers' identities rendered by the persona runtime's own prompt code, one call per meeting | 7, 8 |
 | 5 | Arms B, C, D and D′: deployments, channels, the memo turn, restarts in D, D′'s transcript prefix, retries and failure detection | 1, 2, 3, 5, 6 |
@@ -51,6 +52,7 @@ the evidence that the eight checks pass before any scored meeting.
 | Price range | Prices p from zero up; the verdict can change only where the interval's low end, or its mean less p, crosses zero, and those points are solved exactly | 2 |
 | Cheaper-model repricing | Every `bid` and `summary` call moves to `claude-haiku-4-5` at $1.00 input and $5.00 output; its cache tokens keep the fixed table's ratio to input, $1.25 to write and $0.10 to read. That model is never in the run's own price table | 2 |
 | Blinding | Every adviser's ID and name from `panel.yaml`, in any case and joined by a space, hyphen, underscore or line break, becomes `[adviser]`; so does any one word of a name written capitalised, such as `Stoat`. A packet ID is 8 hex characters from the operating system's random source, so no seed can rebuild it. Each rater's order is a fresh shuffle from that source, drawn again if another rater already has it. A missing memo scores 0 and never reaches the raters | 2 |
+| Story clock | An adviser's [agent time](../ai-glossary.md#agent-time) starts at 10:00 on the meeting's story date and then runs with the real clock; it is not frozen. Memory stamps, recall ages and incoming messages all read it, so in arm D a fact from the last meeting is a week old. Timers, deadlines and the orchestrator's records stay on real time | 3a |
 
 The arm order each series runs in:
 

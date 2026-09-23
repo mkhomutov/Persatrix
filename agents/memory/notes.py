@@ -11,12 +11,12 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 import uuid
 from typing import TYPE_CHECKING
 
 import aiosqlite
 
+from ..clock import agent_now
 from ..epoch_id import DEFAULT_EPOCH_ID
 from ..principal_id import DEFAULT_PRINCIPAL_ID
 from ..session_id import LEGACY_SESSION_ID, normalize_session_id
@@ -170,7 +170,7 @@ class NoteStore(_NoteMutationsMixin):
         await self._prune_notes(max_notes, session_id, principal_id, epoch_id)
 
         note_id = str(uuid.uuid4())
-        now = time.time()
+        now = agent_now()
         await self._db.execute(
             """
             INSERT INTO notes

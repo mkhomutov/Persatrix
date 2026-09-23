@@ -13,7 +13,7 @@ The shipped default ``lambda = 0.01 / day`` gives a half-life of
 
 Decay is computed at *read time* — there is no periodic rewrite pass.
 The episodic-tier query path multiplies the stored ``c_0`` by the decay
-factor for the current ``time.time()`` and applies the ``c_min`` floor
+factor for the current ``agent_now()`` and applies the ``c_min`` floor
 before returning rows.  That keeps the storage path append-only and
 makes the formula trivial to retune (one config value, no migration).
 

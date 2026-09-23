@@ -52,9 +52,9 @@ method surface.  Private-attribute access is package-internal
 from __future__ import annotations
 
 import logging
-import time
 from typing import TYPE_CHECKING
 
+from ..clock import agent_now
 from ._epoch_filter import resolve_active_epoch
 from ._principal_filter import resolve_active_principal
 from ._session_filter import _resolve_session_list
@@ -147,7 +147,7 @@ async def recall_room_ranked(
         # Mirror ``EpisodicMemory.recall``'s bump exactly (UPDATE + the
         # in-memory object refresh) so the promoted live path keeps the
         # pre-promotion reinforcement contract byte-for-byte.
-        now = time.time()
+        now = agent_now()
         ids = [e.id for e in episodes]
         placeholders = ",".join("?" for _ in ids)
         await db.execute(

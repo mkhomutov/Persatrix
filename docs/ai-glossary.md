@@ -259,6 +259,18 @@ Process vocabulary (scope lock, cuttable, live arc, finding, …) lives in the
 - **Example:** "The agent recalls three relevant episodes when a similar
   question recurs."
 
+### Agent Time
+- **Aliases:** —
+- **Disallowed:** "story time" (for the mechanism; EXP-001's story date is one use of it)
+- **Definition:** The time an agent process lives on, read through
+  `agent_now()` in [`agents/clock.py`](../agents/clock.py). It is real time
+  unless `PERSATRIX_CLOCK_START` shifts it: then it starts at that instant and
+  moves with the real clock. Memory stamps, recency, the now-anchor line and
+  new events read it; timestamps from the orchestrator are moved into it.
+  Timers, deadlines and telemetry stay on real time.
+- **Example:** "With `PERSATRIX_CLOCK_START=2036-10-06T10:00:00+00:00`, a
+  note written a minute after startup is stamped 10:01 on 6 October 2036."
+
 ### Trust Level
 - **Aliases:** "trust score"
 - **Disallowed:** "rapport", "affinity", "reputation"

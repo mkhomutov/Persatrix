@@ -15,9 +15,9 @@ for backward compatibility with existing import sites.
 from __future__ import annotations
 
 import logging
-import time
 from typing import TYPE_CHECKING
 
+from ..clock import agent_now
 from ..observability.metrics import current_agent_id, try_get_instruments
 from .boundary_detectors import DEFAULT_CLOSING_GRACE_SEC
 
@@ -74,7 +74,7 @@ async def cleanup_closing_interactions(
     a periodic tick or operator-driven recovery script; the function
     does not own its own scheduling.
     """
-    ts = now if now is not None else time.time()
+    ts = now if now is not None else agent_now()
     cutoff = ts - grace_sec
     cursor = await db.execute(
         "UPDATE episodes SET summary = ? "
