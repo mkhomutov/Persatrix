@@ -29,7 +29,7 @@ from .llm_offline import MockProvider
 from .llm_ollama import OllamaProvider
 from .llm_providers import AnthropicProvider, OpenAIProvider
 from .llm_types import (
-    CallPurpose,
+    LLMCallPurpose,
     LLMProvider,
     LLMResponse,
     LLMToolResult,
@@ -70,7 +70,7 @@ _tracer = trace.get_tracer(__name__)
 __all__ = [
     "AnthropicProvider",
     "BudgetExceededError",
-    "CallPurpose",
+    "LLMCallPurpose",
     "GeminiProvider",
     "LLMClient",
     "LaneProviderError",
@@ -132,7 +132,7 @@ class LLMClient:
         agent_id: str = "",
         interaction_id: str = "",
         model_alias: str | None = None,
-        purpose: CallPurpose | None = None,
+        purpose: LLMCallPurpose | None = None,
         cache_prefix: str = "",
         **kwargs: Any,
     ) -> LLMResponse:
@@ -205,9 +205,14 @@ class LLMClient:
                 kwargs, provider=provider, lease=lease, model_alias=model_alias,
                 purpose=purpose,
             )
+            usage = response.usage
+            # The wallet has no cache price, so it is charged every input
+            # token the call carried, cached ones included.
             await lease.settle(
-                input_tokens=response.usage.input_tokens,
-                output_tokens=response.usage.output_tokens,
+                input_tokens=(
+                    usage.input_tokens + usage.cache_write_tokens + usage.cache_read_tokens
+                ),
+                output_tokens=usage.output_tokens,
             )
             return response
 
@@ -270,7 +275,7 @@ class LLMClient:
         provider: LLMProvider | None = None,
         lease: Lease | None = None,
         model_alias: str | None = None,
-        purpose: CallPurpose | None = None,
+        purpose: LLMCallPurpose | None = None,
     ) -> LLMResponse:
         """Invoke the underlying provider, wrapped in an ``agent.llm.call`` span.
 

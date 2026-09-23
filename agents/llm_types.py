@@ -46,7 +46,7 @@ class ToolCall:
     signature: bytes | None = None
 
 
-class CallPurpose(Enum):
+class LLMCallPurpose(Enum):
     """What a model call is for, named by the code that makes it.
 
     The model alias cannot tell the calls apart: a salience bid and the
@@ -66,9 +66,11 @@ class CallPurpose(Enum):
 class Usage:
     """Token usage from LLM response.
 
-    ``input_tokens`` counts only the uncached input. Tokens written to or
-    read from a provider's prompt cache are counted apart, since they are
-    priced apart; providers without a cache leave both at zero.
+    Only the Anthropic adapter fills the two cache counts. There,
+    ``input_tokens`` is the uncached input, and tokens written to or read
+    from the prompt cache are counted apart, since they are priced apart.
+    Every other adapter leaves both at zero, and its ``input_tokens`` is
+    the provider's whole prompt count, whatever that provider cached.
     """
 
     input_tokens: int

@@ -19,7 +19,7 @@ import pytest
 from agents import call_log
 from agents.clock import CLOCK_ANCHOR_ENV, CLOCK_START_ENV
 from agents.llm_client import LLMClient, LLMResponse, Usage
-from agents.llm_types import CallPurpose as RuntimePurpose
+from agents.llm_types import LLMCallPurpose
 from agents.observability import metrics
 from evaluators.exp001.costs import CallPurpose, CallRecord
 from evaluators.exp001.materials import MeetingKind
@@ -27,6 +27,7 @@ from evaluators.exp001.runtime import (
     CallLogError,
     MemoTurn,
     call_log_env,
+    call_log_scope,
     meeting_clock_env,
     read_call_log,
 )
@@ -46,6 +47,33 @@ class TestMeetingClock:
     def test_a_real_start_without_a_zone_is_refused(self):
         with pytest.raises(ValueError, match="zone"):
             meeting_clock_env(dt.date(2036, 10, 13), _BEGAN.replace(tzinfo=None))
+
+
+class TestCallLogScope:
+    async def test_the_harness_tags_its_own_calls_per_meeting(self, tmp_path, monkeypatch):
+        """Arm A's call and the judge run inside the harness process, so they
+        are tagged with a scope rather than the process settings."""
+        monkeypatch.delenv(call_log.CALL_LOG_ENV, raising=False)
+        call_log.reset_call_log()
+        path = tmp_path / "calls.jsonl"
+
+        class _Provider:
+            name = "anthropic"
+
+            async def create_message(self, **_: object) -> LLMResponse:
+                return LLMResponse(text="ok", usage=Usage(1, 1))
+
+        for meeting in ("plan-1", "plan-2"):
+            with call_log_scope(path, arm="A", series="series-3", meeting=meeting,
+                                meeting_kind=MeetingKind.PLAN, attempt=1):
+                await LLMClient(_Provider()).create_message(
+                    model="claude-sonnet-4-6", messages=[], system="s", tools=[],
+                    max_tokens=10, temperature=0.7, purpose=LLMCallPurpose.TURN,
+                )
+        records = read_call_log(path).records
+        assert [(r.arm, r.meeting, r.adviser) for r in records] == [
+            ("A", "plan-1", None), ("A", "plan-2", None),
+        ]
 
 
 class TestCallLogEnv:
@@ -128,7 +156,7 @@ class TestReadCallLog:
         assert record.purpose is purpose
 
     def test_every_runtime_purpose_has_a_mapping(self, tmp_path):
-        lines = [_line(purpose=p.value) for p in RuntimePurpose]
+        lines = [_line(purpose=p.value) for p in LLMCallPurpose]
         assert len(read_call_log(_write(tmp_path / "c.jsonl", *lines)).records) == len(lines)
 
     @pytest.mark.parametrize("purpose", [None, "gossip"])
@@ -195,6 +223,11 @@ class TestReadCallLog:
             "plan-1", "ember-owl", "TimeoutError",
         )
 
+    def test_a_memo_request_without_a_zone_is_refused(self):
+        with pytest.raises(ValueError, match="zone"):
+            MemoTurn(arm="C", series="series-1", meeting="plan-1", attempt=2,
+                     chair="ember-owl", asked_at=_T.replace(tzinfo=None))
+
     def test_no_file_is_an_empty_log(self, tmp_path):
         log = read_call_log(tmp_path / "missing.jsonl")
         assert (log.records, log.failures) == ((), ())
@@ -220,7 +253,7 @@ async def test_what_the_runtime_writes_the_harness_reads(tmp_path, monkeypatch):
     try:
         await LLMClient(_Provider()).create_message(
             model="claude-sonnet-4-6", messages=[], system="s", tools=[],
-            max_tokens=10, temperature=0.7, purpose=RuntimePurpose.BID,
+            max_tokens=10, temperature=0.7, purpose=LLMCallPurpose.BID,
         )
     finally:
         call_log.reset_call_log()

@@ -10,7 +10,7 @@ import logging
 from dataclasses import dataclass
 
 from ..llm_client import LLMClient
-from ..llm_types import CallPurpose
+from ..llm_types import LLMCallPurpose
 from ..model_aliases import resolve
 from ..prompt_loader import load_snippet
 
@@ -209,7 +209,7 @@ class WorkingMemory:
                 response = await llm_client.create_message(
                     model=resolved.model,
                     model_alias=resolved.alias,
-                    purpose=CallPurpose.COMPRESS,
+                    purpose=LLMCallPurpose.COMPRESS,
                     messages=[{"role": "user", "content": section.content}],
                     system=load_snippet("working-memory-compressor"),
                     tools=[],

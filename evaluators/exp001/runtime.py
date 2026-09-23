@@ -5,7 +5,8 @@ settings. The **meeting clock** puts the adviser on the meeting's story date:
 its agent time starts at 10:00 UTC that day and runs on with the real clock
 (check 7). The **call log** names the file the adviser appends a line to for
 every model call, and the tags that say which arm, series, meeting and
-attempt the process is serving (check 4).
+attempt the process is serving (check 4). Calls the harness makes itself,
+arm A's and the judge's, are tagged per meeting with :func:`call_log_scope`.
 
 After the run, :func:`read_call_log` turns those lines into the
 :class:`~evaluators.exp001.costs.CallRecord` values ``costs`` prices. It
@@ -21,10 +22,12 @@ from __future__ import annotations
 import datetime as dt
 import json
 from collections.abc import Iterable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from agents import call_log
 from agents.call_log import CALL_LOG_ENV, CALL_TAGS_ENV
 from agents.clock import CLOCK_ANCHOR_ENV, CLOCK_START_ENV
 from evaluators.exp001.costs import ARMS, CallPurpose, CallRecord
@@ -76,16 +79,35 @@ def call_log_env(
     attempt: int,
 ) -> dict[str, str]:
     """The call-log settings for a process serving one meeting of one arm."""
+    tags = _tags(arm, series, meeting, meeting_kind, attempt)
+    return {CALL_LOG_ENV: str(path), CALL_TAGS_ENV: json.dumps(tags)}
+
+
+def call_log_scope(
+    path: Path,
+    *,
+    arm: str,
+    series: str,
+    meeting: str,
+    meeting_kind: MeetingKind,
+    attempt: int,
+) -> AbstractContextManager[None]:
+    """The same log and tags for the calls the harness makes inside the block."""
+    return call_log.scoped(path, _tags(arm, series, meeting, meeting_kind, attempt))
+
+
+def _tags(
+    arm: str, series: str, meeting: str, meeting_kind: MeetingKind, attempt: int,
+) -> dict[str, str]:
     if arm not in ARMS:
         raise ValueError(f"unknown arm {arm!r}; expected one of {ARMS}")
-    tags = {
+    return {
         "arm": arm,
         "series": series,
         "meeting": meeting,
         "meeting_kind": meeting_kind.value,
         "attempt": str(attempt),
     }
-    return {CALL_LOG_ENV: str(path), CALL_TAGS_ENV: json.dumps(tags)}
 
 
 @dataclass(frozen=True)
@@ -98,6 +120,11 @@ class MemoTurn:
     attempt: int
     chair: str
     asked_at: dt.datetime
+
+    def __post_init__(self) -> None:
+        # Call-log times carry a zone; a bare one could not be compared.
+        if self.asked_at.tzinfo is None:
+            raise ValueError("the memo request's time needs a zone")
 
 
 @dataclass(frozen=True)

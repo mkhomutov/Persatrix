@@ -283,7 +283,9 @@ Process vocabulary (scope lock, cuttable, live arc, finding, …) lives in the
   labels from `PERSATRIX_CALL_TAGS`, the agent's ID, the call's purpose
   (turn, bid, critic, revise, summary or compress, named by the code that
   makes the call), the start in real time, the model and the token counts,
-  cache writes and reads apart. Without the setting nothing is written.
+  cache writes and reads apart. Without the setting nothing is written;
+  a process serving many runs in turn names the file and tags per block of
+  calls instead.
 - **Example:** "EXP-001 gives every adviser the same call log, tagged with
   the arm and meeting, and prices each line with its fixed table."
 

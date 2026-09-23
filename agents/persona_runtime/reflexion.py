@@ -47,7 +47,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Final
 
 from ..generated import wallet_pb2 as walletpb
-from ..llm_types import CallPurpose, StopReason
+from ..llm_types import LLMCallPurpose, StopReason
 from ..model_aliases import resolve as resolve_model
 from ..observability._metrics_salience import record_reflexion
 from ..persona_types import ActionType, AgentAction
@@ -321,7 +321,7 @@ async def _run_critic(
         )
         response = await llm_client.create_message(
             model=critic_model, model_alias=critic_alias,
-            purpose=CallPurpose.CRITIC,
+            purpose=LLMCallPurpose.CRITIC,
             messages=[{"role": "user", "content": user}], system=system, tools=[],
             max_tokens=_CRITIC_MAX_OUTPUT_TOKENS, temperature=_REFLEXION_TEMPERATURE,
             cause=cause, agent_id=agent_id, interaction_id=interaction_id,
@@ -373,7 +373,7 @@ async def _run_revise(
         )
         response = await llm_client.create_message(
             model=model, model_alias=model_alias,
-            purpose=CallPurpose.REVISE,
+            purpose=LLMCallPurpose.REVISE,
             messages=[{"role": "user", "content": user}], system=system, tools=[],
             max_tokens=max_tokens, temperature=_REFLEXION_TEMPERATURE,
             cause=cause, agent_id=agent_id, interaction_id=interaction_id,

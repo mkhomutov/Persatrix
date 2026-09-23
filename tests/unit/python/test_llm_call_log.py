@@ -26,7 +26,7 @@ import pytest
 
 from agents import call_log
 from agents.llm_client import LLMClient, LLMResponse, Usage
-from agents.llm_types import CallPurpose
+from agents.llm_types import LLMCallPurpose
 from agents.observability import metrics
 
 _AGENTS = Path(__file__).resolve().parents[3] / "agents"
@@ -75,7 +75,7 @@ def _lines(path: Path) -> list[dict]:
 class TestWritingTheLog:
     async def test_a_call_writes_one_tagged_line(self, log_path):
         before = dt.datetime.now(dt.UTC)
-        await _call(LLMClient(_Provider()), purpose=CallPurpose.TURN)
+        await _call(LLMClient(_Provider()), purpose=LLMCallPurpose.TURN)
         after = dt.datetime.now(dt.UTC)
         [line] = _lines(log_path)
         started = dt.datetime.fromisoformat(line.pop("started_at"))
@@ -96,13 +96,15 @@ class TestWritingTheLog:
 
     async def test_calls_append(self, log_path):
         client = LLMClient(_Provider())
-        await _call(client, purpose=CallPurpose.BID)
-        await _call(client, purpose=CallPurpose.SUMMARY)
+        await _call(client, purpose=LLMCallPurpose.BID)
+        await _call(client, purpose=LLMCallPurpose.SUMMARY)
         assert [line["purpose"] for line in _lines(log_path)] == ["bid", "summary"]
 
     async def test_a_failed_call_is_logged_with_its_error_and_still_raises(self, log_path):
         with pytest.raises(TimeoutError):
-            await _call(LLMClient(_Provider(error=TimeoutError("slow"))), purpose=CallPurpose.TURN)
+            await _call(
+                LLMClient(_Provider(error=TimeoutError("slow"))), purpose=LLMCallPurpose.TURN,
+            )
         [line] = _lines(log_path)
         assert line["error"] == "TimeoutError"
         assert (line["input_tokens"], line["output_tokens"]) == (0, 0)
@@ -113,7 +115,8 @@ class TestWritingTheLog:
 
         with pytest.raises(asyncio.CancelledError):
             await _call(
-                LLMClient(_Provider(error=asyncio.CancelledError())), purpose=CallPurpose.SUMMARY,
+                LLMClient(_Provider(error=asyncio.CancelledError())),
+                purpose=LLMCallPurpose.SUMMARY,
             )
         [line] = _lines(log_path)
         assert line["error"] == "CancelledError"
@@ -126,7 +129,7 @@ class TestWritingTheLog:
     async def test_no_tags_setting_logs_empty_tags(self, log_path, monkeypatch):
         monkeypatch.delenv(call_log.CALL_TAGS_ENV)
         call_log.reset_call_log()
-        await _call(LLMClient(_Provider()), purpose=CallPurpose.TURN)
+        await _call(LLMClient(_Provider()), purpose=LLMCallPurpose.TURN)
         assert _lines(log_path)[0]["tags"] == {}
 
 
@@ -135,7 +138,7 @@ class TestSettings:
         monkeypatch.delenv(call_log.CALL_LOG_ENV, raising=False)
         monkeypatch.chdir(tmp_path)
         call_log.reset_call_log()
-        await _call(LLMClient(_Provider()), purpose=CallPurpose.TURN)
+        await _call(LLMClient(_Provider()), purpose=LLMCallPurpose.TURN)
         assert list(tmp_path.iterdir()) == []
 
     @pytest.mark.parametrize("raw", ["not json", "[1, 2]", '{"arm": 4}'])
@@ -153,13 +156,20 @@ class TestSettings:
         assert call_log.call_tags() == {"arm": "B"}
 
 
-def _create_message_calls(tree: ast.AST):
+# The one call that is not a call site: LLMClient handing the request on to
+# its provider, after the purpose has already been taken off.
+_PROVIDER_HANDOFF = ("llm_client.py", "provider")
+
+
+def _create_message_calls(path: Path, tree: ast.AST):
+    """Every ``<anything>.create_message(...)`` call, whatever the receiver
+    is named, apart from the provider hand-off inside LLMClient."""
     for node in ast.walk(tree):
         if (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
             and node.func.attr == "create_message"
-            and ast.unparse(node.func.value).endswith("llm_client")
+            and (path.name, ast.unparse(node.func.value)) != _PROVIDER_HANDOFF
         ):
             yield node
 
@@ -184,13 +194,16 @@ def test_every_runtime_call_site_names_its_purpose():
     for path in sorted(_AGENTS.rglob("*.py")):
         if "tests" in path.parts or "generated" in path.parts:
             continue
-        for call in _create_message_calls(ast.parse(path.read_text())):
+        # Provider adapters implement create_message; they never call one.
+        if path.parent == _AGENTS and path.name.startswith("llm_") and path.name != "llm_client.py":
+            continue
+        for call in _create_message_calls(path, ast.parse(path.read_text())):
             where = path.relative_to(_AGENTS).as_posix()
             purpose = next((kw.value for kw in call.keywords if kw.arg == "purpose"), None)
             name = (
                 purpose.attr
                 if isinstance(purpose, ast.Attribute)
-                and ast.unparse(purpose.value) == "CallPurpose"
+                and ast.unparse(purpose.value) == "LLMCallPurpose"
                 else f"<{ast.unparse(purpose) if purpose else 'missing'} at line {call.lineno}>"
             )
             found.setdefault(where, set()).add(name)
@@ -212,3 +225,57 @@ def test_bad_tags_stop_the_agent_at_startup(monkeypatch):
             server_cli._validate_startup_config()
     finally:
         call_log.reset_call_log()
+
+
+class TestScopedLog:
+    """A process that serves many meetings in turn, such as the harness running
+    arm A or the judge, names the file and tags per block of calls."""
+
+    async def test_a_scope_overrides_the_settings_and_ends_with_the_block(self, log_path, tmp_path):
+        other = tmp_path / "arm-a.jsonl"
+        client = LLMClient(_Provider())
+        with call_log.scoped(other, {"arm": "A", "meeting": "plan-1"}):
+            await _call(client, purpose=LLMCallPurpose.TURN)
+        with call_log.scoped(other, {"arm": "A", "meeting": "plan-2"}):
+            await _call(client, purpose=LLMCallPurpose.TURN)
+        await _call(client, purpose=LLMCallPurpose.TURN)
+        assert [line["tags"]["meeting"] for line in _lines(other)] == ["plan-1", "plan-2"]
+        assert [line["tags"] for line in _lines(log_path)] == [
+            {"arm": "D", "series": "series-1", "meeting": "plan-1"},
+        ]
+
+    async def test_a_scope_works_without_any_setting(self, tmp_path, monkeypatch):
+        monkeypatch.delenv(call_log.CALL_LOG_ENV, raising=False)
+        call_log.reset_call_log()
+        path = tmp_path / "judge.jsonl"
+        with call_log.scoped(path, {"arm": "A"}):
+            await _call(LLMClient(_Provider()), purpose=LLMCallPurpose.TURN)
+        assert len(_lines(path)) == 1
+
+    def test_scoped_tags_must_be_strings(self, tmp_path):
+        with pytest.raises(ValueError, match="strings"):
+            call_log.scoped(tmp_path / "x.jsonl", {"attempt": 1})  # type: ignore[dict-item]
+
+
+async def test_the_lease_settles_cached_tokens_too(monkeypatch):
+    """The wallet has no cache price, so it is charged every input token the
+    call carried, cached or not; settling only the uncached part would let
+    a cached prefix run past every budget."""
+    from unittest.mock import AsyncMock
+
+    from agents.generated import wallet_pb2 as walletpb
+    from agents.wallet_client import WalletClient
+
+    stub = AsyncMock()
+    stub.AcquireLease = AsyncMock(return_value=walletpb.LeaseResponse(
+        grant=walletpb.LeaseGrant(lease_id="01J000000000000000000CA",
+                                  granted_input_tokens=90_000, granted_output_tokens=500,
+                                  ttl_seconds=60),
+    ))
+    stub.SettleLease = AsyncMock(return_value=walletpb.SettlementAck(success=True))
+    stub.ReleaseLease = AsyncMock(return_value=walletpb.SettlementAck(success=True))
+    client = LLMClient(_Provider(), wallet=WalletClient(stub, backoff_base=0.0))
+    await _call(client, purpose=LLMCallPurpose.TURN, cause=walletpb.CAUSE_CHANNEL_MESSAGE,
+                agent_id="ember-owl")
+    settle = stub.SettleLease.await_args.args[0]
+    assert (settle.actual_input_tokens, settle.actual_output_tokens) == (10 + 7 + 3, 5)
