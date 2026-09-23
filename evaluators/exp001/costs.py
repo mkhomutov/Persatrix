@@ -19,8 +19,8 @@ from __future__ import annotations
 import datetime as dt
 import enum
 import random
-from collections.abc import Iterable
-from dataclasses import dataclass
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, replace
 
 from evaluators.exp001.materials import PLANS_PER_SCORED_SERIES, PRACTICE_SERIES, MeetingKind
 
@@ -42,6 +42,16 @@ class Price:
 PRICES: dict[str, Price] = {
     "claude-sonnet-4-6": Price(input=3.00, output=15.00, cache_write=3.75, cache_read=0.30),
     "claude-opus-5": Price(input=5.00, output=25.00),
+}
+
+# Part 2 §7 reports each deciding verdict again with bids and memory
+# summaries repriced at the shipped fast model's list price. Its cache prices
+# keep the fixed table's ratio to input: 1.25x to write, 0.1x to read. It is
+# kept out of PRICES, so no call the run makes is ever priced at it.
+REPRICE_MODEL = "claude-haiku-4-5"
+REPRICING_PRICES: dict[str, Price] = {
+    **PRICES,
+    REPRICE_MODEL: Price(input=1.00, output=5.00, cache_write=1.25, cache_read=0.10),
 }
 
 
@@ -75,8 +85,8 @@ class CallRecord:
     counts_in_arm: bool = True
 
 
-def price_call(call: CallRecord) -> float:
-    price = PRICES[call.model]
+def price_call(call: CallRecord, prices: Mapping[str, Price] = PRICES) -> float:
+    price = prices[call.model]
     dollars = call.input_tokens * price.input + call.output_tokens * price.output
     for tokens, rate in (
         (call.cache_write_tokens, price.cache_write),
@@ -89,11 +99,16 @@ def price_call(call: CallRecord) -> float:
 
 
 def dollars_per_plan(
-    records: Iterable[CallRecord], *, arm: str, series: str, attempt: int
+    records: Iterable[CallRecord],
+    *,
+    arm: str,
+    series: str,
+    attempt: int,
+    prices: Mapping[str, Price] = PRICES,
 ) -> float:
     """The arm's spend on the series' briefing and plans in one attempt, per plan."""
     total = sum(
-        price_call(r)
+        price_call(r, prices)
         for r in records
         if r.arm == arm
         and r.series == series
@@ -103,6 +118,12 @@ def dollars_per_plan(
         and r.meeting_kind is not MeetingKind.RECALL
     )
     return total / PLANS_PER_SCORED_SERIES
+
+
+def repriced(records: Iterable[CallRecord]) -> list[CallRecord]:
+    """The records with every bid and summary moved to the fast model, for §7's report."""
+    cheap = (CallPurpose.BID, CallPurpose.SUMMARY)
+    return [replace(r, model=REPRICE_MODEL) if r.purpose in cheap else r for r in records]
 
 
 def real_spend(records: Iterable[CallRecord]) -> float:
