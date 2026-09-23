@@ -213,6 +213,11 @@ echo "what's on fire?" | ./bin/persatrix.exe chat ember-owl
 The `chat` command takes the agent id as its first argument and reads one turn
 per line from stdin, so piping a single line runs one turn and exits.
 
+Then wait at least 10 minutes before the checks below, and before Step 5
+stops the persona. Exiting sends no session end, so the persona writes these
+rows only when the interaction goes quiet and closes (RFC 0020 idle window,
+600 s by default).
+
 Otherwise skip to Step 5; the cross-process automated test
 (`tests/integration/test_session_id_cross_process.py`) already covers
 the Python side equivalent.
@@ -290,6 +295,7 @@ carries the session the CLI sends (Step 4):
 $env:PERSATRIX_SESSION_ID = "run-b"
 echo "different session, same peer" | ./bin/persatrix.exe chat ember-owl
 
+# Wait at least 10 minutes for the interaction to close (Step 4), then:
 sqlite3 data/memory.db "SELECT other_participant_id, session_id FROM relationships WHERE participant_id='ember-owl';"
 ```
 

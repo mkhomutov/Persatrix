@@ -172,9 +172,9 @@ normal accumulation a `live` deployment relies on.
 
 **Action**:
 
-Wait out the idle window after Step 2 so the `live` interaction closes first
-(see Preconditions), then send the turn under the fresh epoch — same stack, no
-restart:
+Wait at least 10 minutes after Step 2 (the RFC 0020 idle window, 600 s by
+default) so the `live` interaction closes first (see Preconditions), then send
+the turn under the fresh epoch — same stack, no restart:
 
 ```bash
 echo "Where did we land on that incident process?" \
@@ -186,6 +186,9 @@ echo "Where did we land on that incident process?" \
 prior episodes, **no** facts. The persona treats Alice as new (no recall of the
 platform team or the migration). This is the structural residue a fresh channel
 name alone cannot reach.
+
+Check the reply at once; run the two storage checks only after another
+10 minutes, once Step 3's own interaction has closed and written its rows.
 
 **Verification**:
 - [ ] The reply shows **no** recall of the Step 1–2 context (treats Alice as a
