@@ -63,6 +63,76 @@ class TestTheShippedPanel:
         assert template.endswith("then reply\nonce, as the panel.")
 
 
+class TestTheChannelArms:
+    """Arms B to D-prime run the advisers as persona agents in a channel;
+    panel.yaml fixes that channel, their settings and the memo turn after it."""
+
+    def test_governance_is_off_in_b_and_as_shipped_in_the_others(self) -> None:
+        panel = load_panel(_PANEL)
+        b = panel.channels["B"]
+        assert dict(b.members) == dict.fromkeys((a.id for a in panel.advisers), "always")
+        assert (b.reasoning_mode, b.end_vote_threshold, b.end_vote_window) == ("off", 9, 8)
+        for arm in ("C", "D", "D-prime"):
+            governed = panel.channels[arm]
+            assert dict(governed.members) == {
+                "lunar-stoat": "chair", "velvet-pika": "participant",
+                "ripple-kite": "participant", "crimson-crow": "participant",
+            }
+            assert (
+                governed.reasoning_mode, governed.end_vote_threshold, governed.end_vote_window,
+            ) == ("bid", 4, 8)
+
+    def test_every_channel_arm_shares_the_rest(self) -> None:
+        panel = load_panel(_PANEL)
+        assert sorted(panel.channels) == ["B", "C", "D", "D-prime"]
+        for channel in panel.channels.values():
+            assert (
+                channel.topic, channel.goal, channel.agenda, channel.max_rounds,
+                channel.interaction_budget_tokens, channel.escalation_chair_id,
+                channel.convener, channel.classification, channel.cascade_depth_cap,
+            ) == (
+                "Advice for {organisation}", "Answer the operator's latest message.", (), 8,
+                2_000_000, "lunar-stoat", "crimson-crow", "internal", 5,
+            )
+
+    def test_only_d_recalls_memory_into_its_prompts(self) -> None:
+        assert dict(load_panel(_PANEL).memory_budget_tokens) == {
+            "B": 0, "C": 0, "D": 1500, "D-prime": 0,
+        }
+
+    def test_the_settings_the_advisers_are_deployed_with(self) -> None:
+        assert load_panel(_PANEL).persona_settings == {
+            "permissions": {"memory": {"read": True, "write": True}},
+            "relationships": [],
+            "autonomy": {"level": "reactive", "timers": []},
+            "conversation_window": {"enabled": True, "max_turns": 200, "max_tokens": 32000},
+        }
+
+    def test_the_operator_is_a_member_who_never_answers(self) -> None:
+        assert load_panel(_PANEL).operator == "operator"
+
+    def test_the_memo_turn_asks_the_chair_for_the_memo_or_the_answers(self) -> None:
+        panel = load_panel(_PANEL)
+        plan = panel.memo_turn_instruction(MeetingKind.PLAN)
+        assert plan == (
+            "The discussion has ended. As chair, write the panel's decision memo from\n"
+            f"what was said.\n{panel.memo_format}"
+        )
+        assert panel.memo_turn_instruction(MeetingKind.CONTROL) == plan
+        assert panel.memo_turn_instruction(MeetingKind.RECALL) == (
+            f"The discussion has ended. As chair, give the panel's answers.\n{panel.recall_format}"
+        )
+        with pytest.raises(ValueError, match="a briefing has no memo turn"):
+            panel.memo_turn_instruction(MeetingKind.BRIEFING)
+
+    def test_the_channel_settings_cannot_be_changed(self) -> None:
+        panel = load_panel(_PANEL)
+        with pytest.raises(TypeError):
+            panel.channels["B"].members["lunar-stoat"] = "observer"  # type: ignore[index]
+        with pytest.raises(TypeError):
+            panel.persona_settings["relationships"] = ["x"]  # type: ignore[index]
+
+
 class TestPlaceholders:
     """rubric.yaml's templating note: a placeholder is filled by replacing its
     exact string, and every other brace in the materials is literal text."""
@@ -214,6 +284,11 @@ class TestRefusals:
         ("instructions", "recall_format"),
         ("instructions", "arm_a_by_meeting", "recall"),
         ("persona_settings",),
+        ("persona_settings", "conversation_window"),
+        ("instructions", "memo_turn", "recall"),
+        ("channel", "every_channel_arm", "goal"),
+        ("memory", "D-prime", "memory_budget_tokens"),
+        ("operator", "respond"),
     ])
     def test_a_missing_part(
         self, tmp_path: Path, doc: dict[str, Any], path: tuple[str, ...],
@@ -276,4 +351,94 @@ class TestRefusals:
     ) -> None:
         doc["instructions"]["arm_a_system"]["template"] += "\n{memo_format}"
         with pytest.raises(PanelError, match="template names {memo_format}, which the harness"):
+            load_panel(_write(tmp_path, doc))
+
+
+class TestChannelRefusals:
+    """A channel arm the panel leaves unset, or sets so its meetings could not
+    run as the pre-registration describes, is refused before any meeting."""
+
+    def test_a_channel_arm_no_block_holds(self, tmp_path: Path, doc: dict[str, Any]) -> None:
+        doc["channel"]["governance_on"]["arms"] = ["C", "D"]
+        with pytest.raises(PanelError, match="no channel block holds arm D-prime"):
+            load_panel(_write(tmp_path, doc))
+
+    def test_an_arm_two_blocks_hold(self, tmp_path: Path, doc: dict[str, Any]) -> None:
+        doc["channel"]["governance_off"]["arms"] = ["B", "C"]
+        with pytest.raises(PanelError, match="arm C is in two channel blocks"):
+            load_panel(_write(tmp_path, doc))
+
+    def test_arm_a_in_a_channel(self, tmp_path: Path, doc: dict[str, Any]) -> None:
+        doc["channel"]["governance_off"]["arms"] = ["A", "B"]
+        with pytest.raises(PanelError, match="governance_off names arm 'A', which meets in no"):
+            load_panel(_write(tmp_path, doc))
+
+    def test_members_other_than_the_advisers(self, tmp_path: Path, doc: dict[str, Any]) -> None:
+        del doc["channel"]["governance_on"]["members"]["crimson-crow"]
+        with pytest.raises(PanelError, match="governance_on members are not the four advisers"):
+            load_panel(_write(tmp_path, doc))
+
+    def test_a_disposition_no_channel_knows(self, tmp_path: Path, doc: dict[str, Any]) -> None:
+        doc["channel"]["governance_on"]["members"]["velvet-pika"] = "sometimes"
+        with pytest.raises(PanelError, match="velvet-pika is 'sometimes', not a disposition"):
+            load_panel(_write(tmp_path, doc))
+
+    def test_a_closing_chair_other_than_the_panels(
+        self, tmp_path: Path, doc: dict[str, Any],
+    ) -> None:
+        doc["channel"]["every_channel_arm"]["escalation_chair_id"] = "velvet-pika"
+        with pytest.raises(PanelError, match="escalation_chair_id is 'velvet-pika', not lunar-"):
+            load_panel(_write(tmp_path, doc))
+
+    @pytest.mark.parametrize("convener", ["lunar-stoat", "operator"])
+    def test_a_convener_that_is_the_chair_or_no_adviser(
+        self, tmp_path: Path, doc: dict[str, Any], convener: str,
+    ) -> None:
+        doc["channel"]["every_channel_arm"]["convener"] = convener
+        with pytest.raises(PanelError, match="convener .* an adviser other than the chair"):
+            load_panel(_write(tmp_path, doc))
+
+    @pytest.mark.parametrize("autonomous", [False, "true", None])
+    def test_a_channel_that_is_not_armed(
+        self, tmp_path: Path, doc: dict[str, Any], autonomous: object,
+    ) -> None:
+        doc["channel"]["every_channel_arm"]["autonomous"] = autonomous
+        with pytest.raises(PanelError, match="every_channel_arm.autonomous is .*, not true"):
+            load_panel(_write(tmp_path, doc))
+
+    @pytest.mark.parametrize(("key", "value"), [
+        ("max_rounds", 0), ("interaction_budget_tokens", True), ("cascade_depth_cap", "5"),
+    ])
+    def test_a_bound_that_is_not_a_positive_count(
+        self, tmp_path: Path, doc: dict[str, Any], key: str, value: object,
+    ) -> None:
+        doc["channel"]["every_channel_arm"][key] = value
+        with pytest.raises(PanelError, match=f"every_channel_arm.{key} is .*, not a positive"):
+            load_panel(_write(tmp_path, doc))
+
+    @pytest.mark.parametrize("tokens", [True, "1500", -1, 1.5])
+    def test_a_memory_budget_that_is_not_a_count(
+        self, tmp_path: Path, doc: dict[str, Any], tokens: object,
+    ) -> None:
+        doc["memory"]["D"]["memory_budget_tokens"] = tokens
+        with pytest.raises(PanelError, match="memory.D.memory_budget_tokens is .*, not a count"):
+            load_panel(_write(tmp_path, doc))
+
+    @pytest.mark.parametrize(("respond", "operator", "error"), [
+        ("observer", "velvet-pika", "operator velvet-pika is an adviser"),
+        ("observer", "The Operator", "'The Operator' is not an agent ID"),
+        ("always", "operator", "the operator responds 'always', not as an observer"),
+    ])
+    def test_an_operator_who_could_take_part(
+        self, tmp_path: Path, doc: dict[str, Any], respond: str, operator: str, error: str,
+    ) -> None:
+        doc["operator"].update(id=operator, respond=respond)
+        with pytest.raises(PanelError, match=error):
+            load_panel(_write(tmp_path, doc))
+
+    def test_a_memo_turn_naming_a_placeholder_it_cannot_fill(
+        self, tmp_path: Path, doc: dict[str, Any],
+    ) -> None:
+        doc["instructions"]["memo_turn"]["plan"] += "For {organisation}."
+        with pytest.raises(PanelError, match="memo_turn.plan names {organisation}"):
             load_panel(_write(tmp_path, doc))

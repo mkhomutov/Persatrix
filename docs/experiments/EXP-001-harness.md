@@ -1,6 +1,6 @@
 # EXP-001 — The harness
 
-> **Status**: 🚧 **In Progress** — PRs 1, 2, 3a and 3b merged ([#984](https://github.com/mkhomutov/Persatrix/pull/984), [#986](https://github.com/mkhomutov/Persatrix/pull/986), [#987](https://github.com/mkhomutov/Persatrix/pull/987), [#988](https://github.com/mkhomutov/Persatrix/pull/988)); PR 4 open ([#992](https://github.com/mkhomutov/Persatrix/pull/992)); no practice run yet.
+> **Status**: 🚧 **In Progress** — PRs 1, 2, 3a, 3b and 4 merged ([#984](https://github.com/mkhomutov/Persatrix/pull/984), [#986](https://github.com/mkhomutov/Persatrix/pull/986), [#987](https://github.com/mkhomutov/Persatrix/pull/987), [#988](https://github.com/mkhomutov/Persatrix/pull/988), [#992](https://github.com/mkhomutov/Persatrix/pull/992)); PR 5a open; no practice run yet.
 > **Last updated**: 2026-09-24
 > **Carries out**: the [EXP-001 pre-registration](EXP-001-preregistration.md) and its [part 2](EXP-001-preregistration-scoring.md)
 > **Code**: [`evaluators/exp001/`](../../evaluators/exp001/)
@@ -13,8 +13,8 @@ picks a rule. It lands in the reviewed PRs below, as
 
 That section also says every choice a harness PR makes, where the documents
 leave it open, is listed in the PR and frozen when it merges. The
-[frozen choices](#frozen-choices) table collects them in one place, so the
-result can cite them.
+[frozen choices](EXP-001-harness-choices.md) document collects them in one
+place, so the result can cite them.
 
 ## The PRs
 
@@ -25,20 +25,24 @@ result can cite them.
 | 3a ([#987](https://github.com/mkhomutov/Persatrix/pull/987)) | Agent time: memory stamps, recall ages and the orchestrator's timestamps all read one clock that `PERSATRIX_CLOCK_START` can shift, so the adviser's clock and arm D's memories agree on the story date | 2 and 7, in part |
 | 3b ([#988](https://github.com/mkhomutov/Persatrix/pull/988)) | Runtime: the Anthropic adapter's prompt-cache marker and cache token counts; each meeting's clock settings; a [call log](../ai-glossary.md#call-log) that tags each call with its arm, meeting, adviser and purpose, and the reader that turns it into call records | 3, 4 and 7, in part |
 | 4 ([#992](https://github.com/mkhomutov/Persatrix/pull/992)) | Arm A: one call per meeting, with the advisers' identities rendered by the persona runtime's own prompt code; the reader that checks the panel and builds each adviser's agent config | 3, 4, 7 and 8, for arm A |
-| 5 | Arms B, C, D and D′: deployments, channels, the memo turn, restarts in D, D′'s transcript prefix; retries and failure detection for every arm, A included | 1, 2, 3, 5, 6; 7 and 8 for the deployed advisers |
+| 5a | Arms B and C: a deployment of the advisers for every meeting, its channel from `panel.yaml`, the memo turn, and the failures a meeting can show | 1, 5 and 6, for B and C; 7 and 8 for the deployed advisers |
+| 5b | Retries and failure detection for every arm, A included: provider errors retried, a series restarted from its briefing and then dropped, and the harness faults that stop the run | — (§3, attempts and failures) |
+| 5c | Arm D: one deployment per series, and restarts between meetings that leave memory as it was | 2; 5 and 6 for D |
+| 5d | Arm D′: the earlier meetings' transcripts in a cached prompt prefix | 3; 1, 5 and 6 for D′ |
 | 6 | The judge, with a call purpose of its own, and the practice run, which also checks the call log's total against the provider's usage report | all eight, on the practice series |
 
 Each PR is test-first, like all unit-level code here. PR 6's practice run is
-the evidence that the eight checks pass before any scored meeting.
+the evidence that the eight checks pass before any scored meeting. PR 5 is
+split in four, as PR 3 was in two, so each part stays reviewable.
 
-PR 3b leaves two constraints for PR 5. Anthropic can read a cache entry only
-once the response that wrote it has begun, and it keys the entry on the tool
-list as well as the prefix. So every call that carries D′'s prefix must share
-one tool list, and a meeting's first such call must be under way before the
-next one starts; otherwise each writes its own entry and check 3 fails. And a
-close summary that runs past its 30-second limit is cancelled: in D that
-adviser loses its summary and facts of the meeting, and the call may still be
-billed, so PR 5's failure detection must catch it.
+PR 3b leaves two constraints for PRs 5c and 5d. Anthropic can read a cache
+entry only once the response that wrote it has begun, and it keys the entry
+on the tool list as well as the prefix. So every call that carries D′'s
+prefix must share one tool list, and a meeting's first such call must be
+under way before the next one starts; otherwise each writes its own entry and
+check 3 fails. And a close summary that runs past its 30-second limit is
+cancelled: in D that adviser loses its summary and facts of the meeting, and
+the call may still be billed, so D's failure detection must catch it.
 
 PR 4 leaves PR 5 two more. Arm A renders each adviser from the agent config
 the panel reader builds, and shows the clock line of an adviser on UTC. So the
@@ -46,57 +50,33 @@ channel arms must deploy the advisers from that same config, adding nothing
 under `persona` and changing none of its fields, with the panel's
 `temperature` and no `max_tokens`; otherwise checks 7 and 8 no longer hold. A
 `persona.timezone` would move the advisers' clock line, and `persona.quirks`
-would add a section arm A never shows. And arm A logs a failed call and
-raises it: the retries the pre-registration asks for come with PR 5, for every
-arm at once.
+would add a section arm A never shows. PR 5a deploys them that way, and a
+test builds each adviser from the `agents.yaml` a deployment writes and finds
+arm A's sections and clock line in its prompt. And arm A logs a failed call
+and raises it: the retries the pre-registration asks for come with PR 5b, for
+every arm at once.
+
+PR 5a leaves three things for the parts after it. Each meeting of B and C
+writes its own call log, so PR 5b can read a meeting's provider errors from
+it: a failed line names the exception's class. A deployment that will not
+start, a rate limiter left on and a lease the wallet refused each raise
+`DeploymentError`; PR 5b decides which of them are harness faults. And arm D
+declares its series' six channels in one deployment, each named for its
+meeting's place as B and C name theirs, well inside the shipped cap of 50
+channels.
 
 ## Frozen choices
 
-| Choice | What the harness does | PR |
-|---|---|---|
-| Story date | Read from each message's first line, "Today is Monday 6 October 2036."; the weekday must match the date, every briefing falls on Monday 6 October 2036, and meetings must be exactly one week apart | 1 |
-| Arm names | `A`, `B`, `C`, `D`, `D-prime`, in that order | 1 |
-| Arm order | Python's `random.Random(2026)`; for each series in turn, series 1 first, one `sample` of all five arm names. The recorded orders are below; a test pins them | 1 |
-| Call purposes | `reply` (an adviser's turn, or arm A's one call), `bid`, `memo`, `summary` (memory summaries and fact extraction), `judge` | 1 |
-| Dollars | The table in pre-registration §3, per million tokens; a call on a model the table does not list, or with cache tokens on a model with no cache price, is refused rather than priced at zero | 1 |
-| Dollars per plan | Counted calls of the series' briefing and plan meetings, in the attempt that finished, divided by four; judge calls never count | 1 |
-| Real spend | Every arm call in the scored series, in every attempt, counted or not; practice and judge calls are left out | 1 |
-| Judging spend | Every `judge` call, for the $25 judging cap | 1 |
-| The 400-word cut | A word is any run of characters without a space or line break, so a heading's `##` counts. The memo is kept up to the end of its 400th word, formatting and all, and its word count and whether it was cut are recorded | 2 |
-| Control plans | A rater's total is (C1 + C3 + C4 + C5) × 10 ÷ 8. A score for C2 on a control plan, or a missing one on a plan, is refused | 2 |
-| A plan a rater cannot rank | When one rater gives all of a plan's memos the same total, the correlation is undefined. That plan is skipped for that pair, like a plan with fewer than three memos, and the count of skipped plans is reported. A pair left with no plan makes agreement undefined, and the result inconclusive | 2 |
-| The pooled correlations | Over every memo that exists, leaving out missing ones as the per-plan figure does; reported only | 2 |
-| Rounding at a threshold | Agreement, "beats" and "clearly beats" are compared after rounding to nine decimals, so a figure of exactly 0.4, zero or p is not decided by floating point | 2 |
-| t | 2.776 for five series and 3.182 for four, as part 2 states them | 2 |
-| Price range | Prices p from zero up; the verdict can change only where the interval's low end, or its mean less p, crosses zero, and those points are solved exactly | 2 |
-| Cheaper-model repricing | Every `bid` and `summary` call moves to `claude-haiku-4-5` at $1.00 input and $5.00 output; its cache tokens keep the fixed table's ratio to input, $1.25 to write and $0.10 to read. That model is never in the run's own price table | 2 |
-| Blinding | Every adviser's ID and name from `panel.yaml`, in any case and joined by a space, hyphen, underscore or line break, becomes `[adviser]`; so does any one word of a name written capitalised, such as `Stoat`. A packet ID is 8 hex characters from the operating system's random source, so no seed can rebuild it. Each rater's order is a fresh shuffle from that source, drawn again if another rater already has it. A missing memo scores 0 and never reaches the raters | 2 |
-| Story clock | An adviser's [agent time](../ai-glossary.md#agent-time) starts at 10:00 UTC on the meeting's story date and then runs with the real clock; it is not frozen. The advisers set no timezone, so they render UTC and their clock line reads 10:00. The harness also sets `PERSATRIX_CLOCK_ANCHOR` to the real moment the meeting began, so a restart inside a meeting resumes the clock rather than winding it back; at boot, messages sent before that moment are not replayed, because they belong to an earlier meeting's clock. Memory stamps, recall ages and incoming messages all read it, so in arm D a fact from the last meeting is a week old. Timers, deadlines and the orchestrator's records stay on real time | 3a; the zone in 3b |
-| Cache marker | A caller hands the stable text to the model client as a cache prefix. The Anthropic adapter sends it as the first system block, before the system prompt, marked `ephemeral` with no TTL: the five-minute cache, whose write price of 1.25 times input is the one in pre-registration §3's table. A call without a prefix carries no marker anywhere. A provider that cannot cache reads the prefix joined onto the front of its system prompt | 3b |
-| Call log | Every adviser appends to the file named by `PERSATRIX_CALL_LOG`, one line per call, failed calls included, with its tags in `PERSATRIX_CALL_TAGS`: arm, series, meeting, meeting kind and attempt. Calls the harness makes itself, such as arm A's, carry the same tags through a scope around each meeting's calls; how the judge's calls are logged is PR 6's choice. A line's time is when the call began, in real time, never agent time. A line the reader cannot place (no purpose, a missing tag, an unknown arm) is refused, never guessed at | 3b |
-| Call purposes, mapped | The runtime names each call `turn`, `bid`, `critic`, `revise`, `summary` or `compress`. A turn, critic or revise call is `reply`; `compress` is `summary`. Arm A's call has no adviser. Neither the reflexion loop (critic, revise) nor working-memory compression runs in EXP-001: reflexion needs `mode: plan` and `revise` of 1 or more, which the shipped `roundtable` channel leaves at `bid` and 0, and nothing calls compression. Those mappings only keep every line readable | 3b |
-| The memo's calls | A call is `memo` when it is the chair's turn, critic or revise, in that meeting and attempt, begun at or after the moment the harness asked for the memo; both times are real time, and the harness asks only once the discussion has closed. A bid the chair makes before answering stays `bid`, and its memory summary after that stays `summary` | 3b |
-| Memory writes in B, C and D′ | The runtime has no setting that stops memory writing: nothing turns off the summary written when an interaction closes. So those arms' `summary` calls are kept and priced in real spend but not counted in the arm's dollars per plan | 3b |
-| Failed calls | A call that raised is logged with its error and no tokens, and read back apart from the records, so a failed call is never priced. A call cancelled after the provider began work, or retried inside the provider's library, may be billed for more than the log shows; the practice run compares the two | 3b |
-| Arm A's prompt | The system prompt is the panel's arm A template, filled in, then a blank line and the meeting's instruction from `arm_a_by_meeting`; a control plan takes the plan's. The only user message is the operator's message, word for word. Nothing from an earlier meeting is sent | 4 |
-| The advisers in arm A | Each adviser is its persona prompt's identity, background, behaviour and goals sections, rendered by the runtime's own section code from the agent config the channel arms deploy, a blank line apart as the runtime sets them; the advisers follow in `panel.yaml`'s order, a blank line apart, with one more after the last, so the template's closing line does not read as that adviser's last goal. The grounding section, which tells a persona to reply as itself, and the state section, which gives its mood, are left out. An adviser field no identity section renders, such as quirks, is refused, since the persona agents would read it and arm A would not; `knowledge` is kept, as no prompt renders it | 4 |
-| Arm A's clock line | The now-anchor line an adviser's prompt shows as its meeting begins, when its [agent time](../ai-glossary.md#agent-time) reads 10:00:00 UTC on the story date. The runtime's own code renders it, and calls that hour late morning | 4 |
-| Arm A's call | `claude-sonnet-4-6` with no alias; temperature 0.7, from `panel.yaml`; at most 4 096 output tokens, the persona agents' own limit, since the shipped personas set none; no tools and no cache prefix. The purpose is `turn`, read as `reply`, with no adviser. The reply's text is the memo at a plan meeting, unless it is empty or was cut off at the token limit: then the memo is missing, as it is when a persona agent's reply hits its limit and it posts nothing. Its stop reason and the real times the call began and ended are kept; the adapter reads a stop reason it does not know, a refusal included, as end_turn | 4 |
-
-The arm order each series runs in:
-
-| Series | Order |
-|---|---|
-| 1 | A, C, D, D′, B |
-| 2 | D′, D, C, B, A |
-| 3 | B, A, C, D, D′ |
-| 4 | C, A, B, D, D′ |
-| 5 | C, B, D, D′, A |
+The choices each harness PR froze, and the arm order each series runs in, are
+in [their own document](EXP-001-harness-choices.md), so the result can cite
+them in one place.
 
 ## Related documentation
 
 - [EXP-001 pre-registration](EXP-001-preregistration.md) — materials, arms
   and the run.
 - [Part 2: scoring and the decision](EXP-001-preregistration-scoring.md).
+- [Frozen choices](EXP-001-harness-choices.md) — every choice a harness PR
+  froze, and the arm order.
 - [Evaluators guide](../evaluators-guide.md) — the golden-trace harness this
   one sits beside.
