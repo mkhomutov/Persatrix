@@ -143,7 +143,7 @@ def test_arm_orders_are_drawn_from_one_stream_seeded_2026() -> None:
 
 
 def test_arm_orders_are_the_recorded_ones() -> None:
-    """The orders docs/experiments/EXP-001-harness.md records; a change here is a harness fault."""
+    """The orders EXP-001-harness-choices.md records; a change here is a harness fault."""
     assert arm_orders(5) == [
         ("A", "C", "D", "D-prime", "B"),
         ("D-prime", "D", "C", "B", "A"),
