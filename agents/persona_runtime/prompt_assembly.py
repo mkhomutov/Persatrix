@@ -20,7 +20,7 @@ Contains the ``_PromptAssemblyMixin`` with:
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -253,6 +253,24 @@ _SECTIONS: tuple[_Section, ...] = (
 )
 
 
+def render_persona_sections(
+    persona_cfg: dict[str, Any], state: PersonaState, name: str, role: str,
+    *, only: Iterable[str] | None = None,
+) -> list[str]:
+    """The sections that apply, in prompt order; *only* keeps the named ones.
+
+    EXP-001's arm A renders its advisers with it. *only* is read once; a str is one name.
+    """
+    names = None if only is None else frozenset([only] if isinstance(only, str) else only)
+    if unknown := sorted((names or frozenset()) - {s.name for s in _SECTIONS}):
+        raise ValueError(f"no persona section is named {', '.join(map(repr, unknown))}")
+    return [
+        load_persona_section(s.name).format_map(s.context(persona_cfg, state, name, role))
+        for s in _SECTIONS
+        if (names is None or s.name in names) and s.predicate(persona_cfg, state)
+    ]
+
+
 class _PromptAssemblyMixin:
     """System-prompt and event-formatting helpers for persona agents."""
 
@@ -277,14 +295,7 @@ class _PromptAssemblyMixin:
         blank line — equivalent to the previous f-string composer's
         ``"\\n".join(parts)``-with-leading-``\\n`` idiom.
         """
-        persona_cfg = self.persona
-        rendered: list[str] = []
-
-        for section in _SECTIONS:
-            if section.predicate(persona_cfg, self._state):
-                template = load_persona_section(section.name)
-                ctx = section.context(persona_cfg, self._state, self.name, self.role)
-                rendered.append(template.format_map(ctx))
+        rendered = render_persona_sections(self.persona, self._state, self.name, self.role)
 
         # RFC 0021 §C: now-anchor block, unconditionally appended after
         # the persona-config sections and before the safety snippets.
