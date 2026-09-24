@@ -6,9 +6,10 @@ model; the channel arms deploy each adviser as a persona agent. Both start
 from :func:`adviser_agent_config`, so the two read one source (check 8).
 
 The loader reads what arm A needs: the advisers, its instructions and its
-template; the memo turn's instructions and the channel settings are the
-channel arms' to read. An instruction may name another by placeholder, as
-``{memo_format}``. As rubric.yaml's templating note fixes, a placeholder is
+template. It also reads what the channel arms need: the settings the advisers
+are deployed with, each arm's channel and memory budget, the operator, and
+the memo turn's instructions. An instruction may name another by placeholder,
+as ``{memo_format}``. As rubric.yaml's templating note fixes, a placeholder is
 filled by replacing its exact string, in one pass, and every other brace is
 literal text; a placeholder a text cannot fill is refused. Trailing blank
 space at the end of a text is dropped.
@@ -55,6 +56,24 @@ _ARM_A_KEYS = {
     MeetingKind.CONTROL: "plan",
     MeetingKind.RECALL: "recall",
 }
+# A briefing ends when its discussion closes; every other meeting ends with
+# the chair's memo turn.
+_MEMO_TURN_KEYS = {
+    MeetingKind.PLAN: "plan",
+    MeetingKind.CONTROL: "plan",
+    MeetingKind.RECALL: "recall",
+}
+# The arms whose advisers meet in a channel, as persona agents.
+CHANNEL_ARMS = ("B", "C", "D", "D-prime")
+# The persona settings the channel arms deploy exactly as panel.yaml writes
+# them; its other persona settings are prose the harness carries out.
+_PERSONA_SETTINGS = ("permissions", "relationships", "autonomy", "conversation_window")
+# How a channel member may respond, as config/channels.yaml spells it.
+_DISPOSITIONS = frozenset(
+    {"chair", "participant", "always", "addressed", "when_mentioned", "observer", "never"},
+)
+_CHANNEL_COUNTS = ("max_rounds", "interaction_budget_tokens", "cascade_depth_cap")
+_VOTE_COUNTS = ("end_vote_threshold", "end_vote_window")
 
 
 class PanelError(ValueError):
@@ -77,6 +96,29 @@ class Adviser:
 
 
 @dataclass(frozen=True, eq=False)
+class ChannelSettings:
+    """The channel one channel arm meets in, as panel.yaml sets it.
+
+    ``topic`` still holds its ``{organisation}`` placeholder; ``members``
+    maps each adviser to how it responds. The operator is not among them.
+    """
+
+    topic: str
+    goal: str
+    agenda: tuple[str, ...]
+    max_rounds: int
+    interaction_budget_tokens: int
+    escalation_chair_id: str
+    convener: str
+    classification: str
+    cascade_depth_cap: int
+    members: Mapping[str, str]
+    reasoning_mode: str
+    end_vote_threshold: int
+    end_vote_window: int
+
+
+@dataclass(frozen=True, eq=False)
 class Panel:
     advisers: tuple[Adviser, ...]
     temperature: float
@@ -84,6 +126,11 @@ class Panel:
     recall_format: str
     arm_a_template: str
     arm_a_by_meeting: Mapping[str, str]
+    persona_settings: Mapping[str, Any]
+    operator: str
+    channels: Mapping[str, ChannelSettings]
+    memory_budget_tokens: Mapping[str, int]
+    memo_turn_by_meeting: Mapping[str, str]
 
     @property
     def chair(self) -> Adviser:
@@ -92,6 +139,12 @@ class Panel:
     def arm_a_instruction(self, kind: MeetingKind) -> str:
         """What arm A is told to write at a meeting of *kind*."""
         return self.arm_a_by_meeting[_ARM_A_KEYS[kind]]
+
+    def memo_turn_instruction(self, kind: MeetingKind) -> str:
+        """What the operator asks the chair once a meeting of *kind* has closed."""
+        if kind not in _MEMO_TURN_KEYS:
+            raise ValueError(f"a {kind.value} has no memo turn")
+        return self.memo_turn_by_meeting[_MEMO_TURN_KEYS[kind]]
 
 
 def load_panel(path: Path) -> Panel:
@@ -121,6 +174,10 @@ def load_panel(path: Path) -> Panel:
         raise PanelError(
             f"persona_settings.temperature is {temperature!r}, not a number from 0 to 1",
         )
+    memo_turn = {
+        key: _fill(f"memo_turn.{key}", _at(doc, "instructions", "memo_turn", key), formats)
+        for key in sorted(set(_MEMO_TURN_KEYS.values()))
+    }
     return Panel(
         advisers=advisers,
         temperature=float(temperature),
@@ -128,6 +185,11 @@ def load_panel(path: Path) -> Panel:
         recall_format=formats["recall_format"],
         arm_a_template=template,
         arm_a_by_meeting=MappingProxyType(by_meeting),
+        persona_settings=_persona_settings(doc),
+        operator=_operator(doc, advisers),
+        channels=MappingProxyType(_channels(doc, advisers)),
+        memory_budget_tokens=MappingProxyType(_memory_budgets(doc)),
+        memo_turn_by_meeting=MappingProxyType(memo_turn),
     )
 
 
@@ -208,6 +270,108 @@ def _check_advisers(advisers: tuple[Adviser, ...]) -> None:
     chairs = sum(a.duty == CHAIR_DUTY for a in advisers)
     if chairs != 1:
         raise PanelError(f"the panel has {chairs} chairs, expected 1")
+
+
+def _persona_settings(doc: Any) -> Mapping[str, Any]:
+    settings = {key: copy.deepcopy(_at(doc, "persona_settings", key)) for key in _PERSONA_SETTINGS}
+    window = settings["conversation_window"]
+    if isinstance(window, dict):
+        window.pop("why", None)  # the reason for the size, for readers; not a setting
+    return MappingProxyType(settings)
+
+
+def _operator(doc: Any, advisers: tuple[Adviser, ...]) -> str:
+    oid = _at(doc, "operator", "id")
+    # An agent refuses a sender or mention that is not shaped like an ID.
+    if not isinstance(oid, str) or not _AGENT_ID.fullmatch(oid):
+        raise PanelError(f"operator: {oid!r} is not an agent ID")
+    if oid in {a.id for a in advisers}:
+        raise PanelError(f"operator {oid} is an adviser")
+    respond = _at(doc, "operator", "respond")
+    if respond != "observer":
+        raise PanelError(f"the operator responds {respond!r}, not as an observer")
+    return oid
+
+
+def _channels(doc: Any, advisers: tuple[Adviser, ...]) -> dict[str, ChannelSettings]:
+    """Each channel arm's channel: the shared settings, then its governance block."""
+    ids = {a.id for a in advisers}
+    chair = next(a.id for a in advisers if a.duty == CHAIR_DUTY)
+
+    def every(key: str) -> Any:
+        return _at(doc, "channel", "every_channel_arm", key)
+
+    # An armed channel carries on the discussion the operator's message opens.
+    if every("autonomous") is not True:
+        raise PanelError(f"every_channel_arm.autonomous is {every('autonomous')!r}, not true")
+    if every("escalation_chair_id") != chair:
+        raise PanelError(
+            f"every_channel_arm.escalation_chair_id is {every('escalation_chair_id')!r}, "
+            f"not {chair}, the panel's chair",
+        )
+    convener = every("convener")
+    if convener not in ids or convener == chair:
+        raise PanelError(
+            f"every_channel_arm.convener is {convener!r}, not an adviser other than the chair",
+        )
+    counts = {key: _count(f"every_channel_arm.{key}", every(key)) for key in _CHANNEL_COUNTS}
+    agenda = every("agenda")
+    if not isinstance(agenda, list) or not all(isinstance(i, str) and i.strip() for i in agenda):
+        raise PanelError(f"every_channel_arm.agenda is {agenda!r}, not a list of items")
+    settings: dict[str, ChannelSettings] = {}
+    for name in _at(doc, "channel"):
+        if name == "every_channel_arm":
+            continue
+        members = _at(doc, "channel", name, "members")
+        if not isinstance(members, dict) or set(members) != ids:
+            raise PanelError(f"{name} members are not the four advisers")
+        for aid, respond in members.items():
+            if respond not in _DISPOSITIONS:
+                raise PanelError(f"{name}: {aid} is {respond!r}, not a disposition")
+        votes = {
+            key: _count(f"{name}.{key}", _at(doc, "channel", name, key)) for key in _VOTE_COUNTS
+        }
+        mode = _text(f"{name}.reasoning_mode", _at(doc, "channel", name, "reasoning_mode"))
+        channel = ChannelSettings(
+            topic=_text("every_channel_arm.topic", every("topic")),
+            goal=_text("every_channel_arm.goal", every("goal")),
+            agenda=tuple(agenda),
+            escalation_chair_id=chair,
+            convener=convener,
+            classification=_text("every_channel_arm.classification", every("classification")),
+            members=MappingProxyType(dict(members)),
+            reasoning_mode=mode,
+            **counts,
+            **votes,
+        )
+        for arm in _at(doc, "channel", name, "arms"):
+            if arm not in CHANNEL_ARMS:
+                raise PanelError(f"{name} names arm {arm!r}, which meets in no channel")
+            if arm in settings:
+                raise PanelError(f"arm {arm} is in two channel blocks")
+            settings[arm] = channel
+    for arm in CHANNEL_ARMS:
+        if arm not in settings:
+            raise PanelError(f"no channel block holds arm {arm}")
+    return settings
+
+
+def _memory_budgets(doc: Any) -> dict[str, int]:
+    budgets = {}
+    for arm in CHANNEL_ARMS:
+        tokens = _at(doc, "memory", arm, "memory_budget_tokens")
+        if isinstance(tokens, bool) or not isinstance(tokens, int) or tokens < 0:
+            raise PanelError(
+                f"memory.{arm}.memory_budget_tokens is {tokens!r}, not a count of tokens",
+            )
+        budgets[arm] = tokens
+    return budgets
+
+
+def _count(where: str, value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise PanelError(f"{where} is {value!r}, not a positive whole number")
+    return value
 
 
 @functools.cache
