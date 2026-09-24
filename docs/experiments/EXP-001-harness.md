@@ -1,6 +1,6 @@
 # EXP-001 — The harness
 
-> **Status**: 🚧 **In Progress** — PRs 1, 2, 3a and 3b merged ([#984](https://github.com/mkhomutov/Persatrix/pull/984), [#986](https://github.com/mkhomutov/Persatrix/pull/986), [#987](https://github.com/mkhomutov/Persatrix/pull/987), [#988](https://github.com/mkhomutov/Persatrix/pull/988)); no practice run yet.
+> **Status**: 🚧 **In Progress** — PRs 1, 2, 3a and 3b merged ([#984](https://github.com/mkhomutov/Persatrix/pull/984), [#986](https://github.com/mkhomutov/Persatrix/pull/986), [#987](https://github.com/mkhomutov/Persatrix/pull/987), [#988](https://github.com/mkhomutov/Persatrix/pull/988)); PR 4 open ([#992](https://github.com/mkhomutov/Persatrix/pull/992)); no practice run yet.
 > **Last updated**: 2026-09-24
 > **Carries out**: the [EXP-001 pre-registration](EXP-001-preregistration.md) and its [part 2](EXP-001-preregistration-scoring.md)
 > **Code**: [`evaluators/exp001/`](../../evaluators/exp001/)
@@ -24,8 +24,8 @@ result can cite them.
 | 2 ([#986](https://github.com/mkhomutov/Persatrix/pull/986)) | Scoring and the decision: the 400-word cut, memo quality, recall majority, per-plan agreement, the interval, the verdicts and the rule that fires, the price range and the cheaper-model repricing; blinded rater packets | — (part 2) |
 | 3a ([#987](https://github.com/mkhomutov/Persatrix/pull/987)) | Agent time: memory stamps, recall ages and the orchestrator's timestamps all read one clock that `PERSATRIX_CLOCK_START` can shift, so the adviser's clock and arm D's memories agree on the story date | 2 and 7, in part |
 | 3b ([#988](https://github.com/mkhomutov/Persatrix/pull/988)) | Runtime: the Anthropic adapter's prompt-cache marker and cache token counts; each meeting's clock settings; a [call log](../ai-glossary.md#call-log) that tags each call with its arm, meeting, adviser and purpose, and the reader that turns it into call records | 3, 4 and 7, in part |
-| 4 | Arm A: the advisers' identities rendered by the persona runtime's own prompt code, one call per meeting | 7, 8 |
-| 5 | Arms B, C, D and D′: deployments, channels, the memo turn, restarts in D, D′'s transcript prefix, retries and failure detection | 1, 2, 3, 5, 6 |
+| 4 ([#992](https://github.com/mkhomutov/Persatrix/pull/992)) | Arm A: one call per meeting, with the advisers' identities rendered by the persona runtime's own prompt code; the reader that checks the panel and builds each adviser's agent config | 7 and 8; 3 and 4 for arm A |
+| 5 | Arms B, C, D and D′: deployments, channels, the memo turn, restarts in D, D′'s transcript prefix; retries and failure detection for every arm, A included | 1, 2, 3, 5, 6 |
 | 6 | The judge, with a call purpose of its own, and the practice run, which also checks the call log's total against the provider's usage report | all eight, on the practice series |
 
 Each PR is test-first, like all unit-level code here. PR 6's practice run is
@@ -39,6 +39,12 @@ next one starts; otherwise each writes its own entry and check 3 fails. And a
 close summary that runs past its 30-second limit is cancelled: in D that
 adviser loses its summary and facts of the meeting, and the call may still be
 billed, so PR 5's failure detection must catch it.
+
+PR 4 leaves PR 5 two more. Arm A renders each adviser from the agent config
+the panel reader builds, so the channel arms must deploy the advisers from
+that same config, adding settings but changing none of its fields; otherwise
+check 8 no longer holds. And arm A logs a failed call and raises it: the
+retries the pre-registration asks for come with PR 5, for every arm at once.
 
 ## Frozen choices
 
@@ -68,6 +74,10 @@ billed, so PR 5's failure detection must catch it.
 | The memo's calls | A call is `memo` when it is the chair's turn, critic or revise, in that meeting and attempt, begun at or after the moment the harness asked for the memo; both times are real time, and the harness asks only once the discussion has closed. A bid the chair makes before answering stays `bid`, and its memory summary after that stays `summary` | 3b |
 | Memory writes in B, C and D′ | The runtime has no setting that stops memory writing: nothing turns off the summary written when an interaction closes. So those arms' `summary` calls are kept and priced in real spend but not counted in the arm's dollars per plan | 3b |
 | Failed calls | A call that raised is logged with its error and no tokens, and read back apart from the records, so a failed call is never priced. A call cancelled after the provider began work, or retried inside the provider's library, may be billed for more than the log shows; the practice run compares the two | 3b |
+| Arm A's prompt | The system prompt is the panel's arm A template, filled in, then a blank line and the meeting's instruction from `arm_a_by_meeting`; a control plan takes the plan's. The only user message is the operator's message, word for word. Nothing from an earlier meeting is sent | 4 |
+| The advisers in arm A | Each adviser is its persona prompt's identity, background, behaviour and goals sections, rendered by the runtime's own section code from the agent config the channel arms deploy, a blank line apart as the runtime sets them; the advisers follow in `panel.yaml`'s order, a blank line apart. The grounding section, which tells a persona to reply as itself, and the state section, which gives its mood, are left out. An adviser field no identity section renders, such as quirks, is refused, since the persona agents would read it and arm A would not; `knowledge` is kept, as no prompt renders it | 4 |
+| Arm A's clock line | The now-anchor line an adviser's prompt shows as its meeting begins, when its [agent time](../ai-glossary.md#agent-time) reads 10:00:00 UTC on the story date. The runtime's own code renders it, and calls that hour late morning | 4 |
+| Arm A's call | `claude-sonnet-4-6` with no alias; temperature 0.7, from `panel.yaml`; at most 4 096 output tokens, the persona agents' own limit, since the shipped personas set none; no tools and no cache prefix. The purpose is `turn`, read as `reply`, with no adviser. The reply's text, empty if the model sent none, is the memo at a plan meeting; its stop reason and the real times the call began and ended are kept | 4 |
 
 The arm order each series runs in:
 

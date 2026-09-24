@@ -56,6 +56,11 @@ class CallLogError(ValueError):
     """A call-log line the harness cannot turn into a record."""
 
 
+def story_start(story_date: dt.date) -> dt.datetime:
+    """The agent time a meeting on *story_date* begins at: 10:00 UTC that day."""
+    return dt.datetime.combine(story_date, STORY_CLOCK_START)
+
+
 def meeting_clock_env(story_date: dt.date, began_at: dt.datetime) -> dict[str, str]:
     """The clock settings for an adviser serving the meeting on *story_date*.
 
@@ -65,7 +70,7 @@ def meeting_clock_env(story_date: dt.date, began_at: dt.datetime) -> dict[str, s
     """
     if began_at.tzinfo is None:
         raise ValueError("the meeting's real start needs a zone")
-    start = dt.datetime.combine(story_date, STORY_CLOCK_START)
+    start = story_start(story_date)
     return {CLOCK_START_ENV: start.isoformat(), CLOCK_ANCHOR_ENV: began_at.isoformat()}
 
 
