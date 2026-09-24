@@ -30,6 +30,7 @@ from evaluators.exp001.runtime import (
     call_log_scope,
     meeting_clock_env,
     read_call_log,
+    story_start,
 )
 
 _BEGAN = dt.datetime(2026, 10, 1, 9, 30, 15, tzinfo=dt.UTC)
@@ -47,6 +48,9 @@ class TestMeetingClock:
     def test_a_real_start_without_a_zone_is_refused(self):
         with pytest.raises(ValueError, match="zone"):
             meeting_clock_env(dt.date(2036, 10, 13), _BEGAN.replace(tzinfo=None))
+
+    def test_the_story_start_is_ten_utc_on_the_date(self):
+        assert story_start(dt.date(2036, 10, 13)) == dt.datetime(2036, 10, 13, 10, tzinfo=dt.UTC)
 
 
 class TestCallLogScope:

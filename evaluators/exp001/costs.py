@@ -25,6 +25,8 @@ from dataclasses import dataclass, replace
 from evaluators.exp001.materials import PLANS_PER_SCORED_SERIES, PRACTICE_SERIES, MeetingKind
 
 ARMS = ("A", "B", "C", "D", "D-prime")
+# The one model every arm calls, for every purpose (pre-registration §2).
+ARMS_MODEL = "claude-sonnet-4-6"
 ORDER_SEED = 2026
 _PER_MILLION = 1_000_000
 
@@ -40,7 +42,7 @@ class Price:
 
 
 PRICES: dict[str, Price] = {
-    "claude-sonnet-4-6": Price(input=3.00, output=15.00, cache_write=3.75, cache_read=0.30),
+    ARMS_MODEL: Price(input=3.00, output=15.00, cache_write=3.75, cache_read=0.30),
     "claude-opus-5": Price(input=5.00, output=25.00),
 }
 
