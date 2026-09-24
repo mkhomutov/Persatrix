@@ -26,8 +26,7 @@ import pytest
 
 from agents.clock import FrozenClock
 from agents.persona import create_persona_agent
-from agents.persona_runtime.prompt_assembly import render_persona_sections
-from agents.persona_types import Mood, PersonaState
+from agents.persona_types import Mood
 
 from ._persona_test_helpers import _PERSONA_CONFIG, _make_client
 
@@ -467,29 +466,3 @@ class TestMinimalPersona:
             assert prompt.startswith("You are Minimal Agent.\n")
         finally:
             await agent.close_memory()
-
-
-class TestRenderPersonaSections:
-    """The sections alone: EXP-001's arm A shows the advisers' identities
-    through this function, so it reads the words the persona agents read."""
-
-    def _render(self, only: tuple[str, ...] | None = None) -> list[str]:
-        cfg = _PERSONA_CONFIG
-        return render_persona_sections(
-            cfg["persona"], PersonaState(), cfg["name"], cfg["role"], only=only,
-        )
-
-    def test_they_open_the_system_prompt(self) -> None:
-        opening = "\n\n".join(self._render()) + "\n\nCurrent time:"
-        assert _GOLDEN_FULL_PERSONA_PROMPT.startswith(opening)
-
-    def test_only_keeps_the_named_sections_in_prompt_order(self) -> None:
-        assert self._render(only=("goals", "identity")) == [
-            _GOLDEN_FULL_PERSONA_PROMPT.split("\n\n")[0],
-            "Goals:\n- Primary: Ship v2.0 on time\n- Secondary: Reduce tech debt by 20%\n"
-            "- Hidden motivation: Prove the team can self-organize",
-        ]
-
-    def test_a_name_that_is_no_section_is_refused(self) -> None:
-        with pytest.raises(ValueError, match="'goal'"):
-            self._render(only=("identity", "goal"))

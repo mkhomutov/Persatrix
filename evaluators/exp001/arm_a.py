@@ -28,7 +28,7 @@ from agents.prompt_loader import load_persona_section
 from agents.temporal.rendering import format_now_anchor
 from evaluators.exp001.costs import ARMS_MODEL
 from evaluators.exp001.materials import Meeting, Series
-from evaluators.exp001.panel import Adviser, Panel, adviser_agent_config
+from evaluators.exp001.panel import Adviser, Panel, adviser_agent_config, fill_placeholders
 from evaluators.exp001.runtime import call_log_scope, story_start
 
 ARM = "A"
@@ -59,8 +59,10 @@ def now_anchor_line(story_date: dt.date) -> str:
 
 def system_prompt(panel: Panel, series: Series, meeting: Meeting) -> str:
     """The panel's template, filled for *meeting*, then the meeting's instruction."""
-    blocks = "\n\n".join("\n\n".join(identity_sections(a)) for a in panel.advisers)
-    framing = panel.arm_a_template.format_map({
+    # A blank line after the last adviser too, so the template's closing line
+    # does not read as that adviser's last goal.
+    blocks = "\n\n".join("\n\n".join(identity_sections(a)) for a in panel.advisers) + "\n"
+    framing = fill_placeholders(panel.arm_a_template, {
         "current_time_line": now_anchor_line(meeting.story_date),
         "organisation": series.organisation,
         "adviser_identity_blocks": blocks,
@@ -78,6 +80,15 @@ class ArmAReply:
     stop_reason: StopReason
     asked_at: dt.datetime
     answered_at: dt.datetime
+
+    @property
+    def missing(self) -> bool:
+        """Whether the memo, or a recall check's answers, counts as missing.
+
+        A reply with no text, or one cut off at the token limit, is missing,
+        as when a persona agent's reply hits its limit and it posts nothing.
+        """
+        return self.stop_reason is StopReason.MAX_TOKENS or not self.text.strip()
 
 
 def _real_now() -> dt.datetime:

@@ -20,7 +20,7 @@ Contains the ``_PromptAssemblyMixin`` with:
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -255,18 +255,19 @@ _SECTIONS: tuple[_Section, ...] = (
 
 def render_persona_sections(
     persona_cfg: dict[str, Any], state: PersonaState, name: str, role: str,
-    *, only: Collection[str] | None = None,
+    *, only: Iterable[str] | None = None,
 ) -> list[str]:
     """The sections that apply, in prompt order; *only* keeps the named ones.
 
-    EXP-001's arm A renders its advisers with it, in the persona agents' words.
+    EXP-001's arm A renders its advisers with it. *only* is read once; a str is one name.
     """
-    if unknown := sorted(set(only or ()) - {s.name for s in _SECTIONS}):
+    names = None if only is None else frozenset([only] if isinstance(only, str) else only)
+    if unknown := sorted((names or frozenset()) - {s.name for s in _SECTIONS}):
         raise ValueError(f"no persona section is named {', '.join(map(repr, unknown))}")
     return [
         load_persona_section(s.name).format_map(s.context(persona_cfg, state, name, role))
         for s in _SECTIONS
-        if (only is None or s.name in only) and s.predicate(persona_cfg, state)
+        if (names is None or s.name in names) and s.predicate(persona_cfg, state)
     ]
 
 

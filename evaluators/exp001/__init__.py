@@ -7,7 +7,7 @@ and its part 2; this package only carries those documents out.
 
 - :mod:`evaluators.exp001.materials` reads and checks the series files.
 - :mod:`evaluators.exp001.panel` reads and checks the panel: the advisers and
-  the wording of every instruction the harness adds.
+  arm A's instructions and template.
 - :mod:`evaluators.exp001.costs` records each model call, prices it with the
   fixed table, and draws each series' arm order.
 - :mod:`evaluators.exp001.runtime` gives each agent process its meeting's
@@ -18,8 +18,9 @@ and its part 2; this package only carries those documents out.
   measures how well the raters agree.
 - :mod:`evaluators.exp001.decision` compares the arms and picks the rule.
 
-Only ``runtime`` and ``arm_a`` import from the agents' runtime: the call log,
-the clock and, for arm A, the persona prompt code, so arm A reads the
-advisers in the persona agents' own words. The other modules import none of
-it, so they can be tested and used without starting any agent.
+Only ``runtime`` and ``arm_a`` import from the agents' runtime: the call log
+and the clock, and for arm A the model client and the persona prompt code, so
+arm A reads the advisers in the persona agents' own words. Importing either
+loads most of the ``agents`` package. The other modules import none of it, so
+they can be tested and used without starting any agent.
 """
