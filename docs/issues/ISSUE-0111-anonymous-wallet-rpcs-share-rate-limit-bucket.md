@@ -122,6 +122,7 @@ Landed with the v0.3.11 release-prep MT-execution PR (TDD,
 > the offline mock provider their roster reads, history reads and publishes
 > used up the 60 shared calls within seconds. The chair's memo publish then
 > got `429`, and the memo was gone: the agent logged a warning, and nothing
-> reached the channel or the call log. The harness now turns the limiter
+> reached the channel, though the model call that wrote the memo was made
+> and logged before the publish. The harness now turns the limiter
 > off for its own deployments (EXP-001 harness PR 5a), so no adviser's reply
 > is refused; the residual above is still the fix for everyone else.

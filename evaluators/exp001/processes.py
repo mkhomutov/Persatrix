@@ -4,8 +4,10 @@ A deployment (:mod:`evaluators.exp001.deployment`) is one orchestrator process
 and one process per adviser. They run this checkout's code: the orchestrator
 binary built from it, and ``python -m agents.server`` with the checkout on the
 import path. None of them inherits a ``PERSATRIX_`` or ``SECURITY_`` setting
-from the shell that runs the harness, so a stray setting there cannot change a
-deployment. Every one of them listens on loopback only.
+from the shell that runs the harness, so a stray orchestrator or agent setting
+there cannot change a deployment. The model client's own settings, such as
+``ANTHROPIC_BASE_URL`` or a proxy, do pass through, as they reach arm A's calls
+in the harness's own process. Every process listens on loopback only.
 
 The orchestrator starts first, and the advisers once it answers; on the way
 down the advisers stop first, since an adviser drains its memory summaries as
@@ -26,6 +28,7 @@ from pathlib import Path
 from typing import Protocol
 
 from evaluators.exp001.deployment import DeploymentError, Layout
+from evaluators.exp001.orchestrator import OrchestratorError
 
 LOOPBACK = "127.0.0.1"
 # The shell settings a process never inherits from the harness.
@@ -199,7 +202,11 @@ class Deployment:
             self._handles[process.name] = self._spawn(process, self._environ)
         while True:
             self._refuse_exited()
-            missing = sorted({p.name for p in self._advisers} - await registry.agents())
+            try:
+                registered = await registry.agents()
+            except OrchestratorError:  # it stopped answering; its exit, or the deadline, says why
+                registered = set()
+            missing = sorted({p.name for p in self._advisers} - registered)
             if not missing:
                 return
             await self._wait(deadline, f"not registered after {timeout:g} s: {', '.join(missing)}")
@@ -228,6 +235,13 @@ class Deployment:
         await self._stop_all([name for name in self._handles if name != "orchestrator"], grace)
         await self._stop_all([name for name in self._handles if name == "orchestrator"], grace)
         return self.exited()
+
+    def kill(self) -> None:
+        """Kill every process still running, at once: what a stop that is
+        itself interrupted falls back on, so nothing is left running."""
+        for handle in self._handles.values():
+            if handle.poll() is None:
+                handle.kill()
 
     async def _stop_all(self, names: Sequence[str], grace: float) -> None:
         running = [name for name in names if self._handles[name].poll() is None]

@@ -17,6 +17,7 @@ from typing import Any
 import pytest
 
 from evaluators.exp001.deployment import DeploymentError, Layout
+from evaluators.exp001.orchestrator import OrchestratorError
 from evaluators.exp001.panel import load_panel
 from evaluators.exp001.processes import (
     Deployment,
@@ -133,7 +134,8 @@ class _World:
     """Spawns fake processes, runs a fake clock and answers like an orchestrator."""
 
     def __init__(self, *, healthy_after: int = 2, stubborn: frozenset[str] = frozenset(),
-                 exits: frozenset[str] = frozenset(), registers: bool = True) -> None:
+                 exits: frozenset[str] = frozenset(), registers: bool = True,
+                 dies_while_registering: bool = False) -> None:
         self.now = 0.0
         self.handles: dict[str, _Handle] = {}
         self.spawned: list[tuple[str, int]] = []  # each name, with the health checks so far
@@ -143,6 +145,7 @@ class _World:
         self.stubborn = stubborn
         self.exits = exits
         self.registers = registers
+        self.dies_while_registering = dies_while_registering
 
     def spawn(self, process: Process, environ: Any) -> _Handle:
         self.spawned.append((process.name, self.health_checks))
@@ -164,6 +167,9 @@ class _World:
         return self.health_checks >= self.healthy_after
 
     async def agents(self) -> set[str]:
+        if self.dies_while_registering:  # it stops answering, and exits a moment later
+            self.handles["orchestrator"].returncode = 2
+            raise OrchestratorError("GET /api/v1/agents: Cannot connect to host")
         if not self.registers:
             return set()
         return {name for name in self.handles if name != "orchestrator"}
@@ -228,6 +234,26 @@ class TestStartAndStop:
         assert world.signalled[-2:] == [
             ("velvet-pika", signal.SIGKILL), ("orchestrator", signal.SIGTERM),
         ]
+
+    async def test_an_orchestrator_that_goes_away_while_advisers_register_is_named(
+        self, layout: Layout,
+    ) -> None:
+        world = _World(dies_while_registering=True)
+        with pytest.raises(DeploymentError, match=r"orchestrator exited \(2\).*orchestrator\.log"):
+            await _deployment(layout, world).start(world, timeout=60)
+
+    async def test_kill_ends_every_process_still_running_at_once(self, layout: Layout) -> None:
+        """What a stop that is itself interrupted falls back on: nothing is
+        left running, grace or not."""
+        world = _World(stubborn=frozenset({"velvet-pika", "orchestrator"}))
+        deployment = _deployment(layout, world)
+        await deployment.start(world, timeout=60)
+        world.handles["ripple-kite"].returncode = 0
+        deployment.kill()
+        assert sorted(name for name, sig in world.signalled if sig == signal.SIGKILL) == sorted(
+            name for name in world.handles if name != "ripple-kite"
+        )
+        assert all(handle.returncode is not None for handle in world.handles.values())
 
     async def test_stopping_twice_signals_nothing_more(self, layout: Layout) -> None:
         world = _World()

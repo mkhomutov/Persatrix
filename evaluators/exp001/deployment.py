@@ -12,11 +12,13 @@ persona settings panel.yaml lists; a setting it leaves unset takes the value
 the shipped reactive personas in ``config/agents.yaml`` use. Every model
 alias points at the arms' one model, at the pre-registered prices. The rest
 of the orchestrator's config is the shipped config, apart from two changes.
-The spending limits are 0, which turns each off (check 6). The REST rate
-limiter is off too: the four advisers share its one anonymous bucket, and a
-refused publish would drop an adviser's reply without a line in the call
-log. Before any process starts, the config the harness writes is checked
-against the JSON schemas ``make validate`` uses.
+The spending limits are 0, which turns each off (check 6). The rate limiter
+is off too, and with it the circuit breaker and the per-agent limit on the
+wallet's gRPC calls: the four advisers' REST calls share one anonymous
+bucket, and a refused publish drops an adviser's reply from the channel
+after its model call was made and logged. Before any process starts, the
+config the harness writes is checked against the JSON schemas
+``make validate`` uses.
 
 This module writes a deployment's directory; :mod:`evaluators.exp001.processes`
 starts and stops its processes.
@@ -45,7 +47,9 @@ SCHEMAS = REPO / "schemas"
 PERSONA_ALIAS = "quality"
 MODEL_ALIASES = ("quality", "fast", "summarizer")
 # What the shipped reactive personas set that panel.yaml leaves unset. A
-# test holds these to config/agents.yaml.
+# test holds these to config/agents.yaml. Nothing on the persona path reads
+# max_retries or timeout_seconds: a persona turn ends at the runtime's own
+# 300-second event timeout, and the provider library keeps its own retries.
 SHIPPED_PERSONA = {"max_retries": 2, "timeout_seconds": 300}
 SHIPPED_AUTONOMY = {"max_actions_per_tick": 1, "idle_after_ticks": 5}
 SHIPPED_NOTES = {
@@ -126,12 +130,19 @@ def optimization_config(
 
 
 def channel_config(panel: Panel, arm: str, *, name: str, organisation: str) -> dict[str, Any]:
-    """One meeting's channel as a channels.yaml entry, shaped like the shipped roundtable."""
+    """One meeting's channel as a channels.yaml entry, shaped like the shipped roundtable.
+
+    Its description is the organisation's one-line description, which every
+    arm gets (pre-registration §2): an adviser's prompt names the channel and
+    its description, while the topic reaches only a convene, agenda or
+    synthesis turn.
+    """
     channel = panel.channels[arm]
     members = [{"id": aid, "respond": respond} for aid, respond in channel.members.items()]
     members.append({"id": panel.operator, "respond": "observer"})
     return {
         "name": name,
+        "description": organisation,
         "classification": channel.classification,
         "interaction_budget_tokens": channel.interaction_budget_tokens,
         "escalation_chair_id": channel.escalation_chair_id,

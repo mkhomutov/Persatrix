@@ -9,8 +9,9 @@ orchestrator's audit log can tell them from the advisers'.
 Nothing on the REST API says when a discussion has closed; the orchestrator
 logs it. So the harness also reads the orchestrator's log: each close, with
 its channel and trigger; each discussion cut at the cascade-depth cap; every
-lease the wallet refused (check 6); and the startup line that says the rate
-limiter is off.
+lease the wallet refused, telling a spending limit's refusal (check 6) from
+any other; and the startup lines that say the rate limiter is off and the
+wallet is served.
 """
 
 from __future__ import annotations
@@ -29,15 +30,23 @@ import aiohttp
 HARNESS_ID = "exp001-harness"
 # The newest messages the orchestrator returns in one read, its own maximum.
 _HISTORY_LIMIT = 1000
-_CLOSES = frozenset({
-    "channels: interaction closed by end-of-interaction votes",
-    "channels: interaction closed by RFC 0052 bounded close",
-})
+# One request's limit; every request is a quick read or write on loopback.
+_REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=30)
+# The lines the harness reads; a test holds each to the Go source that logs it.
+_END_VOTE_CLOSE = "channels: interaction closed by end-of-interaction votes"
+_BOUNDED_CLOSE = "channels: interaction closed by RFC 0052 bounded close"
+_CLOSES = frozenset({_END_VOTE_CLOSE, _BOUNDED_CLOSE})
 _DEPTH_CAP = (
     "channels: autonomous discussion reached the cascade-depth cap; running the structural close"
 )
+# A spending limit's refusal, the one check 6 is about. Every other refusal
+# starts with one of _REFUSED_LEASE.
+_SPENDING_LIMIT_REFUSAL = "wallet: lease denied — budget exceeded"
 _REFUSED_LEASE = ("wallet: lease denied", "wallet: request rejected")
 _RATE_LIMIT_OFF = "security.rate_limit.disabled scope=startup"
+# Both are logged only when the orchestrator serves the wallet; without it,
+# every adviser's model call is refused before any lease is asked for.
+_WALLET_SERVED = frozenset({"wallet lease enforcement initialized", "gRPC server listening"})
 # Go writes up to nine digits of a second; keep six, which Python reads.
 _FRACTION = re.compile(r"(\.\d{6})\d+")
 
@@ -95,16 +104,22 @@ class Message:
 class Orchestrator:
     """The orchestrator's REST API, as far as the harness uses it."""
 
-    def __init__(self, base_url: str, session: aiohttp.ClientSession) -> None:
+    def __init__(
+        self, base_url: str, session: aiohttp.ClientSession, *,
+        timeout: aiohttp.ClientTimeout = _REQUEST_TIMEOUT,
+    ) -> None:
         self._base = base_url.rstrip("/")
         self._session = session
         self._headers = {"X-Agent-ID": HARNESS_ID}
+        self._timeout = timeout
 
     async def healthy(self) -> bool:
         try:
-            async with self._session.get(f"{self._base}/healthz", headers=self._headers) as r:
+            async with self._session.get(
+                f"{self._base}/healthz", headers=self._headers, timeout=self._timeout,
+            ) as r:
                 return r.status == 200
-        except aiohttp.ClientError:
+        except (aiohttp.ClientError, TimeoutError):
             return False
 
     async def agents(self) -> set[str]:
@@ -127,6 +142,11 @@ class Orchestrator:
             raise OrchestratorError(f"{channel} holds more messages than one read returns")
         return newest_first[::-1]
 
+    async def activity(self, channel: str) -> set[str]:
+        """The members the orchestrator has sent a turn to and awaits a reply from."""
+        answer = await self._call("GET", f"/api/v1/channels/{channel}/activity")
+        return {str(member) for member in answer["thinking"]}
+
     async def disarm(self, channel: str) -> None:
         """Turn the channel's autonomous mode off; no new discussion opens after this."""
         config = await self._call("GET", f"/api/v1/channels/{channel}/config")
@@ -143,13 +163,20 @@ class Orchestrator:
     async def _call(
         self, method: str, path: str, body: Any = None, *, headers: Mapping[str, str] | None = None,
     ) -> Any:
-        async with self._session.request(
-            method, f"{self._base}{path}", json=body, headers={**self._headers, **(headers or {})},
-        ) as response:
-            text = await response.text()
-            if response.status >= 400:
-                raise OrchestratorError(f"{method} {path}: {response.status} {text[:300]}")
+        try:
+            async with self._session.request(
+                method, f"{self._base}{path}", json=body,
+                headers={**self._headers, **(headers or {})}, timeout=self._timeout,
+            ) as response:
+                status, text = response.status, await response.text()
+        except (aiohttp.ClientError, TimeoutError) as exc:
+            raise OrchestratorError(f"{method} {path}: {exc!r}") from exc
+        if status >= 400:
+            raise OrchestratorError(f"{method} {path}: {status} {text[:300]}")
+        try:
             return json.loads(text) if text else None
+        except ValueError as exc:
+            raise OrchestratorError(f"{method} {path}: not JSON: {text[:300]}") from exc
 
 
 @dataclass(frozen=True)
@@ -165,9 +192,11 @@ class Close:
 @dataclass(frozen=True)
 class OrchestratorLog:
     closes: tuple[Close, ...]
-    depth_capped: frozenset[str]  # channels a discussion ran to the depth cap in
-    refused_leases: tuple[str, ...]  # "agent: message", in log order
+    depth_capped: frozenset[str]  # interactions a discussion ran to the depth cap in
+    spending_limit_refusals: tuple[str, ...]  # "agent: message", in log order (check 6)
+    refused_leases: tuple[str, ...]  # every other refusal, the same way
     rate_limit_off: bool
+    wallet_served: bool
 
     def closes_in(self, channel: str) -> tuple[Close, ...]:
         return tuple(c for c in self.closes if c.channel == channel)
@@ -177,8 +206,10 @@ def read_orchestrator_log(path: Path) -> OrchestratorLog:
     """What the orchestrator has logged so far; a line that is not JSON is skipped."""
     closes: list[Close] = []
     capped: set[str] = set()
+    spending: list[str] = []
     refused: list[str] = []
     rate_limit_off = False
+    served: set[str] = set()
     lines = path.read_text(errors="replace").splitlines() if path.exists() else []
     for text in lines:
         try:
@@ -194,9 +225,17 @@ def read_orchestrator_log(path: Path) -> OrchestratorLog:
                 trigger=str(line["trigger"]), at=_instant(str(line["timestamp"])),
             ))
         elif message == _DEPTH_CAP:
-            capped.add(str(line["channel_id"]))
+            capped.add(str(line["interaction_id"]))
+        elif message == _SPENDING_LIMIT_REFUSAL:
+            spending.append(f"{line.get('agent_id', '?')}: {message}")
         elif message.startswith(_REFUSED_LEASE):
             refused.append(f"{line.get('agent_id', '?')}: {message}")
         elif message == _RATE_LIMIT_OFF:
             rate_limit_off = True
-    return OrchestratorLog(tuple(closes), frozenset(capped), tuple(refused), rate_limit_off)
+        elif message in _WALLET_SERVED:
+            served.add(message)
+    return OrchestratorLog(
+        closes=tuple(closes), depth_capped=frozenset(capped),
+        spending_limit_refusals=tuple(spending), refused_leases=tuple(refused),
+        rate_limit_off=rate_limit_off, wallet_served=served == _WALLET_SERVED,
+    )

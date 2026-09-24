@@ -20,6 +20,7 @@ import pytest
 import yaml
 
 from evaluators.exp001.channel_arm import (
+    CLOSE_MISMATCH,
     LIMITS,
     MEMO_TURN_WENT_ON,
     MISSING_MEMO,
@@ -56,18 +57,27 @@ class _Room:
         replies: Sequence[tuple[float, str]] = ((10, "velvet-pika"), (20, "ripple-kite")),
         close_after: float | None = 35,
         trigger: str = "structural",
+        depth_capped: bool = False,
+        busy_until: float = 0,
         memo_after: float | None = 12,
+        late_synthesis_after: float | None = None,
+        stamp: str | None = None,
         chatter_every: float | None = None,
         after_memo: Sequence[tuple[float, str]] = (),
     ) -> None:
         self.seconds = 0.0
         self.actions: list[tuple[Any, ...]] = []
+        self.disarmed_at: float | None = None
         self._scheduled: list[Message] = []
         self._closes: list[Close] = []
         self._replies = replies
         self._close_after = close_after
         self._trigger = trigger
+        self._depth_capped = depth_capped
+        self._busy_until = busy_until  # someone has a turn in flight until then
         self._memo_after = memo_after
+        self._late_synthesis_after = late_synthesis_after
+        self._stamp = stamp  # the close the memo request is stamped with, if not the real one
         self._chatter_every = chatter_every
         self._after_memo = after_memo
         self._ids = 0
@@ -82,11 +92,13 @@ class _Room:
     async def sleep(self, seconds: float) -> None:
         self.seconds += seconds
 
-    def _say(self, offset: float, sender: str, text: str = "a point") -> None:
+    def _say(
+        self, offset: float, sender: str, text: str = "a point", **metadata: Any,
+    ) -> None:
         mid = self._next_id()
         self._scheduled.append(Message(
             id=mid, sender=sender, content=f"{text} {mid}",
-            at=self.now() + dt.timedelta(seconds=offset),
+            at=self.now() + dt.timedelta(seconds=offset), metadata=metadata,
         ))
 
     async def post(
@@ -95,7 +107,7 @@ class _Room:
         self.actions.append(("post", channel, sender, content, tuple(mentions)))
         metadata: dict[str, Any] = {}
         if len(self.actions) > 1:  # the memo request: stamped with the close before it
-            trigger = self._closed_by()
+            trigger = self._stamp or self._closed_by()
             if trigger is not None:
                 metadata = {
                     "previous_interaction_id": "i-1", "previous_interaction_close_trigger": trigger,
@@ -108,6 +120,10 @@ class _Room:
         if len(self.actions) == 1:
             self._open()
         else:
+            if self._late_synthesis_after is not None:  # the closing synthesis, running late
+                self._say(
+                    self._late_synthesis_after, "lunar-stoat", "In summary", synthesis_reply=True,
+                )
             if self._memo_after is not None:
                 self._say(self._memo_after, "lunar-stoat", "## Recommendation")
             for offset, sender_after in self._after_memo:
@@ -134,25 +150,31 @@ class _Room:
     async def messages(self, channel: str) -> list[Message]:
         return sorted((m for m in self._scheduled if m.at <= self.now()), key=lambda m: m.at)
 
+    async def activity(self, channel: str) -> set[str]:
+        return {"crimson-crow"} if self.seconds < self._busy_until else set()
+
     async def disarm(self, channel: str) -> None:
         self.actions.append(("disarm", channel))
+        self.disarmed_at = self.seconds
 
     async def set_respond(self, channel: str, member: str, respond: str) -> None:
-        """An observer's messages still to come are never sent."""
+        """As in the orchestrator, a turn already dispatched still lands."""
         self.actions.append(("set_respond", channel, member, respond))
-        self._scheduled = [
-            m for m in self._scheduled if m.sender != member or m.at <= self.now()
-        ]
 
     def log(self) -> OrchestratorLog:
         closes = tuple(c for c in self._closes if c.at <= self.now())
-        return OrchestratorLog(closes, frozenset(), (), True)
+        return OrchestratorLog(
+            closes=closes,
+            depth_capped=frozenset({"i-1"} if self._depth_capped else ()),
+            spending_limit_refusals=(), refused_leases=(), rate_limit_off=True,
+            wallet_served=True,
+        )
 
 
-async def _hold(room: _Room, meeting: Meeting, arm: str = "C") -> Any:
+async def _hold(room: _Room, meeting: Meeting, arm: str = "C", **kwargs: Any) -> Any:
     return await hold_meeting(
         room, room.log, PANEL, arm, SERIES, meeting,
-        channel=_CHANNEL, attempt=1, now=room.now, sleep=room.sleep,
+        channel=_CHANNEL, attempt=1, now=room.now, sleep=room.sleep, **kwargs,
     )
 
 
@@ -222,28 +244,95 @@ class TestAPlanMeeting:
         await _hold(room, _first(MeetingKind.RECALL))
         assert room.actions[-1][3] == PANEL.memo_turn_instruction(MeetingKind.RECALL)
 
+    @pytest.mark.parametrize(("room", "closed_by"), [
+        (_Room(trigger="end_votes"), "vote"),
+        (_Room(trigger="structural", depth_capped=True), "depth_cap"),
+        (_Room(trigger="structural"), "round_limit"),
+        (_Room(trigger="cost"), "cost"),
+        (_Room(close_after=None), "idle"),
+    ])
+    async def test_what_closed_the_discussion(self, room: _Room, closed_by: str) -> None:
+        """Part 2 reports each meeting's close as a vote, the depth cap or the
+        round limit; the last two log the same trigger."""
+        result = await _hold(room, _first(MeetingKind.PLAN))
+        assert result.closed_by == closed_by
+
+    async def test_each_advisers_energy_is_read_as_the_memo_is_asked_for(self) -> None:
+        room = _Room()
+        read_after: list[int] = []
+
+        def energy() -> dict[str, float | None]:
+            read_after.append(len(room.actions))
+            return {a.id: 0.8 for a in PANEL.advisers}
+
+        result = await _hold(room, _first(MeetingKind.PLAN), read_energy=energy)
+        assert result.energy == {a.id: 0.8 for a in PANEL.advisers}
+        assert read_after == [5]  # the message, the disarm, three observers; then the request
+
+    async def test_the_memo_turn_waits_for_turns_still_in_flight(self) -> None:
+        """A turn the floor dispatched before the close still posts; it lands
+        before the memo request, while the channel is still armed."""
+        room = _Room(
+            replies=((10, "velvet-pika"), (20, "ripple-kite"), (44, "crimson-crow")),
+            busy_until=45,
+        )
+        result = await _hold(room, _first(MeetingKind.PLAN))
+        assert room.disarmed_at is not None and room.disarmed_at >= 45
+        assert result.failures == ()
+
+    async def test_a_turn_that_never_ends_holds_the_memo_turn_back_only_so_long(self) -> None:
+        room = _Room(busy_until=10_000)
+        await _hold(room, _first(MeetingKind.PLAN))
+        assert room.disarmed_at is not None
+        waited = dt.timedelta(seconds=room.disarmed_at - 35)
+        assert LIMITS.drain <= waited <= LIMITS.drain + dt.timedelta(seconds=LIMITS.poll_seconds)
+
+    async def test_a_late_closing_synthesis_is_not_the_memo(self) -> None:
+        room = _Room(late_synthesis_after=3, memo_after=12)
+        result = await _hold(room, _first(MeetingKind.PLAN))
+        assert result.memo is not None and result.memo.content.startswith("## Recommendation")
+        assert result.failures == ()
+
+    async def test_an_idle_gap_ended_between_two_polls_is_still_the_close(self) -> None:
+        """The orchestrator closes an idle discussion when the next message
+        arrives, whenever the harness last looked."""
+        room = _Room(replies=((12, "velvet-pika"), (614, "ripple-kite")), close_after=900)
+        result = await _hold(room, _first(MeetingKind.PLAN))
+        assert (result.closed_at, result.trigger) == (
+            _T0 + dt.timedelta(seconds=612), "idle",
+        )
+
 
 class TestABriefing:
     async def test_it_ends_when_its_discussion_closes(self) -> None:
         room = _Room()
         result = await _hold(room, _first(MeetingKind.BRIEFING), arm="B")
         assert [a[0] for a in room.actions] == ["post"]
-        assert (result.memo_turn, result.memo, result.trigger, result.failures) == (
-            None, None, "structural", (),
-        )
+        assert (
+            result.memo_turn, result.memo, result.trigger, result.energy, result.failures,
+        ) == (None, None, "structural", {}, ())
 
 
 class TestFailuresTheSystemCauses:
-    async def test_a_discussion_that_never_closes_is_recorded_then_ended_by_the_memo_turn(
+    async def test_a_discussion_that_never_closes_is_recorded_and_has_no_memo_turn(
         self,
     ) -> None:
+        """The memo turn follows a close; asking during a live discussion would
+        take the chair's next discussion turn for the memo."""
         room = _Room(close_after=None, chatter_every=30)
         result = await _hold(room, _first(MeetingKind.PLAN))
-        assert (result.closed_at, result.trigger) == (None, None)
+        assert (result.closed_at, result.trigger, result.closed_by) == (None, None, None)
         assert result.failures == (NEVER_CLOSED,)
         assert room.seconds >= LIMITS.discussion.total_seconds()
-        assert ("disarm", _CHANNEL) in room.actions
-        assert result.memo is not None
+        assert [a[0] for a in room.actions] == ["post"]
+        assert (result.memo_turn, result.memo) == (None, None)
+
+    async def test_a_close_the_orchestrator_stamped_otherwise_is_recorded(self) -> None:
+        """The memo request carries the orchestrator's own record of the close
+        before it; a different one means the harness misread the close."""
+        room = _Room(trigger="structural", stamp="end_votes")
+        result = await _hold(room, _first(MeetingKind.PLAN))
+        assert result.failures == (CLOSE_MISMATCH,)
 
     async def test_a_chair_who_never_answers_leaves_the_memo_missing(self) -> None:
         room = _Room(memo_after=None)
@@ -278,8 +367,8 @@ class TestChannelName:
 
 class TestLimits:
     def test_the_harness_waits_as_long_as_the_frozen_choices_say(self) -> None:
-        assert (LIMITS.discussion, LIMITS.idle, LIMITS.memo, LIMITS.settle) == (
-            dt.timedelta(minutes=60), dt.timedelta(seconds=600),
+        assert (LIMITS.discussion, LIMITS.idle, LIMITS.drain, LIMITS.memo, LIMITS.settle) == (
+            dt.timedelta(minutes=60), dt.timedelta(seconds=600), dt.timedelta(minutes=5),
             dt.timedelta(minutes=35), dt.timedelta(seconds=10),
         )
 

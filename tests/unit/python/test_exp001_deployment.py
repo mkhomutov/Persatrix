@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import copy
 import datetime as dt
+import re
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,7 @@ import yaml
 
 from agents.clock import CLOCK_ANCHOR_ENV, CLOCK_START_ENV, reset_agent_clock
 from agents.persona import create_persona_agent
+from agents.persona_runtime.channel_roster import RosterMember, render_roster_section
 from evaluators.exp001.arm_a import identity_sections, now_anchor_line
 from evaluators.exp001.costs import ARMS_MODEL, PRICES
 from evaluators.exp001.deployment import (
@@ -40,6 +42,7 @@ from evaluators.exp001.deployment import (
     optimization_config,
     write_deployment,
 )
+from evaluators.exp001.materials import load_series
 from evaluators.exp001.panel import adviser_agent_config, load_panel
 from evaluators.exp001.runtime import meeting_clock_env
 
@@ -172,6 +175,7 @@ class TestChannelConfig:
     def test_a_governed_arm_meets_in_a_channel_shaped_like_the_shipped_roundtable(self) -> None:
         assert channel_config(PANEL, "C", name="advice-2", organisation="Linden Loaf") == {
             "name": "advice-2",
+            "description": "Linden Loaf",
             "classification": "internal",
             "interaction_budget_tokens": 2_000_000,
             "escalation_chair_id": "lunar-stoat",
@@ -301,3 +305,25 @@ class TestTheDeployedAdvisersReadAsArmADoes:
             monkeypatch.delenv(CLOCK_START_ENV)
             monkeypatch.delenv(CLOCK_ANCHOR_ENV)
             reset_agent_clock()
+
+    def test_every_adviser_reads_the_organisation_in_its_room(self, layout: Layout) -> None:
+        """§2: every arm gets the organisation's one-line description, and arm
+        A's prompt names it. An adviser's prompt shows its channel's name and
+        description; the topic reaches only a convene, agenda or synthesis turn."""
+        organisation = load_series(_EXP / "series-1.yaml").organisation
+        entry = channel_config(PANEL, "C", name="advice-2", organisation=organisation)
+        write_deployment(layout, PANEL, "C", channels=[entry])
+        [written] = yaml.safe_load((layout.config / "channels.yaml").read_text())["channels"]
+        # What GET /api/v1/channels/{id} serves from the declaration, as the roster reads it.
+        meta = {"name": written["name"], "description": written["description"]}
+        me = RosterMember(id="lunar-stoat", name="Lunar Stoat", role="Chair", is_self=True)
+        section = render_roster_section(meta, [me])
+        assert section is not None
+        assert section.content.startswith(f"Channel #advice-2 — {organisation}\n")
+        # The orchestrator carries the declared description through to that read.
+        for go, carried in [
+            ("internal/channels/config.go", r'Description\s+string\s+`yaml:"description"`'),
+            ("internal/channels/router_reconcile.go", r"Description:\s+decl\.Description,"),
+            ("internal/server/channel_response_builders.go", r"Description:\s+ch\.Description,"),
+        ]:
+            assert re.search(carried, (_REPO / go).read_text()), go

@@ -59,8 +59,9 @@ every arm at once.
 PR 5a leaves three things for the parts after it. Each meeting of B and C
 writes its own call log, so PR 5b can read a meeting's provider errors from
 it: a failed line names the exception's class. A deployment that will not
-start, a rate limiter left on and a lease the wallet refused each raise
-`DeploymentError`; PR 5b decides which of them are harness faults. And arm D
+start, a rate limiter left on, a wallet not served and a lease a spending
+limit refused each raise `DeploymentError`; PR 5b decides which of them are
+harness faults. And arm D
 declares its series' six channels in one deployment, each named for its
 meeting's place as B and C name theirs, well inside the shipped cap of 50
 channels.

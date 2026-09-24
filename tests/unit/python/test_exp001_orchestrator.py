@@ -9,6 +9,7 @@ refused (check 6), and the startup line that says the rate limiter is off.
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import json
 from collections.abc import AsyncIterator
@@ -21,6 +22,13 @@ from aiohttp import web
 from aiohttp.test_utils import TestServer
 
 from evaluators.exp001.orchestrator import (
+    _BOUNDED_CLOSE,
+    _DEPTH_CAP,
+    _END_VOTE_CLOSE,
+    _RATE_LIMIT_OFF,
+    _REFUSED_LEASE,
+    _SPENDING_LIMIT_REFUSAL,
+    _WALLET_SERVED,
     HARNESS_ID,
     Close,
     Message,
@@ -28,6 +36,8 @@ from evaluators.exp001.orchestrator import (
     OrchestratorError,
     read_orchestrator_log,
 )
+
+_REPO = Path(__file__).resolve().parents[3]
 
 
 def _line(message: str, **fields: Any) -> str:
@@ -50,12 +60,14 @@ class TestReadOrchestratorLog:
             "panic: a line that is not JSON",
             _line(
                 "channels: autonomous discussion reached the cascade-depth cap; running the "
-                "structural close", channel_id="group:advice-2",
+                "structural close", channel_id="group:advice-2", interaction_id="i-2",
             ),
             _line(
                 "channels: interaction closed by RFC 0052 bounded close",
                 channel_id="group:advice-2", interaction_id="i-2", trigger="structural",
             ),
+            _line("wallet lease enforcement initialized", leaseTTL="5m0s"),
+            _line("gRPC server listening", addr="127.0.0.1:19090"),
             "",
         ]))
         read = read_orchestrator_log(log)
@@ -64,11 +76,23 @@ class TestReadOrchestratorLog:
             Close(channel="group:advice-1", interaction="i-1", trigger="end_votes", at=at),
             Close(channel="group:advice-2", interaction="i-2", trigger="structural", at=at),
         )
-        assert read.depth_capped == frozenset({"group:advice-2"})
+        assert read.depth_capped == frozenset({"i-2"})
         assert read.refused_leases == ()
         assert read.rate_limit_off
+        assert read.wallet_served
 
-    def test_it_finds_every_lease_the_wallet_refused(self, tmp_path: Path) -> None:
+    def test_the_wallet_is_served_only_once_both_its_startup_lines_are_logged(
+        self, tmp_path: Path,
+    ) -> None:
+        """Without the log buffer the orchestrator starts no gRPC server, so
+        every adviser's model call is refused before any lease is asked for."""
+        log = tmp_path / "orchestrator.log"
+        log.write_text(_line("wallet lease enforcement initialized"))
+        assert not read_orchestrator_log(log).wallet_served
+
+    def test_it_tells_a_spending_limit_refusal_from_every_other(self, tmp_path: Path) -> None:
+        """Check 6 is about the three spending limits alone; any other refusal
+        is a failure the system causes."""
         log = tmp_path / "orchestrator.log"
         log.write_text("\n".join([
             _line("wallet: lease denied — budget exceeded", agent_id="velvet-pika",
@@ -78,15 +102,21 @@ class TestReadOrchestratorLog:
             _line("wallet: request rejected — token count out of range", agent_id="ripple-kite"),
             _line("wallet: lease granted", agent_id="ripple-kite"),
         ]))
-        assert read_orchestrator_log(log).refused_leases == (
+        read = read_orchestrator_log(log)
+        assert read.spending_limit_refusals == (
             "velvet-pika: wallet: lease denied — budget exceeded",
+        )
+        assert read.refused_leases == (
             "lunar-stoat: wallet: lease denied — interaction cost ceiling exceeded",
             "ripple-kite: wallet: request rejected — token count out of range",
         )
 
     def test_a_log_not_yet_written_holds_nothing(self, tmp_path: Path) -> None:
         read = read_orchestrator_log(tmp_path / "orchestrator.log")
-        assert (read.closes, read.refused_leases, read.rate_limit_off) == ((), (), False)
+        assert (
+            read.closes, read.spending_limit_refusals, read.refused_leases,
+            read.rate_limit_off, read.wallet_served,
+        ) == ((), (), (), False, False)
 
     def test_the_closes_of_one_channel(self, tmp_path: Path) -> None:
         log = tmp_path / "orchestrator.log"
@@ -98,6 +128,52 @@ class TestReadOrchestratorLog:
         assert [c.interaction for c in read_orchestrator_log(log).closes_in("group:a")] == [
             "i-0", "i-2",
         ]
+
+
+def _logged(go: str, message: str) -> str:
+    """The rest of the Go logger call that logs *message*: the fields it logs."""
+    source = (_REPO / go).read_text()
+    start = source.index(f'"{message}"')
+    depth = 1
+    for end in range(start, len(source)):
+        depth += {"(": 1, ")": -1}.get(source[end], 0)
+        if depth == 0:
+            return source[start:end]
+    raise AssertionError(f"{go}: the call that logs {message!r} never closes")
+
+
+class TestTheLinesTheHarnessReads:
+    """The orchestrator's own source logs every line the harness reads, with
+    every field it reads, so a reworded line fails here instead of turning a
+    close into an idle one or hiding a refused lease."""
+
+    @pytest.mark.parametrize(("go", "message", "fields"), [
+        ("internal/channels/end_vote.go", _END_VOTE_CLOSE,
+         ("channel_id", "interaction_id", "trigger")),
+        ("internal/channels/bounded_close.go", _BOUNDED_CLOSE,
+         ("channel_id", "interaction_id", "trigger")),
+        ("internal/channels/autonomous_continuation.go", _DEPTH_CAP,
+         ("channel_id", "interaction_id")),
+        ("internal/wallet/wallet.go", _SPENDING_LIMIT_REFUSAL, ("agent_id",)),
+        ("cmd/orchestrator/ratelimit.go", _RATE_LIMIT_OFF, ()),
+        *(("cmd/orchestrator/main.go", line, ()) for line in sorted(_WALLET_SERVED)),
+    ])
+    def test_each_line_is_logged_with_the_fields_read(
+        self, go: str, message: str, fields: tuple[str, ...],
+    ) -> None:
+        call = _logged(go, message)
+        for name in fields:
+            assert f'zap.String("{name}",' in call, f"{go} logs {message!r} without {name}"
+
+    @pytest.mark.parametrize(("go", "message"), [
+        ("internal/wallet/wallet.go", "wallet: lease denied — per-agent active-lease cap reached"),
+        ("internal/wallet/interaction_budget.go",
+         "wallet: lease denied — interaction cost ceiling exceeded"),
+        ("internal/wallet/validation.go", "wallet: request rejected — token count out of range"),
+    ])
+    def test_every_other_refusal_starts_as_the_harness_expects(self, go: str, message: str) -> None:
+        assert message.startswith(_REFUSED_LEASE)
+        assert _logged(go, message)
 
 
 _METADATA = {
@@ -118,6 +194,8 @@ class _Orchestrator:
         self.requests: list[tuple[str, str, dict[str, str], Any]] = []
         self.revision = 3
         self.fail: int | None = None
+        self.stall = 0.0  # seconds to wait before answering
+        self.garbage = False  # answer 200 with a body that is not JSON
         app = web.Application()
         app.router.add_route("*", "/{tail:.*}", self.handle)
         self.server = TestServer(app, host="127.0.0.1")
@@ -125,8 +203,11 @@ class _Orchestrator:
     async def handle(self, request: web.Request) -> web.StreamResponse:
         body = await request.json() if request.can_read_body else None
         self.requests.append((request.method, request.path_qs, dict(request.headers), body))
+        await asyncio.sleep(self.stall)
         if self.fail is not None:
             return web.json_response({"error": {"message": "no such channel"}}, status=self.fail)
+        if self.garbage:
+            return web.Response(text="<html>proxy error</html>")
         route = (request.method, request.path)
         if route == ("GET", "/healthz"):
             return web.Response(text="ok")
@@ -147,6 +228,8 @@ class _Orchestrator:
             return web.json_response({"revision": self.revision + 1})
         if route == ("PATCH", "/api/v1/channels/group:advice-1/members/velvet-pika"):
             return web.Response(status=204)
+        if route == ("GET", "/api/v1/channels/group:advice-1/activity"):
+            return web.json_response({"thinking": ["ripple-kite"]})
         return web.json_response({"error": "unrouted"}, status=500)
 
 
@@ -227,3 +310,35 @@ class TestTheRestClient:
     async def test_an_orchestrator_that_is_not_listening_is_not_healthy(self) -> None:
         async with aiohttp.ClientSession() as session:
             assert not await Orchestrator("http://127.0.0.1:9", session).healthy()
+
+    async def test_the_turns_still_in_flight(
+        self, fake: _Orchestrator, client: Orchestrator,
+    ) -> None:
+        assert await client.activity("group:advice-1") == {"ripple-kite"}
+        assert fake.requests[0][:2] == ("GET", "/api/v1/channels/group:advice-1/activity")
+
+    async def test_a_stalled_orchestrator_is_not_healthy_and_fails_a_request(
+        self, fake: _Orchestrator,
+    ) -> None:
+        """Each request has a limit of its own, so a stalled orchestrator
+        cannot hold the start past its deadline."""
+        fake.stall = 1.0
+        async with aiohttp.ClientSession() as session:
+            client = Orchestrator(
+                str(fake.server.make_url("")), session, timeout=aiohttp.ClientTimeout(total=0.1),
+            )
+            assert not await client.healthy()
+            with pytest.raises(OrchestratorError, match="GET /api/v1/agents"):
+                await client.agents()
+
+    async def test_an_answer_that_is_not_json_is_an_orchestrator_error(
+        self, fake: _Orchestrator, client: Orchestrator,
+    ) -> None:
+        fake.garbage = True
+        with pytest.raises(OrchestratorError, match="not JSON"):
+            await client.messages("group:advice-1")
+
+    async def test_an_orchestrator_that_is_gone_is_an_orchestrator_error(self) -> None:
+        async with aiohttp.ClientSession() as session:
+            with pytest.raises(OrchestratorError, match="GET /api/v1/agents"):
+                await Orchestrator("http://127.0.0.1:9", session).agents()
