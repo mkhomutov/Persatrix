@@ -18,10 +18,10 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "ti
 reqwest = { version = "0.13", features = ["json", "stream"] }
 colored = "3"
 ctrlc = "3"                       # graceful Ctrl-C handling for chat REPL
-tabled = "0.21"                   # table output formatting
+tabled = "0.22"                   # table output formatting
 # Home-directory resolution for the `~/.persatrix/active-session` pointer file
 # (RFC 0031 Phase 3 §E). The only cross-platform homedir API; std has none.
-dirs = "6"
+dirs = "7"
 # No-echo password prompt for `persatrix login` (RFC 0039 §J — the
 # password is never in argv and never echoed). TTY-only; the CLI itself
 # falls back to a stdin line when stdin is not a terminal (pipes).
