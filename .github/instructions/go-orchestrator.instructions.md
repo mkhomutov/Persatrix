@@ -13,7 +13,7 @@ description: "Go orchestrator conventions: zap logging, testify tests, deny-by-d
 - Entry point flags: `--config` (dir), `--port` (gRPC 9090), `--http-port` (REST 8080), `--env` (development|staging|production).
 - **Comments in plain English.** Write comments a non-programmer could follow — say what the code does and why it matters, briefly. Full rules: [Documentation Guide § Writing Style](../../docs/documentation-guide.md#writing-style).
 
-## TDD (from v0.3.0 onward)
+## TDD
 
 - **Red-Green-Refactor:** Write a failing `_test.go` file before writing the implementation. Commit the failing test separately if it clarifies intent.
 - **Test file placement:** `internal/foo/bar_test.go` alongside `bar.go`. Use `package foo_test` (black-box) unless you must access unexported symbols.

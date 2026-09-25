@@ -39,7 +39,7 @@ class TestMemoryToolInstruction:
         # Confirm memory tools are wired
         assert len(agent._memory_tools) > 0
         prompt = agent._build_system_prompt()
-        assert "MUST call store_note" in prompt
+        assert "remember something, call store_note" in prompt
         assert "recall_notes" in prompt
         # F-3a/F-3b (v0.3.7): the old blanket "memory persists across
         # conversations" promise is gone; person facts now cross
@@ -63,7 +63,7 @@ class TestMemoryToolInstruction:
         # Clear memory tools to simulate an agent without memory
         agent._memory_tools = []
         prompt = agent._build_system_prompt()
-        assert "MUST call store_note" not in prompt
+        assert "remember something, call store_note" not in prompt
         await agent.close_memory()
 
     async def test_memory_instruction_after_delimiter_instruction(self):
@@ -71,7 +71,7 @@ class TestMemoryToolInstruction:
         agent = await self._make_agent()
         prompt = agent._build_system_prompt()
         delimiter_pos = prompt.index("<|user_message|>")
-        memory_pos = prompt.index("MUST call store_note")
+        memory_pos = prompt.index("remember something, call store_note")
         assert memory_pos > delimiter_pos, (
             "Memory instruction should come after delimiter instruction"
         )

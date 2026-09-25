@@ -286,7 +286,9 @@ class TestUserIdentitySystemPromptInstruction:
     to help the agent remember who it is talking to.
 
     The instruction tells the agent to:
-    - check stored notes on first contact via recall_notes
+    - look for what it already knows about the sender in the relationship
+      block of its context (identity lives on the relationship tier since
+      ISSUE-0093 D3, so a recall_notes search cannot find it)
     - store the user's real name/role immediately via store_note with topic
       'contact:<user_id>' when the user identifies themselves
     """
@@ -300,14 +302,18 @@ class TestUserIdentitySystemPromptInstruction:
         await agent.initialize_memory()
         return agent
 
-    async def test_user_identity_recall_instruction_present(self):
-        """System prompt instructs agent to call recall_notes at conversation start."""
+    async def test_user_identity_lookup_points_at_relationship_block(self):
+        """System prompt sends the agent to its relationship block for who it knows."""
         agent = await self._make_agent()
         prompt = agent._build_system_prompt()
-        assert "recall_notes" in prompt
-        # The instruction should mention querying by user_id to look up existing
-        # contact notes before asking who the user is.
-        assert "user_id" in prompt
+        assert "Relationship with <user_id>" in prompt
+        await agent.close_memory()
+
+    async def test_user_identity_not_looked_up_with_recall_notes(self):
+        """No recall_notes call at conversation start: it cannot find identity."""
+        agent = await self._make_agent()
+        prompt = agent._build_system_prompt()
+        assert "call recall_notes with the user_id" not in prompt
         await agent.close_memory()
 
     async def test_user_identity_store_note_instruction_present(self):
@@ -323,7 +329,7 @@ class TestUserIdentitySystemPromptInstruction:
         prompt = agent._build_system_prompt()
         # Both the memory-tool intro and the user-identity guidance should be in
         # the same contiguous block (no blank line between them).
-        mem_tool_pos = prompt.index("MUST call store_note")
+        mem_tool_pos = prompt.index("call store_note;")
         contact_pos = prompt.index("contact:<user_id>")
         # They should be within 600 chars of each other (same paragraph).
         assert abs(mem_tool_pos - contact_pos) < 600, (

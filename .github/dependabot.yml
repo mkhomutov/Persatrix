@@ -34,7 +34,8 @@ updates:
       # A major bump of the Anthropic SDK is a code change, not a bump, so it
       # should not arrive as a line in the monthly sweep. 1.x removed the
       # `temperature` parameter from `messages.create`, which
-      # AnthropicProvider passes on every call (agents/llm_providers.py), so
+      # AnthropicProvider passes to every older model that takes it
+      # (agents/llm_providers.py), so
       # merging the widening would have turned every Anthropic request into a
       # TypeError raised before the request was sent. The first sweep (#870)
       # proposed exactly that, and CI went green on it: the unit tests build

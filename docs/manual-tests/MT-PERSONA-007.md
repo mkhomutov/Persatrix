@@ -75,8 +75,8 @@ cross-room recall that does not yet work.
 
 **Expected Result**: All pass — the blanket "persists across
 conversations" promise is gone, the honest "scoped to the conversation"
-statement is present, and the "MUST call store_note / recall_notes"
-instruction is preserved.
+statement is present, and the instruction to actually call store_note /
+recall_notes is preserved.
 
 **Verification**:
 - [ ] `test_false_cross_conversation_promise_removed` passes
