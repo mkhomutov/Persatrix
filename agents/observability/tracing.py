@@ -140,7 +140,7 @@ def init_tracing(
 
     resource = Resource.create(attributes=attributes, schema_url=_SCHEMA_URL)
 
-    # Resolve exporter and build the exporter_opts carrier for OTLP.
+    # Resolve the traces endpoint for the OTLP exporter.
     #
     # The OTEL spec defines two env vars:
     #   - OTEL_EXPORTER_OTLP_ENDPOINT          → base URL (e.g. ``http://collector:4318``)
@@ -159,7 +159,6 @@ def init_tracing(
     normalised_endpoint = otlp_endpoint.rstrip("/")
     if not normalised_endpoint.endswith("/v1/traces"):
         normalised_endpoint = f"{normalised_endpoint}/v1/traces"
-    exporter_opts: dict[str, object] = {"endpoint": normalised_endpoint}
     # NOTE: ``OTLPSpanExporter`` defaults to plain HTTP for ``http://`` URLs;
     # no explicit insecure flag is needed.  ``OTEL_EXPORTER_OTLP_INSECURE`` is
     # honoured by the SDK itself when present in the environment.
@@ -167,7 +166,7 @@ def init_tracing(
     # If an explicit exporter was provided (test mode), use SimpleSpanProcessor
     # so spans are exported synchronously — no async queue to flush.
     if exporter is None:
-        real_exporter = OTLPSpanExporter(**exporter_opts)  # type: ignore[arg-type]
+        real_exporter = OTLPSpanExporter(endpoint=normalised_endpoint)
         # Build the BatchSpanProcessor with explicit queue and batch caps so
         # behaviour is deterministic across environments.  PR 3 will wrap
         # this in a subclass that surfaces queue-drop events to a metric.
