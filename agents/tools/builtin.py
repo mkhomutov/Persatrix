@@ -341,7 +341,9 @@ async def http_request(url: str, method: str = "GET", body: str = "") -> ToolRes
             # allowlisted domains. The LLM can re-issue a request to the
             # redirect target after domain re-validation (review M-01).
             async with session.request(**kwargs, allow_redirects=False) as resp:
-                text = await resp.text()
+                # A binary or mislabelled body must not cost the model the
+                # status and headers, so undecodable bytes are replaced.
+                text = await resp.text(errors="replace")
                 # SF-02: filter to safe headers only — prevents leaking
                 # Set-Cookie, Server, X-Powered-By, etc. to the LLM.
                 safe_headers = {

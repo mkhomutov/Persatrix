@@ -39,11 +39,16 @@ _TEMPERATURE_MODEL_PREFIXES: tuple[str, ...] = (
     "claude-3",
     "claude-haiku-4",
     "claude-sonnet-4",
+    "claude-opus-4-0",
     "claude-opus-4-1",
     "claude-opus-4-5",
     "claude-opus-4-6",
     "claude-opus-4-2025",
 )
+
+# Models already warned about, so a caller's dropped temperature is logged
+# once per model rather than on every call.
+_warned_no_temperature: set[str] = set()
 
 
 class AnthropicProvider:
@@ -82,6 +87,13 @@ class AnthropicProvider:
         }
         if model.startswith(_TEMPERATURE_MODEL_PREFIXES):
             kwargs["temperature"] = temperature
+        elif model not in _warned_no_temperature:
+            _warned_no_temperature.add(model)
+            logger.warning(
+                "Sending %r no temperature (the caller asked for %s): it is not "
+                "in _TEMPERATURE_MODEL_PREFIXES; add it there if it accepts one",
+                model, temperature,
+            )
         if cache_prefix:
             blocks: list[dict[str, Any]] = [{
                 "type": "text",

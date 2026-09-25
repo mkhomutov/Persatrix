@@ -288,7 +288,9 @@ class TestUserIdentitySystemPromptInstruction:
     The instruction tells the agent to:
     - look for what it already knows about the sender in the relationship
       block of its context (identity lives on the relationship tier since
-      ISSUE-0093 D3, so a recall_notes search cannot find it)
+      ISSUE-0093 D3), and call recall_notes with the sender's user_id when
+      it is not there: on restricted and secret channels the identity is
+      kept as an ordinary contact note, which only recall_notes finds
     - store the user's real name/role immediately via store_note with topic
       'contact:<user_id>' when the user identifies themselves
     """
@@ -309,11 +311,15 @@ class TestUserIdentitySystemPromptInstruction:
         assert "Relationship with <user_id>" in prompt
         await agent.close_memory()
 
-    async def test_user_identity_not_looked_up_with_recall_notes(self):
-        """No recall_notes call at conversation start: it cannot find identity."""
+    async def test_user_identity_falls_back_to_recall_notes(self):
+        """Identity missing from the relationship block may be a contact note
+        (restricted and secret channels keep it as one), so the agent searches
+        its notes for the user_id before asking. There is still no call at the
+        start of every conversation."""
         agent = await self._make_agent()
         prompt = agent._build_system_prompt()
-        assert "call recall_notes with the user_id" not in prompt
+        assert "if it is not there, call recall_notes with their user_id" in prompt
+        assert "At the start of a conversation" not in prompt
         await agent.close_memory()
 
     async def test_user_identity_store_note_instruction_present(self):
@@ -331,8 +337,8 @@ class TestUserIdentitySystemPromptInstruction:
         # the same contiguous block (no blank line between them).
         mem_tool_pos = prompt.index("call store_note;")
         contact_pos = prompt.index("contact:<user_id>")
-        # They should be within 600 chars of each other (same paragraph).
-        assert abs(mem_tool_pos - contact_pos) < 600, (
+        assert mem_tool_pos < contact_pos
+        assert "\n\n" not in prompt[mem_tool_pos:contact_pos], (
             "User-identity instruction appears to be separated from the "
             "memory-tools instruction"
         )

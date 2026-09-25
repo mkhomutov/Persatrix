@@ -1,35 +1,35 @@
-25efa0de947c449cd06257f02cbcf33f9232899242b959506190c4081bcd3e4b:
-  stop_reason: end_turn
-  text: Morning! Nothing blocking from me — go ahead with the round.
-  usage:
-    input_tokens: 2024
-    output_tokens: 15
-2f24faf5b7648a191a639d99cf094ae263f9c83bf2a7b5940d9d4b4f5cbf5196:
+05765b78cedf84d53c517461ff9559f39e9511f17c4cd60d44c3b39a8b9771b3:
   stop_reason: end_turn
   text: Understood — the Helix rollout is paused until the security review clears.
     I'll keep that between us.
   usage:
-    input_tokens: 2027
+    input_tokens: 2017
     output_tokens: 25
-4655db2984bf75742365fc6c63a1335ec69afa70a86093d41b3c7fbb54d8c565:
+193e7eef7fa8ab75b5a3d938126f87840e0b8cc6543662f3bf5a3733cacca7d7:
+  stop_reason: end_turn
+  text: I don't have anything on where the Helix rollout landed, I'm afraid — tell
+    me what you've heard and I'll help shape the board note.
+  usage:
+    input_tokens: 2062
+    output_tokens: 32
+7edc493f906d9a89f50dd4da8e4ec794a6db5edbc266f2c873cc0e2ccd413299:
+  stop_reason: end_turn
+  text: Morning! Nothing blocking from me — go ahead with the round.
+  usage:
+    input_tokens: 2014
+    output_tokens: 15
+8b7feecb06c9e845a91bffd23e74ea5e5170ca9330d8a16666132914a5b74e53:
   stop_reason: end_turn
   text: '{"summary": "Alice said in the DM that the Helix rollout is paused until
     the security review clears, and asked to keep it between them.", "facts": [{"subject":
     "helix", "predicate": "topic.has_status", "object": "the rollout is paused until
     the security review clears", "certainty": 0.9}]}'
   usage:
-    input_tokens: 536
+    input_tokens: 559
     output_tokens: 72
-92f1ca03a198dd34a5992ea644476435c73ddb5e1d1c324232ad933758fe1554:
-  stop_reason: end_turn
-  text: I don't have anything on where the Helix rollout landed, I'm afraid — tell
-    me what you've heard and I'll help shape the board note.
-  usage:
-    input_tokens: 2072
-    output_tokens: 32
-f904fc2563818154815d11d6ceebfbd97fdbf214ff805c1ad67955f5830e7884:
+b68a5125cf21946001d39331612e92499cd9866378295ce41a7b858782e35008:
   stop_reason: end_turn
   text: 'Same picture: the Helix rollout is paused until the security review clears.'
   usage:
-    input_tokens: 2046
+    input_tokens: 2036
     output_tokens: 18

@@ -288,20 +288,23 @@ class TestShippedSnippetsByteIdentity:
             "update_note, delete_note). When a user asks you to remember "
             "something, call store_note; saying you will remember it does "
             "not save anything. When a user asks if you remember "
-            "something, call recall_notes first before answering. "
+            "something, check your context and call recall_notes before "
+            "answering. "
             "What you save about a person — their name, role, and stable "
             "preferences — you remember about them across conversations; "
             "other notes and the running transcript stay within the "
-            "conversation you are in. When recall_notes returns nothing, "
-            "say so plainly rather than guess.\n"
+            "conversation you are in. When neither your context nor "
+            "recall_notes has it, say so plainly rather than guess.\n"
             "User identity: each message shows the sender's user_id in the "
             "user_id attribute. When a user tells you their real name or "
             "role, immediately call store_note with topic "
             "'contact:<user_id>' (substituting the actual user_id) and "
-            "content containing their name and any other details they share. "
+            "content containing their name, role and any stable preferences "
+            "they share. "
             "What you already know about the person you are talking to shows "
-            "in your context under 'Relationship with <user_id>'; check there "
-            "before asking who they are."
+            "in your context under 'Relationship with <user_id>'; if it is not "
+            "there, call recall_notes with their user_id before asking who "
+            "they are."
         )
         assert load_snippet(
             "memory-tool-usage", repo_root=self.PROD_REPO_ROOT
@@ -324,7 +327,8 @@ class TestShippedSnippetsByteIdentity:
             "of the transcript, so keep what it needs to pick the "
             "conversation back up: who took part, what was asked, decided or "
             "promised, what it learned about the people involved, and what "
-            "was left open. Keep it brief."
+            "was left open. Put the most important first and keep it under "
+            "200 characters, because the agent sees no more than that."
         )
         assert load_snippet(
             "episode-summarizer", repo_root=self.PROD_REPO_ROOT
