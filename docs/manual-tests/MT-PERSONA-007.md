@@ -2,9 +2,9 @@
 
 **Test ID**: `MT-PERSONA-007`
 **Feature Area**: Persona
-**Version**: 1.0
+**Version**: 1.1
 **Created**: 2026-06-05
-**Last Updated**: 2026-06-05
+**Last Updated**: 2026-09-25
 **Status**: Active
 
 ---
@@ -79,8 +79,9 @@ statement is present, and the instruction to actually call store_note /
 recall_notes is preserved.
 
 **Verification**:
-- [ ] `test_false_cross_conversation_promise_removed` passes
-- [ ] `test_honest_room_scoped_statement_present` passes
+- [ ] `test_no_blanket_cross_conversation_promise` passes
+- [ ] `test_person_facts_cross_conversations` passes
+- [ ] `test_other_notes_and_transcript_stay_per_conversation` passes
 
 ---
 
@@ -158,6 +159,7 @@ then superseded by the PR 5 manual test.
 | Date | Tester | OS | Result | Notes |
 |------|--------|----|--------|-------|
 | 2026-06-05 | _pending_ | _pending_ | _pending_ | Initial manual run alongside v0.3.7 test-findings PR plan §PR 4 merge. |
+| 2026-09-25 | Claude (Opus 5.5) | macOS 26.6.2 (`arm64`) | ✅ Pass on gpt-4o and `claude-sonnet-4-6` | Run on `main` at `054f0de2`, after [#995](https://github.com/mkhomutov/Persatrix/pull/995) rewrote this snippet. Step 1 passes; v1.1 corrects its test names. Step 2: both models described the scope accurately — name, role and stable preferences carry across conversations, other notes and the transcript stay in one. Step 3: both said they had no note, and gpt-4o's `recall_notes` call shows in the tool metrics. **Extra check, restricted room** (#995 review F-1), on `claude-sonnet-4-6` with `dm_default_classification: restricted` set for the run and restored afterwards: the persona kept the user's name as a restricted contact note, then ten unrelated turns pushed the introduction out of the 20-message window. Asked "do you remember who I am?", it called `recall_notes` and answered "Yes — you're Dana, CFO." The same run re-saved the note on three turns and answered two of them with the empty-reply "…", filed as [ISSUE-0170](../issues/ISSUE-0170-restricted-room-contact-re-saves.md) in [#999](https://github.com/mkhomutov/Persatrix/pull/999). |
 
 ---
 
