@@ -227,15 +227,11 @@ jobs:
       # open PR at once (#1002). This gate fails a PR that changes
       # agents/pyproject.toml without re-resolving the file (`make
       # python-constraints`); it runs before the install so a stale file is
-      # the first red. uv comes from the Makefile pin, as golangci-lint does,
-      # and installs through pipx, so it stays out of the project's
+      # the first red. `make uv-install` installs the Makefile's uv pin, as
+      # golangci-lint does, through pipx, so uv stays out of the project's
       # environment.
-      - name: Read the uv pin from the Makefile
-        id: uv
-        run: echo "version=$(make -s uv-version)" >> "$GITHUB_OUTPUT"
-
       - name: Install the pinned uv
-        run: pipx install "uv==${{ steps.uv.outputs.version }}"
+        run: make uv-install
 
       - name: Check the pinned Python dependencies match agents/pyproject.toml
         run: make python-constraints-check

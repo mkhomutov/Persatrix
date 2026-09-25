@@ -1,4 +1,4 @@
-.PHONY: all build build-orchestrator build-orchestrator-ui ui ui-test ui-html-check build-cli build-agents uv-version python-constraints python-constraints-upgrade python-constraints-check python-constraints-uv proto proto-go proto-python proto-python-check proto-orphans-check proto-check clean reset test lint lint-go lint-python lint-rust golangci-lint-version golangci-lint-install run run-ui validate dockerignore-check help demo-autonomous demo-offline demo-ollama generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues issues-check rfcs rfcs-check imports-check eval-replay eval-record eval-record-offline eval-drift eval-verdict
+.PHONY: all build build-orchestrator build-orchestrator-ui ui ui-test ui-html-check build-cli build-agents uv-install python-constraints python-constraints-upgrade python-constraints-check python-constraints-uv proto proto-go proto-python proto-python-check proto-orphans-check proto-check clean reset test lint lint-go lint-python lint-rust golangci-lint-version golangci-lint-install run run-ui validate dockerignore-check help demo-autonomous demo-offline demo-ollama generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues issues-check rfcs rfcs-check imports-check eval-replay eval-record eval-record-offline eval-drift eval-verdict
 
 # ─── Config ─────────────────────────────────────────────
 GO_MODULE     := github.com/mkhomutov/persatrix
@@ -18,8 +18,8 @@ GOLANGCI_LINT_VERSION := v2.13.2
 GOLANGCI_LINT := golangci-lint
 # The one uv pin. uv writes CI's Python pins (PYTHON_CONSTRAINTS below) and
 # `make python-constraints-check` compares its output byte for byte, so the
-# python-constraints targets refuse any other version and CI reads this one
-# with `make -s uv-version`. Bump here and nowhere else.
+# python-constraints targets refuse any other version and CI installs this one
+# with `make uv-install`. Bump here and nowhere else.
 UV_VERSION    := 0.12.19
 UV            := uv
 # The versions CI installs the agents' Python dependencies at. `make
@@ -152,17 +152,25 @@ build-agents: ## Install Python agent dependencies at the versions CI pins (.git
 # python-constraints`: it keeps every pin the new ranges still allow. The
 # weekly .github/workflows/python-constraints-refresh.yml offers the newest
 # releases as a PR once the Python checks pass on them.
-UV_COMPILE = $(UV) pip compile agents/pyproject.toml --extra dev --universal \
+#
+# The check compares uv's output byte for byte, so nothing of the caller's
+# may steer the resolution: --no-config skips every uv.toml, and env -u
+# clears the variables that pick an index, a cut-off date, a strategy or
+# extra constraints.
+UV_COMPILE = env -u UV_CONFIG_FILE -u UV_INDEX -u UV_DEFAULT_INDEX -u UV_INDEX_URL \
+	-u UV_EXTRA_INDEX_URL -u UV_FIND_LINKS -u UV_INDEX_STRATEGY -u UV_EXCLUDE_NEWER \
+	-u UV_RESOLUTION -u UV_PRERELEASE -u UV_CONSTRAINT -u UV_OVERRIDE \
+	$(UV) pip compile --no-config agents/pyproject.toml --extra dev --universal \
 	--python-version 3.11 --custom-compile-command "make python-constraints" --quiet
 
-uv-version: ## Print the pinned uv version (CI reads this)
-	@echo $(UV_VERSION)
+uv-install: ## Install the pinned uv with pipx (CI runs this; --force replaces another version)
+	pipx install --force "uv==$(UV_VERSION)"
 
 python-constraints-uv:
 	@installed="$$($(UV) --version 2>/dev/null | cut -d' ' -f2)"; \
 	if [ "$$installed" != "$(UV_VERSION)" ]; then \
 		echo "python-constraints: uv $(UV_VERSION) is required, found '$${installed:-none}'"; \
-		echo "  its output is compared byte for byte; install it (pipx install uv==$(UV_VERSION)) or point UV= at it"; \
+		echo "  its output is compared byte for byte; run: make uv-install, or point UV= at it"; \
 		exit 1; \
 	fi
 

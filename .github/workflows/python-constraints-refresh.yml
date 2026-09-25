@@ -60,7 +60,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
+      # main, whatever ref the run was dispatched from: the branch this job
+      # pushes, and the issue's compare link, sit on main.
       - uses: actions/checkout@v7
+        with:
+          ref: main
 
       - uses: actions/setup-python@v7
         with:
@@ -74,12 +78,8 @@ jobs:
           version: "34.1"
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Read the uv pin from the Makefile
-        id: uv
-        run: echo "version=$(make -s uv-version)" >> "$GITHUB_OUTPUT"
-
       - name: Install the pinned uv
-        run: pipx install "uv==${{ steps.uv.outputs.version }}"
+        run: make uv-install
 
       - name: Re-resolve to the newest versions agents/pyproject.toml allows
         id: resolve
@@ -111,6 +111,8 @@ jobs:
                         test-python test-agents test-integration \
                         check-licenses-python validate; do
             echo "::group::make $target"
+            # Names the check that was running if the job times out or is cancelled.
+            echo "make $target" > "$RUNNER_TEMP/check.running"
             # Unquoted on purpose: "eval-replay TIER=stable" is a target and a variable.
             make $target || failed="$failed make $target;"
             echo "::endgroup::"
@@ -163,11 +165,18 @@ jobs:
             }
             const moved = pins ? `\n\nPins that moved:\n\n\`\`\`diff\n${pins}\n\`\`\`` : '';
             const failed = (env.FAILED || '').split(';').map((s) => s.trim()).filter(Boolean);
+            let running = '';
+            try {
+              running = fs.readFileSync(`${env.RUNNER_TEMP}/check.running`, 'utf8').trim();
+            } catch (err) {
+              // The checks never started.
+            }
 
             let state;
             if (env.MOVED === 'false') state = 'current';
             else if (env.CHECKS === 'success' && env.PUSH === 'success') state = env.OPEN_PR ? 'pr-open' : 'ready';
             else if (env.CHECKS === 'failure') state = 'failing';
+            else if (env.CHECKS === 'cancelled') state = 'stopped';
             else if (env.INSTALL === 'failure') state = 'uninstallable';
             else state = 'broken';
 
@@ -189,6 +198,8 @@ jobs:
               return;
             }
 
+            // Created before the body is written: the ready state's PR link
+            // closes this issue by its number.
             let number = existing ? existing.number : 0;
             if (!number) {
               const created = await github.rest.issues.create({
@@ -233,6 +244,13 @@ jobs:
                 + failed.map((t) => `- \`${t}\``).join('\n') + '\n\n'
                 + `${unaffected} Fix the code on \`main\`, or cap the range in \`agents/pyproject.toml\`, `
                 + 'then run this workflow again from the Actions tab.' + moved;
+            } else if (state === 'stopped') {
+              const where = running ? ` while \`${running}\` was running` : '';
+              headline = `the checks on the newest releases stopped before they finished${where}.`;
+              body = `The checks on the newest releases stopped before they finished (${run}): the job timed out or was cancelled${where}. `
+                + 'A new release that hangs a check looks like this. '
+                + `${unaffected} Run this workflow again from the Actions tab; if it stops in the same check again, `
+                + 'cap the range of the release that hangs it.' + moved;
             } else if (state === 'uninstallable') {
               headline = 'the newest releases do not install.';
               body = `The newest releases \`agents/pyproject.toml\` allows do not install: \`make build-agents\` failed (${run}). `

@@ -19,36 +19,39 @@ import re
 import tomllib
 from pathlib import Path
 
+import pytest
 import yaml
-from _test_infra import ci_job_steps, makefile_recipe_body
+from _test_infra import makefile_recipe_body
 from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-CONSTRAINTS = REPO_ROOT / ".github" / "python-constraints.txt"
-WORKFLOWS = REPO_ROOT / ".github" / "workflows"
+GITHUB = REPO_ROOT / ".github"
+CONSTRAINTS = GITHUB / "python-constraints.txt"
+WORKFLOWS = GITHUB / "workflows"
 
 UV_PIN_RE = re.compile(r"^UV_VERSION\s*:=\s*(\d+\.\d+\.\d+)\s*$", re.M)
 # A pin line: `name==version`, optionally followed by ` ; marker`.
 PIN_RE = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)==([^\s;]+)", re.M)
 # A pip install of the agents package itself: its dev extra, the agents
-# directory, or an editable install. Installing pip or a tool is fine.
-AGENTS_INSTALL_RE = re.compile(r"pip3?\s+install\b[^\n]*(\.\[dev\]|\bagents\b|\s-e\s)")
+# directory, an editable install, or `.` (the package in the working
+# directory). Installing pip or a tool is fine.
+AGENTS_INSTALL_RE = re.compile(
+    r"pip3?\s+install\b[^\n]*?"
+    r"(\.\[dev\]|\bagents\b|\s(?:-e|--editable)(?:\s|=)|\s\.(?:\s|$))",
+    re.M,
+)
 
 
 def _makefile() -> str:
     return (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
 
 
-def _canonical(name: str) -> str:
-    """PEP 503 normalisation, so `PyYAML` and `pyyaml` are one package."""
-    return re.sub(r"[-_.]+", "-", name).lower()
-
-
 def _pins() -> dict[str, list[str]]:
     """Every pinned version per package; a platform split can pin one twice."""
     pins: dict[str, list[str]] = {}
     for name, version in PIN_RE.findall(CONSTRAINTS.read_text(encoding="utf-8")):
-        pins.setdefault(_canonical(name), []).append(version)
+        pins.setdefault(canonicalize_name(name), []).append(version)
     return pins
 
 
@@ -60,16 +63,33 @@ def _declared() -> list[Requirement]:
     return [Requirement(spec) for spec in specs]
 
 
-def _workflow_run_scripts() -> list[tuple[str, str]]:
-    """(`workflow:job`, script) for every `run:` step in every workflow."""
+def _job_steps(workflow: str, job: str) -> list[dict[str, object]]:
+    """The ordered `steps` of one job in one workflow."""
+    doc = yaml.safe_load((WORKFLOWS / workflow).read_text(encoding="utf-8"))
+    return list(doc["jobs"][job]["steps"])
+
+
+def _run_scripts() -> list[tuple[str, str]]:
+    """(`file:job`, script) for every `run:` step in every workflow (`.yml` or
+    `.yaml`) and every composite action under `.github/actions/`."""
+    paths = [*WORKFLOWS.glob("*.y*ml"), *GITHUB.glob("actions/**/action.y*ml")]
     scripts = []
-    for path in sorted(WORKFLOWS.glob("*.yml")):
-        workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
-        for job_id, job in (workflow.get("jobs") or {}).items():
+    for path in sorted(paths):
+        doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        # A composite action has one step list, under `runs`.
+        jobs = doc.get("jobs") or {"runs": doc.get("runs") or {}}
+        for job_id, job in jobs.items():
             for step in job.get("steps") or []:
                 if "run" in step:
-                    scripts.append((f"{path.name}:{job_id}", str(step["run"])))
+                    scripts.append((f"{path.relative_to(GITHUB)}:{job_id}", str(step["run"])))
     return scripts
+
+
+def _installs_agents(script: str) -> bool:
+    """Whether a `run:` script installs the agents package with pip. A
+    backslash continuation is joined first, so a command split across lines
+    is read as one."""
+    return bool(AGENTS_INSTALL_RE.search(script.replace("\\\n", " ")))
 
 
 def test_makefile_declares_exactly_one_uv_pin() -> None:
@@ -96,7 +116,7 @@ def test_constraints_pin_every_declared_dependency_inside_its_range() -> None:
     pins = _pins()
     problems = []
     for req in _declared():
-        versions = pins.get(_canonical(req.name))
+        versions = pins.get(canonicalize_name(req.name))
         if not versions:
             problems.append(f"{req.name} is not pinned")
             continue
@@ -125,23 +145,92 @@ def test_build_agents_installs_at_the_pinned_versions() -> None:
 
 def test_no_workflow_installs_the_agents_package_around_the_pins() -> None:
     """A direct `pip install -e ".[dev]"` takes whatever PyPI has that minute."""
-    offenders = [
-        where for where, script in _workflow_run_scripts() if AGENTS_INSTALL_RE.search(script)
-    ]
+    offenders = [where for where, script in _run_scripts() if _installs_agents(script)]
     assert not offenders, f"install through `make build-agents` instead: {offenders}"
 
 
-def test_python_job_checks_the_constraints_with_the_pinned_uv() -> None:
-    """The required job reads the Makefile pin, installs exactly it, and runs
-    the same target a developer runs."""
-    steps = ci_job_steps("python")
-    runs = [str(step.get("run", "")) for step in steps]
-    reads_pin = [step for step in steps if "make -s uv-version" in str(step.get("run", ""))]
-    assert len(reads_pin) == 1, "no step reads the pin with `make -s uv-version`"
-    step_id = reads_pin[0].get("id")
-    assert step_id, "the pin-reading step needs an id the install step can reference"
-    installs = [run for run in runs if f"uv==${{{{ steps.{step_id}.outputs.version }}}}" in run]
-    assert len(installs) == 1, "no step installs uv at the version the Makefile step read"
-    assert [run.strip() for run in runs].count("make python-constraints-check") == 1, (
+@pytest.mark.parametrize(
+    "script",
+    [
+        'cd agents && pip install -e ".[dev]"',
+        "pip install --editable .",
+        "pip install --editable=.",
+        "pip install .",
+        "python -m pip install ./agents",
+        'pip install \\\n  -e ".[dev]"',
+    ],
+)
+def test_install_detector_catches_each_shape_of_an_agents_install(script: str) -> None:
+    assert _installs_agents(script)
+
+
+@pytest.mark.parametrize(
+    "script",
+    ["python -m pip install --upgrade pip", "pip install pre-commit", "make build-agents"],
+)
+def test_install_detector_passes_other_installs(script: str) -> None:
+    assert not _installs_agents(script)
+
+
+def test_uv_compile_ignores_the_callers_uv_settings() -> None:
+    """The check compares uv's output byte for byte, so a local uv.toml or a
+    `UV_*` index, cut-off date or strategy must not reach the resolution."""
+    m = re.search(r"^UV_COMPILE\s*=((?:[^\n]*\\\n)*[^\n]*)", _makefile(), re.M)
+    assert m, "no UV_COMPILE definition in the Makefile"
+    command = m.group(1)
+    assert "--no-config" in command, "UV_COMPILE reads uv.toml files"
+    for var in ("UV_INDEX_URL", "UV_DEFAULT_INDEX", "UV_EXCLUDE_NEWER", "UV_RESOLUTION"):
+        assert f"-u {var}" in command, f"UV_COMPILE does not clear {var}"
+
+
+def test_uv_install_target_installs_the_pin() -> None:
+    """One install command for CI and developers; --force replaces another uv."""
+    recipe = makefile_recipe_body("uv-install")
+    assert "--force" in recipe and "uv==$(UV_VERSION)" in recipe, recipe
+
+
+@pytest.mark.parametrize(
+    ("workflow", "job", "consumer"),
+    [
+        ("ci.yml", "python", "make python-constraints-check"),
+        ("python-constraints-refresh.yml", "refresh", "make python-constraints-upgrade"),
+    ],
+)
+def test_workflow_installs_the_pinned_uv_before_the_constraints(
+    workflow: str, job: str, consumer: str
+) -> None:
+    """uv comes from the Makefile pin, and the constraints step runs before the
+    install, so a stale file is the first red."""
+    runs = [str(step.get("run", "")) for step in _job_steps(workflow, job)]
+
+    def first(text: str) -> int:
+        found = [i for i, run in enumerate(runs) if text in run]
+        assert found, f"{workflow}:{job} has no step running `{text}`"
+        return found[0]
+
+    assert [run.strip() for run in runs].count("make uv-install") == 1, (
+        f"{workflow}:{job} must install uv with exactly one `make uv-install` step"
+    )
+    assert not [run for run in runs if "uv==" in run], f"{workflow}:{job} hardcodes a uv version"
+    assert first("make uv-install") < first(consumer) < first("make build-agents"), (
+        f"{workflow}:{job} must install uv, then run `{consumer}`, then `make build-agents`"
+    )
+
+
+def test_python_job_runs_the_constraints_check_once() -> None:
+    runs = [str(step.get("run", "")).strip() for step in _job_steps("ci.yml", "python")]
+    assert runs.count("make python-constraints-check") == 1, (
         "the python job must run exactly `make python-constraints-check`"
+    )
+
+
+def test_refresh_builds_its_branch_from_main() -> None:
+    """The issue's link compares against main, so the branch must sit on main
+    even when the workflow is dispatched from another ref."""
+    steps = _job_steps("python-constraints-refresh.yml", "refresh")
+    checkout = [s for s in steps if str(s.get("uses", "")).startswith("actions/checkout@")]
+    assert checkout, "the refresh job has no checkout step"
+    options = checkout[0].get("with")
+    assert isinstance(options, dict) and options.get("ref") == "main", (
+        "the refresh job must check out main"
     )
