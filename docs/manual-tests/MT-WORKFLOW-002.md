@@ -42,7 +42,7 @@ body, and missing required fields.
 - ☐ Linux (Ubuntu 22.04+)
 
 **Dependencies Installed**:
-- Go 1.24+: `go version`
+- Go 1.26+: `go version`
 - `curl` available in PATH: `curl --version`
 
 ### Application State

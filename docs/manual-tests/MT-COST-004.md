@@ -64,7 +64,7 @@ budget policies (RFC 0023 Phase 7+).
 - ☐ Linux (Ubuntu 22.04+)
 
 **Dependencies Installed**:
-- Go 1.24+: `go version`
+- Go 1.26+: `go version`
 - Python 3.11+: `python3 --version`
 - `curl` available in PATH
 - `jq` available in PATH (response inspection)
