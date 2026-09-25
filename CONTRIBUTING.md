@@ -32,6 +32,7 @@ make validate # config validation
 - **[`commitlint.yml`](.github/workflows/commitlint.yml)** — Enforces Conventional Commit format on PR titles (for automated changelog generation).
 - **[`scheduled-audit.yml`](.github/workflows/scheduled-audit.yml)** — Weekly dependency audit for Rust crates.
 - **[`perf-baseline-capture.yml`](.github/workflows/perf-baseline-capture.yml)** — Maintainer-dispatched capture of the recall-latency baseline that arms the perf gate.
+- **[`python-constraints-refresh.yml`](.github/workflows/python-constraints-refresh.yml)** — Weekly: tries the newest Python releases on the Python checks and, when they pass, posts a link that opens the PR moving CI's pins in `.github/python-constraints.txt`.
 - **[`dependabot.yml`](.github/dependabot.yml)** — Monthly grouped dependency-update PRs per ecosystem, titled `chore(deps): …` so the title check passes.
 
 Which CI jobs branch protection requires is versioned in [`docs/methodology/branch-protection.json`](docs/methodology/branch-protection.json); `make branch-protection-show` diffs it against the live setting.
@@ -87,7 +88,8 @@ make build-orchestrator    # → bin/persatrix-server
 make test-go               # go test ./internal/... -v -race -cover
 
 # Python agents
-make build-agents          # pip install -e ".[dev]"
+make build-agents          # pip install -e ".[dev]" at CI's pins (.github/python-constraints.txt)
+make python-constraints    # after changing agents/pyproject.toml: re-resolve those pins
 make test-python           # pytest tests/unit/python/ -v --tb=short
 
 # Rust CLI
