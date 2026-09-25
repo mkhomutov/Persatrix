@@ -38,7 +38,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          cd agents && pip install -e ".[dev]"
+          make build-agents
 
       - name: Capture baseline
         run: |
