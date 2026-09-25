@@ -1,0 +1,14 @@
+# The Rust release the CLI is built, linted and tested with, so CI and every
+# rustup user run the same compiler and the same clippy. rustup reads this
+# file whenever cargo runs in cli/ and installs the release on first use; CI
+# installs it with `rustup toolchain install`, which reads it too.
+#
+# Dependabot proposes each new release as its own PR (the rust-toolchain
+# block in .github/dependabot.yml). CI runs clippy with warnings as errors,
+# so any lint a release adds fails that PR, and is fixed there, instead of
+# failing every open PR on release day. Dependabot changes this file and no
+# other, which is why no workflow names a version.
+[toolchain]
+channel = "1.98.1"
+profile = "minimal"
+components = ["clippy", "rustfmt"]
