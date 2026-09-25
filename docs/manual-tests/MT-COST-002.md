@@ -51,7 +51,7 @@ status endpoint — exercising the RFC 0006 budget-enforcement path.
 - ☐ Linux (Ubuntu 22.04+)
 
 **Dependencies Installed**:
-- Go 1.24+: `go version`
+- Go 1.26+: `go version`
 - Python 3.11+: `python3 --version`
 - `curl` available in PATH
 - `ANTHROPIC_API_KEY` set
