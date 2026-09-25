@@ -1,4 +1,4 @@
-.PHONY: all build build-orchestrator build-orchestrator-ui ui ui-test ui-html-check build-cli build-agents proto proto-go proto-python proto-python-check proto-orphans-check proto-check clean reset test lint lint-go lint-python lint-rust golangci-lint-version golangci-lint-install run run-ui validate dockerignore-check help demo-autonomous demo-offline demo-ollama generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues issues-check rfcs rfcs-check imports-check eval-replay eval-record eval-record-offline eval-drift eval-verdict
+.PHONY: all build build-orchestrator build-orchestrator-ui ui ui-test ui-html-check build-cli build-agents uv-install python-constraints python-constraints-upgrade python-constraints-check python-constraints-uv proto proto-go proto-python proto-python-check proto-orphans-check proto-check clean reset test lint lint-go lint-python lint-rust golangci-lint-version golangci-lint-install run run-ui validate dockerignore-check help demo-autonomous demo-offline demo-ollama generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues issues-check rfcs rfcs-check imports-check eval-replay eval-record eval-record-offline eval-drift eval-verdict
 
 # ─── Config ─────────────────────────────────────────────
 GO_MODULE     := github.com/mkhomutov/persatrix
@@ -16,6 +16,15 @@ WEB_DIR       := web
 # linter set is in .golangci.yml. Bump here and nowhere else.
 GOLANGCI_LINT_VERSION := v2.13.2
 GOLANGCI_LINT := golangci-lint
+# The one uv pin. uv writes CI's Python pins (PYTHON_CONSTRAINTS below) and
+# `make python-constraints-check` compares its output byte for byte, so the
+# python-constraints targets refuse any other version and CI installs this one
+# with `make uv-install`. Bump here and nowhere else.
+UV_VERSION    := 0.12.19
+UV            := uv
+# The versions CI installs the agents' Python dependencies at. `make
+# build-agents` passes the file to pip with -c; see "Python constraints".
+PYTHON_CONSTRAINTS := .github/python-constraints.txt
 # On Windows, executables require the .exe extension; EXE is empty on Unix.
 EXE           := $(if $(filter Windows_NT,$(OS)),.exe,)
 
@@ -127,10 +136,64 @@ build-cli: ## Build Rust CLI binary
 	@cp cli/target/release/persatrix$(EXE) $(GO_BIN)/persatrix$(EXE) 2>/dev/null || true
 	@echo "✓ CLI built → $(GO_BIN)/persatrix$(EXE)"
 
-build-agents: ## Install Python agent dependencies
+build-agents: ## Install Python agent dependencies at the versions CI pins (.github/python-constraints.txt)
 	@echo "→ Installing Python agent dependencies..."
-	cd agents && $(PIP) install -e ".[dev]"
+	cd agents && $(PIP) install -c ../$(PYTHON_CONSTRAINTS) -e ".[dev]"
 	@echo "✓ Agent dependencies installed"
+
+# ─── Python constraints ─────────────────────────────────
+# CI installs the agents' dependencies at the versions in PYTHON_CONSTRAINTS:
+# every workflow installs through `make build-agents`, which passes the file
+# to pip with -c. Without it, CI took the newest release PyPI had at that
+# minute, so one release could fail every open PR at once — OpenTelemetry
+# 1.45.0 did on 2026-09-25 (#1002). agents/pyproject.toml keeps the ranges;
+# the file records one resolution of them, for CI's Python 3.11 and every
+# platform (--universal). After changing a dependency, run `make
+# python-constraints`: it keeps every pin the new ranges still allow. The
+# weekly .github/workflows/python-constraints-refresh.yml offers the newest
+# releases as a PR once the Python checks pass on them.
+#
+# The check compares uv's output byte for byte, so nothing of the caller's
+# may steer the resolution: --no-config skips every uv.toml, and env -u
+# clears the variables that pick an index, a cut-off date, a strategy or
+# extra constraints.
+UV_COMPILE = env -u UV_CONFIG_FILE -u UV_INDEX -u UV_DEFAULT_INDEX -u UV_INDEX_URL \
+	-u UV_EXTRA_INDEX_URL -u UV_FIND_LINKS -u UV_INDEX_STRATEGY -u UV_EXCLUDE_NEWER \
+	-u UV_RESOLUTION -u UV_PRERELEASE -u UV_CONSTRAINT -u UV_OVERRIDE \
+	$(UV) pip compile --no-config agents/pyproject.toml --extra dev --universal \
+	--python-version 3.11 --custom-compile-command "make python-constraints" --quiet
+
+uv-install: ## Install the pinned uv with pipx (CI runs this; --force replaces another version)
+	pipx install --force "uv==$(UV_VERSION)"
+
+python-constraints-uv:
+	@installed="$$($(UV) --version 2>/dev/null | cut -d' ' -f2)"; \
+	if [ "$$installed" != "$(UV_VERSION)" ]; then \
+		echo "python-constraints: uv $(UV_VERSION) is required, found '$${installed:-none}'"; \
+		echo "  its output is compared byte for byte; run: make uv-install, or point UV= at it"; \
+		exit 1; \
+	fi
+
+python-constraints: python-constraints-uv ## Re-resolve .github/python-constraints.txt after editing agents/pyproject.toml, keeping every pin it can
+	$(UV_COMPILE) -o $(PYTHON_CONSTRAINTS)
+
+python-constraints-upgrade: python-constraints-uv ## Move every pin in .github/python-constraints.txt to the newest release agents/pyproject.toml allows
+	$(UV_COMPILE) --upgrade -o $(PYTHON_CONSTRAINTS)
+
+python-constraints-check: python-constraints-uv ## Fail if .github/python-constraints.txt no longer matches agents/pyproject.toml (CI)
+	@# Re-resolve into a copy, then compare. uv keeps the copy's pins where the
+	@# ranges allow (a yanked release included), so the copy changes only when
+	@# agents/pyproject.toml asks for something the file does not pin.
+	@tmp=$$(mktemp) || exit 1; \
+	cp $(PYTHON_CONSTRAINTS) "$$tmp"; \
+	$(UV_COMPILE) -o "$$tmp" || { rm -f "$$tmp"; exit 1; }; \
+	if ! diff -u $(PYTHON_CONSTRAINTS) "$$tmp"; then \
+		rm -f "$$tmp"; \
+		echo "✗ $(PYTHON_CONSTRAINTS) is stale relative to agents/pyproject.toml; run: make python-constraints"; \
+		exit 1; \
+	fi; \
+	rm -f "$$tmp"
+	@echo "✓ $(PYTHON_CONSTRAINTS) matches agents/pyproject.toml"
 
 # ─── Run ────────────────────────────────────────────────
 run: build ## Run the orchestrator

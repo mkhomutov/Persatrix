@@ -1,6 +1,6 @@
 # Automation Catalogue
 
-> **Last updated**: 2026-09-17
+> **Last updated**: 2026-09-25
 > Everything that runs without a human typing the steps: `make` targets,
 > scripts, the pre-commit hook, and the GitHub workflows — grouped by
 > purpose, with **when it runs**. `make help` is the live list of targets;
@@ -21,7 +21,7 @@ dependencies.
 | Target | Does | When |
 |--------|------|------|
 | `make all` | `proto` + `build` | Fresh checkout; after a proto change |
-| `make build` / `build-orchestrator` / `build-cli` / `build-agents` | Go binary → `bin/persatrix-server`; Rust → `cli/target/release/persatrix`; `pip install -e ".[dev]"` | Development |
+| `make build` / `build-orchestrator` / `build-cli` / `build-agents` | Go binary → `bin/persatrix-server`; Rust → `cli/target/release/persatrix`; `pip install -c .github/python-constraints.txt -e ".[dev]"`, the versions CI pins, and the one command every workflow installs the Python dependencies with | Development; every CI job that needs the agents package |
 | `make ui` / `build-orchestrator-ui` / `run-ui` | Vite bundle into `internal/ui/assets/` (overwrites the tracked placeholder `index.html` — restore it before committing); orchestrator with the bundle embedded; local console iteration | Console work; release asset lane |
 | `make run` / `run-agent AGENT= PORT=` | Run the orchestrator / one Python agent | Manual tests |
 | `make docker-build` / `docker-up` / `docker-down` / `docker-logs` / `reset` | Compose lifecycle; `reset` purges **all** named volumes (ISSUE-0051 workaround) | Live arcs start from `make reset` |
@@ -34,6 +34,7 @@ dependencies.
 |-----------------|------|------------|---------------------|
 | `make proto` (`proto-go`, `proto-python`) | Regenerate Go and Python gRPC stubs, incl. `.pyi` via mypy-protobuf. Pinned toolchain: protoc 34.1, protoc-gen-go 1.36.11, protoc-gen-go-grpc 1.6.1 (local brew tools are newer and fail the gate) | `make proto-check` = `proto-python-check` + `proto-orphans-check`; Go side is `make proto-go && git diff --exit-code internal/generated/` | CI (`Proto staleness`, `Python`) |
 | `make generate-sanitizer-patterns` | Regenerate `agents/security_patterns.py` + `security_enums.py` from the Go canonical sources | `generate-sanitizer-patterns-check` | CI (`Go`) |
+| `make python-constraints` / `python-constraints-upgrade` | Re-resolve `.github/python-constraints.txt`, the versions CI installs the Python dependencies at, from the ranges in `agents/pyproject.toml` with the pinned uv (`UV_VERSION`, which `make uv-install` installs; the targets refuse any other). The first keeps every pin the ranges still allow, so run it after changing a dependency; the second moves every pin to the newest release, which the weekly refresh workflow does | `python-constraints-check` — re-resolves into a copy and diffs it | CI (`Python`), before the install |
 | `make notices` (`scripts/generate_third_party_notices.py`) | Regenerate `THIRD_PARTY_NOTICES.md` from the three dependency graphs | `notices-check` | Make-only; the tag PR |
 | `make rfcs` (`scripts/rfcs.py`) | Regenerate `docs/rfcs/INDEX.md` from RFC YAML front-matter; fail when an RFC's `**Status**` header line disagrees with it | `rfcs-check` | CI (`Validate configs`) + pre-commit |
 | `make issues` (`scripts/issues.py`) | Regenerate `docs/issues/INDEX.md` from issue front-matter | `issues-check` | CI (`Validate configs`) |
@@ -116,7 +117,8 @@ The hook is the fast local copy, not the only copy.
 | `commitlint.yml` | PR opened/edited/synchronised | Conventional Commit PR title (`Validate PR Title`) |
 | `scheduled-audit.yml` | Mondays 06:00 UTC; manual | `cargo deny check advisories bans sources licenses`; opens or comments on a `Scheduled Dependency Audit Failure` issue |
 | `perf-baseline-capture.yml` | manual (`workflow_dispatch`) | Captures the recall-latency baseline on a runner and opens a PR with it; merging arms the perf gate. Never run yet |
-| `dependabot.yml` (config, not a workflow) | monthly | One grouped version-update PR per ecosystem — Go, pip (`agents/`), Cargo (`cli/`), npm (`web/`), GitHub Actions — titled `chore(deps): …`; at most two open per ecosystem. Committed 2026-09-06; before that only security updates ran |
+| `python-constraints-refresh.yml` | Mondays 05:00 UTC; a push to `main` that changes `agents/pyproject.toml`; manual | Re-resolves CI's Python pins to the newest releases the ranges allow, installs them and runs the Python checks (`lint-python`, `proto-python-check`, the stable eval replay, the three test trees, `check-licenses-python`, `validate`). Reports in one `CI Python constraints: weekly refresh` issue: on green it pushes `chore/python-constraints-refresh` and links "Open the PR" (Actions may not open PRs here, and a person's PR starts CI); on red it names every failing check and leaves the pins alone; when nothing moved it closes the issue |
+| `dependabot.yml` (config, not a workflow) | monthly | One grouped version-update PR per ecosystem — Go, pip (`agents/`), Cargo (`cli/`), npm (`web/`), GitHub Actions — titled `chore(deps): …`; at most two open per ecosystem. Committed 2026-09-06; before that only security updates ran. The pip block manages the ranges in `agents/pyproject.toml` only; CI's pins move through `python-constraints-refresh.yml` |
 
 ## Manual-test automation
 

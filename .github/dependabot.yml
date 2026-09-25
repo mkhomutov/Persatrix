@@ -19,6 +19,14 @@ updates:
       prefix: "chore(deps)"
     open-pull-requests-limit: 2
 
+  # The ranges in agents/pyproject.toml only. CI installs at the versions in
+  # .github/python-constraints.txt, which Dependabot must not manage: it edits
+  # a uv-compiled file line by line instead of re-resolving it, and so
+  # proposes versions the file's other pins rule out. Those pins move through
+  # .github/workflows/python-constraints-refresh.yml, which also tries a
+  # widening merged here on the newest releases the day it lands. The file
+  # sits outside /agents on purpose: this block reads any .txt there whose
+  # lines look like requirements.
   - package-ecosystem: pip
     directory: /agents
     schedule:
