@@ -1,28 +1,28 @@
-2f14ad65badaa04eb354bb4d96205dfe7005cbb3c9424bdd285b2fc1066e8543:
-  stop_reason: end_turn
-  text: Morning! Nothing blocking on my plate — what's up in this standup?
-  usage:
-    input_tokens: 2047
-    output_tokens: 16
-7daab5e21051a8d697988cc7a114d74a8c606472be45a94bea7fe18c8da000c7:
+117f077aecc98e78241ba1b497d5e7661fdd9dd9cfa08a51c383f203d1c73efa:
   stop_reason: end_turn
   text: '{"summary": "Sam said the Atlas launch ships Friday; ember-owl acknowledged
     the hard deadline.", "facts": [{"subject": "atlas", "predicate": "topic.has_deadline",
     "object": "ships Friday", "certainty": 0.9}, {"subject": "sam", "predicate": "committed_to",
     "object": "shipping Atlas by Friday", "certainty": 0.85}]}'
   usage:
-    input_tokens: 465
+    input_tokens: 551
     output_tokens: 78
-a9138846d00954954ffadeff5c9e0b0f52c379499e39a4a6597a9967ccc5d173:
+b7a2066ff3ef7b47f86b183efae40f5948904bfb63d37c14d6e08e722d49cd95:
   stop_reason: end_turn
   text: I don't have a deadline on record for Atlas in this room — want me to chase
     one down?
   usage:
-    input_tokens: 2051
+    input_tokens: 2011
     output_tokens: 21
-e93fa5d028b3a0640d45b339b4332fbfe041b4308424b2dfacb9a0fe982a5de2:
+d845780b8d6a35507f814ebe888de7efe0df6419221adb7a6a93d3fb3af06fda:
+  stop_reason: end_turn
+  text: Morning! Nothing blocking on my plate — what's up in this standup?
+  usage:
+    input_tokens: 2007
+    output_tokens: 16
+e60020b6622927c8af88bac69def6cbff444482d4d678ec16379255b3a554953:
   stop_reason: end_turn
   text: Noted — the Atlas launch ships Friday. I'll hold us to that deadline.
   usage:
-    input_tokens: 2056
+    input_tokens: 2015
     output_tokens: 17

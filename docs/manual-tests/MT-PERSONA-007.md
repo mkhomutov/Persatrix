@@ -75,8 +75,8 @@ cross-room recall that does not yet work.
 
 **Expected Result**: All pass — the blanket "persists across
 conversations" promise is gone, the honest "scoped to the conversation"
-statement is present, and the "MUST call store_note / recall_notes"
-instruction is preserved.
+statement is present, and the instruction to actually call store_note /
+recall_notes is preserved.
 
 **Verification**:
 - [ ] `test_false_cross_conversation_promise_removed` passes
@@ -166,6 +166,7 @@ then superseded by the PR 5 manual test.
 - PR 4 changes only the **prompt promise** to match current behaviour; it
   does not change what is stored or recalled. The substantive cross-room
   recall fix is F-3b / PR 5.
-- The "MUST call the tools, don't just acknowledge verbally" instruction
-  is intentionally preserved — the live DB confirmed those stores land;
-  the bug was the scope claim, not the tool call.
+- The instruction to actually call the tools (saying you will remember
+  something does not save it) is intentionally preserved — the live DB
+  confirmed those stores land; the bug was the scope claim, not the tool
+  call.

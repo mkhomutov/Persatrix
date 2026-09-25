@@ -32,6 +32,24 @@ _ANTHROPIC_STOP_MAP: dict[str, StopReason] = {
     "max_tokens": StopReason.MAX_TOKENS,
 }
 
+# Claude models from Opus 4.7 on reject ``temperature`` with an HTTP 400.
+# These prefixes name the older families that still accept it; every other
+# model is sent none, so a newly released model works without a change here.
+_TEMPERATURE_MODEL_PREFIXES: tuple[str, ...] = (
+    "claude-3",
+    "claude-haiku-4",
+    "claude-sonnet-4",
+    "claude-opus-4-0",
+    "claude-opus-4-1",
+    "claude-opus-4-5",
+    "claude-opus-4-6",
+    "claude-opus-4-2025",
+)
+
+# Models already warned about, so a caller's dropped temperature is logged
+# once per model rather than on every call.
+_warned_no_temperature: set[str] = set()
+
 
 class AnthropicProvider:
     """Wraps anthropic.AsyncAnthropic, translates to LLMResponse."""
@@ -59,13 +77,23 @@ class AnthropicProvider:
         """Send one request. A ``cache_prefix`` goes first in the system
         prompt, marked so Anthropic caches everything up to its end; the
         first call writes the cache and later ones with the same prefix read
-        it. Without one the request carries no cache marker at all."""
+        it. Without one the request carries no cache marker at all.
+        ``temperature`` goes only to a model that accepts it (see
+        ``_TEMPERATURE_MODEL_PREFIXES``)."""
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": messages,
             "max_tokens": max_tokens,
-            "temperature": temperature,
         }
+        if model.startswith(_TEMPERATURE_MODEL_PREFIXES):
+            kwargs["temperature"] = temperature
+        elif model not in _warned_no_temperature:
+            _warned_no_temperature.add(model)
+            logger.warning(
+                "Sending %r no temperature (the caller asked for %s): it is not "
+                "in _TEMPERATURE_MODEL_PREFIXES; add it there if it accepts one",
+                model, temperature,
+            )
         if cache_prefix:
             blocks: list[dict[str, Any]] = [{
                 "type": "text",

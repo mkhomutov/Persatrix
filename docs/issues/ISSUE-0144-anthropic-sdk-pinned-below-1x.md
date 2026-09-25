@@ -1,6 +1,6 @@
 ---
 id: ISSUE-0144
-summary: "The Anthropic SDK is capped below 1.x because `messages.create` dropped the `temperature` parameter that `AnthropicProvider` passes on every call — and the Dependabot rule that stops the monthly sweep re-proposing the widening also removes the only recurring prompt to do the port, so the tree sits on a superseded SDK line with nothing scheduled to move it"
+summary: "The Anthropic SDK is capped below 1.x because `messages.create` dropped the `temperature` parameter that `AnthropicProvider` passes to every older Claude model that takes it — and the Dependabot rule that stops the monthly sweep re-proposing the widening also removes the only recurring prompt to do the port, so the tree sits on a superseded SDK line with nothing scheduled to move it"
 status: open
 severity: medium
 area: agents
@@ -14,8 +14,9 @@ refs:
 ## Summary
 
 `agents/pyproject.toml` pins `anthropic>=0.40.0,<1`. The cap is load-bearing:
-`AnthropicProvider.create_message` passes `temperature` on every call, and
-`messages.create` in the 1.x line does not accept it. Porting the provider is
+`AnthropicProvider.create_message` passes `temperature` to every older Claude
+model that takes it (`claude-sonnet-4-6` and `claude-haiku-4-5` among them),
+and `messages.create` in the 1.x line does not accept it. Porting the provider is
 the work; the cap and the Dependabot `ignore` rule are only holding the line
 until someone does it.
 
@@ -32,8 +33,8 @@ AsyncMessages.create() got an unexpected keyword argument 'temperature'
 
 `messages.create` no longer declares `temperature` and has no `**kwargs`, so
 the call `AnthropicProvider.create_message` builds raises `TypeError` before a
-request is sent. The kwargs dict is unconditional — `temperature` is not
-behind a truthiness guard the way `system` and `tools` are:
+request is sent. At the time the kwargs dict was unconditional — `temperature`
+was not behind a truthiness guard the way `system` and `tools` are:
 
 ```python
 kwargs: dict[str, Any] = {
@@ -43,6 +44,11 @@ kwargs: dict[str, Any] = {
     "temperature": temperature,
 }
 ```
+
+It is now sent only when the model ID starts with an entry in
+`_TEMPERATURE_MODEL_PREFIXES`, because Claude Opus 4.7 and later, Sonnet 5 and
+Fable reject it. The 1.x break still covers every request to the models on
+that list, which the shipped configs use.
 
 **CI reported the widening green.** That is the part worth recording, because
 it will hold for the next SDK major too:
@@ -77,7 +83,8 @@ things degrade over time:
 One change, three edits that must land together:
 
 1. Port `AnthropicProvider.create_message` (`agents/llm_providers.py`) to
-   whatever 1.x replaced `temperature` with, and re-check `_normalize` against
+   whatever 1.x replaced `temperature` with, keeping it off the models
+   outside `_TEMPERATURE_MODEL_PREFIXES`, and re-check `_normalize` against
    the 1.x response shape — it reads `response.content[].type/.text/.id/
    .name/.input`, `response.stop_reason`, and
    `response.usage.input_tokens/.output_tokens`, none of which were checked

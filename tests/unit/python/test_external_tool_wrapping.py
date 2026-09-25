@@ -40,7 +40,9 @@ def _clean_registry():
 
 # ISSUE-0151: a task agent runs only the tools on its ``tools`` list, so the
 # agent under test lists every tool this module stubs.
-_STUBBED_TOOLS = ["http_request", "file_read", "recall_channel_messages", "recall_notes"]
+_STUBBED_TOOLS = [
+    "http_request", "file_read", "recall_channel_messages", "recall_notes", "shell_exec",
+]
 
 
 def _make_agent() -> _TestableAgent:
@@ -166,6 +168,45 @@ class TestExternalToolWrapping:
         content = results[0].content
         assert "<external_data" not in content
         assert "domain not in allowlist" in content
+
+    async def test_failed_tool_output_reaches_llm(self) -> None:
+        # shell_exec reports a non-zero exit as a failure that still carries
+        # stdout and stderr; the model needs that output to see what failed.
+        @tool(name="shell_exec", description="Shell", tier="builtin")
+        async def shell_exec_stub(command: str) -> ToolResult:
+            return ToolResult(
+                success=False,
+                data={"stdout": "FAILED test_x", "stderr": "Traceback: boom", "exit_code": 1},
+                error="Command exited with code 1",
+            )
+
+        agent = _make_agent()
+        results = await agent._execute_tools([
+            ToolCall(id="c1", name="shell_exec", input={"command": "pytest"}),
+        ])
+        assert results[0].is_error is True
+        content = results[0].content
+        assert content.startswith("Command exited with code 1\n")
+        assert "FAILED test_x" in content
+        assert "Traceback: boom" in content
+        assert "<external_data" not in content
+
+    async def test_failed_external_tool_output_wrapped(self) -> None:
+        # Output that comes with a failure is still external data when the
+        # tool is an external source: it goes inside the envelope, and the
+        # framework's error line stays outside it.
+        @tool(name="http_request", description="HTTP", tier="builtin")
+        async def http_request_stub(url: str) -> ToolResult:
+            return ToolResult(success=False, data={"body": "partial page"}, error="boom")
+
+        agent = _make_agent()
+        results = await agent._execute_tools([
+            ToolCall(id="c1", name="http_request",
+                     input={"url": "https://api.example.com"}),
+        ])
+        content = results[0].content
+        assert content.startswith('boom\n<external_data source="external"')
+        assert '"partial page"' in content
 
     async def test_dict_data_serialized_then_wrapped(self) -> None:
         # http_request returns dict {"status", "body", "headers"} — the

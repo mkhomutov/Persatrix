@@ -89,7 +89,17 @@ def create_memory_tools(
 
     @tool(
         name="store_note",
-        description="Store a note for future reference",
+        description=(
+            "Save a note to your memory of this conversation. topic is a short label, content "
+            "the note itself (up to 10 KB), and tags an optional comma-separated list. The "
+            "note is recalled only in this conversation; when the note limit is reached, the "
+            "least-used notes are removed first. The topic 'contact:<user_id>' is only for "
+            "the person you are talking to, under their own user_id: all of its content can "
+            "become part of the record of who they are, which follows them into every "
+            "conversation, so put only their name, role and stable preferences in it, never "
+            "something they told you in confidence. Returns the new note's id, or "
+            "identity_stored: true when the content went to that record."
+        ),
         permissions=["memory:write"],
         tier="builtin",
     )
@@ -126,7 +136,12 @@ def create_memory_tools(
 
     @tool(
         name="recall_notes",
-        description="Search stored notes by query",
+        description=(
+            "Search the notes you saved in this conversation. query is a full-text search "
+            "over topic, content and tags; an empty query returns your most recent notes. "
+            "limit caps how many come back (default 10). Each result has id, topic, content, "
+            "tags and access_count; pass id to update_note or delete_note."
+        ),
         permissions=["memory:read"],
         tier="builtin",
     )
@@ -165,7 +180,10 @@ def create_memory_tools(
 
     @tool(
         name="update_note",
-        description="Update the content of an existing note",
+        description=(
+            "Replace the content of one of your notes; its topic and tags stay. note_id is "
+            "the id that store_note or recall_notes returned. Fails when no note has that id."
+        ),
         permissions=["memory:write"],
         tier="builtin",
     )
@@ -205,7 +223,10 @@ def create_memory_tools(
 
     @tool(
         name="delete_note",
-        description="Delete a stored note",
+        description=(
+            "Delete one of your notes. note_id is the id that store_note or recall_notes "
+            "returned. Fails when no note has that id."
+        ),
         permissions=["memory:write"],
         tier="builtin",
     )
