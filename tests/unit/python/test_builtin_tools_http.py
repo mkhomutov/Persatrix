@@ -89,6 +89,39 @@ class TestHttpRequest:
         assert result.data["status"] == 200
         assert result.data["body"] == '{"ok": true}'
 
+    async def test_undecodable_body_keeps_status_and_headers(self, tmp_path):
+        """A binary or mislabelled body is not an error: the status and headers
+        still come back, with the bytes that are not UTF-8 replaced."""
+        _setup_tools(tmp_path)
+        raw = b"\x89PNG\r\n\x1a\n"
+
+        async def text(encoding: str | None = None, errors: str = "strict") -> str:
+            # Decodes the way aiohttp does: UTF-8, strict unless told otherwise.
+            return raw.decode(encoding or "utf-8", errors)
+
+        mock_resp = AsyncMock()
+        mock_resp.status = 301
+        mock_resp.text = text
+        mock_resp.headers = {
+            "Content-Type": "image/png",
+            "Location": "https://api.example.com/new-logo.png",
+        }
+        mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+        mock_resp.__aexit__ = AsyncMock(return_value=False)
+
+        mock_session = AsyncMock()
+        mock_session.request = MagicMock(return_value=mock_resp)
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("agents.tools.builtin.aiohttp.ClientSession", return_value=mock_session):
+            result = await builtin.http_request("https://api.example.com/logo.png")
+
+        assert result.success is True
+        assert result.data["status"] == 301
+        assert result.data["headers"]["Location"] == "https://api.example.com/new-logo.png"
+        assert "�" in result.data["body"]
+
     async def test_denied_domain(self, tmp_path):
         _setup_tools(tmp_path)
         result = await builtin.http_request("https://evil.com/hack")

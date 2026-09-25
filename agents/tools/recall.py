@@ -77,7 +77,8 @@ _RECALL_TOOL_DESCRIPTION = (
     "channel_id it searches every channel you can access; pass channel_id "
     "or sender to narrow. Results only include conversations at or below "
     "the confidentiality level of the channel you are acting in, and older "
-    "messages beyond the channel's retention horizon may be unavailable."
+    "messages beyond the channel's retention horizon may be unavailable. "
+    "Results arrive inside an <external_data> envelope."
 )
 
 

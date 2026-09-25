@@ -175,6 +175,15 @@ class _ActionLoopMixin:
                         content = f"Tool error ({result.error_type}): {error_msg}"
                     else:
                         content = error_msg
+                    # A failure can still carry output (shell_exec's stdout
+                    # and stderr on a non-zero exit); the model needs it.
+                    if result.data:
+                        output = (
+                            json.dumps(result.data)
+                            if isinstance(result.data, (dict, list))
+                            else str(result.data)
+                        )
+                        content += "\n" + maybe_wrap_tool_content(call.name, output)
                 results.append(LLMToolResult(
                     tool_call_id=call.id,
                     content=content,

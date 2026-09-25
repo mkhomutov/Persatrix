@@ -1,8 +1,7 @@
 # CLAUDE.md
 
 Guidance for Claude Code working in this repository. Claude Code reads this
-file from the repository root; it lived at `.github/CLAUDE.md` until
-2026-09-06, a path the tool does not load.
+file from the repository root.
 
 The project rules shared with every assistant — architecture, build and test
 commands, code conventions, TDD, terminology, methodology, status hygiene,

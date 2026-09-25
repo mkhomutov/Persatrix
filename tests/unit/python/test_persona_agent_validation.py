@@ -231,6 +231,34 @@ class TestBuildToolDefinitionsWithRegistry:
         assert results[0].content == "executed"
         await agent.close_memory()
 
+    async def test_execute_tools_includes_failed_tool_output(self):
+        """A failed tool's output (shell_exec's stdout and stderr on a non-zero
+        exit) reaches the model after the error line."""
+        from agents.tools.builtin import ToolResult
+        from agents.tools.registry import tool
+
+        @tool(name="failing_tool", description="Fails with output")
+        async def failing_tool() -> ToolResult:
+            return ToolResult(
+                success=False,
+                data={"stdout": "FAILED test_x", "stderr": "boom", "exit_code": 1},
+                error="Command exited with code 1",
+            )
+
+        cfg = {**_PERSONA_CONFIG, "tools": ["failing_tool"]}
+        agent = create_persona_agent(
+            agent_id="ember-owl", config=cfg, llm_client=_make_client(),
+        )
+        await agent.initialize_memory()
+
+        results = await agent._execute_tools([
+            ToolCall(id="tc1", name="failing_tool", input={}),
+        ])
+        assert results[0].is_error is True
+        assert results[0].content.startswith("Command exited with code 1\n")
+        assert "FAILED test_x" in results[0].content
+        await agent.close_memory()
+
     async def test_execute_tools_returns_error_for_func_none_memory_tool(self):
         """_execute_tools must return is_error=True when a ToolDefinition has
         func=None (e.g. a schema-only declaration injected as a memory tool).

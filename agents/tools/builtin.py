@@ -78,7 +78,13 @@ def _truncate(text: str) -> str:
 
 @tool(
     name="file_read",
-    description="Read the contents of a file",
+    description=(
+        "Read a UTF-8 text file from this agent's sandboxed workspace. path must be an "
+        "absolute path that this agent's read allowlist covers; the deny list always wins. "
+        "Returns the file's text, cut off at 100 KB with a '[truncated at 100 KB]' marker. "
+        "Binary files, missing files and denied paths come back as errors. The text "
+        "arrives inside an <external_data> envelope."
+    ),
     permissions=["filesystem:read"],
     tier="builtin",
 )
@@ -113,7 +119,12 @@ async def file_read(path: str) -> ToolResult:
 
 @tool(
     name="file_write",
-    description="Write content to a file",
+    description=(
+        "Write text to a file in this agent's sandboxed workspace, replacing the whole file "
+        "if it exists and creating missing parent directories. path must be an absolute "
+        "path that this agent's write allowlist covers; the deny list always wins. content "
+        "is written as UTF-8. Returns the number of bytes written."
+    ),
     permissions=["filesystem:write"],
     tier="builtin",
 )
@@ -158,7 +169,17 @@ def _shell_timeout(requested: int, limit: int | None) -> int:
 
 @tool(
     name="shell_exec",
-    description="Execute a shell command",
+    description=(
+        "Run one command in this agent's workspace directory and return its stdout, stderr "
+        "and exit code. Only commands on this agent's allowlist run, matched on their "
+        "leading words: an entry 'git diff' permits 'git diff src/app.py' but not "
+        "'git push'. The command is split into arguments the way a shell would split it, "
+        "but no shell runs it, so pipes, redirection, globs, '&&' and environment variables "
+        "do not work, and it gets no input on stdin. timeout is in seconds (default 30), "
+        "capped at this agent's shell time limit and never above 300. A non-zero exit code "
+        "is reported as a failure with the output attached. Each output stream is cut off "
+        "at 100 KB."
+    ),
     permissions=["shell:exec"],
     tier="builtin",
 )
@@ -250,7 +271,15 @@ ALLOWED_HTTP_METHODS = frozenset({"GET", "POST", "PUT", "PATCH"})
 
 @tool(
     name="http_request",
-    description="Make an HTTP request",
+    description=(
+        "Send an HTTP request to a domain on this agent's network allowlist. method is GET, "
+        "POST, PUT or PATCH (DELETE is refused), and url must be http or https. body is "
+        "sent only with POST, PUT and PATCH, always as application/json. Redirects are not "
+        "followed: a 3xx response comes back with its location header. The request times "
+        "out after 30 seconds. Returns the status code, the body (cut off at 100 KB) and "
+        "only these headers: content-type, content-length, location, date, cache-control, "
+        "etag, last-modified. The response arrives inside an <external_data> envelope."
+    ),
     permissions=["network:http"],
     tier="builtin",
 )
@@ -312,7 +341,9 @@ async def http_request(url: str, method: str = "GET", body: str = "") -> ToolRes
             # allowlisted domains. The LLM can re-issue a request to the
             # redirect target after domain re-validation (review M-01).
             async with session.request(**kwargs, allow_redirects=False) as resp:
-                text = await resp.text()
+                # A binary or mislabelled body must not cost the model the
+                # status and headers, so undecodable bytes are replaced.
+                text = await resp.text(errors="replace")
                 # SF-02: filter to safe headers only — prevents leaking
                 # Set-Cookie, Server, X-Powered-By, etc. to the LLM.
                 safe_headers = {
