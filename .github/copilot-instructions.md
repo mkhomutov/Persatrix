@@ -7,11 +7,11 @@ Polyglot AI agent orchestration framework: **Go** orchestrator, **Python** agent
 Be brief by default. Expand only when asked.
 
 - **Answer first**, background second.
-- Routine answers: ≤8 lines. Code explanations: ≤3 bullets + 1 example.
+- Routine answers stop once the question is answered. Code explanations: a few points and one example.
 - Reviews: list findings; skip long recap.
 - Do not restate the prompt, repeat unchanged context, or add preambles.
 - Ask at most one clarifying question; prefer acting on the most reasonable interpretation.
-- Status updates: 1–2 sentences.
+- Status updates: what changed and what comes next, briefly.
 - Prefer links to existing docs over embedding large guidance text.
 
 ## Writing docs & comments
@@ -63,7 +63,7 @@ Language-specific rules live in the instruction files under `.github/instruction
 
 Key patterns: `@tool(name=..., permissions=[...])` auto-generates schemas; sub-agents inherit restricted permissions; three-tier memory (Episodic/Relationship/Working); optimization profiles in `config/optimization.yaml`.
 
-## TDD (from v0.3.0 onward)
+## TDD
 
 All new unit-level code follows Red-Green-Refactor:
 

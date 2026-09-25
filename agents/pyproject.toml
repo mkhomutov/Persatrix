@@ -36,9 +36,10 @@ dependencies = [
     "pyyaml>=6.0,<7",
     "aiohttp>=3.9.0,<4",
     # The <1 cap is load-bearing, not just cautious: anthropic 1.x removed
-    # `temperature` from `messages.create`, and AnthropicProvider passes it on
-    # every call (agents/llm_providers.py), so 1.x turns every Anthropic
-    # request into a TypeError raised before the request is even sent. CI
+    # `temperature` from `messages.create`, and AnthropicProvider passes it to
+    # every older model that takes it (agents/llm_providers.py),
+    # claude-sonnet-4-6 and claude-haiku-4-5 among them, so 1.x turns those
+    # requests into a TypeError raised before the request is even sent. CI
     # cannot see it — the unit tests construct the provider (whose signature
     # did not change) and mock the client from there. Lifting this cap means
     # moving the provider to whatever 1.x replaced `temperature` with, in the

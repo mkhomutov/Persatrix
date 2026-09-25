@@ -51,8 +51,8 @@ class TestSnippetLoader:
         lower = load_snippet(_SNIPPET).lower()
         assert "store_note" in lower
         assert "recall_notes" in lower
-        assert "must call store_note" in lower
-        assert "do not just acknowledge" in lower
+        assert "remember something, call store_note" in lower
+        assert "does not save anything" in lower
         # The contact-note convention PR 5 builds on stays in place.
         assert "contact:<user_id>" in load_snippet(_SNIPPET)
 

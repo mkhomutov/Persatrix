@@ -13,7 +13,7 @@ description: "Rust CLI conventions: clap v4 derive, exhaustive match, tokio asyn
 - **YAML:** `serde_yml` (maintained successor to `serde_yaml`).
 - **Comments in plain English.** Write comments a non-programmer could follow — say what the code does and why it matters, briefly. Full rules: [Documentation Guide § Writing Style](../../docs/documentation-guide.md#writing-style).
 
-## TDD (from v0.3.0 onward)
+## TDD
 
 - **Red-Green-Refactor:** Write a failing `#[test]` (or `#[tokio::test]`) before implementing the function. Confirm the red state with `cargo test -p persatrix` (the package name in [`cli/Cargo.toml`](../../cli/Cargo.toml)) or simply `cargo test` from `cli/`.
 - **Unit test placement:** Inline `#[cfg(test)] mod tests { ... }` at the bottom of the source file being tested.

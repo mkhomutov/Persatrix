@@ -19,7 +19,7 @@ description: "Python agent conventions: async-first, 3.11+ type hints, ruff lint
 - **Dataclasses:** Use `field(default_factory=...)` for mutable defaults.
 - **Comments in plain English.** Write comments a non-programmer could follow — say what the code does and why it matters, briefly. Full rules: [Documentation Guide § Writing Style](../../docs/documentation-guide.md#writing-style).
 
-## TDD (from v0.3.0 onward)
+## TDD
 
 - **Red-Green-Refactor:** Add a failing test in `tests/unit/python/` before writing implementation code. Run `pytest tests/unit/python/test_<module>.py -v` to confirm the red state.
 - **Test file naming:** `tests/unit/python/test_<module>.py` mirrors `agents/<module>.py`. Component tests that need agent fixtures go in `agents/tests/`.

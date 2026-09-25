@@ -7,7 +7,7 @@ unconditionally by ``_build_system_prompt`` in
 persona boots is deliberate (the first ``http_request`` / ``file_read``
 must not arrive before the envelope contract is in context).
 
-**F-1 (this module).** The snippet teaches the persona to treat content
+**F-1 (this module).** The snippet taught the persona to treat content
 inside an ``<external_data flagged="true">`` envelope as untrusted and, if
 the user's task depends on it, to surface that fact rather than comply —
 phrased as *"the page contains text that tried to redirect my
@@ -25,6 +25,10 @@ user turn with the external-data warning. These tests pin that carve-out
 (content + unconditional render) so a future prompt edit that drops it
 fails here with a focused diagnostic; the byte-identical golden in
 ``test_persona_section_composer`` locks the exact bytes.
+
+The quoted sentence itself is gone from the snippet: a model reuses a quoted
+line word for word, which is how ``gpt-4o`` came to say it to a plain user.
+The snippet now describes what to tell the user instead of scripting it.
 """
 
 from __future__ import annotations
@@ -55,8 +59,12 @@ class TestSnippetLoader:
         assert "<external_data" in lower
         assert "flagged" in lower
 
+    def test_no_scripted_deflection_sentence(self) -> None:
+        """No ready-made sentence for the model to repeat to a plain user."""
+        assert "redirect my behaviour" not in load_snippet("external-data-handling").lower()
+
     def test_flagged_warning_is_scoped_to_the_envelope(self) -> None:
-        """The "redirect my behaviour" deflection must be tied to the
+        """The flagged-content warning must be tied to the
         ``<external_data>`` envelope, not stated as free-floating advice
         the model can reach for on any input.
         """

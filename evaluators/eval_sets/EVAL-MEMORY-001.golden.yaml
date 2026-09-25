@@ -1,48 +1,48 @@
-3c1a9b691c636a6602cf8861e05b4f3232e54f09c3f36961f4bf1acb0e9f5a36:
+2fc4d5c9e8518042b999601c59d8b03bea638c564f31bdb43e4f28d5e755f92b:
   stop_reason: end_turn
   text: That's lovely — Mira must be glad you're picking her up. Seven is a wonderful
     age.
   usage:
-    input_tokens: 537
+    input_tokens: 2012
     output_tokens: 20
-434b63e8bbdbfe78c5aaad7d31d3944790a2ff2f7d6a1648f3c01224dd6c0785:
-  stop_reason: end_turn
-  text: Understood — I'll keep things to concise written threads rather than long
-    meetings.
-  usage:
-    input_tokens: 2060
-    output_tokens: 20
-69a0982a87ac87cc879880a2ddd072f3495344d1c9280b18a0c7803a04978eb1:
-  stop_reason: end_turn
-  text: For a seven-year-old like Mira, a hands-on children's museum or a short nature
-    walk tends to land well.
-  usage:
-    input_tokens: 2048
-    output_tokens: 25
-731f6b851f8d05856e90280877f4278a75b98f7b83d6dcd5de840d110cc6be73:
+49a6084789ac0cdfca515f46394631dfee3d6f6e4146269b42856267f78f39cc:
   stop_reason: end_turn
   text: You committed to shipping the migration guide by Friday, and you prefer concise
     written threads over long meetings.
   usage:
-    input_tokens: 2109
+    input_tokens: 2069
     output_tokens: 28
-993461a2606b4e619c884bdc7a514845ad4d72eb3ddf51a026a0e565d00b0d03:
+b6bda79f3bfb6de4ec468b8de3234844d08f9c71e22da895eb0f55e680e4f5c3:
+  stop_reason: end_turn
+  text: Understood — I'll keep things to concise written threads rather than long
+    meetings.
+  usage:
+    input_tokens: 2019
+    output_tokens: 20
+cbbe9a546f4a35cebb8a4ed690179bfe93eb15253bd1eccfc950e7e801b2d2cf:
   stop_reason: end_turn
   text: 'Got it: the migration guide is committed for Friday. I''ll keep that in view.'
   usage:
-    input_tokens: 2053
+    input_tokens: 2012
     output_tokens: 19
-b1a5b3e404607b7cadce9f3d9eee5772e8f624820fbab87b912b0e98c88b65ce:
+cfc8c0b3968e5b599b27bb96e9b6a04527f228b8466062a1f7782054604c0443:
   stop_reason: end_turn
   text: For a seven-year-old like Mira, a hands-on children's museum or a short nature
     walk tends to land well.
   usage:
-    input_tokens: 458
+    input_tokens: 2008
     output_tokens: 25
-e47f7e5a2735771cc64b57e5bbf011acca4bc75a95006704e93c010b912a93bc:
+fa5f2411a95344718eba02b99860bed4b8d162372aaece2a36c548645ffdba49:
   stop_reason: end_turn
   text: That's lovely — Mira must be glad you're picking her up. Seven is a wonderful
     age.
   usage:
-    input_tokens: 2052
+    input_tokens: 623
     output_tokens: 20
+fac270e962a3081c0ec9e9c0e700756833c2bfc9b1ef97eb764454abca221782:
+  stop_reason: end_turn
+  text: For a seven-year-old like Mira, a hands-on children's museum or a short nature
+    walk tends to land well.
+  usage:
+    input_tokens: 544
+    output_tokens: 25
