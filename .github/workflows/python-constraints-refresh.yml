@@ -1,0 +1,269 @@
+# Weekly refresh of CI's Python pins, and the early warning for new releases.
+#
+# CI installs the agents' Python dependencies at the versions in
+# .github/python-constraints.txt (`make build-agents` passes the file to pip
+# with -c), so a release on PyPI no longer fails every open PR the minute it
+# is published, as OpenTelemetry 1.45.0 did on 2026-09-25 (#1002). Pinning
+# costs two things: the pins age, and nothing in CI tries the newest releases
+# that a fresh install or a new agent image gets. This workflow covers both.
+# Once a week, and whenever a change to agents/pyproject.toml reaches main,
+# it re-resolves the newest versions agents/pyproject.toml allows, installs
+# them, runs the Python checks on them, and reports in one issue, "CI Python
+# constraints: weekly refresh":
+#
+#   - nothing moved: it closes the issue if one is open.
+#   - the checks pass: it pushes the new file to chore/python-constraints-refresh
+#     and puts a link in the issue that opens the PR.
+#   - a check fails: it leaves the pins alone and names every failing check,
+#     so a breaking release is fixed once instead of failing every PR.
+#
+# A link, not a bot-opened PR: this repository does not let Actions open pull
+# requests, and a PR opened with GITHUB_TOKEN would not start CI anyway. A PR
+# opened from the link is a person's, so CI and the title check run on it as
+# on any other. The branch is rebuilt from main every week, so fixes belong
+# on main, not on the branch.
+#
+# Not Dependabot: its pip updater edits a uv-compiled file line by line
+# instead of re-resolving it, and so proposes versions the file's other pins
+# rule out. Dependabot still proposes widening the ranges in
+# agents/pyproject.toml.
+
+name: Python constraints refresh
+
+on:
+  schedule:
+    # Mondays 05:00 UTC, an hour before the Rust dependency audit.
+    - cron: '0 5 * * 1'
+  # A merged change to the ranges, such as a Dependabot widening, is tried on
+  # the newest releases the same day: the PR itself ran CI on the old pins.
+  push:
+    branches: [main]
+    paths: ['agents/pyproject.toml']
+  workflow_dispatch:
+
+permissions:
+  contents: write      # push the refresh branch
+  issues: write        # the tracking issue
+  pull-requests: read  # is a refresh PR already open?
+
+concurrency:
+  group: python-constraints-refresh
+  cancel-in-progress: false
+
+env:
+  BRANCH: chore/python-constraints-refresh
+  ISSUE_TITLE: "CI Python constraints: weekly refresh"
+
+jobs:
+  refresh:
+    name: Refresh CI Python constraints
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      # main, whatever ref the run was dispatched from: the branch this job
+      # pushes, and the issue's compare link, sit on main.
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      # The required Python job's toolchain, so a check that passes here
+      # passes there.
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          version: "34.1"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install the pinned uv
+        run: make uv-install
+
+      - name: Re-resolve to the newest versions agents/pyproject.toml allows
+        id: resolve
+        run: |
+          make python-constraints-upgrade
+          # Pin lines only: a `# via` comment can change while no version does.
+          git diff -U0 -- .github/python-constraints.txt \
+            | grep -E '^[-+][A-Za-z0-9]' > "$RUNNER_TEMP/pins.diff" || true
+          if [ -s "$RUNNER_TEMP/pins.diff" ]; then moved=true; else moved=false; fi
+          echo "moved=$moved" >> "$GITHUB_OUTPUT"
+          cat "$RUNNER_TEMP/pins.diff"
+
+      - name: Install the new pins
+        id: install
+        if: steps.resolve.outputs.moved == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          make build-agents
+
+      # The Python job's checks, through the Make targets its steps mirror,
+      # plus the Python halves of the license and config jobs. Every check
+      # runs even after another fails, so the issue names all of them.
+      - name: Run the Python checks on the new pins
+        id: checks
+        if: steps.install.outcome == 'success'
+        run: |
+          failed=""
+          for target in lint-python proto-python-check "eval-replay TIER=stable" \
+                        test-python test-agents test-integration \
+                        check-licenses-python validate; do
+            echo "::group::make $target"
+            # Names the check that was running if the job times out or is cancelled.
+            echo "make $target" > "$RUNNER_TEMP/check.running"
+            # Unquoted on purpose: "eval-replay TIER=stable" is a target and a variable.
+            make $target || failed="$failed make $target;"
+            echo "::endgroup::"
+          done
+          echo "failed=$failed" >> "$GITHUB_OUTPUT"
+          [ -z "$failed" ]
+
+      - name: Push the new pins to the refresh branch
+        id: push
+        if: steps.checks.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # A push made with GITHUB_TOKEN starts no CI, so moving the branch
+          # under an open PR would leave the PR's checks describing an older
+          # commit. Merge or close that PR; the next run refreshes from main.
+          open_pr="$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')"
+          echo "open_pr=$open_pr" >> "$GITHUB_OUTPUT"
+          if [ -n "$open_pr" ]; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -C "$BRANCH"
+          git commit -q -m "chore(deps): refresh the CI Python constraints" -- .github/python-constraints.txt
+          git push --force origin "$BRANCH"
+
+      - name: Report in the tracking issue
+        if: always()
+        uses: actions/github-script@v9
+        env:
+          MOVED: ${{ steps.resolve.outputs.moved }}
+          INSTALL: ${{ steps.install.outcome }}
+          CHECKS: ${{ steps.checks.outcome }}
+          FAILED: ${{ steps.checks.outputs.failed }}
+          PUSH: ${{ steps.push.outcome }}
+          OPEN_PR: ${{ steps.push.outputs.open_pr }}
+        with:
+          script: |
+            const fs = require('fs');
+            const env = process.env;
+            const { owner, repo } = context.repo;
+            const base = `${context.serverUrl}/${owner}/${repo}`;
+            const run = `[run ${context.runId}](${base}/actions/runs/${context.runId})`;
+            const file = '`.github/python-constraints.txt`';
+
+            let pins = '';
+            try {
+              pins = fs.readFileSync(`${env.RUNNER_TEMP}/pins.diff`, 'utf8').trim();
+            } catch (err) {
+              // The re-resolve never ran; nothing to show.
+            }
+            const moved = pins ? `\n\nPins that moved:\n\n\`\`\`diff\n${pins}\n\`\`\`` : '';
+            const failed = (env.FAILED || '').split(';').map((s) => s.trim()).filter(Boolean);
+            let running = '';
+            try {
+              running = fs.readFileSync(`${env.RUNNER_TEMP}/check.running`, 'utf8').trim();
+            } catch (err) {
+              // The checks never started.
+            }
+
+            let state;
+            if (env.MOVED === 'false') state = 'current';
+            else if (env.CHECKS === 'success' && env.PUSH === 'success') state = env.OPEN_PR ? 'pr-open' : 'ready';
+            else if (env.CHECKS === 'failure') state = 'failing';
+            else if (env.CHECKS === 'cancelled') state = 'stopped';
+            else if (env.INSTALL === 'failure') state = 'uninstallable';
+            else state = 'broken';
+
+            const open = await github.paginate(github.rest.issues.listForRepo, {
+              owner, repo, state: 'open', labels: 'dependencies',
+            });
+            const existing = open.find((i) => !i.pull_request && i.title === env.ISSUE_TITLE);
+
+            if (state === 'current') {
+              if (existing) {
+                await github.rest.issues.createComment({
+                  owner, repo, issue_number: existing.number,
+                  body: `Every pin is at the newest release \`agents/pyproject.toml\` allows (${run}). Closing.`,
+                });
+                await github.rest.issues.update({
+                  owner, repo, issue_number: existing.number, state: 'closed', state_reason: 'completed',
+                });
+              }
+              return;
+            }
+
+            // Created before the body is written: the ready state's PR link
+            // closes this issue by its number.
+            let number = existing ? existing.number : 0;
+            if (!number) {
+              const created = await github.rest.issues.create({
+                owner, repo, title: env.ISSUE_TITLE, body: 'Filled in by the refresh run.',
+                labels: ['dependencies', 'automated'],
+              });
+              number = created.data.number;
+            }
+
+            const unaffected = `CI is unaffected: every job still installs the pins in ${file}.`;
+            let headline;
+            let body;
+            if (state === 'ready') {
+              const prBody = [
+                '## What', '',
+                `Moves the pins in ${file} to the newest releases \`agents/pyproject.toml\` allows.`, '',
+                '## Why', '',
+                `The weekly refresh. CI installs at these pins, so they move only through a reviewed PR. Closes #${number}.`, '',
+                '## Gates', '',
+                `The refresh run installed these pins and passed the Python checks: ${run}.`,
+              ].join('\n');
+              // encodeURIComponent leaves ( and ) alone, and a bare one would
+              // end the Markdown link early.
+              const enc = (s) => encodeURIComponent(s).replace(/\(/g, '%28').replace(/\)/g, '%29');
+              const link = `${base}/compare/main...${env.BRANCH}?quick_pull=1`
+                + `&title=${enc('chore(deps): refresh the CI Python constraints')}`
+                + `&body=${enc(prBody)}`;
+              headline = 'the newest releases pass the Python checks; the PR is ready to open.';
+              body = `The newest releases \`agents/pyproject.toml\` allows pass the Python checks (${run}). `
+                + `They are on branch \`${env.BRANCH}\`, one commit on \`main\`.\n\n`
+                + `**[Open the PR](${link})**: CI runs on it as on any other PR. `
+                + 'The branch is rebuilt from `main` every week, so put fixes on `main`, not on the branch.'
+                + moved;
+            } else if (state === 'pr-open') {
+              headline = `the refresh PR #${env.OPEN_PR} is still open.`;
+              body = `The refresh PR #${env.OPEN_PR} is still open. This week's newest releases also pass the Python checks (${run}), `
+                + 'but the branch was left alone so the PR\'s checks still describe its head. '
+                + `Merge or close #${env.OPEN_PR}, and the next run refreshes from \`main\`.` + moved;
+            } else if (state === 'failing') {
+              headline = `the newest releases fail ${failed.length} check(s).`;
+              body = `The newest releases \`agents/pyproject.toml\` allows fail these checks (${run}):\n\n`
+                + failed.map((t) => `- \`${t}\``).join('\n') + '\n\n'
+                + `${unaffected} Fix the code on \`main\`, or cap the range in \`agents/pyproject.toml\`, `
+                + 'then run this workflow again from the Actions tab.' + moved;
+            } else if (state === 'stopped') {
+              const where = running ? ` while \`${running}\` was running` : '';
+              headline = `the checks on the newest releases stopped before they finished${where}.`;
+              body = `The checks on the newest releases stopped before they finished (${run}): the job timed out or was cancelled${where}. `
+                + 'A new release that hangs a check looks like this. '
+                + `${unaffected} Run this workflow again from the Actions tab; if it stops in the same check again, `
+                + 'cap the range of the release that hangs it.' + moved;
+            } else if (state === 'uninstallable') {
+              headline = 'the newest releases do not install.';
+              body = `The newest releases \`agents/pyproject.toml\` allows do not install: \`make build-agents\` failed (${run}). `
+                + `${unaffected} Cap the range of the release that breaks the install, then run this workflow again.` + moved;
+            } else {
+              headline = 'the refresh job failed before it could judge the new pins.';
+              body = `The refresh job failed before it could judge the new pins (${run}): a setup step, the re-resolve or the push. `
+                + unaffected + moved;
+            }
+
+            await github.rest.issues.update({ owner, repo, issue_number: number, body });
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: number, body: `Updated by ${run}: ${headline}`,
+              });
+            }

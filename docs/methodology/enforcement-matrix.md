@@ -1,6 +1,6 @@
 # Enforcement Matrix
 
-> **Last updated**: 2026-09-17
+> **Last updated**: 2026-09-25
 > Every rule the project states, with the document that states it, the check
 > that enforces it, and how hard the enforcement is. Read the **Enforcement**
 > column literally: a rule is only as strong as the weakest place it is
@@ -41,6 +41,9 @@ the twelve, and the job is named where it is not one of the original six.
 | Python types (mypy) — `agents/`, `tests/` | instructions; ISSUE-0062 | `mypy` ×2 | Required (`Python`) |
 | Python lint + types — `scripts/`, `evaluators/` | Makefile `lint-python`; ISSUE-0134 | `ruff check scripts/ evaluators/`; `mypy scripts/ evaluators/` | Required (`Python`) — since the CI-promotion PR |
 | Python unit + agents + integration suites pass | testing-strategy | three `pytest` steps | Required (`Python`) |
+| CI installs the Python dependencies at the committed pins, not the newest release of the minute ([#1002](https://github.com/mkhomutov/Persatrix/pull/1002) failed every open PR at once) | Makefile §Python constraints; `ci.yml` | every workflow installs through `make build-agents`, which passes `.github/python-constraints.txt` with `-c`; `test_ci_python_constraints.py` fails any workflow step that installs the agents package around it | Required (`Python`) |
+| The pins match `agents/pyproject.toml`: every declared dependency pinned, inside its range | Makefile §Python constraints; `agents/pyproject.toml` | `make python-constraints-check` (the pinned uv re-resolves into a copy and diffs it); `test_ci_python_constraints.py` checks the same offline | Required (`Python`) |
+| The pins move to the newest releases only after the Python checks pass on them | `python-constraints-refresh.yml` | weekly, and on a push to `main` that changes `agents/pyproject.toml`: re-resolve, install, run the checks, report in one issue; the PR that moves the pins is opened by a person from the issue's link | Scheduled |
 | Every `stable` golden-trace eval replays green ([RFC 0044](../rfcs/0044-eval-set-golden-traces.md) §F) | RFC 0044; [evaluators guide](../evaluators-guide.md#promoting-a-recipe-to-stable) | `make eval-replay TIER=stable` — exits 1 on a failed assertion, a cassette miss, a malformed or golden-less stable recipe, or an empty selection | Required (`Python`) — since v0.3.16 PR C2; was Make-only |
 | Go and Python protobuf stubs match `proto/*.proto`; no orphans | Makefile; ISSUE-0017/0023 | `make proto-go && git diff --exit-code`; `make proto-python-check proto-orphans-check` | Required (`Proto staleness`, `Python`) |
 | MIT-candidate primitives never import BUSL code (RFC 0045 §B) | RFC 0045; CONTRIBUTING | `make imports-check` (import-linter) | Required (`Python`) |
@@ -60,7 +63,7 @@ the twelve, and the job is named where it is not one of the original six.
 | `agents.yaml` `instructions_file` references resolve | prompt-organization | `scripts/checks/prompt_refs.py` | Required (`Validate configs`) |
 | Personal-tier recall latency within 20 % of baseline | RFC 0029 | `tests/perf/personal_tier_latency.py` | Required job, **informational** until a baseline exists |
 | Weekly Rust advisory / bans / sources audit | CONTRIBUTING | `scheduled-audit.yml` (cargo-deny, Mondays; files an issue on failure) | Scheduled |
-| Dependencies bumped monthly, one grouped PR per ecosystem (Go, pip, Cargo, npm, Actions), `chore(deps)` titles | `.github/dependabot.yml` | Dependabot | Scheduled (security updates run on their own cadence) |
+| Dependencies bumped monthly, one grouped PR per ecosystem (Go, pip, Cargo, npm, Actions), `chore(deps)` titles | `.github/dependabot.yml` | Dependabot; for pip, the ranges in `agents/pyproject.toml` only (CI's pins move through `python-constraints-refresh.yml`) | Scheduled (security updates run on their own cadence) |
 | Required status checks on `main` match the versioned set | `branch-protection.json` | `make branch-protection-show`; `test_branch_protection_config.py` pins the file to the CI job list | Owner applies; file is reviewed |
 
 ## Size and shape

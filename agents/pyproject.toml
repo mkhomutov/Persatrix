@@ -8,6 +8,11 @@ license = {text = "BUSL-1.1"}
 # PR review: upper bounds prevent silent breakage from major version bumps.
 # Caps are set at the next major (or next minor for 0.x) version to allow
 # compatible updates while guarding against breaking API changes.
+#
+# CI installs these, and the `dev` extra below, at the exact versions in
+# .github/python-constraints.txt. After changing a dependency here, run `make
+# python-constraints` and commit the file with it: the Python CI job fails
+# until the two agree.
 dependencies = [
     "grpcio>=1.71.2,<2",
     # Pinned exactly because this is the program that emits the committed
