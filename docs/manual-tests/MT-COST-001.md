@@ -43,9 +43,10 @@ well-formed JSON response containing token usage data for that run.
 
 **Dependencies Installed**:
 - Go 1.26+: `go version`
-- Python 3.11+: `python3 --version`
+- Rust 1.86+: `rustc --version` (`make run` and `make build` also compile the CLI)
+- Python 3.11+: `python3 --version`, with the agent packages installed by `make build-agents`
 - `curl` available in PATH
-- `ANTHROPIC_API_KEY` set (agents must complete at least one LLM call for cost data to accumulate)
+- `ANTHROPIC_API_KEY` set (agents must complete at least one LLM call for cost data to accumulate), and a provider selected: `config/optimization.yaml` selects none, so copy `config/demo/anthropic/optimization.yaml` over it before starting anything (`git checkout config/optimization.yaml` restores it)
 
 ### Application State
 

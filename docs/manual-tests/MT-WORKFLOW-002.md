@@ -43,6 +43,8 @@ body, and missing required fields.
 
 **Dependencies Installed**:
 - Go 1.26+: `go version`
+- Rust 1.86+: `rustc --version` (`make run` and `make build` also compile the CLI)
+- Python 3.11+: `python3 --version`, with the agent packages installed by `make build-agents` (for `make validate`)
 - `curl` available in PATH: `curl --version`
 
 ### Application State

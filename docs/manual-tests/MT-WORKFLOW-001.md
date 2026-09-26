@@ -51,7 +51,8 @@ response envelope shape, and workflow state transitions.
 
 **Dependencies Installed**:
 - Go 1.26+: `go version`
-- Python 3.11+: `python3 --version`
+- Rust 1.86+: `rustc --version` (`make run` and `make build` also compile the CLI)
+- Python 3.11+: `python3 --version`, with the agent packages installed by `make build-agents`
 - `curl` available in PATH: `curl --version`
 
 ### Application State
@@ -63,7 +64,7 @@ response envelope shape, and workflow state transitions.
 
 **Agent Requirements (choose one mode)**:
 - ☐ API terminal-state mode: no agents required (a terminal `failed` run is valid for this test)
-- ☐ End-to-end success mode: all workflow agents are registered: `planner`, `code-writer`, `code-reviewer`
+- ☐ End-to-end success mode: all workflow agents are registered: `planner`, `code-writer`, `code-reviewer` (they need `ANTHROPIC_API_KEY` and a provider selected: `config/optimization.yaml` selects none, so copy `config/demo/anthropic/optimization.yaml` over it before starting anything (`git checkout config/optimization.yaml` restores it))
 
 ### Test Data
 

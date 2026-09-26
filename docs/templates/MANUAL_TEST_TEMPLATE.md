@@ -42,8 +42,8 @@
 
 **Dependencies Installed**:
 - Go 1.26+: `go version`
-- Python 3.11+: `python3 --version`
-- Rust: `rustc --version`
+- Python 3.11+: `python3 --version`, with the agent packages installed by `make build-agents`
+- Rust 1.86+: `rustc --version`
 
 ### Application State
 
