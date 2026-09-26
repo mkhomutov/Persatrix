@@ -104,6 +104,20 @@ updates:
       prefix: "chore(deps)"
     open-pull-requests-limit: 2
 
+  # The Rust release CI builds, lints and tests the CLI with, pinned in
+  # cli/rust-toolchain.toml. Each new release arrives as one PR. CI runs
+  # clippy with warnings as errors, so a lint the release adds fails that PR
+  # alone instead of every open PR on release day. Dependabot edits only that
+  # file, which is why the workflows install whatever it names rather than a
+  # version of their own.
+  - package-ecosystem: rust-toolchain
+    directory: /cli
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "chore(deps)"
+    open-pull-requests-limit: 1
+
   - package-ecosystem: npm
     directory: /web
     schedule:
