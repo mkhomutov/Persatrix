@@ -45,7 +45,7 @@ async def test_an_arm_b_meeting_on_the_mock_provider(tmp_path: Path, binary: Pat
     plan = next(m for m in series.meetings if m.kind is MeetingKind.PLAN)
 
     result = await run_meeting(
-        panel, "B", series, plan, attempt=1, directory=tmp_path, binary=binary,
+        panel, "B", series, plan, attempt=1, meeting_try=1, directory=tmp_path, binary=binary,
         python=Path(sys.executable), alias=_MOCK,
     )
 
@@ -58,7 +58,7 @@ async def test_an_arm_b_meeting_on_the_mock_provider(tmp_path: Path, binary: Pat
     log = read_call_log(tmp_path / CALL_LOG, memo_turns=[result.memo_turn])
     assert log.failures == ()
     assert {r.adviser for r in log.records} == {a.id for a in panel.advisers}
-    assert {(r.arm, r.series, r.meeting, r.attempt) for r in log.records} == {
-        ("B", series.id, plan.id, 1),
+    assert {(r.arm, r.series, r.meeting, r.attempt, r.meeting_try) for r in log.records} == {
+        ("B", series.id, plan.id, 1, 1),
     }
     assert any(r.purpose.value == "memo" and r.adviser == panel.chair.id for r in log.records)

@@ -69,7 +69,7 @@ class TestCallLogScope:
 
         for meeting in ("plan-1", "plan-2"):
             with call_log_scope(path, arm="A", series="series-3", meeting=meeting,
-                                meeting_kind=MeetingKind.PLAN, attempt=1):
+                                meeting_kind=MeetingKind.PLAN, attempt=1, meeting_try=1):
                 await LLMClient(_Provider()).create_message(
                     model="claude-sonnet-4-6", messages=[], system="s", tools=[],
                     max_tokens=10, temperature=0.7, purpose=LLMCallPurpose.TURN,
@@ -84,19 +84,19 @@ class TestCallLogEnv:
     def test_names_the_file_and_the_meeting(self, tmp_path):
         env = call_log_env(
             tmp_path / "calls.jsonl", arm="D-prime", series="series-2",
-            meeting="plan-3", meeting_kind=MeetingKind.PLAN, attempt=1,
+            meeting="plan-3", meeting_kind=MeetingKind.PLAN, attempt=1, meeting_try=2,
         )
         assert env[call_log.CALL_LOG_ENV] == str(tmp_path / "calls.jsonl")
         assert json.loads(env[call_log.CALL_TAGS_ENV]) == {
             "arm": "D-prime", "series": "series-2", "meeting": "plan-3",
-            "meeting_kind": "plan", "attempt": "1",
+            "meeting_kind": "plan", "attempt": "1", "try": "2",
         }
 
     def test_an_unknown_arm_is_refused(self, tmp_path):
         with pytest.raises(ValueError, match="arm"):
             call_log_env(
                 tmp_path / "c.jsonl", arm="E", series="series-1", meeting="plan-1",
-                meeting_kind=MeetingKind.PLAN, attempt=1,
+                meeting_kind=MeetingKind.PLAN, attempt=1, meeting_try=1,
             )
 
 
@@ -112,7 +112,7 @@ def _line(
 ) -> dict:
     return {
         "tags": {"arm": arm, "series": "series-1", "meeting": meeting,
-                 "meeting_kind": "plan", "attempt": "2"},
+                 "meeting_kind": "plan", "attempt": "2", "try": "3"},
         "agent_id": agent_id,
         "purpose": purpose,
         "provider": "anthropic",
@@ -142,7 +142,7 @@ class TestReadCallLog:
                 arm="C", series="series-1", meeting="plan-1", meeting_kind=MeetingKind.PLAN,
                 attempt=2, adviser="ember-owl", purpose=CallPurpose.REPLY, started_at=_T,
                 model="claude-sonnet-4-6", input_tokens=100, output_tokens=20,
-                cache_write_tokens=900, cache_read_tokens=40,
+                cache_write_tokens=900, cache_read_tokens=40, meeting_try=3,
             ),
         )
         assert log.failures == ()
@@ -169,7 +169,9 @@ class TestReadCallLog:
         with pytest.raises(CallLogError, match="c.jsonl:1"):
             read_call_log(path)
 
-    @pytest.mark.parametrize("tag", ["arm", "series", "meeting", "meeting_kind", "attempt"])
+    @pytest.mark.parametrize(
+        "tag", ["arm", "series", "meeting", "meeting_kind", "attempt", "try"],
+    )
     def test_a_line_missing_a_tag_is_refused(self, tmp_path, tag):
         line = _line()
         del line["tags"][tag]
@@ -185,7 +187,7 @@ class TestReadCallLog:
     def test_the_chairs_turns_after_the_memo_request_are_the_memo(self, tmp_path):
         asked = _T + dt.timedelta(minutes=5)
         memo = MemoTurn(arm="C", series="series-1", meeting="plan-1", attempt=2,
-                        chair="ember-owl", asked_at=asked)
+                        meeting_try=3, chair="ember-owl", asked_at=asked)
         log = read_call_log(
             _write(
                 tmp_path / "c.jsonl",
@@ -223,14 +225,24 @@ class TestReadCallLog:
         ))
         assert len(log.records) == 1
         [failure] = log.failures
-        assert (failure.meeting, failure.adviser, failure.error) == (
-            "plan-1", "ember-owl", "TimeoutError",
+        assert (failure.meeting, failure.meeting_try, failure.adviser, failure.error) == (
+            "plan-1", 3, "ember-owl", "TimeoutError",
         )
+
+    def test_a_memo_request_marks_only_its_own_try(self, tmp_path):
+        """A meeting held again after a provider error writes its calls under
+        the next try; the memo asked for in one try is not the other's."""
+        memo = MemoTurn(arm="C", series="series-1", meeting="plan-1", attempt=2,
+                        meeting_try=2, chair="ember-owl", asked_at=_T)
+        [record] = read_call_log(
+            _write(tmp_path / "c.jsonl", _line()), memo_turns=[memo],
+        ).records
+        assert (record.meeting_try, record.purpose) == (3, CallPurpose.REPLY)
 
     def test_a_memo_request_without_a_zone_is_refused(self):
         with pytest.raises(ValueError, match="zone"):
             MemoTurn(arm="C", series="series-1", meeting="plan-1", attempt=2,
-                     chair="ember-owl", asked_at=_T.replace(tzinfo=None))
+                     meeting_try=3, chair="ember-owl", asked_at=_T.replace(tzinfo=None))
 
     def test_no_file_is_an_empty_log(self, tmp_path):
         log = read_call_log(tmp_path / "missing.jsonl")
@@ -249,7 +261,7 @@ async def test_what_the_runtime_writes_the_harness_reads(tmp_path, monkeypatch):
 
     path = tmp_path / "calls.jsonl"
     env = call_log_env(path, arm="D-prime", series="series-4", meeting="plan-2",
-                       meeting_kind=MeetingKind.PLAN, attempt=1)
+                       meeting_kind=MeetingKind.PLAN, attempt=1, meeting_try=1)
     for key, value in env.items():
         monkeypatch.setenv(key, value)
     monkeypatch.setattr(metrics, "_AGENT_ID", "quiet-lynx")
@@ -262,8 +274,8 @@ async def test_what_the_runtime_writes_the_harness_reads(tmp_path, monkeypatch):
     finally:
         call_log.reset_call_log()
     [record] = read_call_log(path).records
-    assert (record.arm, record.series, record.meeting, record.attempt) == (
-        "D-prime", "series-4", "plan-2", 1,
+    assert (record.arm, record.series, record.meeting, record.attempt, record.meeting_try) == (
+        "D-prime", "series-4", "plan-2", 1, 1,
     )
     assert (record.adviser, record.purpose, record.cache_read_tokens) == (
         "quiet-lynx", CallPurpose.BID, 2000,

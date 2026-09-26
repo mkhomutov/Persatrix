@@ -1,7 +1,7 @@
 # EXP-001 — The harness
 
-> **Status**: 🚧 **In Progress** — PRs 1, 2, 3a, 3b and 4 merged ([#984](https://github.com/mkhomutov/Persatrix/pull/984), [#986](https://github.com/mkhomutov/Persatrix/pull/986), [#987](https://github.com/mkhomutov/Persatrix/pull/987), [#988](https://github.com/mkhomutov/Persatrix/pull/988), [#992](https://github.com/mkhomutov/Persatrix/pull/992)); PR 5a open ([#993](https://github.com/mkhomutov/Persatrix/pull/993)); no practice run yet.
-> **Last updated**: 2026-09-24
+> **Status**: 🚧 **In Progress** — PRs 1, 2, 3a, 3b, 4 and 5a merged ([#984](https://github.com/mkhomutov/Persatrix/pull/984), [#986](https://github.com/mkhomutov/Persatrix/pull/986), [#987](https://github.com/mkhomutov/Persatrix/pull/987), [#988](https://github.com/mkhomutov/Persatrix/pull/988), [#992](https://github.com/mkhomutov/Persatrix/pull/992), [#993](https://github.com/mkhomutov/Persatrix/pull/993)); PR 5b open; no practice run yet.
+> **Last updated**: 2026-09-26
 > **Carries out**: the [EXP-001 pre-registration](EXP-001-preregistration.md) and its [part 2](EXP-001-preregistration-scoring.md)
 > **Code**: [`evaluators/exp001/`](../../evaluators/exp001/)
 
@@ -13,8 +13,9 @@ picks a rule. It lands in the reviewed PRs below, as
 
 That section also says every choice a harness PR makes, where the documents
 leave it open, is listed in the PR and frozen when it merges. The
-[frozen choices](EXP-001-harness-choices.md) document collects them in one
-place, so the result can cite them.
+[frozen choices](EXP-001-harness-choices.md) document and its second part,
+[holding the meetings](EXP-001-harness-choices-meetings.md), collect them,
+so the result can cite them.
 
 ## The PRs
 
@@ -68,18 +69,31 @@ declares its series' six channels in one deployment, each named for its
 meeting's place as B and C name theirs, well inside the shipped cap of 50
 channels.
 
+PR 5b holds every arm's series by the rules of attempts and failures, and
+leaves two things. Arm D's memory carries from one meeting to the next, so
+PR 5c's own way of holding a D meeting must give a second try the memory
+its advisers had before the first: it keeps a copy of each adviser's store
+from before the meeting and puts it back before trying again. And PR 6's
+run does what a harness fault asks beyond stopping: it counts the faults,
+so a third ends the run, and it sets aside the scored outputs so far. It
+also passes each series' finished tries to dollars per plan, and asks
+which series every arm's comparisons keep.
+
 ## Frozen choices
 
 The choices each harness PR froze, and the arm order each series runs in, are
 in [their own document](EXP-001-harness-choices.md), so the result can cite
-them in one place.
+them. Those of PRs 5a on, which hold the meetings, are in its second part,
+[holding the meetings](EXP-001-harness-choices-meetings.md).
 
 ## Related documentation
 
 - [EXP-001 pre-registration](EXP-001-preregistration.md) — materials, arms
   and the run.
 - [Part 2: scoring and the decision](EXP-001-preregistration-scoring.md).
-- [Frozen choices](EXP-001-harness-choices.md) — every choice a harness PR
-  froze, and the arm order.
+- [Frozen choices](EXP-001-harness-choices.md) — the choices of PRs 1 to 4,
+  and the arm order.
+- [Frozen choices: holding the meetings](EXP-001-harness-choices-meetings.md)
+  — the choices of PRs 5a on.
 - [Evaluators guide](../evaluators-guide.md) — the golden-trace harness this
   one sits beside.

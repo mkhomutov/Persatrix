@@ -45,6 +45,7 @@ def _call(
     cache_read: int = 0,
     counts_in_arm: bool = True,
     model: str = "claude-sonnet-4-6",
+    meeting_try: int = 1,
 ) -> CallRecord:
     return CallRecord(
         arm=arm,
@@ -61,6 +62,7 @@ def _call(
         cache_write_tokens=cache_write,
         cache_read_tokens=cache_read,
         counts_in_arm=counts_in_arm,
+        meeting_try=meeting_try,
     )
 
 
@@ -106,9 +108,31 @@ def test_dollars_per_plan_counts_briefing_and_plans_of_the_given_attempt_only() 
         _call(counts_in_arm=False),  # not counted: memory write outside the arm's design
         _call(purpose=CallPurpose.JUDGE, model="claude-opus-5"),  # not counted: the judge
     ]
-    assert dollars_per_plan(records, arm="C", series="series-1", attempt=1) == pytest.approx(
-        9.0 / 4
+    got = dollars_per_plan(records, arm="C", series="series-1", attempt=1, tries=_FINISHED)
+    assert got == pytest.approx(9.0 / 4)
+
+
+# Every call in these tests is to one meeting; its first try finished.
+_FINISHED = {"series-1-x": 1}
+
+
+def test_dollars_per_plan_counts_only_the_try_that_finished() -> None:
+    """A meeting a provider error cut short is held again. Its spend is
+    reported, but not counted in dollars per plan (pre-registration §3)."""
+    records = [
+        _call(meeting_try=1),  # not counted: a provider error cut it short
+        _call(meeting_try=2, input_tokens=2_000_000),  # $6
+    ]
+    got = dollars_per_plan(
+        records, arm="C", series="series-1", attempt=1, tries={"series-1-x": 2},
     )
+    assert got == pytest.approx(6.0 / 4)
+    assert real_spend(records) == pytest.approx(9.0)
+
+
+def test_dollars_per_plan_refuses_a_meeting_whose_finished_try_is_unknown() -> None:
+    with pytest.raises(ValueError, match="series-1-x"):
+        dollars_per_plan([_call()], arm="C", series="series-1", attempt=1, tries={})
 
 
 def test_real_spend_counts_every_call_made() -> None:
@@ -194,7 +218,8 @@ def test_repriced_dollars_per_plan() -> None:
         _call(purpose=CallPurpose.REPLY),  # $3 at the arms' price
     ]
     got = dollars_per_plan(
-        repriced(records), arm="C", series="series-1", attempt=1, prices=REPRICING_PRICES
+        repriced(records), arm="C", series="series-1", attempt=1, tries=_FINISHED,
+        prices=REPRICING_PRICES,
     )
     assert got == pytest.approx((7.35 + 3.0) / 4)
 
@@ -202,5 +227,6 @@ def test_repriced_dollars_per_plan() -> None:
 def test_the_run_itself_never_prices_a_call_at_the_fast_models_rate() -> None:
     with pytest.raises(KeyError):
         dollars_per_plan(
-            repriced([_call(purpose=CallPurpose.BID)]), arm="C", series="series-1", attempt=1
+            repriced([_call(purpose=CallPurpose.BID)]), arm="C", series="series-1", attempt=1,
+            tries=_FINISHED,
         )

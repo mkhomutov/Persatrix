@@ -174,7 +174,7 @@ class _Room:
 async def _hold(room: _Room, meeting: Meeting, arm: str = "C", **kwargs: Any) -> Any:
     return await hold_meeting(
         room, room.log, PANEL, arm, SERIES, meeting,
-        channel=_CHANNEL, attempt=1, now=room.now, sleep=room.sleep, **kwargs,
+        channel=_CHANNEL, attempt=1, meeting_try=1, now=room.now, sleep=room.sleep, **kwargs,
     )
 
 
@@ -203,7 +203,8 @@ class TestAPlanMeeting:
         )
         request = result.transcript[3]
         assert result.memo_turn == MemoTurn(
-            arm="C", series="series-1", meeting=plan.id, attempt=1, chair="lunar-stoat",
+            arm="C", series="series-1", meeting=plan.id, attempt=1, meeting_try=1,
+            chair="lunar-stoat",
             asked_at=request.at,
         )
         assert result.memo == result.transcript[4]

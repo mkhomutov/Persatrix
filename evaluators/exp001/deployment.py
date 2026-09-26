@@ -68,6 +68,11 @@ class DeploymentError(RuntimeError):
     """A deployment could not be written, started or stopped as intended."""
 
 
+class StartError(DeploymentError):
+    """A deployment's processes did not all start: one exited, or they were
+    too slow. The operator had not spoken, so nothing of the meeting happened."""
+
+
 @dataclass(frozen=True)
 class Alias:
     """What a model alias points at, and the price the orchestrator charges."""
