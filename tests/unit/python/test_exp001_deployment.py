@@ -17,6 +17,7 @@ from __future__ import annotations
 import copy
 import datetime as dt
 import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +27,7 @@ import yaml
 from agents.clock import CLOCK_ANCHOR_ENV, CLOCK_START_ENV, reset_agent_clock
 from agents.persona import create_persona_agent
 from agents.persona_runtime.channel_roster import RosterMember, render_roster_section
-from evaluators.exp001.arm_a import identity_sections, now_anchor_line
+from evaluators.exp001.arm_a import anchor_line_at, identity_sections
 from evaluators.exp001.costs import ARMS_MODEL, PRICES
 from evaluators.exp001.deployment import (
     ARMS_ALIAS,
@@ -44,7 +45,7 @@ from evaluators.exp001.deployment import (
 )
 from evaluators.exp001.materials import load_series
 from evaluators.exp001.panel import adviser_agent_config, load_panel
-from evaluators.exp001.runtime import meeting_clock_env
+from evaluators.exp001.runtime import meeting_clock_env, story_start
 
 from ._persona_test_helpers import _make_client
 
@@ -294,13 +295,40 @@ class TestTheDeployedAdvisersReadAsArmADoes:
                 )
                 await agent.initialize_memory()
                 try:
+                    # Real time either side of the build, to bracket the
+                    # reading the agent took inside it (see below).
+                    before = time.time()
                     prompt = agent._build_system_prompt()
+                    after = time.time()
                 finally:
                     await agent.close_memory()
                 sections = identity_sections(adviser)
                 where = [prompt.index(section) for section in sections]
                 assert where == sorted(where)
-                assert now_anchor_line(story_date) in prompt
+                # The deployment gives the adviser the meeting's clock
+                # through the environment: it starts at 10:00 on the story
+                # date and runs on with real time from ``began``, so the
+                # instant its prompt shows is ``story_start + (that build's
+                # reading - began)``.  Both ends come from this test's own
+                # values — the story start it asked for and real readings —
+                # so the window still says the clock is the *meeting's*, in
+                # 2036, and not whatever clock the agent happened to find.
+                # The renderer truncates to the second, so one whole second
+                # in the window is the line the prompt shows.
+                #
+                # (A single fixed 10:00:00 lived here until building these
+                # agents pushed the render past it and reddened main.  That
+                # assertion said the loop finishes inside one second, which
+                # is not what this test claims.)
+                ran_on = story_start(story_date).timestamp() - began.timestamp()
+                shown = [
+                    anchor_line_at(float(second))
+                    for second in range(int(before + ran_on), int(after + ran_on) + 1)
+                ]
+                assert any(line in prompt for line in shown), (
+                    f"expected {entry['id']}'s prompt to show the meeting's "
+                    f"clock somewhere between {shown[0]!r} and {shown[-1]!r}"
+                )
         finally:
             monkeypatch.delenv(CLOCK_START_ENV)
             monkeypatch.delenv(CLOCK_ANCHOR_ENV)

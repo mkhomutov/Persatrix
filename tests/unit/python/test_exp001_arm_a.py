@@ -28,6 +28,7 @@ from agents.persona_runtime.action_loop import _PERSONA_DEFAULT_MAX_TOKENS
 from agents.persona_runtime.prompt_assembly import render_persona_sections
 from evaluators.exp001.arm_a import (
     MAX_TOKENS,
+    anchor_line_at,
     identity_sections,
     now_anchor_line,
     run_meeting,
@@ -54,6 +55,21 @@ class TestNowAnchorLine:
         assert now_anchor_line(dt.date(2036, 10, 13)) == (
             "Current time: 2036-10-13T10:00:00+00:00 (Monday late morning)."
         )
+
+    def test_it_reads_any_instant_the_meeting_has_run_on_to(self) -> None:
+        """A meeting's clock keeps running once it has begun, so the line an
+        adviser's prompt shows minutes in is the same line at a later second.
+        ``anchor_line_at`` is that line for one instant, and the start of the
+        meeting is the instant ``now_anchor_line`` asks it for."""
+        began = story_start(dt.date(2036, 10, 13)).timestamp()
+        assert anchor_line_at(began) == now_anchor_line(dt.date(2036, 10, 13))
+        assert anchor_line_at(began + 73.0) == (
+            "Current time: 2036-10-13T10:01:13+00:00 (Monday late morning)."
+        )
+        # The renderer truncates to the second, so part of a second reads as
+        # the second it falls in — which is what lets a test bracket a
+        # prompt's line between two clock readings.
+        assert anchor_line_at(began + 73.9) == anchor_line_at(began + 73.0)
 
 
 class TestSystemPrompt:

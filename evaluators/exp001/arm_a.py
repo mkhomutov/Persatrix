@@ -50,11 +50,19 @@ def identity_sections(adviser: Adviser) -> list[str]:
     )
 
 
-def now_anchor_line(story_date: dt.date) -> str:
-    """The now-anchor line an adviser's prompt shows as a meeting on *story_date* begins."""
-    at = story_start(story_date).timestamp()
+def anchor_line_at(at: float) -> str:
+    """The now-anchor line an adviser's prompt shows at agent time *at*.
+
+    *at* is epoch seconds on the adviser's own clock. The renderer truncates
+    to the second, so any instant within a second reads as that second.
+    """
     anchor = format_now_anchor(at, DEFAULT_TIMEZONE)
     return load_persona_section("now-anchor").format_map({"now_anchor": anchor})
+
+
+def now_anchor_line(story_date: dt.date) -> str:
+    """The now-anchor line an adviser's prompt shows as a meeting on *story_date* begins."""
+    return anchor_line_at(story_start(story_date).timestamp())
 
 
 def system_prompt(panel: Panel, series: Series, meeting: Meeting) -> str:
