@@ -93,11 +93,14 @@ agents) interact with over time.
 
 ## Quick start
 
-You'll need: **Docker Desktop**, **Go 1.26+**, **Python 3.11+**,
-**Rust 1.86+**, and **an LLM provider**. Persatrix is provider-agnostic
+You'll need: **Docker Desktop**, **Rust 1.86+** and **make** to build the CLI
+(Windows needs make installed; see [CONTRIBUTING](CONTRIBUTING.md#prerequisites)),
+and **an LLM provider**. Docker builds the orchestrator and the agents; you need
+**Go 1.26+** and **Python 3.11+** only to build them outside Docker.
+Persatrix is provider-agnostic
 ([RFC 0033](docs/rfcs/0033-model-alias-layer.md)) with **no default provider** —
 you pick one explicitly. Run a **free** local / offline model with no key at all,
-or use a cloud key you have (Anthropic or OpenAI). Each provider is selected the
+or use a cloud key you have (Anthropic, OpenAI, Gemini or watsonx). Each provider is selected the
 same way: a one-command demo that points the model aliases at it (see the
 [model providers guide](docs/guides/model-providers.md)).
 
@@ -109,8 +112,8 @@ cp .env.example .env
 # Put the API key for the provider you'll use in .env (e.g. ANTHROPIC_API_KEY
 # or OPENAI_API_KEY) — or skip keys entirely and use the free demos below.
 
-# Build everything
-make all && make build-agents
+# Build the CLI (the demo below builds the orchestrator and agents in Docker)
+make build-cli
 
 # Bring the stack up ON A PROVIDER — pick one (each mounts an alias config):
 make demo-offline     # free: scripted mock, no key, no network  ← start here
@@ -170,8 +173,8 @@ alias like Anthropic, or `make demo-openai` — where real per-token cost
 accrues against the `$5`/agent simulated budget. See [§ Cost Warning](#-cost-warning).
 
 > Offline mode removes the **API-key** and **cost** barriers (the two scariest
-> ones). You still need the Docker + Go + Rust toolchain to build the stack
-> itself — a toolchain-free quickstart is on the roadmap.
+> ones). You still need Docker, and Rust to build the CLI — a toolchain-free
+> quickstart is on the roadmap.
 
 ### Try it in the browser — web console 🖥️
 

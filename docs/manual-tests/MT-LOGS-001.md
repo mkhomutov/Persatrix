@@ -50,12 +50,15 @@ endpoint (deferred to RFC 0009).
 
 ### System Requirements
 
-- Go 1.26+, Rust stable, Python 3.11+
+- Go 1.26+, Rust 1.86+, Python 3.11+
 - Windows: PowerShell 7+ (commands below assume `pwsh`). Linux/macOS users substitute the
   shell-specific equivalents noted inline.
 - An `ANTHROPIC_API_KEY` is **required for Scenario B** (full-agent path used by Steps 1
   and 6). Without it the workflow run fails at planner registration and the steps that
   depend on agent-side entries (`service_kind=agent`, `trace_id`) become N/A.
+  Scenario B also needs a provider selected: `config/optimization.yaml` selects none,
+  so copy `config/demo/anthropic/optimization.yaml` over it before starting anything
+  (`git checkout config/optimization.yaml` restores it).
 
 ### One-time build
 

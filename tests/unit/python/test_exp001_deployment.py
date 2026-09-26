@@ -17,16 +17,19 @@ from __future__ import annotations
 import copy
 import datetime as dt
 import re
+import time
 from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
 
-from agents.clock import CLOCK_ANCHOR_ENV, CLOCK_START_ENV, reset_agent_clock
+from agents.clock import CLOCK_ANCHOR_ENV, CLOCK_START_ENV, DEFAULT_TIMEZONE, reset_agent_clock
 from agents.persona import create_persona_agent
 from agents.persona_runtime.channel_roster import RosterMember, render_roster_section
-from evaluators.exp001.arm_a import identity_sections, now_anchor_line
+from agents.prompt_loader import load_persona_section
+from agents.temporal.rendering import format_now_anchor
+from evaluators.exp001.arm_a import identity_sections
 from evaluators.exp001.costs import ARMS_MODEL, PRICES
 from evaluators.exp001.deployment import (
     ARMS_ALIAS,
@@ -44,7 +47,7 @@ from evaluators.exp001.deployment import (
 )
 from evaluators.exp001.materials import load_series
 from evaluators.exp001.panel import adviser_agent_config, load_panel
-from evaluators.exp001.runtime import meeting_clock_env
+from evaluators.exp001.runtime import meeting_clock_env, story_start
 
 from ._persona_test_helpers import _make_client
 
@@ -229,6 +232,15 @@ def _channel(arm: str = "C") -> dict[str, Any]:
     return channel_config(PANEL, arm, name="advice-1", organisation="Linden Loaf")
 
 
+def _clock_line_at(epoch: float) -> str:
+    """The now-anchor line an adviser on UTC shows at agent time *epoch*.
+
+    The renderer truncates to the second, so any instant within a second
+    reads as that second."""
+    anchor = format_now_anchor(epoch, DEFAULT_TIMEZONE)
+    return load_persona_section("now-anchor").format_map({"now_anchor": anchor})
+
+
 class TestWriteDeployment:
     def test_it_writes_the_config_every_process_reads(self, layout: Layout) -> None:
         write_deployment(layout, PANEL, "B", channels=[_channel("B")])
@@ -289,18 +301,40 @@ class TestTheDeployedAdvisersReadAsArmADoes:
         reset_agent_clock()
         try:
             for adviser, entry in zip(PANEL.advisers, entries, strict=True):
+                # Real time either side of everything that builds the agent
+                # and its prompt, so the bracket holds wherever the agent
+                # reads its clock along the way (see below).
+                before = time.time()
                 agent = create_persona_agent(
                     agent_id=entry["id"], config=entry, llm_client=_make_client(),
                 )
                 await agent.initialize_memory()
                 try:
                     prompt = agent._build_system_prompt()
+                    after = time.time()
                 finally:
                     await agent.close_memory()
                 sections = identity_sections(adviser)
                 where = [prompt.index(section) for section in sections]
                 assert where == sorted(where)
-                assert now_anchor_line(story_date) in prompt
+                # The deployment gives the adviser the meeting's clock
+                # through the environment: it starts at 10:00 on the story
+                # date and runs on with real time from ``began``, so the
+                # instant its prompt shows is its real reading plus
+                # ``offset``.  Both come from this test's own values — the
+                # story start it asked for and real readings — so the window
+                # still says the clock is the *meeting's*, in 2036, and not
+                # whatever clock the agent happened to find.  The renderer
+                # truncates to the second, so one whole second in the window
+                # is the line the prompt shows.
+                offset = story_start(story_date).timestamp() - began.timestamp()
+                first, last = int(before + offset), int(after + offset)
+                shown = [_clock_line_at(second) for second in range(first, last + 1)]
+                assert any(line in prompt for line in shown), (
+                    f"expected {entry['id']}'s prompt to show the meeting's "
+                    f"clock somewhere between {_clock_line_at(first)!r} "
+                    f"and {_clock_line_at(last)!r}"
+                )
         finally:
             monkeypatch.delenv(CLOCK_START_ENV)
             monkeypatch.delenv(CLOCK_ANCHOR_ENV)
