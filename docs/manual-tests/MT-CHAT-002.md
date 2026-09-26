@@ -47,15 +47,15 @@ error resilience, and clean exit.
 **Dependencies Installed**:
 - Rust CLI built: `make build-cli` (binary at `cli/target/release/persatrix`)
 - Go 1.26+: `go version`
-- Python 3.11+: `python3 --version`
+- Python 3.11+: `python3 --version`, with the agent packages installed by `make build-agents`
 
 ### Application State
 
 - ☐ Orchestrator running: `make run` (defaults to `http://localhost:8080`)
 - ☐ At least one persona agent registered and healthy (e.g. `ember-owl`):
-  `make run-agent`
+  `make run-agent AGENT=ember-owl`
 - ☐ Config files valid: `make validate`
-- ☐ `ANTHROPIC_API_KEY` set in environment (required for agent to produce LLM replies)
+- ☐ `ANTHROPIC_API_KEY` set in environment (required for agent to produce LLM replies), and a provider selected: `config/optimization.yaml` selects none, so copy `config/demo/anthropic/optimization.yaml` over it before starting anything (`git checkout config/optimization.yaml` restores it)
 
 ### Test Data
 

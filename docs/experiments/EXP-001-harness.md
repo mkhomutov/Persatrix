@@ -52,7 +52,9 @@ under `persona` and changing none of its fields, with the panel's
 `persona.timezone` would move the advisers' clock line, and `persona.quirks`
 would add a section arm A never shows. PR 5a deploys them that way, and a
 test builds each adviser from the `agents.yaml` a deployment writes and finds
-arm A's sections and clock line in its prompt. And arm A logs a failed call
+arm A's sections in its prompt. Its clock line is arm A's line moved on by the
+real time since the meeting began, since a deployed adviser's clock keeps
+running; the test allows for that time. And arm A logs a failed call
 and raises it: the retries the pre-registration asks for come with PR 5b, for
 every arm at once.
 

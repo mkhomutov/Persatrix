@@ -59,7 +59,7 @@ into this script once Slice 2 lands (per [RFC §Test Strategy](../rfcs/0048-oper
 
 **Dependencies Installed**:
 - Go 1.26+: `go version`
-- Python 3.11+: `python3 --version`
+- Python 3.11+: `python3 --version`, with the agent packages installed by `make build-agents`
 - Node `^22.22.2 || ^24.15.0 || >=26.0.0`: `node --version` (only for the local `make ui` build path, where `npm ci` refuses any other Node; the Docker path builds the bundle in-image)
 - `curl` and a browser available
 

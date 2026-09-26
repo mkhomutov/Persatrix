@@ -61,10 +61,11 @@ installed hook has drifted.
 ### Prerequisites
 
 - **Go 1.26+** — Orchestrator
-- **Python 3.11+** — Agents
-- **Rust 2021 edition** — CLI
+- **A C compiler** (gcc or clang; MinGW-w64 on Windows) — on Linux and Windows, `make test` runs Go's race detector, which needs one
+- **Python 3.11+** — Agents. Prefer 3.11–3.13: on 3.14 the pinned grpcio-tools 1.71.2 has no ready-made wheel, so pip compiles it from C++ source, which can fail ([ISSUE-0145](docs/issues/ISSUE-0145-proto-toolchain-pinned-to-protobuf-5x.md))
+- **Rust 1.86+** — CLI
 - **Node.js `^22.22.2 || ^24.15.0 || >=26.0.0`** — only for the web console (`make ui`, `make ui-test`): Node 22 from 22.22.2, Node 24 from 24.15.0, or Node 26 and later. `npm ci` refuses any other version, because `web/.npmrc` enforces the range in `web/package.json`
-- **protoc** — Protocol buffer compiler (for gRPC codegen)
+- **protoc 34.1**, with the Go plugins **protoc-gen-go v1.36.11** and **protoc-gen-go-grpc v1.6.1** — Protocol buffer compiler (for gRPC codegen). These are the versions CI pins: other versions rewrite the committed stubs, and CI's proto staleness check then fails
 - **Windows only:** `make` — install via [GnuWin32](https://gnuwin32.sourceforge.net/packages/make.htm) or `winget install GnuWin32.Make`, then add `C:\Program Files (x86)\GnuWin32\bin` to your PATH
 
 ### Quick Start
