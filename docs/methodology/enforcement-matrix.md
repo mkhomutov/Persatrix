@@ -1,6 +1,6 @@
 # Enforcement Matrix
 
-> **Last updated**: 2026-09-25
+> **Last updated**: 2026-09-26
 > Every rule the project states, with the document that states it, the check
 > that enforces it, and how hard the enforcement is. Read the **Enforcement**
 > column literally: a rule is only as strong as the weakest place it is
@@ -47,6 +47,7 @@ the twelve, and the job is named where it is not one of the original six.
 | Every `stable` golden-trace eval replays green ([RFC 0044](../rfcs/0044-eval-set-golden-traces.md) §F) | RFC 0044; [evaluators guide](../evaluators-guide.md#promoting-a-recipe-to-stable) | `make eval-replay TIER=stable` — exits 1 on a failed assertion, a cassette miss, a malformed or golden-less stable recipe, or an empty selection | Required (`Python`) — since v0.3.16 PR C2; was Make-only |
 | Go and Python protobuf stubs match `proto/*.proto`; no orphans | Makefile; ISSUE-0017/0023 | `make proto-go && git diff --exit-code`; `make proto-python-check proto-orphans-check` | Required (`Proto staleness`, `Python`) |
 | MIT-candidate primitives never import BUSL code (RFC 0045 §B) | RFC 0045; CONTRIBUTING | `make imports-check` (import-linter) | Required (`Python`) |
+| The CLI compiles on the oldest Rust it claims, `rust-version` in `cli/Cargo.toml` | `cli/Cargo.toml`; README | the `Rust` job's last step installs that release and runs `cargo +<rust-version> check --locked --all-targets`, so a dependency update that needs a newer Rust fails there; clippy's `incompatible_msrv` lint, under `-D warnings`, names any newer standard-library API in CLI code; `test_toolchain_minimums.py` pins the step | Required (`Rust`, `Python`) — since 2026-09-26; CI had only ever built with the newest release |
 | Rust builds; clippy clean; `cargo test` passes (incl. lockstep guards) | instructions | `cargo build`, `cargo clippy -- -D warnings`, `cargo test` | Required (`Rust`) |
 | YAML configs validate against `schemas/` | CLAUDE.md; instructions | `python agents/validate.py config/` | Required (`Validate configs`) |
 | RFC and issue INDEX files fresh; front-matter valid; each RFC's `**Status**` header line agrees with its front-matter | rfcs/README, issues/README | `make rfcs-check issues-check` | Required (`Validate configs`) |
@@ -93,6 +94,7 @@ the twelve, and the job is named where it is not one of the original six.
 | A patch release keeps one document: no `docs/vX.Y.Z-*.md` file beside its plan but a test-findings PR plan | release-cycle §Phase 0 (sequencing Amendment 2026-09-12, ruling (e)) | `scripts/checks/plan_status.py` (`make plan-status-check`) fails one for any `X.Y.Z` after 0.3.16 with `Z` above 0, dated or not; v0.3.16 and earlier keep their files, a minor release is not judged | Required (`Docs hygiene`) + Pre-commit |
 | Every artifact the methodology names exists (documents, tools, make targets, Docs-hygiene steps) | [conformance.json](conformance.json) | `make conformance-check` | Required (`Docs hygiene`) + Pre-commit |
 | No ROADMAP Component Status row says less than the RFC it names | ROADMAP §How to Update | `scripts/checks/roadmap_status.py` (`make roadmap-status-check`) | Required (`Validate configs`) + Pre-commit — its first run found `internal/security/` still "In progress" four months after RFC 0009 closed part-way |
+| The Go, Python and Rust minimums the setup docs state are the ones the build requires: the `go` line in `go.mod`, `requires-python` in `agents/pyproject.toml`, `rust-version` in `cli/Cargo.toml` | README; CONTRIBUTING; `cli/Cargo.toml` | `test_toolchain_minimums.py` reads every "Go 1.26+"-style minimum in README (badges and quick start), CONTRIBUTING, the guides, the manual-test template and the manual tests, the bug form's example, and the CLI's Python message, and fails when a main setup doc stops stating one it can read. Records of their time (execution reports, the CHANGELOG, RFCs, issues) are left alone | Required (`Python`) — since 2026-09-26; README had said Go 1.24+ and Rust 1.80+ while the build needed 1.26 and 1.86 |
 | Unified doc audit (links + markers + sizes) | `doc_audit.py` | — | Local convenience wrapper; its three checks run individually in CI |
 | Local-only files never referenced from committed files | CLAUDE.md; copilot-instructions; review-process | review | Convention |
 | Glossary terms mandatory; new terms added in the same change | CLAUDE.md §Terminology | review | Convention |

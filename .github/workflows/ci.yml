@@ -457,6 +457,19 @@ jobs:
       - name: Test
         run: cd cli && cargo test
 
+      # The oldest Rust the CLI supports is `rust-version` in cli/Cargo.toml,
+      # the number README states (test_toolchain_minimums.py holds the two
+      # equal). Every step above builds with a newer release, so none of them
+      # would notice a dependency update that needs a newer Rust, or CLI code
+      # that does: README said 1.80 while the dependencies needed 1.86. This
+      # step compiles the CLI and its tests with exactly that release.
+      - name: Check the CLI compiles on its minimum Rust (rust-version)
+        working-directory: cli
+        run: |
+          msrv=$(cargo metadata --no-deps --format-version 1 | jq -er '.packages[0].rust_version')
+          rustup toolchain install --profile minimal --no-self-update "$msrv"
+          cargo "+$msrv" check --locked --all-targets
+
   validate:
     name: Validate configs
     runs-on: ubuntu-latest
