@@ -50,7 +50,7 @@ response envelope shape, and workflow state transitions.
 - ☐ Linux (Ubuntu 22.04+)
 
 **Dependencies Installed**:
-- Go 1.24+: `go version`
+- Go 1.26+: `go version`
 - Python 3.11+: `python3 --version`
 - `curl` available in PATH: `curl --version`
 

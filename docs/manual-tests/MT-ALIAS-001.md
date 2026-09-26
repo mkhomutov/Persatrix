@@ -79,7 +79,7 @@ automated `cost-attribution gate` (`internal/server/cost_alias_gate_test.go` +
 - ☐ Linux (Ubuntu 22.04+)
 
 **Dependencies Installed**:
-- Go 1.24+, Python 3.11+, Docker + Docker Compose
+- Go 1.26+, Python 3.11+, Docker + Docker Compose
 - `curl` + `jq` (or `python3 -m json.tool`) in PATH
 - A real `ANTHROPIC_API_KEY` (the `quality` alias resolves to Anthropic).
 

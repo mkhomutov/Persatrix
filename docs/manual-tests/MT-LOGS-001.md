@@ -50,7 +50,7 @@ endpoint (deferred to RFC 0009).
 
 ### System Requirements
 
-- Go 1.24+, Rust stable, Python 3.11+
+- Go 1.26+, Rust stable, Python 3.11+
 - Windows: PowerShell 7+ (commands below assume `pwsh`). Linux/macOS users substitute the
   shell-specific equivalents noted inline.
 - An `ANTHROPIC_API_KEY` is **required for Scenario B** (full-agent path used by Steps 1

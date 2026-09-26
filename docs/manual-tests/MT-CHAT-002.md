@@ -46,7 +46,7 @@ error resilience, and clean exit.
 
 **Dependencies Installed**:
 - Rust CLI built: `make build-cli` (binary at `cli/target/release/persatrix`)
-- Go 1.24+: `go version`
+- Go 1.26+: `go version`
 - Python 3.11+: `python3 --version`
 
 ### Application State

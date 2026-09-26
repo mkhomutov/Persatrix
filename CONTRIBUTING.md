@@ -60,7 +60,7 @@ installed hook has drifted.
 
 ### Prerequisites
 
-- **Go 1.24+** — Orchestrator
+- **Go 1.26+** — Orchestrator
 - **Python 3.11+** — Agents
 - **Rust 2021 edition** — CLI
 - **Node.js `^22.22.2 || ^24.15.0 || >=26.0.0`** — only for the web console (`make ui`, `make ui-test`): Node 22 from 22.22.2, Node 24 from 24.15.0, or Node 26 and later. `npm ci` refuses any other version, because `web/.npmrc` enforces the range in `web/package.json`
