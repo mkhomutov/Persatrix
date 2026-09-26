@@ -2,6 +2,12 @@
 name = "persatrix"
 version = "0.3.16"
 edition = "2021"
+# The oldest Rust the CLI builds with: the number README states, which a unit
+# test holds equal to this one. An older cargo refuses to build with a message
+# naming it, clippy flags any standard-library API newer than it, and CI
+# compiles the CLI with exactly this release. It is 1.86 because the
+# dependencies need it (the icu crates, through reqwest's URL parsing).
+rust-version = "1.86"
 description = "Persatrix CLI — manage agents, workflows, and channels"
 license = "BUSL-1.1"
 
