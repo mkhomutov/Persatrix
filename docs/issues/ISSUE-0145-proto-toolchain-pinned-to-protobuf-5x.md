@@ -23,6 +23,10 @@ above 1.71.2 requires `protobuf>=6`, and the runtime caps `protobuf<6`, so the
 pair moves together or not at all. Upgrading is a coordinated change that
 regenerates every committed stub, not a range widening.
 
+The freeze also keeps Python 3.14 off the tested path: 1.71.2 ships no 3.14
+wheel (the first is 1.75.1), so pip compiles it from C++ source there.
+CONTRIBUTING's Prerequisites steers contributors to 3.11–3.13 until this lands.
+
 ## Context
 
 Found twice, the same way. The first pip sweep

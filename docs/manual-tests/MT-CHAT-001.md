@@ -49,16 +49,17 @@ relationship memory evolution (MT-CHAT-004).
 
 **Dependencies Installed**:
 - Go 1.26+: `go version`
-- Python 3.11+: `python3 --version`
+- Rust 1.86+: `rustc --version` (`make run` and `make build` also compile the CLI)
+- Python 3.11+: `python3 --version`, with the agent packages installed by `make build-agents`
 - `curl` available in PATH
 
 ### Application State
 
 - ☐ Orchestrator running: `make run` (defaults to `http://localhost:8080`)
 - ☐ At least one persona agent registered and healthy (e.g. `ember-owl`):
-  `make run-agent` (defaults to `127.0.0.1:50051`)
+  `make run-agent AGENT=ember-owl` (defaults to `127.0.0.1:50051`)
 - ☐ Config files valid: `make validate`
-- ☐ `ANTHROPIC_API_KEY` set in environment (required for Steps 1–3 which hit the LLM)
+- ☐ `ANTHROPIC_API_KEY` set in environment (required for Steps 1–3 which hit the LLM), and a provider selected: `config/optimization.yaml` selects none, so copy `config/demo/anthropic/optimization.yaml` over it before starting anything (`git checkout config/optimization.yaml` restores it)
 
 ### Test Data
 

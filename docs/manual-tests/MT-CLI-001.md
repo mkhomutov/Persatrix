@@ -45,13 +45,14 @@ orchestrator.
 
 **Dependencies Installed**:
 - Go 1.26+: `go version`
-- Rust (stable): `rustc --version` and `cargo --version`
+- Rust 1.86+: `rustc --version` and `cargo --version`
+- Python 3.11+: `python3 --version`, with the agent packages installed by `make build-agents` (for `make validate`)
 - `curl` available in PATH (optional, for cross-checking)
 
 ### Application State
 
 **Orchestrator Setup**:
-- ☐ Full build complete: `make all` (builds orchestrator + CLI)
+- ☐ Full build complete: `make build` (builds orchestrator + CLI)
 - ☐ Orchestrator running in a separate terminal: `make run`
 - ☐ Config valid: `make validate` exits 0
 - ☐ CLI binary present: `ls bin/persatrix` (or `ls bin/persatrix.exe` on Windows)
