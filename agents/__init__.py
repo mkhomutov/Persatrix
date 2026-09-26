@@ -2,6 +2,19 @@
 
 from .base import BaseAgent, TaskInput, TaskOutput, TaskStatus
 from .dispatch import ActionExecutor, EventDispatcher
+from .events import (
+    CallbackModelOutput,
+    Control,
+    Error,
+    ErrorKind,
+    ModelOutput,
+    StateDelta,
+    ToolCallEvent,
+    ToolErrorKind,
+    ToolResultEvent,
+    TurnEvent,
+    new_event_id,
+)
 from .participant import (
     VALID_PARTICIPANT_TYPES,
     Participant,
@@ -17,18 +30,29 @@ from .tick import TickScheduler
 __all__ = [
     "ActionExecutor",
     "BaseAgent",
+    "CallbackModelOutput",
+    "Control",
+    "create_persona_agent",
+    "Error",
+    "ErrorKind",
     "EventDispatcher",
+    "ModelOutput",
     "Mood",
+    "new_event_id",
     "Participant",
     "PersonaState",
+    "render_behavior",
+    "StateDelta",
     "TaskAgent",
     "TaskInput",
     "TaskOutput",
     "TaskStatus",
     "TickScheduler",
+    "ToolCallEvent",
+    "ToolErrorKind",
+    "ToolResultEvent",
+    "TurnEvent",
     "UserParticipant",
     "UserStore",
     "VALID_PARTICIPANT_TYPES",
-    "create_persona_agent",
-    "render_behavior",
 ]
