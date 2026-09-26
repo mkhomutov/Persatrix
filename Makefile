@@ -32,10 +32,16 @@ PYTHON_CONSTRAINTS := .github/python-constraints.txt
 # any other version, and CI installs go-licenses with `make
 # go-licenses-install`. Bump here and nowhere else. go-licenses stays on v1:
 # v2 is a separate module that classifies licenses differently, so moving to
-# it is a change of its own.
+# it is a change of its own. The targets run the binary whose version they
+# checked: GO_LICENSES, which can point at a pinned build PATH does not find
+# first, and the cargo-license cargo installed, whose version it recorded
+# (in CARGO_INSTALL_ROOT, else CARGO_HOME; an install.root in cargo's config
+# is not read). `cargo license` would run whichever copy PATH finds.
 GO_LICENSES_VERSION   := v1.6.0
 GO_LICENSES_MODULE    := github.com/google/go-licenses
+GO_LICENSES           := go-licenses
 CARGO_LICENSE_VERSION := 0.7.0
+CARGO_LICENSE         := $(or $(CARGO_INSTALL_ROOT),$(CARGO_HOME),$(HOME)/.cargo)/bin/cargo-license
 # On Windows, executables require the .exe extension; EXE is empty on Unix.
 EXE           := $(if $(filter Windows_NT,$(OS)),.exe,)
 
@@ -383,11 +389,17 @@ go-licenses-pinned:
 	@# Installs the pin when go-licenses is missing, as the check always did.
 	@# v1 has no version command, so read the module and version Go recorded
 	@# in the binary; a build without that record cannot be verified.
-	@command -v go-licenses >/dev/null 2>&1 || go install $(GO_LICENSES_MODULE)@$(GO_LICENSES_VERSION)
-	@installed="$$(go version -m "$$(command -v go-licenses)" 2>/dev/null | awk '$$1 == "mod" { print $$2 "@" $$3; exit }')"; \
+	@command -v $(GO_LICENSES) >/dev/null 2>&1 || $(MAKE) --no-print-directory go-licenses-install
+	@bin="$$(command -v $(GO_LICENSES))" || { \
+		dir="$$(go env GOBIN)"; dir="$${dir:-$$(go env GOPATH)/bin}"; \
+		echo "go-licenses is installed in $$dir, which is not on PATH"; \
+		echo "  add it to PATH, or point GO_LICENSES= at $$dir/go-licenses"; \
+		exit 1; \
+	}; \
+	installed="$$(go version -m "$$bin" 2>/dev/null | awk '$$1 == "mod" { print $$2 "@" $$3; exit }')"; \
 	if [ "$$installed" != "$(GO_LICENSES_MODULE)@$(GO_LICENSES_VERSION)" ]; then \
-		echo "go-licenses $(GO_LICENSES_VERSION) is required, found '$${installed:-unknown}'"; \
-		echo "  run: make go-licenses-install"; \
+		echo "go-licenses $(GO_LICENSES_VERSION) is required, found '$${installed:-unknown}' at $$bin"; \
+		echo "  run: make go-licenses-install, or point GO_LICENSES= at the pinned build"; \
 		exit 1; \
 	fi
 
@@ -397,7 +409,7 @@ check-licenses-go: go-licenses-pinned ## Check Go module licenses against the al
 	@# (LICENSE-MATHUTIL) that go-licenses cannot auto-detect. Upstream license
 	@# is BSD-3-Clause; verified manually and recorded in THIRD_PARTY_NOTICES.md.
 	@ALLOWED=$$(grep -v '^\s*#' scripts/checks/allowed_licenses.txt | grep -v '^\s*$$' | paste -sd, -); \
-		go-licenses check ./cmd/... ./internal/... \
+		$(GO_LICENSES) check ./cmd/... ./internal/... \
 			--allowed_licenses="$$ALLOWED" \
 			--ignore=$(GO_MODULE) \
 			--ignore=modernc.org/mathutil
@@ -416,19 +428,19 @@ check-licenses-python: ## Check Python dependency licenses against the allow-lis
 
 check-licenses-rust: ## Check Rust crate licenses via cargo-deny
 	@echo "→ Checking Rust dependency licenses..."
-	@command -v cargo-deny >/dev/null 2>&1 || $(CARGO) install cargo-deny --locked --version 0.19.0
+	@command -v cargo-deny >/dev/null 2>&1 || (cd cli && $(CARGO) install cargo-deny --locked --version 0.19.0)
 	cd cli && $(CARGO) deny check licenses
 	@echo "✓ Rust licenses OK"
 
 # ─── Third-party notices ────────────────────────────────
 cargo-license-install: ## Install the pinned cargo-license (make notices runs it)
-	$(CARGO) install cargo-license --locked --version $(CARGO_LICENSE_VERSION)
+	cd cli && $(CARGO) install cargo-license --locked --version $(CARGO_LICENSE_VERSION)
 
 cargo-license-pinned:
 	@# Installs the pin when cargo-license is missing, as `make notices` always
 	@# did. It has no version command, so read the version cargo recorded when
 	@# it installed it.
-	@$(CARGO) install --list | grep -q '^cargo-license v' || $(CARGO) install cargo-license --locked --version $(CARGO_LICENSE_VERSION)
+	@$(CARGO) install --list | grep -q '^cargo-license v' || $(MAKE) --no-print-directory cargo-license-install
 	@installed="$$($(CARGO) install --list | sed -n 's/^cargo-license v\(.*\):$$/\1/p')"; \
 	if [ "$$installed" != "$(CARGO_LICENSE_VERSION)" ]; then \
 		echo "cargo-license $(CARGO_LICENSE_VERSION) is required, found '$${installed:-unknown}'"; \
@@ -438,11 +450,11 @@ cargo-license-pinned:
 
 notices: go-licenses-pinned cargo-license-pinned ## Regenerate THIRD_PARTY_NOTICES.md from Go, Python, and Rust dependency graphs
 	@echo "→ Regenerating THIRD_PARTY_NOTICES.md..."
-	@$(PYTHON) scripts/generate_third_party_notices.py
+	@GO_LICENSES="$(GO_LICENSES)" CARGO_LICENSE="$(CARGO_LICENSE)" $(PYTHON) scripts/generate_third_party_notices.py
 	@echo "✓ THIRD_PARTY_NOTICES.md updated"
 
 notices-check: go-licenses-pinned cargo-license-pinned ## Fail if THIRD_PARTY_NOTICES.md is stale relative to current deps
-	@$(PYTHON) scripts/generate_third_party_notices.py --check
+	@GO_LICENSES="$(GO_LICENSES)" CARGO_LICENSE="$(CARGO_LICENSE)" $(PYTHON) scripts/generate_third_party_notices.py --check
 
 # ─── Validate ───────────────────────────────────────────
 validate: ## Validate all YAML configs against JSON schemas

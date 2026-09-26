@@ -19,12 +19,11 @@ from __future__ import annotations
 
 import re
 import tomllib
-from pathlib import Path
 from typing import Any
 
 import yaml
+from _test_infra import REPO_ROOT
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
 TOOLCHAIN_FILE = REPO_ROOT / "cli" / "rust-toolchain.toml"
 GITHUB = REPO_ROOT / ".github"
 WORKFLOWS = GITHUB / "workflows"
@@ -33,14 +32,14 @@ WORKFLOWS = GITHUB / "workflows"
 # components included, without rustup updating itself mid-job.
 INSTALL_FROM_FILE = "rustup toolchain install --no-self-update"
 CARGO_RE = re.compile(r"\bcargo\b")
-# A workflow choosing its own toolchain: an installer action, or a rustup /
-# cargo command that names one.
+# A workflow choosing its own toolchain: an installer action, a rustup /
+# cargo command that names one, or RUSTUP_TOOLCHAIN, which outranks the file.
 TOOLCHAIN_ACTIONS = (
     "dtolnay/rust-toolchain",
     "actions-rs/toolchain",
     "actions-rust-lang/setup-rust-toolchain",
 )
-NAMED_TOOLCHAIN_RE = re.compile(r"rustup\s+(?:default|override)\b|\bcargo\s+[\"']?\+")
+NAMED_TOOLCHAIN_RE = re.compile(r"rustup\s+(?:default|override|run)\b|\bcargo\s+[\"']?\+")
 RUSTUP_INSTALL_RE = re.compile(r"rustup\s+toolchain\s+install\b(?P<args>[^\n]*)")
 # The one step allowed to name a toolchain: it builds the CLI on the oldest
 # Rust it supports, `rust-version` in cli/Cargo.toml, which
@@ -161,6 +160,10 @@ def test_no_workflow_names_a_rust_toolchain_of_its_own() -> None:
         for action in TOOLCHAIN_ACTIONS:
             assert action not in text, f"{path.name} installs Rust with {action}"
         assert version not in text, f"{path.name} repeats the pinned version {version}"
+        # Set in an env block, on a command, or through $GITHUB_ENV alike.
+        assert "RUSTUP_TOOLCHAIN" not in text, (
+            f"{path.name} sets RUSTUP_TOOLCHAIN, which outranks cli/rust-toolchain.toml"
+        )
     for name, job in _jobs():
         for step in job.get("steps") or []:
             if step.get("name") == MINIMUM_RUST_STEP:
