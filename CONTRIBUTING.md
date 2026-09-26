@@ -33,7 +33,7 @@ make validate # config validation
 - **[`scheduled-audit.yml`](.github/workflows/scheduled-audit.yml)** — Weekly dependency audit for Rust crates.
 - **[`perf-baseline-capture.yml`](.github/workflows/perf-baseline-capture.yml)** — Maintainer-dispatched capture of the recall-latency baseline that arms the perf gate.
 - **[`python-constraints-refresh.yml`](.github/workflows/python-constraints-refresh.yml)** — Weekly: tries the newest Python releases on the Python checks and, when they pass, posts a link that opens the PR moving CI's pins in `.github/python-constraints.txt`.
-- **[`dependabot.yml`](.github/dependabot.yml)** — Monthly grouped dependency-update PRs per ecosystem, titled `chore(deps): …` so the title check passes.
+- **[`dependabot.yml`](.github/dependabot.yml)** — Monthly grouped dependency-update PRs per ecosystem, the Rust release in `cli/rust-toolchain.toml` among them, titled `chore(deps): …` so the title check passes.
 
 Which CI jobs branch protection requires is versioned in [`docs/methodology/branch-protection.json`](docs/methodology/branch-protection.json); `make branch-protection-show` diffs it against the live setting.
 
@@ -63,7 +63,7 @@ installed hook has drifted.
 - **Go 1.26+** — Orchestrator
 - **A C compiler** (gcc or clang; MinGW-w64 on Windows) — on Linux and Windows, `make test` runs Go's race detector, which needs one
 - **Python 3.11+** — Agents. Prefer 3.11–3.13: on 3.14 the pinned grpcio-tools 1.71.2 has no ready-made wheel, so pip compiles it from C++ source, which can fail ([ISSUE-0145](docs/issues/ISSUE-0145-proto-toolchain-pinned-to-protobuf-5x.md))
-- **Rust 1.86+** — CLI
+- **Rust 1.86+**, through rustup — CLI. `cli/rust-toolchain.toml` pins the release CI uses, and rustup installs it the first time cargo runs in `cli/`
 - **Node.js `^22.22.2 || ^24.15.0 || >=26.0.0`** — only for the web console (`make ui`, `make ui-test`): Node 22 from 22.22.2, Node 24 from 24.15.0, or Node 26 and later. `npm ci` refuses any other version, because `web/.npmrc` enforces the range in `web/package.json`
 - **protoc 34.1**, with the Go plugins **protoc-gen-go v1.36.11** and **protoc-gen-go-grpc v1.6.1** — Protocol buffer compiler (for gRPC codegen). These are the versions CI pins: other versions rewrite the committed stubs, and CI's proto staleness check then fails
 - **Windows only:** `make` — install via [GnuWin32](https://gnuwin32.sourceforge.net/packages/make.htm) or `winget install GnuWin32.Make`, then add `C:\Program Files (x86)\GnuWin32\bin` to your PATH

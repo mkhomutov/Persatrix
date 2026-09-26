@@ -431,12 +431,24 @@ jobs:
   rust:
     name: Rust (build + clippy)
     runs-on: ubuntu-latest
+    # Incremental builds only slow down a one-off CI build; colour keeps
+    # cargo's errors readable in the log.
+    env:
+      CARGO_INCREMENTAL: 0
+      CARGO_TERM_COLOR: always
     steps:
       - uses: actions/checkout@v7
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
+      # The toolchain comes from cli/rust-toolchain.toml. This step used to
+      # install whatever `stable` was that day, and since the job runs clippy
+      # with -D warnings, any Rust release could add a lint that failed every
+      # open PR at once, whatever the PR changed. Dependabot now proposes each
+      # release as one PR, so a new lint fails that PR alone. Run in cli/,
+      # `rustup toolchain install` with no name installs exactly what the file
+      # names, components included, so the version lives in that file only.
+      - name: Install the Rust toolchain pinned in cli/rust-toolchain.toml
+        working-directory: cli
+        run: rustup toolchain install --no-self-update
 
       - name: Build CLI
         run: cd cli && cargo build
@@ -613,10 +625,18 @@ jobs:
         with:
           python-version: "3.11"
 
-      - uses: dtolnay/rust-toolchain@stable
+      # The same pinned toolchain as the rust job. cargo-deny runs cargo in
+      # cli/, where rustup would install the pinned release anyway, so a
+      # `stable` install here was a second download.
+      - name: Install the Rust toolchain pinned in cli/rust-toolchain.toml
+        working-directory: cli
+        run: rustup toolchain install --no-self-update
 
+      # The Makefile's pin, installed the way a developer installs it. This
+      # was `@latest`, and `make check-licenses-go` now refuses any other
+      # version.
       - name: Install go-licenses
-        run: go install github.com/google/go-licenses@latest
+        run: make go-licenses-install
 
       - name: Cache cargo-deny
         id: cache-cargo-deny
@@ -628,8 +648,11 @@ jobs:
             ~/.cargo/.crates2.json
           key: ${{ runner.os }}-cargo-deny-0.19.0
 
+      # From cli/, so rustup builds it with the pinned toolchain rather than
+      # whichever Rust the runner image ships.
       - name: Install cargo-deny
         if: steps.cache-cargo-deny.outputs.cache-hit != 'true'
+        working-directory: cli
         run: cargo install cargo-deny --locked --version 0.19.0
 
       - name: Install Python dependencies
