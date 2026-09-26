@@ -24,10 +24,12 @@ from typing import Any
 import pytest
 import yaml
 
-from agents.clock import CLOCK_ANCHOR_ENV, CLOCK_START_ENV, reset_agent_clock
+from agents.clock import CLOCK_ANCHOR_ENV, CLOCK_START_ENV, DEFAULT_TIMEZONE, reset_agent_clock
 from agents.persona import create_persona_agent
 from agents.persona_runtime.channel_roster import RosterMember, render_roster_section
-from evaluators.exp001.arm_a import anchor_line_at, identity_sections
+from agents.prompt_loader import load_persona_section
+from agents.temporal.rendering import format_now_anchor
+from evaluators.exp001.arm_a import identity_sections
 from evaluators.exp001.costs import ARMS_MODEL, PRICES
 from evaluators.exp001.deployment import (
     ARMS_ALIAS,
@@ -230,6 +232,15 @@ def _channel(arm: str = "C") -> dict[str, Any]:
     return channel_config(PANEL, arm, name="advice-1", organisation="Linden Loaf")
 
 
+def _clock_line_at(epoch: float) -> str:
+    """The now-anchor line an adviser on UTC shows at agent time *epoch*.
+
+    The renderer truncates to the second, so any instant within a second
+    reads as that second."""
+    anchor = format_now_anchor(epoch, DEFAULT_TIMEZONE)
+    return load_persona_section("now-anchor").format_map({"now_anchor": anchor})
+
+
 class TestWriteDeployment:
     def test_it_writes_the_config_every_process_reads(self, layout: Layout) -> None:
         write_deployment(layout, PANEL, "B", channels=[_channel("B")])
@@ -290,14 +301,15 @@ class TestTheDeployedAdvisersReadAsArmADoes:
         reset_agent_clock()
         try:
             for adviser, entry in zip(PANEL.advisers, entries, strict=True):
+                # Real time either side of everything that builds the agent
+                # and its prompt, so the bracket holds wherever the agent
+                # reads its clock along the way (see below).
+                before = time.time()
                 agent = create_persona_agent(
                     agent_id=entry["id"], config=entry, llm_client=_make_client(),
                 )
                 await agent.initialize_memory()
                 try:
-                    # Real time either side of the build, to bracket the
-                    # reading the agent took inside it (see below).
-                    before = time.time()
                     prompt = agent._build_system_prompt()
                     after = time.time()
                 finally:
@@ -308,26 +320,20 @@ class TestTheDeployedAdvisersReadAsArmADoes:
                 # The deployment gives the adviser the meeting's clock
                 # through the environment: it starts at 10:00 on the story
                 # date and runs on with real time from ``began``, so the
-                # instant its prompt shows is ``story_start + (that build's
-                # reading - began)``.  Both ends come from this test's own
-                # values — the story start it asked for and real readings —
-                # so the window still says the clock is the *meeting's*, in
-                # 2036, and not whatever clock the agent happened to find.
-                # The renderer truncates to the second, so one whole second
-                # in the window is the line the prompt shows.
-                #
-                # (A single fixed 10:00:00 lived here until building these
-                # agents pushed the render past it and reddened main.  That
-                # assertion said the loop finishes inside one second, which
-                # is not what this test claims.)
-                ran_on = story_start(story_date).timestamp() - began.timestamp()
-                shown = [
-                    anchor_line_at(float(second))
-                    for second in range(int(before + ran_on), int(after + ran_on) + 1)
-                ]
+                # instant its prompt shows is its real reading plus
+                # ``offset``.  Both come from this test's own values — the
+                # story start it asked for and real readings — so the window
+                # still says the clock is the *meeting's*, in 2036, and not
+                # whatever clock the agent happened to find.  The renderer
+                # truncates to the second, so one whole second in the window
+                # is the line the prompt shows.
+                offset = story_start(story_date).timestamp() - began.timestamp()
+                first, last = int(before + offset), int(after + offset)
+                shown = [_clock_line_at(second) for second in range(first, last + 1)]
                 assert any(line in prompt for line in shown), (
                     f"expected {entry['id']}'s prompt to show the meeting's "
-                    f"clock somewhere between {shown[0]!r} and {shown[-1]!r}"
+                    f"clock somewhere between {_clock_line_at(first)!r} "
+                    f"and {_clock_line_at(last)!r}"
                 )
         finally:
             monkeypatch.delenv(CLOCK_START_ENV)
