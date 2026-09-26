@@ -44,7 +44,7 @@ orchestrator.
 - ☐ Linux (Ubuntu 22.04+)
 
 **Dependencies Installed**:
-- Go 1.24+: `go version`
+- Go 1.26+: `go version`
 - Rust (stable): `rustc --version` and `cargo --version`
 - `curl` available in PATH (optional, for cross-checking)
 

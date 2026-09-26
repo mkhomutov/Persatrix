@@ -2,9 +2,9 @@
 
 [![CI](https://github.com/mkhomutov/Persatrix/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mkhomutov/Persatrix/actions/workflows/ci.yml)
 [![License: BUSL-1.1](https://img.shields.io/badge/license-BUSL--1.1-blue.svg)](LICENSE)
-[![Go 1.24+](https://img.shields.io/badge/Go-1.24%2B-00ADD8?logo=go&logoColor=white)](https://go.dev/)
+[![Go 1.26+](https://img.shields.io/badge/Go-1.26%2B-00ADD8?logo=go&logoColor=white)](https://go.dev/)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![Rust 1.80+](https://img.shields.io/badge/Rust-1.80%2B-DEA584?logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![Rust 1.86+](https://img.shields.io/badge/Rust-1.86%2B-DEA584?logo=rust&logoColor=white)](https://www.rust-lang.org/)
 
 **Build AI agents that have a personality, remember you, talk to each
 other, and act on their own.**
@@ -93,8 +93,8 @@ agents) interact with over time.
 
 ## Quick start
 
-You'll need: **Docker Desktop**, **Go 1.24+**, **Python 3.11+**,
-**Rust 1.80+**, and **an LLM provider**. Persatrix is provider-agnostic
+You'll need: **Docker Desktop**, **Go 1.26+**, **Python 3.11+**,
+**Rust 1.86+**, and **an LLM provider**. Persatrix is provider-agnostic
 ([RFC 0033](docs/rfcs/0033-model-alias-layer.md)) with **no default provider** —
 you pick one explicitly. Run a **free** local / offline model with no key at all,
 or use a cloud key you have (Anthropic or OpenAI). Each provider is selected the

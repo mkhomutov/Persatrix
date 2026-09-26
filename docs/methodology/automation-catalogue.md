@@ -1,6 +1,6 @@
 # Automation Catalogue
 
-> **Last updated**: 2026-09-25
+> **Last updated**: 2026-09-26
 > Everything that runs without a human typing the steps: `make` targets,
 > scripts, the pre-commit hook, and the GitHub workflows — grouped by
 > purpose, with **when it runs**. `make help` is the live list of targets;
@@ -56,6 +56,7 @@ dependencies.
 | `make test-agents` | `pytest agents/tests/ -c agents/pyproject.toml` from the repo root | `Python` |
 | `make test-integration` | `pytest tests/integration/` with `PYTHONPATH=agents/generated` | `Python` |
 | `cd cli && cargo test` | Rust suite incl. lockstep guards | `Rust` |
+| `cd cli && cargo "+$msrv" check --locked --all-targets` | Compiles the CLI and its tests on the oldest Rust it claims: `msrv` is `rust-version` in `cli/Cargo.toml`, read with `cargo metadata` and installed with `rustup toolchain install` first | `Rust` |
 | `make ui-test` | `npm ci && npm test` (Vitest) | `Web console` |
 | `go test ./tests/integration/... -race` | Go integration (bufconn scheduler→executor, rate limiter, audit log) | `Go` |
 | `make eval-replay [TARGET= TIER= REPORT=]` | Replay goldens deterministically under the offline overlay; `TIER=stable` is the merge gate | `Python` (since v0.3.16 PR C2) |
