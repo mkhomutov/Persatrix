@@ -88,16 +88,68 @@ def _provenance_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRec
     ]
 
 
+# The attributes ``logging`` stamps on every record to say where the call
+# ran: logger, level, file, function, line, time, thread, process, task.
+# They describe the checkout, not the record's content — a checkout under
+# ``/tmp/rustpin/`` would otherwise read as a leaked ``"Rust"``.
+_LOG_ORIGIN_ATTRS = frozenset({
+    "name", "levelname", "levelno", "pathname", "filename", "module",
+    "funcName", "lineno", "created", "msecs", "relativeCreated", "asctime",
+    "thread", "threadName", "process", "processName", "taskName",
+})
+
+
 def _record_text(rec: logging.LogRecord) -> str:
-    """Every string that could reach a log sink off this record — the
-    message plus each string attribute (the structured ``extra`` fields
-    land on the record as attributes) — lower-cased for the leak probe."""
-    parts = [str(v) for v in vars(rec).values() if isinstance(v, str)]
+    """Everything the record carries that could reach a log sink — the
+    message, its args, any exception or stack text, and every structured
+    ``extra`` field (they land on the record as attributes), whatever its
+    type — lower-cased for the leak probe."""
+    parts = [str(v) for k, v in vars(rec).items() if k not in _LOG_ORIGIN_ATTRS]
     parts.append(rec.getMessage())
     return " ".join(parts).lower()
 
 
 _LEAK_PROBES = ("alice", "release owner", "rust", "berlin")
+
+
+class TestRecordTextProbe:
+    """The probe reads what the record carries, not where the log call ran:
+    a checkout under ``/tmp/rustpin/`` must not read as a leaked ``"Rust"``."""
+
+    def test_where_the_call_ran_does_not_trip_the_probe(self) -> None:
+        rec = logging.makeLogRecord({
+            "msg": "persatrix.memory.tier_admitted",
+            "tier": "relationship",
+            "item_id": f"user:{_ALICE_ID}",
+        })
+        rec.name = "berlin.logger"
+        rec.pathname = "/tmp/rustpin/agents/persona_runtime/memory_budget.py"
+        rec.filename = "rustpin.py"
+        rec.module = "rustpin"
+        rec.funcName = "trust_alice"
+        rec.threadName = "alice-thread"
+        rec.processName = "berlin-worker"
+        rec.taskName = "rust-task"
+        text = _record_text(rec)
+        for leak in _LEAK_PROBES:
+            assert leak not in text
+
+    @pytest.mark.parametrize(
+        "fields",
+        [
+            {"msg": "admitted Alice"},
+            {"msg": "admitted %s", "args": ("Alice",)},
+            {"msg": "tier_admitted", "exc_text": "ValueError: Alice"},
+            {"msg": "tier_admitted", "stack_info": "Stack: Alice"},
+            {"msg": "tier_admitted", "item_id": "Alice"},
+            {"msg": "tier_admitted", "prefs": ["Alice"]},
+        ],
+        ids=["message", "args", "exc_text", "stack_info", "str-extra", "list-extra"],
+    )
+    def test_what_the_record_carries_still_trips_the_probe(
+        self, fields: dict[str, object],
+    ) -> None:
+        assert "alice" in _record_text(logging.makeLogRecord(fields))
 
 
 # ─── Registry pairing at the render helper ─────────────────
