@@ -19,8 +19,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      # The toolchain CI uses, from cli/rust-toolchain.toml. Run in cli/,
+      # `rustup toolchain install` with no name installs what that file names.
+      - name: Install the Rust toolchain pinned in cli/rust-toolchain.toml
+        working-directory: cli
+        run: rustup toolchain install --no-self-update
 
       - name: Cache cargo-deny
         id: cache-cargo-deny
@@ -32,8 +35,10 @@ jobs:
             ~/.cargo/.crates2.json
           key: ${{ runner.os }}-cargo-deny-0.19.0
 
+      # From cli/, so rustup builds it with the pinned toolchain.
       - name: Install cargo-deny
         if: steps.cache-cargo-deny.outputs.cache-hit != 'true'
+        working-directory: cli
         run: cargo install cargo-deny --locked --version 0.19.0
 
       - name: Run comprehensive dependency audit
