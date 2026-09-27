@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -151,7 +152,8 @@ def _run(cmd: list[str], cwd: Path | None = None) -> str:
 def collect_go() -> list[dict[str, str]]:
     out = _run(
         [
-            "go-licenses",
+            # `make notices` names the go-licenses whose version it checked.
+            os.environ.get("GO_LICENSES") or "go-licenses",
             "report",
             "./cmd/...",
             "./internal/...",
@@ -203,7 +205,12 @@ def collect_python() -> list[dict[str, str]]:
 
 def collect_rust() -> list[dict[str, str]]:
     cli_dir = REPO_ROOT / "cli"
-    out = _run(["cargo", "license", "--json"], cwd=cli_dir)
+    # `make notices` names the cargo-license whose version it checked; `cargo
+    # license` would run whichever copy comes first on PATH. The tool drops
+    # the `license` argument cargo passes it, so both forms read the same.
+    cargo_license = os.environ.get("CARGO_LICENSE")
+    tool = [cargo_license] if cargo_license else ["cargo"]
+    out = _run([*tool, "license", "--json"], cwd=cli_dir)
     data = json.loads(out)
     rows: list[dict[str, str]] = []
     for pkg in data:
