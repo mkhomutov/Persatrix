@@ -25,7 +25,8 @@ import yaml
 from agents.call_log import CALL_LOG_ENV, CALL_TAGS_ENV
 from agents.clock import CLOCK_ANCHOR_ENV, CLOCK_START_ENV
 from agents.persona import create_persona_agent
-from evaluators.exp001.channel_arm import LEASE_REFUSED, PROCESS_EXITED, _energy, run_meeting
+from evaluators.exp001.channel_arm import LEASE_REFUSED, PROCESS_EXITED
+from evaluators.exp001.deployed_meeting import _energy, run_meeting
 from evaluators.exp001.deployment import DeploymentError, adviser_config, channel_config
 from evaluators.exp001.materials import MeetingKind, load_series
 from evaluators.exp001.orchestrator import Message, OrchestratorError

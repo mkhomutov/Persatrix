@@ -20,8 +20,14 @@ and its part 2; this package only carries those documents out.
   orchestrator and adviser processes.
 - :mod:`evaluators.exp001.orchestrator` is what the harness asks a
   deployment's orchestrator over REST, and reads in its log.
-- :mod:`evaluators.exp001.channel_arm` holds the meetings of arms B and C: the
+- :mod:`evaluators.exp001.channel_arm` holds a channel arm's meeting: the
   discussion, then the memo turn.
+- :mod:`evaluators.exp001.deployed_meeting` holds one such meeting on a
+  deployment's processes, and each of arm B's and C's on a new deployment.
+- :mod:`evaluators.exp001.arm_d` holds arm D's series on one deployment,
+  whose restarts must leave the advisers' memory as it was.
+- :mod:`evaluators.exp001.attempts` holds every arm's meetings by the rules
+  of attempts and failures.
 - :mod:`evaluators.exp001.packets` builds the blinded packets the raters score.
 - :mod:`evaluators.exp001.scoring` cuts memos, turns scores into quality and
   measures how well the raters agree.
