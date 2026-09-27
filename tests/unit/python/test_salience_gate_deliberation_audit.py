@@ -36,6 +36,7 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from _log_probe_helpers import assert_absent
 from _salience_gate_helpers import (
     _AUDIT_EVENT,
     _BID_PATH,
@@ -165,9 +166,8 @@ class TestDeliberatedAuditNeverLeaksProse:
         rec = _audit_records(caplog)[0]
         assert not hasattr(rec, "reason_note")
         assert not hasattr(rec, "plan")
-        # Defence in depth: the secret clause appears in no string attribute.
-        blob = " ".join(str(v) for v in rec.__dict__.values())
-        assert _SECRET_NOTE not in blob
+        # Defence in depth: the secret clause appears nowhere on the record.
+        assert_absent(rec, _SECRET_NOTE)
 
 
 # ─── Dark: no audit on the scalar (mode: off) path ───────────────────────────

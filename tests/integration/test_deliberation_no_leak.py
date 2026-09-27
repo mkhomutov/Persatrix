@@ -41,6 +41,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from _log_probe_helpers import assert_absent
 
 from agents.llm_client import LLMClient, LLMResponse, StopReason, Usage
 from agents.model_aliases import use_alias_map
@@ -421,4 +422,4 @@ class TestSilenceReasonNoteReachesDebugLogButNeverLeaks:
             if getattr(r, "audit", None) is True and r.getMessage() == _AUDIT_EVENT
         ]
         assert len(audits) == 1
-        assert _PRIVATE_NOTE not in " ".join(str(v) for v in audits[0].__dict__.values())
+        assert_absent(audits[0], _PRIVATE_NOTE)
