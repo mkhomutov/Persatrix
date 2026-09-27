@@ -26,11 +26,14 @@ MT-MEMORY-CROSSROOM-001 Leg 2b said could never exist.
 
 from __future__ import annotations
 
+import enum
+import io
 import logging
 
 import pytest
 
 from agents.memory.relationship_types import RelationshipSummary
+from agents.observability.logging import configure_logging
 from agents.persona import create_persona_agent
 from agents.persona_runtime.memory_budget import MemoryBudget
 from agents.persona_runtime.memory_context import _truncate_with_ellipsis
@@ -44,17 +47,27 @@ from agents.session_id import session_scope
 
 from ._persona_test_helpers import _PERSONA_CONFIG, _make_client
 
+# The identity is made of invented words, so the leak probe can read the
+# whole record: no checkout path, user or host name, logger, thread or task
+# name, traceback or ids-only field can contain one by accident. Common
+# words could: a ``"Rust"`` preference matched a ``rustpin/`` checkout path
+# and the tier's own word ``trust``.
+_NAME = "Zyxwen"
+_ROLE = "glimmerfold steward"
+_PREF = "Quillonlang"
+_PLACE = "Vexmoor"
+
 _IDENTITY = {
-    "name": "Alice",
-    "role": "release owner",
-    "prefs": ["Rust"],
-    "raw": "Lives in Berlin",
+    "name": _NAME,
+    "role": _ROLE,
+    "prefs": [_PREF],
+    "raw": f"Lives in {_PLACE}",
 }
 
 
 # The participant id deliberately shares no text with the identity fields
 # above, so the no-leak assertion below cannot pass by accident (an id of
-# ``user-alice`` would only fail to contain ``"Alice"`` by letter case).
+# ``user-zyxwen`` would only fail to contain ``"Zyxwen"`` by letter case).
 _ALICE_ID = "p-7f3a"
 
 
@@ -89,15 +102,59 @@ def _provenance_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRec
 
 
 def _record_text(rec: logging.LogRecord) -> str:
-    """Every string that could reach a log sink off this record — the
-    message plus each string attribute (the structured ``extra`` fields
-    land on the record as attributes) — lower-cased for the leak probe."""
-    parts = [str(v) for v in vars(rec).values() if isinstance(v, str)]
+    """Everything on the record that could reach a log sink, lower-cased for
+    the leak probe: each attribute's name, and its value both as ``str()``
+    and as ``repr()`` (the JSON renderer and the log shipper write a value
+    that is not plain JSON as its ``repr()``), plus the formatted message.
+    The structured ``extra`` fields land on the record as attributes, so
+    they are read the same way."""
+    parts = [f"{k} {v} {v!r}" for k, v in vars(rec).items()]
     parts.append(rec.getMessage())
     return " ".join(parts).lower()
 
 
-_LEAK_PROBES = ("alice", "release owner", "rust", "berlin")
+_LEAK_PROBES = tuple(word.lower() for word in (_NAME, _ROLE, _PREF, _PLACE))
+
+
+def _assert_no_leak(text: str) -> None:
+    for leak in _LEAK_PROBES:
+        assert leak not in text.lower()
+
+
+class _Who(enum.Enum):
+    """An ``extra`` value whose ``str()`` is only ``_Who.NAME``, while its
+    ``repr()``, which the JSON renderer writes, carries the name."""
+
+    NAME = _NAME
+
+
+class TestRecordTextProbe:
+    """Each way the record can carry identity text to a sink trips the
+    probe: the message (raw or formatted), its args, the exception and stack
+    text, and an extra's value, its ``repr()`` or its name."""
+
+    @pytest.mark.parametrize(
+        "fields",
+        [
+            {"msg": f"admitted {_NAME}"},
+            {"msg": "admitted %s%s", "args": (_NAME[:3], _NAME[3:])},
+            {"msg": "tier_admitted", "args": {"who": _NAME}},
+            {"msg": "tier_admitted", "exc_text": f"ValueError: {_NAME}"},
+            {"msg": "tier_admitted", "stack_info": f"Stack: {_NAME}"},
+            {"msg": "tier_admitted", "item_id": _NAME},
+            {"msg": "tier_admitted", "prefs": [_NAME]},
+            {"msg": "tier_admitted", "who": _Who.NAME},
+            {"msg": "tier_admitted", f"pref_{_NAME}": True},
+        ],
+        ids=[
+            "message", "formatted-args", "unused-args", "exc_text", "stack_info",
+            "str-extra", "list-extra", "repr-only-extra", "extra-name",
+        ],
+    )
+    def test_what_the_record_carries_trips_the_probe(
+        self, fields: dict[str, object],
+    ) -> None:
+        assert _NAME.lower() in _record_text(logging.makeLogRecord(fields))
 
 
 # ─── Registry pairing at the render helper ─────────────────
@@ -184,11 +241,23 @@ class TestRelationshipProvenanceEmission:
             section = _render(_alice(), budget)
         assert section is not None
         # The section itself carries the identity — that is its job.
-        assert "Alice" in section.content
+        assert _NAME in section.content
         (rec,) = _provenance_records(caplog)
-        text = _record_text(rec)
-        for leak in _LEAK_PROBES:
-            assert leak not in text
+        _assert_no_leak(_record_text(rec))
+
+    def test_rendered_line_never_carries_the_identity_text(
+        self,
+        rendered_log: io.StringIO,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The same probe on the JSON line an operator reads: what actually
+        leaves the process, not the record that stands in for it."""
+        monkeypatch.setenv("PERSATRIX_MEMORY_PROVENANCE", "1")
+        configure_logging(service_kind="agent", service_instance="ember-owl")
+        assert _render(_alice(), MemoryBudget(total_tokens=1500)) is not None
+        rendered = rendered_log.getvalue()
+        assert "persatrix.memory.tier_admitted" in rendered
+        _assert_no_leak(rendered)
 
     def test_silent_without_the_switch(
         self,
@@ -234,7 +303,10 @@ class TestIdentityTurnIsVisibleToProvenance:
             ):
                 res = await store_note.func(
                     topic=f"contact:{_ALICE_ID}",
-                    content="Name: Alice. Role: release owner.",
+                    content=(
+                        f"Name: {_NAME}. Role: {_ROLE}. "
+                        f"Prefers: {_PREF}. Lives in {_PLACE}."
+                    ),
                 )
             assert res.success
 
@@ -252,15 +324,16 @@ class TestIdentityTurnIsVisibleToProvenance:
 
             rel_section = agent._working_memory.get_section("relationship_context")
             assert rel_section is not None
-            assert "Alice" in rel_section.content
+            # All four identity fields reach the prompt on this path, so the
+            # probe below has something to catch.
+            for value in (_NAME, _ROLE, _PREF, _PLACE):
+                assert value in rel_section.content
             records = _provenance_records(caplog)
             assert len(records) == 1
             assert getattr(records[0], "item_id", None) == f"user:{_ALICE_ID}"
             assert getattr(records[0], "tokens_admitted", 0) > 0
             # Same probe as the render-level test: the structured fields
             # are attributes, so the message alone proves nothing.
-            text = _record_text(records[0])
-            for leak in _LEAK_PROBES:
-                assert leak not in text
+            _assert_no_leak(_record_text(records[0]))
         finally:
             await agent.close_memory()
