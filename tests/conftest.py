@@ -21,12 +21,6 @@ _tests_dir = str(Path(__file__).parent)
 if _tests_dir not in sys.path:
     sys.path.insert(0, _tests_dir)
 
-# pytest explains a failed ``assert`` (what was compared, where the text
-# matched) only in test files and conftest files, unless a module is
-# registered here before anything imports it. The leak probe asserts inside
-# its helper, so this makes its failures show where the secret sits.
-pytest.register_assert_rewrite("_log_probe_helpers")
-
 # Ensure leaked aiosqlite connections cannot hang interpreter shutdown.
 # See tests/_test_infra.py for the rationale.
 from _test_infra import (  # noqa: E402

@@ -50,9 +50,11 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 # A distinctive protected sentence — 12 normalized words, comfortably above
 # the span threshold. If any fragment of it appears in an audit record the
-# §G metadata-only wall has been breached.
+# §G metadata-only wall has been breached. Its names are invented words:
+# the leak probe ignores letter case and also reads the checkout path, so a
+# real word could match a folder name.
 _SECRET = (
-    "Project Nightjar acquires Meadowlark Systems for ninety million "
+    "Project Quorvath acquires Brellomir Systems for ninety million "
     "dollars closing next quarter"
 )
 _BENIGN = "Let us schedule the retro for Thursday and invite the new team"
@@ -92,7 +94,7 @@ class TestSpanHashes:
 
     def test_normalization_folds_case_whitespace_punctuation(self) -> None:
         mangled = (
-            "project NIGHTJAR   acquires,\n Meadowlark - Systems for "
+            "project QUORVATH   acquires,\n Brellomir - Systems for "
             "NINETY million dollars; closing next QUARTER!"
         )
         assert span_hashes(_SECRET) & span_hashes(mangled)
@@ -228,7 +230,7 @@ class TestAuditEmit:
         assert rec.matched_spans >= 1  # type: ignore[attr-defined]
         # §G metadata-only wall: no fragment of the protected text may ride
         # the record — not the message, not any extra value.
-        assert_absent(rec, "Nightjar", "Meadowlark")
+        assert_absent(rec, "Quorvath", "Brellomir")
 
     def test_silent_on_benign_traffic(
         self, caplog: pytest.LogCaptureFixture,

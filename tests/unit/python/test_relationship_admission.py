@@ -273,7 +273,7 @@ class TestIdentityTurnIsVisibleToProvenance:
             assert rel_section is not None
             # All four identity fields reach the prompt on this path, so the
             # probe below has something to catch.
-            for value in (_NAME, _ROLE, _PREF, _PLACE):
+            for value in _LEAK_PROBES:
                 assert value in rel_section.content
             records = _provenance_records(caplog)
             assert len(records) == 1

@@ -23,6 +23,7 @@ from __future__ import annotations
 import logging
 
 import pytest
+from _log_probe_helpers import assert_absent, record_text
 
 from agents.epoch_id import epoch_scope
 from agents.memory.facts import FactStore
@@ -380,8 +381,7 @@ class TestEmitFactsShadow:
         await _emit(fact_store, _channel_event())
         (trace,) = _traces(shadow_log)
         assert trace["candidates"], "expected the seeded candidate"
-        assert secret not in repr(trace)
-        assert all(secret not in r.getMessage() for r in shadow_log.records)
+        assert_absent(record_text(*shadow_log.records), secret)
 
 
 # ─── End-to-end: shadow never enters the prompt ─────────────
