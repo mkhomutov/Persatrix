@@ -75,9 +75,12 @@ PR 5c's own way of holding a D meeting must give a second try the memory
 its advisers had before the first: it keeps a copy of each adviser's store
 from before the meeting and puts it back before trying again. And PR 6's
 run does what a harness fault asks beyond stopping: it counts the faults,
-so a third ends the run, and it sets aside the scored outputs so far. It
-also passes each series' finished tries to dollars per plan, and asks
-which series every arm's comparisons keep.
+so a third ends the run, and it sets aside the scored outputs so far,
+including the stopped series' tries, which the fault carries. It builds
+each channel arm's hold with `channel_arm.run_meeting` and the binary bound
+to it, and arm A's with a new log per series. It also passes each series'
+finished tries to dollars per plan, and asks which series every arm's
+comparisons keep.
 
 ## Frozen choices
 

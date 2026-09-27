@@ -229,6 +229,14 @@ class TestReadCallLog:
             "plan-1", 3, "ember-owl", "TimeoutError",
         )
 
+    @pytest.mark.parametrize(("arm", "counts"), [("C", False), ("D", True)])
+    def test_a_failed_memory_write_counts_as_its_answer_would(self, tmp_path, arm, counts):
+        log = read_call_log(_write(
+            tmp_path / "c.jsonl", _line(arm=arm, purpose="summary", error="RateLimitError"),
+            _line(arm=arm, error="RateLimitError"),
+        ))
+        assert [f.counts_in_arm for f in log.failures] == [counts, True]
+
     def test_a_memo_request_marks_only_its_own_try(self, tmp_path):
         """A meeting held again after a provider error writes its calls under
         the next try; the memo asked for in one try is not the other's."""

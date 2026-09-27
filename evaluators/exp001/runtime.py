@@ -153,6 +153,8 @@ class FailedCall:
     adviser: str | None
     started_at: dt.datetime
     error: str
+    # False, as for its answer, for a memory write in an arm with no memory.
+    counts_in_arm: bool = True
 
 
 @dataclass(frozen=True)
@@ -180,6 +182,7 @@ def read_call_log(path: Path, *, memo_turns: Iterable[MemoTurn] = ()) -> CallLog
                 arm=record.arm, series=record.series, meeting=record.meeting,
                 attempt=record.attempt, meeting_try=record.meeting_try, adviser=record.adviser,
                 started_at=record.started_at, error=str(line["error"]),
+                counts_in_arm=record.counts_in_arm,
             ))
         else:
             records.append(record)
