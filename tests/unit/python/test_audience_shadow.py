@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 import pytest
+from _log_probe_helpers import assert_absent, record_text
 
 from agents.persona_runtime.audience import (
     AUDIENCE_LIVE,
@@ -145,8 +146,7 @@ def test_the_trace_never_carries_entry_content(
         )
     trace = _trace(caplog)
     assert trace is not None
-    assert "March 3" not in repr(trace)
-    assert "March 3" not in caplog.text
+    assert_absent(record_text(*caplog.records), "March 3")
 
 
 def test_the_per_entry_array_is_debug_only(
@@ -169,7 +169,7 @@ def test_the_per_entry_array_is_debug_only(
         "tier": "facts", "entry_id": "e1", "protection_level": "internal",
         "source_channel_id": DM, "verdict": "withhold-disjoint",
     }]
-    assert "March 3" not in repr(trace)
+    assert_absent(record_text(*caplog.records), "March 3")
 
 
 @pytest.mark.parametrize("mode", [AUDIENCE_OFF, AUDIENCE_SHADOW])

@@ -23,6 +23,7 @@ import logging
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from _log_probe_helpers import assert_absent
 
 from agents.channel_wire_metadata import DispatchContext
 from agents.chat_reply import process_inbound_channel_event
@@ -38,9 +39,11 @@ from agents.persona_types import ActionType, AgentEvent, EventType
 from agents.tools.registry import clear_registry
 
 # The protected sentence: 12 normalized words, comfortably above the §G
-# span threshold, with a distinctive token for the metadata-only check.
+# span threshold, with a distinctive token for the metadata-only check. The
+# token is an invented word, since the leak probe ignores letter case and
+# also reads the checkout path.
 _PROTECTED_SUMMARY = (
-    "Leadership agreed to sunset the REDWOLF-2291 programme and move the "
+    "Leadership agreed to sunset the VOLSKAR-2291 programme and move the "
     "whole team to the Nightjar platform next quarter"
 )
 _CHANNEL = "group:town-square"
@@ -197,7 +200,7 @@ class TestTripwireEndToEnd:
             assert rec.protection_level == "restricted"  # type: ignore[attr-defined]
             assert rec.acting_classification == "internal"  # type: ignore[attr-defined]
             # §G metadata-only wall, through the whole seam.
-            assert "REDWOLF" not in repr(rec.__dict__)
+            assert_absent(rec, "VOLSKAR")
         finally:
             await agent.close_memory()
 
