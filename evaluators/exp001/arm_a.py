@@ -103,13 +103,14 @@ async def run_meeting(
     *,
     log_path: Path,
     attempt: int,
+    meeting_try: int,
     now: Callable[[], dt.datetime] = _real_now,
 ) -> ArmAReply:
     """Hold one meeting of arm A: one call, logged to *log_path* under its tags."""
     system = system_prompt(panel, series, meeting)
     with call_log_scope(
         log_path, arm=ARM, series=series.id, meeting=meeting.id,
-        meeting_kind=meeting.kind, attempt=attempt,
+        meeting_kind=meeting.kind, attempt=attempt, meeting_try=meeting_try,
     ):
         asked_at = now()
         response = await client.create_message(

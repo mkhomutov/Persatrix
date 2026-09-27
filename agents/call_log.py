@@ -10,7 +10,7 @@ A line holds:
 
 * ``tags`` — the fixed labels from ``PERSATRIX_CALL_TAGS``, a JSON object of
   strings the operator sets per process (EXP-001 sets the arm, series,
-  meeting and attempt); ``{}`` when unset;
+  meeting, meeting kind, attempt and try); ``{}`` when unset;
 * ``agent_id`` — the process's agent;
 * ``purpose`` — what the call was for, from :class:`agents.llm_types.LLMCallPurpose`;
 * ``started_at`` — real time, UTC, when the call began (never agent time);

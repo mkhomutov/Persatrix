@@ -16,7 +16,7 @@ from typing import Any
 
 import pytest
 
-from evaluators.exp001.deployment import DeploymentError, Layout
+from evaluators.exp001.deployment import Layout, StartError
 from evaluators.exp001.orchestrator import OrchestratorError
 from evaluators.exp001.panel import load_panel
 from evaluators.exp001.processes import (
@@ -199,14 +199,14 @@ class TestStartAndStop:
         self, layout: Layout,
     ) -> None:
         world = _World(exits=frozenset({"ripple-kite"}))
-        with pytest.raises(DeploymentError, match=r"ripple-kite exited \(1\).*ripple-kite\.log"):
+        with pytest.raises(StartError, match=r"ripple-kite exited \(1\).*ripple-kite\.log"):
             await _deployment(layout, world).start(world, timeout=60)
 
     async def test_advisers_that_never_register_time_the_start_out(
         self, layout: Layout,
     ) -> None:
         world = _World(registers=False)
-        with pytest.raises(DeploymentError, match="not registered after 60 s: crimson-crow, "):
+        with pytest.raises(StartError, match="not registered after 60 s: crimson-crow, "):
             await _deployment(layout, world).start(world, timeout=60)
 
     async def test_the_advisers_stop_before_the_orchestrator(self, layout: Layout) -> None:
@@ -239,7 +239,7 @@ class TestStartAndStop:
         self, layout: Layout,
     ) -> None:
         world = _World(dies_while_registering=True)
-        with pytest.raises(DeploymentError, match=r"orchestrator exited \(2\).*orchestrator\.log"):
+        with pytest.raises(StartError, match=r"orchestrator exited \(2\).*orchestrator\.log"):
             await _deployment(layout, world).start(world, timeout=60)
 
     async def test_kill_ends_every_process_still_running_at_once(self, layout: Layout) -> None:

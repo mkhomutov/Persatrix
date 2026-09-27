@@ -6,7 +6,8 @@ ledger, which has no price for cached tokens and misses some memory
 summaries. Two totals matter:
 
 - an arm's **dollars per plan**: what it spent on one series' briefing and
-  four plans, in the attempt that finished, divided by four;
+  four plans, in the attempt that finished and each meeting's last try,
+  divided by four;
 - **real spend**: every call the arms made in the scored run, counted or not,
   which the $150 cap reads. Practice calls and the judge are left out; the
   judge has its own $25 cap, read from **judging spend**.
@@ -85,6 +86,9 @@ class CallRecord:
     # False for memory writes in an arm whose design has no memory (B, C,
     # D-prime) when the runtime cannot switch them off.
     counts_in_arm: bool = True
+    # Which time the meeting was held within the attempt: a meeting a
+    # provider error cut short is held again, as the next try.
+    meeting_try: int = 1
 
 
 def price_call(call: CallRecord, prices: Mapping[str, Price] = PRICES) -> float:
@@ -106,15 +110,24 @@ def dollars_per_plan(
     arm: str,
     series: str,
     attempt: int,
+    tries: Mapping[str, int],
     prices: Mapping[str, Price] = PRICES,
 ) -> float:
-    """The arm's spend on the series' briefing and plans in one attempt, per plan."""
+    """The arm's spend on the series' briefing and plans in one attempt, per plan.
+
+    *tries* gives, for each meeting, the try that finished; the calls of a
+    try a provider error cut short are real spend, not the arm's.
+    """
+    attempt_calls = [
+        r for r in records if r.arm == arm and r.series == series and r.attempt == attempt
+    ]
+    unknown = sorted({r.meeting for r in attempt_calls} - set(tries))
+    if unknown:
+        raise ValueError(f"which try finished is not known for {', '.join(unknown)}")
     total = sum(
         price_call(r, prices)
-        for r in records
-        if r.arm == arm
-        and r.series == series
-        and r.attempt == attempt
+        for r in attempt_calls
+        if r.meeting_try == tries[r.meeting]
         and r.counts_in_arm
         and r.purpose is not CallPurpose.JUDGE
         and r.meeting_kind is not MeetingKind.RECALL

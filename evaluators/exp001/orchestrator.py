@@ -16,6 +16,7 @@ wallet is served.
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import json
 import re
@@ -32,6 +33,11 @@ HARNESS_ID = "exp001-harness"
 _HISTORY_LIMIT = 1000
 # One request's limit; every request is a quick read or write on loopback.
 _REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=30)
+# A meeting polls for up to an hour, so a read that fails in transit or with
+# a 5xx is asked again before it counts; a write is sent once, as it could
+# land twice.
+_READ_TRIES = 3
+_RETRY_WAIT = 1.0
 # The lines the harness reads; a test holds each to the Go source that logs it.
 _END_VOTE_CLOSE = "channels: interaction closed by end-of-interaction votes"
 _BOUNDED_CLOSE = "channels: interaction closed by RFC 0052 bounded close"
@@ -106,12 +112,13 @@ class Orchestrator:
 
     def __init__(
         self, base_url: str, session: aiohttp.ClientSession, *,
-        timeout: aiohttp.ClientTimeout = _REQUEST_TIMEOUT,
+        timeout: aiohttp.ClientTimeout = _REQUEST_TIMEOUT, retry_wait: float = _RETRY_WAIT,
     ) -> None:
         self._base = base_url.rstrip("/")
         self._session = session
         self._headers = {"X-Agent-ID": HARNESS_ID}
         self._timeout = timeout
+        self._retry_wait = retry_wait
 
     async def healthy(self) -> bool:
         try:
@@ -163,20 +170,35 @@ class Orchestrator:
     async def _call(
         self, method: str, path: str, body: Any = None, *, headers: Mapping[str, str] | None = None,
     ) -> Any:
-        try:
-            async with self._session.request(
-                method, f"{self._base}{path}", json=body,
-                headers={**self._headers, **(headers or {})}, timeout=self._timeout,
-            ) as response:
-                status, text = response.status, await response.text()
-        except (aiohttp.ClientError, TimeoutError) as exc:
-            raise OrchestratorError(f"{method} {path}: {exc!r}") from exc
+        tries = _READ_TRIES if method == "GET" else 1
+        for n in range(1, tries + 1):
+            try:
+                status, text = await self._send(method, path, body, headers)
+            except OrchestratorError:
+                if n == tries:
+                    raise
+            else:
+                if status < 500 or n == tries:
+                    break
+            await asyncio.sleep(self._retry_wait)
         if status >= 400:
             raise OrchestratorError(f"{method} {path}: {status} {text[:300]}")
         try:
             return json.loads(text) if text else None
         except ValueError as exc:
             raise OrchestratorError(f"{method} {path}: not JSON: {text[:300]}") from exc
+
+    async def _send(
+        self, method: str, path: str, body: Any, headers: Mapping[str, str] | None,
+    ) -> tuple[int, str]:
+        try:
+            async with self._session.request(
+                method, f"{self._base}{path}", json=body,
+                headers={**self._headers, **(headers or {})}, timeout=self._timeout,
+            ) as response:
+                return response.status, await response.text()
+        except (aiohttp.ClientError, TimeoutError) as exc:
+            raise OrchestratorError(f"{method} {path}: {exc!r}") from exc
 
 
 @dataclass(frozen=True)
