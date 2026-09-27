@@ -147,3 +147,12 @@ that running them surfaced.
 > is documented here and in the helper's docstring, not in the RFC 0026
 > MQ-11 record, which types it only as `str`. Either lands with the next
 > PR that touches the allocator.
+>
+> 2026-09-27 — **The pin's leak probe reads the whole record**
+> ([#1010](https://github.com/mkhomutov/Persatrix/pull/1010)). The pin
+> used common words for the identity, so a checkout under a `rustpin/`
+> directory read as a leaked "Rust". The identity is now made of invented
+> words. The probe reads every attribute of the emitted `LogRecord`: each
+> attribute's name, and its value both as text and in the `repr()` form
+> the log sinks write. A second test probes the rendered JSON line an
+> operator reads.
