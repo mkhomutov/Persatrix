@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0172
 summary: "An agent that stops drops every conversation it still holds open, and with it everything that conversation should have written to memory: nothing closes an open record with the shutdown reason, though the reason is defined. A room that ends by its idle window tells no member, and a reactive persona checks for idle conversations only when its next event arrives, so such a conversation stays open until then. EXP-001's arm D restarts its advisers after every meeting; on real processes, a briefing that ended by the idle window left all four advisers' memory empty."
-status: in_progress
+status: resolved
 severity: medium
 area: memory
 created: 2026-09-28
+closed: 2026-09-28
+closed_pr: 1014
 refs:
   - agents/persona_runtime/state_persistence.py
   - agents/persona_runtime/close_lifecycle.py
