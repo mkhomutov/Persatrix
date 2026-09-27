@@ -145,6 +145,7 @@ class ChannelMeeting:
     series: str
     meeting: str
     attempt: int
+    meeting_try: int
     channel: str
     opened: Message  # the operator's message, as stored
     closed_at: dt.datetime | None  # None: the discussion never closed
@@ -180,6 +181,7 @@ async def hold_meeting(
     *,
     channel: str,
     attempt: int,
+    meeting_try: int,
     now: Callable[[], dt.datetime] = _real_now,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     limits: Limits = LIMITS,
@@ -223,7 +225,7 @@ async def hold_meeting(
             failures.append(CLOSE_MISMATCH)
         memo_turn = MemoTurn(
             arm=arm, series=series.id, meeting=meeting.id, attempt=attempt,
-            chair=panel.chair.id, asked_at=asked_at,
+            meeting_try=meeting_try, chair=panel.chair.id, asked_at=asked_at,
         )
         memo = await wait.for_reply(panel.chair.id, request)
         if memo is None:
@@ -234,8 +236,9 @@ async def hold_meeting(
     if request is not None and _went_on(transcript, request, memo):
         failures.append(MEMO_TURN_WENT_ON)
     return ChannelMeeting(
-        arm=arm, series=series.id, meeting=meeting.id, attempt=attempt, channel=channel,
-        opened=opened, closed_at=closed_at, trigger=trigger, closed_by=closed_by,
+        arm=arm, series=series.id, meeting=meeting.id, attempt=attempt,
+        meeting_try=meeting_try, channel=channel, opened=opened, closed_at=closed_at,
+        trigger=trigger, closed_by=closed_by,
         memo_turn=memo_turn, energy=energy, memo=memo, transcript=transcript,
         failures=tuple(failures),
     )
@@ -331,6 +334,7 @@ async def run_meeting(
     meeting: Meeting,
     *,
     attempt: int,
+    meeting_try: int,
     directory: Path,
     binary: Path,
     python: Path = Path(sys.executable),
@@ -365,7 +369,7 @@ async def run_meeting(
         **meeting_clock_env(meeting.story_date, now()),
         **call_log_env(
             directory / CALL_LOG, arm=arm, series=series.id, meeting=meeting.id,
-            meeting_kind=meeting.kind, attempt=attempt,
+            meeting_kind=meeting.kind, attempt=attempt, meeting_try=meeting_try,
         ),
     }
     deployment = Deployment(
@@ -397,13 +401,15 @@ async def run_meeting(
                     )
                 result = await hold_meeting(
                     api, orchestrator_log, panel, arm, series, meeting, channel=channel,
-                    attempt=attempt, now=now, sleep=sleep, limits=limits, read_energy=energy,
+                    attempt=attempt, meeting_try=meeting_try, now=now, sleep=sleep,
+                    limits=limits, read_energy=energy,
                 )
                 exited = deployment.exited()
             except Exception as exc:
                 _write_failure(
                     directory / RECORD, error=exc, arm=arm, series=series.id,
-                    meeting=meeting.id, attempt=attempt, channel=channel,
+                    meeting=meeting.id, attempt=attempt, meeting_try=meeting_try,
+                    channel=channel,
                     exited=deployment.exited(),
                 )
                 raise

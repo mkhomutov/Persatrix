@@ -185,7 +185,8 @@ class TestRunMeeting:
         plan = _first(MeetingKind.PLAN)
         provider = _Provider("## Recommendation\nOption B.")
         reply = await run_meeting(
-            LLMClient(provider), PANEL, SERIES, plan, log_path=log_path, attempt=2, now=_clock(),
+            LLMClient(provider), PANEL, SERIES, plan, log_path=log_path, attempt=2,
+            meeting_try=3, now=_clock(),
         )
         assert provider.calls == [{
             "model": ARMS_MODEL,
@@ -203,10 +204,10 @@ class TestRunMeeting:
         [record] = read_call_log(log_path).records
         assert (
             record.arm, record.series, record.meeting, record.meeting_kind, record.attempt,
-            record.adviser, record.purpose, record.model, record.input_tokens,
+            record.meeting_try, record.adviser, record.purpose, record.model, record.input_tokens,
         ) == (
             "A", "series-1", plan.id, MeetingKind.PLAN, 2,
-            None, CallPurpose.REPLY, ARMS_MODEL, 1200,
+            3, None, CallPurpose.REPLY, ARMS_MODEL, 1200,
         )
         # The record reads turn, critic and revise alike, and keeps no alias.
         line = json.loads(log_path.read_text())
@@ -223,7 +224,7 @@ class TestRunMeeting:
         answer = LLMResponse(text=text, stop_reason=stop_reason, usage=Usage(1200, 4096))
         reply = await run_meeting(
             LLMClient(_Provider(answer)), PANEL, SERIES, _first(MeetingKind.PLAN),
-            log_path=log_path, attempt=1,
+            log_path=log_path, attempt=1, meeting_try=1,
         )
         assert (reply.text, reply.stop_reason, reply.missing) == (text or "", stop_reason, True)
 
@@ -232,7 +233,9 @@ class TestRunMeeting:
         provider = _Provider("NOTED-THE-LEASE", "MEMO")
         client = LLMClient(provider)
         for meeting in (briefing, plan):
-            await run_meeting(client, PANEL, SERIES, meeting, log_path=log_path, attempt=1)
+            await run_meeting(
+                client, PANEL, SERIES, meeting, log_path=log_path, attempt=1, meeting_try=1,
+            )
         second = provider.calls[1]
         assert second["messages"] == [{"role": "user", "content": plan.message}]
         assert second["system"] == system_prompt(PANEL, SERIES, plan)
@@ -244,7 +247,7 @@ class TestRunMeeting:
         with pytest.raises(ConnectionResetError):
             await run_meeting(
                 LLMClient(provider), PANEL, SERIES, SERIES.meetings[0],
-                log_path=log_path, attempt=1,
+                log_path=log_path, attempt=1, meeting_try=1,
             )
         log = read_call_log(log_path)
         assert log.records == ()

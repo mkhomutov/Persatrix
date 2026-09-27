@@ -4,8 +4,10 @@ Before a meeting the harness starts every adviser with two groups of
 settings. The **meeting clock** puts the adviser on the meeting's story date:
 its agent time starts at 10:00 UTC that day and runs on with the real clock
 (check 7). The **call log** names the file the adviser appends a line to for
-every model call, and the tags that say which arm, series, meeting and
-attempt the process is serving (check 4). Calls the harness makes itself,
+every model call, and the tags that say which arm, series, meeting, attempt
+and try the process is serving (check 4). An attempt is one run of the
+series from its briefing; a try is one holding of a meeting within it, and a
+meeting a provider error cut short is held again as the next try. Calls the harness makes itself,
 such as arm A's, are tagged per meeting with :func:`call_log_scope`.
 
 After the run, :func:`read_call_log` turns those lines into the
@@ -49,7 +51,7 @@ _PURPOSES = {
 }
 # Purposes that are the chair speaking, so they become the memo once asked.
 _SPEAKING = frozenset({"turn", "critic", "revise"})
-_TAGS = ("arm", "series", "meeting", "meeting_kind", "attempt")
+_TAGS = ("arm", "series", "meeting", "meeting_kind", "attempt", "try")
 
 
 class CallLogError(ValueError):
@@ -82,9 +84,10 @@ def call_log_env(
     meeting: str,
     meeting_kind: MeetingKind,
     attempt: int,
+    meeting_try: int,
 ) -> dict[str, str]:
     """The call-log settings for a process serving one meeting of one arm."""
-    tags = _tags(arm, series, meeting, meeting_kind, attempt)
+    tags = _tags(arm, series, meeting, meeting_kind, attempt, meeting_try)
     return {CALL_LOG_ENV: str(path), CALL_TAGS_ENV: json.dumps(tags)}
 
 
@@ -96,13 +99,17 @@ def call_log_scope(
     meeting: str,
     meeting_kind: MeetingKind,
     attempt: int,
+    meeting_try: int,
 ) -> AbstractContextManager[None]:
     """The same log and tags for the calls the harness makes inside the block."""
-    return call_log.scoped(path, _tags(arm, series, meeting, meeting_kind, attempt))
+    return call_log.scoped(
+        path, _tags(arm, series, meeting, meeting_kind, attempt, meeting_try),
+    )
 
 
 def _tags(
     arm: str, series: str, meeting: str, meeting_kind: MeetingKind, attempt: int,
+    meeting_try: int,
 ) -> dict[str, str]:
     if arm not in ARMS:
         raise ValueError(f"unknown arm {arm!r}; expected one of {ARMS}")
@@ -112,6 +119,7 @@ def _tags(
         "meeting": meeting,
         "meeting_kind": meeting_kind.value,
         "attempt": str(attempt),
+        "try": str(meeting_try),
     }
 
 
@@ -123,6 +131,7 @@ class MemoTurn:
     series: str
     meeting: str
     attempt: int
+    meeting_try: int
     chair: str
     asked_at: dt.datetime
 
@@ -140,9 +149,12 @@ class FailedCall:
     series: str
     meeting: str
     attempt: int
+    meeting_try: int
     adviser: str | None
     started_at: dt.datetime
     error: str
+    # False, as for its answer, for a memory write in an arm with no memory.
+    counts_in_arm: bool = True
 
 
 @dataclass(frozen=True)
@@ -153,7 +165,7 @@ class CallLog:
 
 def read_call_log(path: Path, *, memo_turns: Iterable[MemoTurn] = ()) -> CallLog:
     """Every line of *path*, as records and failures. No file is an empty log."""
-    memos = {(m.arm, m.series, m.meeting, m.attempt): m for m in memo_turns}
+    memos = {(m.arm, m.series, m.meeting, m.attempt, m.meeting_try): m for m in memo_turns}
     records: list[CallRecord] = []
     failures: list[FailedCall] = []
     if not path.exists():
@@ -168,8 +180,9 @@ def read_call_log(path: Path, *, memo_turns: Iterable[MemoTurn] = ()) -> CallLog
         if line.get("error") is not None:
             failures.append(FailedCall(
                 arm=record.arm, series=record.series, meeting=record.meeting,
-                attempt=record.attempt, adviser=record.adviser,
+                attempt=record.attempt, meeting_try=record.meeting_try, adviser=record.adviser,
                 started_at=record.started_at, error=str(line["error"]),
+                counts_in_arm=record.counts_in_arm,
             ))
         else:
             records.append(record)
@@ -177,7 +190,7 @@ def read_call_log(path: Path, *, memo_turns: Iterable[MemoTurn] = ()) -> CallLog
 
 
 def _record(
-    line: Any, where: str, memos: dict[tuple[str, str, str, int], MemoTurn],
+    line: Any, where: str, memos: dict[tuple[str, str, str, int, int], MemoTurn],
 ) -> CallRecord:
     if not isinstance(line, dict):
         raise CallLogError(f"{where}: not a JSON object")
@@ -191,6 +204,7 @@ def _record(
     try:
         arm = tags["arm"]
         attempt = int(tags["attempt"])
+        meeting_try = int(tags["try"])
         kind = MeetingKind(tags["meeting_kind"])
         started_at = dt.datetime.fromisoformat(line["started_at"])
         agent_id = line["agent_id"]
@@ -205,7 +219,7 @@ def _record(
         raise CallLogError(f"{where}: unknown arm {arm!r}")
 
     purpose = _PURPOSES[runtime_purpose]
-    memo = memos.get((arm, tags["series"], tags["meeting"], attempt))
+    memo = memos.get((arm, tags["series"], tags["meeting"], attempt, meeting_try))
     if (
         memo is not None
         and runtime_purpose in _SPEAKING
@@ -225,5 +239,6 @@ def _record(
         started_at=started_at,
         model=model,
         counts_in_arm=not (purpose is CallPurpose.SUMMARY and arm in MEMORYLESS_ARMS),
+        meeting_try=meeting_try,
         **tokens,
     )
