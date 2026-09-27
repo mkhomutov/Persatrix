@@ -401,7 +401,10 @@ class PersonaRuntimeDriver:
                             turn_outputs.append(last_reply)
             terminal_state = await _snapshot_state(agent, setup.persona)
         finally:
-            await agent.close_memory()
+            # The run ended at the snapshot. Writing the conversations still
+            # open would summarise them, a model call no golden recorded
+            # (ISSUE-0172), so they go unwritten, as they always did here.
+            await agent.close_memory(write_open=False)
 
         return EvalRun(
             turn_outputs=turn_outputs,

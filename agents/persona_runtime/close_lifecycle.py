@@ -24,7 +24,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from ..llm_client import LLMClient
-from ..memory.boundary_detectors import DEFAULT_CLOSING_GRACE_SEC
+from ..memory.boundary_detectors import DEFAULT_CLOSING_GRACE_SEC, REASON_SHUTDOWN
 from ..memory.episodic import EpisodicMemory
 from ..memory.interactions import InteractionTracker, cleanup_closing_interactions
 from .close_path import persist_closed_interaction
@@ -100,6 +100,41 @@ class _CloseLifecycleMixin:
             self._interaction_tracker, self._persist_closed_interaction,
             derive_channels=derive_channels, speaker_gaps=speaker_gaps,
         )
+
+    async def close_open_interactions(self) -> int:
+        """Close every live open record as the agent stops, and write each
+        to memory; return how many closed (ISSUE-0172).
+
+        Nothing else would. A record closes on a close notification, when a
+        message arrives under a new interaction id, or once its idle window
+        has passed, and the idle check runs only when the agent's next event
+        arrives; a reactive agent gets no tick. So a conversation the room
+        ended by its idle window, which tells no one, stays open until that
+        event, and an agent that stops first would lose it. One instant
+        closes them all, as a room close does. A record the catch-up replay
+        opened is left alone: it derives only when its pass ends
+        (ISSUE-0130 (b)), and the next boot reads its window again. The
+        caller holds ``_lock`` and drains the summaries this starts.
+        """
+        tracker = self._interaction_tracker
+        now = tracker.now()
+        closed = [
+            finished
+            for record in tracker.open_records() if not record.replayed
+            if (finished := tracker.close_record(record, reason=REASON_SHUTDOWN, now=now))
+            is not None
+        ]
+        for interaction in closed:
+            try:
+                await self._persist_closed_interaction(interaction)
+            except Exception:
+                logger.warning(
+                    "Failed to write open interaction on stop for agent %s "
+                    "(scope=%s, interaction_id=%s)",
+                    self.agent_id, interaction.scope, interaction.interaction_id,
+                    exc_info=True,
+                )
+        return len(closed)
 
     async def drain_pending_summaries(
         self, *, timeout: float | None = DRAIN_TIMEOUT_SEC,

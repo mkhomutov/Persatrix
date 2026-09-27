@@ -83,7 +83,7 @@ class _FakeAgent:
     async def initialize_memory(self) -> None:
         pass
 
-    async def close_memory(self) -> None:
+    async def close_memory(self, *, write_open: bool = True) -> None:
         pass
 
     def set_history_fetcher(self, fetcher: Any) -> None:
