@@ -23,6 +23,7 @@ import logging
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from _log_probe_helpers import assert_absent
 
 from agents.channel_wire_metadata import DispatchContext
 from agents.chat_reply import process_inbound_channel_event
@@ -197,7 +198,7 @@ class TestTripwireEndToEnd:
             assert rec.protection_level == "restricted"  # type: ignore[attr-defined]
             assert rec.acting_classification == "internal"  # type: ignore[attr-defined]
             # §G metadata-only wall, through the whole seam.
-            assert "REDWOLF" not in repr(rec.__dict__)
+            assert_absent(rec, "REDWOLF")
         finally:
             await agent.close_memory()
 

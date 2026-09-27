@@ -35,6 +35,7 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from _log_probe_helpers import assert_absent, record_text
 from _salience_gate_helpers import (
     _AUDIT_EVENT,
     _BID_PATH,
@@ -72,10 +73,6 @@ def _silence(note: str | None = _NOTE) -> SalienceDecision:
 
 def _note_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
     return [rec for rec in caplog.records if rec.getMessage() == _NOTE_EVENT]
-
-
-def _record_text(rec: logging.LogRecord) -> str:
-    return " ".join(str(v) for v in rec.__dict__.values())
 
 
 async def _run(
@@ -119,7 +116,7 @@ class TestReasonNoteDebugRecord:
         audits = _audit_records(caplog)
         assert len(audits) == 1
         assert not hasattr(audits[0], "reason_note")
-        assert _NOTE not in _record_text(audits[0])
+        assert_absent(audits[0], _NOTE)
 
     async def test_plan_rung_emits_the_record_too(
         self, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch,
@@ -146,7 +143,7 @@ class TestNoRecordOffTheSuppressionPath:
 
         assert outcome is not None and outcome.silence is False
         assert _note_records(caplog) == []
-        assert _NOTE not in " ".join(_record_text(r) for r in caplog.records)
+        assert_absent(record_text(*caplog.records), _NOTE)
 
     async def test_silence_without_a_note_emits_no_record(
         self, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch,
@@ -165,7 +162,7 @@ class TestNoRecordOffTheSuppressionPath:
             await _run(monkeypatch, _silence(), mode=MODE_OFF)
 
         assert _note_records(caplog) == []
-        assert _NOTE not in " ".join(_record_text(r) for r in caplog.records)
+        assert_absent(record_text(*caplog.records), _NOTE)
 
 
 # ─── The rendered line: DEBUG only ───────────────────────────────────────────

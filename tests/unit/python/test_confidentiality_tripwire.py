@@ -28,6 +28,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
+from _log_probe_helpers import assert_absent
 
 from agents.channel_wire_metadata import DispatchContext
 from agents.confidentiality_tripwire import (
@@ -227,9 +228,7 @@ class TestAuditEmit:
         assert rec.matched_spans >= 1  # type: ignore[attr-defined]
         # §G metadata-only wall: no fragment of the protected text may ride
         # the record — not the message, not any extra value.
-        rendered = repr(rec.__dict__)
-        assert "Nightjar" not in rendered
-        assert "Meadowlark" not in rendered
+        assert_absent(rec, "Nightjar", "Meadowlark")
 
     def test_silent_on_benign_traffic(
         self, caplog: pytest.LogCaptureFixture,
