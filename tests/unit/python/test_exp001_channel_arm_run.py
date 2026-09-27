@@ -176,7 +176,7 @@ class _World:
 
 async def _run(world: _World, directory: Path, arm: str = "C") -> Any:
     return await run_meeting(
-        PANEL, arm, SERIES, PLAN, attempt=2, directory=directory,
+        PANEL, arm, SERIES, PLAN, attempt=2, meeting_try=3, directory=directory,
         binary=Path("/repo/bin/persatrix-server"), python=Path("/venv/bin/python"),
         repo=Path("/repo"), spawn=world.spawn, room=world, now=world.now, sleep=world.sleep,
     )
@@ -210,7 +210,7 @@ class TestRunMeeting:
         assert env[CALL_LOG_ENV] == str(tmp_path / "calls.jsonl")
         assert json.loads(env[CALL_TAGS_ENV]) == {
             "arm": "C", "series": "series-1", "meeting": PLAN.id, "meeting_kind": "plan",
-            "attempt": "2",
+            "attempt": "2", "try": "3",
         }
 
     async def test_the_meeting_is_recorded_beside_its_deployment(self, tmp_path: Path) -> None:
@@ -268,7 +268,9 @@ class TestRunMeeting:
         with pytest.raises(OrchestratorError):
             await _run(world, tmp_path)
         record = json.loads((tmp_path / "meeting.json").read_text())
-        assert (record["arm"], record["meeting"], record["attempt"]) == ("C", PLAN.id, 2)
+        assert (record["arm"], record["meeting"], record["attempt"], record["meeting_try"]) == (
+            "C", PLAN.id, 2, 3,
+        )
         assert record["error"].startswith("OrchestratorError: GET .../messages: 503")
         assert {name for name, _ in world.signalled} == set(world.processes)
 

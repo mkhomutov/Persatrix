@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from evaluators.exp001.deployment import DeploymentError, Layout
+from evaluators.exp001.deployment import Layout, StartError
 from evaluators.exp001.orchestrator import OrchestratorError
 
 LOOPBACK = "127.0.0.1"
@@ -189,7 +189,7 @@ class Deployment:
         """Start every process and wait until each adviser has registered.
 
         A process that exits meanwhile, or a start that takes longer than
-        *timeout* seconds, is a :class:`DeploymentError`.
+        *timeout* seconds, is a :class:`StartError`.
         """
         deadline = self._clock() + timeout
         self._handles["orchestrator"] = self._spawn(self._orchestrator, self._environ)
@@ -213,11 +213,11 @@ class Deployment:
 
     def _refuse_exited(self) -> None:
         for name, code in self.exited().items():
-            raise DeploymentError(f"{name} exited ({code}) while starting; see {self._logs[name]}")
+            raise StartError(f"{name} exited ({code}) while starting; see {self._logs[name]}")
 
     async def _wait(self, deadline: float, timed_out: str) -> None:
         if self._clock() >= deadline:
-            raise DeploymentError(timed_out)
+            raise StartError(timed_out)
         await self._sleep(_POLL)
 
     def exited(self) -> dict[str, int]:

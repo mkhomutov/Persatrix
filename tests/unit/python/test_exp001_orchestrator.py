@@ -196,6 +196,7 @@ class _Orchestrator:
         self.fail: int | None = None
         self.stall = 0.0  # seconds to wait before answering
         self.garbage = False  # answer 200 with a body that is not JSON
+        self.busy = 0  # answer this many requests first with a 503
         app = web.Application()
         app.router.add_route("*", "/{tail:.*}", self.handle)
         self.server = TestServer(app, host="127.0.0.1")
@@ -204,6 +205,9 @@ class _Orchestrator:
         body = await request.json() if request.can_read_body else None
         self.requests.append((request.method, request.path_qs, dict(request.headers), body))
         await asyncio.sleep(self.stall)
+        if self.busy:
+            self.busy -= 1
+            return web.json_response({"error": {"message": "busy"}}, status=503)
         if self.fail is not None:
             return web.json_response({"error": {"message": "no such channel"}}, status=self.fail)
         if self.garbage:
@@ -246,7 +250,7 @@ async def fake() -> AsyncIterator[_Orchestrator]:
 @pytest.fixture
 async def client(fake: _Orchestrator) -> AsyncIterator[Orchestrator]:
     async with aiohttp.ClientSession() as session:
-        yield Orchestrator(str(fake.server.make_url("")), session)
+        yield Orchestrator(str(fake.server.make_url("")), session, retry_wait=0)
 
 
 class TestTheRestClient:
@@ -326,6 +330,7 @@ class TestTheRestClient:
         async with aiohttp.ClientSession() as session:
             client = Orchestrator(
                 str(fake.server.make_url("")), session, timeout=aiohttp.ClientTimeout(total=0.1),
+                retry_wait=0,
             )
             assert not await client.healthy()
             with pytest.raises(OrchestratorError, match="GET /api/v1/agents"):
@@ -341,4 +346,26 @@ class TestTheRestClient:
     async def test_an_orchestrator_that_is_gone_is_an_orchestrator_error(self) -> None:
         async with aiohttp.ClientSession() as session:
             with pytest.raises(OrchestratorError, match="GET /api/v1/agents"):
-                await Orchestrator("http://127.0.0.1:9", session).agents()
+                await Orchestrator("http://127.0.0.1:9", session, retry_wait=0).agents()
+
+    async def test_a_read_the_orchestrator_fails_once_is_asked_again(
+        self, fake: _Orchestrator, client: Orchestrator,
+    ) -> None:
+        """A meeting polls for an hour; one busy answer is not the harness proving wrong."""
+        fake.busy = 2
+        assert await client.activity("group:advice-1") == {"ripple-kite"}
+        assert len(fake.requests) == 3
+
+    async def test_a_read_that_keeps_failing_is_an_orchestrator_error(
+        self, fake: _Orchestrator, client: Orchestrator,
+    ) -> None:
+        fake.busy = 3
+        with pytest.raises(OrchestratorError, match="GET .*/activity: 503"):
+            await client.activity("group:advice-1")
+
+    async def test_a_write_is_sent_once(self, fake: _Orchestrator, client: Orchestrator) -> None:
+        """Sent again, a post could land twice."""
+        fake.busy = 1
+        with pytest.raises(OrchestratorError, match="POST .*/messages: 503"):
+            await client.post("group:advice-1", "operator", "Hello")
+        assert len(fake.requests) == 1

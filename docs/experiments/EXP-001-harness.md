@@ -1,7 +1,7 @@
 # EXP-001 — The harness
 
-> **Status**: 🚧 **In Progress** — PRs 1, 2, 3a, 3b and 4 merged ([#984](https://github.com/mkhomutov/Persatrix/pull/984), [#986](https://github.com/mkhomutov/Persatrix/pull/986), [#987](https://github.com/mkhomutov/Persatrix/pull/987), [#988](https://github.com/mkhomutov/Persatrix/pull/988), [#992](https://github.com/mkhomutov/Persatrix/pull/992)); PR 5a open ([#993](https://github.com/mkhomutov/Persatrix/pull/993)); no practice run yet.
-> **Last updated**: 2026-09-24
+> **Status**: 🚧 **In Progress** — PRs 1, 2, 3a, 3b, 4 and 5a merged ([#984](https://github.com/mkhomutov/Persatrix/pull/984), [#986](https://github.com/mkhomutov/Persatrix/pull/986), [#987](https://github.com/mkhomutov/Persatrix/pull/987), [#988](https://github.com/mkhomutov/Persatrix/pull/988), [#992](https://github.com/mkhomutov/Persatrix/pull/992), [#993](https://github.com/mkhomutov/Persatrix/pull/993)); PR 5b open ([#1013](https://github.com/mkhomutov/Persatrix/pull/1013)); no practice run yet.
+> **Last updated**: 2026-09-27
 > **Carries out**: the [EXP-001 pre-registration](EXP-001-preregistration.md) and its [part 2](EXP-001-preregistration-scoring.md)
 > **Code**: [`evaluators/exp001/`](../../evaluators/exp001/)
 
@@ -13,8 +13,9 @@ picks a rule. It lands in the reviewed PRs below, as
 
 That section also says every choice a harness PR makes, where the documents
 leave it open, is listed in the PR and frozen when it merges. The
-[frozen choices](EXP-001-harness-choices.md) document collects them in one
-place, so the result can cite them.
+[frozen choices](EXP-001-harness-choices.md) document and its second part,
+[holding the meetings](EXP-001-harness-choices-meetings.md), collect them,
+so the result can cite them.
 
 ## The PRs
 
@@ -26,7 +27,7 @@ place, so the result can cite them.
 | 3b ([#988](https://github.com/mkhomutov/Persatrix/pull/988)) | Runtime: the Anthropic adapter's prompt-cache marker and cache token counts; each meeting's clock settings; a [call log](../ai-glossary.md#call-log) that tags each call with its arm, meeting, adviser and purpose, and the reader that turns it into call records | 3, 4 and 7, in part |
 | 4 ([#992](https://github.com/mkhomutov/Persatrix/pull/992)) | Arm A: one call per meeting, with the advisers' identities rendered by the persona runtime's own prompt code; the reader that checks the panel and builds each adviser's agent config | 3, 4, 7 and 8, for arm A |
 | 5a ([#993](https://github.com/mkhomutov/Persatrix/pull/993)) | Arms B and C: a deployment of the advisers for every meeting, its channel from `panel.yaml`, the memo turn, and the failures a meeting can show | 1, 5 and 6, for B and C; 7 and 8 for the deployed advisers |
-| 5b | Retries and failure detection for every arm, A included: provider errors retried, a series restarted from its briefing and then dropped, and the harness faults that stop the run | — (§3, attempts and failures) |
+| 5b ([#1013](https://github.com/mkhomutov/Persatrix/pull/1013)) | Retries and failure detection for every arm, A included: provider errors retried, a series restarted from its briefing and then dropped, and the harness faults that stop the run | — (§3, attempts and failures) |
 | 5c | Arm D: one deployment per series, and restarts between meetings that leave memory as it was | 2; 5 and 6 for D |
 | 5d | Arm D′: the earlier meetings' transcripts in a cached prompt prefix | 3; 1, 5 and 6 for D′ |
 | 6 | The judge, with a call purpose of its own, and the practice run, which also checks the call log's total against the provider's usage report | all eight, on the practice series |
@@ -68,18 +69,34 @@ declares its series' six channels in one deployment, each named for its
 meeting's place as B and C name theirs, well inside the shipped cap of 50
 channels.
 
+PR 5b holds every arm's series by the rules of attempts and failures, and
+leaves two things. Arm D's memory carries from one meeting to the next, so
+PR 5c's own way of holding a D meeting must give a second try the memory
+its advisers had before the first: it keeps a copy of each adviser's store
+from before the meeting and puts it back before trying again. And PR 6's
+run does what a harness fault asks beyond stopping: it counts the faults,
+so a third ends the run, and it sets aside the scored outputs so far,
+including the stopped series' tries, which the fault carries. It builds
+each channel arm's hold with `channel_arm.run_meeting` and the binary bound
+to it, and arm A's with a new log per series. It also passes each series'
+finished tries to dollars per plan, and asks which series every arm's
+comparisons keep.
+
 ## Frozen choices
 
 The choices each harness PR froze, and the arm order each series runs in, are
 in [their own document](EXP-001-harness-choices.md), so the result can cite
-them in one place.
+them. Those of PRs 5a on, which hold the meetings, are in its second part,
+[holding the meetings](EXP-001-harness-choices-meetings.md).
 
 ## Related documentation
 
 - [EXP-001 pre-registration](EXP-001-preregistration.md) — materials, arms
   and the run.
 - [Part 2: scoring and the decision](EXP-001-preregistration-scoring.md).
-- [Frozen choices](EXP-001-harness-choices.md) — every choice a harness PR
-  froze, and the arm order.
+- [Frozen choices](EXP-001-harness-choices.md) — the choices of PRs 1 to 4,
+  and the arm order.
+- [Frozen choices: holding the meetings](EXP-001-harness-choices-meetings.md)
+  — the choices of PRs 5a on.
 - [Evaluators guide](../evaluators-guide.md) — the golden-trace harness this
   one sits beside.
