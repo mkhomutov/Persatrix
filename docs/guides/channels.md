@@ -754,6 +754,8 @@ agent's local interaction record through two seams
   rotated `interaction_id` (the new topic) — or by its own idle window if the
   room stays quiet. Until one of those happens, its row for the closed
   discussion does not exist yet; that lag is inherent to the lazy rotation.
+  An agent that stops first closes the record as it stops, and writes it
+  then ([ISSUE-0172](../issues/ISSUE-0172-stopping-agent-drops-open-conversations.md)).
 
 Two boundary notes on those seams:
 
@@ -804,6 +806,7 @@ both surfaces):
 | `idle_gap` | *went idle* | the conversation went quiet past an idle window — the agent's own, or the channel's (carried on the wire as the rotation cause, producer plan OQ 5) |
 | `structural` | *ended* | an explicit end — the Layer 4 end-vote close routes through the structural close; the row does not distinguish a vote-close from a plain structural close, so "ended" is the honest label |
 | `cost` | *cost limit reached* | the Layer 1 per-interaction cost ceiling tripped |
+| `shutdown` | *closed* | the agent stopped while the conversation was still open, and wrote it as it stopped ([ISSUE-0172](../issues/ISSUE-0172-stopping-agent-drops-open-conversations.md)); both surfaces show their neutral label for it |
 
 **Honest failure.** When the on-close summariser fails, the persisted
 `"[interaction summary unavailable]"` sentinel is surfaced as an explicit

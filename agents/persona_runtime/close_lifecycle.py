@@ -24,9 +24,10 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from ..llm_client import LLMClient
-from ..memory.boundary_detectors import DEFAULT_CLOSING_GRACE_SEC
+from ..memory.boundary_detectors import DEFAULT_CLOSING_GRACE_SEC, REASON_SHUTDOWN
 from ..memory.episodic import EpisodicMemory
 from ..memory.interactions import InteractionTracker, cleanup_closing_interactions
+from .close_fan import persist_fanned_closes
 from .close_path import persist_closed_interaction
 from .finalize_close import DRAIN_TIMEOUT_SEC, drain_pending_summary_tasks
 from .replay_sweep import close_replayed_scopes
@@ -100,6 +101,30 @@ class _CloseLifecycleMixin:
             self._interaction_tracker, self._persist_closed_interaction,
             derive_channels=derive_channels, speaker_gaps=speaker_gaps,
         )
+
+    async def close_open_interactions(self) -> None:
+        """Close every live open record as the agent stops, and write each
+        to memory (ISSUE-0172).
+
+        Nothing else would. A record closes on a close notification, when a
+        message arrives under a new interaction id, or once its idle window
+        has passed, and the idle check runs only when the agent's next event
+        arrives; a reactive agent gets no tick. So a conversation the room
+        ended by its idle window, which tells no one, stays open until that
+        event, and an agent that stops first would lose it. One instant
+        closes them all, as a room close does: by the idle rule a record
+        whose window has already run out, as that event would have, and
+        with the shutdown reason the rest. A record the catch-up replay
+        opened is left alone (``admitted_records``): it derives only when
+        its pass ends (ISSUE-0130 (b)), and the next boot reads its window
+        again. The caller holds ``_lock`` and drains the summaries this
+        starts.
+        """
+        tracker = self._interaction_tracker
+        now = tracker.now()
+        closed = tracker.idle_check(now=now, records=tracker.admitted_records(None))
+        closed += tracker.close_scope(None, reason=REASON_SHUTDOWN, now=now)
+        await persist_fanned_closes(closed, self._persist_closed_interaction)
 
     async def drain_pending_summaries(
         self, *, timeout: float | None = DRAIN_TIMEOUT_SEC,
