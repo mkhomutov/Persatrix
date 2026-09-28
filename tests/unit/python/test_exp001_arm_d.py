@@ -15,9 +15,13 @@ import contextlib
 import json
 import sqlite3
 from pathlib import Path
+from typing import Any
 
+import aiohttp
 import pytest
 
+import agents.channel_catchup as channel_catchup
+from agents.channel_catchup import replay_channel_history, replay_for_persona_agents
 from agents.persona import create_persona_agent
 from evaluators.exp001.arm_d import (
     catch_up_replayed,
@@ -27,10 +31,11 @@ from evaluators.exp001.arm_d import (
     restore_stores,
     series_channels,
 )
-from evaluators.exp001.deployment import REPO, Layout, adviser_config, channel_config
+from evaluators.exp001.deployment import REPO, Layout, StartError, adviser_config, channel_config
 from evaluators.exp001.materials import load_series
 from evaluators.exp001.panel import load_panel
 
+from ._catchup_test_helpers import _channel, _msg, _SpyAgent
 from ._persona_test_helpers import _make_client
 
 _EXP = REPO / "evaluators" / "experiments" / "EXP-001"
@@ -133,7 +138,7 @@ class TestPersonaState:
     def test_the_persona_state_goes_back_to_the_defaults_and_the_counter_stays(
         self, tmp_path: Path,
     ) -> None:
-        """The counter paces note reflection, which memory as shipped keeps doing."""
+        """The runtime keeps counting interactions, though nothing reads the count."""
         layout = Layout(tmp_path)
         _store(layout.memory_db(CHAIR), "briefing", count=3)
         held = memory_rows(layout.memory_db(CHAIR))
@@ -182,6 +187,14 @@ class TestMemoryRows:
             store.execute("UPDATE episodes SET summary = 'said it twice'")
         assert memory_rows(db) != before
 
+    def test_a_store_is_read_where_it_is_whatever_its_path_holds(self, tmp_path: Path) -> None:
+        """A '#' or '?' ends the path of an SQLite URI early: the store read would
+        be another, empty one, and check 2 would compare nothing with nothing."""
+        db = tmp_path / "run#1?" / f"{CHAIR}.db"
+        _store(db, "briefing")
+        assert memory_rows(db) == {"episodes": (repr(("briefing", "said briefing")),)}
+        assert [p.name for p in tmp_path.iterdir()] == ["run#1?"]
+
     async def test_the_runtime_reopening_a_store_leaves_its_memory_as_it_was(
         self, tmp_path: Path,
     ) -> None:
@@ -222,6 +235,85 @@ class TestCatchUp:
         log = _log(tmp_path / f"{CHAIR}.log", "channels: catch-up replay aborted for agent x")
         assert catch_up_replayed(log, CHAIR) is None
 
-    def test_the_line_is_the_one_the_runtime_logs(self) -> None:
-        source = (REPO / "agents" / "channel_catchup.py").read_text()
-        assert '"channels: catch-up complete agent=%s channels=%d events=%d "' in source
+    def test_a_pass_cut_off_by_its_budget_ends_with_the_count_it_reached(
+        self, tmp_path: Path,
+    ) -> None:
+        log = _log(
+            tmp_path / f"{CHAIR}.log",
+            f"channels: catch-up exceeded 60s wall-clock budget for agent={CHAIR}; partial "
+            "channels=2 events=3 elapsed_ms=60001 (remaining channels skipped)",
+        )
+        assert catch_up_replayed(log, CHAIR) == 3
+
+    def test_a_pass_that_aborted_is_a_start_that_failed(self, tmp_path: Path) -> None:
+        """What it replayed before the error is not known, so the meeting is held again."""
+        aborted = f"channels: catch-up replay aborted for agent {CHAIR}"
+        log = _log(tmp_path / f"{CHAIR}.log", aborted)
+        with pytest.raises(StartError, match="catch-up pass aborted"):
+            catch_up_replayed(log, CHAIR)
+
+
+def _logged(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> Path:
+    """What the runtime logged, as an adviser's JSON log carries each message."""
+    return _log(tmp_path / f"{CHAIR}.log", *(r.getMessage() for r in caplog.records))
+
+
+class TestTheLinesTheRuntimeLogs:
+    """A lockstep guard. The harness learns that a pass ended, and what it
+    replayed, only from the runtime's own log lines, so these run the runtime's
+    pass and read what it logged. A change to a line, or to what it counts,
+    fails here rather than at every arm-D start, which CI never runs."""
+
+    async def test_a_pass_that_ends(
+        self, orchestrator: Any, caplog: pytest.LogCaptureFixture, tmp_path: Path,
+    ) -> None:
+        base_url, state = orchestrator
+        state["channels"] = [_channel(channel_id="group:advice-1")]
+        state["members"]["group:advice-1"] = [
+            {"id": CHAIR, "respond": "always", "joined_at": "2026-05-01T00:00:00+00:00"},
+        ]
+        state["history"]["group:advice-1"] = [
+            _msg(msg_id=f"m{n}", channel_id="group:advice-1", sender_id="operator", content="Hi")
+            for n in range(3)
+        ]
+        with caplog.at_level("INFO", logger="agents.channel_catchup"):
+            async with aiohttp.ClientSession() as session:
+                await replay_channel_history(
+                    agent=_SpyAgent(CHAIR), orchestrator_url=base_url, session=session,
+                )
+        assert catch_up_replayed(_logged(tmp_path, caplog), CHAIR) == 3
+
+    async def test_a_pass_cut_off_by_its_budget(
+        self, orchestrator: Any, caplog: pytest.LogCaptureFixture, tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        base_url, _ = orchestrator
+        monkeypatch.setattr(channel_catchup, "_CATCHUP_BUDGET_SECONDS", 0.0)
+        with caplog.at_level("INFO", logger="agents.channel_catchup"):
+            async with aiohttp.ClientSession() as session:
+                await replay_channel_history(
+                    agent=_SpyAgent(CHAIR), orchestrator_url=base_url, session=session,
+                )
+        assert catch_up_replayed(_logged(tmp_path, caplog), CHAIR) == 0
+
+    async def test_a_pass_that_aborted(
+        self, caplog: pytest.LogCaptureFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        async def broken(**_: Any) -> None:
+            raise RuntimeError("a reply it cannot read")
+
+        monkeypatch.setattr(channel_catchup, "replay_channel_history", broken)
+        entry = adviser_config(PANEL, PANEL.chair, memory_db=tmp_path / f"{CHAIR}.db")
+        agent = create_persona_agent(agent_id=CHAIR, config=entry, llm_client=_make_client())
+        await agent.initialize_memory()
+        try:
+            with caplog.at_level("INFO", logger="agents.channel_catchup"):
+                async with aiohttp.ClientSession() as session:
+                    await replay_for_persona_agents(
+                        agents={CHAIR: agent}, orchestrator_url="http://127.0.0.1:9",
+                        session=session,
+                    )
+        finally:
+            await agent.close_memory()
+        with pytest.raises(StartError):
+            catch_up_replayed(_logged(tmp_path, caplog), CHAIR)

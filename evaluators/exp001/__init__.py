@@ -14,8 +14,8 @@ and its part 2; this package only carries those documents out.
   clock and call-log settings, and reads the call log back.
 - :mod:`evaluators.exp001.arm_a` holds arm A's meetings: one model call each.
 - :mod:`evaluators.exp001.deployment` writes a local deployment of the
-  advisers for the channel arms: their config, the orchestrator's and the
-  meeting's channel.
+  advisers for the channel arms: their config, the orchestrator's, and the
+  channel of each meeting it holds.
 - :mod:`evaluators.exp001.processes` starts and stops a deployment's
   orchestrator and adviser processes.
 - :mod:`evaluators.exp001.orchestrator` is what the harness asks a

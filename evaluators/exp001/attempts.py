@@ -38,6 +38,8 @@ finished (:meth:`SeriesRun.finished_tries`).
 from __future__ import annotations
 
 import asyncio
+import dataclasses
+import datetime as dt
 import enum
 import itertools
 import json
@@ -48,6 +50,7 @@ from typing import Any, Generic, TypeVar
 
 from agents.llm_client import LLMClient
 from evaluators.exp001 import arm_a, channel_arm, deployed_meeting
+from evaluators.exp001.costs import CallPurpose
 from evaluators.exp001.deployment import StartError
 from evaluators.exp001.materials import Meeting, Series
 from evaluators.exp001.orchestrator import OrchestratorError
@@ -299,8 +302,13 @@ def channel_hold(
     holds one meeting there, as ``functools.partial(deployed_meeting.run_meeting,
     binary=...)`` does for arms B and C, each try on a deployment of its own;
     arm D's hold (:func:`evaluators.exp001.arm_d.arm_d_hold`) passes its own.
-    Every *watch_seconds* while it runs, the harness reads the try's call log
-    and ends the try at the first failed call that means it is held again."""
+    Every *watch_seconds* while the meeting runs, the harness reads the try's
+    call log and ends the try at the first failed call that means it is held
+    again. *run* tells ``ended`` when the meeting is over; from then on the
+    processes are stopping, and a call that fails meanwhile is read once they
+    have stopped, so none is killed while it still writes. A summary that
+    fails once the series' last meeting is over changes nothing any meeting
+    shows, and counts in no arm."""
     root = root.resolve()  # the orchestrator runs in its deployment's directory
 
     async def hold(
@@ -311,11 +319,17 @@ def channel_hold(
         task = asyncio.current_task()
         assert task is not None
         watcher = asyncio.ensure_future(_watch(log, task, watch_seconds))
+        over: list[dt.datetime] = []
+
+        def ended(at: dt.datetime) -> None:
+            watcher.cancel()
+            over.append(at)
+
         result: channel_arm.ChannelMeeting | None = None
         try:
             result = await run(
                 panel, arm, series, meeting, attempt=attempt, meeting_try=meeting_try,
-                directory=directory,
+                directory=directory, ended=ended,
             )
         except asyncio.CancelledError:
             # The watcher's own cancel ends the try; any other goes on up.
@@ -331,7 +345,14 @@ def channel_hold(
         finally:
             watcher.cancel()
         calls = read_call_log(log)
-        errors = _bearing(calls.failures)
+        failures = calls.failures
+        if over and meeting == series.meetings[-1]:
+            failures = tuple(
+                dataclasses.replace(f, counts_in_arm=False)
+                if f.purpose is CallPurpose.SUMMARY and f.started_at >= over[0] else f
+                for f in failures
+            )
+        errors = _bearing(failures)
         if errors and not calls.records and all(error_kind(e) is ErrorKind.SYSTEM for e in errors):
             raise HarnessFault(
                 f"{_where(arm, series, meeting, attempt, meeting_try)}: every call was refused "

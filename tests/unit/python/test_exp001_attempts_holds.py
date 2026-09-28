@@ -1,8 +1,8 @@
 """EXP-001 harness — attempts and failures: holding arm A's and arms B/C's meetings (PR 5b).
 
 Arm A's hold makes its one call through a real ``LLMClient`` and call log;
-the channel arms' hold runs a stand-in for ``channel_arm.run_meeting`` that
-writes call-log lines. The rules both holds serve are in
+the channel arms' hold runs a stand-in for ``deployed_meeting.run_meeting``
+that writes call-log lines. The rules both holds serve are in
 ``test_exp001_attempts.py``.
 """
 
@@ -161,7 +161,7 @@ _Line = str | tuple[str, str] | None  # an error, (purpose, error), or a call th
 
 
 class _Meetings:
-    """Stands in for ``channel_arm.run_meeting``: each call acts as scripted,
+    """Stands in for ``deployed_meeting.run_meeting``: each call acts as scripted,
     by try, and may write lines to the meeting's call log first: a failed
     turn for each error named, (purpose, error) for another purpose, and a
     call that answered for None."""
@@ -173,7 +173,7 @@ class _Meetings:
 
     async def __call__(
         self, panel: Any, arm: str, series: Any, meeting: Meeting, *, attempt: int,
-        meeting_try: int, directory: Path,
+        meeting_try: int, directory: Path, ended: Any,
     ) -> Any:  # a ChannelMeeting in the harness; its name is enough here
         self.directories.append(directory)
         self.attempts.append(attempt)

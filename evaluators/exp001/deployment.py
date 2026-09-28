@@ -3,9 +3,11 @@
 Arms B to D-prime hold each meeting in a channel whose members are the four
 advisers, run as persona agents, and the operator. A deployment is one
 orchestrator process and one process per adviser, all started from one
-directory that holds their config, their stores and their logs. B, C and
-D-prime get a new directory for every meeting, so each of their meetings
-starts with empty stores (check 1).
+directory that holds their config and their stores. B, C and D-prime get a
+new directory for every meeting, which also holds its processes' logs, so
+each of their meetings starts with empty stores (check 1). Arm D keeps one
+for a series, with a channel for every meeting, and logs each try in the
+try's own directory.
 
 An adviser is deployed with its panel agent config, unchanged, and the
 persona settings panel.yaml lists; a setting it leaves unset takes the value

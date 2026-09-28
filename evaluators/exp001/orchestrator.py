@@ -20,7 +20,7 @@ import asyncio
 import datetime as dt
 import json
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
@@ -224,6 +224,19 @@ class OrchestratorLog:
         return tuple(c for c in self.closes if c.channel == channel)
 
 
+def log_lines(path: Path) -> Iterator[dict[str, Any]]:
+    """Each JSON object a process has logged to *path* so far; a line that is
+    not one, a half-written last line among them, is skipped."""
+    lines = path.read_text(errors="replace").splitlines() if path.exists() else []
+    for text in lines:
+        try:
+            line = json.loads(text)
+        except ValueError:
+            continue
+        if isinstance(line, dict):
+            yield line
+
+
 def read_orchestrator_log(path: Path) -> OrchestratorLog:
     """What the orchestrator has logged so far; a line that is not JSON is skipped."""
     closes: list[Close] = []
@@ -232,14 +245,7 @@ def read_orchestrator_log(path: Path) -> OrchestratorLog:
     refused: list[str] = []
     rate_limit_off = False
     served: set[str] = set()
-    lines = path.read_text(errors="replace").splitlines() if path.exists() else []
-    for text in lines:
-        try:
-            line = json.loads(text)
-        except ValueError:
-            continue
-        if not isinstance(line, dict):
-            continue
+    for line in log_lines(path):
         message = str(line.get("message", ""))
         if message in _CLOSES:
             closes.append(Close(
