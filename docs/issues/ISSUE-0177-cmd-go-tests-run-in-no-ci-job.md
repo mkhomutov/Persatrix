@@ -1,16 +1,17 @@
 ---
 id: ISSUE-0177
-summary: "The orchestrator's own Go tests under cmd/ run in no CI job and no make target: CI and `make test-go` test only ./internal/..., so a change that breaks the startup wiring they cover merges green. None has ever run in CI; the first landed on 2026-04-17."
+summary: "The orchestrator's own Go tests under cmd/ run in no CI job and no make target: no `go test` pattern in CI or in `make test-go` reaches cmd/, so a change that breaks the startup wiring they cover merges green. None has ever run in CI; the first landed on 2026-04-17."
 status: resolved
 severity: medium
 area: ci
 created: 2026-09-28
-closed: 2026-09-28
+closed: 2026-09-29
 closed_pr: 1019
 refs:
   - .github/workflows/ci.yml
   - Makefile
   - cmd/orchestrator/
+  - tests/unit/python/test_go_test_gate_ci.py
   - docs/methodology/testing-strategy.md
   - docs/issues/ISSUE-0076-full-integration-suite-not-run-in-ci.md
 ---
@@ -35,9 +36,10 @@ first. Neither pattern reaches `cmd/`, and no other workflow runs
 Found on 2026-09-28 while fixing ISSUE-0176
 ([#1017](https://github.com/mkhomutov/Persatrix/pull/1017)): its
 regression tests for the orchestrator's stop, `TestServeAgentGRPC_*` in
-`cmd/orchestrator/grpcserver_test.go`, would never have run in CI. The job
-has tested `./internal/...` alone since the repository's first commit on
-2026-04-08, and the first `cmd/` test arrived nine days later
+`cmd/orchestrator/grpcserver_test.go`, would never have run in CI. No
+`go test` pattern CI has run since it was added
+([#1](https://github.com/mkhomutov/Persatrix/pull/1), 2026-04-08) reached
+`cmd/`, and the first `cmd/` test arrived nine days later
 ([#90](https://github.com/mkhomutov/Persatrix/pull/90)). The same job
 builds `cmd/orchestrator` and checks its formatting, and since v0.3.16 PR C1
 its lint step type-checks the test files too. So a test that stops
@@ -59,24 +61,20 @@ with every check green. It would surface only when someone next ran
 
 ## Fix
 
-The `Go` job's test step and `make test-go` now run
-`go test ./internal/... ./cmd/... -v -race -cover`. The tests needed no
-changes. Before the gate was added they were run as CI will run them:
+`make test-go` now runs `go test ./... -v -race -cover`: every package in
+the module, so a new Go test tree runs with no edit. The required `Go` job
+runs `make test-go` instead of its own copy of the command, and its separate
+Go integration step folded into it, since `./...` includes
+`tests/integration/`. `tests/unit/python/test_go_test_gate_ci.py` pins both
+halves: the recipe tests `./...` with `-race`, and the Go job runs
+`make test-go` and no other `go test`. The first version of the fix added
+`./cmd/...` to both hand-made lists; review replaced the two lists with one
+pattern in one place.
 
-- with `-race` on macOS: all 47 pass;
-- on Linux, in a `golang:1.26-alpine` container without `-race`: all pass;
-- 20 times in shuffled order with `-race`: no failure;
-- the same checks on the ISSUE-0176 fix's tree, which adds four
-  `TestServeAgentGRPC_*` tests: all 51 pass.
-
-The step names the two trees rather than `./...`, which would also run
-`tests/integration/` a second time, ahead of its own step.
-`cmd/genpatterns` has no tests yet; `./cmd/...` runs them once it has.
-
-The [testing strategy](../methodology/testing-strategy.md),
-[enforcement matrix](../methodology/enforcement-matrix.md),
-[automation catalogue](../methodology/automation-catalogue.md),
-[review process](../methodology/review-process.md),
-[CONTRIBUTING](../../CONTRIBUTING.md) and the
-[execution-report template](../templates/EXECUTION_REPORT_TEMPLATE.md) name
-the new command.
+The tests needed no changes. They pass in CI on Linux with `-race`, and
+locally with `-race`, once and 20 times in shuffled order. They also pass on
+Linux without `-race`, in a local `golang:1.26-alpine` container. #1017's
+head `df9ee1c5`, which adds nine tests (56 in all), passes with `-race` once
+and 10 times shuffled. A throwaway failing test in `cmd/orchestrator`, added
+through `go test -overlay` so nothing entered the tree, makes `make test-go`
+fail; the old `./internal/...` command passed with it in place.
