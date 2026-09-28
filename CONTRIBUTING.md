@@ -86,7 +86,7 @@ make test
 ```bash
 # Go orchestrator
 make build-orchestrator    # → bin/persatrix-server
-make test-go               # go test ./internal/... -v -race -cover
+make test-go               # go test ./... -v -race -cover (every Go package)
 
 # Python agents
 make build-agents          # pip install -e ".[dev]" at CI's pins (.github/python-constraints.txt)

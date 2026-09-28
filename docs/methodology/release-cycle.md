@@ -1,6 +1,6 @@
 # The Release Cycle
 
-> **Last updated**: 2026-09-17
+> **Last updated**: 2026-09-29
 > Describes the cycle a patch release follows since ruling (e) of the
 > [sequencing Amendment 2026-09-12](../v0.3.x-sequencing.md#amendment-2026-09-12--close-v0316-small-then-measure-before-any-train-opens):
 > **one document**, the plan. v0.3.0–v0.3.16 ran the same steps across five
@@ -248,9 +248,9 @@ Branch `feature/vXYZ-release`. In order:
   RUN=1 OPTIONAL=1 REPORT=/tmp/sweep.md` runs the host gates listed in
   `scripts/release/sweep.py`, the offline Docker smoke included, and prints
   the results table for the report's Final Pre-Tag Verification. Run the
-  plan's named suites by hand. The formatting, Go integration and
-  repository-rule steps run only in CI and the hook, so the PR's required
-  checks on the same head complete the evidence.
+  plan's named suites by hand. The formatting and repository-rule steps run
+  only in CI and the hook, so the PR's required checks on the same head
+  complete the evidence.
 - Flip the statuses to **✅ Released** with the tag link, dated for the day
   this PR merges: the plan's status line and every merged Progress row, this
   PR's own included (✂️ Cut rows stay cut; a cuttable item that shipped says

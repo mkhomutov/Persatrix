@@ -43,7 +43,7 @@ the eval replay, the offline smoke>.
 |------|---------|--------|
 | Golden replay | `make eval-replay PYTHON=.venv/bin/python` | ⬜ |
 | Rust suite | `cd cli && cargo test` | ⬜ |
-| Go suites | `go test ./internal/... -race` | ⬜ |
+| Go suites | `make test-go` | ⬜ |
 | <this release's named suites> | | ⬜ |
 | Config validation | `make validate` | ⬜ |
 
