@@ -390,11 +390,13 @@ class InteractionTracker(_ReplayBookkeepingMixin):
 
     def admitted_records(
         self,
-        scope: str,
+        scope: str | None,
         *,
         admit: Callable[[Interaction], bool] | None = None,
     ) -> list[Interaction]:
-        """The records in ``scope`` a ROOM-wide close may act on.
+        """The records in ``scope`` a ROOM-wide close may act on;
+        ``scope=None`` takes every scope, as a stopping agent does
+        (ISSUE-0172).
 
         One owner for the fan's eligibility rule (PR #846 review).
         REPLAY-opened records are excluded unconditionally: a replayed
@@ -414,14 +416,14 @@ class InteractionTracker(_ReplayBookkeepingMixin):
         """
         return [
             i for i in self._open.values()
-            if i.scope == scope
+            if (scope is None or i.scope == scope)
             and not i.replayed
             and (admit is None or admit(i))
         ]
 
     def close_scope(
         self,
-        scope: str,
+        scope: str | None,
         *,
         reason: CloseReason,
         now: float | None = None,
@@ -456,8 +458,10 @@ class InteractionTracker(_ReplayBookkeepingMixin):
 
     def idle_check(
         self, *, now: float | None = None,
+        records: Iterable[Interaction] | None = None,
     ) -> list[Interaction]:
-        """Evaluate every open record against the detector chain.
+        """Evaluate every open record (or just ``records``) against the
+        detector chain.
 
         Returns the list of newly-closed interactions in evaluation
         order.  Wired into the per-event hot path of
@@ -471,7 +475,7 @@ class InteractionTracker(_ReplayBookkeepingMixin):
         ts = now if now is not None else self._clock()
         closed: list[Interaction] = []
         # Copy because :meth:`close_record` mutates ``self._open``.
-        for interaction in list(self._open.values()):
+        for interaction in list(self._open.values() if records is None else records):
             for detector in self._detectors:
                 # Access the tagged-union tuple via indexing so mypy
                 # narrows ``result[1]`` to :data:`CloseReason` on the

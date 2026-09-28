@@ -2,9 +2,9 @@
 
 **Test ID**: `MT-CHAT-003`
 **Feature Area**: Chat
-**Version**: 1.1
+**Version**: 1.2
 **Created**: 2026-04-20
-**Last Updated**: 2026-05-22
+**Last Updated**: 2026-09-28
 **Status**: Active
 
 ---
@@ -247,8 +247,10 @@ print("episodes after restart:",
 PY
 ```
 
-**Expected Result**: The agent re-registers `healthy`; the episode count is unchanged (the
-SQLite named volume persists across restart).
+**Expected Result**: The agent re-registers `healthy`; the episode count is not lower (the
+SQLite named volume persists across restart). It can be higher: the stop writes the Step 3
+nudge's still-open conversation ([ISSUE-0172](../issues/ISSUE-0172-stopping-agent-drops-open-conversations.md)),
+and the restart's catch-up can derive the DM window again.
 
 **Verification**:
 - [ ] Agent re-registers as healthy

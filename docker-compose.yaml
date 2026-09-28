@@ -224,6 +224,10 @@ services:
       context: .
       dockerfile: Dockerfile.agent
     restart: unless-stopped
+    # A stopping persona writes the conversations it still holds open and
+    # waits up to 60 s for their summaries (ISSUE-0172); Docker's default
+    # 10 s would kill it partway.
+    stop_grace_period: 90s
     command: ["--agent", "ember-owl", "--port", "50054", "--host", "0.0.0.0", "--orchestrator-url", "http://orchestrator:8080", "--advertise-address", "agent-ember-owl:50054"]
     volumes:
       - ./config:/app/config:ro
@@ -278,6 +282,7 @@ services:
       context: .
       dockerfile: Dockerfile.agent
     restart: unless-stopped
+    stop_grace_period: 90s  # the summary wait on stop — see agent-ember-owl
     command: ["--agent", "iron-fox", "--port", "50055", "--host", "0.0.0.0", "--orchestrator-url", "http://orchestrator:8080", "--advertise-address", "agent-iron-fox:50055"]
     volumes:
       - ./config:/app/config:ro
@@ -307,6 +312,7 @@ services:
       context: .
       dockerfile: Dockerfile.agent
     restart: unless-stopped
+    stop_grace_period: 90s  # the summary wait on stop — see agent-ember-owl
     command: ["--agent", "nova-sparrow", "--port", "50056", "--host", "0.0.0.0", "--orchestrator-url", "http://orchestrator:8080", "--advertise-address", "agent-nova-sparrow:50056"]
     volumes:
       - ./config:/app/config:ro
