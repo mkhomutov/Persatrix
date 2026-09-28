@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0177
 summary: "The orchestrator's own Go tests under cmd/ run in no CI job and no make target: CI and `make test-go` test only ./internal/..., so a change that breaks the startup wiring they cover merges green. None has ever run in CI; the first landed on 2026-04-17."
-status: in_progress
+status: resolved
 severity: medium
 area: ci
 created: 2026-09-28
+closed: 2026-09-28
+closed_pr: 1019
 refs:
   - .github/workflows/ci.yml
   - Makefile
