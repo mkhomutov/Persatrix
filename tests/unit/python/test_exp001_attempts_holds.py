@@ -28,7 +28,7 @@ from evaluators.exp001.attempts import (
     run_series,
     try_directory,
 )
-from evaluators.exp001.channel_arm import CALL_LOG, RECORD
+from evaluators.exp001.deployed_meeting import CALL_LOG, RECORD
 from evaluators.exp001.deployment import DeploymentError, StartError
 from evaluators.exp001.materials import Meeting, load_series
 from evaluators.exp001.orchestrator import OrchestratorError

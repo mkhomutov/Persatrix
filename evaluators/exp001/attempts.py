@@ -47,7 +47,7 @@ from pathlib import Path
 from typing import Any, Generic, TypeVar
 
 from agents.llm_client import LLMClient
-from evaluators.exp001 import arm_a, channel_arm
+from evaluators.exp001 import arm_a, channel_arm, deployed_meeting
 from evaluators.exp001.deployment import StartError
 from evaluators.exp001.materials import Meeting, Series
 from evaluators.exp001.orchestrator import OrchestratorError
@@ -274,9 +274,16 @@ def arm_a_hold(
     return hold
 
 
+def attempt_directory(root: Path, attempt: int) -> Path:
+    """Where one attempt at a channel arm's series keeps its meetings' tries,
+    and in arm D the attempt's deployment."""
+    return root / f"attempt-{attempt}"
+
+
 def try_directory(root: Path, attempt: int, meeting: Meeting, meeting_try: int) -> Path:
-    """Where one try of a channel-arm meeting keeps its deployment, call log and record."""
-    return root / f"attempt-{attempt}" / meeting.id / f"try-{meeting_try}"
+    """Where one try of a channel-arm meeting keeps its call log and record,
+    and in arms B and C its deployment."""
+    return attempt_directory(root, attempt) / meeting.id / f"try-{meeting_try}"
 
 
 def channel_hold(
@@ -288,18 +295,19 @@ def channel_hold(
     run: Callable[..., Awaitable[channel_arm.ChannelMeeting]],
     watch_seconds: float = 5.0,
 ) -> Hold[channel_arm.ChannelMeeting]:
-    """Arms B and C: each try on a deployment of its own, in its own directory
-    under *root*. *run* holds one meeting, as
-    ``functools.partial(channel_arm.run_meeting, binary=...)`` does. Every
-    *watch_seconds* while it runs, the harness reads the try's call log and
-    ends the try at the first failed call that means it is held again."""
+    """The channel arms: each try in its own directory under *root*. *run*
+    holds one meeting there, as ``functools.partial(deployed_meeting.run_meeting,
+    binary=...)`` does for arms B and C, each try on a deployment of its own;
+    arm D's hold (:func:`evaluators.exp001.arm_d.arm_d_hold`) passes its own.
+    Every *watch_seconds* while it runs, the harness reads the try's call log
+    and ends the try at the first failed call that means it is held again."""
     root = root.resolve()  # the orchestrator runs in its deployment's directory
 
     async def hold(
         meeting: Meeting, attempt: int, meeting_try: int,
     ) -> Held[channel_arm.ChannelMeeting]:
         directory = try_directory(root, attempt, meeting, meeting_try)
-        log = directory / channel_arm.CALL_LOG
+        log = directory / deployed_meeting.CALL_LOG
         task = asyncio.current_task()
         assert task is not None
         watcher = asyncio.ensure_future(_watch(log, task, watch_seconds))
@@ -368,7 +376,7 @@ def _fired(watcher: asyncio.Future[bool]) -> bool:
 def _exited(directory: Path) -> Mapping[str, Any]:
     """The processes a failed meeting's record says had exited; none without a record."""
     try:
-        record = json.loads((directory / channel_arm.RECORD).read_text())
+        record = json.loads((directory / deployed_meeting.RECORD).read_text())
     except (OSError, ValueError):
         return {}
     exited = record.get("exited") if isinstance(record, dict) else None
