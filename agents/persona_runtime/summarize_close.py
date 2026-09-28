@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..generated import wallet_pb2 as walletpb
 from ..llm_types import LLMCallPurpose
+from ..memory.boundary_detectors import REASON_SHUTDOWN
 from ..memory.interactions import SUMMARY_UNAVAILABLE_TEXT
 from ..memory.store import CompressedView, MemoryStore
 from ..model_aliases import resolve as resolve_model
@@ -412,13 +413,21 @@ def _build_summarization_prompt(
     (:func:`_projection_levels` non-empty): every unprotected close
     keeps the exact pre-PR-6 prompt bytes, which is what holds the
     landed RFC 0044 goldens (and every mocked close fixture) stable.
+
+    A shutdown close (ISSUE-0172) names no reason: the agent stopping is
+    nothing the conversation did, and a summary told of it could keep it
+    as though it were.
     """
+    reason = (
+        "" if interaction.close_reason == REASON_SHUTDOWN
+        else f"Close reason: {interaction.close_reason}\n"
+    )
     prompt = (
         load_snippet("interaction-summarizer") + "\n\n"
         f"Scope: {interaction.scope}\n"
         f"Turns: {shown_turns}\n"
-        f"Close reason: {interaction.close_reason}\n"
-        f"Tokens (before compression / after): "
+        + reason
+        + "Tokens (before compression / after): "
         f"{view.tokens_before} / {view.tokens_after}\n"
         f"Entries dropped during compression: {view.entries_dropped}\n\n"
         f"Compressed turns:\n{view.summary}\n"
