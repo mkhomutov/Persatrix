@@ -1,6 +1,9 @@
 package main
 
 import (
+	"context"
+	"errors"
+	"net"
 	"time"
 
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
@@ -19,8 +22,8 @@ import (
 // newAgentGRPCServer builds the agent-facing gRPC server — the listener
 // that hosts LogService and, when the cost config loaded, the RFC 0023
 // WalletService. Extracted from main() so the orchestrator entry point
-// stays within the file-size budget (cf. ISSUE-0008); the listener
-// lifecycle (net.Listen / Serve / GracefulStop) stays in main().
+// stays within the file-size budget (cf. ISSUE-0008); net.Listen stays in
+// main(), and serveAgentGRPC below runs Serve and the stop.
 //
 // walletSvc is nil when the cost config failed to load — the wallet
 // composes the budget enforcer, so without it budget enforcement is
@@ -89,4 +92,47 @@ func newAgentGRPCServer(
 		walletpb.RegisterWalletServiceServer(srv, walletSvc)
 	}
 	return srv
+}
+
+// grpcStopGrace bounds the graceful part of the agent-facing server's stop
+// (ISSUE-0176). A running agent's log shipper holds its LogService stream
+// open for as long as the agent runs, so a graceful stop alone would wait
+// for every agent to stop first. Past the grace the server stops hard,
+// which ends the calls still open; the shippers reconnect. It stays under
+// shutdownDrainTimeout, so the drain in main() still ends cleanly, and
+// well under Docker's default 10 s stop timeout.
+const grpcStopGrace = 5 * time.Second
+
+// serveAgentGRPC serves srv on lis until ctx is cancelled, then stops it and
+// returns: the gRPC counterpart of server.Start, and main() runs both the
+// same way (ISSUE-0176). The stop is graceful first, so no new calls start
+// and the ones in flight (a wallet lease call) finish, and hard once grace
+// runs out. If Serve fails on its own, its error returns at once, with ctx
+// still live.
+func serveAgentGRPC(ctx context.Context, srv *grpc.Server, lis net.Listener, grace time.Duration, logger *zap.Logger) error {
+	served := make(chan error, 1)
+	go func() { served <- srv.Serve(lis) }()
+	select {
+	case err := <-served:
+		return err
+	case <-ctx.Done():
+	}
+
+	stopped := make(chan struct{})
+	go func() {
+		srv.GracefulStop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(grace):
+		logger.Warn("gRPC graceful stop timed out, stopping hard", zap.Duration("grace", grace))
+		srv.Stop() // ends the calls still open, and with them the GracefulStop
+	}
+	// Serve returns nil once stopped, or ErrServerStopped when the stop
+	// came before it started serving.
+	if err := <-served; !errors.Is(err, grpc.ErrServerStopped) {
+		return err
+	}
+	return nil
 }

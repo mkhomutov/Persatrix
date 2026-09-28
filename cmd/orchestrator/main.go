@@ -35,11 +35,11 @@ import (
 
 const (
 	// shutdownDrainTimeout is the maximum time to wait for in-flight goroutines
-	// (HTTP server, scheduler) to finish after receiving a shutdown signal.
+	// (HTTP + gRPC servers, wallet reaper, scheduler) to finish after a signal.
 	// Extracted from inline magic number per PR #33 review F-02.
 	// Must exceed the HTTP server's internal shutdown timeout (10s in server.go)
-	// to avoid a spurious "drain timed out" warning when the server is still
-	// gracefully draining connections. (PR #33 review S-01)
+	// and grpcStopGrace (grpcserver.go) to avoid a spurious "drain timed out"
+	// warning when a server is still gracefully draining. (PR #33 review S-01)
 	shutdownDrainTimeout = 12 * time.Second
 )
 
@@ -387,7 +387,7 @@ func main() {
 		}
 		grpcListener = lis
 		grpcServer = newAgentGRPCServer(logBuf, rateLimiter, circuitBreaker, walletSvc, logger)
-		defer grpcServer.GracefulStop()
+		defer grpcServer.Stop() // a backstop; unlike GracefulStop, never waits on an open stream
 	}
 
 	// 11. Start HTTP server (REST API + SSE streaming)
@@ -400,13 +400,13 @@ func main() {
 	var wg sync.WaitGroup
 
 	// Spawn the gRPC LogService goroutine after wg is declared so it
-	// can register itself for the drain.  The listener + server were
-	// constructed above; here we only own the Serve() lifecycle.
+	// can register itself for the drain.  serveAgentGRPC stops the server
+	// once ctx is cancelled, so the drain can finish (ISSUE-0176).
 	if grpcServer != nil {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := grpcServer.Serve(grpcListener); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
+			if err := serveAgentGRPC(ctx, grpcServer, grpcListener, grpcStopGrace, logger); err != nil {
 				logger.Error("gRPC server terminated with error", zap.Error(err))
 				cancel()
 			}
