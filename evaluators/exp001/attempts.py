@@ -38,6 +38,8 @@ finished (:meth:`SeriesRun.finished_tries`).
 from __future__ import annotations
 
 import asyncio
+import dataclasses
+import datetime as dt
 import enum
 import itertools
 import json
@@ -47,7 +49,8 @@ from pathlib import Path
 from typing import Any, Generic, TypeVar
 
 from agents.llm_client import LLMClient
-from evaluators.exp001 import arm_a, channel_arm
+from evaluators.exp001 import arm_a, channel_arm, deployed_meeting
+from evaluators.exp001.costs import CallPurpose
 from evaluators.exp001.deployment import StartError
 from evaluators.exp001.materials import Meeting, Series
 from evaluators.exp001.orchestrator import OrchestratorError
@@ -274,9 +277,16 @@ def arm_a_hold(
     return hold
 
 
+def attempt_directory(root: Path, attempt: int) -> Path:
+    """Where one attempt at a channel arm's series keeps its meetings' tries,
+    and in arm D the attempt's deployment."""
+    return root / f"attempt-{attempt}"
+
+
 def try_directory(root: Path, attempt: int, meeting: Meeting, meeting_try: int) -> Path:
-    """Where one try of a channel-arm meeting keeps its deployment, call log and record."""
-    return root / f"attempt-{attempt}" / meeting.id / f"try-{meeting_try}"
+    """Where one try of a channel-arm meeting keeps its call log and record,
+    and in arms B and C its deployment."""
+    return attempt_directory(root, attempt) / meeting.id / f"try-{meeting_try}"
 
 
 def channel_hold(
@@ -288,26 +298,38 @@ def channel_hold(
     run: Callable[..., Awaitable[channel_arm.ChannelMeeting]],
     watch_seconds: float = 5.0,
 ) -> Hold[channel_arm.ChannelMeeting]:
-    """Arms B and C: each try on a deployment of its own, in its own directory
-    under *root*. *run* holds one meeting, as
-    ``functools.partial(channel_arm.run_meeting, binary=...)`` does. Every
-    *watch_seconds* while it runs, the harness reads the try's call log and
-    ends the try at the first failed call that means it is held again."""
+    """The channel arms: each try in its own directory under *root*. *run*
+    holds one meeting there, as ``functools.partial(deployed_meeting.run_meeting,
+    binary=...)`` does for arms B and C, each try on a deployment of its own;
+    arm D's hold (:func:`evaluators.exp001.arm_d.arm_d_hold`) passes its own.
+    Every *watch_seconds* while the meeting runs, the harness reads the try's
+    call log and ends the try at the first failed call that means it is held
+    again. *run* tells ``ended`` when the meeting is over; from then on the
+    processes are stopping, and a call that fails meanwhile is read once they
+    have stopped, so none is killed while it still writes. A summary that
+    fails once the series' last meeting is over changes nothing any meeting
+    shows, and counts in no arm."""
     root = root.resolve()  # the orchestrator runs in its deployment's directory
 
     async def hold(
         meeting: Meeting, attempt: int, meeting_try: int,
     ) -> Held[channel_arm.ChannelMeeting]:
         directory = try_directory(root, attempt, meeting, meeting_try)
-        log = directory / channel_arm.CALL_LOG
+        log = directory / deployed_meeting.CALL_LOG
         task = asyncio.current_task()
         assert task is not None
         watcher = asyncio.ensure_future(_watch(log, task, watch_seconds))
+        over: list[dt.datetime] = []
+
+        def ended(at: dt.datetime) -> None:
+            watcher.cancel()
+            over.append(at)
+
         result: channel_arm.ChannelMeeting | None = None
         try:
             result = await run(
                 panel, arm, series, meeting, attempt=attempt, meeting_try=meeting_try,
-                directory=directory,
+                directory=directory, ended=ended,
             )
         except asyncio.CancelledError:
             # The watcher's own cancel ends the try; any other goes on up.
@@ -323,7 +345,14 @@ def channel_hold(
         finally:
             watcher.cancel()
         calls = read_call_log(log)
-        errors = _bearing(calls.failures)
+        failures = calls.failures
+        if over and meeting == series.meetings[-1]:
+            failures = tuple(
+                dataclasses.replace(f, counts_in_arm=False)
+                if f.purpose is CallPurpose.SUMMARY and f.started_at >= over[0] else f
+                for f in failures
+            )
+        errors = _bearing(failures)
         if errors and not calls.records and all(error_kind(e) is ErrorKind.SYSTEM for e in errors):
             raise HarnessFault(
                 f"{_where(arm, series, meeting, attempt, meeting_try)}: every call was refused "
@@ -368,7 +397,7 @@ def _fired(watcher: asyncio.Future[bool]) -> bool:
 def _exited(directory: Path) -> Mapping[str, Any]:
     """The processes a failed meeting's record says had exited; none without a record."""
     try:
-        record = json.loads((directory / channel_arm.RECORD).read_text())
+        record = json.loads((directory / deployed_meeting.RECORD).read_text())
     except (OSError, ValueError):
         return {}
     exited = record.get("exited") if isinstance(record, dict) else None
