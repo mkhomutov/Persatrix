@@ -1,6 +1,6 @@
 # Testing Strategy
 
-> **Last updated**: 2026-09-17
+> **Last updated**: 2026-09-29
 > Every test layer in the repository, what it proves, where it runs, and how
 > to add to it. Counts are from `git ls-files` on 2026-09-06 and will drift;
 > the layers and rules will not.
@@ -16,10 +16,15 @@ a knob shipped with a red lockstep guard
 integration tier until a config change broke its close-path tests on `main`
 ([ISSUE-0076](../issues/ISSUE-0076-full-integration-suite-not-run-in-ci.md)) —
 and a fourth, the Go integration tests, was found by the audit that produced
-this document and wired into CI in the same series. A
+this document and wired into CI in the same series. A fifth, the
+orchestrator's own tests under `cmd/`, ran in no job from the first one
+(2026-04-17) until
+[ISSUE-0177](../issues/ISSUE-0177-cmd-go-tests-run-in-no-ci-job.md): CI and
+`make test-go` named the Go trees one by one, and neither list named `cmd/`.
+Go now tests `./...`, every package, so a new Go tree runs with no edit. A
 green lint is not a running tree. When a new test directory is created, the
-same PR adds its `make` target and its CI step, and adds a row to the table
-below.
+same PR adds a row to the table below and, unless Go's `./...` already
+reaches it, its `make` target and its CI step.
 
 ---
 
@@ -27,11 +32,11 @@ below.
 
 | # | Layer | What it proves | Where it lives | Runner | CI |
 |---|-------|----------------|----------------|--------|----|
-| 1 | Go unit | Orchestrator packages behave in isolation; races (`-race`) | `internal/**/*_test.go` (309 files, 22 packages) | `make test-go` | `go` job |
+| 1 | Go unit | Orchestrator packages behave in isolation; races (`-race`) | `internal/**/*_test.go` (294 files, 20 packages) + `cmd/orchestrator/*_test.go` (12 files, the startup wiring) | `make test-go` (`go test ./...`, with layer 5) | `go` job (`cmd/` since ISSUE-0177) |
 | 2 | Python unit, root tree | Agent-runtime modules, mirrored per source module | `tests/unit/python/test_<module>.py` (347 files) | `make test-python` (~5.5 min) | `python` job |
 | 3 | Python unit, agents tree | Component tests that need agent fixtures; the **only** executable coverage of `observability/tracing.py`, `grpc_logging.py`, `memory/scheduled_wakes.py` | `agents/tests/` (46 files) | `make test-agents` | `python` job (since #848) |
 | 4 | Python integration | Assembled pieces: close path, channels, memory scoping, catch-up replay, confidentiality, delegation | `tests/integration/test_*.py` (73 files) + `_*_helpers.py` | `make test-integration` | `python` job (since ISSUE-0076) |
-| 5 | Go integration | Scheduler → executor → mock agent over bufconn; rate limiter; audit logger | `tests/integration/*_test.go` (3 files) | `go test ./tests/integration/... -race` | `go` job (since the CI-promotion PR) |
+| 5 | Go integration | Scheduler → executor → mock agent over bufconn; rate limiter; audit logger | `tests/integration/*_test.go` (3 files) | `make test-go`, in the same `go test ./...` run as layer 1 | `go` job (since the CI-promotion PR) |
 | 6 | Rust | CLI parsing, output, and the CLI↔server **lockstep guards** (knob set and wire types parsed out of the Go sources) | inline `#[cfg(test)]` modules (24 files) | `cd cli && cargo test` | `rust` job (since #813) |
 | 7 | Web console | Svelte components and stores under jsdom | `web/src/**/*.test.js` (30 files) | `make ui-test` (Vitest) | `web-console` job |
 | 8 | Golden-trace evals | Persona-quality regressions replayed deterministically against recorded goldens ([RFC 0044](../rfcs/0044-eval-set-golden-traces.md)) | `evaluators/eval_sets/*.yaml` + `.golden.yaml` (6 recipes) | `make eval-replay` | `Python` — `make eval-replay TIER=stable`, since v0.3.16 PR C2 |
@@ -41,10 +46,10 @@ below.
 | 12 | Offline smoke | The whole stack round-trips at $0 on the mock provider | `make demo-autonomous` / `make demo-offline` | Docker | never (the last implementation PR and the tag PR) |
 | 13 | Structural gates | The repository's own invariants: proto sync, import direction, sizes, doc links, generated indexes | `scripts/checks/`, `make *-check` | see [enforcement matrix](enforcement-matrix.md) | mixed |
 
-`make test` runs layers **1–4 only**. Rust, web, evals, and Go integration are
-separate commands. The tag PR's `make release-sweep` enumerates the host gates
+`make test` runs layers **1–5 only**. Rust, web and evals are separate
+commands. The tag PR's `make release-sweep` enumerates the host gates
 rather than leaning on `make test` reading as comprehensive; the steps that run
-only in CI, Go integration among them, run in that PR's required checks.
+only in CI run in that PR's required checks.
 
 ---
 

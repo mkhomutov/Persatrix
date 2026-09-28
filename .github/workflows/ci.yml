@@ -84,16 +84,14 @@ jobs:
       - name: Run golangci-lint (the same target as `make lint`)
         run: make lint-go
 
-      - name: Run Go tests
-        run: go test ./internal/... -v -race -cover
-
-      # tests/integration/*_test.go (scheduler→executor over bufconn, the rate
-      # limiter, the audit logger) sat outside `./internal/...` and so ran in
-      # no job — the fourth "test tree with no runner" this repo has found
-      # (after agents/tests/, the Rust suite, and the Python integration tier).
-      # ~2 s under -race.
-      - name: Run Go integration tests
-        run: go test ./tests/integration/... -v -race
+      # `make test-go` runs `go test ./...`, every package in the module, so a
+      # new Go test tree runs with no edit here. Naming trees by hand left two
+      # of them in no job: tests/integration/*_test.go (scheduler→executor over
+      # bufconn, the rate limiter, the audit logger), the fourth "test tree
+      # with no runner" this repo found, and the orchestrator's own tests under
+      # cmd/, the fifth (ISSUE-0177). test_go_test_gate_ci.py pins this step.
+      - name: Run Go tests (the same target as `make test-go`)
+        run: make test-go
 
       # agents/security_patterns.py + security_enums.py are generated from the
       # Go canonical sources (RFC 0009 PR 3). The sync check needs `go run`, so

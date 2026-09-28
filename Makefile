@@ -254,8 +254,12 @@ generate-sanitizer-patterns-check: ## Fail if agents/security_patterns.py or age
 # ─── Test ───────────────────────────────────────────────
 test: test-go test-python test-agents test-integration ## Run all tests
 
-test-go: ## Run Go unit tests
-	go test ./internal/... -v -race -cover
+# `./...` is every package in the module, so a new Go test tree runs with no
+# edit here or in CI. Listing trees by hand left the orchestrator's own tests
+# under cmd/ in no target and no CI job (ISSUE-0177). CI's `Go` job runs this
+# target; tests/unit/python/test_go_test_gate_ci.py pins both.
+test-go: ## Run every Go test: unit, cmd/ and integration
+	go test ./... -v -race -cover
 
 test-python: ## Run Python agent tests
 	$(PYTHON) -m pytest tests/unit/python/ -v --tb=short
