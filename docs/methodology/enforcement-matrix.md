@@ -35,7 +35,7 @@ the twelve, and the job is named where it is not one of the original six.
 | Rule | Stated in | Check | Enforcement |
 |------|-----------|-------|-------------|
 | Go builds; all Go tests pass with `-race` | CONTRIBUTING | `go build ./cmd/orchestrator`; `make test-go` (`go test ./...`), pinned by `test_go_test_gate_ci.py` | Required (`Go`) — `cmd/` since ISSUE-0177 |
-| Every test tree has a named runner | testing-strategy | Go: `./...` reaches every package; other languages: review ([ISSUE-0178](../issues/ISSUE-0178-runner-rule-checked-only-for-go.md)) | Required (`Go`) for Go; Convention elsewhere |
+| Every test tree has a named runner | testing-strategy | Go: `./...` reaches every package; `test_every_test_file_has_a_runner.py` names any test file, in any language, that no CI step runs | Required (`Go`, `Python`), opt-in tests aside ([ISSUE-0178](../issues/ISSUE-0178-runner-rule-checked-only-for-go.md)) |
 | Go lint clean under one pinned golangci-lint and the committed linter set | [ISSUE-0142](../issues/ISSUE-0142-ci-never-runs-golangci-lint.md); `.golangci.yml`; Makefile `GOLANGCI_LINT_VERSION` | `make lint-go` — refuses any other version; CI installs the pin it reads from the Makefile and runs the same target | Required (`Go`) — since v0.3.16 PR C1; was Make-only and unpinned |
 | Committed UI embed is the placeholder, never build output | `.gitignore` comment; `ci.yml` | `grep` assert in the `go` job | Required (`Go`) |
 | Python lint (ruff) — `agents/`, `tests/` | instructions; ISSUE-0056 | `ruff check` ×2 | Required (`Python`) |
