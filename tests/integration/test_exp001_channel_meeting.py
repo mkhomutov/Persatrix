@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from evaluators.exp001.channel_arm import CALL_LOG, RECORD, run_meeting
+from evaluators.exp001.deployed_meeting import CALL_LOG, RECORD, run_meeting
 from evaluators.exp001.deployment import REPO, Alias
 from evaluators.exp001.materials import MeetingKind, load_series
 from evaluators.exp001.panel import load_panel

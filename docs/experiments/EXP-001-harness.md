@@ -1,7 +1,7 @@
 # EXP-001 — The harness
 
-> **Status**: 🚧 **In Progress** — PRs 1, 2, 3a, 3b, 4 and 5a merged ([#984](https://github.com/mkhomutov/Persatrix/pull/984), [#986](https://github.com/mkhomutov/Persatrix/pull/986), [#987](https://github.com/mkhomutov/Persatrix/pull/987), [#988](https://github.com/mkhomutov/Persatrix/pull/988), [#992](https://github.com/mkhomutov/Persatrix/pull/992), [#993](https://github.com/mkhomutov/Persatrix/pull/993)); PR 5b open ([#1013](https://github.com/mkhomutov/Persatrix/pull/1013)); no practice run yet.
-> **Last updated**: 2026-09-27
+> **Status**: 🚧 **In Progress** — PRs 1, 2, 3a, 3b, 4, 5a, 5b and 5c merged ([#984](https://github.com/mkhomutov/Persatrix/pull/984), [#986](https://github.com/mkhomutov/Persatrix/pull/986), [#987](https://github.com/mkhomutov/Persatrix/pull/987), [#988](https://github.com/mkhomutov/Persatrix/pull/988), [#992](https://github.com/mkhomutov/Persatrix/pull/992), [#993](https://github.com/mkhomutov/Persatrix/pull/993), [#1013](https://github.com/mkhomutov/Persatrix/pull/1013), [#1015](https://github.com/mkhomutov/Persatrix/pull/1015)); no practice run yet.
+> **Last updated**: 2026-09-28
 > **Carries out**: the [EXP-001 pre-registration](EXP-001-preregistration.md) and its [part 2](EXP-001-preregistration-scoring.md)
 > **Code**: [`evaluators/exp001/`](../../evaluators/exp001/)
 
@@ -28,7 +28,7 @@ so the result can cite them.
 | 4 ([#992](https://github.com/mkhomutov/Persatrix/pull/992)) | Arm A: one call per meeting, with the advisers' identities rendered by the persona runtime's own prompt code; the reader that checks the panel and builds each adviser's agent config | 3, 4, 7 and 8, for arm A |
 | 5a ([#993](https://github.com/mkhomutov/Persatrix/pull/993)) | Arms B and C: a deployment of the advisers for every meeting, its channel from `panel.yaml`, the memo turn, and the failures a meeting can show | 1, 5 and 6, for B and C; 7 and 8 for the deployed advisers |
 | 5b ([#1013](https://github.com/mkhomutov/Persatrix/pull/1013)) | Retries and failure detection for every arm, A included: provider errors retried, a series restarted from its briefing and then dropped, and the harness faults that stop the run | — (§3, attempts and failures) |
-| 5c | Arm D: one deployment per series, and restarts between meetings that leave memory as it was | 2; 5 and 6 for D |
+| 5c ([#1015](https://github.com/mkhomutov/Persatrix/pull/1015)) | Arm D: one deployment per series, with a channel for every meeting, and restarts between meetings that are checked to leave memory as it was; a meeting held again starts from the memory it began with | 2, for restarts; 5 and 6 for D |
 | 5d | Arm D′: the earlier meetings' transcripts in a cached prompt prefix | 3; 1, 5 and 6 for D′ |
 | 6 | The judge, with a call purpose of its own, and the practice run, which also checks the call log's total against the provider's usage report | all eight, on the practice series |
 
@@ -77,10 +77,30 @@ from before the meeting and puts it back before trying again. And PR 6's
 run does what a harness fault asks beyond stopping: it counts the faults,
 so a third ends the run, and it sets aside the scored outputs so far,
 including the stopped series' tries, which the fault carries. It builds
-each channel arm's hold with `channel_arm.run_meeting` and the binary bound
-to it, and arm A's with a new log per series. It also passes each series'
-finished tries to dollars per plan, and asks which series every arm's
-comparisons keep.
+arm B's and C's hold with `deployed_meeting.run_meeting` and the binary
+bound to it, arm D's with `arm_d_hold` and the binary, and arm A's with a
+new log per series. It also passes each series' finished tries to dollars
+per plan, and asks which series every arm's comparisons keep.
+
+PR 5c holds arm D and meets PR 3b's second constraint: a close summary cut
+off at its 30-second limit is a provider error, and in D, whose summaries
+count, the meeting is then held again from the memory it began with. It
+rests on the fix for
+[ISSUE-0172](../issues/ISSUE-0172-stopping-agent-drops-open-conversations.md):
+a discussion that ends by its idle window tells no adviser, so each still
+holds it open when the harness stops the advisers, and only since that fix
+does the stop write it to memory. A stopping adviser writes it once the turn
+it is running, and any queued behind that turn, has finished. The harness
+kills an adviser still running 90 seconds after it was asked to stop, which
+loses everything the adviser still held open, so in D a kill at the stop is
+a harness fault, and the harness's wait of up to five minutes for the turns
+in flight also guards D's memory. PR 5c leaves one thing. Check 2 has two halves, and PR 5c's tests show only the
+second, that a restart leaves memory exactly as it was. The first, that a
+briefing fact can reach a later meeting's prompt through the shipped memory
+path, needs a model that writes real summaries; the offline mock provider
+the tests run on writes placeholders. So PR 6's practice run shows it,
+through arm D's recall check: each meeting is a new channel, so the chair
+can answer the briefing's questions only from memory.
 
 ## Frozen choices
 

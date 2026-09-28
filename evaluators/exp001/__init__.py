@@ -14,14 +14,20 @@ and its part 2; this package only carries those documents out.
   clock and call-log settings, and reads the call log back.
 - :mod:`evaluators.exp001.arm_a` holds arm A's meetings: one model call each.
 - :mod:`evaluators.exp001.deployment` writes a local deployment of the
-  advisers for the channel arms: their config, the orchestrator's and the
-  meeting's channel.
+  advisers for the channel arms: their config, the orchestrator's, and the
+  channel of each meeting it holds.
 - :mod:`evaluators.exp001.processes` starts and stops a deployment's
   orchestrator and adviser processes.
 - :mod:`evaluators.exp001.orchestrator` is what the harness asks a
   deployment's orchestrator over REST, and reads in its log.
-- :mod:`evaluators.exp001.channel_arm` holds the meetings of arms B and C: the
+- :mod:`evaluators.exp001.channel_arm` holds a channel arm's meeting: the
   discussion, then the memo turn.
+- :mod:`evaluators.exp001.deployed_meeting` holds one such meeting on a
+  deployment's processes, and each of arm B's and C's on a new deployment.
+- :mod:`evaluators.exp001.arm_d` holds arm D's series on one deployment,
+  whose restarts must leave the advisers' memory as it was.
+- :mod:`evaluators.exp001.attempts` holds every arm's meetings by the rules
+  of attempts and failures.
 - :mod:`evaluators.exp001.packets` builds the blinded packets the raters score.
 - :mod:`evaluators.exp001.scoring` cuts memos, turns scores into quality and
   measures how well the raters agree.
