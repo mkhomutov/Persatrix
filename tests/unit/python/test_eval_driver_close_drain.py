@@ -79,8 +79,8 @@ class _RacingFakeAgent:
     async def initialize_memory(self) -> None:
         pass
 
-    async def close_memory(self, *, write_open: bool = True) -> None:
-        self.log.append(f"close_memory(write_open={write_open})")
+    async def close_memory(self) -> None:
+        pass
 
     def set_history_fetcher(self, fetcher: Any) -> None:
         pass
@@ -110,9 +110,7 @@ async def test_each_turn_settles_before_the_next_dispatches(
 ) -> None:
     """Every turn's background close completes before the next turn's
     event dispatches — the interleaving the goldens are recorded under,
-    now a contract instead of a coin flip. The run ends by closing memory
-    without writing what is still open, which no golden recorded
-    (ISSUE-0172)."""
+    now a contract instead of a coin flip."""
     p = tmp_path / "recipe.yaml"
     p.write_text(_THREE_TURNS, encoding="utf-8")
     eval_set = load_eval_set(p)
@@ -126,5 +124,4 @@ async def test_each_turn_settles_before_the_next_dispatches(
         "event[0]", "close[0]",
         "event[1]", "close[1]",
         "event[2]", "close[2]",
-        "close_memory(write_open=False)",
     ], fake.log

@@ -169,7 +169,8 @@ class TestAgentServerPersonaLifecycle:
 
         agent.close_memory = AsyncMock()  # type: ignore[method-assign]
         await server.stop()
-        agent.close_memory.assert_awaited_once()
+        # ISSUE-0172: a stopping persona writes what it still holds open.
+        agent.close_memory.assert_awaited_once_with(write_open=True)
 
     async def test_tick_scheduler_started_for_autonomous_agent(self):
         """Agents with autonomy.level=semi-autonomous get a tick scheduler."""

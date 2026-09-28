@@ -78,6 +78,8 @@ services:
       args:
         AGENT_EXTRAS: providers
     restart: unless-stopped
+    # The summary wait on stop — see agent-ember-owl in docker-compose.yaml.
+    stop_grace_period: 90s
     command: ["--agent", "slate-heron", "--port", "50057", "--host", "0.0.0.0", "--orchestrator-url", "http://orchestrator:8080", "--advertise-address", "agent-slate-heron:50057"]
     # No host publish: the orchestrator reaches this agent at
     # agent-slate-heron:50057 over the compose network, and the agent gRPC

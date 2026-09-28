@@ -138,36 +138,34 @@ class _StatePersistenceMixin:
             await self._fact_store.initialize()
         self._state = await self._load_persona_state()
 
-    async def close_memory(self, *, write_open: bool = True) -> None:
+    async def close_memory(self, *, write_open: bool = False) -> None:
         """Close all memory tiers, awaiting in-flight operations.
 
         Each tier closes in its own try/except so a failure in one
         does not prevent the rest from releasing resources (PR #54).
         RFC 0020 PR 4: drains pending background summary tasks first
         so they don't outlive the EpisodicMemory DB handle.
-        ISSUE-0172: before the drain, every live record still open closes
-        with the shutdown reason and is written, so its summary is among
-        the tasks drained. ``write_open=False`` leaves those records
-        unwritten, as a caller whose run is already over may want: the
-        golden-trace driver's run ends at its snapshot, and no recording
-        holds the model call a summary makes. ``close_open_interactions`` and
-        ``drain_pending_summaries`` are provided by
+        ``write_open=True`` is what a stopping agent passes
+        (``AgentServer.stop``, ISSUE-0172): before the drain, every live
+        record still open closes and is written, so its summary is among
+        the tasks drained. The default only releases the stores, as a test
+        or the golden-trace driver wants: that run ends at its snapshot, and
+        no recording holds the model call a summary makes.
+        ``close_open_interactions`` and ``drain_pending_summaries`` are
+        provided by
         :class:`~agents.persona_runtime.episode_routing._EpisodeRoutingMixin`.
         """
         async with self._lock:
             await self._persist_persona_state()
             errors: list[Exception] = []
-            # ISSUE-0172: a conversation still open would be lost with the
-            # process, so it closes and is written now, and the drain below
-            # waits for its summary.
-            try:
-                if write_open:
+            if write_open:
+                try:
                     await self.close_open_interactions()  # type: ignore[attr-defined]
-            except Exception as exc:
-                errors.append(exc)
-                logger.warning(
-                    "Failed to close open interactions on close: %s", exc,
-                )
+                except Exception as exc:
+                    errors.append(exc)
+                    logger.warning(
+                        "Failed to close open interactions on close: %s", exc,
+                    )
             try:
                 await self.drain_pending_summaries()  # type: ignore[attr-defined]
             except Exception as exc:

@@ -8,6 +8,7 @@ created: 2026-09-28
 closed: 2026-09-28
 closed_pr: 1014
 refs:
+  - agents/server.py
   - agents/persona_runtime/state_persistence.py
   - agents/persona_runtime/close_lifecycle.py
   - agents/memory/boundary_detectors.py
@@ -54,27 +55,47 @@ episodes.
 
 ## Impact
 
-Any stop loses the memory of the conversations an agent still holds open:
-a deployment restarted by its operator, or an agent moved to a new host.
+A stop loses the memory of the conversations an agent still holds open
+unless the next start's catch-up reads them again. On the real clock it
+replays each channel's last 50 messages and derives them, but not a
+conversation older than that window, one from before a clock anchored
+after it, or one from an orchestrator older than channel-store v12.
 Nothing is logged, since nothing was attempted. For EXP-001 it would bias
-the experiment against memory: arm D keeps memory as shipped, and the
-restarts only the experiment makes would erase every meeting that ended
-by its idle window.
+the experiment against memory: arm D keeps memory as shipped, and each
+restart anchors a new clock, so catch-up drops the earlier meetings and
+the restarts only the experiment makes would erase every meeting that
+ended by its idle window.
 
 ## Fix
 
-`close_memory` now closes every open conversation with the shutdown reason
-before it waits for the running summaries, so their summaries run and are
-waited for too. One instant closes them all, as a room close does. A
-conversation the catch-up replay opened at startup is left alone: it is
-written only when its replay pass ends, and the next start reads it again.
-A summary still running when the wait's bound (60 seconds) runs out stays
-marked pending, as before.
+A stopping agent (`AgentServer.stop` passes `close_memory(write_open=True)`)
+now closes every open conversation before it waits for the running
+summaries, so their summaries run and are waited for too. One instant
+closes them all, as a room close does: by the idle rule a conversation
+whose idle window has already run out, as the next event would have, and
+with the shutdown reason the rest. A conversation the catch-up replay
+opened at startup is left alone: it is written only when its replay pass
+ends, and the next start reads it again. A summary still running when the
+wait's bound (60 seconds) runs out stays marked pending, as before. The
+summariser is not told a shutdown close's reason, so it cannot record the
+stop as part of the conversation.
 
-The golden-trace driver ends a run at its snapshot and then closes memory.
-Writing the conversations still open would summarise them, a model call no
-golden recorded, so the driver passes `write_open=False` and they go
-unwritten there, as they always did.
+`close_memory()` alone only releases the stores, as tests and the
+golden-trace driver want: that driver ends a run at its snapshot, and
+writing the conversations still open would summarise them, a model call no
+golden recorded.
+
+On the real clock, a conversation written at the stop and still inside the
+next start's catch-up window is derived a second time there: the replay's
+guard matches only an earlier replay's digest. That is the duplicate a
+conversation closed live before a restart already had, accepted over the
+loss where the replay cannot read the window again, and tracked as
+[ISSUE-0174](ISSUE-0174-restart-derives-a-conversation-twice.md).
+
+The root causes stay open as
+[ISSUE-0173](ISSUE-0173-idle-ended-conversation-unwritten-until-next-event.md):
+while the process keeps running, a conversation that ended by its idle
+window is written only when the persona's next event arrives.
 
 ## Notes
 
@@ -83,4 +104,6 @@ unwritten there, as they always did.
   harness records those calls but does not count them in the arms'
   dollars.
 - The harness gives each process 90 seconds to stop before killing it,
-  which covers the 60-second wait.
+  which covers the 60-second wait. The compose files give each persona
+  service the same 90 seconds (`stop_grace_period`), where Docker's
+  default of 10 would kill a stop whose summaries are slow.
