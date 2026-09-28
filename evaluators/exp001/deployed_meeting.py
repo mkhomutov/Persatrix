@@ -64,7 +64,7 @@ from evaluators.exp001.processes import (
     launch,
     orchestrator_process,
 )
-from evaluators.exp001.runtime import call_log_env, meeting_clock_env
+from evaluators.exp001.runtime import MEMORYLESS_ARMS, call_log_env, meeting_clock_env
 
 # The arms whose every meeting gets a new deployment.
 ARMS = ("B", "C")
@@ -99,6 +99,7 @@ async def run_meeting(
     now: Callable[[], dt.datetime] = _real_now,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     limits: Limits = LIMITS,
+    ended: Callable[[dt.datetime], None] | None = None,
 ) -> ChannelMeeting:
     """Hold one meeting of arm B or C on a new deployment in *directory*.
 
@@ -107,7 +108,8 @@ async def run_meeting(
     midway still leaves, naming the error. The deployment is stopped however
     the meeting ends, a hangup included. *room* stands in for the
     orchestrator's REST API in tests; by default the harness talks to the
-    deployment's own.
+    deployment's own. *ended* is told when the meeting is over, as
+    :func:`run_on_deployment` tells it.
     """
     if arm not in ARMS:
         raise ValueError(f"arm {arm} is not held on a new deployment per meeting; only {ARMS} are")
@@ -121,7 +123,7 @@ async def run_meeting(
     return await run_on_deployment(
         layout, panel, arm, series, meeting, attempt=attempt, meeting_try=meeting_try,
         directory=directory, logs=layout.logs, binary=binary, python=python, repo=repo,
-        spawn=spawn, room=room, now=now, sleep=sleep, limits=limits,
+        spawn=spawn, room=room, now=now, sleep=sleep, limits=limits, ended=ended,
     )
 
 
@@ -144,14 +146,19 @@ async def run_on_deployment(
     now: Callable[[], dt.datetime] = _real_now,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     limits: Limits = LIMITS,
-    started: Callable[[], Awaitable[None]] | None = None,
+    started: Callable[[Deployment], Awaitable[None]] | None = None,
+    ended: Callable[[dt.datetime], None] | None = None,
 ) -> ChannelMeeting:
     """Hold one meeting on the deployment written at *layout*, then stop it.
 
     *directory* gets the call log and the meeting's record, and *logs* the
     processes' own logs. *started* runs once every process has started and
     the orchestrator is set up as the design needs, before the operator
-    speaks; what it raises fails the meeting as any error does.
+    speaks, and is given the deployment; what it raises fails the meeting as
+    any error does. *ended* is told the moment the meeting is over, however
+    it ends, before the processes are asked to stop. In an arm whose memory
+    carries over, an adviser the stop has to kill may not have written what
+    it still held open, so that fails the meeting once its record is kept.
     """
     ports = free_ports()
     env = {
@@ -190,7 +197,7 @@ async def run_on_deployment(
                         f"the orchestrator serves no wallet; see {orchestrator.log}",
                     )
                 if started is not None:
-                    await started()
+                    await started(deployment)
                 result = await hold_meeting(
                     api, orchestrator_log, panel, arm, series, meeting, channel=channel,
                     attempt=attempt, meeting_try=meeting_try, now=now, sleep=sleep,
@@ -206,8 +213,10 @@ async def run_on_deployment(
                 )
                 raise
             finally:
+                if ended is not None:
+                    ended(now())
                 try:
-                    await deployment.stop()
+                    stopped = await deployment.stop()
                 except BaseException:  # interrupted again: nothing may be left running
                     deployment.kill()
                     raise
@@ -223,6 +232,15 @@ async def run_on_deployment(
         raise DeploymentError(
             "a spending limit the deployment turns off refused leases (check 6): "
             + "; ".join(log.spending_limit_refusals),
+        )
+    killed = sorted(
+        name for name, code in stopped.items()
+        if code == -signal.SIGKILL and name != "orchestrator" and name not in exited
+    )
+    if killed and arm not in MEMORYLESS_ARMS:
+        raise DeploymentError(
+            f"killed at the stop: {', '.join(killed)}; what each still held open may be "
+            "missing from its memory",
         )
     return result
 
@@ -251,10 +269,16 @@ def _cancelled_on_hangup() -> Iterator[None]:
             loop.remove_signal_handler(sig)
 
 
+def read_only(db: Path) -> contextlib.closing[sqlite3.Connection]:
+    """A store opened for reading only. Its path goes into the SQLite URI
+    escaped, so a ``#`` or ``?`` in it cannot name another file."""
+    return contextlib.closing(sqlite3.connect(f"{db.resolve().as_uri()}?mode=ro", uri=True))
+
+
 def _energy(db: Path, adviser_id: str) -> float | None:
     """The energy an adviser's store last saved for it; None before it saved any."""
     try:
-        with contextlib.closing(sqlite3.connect(f"file:{db}?mode=ro", uri=True)) as store:
+        with read_only(db) as store:
             row = store.execute(
                 "SELECT persona_state_json FROM agent_state WHERE agent_id = ?", (adviser_id,),
             ).fetchone()

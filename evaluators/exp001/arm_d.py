@@ -14,10 +14,11 @@ the meeting's clock and call-log settings, and stops them once the meeting is
 over, as :mod:`evaluators.exp001.deployed_meeting` does for B and C; their
 logs are the try's own. An adviser that stops writes the conversations it
 still holds open (ISSUE-0172), so a meeting that ended by its idle window,
-which tells no adviser, keeps its memory too. Before a start the harness
+which tells no adviser, keeps its memory too; an adviser the stop has to
+kill may not have, so that fails the meeting. Before a start the harness
 puts each adviser's saved persona state (its mood, stress, energy and goal
 progress) back to the runtime's defaults. Its memory, and the interaction
-counter that paces note reflection, stay as they are.
+counter the runtime keeps though nothing reads it, stay as they are.
 
 A restart must leave the memory stores exactly as they were (check 2). An
 adviser that starts replays the channels' recent messages into memory, but
@@ -27,7 +28,9 @@ time. Once each adviser has logged the end of its catch-up pass, the pass
 must have replayed nothing, and each store that existed before the start
 must hold exactly what it held then, in every table but the saved state.
 If not, arm D cannot be held as designed: the meeting raises, and the run
-stops on a harness fault.
+stops on a harness fault. A pass the runtime's budget cut off has ended
+too, with the count it reached. An adviser that exits, or whose pass aborts,
+before every pass has ended is a start that failed, held again.
 
 A try that a provider error cut short is held again
 (:mod:`evaluators.exp001.attempts`) from the memory its advisers had before
@@ -42,7 +45,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import datetime as dt
-import json
 import re
 import shutil
 import sqlite3
@@ -51,21 +53,23 @@ from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from typing import Any
 
-from evaluators.exp001.attempts import Hold, attempt_directory, channel_hold
+from evaluators.exp001.attempts import Hold, channel_hold
 from evaluators.exp001.channel_arm import LIMITS, ChannelMeeting, Limits, channel_name
-from evaluators.exp001.deployed_meeting import DeploymentAPI, run_on_deployment
+from evaluators.exp001.deployed_meeting import DeploymentAPI, read_only, run_on_deployment
 from evaluators.exp001.deployment import (
     ARMS_ALIAS,
     REPO,
     Alias,
     DeploymentError,
     Layout,
+    StartError,
     channel_config,
     write_deployment,
 )
 from evaluators.exp001.materials import Meeting, Series
+from evaluators.exp001.orchestrator import log_lines
 from evaluators.exp001.panel import Panel
-from evaluators.exp001.processes import Handle, Process, launch
+from evaluators.exp001.processes import Deployment, Handle, Process, launch
 
 ARM = "D"
 # Where a meeting keeps the stores from before its first try, beside its tries.
@@ -74,10 +78,17 @@ STORES_BEFORE = "stores-before"
 # runtime gives each pass 60 seconds.
 CATCH_UP_LIMIT = dt.timedelta(seconds=90)
 _CATCH_UP_POLL = 1.0
-# The adviser logs this as its catch-up pass ends; a test holds it to the runtime.
-_CATCH_UP = re.compile(
+# The adviser logs one of these as its catch-up pass ends: complete; cut off by
+# the runtime's budget, with the count it had reached; or aborted by an error,
+# with none. Tests hold each to the runtime.
+_CAUGHT_UP = re.compile(
     r"channels: catch-up complete agent=(?P<agent>\S+) channels=\d+ events=(?P<events>\d+) ",
 )
+_CUT_OFF = re.compile(
+    r"channels: catch-up exceeded \S+ wall-clock budget for agent=(?P<agent>[^\s;]+); "
+    r"partial channels=\d+ events=(?P<events>\d+) ",
+)
+_ABORTED = re.compile(r"channels: catch-up replay aborted for agent (?P<agent>\S+)")
 # The table of an adviser's saved state other than memory: the persona state,
 # and the interaction counter.
 _SAVED_STATE = "agent_state"
@@ -103,31 +114,23 @@ def arm_d_hold(
     root: Path,
     *,
     binary: Path,
-    python: Path = Path(sys.executable),
-    repo: Path = REPO,
-    alias: Alias = ARMS_ALIAS,
-    spawn: Callable[[Process, Mapping[str, str]], Handle] = launch,
-    room: DeploymentAPI | None = None,
-    now: Callable[[], dt.datetime] = _real_now,
-    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
-    limits: Limits = LIMITS,
     watch_seconds: float = 5.0,
+    **options: Any,
 ) -> Hold[ChannelMeeting]:
     """Arm D's meetings, held by the rules of attempts and failures as B's and
     C's are: each try in its own directory under *root*, and each attempt on
-    a deployment of its own, ``attempt-N/deployment``."""
-    root = root.resolve()  # as channel_hold resolves it, so the two agree
+    a deployment of its own, ``attempt-N/deployment``. *options* go to
+    :func:`run_meeting` as they are."""
 
     async def run(
         _panel: Panel, _arm: str, _series: Series, meeting: Meeting, *,
-        attempt: int, meeting_try: int, directory: Path,
+        attempt: int, meeting_try: int, directory: Path, ended: Callable[[dt.datetime], None],
     ) -> ChannelMeeting:
-        here = attempt_directory(root, attempt)
+        # channel_hold lays each try out as attempt-N/<meeting>/try-M.
         return await run_meeting(
             panel, series, meeting, attempt=attempt, meeting_try=meeting_try,
-            directory=directory, deployment=here / "deployment",
-            before=here / meeting.id / STORES_BEFORE, binary=binary, python=python, repo=repo,
-            alias=alias, spawn=spawn, room=room, now=now, sleep=sleep, limits=limits,
+            directory=directory, deployment=directory.parents[1] / "deployment",
+            before=directory.parent / STORES_BEFORE, binary=binary, ended=ended, **options,
         )
 
     return channel_hold(panel, ARM, series, root, run=run, watch_seconds=watch_seconds)
@@ -153,13 +156,16 @@ async def run_meeting(
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     limits: Limits = LIMITS,
     catch_up: dt.timedelta = CATCH_UP_LIMIT,
+    ended: Callable[[dt.datetime], None] | None = None,
 ) -> ChannelMeeting:
     """Hold one try of an arm-D meeting on its series' *deployment*.
 
     The series' first meeting writes the deployment at its first try.
     *before* keeps the stores from before the meeting's first try, and a
     later try puts them back. *directory* must be empty; it holds the try's
-    call log, its record and its processes' logs.
+    call log, its record and its processes' logs. *ended* is told when the
+    meeting is over, as :func:`~evaluators.exp001.deployed_meeting.run_on_deployment`
+    tells it.
     """
     # An earlier run's call log would be appended to, and counted again.
     if directory.exists() and any(directory.iterdir()):
@@ -177,14 +183,16 @@ async def run_meeting(
     held = {a.id: memory_rows(layout.memory_db(a.id)) for a in panel.advisers}
     logs = directory / "logs"
 
-    async def check_restart() -> None:
-        await _check_restart(layout, logs, panel, held, now=now, sleep=sleep, limit=catch_up)
+    async def check_restart(deployment: Deployment) -> None:
+        await _check_restart(
+            layout, logs, panel, held, deployment, now=now, sleep=sleep, limit=catch_up,
+        )
 
     directory.mkdir(parents=True, exist_ok=True)
     return await run_on_deployment(
         layout, panel, ARM, series, meeting, attempt=attempt, meeting_try=meeting_try,
         directory=directory, logs=logs, binary=binary, python=python, repo=repo, spawn=spawn,
-        room=room, now=now, sleep=sleep, limits=limits, started=check_restart,
+        room=room, now=now, sleep=sleep, limits=limits, started=check_restart, ended=ended,
     )
 
 
@@ -193,6 +201,7 @@ async def _check_restart(
     logs: Path,
     panel: Panel,
     held: Mapping[str, Rows | None],
+    deployment: Deployment,
     *,
     now: Callable[[], dt.datetime],
     sleep: Callable[[float], Awaitable[None]],
@@ -200,9 +209,12 @@ async def _check_restart(
 ) -> None:
     """Refuse a start that changed memory (check 2): once every adviser has
     ended its catch-up pass, none may have replayed a message, and every store
-    that existed before the start must hold what it *held* then."""
+    that existed before the start must hold what it *held* then. A process
+    that exits first is a start that failed, as it is while starting."""
     deadline = now() + limit
     while True:
+        for name, code in deployment.exited().items():
+            raise StartError(f"{name} exited ({code}) before every catch-up pass ended; see {logs}")
         # Each adviser's own log, named as run_on_deployment names it.
         replayed = {a.id: catch_up_replayed(logs / f"{a.id}.log", a.id) for a in panel.advisers}
         waiting = [aid for aid, count in replayed.items() if count is None]
@@ -238,7 +250,7 @@ def memory_rows(db: Path) -> Rows | None:
     leaving out the saved state; None when there is no store."""
     if not db.exists():
         return None
-    with contextlib.closing(sqlite3.connect(f"file:{db}?mode=ro", uri=True)) as store:
+    with read_only(db) as store:
         tables = [name for (name,) in store.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
         )]
@@ -264,16 +276,18 @@ def reset_persona_state(layout: Layout, panel: Panel) -> None:
 
 def catch_up_replayed(log: Path, adviser_id: str) -> int | None:
     """How many messages the adviser's catch-up pass replayed into memory, read
-    from its log; None until it has logged the pass's end."""
-    lines = log.read_text(errors="replace").splitlines() if log.exists() else []
-    for text in lines:
-        try:
-            line = json.loads(text)
-        except ValueError:
-            continue
-        match = _CATCH_UP.match(str(line.get("message", ""))) if isinstance(line, dict) else None
+    from its log; None until it has logged the pass's end. A pass the runtime's
+    budget cut off ends with the count it had reached. One that aborted is a
+    start that failed, since what it replayed first is not known."""
+    for line in log_lines(log):
+        message = str(line.get("message", ""))
+        for ending in (_CAUGHT_UP, _CUT_OFF):
+            match = ending.match(message)
+            if match is not None and match["agent"] == adviser_id:
+                return int(match["events"])
+        match = _ABORTED.match(message)
         if match is not None and match["agent"] == adviser_id:
-            return int(match["events"])
+            raise StartError(f"{adviser_id}'s catch-up pass aborted; see {log}")
     return None
 
 

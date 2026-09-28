@@ -53,6 +53,13 @@ def binary() -> Path:
     return _BINARY
 
 
+@pytest.fixture(autouse=True)
+def _no_telemetry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No collector runs here, so each adviser's exporters would spend 15 to
+    28 seconds of every stop retrying it; the processes inherit this."""
+    monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+
+
 def _governed_as_b(tmp_path: Path) -> Panel:
     """The panel, with arm D moved to arm B's channel block."""
     doc = yaml.safe_load((_EXP / "panel.yaml").read_text())

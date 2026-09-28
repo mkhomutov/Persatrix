@@ -15,7 +15,7 @@ import contextlib
 import datetime as dt
 import json
 import sqlite3
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -33,7 +33,7 @@ from evaluators.exp001.arm_d import (
 )
 from evaluators.exp001.attempts import RETRIES, HarnessFault, run_series
 from evaluators.exp001.deployed_meeting import RECORD
-from evaluators.exp001.deployment import REPO, DeploymentError, Layout
+from evaluators.exp001.deployment import REPO, DeploymentError, Layout, StartError
 from evaluators.exp001.materials import Meeting, load_series
 from evaluators.exp001.orchestrator import Message
 from evaluators.exp001.panel import load_panel
@@ -58,14 +58,29 @@ def _log_line(message: str, **fields: Any) -> str:
 
 
 class _Handle:
-    def __init__(self) -> None:
+    """A process that stops *polls* polls after it is asked to, as an adviser
+    writing memory does, or never, when it *hangs*, until it is killed."""
+
+    def __init__(
+        self, *, polls: int = 0, hangs: bool = False, on_stop: Callable[[], None] | None = None,
+    ) -> None:
         self.returncode: int | None = None
+        self.polls = polls
+        self.hangs = hangs
+        self.on_stop = on_stop
+        self.stopping = False
 
     def poll(self) -> int | None:
+        if self.stopping and self.returncode is None and not self.hangs:
+            if self.polls <= 0:
+                self.returncode = 0
+            self.polls -= 1
         return self.returncode
 
     def send_signal(self, sig: int) -> None:
-        self.returncode = 0
+        self.stopping = True
+        if self.on_stop is not None:
+            self.on_stop()
 
     def kill(self) -> None:
         self.returncode = -9
@@ -79,12 +94,18 @@ class _World:
 
     def __init__(
         self, *, replayed: int = 0, logs_catch_up: bool = True, restart_writes: bool = False,
-        failing: Sequence[tuple[str, int, int]] = (),
+        failing: Sequence[tuple[str, int, int]] = (), exits: str | None = None,
+        hangs: str | None = None, fails_at_stop: str | None = None, stop_polls: int = 0,
     ) -> None:
         self.replayed = replayed
         self.logs_catch_up = logs_catch_up
         self.restart_writes = restart_writes  # an adviser that adds to memory as it restarts
         self.failing = set(failing)  # (meeting, attempt, try): a provider error in the call log
+        self.exits = exits  # an adviser that exits once registered, before its pass ends
+        self.hangs = hangs  # an adviser that does not stop until it is killed
+        self.fails_at_stop = fails_at_stop  # a meeting whose first try's stop logs a failed summary
+        self.stop_polls = stop_polls
+        self.handles: dict[str, _Handle] = {}
         self.processes: dict[str, Process] = {}
         self.found: list[tuple[str, str, str, Any, Any]] = []  # what each adviser found at a start
         self.posts: list[tuple[str, str]] = []
@@ -110,7 +131,8 @@ class _World:
             _append(process.log, _log_line("wallet lease enforcement initialized"))
             _append(process.log, _log_line("gRPC server listening"))
             self._messages = []
-            return _Handle()
+            self.handles[process.name] = _Handle()
+            return self.handles[process.name]
         db = layout.memory_db(process.name)
         tags = json.loads(process.env[CALL_TAGS_ENV])
         state = _state(db) if db.exists() else None
@@ -119,14 +141,27 @@ class _World:
         _open(db, process.name)
         if self.restart_writes and existed and process.name == "ripple-kite":
             _remember(db, "replayed at the restart")
-        if self.logs_catch_up:
+        if self.logs_catch_up and process.name != self.exits:
             _append(process.log, _log_line(_CATCH_UP.format(process.name, self.replayed)))
-        return _Handle()
+        on_stop: Callable[[], None] | None = None
+        if (tags["meeting"], tags["try"]) == (self.fails_at_stop, "1") and (
+            process.name == PANEL.chair.id
+        ):
+            def fail() -> None:  # the chair writes what it held open, and a summary fails
+                _append(Path(process.env[CALL_LOG_ENV]), _failed(tags, "summary", self.now()))
+
+            on_stop = fail
+        self.handles[process.name] = _Handle(
+            polls=self.stop_polls, hangs=process.name == self.hangs, on_stop=on_stop,
+        )
+        return self.handles[process.name]
 
     async def healthy(self) -> bool:
         return True
 
     async def agents(self) -> set[str]:
+        if self.exits in self.handles:
+            self.handles[self.exits].returncode = 1  # once it has registered
         return {name for name in self.processes if name != "orchestrator"}
 
     async def post(
@@ -149,12 +184,7 @@ class _World:
         for a in PANEL.advisers:
             _remember(layout.memory_db(a.id), where)
         if (tags["meeting"], int(tags["attempt"]), int(tags["try"])) in self.failing:
-            _append(Path(adviser.env[CALL_LOG_ENV]), json.dumps({
-                "tags": tags, "agent_id": "ripple-kite", "purpose": "turn",
-                "provider": "anthropic", "model": "claude-sonnet-4-6", "model_alias": None,
-                "started_at": _T0.isoformat(), "input_tokens": 0, "output_tokens": 0,
-                "cache_write_tokens": 0, "cache_read_tokens": 0, "error": "RateLimitError",
-            }))
+            _append(Path(adviser.env[CALL_LOG_ENV]), _failed(tags, "turn", _T0))
         _append(orchestrator.log, _log_line(
             "channels: interaction closed by RFC 0052 bounded close", channel_id=channel,
             interaction_id="i-1", trigger="structural",
@@ -172,6 +202,16 @@ class _World:
 
     async def set_respond(self, channel: str, member: str, respond: str) -> None:
         pass
+
+
+def _failed(tags: Mapping[str, str], purpose: str, at: dt.datetime) -> str:
+    """A call-log line for a call the provider refused with a rate limit."""
+    return json.dumps({
+        "tags": tags, "agent_id": "ripple-kite", "purpose": purpose,
+        "provider": "anthropic", "model": "claude-sonnet-4-6", "model_alias": None,
+        "started_at": at.isoformat(), "input_tokens": 0, "output_tokens": 0,
+        "cache_write_tokens": 0, "cache_read_tokens": 0, "error": "RateLimitError",
+    })
 
 
 def _open(db: Path, adviser: str) -> None:
@@ -296,6 +336,24 @@ class TestRunMeeting:
             await _run(world, tmp_path, BRIEFING)
         assert world.posts == []
 
+    async def test_an_adviser_that_exits_before_its_pass_ends_is_a_start_that_failed(
+        self, tmp_path: Path,
+    ) -> None:
+        """As a process that exits before the operator speaks is for B and C (PR 5b)."""
+        world = _World(exits="ripple-kite")
+        with pytest.raises(StartError, match=r"ripple-kite exited \(1\)"):
+            await _run(world, tmp_path, BRIEFING)
+        assert world.posts == []
+        assert world.seconds < 1  # no wait for a pass that cannot end
+
+    async def test_an_adviser_killed_at_the_stop_fails_the_meeting(self, tmp_path: Path) -> None:
+        """It may not have written what it still held open, which D's next meeting reads."""
+        world = _World(hangs="velvet-pika")
+        with pytest.raises(DeploymentError, match="killed at the stop: velvet-pika"):
+            await _run(world, tmp_path, BRIEFING)
+        record = tmp_path / "attempt-1" / BRIEFING.id / "try-1" / RECORD
+        assert json.loads(record.read_text())["failures"] == []
+
     async def test_a_try_held_again_starts_from_the_stores_its_meeting_began_with(
         self, tmp_path: Path,
     ) -> None:
@@ -328,11 +386,11 @@ async def _no_wait(seconds: float) -> None:
     """Stands in for asyncio.sleep between tries."""
 
 
-def _hold(world: _World, root: Path) -> Any:
+def _hold(world: _World, root: Path, **options: Any) -> Any:
     return arm_d_hold(
         PANEL, SERIES, root, binary=Path("/repo/bin/persatrix-server"),
         python=Path("/venv/bin/python"), repo=Path("/repo"), spawn=world.spawn, room=world,
-        now=world.now, sleep=world.sleep,
+        now=world.now, sleep=world.sleep, **options,
     )
 
 
@@ -370,3 +428,25 @@ class TestHold:
         with pytest.raises(HarnessFault, match=f"D, practice, {PLAN.id}, attempt 1, try 1: "
                                                "DeploymentError: a restart changed"):
             await run_series("D", SERIES, _hold(world, tmp_path), sleep=_no_wait)
+
+    async def test_a_summary_that_fails_at_the_stop_lets_the_stop_finish(
+        self, tmp_path: Path,
+    ) -> None:
+        """The try is held again all the same, from the stores its meeting began
+        with. Killing the advisers still writing would lose their calls from the
+        call log, which counts the spend."""
+        world = _World(fails_at_stop=PLAN.id, stop_polls=20)
+        hold = _hold(world, tmp_path, watch_seconds=0)
+        await hold(BRIEFING, 1, 1)
+        held = await hold(PLAN, 1, 1)
+        assert held.result is not None and held.cut_short
+        assert [n for n, h in world.handles.items() if h.returncode != 0] == []
+
+    async def test_a_summary_that_fails_once_the_series_last_meeting_is_over_changes_nothing(
+        self, tmp_path: Path,
+    ) -> None:
+        """No later meeting reads what the last one writes to memory as it stops."""
+        last = SERIES.meetings[-1]
+        world = _World(fails_at_stop=last.id)
+        run = await run_series("D", SERIES, _hold(world, tmp_path), sleep=_no_wait)
+        assert run.finished_tries()[last.id] == 1

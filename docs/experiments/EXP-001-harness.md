@@ -89,10 +89,12 @@ rests on the fix for
 [ISSUE-0172](../issues/ISSUE-0172-stopping-agent-drops-open-conversations.md):
 a discussion that ends by its idle window tells no adviser, so each still
 holds it open when the harness stops the advisers, and only since that fix
-does the stop write it to memory. A turn still running at the stop never
-records the message it was answering, so the harness's wait of up to five
-minutes for the turns in flight also guards D's memory. PR 5c leaves one
-thing. Check 2 has two halves, and PR 5c's tests show only the
+does the stop write it to memory. A stopping adviser writes it once the turn
+it is running, and any queued behind that turn, has finished. The harness
+kills an adviser still running 90 seconds after it was asked to stop, which
+loses everything the adviser still held open, so in D a kill at the stop is
+a harness fault, and the harness's wait of up to five minutes for the turns
+in flight also guards D's memory. PR 5c leaves one thing. Check 2 has two halves, and PR 5c's tests show only the
 second, that a restart leaves memory exactly as it was. The first, that a
 briefing fact can reach a later meeting's prompt through the shipped memory
 path, needs a model that writes real summaries; the offline mock provider
