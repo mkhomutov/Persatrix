@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0176
 summary: "Every orchestrator stop waited out the whole 12-second shutdown drain and logged \"shutdown drain timed out, exiting\", even with nothing in flight: main() waited for the agent-facing gRPC server to return before it stopped that server. With an agent still connected, whose log shipper holds a stream open, the orchestrator did not exit at all until killed, and its deferred closes never ran. Docker's default 10-second stop timeout, which the compose orchestrator service keeps, is shorter than the drain. EXP-001 paid the 12 seconds at every deployment it stopped."
-status: in_progress
+status: resolved
 severity: medium
 area: cmd/orchestrator
 created: 2026-09-28
+closed: 2026-09-28
+closed_pr: 1017
 refs:
   - cmd/orchestrator/main.go
   - cmd/orchestrator/grpcserver.go
