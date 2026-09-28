@@ -1,6 +1,6 @@
 # Automation Catalogue
 
-> **Last updated**: 2026-09-26
+> **Last updated**: 2026-09-29
 > Everything that runs without a human typing the steps: `make` targets,
 > scripts, the pre-commit hook, and the GitHub workflows — grouped by
 > purpose, with **when it runs**. `make help` is the live list of targets;
@@ -50,15 +50,14 @@ dependencies.
 
 | Target | Runs | CI job |
 |--------|------|--------|
-| `make test` | `test-go test-python test-agents test-integration` — four legs, **not** Rust, web, evals, or Go integration | — |
-| `make test-go` | `go test ./internal/... -v -race -cover` | `Go` |
+| `make test` | `test-go test-python test-agents test-integration` — four legs, **not** Rust, web or evals | — |
+| `make test-go` | `go test ./... -v -race -cover`: every Go package, the Go integration tests (bufconn scheduler→executor, rate limiter, audit log) included | `Go` |
 | `make test-python` | `pytest tests/unit/python/` (~5.5 min) | `Python` |
 | `make test-agents` | `pytest agents/tests/ -c agents/pyproject.toml` from the repo root | `Python` |
 | `make test-integration` | `pytest tests/integration/` with `PYTHONPATH=agents/generated` | `Python` |
 | `cd cli && cargo test` | Rust suite incl. lockstep guards | `Rust` |
 | `cd cli && cargo "+$msrv" check --locked --all-targets` | Compiles the CLI and its tests on the oldest Rust it claims: `msrv` is `rust-version` in `cli/Cargo.toml`, read with `cargo metadata` and installed with `rustup toolchain install` first | `Rust` |
 | `make ui-test` | `npm ci && npm test` (Vitest) | `Web console` |
-| `go test ./tests/integration/... -race` | Go integration (bufconn scheduler→executor, rate limiter, audit log) | `Go` |
 | `make eval-replay [TARGET= TIER= REPORT=]` | Replay goldens deterministically under the offline overlay; `TIER=stable` is the merge gate | `Python` (since v0.3.16 PR C2) |
 | `make eval-record` / `eval-record-offline TARGET=` / `eval-drift` | Record a golden live / against the mock; report live drift (never gates) | on demand |
 | `python tests/perf/personal_tier_latency.py [--capture-baseline PATH]` | Recall latency vs baseline | `Python` (informational) |
@@ -114,7 +113,7 @@ The hook is the fast local copy, not the only copy.
 
 | Workflow | Trigger | Does |
 |----------|---------|------|
-| `ci.yml` | push to `main`, every PR | Eleven jobs: `Go (build + test)` (incl. gofmt, the pinned golangci-lint via `make lint-go`, Go integration tests, sanitizer sync), `Web console (build + test)`, `Dockerignore context hygiene`, `Proto staleness check`, `Python (lint + test)` (incl. ruff/mypy on `scripts/` + `evaluators/`), `Cost regression gate (bored persona)` (path-filtered), `Rust (build + clippy)` (incl. rustfmt, `cargo test`; on the release `cli/rust-toolchain.toml` pins), `Validate configs` (incl. `prompt_refs` and the ROADMAP status rows), `Docs hygiene` (links, markup, markers, FILEMAP, merged-PR history, plan status, amendment evidence, conformance), `File size check`, `Third-party license check`. Every job carries a comment naming the incident it guards. |
+| `ci.yml` | push to `main`, every PR | Eleven jobs: `Go (build + test)` (incl. gofmt, the pinned golangci-lint via `make lint-go`, every Go package's tests via `make test-go`, sanitizer sync), `Web console (build + test)`, `Dockerignore context hygiene`, `Proto staleness check`, `Python (lint + test)` (incl. ruff/mypy on `scripts/` + `evaluators/`), `Cost regression gate (bored persona)` (path-filtered), `Rust (build + clippy)` (incl. rustfmt, `cargo test`; on the release `cli/rust-toolchain.toml` pins), `Validate configs` (incl. `prompt_refs` and the ROADMAP status rows), `Docs hygiene` (links, markup, markers, FILEMAP, merged-PR history, plan status, amendment evidence, conformance), `File size check`, `Third-party license check`. Every job carries a comment naming the incident it guards. |
 | `commitlint.yml` | PR opened/edited/synchronised | Conventional Commit PR title (`Validate PR Title`) |
 | `scheduled-audit.yml` | Mondays 06:00 UTC; manual | `cargo deny check advisories bans sources licenses`; opens or comments on a `Scheduled Dependency Audit Failure` issue |
 | `perf-baseline-capture.yml` | manual (`workflow_dispatch`) | Captures the recall-latency baseline on a runner and opens a PR with it; merging arms the perf gate. Never run yet |

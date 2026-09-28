@@ -30,9 +30,10 @@ one form that wins.
 
 Not covered, by design: "this release's named suites" (the plan's
 Acceptance names them — run them by hand), the live arc, and the steps that
-run only in CI and the hook — gofmt, cargo fmt, the Go integration tests and
-the dockerignore, ROADMAP-status, amendment-evidence and conformance checks —
-which the tag PR's required checks run on the same head.
+run only in CI and the hook — gofmt, cargo fmt and the dockerignore,
+ROADMAP-status, amendment-evidence and conformance checks — which the tag PR's
+required checks run on the same head. (`make test` covers the Go integration
+tests: `make test-go` tests `./...`.)
 """
 
 from __future__ import annotations

@@ -1,6 +1,6 @@
 # Enforcement Matrix
 
-> **Last updated**: 2026-09-26
+> **Last updated**: 2026-09-29
 > Every rule the project states, with the document that states it, the check
 > that enforces it, and how hard the enforcement is. Read the **Enforcement**
 > column literally: a rule is only as strong as the weakest place it is
@@ -34,7 +34,8 @@ the twelve, and the job is named where it is not one of the original six.
 
 | Rule | Stated in | Check | Enforcement |
 |------|-----------|-------|-------------|
-| Go builds; Go unit tests pass with `-race` | CONTRIBUTING | `go build ./cmd/orchestrator`; `go test ./internal/... -race -cover` | Required (`Go`) |
+| Go builds; all Go tests pass with `-race` | CONTRIBUTING | `go build ./cmd/orchestrator`; `make test-go` (`go test ./...`), pinned by `test_go_test_gate_ci.py` | Required (`Go`) — `cmd/` since ISSUE-0177 |
+| Every test tree has a named runner | testing-strategy | Go: `./...` reaches every package; other languages: review ([ISSUE-0178](../issues/ISSUE-0178-runner-rule-checked-only-for-go.md)) | Required (`Go`) for Go; Convention elsewhere |
 | Go lint clean under one pinned golangci-lint and the committed linter set | [ISSUE-0142](../issues/ISSUE-0142-ci-never-runs-golangci-lint.md); `.golangci.yml`; Makefile `GOLANGCI_LINT_VERSION` | `make lint-go` — refuses any other version; CI installs the pin it reads from the Makefile and runs the same target | Required (`Go`) — since v0.3.16 PR C1; was Make-only and unpinned |
 | Committed UI embed is the placeholder, never build output | `.gitignore` comment; `ci.yml` | `grep` assert in the `go` job | Required (`Go`) |
 | Python lint (ruff) — `agents/`, `tests/` | instructions; ISSUE-0056 | `ruff check` ×2 | Required (`Python`) |
@@ -59,7 +60,6 @@ the twelve, and the job is named where it is not one of the original six.
 | Third-party licences on the allow-list (Go, Python, Rust) | Makefile; `allowed_licenses.txt`; `deny.toml` | `make check-licenses`, with go-licenses at the Makefile pin (`GO_LICENSES_VERSION`: the target refuses any other version, and CI installs it with `make go-licenses-install`) | Required (`Third-party license check`) — go-licenses pinned since 2026-09-26; was `@latest` |
 | Idle persona spends nothing (RFC 0024) | RFC 0024 §Test Strategy | `test_bored_persona_cost.py`, path-filtered | Required (`Cost regression gate (bored persona)`) |
 | `gofmt` / `cargo fmt` clean | instructions | `gofmt -l` over every tracked `.go` file; `cargo fmt -- --check` | Required (`Go`, `Rust`) + Pre-commit (hook covers `internal/`, `cmd/` only) |
-| Go integration tests pass | testing-strategy | `go test ./tests/integration/... -race` | Required (`Go`) |
 | Python sanitizer patterns/enums match the Go canonical source | Makefile (RFC 0009 PR 3) | `make generate-sanitizer-patterns-check` | Required (`Go`) |
 | `THIRD_PARTY_NOTICES.md` matches the dependency graphs | Makefile | `make notices-check`, with go-licenses and cargo-license at the Makefile pins | Make-only — deliberately: the notices file is regenerated in the tag PR, so it is legitimately stale between a dependency bump and the next release (it is stale today) |
 | `agents.yaml` `instructions_file` references resolve | prompt-organization | `scripts/checks/prompt_refs.py` | Required (`Validate configs`) |
