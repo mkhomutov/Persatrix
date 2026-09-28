@@ -84,8 +84,13 @@ jobs:
       - name: Run golangci-lint (the same target as `make lint`)
         run: make lint-go
 
+      # ./cmd/... is cmd/orchestrator/*_test.go: the startup wiring (auth,
+      # channels, the agent gRPC server, the UI toggles, the env-var reads).
+      # It sat outside `./internal/...` and ran in no job — the fifth "test
+      # tree with no runner", found after the Go integration tests below
+      # (ISSUE-0177). ~4 s under -race.
       - name: Run Go tests
-        run: go test ./internal/... -v -race -cover
+        run: go test ./internal/... ./cmd/... -v -race -cover
 
       # tests/integration/*_test.go (scheduler→executor over bufconn, the rate
       # limiter, the audit logger) sat outside `./internal/...` and so ran in

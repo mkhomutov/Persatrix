@@ -1,6 +1,6 @@
 # Automation Catalogue
 
-> **Last updated**: 2026-09-26
+> **Last updated**: 2026-09-28
 > Everything that runs without a human typing the steps: `make` targets,
 > scripts, the pre-commit hook, and the GitHub workflows — grouped by
 > purpose, with **when it runs**. `make help` is the live list of targets;
@@ -51,7 +51,7 @@ dependencies.
 | Target | Runs | CI job |
 |--------|------|--------|
 | `make test` | `test-go test-python test-agents test-integration` — four legs, **not** Rust, web, evals, or Go integration | — |
-| `make test-go` | `go test ./internal/... -v -race -cover` | `Go` |
+| `make test-go` | `go test ./internal/... ./cmd/... -v -race -cover` | `Go` |
 | `make test-python` | `pytest tests/unit/python/` (~5.5 min) | `Python` |
 | `make test-agents` | `pytest agents/tests/ -c agents/pyproject.toml` from the repo root | `Python` |
 | `make test-integration` | `pytest tests/integration/` with `PYTHONPATH=agents/generated` | `Python` |

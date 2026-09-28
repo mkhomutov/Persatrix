@@ -1,6 +1,6 @@
 # Testing Strategy
 
-> **Last updated**: 2026-09-17
+> **Last updated**: 2026-09-28
 > Every test layer in the repository, what it proves, where it runs, and how
 > to add to it. Counts are from `git ls-files` on 2026-09-06 and will drift;
 > the layers and rules will not.
@@ -16,7 +16,11 @@ a knob shipped with a red lockstep guard
 integration tier until a config change broke its close-path tests on `main`
 ([ISSUE-0076](../issues/ISSUE-0076-full-integration-suite-not-run-in-ci.md)) —
 and a fourth, the Go integration tests, was found by the audit that produced
-this document and wired into CI in the same series. A
+this document and wired into CI in the same series. A fifth, the
+orchestrator's own tests under `cmd/`, ran in no job from the first one
+(2026-04-17) until
+[ISSUE-0177](../issues/ISSUE-0177-cmd-go-tests-run-in-no-ci-job.md): the
+`go` job built and linted `cmd/` but tested only `./internal/...`. A
 green lint is not a running tree. When a new test directory is created, the
 same PR adds its `make` target and its CI step, and adds a row to the table
 below.
@@ -27,7 +31,7 @@ below.
 
 | # | Layer | What it proves | Where it lives | Runner | CI |
 |---|-------|----------------|----------------|--------|----|
-| 1 | Go unit | Orchestrator packages behave in isolation; races (`-race`) | `internal/**/*_test.go` (309 files, 22 packages) | `make test-go` | `go` job |
+| 1 | Go unit | Orchestrator packages behave in isolation; races (`-race`) | `internal/**/*_test.go` (309 files, 22 packages) + `cmd/orchestrator/*_test.go` (12 files, the startup wiring) | `make test-go` | `go` job (`cmd/` since ISSUE-0177) |
 | 2 | Python unit, root tree | Agent-runtime modules, mirrored per source module | `tests/unit/python/test_<module>.py` (347 files) | `make test-python` (~5.5 min) | `python` job |
 | 3 | Python unit, agents tree | Component tests that need agent fixtures; the **only** executable coverage of `observability/tracing.py`, `grpc_logging.py`, `memory/scheduled_wakes.py` | `agents/tests/` (46 files) | `make test-agents` | `python` job (since #848) |
 | 4 | Python integration | Assembled pieces: close path, channels, memory scoping, catch-up replay, confidentiality, delegation | `tests/integration/test_*.py` (73 files) + `_*_helpers.py` | `make test-integration` | `python` job (since ISSUE-0076) |

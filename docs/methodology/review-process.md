@@ -1,6 +1,6 @@
 # The Review Process
 
-> **Last updated**: 2026-09-17
+> **Last updated**: 2026-09-28
 > Every PR in this repository is reviewed before merge. This document says how,
 > because until now the only committed trace of a review was its findings.
 
@@ -118,7 +118,7 @@ At minimum, for the language the diff touches:
 
 | Diff touches | Reviewer runs |
 |---|---|
-| `internal/`, `cmd/` | `go test ./internal/... -race`; `gofmt -l` |
+| `internal/`, `cmd/` | `go test ./internal/... ./cmd/... -race`; `gofmt -l` |
 | `agents/`, `tests/` | The named test file(s); `ruff check`; `mypy` on the tree |
 | `cli/` | `cargo test`; `cargo clippy -- -D warnings`; `cargo fmt --check` |
 | `web/` | `make ui-test`; `make ui-html-check` |

@@ -254,8 +254,10 @@ generate-sanitizer-patterns-check: ## Fail if agents/security_patterns.py or age
 # ─── Test ───────────────────────────────────────────────
 test: test-go test-python test-agents test-integration ## Run all tests
 
+# ./cmd/... holds the orchestrator's startup-wiring tests, which no target and
+# no CI job ran until ISSUE-0177. CI's `Go` job runs this same command.
 test-go: ## Run Go unit tests
-	go test ./internal/... -v -race -cover
+	go test ./internal/... ./cmd/... -v -race -cover
 
 test-python: ## Run Python agent tests
 	$(PYTHON) -m pytest tests/unit/python/ -v --tb=short

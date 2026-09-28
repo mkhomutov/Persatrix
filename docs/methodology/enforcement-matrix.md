@@ -1,6 +1,6 @@
 # Enforcement Matrix
 
-> **Last updated**: 2026-09-26
+> **Last updated**: 2026-09-28
 > Every rule the project states, with the document that states it, the check
 > that enforces it, and how hard the enforcement is. Read the **Enforcement**
 > column literally: a rule is only as strong as the weakest place it is
@@ -34,7 +34,7 @@ the twelve, and the job is named where it is not one of the original six.
 
 | Rule | Stated in | Check | Enforcement |
 |------|-----------|-------|-------------|
-| Go builds; Go unit tests pass with `-race` | CONTRIBUTING | `go build ./cmd/orchestrator`; `go test ./internal/... -race -cover` | Required (`Go`) |
+| Go builds; Go unit tests pass with `-race` | CONTRIBUTING | `go build ./cmd/orchestrator`; `go test ./internal/... ./cmd/... -race -cover` | Required (`Go`) — `cmd/` since ISSUE-0177 |
 | Go lint clean under one pinned golangci-lint and the committed linter set | [ISSUE-0142](../issues/ISSUE-0142-ci-never-runs-golangci-lint.md); `.golangci.yml`; Makefile `GOLANGCI_LINT_VERSION` | `make lint-go` — refuses any other version; CI installs the pin it reads from the Makefile and runs the same target | Required (`Go`) — since v0.3.16 PR C1; was Make-only and unpinned |
 | Committed UI embed is the placeholder, never build output | `.gitignore` comment; `ci.yml` | `grep` assert in the `go` job | Required (`Go`) |
 | Python lint (ruff) — `agents/`, `tests/` | instructions; ISSUE-0056 | `ruff check` ×2 | Required (`Python`) |
