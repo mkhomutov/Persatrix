@@ -1,6 +1,6 @@
 # EXP-001 — The harness's frozen choices: holding the meetings
 
-> **Status**: 🚧 **In Progress** — PR 5a's and PR 5b's rows froze when they merged; PR 5c's rows freeze when it merges.
+> **Status**: 🚧 **In Progress** — PR 5a's, PR 5b's and PR 5c's rows froze when they merged; the review of PR 5c changed its rows before any meeting was scored.
 > **Last updated**: 2026-09-28
 > **Part of**: the [EXP-001 harness](EXP-001-harness.md); the [first part](EXP-001-harness-choices.md) holds the choices of PRs 1 to 4 and the arm order
 
