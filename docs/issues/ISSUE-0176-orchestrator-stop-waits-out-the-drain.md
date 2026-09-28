@@ -39,7 +39,7 @@ then sent SIGTERM:
 | Case | Before | After |
 |---|---|---|
 | Nothing connected (the harness's order) | 12.07 s, "drain timed out" | 0.02 s, "drained cleanly" |
-| One agent log stream held open | did not exit; killed after 40 s | 5.04 s, "drained cleanly" |
+| One agent log stream held open | did not exit; killed after 40 s | 5.02 s, "drained cleanly" |
 
 ## Impact
 
@@ -59,14 +59,23 @@ then sent SIGTERM:
 
 ## Fix
 
-`serveAgentGRPC` in `cmd/orchestrator/grpcserver.go` runs the gRPC server
-the way `server.Start` runs the HTTP one: it serves until the root context
-is cancelled, then stops the server and returns, so the drain can finish.
-The stop is graceful first, so a call in flight, such as a wallet lease
-call, finishes. After `grpcStopGrace` (5 seconds) it stops hard, which ends
-the log streams still open; the shippers reconnect. The deferred call is now
-`Stop`, which never waits on an open stream. It is a backstop for when
-`Serve` fails on its own.
+`runAgentGRPC` in `cmd/orchestrator/grpcserver.go` runs the gRPC server, and
+`main()` no longer counts it in the drain. A deferred call stops it after the
+HTTP drain and the channels' fanout drain. The persona turns those drains
+finish still take wallet leases and ship their logs through this server, and
+an agent that cannot reach the wallet fails its LLM call closed. Stopping the
+server as soon as the signal came would have failed those turns.
+
+The stop is graceful first, so a call in flight, such as a wallet lease call,
+finishes. After `grpcStopGrace` (5 seconds) it stops hard, which ends the log
+streams still open (the shippers reconnect). It then waits up to the grace
+again for the handlers it ended, so nothing is closed under them. A handler
+that never returns cannot hold the stop past that. The compose orchestrator
+service now sets `stop_grace_period: 45s`, which covers the drain, the fanout
+drain, both gRPC waits and the telemetry flushes.
+
+Measured with a log tail holding the HTTP drain: a new agent call made
+0.5 seconds after SIGTERM is still served.
 
 ## Notes
 
@@ -74,9 +83,9 @@ the log streams still open; the shippers reconnect. The deferred call is now
   still holds the HTTP server's own drain for its whole 10-second window.
   `http.Server.Shutdown` waits for a response in progress, and the stream
   ends only when its client leaves or the log buffer closes, which happens
-  after the drain. Measured: 10.05 s with one tail attached. That is bounded
-  and inside the drain, so it is not this issue, but it is as long as
-  Docker's default stop timeout.
+  after the drain. Measured: 10.07 s with one tail attached. That is bounded,
+  and inside both the drain and the compose `stop_grace_period`, so it is
+  not this issue.
 
 > 2026-09-28 — found while reviewing EXP-001 harness PR 5c
 > ([#1015](https://github.com/mkhomutov/Persatrix/pull/1015)).

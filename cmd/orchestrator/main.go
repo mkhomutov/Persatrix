@@ -35,11 +35,11 @@ import (
 
 const (
 	// shutdownDrainTimeout is the maximum time to wait for in-flight goroutines
-	// (HTTP + gRPC servers, wallet reaper, scheduler) to finish after a signal.
+	// (HTTP server, wallet reaper, scheduler) to finish after a signal; the
+	// agent-facing gRPC server stops after it (ISSUE-0176, runAgentGRPC).
 	// Extracted from inline magic number per PR #33 review F-02.
 	// Must exceed the HTTP server's internal shutdown timeout (10s in server.go)
-	// and grpcStopGrace (grpcserver.go) to avoid a spurious "drain timed out"
-	// warning when a server is still gracefully draining. (PR #33 review S-01)
+	// to avoid a spurious "drain timed out" warning. (PR #33 review S-01)
 	shutdownDrainTimeout = 12 * time.Second
 )
 
@@ -343,6 +343,11 @@ func main() {
 	// at boot. `live` in production (behaviour unchanged); a per-job id in CI.
 	epochID := resolveEpochID(logger)
 
+	// ISSUE-0176: stops the agent-facing gRPC server (runAgentGRPC). Deferred
+	// before chanCleanup so it runs after it; set once the server runs.
+	stopAgentGRPC := func() {}
+	defer func() { stopAgentGRPC() }()
+
 	// RFC 0011 PR 2 — channels subsystem (see channels.go).
 	chanOpts, chanCleanup, chanErr := initChannels(*configDir, *channelsDB, sessionID, epochID, orchMetrics, reg, walletSvc, logger)
 	if chanErr != nil {
@@ -387,7 +392,6 @@ func main() {
 		}
 		grpcListener = lis
 		grpcServer = newAgentGRPCServer(logBuf, rateLimiter, circuitBreaker, walletSvc, logger)
-		defer grpcServer.Stop() // a backstop; unlike GracefulStop, never waits on an open stream
 	}
 
 	// 11. Start HTTP server (REST API + SSE streaming)
@@ -399,18 +403,13 @@ func main() {
 	// N-46: Track goroutines with WaitGroup so shutdown can drain in-flight work.
 	var wg sync.WaitGroup
 
-	// Spawn the gRPC LogService goroutine after wg is declared so it
-	// can register itself for the drain.  serveAgentGRPC stops the server
-	// once ctx is cancelled, so the drain can finish (ISSUE-0176).
+	// Serve the agent-facing gRPC server. It is not part of the drain below:
+	// the deferred stopAgentGRPC stops it after the drains (ISSUE-0176).
 	if grpcServer != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if err := serveAgentGRPC(ctx, grpcServer, grpcListener, grpcStopGrace, logger); err != nil {
-				logger.Error("gRPC server terminated with error", zap.Error(err))
-				cancel()
-			}
-		}()
+		stopAgentGRPC = runAgentGRPC(grpcServer, grpcListener, grpcStopGrace, logger, func(err error) {
+			logger.Error("gRPC server terminated with error", zap.Error(err))
+			cancel()
+		})
 		logger.Info("gRPC server listening", zap.String("addr", grpcListener.Addr().String()))
 
 		// RFC 0023 — run the wallet's TTL reaper alongside the listener
