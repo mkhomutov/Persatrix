@@ -38,6 +38,10 @@ services:
       context: .
       dockerfile: Dockerfile.orchestrator
     restart: unless-stopped
+    # A stop can run the 12 s drain, the channels' 10 s fanout drain, the gRPC
+    # server's two 5 s waits and two 5 s telemetry flushes, one after another
+    # (ISSUE-0176); Docker's default 10 s would kill it before its closes run.
+    stop_grace_period: 45s
     # NOTE(review-F02): Docker 'command' replaces Dockerfile CMD entirely.
     # All required flags must be listed here, not just the override.
     # PR #173 review Must-Fix #2 defaulted --grpc-bind to 127.0.0.1 so a
