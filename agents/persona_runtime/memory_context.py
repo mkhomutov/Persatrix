@@ -194,7 +194,7 @@ class _MemoryContextMixin:
     # legacy mixin harnesses and DM-only paths are unaffected.
     _roster_fetcher: ChannelRosterFetcher | None = None
     # Owned by ``_LLMPersonaAgent.__init__`` (set from ``create_memory_tools``)
-    # and consumed by ``_ActionLoopMixin``; redeclared here so ``add_recall_tool``
+    # and consumed by ``_ToolRoundMixin``; redeclared here so ``add_recall_tool``
     # type-checks against it.
     _memory_tools: list[ToolDefinition]
 

@@ -12,7 +12,8 @@ in ``tick``.  The runtime class itself is split across mixin submodules for
 file-size hygiene:
 
 - ``memory_context`` — memory recall + §D gate; ``memory_assembly`` — the allocate-loop
-- ``action_loop`` — multi-turn tool-use loop, prompt assembly, action parsing
+- ``action_loop`` — multi-turn tool-use loop, prompt assembly, action parsing;
+  ``tool_round`` — the tools a turn offers, and running the calls it makes
 - ``state_persistence`` — state serialisation and memory lifecycle
 """
 

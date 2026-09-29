@@ -4,7 +4,7 @@ Each agent in ``config/agents.yaml`` lists the tools it may use.
 ``_build_tool_definitions`` has always offered a task agent only the
 registered tools on that list, but ``_execute_tools`` ran any registered
 tool the model named, listed or not — while a persona refuses such a call
-(``agents/persona_runtime/action_loop.py``). These tests pin the task-agent
+(``agents/persona_runtime/tool_round.py``). These tests pin the task-agent
 rule: a call to a tool the agent was not offered gets the same
 ``Unknown tool`` error as a tool that does not exist, and never runs. Both
 methods share the rule in :mod:`agents.tools.tool_list`.

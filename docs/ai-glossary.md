@@ -289,11 +289,28 @@ Process vocabulary (scope lock, cuttable, live arc, finding, …) lives in the
   labels from `PERSATRIX_CALL_TAGS`, the agent's ID, the call's purpose
   (turn, bid, critic, revise, summary or compress, named by the code that
   makes the call), the start in real time, the model and the token counts,
-  cache writes and reads apart. Without the setting nothing is written;
-  a process serving many runs in turn names the file and tags per block of
-  calls instead.
+  cache writes and reads apart, and the SHA-256 of the
+  [prompt prefix](#prompt-prefix) the call carried, if any. Without the
+  setting nothing is written; a process serving many runs in turn names the
+  file and tags per block of calls instead.
 - **Example:** "EXP-001 gives every adviser the same call log, tagged with
   the arm and meeting, and prices each line with its fixed table."
+
+### Prompt Prefix
+- **Aliases:** "cached prefix"
+- **Disallowed:** "memory" (the agent recalls nothing; an operator supplies the text)
+- **Definition:** Text an operator gives a persona agent in the file
+  `PERSATRIX_PROMPT_PREFIX` names
+  ([`agents/prompt_prefix.py`](../agents/prompt_prefix.py)). Every call of
+  the persona's turn carries it at the front of its prompt, marked for the
+  provider's prompt cache. The turn is the one prompt recalled memory
+  reaches, so no bid, summary or critic call carries it. Calls that carry
+  the same prefix after the same tools share one cache entry: the first
+  writes it and later ones read it, at a fraction of the input price. A
+  provider that cannot cache gets the same words at the front of the system
+  prompt. Without the setting there is no prefix.
+- **Example:** "EXP-001's arm D′ has no memory; its advisers' prompt prefix
+  is the full transcripts of the series' earlier meetings."
 
 ### Trust Level
 - **Aliases:** "trust score"
