@@ -25,6 +25,7 @@ from ..persona_types import (
     EventType,
     PersonaState,
 )
+from ..prompt_prefix import prompt_prefix
 from ..response_gate import evaluate_response_gate
 from .action_parser import parse_actions
 from .channel_ingest import sanitize_inbound_event
@@ -301,6 +302,9 @@ class _ActionLoopMixin(_ToolRoundMixin):
                     model=self.config["model"],
                     model_alias=self.config.get("model_alias"),
                     purpose=LLMCallPurpose.TURN,
+                    # The turn is the prompt recalled memory reaches, so it
+                    # alone carries an operator's cached prefix (EXP-001 D′).
+                    cache_prefix=prompt_prefix(),
                     messages=messages,
                     system=system_prompt,
                     tools=tool_defs,

@@ -1,16 +1,20 @@
 """One channel meeting on a deployment's processes, start to finish.
 
-Arms B and C hold each meeting on a new deployment of the four advisers,
-written into the meeting's own directory (:func:`run_meeting`), so every
-meeting starts with empty stores. Arm D holds each of a series' meetings on
-the series' one deployment (:mod:`evaluators.exp001.arm_d`). Either way the
-harness runs the processes the same way (:func:`run_on_deployment`): it
-starts them with the meeting's clock and call-log settings, goes on only once
-the orchestrator has logged its rate limiter off and serves the wallet,
-holds the meeting (:func:`evaluators.exp001.channel_arm.hold_meeting`), and
-stops them however the meeting ends, a hangup included. Then it keeps the
-meeting's record beside the call log; a meeting that fails midway still
-leaves one, naming the error.
+Arms B, C and D-prime hold each meeting on a new deployment of the four
+advisers, written into the meeting's own directory (:func:`run_meeting`), so
+every meeting starts with empty stores. In D-prime, from the series' second
+meeting on, the directory also holds the earlier meetings' transcripts,
+which every adviser's turn carries as its cached prefix
+(:mod:`evaluators.exp001.arm_d_prime`). Arm D holds each of a series'
+meetings on the series' one deployment (:mod:`evaluators.exp001.arm_d`).
+Either way the harness runs the processes the same way
+(:func:`run_on_deployment`): it starts them with the meeting's clock and
+call-log settings, goes on only once the orchestrator has logged its rate
+limiter off and serves the wallet, holds the meeting
+(:func:`evaluators.exp001.channel_arm.hold_meeting`), and stops them however
+the meeting ends, a hangup included. Then it keeps the meeting's record
+beside the call log; a meeting that fails midway still leaves one, naming
+the error.
 """
 
 from __future__ import annotations
@@ -64,13 +68,21 @@ from evaluators.exp001.processes import (
     launch,
     orchestrator_process,
 )
-from evaluators.exp001.runtime import MEMORYLESS_ARMS, call_log_env, meeting_clock_env
+from evaluators.exp001.runtime import (
+    MEMORYLESS_ARMS,
+    call_log_env,
+    meeting_clock_env,
+    prompt_prefix_env,
+)
 
 # The arms whose every meeting gets a new deployment.
-ARMS = ("B", "C")
+ARMS = ("B", "C", "D-prime")
+# The one arm whose turns carry a cached prefix.
+PREFIX_ARM = "D-prime"
 # What a meeting's directory holds besides the processes' logs.
 CALL_LOG = "calls.jsonl"
 RECORD = "meeting.json"
+PREFIX = "prefix.txt"
 
 
 def _real_now() -> dt.datetime:
@@ -100,8 +112,9 @@ async def run_meeting(
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     limits: Limits = LIMITS,
     ended: Callable[[dt.datetime], None] | None = None,
+    prefix: str = "",
 ) -> ChannelMeeting:
-    """Hold one meeting of arm B or C on a new deployment in *directory*.
+    """Hold one meeting of arm B, C or D-prime on a new deployment in *directory*.
 
     *directory* must be empty; it then holds the deployment, the call log
     its advisers write and the meeting's record, which a meeting that fails
@@ -109,10 +122,14 @@ async def run_meeting(
     the meeting ends, a hangup included. *room* stands in for the
     orchestrator's REST API in tests; by default the harness talks to the
     deployment's own. *ended* is told when the meeting is over, as
-    :func:`run_on_deployment` tells it.
+    :func:`run_on_deployment` tells it. *prefix*, D-prime's alone, is the
+    text every adviser's turn carries as its cached prefix; it is kept in
+    *directory*, word for word.
     """
     if arm not in ARMS:
         raise ValueError(f"arm {arm} is not held on a new deployment per meeting; only {ARMS} are")
+    if prefix and arm != PREFIX_ARM:
+        raise ValueError(f"arm {arm} carries no prefix; only arm {PREFIX_ARM} does")
     # An earlier run's call log would be appended to, and counted again.
     if directory.exists() and any(directory.iterdir()):
         raise DeploymentError(f"{directory} is not empty; each meeting has a directory of its own")
@@ -120,10 +137,15 @@ async def run_meeting(
     name = channel_name(series, meeting)
     entry = channel_config(panel, arm, name=name, organisation=series.organisation)
     write_deployment(layout, panel, arm, channels=[entry], alias=alias)
+    carried = None
+    if prefix:
+        carried = directory / PREFIX
+        carried.write_bytes(prefix.encode("utf-8"))
     return await run_on_deployment(
         layout, panel, arm, series, meeting, attempt=attempt, meeting_try=meeting_try,
         directory=directory, logs=layout.logs, binary=binary, python=python, repo=repo,
         spawn=spawn, room=room, now=now, sleep=sleep, limits=limits, ended=ended,
+        prefix=carried,
     )
 
 
@@ -148,6 +170,7 @@ async def run_on_deployment(
     limits: Limits = LIMITS,
     started: Callable[[Deployment], Awaitable[None]] | None = None,
     ended: Callable[[dt.datetime], None] | None = None,
+    prefix: Path | None = None,
 ) -> ChannelMeeting:
     """Hold one meeting on the deployment written at *layout*, then stop it.
 
@@ -159,6 +182,8 @@ async def run_on_deployment(
     it ends, before the processes are asked to stop. In an arm whose memory
     carries over, an adviser the stop has to kill may not have written what
     it still held open, so that fails the meeting once its record is kept.
+    *prefix* names the file whose text every adviser's turn carries as its
+    cached prefix.
     """
     ports = free_ports()
     env = {
@@ -167,6 +192,7 @@ async def run_on_deployment(
             directory / CALL_LOG, arm=arm, series=series.id, meeting=meeting.id,
             meeting_kind=meeting.kind, attempt=attempt, meeting_try=meeting_try,
         ),
+        **(prompt_prefix_env(prefix) if prefix is not None else {}),
     }
     orchestrator = _logged(orchestrator_process(layout, ports, binary=binary), logs)
     deployment = Deployment(

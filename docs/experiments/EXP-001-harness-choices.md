@@ -1,7 +1,7 @@
 # EXP-001 — The harness's frozen choices
 
-> **Status**: 🚧 **In Progress** — the rows of PRs 1 to 4 froze when each merged; those of PRs 5a on are in [holding the meetings](EXP-001-harness-choices-meetings.md).
-> **Last updated**: 2026-09-27
+> **Status**: 🚧 **In Progress** — the rows of PRs 1 to 4 froze when each merged; those of PRs 5a to 5c are in [holding the meetings](EXP-001-harness-choices-meetings.md), and PR 5d's in [arm D′'s transcript prefix](EXP-001-harness-choices-d-prime.md).
+> **Last updated**: 2026-09-29
 > **Part of**: the [EXP-001 harness](EXP-001-harness.md), which lists the harness PRs and what each leaves the next
 
 [Pre-registration §3](EXP-001-preregistration.md#3-running-it) says every
@@ -46,8 +46,9 @@ nothing changes.
 | Arm A's clock line | The now-anchor line an adviser's prompt shows as its meeting begins, when its [agent time](../ai-glossary.md#agent-time) reads 10:00:00 UTC on the story date. The runtime's own code renders it, and calls that hour late morning | 4 |
 | Arm A's call | `claude-sonnet-4-6` with no alias; temperature 0.7, from `panel.yaml`; at most 4 096 output tokens, the persona agents' own limit, since the shipped personas set none; no tools and no cache prefix. The purpose is `turn`, read as `reply`, with no adviser. The reply's text is the memo at a plan meeting, unless it is empty or was cut off at the token limit: then the memo is missing, as it is when a persona agent's reply hits its limit and it posts nothing. Its stop reason and the real times the call began and ended are kept; the adapter reads a stop reason it does not know, a refusal included, as end_turn | 4 |
 
-The choices of PRs 5a on, which hold the meetings, are in
-[their own document](EXP-001-harness-choices-meetings.md).
+The choices of PRs 5a to 5c, which hold the meetings, are in
+[their own document](EXP-001-harness-choices-meetings.md), and PR 5d's, arm
+D′'s transcript prefix, in [a third](EXP-001-harness-choices-d-prime.md).
 
 ## The arm order
 
@@ -64,7 +65,9 @@ The arm order each series runs in:
 ## Related documentation
 
 - [Holding the meetings](EXP-001-harness-choices-meetings.md) — the frozen
-  choices of PRs 5a on.
+  choices of PRs 5a to 5c.
+- [Arm D′'s transcript prefix](EXP-001-harness-choices-d-prime.md) — the
+  frozen choices of PR 5d.
 - [EXP-001 harness](EXP-001-harness.md) — the harness PRs, and what each
   leaves the next.
 - [EXP-001 pre-registration](EXP-001-preregistration.md) — materials, arms

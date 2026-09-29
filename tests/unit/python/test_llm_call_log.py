@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import ast
 import datetime as dt
+import hashlib
 import json
 from collections.abc import Iterator
 from pathlib import Path
@@ -91,6 +92,7 @@ class TestWritingTheLog:
             "output_tokens": 5,
             "cache_write_tokens": 7,
             "cache_read_tokens": 3,
+            "cache_prefix_sha256": None,
             "error": None,
         }
 
@@ -131,6 +133,47 @@ class TestWritingTheLog:
         call_log.reset_call_log()
         await _call(LLMClient(_Provider()), purpose=LLMCallPurpose.TURN)
         assert _lines(log_path)[0]["tags"] == {}
+
+
+class TestThePrefixACallCarried:
+    """Arm D′'s advisers carry the earlier meetings' transcripts in a cached
+    prefix (PR 5d). The line names the prefix a call carried by its SHA-256,
+    so the harness can show which calls carried the transcript it wrote
+    (checks 1 and 3), whether or not the provider could cache it."""
+
+    _PREFIX = "Transcripts of your earlier meetings with the same members.\r\nMeeting 1\n"
+
+    def _sha256(self) -> str:
+        return hashlib.sha256(self._PREFIX.encode("utf-8")).hexdigest()
+
+    async def test_a_call_logs_the_sha256_of_its_prefix(self, log_path):
+        await _call(LLMClient(_Provider()), purpose=LLMCallPurpose.TURN, cache_prefix=self._PREFIX)
+        [line] = _lines(log_path)
+        assert line["cache_prefix_sha256"] == self._sha256()
+
+    async def test_so_does_a_call_to_a_provider_that_caches(self, log_path):
+        provider = _CachingProvider()
+        await _call(LLMClient(provider), purpose=LLMCallPurpose.TURN, cache_prefix=self._PREFIX)
+        assert provider.sent["cache_prefix"] == self._PREFIX
+        assert _lines(log_path)[0]["cache_prefix_sha256"] == self._sha256()
+
+    async def test_a_failed_call_logs_its_prefix_too(self, log_path):
+        client = LLMClient(_Provider(error=TimeoutError("slow")))
+        with pytest.raises(TimeoutError):
+            await _call(client, purpose=LLMCallPurpose.TURN, cache_prefix=self._PREFIX)
+        assert _lines(log_path)[0]["cache_prefix_sha256"] == self._sha256()
+
+
+class _CachingProvider(_Provider):
+    supports_prompt_cache = True
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.sent: dict[str, object] = {}
+
+    async def create_message(self, **kwargs: object) -> LLMResponse:
+        self.sent = kwargs
+        return await super().create_message(**kwargs)
 
 
 class TestSettings:
@@ -257,14 +300,11 @@ class TestScopedLog:
             call_log.scoped(tmp_path / "x.jsonl", {"attempt": 1})  # type: ignore[dict-item]
 
 
-async def test_the_lease_settles_cached_tokens_too(monkeypatch):
-    """The wallet has no cache price, so it is charged every input token the
-    call carried, cached or not; settling only the uncached part would let
-    a cached prefix run past every budget."""
+def _wallet_stub() -> Any:
+    """A wallet that grants every lease and settles it."""
     from unittest.mock import AsyncMock
 
     from agents.generated import wallet_pb2 as walletpb
-    from agents.wallet_client import WalletClient
 
     stub = AsyncMock()
     stub.AcquireLease = AsyncMock(return_value=walletpb.LeaseResponse(
@@ -274,8 +314,31 @@ async def test_the_lease_settles_cached_tokens_too(monkeypatch):
     ))
     stub.SettleLease = AsyncMock(return_value=walletpb.SettlementAck(success=True))
     stub.ReleaseLease = AsyncMock(return_value=walletpb.SettlementAck(success=True))
+    return stub
+
+
+async def test_the_lease_settles_cached_tokens_too(monkeypatch):
+    """The wallet has no cache price, so it is charged every input token the
+    call carried, cached or not; settling only the uncached part would let
+    a cached prefix run past every budget."""
+    from agents.generated import wallet_pb2 as walletpb
+    from agents.wallet_client import WalletClient
+
+    stub = _wallet_stub()
     client = LLMClient(_Provider(), wallet=WalletClient(stub, backoff_base=0.0))
     await _call(client, purpose=LLMCallPurpose.TURN, cause=walletpb.CAUSE_CHANNEL_MESSAGE,
                 agent_id="ember-owl")
     settle = stub.SettleLease.await_args.args[0]
     assert (settle.actual_input_tokens, settle.actual_output_tokens) == (10 + 7 + 3, 5)
+
+
+async def test_a_leased_call_logs_its_prefix(log_path):
+    """An adviser's turn is leased, so this is the path arm D′'s calls take."""
+    from agents.generated import wallet_pb2 as walletpb
+    from agents.wallet_client import WalletClient
+
+    client = LLMClient(_Provider(), wallet=WalletClient(_wallet_stub(), backoff_base=0.0))
+    await _call(client, purpose=LLMCallPurpose.TURN, cause=walletpb.CAUSE_CHANNEL_MESSAGE,
+                agent_id="ember-owl", cache_prefix="Meeting 1")
+    [line] = _lines(log_path)
+    assert line["cache_prefix_sha256"] == hashlib.sha256(b"Meeting 1").hexdigest()

@@ -1,7 +1,7 @@
 # EXP-001 — The harness
 
-> **Status**: 🚧 **In Progress** — PRs 1, 2, 3a, 3b, 4, 5a, 5b and 5c merged ([#984](https://github.com/mkhomutov/Persatrix/pull/984), [#986](https://github.com/mkhomutov/Persatrix/pull/986), [#987](https://github.com/mkhomutov/Persatrix/pull/987), [#988](https://github.com/mkhomutov/Persatrix/pull/988), [#992](https://github.com/mkhomutov/Persatrix/pull/992), [#993](https://github.com/mkhomutov/Persatrix/pull/993), [#1013](https://github.com/mkhomutov/Persatrix/pull/1013), [#1015](https://github.com/mkhomutov/Persatrix/pull/1015)); no practice run yet.
-> **Last updated**: 2026-09-28
+> **Status**: 🚧 **In Progress** — PRs 1, 2, 3a, 3b, 4, 5a, 5b and 5c merged ([#984](https://github.com/mkhomutov/Persatrix/pull/984), [#986](https://github.com/mkhomutov/Persatrix/pull/986), [#987](https://github.com/mkhomutov/Persatrix/pull/987), [#988](https://github.com/mkhomutov/Persatrix/pull/988), [#992](https://github.com/mkhomutov/Persatrix/pull/992), [#993](https://github.com/mkhomutov/Persatrix/pull/993), [#1013](https://github.com/mkhomutov/Persatrix/pull/1013), [#1015](https://github.com/mkhomutov/Persatrix/pull/1015)); PR 5d open; no practice run yet.
+> **Last updated**: 2026-09-29
 > **Carries out**: the [EXP-001 pre-registration](EXP-001-preregistration.md) and its [part 2](EXP-001-preregistration-scoring.md)
 > **Code**: [`evaluators/exp001/`](../../evaluators/exp001/)
 
@@ -102,12 +102,43 @@ the tests run on writes placeholders. So PR 6's practice run shows it,
 through arm D's recall check: each meeting is a new channel, so the chair
 can answer the briefing's questions only from memory.
 
+PR 5d holds arm D′. Its meetings are arm C's, each on a new deployment with
+empty stores and no memory, so nothing from an earlier meeting reaches a
+prompt but the prefix (check 1). What carries from one meeting to the next
+is text. From the series' second meeting on, the harness writes the
+transcripts of the meetings before it, every message of each, oldest first,
+into a file beside the try, and every adviser's turn carries that text at
+the front of its prompt, marked for the cache, as its
+[prompt prefix](../ai-glossary.md#prompt-prefix). In D only the turn receives
+recalled memory, so only the turn carries it: no bid or memory summary
+does. The call log names the prefix each call carried by its SHA-256, so
+every turn can be matched to the file the harness wrote. PR 5d meets PR
+3b's first constraint. Every turn that carries the prefix has the same
+tools ahead of it, so the four advisers share one cache entry, and floor
+control gives one adviser the floor at a time, so a meeting's first turn is
+under way before the next begins. A try held again waits six minutes after
+the try before it stopped, so its first turn writes the prefix again rather
+than reading what a discarded try paid for.
+
+PR 5d leaves two things for PR 6. Its practice run shows check 3 on the
+real provider: the harness's check reads each try's call records and names
+every call that broke the check. And that run may show a meeting check 3
+cannot pass. A cache entry lives five minutes after the last call that wrote
+or read it began, and a discussion that closes by its 600-second idle window has
+made no call for ten, so the memo turn after it writes the prefix again. The
+fixed price table holds the five-minute cache's price, so a longer-lived
+cache would change that table, which only an amendment does; a harness that
+kept the entry alive would be a harness PR. A prefix shorter than the
+model's minimum of 1 024 tokens is not cached at all, and the check names
+that too.
+
 ## Frozen choices
 
 The choices each harness PR froze, and the arm order each series runs in, are
 in [their own document](EXP-001-harness-choices.md), so the result can cite
-them. Those of PRs 5a on, which hold the meetings, are in its second part,
-[holding the meetings](EXP-001-harness-choices-meetings.md).
+them. Those of PRs 5a to 5c, which hold the meetings, are in its second part,
+[holding the meetings](EXP-001-harness-choices-meetings.md), and PR 5d's in
+its third, [arm D′'s transcript prefix](EXP-001-harness-choices-d-prime.md).
 
 ## Related documentation
 
@@ -117,6 +148,8 @@ them. Those of PRs 5a on, which hold the meetings, are in its second part,
 - [Frozen choices](EXP-001-harness-choices.md) — the choices of PRs 1 to 4,
   and the arm order.
 - [Frozen choices: holding the meetings](EXP-001-harness-choices-meetings.md)
-  — the choices of PRs 5a on.
+  — the choices of PRs 5a to 5c.
+- [Frozen choices: arm D′'s transcript prefix](EXP-001-harness-choices-d-prime.md)
+  — the choices of PR 5d.
 - [Evaluators guide](../evaluators-guide.md) — the golden-trace harness this
   one sits beside.

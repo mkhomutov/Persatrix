@@ -16,6 +16,9 @@ A line holds:
 * ``started_at`` — real time, UTC, when the call began (never agent time);
 * the provider, model and alias, and the token counts, cache reads and
   writes apart;
+* ``cache_prefix_sha256`` — the SHA-256 of the cached prompt prefix the call
+  carried (:mod:`agents.prompt_prefix`), in hex, else null; it is there
+  whether or not the provider could cache the prefix;
 * ``error`` — the exception's class name when the call failed, else null.
 
 Both settings are read on first use and fixed for the life of the process.
@@ -30,6 +33,7 @@ from __future__ import annotations
 
 import contextvars
 import functools
+import hashlib
 import json
 import logging
 import os
@@ -110,8 +114,10 @@ def record_call(
     model_alias: str | None,
     usage: Usage | None,
     error: BaseException | None,
+    cache_prefix: str = "",
 ) -> None:
-    """Append one line for a finished call, when the log is on."""
+    """Append one line for a finished call, when the log is on; *cache_prefix*
+    is the prefix the call carried, logged by its SHA-256."""
     scope = _scope.get()
     if scope is not None:
         path, tags = scope
@@ -140,6 +146,9 @@ def record_call(
         "output_tokens": usage.output_tokens,
         "cache_write_tokens": usage.cache_write_tokens,
         "cache_read_tokens": usage.cache_read_tokens,
+        "cache_prefix_sha256": (
+            hashlib.sha256(cache_prefix.encode("utf-8")).hexdigest() if cache_prefix else None
+        ),
         "error": type(error).__name__ if error is not None else None,
     }
     data = (json.dumps(line) + "\n").encode()
