@@ -112,7 +112,7 @@ async def run_meeting(
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     limits: Limits = LIMITS,
     ended: Callable[[dt.datetime], None] | None = None,
-    prefix: str = "",
+    prefix: str | None = None,
 ) -> ChannelMeeting:
     """Hold one meeting of arm B, C or D-prime on a new deployment in *directory*.
 
@@ -124,12 +124,15 @@ async def run_meeting(
     deployment's own. *ended* is told when the meeting is over, as
     :func:`run_on_deployment` tells it. *prefix*, D-prime's alone, is the
     text every adviser's turn carries as its cached prefix; it is kept in
-    *directory*, word for word.
+    *directory*, word for word. D-prime must give it, empty at the briefing,
+    since without it the meeting would be arm C's.
     """
     if arm not in ARMS:
         raise ValueError(f"arm {arm} is not held on a new deployment per meeting; only {ARMS} are")
-    if prefix and arm != PREFIX_ARM:
+    if prefix is not None and arm != PREFIX_ARM:
         raise ValueError(f"arm {arm} carries no prefix; only arm {PREFIX_ARM} does")
+    if prefix is None and arm == PREFIX_ARM:
+        raise ValueError(f"arm {PREFIX_ARM} needs its prefix, empty at the briefing")
     # An earlier run's call log would be appended to, and counted again.
     if directory.exists() and any(directory.iterdir()):
         raise DeploymentError(f"{directory} is not empty; each meeting has a directory of its own")

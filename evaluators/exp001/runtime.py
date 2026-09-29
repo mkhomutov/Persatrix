@@ -168,6 +168,9 @@ class FailedCall:
     purpose: CallPurpose
     # False, as for its answer, for a memory write in an arm with no memory.
     counts_in_arm: bool = True
+    # The SHA-256 of the cached prefix it carried, as for its answer: a call
+    # can write the cache entry and still fail.
+    cache_prefix: str | None = None
 
 
 @dataclass(frozen=True)
@@ -196,6 +199,7 @@ def read_call_log(path: Path, *, memo_turns: Iterable[MemoTurn] = ()) -> CallLog
                 attempt=record.attempt, meeting_try=record.meeting_try, adviser=record.adviser,
                 started_at=record.started_at, error=str(line["error"]),
                 purpose=record.purpose, counts_in_arm=record.counts_in_arm,
+                cache_prefix=record.cache_prefix,
             ))
         else:
             records.append(record)

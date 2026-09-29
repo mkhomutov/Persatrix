@@ -105,6 +105,12 @@ def reset_call_log() -> None:
     call_tags.cache_clear()
 
 
+def prefix_sha256(prefix: str) -> str | None:
+    """The name a line gives a cached prompt prefix: its SHA-256 in hex,
+    None for no prefix. The harness names the prefixes it writes the same way."""
+    return hashlib.sha256(prefix.encode("utf-8")).hexdigest() if prefix else None
+
+
 def record_call(
     *,
     started_at: float,
@@ -146,9 +152,7 @@ def record_call(
         "output_tokens": usage.output_tokens,
         "cache_write_tokens": usage.cache_write_tokens,
         "cache_read_tokens": usage.cache_read_tokens,
-        "cache_prefix_sha256": (
-            hashlib.sha256(cache_prefix.encode("utf-8")).hexdigest() if cache_prefix else None
-        ),
+        "cache_prefix_sha256": prefix_sha256(cache_prefix),
         "error": type(error).__name__ if error is not None else None,
     }
     data = (json.dumps(line) + "\n").encode()
@@ -167,6 +171,7 @@ __all__ = [
     "CALL_TAGS_ENV",
     "call_log_path",
     "call_tags",
+    "prefix_sha256",
     "record_call",
     "reset_call_log",
     "scoped",

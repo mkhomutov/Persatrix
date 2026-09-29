@@ -266,6 +266,13 @@ class TestReadCallLog:
         records = read_call_log(_write(tmp_path / "c.jsonl", carried, _line())).records
         assert [r.cache_prefix for r in records] == ["ab" * 32, None]
 
+    def test_a_failed_call_keeps_the_prefix_it_carried(self, tmp_path):
+        """A turn can write the cache entry and still fail, so check 3 reads
+        failed calls' prefixes too."""
+        failed = {**_line(error="OverloadedError"), "cache_prefix_sha256": "ab" * 32}
+        [failure] = read_call_log(_write(tmp_path / "c.jsonl", failed)).failures
+        assert failure.cache_prefix == "ab" * 32
+
     @pytest.mark.parametrize("value", [5, "", ["ab"]])
     def test_a_prefix_that_is_not_a_digest_is_refused(self, tmp_path, value):
         line = {**_line(), "cache_prefix_sha256": value}

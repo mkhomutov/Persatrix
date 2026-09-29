@@ -6,17 +6,20 @@ text: every adviser's turn carries the full transcripts of the series'
 earlier meetings, oldest first, marked for the provider's cache
 (pre-registration §2). Check 3 asks that the first call of a meeting that
 carries the prefix writes it to the cache, that every later call of the
-meeting reads it, and that no other arm sets a cache breakpoint. A try held
-again waits until the cache entry of the try before it has gone, so its
-first call writes the prefix again rather than reading what a discarded try
-paid for.
+meeting reads it, and that no other arm sets a cache breakpoint. A try that
+carries a prefix waits until the cache entry of the last try that carried
+the same one has gone, so its first call writes the prefix again rather
+than reading what an earlier try paid for. How the harness reads check 3 is
+tested in ``test_exp001_arm_d_prime_cache.py``.
 """
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import datetime as dt
-import hashlib
 import json
+import sqlite3
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -24,22 +27,22 @@ from typing import Any
 import pytest
 import yaml
 
+from agents import call_log
 from agents.prompt_prefix import PROMPT_PREFIX_ENV
 from evaluators.exp001 import deployed_meeting
 from evaluators.exp001.arm_d_prime import (
     ARM,
     RETRY_GAP,
+    Posted,
     arm_d_prime_hold,
-    check_cache,
     prefix_sha256,
     transcript_prefix,
 )
 from evaluators.exp001.attempts import RETRIES, run_series
 from evaluators.exp001.channel_arm import ChannelMeeting
-from evaluators.exp001.costs import CallPurpose, CallRecord
 from evaluators.exp001.deployed_meeting import CALL_LOG, RECORD
 from evaluators.exp001.deployment import StartError, channel_config
-from evaluators.exp001.materials import Meeting, MeetingKind, load_series
+from evaluators.exp001.materials import Meeting, load_series
 from evaluators.exp001.orchestrator import Message, OrchestratorError
 from evaluators.exp001.panel import load_panel
 from evaluators.exp001.processes import Process
@@ -92,21 +95,29 @@ class TestTranscriptPrefix:
             "[lunar-stoat]: Recommendation\nOption B.\n"
         )
 
-    def test_its_digest_is_what_the_runtime_logs(self) -> None:
-        text = "Meeting in #advice-1\r\n"
-        assert prefix_sha256(text) == hashlib.sha256(text.encode("utf-8")).hexdigest()
+    def test_its_digest_is_the_one_the_runtime_logs(self) -> None:
+        """One function names a prefix in the call log and in the harness, and
+        no prefix has no digest."""
+        assert prefix_sha256 is call_log.prefix_sha256
+        assert prefix_sha256("") is None
 
 
 _Script = Exception | Sequence[str] | None  # raise; provider errors to log; or answer
+_Try = tuple[str, int, int]
 
 
 class _Meetings:
     """Stands in for ``deployed_meeting.run_meeting``. Each try takes ten
     minutes on the shared clock, leaves a transcript of its own and, as
-    scripted, logs failed turns or raises."""
+    scripted, logs failed turns or raises. A try whose orchestrator exits
+    leaves in its store what *stored* gives it."""
 
-    def __init__(self, scripts: dict[tuple[str, int, int], _Script] | None = None) -> None:
+    def __init__(
+        self, scripts: dict[_Try, _Script] | None = None,
+        stored: dict[_Try, list[tuple[str, str]]] | None = None,
+    ) -> None:
         self.scripts = scripts or {}
+        self.stored = stored or {}
         self.seconds = 0.0
         self.calls: list[dict[str, Any]] = []
 
@@ -123,13 +134,14 @@ class _Meetings:
     ) -> ChannelMeeting:
         self.calls.append({
             "arm": arm, "meeting": meeting.id, "attempt": attempt, "try": meeting_try,
-            "prefix": prefix, "began": self.now(), "options": options,
+            "prefix": prefix, "binary": binary, "began": self.now(), "options": options,
         })
         directory.mkdir(parents=True)
         script = self.scripts.get((meeting.id, attempt, meeting_try))
         if isinstance(script, Exception):
             if isinstance(script, OrchestratorError):  # the orchestrator exited
                 (directory / RECORD).write_text(json.dumps({"exited": {"orchestrator": 2}}))
+                _store(directory, meeting, self.stored.get((meeting.id, attempt, meeting_try)))
             raise script
         self.seconds += 600
         tags = {"arm": arm, "series": series.id, "meeting": meeting.id,
@@ -146,6 +158,25 @@ class _Meetings:
                 }) + "\n")
         ended(self.now())
         return _held(meeting, attempt, meeting_try, directory)
+
+
+def _store(directory: Path, meeting: Meeting, said: list[tuple[str, str]] | None) -> None:
+    """The try's channel store, shaped like the orchestrator's: *said* posted
+    in the meeting's channel, written newest first so only the timestamps
+    give their order, and a message of another channel beside them."""
+    if said is None:
+        return
+    db = directory / "deployment" / "data" / "channels.db"
+    db.parent.mkdir(parents=True)
+    channel = f"group:advice-{IDS.index(meeting.id) + 1}"
+    rows = [(f"m-{n}", channel, sender, content, f"2026-10-01 09:00:{n:02d}+00:00")
+            for n, (sender, content) in enumerate(said)]
+    with contextlib.closing(sqlite3.connect(db)) as store, store:
+        store.execute("CREATE TABLE messages (id TEXT PRIMARY KEY, channel_id TEXT, "
+                      "sender_id TEXT, content TEXT, timestamp DATETIME)")
+        store.executemany("INSERT INTO messages VALUES (?, ?, ?, ?, ?)", reversed(rows))
+        store.execute("INSERT INTO messages VALUES ('x', 'group:other', 'ripple-kite', "
+                      "'Elsewhere.', '2026-10-01 08:59:00+00:00')")
 
 
 def _transcript(meeting: Meeting, attempt: int, meeting_try: int) -> tuple[Message, ...]:
@@ -207,6 +238,7 @@ class TestTheHold:
         assert (options["python"], options["now"], options["sleep"]) == (
             Path("/venv/py"), meetings.now, meetings.sleep,
         )
+        assert meetings.calls[0]["binary"] == Path("/repo/bin/persatrix-server")
 
     async def test_a_try_cut_short_is_never_carried(self, tmp_path: Path) -> None:
         meetings = _Meetings({(IDS[1], 1, 1): ["RateLimitError"]})
@@ -235,6 +267,25 @@ class TestTheHold:
         first, second = (c for c in meetings.calls if c["meeting"] == IDS[1])
         assert second["began"] - first["began"] == dt.timedelta(minutes=1)
 
+    async def test_a_try_that_carried_no_prefix_adds_no_wait(self, tmp_path: Path) -> None:
+        """The briefing carries none, so its tries wait only the harness's own minute."""
+        meetings = _Meetings({(IDS[0], 1, 1): ["RateLimitError"]})
+        await _hold_series(tmp_path, meetings)
+        first, second = (c for c in meetings.calls if c["meeting"] == IDS[0])
+        assert second["began"] - first["began"] == dt.timedelta(seconds=600 + 60)
+
+    async def test_the_next_meeting_waits_when_it_carries_the_same_prefix(
+        self, tmp_path: Path,
+    ) -> None:
+        """A meeting whose orchestrator exited with nothing stored adds nothing
+        to the next meeting's prefix, so that meeting carries the same one and
+        waits as a try held again does."""
+        meetings = _Meetings({(IDS[1], 1, 1): OrchestratorError("GET …/messages: refused")})
+        await _hold_series(tmp_path, meetings)
+        exited, after = (c for c in meetings.calls if c["meeting"] in IDS[1:3])
+        assert after["prefix"] == exited["prefix"] != ""
+        assert after["began"] == exited["began"] + RETRY_GAP
+
     async def test_a_series_started_again_carries_only_its_own_attempt(
         self, tmp_path: Path,
     ) -> None:
@@ -243,9 +294,34 @@ class TestTheHold:
         assert run.finished_attempt == 2
         assert _prefixes(meetings)[(IDS[1], 2, 1)] == _expected((SERIES.meetings[0], 2, 1))
 
-    async def test_a_meeting_that_left_no_transcript_is_left_out(self, tmp_path: Path) -> None:
-        """An orchestrator that exits mid-meeting is recorded, not retried,
-        and the harness could read none of the meeting's messages."""
+    async def test_an_attempt_never_carries_the_attempt_before_it(self, tmp_path: Path) -> None:
+        """Attempt 2's briefing leaves nothing, so its next meeting carries
+        nothing, not attempt 1's briefing."""
+        scripts: dict[_Try, _Script] = {
+            (IDS[1], 1, t): ["RateLimitError"] for t in range(1, RETRIES + 2)
+        }
+        scripts[(IDS[0], 2, 1)] = OrchestratorError("GET …/messages: refused")
+        meetings = _Meetings(scripts)
+        await _hold_series(tmp_path, meetings)
+        assert _prefixes(meetings)[(IDS[1], 2, 1)] == ""
+
+    async def test_a_meeting_whose_orchestrator_exited_carries_what_its_store_holds(
+        self, tmp_path: Path,
+    ) -> None:
+        """An orchestrator that exits mid-meeting is recorded, not retried. The
+        harness reads what it stored of the meeting's channel, as far as it got."""
+        said = [(PANEL.operator, SERIES.meetings[1].message), ("ripple-kite", "Half a reply.")]
+        meetings = _Meetings(
+            {(IDS[1], 1, 1): OrchestratorError("GET …/messages: refused")},
+            stored={(IDS[1], 1, 1): said},
+        )
+        await _hold_series(tmp_path, meetings)
+        briefing = _transcript(SERIES.meetings[0], 1, 1)
+        assert _prefixes(meetings)[(IDS[2], 1, 1)] == transcript_prefix([
+            ("advice-1", briefing), ("advice-2", [Posted(*s) for s in said]),
+        ])
+
+    async def test_a_meeting_that_stored_nothing_is_left_out(self, tmp_path: Path) -> None:
         meetings = _Meetings({(IDS[1], 1, 1): OrchestratorError("GET …/messages: refused")})
         await _hold_series(tmp_path, meetings)
         assert _prefixes(meetings)[(IDS[2], 1, 1)] == _expected((SERIES.meetings[0], 1, 1))
@@ -277,17 +353,20 @@ class _Handle:
 
 class _World:
     """Stand-in processes, and an orchestrator whose discussion closes at once
-    and whose chair answers the memo request."""
+    and whose chair answers the memo request. Its clock moves as the harness
+    sleeps, so a close it fails to read ends by the idle window, not never."""
 
     def __init__(self) -> None:
         self.processes: dict[str, Process] = {}
         self.messages_: list[Message] = []
+        self.seconds = 0.0
 
     def now(self) -> dt.datetime:
-        return _T0
+        return _T0 + dt.timedelta(seconds=self.seconds)
 
     async def sleep(self, seconds: float) -> None:
-        pass
+        self.seconds += seconds
+        await asyncio.sleep(0)
 
     def spawn(self, process: Process, environ: Any) -> _Handle:
         self.processes[process.name] = process
@@ -336,7 +415,9 @@ class _World:
         pass
 
 
-async def _deploy(world: _World, directory: Path, arm: str = ARM, prefix: str = "") -> Any:
+async def _deploy(
+    world: _World, directory: Path, arm: str = ARM, prefix: str | None = "",
+) -> Any:
     return await deployed_meeting.run_meeting(
         PANEL, arm, SERIES, SERIES.meetings[1], attempt=1, meeting_try=1, directory=directory,
         binary=Path("/repo/bin/persatrix-server"), python=Path("/venv/bin/python"),
@@ -366,15 +447,22 @@ class TestTheDeployment:
         assert not (tmp_path / deployed_meeting.PREFIX).exists()
         assert all(PROMPT_PREFIX_ENV not in p.env for p in world.processes.values())
 
+    @pytest.mark.parametrize("prefix", ["Meeting in #advice-1\n", ""])
     @pytest.mark.parametrize("arm", ["B", "C"])
-    async def test_no_other_arm_is_given_a_prefix(self, tmp_path: Path, arm: str) -> None:
+    async def test_no_other_arm_is_given_a_prefix(
+        self, tmp_path: Path, arm: str, prefix: str,
+    ) -> None:
         with pytest.raises(ValueError, match="only arm D-prime"):
-            await _deploy(_World(), tmp_path, arm=arm, prefix="Meeting in #advice-1\n")
+            await _deploy(_World(), tmp_path, arm=arm, prefix=prefix)
+
+    async def test_d_prime_is_never_held_without_its_prefix(self, tmp_path: Path) -> None:
+        """Held without one it would be plain arm C, and nothing would say so."""
+        with pytest.raises(ValueError, match="arm D-prime needs its prefix"):
+            await _deploy(_World(), tmp_path, prefix=None)
 
     async def test_d_prime_meets_as_c_does_with_no_memory(self, tmp_path: Path) -> None:
         """Governance as shipped, memory off (pre-registration §2), and the
-        shipped floor control, which lets one adviser speak at a time, so a
-        meeting's first turn is under way before the next one starts."""
+        shipped floor control, which gives one adviser the floor at a time."""
         await _deploy(_World(), tmp_path)
         config = tmp_path / "deployment" / "config"
         [channel] = yaml.safe_load((config / "channels.yaml").read_text())["channels"]
@@ -385,110 +473,3 @@ class TestTheDeployment:
         optimization = yaml.safe_load((config / "optimization.yaml").read_text())
         assert optimization["memory_budget"] == {"tokens": 0}
 
-
-def _record(
-    *, arm: str = ARM, meeting: str = "plan-1", meeting_try: int = 1, adviser: str = "ripple-kite",
-    purpose: CallPurpose = CallPurpose.REPLY, second: int = 0, prefix: str | None = "a" * 64,
-    write: int = 0, read: int = 0,
-) -> CallRecord:
-    return CallRecord(
-        arm=arm, series="series-1", meeting=meeting, meeting_kind=MeetingKind.PLAN, attempt=1,
-        adviser=adviser, purpose=purpose, started_at=_T0 + dt.timedelta(seconds=second),
-        model="claude-sonnet-4-6", input_tokens=100, output_tokens=20,
-        cache_write_tokens=write, cache_read_tokens=read, meeting_try=meeting_try,
-        cache_prefix=prefix,
-    )
-
-
-def _meeting_that_holds() -> list[CallRecord]:
-    """A D′ meeting as check 3 wants it: bids carry nothing, the first turn
-    writes the prefix, and every later turn, the memo's included, reads it."""
-    return [
-        _record(purpose=CallPurpose.BID, prefix=None, second=0),
-        _record(adviser="lunar-stoat", second=5, write=12_000),
-        _record(purpose=CallPurpose.BID, adviser="velvet-pika", prefix=None, second=40),
-        _record(adviser="velvet-pika", second=45, read=12_000),
-        _record(adviser="lunar-stoat", purpose=CallPurpose.MEMO, second=200, read=12_000),
-    ]
-
-
-class TestCheckCache:
-    def test_a_meeting_that_holds_check_3_has_no_findings(self) -> None:
-        assert check_cache(_meeting_that_holds()) == []
-
-    def test_the_calls_are_taken_in_the_order_they_began(self) -> None:
-        assert check_cache(list(reversed(_meeting_that_holds()))) == []
-
-    def test_a_first_call_that_wrote_nothing_is_a_finding(self) -> None:
-        """A prefix under the model's minimum is cached silently not at all,
-        so the call after it has nothing to read either."""
-        first, after = check_cache([_record(second=0), _record(second=30)])
-        assert first.startswith(f"{ARM}, series-1, plan-1, attempt 1, try 1: ")
-        assert "the first call that carried the prefix wrote 0 tokens to the cache" in first
-        assert "wrote 0 and read 0 tokens of the cache, 30 s after" in after
-
-    def test_a_first_call_that_read_an_entry_already_there_is_a_finding(self) -> None:
-        [finding] = check_cache([_record(write=12_000, read=12_000)])
-        assert "read 12000" in finding
-
-    def test_a_later_call_that_wrote_the_prefix_again_names_the_gap(self) -> None:
-        """An entry lives five minutes: a discussion quiet for its whole
-        600-second idle window outlasts it, and the memo turn writes again."""
-        records = [
-            _record(second=0, write=12_000),
-            _record(adviser="lunar-stoat", purpose=CallPurpose.MEMO, second=700, write=12_000),
-        ]
-        [finding] = check_cache(records)
-        assert "lunar-stoat's memo call" in finding
-        assert "wrote 12000 and read 0" in finding
-        assert "700 s after" in finding
-
-    def test_a_later_call_that_read_and_wrote_is_a_finding(self) -> None:
-        """One breakpoint, at the end of the prefix: a call that reads it has
-        nothing else to write."""
-        [finding] = check_cache([
-            _record(second=0, write=12_000), _record(second=30, write=500, read=12_000),
-        ])
-        assert "wrote 500 and read 12000 tokens of the cache, 30 s after" in finding
-
-    def test_calls_that_carried_different_prefixes_are_a_finding(self) -> None:
-        records = [_record(write=12_000), _record(second=30, read=12_000, prefix="b" * 64)]
-        assert any("2 different prefixes" in f for f in check_cache(records))
-
-    def test_a_call_without_a_prefix_that_touched_the_cache_is_a_finding(self) -> None:
-        [finding] = check_cache([_record(purpose=CallPurpose.BID, prefix=None, write=5)])
-        assert "carried no prefix" in finding
-
-    @pytest.mark.parametrize("arm", ["A", "B", "C", "D"])
-    def test_no_other_arm_sets_a_cache_breakpoint(self, arm: str) -> None:
-        assert check_cache([_record(arm=arm, prefix=None)]) == []
-        assert check_cache([_record(arm=arm, prefix=None, read=40)]) != []
-        [finding] = check_cache([_record(arm=arm)])
-        assert finding.endswith(f"carried a prefix, which only arm {ARM}'s turns do")
-
-    def test_each_try_is_judged_on_its_own(self) -> None:
-        """A second try writes the prefix again, as the wait before it makes sure."""
-        records = [
-            _record(write=12_000), _record(second=30, read=12_000),
-            _record(meeting_try=2, second=900, write=12_000),
-        ]
-        assert check_cache(records) == []
-
-    def test_a_call_must_carry_the_prefix_the_harness_wrote(self) -> None:
-        records = [_record(write=12_000), _record(second=30, read=12_000)]
-        written = {(ARM, "series-1", "plan-1", 1, 1): "c" * 64}
-        [finding] = check_cache(records, written=written)
-        assert "not the prefix the harness wrote" in finding
-        assert check_cache(records, written={(ARM, "series-1", "plan-1", 1, 1): "a" * 64}) == []
-
-    @pytest.mark.parametrize("records", [[_record(prefix=None)], []])
-    def test_a_try_given_a_prefix_whose_turns_carried_none_is_a_finding(
-        self, records: list[CallRecord],
-    ) -> None:
-        """Whether its advisers made other calls or none at all."""
-        written = {(ARM, "series-1", "plan-1", 1, 1): "a" * 64}
-        [finding] = check_cache(records, written=written)
-        assert finding == (
-            f"{ARM}, series-1, plan-1, attempt 1, try 1: "
-            "no call carried the prefix the harness wrote"
-        )

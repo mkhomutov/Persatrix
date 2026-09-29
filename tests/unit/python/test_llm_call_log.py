@@ -163,6 +163,12 @@ class TestThePrefixACallCarried:
             await _call(client, purpose=LLMCallPurpose.TURN, cache_prefix=self._PREFIX)
         assert _lines(log_path)[0]["cache_prefix_sha256"] == self._sha256()
 
+    def test_one_function_names_a_prefix_and_no_prefix_has_no_name(self):
+        """The harness imports it, so a call's line and the harness's file
+        are named the same way."""
+        assert call_log.prefix_sha256(self._PREFIX) == self._sha256()
+        assert call_log.prefix_sha256("") is None
+
 
 class _CachingProvider(_Provider):
     supports_prompt_cache = True
