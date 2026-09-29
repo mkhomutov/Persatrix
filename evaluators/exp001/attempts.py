@@ -301,7 +301,8 @@ def channel_hold(
     """The channel arms: each try in its own directory under *root*. *run*
     holds one meeting there, as ``functools.partial(deployed_meeting.run_meeting,
     binary=...)`` does for arms B and C, each try on a deployment of its own;
-    arm D's hold (:func:`evaluators.exp001.arm_d.arm_d_hold`) passes its own.
+    arm D's hold (:func:`evaluators.exp001.arm_d.arm_d_hold`) and arm D-prime's
+    (:func:`evaluators.exp001.arm_d_prime.arm_d_prime_hold`) pass their own.
     Every *watch_seconds* while the meeting runs, the harness reads the try's
     call log and ends the try at the first failed call that means it is held
     again. *run* tells ``ended`` when the meeting is over; from then on the

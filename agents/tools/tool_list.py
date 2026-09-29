@@ -4,7 +4,7 @@ Each agent in ``config/agents.yaml`` lists the tools it may use. An agent is
 offered only the registered tools on that list and runs only those: a call to
 any other tool is answered as if the tool did not exist (ISSUE-0151). Task
 agents (:class:`agents.base.BaseAgent`) and persona agents
-(``agents/persona_runtime/action_loop.py``) both ask this module, both when
+(``agents/persona_runtime/tool_round.py``) both ask this module, both when
 they offer tools and when they run them, so the two cannot drift apart again.
 A persona is also given its memory tools and the recall tool, from a list of
 its own; those sit on top of what this module returns.

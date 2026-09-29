@@ -8,7 +8,11 @@ every model call, and the tags that say which arm, series, meeting, attempt
 and try the process is serving (check 4). An attempt is one run of the
 series from its briefing; a try is one holding of a meeting within it, and a
 meeting a provider error cut short is held again as the next try. Calls the harness makes itself,
-such as arm A's, are tagged per meeting with :func:`call_log_scope`.
+such as arm A's, are tagged per meeting with :func:`call_log_scope`. In arm
+D-prime, from the series' second meeting on, a third setting names the file
+of earlier transcripts every turn carries as its cached prefix
+(:func:`prompt_prefix_env`); a call-log line names the prefix its call
+carried by its SHA-256.
 
 After the run, :func:`read_call_log` turns those lines into the
 :class:`~evaluators.exp001.costs.CallRecord` values ``costs`` prices. It
@@ -23,6 +27,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import re
 from collections.abc import Iterable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
@@ -32,6 +37,7 @@ from typing import Any
 from agents import call_log
 from agents.call_log import CALL_LOG_ENV, CALL_TAGS_ENV
 from agents.clock import CLOCK_ANCHOR_ENV, CLOCK_START_ENV
+from agents.prompt_prefix import PROMPT_PREFIX_ENV
 from evaluators.exp001.costs import ARMS, CallPurpose, CallRecord
 from evaluators.exp001.materials import MeetingKind
 
@@ -52,6 +58,7 @@ _PURPOSES = {
 # Purposes that are the chair speaking, so they become the memo once asked.
 _SPEAKING = frozenset({"turn", "critic", "revise"})
 _TAGS = ("arm", "series", "meeting", "meeting_kind", "attempt", "try")
+_SHA256 = re.compile(r"[0-9a-f]{64}")
 
 
 class CallLogError(ValueError):
@@ -89,6 +96,11 @@ def call_log_env(
     """The call-log settings for a process serving one meeting of one arm."""
     tags = _tags(arm, series, meeting, meeting_kind, attempt, meeting_try)
     return {CALL_LOG_ENV: str(path), CALL_TAGS_ENV: json.dumps(tags)}
+
+
+def prompt_prefix_env(path: Path) -> dict[str, str]:
+    """The setting that gives every turn the text in *path* as its cached prefix."""
+    return {PROMPT_PREFIX_ENV: str(path)}
 
 
 def call_log_scope(
@@ -156,6 +168,9 @@ class FailedCall:
     purpose: CallPurpose
     # False, as for its answer, for a memory write in an arm with no memory.
     counts_in_arm: bool = True
+    # The SHA-256 of the cached prefix it carried, as for its answer: a call
+    # can write the cache entry and still fail.
+    cache_prefix: str | None = None
 
 
 @dataclass(frozen=True)
@@ -184,6 +199,7 @@ def read_call_log(path: Path, *, memo_turns: Iterable[MemoTurn] = ()) -> CallLog
                 attempt=record.attempt, meeting_try=record.meeting_try, adviser=record.adviser,
                 started_at=record.started_at, error=str(line["error"]),
                 purpose=record.purpose, counts_in_arm=record.counts_in_arm,
+                cache_prefix=record.cache_prefix,
             ))
         else:
             records.append(record)
@@ -218,6 +234,10 @@ def _record(
         raise CallLogError(f"{where}: {exc!r}") from exc
     if arm not in ARMS:
         raise CallLogError(f"{where}: unknown arm {arm!r}")
+    # A line written before the runtime logged prefixes has none.
+    prefix = line.get("cache_prefix_sha256")
+    if prefix is not None and not (isinstance(prefix, str) and _SHA256.fullmatch(prefix)):
+        raise CallLogError(f"{where}: cache_prefix_sha256 is {prefix!r}, not a SHA-256")
 
     purpose = _PURPOSES[runtime_purpose]
     memo = memos.get((arm, tags["series"], tags["meeting"], attempt, meeting_try))
@@ -241,5 +261,6 @@ def _record(
         model=model,
         counts_in_arm=not (purpose is CallPurpose.SUMMARY and arm in MEMORYLESS_ARMS),
         meeting_try=meeting_try,
+        cache_prefix=prefix,
         **tokens,
     )

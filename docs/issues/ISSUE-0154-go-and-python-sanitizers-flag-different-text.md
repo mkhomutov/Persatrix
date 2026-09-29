@@ -15,7 +15,7 @@ refs:
   - agents/security_patterns.py
   - agents/security.py
   - agents/base.py
-  - agents/persona_runtime/action_loop.py
+  - agents/persona_runtime/tool_round.py
   - agents/persona_runtime/channel_ingest.py
   - prompts/runtime/safety/external-data-handling.md
   - tests/unit/python/test_pattern_parity.py
@@ -50,7 +50,7 @@ but not called by the orchestrator yet". The Python copy has three callers:
 
 | Caller | What it checks |
 |---|---|
-| `agents/base.py` (task agents) and `agents/persona_runtime/action_loop.py` (personas), through `maybe_wrap_tool_content` | The output of `http_request`, `file_read` and `recall_channel_messages`, before it is wrapped in the `<external_data>` envelope |
+| `agents/base.py` (task agents) and `agents/persona_runtime/tool_round.py` (personas; in `action_loop.py` when this was filed), through `maybe_wrap_tool_content` | The output of `http_request`, `file_read` and `recall_channel_messages`, before it is wrapped in the `<external_data>` envelope |
 | `agents/persona_runtime/channel_ingest.py` | Every incoming channel message |
 
 **How the copy is made.** `make generate-sanitizer-patterns` runs

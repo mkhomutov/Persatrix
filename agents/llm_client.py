@@ -190,6 +190,7 @@ class LLMClient:
         if self._wallet is None or cause == walletpb.CAUSE_UNSPECIFIED:
             return await self._invoke_provider(
                 kwargs, provider=provider, model_alias=model_alias, purpose=purpose,
+                cache_prefix=cache_prefix,
             )
         async with self._wallet.lease(
             agent_id=agent_id,
@@ -203,7 +204,7 @@ class LLMClient:
         ) as lease:
             response = await self._invoke_provider(
                 kwargs, provider=provider, lease=lease, model_alias=model_alias,
-                purpose=purpose,
+                purpose=purpose, cache_prefix=cache_prefix,
             )
             usage = response.usage
             # The wallet has no cache price, so it is charged every input
@@ -276,6 +277,7 @@ class LLMClient:
         lease: Lease | None = None,
         model_alias: str | None = None,
         purpose: LLMCallPurpose | None = None,
+        cache_prefix: str = "",
     ) -> LLMResponse:
         """Invoke the underlying provider, wrapped in an ``agent.llm.call`` span.
 
@@ -302,6 +304,8 @@ class LLMClient:
 
         Every call, finished or failed, ends with one call-log line
         (:func:`agents.call_log.record_call`), written only when the log is on.
+        *cache_prefix* is the prefix the call carried, however it was sent,
+        for that line.
         """
         if provider is None:
             provider = self._provider
@@ -336,6 +340,7 @@ class LLMClient:
                 record_call(
                     started_at=call_started_wall, purpose=purpose, provider=system_name,
                     model=model, model_alias=model_alias, usage=usage, error=error,
+                    cache_prefix=cache_prefix,
                 )
 
             agent_id = current_agent_id()
