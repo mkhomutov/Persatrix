@@ -1,6 +1,6 @@
 # EXP-001 — The harness's frozen choices: arm D′'s transcript prefix
 
-> **Status**: 🚧 **In Progress** — PR 5d's rows freeze when it merges.
+> **Status**: 🚧 **In Progress** — PR 5d's rows freeze when it merges ([#1021](https://github.com/mkhomutov/Persatrix/pull/1021)).
 > **Last updated**: 2026-09-29
 > **Part of**: the [EXP-001 harness](EXP-001-harness.md); the [first part](EXP-001-harness-choices.md) holds the choices of PRs 1 to 4 and the arm order, and the [second part](EXP-001-harness-choices-meetings.md) those of PRs 5a to 5c
 
