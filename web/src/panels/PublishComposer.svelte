@@ -16,12 +16,15 @@
   // onSubmit / onKeydown — form submit + textarea keydown handlers (post path).
   // members — the active channel's members ([{ id, … }]); agentsById decorates a
   //   row with a display name; userId is excluded (you don't @-mention yourself).
+  // channelName — addresses the placeholder ("Message #General…").
   import { tick } from "svelte";
   import {
     findActiveMention,
     applyMention,
     mentionCandidates,
   } from "../lib/mentions.js";
+  import Icon from "../ui/Icon.svelte";
+  import Avatar from "../ui/Avatar.svelte";
 
   let {
     content = $bindable(),
@@ -32,6 +35,7 @@
     members = [],
     agentsById = {},
     userId = "",
+    channelName = "",
   } = $props();
 
   let textareaEl = $state(null);
@@ -153,7 +157,7 @@
       bind:this={textareaEl}
       bind:value={content}
       rows="1"
-      placeholder="Post to this channel… (@ to mention)"
+      placeholder={channelName ? `Message #${channelName}… (@ to mention)` : "Post to this channel… (@ to mention)"}
       disabled={publishing}
       oninput={onInput}
       onkeydown={onComposerKeydown}
@@ -186,6 +190,7 @@
             selectCandidate(candidate);
           }}
         >
+          <Avatar id={candidate.id} label={candidate.name || candidate.id} size={20} />
           <span class="mention-id">@{candidate.id}</span>
           <span class="mention-name">{mentionLabel(candidate)}</span>
         </li>
@@ -195,10 +200,10 @@
 
   <div class="composer-actions">
     <span class="composer-hint" aria-hidden="true"
-      >@ to mention · Enter to post · Shift+Enter for a new line</span
+      ><kbd>@</kbd> to mention · <kbd>Enter</kbd> to post · <kbd>Shift</kbd>+<kbd>Enter</kbd> for a new line</span
     >
     <button type="submit" disabled={!canPublish}>
-      {publishing ? "Posting…" : "Post"}
+      <Icon name="send" size={14} />{publishing ? "Posting…" : "Post"}
     </button>
   </div>
 </form>
@@ -212,13 +217,13 @@
   .mention-menu {
     list-style: none;
     margin: 0;
-    padding: 0.25rem 0;
+    padding: 0.3rem;
     position: absolute;
     z-index: 10;
     left: 0.5rem;
     right: 0.5rem;
     bottom: calc(100% + 0.4rem);
-    max-height: 12rem;
+    max-height: 14rem;
     overflow-y: auto;
     background: var(--surface-raised, #fff);
     border: 1px solid var(--border, #d4d4d8);
@@ -227,9 +232,10 @@
   }
   .mention-menu li {
     display: flex;
-    gap: 0.5rem;
-    align-items: baseline;
-    padding: 0.35rem 0.6rem;
+    gap: 0.55rem;
+    align-items: center;
+    padding: 0.35rem 0.5rem;
+    border-radius: var(--radius-xs, 5px);
     cursor: pointer;
   }
   .mention-menu li.active {
@@ -237,10 +243,14 @@
   }
   .mention-id {
     font-weight: 600;
-    color: var(--accent, #2563eb);
+    color: var(--accent-strong, #2563eb);
   }
   .mention-name {
     color: var(--muted, #6b7280);
     font-size: 0.9em;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 </style>

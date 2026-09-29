@@ -1,11 +1,10 @@
 <script>
-  // Shown where the DM persona picker would be when NO personas are registered
-  // but channels exist — so the entry point does not vanish SILENTLY (the
-  // {:else} of ChannelTimeline's persona-picker guard). Extracted as its own
-  // component to keep ChannelTimeline under the review-size cap, mirroring
-  // PersonaPicker / PublishComposer / OnboardingEmpty.
+  // Shown where the sidebar's persona list would be when NO personas are
+  // registered but channels exist — so the DM entry point does not vanish
+  // SILENTLY (the {:else} of ConversationRail's persona-list guard). Its own
+  // component, mirroring PublishComposer / OnboardingEmpty.
   //
-  // The empty picker's most common cause is a cloud demo whose agents fail
+  // The empty list's most common cause is a cloud demo whose agents fail
   // closed at startup on missing provider config (RFC 0053 §C — e.g. an unfilled
   // watsonx project_id), leaving nothing registered to DM. The orchestrator has
   // no expected-agent roster (agents self-register), so this reports the
@@ -21,8 +20,8 @@
   No personas are registered, so direct messages aren't available. If you just
   started a cloud demo, an agent may have failed to start on missing provider
   config — check <code>docker compose logs</code>.
-  <!-- "Refresh personas", not a bare "Refresh": the ChannelPicker toolbar
-       already owns "Refresh" (re-list channels) in this same panel, so a
+  <!-- "Refresh personas", not a bare "Refresh": the sidebar's toolbar already
+       owns "Refresh" (re-list personas and channels) in this same panel, so a
        distinct label keeps both the operator and the a11y tree unambiguous. -->
   <button type="button" class="retry" onclick={onRefresh}>Refresh personas</button>
 </p>

@@ -2,8 +2,10 @@
   import { loadBootstrap } from "./lib/api.js";
   import { onUnauthorized } from "./lib/auth.js";
   import { selectPanels, deriveUserId } from "./lib/bootstrap.js";
+  import { loadTheme, nextTheme, applyTheme, writePref } from "./lib/prefs.js";
   import ChannelTimeline from "./panels/ChannelTimeline.svelte";
   import LoginPanel from "./panels/LoginPanel.svelte";
+  import Icon from "./ui/Icon.svelte";
 
   // Known panel name → its Svelte component. selectPanels already filters to
   // panels the client knows and the server reports enabled && available, so an
@@ -62,6 +64,37 @@
   // reboots the shell, whose /ui/context now carries the verified
   // principal (and the acting-as override disappears — `authenticated`).
   let authRequired = $state(false);
+
+  // Colour theme: "system" follows the OS; the topbar switch pins light or
+  // dark and remembers the choice per browser (lib/prefs.js).
+  let theme = $state(loadTheme());
+  const THEME_LABELS = { system: "System", light: "Light", dark: "Dark" };
+  const THEME_ICONS = { system: "monitor", light: "sun", dark: "moon" };
+
+  $effect(() => {
+    applyTheme(theme);
+  });
+
+  function cycleTheme() {
+    theme = nextTheme(theme);
+    writePref("theme", theme);
+  }
+
+  // The shortcut reference closes on Escape or a click outside it.
+  let shortcutsOpen = $state(false);
+  let shortcutsEl = $state(null);
+
+  function onWindowPointer(event) {
+    if (shortcutsOpen && shortcutsEl && !shortcutsEl.contains(event.target)) {
+      shortcutsOpen = false;
+    }
+  }
+
+  function onWindowKey(event) {
+    if (event.key === "Escape" && shortcutsOpen) {
+      shortcutsOpen = false;
+    }
+  }
 
   $effect(() => {
     onUnauthorized(() => (authRequired = true));
@@ -216,21 +249,25 @@
   }
 </script>
 
+<svelte:window onpointerdown={onWindowPointer} onkeydown={onWindowKey} />
+
 <header class="topbar">
   <span class="brand">
     <!-- Three-node mark: a nod to the multi-persona orchestration the console
          fronts. Decorative only (aria-hidden); the brand text carries the name. -->
-    <svg class="logo" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <circle cx="12" cy="5.5" r="2.6" fill="currentColor" />
-      <circle cx="5.5" cy="17.5" r="2.6" fill="currentColor" />
-      <circle cx="18.5" cy="17.5" r="2.6" fill="currentColor" />
-      <path
-        d="M12 8.1 6.7 15.3M12 8.1l5.3 7.2M8.1 17.5h7.8"
-        stroke="currentColor"
-        stroke-width="1.4"
-        stroke-linecap="round"
-      />
-    </svg>
+    <span class="brand-mark" aria-hidden="true">
+      <svg class="logo" viewBox="0 0 24 24" fill="none">
+        <circle cx="12" cy="5.5" r="2.6" fill="currentColor" />
+        <circle cx="5.5" cy="17.5" r="2.6" fill="currentColor" />
+        <circle cx="18.5" cy="17.5" r="2.6" fill="currentColor" />
+        <path
+          d="M12 8.1 6.7 15.3M12 8.1l5.3 7.2M8.1 17.5h7.8"
+          stroke="currentColor"
+          stroke-width="1.6"
+          stroke-linecap="round"
+        />
+      </svg>
+    </span>
     Persatrix <span class="console-word">console</span>
     {#if version}<span class="version" title="Orchestrator build">v{version}</span>{/if}
   </span>
@@ -256,6 +293,41 @@
       {/each}
     </div>
   {/if}
+  <div class="topbar-actions">
+    <!-- The keyboard reference: every shortcut the console answers to. -->
+    <details class="shortcuts" bind:open={shortcutsOpen} bind:this={shortcutsEl}>
+      <summary class="btn-icon btn-ghost" aria-label="Keyboard shortcuts" title="Keyboard shortcuts">
+        <Icon name="keyboard" size={17} />
+      </summary>
+      <div class="shortcuts-card">
+        <h2>Keyboard shortcuts</h2>
+        <dl>
+          <dt><kbd>⌘</kbd><kbd>K</kbd></dt>
+          <dd>Jump to a conversation</dd>
+          <dt><kbd>↑</kbd><kbd>↓</kbd></dt>
+          <dd>Move through a list</dd>
+          <dt><kbd>Enter</kbd></dt>
+          <dd>Open the highlighted conversation · send a message</dd>
+          <dt><kbd>Shift</kbd><kbd>Enter</kbd></dt>
+          <dd>New line in a message</dd>
+          <dt><kbd>@</kbd></dt>
+          <dd>Mention a channel member</dd>
+          <dt><kbd>Esc</kbd></dt>
+          <dd>Clear the jump box · close a dialog or drawer</dd>
+        </dl>
+        <p class="shortcuts-note">On Windows and Linux, press <kbd>Ctrl</kbd> for <kbd>⌘</kbd>.</p>
+      </div>
+    </details>
+    <button
+      type="button"
+      class="btn-icon btn-ghost theme-toggle"
+      aria-label="Theme: {THEME_LABELS[theme]}"
+      title="Colour theme: {THEME_LABELS[theme]} — click to switch"
+      onclick={cycleTheme}
+    >
+      <Icon name={THEME_ICONS[theme]} size={17} />
+    </button>
+  </div>
   {#if principal}
     <!-- `identity-block` (not `identity`): the bare `.identity` class is the
          conversation panel's identity line, a global rule that would otherwise
@@ -305,24 +377,39 @@
        reload on success is a full reboot: every panel refetches under
        the new cookie session and /ui/context reports the verified
        principal. -->
-  <main class="content">
+  <main class="app-main">
     <LoginPanel onsuccess={() => window.location.reload()} />
   </main>
 {:else if status === "loading"}
-  <main class="content">
-    <p class="boot">Loading the console…</p>
+  <main class="app-main">
+    <div class="boot-skeleton" aria-hidden="true">
+      <span class="skeleton sk-line" style="width: 38%"></span>
+      <span class="skeleton sk-line" style="width: 62%"></span>
+      <span class="skeleton sk-line" style="width: 50%"></span>
+    </div>
+    <p class="sr-only" role="status">Loading the console…</p>
   </main>
 {:else if status === "error"}
-  <main class="content">
-    <p class="boot error" role="alert">{errorMessage}</p>
+  <main class="app-main">
+    <div class="boot-card is-error">
+      <div class="boot-icon"><Icon name="alert" size={20} /></div>
+      <h1>The console couldn’t start</h1>
+      <p class="boot error" role="alert">{errorMessage}</p>
+      <button type="button" class="btn-primary" onclick={() => window.location.reload()}>
+        <Icon name="refresh" size={15} />Try again
+      </button>
+    </div>
   </main>
 {:else if panels.length === 0}
   <!-- Reachable backend with a valid principal but no enabled && available
        panel. Render the empty-state copy on its own — an empty role=tablist (a
        tablist with no tabs) and a tabpanel labelled by a tab that doesn't exist
        are both invalid ARIA, so the tab scaffolding is omitted entirely. -->
-  <main class="content">
-    <p class="boot">No panels are enabled for this deployment.</p>
+  <main class="app-main">
+    <div class="boot-card">
+      <div class="boot-icon"><Icon name="info" size={20} /></div>
+      <p class="boot">No panels are enabled for this deployment.</p>
+    </div>
   </main>
 {:else}
   <!-- The content region is the tabpanel for whichever tab is active;
@@ -336,7 +423,7 @@
        landmark isn't given an interactive role; tabindex makes the panel
        keyboard-reachable even when its content has no focusable element (ARIA
        APG tabs pattern). -->
-  <main class="content">
+  <main class="app-main">
     <div
       role="tabpanel"
       id="panel-{activeName}"

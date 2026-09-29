@@ -4,10 +4,11 @@
   // presentation plus the convener candidate list: the PARENT owns the
   // draft/patch/save/revision state and the list<->text coercion; this component
   // renders the autonomous rows bound to the parent's reactive `drafts` (by
-  // reference), mirroring the parent's flat-knob rows (a provenance badge + an
-  // inherit/override control) so the one Save covers every knob.
+  // reference) through the same KnobRow as the parent's flat knobs (a
+  // provenance badge + an inherit/override control), so the one Save covers
+  // every knob.
   //
-  // knobs      — the AUTONOMOUS_KNOBS descriptors ({key, label, type}).
+  // knobs      — the AUTONOMOUS_KNOBS descriptors ({key, label, type, hint}).
   // drafts     — the parent's reactive draft map (key -> {inherit, value}); the
   //              controls bind into it, so edits flow to the parent's patch with
   //              no callback. Adopt populates these before this renders.
@@ -22,6 +23,8 @@
   //              PERSISTED block, so we disable Convene while dirty and tell the
   //              operator to save first rather than convene a stale config.
   import { conveneChannel, ApiError } from "../lib/api.js";
+  import KnobRow from "./KnobRow.svelte";
+  import Icon from "../ui/Icon.svelte";
   let {
     knobs,
     drafts,
@@ -118,86 +121,12 @@
   });
 </script>
 
-<fieldset class="autonomous-settings">
-  <legend>Autonomous channel (RFC 0052)</legend>
+<fieldset class="autonomous-settings settings-section">
+  <legend class="settings-section-title"><Icon name="zap" size={13} />Autonomous channel</legend>
   <ul class="knob-list">
     {#each knobs as knob (knob.key)}
       {#if drafts[knob.key]}
-        <li class="knob-row">
-          <div class="knob-head">
-            <span class="knob-label">{knob.label}</span>
-            <span
-              class="provenance"
-              class:overridden={!drafts[knob.key].inherit}
-            >
-              {drafts[knob.key].inherit
-                ? "Inherited default"
-                : "Overridden on this channel"}
-            </span>
-          </div>
-
-          <div class="knob-control">
-            {#if knob.type === "bool"}
-              <input
-                class="value"
-                type="checkbox"
-                aria-label={knob.label}
-                bind:checked={drafts[knob.key].value}
-                disabled={drafts[knob.key].inherit}
-              />
-            {:else if knob.type === "int"}
-              <input
-                class="value"
-                type="number"
-                aria-label={knob.label}
-                min="0"
-                step="1"
-                bind:value={drafts[knob.key].value}
-                disabled={drafts[knob.key].inherit}
-              />
-            {:else if knob.type === "list"}
-              <!-- The agenda: one sub-topic per line. The parent coerces this
-                   text to/from the `[]string` wire shape (agendaToText/List). -->
-              <textarea
-                class="value agenda"
-                aria-label={knob.label}
-                rows="3"
-                bind:value={drafts[knob.key].value}
-                disabled={drafts[knob.key].inherit}
-              ></textarea>
-            {:else if knob.type === "convener"}
-              <select
-                class="value"
-                aria-label={knob.label}
-                bind:value={drafts[knob.key].value}
-                disabled={drafts[knob.key].inherit}
-              >
-                <option value="" disabled>Select a convener…</option>
-                {#each convenerCandidates as cand (cand.id)}
-                  <option value={cand.id}>{cand.name}</option>
-                {/each}
-              </select>
-            {:else}
-              <!-- type === "text": the topic / goal free-text strings. -->
-              <input
-                class="value"
-                type="text"
-                aria-label={knob.label}
-                bind:value={drafts[knob.key].value}
-                disabled={drafts[knob.key].inherit}
-              />
-            {/if}
-
-            <label class="inherit">
-              <input
-                type="checkbox"
-                bind:checked={drafts[knob.key].inherit}
-                aria-label={`Inherit fleet default for ${knob.label}`}
-              />
-              Inherit fleet default
-            </label>
-          </div>
-        </li>
+        <KnobRow {knob} draft={drafts[knob.key]} candidates={convenerCandidates} />
       {/if}
     {/each}
   </ul>
@@ -222,7 +151,7 @@
     <div class="convene-action">
       <button
         type="button"
-        class="convene"
+        class="convene btn-primary btn-sm"
         onclick={convene}
         disabled={convening || dirty || convened}
         title={dirty
@@ -231,7 +160,7 @@
             ? "Convened — reload to convene again"
             : ""}
       >
-        {convening ? "Convening…" : convened ? "Convened" : "Convene now"}
+        <Icon name="play" size={13} />{convening ? "Convening…" : convened ? "Convened" : "Convene now"}
       </button>
       {#if dirty}
         <span class="convene-hint">Save your changes before convening.</span>
@@ -245,85 +174,3 @@
     </div>
   {/if}
 </fieldset>
-
-<style>
-  /* Mirror ChannelSettings' row layout (scoped styles don't cross components). */
-  .autonomous-settings {
-    border: 1px solid var(--border, #d0d0d0);
-    border-radius: 6px;
-    margin: 0.75rem 0 0;
-    padding: 0.5rem 0.75rem 0.75rem;
-  }
-  .autonomous-settings legend {
-    font-weight: 600;
-    font-size: 0.85rem;
-    padding: 0 0.4rem;
-  }
-  .knob-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.6rem;
-  }
-  .knob-row {
-    display: flex;
-    flex-direction: column;
-    gap: 0.2rem;
-  }
-  .knob-head {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 0.5rem;
-  }
-  .knob-label {
-    font-weight: 600;
-  }
-  .provenance {
-    font-size: 0.75rem;
-    opacity: 0.7;
-  }
-  .provenance.overridden {
-    opacity: 1;
-    font-weight: 600;
-  }
-  .knob-control {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
-    flex-wrap: wrap;
-  }
-  .knob-control .inherit {
-    display: flex;
-    align-items: center;
-    gap: 0.3rem;
-    font-size: 0.8rem;
-  }
-  .agenda {
-    flex: 1 1 14rem;
-    resize: vertical;
-    font: inherit;
-  }
-  .convene-action {
-    margin-top: 0.75rem;
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    flex-wrap: wrap;
-  }
-  .convene-hint {
-    font-size: 0.8rem;
-    opacity: 0.7;
-  }
-  .convening-readout {
-    margin: 0.75rem 0 0;
-    font-size: 0.8rem;
-    opacity: 0.8;
-  }
-  .readout-label {
-    font-weight: 600;
-  }
-</style>

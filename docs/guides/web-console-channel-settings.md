@@ -15,9 +15,10 @@ the console — the browser counterpart to the CLI
 verb group (RFC 0050 Phase 2). Both surfaces ride the **same**
 `GET`/`PATCH /api/v1/channels/{id}/config` endpoint and the **same** per-channel
 revision, so a value set in one is what the other reads back — one source of
-truth, the store. It is a **Channel settings** card in the management rail,
-beside the **Members** card, shown only for a watched **group** channel
-(not DMs).
+truth, the store. It is a **Channel settings** card in the **Details** panel
+(the management rail), below the **Members** card, shown only for a watched
+**group** channel (not DMs); the panel button in the conversation header shows
+and hides the panel.
 
 **It ships on.** The schema default is `false`, but the delivered
 [`config/ui.yaml`](../../config/ui.yaml) sets `config_edit_enabled: true` (RFC
@@ -42,11 +43,14 @@ curl -s http://localhost:8080/api/v1/ui/config | jq '.panels.channel_timeline.co
 # want: { "enabled": true, "available": true }
 ```
 
-**Using it.** Each knob shows its effective value and a provenance badge —
-**Overridden on this channel** or **Inherited default**. To change one, untick
-**Inherit fleet default** and set the value; to revert, re-tick it. **Save
-settings** sends only the knobs you touched (a sparse patch), carrying the loaded
-revision as an `If-Match` guard:
+**Using it.** The knobs are grouped by what they govern — **Turn-taking**,
+**Closing an interaction**, **Reasoning** and **Autonomous channel** — and each
+says in one line what it does. Each shows its effective value and a provenance
+badge — **Overridden on this channel** or **Inherited default**. To change one,
+untick **Inherit fleet default** and set the value; to revert, re-tick it. The
+bar at the bottom of the card counts your unsaved changes, and **Discard**
+throws them away. **Save settings** sends only the knobs you touched (a sparse
+patch), carrying the loaded revision as an `If-Match` guard:
 
 - A reverted knob sends an explicit "unset → inherit"; an override left blank is
   skipped, not sent as `0` (a no-op save sends nothing).

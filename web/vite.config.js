@@ -41,5 +41,6 @@ export default defineConfig(({ mode }) => ({
   test: {
     environment: "jsdom",
     include: ["src/**/*.{test,spec}.js"],
+    setupFiles: ["src/test-setup.js"],
   },
 }));

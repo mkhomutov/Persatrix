@@ -21,7 +21,9 @@
   // onChanged  — async () => …; called after a successful save to refresh siblings.
   import { getChannelConfig, patchChannelConfig, ApiError } from "../lib/api.js";
   import AutonomousSettings from "./AutonomousSettings.svelte";
-  import { KNOBS } from "../lib/channelKnobs.js";
+  import KnobRow from "./KnobRow.svelte";
+  import Icon from "../ui/Icon.svelte";
+  import { KNOBS, KNOB_SECTIONS } from "../lib/channelKnobs.js";
   import {
     AUTONOMOUS_KNOBS,
     agendaToText,
@@ -131,25 +133,26 @@
     return normalize(k, o.value) !== normalize(k, c.value);
   }
 
-  // The sparse patch: only the touched knobs. A reverted knob sends an explicit
-  // null (unset->inherit); an overridden int with an empty box is skipped rather
-  // than sent as 0. Derived so the Save button and the request share one source.
-  const patch = $derived.by(() => {
-    const body = {};
+  // The pending edits as [key, value] pairs: only the touched knobs. A reverted
+  // knob sends an explicit null (unset->inherit); an overridden int with an
+  // empty box is skipped rather than sent as 0. The sparse patch body, the
+  // unsaved-changes count and the Save button all derive from this one list.
+  const pending = $derived.by(() => {
+    const out = [];
     for (const k of allKnobs) {
       if (!changed(k)) continue;
       if (drafts[k.key].inherit) {
-        setBody(body, k.key, null);
+        out.push([k.key, null]);
         continue;
       }
       const v = drafts[k.key].value;
-      if (k.type === "bool") setBody(body, k.key, Boolean(v));
+      if (k.type === "bool") out.push([k.key, Boolean(v)]);
       else if (k.type === "int") {
         if (v === "" || v == null) continue;
-        setBody(body, k.key, Number(v));
+        out.push([k.key, Number(v)]);
       } else if (k.type === "list") {
         // The agenda override rides as a JSON array (empty box -> []).
-        setBody(body, k.key, agendaToList(v));
+        out.push([k.key, agendaToList(v)]);
       } else {
         // chair/convener selects + enum: a blank pick has nothing concrete to
         // send — skip it rather than emit escalation_chair_id:"" (a 400), as a
@@ -157,13 +160,27 @@
         // "" is a valid explicit override (CLI parity, server accepts it).
         const s = String(v ?? "");
         if (s === "" && k.type !== "text") continue;
-        setBody(body, k.key, s);
+        out.push([k.key, s]);
       }
     }
+    return out;
+  });
+
+  const patch = $derived.by(() => {
+    const body = {};
+    for (const [key, value] of pending) setBody(body, key, value);
     return body;
   });
 
-  const dirty = $derived(Object.keys(patch).length > 0);
+  const dirty = $derived(pending.length > 0);
+
+  // discard throws the pending edits away, back to the last loaded config.
+  function discard() {
+    if (!config || saving) return;
+    adopt(config);
+    warning = "";
+    notice = "";
+  }
 
   async function load(id) {
     const token = ++loadToken;
@@ -272,8 +289,8 @@
   });
 </script>
 
-<details class="channel-settings">
-  <summary>Channel settings</summary>
+<details class="channel-settings card">
+  <summary><Icon name="sliders" size={15} />Channel settings</summary>
 
   {#if error}
     <p class="boot error" role="alert">{error}</p>
@@ -289,146 +306,33 @@
     <p class="loading" role="status">Loading settings…</p>
   {:else if config}
     <form class="settings-form" aria-label="Channel settings" onsubmit={save}>
-      <ul class="knob-list">
-        {#each KNOBS as knob (knob.key)}
-          <li class="knob-row">
-            <div class="knob-head">
-              <span class="knob-label">{knob.label}</span>
-              <span
-                class="provenance"
-                class:overridden={!drafts[knob.key].inherit}
-              >
-                {drafts[knob.key].inherit
-                  ? "Inherited default"
-                  : "Overridden on this channel"}
-              </span>
-            </div>
-
-            <div class="knob-control">
-              <!-- The label is shown once in .knob-head above; the control
-                   carries it as an accessible name (aria-label), not a second
-                   visible copy of the text. -->
-              {#if knob.type === "bool"}
-                <input
-                  class="value"
-                  type="checkbox"
-                  aria-label={knob.label}
-                  bind:checked={drafts[knob.key].value}
-                  disabled={drafts[knob.key].inherit}
-                />
-              {:else if knob.type === "int"}
-                <input
-                  class="value"
-                  type="number"
-                  aria-label={knob.label}
-                  min="0"
-                  step="1"
-                  bind:value={drafts[knob.key].value}
-                  disabled={drafts[knob.key].inherit}
-                />
-              {:else if knob.type === "enum"}
-                <!-- Generic enum select: options are a fixed value set on the knob
-                     (reasoning.mode/model/depth). The same <select> primitive as
-                     the chair picker below, generalized off a static list rather
-                     than the member roster. -->
-                <select
-                  class="value"
-                  aria-label={knob.label}
-                  bind:value={drafts[knob.key].value}
-                  disabled={drafts[knob.key].inherit}
-                >
-                  {#each knob.options as opt (opt)}
-                    <option value={opt}>{opt}</option>
-                  {/each}
-                </select>
-              {:else}
-                <select
-                  class="value"
-                  aria-label={knob.label}
-                  bind:value={drafts[knob.key].value}
-                  disabled={drafts[knob.key].inherit}
-                >
-                  <option value="" disabled>Select a chair…</option>
-                  {#each chairCandidates as cand (cand.id)}
-                    <option value={cand.id}>{cand.name}</option>
-                  {/each}
-                </select>
-              {/if}
-
-              <label class="inherit">
-                <input
-                  type="checkbox"
-                  bind:checked={drafts[knob.key].inherit}
-                  aria-label={`Inherit fleet default for ${knob.label}`}
-                />
-                Inherit fleet default
-              </label>
-            </div>
-          </li>
-        {/each}
-      </ul>
+      {#each KNOB_SECTIONS as section (section.title)}
+        <section class="settings-section">
+          <h3 class="settings-section-title">{section.title}</h3>
+          <ul class="knob-list">
+            {#each section.knobs as knob (knob.key)}
+              <KnobRow {knob} draft={drafts[knob.key]} candidates={chairCandidates} />
+            {/each}
+          </ul>
+        </section>
+      {/each}
 
       <!-- RFC 0052: own child, shares this save; hosts the Convene action (PR 3, armed off `config`). -->
       <AutonomousSettings knobs={AUTONOMOUS_KNOBS} {drafts} {members} {agentsById} {channelId} {config} {dirty} />
 
-      <button type="submit" class="save" disabled={!dirty || saving}>
-        {saving ? "Saving…" : "Save settings"}
-      </button>
+      <!-- The save bar sticks to the bottom of the rail while the form scrolls,
+           so the pending-edit count and Save stay in reach. -->
+      <div class="settings-bar" class:dirty>
+        {#if dirty}
+          <span class="unsaved">{pending.length} unsaved change{pending.length === 1 ? "" : "s"}</span>
+          <button type="button" class="btn-sm btn-ghost" onclick={discard} disabled={saving}>Discard</button>
+        {:else}
+          <span class="unsaved quiet">Up to date</span>
+        {/if}
+        <button type="submit" class="save btn-sm" disabled={!dirty || saving}>
+          {saving ? "Saving…" : "Save settings"}
+        </button>
+      </div>
     </form>
   {/if}
 </details>
-
-<style>
-  .knob-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.6rem;
-  }
-  .knob-row {
-    display: flex;
-    flex-direction: column;
-    gap: 0.2rem;
-  }
-  .knob-head {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 0.5rem;
-  }
-  .knob-label {
-    font-weight: 600;
-  }
-  .provenance {
-    font-size: 0.75rem;
-    opacity: 0.7;
-  }
-  .provenance.overridden {
-    opacity: 1;
-    font-weight: 600;
-  }
-  .knob-control {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
-    flex-wrap: wrap;
-  }
-  .knob-control .inherit {
-    display: flex;
-    align-items: center;
-    gap: 0.3rem;
-    font-size: 0.8rem;
-  }
-  .warning {
-    color: var(--warn, #b26a00);
-  }
-  .notice {
-    color: var(--ok, green);
-  }
-  .save {
-    margin-top: 0.75rem;
-  }
-</style>

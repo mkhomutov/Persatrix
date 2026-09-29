@@ -11,12 +11,15 @@
   // exponential error-backoff, and a head-poll that de-dupes by id (never a full
   // re-fetch per tick). A loadToken invalidates in-flight work when the channel
   // switches, so a stale resolution can't write to the wrong conversation.
+  import { tick } from "svelte";
   import { getChannelHistory, getChannelActivity } from "../lib/api.js";
   import { participantAgentIds } from "../lib/interactions.js";
   import { GRACE_MS } from "../lib/presence.js";
+  import { dayLabelAt, isCompact } from "../lib/timeline.js";
   import ChannelMessage from "./ChannelMessage.svelte";
   import InteractionSummary from "./InteractionSummary.svelte";
   import PresenceBar from "./PresenceBar.svelte";
+  import Icon from "../ui/Icon.svelte";
   import { createPresence } from "../lib/presence.svelte.js";
 
   // channelId — the conversation to show ("" = a clean empty view, e.g. a fresh
@@ -88,6 +91,11 @@
   let historyError = $state("");
   let historyLoaded = $state(false);
   let pollError = $state("");
+  // Paging backwards: a full first page means older rows may exist; a short
+  // page (initial or older) means the channel's start has been reached.
+  let hasOlder = $state(false);
+  let loadingOlder = $state(false);
+  let olderError = $state("");
 
   let seenIds = new Set();
   let pollTimer = null;
@@ -143,6 +151,11 @@
       if (fresh.length > 0) {
         fresh.forEach((m) => seenIds.add(m.id));
         messages = [...fresh, ...messages];
+        // Reading history further up: count what arrived below, for the
+        // jump-to-latest control, instead of yanking the view down.
+        if (!pinnedToBottom) {
+          unseen += fresh.length;
+        }
       }
       // Reconcile the authoritative thinking set, THEN prune locally-seen
       // replies — pruneFrom bridges the gap before the next /activity read
@@ -213,11 +226,17 @@
     seenIds = new Set();
     backoffMs = POLL_INTERVAL_MS;
     polling = false;
+    hasOlder = false;
+    loadingOlder = false;
+    olderError = "";
+    pinnedToBottom = true;
+    unseen = 0;
     return getChannelHistory(channel, { limit: HISTORY_LIMIT })
       .then(({ messages: history }) => {
         if (token !== loadToken) return;
         messages = history;
         history.forEach((m) => seenIds.add(m.id));
+        hasOlder = history.length >= HISTORY_LIMIT;
         // Surface an already-in-flight round the moment a group opens (a reload
         // or a tab switch), rather than waiting for the first poll tick.
         pollActivity(channel, token);
@@ -238,6 +257,42 @@
   function retryHistory() {
     if (channelId) {
       loadHistory(channelId);
+    }
+  }
+
+  // loadOlder extends the timeline backwards one page, using the oldest shown
+  // message's timestamp as the history endpoint's `before` cursor, and keeps
+  // the reader's place: the view is re-anchored so the rows already on screen
+  // stay where they were.
+  async function loadOlder() {
+    const channel = channelId;
+    const token = loadToken;
+    const oldest = messages.at(-1);
+    if (!channel || !oldest || loadingOlder) {
+      return;
+    }
+    loadingOlder = true;
+    olderError = "";
+    try {
+      const { messages: older } = await getChannelHistory(channel, {
+        limit: HISTORY_LIMIT,
+        before: oldest.timestamp,
+      });
+      if (token !== loadToken) return;
+      const unseenOlder = older.filter((m) => !seenIds.has(m.id));
+      unseenOlder.forEach((m) => seenIds.add(m.id));
+      const before = timelineEl ? timelineEl.scrollHeight - timelineEl.scrollTop : 0;
+      messages = [...messages, ...unseenOlder];
+      hasOlder = older.length >= HISTORY_LIMIT;
+      await tick();
+      if (timelineEl && before) {
+        timelineEl.scrollTop = timelineEl.scrollHeight - before;
+      }
+    } catch (err) {
+      if (token !== loadToken) return;
+      olderError = `Could not load older messages: ${err.message}`;
+    } finally {
+      if (token === loadToken) loadingOlder = false;
     }
   }
 
@@ -285,6 +340,9 @@
   export function echo(stored) {
     if (stored && stored.id && !seenIds.has(stored.id)) {
       seenIds.add(stored.id);
+      // The operator just posted: bring the view down to their message.
+      pinnedToBottom = true;
+      unseen = 0;
       messages = [stored, ...messages];
     }
   }
@@ -293,25 +351,12 @@
   // stay newest-first).
   const displayMessages = $derived(messages.slice().reverse());
 
-  // A consecutive same-sender message inside this window renders compact (no
-  // avatar/head) so a run of turns reads as one visual block. Unparseable
-  // timestamps disable grouping for that pair rather than guessing.
-  const COMPACT_WINDOW_MS = 5 * 60 * 1000;
-  function isCompact(list, i) {
-    if (i === 0) return false;
-    const prev = list[i - 1];
-    const cur = list[i];
-    if (prev.sender_id !== cur.sender_id) return false;
-    const a = new Date(prev.timestamp).getTime();
-    const b = new Date(cur.timestamp).getTime();
-    if (Number.isNaN(a) || Number.isNaN(b)) return false;
-    return b - a < COMPACT_WINDOW_MS;
-  }
-
   // Pinned-scroll autoscroll: a new message scrolls to the bottom ONLY when the
-  // operator is already there, so reading history isn't yanked away.
+  // operator is already there, so reading history isn't yanked away. Messages
+  // that arrive meanwhile are counted for the jump-to-latest control.
   let timelineEl = $state(null);
-  let pinnedToBottom = true;
+  let pinnedToBottom = $state(true);
+  let unseen = $state(0);
   const PIN_EPSILON_PX = 40;
 
   function onTimelineScroll() {
@@ -319,6 +364,16 @@
     const distance =
       timelineEl.scrollHeight - timelineEl.scrollTop - timelineEl.clientHeight;
     pinnedToBottom = distance < PIN_EPSILON_PX;
+    if (pinnedToBottom) {
+      unseen = 0;
+    }
+  }
+
+  function jumpToLatest() {
+    if (!timelineEl) return;
+    timelineEl.scrollTo?.({ top: timelineEl.scrollHeight, behavior: "smooth" });
+    pinnedToBottom = true;
+    unseen = 0;
   }
 
   $effect(() => {
@@ -326,6 +381,23 @@
     if (timelineEl && pinnedToBottom) {
       timelineEl.scrollTop = timelineEl.scrollHeight;
     }
+  });
+
+  // Keep a pinned view on the newest message when either the column or the
+  // list changes height after the scroll above ran — the presence line or a
+  // summary appearing, the composer growing, a row laying out taller than it
+  // first measured, a window resize — so the newest turn never ends up below
+  // the fold.
+  $effect(() => {
+    const el = timelineEl;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      if (pinnedToBottom) el.scrollTop = el.scrollHeight;
+    });
+    observer.observe(el);
+    const list = el.querySelector(".timeline");
+    if (list) observer.observe(list);
+    return () => observer.disconnect();
   });
 </script>
 
@@ -335,23 +407,49 @@
 {/if}
 
 {#if historyError}
-  <p class="boot error" role="alert">{historyError}</p>
-  <button type="button" class="retry" onclick={retryHistory}>Retry</button>
+  <div class="feed-state">
+    <p class="boot error" role="alert">{historyError}</p>
+    <button type="button" class="retry" onclick={retryHistory}>Retry</button>
+  </div>
 {:else if !historyLoaded}
-  <p class="loading" role="status">Loading messages…</p>
-{:else if messages.length === 0}
-  <p class="empty">No messages yet.</p>
-{:else}
-  <ol
-    class="timeline"
-    aria-label="Channel messages"
-    bind:this={timelineEl}
-    onscroll={onTimelineScroll}
-  >
-    {#each displayMessages as message, i (message.id)}
-      <ChannelMessage {message} {userId} {agentsById} compact={isCompact(displayMessages, i)} />
+  <div class="feed-skeleton" aria-hidden="true">
+    {#each [58, 74, 40, 66] as w}
+      <div class="sk-msg"><span class="skeleton sk-avatar"></span><span class="skeleton" style="width: {w}%"></span></div>
     {/each}
-  </ol>
+  </div>
+  <p class="sr-only" role="status">Loading messages…</p>
+{:else if messages.length === 0}
+  <div class="empty-state">
+    <div class="empty-icon"><Icon name={isDM ? "message" : "inbox"} size={22} /></div>
+    <p class="empty">No messages yet.</p>
+    <p class="empty-hint">{isDM ? "Say hello — the persona replies here." : "Posts and persona replies land here as they happen."}</p>
+  </div>
+{:else}
+  <div class="timeline-scroll" bind:this={timelineEl} onscroll={onTimelineScroll}>
+    {#if hasOlder || loadingOlder || olderError}
+      <div class="older">
+        {#if olderError}
+          <p class="poll-error" role="status">{olderError}</p>
+        {/if}
+        <button type="button" class="btn-sm btn-ghost" onclick={loadOlder} disabled={loadingOlder}>
+          <Icon name="arrow-up" size={14} />{loadingOlder ? "Loading older messages…" : "Show older messages"}
+        </button>
+      </div>
+    {:else}
+      <p class="history-start" aria-hidden="true">Start of the conversation</p>
+    {/if}
+    <ol class="timeline" aria-label="Channel messages">
+      {#each displayMessages as message, i (message.id)}
+        {@const dayLabel = dayLabelAt(displayMessages, i)}
+        <ChannelMessage {message} {userId} {agentsById} {dayLabel} compact={!dayLabel && isCompact(displayMessages, i)} />
+      {/each}
+    </ol>
+  </div>
+  {#if !pinnedToBottom}
+    <button type="button" class="jump-latest" onclick={jumpToLatest}>
+      <Icon name="arrow-down" size={14} />{unseen > 0 ? `${unseen} new message${unseen === 1 ? "" : "s"}` : "Jump to latest"}
+    </button>
+  {/if}
 {/if}
 
 <!-- Interaction-summary surface (v0.3.8): the synthesised outcome of a closed

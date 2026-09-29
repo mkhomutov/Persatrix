@@ -132,7 +132,7 @@ summary are real LLM calls), **plus**:
 
 ### Part A — Idle close surfaces a summary (DM)
 
-1. ☐ Open the web console, pick `iron-fox` in the persona picker, and hold a
+1. ☐ Open the web console, pick `iron-fox` in the sidebar's persona list, and hold a
    short multi-turn DM (≥ 3 turns) on a concrete topic ("help me pick a name for
    a CLI tool — here are three candidates …"), then **stop replying**.
 2. ☐ Wait past the idle window for the interaction to close.

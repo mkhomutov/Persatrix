@@ -76,11 +76,12 @@ function routeHistory(dmHistory) {
   );
 }
 
-// Open a DM by selecting the persona in the panel's persona picker.
-async function pickPersona(value = "ada") {
-  await fireEvent.change(screen.getByRole("combobox", { name: /persona/i }), {
-    target: { value },
-  });
+// Open a DM by picking the persona in the sidebar's persona list (each option
+// is named by the persona's picker label, e.g. "Ada — Researcher").
+async function pickPersona(name = "Ada") {
+  await fireEvent.click(
+    screen.getByRole("option", { name: new RegExp(`^${name}\\b`) }),
+  );
 }
 
 beforeEach(() => {
@@ -112,14 +113,14 @@ describe("Channels panel — DM mode (§B)", () => {
     render(ChannelTimeline, { props: { userId: "local" } });
     await screen.findByRole("option", { name: "General" });
 
-    await pickPersona("ada");
+    await pickPersona("Ada");
 
     // The DM is resolved read-only via the chat-history endpoint (no create),
     // and its persisted transcript renders through the channel timeline.
     await waitFor(() =>
       expect(getChatHistory).toHaveBeenCalledWith("ada", { userId: "local" }),
     );
-    expect(await screen.findByText("Ada")).toBeTruthy(); // persona header
+    expect(await screen.findByRole("heading", { name: "Ada" })).toBeTruthy(); // persona header
     expect(await screen.findByText(/earlier/)).toBeTruthy();
     await waitFor(() =>
       expect(getChannelHistory).toHaveBeenCalledWith(DM_ID, expect.anything()),
@@ -137,7 +138,7 @@ describe("Channels panel — DM mode (§B)", () => {
 
     render(ChannelTimeline, { props: { userId: "local" } });
     await screen.findByRole("option", { name: "General" });
-    await pickPersona("ada");
+    await pickPersona("Ada");
     await screen.findByText(/earlier/);
 
     await fireEvent.input(screen.getByRole("textbox", { name: /message/i }), {
@@ -178,7 +179,7 @@ describe("Channels panel — DM mode (§B)", () => {
 
     render(ChannelTimeline, { props: { userId: "local" } });
     await screen.findByRole("option", { name: "General" });
-    await pickPersona("ada");
+    await pickPersona("Ada");
     await waitFor(() => expect(getChatHistory).toHaveBeenCalledTimes(1));
 
     await fireEvent.input(screen.getByRole("textbox", { name: /message/i }), {
@@ -194,7 +195,7 @@ describe("Channels panel — DM mode (§B)", () => {
 
     render(ChannelTimeline, { props: { userId: "local" } });
     await screen.findByRole("option", { name: "General" });
-    await pickPersona("ada");
+    await pickPersona("Ada");
     await screen.findByText(/earlier/);
 
     // Set an epoch override (free-text) and send — it must ride the request so the
@@ -222,7 +223,7 @@ describe("Channels panel — DM mode (§B)", () => {
 
     render(ChannelTimeline, { props: { userId: "local" } });
     await screen.findByRole("option", { name: "General" });
-    await pickPersona("ada");
+    await pickPersona("Ada");
 
     expect(await screen.findByText(/no messages yet/i)).toBeTruthy();
 
@@ -245,7 +246,7 @@ describe("Channels panel — DM mode (§B)", () => {
 
     // Runner is a task agent — present in the picker but not selectable for a DM.
     const runnerOption = screen.getByRole("option", { name: /runner/i });
-    expect(runnerOption.disabled).toBe(true);
+    expect(runnerOption.getAttribute("aria-disabled")).toBe("true");
   });
 
   it("exits the DM back to the group-channel view", async () => {
@@ -253,14 +254,16 @@ describe("Channels panel — DM mode (§B)", () => {
 
     render(ChannelTimeline, { props: { userId: "local" } });
     await screen.findByRole("option", { name: "General" });
-    await pickPersona("ada");
-    await screen.findByText("Ada"); // persona header present
+    await pickPersona("Ada");
+    await screen.findByRole("heading", { name: "Ada" }); // persona header present
 
     await fireEvent.click(screen.getByRole("button", { name: /exit/i }));
 
     // Back in group mode: the persona header is gone and the publish composer
     // returns over the selected group channel.
-    await waitFor(() => expect(screen.queryByText("Ada")).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByRole("heading", { name: "Ada" })).toBeNull(),
+    );
     expect(screen.getByRole("button", { name: /post/i })).toBeTruthy();
   });
 
@@ -273,7 +276,7 @@ describe("Channels panel — DM mode (§B)", () => {
     await screen.findByRole("option", { name: "General" });
 
     // Persona picker present (an entry point), but no lobby prompt over it.
-    expect(screen.getByRole("combobox", { name: /persona/i })).toBeTruthy();
+    expect(screen.getByRole("listbox", { name: /persona/i })).toBeTruthy();
     expect(
       screen.queryByText(/select a persona to start a conversation/i),
     ).toBeNull();
@@ -290,7 +293,7 @@ describe("Channels panel — DM mode (§B)", () => {
     await waitFor(() =>
       expect(getChatHistory).toHaveBeenCalledWith("ada", { userId: "local" }),
     );
-    expect(await screen.findByText("Ada")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Ada" })).toBeTruthy();
     expect(await screen.findByText(/earlier/)).toBeTruthy();
   });
 });

@@ -364,8 +364,9 @@ describe("Channel creation affordance", () => {
       expect(screen.getByRole("option", { name: "standup" })).toBeTruthy(),
     );
     expect(listChannels.mock.calls.length).toBeGreaterThanOrEqual(2);
-    const picker = screen.getByRole("combobox", { name: /channel/i });
-    expect(picker.value).toBe("group:standup");
+    expect(
+      screen.getByRole("option", { name: "standup", selected: true }),
+    ).toBeTruthy();
     // The form collapses after a successful create.
     expect(
       screen.queryByRole("textbox", { name: /channel name/i }),

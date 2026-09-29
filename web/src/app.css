@@ -1,50 +1,78 @@
-/* Web-console design system (RFC 0048) — tokens + shell chrome. Light and
-   dark ride the same rules via light-dark(); components consume the custom
-   properties below (several scoped component styles reference them with
-   fallbacks). The workspace layout lives in styles/conversation.css and
-   styles/management.css (one system, three sheets — split to hold the
-   pre-commit file-size cap); main.js imports all three in order. */
+/* Web-console design system (RFC 0048) — the tokens and the base every sheet
+   builds on. Light and dark ride the same rules via light-dark(); `data-theme`
+   on the root pins one (lib/prefs.js), otherwise the OS preference decides.
+   One design system, one sheet per surface, imported in order by main.js:
+   this file, then styles/controls.css (buttons, inputs, chips), shell.css
+   (topbar + boot states), sidebar.css, conversation.css, composer.css,
+   management.css, settings.css, dialogs.css and responsive.css (the narrow
+   layout, last so it overrides). */
 
 :root {
   color-scheme: light dark;
 
   /* Surfaces & lines */
-  --bg: light-dark(#f4f5f8, #0e1014);
-  --surface: light-dark(#ffffff, #171a21);
-  --surface-muted: light-dark(#f4f4f6, #1e222b);
-  --surface-raised: light-dark(#ffffff, #1c2028);
-  --border: light-dark(#e2e4ea, #2a2f3a);
-  --border-strong: light-dark(#c9cdd6, #3a4150);
+  --bg: light-dark(#f5f6f8, #0b0c10);
+  --surface: light-dark(#ffffff, #14161c);
+  --surface-muted: light-dark(#f1f3f6, #1b1e26);
+  --surface-sunken: light-dark(#f8f9fb, #101217);
+  --surface-raised: light-dark(#ffffff, #1b1e27);
+  --border: light-dark(#e3e6ec, #252a35);
+  --border-strong: light-dark(#cdd2dc, #353c4b);
 
   /* Text */
-  --text: light-dark(#171921, #e7e9f0);
-  --text-muted: light-dark(#666e7e, #9aa3b4);
+  --text: light-dark(#14161d, #e9ebf1);
+  --text-muted: light-dark(#5d6576, #a3aab9);
+  /* Small meta text (times, counts) — still ≥ 4.5:1 on every surface. */
+  --text-subtle: light-dark(#6b7282, #858da0);
   --muted: var(--text-muted);
 
   /* Accent (indigo) + statuses */
-  --accent: light-dark(#4f46e5, #8b93f8);
-  --accent-strong: light-dark(#4338ca, #a5abfa);
-  --accent-soft: light-dark(#eef0fe, #262a44);
-  --accent-contrast: light-dark(#ffffff, #10122b);
-  --danger: light-dark(#b3261e, #ff8a80);
-  --danger-soft: light-dark(#fdecea, #3a2426);
-  --warn: light-dark(#8a5a00, #e8b662);
-  --ok: light-dark(#1a7f37, #6fcf8e);
+  --accent: light-dark(#5856d6, #9391ff);
+  --accent-strong: light-dark(#4745c2, #b0aeff);
+  --accent-soft: light-dark(#eeeefd, #24244a);
+  --accent-contrast: light-dark(#ffffff, #0e0e2c);
+  --ring: light-dark(rgba(88, 86, 214, 0.28), rgba(147, 145, 255, 0.35));
+  --danger: light-dark(#c2332b, #ff8f86);
+  --danger-soft: light-dark(#fdeeed, #3b1f21);
+  --warn: light-dark(#8f5d00, #f0bb5c);
+  --warn-soft: light-dark(#fff5e1, #33280f);
+  --ok: light-dark(#1b7a3d, #72d493);
+  --ok-soft: light-dark(#e8f6ed, #142f1e);
 
   /* Type & shape */
   --font-ui:
+    Inter,
+    ui-sans-serif,
     system-ui,
     -apple-system,
     "Segoe UI",
     Roboto,
+    "Helvetica Neue",
+    Arial,
     sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --radius-xs: 5px;
+  --radius-sm: 8px;
   --radius: 10px;
-  --radius-sm: 7px;
+  --radius-lg: 14px;
+  --shadow-xs: 0 1px 2px light-dark(rgba(20, 22, 29, 0.06), rgba(0, 0, 0, 0.4));
   --shadow-pop:
-    0 8px 24px light-dark(rgba(23, 25, 33, 0.14), rgba(0, 0, 0, 0.5));
+    0 10px 30px -6px light-dark(rgba(20, 22, 29, 0.18), rgba(0, 0, 0, 0.6)),
+    0 2px 6px light-dark(rgba(20, 22, 29, 0.06), rgba(0, 0, 0, 0.35));
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
 
   font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* A theme pinned from the topbar overrides the OS preference. */
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
 }
 
 * {
@@ -62,7 +90,12 @@ body {
   background: var(--bg);
   color: var(--text);
   line-height: 1.5;
-  font-size: 0.9375rem;
+  font-size: 0.875rem;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+::selection {
+  background: var(--accent-soft);
 }
 
 #app {
@@ -71,64 +104,9 @@ body {
   min-height: 0;
 }
 
-/* ---------- Shared controls ---------- */
-
-button {
-  font: inherit;
-  font-size: 0.85rem;
-  color: var(--text);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 0.35rem 0.75rem;
-  cursor: pointer;
-  transition:
-    background 120ms ease,
-    border-color 120ms ease;
-}
-
-button:hover:not(:disabled) {
-  background: var(--surface-muted);
-  border-color: var(--border-strong);
-}
-
-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-
-/* Primary actions: form submits (Send / Post / Create / Save). */
-button[type="submit"] {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-contrast);
-  font-weight: 600;
-}
-
-button[type="submit"]:hover:not(:disabled) {
-  background: var(--accent-strong);
-  border-color: var(--accent-strong);
-}
-
-select,
-input:not([type="checkbox"]),
-textarea {
-  font: inherit;
-  font-size: 0.9rem;
-  color: var(--text);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 0.4rem 0.55rem;
-}
-
-textarea {
-  resize: vertical;
-}
-
-:is(button, select, input, textarea, summary, a, [role="tab"]):focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
 }
 
 /* Visually hidden but accessible — labels the design carries as structure
@@ -145,156 +123,36 @@ textarea {
   white-space: nowrap;
 }
 
-/* ---------- Topbar ---------- */
-
-.topbar {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  padding: 0 1rem;
-  height: 52px;
-  flex: none;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
+/* Loading placeholders. */
+.skeleton {
+  display: block;
+  border-radius: var(--radius-xs);
+  background: linear-gradient(
+    90deg,
+    var(--surface-muted) 0%,
+    color-mix(in srgb, var(--surface-muted) 55%, var(--surface)) 50%,
+    var(--surface-muted) 100%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-sheen 1.4s ease-in-out infinite;
 }
 
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-weight: 650;
-  letter-spacing: -0.01em;
-  white-space: nowrap;
+@keyframes skeleton-sheen {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
 }
 
-.logo {
-  width: 22px;
-  height: 22px;
-  color: var(--accent);
-  flex: none;
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
-
-.brand .console-word {
-  font-weight: 400;
-  color: var(--text-muted);
-}
-
-.version {
-  font-weight: 500;
-  font-size: 0.72rem;
-  color: var(--text-muted);
-  background: var(--surface-muted);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 0.05rem 0.5rem;
-}
-
-/* Panel tabs live in the topbar as a segmented nav. */
-.tabs {
-  display: flex;
-  gap: 0.25rem;
-  padding: 0.25rem;
-  background: var(--surface-muted);
-  border-radius: 999px;
-}
-
-.tabs button {
-  border: none;
-  background: transparent;
-  padding: 0.25rem 0.9rem;
-  border-radius: 999px;
-  font-size: 0.85rem;
-  color: var(--text-muted);
-}
-
-.tabs button:hover:not(:disabled) {
-  background: transparent;
-  color: var(--text);
-}
-
-.tabs button[aria-selected="true"] {
-  background: var(--surface);
-  color: var(--text);
-  font-weight: 600;
-  box-shadow: 0 1px 2px light-dark(rgba(23, 25, 33, 0.1), rgba(0, 0, 0, 0.4));
-}
-
-.topbar .identity-block {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  margin-left: auto;
-}
-
-.principal {
-  font-family: var(--font-mono);
-  font-size: 0.8rem;
-  color: var(--text-muted);
-  background: var(--surface-muted);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 0.1rem 0.6rem;
-}
-
-.acting-as {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-size: 0.75rem;
-  color: var(--text-muted);
-}
-
-.acting-as input {
-  font-family: var(--font-mono);
-  font-size: 0.8rem;
-  padding: 0.15rem 0.45rem;
-  width: 7.5rem;
-}
-
-/* ---------- Shell content / boot states ---------- */
-
-.content {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-}
-
-.content > [role="tabpanel"] {
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-}
-
-.boot {
-  margin: auto;
-  padding: 2rem;
-  color: var(--text-muted);
-  text-align: center;
-  max-width: 34rem;
-}
-
-.boot.error {
-  color: var(--danger);
-}
-
-.loading,
-.thinking {
-  color: var(--text-muted);
-  font-style: italic;
-}
-
-.empty {
-  color: var(--text-muted);
-}
-
-.retry {
-  margin-top: 0.5rem;
-}
-
-.poll-error {
-  color: var(--text-muted);
-  font-size: 0.85rem;
-  margin: 0.25rem 0;
-}
-

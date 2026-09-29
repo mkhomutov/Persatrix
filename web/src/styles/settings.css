@@ -1,0 +1,192 @@
+/* The Channel settings form (RFC 0050): section headings, knob rows with
+   their provenance and hint, the autonomous section's Convene action, and the
+   sticky save bar. Consumes the tokens app.css defines. */
+
+/* Settings */
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  border: none;
+  min-width: 0;
+}
+
+.settings-section-title {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0 0 0.15rem;
+  padding: 0;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.knob-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.knob-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  transition: border-color 120ms ease;
+}
+
+.knob-row.overridden {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.knob-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.knob-label {
+  font-weight: 600;
+  font-size: 0.82rem;
+}
+
+.provenance {
+  flex: none;
+  font-size: 0.66rem;
+  font-weight: 600;
+  color: var(--text-subtle);
+  white-space: nowrap;
+}
+
+.provenance.overridden {
+  color: var(--accent-strong);
+}
+
+.knob-hint {
+  margin: -0.15rem 0 0;
+  font-size: 0.74rem;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+.knob-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.knob-control .value:is(input:not([type="checkbox"]), select) {
+  flex: 1 1 7rem;
+  min-width: 0;
+  min-height: 1.9rem;
+  font-size: 0.82rem;
+}
+
+.knob-control .agenda {
+  flex: 1 1 100%;
+  resize: vertical;
+  font-size: 0.82rem;
+}
+
+/* Text, agenda and pickers take the whole row; the inherit toggle drops
+   beneath them. Switches and numbers stay inline with it. */
+.knob-row:is(.type-text, .type-list, .type-chair, .type-convener, .type-enum)
+  .knob-control
+  .value {
+  flex-basis: 100%;
+}
+
+.knob-row:is(.type-text, .type-list, .type-chair, .type-convener, .type-enum)
+  .knob-control
+  .inherit {
+  margin-left: auto;
+}
+
+.knob-control .inherit {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.autonomous-settings .settings-section-title {
+  margin-bottom: 0.5rem;
+}
+
+.convening-readout {
+  margin: 0.35rem 0 0;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.readout-label {
+  font-weight: 650;
+}
+
+.convene-action {
+  margin-top: 0.35rem;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.convene-hint {
+  font-size: 0.76rem;
+  color: var(--text-muted);
+}
+
+/* The save bar sticks to the rail's bottom edge while the form scrolls. */
+.settings-bar {
+  position: sticky;
+  bottom: -0.85rem;
+  margin: 0 -0.85rem -0.75rem;
+  padding: 0.65rem 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(6px);
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+
+.settings-bar.dirty {
+  background: color-mix(in srgb, var(--accent-soft) 85%, var(--surface));
+}
+
+.unsaved {
+  font-size: 0.78rem;
+  font-weight: 650;
+  color: var(--accent-strong);
+  margin-right: auto;
+}
+
+.unsaved.quiet {
+  font-weight: 500;
+  color: var(--text-subtle);
+}

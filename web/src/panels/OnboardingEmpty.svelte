@@ -9,6 +9,8 @@
   // docs are not served by the orchestrator. It assumes a public repo and pins
   // to main, so a private fork or a moved docs path would 404 — treat this as a
   // best-effort pointer, not a guaranteed-resolving link.
+  import Icon from "../ui/Icon.svelte";
+
   const DOCS_URL =
     "https://github.com/mkhomutov/Persatrix/blob/main/docs/guides/web-console.md";
 
@@ -19,10 +21,13 @@
 </script>
 
 <div class="empty onboarding">
-  <p>{title}</p>
+  <div class="onboarding-icon" aria-hidden="true"><Icon name="users" size={24} /></div>
+  <p class="onboarding-title">{title}</p>
   <p>{@render children()}</p>
-  <p>
-    <button type="button" class="retry" onclick={onRetry}>Refresh</button>
+  <p class="onboarding-actions">
+    <button type="button" class="retry btn-primary" onclick={onRetry}>
+      <Icon name="refresh" size={15} />Refresh
+    </button>
     <a href={DOCS_URL} target="_blank" rel="noopener noreferrer"
       >Web console quick-start ↗</a
     >

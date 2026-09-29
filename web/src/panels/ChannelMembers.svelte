@@ -25,9 +25,21 @@
     updateChannelMember,
   } from "../lib/api.members.js";
   import { isChattable } from "../lib/agents.js";
+  import { matchesQuery } from "../lib/filter.js";
+  import Avatar from "../ui/Avatar.svelte";
+  import Icon from "../ui/Icon.svelte";
 
   let { channelId, members = [], agents = [], agentsById = {}, userId, onChanged } =
     $props();
+
+  // A roster longer than this gets a filter box (name, id or role).
+  const FILTER_FROM = 7;
+  let query = $state("");
+  const shownMembers = $derived(
+    members.filter((m) =>
+      matchesQuery([m.id, agentsById[m.id]?.name, agentsById[m.id]?.role], query),
+    ),
+  );
 
   let addId = $state("");
   let addRespond = $state("when_mentioned");
@@ -171,82 +183,106 @@
   }
 </script>
 
-<details class="channel-members">
-  <summary>Members ({members.length})</summary>
+<details class="channel-members card" open>
+  <summary><Icon name="users" size={15} />Members<span class="chip">{members.length}</span></summary>
 
   {#if error}
     <p class="boot error" role="alert">{error}</p>
   {/if}
 
+  {#if members.length >= FILTER_FROM}
+    <label class="card-search">
+      <Icon name="search" size={14} />
+      <span class="sr-only">Filter members</span>
+      <input type="search" bind:value={query} placeholder="Filter members…" autocomplete="off" />
+    </label>
+  {/if}
+
   {#if members.length === 0}
     <p class="empty">This channel has no members yet.</p>
+  {:else if shownMembers.length === 0}
+    <p class="empty">No members match.</p>
   {:else}
-    <ul class="member-list">
-      {#each members as member (member.id)}
-        <li class="member-row">
-          <span class="member-name">{displayName(member.id)}</span>
-          {#if editingMember === member.id}
-            <!-- Inline member-config editor: replace disposition + threshold. -->
-            <select
-              bind:value={editRespond}
-              disabled={busy}
-              aria-label={`Disposition for ${displayName(member.id)}`}
-            >
-              <option value="when_mentioned">When mentioned</option>
-              <option value="participant">Participant (salience bid)</option>
-              <option value="chair">Chair (facilitator)</option>
-              <option value="addressed">Addressed only</option>
-              <option value="observer">Observer (never replies)</option>
-              <option value="always">Always</option>
-              <option value="never">Never (post-only)</option>
-            </select>
-            <input
-              type="number"
-              min="0"
-              max="1"
-              step="0.05"
-              placeholder="unset"
-              disabled={busy}
-              bind:value={editThreshold}
-              aria-label={`Salience threshold for ${displayName(member.id)}`}
-            />
-            <button type="button" class="save" disabled={busy} onclick={saveEdit}>
-              {busy ? "Saving…" : "Save"}
-            </button>
-            <button type="button" class="cancel" disabled={busy} onclick={cancelEdit}>
-              Cancel
-            </button>
-          {:else}
-            <span class="member-respond">{member.respond}</span>
-            {#if salienceNote(member)}
-              <span class="member-salience">{salienceNote(member)}</span>
-            {/if}
-            {#if member.id !== userId}
+    <ul class="member-list" aria-label="Members">
+      {#each shownMembers as member (member.id)}
+        <li class="member-row" class:editing={editingMember === member.id}>
+          <div class="member-main">
+            <Avatar id={member.id} label={agentsById[member.id]?.name || member.id} size={28} self={member.id === userId} />
+            <div class="member-text">
+              <span class="member-name">{displayName(member.id)}</span>
+              <span class="member-meta">
+                <span class="member-respond">{member.respond}</span>
+                {#if salienceNote(member)}
+                  <span class="member-salience">{salienceNote(member)}</span>
+                {/if}
+              </span>
+            </div>
+            {#if member.id !== userId && editingMember !== member.id}
               <!-- Edit + Remove are withheld for the acting user: they are the
                    /ui/context principal, not a registered/governed agent, so the
                    add picker could never re-add them, a non-member sender is
                    rejected on publish (ErrNotMember → 403), and a salience
                    threshold on a human principal is meaningless. Withholding
                    avoids a one-click, web-unrecoverable self-lockout. -->
-              <button
-                type="button"
-                class="edit"
-                disabled={busy}
-                aria-label={`Edit ${displayName(member.id)}`}
-                onclick={() => startEdit(member)}
-              >
-                Edit
-              </button>
-              <button
-                type="button"
-                class="remove"
-                disabled={busy}
-                aria-label={`Remove ${displayName(member.id)}`}
-                onclick={() => remove(member.id)}
-              >
-                {busyMember === member.id ? "Removing…" : "Remove"}
-              </button>
+              <div class="member-actions">
+                <button
+                  type="button"
+                  class="edit btn-icon sm btn-ghost"
+                  disabled={busy}
+                  aria-label={`Edit ${displayName(member.id)}`}
+                  title="Edit disposition"
+                  onclick={() => startEdit(member)}
+                >
+                  <Icon name="pencil" size={14} />
+                </button>
+                <button
+                  type="button"
+                  class="remove btn-icon sm btn-ghost btn-danger"
+                  disabled={busy}
+                  aria-label={`Remove ${displayName(member.id)}`}
+                  title={busyMember === member.id ? "Removing…" : "Remove from channel"}
+                  onclick={() => remove(member.id)}
+                >
+                  <Icon name="trash" size={14} />
+                </button>
+              </div>
             {/if}
+          </div>
+          {#if editingMember === member.id}
+            <!-- Inline member-config editor: replace disposition + threshold. -->
+            <div class="member-edit">
+              <select
+                bind:value={editRespond}
+                disabled={busy}
+                aria-label={`Disposition for ${displayName(member.id)}`}
+              >
+                <option value="when_mentioned">When mentioned</option>
+                <option value="participant">Participant (salience bid)</option>
+                <option value="chair">Chair (facilitator)</option>
+                <option value="addressed">Addressed only</option>
+                <option value="observer">Observer (never replies)</option>
+                <option value="always">Always</option>
+                <option value="never">Never (post-only)</option>
+              </select>
+              <input
+                type="number"
+                min="0"
+                max="1"
+                step="0.05"
+                placeholder="threshold"
+                disabled={busy}
+                bind:value={editThreshold}
+                aria-label={`Salience threshold for ${displayName(member.id)}`}
+              />
+              <div class="member-edit-actions">
+                <button type="button" class="cancel btn-sm btn-ghost" disabled={busy} onclick={cancelEdit}>
+                  Cancel
+                </button>
+                <button type="button" class="save btn-sm btn-primary" disabled={busy} onclick={saveEdit}>
+                  {busy ? "Saving…" : "Save"}
+                </button>
+              </div>
+            </div>
           {/if}
         </li>
       {/each}
@@ -278,8 +314,8 @@
           <option value="never">Never (post-only)</option>
         </select>
       </label>
-      <button type="submit" class="add" disabled={!canAdd}>
-        {busy && !busyMember ? "Adding…" : "Add member"}
+      <button type="submit" class="add btn-sm" disabled={!canAdd}>
+        <Icon name="user-plus" size={14} />{busy && !busyMember ? "Adding…" : "Add member"}
       </button>
     {/if}
   </form>
