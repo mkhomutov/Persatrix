@@ -89,6 +89,9 @@ class CallRecord:
     # Which time the meeting was held within the attempt: a meeting a
     # provider error cut short is held again, as the next try.
     meeting_try: int = 1
+    # The SHA-256 of the cached prefix the call carried (arm D-prime's
+    # transcripts), None when it carried none.
+    cache_prefix: str | None = None
 
 
 def price_call(call: CallRecord, prices: Mapping[str, Price] = PRICES) -> float:

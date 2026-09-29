@@ -108,7 +108,9 @@ def adviser_config(panel: Panel, adviser: Adviser, *, memory_db: Path) -> dict[s
     entry.update({
         "model": PERSONA_ALIAS,
         "temperature": panel.temperature,
-        "tools": [],  # the built-in note tools remain; no channel recall
+        # The built-in note tools remain. Channel recall is offered to every
+        # persona, and refused to an adviser, which holds no channels permission.
+        "tools": [],
         **SHIPPED_PERSONA,
         "permissions": settings["permissions"],
         "autonomy": {**SHIPPED_AUTONOMY, **settings["autonomy"]},

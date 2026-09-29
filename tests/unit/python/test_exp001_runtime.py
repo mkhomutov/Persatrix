@@ -10,6 +10,7 @@ turns the lines the agents write into the call records ``costs`` prices.
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -21,6 +22,7 @@ from agents.clock import CLOCK_ANCHOR_ENV, CLOCK_START_ENV
 from agents.llm_client import LLMClient, LLMResponse, Usage
 from agents.llm_types import LLMCallPurpose
 from agents.observability import metrics
+from agents.prompt_prefix import PROMPT_PREFIX_ENV
 from evaluators.exp001.costs import CallPurpose, CallRecord
 from evaluators.exp001.materials import MeetingKind
 from evaluators.exp001.runtime import (
@@ -29,6 +31,7 @@ from evaluators.exp001.runtime import (
     call_log_env,
     call_log_scope,
     meeting_clock_env,
+    prompt_prefix_env,
     read_call_log,
     story_start,
 )
@@ -255,6 +258,62 @@ class TestReadCallLog:
     def test_no_file_is_an_empty_log(self, tmp_path):
         log = read_call_log(tmp_path / "missing.jsonl")
         assert (log.records, log.failures) == ((), ())
+
+    def test_the_prefix_a_call_carried_is_kept(self, tmp_path):
+        """Arm D′'s turns carry the earlier transcripts (PR 5d); the line names
+        the prefix by its SHA-256, and a line from before PR 5d names none."""
+        carried = {**_line(), "cache_prefix_sha256": "ab" * 32}
+        records = read_call_log(_write(tmp_path / "c.jsonl", carried, _line())).records
+        assert [r.cache_prefix for r in records] == ["ab" * 32, None]
+
+    def test_a_failed_call_keeps_the_prefix_it_carried(self, tmp_path):
+        """A turn can write the cache entry and still fail, so check 3 reads
+        failed calls' prefixes too."""
+        failed = {**_line(error="OverloadedError"), "cache_prefix_sha256": "ab" * 32}
+        [failure] = read_call_log(_write(tmp_path / "c.jsonl", failed)).failures
+        assert failure.cache_prefix == "ab" * 32
+
+    @pytest.mark.parametrize("value", [5, "", ["ab"]])
+    def test_a_prefix_that_is_not_a_digest_is_refused(self, tmp_path, value):
+        line = {**_line(), "cache_prefix_sha256": value}
+        with pytest.raises(CallLogError, match="c.jsonl:1"):
+            read_call_log(_write(tmp_path / "c.jsonl", line))
+
+
+class TestPromptPrefixEnv:
+    def test_names_the_file_every_turn_carries(self, tmp_path):
+        assert prompt_prefix_env(tmp_path / "prefix.txt") == {
+            PROMPT_PREFIX_ENV: str(tmp_path / "prefix.txt"),
+        }
+
+
+async def test_a_call_that_carried_a_prefix_reads_back_with_its_digest(tmp_path, monkeypatch):
+    """The runtime logs the prefix's SHA-256; the harness reads it back, so a
+    record can be matched to the transcript file the harness wrote."""
+
+    class _Provider:
+        name = "anthropic"
+        supports_prompt_cache = True
+
+        async def create_message(self, **_: object) -> LLMResponse:
+            return LLMResponse(text="ok", usage=Usage(120, 30, cache_write_tokens=3000))
+
+    path = tmp_path / "calls.jsonl"
+    for key, value in call_log_env(path, arm="D-prime", series="series-4", meeting="plan-2",
+                                   meeting_kind=MeetingKind.PLAN, attempt=1,
+                                   meeting_try=1).items():
+        monkeypatch.setenv(key, value)
+    call_log.reset_call_log()
+    try:
+        await LLMClient(_Provider()).create_message(
+            model="claude-sonnet-4-6", messages=[], system="s", tools=[], max_tokens=10,
+            temperature=0.7, purpose=LLMCallPurpose.TURN, cache_prefix="Meeting 1\n",
+        )
+    finally:
+        call_log.reset_call_log()
+    [record] = read_call_log(path).records
+    assert record.cache_prefix == hashlib.sha256(b"Meeting 1\n").hexdigest()
+    assert record.cache_write_tokens == 3000
 
 
 async def test_what_the_runtime_writes_the_harness_reads(tmp_path, monkeypatch):

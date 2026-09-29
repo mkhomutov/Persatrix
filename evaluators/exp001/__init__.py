@@ -23,9 +23,13 @@ and its part 2; this package only carries those documents out.
 - :mod:`evaluators.exp001.channel_arm` holds a channel arm's meeting: the
   discussion, then the memo turn.
 - :mod:`evaluators.exp001.deployed_meeting` holds one such meeting on a
-  deployment's processes, and each of arm B's and C's on a new deployment.
+  deployment's processes, and each of arm B's, C's and D-prime's on a new
+  deployment.
 - :mod:`evaluators.exp001.arm_d` holds arm D's series on one deployment,
   whose restarts must leave the advisers' memory as it was.
+- :mod:`evaluators.exp001.arm_d_prime` holds arm D-prime's series, each
+  meeting carrying the earlier ones' transcripts as a cached prompt prefix,
+  and reads check 3 from the call records.
 - :mod:`evaluators.exp001.attempts` holds every arm's meetings by the rules
   of attempts and failures.
 - :mod:`evaluators.exp001.packets` builds the blinded packets the raters score.

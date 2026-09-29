@@ -1219,7 +1219,7 @@ Once this RFC is accepted:
 ### D1. `mcp:` tool entries are dropped without a warning
 
 - **RFC expectation**: [Non-Goals](#non-goals) says the `mcp:github` entries in `config/agents.yaml` produce a startup warning, "MCP tools not yet available".
-- **Current behavior**: No such warning exists anywhere in the code. When an agent builds the list of tools it offers the LLM, it keeps only names found in the tool registry — `_build_tool_definitions` in `agents/base.py` for task agents, and its counterpart in `agents/persona_runtime/action_loop.py` for persona agents. Nothing registers `mcp:github`, because the MCP bridge (`agents/tools/mcp_bridge.py`) is still a placeholder. So the entry is dropped and nothing is logged.
+- **Current behavior**: No such warning exists anywhere in the code. When an agent builds the list of tools it offers the LLM, it keeps only names found in the tool registry — `_build_tool_definitions` in `agents/base.py` for task agents, and its counterpart in `agents/persona_runtime/tool_round.py` for persona agents. Nothing registers `mcp:github`, because the MCP bridge (`agents/tools/mcp_bridge.py`) is still a placeholder. So the entry is dropped and nothing is logged.
 - **Impact**: code-writer, code-reviewer and ember-owl each list `mcp:github` but get no tools from it, and nothing tells the operator. Low severity: nothing breaks, but the config names tools the agents never receive.
 - **Resolution**: Accepted divergence. The bridge itself, deferred to v0.2 in [Items Deferred to v0.2](#tool-system), has not shipped; ROADMAP now lists it under [Planned Components (v0.4.0)](../../ROADMAP.md#planned-components-v040). Adding the promised warning would change behaviour, so it is out of scope for this note.
 

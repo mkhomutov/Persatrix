@@ -319,7 +319,9 @@ class TestRunMeeting:
         finally:
             await agent.close_memory()
 
-    async def test_arms_d_and_d_prime_are_not_held_this_way(self, tmp_path: Path) -> None:
-        for arm in ("A", "D", "D-prime"):
+    async def test_arms_a_and_d_are_not_held_this_way(self, tmp_path: Path) -> None:
+        """Arm D keeps one deployment for a series; D-prime is held this way
+        since PR 5d, with its prefix (test_exp001_arm_d_prime.py)."""
+        for arm in ("A", "D"):
             with pytest.raises(ValueError, match=f"arm {arm}"):
                 await _run(_World(), tmp_path, arm=arm)

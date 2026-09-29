@@ -1,18 +1,18 @@
 """Multi-turn LLM action loop for _LLMPersonaAgent.
 
-Contains the system prompt assembly, event formatting, tool execution,
-action parsing/validation, and the core ``_on_event_inner()`` multi-turn
-loop that drives LLM calls until ``stop_reason == "end_turn"`` or the
-``max_llm_calls`` budget is exhausted.
+Contains the system prompt assembly, event formatting, action
+parsing/validation, and the core ``_on_event_inner()`` multi-turn loop that
+drives LLM calls until ``stop_reason == "end_turn"`` or the
+``max_llm_calls`` budget is exhausted. The tools a turn offers, and running
+the calls it makes, are in :mod:`.tool_round`.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import TYPE_CHECKING, Any
 
-from ..llm_client import LLMClient, LLMResponse, LLMToolResult, StopReason, ToolCall
+from ..llm_client import LLMClient, LLMResponse, StopReason
 from ..llm_types import LLMCallPurpose
 from ..memory.episodic import EpisodicMemory
 from ..memory.working import WorkingMemory
@@ -25,10 +25,8 @@ from ..persona_types import (
     EventType,
     PersonaState,
 )
+from ..prompt_prefix import prompt_prefix
 from ..response_gate import evaluate_response_gate
-from ..security import maybe_wrap_tool_content
-from ..tools.registry import ToolDefinition
-from ..tools.tool_list import offered_tools, refuse_call
 from .action_parser import parse_actions
 from .channel_ingest import sanitize_inbound_event
 from .channel_reply import synthesize_channel_reply
@@ -38,6 +36,7 @@ from .llm_call_errors import handle_llm_call_exception_with_cost_close
 from .reflexion import maybe_revise_channel_message
 from .salience_gate import run_salience_gate
 from .single_channel_turn import enforce_single_channel_turn
+from .tool_round import _ToolRoundMixin
 from .wallet_cause import lease_attribution_for_event
 
 if TYPE_CHECKING:
@@ -64,7 +63,7 @@ _PERSONA_DEFAULT_MAX_TOKENS: int = 4096
 # ─── Mixin ─────────────────────────────────────────────────
 
 
-class _ActionLoopMixin:
+class _ActionLoopMixin(_ToolRoundMixin):
     """Mixin providing the multi-turn LLM action loop for _LLMPersonaAgent."""
 
     # Attribute declarations for type checkers — set by __init__ or base classes.
@@ -80,7 +79,6 @@ class _ActionLoopMixin:
     _working_memory: WorkingMemory
     _state: PersonaState
     _episodic_memory: EpisodicMemory
-    _memory_tools: list[ToolDefinition]
 
     # Stub declarations for methods provided by sibling mixins / concrete class.
     if TYPE_CHECKING:
@@ -110,94 +108,6 @@ class _ActionLoopMixin:
         ) -> None: ...
         def _has_active_goal_payload(self) -> bool: ...
         def _has_pending_turn(self) -> bool: ...
-
-    def _build_tool_definitions(self) -> list[dict[str, Any]]:
-        """Build tool definitions including memory tools.
-
-        Uses a dict keyed by tool name so memory tools take precedence
-        over registry tools with the same name (F-5a-2: defense-in-depth,
-        memory tools should shadow any same-named registry tools).
-        """
-        # Start with agent-configured tools from the global registry, by the
-        # rule task agents share (ISSUE-0151: agents.tools.tool_list).
-        defs_by_name: dict[str, dict[str, Any]] = {}
-
-        for td in offered_tools(self.agent_id, self.config):
-            defs_by_name[td.name] = {
-                "name": td.name,
-                "description": td.description,
-                "parameters": td.parameters,
-            }
-
-        # Memory tools override registry tools with the same name,
-        # consistent with _execute_tools() which checks memory tools first.
-        for td in self._memory_tools:
-            defs_by_name[td.name] = {
-                "name": td.name,
-                "description": td.description,
-                "parameters": td.parameters,
-            }
-
-        return list(defs_by_name.values())
-
-    async def _execute_tools(self, tool_calls: list[ToolCall]) -> list[LLMToolResult]:
-        """Execute tool calls, checking memory tools first then registry.
-
-        Registry lookups are restricted to tools in ``config["tools"]``
-        (F-5a-2: defense-in-depth against LLM hallucinating tool names
-        that exist in the global registry but weren't offered to this agent).
-        """
-        # Offered registry tools, then memory tools (always allowed) shadowing
-        # any of the same name, exactly as _build_tool_definitions() offers them.
-        tool_map = {td.name: td for td in offered_tools(self.agent_id, self.config)}
-        tool_map.update({td.name: td for td in self._memory_tools})
-        results: list[LLMToolResult] = []
-
-        for call in tool_calls:
-            tool_def = tool_map.get(call.name)
-            if tool_def is None or tool_def.func is None:
-                results.append(refuse_call(self.agent_id, call))
-                continue
-
-            try:
-                result = await tool_def.func(**call.input)
-                if result.success:
-                    content = (
-                        json.dumps(result.data)
-                        if isinstance(result.data, (dict, list))
-                        else str(result.data)
-                    )
-                    # RFC 0009 PR 3: external-data tools wrapped here.
-                    content = maybe_wrap_tool_content(call.name, content)
-                else:
-                    error_msg = result.error or "Tool failed"
-                    if result.error_type:
-                        content = f"Tool error ({result.error_type}): {error_msg}"
-                    else:
-                        content = error_msg
-                    # A failure can still carry output (shell_exec's stdout
-                    # and stderr on a non-zero exit); the model needs it.
-                    if result.data:
-                        output = (
-                            json.dumps(result.data)
-                            if isinstance(result.data, (dict, list))
-                            else str(result.data)
-                        )
-                        content += "\n" + maybe_wrap_tool_content(call.name, output)
-                results.append(LLMToolResult(
-                    tool_call_id=call.id,
-                    content=content,
-                    is_error=not result.success,
-                ))
-            except Exception as exc:
-                logger.warning("Unexpected error in tool %s: %s", call.name, exc)
-                results.append(LLMToolResult(
-                    tool_call_id=call.id,
-                    content="Internal tool error",
-                    is_error=True,
-                ))
-
-        return results
 
     def _parse_actions(self, response: LLMResponse) -> list[AgentAction]:
         """Delegate to :func:`action_parser.parse_actions`.
@@ -392,6 +302,9 @@ class _ActionLoopMixin:
                     model=self.config["model"],
                     model_alias=self.config.get("model_alias"),
                     purpose=LLMCallPurpose.TURN,
+                    # The turn is the prompt recalled memory reaches, so it
+                    # alone carries an operator's cached prefix (EXP-001 D′).
+                    cache_prefix=prompt_prefix(),
                     messages=messages,
                     system=system_prompt,
                     tools=tool_defs,
