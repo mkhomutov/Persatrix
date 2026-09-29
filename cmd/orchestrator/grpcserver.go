@@ -1,6 +1,9 @@
 package main
 
 import (
+	"context"
+	"errors"
+	"net"
 	"time"
 
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
@@ -19,8 +22,8 @@ import (
 // newAgentGRPCServer builds the agent-facing gRPC server — the listener
 // that hosts LogService and, when the cost config loaded, the RFC 0023
 // WalletService. Extracted from main() so the orchestrator entry point
-// stays within the file-size budget (cf. ISSUE-0008); the listener
-// lifecycle (net.Listen / Serve / GracefulStop) stays in main().
+// stays within the file-size budget (cf. ISSUE-0008); net.Listen stays in
+// main(), and runAgentGRPC below runs Serve and the stop.
 //
 // walletSvc is nil when the cost config failed to load — the wallet
 // composes the budget enforcer, so without it budget enforcement is
@@ -89,4 +92,89 @@ func newAgentGRPCServer(
 		walletpb.RegisterWalletServiceServer(srv, walletSvc)
 	}
 	return srv
+}
+
+// grpcStopGrace bounds each wait in the agent-facing server's stop
+// (ISSUE-0176). A running agent's log shipper holds its LogService stream
+// open for as long as the agent runs, so a graceful stop alone would wait
+// for every agent to stop first. Past the grace the server stops hard,
+// which ends the calls still open (the shippers reconnect), then waits up
+// to the grace again for their handlers. The compose orchestrator service's
+// stop_grace_period counts both waits.
+const grpcStopGrace = 5 * time.Second
+
+// runAgentGRPC serves srv on lis in the background and returns the call that
+// stops it. main() defers that call so it runs after the HTTP drain and the
+// channels' fanout drain (ISSUE-0176): the persona turns those drains finish
+// still take wallet leases and ship their logs through this server, and a
+// wallet they cannot reach fails the turn closed. onFail gets Serve's error
+// if Serve fails on its own; the stop then ends the connections it left open.
+func runAgentGRPC(srv *grpc.Server, lis net.Listener, grace time.Duration, logger *zap.Logger, onFail func(error)) (stop func()) {
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if err := serveAgentGRPC(ctx, srv, lis, grace, logger); err != nil {
+			onFail(err)
+			<-ctx.Done()
+			stopAgentGRPCWithin(srv, grace, logger)
+		}
+	}()
+	return func() {
+		cancel()
+		<-done
+	}
+}
+
+// serveAgentGRPC serves srv on lis until ctx is cancelled, then stops it
+// (stopAgentGRPCWithin) and returns. If Serve fails on its own, its error
+// returns at once, with ctx still live.
+func serveAgentGRPC(ctx context.Context, srv *grpc.Server, lis net.Listener, grace time.Duration, logger *zap.Logger) error {
+	served := make(chan error, 1)
+	go func() {
+		// Serve returns nil once stopped, or ErrServerStopped when the stop
+		// came before it started serving: both are a normal stop.
+		err := srv.Serve(lis)
+		if errors.Is(err, grpc.ErrServerStopped) {
+			err = nil
+		}
+		served <- err
+	}()
+	select {
+	case err := <-served:
+		return err
+	case <-ctx.Done():
+	}
+	if !stopAgentGRPCWithin(srv, grace, logger) {
+		return nil // Serve returns only once the handlers still running have
+	}
+	return <-served
+}
+
+// stopAgentGRPCWithin stops srv gracefully first, so no new calls start and
+// the ones in flight (a wallet lease call) finish, and hard once grace runs
+// out. It then waits up to grace again for the handlers the hard stop
+// cancelled, so what main() closes next is not closed under them. It
+// reports whether they all returned. Neither stop is waited on past that: a
+// handler that never returns can hold both.
+func stopAgentGRPCWithin(srv *grpc.Server, grace time.Duration, logger *zap.Logger) bool {
+	stopped := make(chan struct{})
+	go func() {
+		srv.GracefulStop() // returns once every handler has
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+		return true
+	case <-time.After(grace):
+	}
+	logger.Warn("gRPC graceful stop timed out, stopping hard", zap.Duration("grace", grace))
+	go srv.Stop() // ends the calls still open; it can wait on their handlers too
+	select {
+	case <-stopped:
+		return true
+	case <-time.After(grace):
+		logger.Warn("gRPC handlers still running after the hard stop", zap.Duration("grace", grace))
+		return false
+	}
 }

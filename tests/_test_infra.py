@@ -155,22 +155,27 @@ def isolate_optimization_config(monkeypatch: pytest.MonkeyPatch) -> Iterator[Non
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-def makefile_recipe_body(target: str) -> str:
+def makefile_recipe_body(target: str, makefile: str | None = None) -> str:
     """The tab-indented recipe lines of one Make ``target`` — nothing past them.
 
     Anchored per line (``[^\n]*``, no ``re.S``), so the captured body ends at
     the first line that is not a recipe line; a fragment in a later target is
-    not in it.
+    not in it. ``makefile`` is a Makefile's text; the repository's when omitted.
     """
-    text = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
-    m = re.search(rf"^{re.escape(target)}:[^\n]*\n((?:\t[^\n]*\n)+)", text, re.M)
+    if makefile is None:
+        makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+    m = re.search(rf"^{re.escape(target)}:[^\n]*\n((?:\t[^\n]*\n)+)", makefile, re.M)
     if m is None:
         raise AssertionError(f"no `{target}` recipe in the Makefile")
     return m.group(1)
 
 
+def ci_workflow() -> dict[str, Any]:
+    """``.github/workflows/ci.yml``, parsed: its jobs, and any workflow-wide ``env``."""
+    workflow = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+    return dict(yaml.safe_load(workflow.read_text(encoding="utf-8")))
+
+
 def ci_job_steps(job: str) -> list[dict[str, Any]]:
     """The ordered ``steps`` of one job in ``.github/workflows/ci.yml``."""
-    workflow = REPO_ROOT / ".github" / "workflows" / "ci.yml"
-    ci = yaml.safe_load(workflow.read_text(encoding="utf-8"))
-    return list(ci["jobs"][job]["steps"])
+    return list(ci_workflow()["jobs"][job]["steps"])
