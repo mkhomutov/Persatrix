@@ -24,7 +24,13 @@ orchestrator's own tests under `cmd/`, ran in no job from the first one
 Go now tests `./...`, every package, so a new Go tree runs with no edit. A
 green lint is not a running tree. When a new test directory is created, the
 same PR adds a row to the table below and, unless Go's `./...` already
-reaches it, its `make` target and its CI step.
+reaches it, its `make` target and its CI step. A unit test checks the CI step
+in every language: `tests/unit/python/test_every_test_file_has_a_runner.py`
+fails, naming the file, when a tracked test file sits where no CI step runs
+it. It cannot see a Rust file that no `mod` line reaches, nor the opt-in tests
+that every job skips: `requires_orchestrator`
+([ISSUE-0178](../issues/ISSUE-0178-runner-rule-checked-only-for-go.md)),
+`requires_compose` and `requires_anthropic`.
 
 ---
 
@@ -143,6 +149,10 @@ limit parked in the RFC 0044 PR plan.
 
 1. Pick the layer from the table. If none fits, you are adding a layer: add
    the row, the `make` target, and the CI step in the same PR.
+   `test_every_test_file_has_a_runner.py` fails until the new tree runs: add
+   a pytest tree's root and make target to its `PYTEST_ROOTS`, or widen the
+   `include` in `web/vite.config.js` for a web tree. A new Go tree needs
+   nothing; a second Rust crate needs that test taught first.
 2. Unit first (red), then implementation (green). Integration after.
 3. No real network in unit tests. Mark integration tests that need a stack
    with the right opt-in marker.
