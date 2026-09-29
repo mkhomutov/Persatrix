@@ -12,9 +12,10 @@ under a root the Python job runs pytest on, inside the web console's Vitest
 test file must not sit where `./...` cannot reach. Beside each language, a
 pin fails when its CI step stops running that place.
 
-A new test tree is added to the constants below in the same PR as its CI
-step, so a tree left without a runner is a visible, reviewed diff. Files and
-configs are read as text; nothing here calls pytest, Vitest, cargo or Go.
+A new pytest tree is added to PYTEST_ROOTS, and a new web tree to the Vitest
+`include`, in the same PR as its CI step, so a tree left without a runner is a
+visible, reviewed diff. Files and configs are read as text; nothing here calls
+pytest, Vitest, cargo or Go.
 """
 
 from __future__ import annotations
@@ -22,29 +23,60 @@ from __future__ import annotations
 import json
 import re
 import subprocess
-from collections.abc import Iterable
+import tomllib
+from collections.abc import Callable, Iterable
 from pathlib import PurePosixPath
+from typing import Any
 
-import pytest
-from _test_infra import REPO_ROOT, ci_job_steps, makefile_recipe_body
+from _test_infra import REPO_ROOT, ci_workflow, makefile_recipe_body
 
-#: The trees the Python job runs pytest on, one step each, as the Makefile does.
-PYTEST_ROOTS = ("tests/unit/python", "agents/tests", "tests/integration")
+#: Each tree the Python job runs pytest on, with the make target that runs it too.
+PYTEST_ROOTS = {
+    "tests/unit/python": "test-python",
+    "agents/tests": "test-agents",
+    "tests/integration": "test-integration",
+}
 #: The web console: its Vitest config, whose `include` globs are relative to it.
 WEB = "web"
-#: The CLI crate: `cargo test` run in it builds and runs every test in it.
+#: The CLI crate: `cargo test` run in it runs the tests of the targets Cargo finds.
 CRATE = "cli"
 
-# pytest's default `python_files`; nothing in the repository overrides it.
+# pytest's default `python_files`; test_pytest_collects_by_its_defaults pins that
+# nothing in the repository overrides it.
 PYTHON_TEST = re.compile(r"(?:^|/)(?:test_[^/]*|[^/]*_test)\.py$")
 # pytest's default `norecursedirs`: it collects nothing below these.
 PYTEST_SKIPS = re.compile(r"\..*|.*\.egg|_darcs|build|CVS|dist|node_modules|venv|\{arch\}")
-# Options that make pytest leave out part of a tree it is given.
-NARROWING = re.compile(r"\s(?:-k|-m|--ignore|--ignore-glob|--deselect)(?:[\s=]|$)")
+# Options that make pytest leave out part of a tree it is given, attached values too.
+NARROWING = re.compile(
+    r"(?:^|\s)(?:-[kmo]|@"
+    r"|--(?:ignore|ignore-glob|deselect|co|collect-only|override-ini)(?=[\s=]|$))"
+)
+# What else shrinks a pytest run: ini options, a conftest, a config found on the way up.
+PYTEST_INI_NARROWING = ("addopts", "python_files", "norecursedirs")
+COLLECT_IGNORE = re.compile(r"\b(?:collect_ignore(?:_glob)?|pytest_ignore_collect)\b")
+PYTEST_CONFIGS = (
+    "pytest.ini", ".pytest.ini", "pytest.toml", ".pytest.toml", "pyproject.toml", "tox.ini",
+    "setup.cfg",
+)
 # Vitest's default test-file names, `**/*.{test,spec}.?(c|m)[jt]s?(x)`.
 JS_TEST = re.compile(r"\.(?:test|spec)\.[cm]?[jt]sx?$")
-# A Rust file that holds tests: a test module or a test function.
-RUST_TEST = re.compile(r"#\[(?:cfg\(test\)|(?:tokio::)?test\b)")
+# The files Vitest takes the web console's config from; it uses the first it finds.
+VITEST_CONFIG = re.compile(rf"{WEB}/vite(?:st)?\.(?:config|workspace)\.[cm]?[jt]s")
+# A JavaScript comment, or a string literal.
+JS_TOKEN = re.compile(
+    r"""//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|`(?:\\.|[^`\\])*`""", re.S
+)
+# A Rust file that holds tests: a test module, or a test attribute of std or a test crate.
+RUST_TEST = re.compile(r"#!?\[\s*(?:cfg\s*\([^\]]*\btest\b|[\w:]*test|quickcheck)")
+# Go's known GOOS and GOARCH: `x_<os>_test.go` or `x_<arch>_test.go` builds only there.
+GO_OS = frozenset(
+    "aix android darwin dragonfly freebsd hurd illumos ios js linux nacl netbsd openbsd"
+    " plan9 solaris wasip1 windows zos".split()
+)
+GO_ARCH = frozenset(
+    "386 amd64 amd64p32 arm armbe arm64 arm64be loong64 mips mipsle mips64 mips64le"
+    " mips64p32 mips64p32le ppc ppc64 ppc64le riscv riscv64 s390 s390x sparc sparc64 wasm".split()
+)
 
 
 def _git_ls_files(*pathspecs: str) -> list[str]:
@@ -54,15 +86,39 @@ def _git_ls_files(*pathspecs: str) -> list[str]:
         capture_output=True,
         check=True,
     ).stdout.decode("utf-8")
-    return [name for name in out.split("\0") if name]
+    # A file with an unresolved conflict is listed once per stage: count it once.
+    return list(dict.fromkeys(name for name in out.split("\0") if name))
 
 
 def _read(path: str) -> str:
     return (REPO_ROOT / path).read_text(encoding="utf-8")
 
 
-def _runs(job: str) -> list[str]:
-    return [str(step.get("run", "")).strip() for step in ci_job_steps(job)]
+def _recipe(target: str, makefile: str) -> str:
+    """`target`'s recipe in `makefile`, or "" when it has none."""
+    try:
+        return makefile_recipe_body(target, makefile)
+    except AssertionError:
+        return ""
+
+
+def gating_runs(workflow: dict[str, Any], job: str) -> list[str]:
+    """The `run` of each step of `job` that runs on every PR and fails the build if it fails.
+
+    An `if:` on the job or the step can skip pull requests and `continue-on-error`
+    lets a failure pass, so neither step counts; nor does one that an `env:` at any
+    level gives PYTEST_ADDOPTS, which narrows every pytest run it reaches.
+    """
+    spec = workflow["jobs"][job]
+    if "if" in spec or spec.get("continue-on-error"):
+        return []
+    env = {**(workflow.get("env") or {}), **(spec.get("env") or {})}
+    return [
+        str(step["run"]).strip()
+        for step in spec["steps"]
+        if "run" in step and "if" not in step and not step.get("continue-on-error")
+        and "PYTEST_ADDOPTS" not in {**env, **(step.get("env") or {})}
+    ]
 
 
 def _within(root: str, path: str) -> bool:
@@ -90,6 +146,64 @@ def _python_test_files() -> list[str]:
     return [f for f in _git_ls_files("*.py") if PYTHON_TEST.search(f)]
 
 
+def pytest_runs_whole(text: str, root: str) -> bool:
+    """True when a shell command in `text` runs pytest on all of `root`.
+
+    The command starts with pytest, after any variable assignments and `python
+    -m`, so a comment or an `echo` naming it does not count. Nothing up to the
+    next `;`, `&`, `|` or line end may narrow it, and no PYTEST_ADDOPTS reach it.
+    """
+    command = re.compile(
+        r"(?:^|[;&|])\s*[@+]?(?:\w+=(?:\"[^\"]*\"|'[^']*'|\S*)\s+)*(?:(?:python3?|\$\(PYTHON\))"
+        rf"\s+-m\s+)?pytest {re.escape(root)}/?(?=\s|$)([^\n;&|]*)",
+        re.M,
+    )
+    return "PYTEST_ADDOPTS" not in text and any(
+        not NARROWING.search(m.group(1)) for m in command.finditer(text)
+    )
+
+
+def pytest_root_problems(runs: list[str], makefile: str) -> list[str]:
+    """Where a pytest root does not run whole: the Python job, its make target, `make test`.
+
+    A CI step counts when it runs pytest on the root, or runs the root's make target.
+    """
+    test = re.search(r"^test:([^#\n]*)", makefile, re.M)
+    problems = []
+    for root, target in PYTEST_ROOTS.items():
+        if not pytest_runs_whole(_recipe(target, makefile), root):
+            problems.append(f"`make {target}` does not run all of `pytest {root}/`")
+        if test is None or target not in test.group(1).split():
+            problems.append(f"`make test` does not run `{target}`")
+        make = re.compile(rf"make {re.escape(target)}(?: PYTHON=\S+)?")
+        if not any(pytest_runs_whole(run, root) or make.fullmatch(run) for run in runs):
+            problems.append(f"no Python-job step runs all of `pytest {root}/` on every PR")
+    return problems
+
+
+def pytest_config_problems(
+    ini: dict[str, Any], conftests: dict[str, str], tracked: Iterable[str]
+) -> list[str]:
+    """What, besides the command line, makes pytest collect less than a root holds.
+
+    Two CI steps run with `-c agents/pyproject.toml`, so its ini options apply. The
+    unit step passes no `-c`, so pytest takes the first config file it finds from
+    the root up. A conftest can drop files from collection too.
+    """
+    problems = [f"agents/pyproject.toml sets `{key}`" for key in PYTEST_INI_NARROWING if key in ini]
+    problems += [f"{path} drops files" for path, text in conftests.items()
+                 if COLLECT_IGNORE.search(text)]
+    found = set(tracked)
+    for root in PYTEST_ROOTS:
+        parts = PurePosixPath(root).parts
+        for depth in range(len(parts) + 1):
+            for name in PYTEST_CONFIGS:
+                path = str(PurePosixPath(*parts[:depth], name))
+                if path in found and path != "agents/pyproject.toml":
+                    problems.append(f"pytest reads {path} for `pytest {root}/`")
+    return problems
+
+
 def test_every_python_test_file_is_under_a_root_ci_runs() -> None:
     files = _python_test_files()
     assert files, "found no Python test files, so this check would pass on nothing"
@@ -102,15 +216,16 @@ def test_every_python_test_file_is_under_a_root_ci_runs() -> None:
 
 
 def test_the_python_job_and_the_makefile_run_pytest_on_every_root() -> None:
-    runs = _runs("python")
-    makefile = _read("Makefile")
-    for root in PYTEST_ROOTS:
-        command = re.compile(rf"\bpytest {re.escape(root)}/?(?:\s|$)")
-        steps = [run for run in runs if command.search(run)]
-        assert steps, f"no step in the Python job runs `pytest {root}/`"
-        narrowed = [run for run in steps if NARROWING.search(run[run.index("pytest"):])]
-        assert not narrowed, f"these steps leave out part of {root}/: {narrowed}"
-        assert command.search(makefile), f"no Makefile target runs `pytest {root}/`"
+    problems = pytest_root_problems(gating_runs(ci_workflow(), "python"), _read("Makefile"))
+    assert not problems, problems
+
+
+def test_pytest_collects_by_its_defaults() -> None:
+    """Nothing but the command line changes which files pytest collects from a root."""
+    ini = tomllib.loads(_read("agents/pyproject.toml"))["tool"]["pytest"]["ini_options"]
+    conftests = {path: _read(path) for path in _git_ls_files("conftest.py", "*/conftest.py")}
+    problems = pytest_config_problems(ini, conftests, _git_ls_files())
+    assert not problems, f"{problems} change which files pytest collects; teach this test how"
 
 
 def test_the_roots_ci_ran_before_848_leave_agents_tests_unrun() -> None:
@@ -130,20 +245,25 @@ def test_the_roots_ci_ran_before_848_leave_agents_tests_unrun() -> None:
 def glob_regex(glob: str) -> re.Pattern[str]:
     """Read a Vitest `include` glob as a regex.
 
-    `**/` is any run of directories, `*` any part of one name, and `{a,b}`
-    either word. Any other glob syntax raises, so the check never guesses.
+    `**` as a whole path segment is any run of directories, `*` any part of one
+    name, and `{a,b}` any of two or more plain words. Any other glob syntax
+    raises, so the check never guesses.
     """
+    if glob.startswith(("/", "./", "../")):
+        raise ValueError(f"cannot read the glob {glob!r}")
     out, i = "", 0
     while i < len(glob):
-        if glob.startswith("**/", i):
+        if glob.startswith("**/", i) and glob[i - 1:i] in ("", "/"):
             out, i = out + "(?:.*/)?", i + 3
-        elif glob[i] == "*":
+        elif glob[i] == "*" and glob[i + 1:i + 2] != "*":
             out, i = out + "[^/]*", i + 1
         elif glob[i] == "{" and "}" in glob[i:]:
             end = glob.index("}", i)
             words = glob[i + 1:end].split(",")
+            if len(words) < 2 or not all(re.fullmatch(r"[\w.-]+", word) for word in words):
+                raise ValueError(f"cannot read the glob {glob!r}")
             out, i = out + "(?:" + "|".join(map(re.escape, words)) + ")", end + 1
-        elif glob[i] in "?[](){}!+@":
+        elif glob[i] in "*?[](){}!+@\\":
             raise ValueError(f"cannot read the glob {glob!r}")
         else:
             out, i = out + re.escape(glob[i]), i + 1
@@ -160,22 +280,82 @@ def outside_vitest(files: Iterable[str], includes: list[str]) -> list[str]:
     )
 
 
-def vitest_includes() -> list[str]:
-    """The `include` globs in the web console's Vitest config."""
-    config = _read(f"{WEB}/vite.config.js")
-    assert not re.search(r"\b(?:exclude|root|dir)\s*:", config), (
-        f"{WEB}/vite.config.js sets `exclude`, `root` or `dir`, which change what "
-        "its `include` runs; teach this test what they mean"
-    )
-    m = re.search(r"\btest:\s*\{[^}]*?\binclude:\s*\[([^\]]*)\]", config)
-    assert m, f"{WEB}/vite.config.js sets no `test.include`; teach this test Vitest's default"
-    return re.findall(r"""["']([^"']+)["']""", m.group(1))
+def _mask_js(code: str) -> str:
+    """`code` with its comments blanked and the letters of its strings hidden, in place.
+
+    A string followed by `:` is an object key and stays readable.
+    """
+
+    def mask(m: re.Match[str]) -> str:
+        token = m.group()
+        if token[0] == "/":
+            return re.sub(r"\S", " ", token)
+        if re.match(r"\s*:", code[m.end():]):
+            return token
+        return token[0] + "_" * (len(token) - 2) + token[-1]
+
+    return JS_TOKEN.sub(mask, code)
+
+
+def vitest_includes(config: str) -> list[str]:
+    """The `test.include` globs of a Vitest config, read as JavaScript text.
+
+    Comments do not count, and only a `test` object with nothing nested in it is
+    read, so no `coverage.include` stands in for it. A key that changes what the
+    include runs, a spread, or an include that is not a list of strings raises
+    rather than being guessed at.
+    """
+    masked = _mask_js(config)
+    blocks = list(re.finditer(r"""(?<![\w$.])(["']?)test\1\s*:\s*\{([^{}]*)\}""", masked))
+    if len(blocks) != 1:
+        raise ValueError("cannot read a single `test` object with nothing nested in it")
+    body, start = blocks[0].group(2), blocks[0].start(2)
+    changes = re.findall(r"(?<![\w$.])(?:exclude|dir|root|projects|workspace)\b|\.\.\.", body)
+    if changes or re.search(r"""(?<![\w$.])(["']?)root\1\s*:""", masked):
+        raise ValueError(f"cannot read a config that sets {changes or ['root']}")
+    include = re.search(r"(?<![\w$.])include\s*:\s*\[([^\]]*)\]", body)
+    if include is None:
+        raise ValueError("cannot read a config with no `test.include`; teach this test the default")
+    offset = start + include.start(1)
+    if not re.fullmatch(r"""[\s,]*(?:(?:"_*"|'_*')[\s,]*)*""", include.group(1)):
+        text = config[offset:offset + len(include.group(1))]
+        raise ValueError(f"cannot read `test.include` as a list of strings: {text!r}")
+    return [
+        config[offset + s.start() + 1:offset + s.end() - 1]
+        for s in re.finditer(r"\"_*\"|'_*'", include.group(1))
+    ]
+
+
+#: The one recipe `make ui-test` may have: all of Vitest's include, in web/.
+UI_TEST = "\tcd $(WEB_DIR) && $(NPM) ci && $(NPM) test\n"
+
+
+def ui_test_problems(runs: list[str], makefile: str, script: str | None) -> list[str]:
+    """Each way the web job's `make ui-test` can run less than Vitest's whole include.
+
+    The recipe must be exactly UI_TEST and set WEB_DIR and NPM once, for every
+    target, so no argument after `npm test` and no second value slips in.
+    """
+    problems = []
+    if "make ui-test" not in runs:
+        problems.append("no web-console step runs `make ui-test` on every PR")
+    if (recipe := _recipe("ui-test", makefile)) != UI_TEST:
+        problems.append(f"`make ui-test` runs {recipe!r}, not {UI_TEST!r}")
+    for name, value in (("WEB_DIR", WEB), ("NPM", "npm")):
+        assignment = rf"^(\S*:)?[ \t]*(?:override |export )*{name}[ \t]*([:?+!]?=)[ \t]*(\S*)"
+        if (sets := re.findall(assignment, makefile, re.M)) != [("", ":=", value)]:
+            problems.append(f"{name} is not set once, as `{name} := {value}`: {sets}")
+    if script != "vitest run":
+        problems.append(f"`npm test` runs {script!r}, not `vitest run`")
+    return problems
 
 
 def test_every_web_test_file_matches_the_vitest_include() -> None:
     files = [f for f in _git_ls_files() if JS_TEST.search(f)]
     assert files, "found no web test files, so this check would pass on nothing"
-    includes = vitest_includes()
+    configs = [f for f in _git_ls_files(f"{WEB}/*") if VITEST_CONFIG.fullmatch(f)]
+    assert configs == [f"{WEB}/vite.config.js"], f"Vitest uses the first config it finds: {configs}"
+    includes = vitest_includes(_read(f"{WEB}/vite.config.js"))
     stray = outside_vitest(files, includes)
     assert not stray, (
         f"no CI step runs these JS test files: {stray}. Vitest runs {includes} "
@@ -184,133 +364,107 @@ def test_every_web_test_file_matches_the_vitest_include() -> None:
 
 
 def test_the_web_job_runs_the_whole_vitest_include() -> None:
-    assert "make ui-test" in _runs("web-console"), "the web-console job must run `make ui-test`"
-    recipe = makefile_recipe_body("ui-test")
-    assert "cd $(WEB_DIR)" in recipe and "$(NPM) test" in recipe, recipe
-    assert re.search(rf"^WEB_DIR\s*:=\s*{WEB}\s*$", _read("Makefile"), re.M), "WEB_DIR is not web"
     script = json.loads(_read(f"{WEB}/package.json"))["scripts"].get("test")
-    assert script == "vitest run", f"`npm test` must run Vitest's whole include, not {script!r}"
+    runs = gating_runs(ci_workflow(), "web-console")
+    problems = ui_test_problems(runs, _read("Makefile"), script)
+    assert not problems, problems
 
 
 # ─── Rust: the CLI crate ─────────────────────────────────────────────────────
 
 
-def outside_crate(files: Iterable[str]) -> list[str]:
-    """The Rust test files outside the CLI crate, sorted."""
-    return sorted(f for f in files if not _within(CRATE, f))
+def outside_crate(files: Iterable[str], manifests: Iterable[str] = ()) -> list[str]:
+    """The Rust test files `cargo test` in the CLI crate never runs, sorted.
+
+    It runs the crate's own targets: not a file outside it, in a package nested in
+    it (`manifests` lists every Cargo.toml), or in its examples, benches or build script.
+    """
+    nested = [str(PurePosixPath(m).parent) for m in manifests if _within(CRATE, m)]
+    skipped = [d for d in nested if d != CRATE] + [f"{CRATE}/examples", f"{CRATE}/benches"]
+    return sorted(
+        f for f in files
+        if not _within(CRATE, f) or f == f"{CRATE}/build.rs"
+        or any(_within(d, f) for d in skipped)
+    )
+
+
+def cargo_test_problems(runs: list[str], manifest: dict[str, Any]) -> list[str]:
+    """Each way the rust job's `cargo test` can skip a test target of the CLI crate.
+
+    `cargo test` runs the targets Cargo finds by its own rules. A target table or a
+    discovery switch in Cargo.toml can turn tests off (`test = false`, `autotests =
+    false`, `required-features`), so any of them fails until this test is taught it.
+    """
+    problems = []
+    if f"cd {CRATE} && cargo test" not in runs:
+        problems.append(f"no rust-job step runs `cd {CRATE} && cargo test` on every PR")
+    targets = {"lib", "bin", "test", "example", "bench"}
+    auto = {"autolib", "autobins", "autotests", "autoexamples", "autobenches", "build"}
+    found = sorted(targets & manifest.keys() | auto & manifest.get("package", {}).keys())
+    if found:
+        problems.append(
+            f"{CRATE}/Cargo.toml sets {found}, which can stop `cargo test` running a target"
+        )
+    return problems
 
 
 def test_every_rust_test_file_is_in_the_crate_ci_tests() -> None:
     files = [f for f in _git_ls_files("*.rs") if RUST_TEST.search(_read(f))]
     assert files, "found no Rust test files, so this check would pass on nothing"
-    stray = outside_crate(files)
+    stray = outside_crate(files, _git_ls_files("Cargo.toml", "*/Cargo.toml"))
     assert not stray, f"no CI step runs the Rust tests in {stray}: CI runs `cargo test` in {CRATE}/"
-    assert _git_ls_files("Cargo.toml", "*/Cargo.toml") == [f"{CRATE}/Cargo.toml"], (
-        f"a second Cargo.toml: `cargo test` in {CRATE}/ does not build another package"
-    )
 
 
 def test_the_rust_job_runs_cargo_test_in_the_crate() -> None:
-    assert f"cd {CRATE} && cargo test" in _runs("rust"), (
-        f"the rust job must run `cd {CRATE} && cargo test`"
-    )
+    manifest = tomllib.loads(_read(f"{CRATE}/Cargo.toml"))
+    problems = cargo_test_problems(gating_runs(ci_workflow(), "rust"), manifest)
+    assert not problems, problems
 
 
 # ─── Go: what `./...` cannot reach ───────────────────────────────────────────
 
 
-def skipped_by_go(path: str) -> bool:
-    """True when `go test ./...` never runs the Go test file `path`.
+def skipped_by_go(path: str, source: str = "") -> bool:
+    """True when CI's `go test ./...`, on linux/amd64 with no tags, never builds `path`.
 
-    Go ignores a file or directory whose name starts with `.` or `_`. A file
+    Go ignores a file or directory whose name starts with `.` or `_`, `./...`
+    skips `vendor` directories, and a `_<os>` or `_<arch>` name suffix builds a
+    file only there. A `//go:build` line counts as skipped: this test cannot
+    evaluate it, so teach it the expression when CI does build the file. A file
     under `testdata` is a fixture by Go's convention, not a test.
     """
     parts = PurePosixPath(path).parts
-    return "testdata" not in parts and any(name.startswith((".", "_")) for name in parts)
+    if "testdata" in parts:
+        return False
+    if any(name.startswith((".", "_")) or name == "vendor" for name in parts):
+        return True
+    words = parts[-1].removesuffix("_test.go").split("_")[1:]  # Go skips the first word
+    if len(words) > 1 and words[-2] in GO_OS and words[-1] in GO_ARCH:
+        return words[-2:] != ["linux", "amd64"]
+    if words and words[-1] in GO_OS | GO_ARCH:
+        return words[-1] not in ("linux", "amd64")
+    return re.search(r"^//go:build\b", source, re.M) is not None
+
+
+def unreached_by_go(
+    files: Iterable[str], manifests: Iterable[str], read: Callable[[str], str]
+) -> list[str]:
+    """The Go test files `go test ./...` from the repo root never runs, sorted.
+
+    `./...` does not reach into a module nested in the repository, and skips what
+    skipped_by_go names; `testdata` holds fixtures either way.
+    """
+    nested = tuple(m.removesuffix("go.mod") for m in manifests if m != "go.mod")
+    return sorted(
+        f for f in files
+        if "testdata" not in PurePosixPath(f).parts
+        and (f.startswith(nested) or skipped_by_go(f, read(f)))
+    )
 
 
 def test_go_test_dot_dot_dot_reaches_every_go_test_file() -> None:
-    """`make test-go` runs `go test ./...`, which test_go_test_gate_ci.py pins.
-
-    `./...` does not reach into a nested module, and skips the names above.
-    """
-    assert _git_ls_files("go.mod", "*/go.mod") == ["go.mod"], (
-        "a nested Go module: `go test ./...` from the repo root does not reach into it"
-    )
+    """`make test-go` runs `go test ./...`, which test_go_test_gate_ci.py pins."""
     files = _git_ls_files("*_test.go")
     assert files, "found no Go test files, so this check would pass on nothing"
-    hidden = sorted(f for f in files if skipped_by_go(f))
-    assert not hidden, f"`go test ./...` never runs {hidden}: a name starts with `.` or `_`"
-
-
-# ─── the matchers, on made-up paths ──────────────────────────────────────────
-
-
-@pytest.mark.parametrize(
-    ("root", "path", "expected"),
-    [
-        ("tests/integration", "tests/integration/test_a.py", True),
-        ("tests/integration", "tests/integration/deep/er/test_a.py", True),
-        ("tests/integration", "tests/integration_old/test_a.py", False),  # a shared name prefix
-        ("tests/unit/python", "evaluators/tests/test_a.py", False),
-        ("agents/tests", "agents/tests/.cache/test_a.py", False),  # pytest's norecursedirs
-        ("agents/tests", "agents/tests/build/test_a.py", False),
-    ],
-)
-def test_collected_by_pytest(root: str, path: str, expected: bool) -> None:
-    assert collected_by_pytest(root, path) is expected
-
-
-def test_a_python_test_file_outside_every_root_is_named() -> None:
-    files = ["tests/unit/python/test_a.py", "agents/tests/test_b.py", "evaluators/tests/test_c.py"]
-    assert outside_pytest(files, PYTEST_ROOTS) == ["evaluators/tests/test_c.py"]
-
-
-@pytest.mark.parametrize(
-    ("path", "expected"),
-    [
-        ("web/src/a.test.js", True),
-        ("web/src/lib/x/b.spec.js", True),
-        ("web/tests/a.test.js", False),  # outside the include
-        ("web/src/a.test.ts", False),
-        ("webx/src/a.test.js", False),  # outside the web console
-    ],
-)
-def test_the_vitest_include_takes_in(path: str, expected: bool) -> None:
-    assert (outside_vitest([path], ["src/**/*.{test,spec}.js"]) == []) is expected
-
-
-def test_an_unreadable_vitest_glob_fails_loudly() -> None:
-    with pytest.raises(ValueError, match="cannot read the glob"):
-        glob_regex("src/**/*.[jt]s")
-
-
-@pytest.mark.parametrize(
-    ("source", "expected"),
-    [
-        ("#[cfg(test)]\nmod tests {}", True),
-        ('#[tokio::test(flavor = "multi_thread")]\nasync fn t() {}', True),
-        ("#[derive(Debug)]\nstruct Testing;", False),
-    ],
-)
-def test_a_rust_test_file_is_told_by_its_test_attributes(source: str, expected: bool) -> None:
-    assert bool(RUST_TEST.search(source)) is expected
-
-
-def test_a_rust_test_file_outside_the_crate_is_named() -> None:
-    files = ["cli/src/main.rs", "clix/src/a.rs", "tools/b.rs"]
-    assert outside_crate(files) == ["clix/src/a.rs", "tools/b.rs"]
-
-
-@pytest.mark.parametrize(
-    ("path", "expected"),
-    [
-        ("internal/x/a_test.go", False),
-        ("internal/_old/a_test.go", True),
-        ("internal/.cache/a_test.go", True),
-        ("internal/x/_a_test.go", True),
-        ("internal/x/testdata/a_test.go", False),  # a fixture, not a test
-    ],
-)
-def test_skipped_by_go(path: str, expected: bool) -> None:
-    assert skipped_by_go(path) is expected
+    hidden = unreached_by_go(files, _git_ls_files("go.mod", "*/go.mod"), _read)
+    assert not hidden, f"`go test ./...` never runs {hidden}: see skipped_by_go, unreached_by_go"

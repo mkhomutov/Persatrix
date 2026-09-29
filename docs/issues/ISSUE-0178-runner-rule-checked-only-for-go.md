@@ -78,8 +78,9 @@ it: a Python test file outside the three pytest roots, a JavaScript test file
 outside the web console's Vitest `include`, a Rust test file outside the CLI
 crate, or a Go test file where `./...` cannot reach (inside a nested module,
 or under a name starting with `.` or `_`). Beside each language, a pin fails
-when the CI step stops running that place, or runs only part of it. A new test
-tree is added to the test's list of roots in the same PR as its CI step.
+when the CI step stops running that place, or runs only part of it. A new
+pytest tree is added to the test's `PYTEST_ROOTS`, and a new web tree to the
+Vitest `include`, in the same PR as its CI step.
 
 **Opt-in tests: open.** The 13 `requires_orchestrator` tests still run in no
 gate.
