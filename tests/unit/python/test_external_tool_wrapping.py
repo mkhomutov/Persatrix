@@ -5,7 +5,7 @@ boundary. Before that content is forwarded to the LLM, it must be wrapped
 in the `<external_data>` envelope and run through `sanitize`. The
 wrapping happens at the LLM-content conversion boundary in
 `BaseAgent._execute_tools` (and the equivalent path in
-`persona_runtime.action_loop`), not inside the tools themselves — that
+`persona_runtime.tool_round`), not inside the tools themselves — that
 keeps the `ToolResult.data` shape unchanged for non-LLM consumers and for
 existing tests that assert against it.
 

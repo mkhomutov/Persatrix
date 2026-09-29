@@ -10,7 +10,7 @@ refs:
   - docs/ai-agents-orchestration-spec.md
   - config/agents.yaml
   - agents/base.py
-  - agents/persona_runtime/action_loop.py
+  - agents/persona_runtime/tool_round.py
   - agents/server_persona.py
   - agents/server.py
   - agents/tools/registry.py
@@ -38,7 +38,8 @@ list of tools to offer. It keeps only the names the tool registry
 
 - task agents (`TaskAgent`): `_build_tool_definitions` in `agents/base.py`;
 - persona agents (`_LLMPersonaAgent`, the class the agent server builds for
-  them): the method of the same name in `agents/persona_runtime/action_loop.py`.
+  them): the method of the same name in `agents/persona_runtime/tool_round.py`
+  (in `action_loop.py` when this was filed).
   A persona is also offered its memory tools and the verbatim recall tool,
   which it keeps in a list of its own, whatever its `tools` list says.
 
