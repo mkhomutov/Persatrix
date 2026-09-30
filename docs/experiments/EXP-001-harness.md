@@ -1,7 +1,7 @@
 # EXP-001 — The harness
 
-> **Status**: 🚧 **In Progress** — PRs 1, 2, 3a, 3b, 4, 5a, 5b and 5c merged ([#984](https://github.com/mkhomutov/Persatrix/pull/984), [#986](https://github.com/mkhomutov/Persatrix/pull/986), [#987](https://github.com/mkhomutov/Persatrix/pull/987), [#988](https://github.com/mkhomutov/Persatrix/pull/988), [#992](https://github.com/mkhomutov/Persatrix/pull/992), [#993](https://github.com/mkhomutov/Persatrix/pull/993), [#1013](https://github.com/mkhomutov/Persatrix/pull/1013), [#1015](https://github.com/mkhomutov/Persatrix/pull/1015)); PR 5d open ([#1021](https://github.com/mkhomutov/Persatrix/pull/1021)); no practice run yet.
-> **Last updated**: 2026-09-29
+> **Status**: 🚧 **In Progress** — PRs 1, 2, 3a, 3b, 4, 5a, 5b, 5c and 5d merged ([#984](https://github.com/mkhomutov/Persatrix/pull/984), [#986](https://github.com/mkhomutov/Persatrix/pull/986), [#987](https://github.com/mkhomutov/Persatrix/pull/987), [#988](https://github.com/mkhomutov/Persatrix/pull/988), [#992](https://github.com/mkhomutov/Persatrix/pull/992), [#993](https://github.com/mkhomutov/Persatrix/pull/993), [#1013](https://github.com/mkhomutov/Persatrix/pull/1013), [#1015](https://github.com/mkhomutov/Persatrix/pull/1015), [#1021](https://github.com/mkhomutov/Persatrix/pull/1021)); PR 6a, the judge, open ([#1023](https://github.com/mkhomutov/Persatrix/pull/1023)); no practice run yet.
+> **Last updated**: 2026-09-30
 > **Carries out**: the [EXP-001 pre-registration](EXP-001-preregistration.md) and its [part 2](EXP-001-preregistration-scoring.md)
 > **Code**: [`evaluators/exp001/`](../../evaluators/exp001/)
 
@@ -14,9 +14,10 @@ picks a rule. It lands in the reviewed PRs below, as
 That section also says every choice a harness PR makes, where the documents
 leave it open, is listed in the PR and frozen when it merges. The
 [frozen choices](EXP-001-harness-choices.md) document, its second part,
-[holding the meetings](EXP-001-harness-choices-meetings.md), and its third,
-[arm D′'s transcript prefix](EXP-001-harness-choices-d-prime.md), collect
-them, so the result can cite them.
+[holding the meetings](EXP-001-harness-choices-meetings.md), its third,
+[arm D′'s transcript prefix](EXP-001-harness-choices-d-prime.md), and its
+fourth, [the judge](EXP-001-harness-choices-judge.md), collect them, so the
+result can cite them.
 
 ## The PRs
 
@@ -31,11 +32,12 @@ them, so the result can cite them.
 | 5b ([#1013](https://github.com/mkhomutov/Persatrix/pull/1013)) | Retries and failure detection for every arm, A included: provider errors retried, a series restarted from its briefing and then dropped, and the harness faults that stop the run | — (§3, attempts and failures) |
 | 5c ([#1015](https://github.com/mkhomutov/Persatrix/pull/1015)) | Arm D: one deployment per series, with a channel for every meeting, and restarts between meetings that are checked to leave memory as it was; a meeting held again starts from the memory it began with | 2, for restarts; 5 and 6 for D |
 | 5d ([#1021](https://github.com/mkhomutov/Persatrix/pull/1021)) | Arm D′: the earlier meetings' transcripts in a cached prompt prefix | 3, its reader; 1, 5 and 6 for D′ |
-| 6 | The judge, with a call purpose of its own, and the practice run, which also checks the call log's total against the provider's usage report | all eight, on the practice series |
+| 6a ([#1023](https://github.com/mkhomutov/Persatrix/pull/1023)) | The judge: its prompts from the rubric, one pass per packet, a call purpose and call log of its own that never name an arm, and the $25 cap | — (part 2 §2) |
+| 6b | The run: every arm's series in its drawn order, harness faults counted and outputs set aside, the $150 cap; and the practice run, which also checks the call log's total against the provider's usage report | all eight, on the practice series |
 
-Each PR is test-first, like all unit-level code here. PR 6's practice run is
-the evidence that the eight checks pass before any scored meeting. PR 5 is
-split in four, as PR 3 was in two, so each part stays reviewable.
+Each PR is test-first, like all unit-level code here. PR 6b's practice run
+is the evidence that the eight checks pass before any scored meeting. PR 5
+is split in four, and PRs 3 and 6 in two, so each part stays reviewable.
 
 PR 3b leaves two constraints for PRs 5c and 5d. Anthropic can read a cache
 entry only once the response that wrote it has begun, and it keys the entry
@@ -74,7 +76,7 @@ PR 5b holds every arm's series by the rules of attempts and failures, and
 leaves two things. Arm D's memory carries from one meeting to the next, so
 PR 5c's own way of holding a D meeting must give a second try the memory
 its advisers had before the first: it keeps a copy of each adviser's store
-from before the meeting and puts it back before trying again. And PR 6's
+from before the meeting and puts it back before trying again. And PR 6b's
 run does what a harness fault asks beyond stopping: it counts the faults,
 so a third ends the run, and it sets aside the scored outputs so far,
 including the stopped series' tries, which the fault carries. It builds
@@ -101,7 +103,7 @@ in flight also guards D's memory. PR 5c leaves one thing. Check 2 has two halves
 second, that a restart leaves memory exactly as it was. The first, that a
 briefing fact can reach a later meeting's prompt through the shipped memory
 path, needs a model that writes real summaries; the offline mock provider
-the tests run on writes placeholders. So PR 6's practice run shows it,
+the tests run on writes placeholders. So PR 6b's practice run shows it,
 through arm D's recall check: each meeting is a new channel, so the chair
 can answer the briefing's questions only from memory.
 
@@ -128,7 +130,7 @@ an earlier try paid for. A meeting whose orchestrator exited is carried as
 far as its own store holds it.
 
 PR 5d leaves three things to settle before any scored meeting. The first
-is to show check 3 on the real provider: PR 6's practice run does, with the
+is to show check 3 on the real provider: PR 6b's practice run does, with the
 harness's check, which reads each try's calls, failed ones included, and
 names every call that broke the check. The
 second is a gap the practice run should confirm rather than discover. A
@@ -148,13 +150,37 @@ The practice run adds up each D′ discussion's tokens against that mark
 before any scored meeting. A prefix shorter than the model's minimum of
 1 024 tokens is not cached at all, and the check names that too.
 
+PR 6a adds the judge, the third rater, which scores the blinded packets PR 2
+builds. It reads each packet in the same words as the two people, and
+answers with the JSON the rubric's prompts ask for. Each packet gets one
+answer. A provider error is tried again, since no answer came, but an answer
+that came is kept and never asked for again, and one the harness cannot read
+stops judging as a harness fault. The judge's calls go to a call log of
+their own, with a purpose of their own, tagged with the packet's ID and
+never its arm, and the $25 cap is read from that log before each call.
+
+PR 6a leaves three things for PR 6b. Its run judges the practice memos in a
+batch of their own, so their calls never count toward the scored judging's
+cap, and gives the judge the order `rater_orders` draws for it. The practice
+run shows whether the judge answers every packet readably within 16 000
+output tokens, its default thinking included. An answer cut off, a refusal,
+or a control plan scored on C2 would stop judging, and a fix to the reader
+or to the call is a harness PR before any scored meeting. And before any
+scored meeting, the run projects the scored judging's spend from the
+practice batch's calls: 100 times a memo packet's mean cost plus 25 times a
+recall packet's. At the token limit a call costs about $0.41, so the 125
+scored calls fit the $25 cap only if they average under about 7 600 output
+tokens, thinking included. A projection over the cap needs a change to the
+call before the first scored meeting, since the caps freeze then.
+
 ## Frozen choices
 
 The choices each harness PR froze, and the arm order each series runs in, are
 in [their own document](EXP-001-harness-choices.md), so the result can cite
 them. Those of PRs 5a to 5c, which hold the meetings, are in its second part,
-[holding the meetings](EXP-001-harness-choices-meetings.md), and PR 5d's in
-its third, [arm D′'s transcript prefix](EXP-001-harness-choices-d-prime.md).
+[holding the meetings](EXP-001-harness-choices-meetings.md), PR 5d's in
+its third, [arm D′'s transcript prefix](EXP-001-harness-choices-d-prime.md),
+and PR 6a's in its fourth, [the judge](EXP-001-harness-choices-judge.md).
 
 ## Related documentation
 
@@ -167,5 +193,7 @@ its third, [arm D′'s transcript prefix](EXP-001-harness-choices-d-prime.md).
   — the choices of PRs 5a to 5c.
 - [Frozen choices: arm D′'s transcript prefix](EXP-001-harness-choices-d-prime.md)
   — the choices of PR 5d.
+- [Frozen choices: the judge](EXP-001-harness-choices-judge.md) — the choices
+  of PR 6a.
 - [Evaluators guide](../evaluators-guide.md) — the golden-trace harness this
   one sits beside.

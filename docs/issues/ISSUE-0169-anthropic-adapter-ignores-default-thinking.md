@@ -143,3 +143,12 @@ how it reads a refusal.
 > a thinking-only reply to a 64-token bid ends in `parse_failure`, a tool
 > round replays only its `tool_use` block, and a refusal comes back as a
 > completed step. The live effects are not yet measured.
+
+> 2026-09-30 — harness PR 6a
+> ([#1023](https://github.com/mkhomutov/Persatrix/pull/1023)) settles the
+> judge's part. Its calls leave room for thinking (`max_tokens` 16 000), and
+> it reads a refusal as an unreadable answer, so judging stops on a harness
+> fault. The adapter still maps `refusal` to `END_TURN`, but `LLMResponse`
+> now also carries the provider's own stop reason, `provider_stop_reason`,
+> and the judge's kept answer records that one. The rest of this issue is
+> still open.

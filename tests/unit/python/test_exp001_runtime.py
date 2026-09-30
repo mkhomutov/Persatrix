@@ -162,9 +162,15 @@ class TestReadCallLog:
         [record] = read_call_log(_write(tmp_path / "c.jsonl", _line(purpose=runtime))).records
         assert record.purpose is purpose
 
-    def test_every_runtime_purpose_has_a_mapping(self, tmp_path):
-        lines = [_line(purpose=p.value) for p in LLMCallPurpose]
+    def test_every_purpose_an_adviser_calls_with_has_a_mapping(self, tmp_path):
+        lines = [_line(purpose=p.value) for p in LLMCallPurpose if p is not LLMCallPurpose.JUDGE]
         assert len(read_call_log(_write(tmp_path / "c.jsonl", *lines)).records) == len(lines)
+
+    def test_a_judge_line_in_an_arms_log_is_refused(self, tmp_path):
+        """The judge logs to its own file, tagged with no arm (PR 6a)."""
+        path = _write(tmp_path / "c.jsonl", _line(purpose=LLMCallPurpose.JUDGE.value))
+        with pytest.raises(CallLogError, match="judge"):
+            read_call_log(path)
 
     @pytest.mark.parametrize("purpose", [None, "gossip"])
     def test_a_line_without_a_known_purpose_is_refused(self, tmp_path, purpose):
