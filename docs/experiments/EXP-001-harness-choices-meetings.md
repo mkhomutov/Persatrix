@@ -2,7 +2,7 @@
 
 > **Status**: 🚧 **In Progress** — PR 5a's, PR 5b's and PR 5c's rows froze when they merged; the review of PR 5c changed its rows before any meeting was scored.
 > **Last updated**: 2026-09-29
-> **Part of**: the [EXP-001 harness](EXP-001-harness.md); the [first part](EXP-001-harness-choices.md) holds the choices of PRs 1 to 4 and the arm order, and the [third part](EXP-001-harness-choices-d-prime.md) PR 5d's
+> **Part of**: the [EXP-001 harness](EXP-001-harness.md); the [first part](EXP-001-harness-choices.md) holds the choices of PRs 1 to 4 and the arm order, the [third part](EXP-001-harness-choices-d-prime.md) PR 5d's, and the [fourth part](EXP-001-harness-choices-judge.md) PR 6a's
 
 These are the frozen choices of the harness PRs that hold the meetings: how
 arms B and C deploy their advisers and hold each meeting (PR 5a), what the
@@ -44,6 +44,8 @@ harness PR that says what changed and why, and from then on nothing changes.
   and the arm order.
 - [Frozen choices, third part](EXP-001-harness-choices-d-prime.md) — PR 5d,
   arm D′'s transcript prefix.
+- [Frozen choices, fourth part](EXP-001-harness-choices-judge.md) — PR 6a,
+  the judge.
 - [EXP-001 harness](EXP-001-harness.md) — the harness PRs, and what each
   leaves the next.
 - [EXP-001 pre-registration](EXP-001-preregistration.md) — materials, arms

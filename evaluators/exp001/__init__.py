@@ -32,7 +32,11 @@ and its part 2; this package only carries those documents out.
   and reads check 3 from the call records.
 - :mod:`evaluators.exp001.attempts` holds every arm's meetings by the rules
   of attempts and failures.
-- :mod:`evaluators.exp001.packets` builds the blinded packets the raters score.
+- :mod:`evaluators.exp001.packets` builds the blinded packets the raters score,
+  and the text every rater reads.
+- :mod:`evaluators.exp001.judge` is the LLM judge, the third rater: one pass
+  per packet, logged apart from the arms, within its $25 cap.
+  :mod:`evaluators.exp001.judge_answers` reads its answers.
 - :mod:`evaluators.exp001.scoring` cuts memos, turns scores into quality and
   measures how well the raters agree.
 - :mod:`evaluators.exp001.decision` compares the arms and picks the rule.
@@ -40,7 +44,8 @@ and its part 2; this package only carries those documents out.
 Only ``runtime``, ``arm_a``, ``deployment`` and the modules that use them
 import from the agents' runtime: the call log and the clock; for arm A the
 model client and the persona prompt code, so arm A reads the advisers in the
-persona agents' own words; and for a deployment the config validator.
+persona agents' own words; for the judge the model client; and for a
+deployment the config validator.
 Importing any of them loads most of the ``agents`` package. The other modules
 import none of it, so they can be tested and used without starting any agent.
 """
