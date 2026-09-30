@@ -72,3 +72,49 @@ export function senderLabel(senderId, userId, agentsById) {
   const name = agent.name || agent.id;
   return agent.role ? `${name} — ${agent.role}` : name;
 }
+
+// formatTime is the timeline's compact per-row time ("15:25"); the full
+// date-time rides the row's tooltip and the <time datetime> attribute. An
+// unparseable value falls back to the raw string, like formatTimestamp.
+export function formatTime(ts) {
+  const date = new Date(ts);
+  if (Number.isNaN(date.getTime())) {
+    return ts;
+  }
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+// dayKey buckets a timestamp by LOCAL calendar day ("2026-09-29"), so the feed
+// draws one divider per day the operator lived through, not per UTC day.
+export function dayKey(ts) {
+  const date = new Date(ts);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+// formatDayLabel is the day divider's text: "Today", "Yesterday", else the
+// weekday and date — with the year only when it is not the current one.
+export function formatDayLabel(ts, now = new Date()) {
+  const key = dayKey(ts);
+  if (!key) {
+    return "";
+  }
+  if (key === dayKey(now)) {
+    return "Today";
+  }
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (key === dayKey(yesterday)) {
+    return "Yesterday";
+  }
+  const date = new Date(ts);
+  const options = { weekday: "long", month: "long", day: "numeric" };
+  if (date.getFullYear() !== now.getFullYear()) {
+    options.year = "numeric";
+  }
+  return date.toLocaleDateString([], options);
+}

@@ -3,7 +3,6 @@ import {
   loadBootstrap,
   listAgents,
   sendChat,
-  listChannels,
   getChannelHistory,
   getChatHistory,
   publishMessage,
@@ -231,36 +230,6 @@ describe("sendChat", () => {
     expect(error).toBeInstanceOf(ApiError);
     expect(error.status).toBe(0);
     expect(error.cause).toBe(cause);
-  });
-});
-
-describe("listChannels", () => {
-  it("fetches the channel list and returns the parsed envelope", async () => {
-    // GET /api/v1/channels returns {channels, next_cursor} (channel_types.go
-    // listChannelsResponse), not a bare array — the panel reads `.channels`, so
-    // the client returns the envelope verbatim rather than unwrapping it (and
-    // discarding the cursor a later slice may paginate on).
-    const envelope = {
-      channels: [
-        { id: "general", name: "General", channel_type: "group" },
-        { id: "ops", name: "Ops", channel_type: "group" },
-      ],
-      next_cursor: "ops",
-    };
-    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse(envelope)));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const result = await listChannels();
-
-    expect(result).toEqual(envelope);
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/channels");
-  });
-
-  it("throws an ApiError when the list endpoint responds non-2xx", async () => {
-    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({}, false, 503)));
-    vi.stubGlobal("fetch", fetchMock);
-
-    await expect(listChannels()).rejects.toBeInstanceOf(ApiError);
   });
 });
 

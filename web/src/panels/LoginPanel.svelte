@@ -6,6 +6,7 @@
   // token never enters JS; `onsuccess` then reboots the shell, whose
   // /ui/context now reports the verified principal.
   import { login } from "../lib/auth.js";
+  import Icon from "../ui/Icon.svelte";
 
   let { onsuccess } = $props();
   let username = $state("");
@@ -33,6 +34,7 @@
 </script>
 
 <form class="login" onsubmit={submit} aria-label="Sign in">
+  <div class="login-icon" aria-hidden="true"><Icon name="lock" size={20} /></div>
   <h2>Sign in</h2>
   <p class="hint">
     This orchestrator requires authentication (<code>auth.mode: enabled</code>).
@@ -66,30 +68,58 @@
 
 <style>
   .login {
-    max-width: 22rem;
-    margin: 4rem auto 0;
+    width: min(23rem, calc(100% - 2rem));
+    margin: 11vh auto auto;
     display: flex;
     flex-direction: column;
     gap: 0.9rem;
+    padding: 1.75rem 1.6rem 1.6rem;
+    background: var(--surface, #fff);
+    border: 1px solid var(--border, #e3e6ec);
+    border-radius: var(--radius-lg, 14px);
+    box-shadow: var(--shadow-pop, 0 10px 30px rgba(0, 0, 0, 0.12));
+  }
+  .login-icon {
+    width: 2.6rem;
+    height: 2.6rem;
+    border-radius: 12px;
+    display: grid;
+    place-items: center;
+    color: var(--accent-contrast, #fff);
+    background: linear-gradient(140deg, #7a78ff, #4c4ad0);
   }
   .login h2 {
-    margin: 0;
+    margin: 0.2rem 0 0;
+    font-size: 1.25rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
   }
   .login .hint {
-    margin: 0;
-    opacity: 0.75;
-    font-size: 0.9em;
+    margin: -0.4rem 0 0.2rem;
+    color: var(--text-muted, #5d6576);
+    font-size: 0.85rem;
   }
   .login label {
     display: flex;
     flex-direction: column;
-    gap: 0.3rem;
+    gap: 0.35rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-muted, #5d6576);
+  }
+  .login input {
+    font-weight: 400;
   }
   .login .error {
     margin: 0;
-    color: var(--danger);
+    padding: 0.5rem 0.7rem;
+    font-size: 0.82rem;
+    color: var(--danger, #c2332b);
+    background: var(--danger-soft, #fdeeed);
+    border-radius: var(--radius-sm, 8px);
   }
   .login button {
-    align-self: flex-start;
+    margin-top: 0.3rem;
+    min-height: 2.4rem;
   }
 </style>

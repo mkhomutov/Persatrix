@@ -1,5 +1,5 @@
 // Persona/agent display helpers shared by the conversation panel and its
-// PersonaPicker (extracted so they render identical option labels and
+// sidebar persona list (extracted so they render identical option labels and
 // chattability rules without the panel re-deriving them — and to keep the panel
 // under the review-size cap, the same reason PublishComposer was split out).
 
@@ -12,14 +12,15 @@ export function isChattable(agent) {
   return agent?.type !== "task";
 }
 
-// agentLabel is the picker's display text: the persona's name, falling back to
+// agentLabel is a persona row's label in the sidebar list (the option's
+// accessible name): the persona's name, falling back to
 // its id when unnamed (matching the server's own display-name fallback in
 // chat_handler.go). A non-healthy persona is annotated with its status, since
 // only a healthy one can actually reply (the chat route 503s otherwise) — the
 // operator sees that before spending a send, not after.
 export function agentLabel(agent) {
   const name = agent.name ? agent.name : agent.id;
-  // Fold the role into the option so the picker reads as a cast of personas
+  // Fold the role into the option so the list reads as a cast of personas
   // ("Ada — Researcher") rather than a list of bare names (RFC 0048 §A). Role
   // is optional; omit the separator when unset.
   const named = agent.role ? `${name} — ${agent.role}` : name;

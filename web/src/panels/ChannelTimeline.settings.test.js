@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, waitFor } from "@testing-library/svelte";
+import { render, screen, cleanup, waitFor, fireEvent } from "@testing-library/svelte";
 import ChannelTimeline from "./ChannelTimeline.svelte";
 
 // RFC 0050 Phase 2 PR 2 mount gating: the nested ChannelSettings panel renders
@@ -93,5 +93,22 @@ describe("ChannelSettings mount gating", () => {
     // Members (gated on canCreate) stays hidden — the two capabilities are
     // independent, so settings must not piggyback on create.
     expect(screen.queryByText(/^Members/)).toBeNull();
+  });
+
+  it("waits to load a channel's settings until the folded Details panel is shown", async () => {
+    listChannels.mockResolvedValue({
+      channels: [...CHANNELS, { id: "ops", name: "Ops", channel_type: "group" }],
+    });
+    render(ChannelTimeline, { props: { userId: "local", canConfigEdit: true } });
+    await screen.findByRole("option", { name: "General" });
+    await waitFor(() => expect(getChannelConfig).toHaveBeenCalledWith("general"));
+
+    const details = screen.getByRole("button", { name: /channel details/i });
+    await fireEvent.click(details);
+    await fireEvent.click(screen.getByRole("option", { name: "Ops" }));
+    expect(getChannelConfig).not.toHaveBeenCalledWith("ops");
+
+    await fireEvent.click(details);
+    await waitFor(() => expect(getChannelConfig).toHaveBeenCalledWith("ops"));
   });
 });

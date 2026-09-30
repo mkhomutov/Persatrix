@@ -73,9 +73,28 @@
   function sessionOptionLabel(session) {
     return session.label ? session.label : session.id;
   }
+
+  // The popover closes on a click outside it or on Escape, like any popover.
+  let open = $state(false);
+  let rootEl = $state(null);
+
+  function onWindowPointer(event) {
+    if (open && rootEl && !rootEl.contains(event.target)) {
+      open = false;
+    }
+  }
+
+  function onWindowKey(event) {
+    if (open && event.key === "Escape") {
+      open = false;
+      rootEl?.querySelector("summary")?.focus();
+    }
+  }
 </script>
 
-<details class="overrides">
+<svelte:window onpointerdown={onWindowPointer} onkeydown={onWindowKey} />
+
+<details class="overrides" bind:open bind:this={rootEl}>
   <!-- The summary reads "Scope · active" when an override is set, so a
        non-default session/epoch is visible even with the popover closed. -->
   <summary

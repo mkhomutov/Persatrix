@@ -19,6 +19,7 @@
     isSummaryUnavailable,
   } from "../lib/interactions.js";
   import { senderLabel } from "../lib/format.js";
+  import Icon from "../ui/Icon.svelte";
 
   // scope — the RFC 0020 scope to filter on (the active channel id; for a group
   //   channel the scope IS the `group:` id, scopes.py `scope_for_group`).
@@ -194,6 +195,7 @@
     aria-label="Interaction summary"
   >
     <header class="meta">
+      <span class="summary-icon" aria-hidden="true"><Icon name="sparkles" size={15} /></span>
       <span class="badge">Conversation {triggerLabel}</span>
       {#if record.turn_count}
         <span class="turns">{record.turn_count} turns</span>
@@ -216,12 +218,15 @@
 <style>
   .interaction-summary {
     flex: none;
-    margin: 0.5rem 0 0;
-    padding: 0.6rem 0.8rem;
-    border: 1px solid var(--border, #d4d4d8);
-    border-left: 3px solid var(--accent, #2563eb);
-    border-radius: var(--radius, 6px);
-    background: var(--surface-muted, #f4f4f5);
+    margin: 0.35rem 1.25rem 0.25rem;
+    padding: 0.75rem 0.9rem;
+    border: 1px solid color-mix(in srgb, var(--accent, #5856d6) 28%, var(--border, #e3e6ec));
+    border-radius: var(--radius, 10px);
+    background: linear-gradient(
+      180deg,
+      var(--accent-soft, #eeeefd),
+      color-mix(in srgb, var(--accent-soft, #eeeefd) 35%, var(--surface, #fff))
+    );
     /* Docked between the timeline and the composer — cap it so a long
        synthesis can't squeeze the live feed out; it scrolls internally. */
     max-height: 12rem;
@@ -229,34 +234,45 @@
   }
   .meta {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     gap: 0.5rem;
-    margin-bottom: 0.35rem;
+    margin-bottom: 0.4rem;
+  }
+  .summary-icon {
+    display: grid;
+    place-items: center;
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: 50%;
+    color: var(--accent-contrast, #fff);
+    background: var(--accent, #5856d6);
   }
   .badge {
-    font-size: 0.75rem;
-    font-weight: 600;
+    font-size: 0.74rem;
+    font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.03em;
-    color: var(--accent, #2563eb);
+    letter-spacing: 0.05em;
+    color: var(--accent-strong, #4745c2);
   }
   .turns {
-    font-size: 0.75rem;
-    color: var(--text-muted, #71717a);
+    margin-left: auto;
+    font-size: 0.74rem;
+    color: var(--text-muted, #5d6576);
   }
   .summary {
     margin: 0;
     white-space: pre-wrap;
+    line-height: 1.55;
   }
   .unavailable {
     margin: 0;
     font-style: italic;
-    color: var(--text-muted, #71717a);
+    color: var(--text-muted, #5d6576);
   }
   .participants {
-    margin: 0.4rem 0 0;
+    margin: 0.5rem 0 0;
     font-size: 0.75rem;
-    color: var(--text-muted, #71717a);
+    color: var(--text-muted, #5d6576);
   }
   .participants-label {
     font-weight: 600;

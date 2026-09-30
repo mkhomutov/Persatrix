@@ -16,18 +16,27 @@ Go-only contributors are never required to install Node (see *Go-only contributo
 ```
 web/
   src/
-    main.js                 # mounts the app
-    App.svelte              # shell: boot, topbar (brand + tabs + identity), active panel
-    app.css                 # design tokens (light/dark) + app-shell layout
+    main.js                 # mounts the app, imports the stylesheets in cascade order
+    App.svelte              # shell: boot, topbar (brand + tabs + shortcuts + theme + identity), active panel
+    app.css                 # design tokens (light/dark) + base styles
+    styles/                 # one sheet per surface: controls, shell, sidebar, conversation,
+                            #   composer, management, settings, dialogs, responsive (last)
+    ui/                     # reusable parts: Icon, Avatar, SelectList (keyboard listbox)
     lib/
       bootstrap.js          # pure panel-selection + identity logic (RFC §C/§F)
-      api.js                # same-origin fetch client
-      …                     # formatting, mentions, presence, interactions helpers
+      api.js / http.js      # one function per endpoint / the same-origin fetch transport
+      dmSession.svelte.js   # the DM lifecycle: open, resolve, send, cancel, exit
+      prefs.js              # per-browser preferences (theme, folded panels)
+      …                     # formatting, filtering, mentions, presence, interactions helpers
     panels/
-      ChannelTimeline.svelte# the conversation panel: sidebar rail | conversation | management rail
-      …                     # its extracted children (feed, pickers, composers, settings, members)
+      ChannelTimeline.svelte# the conversation panel: sidebar | conversation | management rail
+      …                     # its extracted children (feed, rail, composers, settings, members)
   *.test.js                 # Vitest unit/component tests, co-located
 ```
+
+The console follows the OS light/dark preference unless the topbar's theme
+button pins one; colours come only from the tokens in `app.css`, so a new
+surface stays consistent in both themes by using them.
 
 ## Develop
 

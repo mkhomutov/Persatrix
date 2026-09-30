@@ -1,0 +1,288 @@
+/* The console shell (RFC 0048): the topbar — brand, panel tabs, the
+   keyboard-shortcut and theme controls, the identity — and the boot states
+   (loading, error, no panels). Consumes the tokens app.css defines. */
+
+/* ---------- Topbar ---------- */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 0 0.9rem 0 1rem;
+  height: 3rem;
+  flex: none;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: relative;
+  z-index: 30;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.brand-mark {
+  width: 1.65rem;
+  height: 1.65rem;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: linear-gradient(140deg, #7a78ff, #4c4ad0);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  flex: none;
+}
+
+.logo {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+.brand .console-word {
+  font-weight: 450;
+  color: var(--text-muted);
+}
+
+.version {
+  font-weight: 550;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 0.45rem;
+  font-family: var(--font-mono);
+}
+
+/* Panel tabs live in the topbar as a segmented nav. */
+.tabs {
+  display: flex;
+  gap: 0.15rem;
+  padding: 0.2rem;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+.tabs button {
+  border: none;
+  background: transparent;
+  min-height: 1.6rem;
+  padding: 0.1rem 0.85rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.tabs button:hover:not(:disabled) {
+  background: transparent;
+  color: var(--text);
+}
+
+.tabs button[aria-selected="true"] {
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: var(--shadow-xs);
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-left: auto;
+}
+
+.topbar .identity-block {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding-left: 0.75rem;
+  border-left: 1px solid var(--border);
+}
+
+.principal {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text);
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.05rem 0.6rem 0.05rem 0.4rem;
+}
+
+.principal::before {
+  content: "";
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: var(--ok);
+}
+
+.acting-as {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.acting-as input {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  min-height: 1.75rem;
+  padding: 0.1rem 0.5rem;
+  width: 7.5rem;
+}
+
+/* Keyboard-shortcut reference, a popover off the topbar. */
+.shortcuts {
+  position: relative;
+}
+
+.shortcuts > summary {
+  list-style: none;
+}
+
+.shortcuts > summary::-webkit-details-marker {
+  display: none;
+}
+
+.shortcuts-card {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.5rem);
+  width: 18.5rem;
+  padding: 0.85rem 0.95rem;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-pop);
+}
+
+.shortcuts-card h2 {
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+  font-weight: 650;
+}
+
+.shortcuts-card dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.45rem 0.75rem;
+  align-items: center;
+  font-size: 0.8rem;
+}
+
+.shortcuts-card dt {
+  display: flex;
+  gap: 0.2rem;
+  justify-content: flex-end;
+}
+
+.shortcuts-card dd {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.shortcuts-note {
+  margin: 0.75rem 0 0;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.74rem;
+  color: var(--text-subtle);
+}
+
+/* ---------- Shell content / boot states ---------- */
+
+.app-main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.app-main > [role="tabpanel"] {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+
+.boot {
+  margin: auto;
+  padding: 2rem;
+  color: var(--text-muted);
+  text-align: center;
+  max-width: 34rem;
+}
+
+.boot.error {
+  color: var(--danger);
+}
+
+.boot-card {
+  margin: 12vh auto auto;
+  width: min(28rem, calc(100% - 2rem));
+  padding: 1.5rem;
+  text-align: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
+}
+
+.boot-card .boot {
+  margin: 0.25rem 0 1rem;
+  padding: 0;
+}
+
+.boot-icon {
+  width: 2.75rem;
+  height: 2.75rem;
+  margin: 0 auto 0.75rem;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.boot-card.is-error .boot-icon {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.boot-card h1 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 650;
+}
+
+.loading,
+.thinking {
+  color: var(--text-muted);
+}
+
+.empty {
+  color: var(--text-muted);
+}
+
+.retry {
+  margin-top: 0.5rem;
+}
+
+.poll-error {
+  color: var(--warn);
+  font-size: 0.8rem;
+  margin: 0.25rem 0;
+}
