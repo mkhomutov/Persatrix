@@ -68,7 +68,12 @@ class CallPurpose(enum.Enum):
 
 @dataclass(frozen=True)
 class CallRecord:
-    """One model call, with everything check 4 of the pre-registration asks for."""
+    """One model call, with everything check 4 of the pre-registration asks for.
+
+    A judge call names no arm, so its log keeps the seal: its arm is empty,
+    its series the judging batch and its meeting the packet's ID
+    (:func:`evaluators.exp001.judge.read_judge_log`).
+    """
 
     arm: str
     series: str

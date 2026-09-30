@@ -60,6 +60,7 @@ class LLMCallPurpose(Enum):
     REVISE = "revise"  # the reflexion rewrite of a draft
     SUMMARY = "summary"  # an episode summary, with fact extraction at close
     COMPRESS = "compress"  # working-memory compression
+    JUDGE = "judge"  # a rater scoring an answer: EXP-001's LLM judge, in the harness
 
 
 @dataclass

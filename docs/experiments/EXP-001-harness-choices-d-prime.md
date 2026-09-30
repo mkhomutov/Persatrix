@@ -1,8 +1,8 @@
 # EXP-001 — The harness's frozen choices: arm D′'s transcript prefix
 
-> **Status**: 🚧 **In Progress** — PR 5d's rows freeze when it merges ([#1021](https://github.com/mkhomutov/Persatrix/pull/1021)).
-> **Last updated**: 2026-09-29
-> **Part of**: the [EXP-001 harness](EXP-001-harness.md); the [first part](EXP-001-harness-choices.md) holds the choices of PRs 1 to 4 and the arm order, and the [second part](EXP-001-harness-choices-meetings.md) those of PRs 5a to 5c
+> **Status**: 🚧 **In Progress** — PR 5d's rows froze when it merged ([#1021](https://github.com/mkhomutov/Persatrix/pull/1021)); its review changed them before any meeting was scored.
+> **Last updated**: 2026-09-30
+> **Part of**: the [EXP-001 harness](EXP-001-harness.md); the [first part](EXP-001-harness-choices.md) holds the choices of PRs 1 to 4 and the arm order, the [second part](EXP-001-harness-choices-meetings.md) those of PRs 5a to 5c, and the [fourth part](EXP-001-harness-choices-judge.md) PR 6a's
 
 These are the frozen choices of PR 5d, which holds arm D′: the
 [prompt prefix](../ai-glossary.md#prompt-prefix) its advisers' turns carry
@@ -34,5 +34,7 @@ says what changed and why, and from then on nothing changes.
   and the arm order.
 - [Frozen choices, second part](EXP-001-harness-choices-meetings.md) — PRs 5a
   to 5c, holding the meetings.
+- [Frozen choices, fourth part](EXP-001-harness-choices-judge.md) — PR 6a,
+  the judge.
 - [EXP-001 pre-registration](EXP-001-preregistration.md) — the arms, and the
   eight checks the harness must pass before any scored meeting.
