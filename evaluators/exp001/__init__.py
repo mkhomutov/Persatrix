@@ -36,6 +36,7 @@ and its part 2; this package only carries those documents out.
   and the text every rater reads.
 - :mod:`evaluators.exp001.judge` is the LLM judge, the third rater: one pass
   per packet, logged apart from the arms, within its $25 cap.
+  :mod:`evaluators.exp001.judge_answers` reads its answers.
 - :mod:`evaluators.exp001.scoring` cuts memos, turns scores into quality and
   measures how well the raters agree.
 - :mod:`evaluators.exp001.decision` compares the arms and picks the rule.

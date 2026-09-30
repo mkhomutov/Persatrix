@@ -101,6 +101,10 @@ class LLMResponse:
     tool_calls: list[ToolCall] = field(default_factory=list)
     stop_reason: StopReason = StopReason.END_TURN
     usage: Usage = field(default_factory=lambda: Usage(0, 0))
+    # The stop reason as the provider named it, before it was mapped, such as
+    # Anthropic's "refusal", which stop_reason reads as END_TURN. None when
+    # the adapter does not keep it.
+    provider_stop_reason: str | None = None
 
 
 @runtime_checkable

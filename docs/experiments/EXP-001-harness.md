@@ -159,14 +159,19 @@ stops judging as a harness fault. The judge's calls go to a call log of
 their own, with a purpose of their own, tagged with the packet's ID and
 never its arm, and the $25 cap is read from that log before each call.
 
-PR 6a leaves two things for PR 6b. Its run judges the practice memos in a
+PR 6a leaves three things for PR 6b. Its run judges the practice memos in a
 batch of their own, so their calls never count toward the scored judging's
-cap, and gives the judge the order `rater_orders` draws for it. And the
-practice run shows whether the judge answers every packet readably within
-16 000 output tokens, its default thinking included. An answer cut off, a
-refusal, which the adapter reads as a finished answer with no text, or a
-control plan scored on C2 would stop judging, and a fix to the reader or to
-the call is a harness PR before any scored meeting.
+cap, and gives the judge the order `rater_orders` draws for it. The practice
+run shows whether the judge answers every packet readably within 16 000
+output tokens, its default thinking included. An answer cut off, a refusal,
+or a control plan scored on C2 would stop judging, and a fix to the reader
+or to the call is a harness PR before any scored meeting. And before any
+scored meeting, the run projects the scored judging's spend from the
+practice batch's calls: 100 times a memo packet's mean cost plus 25 times a
+recall packet's. At the token limit a call costs about $0.41, so the 125
+scored calls fit the $25 cap only if they average under about 7 600 output
+tokens, thinking included. A projection over the cap needs a change to the
+call before the first scored meeting, since the caps freeze then.
 
 ## Frozen choices
 

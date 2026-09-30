@@ -24,7 +24,7 @@ nothing changes.
 | Dollars | The table in pre-registration §3, per million tokens; a call on a model the table does not list, or with cache tokens on a model with no cache price, is refused rather than priced at zero | 1 |
 | Dollars per plan | Counted calls of the series' briefing and plan meetings, in the attempt that finished, divided by four; judge calls never count. PR 5b holds a meeting a provider error cut short again, as its next try, so since then only each meeting's finished try counts ([holding the meetings](EXP-001-harness-choices-meetings.md)) | 1, 5b |
 | Real spend | Every arm call in the scored series, in every attempt, counted or not; practice and judge calls are left out | 1 |
-| Judging spend | Every `judge` call, for the $25 judging cap | 1 |
+| Judging spend | Every `judge` call, for the $25 judging cap. PR 6a narrows it to the calls in one batch's own log, so the practice judging never counts toward the scored judging's cap ([the judge](EXP-001-harness-choices-judge.md)) | 1, 6a |
 | The 400-word cut | A word is any run of characters without a space or line break, so a heading's `##` counts. The memo is kept up to the end of its 400th word, formatting and all, and its word count and whether it was cut are recorded | 2 |
 | Control plans | A rater's total is (C1 + C3 + C4 + C5) × 10 ÷ 8. A score for C2 on a control plan, or a missing one on a plan, is refused | 2 |
 | A plan a rater cannot rank | When one rater gives all of a plan's memos the same total, the correlation is undefined. That plan is skipped for that pair, like a plan with fewer than three memos, and the count of skipped plans is reported. A pair left with no plan makes agreement undefined, and the result inconclusive | 2 |

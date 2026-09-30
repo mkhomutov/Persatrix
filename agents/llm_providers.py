@@ -142,6 +142,7 @@ class AnthropicProvider:
                 cache_write_tokens=getattr(usage, "cache_creation_input_tokens", None) or 0,
                 cache_read_tokens=getattr(usage, "cache_read_input_tokens", None) or 0,
             ),
+            provider_stop_reason=response.stop_reason,
         )
 
     def format_tool_definitions(self, tools: list[dict]) -> list[dict]:
