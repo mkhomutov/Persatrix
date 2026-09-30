@@ -10,7 +10,7 @@ All notable changes to this project will be documented in this file.
 
 ### 🐛 Fixes
 
-- **The web console lists every channel, not only the first 50** (`web/src/lib/api.js`): the channel list endpoint returns 50 channels a page in id order, and direct messages (`dm:…`) sort ahead of group channels, so once a deployment held 50 DMs the console showed no group channel at all. It now follows the page cursor to the last page.
+- **The web console lists every channel, not only the first 50** (`web/src/lib/api.js`): the channel list endpoint returns 50 channels a page in id order, and direct messages (`dm:…`) sort ahead of group channels, so once a deployment held 50 DMs the console showed no group channel at all. It now asks for the server's largest page (1 000 channels), so one request usually covers the list, and follows the page cursor to the last page.
 - **The web console labels the end-vote window in turns** (`web/src/lib/channelKnobs.js`): the Channel settings card said "(seconds)", but the window counts consecutive turns (`channels.EndVoteWindow`), so a value entered as seconds set that many turns instead.
 - **A console message that mentions someone reads as one paragraph** (`web/src/app.css`): a style meant for the page's main area also matched each message's text, so a mention and the words after it rendered as side-by-side columns.
 

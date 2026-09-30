@@ -40,7 +40,7 @@
       <ChannelMembers {channelId} {members} {agents} {agentsById} {userId} {onChanged} />
     {/if}
     {#if canConfigEdit}
-      <ChannelSettings {channelId} {members} {agentsById} {onChanged} />
+      <ChannelSettings {channelId} {members} {agentsById} {onChanged} active={!hidden} />
     {/if}
   </div>
 </aside>

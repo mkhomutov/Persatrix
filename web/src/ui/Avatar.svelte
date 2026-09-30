@@ -6,14 +6,15 @@
   // id     — hashed for the colour.
   // label  — display text the initials come from ("Ember Owl" → "EO").
   // size   — px; the initials scale with it.
-  // status — agent health ("healthy" | "degraded" | "unhealthy" | …); any
+  // status — agent health, in the orchestrator's words ("healthy" | "degraded"
+  //          | "offline" | "unknown" — agentStatusString); "unknown" or any
   //          other value draws no dot.
   // self   — the operator's own avatar, drawn in the accent colour.
   import { hueForId, initialsFor } from "../lib/format.js";
 
   let { id = "", label = "", size = 28, status = "", self = false } = $props();
 
-  const DOT = { healthy: "ok", degraded: "warn", unhealthy: "danger" };
+  const DOT = { healthy: "ok", degraded: "warn", offline: "danger" };
   const dot = $derived(DOT[status] ?? "");
 </script>
 

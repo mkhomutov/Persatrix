@@ -105,7 +105,9 @@ export const KNOBS = [
     type: "enum",
     options: ["fast", "quality"],
     group: REASONING,
-    hint: "The model alias that runs the reasoning step.",
+    // ISSUE-0167: the value is stored but never reaches the agents, so the
+    // hint must not promise it picks the model.
+    hint: "Meant to pick the model for the reasoning step; for now the personas use fast whatever is set (ISSUE-0167).",
   },
   {
     key: "reasoning.depth",

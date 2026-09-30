@@ -15,7 +15,7 @@
   import { getChannelHistory, getChannelActivity } from "../lib/api.js";
   import { participantAgentIds } from "../lib/interactions.js";
   import { GRACE_MS } from "../lib/presence.js";
-  import { dayLabelAt, isCompact } from "../lib/timeline.js";
+  import { dayLabelAt, isCompact, justAfter } from "../lib/timeline.js";
   import ChannelMessage from "./ChannelMessage.svelte";
   import InteractionSummary from "./InteractionSummary.svelte";
   import PresenceBar from "./PresenceBar.svelte";
@@ -260,10 +260,12 @@
     }
   }
 
-  // loadOlder extends the timeline backwards one page, using the oldest shown
-  // message's timestamp as the history endpoint's `before` cursor, and keeps
-  // the reader's place: the view is re-anchored so the rows already on screen
-  // stay where they were.
+  // loadOlder extends the timeline backwards one page, from just after the
+  // oldest shown message's timestamp (justAfter — so rows sharing it are not
+  // skipped; the ones already shown are dropped by id), and keeps the reader's
+  // place: the view is re-anchored so the rows already on screen stay where
+  // they were. A full page that brings nothing new (a run of rows sharing one
+  // instant) ends the paging rather than offering the same page forever.
   async function loadOlder() {
     const channel = channelId;
     const token = loadToken;
@@ -276,14 +278,14 @@
     try {
       const { messages: older } = await getChannelHistory(channel, {
         limit: HISTORY_LIMIT,
-        before: oldest.timestamp,
+        before: justAfter(oldest.timestamp),
       });
       if (token !== loadToken) return;
       const unseenOlder = older.filter((m) => !seenIds.has(m.id));
       unseenOlder.forEach((m) => seenIds.add(m.id));
       const before = timelineEl ? timelineEl.scrollHeight - timelineEl.scrollTop : 0;
       messages = [...messages, ...unseenOlder];
-      hasOlder = older.length >= HISTORY_LIMIT;
+      hasOlder = older.length >= HISTORY_LIMIT && unseenOlder.length > 0;
       await tick();
       if (timelineEl && before) {
         timelineEl.scrollTop = timelineEl.scrollHeight - before;
@@ -371,7 +373,7 @@
 
   function jumpToLatest() {
     if (!timelineEl) return;
-    timelineEl.scrollTo?.({ top: timelineEl.scrollHeight, behavior: "smooth" });
+    timelineEl.scrollTop = timelineEl.scrollHeight;
     pinnedToBottom = true;
     unseen = 0;
   }

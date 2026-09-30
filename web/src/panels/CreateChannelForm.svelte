@@ -17,6 +17,7 @@
   // agents/userId — the persona list and the acting principal.
   // onCreated     — called with the created channel ({ id }) so the panel lands in it.
   // onCancel      — collapse the form without creating.
+  import { SvelteMap } from "svelte/reactivity";
   import { createChannel, ApiError } from "../lib/api.js";
   import { isChattable } from "../lib/agents.js";
   import { matchesQuery, byLabel } from "../lib/filter.js";
@@ -33,11 +34,12 @@
   let error = $state("");
 
   // memberChecked/respondById are keyed by agent id; an unset policy falls back
-  // to when_mentioned (the server default), so no seeding.
+  // to when_mentioned (the server default), so no seeding. Maps, not objects: an
+  // agent id such as `constructor` would read an object's built-in property.
   let name = $state("");
   let description = $state("");
-  let memberChecked = $state({});
-  let respondById = $state({});
+  const memberChecked = new SvelteMap();
+  const respondById = new SvelteMap();
 
   // A persona list longer than this gets a filter box. Filtering only hides
   // rows: a persona picked and then filtered out of view stays picked.
@@ -49,8 +51,8 @@
 
   const selectedMembers = $derived(
     personaAgents
-      .filter((a) => memberChecked[a.id])
-      .map((a) => ({ id: a.id, respond: respondById[a.id] ?? "when_mentioned" })),
+      .filter((a) => memberChecked.get(a.id))
+      .map((a) => ({ id: a.id, respond: respondById.get(a.id) ?? "when_mentioned" })),
   );
 
   // The members the create sends: selected personas plus the acting user
@@ -194,9 +196,12 @@
         {:else}
           <div class="member-picks">
             {#each [...shownAgents].sort(byLabel((a) => a.name ?? a.id)) as agent (agent.id)}
-              <div class="member" class:checked={memberChecked[agent.id]}>
+              <div class="member" class:checked={memberChecked.get(agent.id)}>
                 <label>
-                  <input type="checkbox" bind:checked={memberChecked[agent.id]} />
+                  <input
+                    type="checkbox"
+                    bind:checked={() => memberChecked.get(agent.id) ?? false, (v) => memberChecked.set(agent.id, v)}
+                  />
                   <Avatar id={agent.id} label={agent.name ?? agent.id} size={24} />
                   <span class="member-pick-name">{agent.name ?? agent.id}</span>
                   {#if agent.role}<span class="member-pick-role" aria-hidden="true">{agent.role}</span>{/if}
@@ -212,14 +217,14 @@
                   verbatim. Option ORDER below is a UX choice, not the Go declaration
                   order; coverage of the server vocabulary is pinned by the
                   source-parsed lockstep test in ChannelTimeline.create.test.js.
-                  `when_mentioned` MUST stay the first option: respondById[id] is unset
+                  `when_mentioned` MUST stay the first option: respondById's entry is unset
                   until the operator picks, and selectedMembers falls back to
                   "when_mentioned", so the first-shown option has to match that
                   fallback or the select would display one value while sending another.
                 -->
                 <select
                   aria-label={`Respond policy for ${agent.name ?? agent.id}`}
-                  bind:value={respondById[agent.id]}
+                  bind:value={() => respondById.get(agent.id), (v) => respondById.set(agent.id, v)}
                 >
                   <option value="when_mentioned">When mentioned</option>
                   <option value="participant">Participant (salience bid)</option>

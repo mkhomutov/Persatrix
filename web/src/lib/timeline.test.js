@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { dayLabelAt, isCompact } from "./timeline.js";
+import { dayLabelAt, isCompact, justAfter } from "./timeline.js";
 
 // The timeline's grouping rules, in display order (oldest first): a day
 // divider opens each local calendar day, and a consecutive same-sender message
@@ -37,5 +37,28 @@ describe("isCompact", () => {
 
   it("does not guess across an unparseable timestamp", () => {
     expect(isCompact([msg("a", "garbage"), msg("a", at(29, 9, 0))], 1)).toBe(false);
+  });
+});
+
+// The history endpoint's `before` bound is strict, so paging back from the
+// oldest shown message asks for rows before the instant just after it: rows
+// that share its timestamp come back too (the feed drops the ones it shows).
+describe("justAfter", () => {
+  it("adds one nanosecond, keeping the offset", () => {
+    expect(justAfter("2026-06-02T11:11:00Z")).toBe("2026-06-02T11:11:00.000000001Z");
+    expect(justAfter("2026-06-02T11:11:00.5Z")).toBe("2026-06-02T11:11:00.500000001Z");
+    expect(justAfter("2026-06-02T11:11:00.123456789+00:00")).toBe(
+      "2026-06-02T11:11:00.123456790+00:00",
+    );
+  });
+
+  it("carries into the next second", () => {
+    expect(Date.parse(justAfter("2026-06-02T11:11:59.999999999Z"))).toBe(
+      Date.parse("2026-06-02T11:12:00Z"),
+    );
+  });
+
+  it("returns an unparseable value unchanged", () => {
+    expect(justAfter("garbage")).toBe("garbage");
   });
 });

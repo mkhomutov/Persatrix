@@ -39,7 +39,9 @@
   let { userId, canCreate = false, canConfigEdit = false } = $props();
 
   let agents = $state([]);
-  let agentsById = $state({});
+  // id → agent, with no prototype: an agent id such as `constructor` must not
+  // resolve to an object built-in. Replaced whole on each load, never mutated.
+  let agentsById = $state(Object.create(null));
   let agentsLoaded = $state(false);
 
   let channels = $state([]);
@@ -161,7 +163,10 @@
     return listAgents()
       .then((list) => {
         agents = list;
-        agentsById = Object.fromEntries(list.map((a) => [a.id, a]));
+        agentsById = Object.assign(
+          Object.create(null),
+          Object.fromEntries(list.map((a) => [a.id, a])),
+        );
         const remembered = selection.dmAgent;
         if (
           remembered &&

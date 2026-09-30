@@ -19,6 +19,8 @@
   // members    — [{ id, respond, … }] from the list row; sources the chair picker.
   // agentsById — id → agent, for chair display names.
   // onChanged  — async () => …; called after a successful save to refresh siblings.
+  // active     — false while the Details panel is folded: the channel's settings
+  //              load when it is shown, not on every switch made meanwhile.
   import { getChannelConfig, patchChannelConfig, ApiError } from "../lib/api.js";
   import AutonomousSettings from "./AutonomousSettings.svelte";
   import KnobRow from "./KnobRow.svelte";
@@ -30,7 +32,7 @@
     agendaToList,
   } from "../lib/autonomousKnobs.js";
 
-  let { channelId, members = [], agentsById = {}, onChanged } = $props();
+  let { channelId, members = [], agentsById = {}, onChanged, active = true } = $props();
 
   // The flat + nested-reasoning knob registry (order, labels, control types)
   // lives in lib/channelKnobs.js — carved out with the ISSUE-0114 cascade-depth
@@ -173,6 +175,10 @@
   });
 
   const dirty = $derived(pending.length > 0);
+  // Knobs switched to an override but left without a value (a blank number or
+  // pick): the row reads "Overridden on this channel", yet there is nothing to
+  // send — say so, and keep Discard in reach, rather than show "Up to date".
+  const blank = $derived(allKnobs.filter(changed).length - pending.length);
 
   // discard throws the pending edits away, back to the last loaded config.
   function discard() {
@@ -282,9 +288,14 @@
     }
   }
 
-  // Reload whenever the watched channel changes.
+  // Reload whenever the watched channel changes — once the panel is shown. The
+  // form keeps the channel it holds while folded, so folding and showing it
+  // again on the same channel keeps unsaved edits.
+  let loadedFor = null;
   $effect(() => {
     const id = channelId;
+    if (!active || id === loadedFor) return;
+    loadedFor = id;
     load(id);
   });
 </script>
@@ -323,8 +334,10 @@
       <!-- The save bar sticks to the bottom of the rail while the form scrolls,
            so the pending-edit count and Save stay in reach. -->
       <div class="settings-bar" class:dirty>
-        {#if dirty}
-          <span class="unsaved">{pending.length} unsaved change{pending.length === 1 ? "" : "s"}</span>
+        {#if dirty || blank > 0}
+          <span class="unsaved">
+            {#if dirty}{pending.length} unsaved change{pending.length === 1 ? "" : "s"}{/if}{#if dirty && blank > 0}{" · "}{/if}{#if blank > 0}{blank} override{blank === 1 ? "" : "s"} without a value{/if}
+          </span>
           <button type="button" class="btn-sm btn-ghost" onclick={discard} disabled={saving}>Discard</button>
         {:else}
           <span class="unsaved quiet">Up to date</span>

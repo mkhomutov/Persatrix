@@ -32,13 +32,18 @@
   let { channelId, members = [], agents = [], agentsById = {}, userId, onChanged } =
     $props();
 
-  // A roster longer than this gets a filter box (name, id or role).
+  // A roster longer than this gets a filter box (name, id or role). The filter
+  // applies only while its box is shown, so a roster that shrinks below the
+  // threshold is never narrowed by text the operator can no longer see.
   const FILTER_FROM = 7;
   let query = $state("");
+  const filtering = $derived(members.length >= FILTER_FROM);
   const shownMembers = $derived(
-    members.filter((m) =>
-      matchesQuery([m.id, agentsById[m.id]?.name, agentsById[m.id]?.role], query),
-    ),
+    filtering
+      ? members.filter((m) =>
+          matchesQuery([m.id, agentsById[m.id]?.name, agentsById[m.id]?.role], query),
+        )
+      : members,
   );
 
   let addId = $state("");
@@ -55,6 +60,15 @@
   let editingMember = $state(""); // member id being edited ("" = none)
   let editRespond = $state("when_mentioned");
   let editThreshold = $state(null);
+
+  // The rail stays mounted across channel switches, so a new channel starts
+  // with no filter and no editor open — an editor left open would otherwise
+  // save the old channel's values onto the new channel's member.
+  $effect(() => {
+    void channelId;
+    query = "";
+    editingMember = "";
+  });
 
   // Personas not already in the channel are the add candidates. Task agents run
   // workflow steps and never converse, so they are excluded (same rule the
@@ -190,7 +204,7 @@
     <p class="boot error" role="alert">{error}</p>
   {/if}
 
-  {#if members.length >= FILTER_FROM}
+  {#if filtering}
     <label class="card-search">
       <Icon name="search" size={14} />
       <span class="sr-only">Filter members</span>

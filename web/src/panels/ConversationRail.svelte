@@ -15,6 +15,7 @@
   // open          — drawer state on narrow screens.
   // onPickChannel(id) / onPickPersona(id) / onRefresh() / onRefreshAgents() /
   // onNewChannel() / onRequestOpen() / onClose() — the panel's handlers.
+  import { tick } from "svelte";
   import SelectList from "../ui/SelectList.svelte";
   import Icon from "../ui/Icon.svelte";
   import Avatar from "../ui/Avatar.svelte";
@@ -128,18 +129,34 @@
   // ⌘K / Ctrl+K from anywhere focuses the box (and opens the drawer on a narrow
   // screen, where the sidebar is off-canvas) — unless a modal dialog is open,
   // which keeps focus. Escape closes an open drawer, after the box has had its
-  // own Escape. Some keydowns carry no `key` (browser autofill).
+  // own Escape, and leaves it open while a dialog opened from it takes that
+  // Escape. Some keydowns carry no `key` (browser autofill).
   function onWindowKeydown(event) {
     const shortcut = isMac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
-    if (shortcut && !event.altKey && event.key?.toLowerCase() === "k") {
-      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
+    if (shortcut && !event.altKey && isKeyK(event)) {
+      if (modalOpen()) return;
       event.preventDefault();
       onRequestOpen?.();
-      filterEl?.focus();
-      filterEl?.select();
-    } else if (event.key === "Escape" && open && !event.defaultPrevented) {
+      // A drawer that was closed is still `visibility: hidden` until the next
+      // render, and a hidden input cannot take focus.
+      tick().then(() => {
+        filterEl?.focus();
+        filterEl?.select();
+      });
+    } else if (event.key === "Escape" && open && !event.defaultPrevented && !modalOpen()) {
       onClose?.();
     }
+  }
+
+  function modalOpen() {
+    return Boolean(document.querySelector('[role="dialog"][aria-modal="true"]'));
+  }
+
+  // The K key: by its letter on a Latin layout, by its physical key on another
+  // (a Russian layout reports "л" for it).
+  function isKeyK(event) {
+    const key = event.key ?? "";
+    return /^[a-z]$/i.test(key) ? key.toLowerCase() === "k" : event.code === "KeyK";
   }
 
   // Opening the drawer moves focus into it, so keyboard users land in the list

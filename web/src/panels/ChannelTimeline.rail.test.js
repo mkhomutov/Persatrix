@@ -133,6 +133,37 @@ describe("Channels panel — conversation sidebar", () => {
     }
   });
 
+  it("answers Ctrl+K on a non-Latin keyboard layout", async () => {
+    // With a Russian layout the K key reports key "л"; the physical key
+    // (code "KeyK") is what the shortcut means.
+    render(ChannelTimeline, { props: { userId: "local" } });
+    await screen.findByRole("option", { name: "General" });
+    const filter = screen.getByRole("searchbox", { name: /filter conversations/i });
+
+    await fireEvent.keyDown(window, { key: "л", code: "KeyK", ctrlKey: true });
+    expect(document.activeElement).toBe(filter);
+  });
+
+  it("closes only the new-channel dialog on Escape, not the drawer under it", async () => {
+    vi.stubGlobal("matchMedia", (query) => ({ matches: query.includes("max-width") }));
+    try {
+      render(ChannelTimeline, { props: { userId: "local", canCreate: true } });
+      await screen.findByRole("option", { name: "General" });
+      const menu = screen.getByRole("button", { name: /show conversations/i });
+      await fireEvent.click(menu);
+      expect(menu.getAttribute("aria-expanded")).toBe("true");
+
+      await fireEvent.click(screen.getByRole("button", { name: /new channel/i }));
+      await screen.findByRole("dialog");
+      await fireEvent.keyDown(window, { key: "Escape" });
+
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      expect(menu.getAttribute("aria-expanded")).toBe("true");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("does nothing on Enter in an empty box — an open DM stays open", async () => {
     render(ChannelTimeline, { props: { userId: "local" } });
     await screen.findByRole("option", { name: "General" });

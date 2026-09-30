@@ -76,6 +76,22 @@ describe("App shell — theme and shortcuts", () => {
     expect(help.textContent).toMatch(/jump to a conversation/i);
   });
 
+  it("closes the shortcut list on Escape and keeps that Escape to itself", async () => {
+    const { container } = render(App);
+    const help = await waitFor(() => {
+      const el = container.querySelector("details.shortcuts");
+      expect(el).not.toBeNull();
+      return el;
+    });
+    help.open = true;
+    await fireEvent(help, new Event("toggle"));
+
+    // Handled here, so the sidebar drawer's own Escape leaves the drawer open.
+    const notPrevented = await fireEvent.keyDown(window, { key: "Escape" });
+    expect(notPrevented).toBe(false);
+    expect(help.open).toBe(false);
+  });
+
   it("shows the theme switch even when the backend is unreachable", async () => {
     loadBootstrap.mockRejectedValue(new Error("offline"));
     render(App);

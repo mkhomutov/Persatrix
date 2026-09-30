@@ -25,7 +25,7 @@ The **Channels** panel has three columns:
 
 - **The sidebar** on the left lists every conversation you can open: group
   **Channels** first, then **Direct messages** — one row per persona, with a
-  dot for its health (green healthy, amber degraded, red unhealthy). Both lists
+  dot for its health (green healthy, amber degraded, red offline). Both lists
   are sorted by name, and each section folds from its heading. Task agents run
   workflow steps and never chat, so they are listed last and cannot be picked.
 - **The conversation** in the middle: its header, the messages, and the box

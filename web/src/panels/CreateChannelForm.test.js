@@ -108,4 +108,29 @@ describe("CreateChannelForm", () => {
     ]);
     await waitFor(() => expect(onCreated).toHaveBeenCalled());
   });
+
+  it("treats a persona whose id names an object built-in like any other", async () => {
+    // `constructor` is a valid agent id; a plain-object lookup would read
+    // Object.prototype.constructor and show the persona as already picked.
+    createChannel.mockResolvedValue({ id: "group:odd" });
+    renderForm([
+      { id: "constructor", name: "Builder" },
+      { id: "ada", name: "Ada" },
+    ]);
+
+    const builder = screen.getByRole("checkbox", { name: /builder/i });
+    expect(builder.checked).toBe(false);
+
+    await fireEvent.click(builder);
+    await fireEvent.input(screen.getByRole("textbox", { name: /channel name/i }), {
+      target: { value: "odd" },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: /create channel/i }));
+
+    await waitFor(() => expect(createChannel).toHaveBeenCalledTimes(1));
+    expect(createChannel.mock.calls[0][0].members).toEqual([
+      { id: "constructor", respond: "when_mentioned" },
+      { id: "local", respond: "never" },
+    ]);
+  });
 });

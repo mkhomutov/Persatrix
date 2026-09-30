@@ -37,7 +37,7 @@ function configBody() {
   };
 }
 
-function renderSettings() {
+function renderSettings(extra = {}) {
   vi.stubGlobal(
     "fetch",
     vi.fn(() =>
@@ -50,6 +50,7 @@ function renderSettings() {
       members: [{ id: "ada", respond: "always" }],
       agentsById: { ada: { id: "ada", name: "Ada" } },
       onChanged: vi.fn(() => Promise.resolve()),
+      ...extra,
     },
   });
 }
@@ -101,5 +102,61 @@ describe("ChannelSettings layout", () => {
       screen.getByLabelText("Inherit fleet default for Floor control").checked,
     ).toBe(false);
     expect(screen.getByRole("button", { name: /save settings/i }).disabled).toBe(true);
+  });
+
+  it("says an override left without a value will not be saved, and offers Discard", async () => {
+    renderSettings();
+    await screen.findByLabelText("Floor control");
+
+    // The chair has no inherited value, so overriding it leaves a blank pick:
+    // nothing to send, but the row now reads "Overridden on this channel".
+    await fireEvent.click(screen.getByLabelText("Inherit fleet default for Escalation chair"));
+
+    expect(await screen.findByText(/1 override without a value/i)).toBeTruthy();
+    expect(screen.queryByText(/up to date/i)).toBeNull();
+    expect(screen.getByRole("button", { name: /save settings/i }).disabled).toBe(true);
+
+    await fireEvent.click(screen.getByRole("button", { name: /discard/i }));
+    await waitFor(() => expect(screen.getByText(/up to date/i)).toBeTruthy());
+    expect(
+      screen.getByLabelText("Inherit fleet default for Escalation chair").checked,
+    ).toBe(true);
+  });
+});
+
+describe("ChannelSettings while the Details panel is folded", () => {
+  it("loads a channel's settings only once the panel is shown", async () => {
+    const { rerender } = renderSettings({ active: false });
+    await Promise.resolve();
+    expect(fetch).not.toHaveBeenCalled();
+
+    rerender({ active: true });
+    await screen.findByLabelText("Floor control");
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps unsaved edits when folded and shown again on the same channel", async () => {
+    const { rerender } = renderSettings();
+    await screen.findByLabelText("Floor control");
+    await fireEvent.click(screen.getByLabelText("Inherit fleet default for Max cascade depth"));
+    expect(await screen.findByText("1 unsaved change")).toBeTruthy();
+
+    rerender({ active: false });
+    rerender({ active: true });
+
+    expect(screen.getByText("1 unsaved change")).toBeTruthy();
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("loads the channel picked while folded once the panel is shown", async () => {
+    const { rerender } = renderSettings();
+    await screen.findByLabelText("Floor control");
+
+    rerender({ active: false, channelId: "group:ops" });
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    rerender({ active: true });
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    expect(fetch.mock.calls[1][0]).toBe("/api/v1/channels/group%3Aops/config");
   });
 });

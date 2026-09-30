@@ -116,23 +116,34 @@ export async function getChatHistory(agentID, { userId, limit, before } = {}) {
 
 // listChannels fetches EVERY channel the conversation list offers
 // (GET /api/v1/channels) and returns them in one `{channels}` envelope. The
-// server pages by 50 in channel-id order and returns a `next_cursor` while more
-// rows exist (ISSUE-0015, channel_types.go); DM ids (`dm:…`) sort ahead of
-// group ids (`group:…`), so reading only the first page hid every group channel
-// once a deployment held 50 DMs. The walk follows the cursor to the last page,
-// stops if a cursor fails to advance, and is bounded by MAX_CHANNEL_PAGES
-// (2 000 channels) so a misbehaving server cannot spin it forever.
+// server pages in channel-id order and returns a `next_cursor` while more rows
+// exist (ISSUE-0015, channel_types.go); DM ids (`dm:…`) sort ahead of group ids
+// (`group:…`), so reading only the first page hid every group channel once a
+// deployment held a page of DMs. The walk asks for the server's largest page
+// (CHANNEL_PAGE_LIMIT, its channelMaxLimit) so one request usually covers
+// everything — each request spends the console's per-agent rate limit, which
+// its live polling shares — and follows the cursor to the last page. It stops
+// if a cursor fails to advance, lists each channel id once, and is bounded by
+// MAX_CHANNEL_PAGES (40 000 channels) so a misbehaving server cannot spin it
+// forever.
+const CHANNEL_PAGE_LIMIT = 1000;
 const MAX_CHANNEL_PAGES = 40;
 
 export async function listChannels() {
   const channels = [];
+  const seen = new Set();
   let cursor = "";
   for (let page = 0; page < MAX_CHANNEL_PAGES; page++) {
     const path = cursor
-      ? `/api/v1/channels?cursor=${encodeURIComponent(cursor)}`
-      : "/api/v1/channels";
+      ? `/api/v1/channels?limit=${CHANNEL_PAGE_LIMIT}&cursor=${encodeURIComponent(cursor)}`
+      : `/api/v1/channels?limit=${CHANNEL_PAGE_LIMIT}`;
     const body = await getJSON(path);
-    channels.push(...(body?.channels ?? []));
+    for (const channel of body?.channels ?? []) {
+      if (!seen.has(channel.id)) {
+        seen.add(channel.id);
+        channels.push(channel);
+      }
+    }
     const next = body?.next_cursor ?? "";
     if (!next || next === cursor) {
       break;

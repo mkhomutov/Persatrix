@@ -282,7 +282,7 @@ describe("Channel creation affordance", () => {
 
   // Order is a deliberate web UX choice (NOT the Go declaration order):
   // `when_mentioned` MUST be first so the unset-fallback in CreateChannelForm
-  // (`respondById[id] ?? "when_mentioned"`) matches the option the browser
+  // (`respondById.get(id) ?? "when_mentioned"`) matches the option the browser
   // shows for an untouched select — otherwise the form would display one value
   // while sending another. Coverage of the vocabulary is pinned separately by
   // the source-parsed guard above.

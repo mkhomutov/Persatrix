@@ -90,8 +90,10 @@
     }
   }
 
+  // The Escape is spent here, so the sidebar drawer under the list stays open.
   function onWindowKey(event) {
     if (event.key === "Escape" && shortcutsOpen) {
+      event.preventDefault();
       shortcutsOpen = false;
     }
   }
