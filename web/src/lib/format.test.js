@@ -4,6 +4,9 @@ import {
   channelLabel,
   isDMChannel,
   senderLabel,
+  formatTime,
+  dayKey,
+  formatDayLabel,
 } from "./format.js";
 
 // Pure display-formatting helpers shared by the Chat and ChannelTimeline panels.
@@ -74,5 +77,71 @@ describe("senderLabel", () => {
 
   it("falls back to the raw id for an unknown sender", () => {
     expect(senderLabel("ghost", userId, agentsById)).toBe("ghost");
+  });
+});
+
+// Day grouping + short times for the conversation timeline: the feed draws a
+// divider per local calendar day and shows a compact time on each row (the full
+// date-time rides the row's tooltip). Dates are built from local-time parts so
+// the assertions hold in any runner timezone.
+describe("formatTime", () => {
+  it("renders a short local time, not the raw ISO string", () => {
+    const ts = new Date(2026, 8, 29, 15, 25).toISOString();
+    const out = formatTime(ts);
+    expect(out).toMatch(/25/);
+    expect(out).not.toMatch(/\dT\d/);
+    expect(out.length).toBeLessThan(12);
+  });
+
+  it("falls back to the raw string for an unparseable value", () => {
+    expect(formatTime("not-a-date")).toBe("not-a-date");
+  });
+});
+
+describe("dayKey", () => {
+  it("is equal for two times on the same local day", () => {
+    const a = new Date(2026, 8, 29, 0, 5).toISOString();
+    const b = new Date(2026, 8, 29, 23, 55).toISOString();
+    expect(dayKey(a)).toBe(dayKey(b));
+  });
+
+  it("differs across local midnight", () => {
+    const a = new Date(2026, 8, 28, 23, 59).toISOString();
+    const b = new Date(2026, 8, 29, 0, 1).toISOString();
+    expect(dayKey(a)).not.toBe(dayKey(b));
+  });
+
+  it("is empty for an unparseable value", () => {
+    expect(dayKey("nope")).toBe("");
+  });
+});
+
+describe("formatDayLabel", () => {
+  const now = new Date(2026, 8, 29, 12, 0);
+
+  it("names today and yesterday", () => {
+    expect(formatDayLabel(new Date(2026, 8, 29, 8).toISOString(), now)).toBe(
+      "Today",
+    );
+    expect(formatDayLabel(new Date(2026, 8, 28, 22).toISOString(), now)).toBe(
+      "Yesterday",
+    );
+  });
+
+  it("spells out an older date with its day of the month", () => {
+    const label = formatDayLabel(new Date(2026, 8, 21, 9).toISOString(), now);
+    expect(label).not.toMatch(/today|yesterday/i);
+    expect(label).toMatch(/21/);
+  });
+
+  it("adds the year only for a date outside the current year", () => {
+    const old = formatDayLabel(new Date(2025, 0, 3).toISOString(), now);
+    expect(old).toMatch(/2025/);
+    const recent = formatDayLabel(new Date(2026, 1, 3).toISOString(), now);
+    expect(recent).not.toMatch(/2026/);
+  });
+
+  it("is empty for an unparseable value", () => {
+    expect(formatDayLabel("nope", now)).toBe("");
   });
 });

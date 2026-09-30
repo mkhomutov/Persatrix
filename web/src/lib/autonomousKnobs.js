@@ -10,21 +10,44 @@
 // topic/goal strings — the flat knobs only had bool/int/enum/chair) and `list` (the
 // multiline agenda, a `[]string` on the wire). `convener` is a member picker like
 // the chair, but over its own candidate set.
+// Each also carries the one-line `hint` the settings form shows under it.
 export const AUTONOMOUS_KNOBS = [
   {
     key: "autonomous.enabled",
     label: "Autonomous (human-free) mode",
     type: "bool",
+    hint: "Personas hold the discussion on their own, with no human in the loop.",
   },
-  { key: "autonomous.topic", label: "Topic", type: "text" },
+  {
+    key: "autonomous.topic",
+    label: "Topic",
+    type: "text",
+    hint: "What the discussion is about.",
+  },
   {
     key: "autonomous.agenda",
     label: "Agenda (one item per line)",
     type: "list",
+    hint: "Sub-topics to cover, in order.",
   },
-  { key: "autonomous.convener", label: "Convener", type: "convener" },
-  { key: "autonomous.goal", label: "Goal", type: "text" },
-  { key: "autonomous.max_rounds", label: "Max rounds", type: "int" },
+  {
+    key: "autonomous.convener",
+    label: "Convener",
+    type: "convener",
+    hint: "The member who writes the opening turn.",
+  },
+  {
+    key: "autonomous.goal",
+    label: "Goal",
+    type: "text",
+    hint: "What a finished discussion should produce.",
+  },
+  {
+    key: "autonomous.max_rounds",
+    label: "Max rounds",
+    type: "int",
+    hint: "Hard limit on discussion rounds.",
+  },
 ];
 
 // agendaToText renders the wire value (a JSON string array) as the newline-joined

@@ -677,7 +677,7 @@ unchanged — this is a read surface, not a new synthesis step.
 
 - **Web console** — the conversation view renders an "interaction closed"
   affordance below the live turns, carrying the summary and the close trigger
-  (see [web-console.md §"The conversation panel"](web-console.md#the-conversation-panel)).
+  (see [web-console-conversations.md §"The conversation panel"](web-console-conversations.md#the-conversation-panel)).
 - **CLI** — read a persona's closed-interaction summaries newest-first:
 
   ```bash

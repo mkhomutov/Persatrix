@@ -141,9 +141,7 @@ describe("Channel timeline — live presence", () => {
     await fireEvent.click(screen.getByRole("button", { name: /post/i }));
     expect(await screen.findByText(/ember owl is thinking/i)).toBeTruthy();
 
-    await fireEvent.change(screen.getByRole("combobox", { name: /channel/i }), {
-      target: { value: "random" },
-    });
+    await fireEvent.click(screen.getByRole("option", { name: "Random" }));
 
     await waitFor(() =>
       expect(screen.queryByText(/ember owl is thinking/i)).toBeNull(),

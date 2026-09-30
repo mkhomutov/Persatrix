@@ -1,10 +1,10 @@
 // Channel member-roster writes (RFC 0011 §C add/remove + RFC 0050 member-config
 // edit). Split out of api.js so that module stays under the repo's file-size cap;
 // the member *tests* already live in their own api.members.test.js. All three
-// answer 204 No Content and reuse api.js's sendNoBody (shared error contract: the
+// answer 204 No Content and reuse http.js's sendNoBody (shared error contract: the
 // server's {error, code} envelope on a non-2xx, a status-0 ApiError on transport
 // failure), so they parse no success body.
-import { sendNoBody } from "./api.js";
+import { sendNoBody } from "./http.js";
 
 // addChannelMember adds a participant to an existing channel
 // (POST /api/v1/channels/{id}/members → 204). `respond` is one of the

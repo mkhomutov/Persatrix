@@ -77,7 +77,7 @@ describe("Channels panel — merged onboarding (§D)", () => {
     render(ChannelTimeline, { props: { userId: "local" } });
 
     expect(
-      await screen.findByRole("combobox", { name: /persona/i }),
+      await screen.findByRole("listbox", { name: /persona/i }),
     ).toBeTruthy();
     expect(screen.queryByText(/no personas or channels/i)).toBeNull();
   });
@@ -90,7 +90,7 @@ describe("Channels panel — merged onboarding (§D)", () => {
     render(ChannelTimeline, { props: { userId: "local" } });
 
     expect(
-      await screen.findByRole("combobox", { name: /channel/i }),
+      await screen.findByRole("listbox", { name: /channel/i }),
     ).toBeTruthy();
     expect(screen.queryByText(/no personas or channels/i)).toBeNull();
   });
@@ -113,7 +113,7 @@ describe("Channels panel — merged onboarding (§D)", () => {
     ).toBeTruthy();
     // Not the merged dead end, and no persona picker to mislead the operator.
     expect(screen.queryByText(/no personas or channels/i)).toBeNull();
-    expect(screen.queryByRole("combobox", { name: /persona/i })).toBeNull();
+    expect(screen.queryByRole("listbox", { name: /persona/i })).toBeNull();
   });
 
   it("Refresh re-checks agents so a late-registering persona becomes pickable", async () => {
@@ -132,7 +132,7 @@ describe("Channels panel — merged onboarding (§D)", () => {
 
     // The picker now renders (persona registered) and the hint is gone.
     expect(
-      await screen.findByRole("combobox", { name: /persona/i }),
+      await screen.findByRole("listbox", { name: /persona/i }),
     ).toBeTruthy();
     expect(screen.queryByText(/no personas are registered/i)).toBeNull();
   });

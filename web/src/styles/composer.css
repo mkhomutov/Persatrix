@@ -1,0 +1,180 @@
+/* The docked composer (RFC 0048 console): the message card shared by the
+   group publish and the DM send, its action row, the character counter and
+   the DM scope popover. Consumes the tokens app.css defines. */
+
+/* ---------- Composer ---------- */
+
+.composer-dock {
+  flex: none;
+  padding: 0.25rem 1.25rem 1rem;
+}
+
+.composer-dock .boot.error,
+.feed-area .boot.error {
+  margin: 0 0 0.5rem;
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  max-width: none;
+  background: var(--danger-soft);
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+  border-radius: var(--radius-sm);
+  font-size: 0.82rem;
+}
+
+/* Composer card (DM + group publish share the shape). */
+.composer,
+.publish {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.composer:focus-within,
+.publish:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--ring);
+}
+
+.composer label,
+.publish label {
+  display: flex;
+  flex-direction: column;
+}
+
+.composer textarea,
+.publish textarea {
+  border: none;
+  background: transparent;
+  padding: 0.7rem 0.85rem 0.3rem;
+  resize: none;
+  field-sizing: content;
+  max-height: 12rem;
+  min-height: 2.75rem;
+  box-shadow: none;
+  line-height: 1.5;
+}
+
+.composer textarea:focus,
+.publish textarea:focus {
+  box-shadow: none;
+}
+
+.composer-note {
+  margin: 0 0.85rem 0.35rem;
+}
+
+.composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.35rem 0.45rem 0.45rem 0.6rem;
+}
+
+.composer-hint {
+  margin-left: auto;
+  font-size: 0.7rem;
+  color: var(--text-subtle);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.composer-hint kbd {
+  font-size: 0.64rem;
+}
+
+.char-count {
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.char-count.over {
+  color: var(--danger);
+  font-weight: 650;
+}
+
+.composer-actions button[type="submit"] {
+  min-width: 5rem;
+  border-radius: 9px;
+}
+
+/* Scope selector: a compact disclosure that pops above the composer. */
+.overrides {
+  position: relative;
+  font-size: 0.85rem;
+}
+
+.overrides summary {
+  list-style: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 550;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.1rem 0.65rem;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.overrides summary::-webkit-details-marker {
+  display: none;
+}
+
+.overrides[open] summary,
+.overrides summary:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+  background: var(--surface-muted);
+}
+
+.overrides-body {
+  position: absolute;
+  bottom: calc(100% + 0.6rem);
+  left: 0;
+  z-index: 20;
+  width: 18rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.85rem;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-pop);
+}
+
+.overrides-body label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.overrides-body :is(select, input) {
+  font-size: 0.85rem;
+  font-weight: 400;
+}
+
+.new-session {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.4rem;
+}
+
+.new-session label {
+  flex: 1;
+}
+
+.new-session input {
+  width: 100%;
+}

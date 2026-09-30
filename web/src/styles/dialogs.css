@@ -1,0 +1,246 @@
+/* Dialogs and first-contact states (RFC 0048 console): the new-channel
+   dialog and the onboarding on-ramp. Consumes the tokens app.css defines. */
+
+/* ---------- New-channel dialog ---------- */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: light-dark(rgba(20, 22, 29, 0.38), rgba(0, 0, 0, 0.62));
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 8vh 1rem 1rem;
+  overflow-y: auto;
+  animation: fade-in 140ms ease;
+}
+
+.modal {
+  width: 100%;
+  max-width: 32rem;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop);
+  animation: pop-in 180ms var(--ease);
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+}
+
+.modal-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 1.1rem 1rem 0.9rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-icon {
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.modal-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.modal-sub {
+  margin: 0.1rem 0 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.modal-close {
+  margin-left: auto;
+}
+
+.create-channel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 1.1rem 1.25rem 1.25rem;
+}
+
+.create-channel > label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.create-channel > label input {
+  font-weight: 400;
+}
+
+.create-channel .preview {
+  margin: -0.45rem 0 0;
+  font-size: 0.76rem;
+  color: var(--text-muted);
+}
+
+.create-channel .members {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.7rem 0.7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  min-width: 0;
+}
+
+.create-channel .members legend {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  padding: 0 0.3rem;
+}
+
+.legend-count {
+  font-weight: 500;
+  color: var(--text-subtle);
+  margin-left: 0.25rem;
+}
+
+.member-picks {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  max-height: 16rem;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.create-channel .member {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.3rem 0.4rem;
+  border-radius: var(--radius-sm);
+}
+
+.create-channel .member:hover,
+.create-channel .member.checked {
+  background: var(--surface-muted);
+}
+
+.create-channel .member label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  flex: 1;
+  cursor: pointer;
+  font-size: 0.86rem;
+}
+
+.member-pick-name {
+  font-weight: 550;
+  white-space: nowrap;
+}
+
+.member-pick-role {
+  font-size: 0.75rem;
+  color: var(--text-subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.create-channel .member select {
+  font-size: 0.78rem;
+  min-height: 1.8rem;
+  padding-top: 0.15rem;
+  padding-bottom: 0.15rem;
+  max-width: 11rem;
+}
+
+.modal-note {
+  margin: -0.2rem 0 0;
+  font-size: 0.76rem;
+  color: var(--text-muted);
+}
+
+.create-actions {
+  display: flex;
+  flex-direction: row-reverse;
+  justify-content: flex-start;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+/* ---------- Onboarding / empty states ---------- */
+
+.onboarding {
+  margin: auto;
+  max-width: 32rem;
+  text-align: center;
+  padding: 2rem 1.25rem;
+  color: var(--text-muted);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.onboarding-icon {
+  width: 3.25rem;
+  height: 3.25rem;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+  background: var(--accent-soft);
+  margin-bottom: 0.5rem;
+}
+
+.onboarding .onboarding-title {
+  margin: 0.25rem 0 0;
+  font-size: 1.1rem;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.onboarding code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  color: var(--text);
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0.05rem 0.35rem;
+}
+
+.onboarding-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 0.5rem;
+}
+
+.onboarding .retry {
+  margin-top: 0;
+}

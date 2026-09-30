@@ -197,7 +197,7 @@ message, and send it.
 **Expected Result**: A "thinking…" affordance, then the persona's reply renders.
 
 **Verification**:
-- [ ] The persona picker is populated from the live agent list.
+- [ ] The sidebar's persona list is populated from the live agent list.
 - [ ] Sending a message shows a pending state, then the `reply`.
 - [ ] The outgoing request carries the `/ui/context`-derived `user_id` and `participant_type:"user"` (inspect in browser network tools).
 

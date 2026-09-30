@@ -1,0 +1,278 @@
+/* The conversation sidebar (RFC 0048 console): the "Jump to…" box, the
+   foldable Channels / Direct messages sections and their list rows, and the
+   acting-identity foot. On narrow screens it becomes a drawer
+   (styles/responsive.css). Consumes the tokens app.css defines. */
+
+/* ---------- Conversation sidebar ---------- */
+
+.rail {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-sunken);
+  border-right: 1px solid var(--border);
+}
+
+.rail-top {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.75rem 0.6rem 0.5rem 0.75rem;
+}
+
+.rail-search {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  color: var(--text-subtle);
+}
+
+.rail-search > .icon {
+  position: absolute;
+  left: 0.6rem;
+  pointer-events: none;
+}
+
+.rail-search input {
+  width: 100%;
+  min-height: 2rem;
+  padding: 0.3rem 2.6rem 0.3rem 1.95rem;
+  font-size: 0.82rem;
+  background: var(--surface);
+}
+
+.rail-search input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.rail-search kbd {
+  position: absolute;
+  right: 0.45rem;
+  pointer-events: none;
+}
+
+.rail-search:focus-within kbd {
+  opacity: 0;
+}
+
+@media (hover: none) {
+  .rail-search kbd {
+    display: none;
+  }
+}
+
+/* Shown only when the sidebar is a drawer (styles/responsive.css). */
+.rail-close,
+.drawer-scrim {
+  display: none;
+}
+
+.rail-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.25rem 0.5rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  scrollbar-width: thin;
+}
+
+.rail-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.rail-head {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding-right: 0.15rem;
+}
+
+.rail-toggle {
+  flex: 1;
+  justify-content: flex-start;
+  gap: 0.3rem;
+  min-height: 1.75rem;
+  padding: 0.15rem 0.35rem;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.rail-toggle:hover:not(:disabled) {
+  background: transparent;
+  color: var(--text);
+}
+
+/* While a filter forces the sections open, folding waits — keep the heading
+   looking like a heading rather than a greyed-out control. */
+.rail-toggle:disabled {
+  opacity: 1;
+  cursor: default;
+}
+
+/* The drawer takes focus as a whole when it opens; the rows show focus. */
+.rail:focus {
+  outline: none;
+}
+
+.rail-toggle .icon {
+  transition: transform 140ms var(--ease);
+}
+
+.rail-toggle[aria-expanded="false"] .icon {
+  transform: rotate(-90deg);
+}
+
+.rail-count {
+  margin-left: 0.15rem;
+  font-weight: 550;
+  letter-spacing: 0;
+  color: var(--text-subtle);
+}
+
+.select-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.select-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-height: 2rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+  --dot-ring: var(--surface-sunken);
+  transition:
+    background 100ms ease,
+    color 100ms ease;
+}
+
+.select-row:hover {
+  background: var(--surface-muted);
+  color: var(--text);
+  --dot-ring: var(--surface-muted);
+}
+
+.select-row.selected {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  --dot-ring: var(--accent-soft);
+}
+
+.select-row.selected .row-name {
+  font-weight: 650;
+}
+
+/* The selected tint is darker than the rail, so its small meta text steps up
+   a shade to keep 4.5:1. */
+.select-row.selected :is(.row-sub, .row-meta) {
+  color: var(--text-muted);
+}
+
+.select-row.disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.select-row.disabled:hover {
+  background: transparent;
+}
+
+.select-row:focus-visible {
+  outline-offset: -2px;
+}
+
+.row-icon {
+  display: grid;
+  place-items: center;
+  width: 1.4rem;
+  flex: none;
+  opacity: 0.75;
+}
+
+.row-name {
+  min-width: 0;
+  flex: 0 1 auto;
+  font-size: 0.86rem;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-sub {
+  min-width: 0;
+  flex: 1 1 0;
+  font-size: 0.75rem;
+  color: var(--text-subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-meta {
+  margin-left: auto;
+  font-size: 0.7rem;
+  color: var(--text-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+.row-chip {
+  margin-left: auto;
+  font-size: 0.66rem;
+}
+
+.select-list-empty,
+.no-personas {
+  margin: 0.15rem 0.55rem 0.35rem;
+  font-size: 0.78rem;
+  color: var(--text-subtle);
+}
+
+.no-personas .retry {
+  margin-top: 0.5rem;
+  display: flex;
+}
+
+.no-personas code {
+  font-size: 0.72rem;
+}
+
+.rail-foot {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0.65rem 0.9rem;
+  border-top: 1px solid var(--border);
+}
+
+.identity {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.identity code {
+  font-family: var(--font-mono);
+  color: var(--text);
+  font-weight: 600;
+}
