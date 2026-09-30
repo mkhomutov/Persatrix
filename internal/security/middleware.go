@@ -27,7 +27,7 @@ const (
 	AgentIDMetadataKey = "x-agent-id"
 
 	// ConsoleAgentID is the self-reported X-Agent-ID the web console
-	// attaches to every request (web/src/lib/api.js CONSOLE_AGENT_ID). The
+	// attaches to every request (web/src/lib/http.js CONSOLE_AGENT_ID). The
 	// server names it here so the orchestrator can wire it as a circuit-
 	// breaker exemption (CircuitBreakerConfig.ExemptAgentIDs). The console
 	// shares the per-agent rate limiter — it gets its own bucket, distinct

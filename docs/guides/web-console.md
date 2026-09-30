@@ -26,10 +26,7 @@ behind the `--enable-ui` flag (**default off**).
 - [What it is](#what-it-is)
 - [Quick start (local binary)](#quick-start-local-binary)
 - [Quick start (Docker demo)](#quick-start-docker-demo)
-- [The conversation panel](#the-conversation-panel)
-  - [Direct-message a persona](#direct-message-a-persona)
-  - [Watch a group channel](#watch-a-group-channel)
-- [Creating a channel](#creating-a-channel)
+- [Using the console](#using-the-console)
 - [Channel settings — edit governance from the browser](#channel-settings--edit-governance-from-the-browser)
 - [The feature-toggle model (`config/ui.yaml`)](#the-feature-toggle-model-configuiyaml)
 - [Security — exposure beyond localhost](#security--exposure-beyond-localhost)
@@ -134,136 +131,12 @@ publish or the bind address.
 
 ---
 
-## The conversation panel
+## Using the console
 
-The console has **one** conversation surface — the **Channels** panel. A chat
-*is* a `dm:` channel server-side (`GetOrCreateDM`), so both kinds of conversation
-live on one panel: **direct messages** with a single persona and **group
-channels** where personas interact. (The earlier separate "Chat" panel was
-retired — [RFC 0048 chat-panel-retirement amendment](../rfcs/0048-amendment-chat-panel-retirement.md).)
-
-### Direct-message a persona
-
-The hero moment — talk to a persona over the synchronous chat API:
-
-1. Pick a persona from the **persona picker** in the sidebar's **Direct
-   message** section (`GET /api/v1/agents`). The conversation opens with a persona header
-   (name — role — capabilities); a reload resumes the persisted history.
-2. Type a message and send it (`POST /api/v1/agents/{id}/chat` with
-   `participant_type:"user"` and the console's `user_id` — the `/ui/context`
-   principal, or the [acting as](#what-it-is) value). A
-   "thinking…" affordance shows until the reply lands (an in-flight turn is
-   cancellable), then the turn appears on the timeline.
-
-**Optional session / epoch selectors** pass `session_id` / `epoch_id` through
-to the request, so you can demonstrate the v0.3.5 isolation story from the
-browser: switch the [epoch](epochs.md) and the same persona answers from a
-clean slate; switch the [session](sessions.md) and it answers from a different
-room's memory. Leave them unset for the default room.
-
-Over-length messages are caught client-side (the server's 4 000-character
-limit) and server errors surface as a user-visible message, not a crashed
-panel.
-
-### Watch a group channel
-
-1. Pick a channel from the **channel picker** (`GET /api/v1/channels`; DMs are
-   reached through the persona picker, so the channel picker lists group
-   channels only).
-2. History renders newest-first (`GET /api/v1/channels/{id}/messages`).
-3. The timeline stays **live by polling** (no channel push API exists yet —
-   [OQ4](../rfcs/0048-operator-tester-web-console.md#open-questions) is deferred):
-   a bounded interval appends new messages, **pauses when the tab is
-   backgrounded** (Page Visibility API), **backs off on errors**, and
-   **de-dupes** by polling the head against the last-seen message id rather than
-   re-rendering the whole history each tick — so an idle tab does not hammer the
-   localhost surface.
-4. **Optional human publish** (`POST /api/v1/channels/{id}/messages`) posts into
-   a group channel; the [RFC 0011](../rfcs/0011-channels-bridges.md) mention
-   fan-out surfaces the agent replies on the next poll.
-
-### The interaction-summary affordance (v0.3.8)
-
-When a conversation **closes** — a group brainstorm ends on a Layer 4 end-vote,
-trips the Layer 1 cost ceiling, or goes idle — the conversation view renders an
-**"interaction closed" affordance** below the live turns, carrying the
-[RFC 0020](../rfcs/0020-interaction-lifecycle.md) one-per-interaction **summary**
-and the close trigger (*went idle* / *ended* / *cost limit reached*): a
-terminated brainstorm hands back a readable synthesis, not just a stop.
-
-It is **additive and self-fetching** — the affordance appears only at close
-(reading `GET /api/v1/agents/{id}/interactions/closed`, merged across the
-channel's participants); a failed on-close summariser shows an honest
-"summary unavailable" state. The same summary is readable from the terminal
-via `persatrix agent interactions <agent>` (see
-[channels.md §"The interaction-summary surface"](channels.md#the-interaction-summary-surface-rfc-0020--v038)).
-
----
-
-## Creating a channel
-
-The Channels panel can also **create** a group channel from the browser — so you
-can spin one up, drop two personas in it, and watch them interact without leaving
-the console for the CLI or hand-editing
-[`config/channels.yaml`](../../config/channels.yaml). It surfaces the existing
-`POST /api/v1/channels` endpoint; **no new backend surface is added**
-([RFC 0048 channel-creation amendment](../rfcs/0048-amendment-channel-creation.md)).
-
-It is **on by default** when the console is running with channels wired. It is a
-**structural write before auth** under the default `auth.mode: disabled`
-(`operator`-gated under `enabled`), so read the
-[Security](#security--exposure-beyond-localhost) note before exposing the
-console beyond localhost. To **hide** the affordance, set `create_enabled: false`
-under the `channel_timeline` panel in [`config/ui.yaml`](../../config/ui.yaml):
-
-```yaml
-panels:
-  channel_timeline:
-    enabled: true
-    create_enabled: false   # default true — set false to hide channel creation
-```
-
-**It renders only when two conditions hold:**
-
-1. **`create_enabled` is on** (the default; the snippet above turns it off).
-
-2. **Channels are wired.** Just like the panel's own `available` flag, the
-   create affordance's `create.available` is **runtime-derived** — true only when
-   the channel store is wired. With channels unconfigured the button stays hidden
-   even with the toggle on. (`create.available` is never authored; an
-   `available:` key in the YAML is a `make validate` error.)
-
-**Using it.** In the sidebar's **Channels** section, click **New channel**
-(a modal form opens). Enter a name (the server derives the canonical
-`group:<name>` id, shown read-only — do not type the prefix yourself), an
-optional description, and pick members — **only persona agents** are listed
-(task agents never hold a conversation), each with a respond policy
-(`when_mentioned` (default) / `always` / `never`). On success the picker
-reloads and selects the channel you made.
-
-   **You are added automatically.** The acting user (the `/ui/context` principal,
-   or the [acting as](#what-it-is) value) joins the new channel with
-   `respond: never` — a poster must be a member, and `never` means you can
-   publish immediately without ever being dispatched a turn.
-
-> **Group channels only.** To start a **DM**, use the **persona picker**
-> ([Direct-message a persona](#direct-message-a-persona)) — DMs and threads are
-> created implicitly on first message
-> ([RFC 0011](../rfcs/0011-channels-bridges.md)); there is nothing to "create".
-
-**Verify the toggle is live:**
-
-```bash
-curl -s http://localhost:8080/api/v1/ui/config | jq '.panels.channel_timeline'
-# want: { "enabled": true, "available": true,
-#         "create": { "enabled": true, "available": true } }
-```
-
-Both must be `true` for the affordance to render — the same
-`enabled && available` rule every panel follows.
-
-> **Scope.** Channel **deletion** and post-create membership editing are not in
-> Slice 1.
+Open the **Channels** panel to talk to a persona or watch a group channel. The
+sidebar lists every conversation, and **⌘K** (**Ctrl+K**) jumps to one by name;
+you can also create a group channel there. How to use each part:
+[Web Console — Conversations](web-console-conversations.md).
 
 ---
 
@@ -358,9 +231,10 @@ a browser*. The mitigations it ships with:
   your network. Docker publishes a mapping without an address (`8080:8080`) on
   every interface. `docker compose port orchestrator 8080` should print
   `127.0.0.1:8080`.
-- **The console is read-mostly.** Slice 1's writes are chat, the optional channel
-  publish, and [group-channel creation](#creating-a-channel), all against existing
-  endpoints. Channel creation is a deliberate, signed-off
+- **The console is read-mostly.** Its writes are chat, the optional channel
+  publish, [group-channel creation](web-console-conversations.md#creating-a-channel),
+  member and [channel settings](web-console-channel-settings.md) edits, Convene,
+  and new sessions from the DM scope selector, all against existing endpoints. Channel creation is a deliberate, signed-off
   **structural-write-before-auth** carve-out adding **zero new reachability**
   (`POST /api/v1/channels` is already exposed; the console changes
   *discoverability*, not *reachability*); set `create_enabled: false` to hide
@@ -403,7 +277,7 @@ Deferred by RFC decision (2026-06-02); each is its own later slice
 | The console shows a "run `make ui`" placeholder | The binary was built without the real bundle (`go build` / `make build-orchestrator` alone embeds the placeholder). Run `make ui` first, or use `make run-ui` / the Docker image. |
 | Every asset 404s under `/ui/` | A bundle built without Vite's `base: "/ui/"`. Use `make ui` (configured correctly); do not hand-build. |
 | The Channel-timeline panel is missing | `channel_timeline.available` is false — channels are not wired. Check the channel config; the panel hides itself when its subsystem is absent. |
-| The **New channel** button is missing | The create affordance needs **both** `channel_timeline.create_enabled: true` (the default — confirm it wasn't set false) **and** `create.available: true` (the channel store is wired). Confirm with `curl -s localhost:8080/api/v1/ui/config \| jq '.panels.channel_timeline.create'`. See [Creating a channel](#creating-a-channel). |
+| The **+** (**New channel**) button beside **Channels** is missing | The create affordance needs **both** `channel_timeline.create_enabled: true` (the default — confirm it wasn't set false) **and** `create.available: true` (the channel store is wired). Confirm with `curl -s localhost:8080/api/v1/ui/config \| jq '.panels.channel_timeline.create'`. See [Creating a channel](web-console-conversations.md#creating-a-channel). |
 | The login form reappears after a successful login, no error (`auth.mode: enabled`) | Plain HTTP on a non-loopback origin — the browser silently drops the `Secure` session cookie. Serve the console over HTTPS or use `http://localhost`. See the [auth guide](auth.md#https-is-required-beyond-localhost). |
 | Logged in, but a write (channel create/edit) answers 403 | The account's role is `user`; mutations need `operator`. See the [auth guide](auth.md#the-role-gate). |
 | Creating a channel fails with a conflict | A `group:<name>` with that name already exists (`409`). Pick a different name; the form keeps your entries so you can retry. |

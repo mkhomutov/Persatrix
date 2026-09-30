@@ -1,0 +1,144 @@
+/* The narrow layout (RFC 0048 console): below 1180px the management rail
+   overlays the conversation; below 860px the sidebar becomes a drawer; below
+   640px the topbar wraps. Last in the import order so it overrides. */
+
+/* ---------- Narrow layout: drawers ---------- */
+
+@media (max-width: 1180px) {
+  /* The management rail overlays the conversation instead of squeezing it. */
+  .workspace.with-details {
+    grid-template-columns: var(--rail-w) minmax(0, 1fr);
+  }
+
+  .details-rail {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 25;
+    width: min(var(--details-w), 92vw);
+    box-shadow: var(--shadow-pop);
+    animation: slide-left 180ms var(--ease);
+  }
+}
+
+@media (max-width: 860px) {
+  .workspace,
+  .workspace.with-details {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* The sidebar becomes a drawer, opened from the header's menu button. */
+  /* Closed, the drawer is also `visibility: hidden` — out of the Tab order and
+     the accessibility tree, not just off-screen — flipped after the slide-out
+     so the animation still shows. */
+  .rail {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 30;
+    width: min(20rem, 86vw);
+    transform: translateX(-102%);
+    visibility: hidden;
+    transition:
+      transform 200ms var(--ease),
+      visibility 0s linear 200ms;
+    box-shadow: var(--shadow-pop);
+  }
+
+  .rail.open {
+    transform: none;
+    visibility: visible;
+    transition:
+      transform 200ms var(--ease),
+      visibility 0s;
+  }
+
+  .rail-close,
+  .nav-toggle {
+    display: inline-flex;
+  }
+
+  .drawer-scrim {
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: 29;
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    background: light-dark(rgba(20, 22, 29, 0.32), rgba(0, 0, 0, 0.55));
+    cursor: default;
+    animation: fade-in 160ms ease;
+  }
+
+  .drawer-scrim:hover:not(:disabled) {
+    background: light-dark(rgba(20, 22, 29, 0.32), rgba(0, 0, 0, 0.55));
+  }
+
+  .convo-bar {
+    padding-left: 0.6rem;
+  }
+
+  .face-stack,
+  .persona-caps,
+  .composer-hint {
+    display: none;
+  }
+
+  .composer-dock {
+    padding: 0.25rem 0.6rem 0.6rem;
+  }
+
+  /* The hint is hidden here, so push the send button to the right. */
+  .composer-actions button[type="submit"] {
+    margin-left: auto;
+  }
+}
+
+/* Phones: the topbar wraps onto two rows so the identity stays readable. */
+@media (max-width: 640px) {
+  .topbar {
+    flex-wrap: wrap;
+    height: auto;
+    gap: 0.4rem 0.5rem;
+    padding: 0.45rem 0.6rem;
+  }
+
+  .brand .console-word,
+  .version,
+  .shortcuts {
+    display: none;
+  }
+
+  .topbar-actions {
+    margin-left: auto;
+  }
+
+  .topbar .identity-block {
+    order: 1;
+    width: 100%;
+    margin-left: 0;
+    padding-left: 0;
+    border-left: none;
+    justify-content: space-between;
+  }
+
+  .acting-as input {
+    width: 8rem;
+  }
+
+  .exit-chat {
+    font-size: 0;
+    gap: 0;
+    padding: 0.2rem 0.45rem;
+  }
+}
+
+@keyframes slide-left {
+  from {
+    transform: translateX(1.5rem);
+    opacity: 0;
+  }
+}

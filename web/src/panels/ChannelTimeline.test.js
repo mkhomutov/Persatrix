@@ -135,7 +135,10 @@ describe("Channel timeline panel", () => {
       name: /channel messages/i,
     });
     const rows = within(timeline);
-    expect(rows.getByText("Ada — Researcher")).toBeTruthy();
+    // The label renders as one sender element — name and role — with the role
+    // in its own quieter span, so read the element's whole text.
+    const senders = [...timeline.querySelectorAll(".sender")].map((el) => el.textContent);
+    expect(senders).toContain("Ada — Researcher");
     expect(rows.getByText("You")).toBeTruthy();
     expect(rows.getByText("ghost")).toBeTruthy();
   });
@@ -372,9 +375,7 @@ describe("Channel timeline panel", () => {
     getChannelHistory.mockResolvedValue(
       historyOf(msg("o1", "ops message", "carol")),
     );
-    await fireEvent.change(screen.getByRole("combobox", { name: /channel/i }), {
-      target: { value: "ops" },
-    });
+    await fireEvent.click(screen.getByRole("option", { name: "Ops" }));
 
     // The new channel's history replaces the old, and the fetch targets it.
     expect(await screen.findByText(/ops message/)).toBeTruthy();
@@ -386,7 +387,7 @@ describe("Channel timeline panel", () => {
   });
 
   it("drops a publish echo when the operator switches channel mid-flight", async () => {
-    // The channel <select> is not disabled while a publish is in flight, so the
+    // The channel list is not disabled while a publish is in flight, so the
     // operator can switch channels before the POST resolves. The publish targets
     // the channel it was issued against; its echo must not leak into — nor seed a
     // seen-id against — the channel now selected. This mirrors the loadToken
@@ -410,9 +411,7 @@ describe("Channel timeline panel", () => {
     getChannelHistory.mockResolvedValue(
       historyOf(msg("o1", "ops message", "carol")),
     );
-    await fireEvent.change(screen.getByRole("combobox", { name: /channel/i }), {
-      target: { value: "ops" },
-    });
+    await fireEvent.click(screen.getByRole("option", { name: "Ops" }));
     await screen.findByText(/ops message/);
 
     // The general-targeted publish now resolves with its stored message.
