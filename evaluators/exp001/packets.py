@@ -94,18 +94,24 @@ def _bounded(pattern: str) -> str:
     return r"(?<![^\W_])" + pattern + r"(?![^\W_])"
 
 
+def random_id() -> str:
+    """A packet ID: 8 hex characters from the operating system's random
+    source, so no seed can rebuild it."""
+    return secrets.token_hex(4)
+
+
 def blind(
     series: Sequence[Series],
     memos: Mapping[MemoRef, str],
     recall_replies: Mapping[MemoRef, str],
     names: Sequence[str],
     *,
-    new_id: Callable[[], str] = lambda: secrets.token_hex(4),
+    new_id: Callable[[], str] = random_id,
 ) -> Blinded:
     """Build every packet and the seal.
 
     ``memos`` holds only memos that were written; a missing memo scores 0
-    without going to the raters.
+    without going to the raters. *new_id* draws each packet's ID.
     """
     by_id = {s.id: s for s in series}
     seal: dict[str, MemoRef] = {}
