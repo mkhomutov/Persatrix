@@ -11,6 +11,8 @@ fixed reader reads the kept answers again without a second pass.
 
 from __future__ import annotations
 
+import asyncio
+import dataclasses
 import json
 from pathlib import Path
 from typing import Any
@@ -22,12 +24,15 @@ from agents.call_log import prefix_sha256
 from agents.llm_client import LLMClient, LLMResponse, Usage
 from agents.llm_types import LLMToolResult
 from evaluators.exp001.attempts import HarnessFault, Held, Hold, try_directory
+from evaluators.exp001.costs import ARMS_MODEL
 from evaluators.exp001.deployed_meeting import PREFIX
+from evaluators.exp001.deployment import ARMS_ALIAS, Alias
 from evaluators.exp001.judge import CALL_LOG, JudgeFault, read_judge_log
 from evaluators.exp001.materials import Meeting, MeetingKind
 from evaluators.exp001.packets import load_adviser_names
 from evaluators.exp001.practice import (
     BATCH,
+    INTERRUPTED,
     JUDGING,
     REPORT,
     RUN,
@@ -85,17 +90,25 @@ class _Holds:
     arm A replying and the channel arms' chair writing the memo; a fault
     raised at (arm, meeting) when named. With *prefixed*, each D′ meeting
     after the briefing keeps the prefix written for it, and its one turn
-    carries another."""
+    carries another. The meeting *paused* at, (arm, meeting), waits until
+    ``go_on`` is set."""
 
-    def __init__(self, fault: tuple[str, str] | None = None, *, prefixed: bool = False) -> None:
+    def __init__(
+        self, fault: tuple[str, str] | None = None, *, prefixed: bool = False,
+        paused: tuple[str, str] | None = None,
+    ) -> None:
         self.fault = fault
         self.prefixed = prefixed
+        self.paused = paused
+        self.go_on = asyncio.Event()
         self.held: list[tuple[str, str]] = []
 
     def __call__(self, arm: str, directory: Path) -> Hold[Any]:
         async def hold(meeting: Meeting, attempt: int, meeting_try: int) -> Held[Any]:
             if (arm, meeting.id) == self.fault:
                 raise HarnessFault(f"{arm}, {SERIES.id}, {meeting.id}: the call log is unreadable")
+            if (arm, meeting.id) == self.paused:
+                await self.go_on.wait()
             self.held.append((arm, meeting.id))
             if arm == "A":
                 return Held(arm_a_reply(meeting, f"Arm A at {meeting.id}."))
@@ -127,10 +140,11 @@ def _carry(directory: Path, arm: str, meeting: Meeting, attempt: int, meeting_tr
 
 async def _practice(
     root: Path, holds: _Holds, judge: _Judge | None, arms: tuple[str, ...] = ("A", "C"),
+    alias: Alias = ARMS_ALIAS,
 ) -> dict[str, Any]:
     return await run_practice(
         root, arms, panel=PANEL, series=SERIES, names=NAMES,
-        client=LLMClient(judge or _Judge()), binary=_BINARY,
+        client=LLMClient(judge or _Judge()), binary=_BINARY, alias=alias,
         prompts=None if judge is None else PROMPTS, sleep=no_wait, make_hold=holds,
     )
 
@@ -180,6 +194,23 @@ class TestAPracticeRun:
         assert len(findings) == 3  # the two plan meetings and the recall check
         assert all("not the prefix the harness wrote" in finding for finding in findings)
 
+    async def test_the_usage_counts_every_call_once_set_aside_pairs_included(
+        self, tmp_path: Path,
+    ) -> None:
+        """A crash can stop a set-aside pair's line half written: that log is
+        named and left out of the totals, and the report is still written."""
+        aside = tmp_path / INTERRUPTED / f"{SERIES.id}-C-1"
+        plan, control = SERIES.meetings[1], SERIES.meetings[2]
+        _carry(try_directory(aside, 1, plan, 1), "C", plan, 1, 1)
+        torn = try_directory(aside, 1, control, 1) / "calls.jsonl"
+        torn.parent.mkdir(parents=True)
+        torn.write_text('{"tags": {"arm": "C", "series"')
+        report = await _practice(tmp_path, _Holds(prefixed=True), _Judge())
+        # C's three meetings after the briefing each logged a turn, and the set-aside pair one.
+        assert report["usage"]["models"][ARMS_MODEL]["calls"] == 4
+        assert report["usage"]["unread"] == [str(torn.relative_to(tmp_path))]
+        assert "left out of these totals" in (tmp_path / SUMMARY).read_text()
+
     async def test_offline_nothing_is_judged(self, tmp_path: Path) -> None:
         """The mock provider cannot answer as the judge."""
         report = await _practice(tmp_path, _Holds(), None)
@@ -225,7 +256,32 @@ class TestStartedAgain:
         with pytest.raises(RefusedError, match="holds arms A, C"):
             await _practice(tmp_path, holds, _Judge(), arms=("A",))
         assert holds.held == []
-        assert json.loads((tmp_path / RUN).read_text()) == {"arms": ["A", "C"]}
+        assert json.loads((tmp_path / RUN).read_text()) == {
+            "arms": ["A", "C"], "alias": dataclasses.asdict(ARMS_ALIAS),
+        }
+
+    async def test_a_run_started_again_on_another_provider_is_refused(
+        self, tmp_path: Path,
+    ) -> None:
+        """Meetings held offline are never judged, or reported, as the provider's."""
+        await _practice(tmp_path, _Holds(), None, alias=Alias("mock", "offline", 0, 0))
+        holds, judge = _Holds(), _Judge()
+        with pytest.raises(RefusedError, match="mock offline, not anthropic claude-sonnet-4-6"):
+            await _practice(tmp_path, holds, judge)
+        assert (holds.held, judge.asked) == ([], [])
+
+    async def test_a_second_run_at_once_is_refused(self, tmp_path: Path) -> None:
+        """It would set aside the pair the first run is holding, and hold it again."""
+        holds = _Holds(paused=("C", SERIES.meetings[1].id))
+        first = asyncio.create_task(_practice(tmp_path, holds, _Judge()))
+        await asyncio.sleep(0)  # the first run holds C's plan meeting, paused
+        second = _Holds()
+        with pytest.raises(RefusedError, match="another run is holding this practice run"):
+            await _practice(tmp_path, second, _Judge())
+        assert second.held == [] and not (tmp_path / INTERRUPTED).exists()
+        holds.go_on.set()
+        await first
+        assert holds.held[-1] == ("C", SERIES.meetings[-1].id)
 
     async def test_a_fault_while_judging_leaves_it_open_and_asks_nothing_twice(
         self, tmp_path: Path,

@@ -42,7 +42,7 @@ from evaluators.exp001.rating import (
     read_packets,
     read_seal,
 )
-from evaluators.exp001.scoring import MemoRef
+from evaluators.exp001.scoring import MemoRef, cut_memo
 
 _EXP = Path(__file__).resolve().parents[3] / "evaluators" / "experiments" / "EXP-001"
 SERIES = load_series(_EXP / "practice.yaml")
@@ -108,12 +108,12 @@ class TestGatheringTheAnswers:
         assert BRIEFING.id not in {ref.meeting for ref in (*answers.memos, *answers.missing)}
 
     def test_a_dropped_series_goes_to_no_rater(self) -> None:
-        """It is dropped from every arm's comparisons, so nothing of it is scored."""
+        """Dropped in one arm, it is dropped from every arm's comparisons, so
+        nothing of it is scored, in any arm."""
         answers = gather_answers(
             [_pair("C", _ANSWERED, dropped=True), _pair("D", _ANSWERED)], {SERIES.id: SERIES},
         )
-        assert {ref.arm for ref in (*answers.memos, *answers.recall_replies)} == {"D"}
-        assert answers.missing == ()
+        assert answers == Answers({}, {}, ())
 
 
 class TestDrawingThePackets:
@@ -153,10 +153,12 @@ class TestDrawingThePackets:
         assert set(seal.packets) == set(drawn.packets)
         assert set(seal.packets.values()) == {*missing.memos, *missing.recall_replies}
         assert seal.missing == (MemoRef("B", SERIES.id, CONTROL.id),)
-        assert {(ref.arm, ref.meeting): (cut.words, cut.cut) for ref, cut in seal.cuts.items()} == {
-            ("C", PLAN.id): (2, False), ("C", CONTROL.id): (2, False),
-            ("B", PLAN.id): (2, False),
+        assert seal.cuts == {
+            MemoRef("C", SERIES.id, PLAN.id): cut_memo("Plan memo.\n"),
+            MemoRef("C", SERIES.id, CONTROL.id): cut_memo("Control memo."),
+            MemoRef("B", SERIES.id, PLAN.id): cut_memo("Plan memo.\n"),
         }
+        assert {(cut.words, cut.cut) for cut in seal.cuts.values()} == {(2, False)}
 
     def test_the_packets_name_no_arm(self, tmp_path: Path) -> None:
         _draw(tmp_path)
@@ -195,6 +197,16 @@ class TestDrawnOnce:
         changed = gather_answers([_pair("C", _ANSWERED)], {SERIES.id: SERIES})
         with pytest.raises(ValueError, match="changed since the packets were drawn"):
             _draw(tmp_path, changed)
+
+    def test_an_answer_reworded_since_the_draw_is_refused(self, tmp_path: Path) -> None:
+        """The same memos, one written again: its packet would show the old words."""
+        _draw(tmp_path)
+        reworded = gather_answers(
+            [_pair("A", _ANSWERED), _pair("C", {**_ANSWERED, PLAN.id: "Another memo."})],
+            {SERIES.id: SERIES},
+        )
+        with pytest.raises(ValueError, match="changed since the packets were drawn"):
+            _draw(tmp_path, reworded)
 
     def test_a_draw_cut_short_before_its_packets_were_kept_is_drawn_again(
         self, tmp_path: Path,

@@ -298,9 +298,14 @@ class TestEachArmsHold:
     def test_arm_a_logs_each_series_to_a_new_file_in_its_directory(
         self, built: dict[str, Any], tmp_path: Path,
     ) -> None:
+        """Its call names the aliases' model: offline, the mock's, which the report never prices."""
         client = LLMClient(MockProvider())
-        assert arm_hold("A", PANEL, SERIES, tmp_path, client=client, binary=_BINARY) == "A"
-        assert built["A"] == ((client, PANEL, SERIES), {"log_path": tmp_path / "calls.jsonl"})
+        mock = Alias("mock", "offline", 0, 0)
+        assert arm_hold("A", PANEL, SERIES, tmp_path, client=client, binary=_BINARY,
+                        alias=mock) == "A"
+        assert built["A"] == (
+            (client, PANEL, SERIES), {"log_path": tmp_path / "calls.jsonl", "model": "offline"},
+        )
 
     @pytest.mark.parametrize("arm", ["B", "C"])
     def test_arms_b_and_c_hold_each_try_on_a_new_deployment(

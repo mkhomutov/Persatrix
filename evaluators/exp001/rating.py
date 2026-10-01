@@ -15,22 +15,24 @@ the same orders, and asks the judge exactly what it asked before:
 - ``sealed/seal.json`` holds the seal, from packet ID back to arm, series
   and meeting, kept apart until every score is in. With it go the answers
   that were missing, since a missing memo scores 0 and never reaches a
-  rater, and each memo's length and whether it was cut at 400 words.
+  rater, each memo as the harness cut it at 400 words, and each answer's
+  SHA-256, which a run started again must match.
 
-A dropped series is dropped from every arm's comparisons, so none of its
-answers is gathered.
+A series dropped in any arm is dropped from every arm's comparisons, so
+none of its answers is gathered, in any arm.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import random
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any
 
-from evaluators.exp001.attempts import SeriesRun
+from evaluators.exp001.attempts import SeriesRun, series_kept
 from evaluators.exp001.deployed_meeting import plain
 from evaluators.exp001.judge import RATER, Packet
 from evaluators.exp001.materials import FactUse, MeetingKind, PlanKey, RecallItem, Series
@@ -44,7 +46,7 @@ from evaluators.exp001.packets import (
     recall_packet_text,
 )
 from evaluators.exp001.pairs import Kept, write_json
-from evaluators.exp001.scoring import MemoRef
+from evaluators.exp001.scoring import CutMemo, MemoRef
 
 PEOPLE = ("person-1", "person-2")
 RATERS = (*PEOPLE, RATER)
@@ -74,30 +76,30 @@ class Drawn:
         return [self.packets[pid] for pid in self.orders[rater]]
 
 
-class Cut(NamedTuple):
-    words: int  # the memo's words as written
-    cut: bool  # whether the harness cut it at 400
-
-
 @dataclass(frozen=True)
 class Seal:
     """The map from packet ID back to arm, and what the raters never see."""
 
     packets: dict[str, MemoRef]
     missing: tuple[MemoRef, ...]
-    cuts: dict[MemoRef, Cut]
+    cuts: dict[MemoRef, CutMemo]
 
 
 def gather_answers(runs: Iterable[SeriesRun[Kept]], series: Mapping[str, Series]) -> Answers:
     """The answer each finished try holds, for every plan meeting and recall
-    check; one that is missing is listed instead."""
+    check; one that is missing is listed instead. A series dropped in any
+    arm gives none, in any arm."""
+    held = tuple(runs)
+    dropped = set(series_kept(held, tuple(series)).dropped)
     memos: dict[MemoRef, str] = {}
     recall_replies: dict[MemoRef, str] = {}
     missing: list[MemoRef] = []
-    for run in runs:
-        finished = run.finished()  # empty when the series was dropped
+    for run in held:
+        if run.series in dropped:
+            continue
+        finished = run.finished()
         for meeting in series[run.series].meetings:
-            if meeting.kind is MeetingKind.BRIEFING or run.dropped:
+            if meeting.kind is MeetingKind.BRIEFING:
                 continue
             ref = MemoRef(run.arm, run.series, meeting.id)
             kept = finished[meeting.id].held.result
@@ -123,13 +125,13 @@ def draw_packets(
     """Blind *answers* into packets and draw each rater's order, once.
 
     What was drawn is kept in *directory*; drawn before, it is read back as
-    it was, and answers that differ from the ones it was drawn from are
-    refused. *names* are the advisers' IDs and names, which no rater reads.
+    it was, and answers that differ from the ones it was drawn from, in
+    which memos there are or in their words, are refused. *names* are the
+    advisers' IDs and names, which no rater reads.
     """
     if (directory / PACKETS).exists():
-        seal = read_seal(directory)
-        drawn_from = (set(seal.packets.values()), set(seal.missing))
-        if drawn_from != ({*answers.memos, *answers.recall_replies}, set(answers.missing)):
+        sealed = json.loads((directory / SEALED / SEAL).read_text())
+        if sealed.get("drawn_from") != _drawn_from(answers):
             raise ValueError(f"{directory}: the answers changed since the packets were drawn")
         return read_packets(directory)
     blinded = blind(series, answers.memos, answers.recall_replies, names, new_id=new_id)
@@ -140,8 +142,8 @@ def draw_packets(
     write_json(directory / SEALED / SEAL, {
         "packets": {pid: ref._asdict() for pid, ref in blinded.seal.items()},
         "missing": [ref._asdict() for ref in answers.missing],
-        "cuts": [{**ref._asdict(), "words": cut.words, "cut": cut.cut}
-                 for ref, cut in blinded.cuts.items()],
+        "cuts": [{"memo": ref._asdict(), "cut": plain(cut)} for ref, cut in blinded.cuts.items()],
+        "drawn_from": _drawn_from(answers),
     })
     (directory / RATER_FILES).mkdir(exist_ok=True)
     for person in PEOPLE:
@@ -167,11 +169,20 @@ def read_seal(directory: Path) -> Seal:
     return Seal(
         packets={pid: MemoRef(**ref) for pid, ref in sealed["packets"].items()},
         missing=tuple(MemoRef(**ref) for ref in sealed["missing"]),
-        cuts={
-            MemoRef(c["arm"], c["series"], c["meeting"]): Cut(c["words"], c["cut"])
-            for c in sealed["cuts"]
-        },
+        cuts={MemoRef(**c["memo"]): CutMemo(**c["cut"]) for c in sealed["cuts"]},
     )
+
+
+def _drawn_from(answers: Answers) -> list[list[str | None]]:
+    """The answers the packets are drawn from, as the seal keeps them for a
+    run started again to match: each one's arm, series and meeting, and the
+    SHA-256 of its words, none for an answer that was missing."""
+    texts: dict[MemoRef, str | None] = {**answers.memos, **answers.recall_replies}
+    texts.update(dict.fromkeys(answers.missing))
+    return [
+        [*ref, None if text is None else hashlib.sha256(text.encode()).hexdigest()]
+        for ref, text in sorted(texts.items(), key=lambda item: item[0])
+    ]
 
 
 def packet_text(packet: Packet) -> str:

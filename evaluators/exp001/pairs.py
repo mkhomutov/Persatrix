@@ -46,7 +46,7 @@ from evaluators.exp001.deployed_meeting import CALL_LOG, plain
 from evaluators.exp001.deployment import ARMS_ALIAS, Alias
 from evaluators.exp001.materials import Meeting, MeetingKind, Series
 from evaluators.exp001.panel import Panel
-from evaluators.exp001.runtime import CallLog, MemoTurn, read_call_log
+from evaluators.exp001.runtime import CallLog, MemoTurn, merge_call_logs, read_call_log
 
 TRIES = "tries.jsonl"
 PAIR = "pair.json"
@@ -72,13 +72,16 @@ def arm_hold(
 ) -> Hold[Any]:
     """How *arm*'s meetings of *series* are held, each try under *directory*.
 
-    Arm A makes its one call a meeting through *client* and logs every try
-    of the series to one new file there. The channel arms run *binary*, the
-    orchestrator, with every model alias on *alias*: arms B and C hold each
-    try on a new deployment, and arms D and D-prime by their own holds.
+    Arm A makes its one call a meeting through *client*, naming *alias*'s
+    model, and logs every try of the series to one new file there. The
+    channel arms run *binary*, the orchestrator, with every model alias on
+    *alias*: arms B and C hold each try on a new deployment, and arms D and
+    D-prime by their own holds.
     """
     if arm == "A":
-        return attempts.arm_a_hold(client, panel, series, log_path=directory / CALL_LOG)
+        return attempts.arm_a_hold(
+            client, panel, series, log_path=directory / CALL_LOG, model=alias.model,
+        )
     if arm in ("B", "C"):
         run = functools.partial(deployed_meeting.run_meeting, binary=binary, alias=alias)
         return attempts.channel_hold(panel, arm, series, directory, run=run)
@@ -151,10 +154,8 @@ def pair_calls(directory: Path, run: SeriesRun[Kept]) -> CallLog:
         turn for t in run.tries if t.held.result is not None
         for turn in (_memo_turn(t.held.result.record),) if turn is not None
     ]
-    logs = [read_call_log(path, memo_turns=turns) for path in sorted(directory.rglob(CALL_LOG))]
-    return CallLog(
-        tuple(sorted((r for log in logs for r in log.records), key=lambda r: r.started_at)),
-        tuple(sorted((f for log in logs for f in log.failures), key=lambda f: f.started_at)),
+    return merge_call_logs(
+        read_call_log(path, memo_turns=turns) for path in sorted(directory.rglob(CALL_LOG))
     )
 
 

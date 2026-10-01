@@ -27,9 +27,11 @@ from evaluators.exp001.practice_report import (
     COST_CLOSE_TOKENS,
     SCORED_MEMO_PACKETS,
     SCORED_RECALL_PACKETS,
+    SCORED_TRANSCRIPTS,
     build,
     discussion_tokens,
     project_judging,
+    projected_tokens,
     recall_marks_by_arm,
     summary,
     usage_totals,
@@ -109,6 +111,28 @@ class TestTheDiscussionsTokens:
 
     def test_the_mark_is_the_cost_close_for_a_room_of_five(self) -> None:
         assert COST_CLOSE_TOKENS == 1_776_000
+
+    def test_each_try_is_projected_to_the_transcripts_a_scored_recall_check_carries(
+        self,
+    ) -> None:
+        """No practice meeting's prefix holds more than three transcripts; a
+        scored series' recall check's holds five. The prefix, what a call
+        wrote to the cache or read from it, grows with them."""
+        records = [
+            _record(1, meeting=BRIEFING.id, tokens=(500, 50, 0, 0)),  # carries none
+            _record(1, tokens=(100, 20, 3000, 0)),  # the plan carries the briefing's
+            _record(2, CallPurpose.BID, tokens=(50, 5, 0, 0)),
+            _record(1, meeting=CONTROL.id, tokens=(100, 20, 0, 6000)),  # the control two
+        ]
+        closed = _kept({"closed_at": _at(8).isoformat()})
+        run = _run("D-prime", *(Try(m.id, 1, 1, closed) for m in (BRIEFING, PLAN, CONTROL)))
+        assert projected_tokens(run, records, SERIES) == {
+            (PLAN.id, 1, 1): 3175 + 3000 * 4,
+            (CONTROL.id, 1, 1): 6120 + 6000 * 3 // 2,
+        }
+
+    def test_a_scored_recall_check_carries_the_briefing_and_every_plan(self) -> None:
+        assert SCORED_TRANSCRIPTS == 5
 
 
 class TestTheJudgesProjection:
@@ -258,8 +282,15 @@ class TestTheReport:
         report = self._build()
         assert report["d_prime_discussions"] == {
             "cost_close_tokens": COST_CLOSE_TOKENS,
-            "tries": [{"meeting": PLAN.id, "attempt": 1, "try": 1, "tokens": 2011}],
+            "scored_transcripts": SCORED_TRANSCRIPTS,
+            "tries": [{"meeting": PLAN.id, "attempt": 1, "try": 1, "tokens": 2011,
+                       "projected": 2011 + 2000 * 4}],
         }
+
+    def test_a_try_at_the_close_measured_or_projected_is_flagged(self) -> None:
+        calls = {"D-prime": CallLog((_record(1, prefix=_PREFIX, tokens=(10, 1, 0, 400_000)),), ())}
+        text = summary(self._build(calls=calls, everything=calls["D-prime"]))
+        assert "400 011 tokens; projected 2 000 011, OVER the close" in text
 
     def test_without_judging_the_judge_is_not_reported(self) -> None:
         report = self._build()

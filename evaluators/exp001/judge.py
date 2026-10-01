@@ -171,7 +171,7 @@ async def judge_batch(
     One run at a time holds the directory; a second is refused.
     """
     directory.mkdir(parents=True, exist_ok=True)
-    with _sole_run(directory):
+    with sole_run(directory, RuntimeError(f"{directory}: another run is judging this batch")):
         return await _judge_batch(client, packets, prompts, directory, batch, cap, retries, sleep)
 
 
@@ -225,16 +225,16 @@ async def _judge_batch(
 
 
 @contextmanager
-def _sole_run(directory: Path) -> Iterator[None]:
-    """Hold the batch's directory for one run, since a second run at once would
-    ask its packets again. The lock goes with the process, so a crash leaves
-    nothing to clear."""
+def sole_run(directory: Path, busy: Exception) -> Iterator[None]:
+    """Hold *directory* for one run, or raise *busy* while another holds it,
+    since a second run at once would ask, or hold, what the first does. The
+    lock goes with the process, so a crash leaves nothing to clear."""
     fd = os.open(directory / LOCK, os.O_WRONLY | os.O_CREAT, 0o644)
     try:
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            raise RuntimeError(f"{directory}: another run is judging this batch") from None
+            raise busy from None
         yield
     finally:
         os.close(fd)

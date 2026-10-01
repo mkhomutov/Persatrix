@@ -1,7 +1,7 @@
 # EXP-001 — The harness
 
 > **Status**: 🚧 **In Progress** — PRs 1, 2, 3a, 3b, 4, 5a, 5b, 5c, 5d and 6a merged ([#984](https://github.com/mkhomutov/Persatrix/pull/984), [#986](https://github.com/mkhomutov/Persatrix/pull/986), [#987](https://github.com/mkhomutov/Persatrix/pull/987), [#988](https://github.com/mkhomutov/Persatrix/pull/988), [#992](https://github.com/mkhomutov/Persatrix/pull/992), [#993](https://github.com/mkhomutov/Persatrix/pull/993), [#1013](https://github.com/mkhomutov/Persatrix/pull/1013), [#1015](https://github.com/mkhomutov/Persatrix/pull/1015), [#1021](https://github.com/mkhomutov/Persatrix/pull/1021), [#1023](https://github.com/mkhomutov/Persatrix/pull/1023)); PR 6b, the practice run, open ([#1024](https://github.com/mkhomutov/Persatrix/pull/1024)); no practice run yet.
-> **Last updated**: 2026-09-30
+> **Last updated**: 2026-10-01
 > **Carries out**: the [EXP-001 pre-registration](EXP-001-preregistration.md) and its [part 2](EXP-001-preregistration-scoring.md)
 > **Code**: [`evaluators/exp001/`](../../evaluators/exp001/)
 
@@ -185,7 +185,8 @@ shows:
 
 - check 3, naming any memo turn that wrote the prefix again after a quiet
   spell outlasted the cache entry;
-- each D′ discussion's tokens against the cost close;
+- each D′ discussion's tokens against the cost close, and projected to
+  the five transcripts a scored series' recall check carries;
 - what each meeting recorded, and the judge's marks on each arm's recall
   check, which D's chair can answer only from memory (check 2);
 - the judge's largest answer against its token limit, and the scored

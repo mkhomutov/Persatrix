@@ -11,7 +11,9 @@ practice run's kept tries and call records into those figures:
   cache entry, the gap PR 5d left for the practice run to confirm.
 - **D′'s discussions against the cost close**: each D′ discussion's tokens,
   counted as the wallet counts them, against the 1 776 000 at which the cost
-  close comes for a room of five.
+  close comes for a room of five. No practice meeting's prefix holds more
+  than three transcripts, and a scored series' recall check's holds five,
+  so each is projected to five as well; a try over the mark is flagged.
 - **What each meeting recorded**, for checks 5 and 6 among others: what
   closed each discussion, the failures its record names, and whether its
   answer is missing. A lease a spending limit refused stops the run instead.
@@ -23,7 +25,8 @@ practice run's kept tries and call records into those figures:
 - **Check 4 and the provider's usage report**: every call's tokens,
   totalled by model and priced with the fixed table, the failed calls
   counted, and the window from the first call to the last, to compare by
-  hand with the provider's own report for the run's API key.
+  hand with the provider's own report for the run's API key. A set-aside
+  log the harness cannot read is named, its calls left out.
 
 Building the report reads no file: the practice run gathers what it reads.
 """
@@ -33,7 +36,7 @@ from __future__ import annotations
 import datetime as dt
 import statistics
 from collections import Counter, defaultdict
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -55,6 +58,9 @@ from evaluators.exp001.runtime import CallLog
 # comes once the synthesis reserve for a room of five is left: at 1 776 000
 # (the harness doc's PR 5d section).
 COST_CLOSE_TOKENS = 1_776_000
+# A scored series' recall check carries the transcripts of the briefing and
+# every plan: the most a D′ prefix holds.
+SCORED_TRANSCRIPTS = PLANS_PER_SCORED_SERIES + 1
 # What the scored judging asks: every arm's memos and recall checks.
 SCORED_MEMO_PACKETS = len(SCORED_SERIES) * PLANS_PER_SCORED_SERIES * len(ARMS)
 SCORED_RECALL_PACKETS = len(SCORED_SERIES) * len(ARMS)
@@ -83,13 +89,40 @@ def discussion_tokens(run: SeriesRun[Kept], records: Iterable[CallRecord]) -> To
     discussion's budget: every input token a turn or bid carried, cached
     ones included, and its output, for the calls begun before the close.
     Keyed by meeting, attempt and try; a try that made no such call has none."""
+    return {key: sum(map(_counted, calls)) for key, calls in _discussions(run, records).items()}
+
+
+def projected_tokens(
+    run: SeriesRun[Kept], records: Iterable[CallRecord], series: Series,
+) -> Tokens:
+    """Each try's discussion tokens with the prefix a scored series' recall
+    check carries: what its calls wrote to the cache or read from it, the
+    prefix, scaled from the transcripts the try carried, one for each
+    meeting before it, to :data:`SCORED_TRANSCRIPTS`, at the same number of
+    calls. A briefing carries none, so it has none."""
+    before = {m.id: number for number, m in enumerate(series.meetings)}
+    projected: Tokens = {}
+    for key, calls in _discussions(run, records).items():
+        carried = before.get(key[0], 0)
+        if carried:
+            prefix = sum(r.cache_write_tokens + r.cache_read_tokens for r in calls)
+            projected[key] = (
+                sum(map(_counted, calls)) + prefix * (SCORED_TRANSCRIPTS - carried) // carried
+            )
+    return projected
+
+
+def _discussions(
+    run: SeriesRun[Kept], records: Iterable[CallRecord],
+) -> dict[tuple[str, int, int], list[CallRecord]]:
+    """Each try's turns and bids begun before its close, keyed as :data:`Tokens` is."""
     closes: dict[tuple[str, int, int], dt.datetime | None] = {}
     for t in run.tries:
         closed = None if t.held.result is None else t.held.result.record.get("closed_at")
         closes[(t.meeting, t.attempt, t.meeting_try)] = (
             dt.datetime.fromisoformat(closed) if closed else None
         )
-    tokens: Tokens = defaultdict(int)
+    calls: dict[tuple[str, int, int], list[CallRecord]] = defaultdict(list)
     for record in records:
         key = (record.meeting, record.attempt, record.meeting_try)
         close = closes.get(key)
@@ -97,11 +130,17 @@ def discussion_tokens(run: SeriesRun[Kept], records: Iterable[CallRecord]) -> To
             continue
         if close is not None and record.started_at >= close:
             continue
-        tokens[key] += (
-            record.input_tokens + record.cache_write_tokens + record.cache_read_tokens
-            + record.output_tokens
-        )
-    return dict(tokens)
+        calls[key].append(record)
+    return calls
+
+
+def _counted(record: CallRecord) -> int:
+    """A call's tokens as the wallet counts them: every input token, cached
+    or not, and its output."""
+    return (
+        record.input_tokens + record.cache_write_tokens + record.cache_read_tokens
+        + record.output_tokens
+    )
 
 
 def project_judging(records: Iterable[CallRecord]) -> Projection:
@@ -183,17 +222,22 @@ def build(
     calls: Mapping[str, CallLog],
     written: Mapping[TryKey, str],
     everything: CallLog,
+    unread: Sequence[str] = (),
     judge_calls: CallLog | None,
     judged: Judged | None,
     seal: Seal | None,
 ) -> dict[str, Any]:
     """The report of a practice run: *runs* and *calls* by arm, the pairs held
     to the end; *written*, the prefixes the harness wrote for D′'s tries;
-    *everything*, every arm call the run made, pairs set aside included;
-    and the judge's calls and marks, none when the run was not judged."""
+    *everything*, every arm call the run made, pairs set aside included,
+    but for those of *unread*, the set-aside logs it could not read; and the
+    judge's calls and marks, none when the run was not judged."""
     records = [r for log in calls.values() for r in log.records]
     failures = [f for log in calls.values() for f in log.failures]
     d_prime = runs.get("D-prime")
+    projected = (
+        {} if d_prime is None else projected_tokens(d_prime, calls["D-prime"].records, series)
+    )
     judge_records = judge_calls.records if judge_calls is not None else ()
     judge_failures = judge_calls.failures if judge_calls is not None else ()
     return {
@@ -203,8 +247,10 @@ def build(
         "check_3": {"findings": check_cache(records, failures=failures, written=written)},
         "d_prime_discussions": None if d_prime is None else {
             "cost_close_tokens": COST_CLOSE_TOKENS,
+            "scored_transcripts": SCORED_TRANSCRIPTS,
             "tries": [
-                {"meeting": meeting, "attempt": attempt, "try": meeting_try, "tokens": tokens}
+                {"meeting": meeting, "attempt": attempt, "try": meeting_try, "tokens": tokens,
+                 "projected": projected.get((meeting, attempt, meeting_try))}
                 for (meeting, attempt, meeting_try), tokens
                 in discussion_tokens(d_prime, calls["D-prime"].records).items()
             ],
@@ -213,9 +259,12 @@ def build(
             None if judged is None or seal is None else recall_marks_by_arm(judged, seal)
         ),
         "judge": None if judge_calls is None or judged is None else _judge(judge_calls, judged),
-        "usage": usage_totals(CallLog(
-            (*everything.records, *judge_records), (*everything.failures, *judge_failures),
-        )),
+        "usage": {
+            **usage_totals(CallLog(
+                (*everything.records, *judge_records), (*everything.failures, *judge_failures),
+            )),
+            "unread": list(unread),
+        },
     }
 
 
@@ -256,10 +305,15 @@ def summary(report: Mapping[str, Any]) -> str:
     lines += [f"  - {finding}" for finding in findings]
     discussions = report["d_prime_discussions"]
     if discussions is not None:
-        lines += ["", "D′ discussions, whose cost close comes at "
-                      f"{_n(discussions['cost_close_tokens'])} tokens:"]
+        close = discussions["cost_close_tokens"]
+        lines += ["", f"D′ discussions, whose cost close comes at {_n(close)} tokens, each also "
+                      f"projected to the {discussions['scored_transcripts']} transcripts a scored "
+                      "series' recall check carries:"]
         lines += [f"  {t['meeting']}, attempt {t['attempt']}, try {t['try']}: "
-                  f"{_n(t['tokens'])} tokens" for t in discussions["tries"]]
+                  f"{_n(t['tokens'])} tokens{_over(t['tokens'], close)}"
+                  + ("" if t["projected"] is None
+                     else f"; projected {_n(t['projected'])}{_over(t['projected'], close)}")
+                  for t in discussions["tries"]]
     lines += ["", *_judge_words(report)]
     lines += ["", *_usage_words(report["usage"])]
     return "\n".join(lines) + "\n"
@@ -318,7 +372,14 @@ def _usage_words(usage: Mapping[str, Any]) -> list[str]:
     failed = usage["failed_calls"]
     if failed:
         lines.append("  failed calls: " + ", ".join(f"{e} {n}" for e, n in failed.items()))
+    if usage.get("unread"):
+        lines.append("  set-aside logs the harness cannot read, their calls left out of these "
+                     "totals: " + ", ".join(usage["unread"]))
     return lines
+
+
+def _over(tokens: int, close: int) -> str:
+    return ", OVER the close" if tokens >= close else ""
 
 
 def _n(value: int) -> str:
