@@ -40,6 +40,14 @@ and its part 2; this package only carries those documents out.
 - :mod:`evaluators.exp001.scoring` cuts memos, turns scores into quality and
   measures how well the raters agree.
 - :mod:`evaluators.exp001.decision` compares the arms and picks the rule.
+- :mod:`evaluators.exp001.pairs` holds one arm's series in a directory of its
+  own, each try kept, so a run started again goes on where it stopped.
+- :mod:`evaluators.exp001.rating` gathers the answers and draws the packets
+  each rater scores, once, with the seal kept apart.
+- :mod:`evaluators.exp001.practice` holds the practice run: every arm's
+  practice series, judged, then reported by
+  :mod:`evaluators.exp001.practice_report`. ``python -m evaluators.exp001
+  practice`` runs it.
 
 Only ``runtime``, ``arm_a``, ``deployment`` and the modules that use them
 import from the agents' runtime: the call log and the clock; for arm A the

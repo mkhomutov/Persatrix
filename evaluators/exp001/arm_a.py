@@ -105,8 +105,10 @@ async def run_meeting(
     attempt: int,
     meeting_try: int,
     now: Callable[[], dt.datetime] = _real_now,
+    model: str = ARMS_MODEL,
 ) -> ArmAReply:
-    """Hold one meeting of arm A: one call, logged to *log_path* under its tags."""
+    """Hold one meeting of arm A: one call, logged to *log_path* under its tags.
+    The call names *model*: the arms' model, or offline the mock provider's."""
     system = system_prompt(panel, series, meeting)
     with call_log_scope(
         log_path, arm=ARM, series=series.id, meeting=meeting.id,
@@ -114,7 +116,7 @@ async def run_meeting(
     ):
         asked_at = now()
         response = await client.create_message(
-            model=ARMS_MODEL,
+            model=model,
             system=system,
             messages=[{"role": "user", "content": meeting.message}],
             tools=[],

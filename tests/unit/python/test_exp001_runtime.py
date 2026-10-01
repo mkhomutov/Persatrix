@@ -31,6 +31,7 @@ from evaluators.exp001.runtime import (
     call_log_env,
     call_log_scope,
     meeting_clock_env,
+    merge_call_logs,
     prompt_prefix_env,
     read_call_log,
     story_start,
@@ -284,6 +285,25 @@ class TestReadCallLog:
         line = {**_line(), "cache_prefix_sha256": value}
         with pytest.raises(CallLogError, match="c.jsonl:1"):
             read_call_log(_write(tmp_path / "c.jsonl", line))
+
+
+class TestMergeCallLogs:
+    def test_the_logs_become_one_each_call_in_the_order_it_began(self, tmp_path):
+        """A pair's tries, and a run's pairs, each log to a file of their own."""
+        later = read_call_log(_write(
+            tmp_path / "a.jsonl", _line(started_at=_T + dt.timedelta(minutes=2)),
+            _line(error="RateLimitError", started_at=_T + dt.timedelta(minutes=3)),
+        ))
+        earlier = read_call_log(_write(
+            tmp_path / "b.jsonl", _line(),
+            _line(error="TimeoutError", started_at=_T + dt.timedelta(minutes=1)),
+        ))
+        merged = merge_call_logs([later, earlier])
+        assert [r.started_at for r in merged.records] == [_T, _T + dt.timedelta(minutes=2)]
+        assert [f.error for f in merged.failures] == ["TimeoutError", "RateLimitError"]
+
+    def test_no_logs_are_an_empty_log(self):
+        assert merge_call_logs([]) == read_call_log(Path("/nonexistent/calls.jsonl"))
 
 
 class TestPromptPrefixEnv:
