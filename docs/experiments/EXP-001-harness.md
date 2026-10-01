@@ -1,6 +1,6 @@
 # EXP-001 — The harness
 
-> **Status**: 🚧 **In Progress** — PRs 1, 2, 3a, 3b, 4, 5a, 5b, 5c, 5d and 6a merged ([#984](https://github.com/mkhomutov/Persatrix/pull/984), [#986](https://github.com/mkhomutov/Persatrix/pull/986), [#987](https://github.com/mkhomutov/Persatrix/pull/987), [#988](https://github.com/mkhomutov/Persatrix/pull/988), [#992](https://github.com/mkhomutov/Persatrix/pull/992), [#993](https://github.com/mkhomutov/Persatrix/pull/993), [#1013](https://github.com/mkhomutov/Persatrix/pull/1013), [#1015](https://github.com/mkhomutov/Persatrix/pull/1015), [#1021](https://github.com/mkhomutov/Persatrix/pull/1021), [#1023](https://github.com/mkhomutov/Persatrix/pull/1023)); PR 6b, the practice run, open ([#1024](https://github.com/mkhomutov/Persatrix/pull/1024)); no practice run yet.
+> **Status**: 🚧 **In Progress** — PRs 1, 2, 3a, 3b, 4, 5a, 5b, 5c, 5d, 6a and 6b merged ([#984](https://github.com/mkhomutov/Persatrix/pull/984), [#986](https://github.com/mkhomutov/Persatrix/pull/986), [#987](https://github.com/mkhomutov/Persatrix/pull/987), [#988](https://github.com/mkhomutov/Persatrix/pull/988), [#992](https://github.com/mkhomutov/Persatrix/pull/992), [#993](https://github.com/mkhomutov/Persatrix/pull/993), [#1013](https://github.com/mkhomutov/Persatrix/pull/1013), [#1015](https://github.com/mkhomutov/Persatrix/pull/1015), [#1021](https://github.com/mkhomutov/Persatrix/pull/1021), [#1023](https://github.com/mkhomutov/Persatrix/pull/1023), [#1024](https://github.com/mkhomutov/Persatrix/pull/1024)); no practice run yet.
 > **Last updated**: 2026-10-01
 > **Carries out**: the [EXP-001 pre-registration](EXP-001-preregistration.md) and its [part 2](EXP-001-preregistration-scoring.md)
 > **Code**: [`evaluators/exp001/`](../../evaluators/exp001/)
@@ -35,7 +35,7 @@ the result can cite them.
 | 5d ([#1021](https://github.com/mkhomutov/Persatrix/pull/1021)) | Arm D′: the earlier meetings' transcripts in a cached prompt prefix | 3, its reader; 1, 5 and 6 for D′ |
 | 6a ([#1023](https://github.com/mkhomutov/Persatrix/pull/1023)) | The judge: its prompts from the rubric, one pass per packet, a call purpose and call log of its own that never name an arm, and the $25 cap | — (part 2 §2) |
 | 6b ([#1024](https://github.com/mkhomutov/Persatrix/pull/1024)) | The practice run: every arm's practice series, each try kept, so a run started again goes on where it stopped; the practice memos judged in a batch of their own; and a report of what the checks show, the scored judging's projected spend and the call log's totals for the provider's usage report | all eight, on the practice series, once it is held |
-| 6c | The scored run: every arm's series in its drawn order, harness faults counted and outputs set aside, the $150 cap and the seven-day window; dollars per plan, and the series every arm's comparisons keep | — (§3, the run) |
+| 6c | The scored run: every arm's series in its drawn order, harness faults counted and outputs set aside, the $150 cap and the seven-day window; dollars per plan, and the series every arm's comparisons keep; and, from PR 6b's review, the scored judging's projected spend at the scored packets' own sizes | — (§3, the run) |
 
 Each PR is test-first, like all unit-level code here. The practice run PR
 6b holds is the evidence that the eight checks pass before any scored
@@ -207,6 +207,13 @@ and judges nothing. PR 6b leaves the scored run to PR 6c: every arm's series
 in its drawn order, the faults and dollars PR 5b names, the $150 cap, which
 every scored attempt counts toward, discarded or not, and the seven-day
 window.
+
+PR 6b's review adds one thing, its finding F-8. The report projects the
+scored judging's spend from the practice packets, but a scored memo packet's
+input is about 28% longer. That adds only about $0.24, yet longer packets
+may also take more thinking, which practice packets cannot show. PR 6c
+settles the projection at the scored packets' own sizes, before the first
+scored meeting, when the caps freeze.
 
 ## Frozen choices
 
