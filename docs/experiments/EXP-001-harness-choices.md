@@ -1,6 +1,6 @@
 # EXP-001 — The harness's frozen choices
 
-> **Status**: 🚧 **In Progress** — the rows of PRs 1 to 4 froze when each merged; those of PRs 5a to 5c are in [holding the meetings](EXP-001-harness-choices-meetings.md), PR 5d's in [arm D′'s transcript prefix](EXP-001-harness-choices-d-prime.md), and PR 6a's in [the judge](EXP-001-harness-choices-judge.md).
+> **Status**: 🚧 **In Progress** — the rows of PRs 1 to 4 froze when each merged; those of PRs 5a to 5c are in [holding the meetings](EXP-001-harness-choices-meetings.md), PR 5d's in [arm D′'s transcript prefix](EXP-001-harness-choices-d-prime.md), PR 6a's in [the judge](EXP-001-harness-choices-judge.md), and PR 6b's in [the practice run](EXP-001-harness-choices-practice.md).
 > **Last updated**: 2026-09-30
 > **Part of**: the [EXP-001 harness](EXP-001-harness.md), which lists the harness PRs and what each leaves the next
 
@@ -48,8 +48,9 @@ nothing changes.
 
 The choices of PRs 5a to 5c, which hold the meetings, are in
 [their own document](EXP-001-harness-choices-meetings.md), PR 5d's, arm
-D′'s transcript prefix, in [a third](EXP-001-harness-choices-d-prime.md), and
-PR 6a's, the judge, in [a fourth](EXP-001-harness-choices-judge.md).
+D′'s transcript prefix, in [a third](EXP-001-harness-choices-d-prime.md),
+PR 6a's, the judge, in [a fourth](EXP-001-harness-choices-judge.md), and PR
+6b's, the practice run, in [a fifth](EXP-001-harness-choices-practice.md).
 
 ## The arm order
 
@@ -71,6 +72,8 @@ The arm order each series runs in:
   frozen choices of PR 5d.
 - [The judge](EXP-001-harness-choices-judge.md) — the frozen choices of
   PR 6a.
+- [The practice run](EXP-001-harness-choices-practice.md) — the frozen
+  choices of PR 6b.
 - [EXP-001 harness](EXP-001-harness.md) — the harness PRs, and what each
   leaves the next.
 - [EXP-001 pre-registration](EXP-001-preregistration.md) — materials, arms

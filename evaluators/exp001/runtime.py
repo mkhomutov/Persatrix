@@ -206,6 +206,15 @@ def read_call_log(path: Path, *, memo_turns: Iterable[MemoTurn] = ()) -> CallLog
     return CallLog(tuple(records), tuple(failures))
 
 
+def merge_call_logs(logs: Iterable[CallLog]) -> CallLog:
+    """*logs*, each a file's, as one log: every call in the order it began."""
+    every = tuple(logs)
+    return CallLog(
+        tuple(sorted((r for log in every for r in log.records), key=lambda r: r.started_at)),
+        tuple(sorted((f for log in every for f in log.failures), key=lambda f: f.started_at)),
+    )
+
+
 def _record(
     line: Any, where: str, memos: dict[tuple[str, str, str, int, int], MemoTurn],
 ) -> CallRecord:
