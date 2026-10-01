@@ -213,6 +213,16 @@ class TestRunMeeting:
         line = json.loads(log_path.read_text())
         assert (line["purpose"], line["model_alias"]) == ("turn", None)
 
+    async def test_the_call_names_the_model_it_is_given(self, log_path: Path) -> None:
+        """Offline every model alias points at the mock's model, and so does arm A's call."""
+        provider = _Provider("Option B.")
+        await run_meeting(
+            LLMClient(provider), PANEL, SERIES, _first(MeetingKind.PLAN), log_path=log_path,
+            attempt=1, meeting_try=1, now=_clock(), model="offline",
+        )
+        assert provider.calls[0]["model"] == "offline"
+        assert [r.model for r in read_call_log(log_path).records] == ["offline"]
+
     @pytest.mark.parametrize(("text", "stop_reason"), [
         (None, StopReason.END_TURN),
         (" \n", StopReason.END_TURN),

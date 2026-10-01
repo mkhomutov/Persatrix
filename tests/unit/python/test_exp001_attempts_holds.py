@@ -156,6 +156,15 @@ class TestArmA:
         await run_series("A", SERIES, arm_a_hold(client, PANEL, SERIES, log_path=log_path))
         assert len(read_call_log(log_path).records) == len(IDS)
 
+    async def test_each_call_names_the_model_the_hold_is_given(self, tmp_path: Path) -> None:
+        """Offline arm A's call goes to the mock, and names its model, as every alias does."""
+        log_path = tmp_path / "calls.jsonl"
+        client = LLMClient(_Provider("noted", "memo", "", ""))
+        await run_series(
+            "A", SERIES, arm_a_hold(client, PANEL, SERIES, log_path=log_path, model="offline"),
+        )
+        assert {r.model for r in read_call_log(log_path).records} == {"offline"}
+
 
 _Line = str | tuple[str, str] | None  # an error, (purpose, error), or a call that answered
 

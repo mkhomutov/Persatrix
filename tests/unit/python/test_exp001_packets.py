@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import itertools
 import random
+import re
 from collections.abc import Callable
 from pathlib import Path
 
@@ -21,6 +22,7 @@ from evaluators.exp001.packets import (
     ADVISER_PLACEHOLDER,
     blind,
     load_adviser_names,
+    random_id,
     rater_orders,
     redact,
 )
@@ -120,6 +122,11 @@ def test_packet_ids_come_from_the_os_random_source_by_default(series_1: Series) 
     first = blind([series_1], memos, {}, NAMES)
     second = blind([series_1], memos, {}, NAMES)
     assert set(first.seal).isdisjoint(second.seal)
+
+
+def test_a_packet_id_is_eight_hex_characters() -> None:
+    """As the frozen blinding row fixes it."""
+    assert all(re.fullmatch(r"[0-9a-f]{8}", random_id()) for _ in range(20))
 
 
 def test_a_repeated_id_is_drawn_again(series_1: Series) -> None:

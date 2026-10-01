@@ -23,6 +23,7 @@ import asyncio
 import contextlib
 import dataclasses
 import datetime as dt
+import enum
 import json
 import signal
 import sqlite3
@@ -328,22 +329,26 @@ async def _connect(room: DeploymentAPI | None, ports: Ports) -> AsyncIterator[De
 
 def write_record(path: Path, meeting: ChannelMeeting) -> None:
     """Keep *meeting* as JSON: every field, times in ISO 8601."""
-    path.write_text(json.dumps(_plain(meeting), indent=1, ensure_ascii=False))
+    path.write_text(json.dumps(plain(meeting), indent=1, ensure_ascii=False))
 
 
 def _write_failure(path: Path, *, error: BaseException, **known: Any) -> None:
     """Keep what is known of a meeting that failed midway, and why it failed."""
-    record = {**_plain(known), "error": f"{type(error).__name__}: {error}"}
+    record = {**plain(known), "error": f"{type(error).__name__}: {error}"}
     path.write_text(json.dumps(record, indent=1, ensure_ascii=False))
 
 
-def _plain(value: Any) -> Any:
+def plain(value: Any) -> Any:
+    """*value* as JSON can hold it: a record's fields by name, times in ISO
+    8601, and a named constant, such as a stop reason, by its value."""
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        return {f.name: _plain(getattr(value, f.name)) for f in dataclasses.fields(value)}
+        return {f.name: plain(getattr(value, f.name)) for f in dataclasses.fields(value)}
     if isinstance(value, dt.datetime):
         return value.isoformat()
+    if isinstance(value, enum.Enum):
+        return value.value
     if isinstance(value, Mapping):
-        return {str(key): _plain(item) for key, item in value.items()}
+        return {str(key): plain(item) for key, item in value.items()}
     if isinstance(value, list | tuple):
-        return [_plain(item) for item in value]
+        return [plain(item) for item in value]
     return value

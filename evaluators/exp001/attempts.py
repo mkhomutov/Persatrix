@@ -50,7 +50,7 @@ from typing import Any, Generic, TypeVar
 
 from agents.llm_client import LLMClient
 from evaluators.exp001 import arm_a, channel_arm, deployed_meeting
-from evaluators.exp001.costs import CallPurpose
+from evaluators.exp001.costs import ARMS_MODEL, CallPurpose
 from evaluators.exp001.deployment import StartError
 from evaluators.exp001.materials import Meeting, Series
 from evaluators.exp001.orchestrator import OrchestratorError
@@ -248,14 +248,15 @@ def series_kept(runs: Iterable[SeriesRun[Any]], scored: Sequence[str]) -> Series
 
 
 def arm_a_hold(
-    client: LLMClient, panel: Panel, series: Series, *, log_path: Path,
+    client: LLMClient, panel: Panel, series: Series, *, log_path: Path, model: str = ARMS_MODEL,
 ) -> Hold[arm_a.ArmAReply]:
     """Arm A's meetings: its one call raises what failed, and the call log keeps it.
 
     Build it once per series: every try of both attempts logs to *log_path*,
     which must not exist yet, so no earlier run's calls are counted again.
-    Only a provider error holds the meeting again; anything else the call
-    raises is a harness fault, since the harness builds arm A's request.
+    Each call names *model*. Only a provider error holds the meeting again;
+    anything else the call raises is a harness fault, since the harness
+    builds arm A's request.
     """
     if log_path.exists():
         raise FileExistsError(f"{log_path}: an earlier run's calls would be counted again")
@@ -266,7 +267,7 @@ def arm_a_hold(
         try:
             reply = await arm_a.run_meeting(
                 client, panel, series, meeting, log_path=log_path,
-                attempt=attempt, meeting_try=meeting_try,
+                attempt=attempt, meeting_try=meeting_try, model=model,
             )
         except Exception as exc:
             if error_kind(type(exc).__name__) is not ErrorKind.PROVIDER:
