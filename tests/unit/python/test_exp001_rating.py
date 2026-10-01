@@ -42,7 +42,7 @@ from evaluators.exp001.rating import (
     read_packets,
     read_seal,
 )
-from evaluators.exp001.scoring import MemoRef
+from evaluators.exp001.scoring import MemoRef, cut_memo
 
 _EXP = Path(__file__).resolve().parents[3] / "evaluators" / "experiments" / "EXP-001"
 SERIES = load_series(_EXP / "practice.yaml")
@@ -107,13 +107,13 @@ class TestGatheringTheAnswers:
                                  {SERIES.id: SERIES})
         assert BRIEFING.id not in {ref.meeting for ref in (*answers.memos, *answers.missing)}
 
-    def test_a_dropped_series_goes_to_no_rater(self) -> None:
-        """It is dropped from every arm's comparisons, so nothing of it is scored."""
+    def test_a_series_dropped_in_one_arm_goes_to_no_rater_from_any_arm(self) -> None:
+        """It is dropped from every arm's comparisons, so nothing of it is scored,
+        not even the answers of an arm that finished it."""
         answers = gather_answers(
             [_pair("C", _ANSWERED, dropped=True), _pair("D", _ANSWERED)], {SERIES.id: SERIES},
         )
-        assert {ref.arm for ref in (*answers.memos, *answers.recall_replies)} == {"D"}
-        assert answers.missing == ()
+        assert answers == Answers({}, {}, ())
 
 
 class TestDrawingThePackets:
@@ -157,6 +157,7 @@ class TestDrawingThePackets:
             ("C", PLAN.id): (2, False), ("C", CONTROL.id): (2, False),
             ("B", PLAN.id): (2, False),
         }
+        assert seal.cuts[MemoRef("C", SERIES.id, PLAN.id)] == cut_memo("Plan memo.\n")
 
     def test_the_packets_name_no_arm(self, tmp_path: Path) -> None:
         _draw(tmp_path)
@@ -195,6 +196,20 @@ class TestDrawnOnce:
         changed = gather_answers([_pair("C", _ANSWERED)], {SERIES.id: SERIES})
         with pytest.raises(ValueError, match="changed since the packets were drawn"):
             _draw(tmp_path, changed)
+
+    @pytest.mark.parametrize("meeting", [PLAN.id, RECALL.id])
+    def test_an_answer_whose_words_changed_since_the_draw_is_refused(
+        self, tmp_path: Path, meeting: str,
+    ) -> None:
+        """The same meetings, but a pair held again wrote other words, which
+        the packets drawn before would not show the raters."""
+        _draw(tmp_path)
+        rewritten = gather_answers(
+            [_pair("A", _ANSWERED), _pair("C", {**_ANSWERED, meeting: "Other words."})],
+            {SERIES.id: SERIES},
+        )
+        with pytest.raises(ValueError, match="changed since the packets were drawn"):
+            _draw(tmp_path, rewritten)
 
     def test_a_draw_cut_short_before_its_packets_were_kept_is_drawn_again(
         self, tmp_path: Path,

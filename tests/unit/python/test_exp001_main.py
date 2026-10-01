@@ -75,6 +75,22 @@ def test_on_anthropic_the_arms_model_is_held_and_the_judge_asked(
     assert isinstance(call["client"]._provider, AnthropicProvider)
 
 
+@pytest.mark.parametrize("key", [None, ""])
+def test_on_anthropic_a_missing_key_is_refused_before_any_meeting(
+    ran: list[dict[str, Any]], tmp_path: Path, binary: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], key: str | None,
+) -> None:
+    """Its first call would fail as a harness fault and close the directory."""
+    if key is None:
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    else:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", key)
+    code = command.main(["practice", str(tmp_path), "--provider", "anthropic",
+                         "--binary", str(binary)])
+    assert code == 2 and ran == []
+    assert "ANTHROPIC_API_KEY" in capsys.readouterr().err
+
+
 def test_the_provider_is_never_a_default(ran: list[dict[str, Any]], tmp_path: Path) -> None:
     """A run on the real provider spends money, so it is always asked for by name."""
     with pytest.raises(SystemExit) as stopped:

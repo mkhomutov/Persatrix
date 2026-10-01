@@ -1,7 +1,7 @@
 # EXP-001 — The harness
 
 > **Status**: 🚧 **In Progress** — PRs 1, 2, 3a, 3b, 4, 5a, 5b, 5c, 5d and 6a merged ([#984](https://github.com/mkhomutov/Persatrix/pull/984), [#986](https://github.com/mkhomutov/Persatrix/pull/986), [#987](https://github.com/mkhomutov/Persatrix/pull/987), [#988](https://github.com/mkhomutov/Persatrix/pull/988), [#992](https://github.com/mkhomutov/Persatrix/pull/992), [#993](https://github.com/mkhomutov/Persatrix/pull/993), [#1013](https://github.com/mkhomutov/Persatrix/pull/1013), [#1015](https://github.com/mkhomutov/Persatrix/pull/1015), [#1021](https://github.com/mkhomutov/Persatrix/pull/1021), [#1023](https://github.com/mkhomutov/Persatrix/pull/1023)); PR 6b, the practice run, open ([#1024](https://github.com/mkhomutov/Persatrix/pull/1024)); no practice run yet.
-> **Last updated**: 2026-09-30
+> **Last updated**: 2026-10-01
 > **Carries out**: the [EXP-001 pre-registration](EXP-001-preregistration.md) and its [part 2](EXP-001-preregistration-scoring.md)
 > **Code**: [`evaluators/exp001/`](../../evaluators/exp001/)
 
@@ -202,10 +202,14 @@ python -m evaluators.exp001 practice ~/exp001/practice-1 --provider anthropic
 ```
 
 `--provider offline` holds the meetings on the mock provider at no cost,
-and judges nothing. PR 6b leaves the scored run to PR 6c: every arm's series
-in its drawn order, the faults and dollars PR 5b names, the $150 cap, which
-every scored attempt counts toward, discarded or not, and the seven-day
-window.
+and judges nothing. Started again in the same directory, it goes on where
+it stopped, if the arms, the provider, the orchestrator binary and the
+materials are those it began with; otherwise it is refused, and so is a
+second run while the first still holds the directory.
+
+PR 6b leaves the scored run to PR 6c: every arm's series in its drawn
+order, the faults and dollars PR 5b names, the $150 cap, which every scored
+attempt counts toward, discarded or not, and the seven-day window.
 
 ## Frozen choices
 

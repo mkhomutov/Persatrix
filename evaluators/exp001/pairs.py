@@ -5,13 +5,14 @@ of one arm and one series, is held in a directory of its own by the rules
 of attempts and failures (:func:`evaluators.exp001.attempts.run_series`),
 with the hold its arm needs (:func:`arm_hold`).
 
-- **Each try is kept** as it ends, as a line of ``tries.jsonl``: the
-  meeting, the attempt and try, whether it started, the failed calls that
-  bear on it, and the arm's whole record of the meeting, so arm A's
-  replies, which no other file keeps, are kept too. The line also holds the
-  try's **answer**: the memo, or the recall check's answers, as the chair or
-  arm A wrote them. There is none when it is missing, or at a briefing,
-  which asks for none.
+- **Each try is kept** as it ends, as a line of ``tries.jsonl``, on the
+  disk before the next try begins: the meeting, the attempt and try,
+  whether it started, the failed calls that bear on it, and the arm's whole
+  record of the meeting, so arm A's replies, which no other file keeps, are
+  kept too. The try's **answer**, the memo or the recall check's answers as
+  the chair or arm A wrote them, is read from that record each time the
+  pair is read, so the rule for a missing answer is applied in one place.
+  There is none when it is missing, or at a briefing, which asks for none.
 - **A pair held to the end** is marked finished in ``pair.json``, with the
   attempt that finished, or none when the series was dropped. A run started
   again reads it back, and never holds it again.
@@ -30,20 +31,20 @@ import datetime as dt
 import functools
 import itertools
 import json
-import os
 from collections.abc import Awaitable, Callable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from agents.llm_client import LLMClient
-from evaluators.exp001 import arm_d, arm_d_prime, attempts, deployed_meeting
+from agents.llm_types import StopReason
+from evaluators.exp001 import arm_a, arm_d, arm_d_prime, attempts, deployed_meeting
 from evaluators.exp001.arm_a import ArmAReply
 from evaluators.exp001.attempts import Held, Hold, SeriesRun, Try, run_series
-from evaluators.exp001.channel_arm import ChannelMeeting
 from evaluators.exp001.costs import ARMS
 from evaluators.exp001.deployed_meeting import CALL_LOG, plain
-from evaluators.exp001.deployment import ARMS_ALIAS, Alias
+from evaluators.exp001.deployment import Alias
+from evaluators.exp001.files import append_line, write_json
 from evaluators.exp001.materials import Meeting, MeetingKind, Series
 from evaluators.exp001.panel import Panel
 from evaluators.exp001.runtime import CallLog, MemoTurn, read_call_log
@@ -68,17 +69,21 @@ def arm_hold(
     *,
     client: LLMClient,
     binary: Path,
-    alias: Alias = ARMS_ALIAS,
+    alias: Alias,
 ) -> Hold[Any]:
     """How *arm*'s meetings of *series* are held, each try under *directory*.
 
-    Arm A makes its one call a meeting through *client* and logs every try
-    of the series to one new file there. The channel arms run *binary*, the
-    orchestrator, with every model alias on *alias*: arms B and C hold each
-    try on a new deployment, and arms D and D-prime by their own holds.
+    Arm A makes its one call a meeting through *client*, asking for *alias*'s
+    model, and logs every try of the series to one new file there. The
+    channel arms run *binary*, the orchestrator, with every model alias on
+    *alias*: arms B and C hold each try on a new deployment, and arms D and
+    D-prime by their own holds. *alias* is never a default, since the arms'
+    own is the real provider's.
     """
-    if arm == "A":
-        return attempts.arm_a_hold(client, panel, series, log_path=directory / CALL_LOG)
+    if arm == arm_a.ARM:
+        return attempts.arm_a_hold(
+            client, panel, series, log_path=directory / CALL_LOG, model=alias.model,
+        )
     if arm in ("B", "C"):
         run = functools.partial(deployed_meeting.run_meeting, binary=binary, alias=alias)
         return attempts.channel_hold(panel, arm, series, directory, run=run)
@@ -107,7 +112,7 @@ async def hold_pair(
     the pair is held in, as :func:`arm_hold` does. *progress* is told as
     each try begins and ends.
     """
-    held_before = read_pair(directory)
+    held_before = read_pair(directory, series)
     if held_before is not None:
         return held_before
     if directory.exists() and any(directory.iterdir()):
@@ -117,11 +122,10 @@ async def hold_pair(
     say = progress or (lambda _: None)
 
     async def kept(meeting: Meeting, attempt: int, meeting_try: int) -> Held[Any]:
-        where = f"{arm}, {series.id}, {meeting.id}, attempt {attempt}, try {meeting_try}"
+        where = attempts.where(arm, series, meeting, attempt, meeting_try)
         say(f"{where}: holding")
         held = await hold(meeting, attempt, meeting_try)
-        with (directory / TRIES).open("a") as tries:
-            tries.write(json.dumps(_line(arm, series, meeting, attempt, meeting_try, held)) + "\n")
+        append_line(directory / TRIES, _line(arm, series, meeting, attempt, meeting_try, held))
         say(f"{where}: {_outcome(held)}")
         return held
 
@@ -129,18 +133,22 @@ async def hold_pair(
     write_json(directory / PAIR, {
         "arm": arm, "series": series.id, "finished_attempt": run.finished_attempt,
     })
-    pair = read_pair(directory)
+    pair = read_pair(directory, series)
     assert pair is not None  # just marked
     return pair
 
 
-def read_pair(directory: Path) -> SeriesRun[Kept] | None:
-    """The pair held in *directory*, as kept; None unless it was held to the end."""
+def read_pair(directory: Path, series: Series) -> SeriesRun[Kept] | None:
+    """The pair of *series* held in *directory*, as kept, each try's answer
+    read from its record; None unless it was held to the end."""
     try:
-        marked = json.loads((directory / PAIR).read_text())
+        marked = json.loads((directory / PAIR).read_text(encoding="utf-8"))
     except FileNotFoundError:
         return None
-    tries = tuple(_try(line) for line in _lines(directory / TRIES))
+    meetings = {m.id: m for m in series.meetings}
+    tries = tuple(
+        _try(line, meetings[line["meeting"]], marked["arm"]) for line in _lines(directory / TRIES)
+    )
     return SeriesRun(marked["arm"], marked["series"], tries, marked["finished_attempt"])
 
 
@@ -172,22 +180,26 @@ def _line(
         "start_error": None if error is None else f"{type(error).__name__}: {error}",
         "errors": list(held.errors),
         "cut_short": held.cut_short,
-        "answer": _answer(meeting, held.result),
         "record": None if held.result is None else plain(held.result),
     }
 
 
-def _answer(meeting: Meeting, result: object) -> str | None:
-    """What the meeting asked for: the memo, or the recall check's answers.
-    None at a briefing, and when the answer is missing: a memo never
-    written, or arm A's reply empty or cut off at its token limit."""
+def _answer(meeting: Meeting, arm: str, record: Mapping[str, Any]) -> str | None:
+    """What the meeting asked for, read from the arm's kept *record*: the
+    memo, or the recall check's answers. None at a briefing, and when the
+    answer is missing: a memo never written, or arm A's reply empty or cut
+    off at its token limit (:attr:`ArmAReply.missing`)."""
     if meeting.kind is MeetingKind.BRIEFING:
         return None
-    if isinstance(result, ArmAReply):
-        return None if result.missing else result.text
-    if isinstance(result, ChannelMeeting) and result.memo is not None:
-        return result.memo.content
-    return None
+    if arm == arm_a.ARM:
+        reply = ArmAReply(**{
+            **record, "stop_reason": StopReason(record["stop_reason"]),
+            "asked_at": dt.datetime.fromisoformat(record["asked_at"]),
+            "answered_at": dt.datetime.fromisoformat(record["answered_at"]),
+        })
+        return None if reply.missing else reply.text
+    memo = record.get("memo")
+    return None if memo is None else str(memo["content"])
 
 
 def _outcome(held: Held[Any]) -> str:
@@ -198,9 +210,9 @@ def _outcome(held: Held[Any]) -> str:
     return "held" + (f"; failed calls: {', '.join(held.errors)}" if held.errors else "")
 
 
-def _try(line: Mapping[str, Any]) -> Try[Kept]:
+def _try(line: Mapping[str, Any], meeting: Meeting, arm: str) -> Try[Kept]:
     record = line["record"]
-    result = None if record is None else Kept(line["answer"], record)
+    result = None if record is None else Kept(_answer(meeting, arm, record), record)
     held = Held(result, errors=tuple(line["errors"]), start_failed=line["start_failed"])
     return Try(line["meeting"], line["attempt"], line["try"], held)
 
@@ -215,7 +227,7 @@ def _memo_turn(record: Mapping[str, Any]) -> MemoTurn | None:
 def _lines(path: Path) -> Iterator[dict[str, Any]]:
     if not path.exists():
         return
-    for text in path.read_text().splitlines():
+    for text in path.read_text(encoding="utf-8").splitlines():
         yield json.loads(text)
 
 
@@ -228,10 +240,3 @@ def _set_aside(directory: Path, interrupted: Path, stem: str) -> Path:
             directory.rename(aside)
             return aside
     raise AssertionError("unreachable")
-
-
-def write_json(path: Path, doc: Any) -> None:
-    """Write *doc* as JSON in one step, so a crash leaves the old file or the new."""
-    part = path.with_name(f"{path.name}.part")
-    part.write_text(json.dumps(doc, indent=1, ensure_ascii=False))
-    os.replace(part, path)

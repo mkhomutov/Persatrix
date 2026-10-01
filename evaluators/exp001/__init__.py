@@ -48,6 +48,8 @@ and its part 2; this package only carries those documents out.
   practice series, judged, then reported by
   :mod:`evaluators.exp001.practice_report`. ``python -m evaluators.exp001
   practice`` runs it.
+- :mod:`evaluators.exp001.files` writes the files a run keeps so any stop
+  leaves each whole, and holds a directory for one run at a time.
 
 Only ``runtime``, ``arm_a``, ``deployment`` and the modules that use them
 import from the agents' runtime: the call log and the clock; for arm A the

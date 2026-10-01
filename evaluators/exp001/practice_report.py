@@ -11,11 +11,13 @@ practice run's kept tries and call records into those figures:
   cache entry, the gap PR 5d left for the practice run to confirm.
 - **D′'s discussions against the cost close**: each D′ discussion's tokens,
   counted as the wallet counts them, against the 1 776 000 at which the cost
-  close comes for a room of five.
-- **What each meeting recorded**, for checks 5 and 6 among others: what
-  closed each discussion, the failures its record names, and whether its
-  answer is missing. A lease a spending limit refused stops the run instead.
-- **Check 2's first half**: the judge's marks on each arm's recall check.
+  close comes for a room of five. A try cut short kept no record, so its
+  close is unknown and its figure can only overstate it; it is marked so.
+- **What each meeting recorded**, for checks 5 and 6 among others: whether
+  each arm's series was held to the end or dropped, what closed each
+  discussion, the failures its record names, and whether its answer is
+  missing. A lease a spending limit refused stops the run instead.
+- **Check 2's first half**: the judge's marks on each arm's recall checks.
   Each meeting is a new channel, so D's chair can answer only from memory.
 - **The judge**: its calls' output tokens against their 16 000 limit, and
   the scored judging's spend projected from the practice batch, 100 memo
@@ -82,7 +84,10 @@ def discussion_tokens(run: SeriesRun[Kept], records: Iterable[CallRecord]) -> To
     """Each try's discussion tokens, as the wallet counts them against the
     discussion's budget: every input token a turn or bid carried, cached
     ones included, and its output, for the calls begun before the close.
-    Keyed by meeting, attempt and try; a try that made no such call has none."""
+    Keyed by meeting, attempt and try; a try that made no such call has none.
+    A try cut short kept no record, so neither its close nor its memo turn
+    is known, and every turn and bid it made counts, the chair's memo call
+    among them: :func:`build` marks its figure as an upper bound."""
     closes: dict[tuple[str, int, int], dt.datetime | None] = {}
     for t in run.tries:
         closed = None if t.held.result is None else t.held.result.record.get("closed_at")
@@ -150,9 +155,14 @@ def usage_totals(calls: CallLog) -> dict[str, Any]:
     }
 
 
-def recall_marks_by_arm(judged: Judged, seal: Seal) -> dict[str, dict[str, bool]]:
-    """The judge's marks on each arm's recall check, read back through the seal."""
-    return {seal.packets[packet].arm: marks for packet, marks in judged.recall_marks.items()}
+def recall_marks_by_arm(judged: Judged, seal: Seal) -> dict[str, dict[str, dict[str, bool]]]:
+    """The judge's marks on each arm's recall checks, by meeting, read back
+    through the seal."""
+    marks: dict[str, dict[str, dict[str, bool]]] = defaultdict(dict)
+    for packet, answers in judged.recall_marks.items():
+        ref = seal.packets[packet]
+        marks[ref.arm][ref.meeting] = answers
+    return dict(marks)
 
 
 def meeting_rows(runs: Mapping[str, SeriesRun[Kept]], series: Series) -> list[dict[str, Any]]:
@@ -199,15 +209,12 @@ def build(
     return {
         "series": series.id,
         "arms": list(runs),
+        "finished_attempts": {arm: run.finished_attempt for arm, run in runs.items()},
         "meetings": meeting_rows(runs, series),
         "check_3": {"findings": check_cache(records, failures=failures, written=written)},
         "d_prime_discussions": None if d_prime is None else {
             "cost_close_tokens": COST_CLOSE_TOKENS,
-            "tries": [
-                {"meeting": meeting, "attempt": attempt, "try": meeting_try, "tokens": tokens}
-                for (meeting, attempt, meeting_try), tokens
-                in discussion_tokens(d_prime, calls["D-prime"].records).items()
-            ],
+            "tries": _discussions(d_prime, calls["D-prime"].records),
         },
         "recall_marks": (
             None if judged is None or seal is None else recall_marks_by_arm(judged, seal)
@@ -217,6 +224,16 @@ def build(
             (*everything.records, *judge_records), (*everything.failures, *judge_failures),
         )),
     }
+
+
+def _discussions(run: SeriesRun[Kept], records: Iterable[CallRecord]) -> list[dict[str, Any]]:
+    """Each D′ try's discussion tokens, and whether its close is known."""
+    unknown = {(t.meeting, t.attempt, t.meeting_try) for t in run.tries if t.held.result is None}
+    return [
+        {"meeting": meeting, "attempt": attempt, "try": meeting_try, "tokens": tokens,
+         "close_known": (meeting, attempt, meeting_try) not in unknown}
+        for (meeting, attempt, meeting_try), tokens in discussion_tokens(run, records).items()
+    ]
 
 
 def _judge(calls: CallLog, judged: Judged) -> dict[str, Any]:
@@ -246,7 +263,11 @@ def _judge(calls: CallLog, judged: Judged) -> dict[str, Any]:
 def summary(report: Mapping[str, Any]) -> str:
     """The report in plain words, one section per thing the run shows."""
     lines = [f"EXP-001 practice run, series {report['series']}: arms {', '.join(report['arms'])}",
-             "", "Meetings:"]
+             "", "Each arm's series:"]
+    lines += [f"  {arm}: " + ("dropped, out of every arm's comparisons" if attempt is None
+                              else f"held to the end, attempt {attempt}")
+              for arm, attempt in report["finished_attempts"].items()]
+    lines += ["", "Meetings:"]
     for row in report["meetings"]:
         lines.append(f"  {row['arm']} {row['meeting']}, attempt {row['attempt']}, "
                      f"try {row['try']}: {_meeting_words(row)}")
@@ -259,7 +280,9 @@ def summary(report: Mapping[str, Any]) -> str:
         lines += ["", "D′ discussions, whose cost close comes at "
                       f"{_n(discussions['cost_close_tokens'])} tokens:"]
         lines += [f"  {t['meeting']}, attempt {t['attempt']}, try {t['try']}: "
-                  f"{_n(t['tokens'])} tokens" for t in discussions["tries"]]
+                  + (f"{_n(t['tokens'])} tokens" if t["close_known"] else
+                     f"at most {_n(t['tokens'])} tokens, its close unknown (cut short)")
+                  for t in discussions["tries"]]
     lines += ["", *_judge_words(report)]
     lines += ["", *_usage_words(report["usage"])]
     return "\n".join(lines) + "\n"
@@ -298,9 +321,10 @@ def _judge_words(report: Mapping[str, Any]) -> list[str]:
         )
     marks = report["recall_marks"] or {}
     lines.append("Recall checks as the judge marked them (check 2: D answers only from memory):")
-    lines += [f"  {arm}: " + ", ".join(f"{q} {'right' if right else 'wrong'}"
-                                       for q, right in answers.items())
-              for arm, answers in sorted(marks.items())]
+    lines += [f"  {arm}, {meeting}: " + ", ".join(f"{q} {'right' if right else 'wrong'}"
+                                                  for q, right in answers.items())
+              for arm, checks in sorted(marks.items())
+              for meeting, answers in sorted(checks.items())]
     return lines
 
 

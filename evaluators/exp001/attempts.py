@@ -50,7 +50,7 @@ from typing import Any, Generic, TypeVar
 
 from agents.llm_client import LLMClient
 from evaluators.exp001 import arm_a, channel_arm, deployed_meeting
-from evaluators.exp001.costs import CallPurpose
+from evaluators.exp001.costs import ARMS_MODEL, CallPurpose
 from evaluators.exp001.deployment import StartError
 from evaluators.exp001.materials import Meeting, Series
 from evaluators.exp001.orchestrator import OrchestratorError
@@ -193,23 +193,23 @@ async def _attempt(
     for meeting in series.meetings:
         failed = not_started = 0
         for meeting_try in itertools.count(1):
-            where = _where(arm, series, meeting, attempt, meeting_try)
+            at = where(arm, series, meeting, attempt, meeting_try)
             try:
                 held = await hold(meeting, attempt, meeting_try)
             except HarnessFault:
                 raise
             except Exception as exc:
-                raise HarnessFault(f"{where}: {type(exc).__name__}: {exc}") from exc
+                raise HarnessFault(f"{at}: {type(exc).__name__}: {exc}") from exc
             unplaced = [e for e in held.errors if error_kind(e) is ErrorKind.HARNESS]
             if unplaced:
-                raise HarnessFault(f"{where}: calls failed with {', '.join(unplaced)}")
+                raise HarnessFault(f"{at}: calls failed with {', '.join(unplaced)}")
             tries.append(Try(meeting.id, attempt, meeting_try, held))
             if held.start_failed:
                 not_started += 1
                 if not_started > retries:
                     last = f"; the last: {held.start_error}" if held.start_error else ""
                     raise HarnessFault(
-                        f"{where}: the deployment did not start in {not_started} tries{last}",
+                        f"{at}: the deployment did not start in {not_started} tries{last}",
                     ) from held.start_error
             elif held.cut_short:
                 failed += 1
@@ -221,7 +221,7 @@ async def _attempt(
     return True
 
 
-def _where(arm: str, series: Series, meeting: Meeting, attempt: int, meeting_try: int) -> str:
+def where(arm: str, series: Series, meeting: Meeting, attempt: int, meeting_try: int) -> str:
     """Where a fault happened, as every HarnessFault names it."""
     return f"{arm}, {series.id}, {meeting.id}, attempt {attempt}, try {meeting_try}"
 
@@ -248,7 +248,7 @@ def series_kept(runs: Iterable[SeriesRun[Any]], scored: Sequence[str]) -> Series
 
 
 def arm_a_hold(
-    client: LLMClient, panel: Panel, series: Series, *, log_path: Path,
+    client: LLMClient, panel: Panel, series: Series, *, log_path: Path, model: str = ARMS_MODEL,
 ) -> Hold[arm_a.ArmAReply]:
     """Arm A's meetings: its one call raises what failed, and the call log keeps it.
 
@@ -256,6 +256,7 @@ def arm_a_hold(
     which must not exist yet, so no earlier run's calls are counted again.
     Only a provider error holds the meeting again; anything else the call
     raises is a harness fault, since the harness builds arm A's request.
+    Each call asks for *model*: the arms', or offline the mock's.
     """
     if log_path.exists():
         raise FileExistsError(f"{log_path}: an earlier run's calls would be counted again")
@@ -266,7 +267,7 @@ def arm_a_hold(
         try:
             reply = await arm_a.run_meeting(
                 client, panel, series, meeting, log_path=log_path,
-                attempt=attempt, meeting_try=meeting_try,
+                attempt=attempt, meeting_try=meeting_try, model=model,
             )
         except Exception as exc:
             if error_kind(type(exc).__name__) is not ErrorKind.PROVIDER:
@@ -356,7 +357,7 @@ def channel_hold(
         errors = _bearing(failures)
         if errors and not calls.records and all(error_kind(e) is ErrorKind.SYSTEM for e in errors):
             raise HarnessFault(
-                f"{_where(arm, series, meeting, attempt, meeting_try)}: every call was refused "
+                f"{where(arm, series, meeting, attempt, meeting_try)}: every call was refused "
                 f"({', '.join(sorted(set(errors)))}), as a spend limit or an empty balance is",
             )
         return Held(result, errors=errors)

@@ -68,9 +68,12 @@ async def test_a_practice_run_of_arms_a_and_b_on_the_mock_provider(
     assert not any(r["cut_short"] or r["failures"] or r["answer_missing"] for r in rows)
     assert report["check_3"]["findings"] == []
     assert report["judge"] is None
+    assert report["finished_attempts"] == {"A": 1, "B": 1}
+    # Arm A's calls went to the mock too, so no call is priced.
+    assert {m: t["dollars"] for m, t in report["usage"]["models"].items()} == {"offline": None}
 
     b = tmp_path / "pairs" / series.id / "B"
-    run = read_pair(b)
+    run = read_pair(b, series)
     assert run is not None and run.finished_attempt == 1
     memos = Counter(r.meeting for r in pair_calls(b, run).records
                     if r.purpose is CallPurpose.MEMO)

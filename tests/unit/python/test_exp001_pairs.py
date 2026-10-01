@@ -13,7 +13,9 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import functools
+import inspect
 import json
+import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -25,7 +27,7 @@ from agents.llm_offline import MockProvider
 from agents.llm_types import StopReason
 from evaluators.exp001 import arm_d, arm_d_prime, attempts, deployed_meeting
 from evaluators.exp001.attempts import HarnessFault, Held, Hold, SeriesRun
-from evaluators.exp001.costs import CallPurpose
+from evaluators.exp001.costs import ARMS_MODEL, CallPurpose
 from evaluators.exp001.deployment import ARMS_ALIAS, Alias
 from evaluators.exp001.materials import Meeting
 from evaluators.exp001.pairs import (
@@ -42,6 +44,7 @@ from ._exp001_run_test_helpers import IDS, PANEL, SERIES, T0, arm_a_reply, chann
 
 BRIEFING, PLAN, CONTROL, RECALL = SERIES.meetings
 _BINARY = Path("/repo/bin/persatrix-server")
+_OFFLINE = Alias("mock", "offline", 0, 0)
 
 
 class _Script:
@@ -113,6 +116,37 @@ class TestKeepingEachTry:
             RECALL.id: f"Answer {RECALL.id}",
         }
 
+    async def test_the_answer_is_read_from_the_record_not_kept_beside_it(
+        self, tmp_path: Path,
+    ) -> None:
+        """So a later fix to what counts as missing reads the kept tries again."""
+        await _hold(tmp_path, _Script())
+        directory = tmp_path / "pairs" / SERIES.id / "C"
+        lines = _lines(directory)
+        assert all("answer" not in line for line in lines)
+        lines[1]["record"]["memo"]["content"] = "The memo, as the record now holds it."
+        (directory / TRIES).write_text("".join(json.dumps(line) + "\n" for line in lines))
+        kept = read_pair(directory, SERIES)
+        assert kept is not None
+        assert kept.finished()[PLAN.id].held.result == Kept(
+            "The memo, as the record now holds it.", lines[1]["record"],
+        )
+
+    async def test_each_try_and_the_mark_reach_the_disk_before_the_run_goes_on(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """After a power cut the mark never names a try the file lost."""
+        synced: list[str] = []
+        monkeypatch.setattr(
+            os, "fsync", lambda fd: synced.append(os.readlink(f"/proc/self/fd/{fd}")),
+        )
+        await _hold(tmp_path, _Script())
+        directory = tmp_path / "pairs" / SERIES.id / "C"
+        assert synced.count(str(directory / TRIES)) == len(SERIES.meetings)
+        assert synced.index(str(directory / f"{PAIR}.part")) > max(
+            i for i, path in enumerate(synced) if path == str(directory / TRIES)
+        )
+
     async def test_a_missing_memo_is_kept_as_no_answer(self, tmp_path: Path) -> None:
         script = _Script({(PLAN.id, 1, 1): Held(channel_meeting(PLAN, 1, 1, memo=None,
                                                           failures=("missing_memo",)))})
@@ -174,7 +208,7 @@ class TestKeepingEachTry:
     async def test_the_pair_read_back_is_the_pair_held(self, tmp_path: Path) -> None:
         script = _Script({(PLAN.id, 1, 1): Held(None, errors=("RateLimitError",))})
         run = await _hold(tmp_path, script)
-        assert read_pair(tmp_path / "pairs" / SERIES.id / "C") == run
+        assert read_pair(tmp_path / "pairs" / SERIES.id / "C", SERIES) == run
         assert [(t.meeting, t.attempt, t.meeting_try) for t in run.tries] == [
             (IDS[0], 1, 1), (IDS[1], 1, 1), (IDS[1], 1, 2), (IDS[2], 1, 1), (IDS[3], 1, 1),
         ]
@@ -189,7 +223,7 @@ class TestKeepingEachTry:
         directory = tmp_path / "pairs" / SERIES.id / "C"
         assert [k["meeting"] for k in _lines(directory)] == [BRIEFING.id]
         assert not (directory / PAIR).exists()
-        assert read_pair(directory) is None
+        assert read_pair(directory, SERIES) is None
 
 
 class TestResuming:
@@ -299,31 +333,47 @@ class TestEachArmsHold:
         self, built: dict[str, Any], tmp_path: Path,
     ) -> None:
         client = LLMClient(MockProvider())
-        assert arm_hold("A", PANEL, SERIES, tmp_path, client=client, binary=_BINARY) == "A"
-        assert built["A"] == ((client, PANEL, SERIES), {"log_path": tmp_path / "calls.jsonl"})
+        assert arm_hold("A", PANEL, SERIES, tmp_path, client=client, binary=_BINARY,
+                        alias=ARMS_ALIAS) == "A"
+        assert built["A"] == (
+            (client, PANEL, SERIES), {"log_path": tmp_path / "calls.jsonl", "model": ARMS_MODEL},
+        )
+
+    def test_offline_arm_as_call_names_the_mock_model_so_it_is_never_priced(
+        self, built: dict[str, Any], tmp_path: Path,
+    ) -> None:
+        """Its call goes to the mock, so its record must not name the arms' model."""
+        arm_hold("A", PANEL, SERIES, tmp_path, client=LLMClient(MockProvider()), binary=_BINARY,
+                 alias=_OFFLINE)
+        assert built["A"][1]["model"] == "offline"
+
+    def test_the_alias_is_never_a_default(self) -> None:
+        """The arms' alias is the real provider's, which spends money."""
+        assert inspect.signature(arm_hold).parameters["alias"].default is inspect.Parameter.empty
 
     @pytest.mark.parametrize("arm", ["B", "C"])
     def test_arms_b_and_c_hold_each_try_on_a_new_deployment(
         self, built: dict[str, Any], tmp_path: Path, arm: str,
     ) -> None:
-        mock = Alias("mock", "offline", 0, 0)
         arm_hold(arm, PANEL, SERIES, tmp_path, client=LLMClient(MockProvider()),
-                 binary=_BINARY, alias=mock)
+                 binary=_BINARY, alias=_OFFLINE)
         args, kwargs = built["channel"]
         assert args == (PANEL, arm, SERIES, tmp_path)
         run = kwargs["run"]
         assert isinstance(run, functools.partial)
         assert (run.func, run.args, run.keywords) == (
-            deployed_meeting.run_meeting, (), {"binary": _BINARY, "alias": mock},
+            deployed_meeting.run_meeting, (), {"binary": _BINARY, "alias": _OFFLINE},
         )
 
     @pytest.mark.parametrize("arm", ["D", "D-prime"])
     def test_arms_d_and_d_prime_are_held_by_their_own_holds(
         self, built: dict[str, Any], tmp_path: Path, arm: str,
     ) -> None:
-        arm_hold(arm, PANEL, SERIES, tmp_path, client=LLMClient(MockProvider()), binary=_BINARY)
+        arm_hold(arm, PANEL, SERIES, tmp_path, client=LLMClient(MockProvider()), binary=_BINARY,
+                 alias=ARMS_ALIAS)
         assert built[arm] == ((PANEL, SERIES, tmp_path), {"binary": _BINARY, "alias": ARMS_ALIAS})
 
     def test_an_arm_the_pre_registration_does_not_name_is_refused(self, tmp_path: Path) -> None:
         with pytest.raises(ValueError, match="unknown arm 'E'"):
-            arm_hold("E", PANEL, SERIES, tmp_path, client=LLMClient(MockProvider()), binary=_BINARY)
+            arm_hold("E", PANEL, SERIES, tmp_path, client=LLMClient(MockProvider()),
+                     binary=_BINARY, alias=ARMS_ALIAS)

@@ -193,6 +193,23 @@ class TestReadCallLog:
         with pytest.raises(CallLogError, match="c.jsonl:2"):
             read_call_log(path)
 
+    def test_a_log_whose_writer_was_killed_leaves_out_its_half_written_last_line(
+        self, tmp_path,
+    ):
+        """A line ends with its line break; one without was being written when
+        its process was killed, and may stop inside a character (PR 6b)."""
+        path = tmp_path / "c.jsonl"
+        path.write_bytes((json.dumps(_line()) + "\n").encode() + b'{"tags": {"arm": "\xe2\x80')
+        assert len(read_call_log(path, cut_off=True).records) == 1
+        with pytest.raises(ValueError):  # not UTF-8, so not text at all
+            read_call_log(path)
+
+    def test_a_broken_line_before_the_last_is_refused_even_in_a_cut_off_log(self, tmp_path):
+        path = tmp_path / "c.jsonl"
+        path.write_text("{broken\n" + json.dumps(_line()) + "\n")
+        with pytest.raises(CallLogError, match="c.jsonl:1"):
+            read_call_log(path, cut_off=True)
+
     def test_the_chairs_turns_after_the_memo_request_are_the_memo(self, tmp_path):
         asked = _T + dt.timedelta(minutes=5)
         memo = MemoTurn(arm="C", series="series-1", meeting="plan-1", attempt=2,

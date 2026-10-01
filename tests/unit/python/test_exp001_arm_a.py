@@ -213,6 +213,18 @@ class TestRunMeeting:
         line = json.loads(log_path.read_text())
         assert (line["purpose"], line["model_alias"]) == ("turn", None)
 
+    async def test_offline_the_call_and_its_record_name_the_mock_model(
+        self, log_path: Path,
+    ) -> None:
+        """So the report prices no call the mock answered (PR 6b)."""
+        provider = _Provider("Noted.")
+        await run_meeting(
+            LLMClient(provider), PANEL, SERIES, _first(MeetingKind.BRIEFING), log_path=log_path,
+            attempt=1, meeting_try=1, model="offline",
+        )
+        assert provider.calls[0]["model"] == "offline"
+        assert [r.model for r in read_call_log(log_path).records] == ["offline"]
+
     @pytest.mark.parametrize(("text", "stop_reason"), [
         (None, StopReason.END_TURN),
         (" \n", StopReason.END_TURN),

@@ -93,6 +93,16 @@ class TestArmA:
             (IDS[0], 1), (IDS[1], 2),
         ]
 
+    async def test_each_call_asks_for_the_model_named(self, tmp_path: Path) -> None:
+        """Offline, the mock's; otherwise the arms' (PR 6b)."""
+        client = LLMClient(_Provider("noted", "memo", "", ""))
+        await run_series(
+            "A", SERIES,
+            arm_a_hold(client, PANEL, SERIES, log_path=tmp_path / "c.jsonl", model="offline"),
+            sleep=_no_wait,
+        )
+        assert {r.model for r in read_call_log(tmp_path / "c.jsonl").records} == {"offline"}
+
     async def test_a_restart_tags_its_calls_with_the_second_attempt(
         self, tmp_path: Path,
     ) -> None:

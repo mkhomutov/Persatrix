@@ -197,7 +197,21 @@ class TestRecallMarks:
                                                       "p2": {"R1": False, "R2": False}},
                         spend=0.1, cap_reached=False, left=())
         assert recall_marks_by_arm(judged, seal) == {
-            "B": {"R1": False, "R2": False}, "D": {"R1": True, "R2": False},
+            "B": {RECALL.id: {"R1": False, "R2": False}},
+            "D": {RECALL.id: {"R1": True, "R2": False}},
+        }
+
+    def test_an_arm_with_several_recall_checks_keeps_the_marks_of_each(self) -> None:
+        """The scored run asks one per series; none overwrites another."""
+        seal = Seal(
+            packets={"p1": MemoRef("D", "series-1", "series-1-recall"),
+                     "p2": MemoRef("D", "series-2", "series-2-recall")},
+            missing=(), cuts={},
+        )
+        judged = Judged(memo_scores={}, recall_marks={"p1": {"R1": True}, "p2": {"R1": False}},
+                        spend=0.1, cap_reached=False, left=())
+        assert recall_marks_by_arm(judged, seal) == {
+            "D": {"series-1-recall": {"R1": True}, "series-2-recall": {"R1": False}},
         }
 
 
@@ -258,8 +272,34 @@ class TestTheReport:
         report = self._build()
         assert report["d_prime_discussions"] == {
             "cost_close_tokens": COST_CLOSE_TOKENS,
-            "tries": [{"meeting": PLAN.id, "attempt": 1, "try": 1, "tokens": 2011}],
+            "tries": [{"meeting": PLAN.id, "attempt": 1, "try": 1, "tokens": 2011,
+                       "close_known": True}],
         }
+
+    def test_a_d_prime_try_cut_short_is_marked_as_counted_without_its_close(self) -> None:
+        """Its record is lost, so its close and memo turn are unknown: every
+        turn and bid counts, the chair's memo call among them, which can only
+        overstate the discussion."""
+        runs = {"D-prime": _run("D-prime",
+                                Try(PLAN.id, 1, 1, Held(None, errors=("RateLimitError",))),
+                                Try(PLAN.id, 1, 2, _kept({"closed_at": _at(30).isoformat()})))}
+        calls = {"D-prime": CallLog((_record(1, tokens=(10, 1, 0, 0)),
+                                     _record(20, meeting_try=2, tokens=(20, 2, 0, 0))), ())}
+        report = self._build(runs=runs, calls=calls, written={})
+        assert [(t["try"], t["close_known"]) for t in report["d_prime_discussions"]["tries"]] == [
+            (1, False), (2, True),
+        ]
+        assert "try 1: at most 11 tokens, its close unknown" in summary(report)
+
+    def test_whether_each_arms_series_was_held_to_the_end_is_named(self) -> None:
+        """The practice run exists to show the series can be held."""
+        runs = {"A": _run("A"), "D": SeriesRun("D", SERIES.id, (), None)}
+        report = self._build(runs=runs, calls={"A": CallLog((), ()), "D": CallLog((), ())},
+                             written={})
+        assert report["finished_attempts"] == {"A": 1, "D": None}
+        text = summary(report)
+        assert "A: held to the end, attempt 1" in text
+        assert "D: dropped, out of every arm's comparisons" in text
 
     def test_without_judging_the_judge_is_not_reported(self) -> None:
         report = self._build()
@@ -279,7 +319,8 @@ class TestTheReport:
         assert report["judge"]["output_tokens_max"] == 6000
         assert report["judge"]["max_tokens"] == MAX_TOKENS
         assert report["judge"]["projection"]["fits"] is True
-        assert report["recall_marks"] == {"D": {"R1": True}}
+        assert report["recall_marks"] == {"D": {RECALL.id: {"R1": True}}}
+        assert f"D, {RECALL.id}: R1 right" in summary(report)
 
     def test_the_summary_names_what_the_run_shows(self) -> None:
         text = summary(self._build())

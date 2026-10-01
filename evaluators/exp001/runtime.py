@@ -179,14 +179,24 @@ class CallLog:
     failures: tuple[FailedCall, ...]
 
 
-def read_call_log(path: Path, *, memo_turns: Iterable[MemoTurn] = ()) -> CallLog:
-    """Every line of *path*, as records and failures. No file is an empty log."""
+def read_call_log(
+    path: Path, *, memo_turns: Iterable[MemoTurn] = (), cut_off: bool = False,
+) -> CallLog:
+    """Every line of *path*, as records and failures. No file is an empty log.
+
+    A *cut_off* log is one whose writer may have been killed midway, such as
+    a pair's set aside after a crash: a last line with no line break was
+    still being written, and is left out.
+    """
     memos = {(m.arm, m.series, m.meeting, m.attempt, m.meeting_try): m for m in memo_turns}
     records: list[CallRecord] = []
     failures: list[FailedCall] = []
     if not path.exists():
         return CallLog((), ())
-    for number, text in enumerate(path.read_text().splitlines(), start=1):
+    data = path.read_bytes()
+    if cut_off and not data.endswith(b"\n"):
+        data = data[: data.rfind(b"\n") + 1]
+    for number, text in enumerate(data.decode().splitlines(), start=1):
         where = f"{path.name}:{number}"
         try:
             line = json.loads(text)

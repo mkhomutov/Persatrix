@@ -37,12 +37,9 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
-import fcntl
 import hashlib
 import json
-import os
-from collections.abc import Awaitable, Callable, Collection, Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -60,6 +57,7 @@ from evaluators.exp001.attempts import (
     error_kind,
 )
 from evaluators.exp001.costs import CallPurpose, CallRecord, judging_spend
+from evaluators.exp001.files import append_line, sole_run
 from evaluators.exp001.judge_answers import (
     MemoScores,
     UnreadableReplyError,
@@ -86,7 +84,6 @@ JUDGING_CAP = 25.0
 RATER = "judge"
 CALL_LOG = "calls.jsonl"
 REPLIES = "replies.jsonl"
-LOCK = "lock"
 
 _MEMO, _RECALL = "memo", "recall"
 _TAGS = ("rater", "batch", "packet", "kind", "try")
@@ -171,7 +168,8 @@ async def judge_batch(
     One run at a time holds the directory; a second is refused.
     """
     directory.mkdir(parents=True, exist_ok=True)
-    with _sole_run(directory):
+    # A second run at once would ask its packets again.
+    with sole_run(directory, "judging this batch"):
         return await _judge_batch(client, packets, prompts, directory, batch, cap, retries, sleep)
 
 
@@ -206,7 +204,7 @@ async def _judge_batch(
                 continue
             tried = _last_try(calls, packet.id)
             answer = await _ask(client, packet, prompts, log, batch, tried, retries, sleep)
-            _keep(kept, answer)
+            append_line(kept, answer)
         elif answer["asked"] != _asked(packet, prompts):
             raise JudgeFault(
                 f"packet {packet.id}: its kept answer was asked with another prompt, packet or "
@@ -222,22 +220,6 @@ async def _judge_batch(
             raise JudgeFault(f"{unreadable}: {exc}") from exc
     spend = _batch_log(log, batch, ids)[1]
     return Judged(memo_scores, recall_marks, spend, cap_reached=bool(left), left=tuple(left))
-
-
-@contextmanager
-def _sole_run(directory: Path) -> Iterator[None]:
-    """Hold the batch's directory for one run, since a second run at once would
-    ask its packets again. The lock goes with the process, so a crash leaves
-    nothing to clear."""
-    fd = os.open(directory / LOCK, os.O_WRONLY | os.O_CREAT, 0o644)
-    try:
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            raise RuntimeError(f"{directory}: another run is judging this batch") from None
-        yield
-    finally:
-        os.close(fd)
 
 
 def _batch_log(log: Path, batch: str, packets: Collection[str]) -> tuple[CallLog, float]:
@@ -339,18 +321,6 @@ def _text(answer: Mapping[str, str]) -> str:
     if answer["stop_reason"] == _REFUSAL:
         raise UnreadableReplyError("the judge refused to answer")
     return answer["text"]
-
-
-def _keep(path: Path, answer: Mapping[str, str]) -> None:
-    """Append one answer as a line, written out in full and flushed before it is read."""
-    data = (json.dumps(answer) + "\n").encode()
-    fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
-    try:
-        while data:  # a write can stop short, on a nearly full disk for one
-            data = data[os.write(fd, data):]
-        os.fsync(fd)
-    finally:
-        os.close(fd)
 
 
 def _read_answers(path: Path) -> dict[str, dict[str, str]]:

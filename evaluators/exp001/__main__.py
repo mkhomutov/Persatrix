@@ -7,9 +7,11 @@ goes on where it stopped.
 
 ``--provider anthropic`` makes real model calls on the pre-registered
 models, so it spends money: the advisers', arm A's and the judge's calls go
-to Anthropic with the key in ``ANTHROPIC_API_KEY``. A key used by nothing
-else keeps the provider's usage report for that key to the run's own calls,
-which the report's totals are compared with. ``--provider offline`` holds
+to Anthropic with the key in ``ANTHROPIC_API_KEY``, and without one it
+refuses to start, since the first call would fail as a harness fault and
+close the directory. A key used by nothing else keeps the provider's usage
+report for that key to the run's own calls, which the report's totals are
+compared with. ``--provider offline`` holds
 the meetings on the offline mock provider instead, at no cost, and judges
 nothing. The provider is never a default.
 
@@ -21,6 +23,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import datetime as dt
+import os
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -53,6 +56,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"{args.binary} is missing: run `make build-orchestrator`", file=sys.stderr)
         return 2
     offline = args.provider == "offline"
+    if not offline and not os.environ.get("ANTHROPIC_API_KEY"):
+        print("ANTHROPIC_API_KEY is not set: set it to a key used by nothing else",
+              file=sys.stderr)
+        return 2
     try:
         report = asyncio.run(practice.run_practice(
             args.root, arms,
