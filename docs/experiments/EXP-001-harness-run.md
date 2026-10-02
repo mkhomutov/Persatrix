@@ -133,6 +133,15 @@ The runtime half sits beside the call log, in `agents/prefix_keepalive.py`,
 since it reads real time, as the provider's cache does; the persona runtime
 reads only agent time.
 
+Before review, arm D′'s practice series was held again on the real provider
+with PR 5e in place, and check 3 named nothing. Each meeting after the
+briefing closed by its idle window as before. In each, the chair sent two
+keep-alives, 240 to 244 seconds apart, each reading the whole prefix and
+writing nothing, and the memo turn, 127 to 142 seconds after the last of
+them, read the prefix (1 665, 5 721 and 10 155 tokens) instead of writing
+it. The six keep-alives cost under two cents in all, and D′'s chair again
+answered all three recall questions from its prefix.
+
 ## Related documentation
 
 - [EXP-001 harness](EXP-001-harness.md) — the first part: every harness PR,
