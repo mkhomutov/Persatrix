@@ -78,12 +78,14 @@ def triggers(seeded: bool) -> Triggers:
     extractor stores the subject ``zephyr acquisition``; the topic seeder
     (`agents/persona_runtime/topic_seeds.py`) matches the WHOLE canonical
     subject at a word boundary, so an ask that names only ``Zephyr`` seeds
-    nothing; and episodic recall is an FTS5 ``MATCH`` on the sanitised
+    nothing; and episodic recall was then an FTS5 ``MATCH`` on the sanitised
     stimulus — an implicit AND over every term — so a natural sentence never
-    surfaces the ``restricted`` episode either. Under the literal asks the
+    surfaced the ``restricted`` episode either. Under the literal asks the
     restricted entries were never recall candidates and the §D gate was
     never exercised: Leg 2's withhold was a recall miss, Leg 4 had nothing
-    watched. ``seeded`` names the stored subject verbatim.
+    watched. Since the ISSUE-0159 fix episodic recall matches any shared
+    word, so the episode half no longer needs the verbatim subject; the
+    topic seeder still does. ``seeded`` names the stored subject verbatim.
     """
     if seeded:
         return Triggers(
@@ -99,8 +101,11 @@ def triggers(seeded: bool) -> Triggers:
 def leg4_body(seed: str, seeded: bool) -> str:
     """The proofread framing — or, seeded, the stored bytes and nothing else.
 
-    Every term of the stimulus must appear in the episode summary for the
-    FTS5 AND to match, so no framing survives: the message IS the summary.
+    Written when episodic recall needed every term of the stimulus in the
+    episode summary (an FTS5 AND), so no framing could survive and the
+    message IS the summary. Since the ISSUE-0159 fix any shared word
+    matches and the summary is the strongest match, so the seeded body
+    stays the surest way to make the episode a candidate.
     """
     return seed if seeded else PROOFREAD.format(seed=seed)
 ZEPHYR_LEAK = ("March 3", "Geneva", "board sign-off", "sign-off")

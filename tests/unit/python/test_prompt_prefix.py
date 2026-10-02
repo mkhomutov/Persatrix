@@ -141,7 +141,9 @@ class TestTheTurnCarriesIt:
 def test_only_the_persona_turn_hands_the_client_a_prefix() -> None:
     """Every other call site builds a prompt recalled memory never reaches,
     so none may carry the prefix: a bid that did would write a cache entry
-    of its own, with no tools, and check 3 would fail."""
+    of its own, with no tools, and check 3 would fail. The one exception is
+    the keep-alive (PR 5e), which offers the turn's tools and carries the
+    turn's prefix only to read the turn's entry and so keep it alive."""
     found: list[tuple[str, str]] = []
     for path in sorted(_AGENTS.rglob("*.py")):
         if "tests" in path.parts or "generated" in path.parts:
@@ -160,4 +162,7 @@ def test_only_the_persona_turn_hands_the_client_a_prefix() -> None:
                     path.relative_to(_AGENTS).as_posix(),
                     ast.unparse(purpose) if purpose is not None else "",
                 ))
-    assert found == [("persona_runtime/action_loop.py", "LLMCallPurpose.TURN")]
+    assert found == [
+        ("persona_runtime/action_loop.py", "LLMCallPurpose.TURN"),
+        ("prefix_keepalive.py", "LLMCallPurpose.KEEPALIVE"),
+    ]

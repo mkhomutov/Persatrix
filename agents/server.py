@@ -7,6 +7,7 @@ ExecuteTaskStream, SendChatMessage, ReceiveChannelMessage) from the generated
 protobuf stubs.
 """
 
+import asyncio
 import logging
 
 import aiohttp
@@ -27,6 +28,7 @@ from .observability.log_shipper import (
     set_active_shipper,
 )
 from .persona_runtime import _LLMPersonaAgent
+from .prefix_keepalive import start_prefix_keepalive
 from .server_persona import (
     default_grpc_target,
     initialize_persona_agents,
@@ -97,6 +99,9 @@ class AgentServer:
         # ISSUE-0125 — re-registers this agent when the orchestrator comes back
         # from a restart. Armed at the end of start(), stopped first in stop().
         self._reregister_watcher: ReregistrationWatcher | None = None
+        # EXP-001 arm D′ — keeps a cached prompt prefix alive through a quiet
+        # spell when the process's setting asks; cancelled early in stop().
+        self._prefix_keepalive: asyncio.Task[None] | None = None
 
     def register_agent(self, agent: BaseAgent) -> None:
         """Register an agent instance with the server."""
@@ -200,6 +205,7 @@ class AgentServer:
         # RFC 0036 Phase 2 — wire the verbatim recall tool onto personas
         # (needs the shared session, so post-construction like the fetcher).
         wire_recall_tools(self.agents, self._session, self.orchestrator_url)
+        self._start_prefix_keepalive()
 
         # RFC 0018 PR 5 — start the log shipper after the structlog chain
         # is configured (configure_logging runs in main()) so the tail
@@ -251,6 +257,11 @@ class AgentServer:
         # empties it and nothing would otherwise tell it we are here; every
         # dispatch is then dropped and the persona goes silently mute.
         self._start_reregistration_watcher()
+
+    def _start_prefix_keepalive(self) -> None:
+        """Keep the cached prompt prefix alive when the setting asks, once
+        the persona's tools are wired (:mod:`.prefix_keepalive`)."""
+        self._prefix_keepalive = start_prefix_keepalive(self.agents)
 
     def _start_reregistration_watcher(self) -> None:
         """Watch the orchestrator channel and re-register when it reconnects.
@@ -388,6 +399,10 @@ class AgentServer:
             except Exception:
                 logger.exception("Error stopping the re-registration watcher")
             self._reregister_watcher = None
+        # A keep-alive has nothing to keep once the agent is going.
+        if self._prefix_keepalive is not None:
+            self._prefix_keepalive.cancel()
+            self._prefix_keepalive = None
         # Stop tick schedulers first (before stopping gRPC)
         for agent_id, scheduler in self._tick_schedulers.items():
             try:

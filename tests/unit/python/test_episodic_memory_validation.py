@@ -218,53 +218,6 @@ class TestScoreExpressionSyntax:
             await cursor.fetchone()
 
 
-# ─── _normalize_bm25 unit tests (RFC 0017 §C) ─────────────
-
-
-class TestNormalizeBm25:
-    """Unit tests for the _normalize_bm25 helper in episodic_queries.
-
-    FTS5 rank is a negative BM25 value (more-negative = more relevant).
-    The normalised score is 1.0 / (1.0 + abs(raw)), clamped to [0, 1].
-    """
-
-    def test_none_returns_zero(self):
-        from agents.memory.episodic_queries import _normalize_bm25
-        assert _normalize_bm25(None) == 0.0
-
-    def test_zero_returns_zero(self):
-        from agents.memory.episodic_queries import _normalize_bm25
-        assert _normalize_bm25(0.0) == 0.0
-
-    def test_negative_one_returns_half(self):
-        from agents.memory.episodic_queries import _normalize_bm25
-        assert _normalize_bm25(-1.0) == pytest.approx(0.5, abs=1e-9)
-
-    def test_positive_one_returns_half(self):
-        """Positive raw scores are treated symmetrically (abs)."""
-        from agents.memory.episodic_queries import _normalize_bm25
-        assert _normalize_bm25(1.0) == pytest.approx(0.5, abs=1e-9)
-
-    def test_very_negative_approaches_zero(self):
-        from agents.memory.episodic_queries import _normalize_bm25
-        score = _normalize_bm25(-1000.0)
-        assert score == pytest.approx(0.001, abs=1e-3)
-        assert score >= 0.0
-
-    def test_small_negative_approaches_one(self):
-        from agents.memory.episodic_queries import _normalize_bm25
-        # rank = -0.001 → 1/(1.001) ≈ 0.999
-        score = _normalize_bm25(-0.001)
-        assert score > 0.99
-        assert score <= 1.0
-
-    def test_result_in_unit_interval(self):
-        from agents.memory.episodic_queries import _normalize_bm25
-        for raw in [None, 0.0, -0.5, -1.0, -5.0, -50.0, 0.5, 5.0]:
-            score = _normalize_bm25(raw)
-            assert 0.0 <= score <= 1.0, f"score={score} out of [0,1] for raw={raw}"
-
-
 # ─── min_score range validation (PR #147 review) ───────────
 
 

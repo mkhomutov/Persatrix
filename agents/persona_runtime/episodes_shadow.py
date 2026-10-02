@@ -54,6 +54,7 @@ from typing import TYPE_CHECKING, Final
 
 from ..memory.episodic import DEFAULT_EPISODIC_MIN_SCORE
 from ..memory.episodic_room_ranked import recall_room_ranked
+from .classification import injectable_levels
 from .cross_room import (
     CROSS_ROOM_SHADOW,
     DEFAULT_EPISODIC_CROSS_ROOM,
@@ -134,13 +135,17 @@ async def emit_episodes_shadow(
     if event.event_type not in CHANNEL_ACTING_EVENT_TYPES:
         return
     try:
-        # Same query / limit / min_score as the live episodic recall in
-        # ``_inject_memory_context`` — the shadow-vs-live comparison is
-        # like-for-like by construction (both read the shared constants).
+        # Same query / limit / min_score / floor bar as the live episodic
+        # recall in ``_inject_memory_context`` — the shadow-vs-live
+        # comparison is like-for-like by construction (both read the shared
+        # constants and the same acting level).
         widened = await recall_room_ranked(
             episodic_memory, query,
             limit=EPISODIC_RECALL_LIMIT,
             min_score=DEFAULT_EPISODIC_MIN_SCORE,
+            floor_protection_levels=injectable_levels(
+                acting_classification_for_event(event),
+            ),
         )
         live_ids = set(live_episode_ids)
         delta = [

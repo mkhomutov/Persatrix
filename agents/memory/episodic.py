@@ -19,7 +19,6 @@ import aiosqlite
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
-from ..clock import agent_now
 from ..epoch_id import resolve_epoch_id_silent
 from ..observability.spans import (
     EPISODIC_RECALL_SPAN,
@@ -41,18 +40,15 @@ from .episodic_crud import (
 from .episodic_crud import (
     get_episode as _get_episode,
 )
+from .episodic_crud import reinforce_episodes as _reinforce_episodes
 from .episodic_notes_api import _EpisodicNotesAPIMixin
 from .episodic_queries import (
     MAX_RECALL_LIMIT,
     Episode,
-    insert_episode,
     recall_fts5,
     recall_like,
     recall_recency,
     row_to_episode,
-)
-from .episodic_queries import (
-    update_episode_summary as _update_episode_summary,
 )
 from .episodic_replay_api import _EpisodicReplayAPIMixin
 from .episodic_retention import (
@@ -62,6 +58,8 @@ from .episodic_retention import (
     summarize_old_episodes as _summarize_old_episodes,
 )
 from .episodic_state_api import _EpisodicStateAPIMixin
+from .episodic_writes import insert_episode
+from .episodic_writes import update_episode_summary as _update_episode_summary
 from .interactions import SUMMARY_PENDING_TEXT
 from .migrations import (
     _FTS5_DDL,
@@ -75,16 +73,21 @@ from .notes import NoteStore
 _tracer = trace.get_tracer(__name__)
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from ..llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
 
 
 # ─── Per-tier min_score defaults (RFC 0017 §C) ────────────────────────────────
-# Calibrated against a representative FTS5 BM25 distribution: clear topic
-# matches normalise ≈ 0.20–0.40; low-signal queries ≤ 0.17.  Conservative to
-# avoid over-filtering; callers may tighten via overrides.  Public names (PR 6
-# — RFC 0017 PR 4 finding 1): consumed cross-module, avoids ruff PLC2701.
+# The share of the best match's bm25 relevance a row must reach (ISSUE-0159).
+# Set from EXP-001's arm D replay, measured before system words left the
+# query: the briefing reached 24 of 25 speaking turns at 0.15-0.16 and 23
+# from 0.17 to 0.325, and the recall meeting's answers turn kept it up to
+# about 0.36.  0.20 sits inside that range; re-measure when the query changes.
+# Public names (PR 6 — RFC 0017 PR 4 finding 1): consumed cross-module,
+# avoids ruff PLC2701.
 DEFAULT_EPISODIC_MIN_SCORE: float = 0.20
 DEFAULT_NOTES_MIN_SCORE: float = 0.20
 
@@ -234,7 +237,7 @@ class EpisodicMemory(
         closed at read time (§A rule (c): unknown entry levels are withheld).
 
         ``speaker_id`` (ISSUE-0131 — v18): the record key's speaker half, projected at close;
-        ``None`` = no speaker.  Full contract: :func:`.episodic_queries.insert_episode`.
+        ``None`` = no speaker.  Full contract: :func:`.episodic_writes.insert_episode`.
 
         ``principal_id`` (ISSUE-0137) is the key's OTHER half — the tenant that owns the
         record, so the call site shows the whole key rather than half of it plus an
@@ -313,6 +316,7 @@ class EpisodicMemory(
         min_importance: float = 0.0,
         min_score: float | None = None,
         sessions: list[str] | str | None = None,
+        floor_protection_levels: Sequence[str] | None = None,
     ) -> list[Episode]:
         """Retrieve relevant episodes ranked by composite score.
 
@@ -322,12 +326,18 @@ class EpisodicMemory(
         Parameters
         ----------
         min_score:
-            Optional relevance floor in ``[0, 1]`` applied to FTS5 BM25
-            normalised scores.  ``None`` → no filtering (current behaviour).
-            LIKE-fallback path ignores this parameter (all LIKE matches score
-            ``1.0`` per RFC 0017 Section C).
+            Optional relevance floor in ``[0, 1]``: the share of the best
+            match's bm25 relevance among this call's candidates a row must
+            reach (ISSUE-0159).  ``None`` or ``0.0`` → no filtering; ``1.0``
+            keeps the best match and its ties.  LIKE-fallback path ignores
+            this parameter (all LIKE matches score ``1.0`` per RFC 0017
+            Section C).
         sessions:
             RFC 0031 §D recall filter — see ``_resolve_session_list``.
+        floor_protection_levels:
+            The levels the acting turn may inject; only those rows set
+            ``min_score``'s bar, and the rest stay candidates for the §D
+            gate (ISSUE-0159, ``episodic_queries._floor_bar_expr``).
         """
         if limit < 1:
             raise ValueError(f"limit must be >= 1, got {limit}")
@@ -375,6 +385,7 @@ class EpisodicMemory(
                         db, self._agent_id, query, limit, min_importance,
                         min_score, sessions=session_list,
                         principal_id=active_principal, epoch_id=active_epoch,
+                        floor_protection_levels=floor_protection_levels,
                     )
                 elif query:
                     rows = await recall_like(
@@ -410,18 +421,11 @@ class EpisodicMemory(
                 ]
                 span.set_attribute("result.count", len(episodes))
 
-                # Increment access_count and update last_accessed_at
+                # Count a use of each returned row, then refresh the objects.
                 if episodes:
-                    now = agent_now()
-                    ids = [e.id for e in episodes]
-                    placeholders = ",".join("?" for _ in ids)
-                    await db.execute(
-                        f"UPDATE episodes SET access_count = access_count + 1, "
-                        f"last_accessed_at = ? WHERE id IN ({placeholders})",
-                        [now, *ids],
+                    now = await _reinforce_episodes(
+                        db, self._agent_id, [e.id for e in episodes],
                     )
-                    await db.commit()
-                    # Update in-memory objects to reflect the increment
                     for ep in episodes:
                         ep.access_count += 1
                         ep.last_accessed_at = now
@@ -431,6 +435,14 @@ class EpisodicMemory(
                 span.record_exception(exc)
                 span.set_status(Status(StatusCode.ERROR, str(exc)))
                 raise
+
+    async def reinforce(self, episode_ids: list[str]) -> None:
+        """Apply :meth:`recall`'s access bump to *episode_ids*, agent-scoped.
+
+        For callers that choose after reading which episodes they use: the
+        persona prompt path passes the ones its budget admitted (ISSUE-0163).
+        """
+        await _reinforce_episodes(self._ensure_db(), self._agent_id, episode_ids)
 
     async def get_episode(self, episode_id: str) -> Episode | None:
         """Retrieve a single episode by ID (agent-scoped)."""

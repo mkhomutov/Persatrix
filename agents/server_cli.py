@@ -31,7 +31,7 @@ from .observability.metrics import (
 from .observability.metrics import shutdown as metrics_shutdown
 from .observability.tracing import init_tracing
 from .observability.tracing import shutdown as tracing_shutdown
-from .prompt_prefix import prompt_prefix
+from .prompt_prefix import prefix_keepalive_seconds, prompt_prefix
 from .server import AgentServer
 from .server_persona import load_agent, setup_shared_pools
 
@@ -57,13 +57,15 @@ def _validate_startup_config() -> None:
     than at its first memory write. The call log's tags
     (``PERSATRIX_CALL_TAGS``, see :mod:`agents.call_log`) are read here too,
     and so is the cached prompt prefix (``PERSATRIX_PROMPT_PREFIX``, see
-    :mod:`agents.prompt_prefix`), so a turn never finds its file missing.
+    :mod:`agents.prompt_prefix`), so a turn never finds its file missing,
+    with its keep-alive (``PERSATRIX_PROMPT_PREFIX_KEEPALIVE``).
     """
     validate_alias_pricing()
     try:
         agent_clock_offset()
         call_tags()
         prompt_prefix()
+        prefix_keepalive_seconds()
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
 

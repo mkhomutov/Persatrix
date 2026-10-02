@@ -28,7 +28,7 @@ import pytest
 import yaml
 
 from agents import call_log
-from agents.prompt_prefix import PROMPT_PREFIX_ENV
+from agents.prompt_prefix import PROMPT_PREFIX_ENV, PROMPT_PREFIX_KEEPALIVE_ENV
 from evaluators.exp001 import deployed_meeting
 from evaluators.exp001.arm_d_prime import (
     ARM,
@@ -439,6 +439,18 @@ class TestTheDeployment:
             assert world.processes[adviser.id].env[PROMPT_PREFIX_ENV] == str(written)
         assert PROMPT_PREFIX_ENV not in world.processes["orchestrator"].env
 
+    async def test_the_chair_alone_keeps_the_prefix_alive(self, tmp_path: Path) -> None:
+        """One keep-alive serves the room, since the four share one entry;
+        the chair's is the memo turn the quiet spell comes before (PR 5e)."""
+        world = _World()
+        await _deploy(world, tmp_path, prefix="Transcripts…\nMeeting in #advice-1\n")
+        keeping = {
+            name: process.env[PROMPT_PREFIX_KEEPALIVE_ENV]
+            for name, process in world.processes.items()
+            if PROMPT_PREFIX_KEEPALIVE_ENV in process.env
+        }
+        assert keeping == {PANEL.chair.id: "240"}
+
     async def test_a_meeting_with_nothing_before_it_gives_no_adviser_the_setting(
         self, tmp_path: Path,
     ) -> None:
@@ -446,6 +458,7 @@ class TestTheDeployment:
         await _deploy(world, tmp_path)
         assert not (tmp_path / deployed_meeting.PREFIX).exists()
         assert all(PROMPT_PREFIX_ENV not in p.env for p in world.processes.values())
+        assert all(PROMPT_PREFIX_KEEPALIVE_ENV not in p.env for p in world.processes.values())
 
     @pytest.mark.parametrize("prefix", ["Meeting in #advice-1\n", ""])
     @pytest.mark.parametrize("arm", ["B", "C"])

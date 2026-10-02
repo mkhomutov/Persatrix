@@ -126,10 +126,12 @@ async def _forward_to_recall(
     min_importance: float = 0.0,
     min_score: float | None = None,
     reinforce: bool = False,
+    floor_protection_levels: Any = None,
 ) -> Any:
     """Mirror ``recall_room_ranked``'s call onto the ``recall`` test double."""
     return await memory.recall(
         query, limit=limit, min_score=min_score, sessions=None,
+        floor_protection_levels=floor_protection_levels,
     )
 
 

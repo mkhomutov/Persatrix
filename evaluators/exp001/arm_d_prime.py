@@ -28,11 +28,16 @@ left has gone, and its first turn writes the prefix again rather than
 reading what an earlier try paid for. :func:`check_cache` reads check 3 from
 the call records; the practice run shows it on the real provider.
 
-An entry does not outlast a quiet spell, and a governed discussion can go
-quiet by design: the chair gets one forced turn per discussion. A discussion
-that closes by its 600-second idle window has made no call for longer than
-an entry lives, so the memo turn after it writes the prefix again, and
-:func:`check_cache` names that call.
+An entry does not outlast a quiet spell on its own, and a governed
+discussion can go quiet by design: the chair gets one forced turn per
+discussion. A discussion that closes by its 600-second idle window has made
+no call for longer than an entry lives. So the chair keeps the entry alive:
+once the room has made no call that carries the prefix for four minutes,
+its process sends one that carries it and asks for no output
+(:mod:`agents.prefix_keepalive`), and the memo turn after
+the close reads the prefix as the turns before it did. A keep-alive is a
+call that carries the prefix like any other, so one sent too late writes
+it again, and :func:`check_cache` names that call.
 """
 
 from __future__ import annotations

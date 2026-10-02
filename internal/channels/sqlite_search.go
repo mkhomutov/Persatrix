@@ -254,11 +254,11 @@ func (s *sqliteStore) RecallMessages(ctx context.Context, params RecallParams) (
 // ascending `rank` is the canonical "best match first" sort, with `m.timestamp
 // DESC` breaking exact ties toward the most recent message.
 //
-// We deliberately do NOT order by the episodic tier's `1.0/(1.0+ABS(rank))`
-// `_normalize_bm25` shape: that maps a stronger match (larger `ABS(rank)`) to a
-// *smaller* value, which inverts relevance order under `DESC`. There it is a
-// [0,1] min-score *filter*, not an ordering key — the episodic ORDER BY itself
-// uses `rank * -1`. Bare `rank` is both correct and the idiomatic FTS5 form.
+// We deliberately do NOT use `1.0/(1.0+ABS(rank))`, the shape the episodic
+// tier once filtered on: it maps a stronger match (larger `ABS(rank)`) to a
+// *smaller* value, which inverts relevance. The episodic tier dropped it
+// (ISSUE-0159) and now keeps a row whose `-rank` reaches a share of the best
+// candidate's. Bare `rank` is both correct and the idiomatic FTS5 form.
 func (s *sqliteStore) recallViaFTS(
 	ctx context.Context, match, scope string, scopeArgs []any, narrow string, narrowArgs []any, limit int,
 ) ([]ChannelMessage, error) {

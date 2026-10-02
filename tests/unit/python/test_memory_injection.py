@@ -163,8 +163,9 @@ class TestInjectMemoryContext:
 
         RFC 0017 PR 4: the TICK skip at the top of _inject_memory_context is
         deleted.  Recall is now called for all event types; the min_score
-        threshold filters low-signal results at the DB layer.  Notes recall
-        is still attempted for all events.
+        floor filters low-signal results at the DB layer, and the tick
+        sentence searches nothing (ISSUE-0159).  Notes recall is still
+        attempted for all events.
         (Previously: PR #60 review TICK skip; removed in RFC 0017 PR 4.
         Since the RFC 0049 PR 4 promotion the default episodic read is the
         room-first-RANKED ``recall_room_ranked`` — the spy targets that

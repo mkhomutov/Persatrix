@@ -21,6 +21,10 @@ A line holds:
   whether or not the provider could cache the prefix;
 * ``error`` — the exception's class name when the call failed, else null.
 
+Since the advisers of one meeting share the file, it is also the room's
+record of when a cached prefix was last used: :func:`last_prefix_use` reads
+it for the keep-alive (:mod:`agents.prefix_keepalive`).
+
 Both settings are read on first use and fixed for the life of the process.
 A process that serves many meetings in turn, such as an experiment harness
 making its own calls, wraps each block of calls in :func:`scoped` instead;
@@ -40,6 +44,7 @@ import os
 from collections.abc import Iterator, Mapping
 from contextlib import AbstractContextManager, contextmanager
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TypeGuard
 
 from .llm_types import LLMCallPurpose, Usage
@@ -111,6 +116,30 @@ def prefix_sha256(prefix: str) -> str | None:
     return hashlib.sha256(prefix.encode("utf-8")).hexdigest() if prefix else None
 
 
+def last_prefix_use(path: str | os.PathLike[str], cache_prefix: str) -> float | None:
+    """When the latest call logged at *path* that carried *cache_prefix* and
+    answered began, as a Unix time; None when none has. Lines arrive as calls
+    end, so the latest start may be on any line. A failed call may never have
+    reached the provider, so it is passed over, and so is a line another
+    process is still writing."""
+    sha256 = prefix_sha256(cache_prefix)
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    latest: float | None = None
+    for raw in text.splitlines():
+        try:
+            line = json.loads(raw)
+            if line["cache_prefix_sha256"] != sha256 or line["error"] is not None:
+                continue
+            started = datetime.fromisoformat(line["started_at"]).timestamp()
+        except (ValueError, TypeError, KeyError):
+            continue
+        latest = started if latest is None else max(latest, started)
+    return latest
+
+
 def record_call(
     *,
     started_at: float,
@@ -171,6 +200,7 @@ __all__ = [
     "CALL_TAGS_ENV",
     "call_log_path",
     "call_tags",
+    "last_prefix_use",
     "prefix_sha256",
     "record_call",
     "reset_call_log",

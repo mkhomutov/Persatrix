@@ -1,8 +1,8 @@
 # EXP-001 — The harness's frozen choices: the practice run
 
-> **Status**: 🚧 **In Progress** — PR 6b's rows freeze when it merges ([#1024](https://github.com/mkhomutov/Persatrix/pull/1024)).
-> **Last updated**: 2026-10-01
-> **Part of**: the [EXP-001 harness](EXP-001-harness.md); the [first part](EXP-001-harness-choices.md) holds the choices of PRs 1 to 4 and the arm order, the [second part](EXP-001-harness-choices-meetings.md) those of PRs 5a to 5c, the [third part](EXP-001-harness-choices-d-prime.md) PR 5d's, and the [fourth part](EXP-001-harness-choices-judge.md) PR 6a's
+> **Status**: 🚧 **In Progress** — PR 6b's rows froze when it merged ([#1024](https://github.com/mkhomutov/Persatrix/pull/1024)).
+> **Last updated**: 2026-10-02
+> **Part of**: the [EXP-001 harness](EXP-001-harness.md); the [first part](EXP-001-harness-choices.md) holds the choices of PRs 1 to 4 and the arm order, the [second part](EXP-001-harness-choices-meetings.md) those of PRs 5a to 5c, the [third part](EXP-001-harness-choices-d-prime.md) those of PRs 5d and 5e, and the [fourth part](EXP-001-harness-choices-judge.md) PR 6a's
 
 These are the frozen choices of PR 6b, which holds the practice run: the
 practice series for every arm, the practice memos judged, and a report of

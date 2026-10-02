@@ -12,28 +12,29 @@ property (same-room first at equal relevance) rather than by the wall.
 
 This is the **gated cross-room episodic recall mode** the amendment
 names.  Since the RFC 0049 PR 4 promotion it has two callers: the live
-prompt path (``memory_context``, ``cross_room: live`` — the default),
-which passes ``reinforce=True``, and the shadow pass
-(:mod:`agents.persona_runtime.episodes_shadow`, ``cross_room: shadow``),
-which keeps the default ``reinforce=False`` so the shadow stays a pure
-observer.  Every candidate still passes the RFC 0037 §D gate at the
-caller.
+prompt path (``memory_context``, ``cross_room: live`` — the default)
+and the shadow pass (:mod:`agents.persona_runtime.episodes_shadow`,
+``cross_room: shadow``).  Both read with ``reinforce=False``.  Every
+candidate still passes the RFC 0037 §D gate at the caller.
 
 Two deliberate differences from :meth:`EpisodicMemory.recall`:
 
 * **Side-effect-free by default.**  No ``access_count`` bump and no
-  ``last_accessed_at`` touch unless ``reinforce=True``.  Load-bearing
-  for the shadow posture: the composite score includes
-  ``access_count``, so a shadow read that reinforced would perturb the
-  *live* ranking on later turns and shift the landed RFC 0044 goldens
-  off their cassettes.  The PR 4 decision (deferred here by PR 3): the
-  **promoted live read reinforces**, preserving the pre-promotion
-  live-recall contract that access strengthens memory — same UPDATE
-  shape as :meth:`EpisodicMemory.recall`, cross-room rows included.
-  It counts a use of every row it returns, before the caller's §D gate,
-  audience check and budget choose what the prompt carries, so an
-  episode the gate withholds is counted as used too and climbs the
-  ranking (ISSUE-0163).
+  ``last_accessed_at`` touch unless ``reinforce=True``.  The composite
+  score includes ``access_count``, so a read that reinforced would
+  change the ranking of later turns.  A reinforcing shadow read would
+  perturb the *live* ranking and shift the landed RFC 0044 goldens off
+  their cassettes.  A reinforcing live read, as PR 4 shipped it, counted
+  a use of every row it returned — before the §D gate, the audience
+  check and the budget had chosen what the prompt would carry — so an
+  episode the gate withheld gained a use on each turn it ranked in, and
+  two unearned uses outweigh the same-room boost (ISSUE-0163).  Access
+  still strengthens memory: once the prompt is assembled, the live
+  path reinforces the episodes the budget admitted
+  (:meth:`EpisodicMemory.reinforce`), the facts tier's rule — so an
+  episode is reinforced when it is used, wherever it was formed.
+  ``reinforce=True`` keeps the :meth:`EpisodicMemory.recall` contract,
+  a use for every row returned, for a caller that uses all it reads.
 * **Wall → boost.**  ``sessions``/``boost_sessions`` are mutually
   exclusive — enforced at the query helpers themselves since PR 4
   (``_reject_wall_and_boost``); this function always passes
@@ -54,10 +55,10 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from ..clock import agent_now
 from ._epoch_filter import resolve_active_epoch
 from ._principal_filter import resolve_active_principal
 from ._session_filter import _resolve_session_list
+from .episodic_crud import reinforce_episodes
 from .episodic_queries import (
     MAX_RECALL_LIMIT,
     recall_fts5,
@@ -68,6 +69,8 @@ from .episodic_queries import (
 from .interactions import SUMMARY_PENDING_TEXT
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from .episodic import EpisodicMemory
     from .episodic_queries import Episode
 
@@ -84,12 +87,16 @@ async def recall_room_ranked(
     min_importance: float = 0.0,
     min_score: float | None = None,
     reinforce: bool = False,
+    floor_protection_levels: Sequence[str] | None = None,
 ) -> list[Episode]:
     """Episodic recall with the §D room wall applied as ranking, not scope.
 
     Same query/limit/``min_score`` semantics as
     :meth:`EpisodicMemory.recall` (FTS5 → LIKE fallback → recency on an
-    empty query; unfinalised ``[summary pending]`` rows dropped at the
+    empty query; ``min_score`` is a share of the best candidate's
+    relevance, the candidates spanning every room of the epoch and
+    principal, so another room's strong match can floor out a weak
+    same-room one; unfinalised ``[summary pending]`` rows dropped at the
     same chokepoint), with the session axis widened to every room of the
     active epoch+principal and the resolved room list applied as the
     same-room score boost.  The boost set resolves exactly like the live
@@ -97,11 +104,17 @@ async def recall_room_ranked(
     wins over the construction snapshot, ``legacy`` carve-out included),
     so wall and boost can never drift on what "same room" means.
 
-    Returns rows in boosted-rank order.  ``reinforce=False`` (default —
-    the shadow caller) never bumps ``access_count``; ``reinforce=True``
-    (the live prompt path since the PR 4 promotion) applies the same
-    access bump as :meth:`EpisodicMemory.recall` — see the module
-    docstring for why the split is load-bearing.
+    Returns rows in boosted-rank order.  ``reinforce=False`` (the default,
+    and what both callers pass) never bumps ``access_count``;
+    ``reinforce=True`` applies :meth:`EpisodicMemory.recall`'s access
+    bump to every returned row — see the module docstring for why the
+    prompt path reinforces after its gate instead (ISSUE-0163).
+
+    ``floor_protection_levels`` (ISSUE-0159) are the levels the acting turn
+    may inject: only those rows set ``min_score``'s bar, so a row the §D
+    gate will withhold cannot floor out one it admits. Withheld rows stay
+    candidates, because the gate's §E projection branch serves stand-ins
+    for them.
     """
     if limit < 1:
         raise ValueError(f"limit must be >= 1, got {limit}")
@@ -124,6 +137,7 @@ async def recall_room_ranked(
             db, memory.agent_id, query, limit, min_importance, min_score,
             sessions=None, boost_sessions=boost,
             principal_id=active_principal, epoch_id=active_epoch,
+            floor_protection_levels=floor_protection_levels,
         )
     elif query:
         rows = await recall_like(
@@ -144,18 +158,11 @@ async def recall_room_ranked(
         if ep.summary != SUMMARY_PENDING_TEXT
     ]
     if reinforce and episodes:
-        # Mirror ``EpisodicMemory.recall``'s bump exactly (UPDATE + the
-        # in-memory object refresh) so the promoted live path keeps the
-        # pre-promotion reinforcement contract byte-for-byte.
-        now = agent_now()
-        ids = [e.id for e in episodes]
-        placeholders = ",".join("?" for _ in ids)
-        await db.execute(
-            f"UPDATE episodes SET access_count = access_count + 1, "
-            f"last_accessed_at = ? WHERE id IN ({placeholders})",
-            [now, *ids],
+        # ``EpisodicMemory.recall``'s bump: the UPDATE, then the same
+        # refresh of the returned objects.
+        now = await reinforce_episodes(
+            db, memory.agent_id, [e.id for e in episodes],
         )
-        await db.commit()
         for ep in episodes:
             ep.access_count += 1
             ep.last_accessed_at = now

@@ -73,6 +73,7 @@ from evaluators.exp001.runtime import (
     MEMORYLESS_ARMS,
     call_log_env,
     meeting_clock_env,
+    prefix_keepalive_env,
     prompt_prefix_env,
 )
 
@@ -187,7 +188,7 @@ async def run_on_deployment(
     carries over, an adviser the stop has to kill may not have written what
     it still held open, so that fails the meeting once its record is kept.
     *prefix* names the file whose text every adviser's turn carries as its
-    cached prefix.
+    cached prefix; with it, the chair keeps the prefix's cache entry alive.
     """
     ports = free_ports()
     env = {
@@ -198,11 +199,16 @@ async def run_on_deployment(
         ),
         **(prompt_prefix_env(prefix) if prefix is not None else {}),
     }
+    # The advisers share the prefix's cache entry, so the chair alone keeps
+    # it alive through the quiet before its memo turn.
+    chair = {**env, **prefix_keepalive_env()} if prefix is not None else env
     orchestrator = _logged(orchestrator_process(layout, ports, binary=binary), logs)
     deployment = Deployment(
         orchestrator,
-        [_logged(adviser_process(layout, a.id, ports, python=python, repo=repo, env=env), logs)
-         for a in panel.advisers],
+        [_logged(adviser_process(
+            layout, a.id, ports, python=python, repo=repo,
+            env=chair if a.id == panel.chair.id else env,
+        ), logs) for a in panel.advisers],
         spawn=spawn, clock=lambda: now().timestamp(), sleep=sleep,
     )
 

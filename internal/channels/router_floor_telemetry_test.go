@@ -30,8 +30,11 @@ func TestFloorRound_Telemetry(t *testing.T) {
 
 	store := newTestStore(t, SQLiteOptions{})
 	// `a` auto-replies; `b` is absent from the reply set, so its turn advances
-	// on the per-turn timeout.
+	// on the per-turn timeout. `a` replies inline (syncReplies) so its reply is
+	// waiting before its turn timer starts — an async reply could land after
+	// the 200ms timer on a slow -race CI runner and be counted as a timeout.
 	disp := newFloorDispatcher(store, "a")
+	disp.syncReplies = true
 	router := NewChannelRouter(store, disp, zap.NewNop(), &RouterMetrics{
 		FloorTurn:          floorTurn,
 		FloorRoundDuration: roundDur,

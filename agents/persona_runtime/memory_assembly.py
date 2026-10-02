@@ -20,7 +20,10 @@ needs as plain arguments rather than the mixin instance, so it knows
 nothing about the mixin's attribute layout and can be exercised without
 one.  Behaviour is what the mixin inlined before the split, unchanged,
 except that the fact-reinforcement failure warning now logs under this
-module's logger.
+module's logger.  The episodic tier's reinforcement write,
+:func:`reinforce_admitted_episodes`, joined it later (ISSUE-0163); it runs
+only when the mixin passes a store, because only the live recall leaves
+the admitted episodes to be reinforced here.
 """
 
 from __future__ import annotations
@@ -36,7 +39,7 @@ from .relationship_section import render_relationship_section
 from .text_truncate import _truncate_with_ellipsis
 
 if TYPE_CHECKING:
-    from ..memory.episodic import Episode
+    from ..memory.episodic import Episode, EpisodicMemory
     from ..memory.facts import Fact, FactStore
     from ..memory.notes import Note
     from ..memory.relationship_types import RelationshipSummary
@@ -45,7 +48,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["inject_admitted_sections"]
+__all__ = ["inject_admitted_sections", "reinforce_admitted_episodes"]
 
 
 async def inject_admitted_sections(
@@ -62,6 +65,7 @@ async def inject_admitted_sections(
     facts: list[Fact],
     episodes: list[Episode],
     notes: list[Note],
+    reinforce_episodes_in: EpisodicMemory | None = None,
 ) -> None:
     """Render the gated tiers against *budget* and stage them in *working_memory*.
 
@@ -76,6 +80,9 @@ async def inject_admitted_sections(
 
     *agent_id*, *timezone* and *facts_budget_tokens* are the mixin's
     per-agent settings, passed as values so this module stays a leaf.
+    *reinforce_episodes_in*, when given, receives a use for each episode
+    the budget admitted (:func:`reinforce_admitted_episodes`); the mixin
+    passes it only for a read that counted no use itself (ISSUE-0163).
     """
     truncate = _truncate_with_ellipsis
 
@@ -139,3 +146,30 @@ async def inject_admitted_sections(
     notes_section = render_notes_section(notes, budget, truncate=truncate)
     if notes_section is not None:
         working_memory.add_section(notes_section)
+    if reinforce_episodes_in is not None:
+        await reinforce_admitted_episodes(
+            reinforce_episodes_in, budget, agent_id=agent_id,
+        )
+
+
+async def reinforce_admitted_episodes(
+    episodic_memory: EpisodicMemory, budget: MemoryBudget, *, agent_id: str,
+) -> None:
+    """Count a use of each episode the budget admitted to the prompt.
+
+    ISSUE-0163: ``access_count`` raises an episode's ranking on every
+    later turn, so it counts the episodes the prompt used, not every row
+    a recall returned — the §D gate, the audience check and the budget
+    may still drop those.  The facts tier's rule (``mark_recalled``
+    above), and non-fatal for the same reason: the section is staged.
+    """
+    admitted_episode_ids = budget.admissions_by_tier("episodic")
+    if not admitted_episode_ids:
+        return
+    try:
+        await episodic_memory.reinforce(admitted_episode_ids)
+    except Exception:
+        logger.warning(
+            "Agent %s: episode reinforcement write failed; skipping",
+            agent_id, exc_info=True,
+        )

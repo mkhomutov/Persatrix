@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0159
 summary: "Episodic recall scores an FTS5 match as 1/(1+|rank|) and drops it below min_score 0.20 — but FTS5's bm25 rank grows more negative the MORE of the summary a stimulus matches, so a one-word mention scores ~1.0 and a stimulus that quotes the summary scores ~0.04 and is discarded. The episodic tier therefore surfaces an episode only on thin, one-or-two-term mentions and never on the turns that engage with its content; the §G confidentiality tripwire, which watches withheld episode candidates, cannot be reached live by MT-PERSONA-CONFIDENTIALITY-001 Leg 4 because the seeded echo is exactly the stimulus the score discards."
-status: open
+status: resolved
 severity: medium
 area: memory
 created: 2026-09-15
+closed: 2026-10-02
+closed_pr: 1030
 refs:
   - docs/manual-tests/v0.3.16-execution-report.md
   - docs/manual-tests/MT-PERSONA-CONFIDENTIALITY-001.md
@@ -12,8 +14,12 @@ refs:
   - docs/rfcs/0017-persona-memory-injection-budget.md
   - agents/memory/episodic_queries.py
   - agents/memory/episodic_room_ranked.py
+  - agents/memory/_fts5_query.py
+  - agents/memory/_notes_recall.py
   - agents/persona_runtime/memory_context.py
   - agents/persona_runtime/tripwire_watch.py
+  - docs/experiments/EXP-001-harness.md
+  - docs/issues/ISSUE-0163-withheld-episodes-reinforced-before-the-gate.md
 ---
 
 # ISSUE-0159: Episodic recall's score inverts BM25 — the better the match, the less likely the episode is recalled
@@ -65,9 +71,148 @@ consider OR-ing the query terms (or a prefix of the sanitised stimulus) so a
 natural sentence can match. Re-record whichever goldens shift, and give the
 MT's Leg 4 a seed that survives the fixed filter.
 
+## Fix
+
+The query side changes; the store does not (no tokenizer, table or trigger
+change). Episodic and notes recall share one MATCH builder,
+[`_fts5_query.py`](../../agents/memory/_fts5_query.py):
+
+- **Any shared word matches.** Each word of the message becomes one quoted
+  phrase of its letters and digits, in any script, and the phrases are
+  joined with OR, so an identifier such as `unique-alpha-xyzzy` stays one
+  phrase. Common words are trimmed from the end of a word, a lone single
+  character is dropped, and only the first 40 phrases are searched. A
+  one-word message made only of common words is searched as written; a
+  longer one searches nothing, since its words sit in nearly every row. A
+  quoted phrase cannot be FTS5 syntax, so
+  `NOT` is searched as a word and no message raises a syntax error. Text
+  with no letter or digit, such as `*`, keeps each tier's old path: recency
+  for episodes, a LIKE search for notes.
+- **System words do not count for episodes.** Every closed conversation
+  stores its bookkeeping in the searched context column (`close_reason`,
+  `participant_type`, `channel_message`, …), and every single-turn event
+  stores `Event: … → Actions: […]` as its summary. An agent's message
+  reaches recall as "Message from X: …", so the word "message" alone would
+  bring back unrelated episodes and count each as used. Episode search
+  trims those words like common words; a test pins the list to the
+  runtime's event types, action types and close reasons, and another drives
+  a real persona and checks every word it stored is listed. A task's own
+  words still match, because they live only in the stored event.
+- **A message is searched by its own words.** The persona searches a
+  channel message or mention by its content, not by the prompt text around
+  it. A scripted turn (a convener opening, a chair escalation, a synthesis
+  turn) wraps the message in instructions long enough to fill all 40
+  phrases, so the meeting topic was never searched. Other events, and the
+  facts tier, still use the prompt text.
+- **The floor is relative.** A row stays when its bm25 relevance is at
+  least `min_score` times the best relevance among the candidates, the rows
+  that pass the call's own filters (agent, importance, session wall,
+  principal, epoch, and for notes the protection levels). A fixed floor
+  would empty small stores: FTS5 gives a word found in half the rows or
+  more almost no weight, so in a store of one or two rows every bm25 is
+  about 1e-6. The defaults stay 0.20; `1.0` now keeps the best match and
+  its ties.
+- **A withheld episode does not set the bar.** The §D gate judges episodes
+  after the search, so the persona passes the levels its turn may inject
+  and only those rows set the best. Otherwise a restricted episode could
+  push every admissible one below the floor, and its absence from the
+  prompt would hint that it exists. The withheld rows stay candidates: the
+  gate's §E projection branch serves cleared-down stand-ins for them.
+- **A tick searches nothing.** OR matching would let the tick sentence
+  match ordinary rows and end the RFC 0017 §F short-circuit, one model call
+  per tick in a public room. The builder returns no query for that exact
+  sentence; a second copy of it lives in the memory package, pinned to the
+  persona runtime's by a test.
+
+Measured on a replay of EXP-001's first practice run, each meeting replayed
+against the store it started with, the briefing reaches 23 of arm D's 25
+speaking turns in the three later meetings, every opening turn included,
+where the shipped code reached none. That replay predates the system-word
+and withheld-bar changes above, and runs again on them before the scored
+run. Three goldens gain the
+episode the fix recalls (EVAL-MEMORY-003, 004 and 005, re-recorded offline);
+EVAL-MEMORY-005 now judges the DM-taught episode beside the fact.
+
+## Slot: merges before EXP-001, by the maintainer's call of 2026-10-02
+
+- **No plan is needed.** Ruling (a) of the
+  [sequencing Amendment 2026-09-12](../v0.3.x-sequencing.md#amendment-2026-09-12--close-v0316-small-then-measure-before-any-train-opens)
+  opens no plan before EXP-001 reports; like
+  [#1014](https://github.com/mkhomutov/Persatrix/pull/1014), this is a
+  standalone fix. Ruling (f) holds: no store migration.
+- **Ruling (b)** covers memory isolation, attribution and audience work.
+  This is recall relevance: the §D gate and the audience check are
+  unchanged, and they now judge more candidates.
+- **EXP-001.** Arm D changes most: it is the only arm whose prompt carries
+  injected memory. The `recall_notes` tool changes for every arm that has
+  it, B, C, D and D′ alike: it now finds a note that shares any word with
+  the query. A has no runtime memory. Check 2 of the pre-registration
+  needs a briefing fact to reach a later meeting's prompt through the
+  shipped memory path, and with the shipped search it never could. Unlike
+  [ISSUE-0163](ISSUE-0163-withheld-episodes-reinforced-before-the-gate.md),
+  which only re-ranks what already carries, this decides whether anything
+  carries at all.
+- **Decision, 2026-10-02.** The maintainer ruled that arm D runs the memory
+  code as shipped when the scored run happens, as #979, #980 and #1014
+  were treated, so this fix lands before it. The same call unholds #972
+  (ISSUE-0163), whose reinforcement now runs on nearly every turn, and
+  has the facts tier's two faults, ISSUE-0180 and ISSUE-0181, fixed before
+  the scored run too.
+
 ## Notes
 
 > 2026-09-15 — filed from the v0.3.16 release-prep arc (F-3 in the execution
 > report). The MT's Leg 4 is recorded *inconclusive* citing this issue; the
 > deterministic firing stays pinned in
 > `tests/integration/test_confidentiality_tripwire.py`.
+
+> 2026-10-02 — found again by EXP-001's first paid practice run: arm D
+> stored its briefing in every adviser's memory and recalled none of it in
+> the three later meetings, answering "the panel does not know" to all three
+> recall questions. Replaying the practice messages against the advisers'
+> stores returned no episode for any of them. Leg 4 of
+> MT-PERSONA-CONFIDENTIALITY-001 is reachable with the fix (v1.3) and has
+> not been re-run live.
+
+> 2026-10-02 — review of the fix. Two gaps closed in the same change: the
+> system words above, and the withheld bar. Known limits it leaves: an
+> episode the audience check withholds can still set the bar, because the
+> audience is known only after the search; withheld rows still take places
+> under the search's row limit, as they did before; bm25 weighs each word
+> over the whole table, every agent, tenant and level included, so the
+> filters choose the candidates but not the weights; and a sender's or
+> channel's name still matches the episodes that sender or channel took
+> part in.
+
+> 2026-10-02 — a second review pass, over the callers outside the
+> persona's episodic tier. Fixed here: the inner query let SQLite run the
+> full-text match once per stored row, seconds per recall on a few
+> thousand rows, so the join now keeps the full-text index as the outer
+> loop (a test counts SQLite's work); and the task-agent facade's scope
+> and tags filters run after the search, so a filtered call now takes no
+> floor rather than let a dropped match set the bar. Known limits it
+> leaves: a task agent's whole task text is the query, so it now recalls
+> memory on most tasks, procedure rows included, and the floor always
+> admits the best match, so it is no defence against a planted entry (no
+> shipped task agent enables memory); the shared pool passes no floor and
+> its context values (pool name, confidence) are searchable, so a pool
+> read fills to its limit (nothing reads the pool yet); and the system
+> word list, drawn from what personas store, also trims task and pool
+> queries, so "the approval request" searches neither word.
+
+> 2026-10-02 — a third review pass, over the whole PR. Fixed here: scripted
+> turns' framing filled the phrase cap (the persona now searches a
+> message's own words); a facade call with a scope or tags filter now
+> applies its floor after the filter, against the best row it keeps,
+> instead of dropping the floor; letters outside ASCII are searched; and a
+> message of several common words searches nothing. Known limits it
+> leaves: the LIKE fallback, used when FTS5 is missing or fails, still
+> looks for the whole message; under `cross_room: live` the floor's best
+> is taken across every room before the same-room boost, so a strong match
+> elsewhere can floor out a weak one in the acting room; the OR query
+> ranks matches from every agent sharing the database before the agent
+> filter, so a turn's cost grows with the whole store; a word that ends in
+> a common or system word loses that part ("end-user" is dropped,
+> "pull-request" becomes "pull"); and the tick is recognised by its exact
+> sentence, a copy pinned by a test, because RFC 0017 PR 4 removed the
+> persona's tick skip on purpose.
