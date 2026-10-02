@@ -21,9 +21,9 @@ nothing about the mixin's attribute layout and can be exercised without
 one.  Behaviour is what the mixin inlined before the split, unchanged,
 except that the fact-reinforcement failure warning now logs under this
 module's logger.  The episodic tier's reinforcement write,
-:func:`reinforce_admitted_episodes`, joined it later (ISSUE-0163); the
-mixin calls it after the loop, because only the live recall leaves the
-admitted episodes to be reinforced here.
+:func:`reinforce_admitted_episodes`, joined it later (ISSUE-0163); it runs
+only when the mixin passes a store, because only the live recall leaves
+the admitted episodes to be reinforced here.
 """
 
 from __future__ import annotations
@@ -65,6 +65,7 @@ async def inject_admitted_sections(
     facts: list[Fact],
     episodes: list[Episode],
     notes: list[Note],
+    reinforce_episodes_in: EpisodicMemory | None = None,
 ) -> None:
     """Render the gated tiers against *budget* and stage them in *working_memory*.
 
@@ -79,6 +80,9 @@ async def inject_admitted_sections(
 
     *agent_id*, *timezone* and *facts_budget_tokens* are the mixin's
     per-agent settings, passed as values so this module stays a leaf.
+    *reinforce_episodes_in*, when given, receives a use for each episode
+    the budget admitted (:func:`reinforce_admitted_episodes`); the mixin
+    passes it only for a read that counted no use itself (ISSUE-0163).
     """
     truncate = _truncate_with_ellipsis
 
@@ -142,6 +146,10 @@ async def inject_admitted_sections(
     notes_section = render_notes_section(notes, budget, truncate=truncate)
     if notes_section is not None:
         working_memory.add_section(notes_section)
+    if reinforce_episodes_in is not None:
+        await reinforce_admitted_episodes(
+            reinforce_episodes_in, budget, agent_id=agent_id,
+        )
 
 
 async def reinforce_admitted_episodes(

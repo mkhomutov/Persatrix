@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0163
-summary: "Under the default `memory.episodic.cross_room: live`, the persona's episodic recall counts a use (`access_count + 1`) of every episode it returns, before the RFC 0037 §D gate, the ISSUE-0132 audience check and the RFC 0017 budget choose what the prompt carries. Uses multiply the ranking score by 1 + ln(1 + uses), so an episode the gate withholds gains one on each turn it ranks in: one use already outranks an equally ranked episode from another room, two beat the 2.0 same-room boost, and it can then hold one of the five recall slots on later matching turns while never reaching the prompt. Episodes the budget drops are counted too, as are the notes tier's and two other episodic reads' rows. The facts tier counts only what its budget admitted. A test-first fix for the live read is drafted (#972). It was held because it changes an EXP-001 arm; since the maintainer's call of 2026-10-02 it merges before the scored run."
-status: open
+summary: "Under the default `memory.episodic.cross_room: live`, the persona's episodic recall counts a use (`access_count + 1`) of every episode it returns, before the RFC 0037 §D gate, the ISSUE-0132 audience check and the RFC 0017 budget choose what the prompt carries. Uses multiply the ranking score by 1 + ln(1 + uses), so an episode the gate withholds gains one on each turn it ranks in: one use already outranks an equally ranked episode from another room, two beat the 2.0 same-room boost, and it can then hold one of the five recall slots on later matching turns while never reaching the prompt. Episodes the budget drops are counted too, as are the notes tier's and two other episodic reads' rows. The facts tier counts only what its budget admitted. #972 fixes the live read: it counts a use only of the episodes the budget admitted. The walled read, the channel-history recall and the notes tier still count every row they return."
+status: resolved
 severity: medium
 area: memory
 created: 2026-09-18
+closed: 2026-10-02
+closed_pr: 972
 refs:
   - https://github.com/mkhomutov/Persatrix/pull/970
   - agents/persona_runtime/memory_context.py
@@ -238,3 +240,19 @@ Drafted test-first as draft PR [#972](https://github.com/mkhomutov/Persatrix/pul
 > rebased onto the ISSUE-0159 fix, reviewed and merged before the scored
 > run; its measurements used single-word queries under the old floor and
 > are taken again.
+
+> 2026-10-02 — fixed for the default live read by
+> [#972](https://github.com/mkhomutov/Persatrix/pull/972), rebased onto the
+> ISSUE-0159 fix. Measured again with natural messages ("Any news on the
+> zephyr deal?" twice, then "What did the atlas retro decide?" three
+> times) on the store above, for both withhold causes. On `main` after the
+> ISSUE-0159 fix the table reads as before: the withheld episode's uses go
+> 1 to 5 and the prompt carries four of the five admissible episodes from
+> turn 3. With #972 the withheld episode stays at 0 uses and all five
+> reach the prompt, gaining one use per turn. Still open, each with its
+> own ranking effect: the walled read under `off` or `shadow`, the
+> channel-history recall (on a channel message it counts the same
+> same-room episode the live read admits, so that episode gains two uses
+> that turn) and the notes tier. A §E projection served for a withheld
+> episode counts as a use of that episode, by design: the stand-in filled
+> the slot.
