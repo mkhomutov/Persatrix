@@ -244,8 +244,9 @@ def test_parse_legs_accepts_ranges_and_rejects_the_unknown() -> None:
 def test_seeded_triggers_reach_the_store_where_the_literal_ones_did_not() -> None:
     """Found on the first live run: the extractor stores the subject
     `zephyr acquisition`, the topic seeder matches the WHOLE canonical
-    subject at a word boundary, and episodic FTS is an implicit AND over
-    every stimulus term — so the MT's literal asks ("…on Zephyr…") never
+    subject at a word boundary, and episodic FTS was then an implicit AND
+    over every stimulus term (ISSUE-0159, since fixed) — so the MT's
+    literal asks ("…on Zephyr…") never
     made the restricted entries recall candidates, and the §D gate was
     never exercised. The seeded variant names the stored subject verbatim
     and, for Leg 4, sends the stored bytes and nothing else."""

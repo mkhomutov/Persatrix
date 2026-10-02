@@ -81,10 +81,12 @@ logger = logging.getLogger(__name__)
 
 
 # ─── Per-tier min_score defaults (RFC 0017 §C) ────────────────────────────────
-# Calibrated against a representative FTS5 BM25 distribution: clear topic
-# matches normalise ≈ 0.20–0.40; low-signal queries ≤ 0.17.  Conservative to
-# avoid over-filtering; callers may tighten via overrides.  Public names (PR 6
-# — RFC 0017 PR 4 finding 1): consumed cross-module, avoids ruff PLC2701.
+# The share of the best match's bm25 relevance a row must reach (ISSUE-0159).
+# Calibrated on EXP-001's arm D replay, where briefing recall is flat from
+# 0.15 to 0.325 and the recall meeting's answers turn keeps the briefing up
+# to about 0.36; 0.20 leaves that margin.  Callers may tighten via overrides.
+# Public names (PR 6 — RFC 0017 PR 4 finding 1): consumed cross-module,
+# avoids ruff PLC2701.
 DEFAULT_EPISODIC_MIN_SCORE: float = 0.20
 DEFAULT_NOTES_MIN_SCORE: float = 0.20
 
@@ -322,10 +324,12 @@ class EpisodicMemory(
         Parameters
         ----------
         min_score:
-            Optional relevance floor in ``[0, 1]`` applied to FTS5 BM25
-            normalised scores.  ``None`` → no filtering (current behaviour).
-            LIKE-fallback path ignores this parameter (all LIKE matches score
-            ``1.0`` per RFC 0017 Section C).
+            Optional relevance floor in ``[0, 1]``: the share of the best
+            match's bm25 relevance among this call's candidates a row must
+            reach (ISSUE-0159).  ``None`` or ``0.0`` → no filtering; ``1.0``
+            keeps the best match and its ties.  LIKE-fallback path ignores
+            this parameter (all LIKE matches score ``1.0`` per RFC 0017
+            Section C).
         sessions:
             RFC 0031 §D recall filter — see ``_resolve_session_list``.
         """

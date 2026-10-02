@@ -12,7 +12,6 @@ public entry point; these are internal helpers and not exported.
 from __future__ import annotations
 
 import logging
-import re
 import sqlite3
 from typing import TYPE_CHECKING
 
@@ -21,6 +20,7 @@ import aiosqlite
 from ..epoch_id import DEFAULT_EPOCH_ID
 from ..principal_id import DEFAULT_PRINCIPAL_ID
 from ._epoch_filter import epoch_eq_clause
+from ._fts5_query import FTS5_SANITIZE, fts5_match_query
 from ._principal_filter import principal_eq_clause
 from ._session_filter import session_in_clause
 from .episodic_queries import resolve_min_score
@@ -30,9 +30,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# FTS5 MATCH operator characters that cause parse errors when present in
-# freeform queries — strip all non-alphanumeric characters except spaces.
-_FTS5_SPECIAL = re.compile(r'[^a-zA-Z0-9\s]+')
+# The character class notes recall once sanitised the whole query with; the
+# MATCH text is now built by :func:`~._fts5_query.fts5_match_query`. The name
+# stays because ``notes.py`` re-exports it for the tests that pin the class.
+_FTS5_SPECIAL = FTS5_SANITIZE
 
 
 def _protection_in_clause(
@@ -77,8 +78,15 @@ async def _recall_notes_fts5(
     (ISSUE-0081 PR 3) / ``epoch_id`` (ISSUE-0085 PR 3) are the resolved
     active tenant + run/test epoch — each unconditional strict equality,
     no carve-out.  ``allowed_protection_levels`` — see
-    :func:`_protection_in_clause`.  Falls back to LIKE on FTS5 parse
-    failure or empty sanitized query.
+    :func:`_protection_in_clause`.
+
+    The MATCH text is one quoted phrase per word, joined with OR
+    (:func:`~._fts5_query.fts5_match_query`, ISSUE-0159); the tick sentence
+    returns no rows. ``min_score`` is relative: a note stays when its bm25
+    relevance is at least ``min_score`` times the best among the candidates,
+    the notes that match and pass every filter above, the protection IN-list
+    included, so a withheld note never sets the bar. Falls back to LIKE on
+    the raw query when it holds no letter or digit, or if FTS5 raises.
     """
     sess_clause, sess_params = session_in_clause(
         sessions, column="n.session_id",
@@ -92,15 +100,16 @@ async def _recall_notes_fts5(
     prot_clause, prot_params = _protection_in_clause(
         allowed_protection_levels, column="n.protection_level",
     )
-    safe_query = _FTS5_SPECIAL.sub(" ", query).strip()
-    if not safe_query:
+    match = fts5_match_query(query)
+    if match is None:
         return await _recall_notes_like(
             db, agent_id=agent_id, query=query, limit=limit,
             min_score=min_score, sessions=sessions, note_cols=note_cols,
             principal_id=principal_id, epoch_id=epoch_id,
             allowed_protection_levels=allowed_protection_levels,
         )
-    effective_min_score = resolve_min_score(min_score)
+    if not match:
+        return []
     try:
         # Deterministic tiebreak (issue #740; follows #745). BM25 `fts.rank` can
         # tie — notes with identical indexed content (topic/content/tags) score
@@ -110,32 +119,39 @@ async def _recall_notes_fts5(
         # tiebreak: `notes.id` is a random uuid4, so NOT portable; the query
         # already JOINs `n.rowid = fts.rowid`, and `notes` (external-content
         # FTS5) always carries a stable rowid identical across record and replay.
+        # The inner query holds the candidates and their best relevance; the
+        # outer one floors each note against that best, then ranks.
         async with db.execute(
             f"""
             SELECT {", ".join(f"n.{c}" for c in note_cols)}
-            FROM notes_fts fts
-            JOIN notes n ON n.rowid = fts.rowid
-            WHERE notes_fts MATCH ?
-              AND n.agent_id = ?
-              AND (1.0 / (1.0 + ABS(fts.rank))) >= ?
-              {sess_clause}
-              {princ_clause}
-              {epoch_clause}
-              {prot_clause}
-            ORDER BY fts.rank * -1 DESC, n.rowid DESC
+            FROM (
+                SELECT fts.rowid AS rid, fts.rank AS rank,
+                       MAX(-fts.rank) OVER () AS best
+                FROM notes_fts fts
+                JOIN notes n ON n.rowid = fts.rowid
+                WHERE notes_fts MATCH ?
+                  AND n.agent_id = ?
+                  {sess_clause}
+                  {princ_clause}
+                  {epoch_clause}
+                  {prot_clause}
+            ) c
+            JOIN notes n ON n.rowid = c.rid
+            WHERE -c.rank >= ? * c.best
+            ORDER BY c.rank * -1 DESC, n.rowid DESC
             LIMIT ?
             """,
             (
-                safe_query, agent_id, effective_min_score,
+                match, agent_id,
                 *sess_params, *princ_params, *epoch_params, *prot_params,
-                limit,
+                resolve_min_score(min_score), limit,
             ),
         ) as cursor:
             return list(await cursor.fetchall())
     except sqlite3.OperationalError as exc:
         logger.warning(
-            "Notes FTS5 query failed for %r (sanitized: %r), falling back to LIKE: %s",
-            query, safe_query, exc,
+            "Notes FTS5 query failed for %r (MATCH %r), falling back to LIKE: %s",
+            query, match, exc,
         )
         return await _recall_notes_like(
             db, agent_id=agent_id, query=query, limit=limit,

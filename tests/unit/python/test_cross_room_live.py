@@ -141,11 +141,10 @@ async def _seed_gate_rows(
         fact_store, object="secret-cross-room-fact",
         protection_level="restricted",
     )
-    # The summary opens with the whole query: the full-text search needs
-    # every query word, and the fallback used without it needs the query
-    # as one unbroken run of text.  The score floor also drops as the
-    # store grows (ISSUE-0159), so the gate test checks the gate judged
-    # the episode.  Real restricted episodes carry an interaction id (the
+    # The summary opens with the whole query: the fallback used without
+    # full-text search needs the query as one unbroken run of text.  The
+    # gate test checks the gate judged the episode, not how many rows the
+    # search returned.  Real restricted episodes carry an interaction id (the
     # close path sets one); without it, a withheld episode skips the §E
     # projection lookup.
     restricted_ep = await episodic.store_episode(

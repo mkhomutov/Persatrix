@@ -4,7 +4,10 @@ the delta is real, and the withhold is load-bearing.
 ``EVAL-MEMORY-005`` is the offline sample the audience shadow verdict was
 measured over: Alice teaches in her DM, the interaction closes, and she
 asks twice — once in a room Bob is in (*disjoint*), once in a room whose
-every member was in the DM (*admit*). This file is the committed,
+every member was in the DM (*admit*). The DM leaves two entries to judge,
+the fact it taught and the episode it closed as: until ISSUE-0159's fix the
+episodic search matched no natural message, so only the fact was judged.
+This file is the committed,
 reproducible form of that measurement — the `EVAL-MEMORY-002` precedent,
 which does the same job for the RFC 0049 promotion — plus the two
 properties a reader of the verdict has to be able to trust:
@@ -100,8 +103,9 @@ def test_the_seed_contributes_both_conclusive_verdicts(tmp_path: Path) -> None:
         "means the check never ran and the measurement is vacuous"
     )
     summary = summarize_audience(traces)
-    assert summary.verdicts["withhold-disjoint"] == 1, summary
-    assert summary.verdicts["admit"] == 1, summary
+    # Two entries (the fact and the episode), each judged in both rooms.
+    assert summary.verdicts["withhold-disjoint"] == 2, summary
+    assert summary.verdicts["admit"] == 2, summary
     assert summary.max_judged_per_turn <= AUDIENCE_TURN_BOUND, summary
     # The three criteria that are this recipe's to satisfy still hold.
     verdict = promotion_verdict(traces, goldens_green=True)
@@ -111,11 +115,14 @@ def test_the_seed_contributes_both_conclusive_verdicts(tmp_path: Path) -> None:
 def test_the_tier_the_seed_measures_is_named_not_assumed(tmp_path: Path) -> None:
     """``by_tier`` exists so a reader of the verdict can see WHICH of the
     three judged tiers a sample exercised.  This seed exercises ``facts``
-    and says so — the visibility that keeps a one-tier delta from reading
-    as a whole-check measurement."""
+    and ``episodic`` and says so — the visibility that keeps a partial
+    delta from reading as a whole-check measurement.  ``channel_history``
+    stays unexercised: no room's history reaches another room."""
     summary = summarize_audience(_traces(tmp_path))
-    assert set(summary.by_tier) == {"facts"}, summary.by_tier
-    assert summary.by_tier["facts"]["withhold-disjoint"] == 1
+    assert set(summary.by_tier) == {"facts", "episodic"}, summary.by_tier
+    for tier in ("facts", "episodic"):
+        assert summary.by_tier[tier]["withhold-disjoint"] == 1, summary.by_tier
+        assert summary.by_tier[tier]["admit"] == 1, summary.by_tier
 
 
 def test_both_halves_of_the_regression_are_exercised(tmp_path: Path) -> None:
@@ -128,20 +135,22 @@ def test_both_halves_of_the_regression_are_exercised(tmp_path: Path) -> None:
     assert set(by_room) == {_WITH_BOB, _WITHOUT_BOB}, sorted(by_room)
 
     disjoint = by_room[_WITH_BOB]["verdicts"]
-    assert disjoint["withhold-disjoint"] == 1, disjoint
+    assert disjoint["withhold-disjoint"] == 2, disjoint
     assert disjoint["admit"] == 0, disjoint
 
     admit = by_room[_WITHOUT_BOB]["verdicts"]
-    assert admit["admit"] == 1, admit
+    assert admit["admit"] == 2, admit
     assert admit["withhold-disjoint"] == 0, admit
 
-    # Both judged the SAME DM-taught entry — otherwise the two rooms are
-    # measuring two different facts and the comparison means nothing.
-    ids = {
-        c["entry_id"]
-        for t in by_room.values() for c in t["candidates"]
+    # Both rooms judged the SAME DM-taught entries, one per tier — otherwise
+    # the two rooms are measuring different memories and the comparison
+    # means nothing.
+    per_room = {
+        room: {(c["tier"], c["entry_id"]) for c in t["candidates"]}
+        for room, t in by_room.items()
     }
-    assert len(ids) == 1, ids
+    assert per_room[_WITH_BOB] == per_room[_WITHOUT_BOB], per_room
+    assert sorted(tier for tier, _ in per_room[_WITH_BOB]) == ["episodic", "facts"]
     for trace in by_room.values():
         for candidate in trace["candidates"]:
             assert candidate["source_channel_id"] == _DM, candidate
@@ -150,19 +159,19 @@ def test_both_halves_of_the_regression_are_exercised(tmp_path: Path) -> None:
 
 def test_live_withholds_the_disjoint_entry_and_nothing_else(tmp_path: Path) -> None:
     """The enforcement, from the trace side (PR A3): the standup turn's
-    trace shows the *disjoint* entry actually withheld, the pair turn's
+    trace shows both *disjoint* entries actually withheld, the pair turn's
     shows nothing withheld.  Unknown verdicts admit, so ``withheld`` can
     only ever count disjoint."""
     by_room = {t["acting_channel_id"]: t for t in _traces(tmp_path)}
     assert all(t["mode"] == "live" for t in by_room.values()), by_room
-    assert by_room[_WITH_BOB]["withheld"] == 1, by_room[_WITH_BOB]
+    assert by_room[_WITH_BOB]["withheld"] == 2, by_room[_WITH_BOB]
     assert by_room[_WITHOUT_BOB]["withheld"] == 0, by_room[_WITHOUT_BOB]
 
 
 def test_the_live_withhold_is_load_bearing(tmp_path: Path) -> None:
     """Replaying the LIVE golden under a shadow-pinned override must MISS
-    the cassette: the recorded standup request carries no Helix fact,
-    and a shadow run — which injects the disjoint entry — cannot
+    the cassette: the recorded standup request carries no Helix fact or
+    episode, and a shadow run — which injects the disjoint entries — cannot
     reproduce it.  A regression that re-admits the entry fails the
     committed seed exactly this way; the request-hash pin, not the
     mock-authored decline, is what makes EVAL-MEMORY-005 load-bearing

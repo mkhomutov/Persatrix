@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import sqlite3
 import uuid
 from typing import Any
@@ -31,6 +30,7 @@ from ._episodic_agent_state import (
     reset_interaction_count,
 )
 from ._epoch_filter import epoch_eq_clause
+from ._fts5_query import FTS5_SANITIZE, fts5_match_query
 from ._migration_protection import PROTECTION_LEVEL_DEFAULT
 from ._principal_filter import principal_eq_clause
 from ._session_filter import session_boost_expr, session_in_clause
@@ -59,13 +59,9 @@ __all__ = [
     "reset_interaction_count",
     "persist_agent_state",
     "load_agent_state",
-    # `_normalize_bm25` is exported for testability (RFC 0017 §C); the
-    # underscore prefix marks it as not part of the stable public API.
-    # PR #147 review: documented to resolve `_`-prefix vs `__all__` tension.
-    "_normalize_bm25",
     # `resolve_min_score` is imported cross-module by `notes.py` (production
-    # code, not just tests), so unlike `_normalize_bm25` it is promoted to a
-    # public name. Mirrors the same-PR promotion of `DEFAULT_*_MIN_SCORE`:
+    # code, not just tests), so it carries a public name. Mirrors the
+    # same-PR promotion of `DEFAULT_*_MIN_SCORE`:
     # if it crosses a module boundary in production, it does not get an
     # underscore. (PR 6 — RFC 0017 PR 6 review finding: rename helper.)
     "resolve_min_score",
@@ -81,10 +77,10 @@ __all__ = [
 # result sets and resource exhaustion.
 MAX_RECALL_LIMIT = 100
 
-# FTS5 query sanitizer: strip all non-alphanumeric characters except spaces
-# to prevent syntax errors from punctuation in natural language queries
-# (commas, periods, colons, angle brackets, pipes, etc.).
-_FTS5_SANITIZE = re.compile(r'[^a-zA-Z0-9\s]+')
+# The character class recall once sanitised the whole query with; the MATCH
+# text is now built by :func:`~._fts5_query.fts5_match_query`. The name stays
+# for the tests that pin the class.
+_FTS5_SANITIZE = FTS5_SANITIZE
 
 
 # ─── Recall query helpers ────────────────────────────────────
@@ -113,43 +109,19 @@ def _reject_wall_and_boost(
         )
 
 
-def _normalize_bm25(raw: float | None) -> float:
-    """Normalise an FTS5 BM25 raw score into [0, 1].
-
-    FTS5 returns negative BM25 scores where more-negative means more relevant.
-    Mapping: ``1.0 / (1.0 + abs(raw))``.
-
-    Returns ``0.0`` for ``None`` or ``0.0`` input (no match signal).
-    The result is clamped to ``[0.0, 1.0]``.
-
-    Notes
-    -----
-    For ``raw == 0.0`` this helper returns ``0.0`` (treated as no-match),
-    while the equivalent SQL expression in :func:`recall_fts5`
-    (``1.0 / (1.0 + ABS(rank))``) would compute ``1.0`` for the same input.
-    In practice FTS5 never returns ``rank = 0.0`` for a MATCH row, so the
-    divergence has no operational impact — but callers using this helper
-    to predict SQL threshold outcomes should be aware of the edge case.
-    (PR #147 review.)
-    """
-    if not raw:
-        return 0.0
-    return min(1.0, max(0.0, 1.0 / (1.0 + abs(raw))))
-
-
 def resolve_min_score(min_score: float | None) -> float:
-    """Resolve ``None`` to ``0.0`` for SQL-side BM25 floor parameters.
+    """Resolve ``None`` to ``0.0`` for the SQL-side relevance floor.
 
-    ``None`` means "no SQL-side filter": passing ``0.0`` to the
-    ``(1.0/(1.0+ABS(rank))) >= ?`` predicate lets every match through
-    because the normalised score is always in ``(0, 1]`` for non-zero
-    ranks.  Centralised here so the contract is a single line of truth
-    shared by :func:`recall_fts5` and ``NoteStore._recall_notes_fts5``.
-    (PR 6 — RFC 0017 PR 3 review finding 3.)
+    The floor keeps a row whose bm25 relevance is at least ``min_score``
+    times the best relevance among the call's candidates
+    (``-rank >= ? * best``). ``0.0`` lets every match through, so ``None``
+    and ``0.0`` both mean no floor. Centralised here so the contract is a
+    single line of truth shared by :func:`recall_fts5` and
+    ``NoteStore._recall_notes_fts5``. (PR 6 — RFC 0017 PR 3 review finding 3;
+    the floor became relative with ISSUE-0159.)
 
-    Note: kept underscore-free (unlike :func:`_normalize_bm25`) because it
-    is imported cross-module by :mod:`agents.memory.notes` in production
-    code, not just tests.  See ``__all__`` rationale above.
+    Underscore-free because :mod:`agents.memory.notes` imports it in
+    production code, not just tests. See the ``__all__`` rationale above.
     """
     return 0.0 if min_score is None else min_score
 
@@ -169,8 +141,22 @@ async def recall_fts5(
 ) -> list[aiosqlite.Row]:
     """FTS5 search with composite BM25 x importance x access x recency scoring.
 
-    Falls back to LIKE search on malformed FTS5 syntax (lone ``*``,
-    unbalanced quotes, bare ``NOT``).  ``sessions`` (RFC 0031 Phase 2
+    The MATCH text is one quoted phrase per word of *query*, joined with
+    OR (:func:`~._fts5_query.fts5_match_query`), so a natural sentence
+    matches every episode that shares a content word with it (ISSUE-0159).
+    A query with no letter or digit falls back to :func:`recall_recency`,
+    and the tick sentence returns no rows.
+
+    ``min_score`` is relative: a row stays when its bm25 relevance is at
+    least ``min_score`` times the best relevance among the candidates, the
+    rows that match and pass this call's own filters (agent, importance,
+    session wall, principal, epoch). It is applied before ``LIMIT``; the
+    room boost and the composite score only order the rows. A fixed floor
+    would empty small stores: FTS5 gives a word found in half the rows
+    almost no weight, so every bm25 there is about 1e-6.
+
+    Falls back to LIKE on the raw query if FTS5 raises, which quoted
+    phrases cannot cause. ``sessions`` (RFC 0031 Phase 2
     PR 2) is a resolved list from
     :func:`agents.memory._session_filter._resolve_session_list` — ``None``
     is the ``"*"`` no-filter mode.
@@ -203,45 +189,55 @@ async def recall_fts5(
     epoch_clause, epoch_params = epoch_eq_clause(
         epoch_id, column="e.epoch_id",
     )
-    safe_query = _FTS5_SANITIZE.sub(" ", query).strip()
-    if not safe_query:
-        # Pure-punctuation query sanitizes to empty — fall through to a
-        # pure recency ranking so the caller still gets relevant rows.
+    match = fts5_match_query(query)
+    if match is None:
+        # No letter or digit to search for — fall through to a pure
+        # recency ranking so the caller still gets relevant rows.
         return await recall_recency(
             db, agent_id, limit, min_importance, sessions=sessions,
             boost_sessions=boost_sessions,
             principal_id=principal_id, epoch_id=epoch_id,
         )
-    effective_min_score = resolve_min_score(min_score)
+    if not match:
+        return []
     try:
+        # The inner query holds the candidates and their best relevance;
+        # the outer one floors each row against that best, then ranks.
         async with db.execute(
             f"""
             SELECT {_EPISODE_SELECT_ALIASED}
-            FROM episodes_fts fts
-            JOIN episodes e ON e.rowid = fts.rowid
-            WHERE episodes_fts MATCH ?
-              AND e.agent_id = ?
-              AND e.importance >= ?
-              AND (1.0 / (1.0 + ABS(fts.rank))) >= ?
-              {sess_clause}
-              {princ_clause}
-              {epoch_clause}
+            FROM (
+                SELECT fts.rowid AS rid, fts.rank AS rank,
+                       MAX(-fts.rank) OVER () AS best
+                FROM episodes_fts fts
+                JOIN episodes e ON e.rowid = fts.rowid
+                WHERE episodes_fts MATCH ?
+                  AND e.agent_id = ?
+                  AND e.importance >= ?
+                  {sess_clause}
+                  {princ_clause}
+                  {epoch_clause}
+            ) c
+            JOIN episodes e ON e.rowid = c.rid
+            WHERE -c.rank >= ? * c.best
             ORDER BY
-                (fts.rank * -1)
+                (c.rank * -1)
                 * {_SCORE_EXPR}{boost_expr}
                 DESC
             LIMIT ?
             """,
             (
-                safe_query, agent_id, min_importance, effective_min_score,
-                *sess_params, *princ_params, *epoch_params, agent_now(),
+                match, agent_id, min_importance,
+                *sess_params, *princ_params, *epoch_params,
+                resolve_min_score(min_score), agent_now(),
                 *boost_params, limit,
             ),
         ) as cursor:
             return list(await cursor.fetchall())
     except sqlite3.OperationalError as exc:
         logger.warning(
-            "FTS5 query failed for %r, falling back to LIKE: %s", query, exc,
+            "FTS5 query failed for %r (MATCH %r), falling back to LIKE: %s",
+            query, match, exc,
         )
         return await recall_like(
             db, agent_id, query, limit, min_importance, min_score,

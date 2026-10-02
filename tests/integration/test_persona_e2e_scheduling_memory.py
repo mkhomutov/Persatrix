@@ -315,12 +315,19 @@ class TestMemoryLifecycleIntegration:
                 )
             )
 
+            # Search on the one word only the other agent's task holds: recall
+            # matches any word of the query (ISSUE-0159), and "unique" and
+            # "marker" are in both agents' tasks.
+            # Positive controls: each agent finds its own episode.
+            assert await agent_a._episodic_memory.recall("Alpha", limit=5)
+            assert await agent_b._episodic_memory.recall("Beta", limit=5)
+
             # Agent A should NOT see Agent B's episodes
-            a_episodes = await agent_a._episodic_memory.recall("Beta unique", limit=5)
+            a_episodes = await agent_a._episodic_memory.recall("Beta", limit=5)
             assert len(a_episodes) == 0
 
             # Agent B should NOT see Agent A's episodes
-            b_episodes = await agent_b._episodic_memory.recall("Alpha unique", limit=5)
+            b_episodes = await agent_b._episodic_memory.recall("Alpha", limit=5)
             assert len(b_episodes) == 0
         finally:
             await agent_a.close_memory()

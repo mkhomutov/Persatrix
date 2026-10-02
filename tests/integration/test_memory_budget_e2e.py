@@ -112,8 +112,8 @@ async def seeded_episodic() -> AsyncGenerator[EpisodicMemory, None]:
     await mem.close()
 
 # The standard query string produced by _LLMPersonaAgent._format_event for TICK events.
-# RFC 0017 PR 4: TICK events now call recall() with this query; the min_score threshold
-# filters low-signal results so TICK against an unrelated seeded DB admits 0 tokens.
+# RFC 0017 PR 4: TICK events now call recall() with this query; the FTS5 query builder
+# searches nothing for it (ISSUE-0159), so a TICK admits 0 tokens.
 _TICK_QUERY = "Autonomous tick: review your goals and decide on next actions."
 
 
@@ -225,10 +225,11 @@ class TestMemoryBudgetE2EFourEventStream:
     ) -> None:
         """TICK and low-keyword 'hi' admit 0 memory tokens.
 
-        Real FTS5 DB with min_score=0.20: the standard TICK query
-        ("Autonomous tick: review your goals...") and "hi" both produce no
-        FTS5 matches above the threshold against the seeded astronomy/cooking/
-        planning/code/travel episodes, so the allocate-loop admits nothing.
+        Real FTS5 DB: the standard TICK query ("Autonomous tick: review your
+        goals...") searches nothing, and no seeded astronomy/cooking/planning/
+        code/travel episode or note contains "hi", so the allocate-loop admits
+        nothing (ISSUE-0159; ``test_tick_recalls_nothing_e2e.py`` covers rows
+        that do share the TICK words).
         """
         # PR #148 review M-1: the zero-admission assertion depends on FTS5
         # BM25 scoring being available.  On SQLite builds without FTS5,
@@ -251,8 +252,8 @@ class TestMemoryBudgetE2EFourEventStream:
             assert result.memory_admitted_tokens == 0, (
                 f"Low-signal ({et!r}, {content!r}) admitted "
                 f"{result.memory_admitted_tokens} tokens; expected 0. "
-                f"Check that min_score={DEFAULT_EPISODIC_MIN_SCORE} filters "
-                f"low-signal FTS5 results."
+                f"Check the FTS5 query builder and the min_score="
+                f"{DEFAULT_EPISODIC_MIN_SCORE} floor."
             )
 
     @pytest.mark.asyncio
