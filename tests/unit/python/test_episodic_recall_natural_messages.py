@@ -36,9 +36,11 @@ async def test_a_long_message_recalls_its_episode_in_a_tiny_store(
 ):
     """The headline case: one shared word in a sixty-word message is enough.
 
-    Stores of one to three rows matter: FTS5 gives a word found in half the
-    rows almost no weight, so every bm25 there is about 1e-6, and any fixed
-    floor would empty recall. The floor is relative, so the best match passes.
+    Small stores matter: FTS5 gives a word found in half the rows or more
+    almost no weight, so in a store of one or two rows every bm25 is about
+    1e-6 and any fixed floor would empty recall. A third row gives the shared
+    word real weight. The floor is relative, so the best match passes in all
+    three.
     """
     target = await memory.store_episode(summary=FIREWORKS, context={})
     for i in range(other_rows):
@@ -152,6 +154,111 @@ async def test_a_withheld_note_does_not_floor_out_an_allowed_one(memory: Episodi
     assert [n.id for n in got] == [public]
 
 
+async def test_a_withheld_episode_does_not_floor_out_an_allowed_one(
+    memory: EpisodicMemory,
+):
+    """The §D gate runs after the search, so the caller names the levels
+    the acting turn may inject and only those rows set the bar. The
+    withheld row stays a candidate: the gate's projection branch needs to
+    see it to serve a cleared-down stand-in."""
+    secret = await memory.store_episode(
+        summary="zephyr launch codename budget plan", context={},
+        protection_level="restricted",
+    )
+    public = await memory.store_episode(
+        summary="budget review", context={}, protection_level="public",
+    )
+    got = await memory.recall(
+        "zephyr launch codename budget", min_score=1.0,
+        floor_protection_levels=["public"],
+    )
+    assert [ep.id for ep in got] == [secret, public]
+
+
+async def test_with_no_allowed_candidate_the_withheld_rows_set_the_bar(
+    memory: EpisodicMemory,
+):
+    """Nothing allowed matched, so no allowed row can be floored out; the
+    withheld rows still reach the gate for their stand-ins."""
+    secret = await memory.store_episode(
+        summary="zephyr launch codename", context={}, protection_level="restricted",
+    )
+    await memory.store_episode(
+        summary="zephyr", context={}, protection_level="restricted",
+    )
+    got = await memory.recall(
+        "zephyr launch codename", min_score=1.0, floor_protection_levels=["public"],
+    )
+    assert [ep.id for ep in got] == [secret]
+
+
+# ─── The words the system writes into every row match nothing ────────────
+
+# What the close path stores for a two-turn conversation (RFC 0020 §D: the
+# context holds no message body, only the record's own bookkeeping).
+CLOSED_CONVERSATION_CONTEXT = {
+    "scope": "group:harbour-room",
+    "close_reason": "idle_gap",
+    "turn_count": 2,
+    "governance_interaction_id": "",
+    "turns": [
+        {"at": 1790929200.49, "payload": {
+            "summary": "Event: channel_message \u2192 Actions: ['send_channel_message']",
+            "event_type": "channel_message", "sender": "iron-fox",
+            "channel_id": "group:harbour-room", "timestamp": 1790929200.49,
+            "participant_type": "user",
+        }},
+        {"at": 1790929260.12, "payload": {
+            "summary": "Event: mention \u2192 Actions: ['do_nothing']",
+            "event_type": "mention", "sender": "iron-fox",
+            "channel_id": "group:harbour-room", "timestamp": 1790929260.12,
+            "participant_type": "agent",
+        }},
+    ],
+}
+
+
+async def test_a_message_sharing_only_system_words_recalls_nothing(
+    memory: EpisodicMemory,
+):
+    """Every closed conversation stores keys and values such as "message",
+    "channel", "event" and "summary", and every tick stores "Event: tick ->
+    Actions: [...]". A message sharing only those words with the store
+    used to bring back five unrelated episodes and count each as used."""
+    for topic in ("bakery flour supplier", "library reading club", "harbour lanterns"):
+        await memory.store_episode(
+            summary=f"Discussed the {topic}", context=CLOSED_CONVERSATION_CONTEXT,
+        )
+    for _ in range(3):
+        await memory.store_episode(
+            summary="Event: tick \u2192 Actions: ['send_channel_message']",
+            context={"event": {}, "sender": None, "close_reason": "structural"},
+        )
+    query = "Message from cobalt-wren:\n\nAny thoughts on the event summary?"
+    assert await memory.recall(query, min_score=DEFAULT_EPISODIC_MIN_SCORE) == []
+
+
+async def test_a_task_is_still_found_by_the_words_of_its_payload(
+    memory: EpisodicMemory,
+):
+    """A single-turn episode keeps its content only in the stored event, so
+    content words must still search the context column."""
+    task = await memory.store_episode(
+        summary="Event: task_assigned \u2192 Actions: ['do_nothing']",
+        context={"event": {"task": "Draft the lantern budget"},
+                 "sender": "orchestrator", "close_reason": "structural"},
+    )
+    await memory.store_episode(
+        summary="Discussed the bakery flour supplier",
+        context=CLOSED_CONVERSATION_CONTEXT,
+    )
+    got = await memory.recall(
+        "Message from cobalt-wren:\n\nHow is the lantern budget going?",
+        min_score=DEFAULT_EPISODIC_MIN_SCORE,
+    )
+    assert [ep.id for ep in got] == [task]
+
+
 # ─── A tick still recalls nothing ────────────────────────────────────────
 
 
@@ -185,7 +292,9 @@ async def test_an_engine_error_falls_back_to_like_for_episodes(
     """Quoted phrases cannot raise, so the fallback is reached by making the
     builder return a query FTS5 rejects."""
     hit = await memory.store_episode(summary=FIREWORKS, context={})
-    monkeypatch.setattr(episodic_queries, "fts5_match_query", lambda _raw: "AND")
+    monkeypatch.setattr(
+        episodic_queries, "fts5_match_query", lambda _raw, **_kw: "AND",
+    )
     with caplog.at_level(logging.WARNING):
         got = await memory.recall("coastguard permit")
     assert [ep.id for ep in got] == [hit]

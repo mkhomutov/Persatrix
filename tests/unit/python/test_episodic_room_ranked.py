@@ -226,6 +226,21 @@ class TestRecallContract:
         ids = [ep.id for ep in await _ranked(memory, query="")]
         assert ids == [kept_id]
 
+    async def test_a_withheld_row_does_not_set_the_bar(
+        self, memory: EpisodicMemory,
+    ):
+        """ISSUE-0159: only rows the acting turn may inject set the floor's
+        bar; the withheld row stays a candidate for the §D gate."""
+        secret = await _seed(
+            memory, "atlas deployment retro sealed", protection_level="restricted",
+        )
+        public = await _seed(memory, "atlas", protection_level="public")
+        got = await _ranked(
+            memory, "atlas deployment retro sealed", min_score=1.0,
+            floor_protection_levels=("public",),
+        )
+        assert [ep.id for ep in got] == [secret, public]
+
     async def test_limit_validated(self, memory: EpisodicMemory):
         with pytest.raises(ValueError, match="limit"):
             await recall_room_ranked(memory, "atlas", limit=0)

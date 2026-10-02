@@ -7,16 +7,16 @@
 
 | Top-level directory | Files |
 |---------------------|-------|
-| `tests/` | 557 |
+| `tests/` | 558 |
 | `docs/` | 549 |
 | `internal/` | 526 |
-| `agents/` | 319 |
+| `agents/` | 320 |
 | `web/` | 108 |
 | `evaluators/` | 58 |
 | `prompts/` | 48 |
 | `scripts/` | 48 |
 | `cli/` | 43 |
-| `(root)` | 34 |
+| `(root)` | 32 |
 | `cmd/` | 23 |
 | `config/` | 22 |
 | `.github/` | 19 |
@@ -28,8 +28,8 @@
 
 | Extension | Count |
 |-----------|-------|
-| `.py` | 950 |
-| `.md` | 615 |
+| `.py` | 952 |
+| `.md` | 613 |
 | `.go` | 544 |
 | `.js` | 69 |
 | `.yaml` | 67 |
@@ -200,6 +200,7 @@
 │   │   ├── episodic_retention.py
 │   │   ├── episodic_room_ranked.py
 │   │   ├── episodic_state_api.py
+│   │   ├── episodic_writes.py
 │   │   ├── eviction.py
 │   │   ├── facade.py
 │   │   ├── facade_procedural.py
@@ -1906,6 +1907,7 @@
 │   │   ├── test_delegation_end_to_end.py
 │   │   ├── test_delegation_rollback_edges.py
 │   │   ├── test_deliberation_no_leak.py
+│   │   ├── test_episodic_recall_system_words_e2e.py
 │   │   ├── test_epoch_run_isolation.py
 │   │   ├── test_eval_driver_close_drain.py
 │   │   ├── test_eval_seed_replay.py

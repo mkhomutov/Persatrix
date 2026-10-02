@@ -6,15 +6,27 @@ The builder turns a message into one quoted phrase per word, joined with OR,
 with common words trimmed and a cap on the phrase count.
 """
 
+import re
+
 import pytest
 
 from agents.memory._fts5_query import (
+    EPISODE_STRUCTURAL_WORDS,
     MAX_MATCH_PHRASES,
     TICK_TEXT,
     fts5_match_query,
 )
+from agents.memory.boundary_detectors import REASON_IDLE_GAP, REASON_STRUCTURAL
+from agents.memory.interaction_janitor import (
+    SUMMARY_PENDING_TEXT,
+    SUMMARY_UNAVAILABLE_TEXT,
+)
+from agents.memory.interaction_types import (
+    LIVE_DUPLICATE_TURN_KEY,
+    ROOM_CLOSE_TURN_KEY,
+)
 from agents.persona_runtime.prompt_assembly import _PromptAssemblyMixin
-from agents.persona_types import AgentEvent, EventType
+from agents.persona_types import ActionType, AgentEvent, EventType
 
 
 @pytest.mark.parametrize(
@@ -93,3 +105,66 @@ def test_only_the_first_phrases_up_to_the_cap_are_searched():
     query = fts5_match_query(" ".join(words))
     assert query == " OR ".join(f'"{w}"' for w in words[:MAX_MATCH_PHRASES])
     assert MAX_MATCH_PHRASES == 40
+
+
+# ─── Episode search leaves out the words the system writes itself ────────
+
+
+def _episode_query(raw: str) -> str | None:
+    return fts5_match_query(raw, structural=EPISODE_STRUCTURAL_WORDS)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        # How an agent's message reaches recall: "message" would match
+        # every closed conversation's stored context.
+        (
+            "Message from cobalt-wren:\n\nWhat do you think about the event?",
+            '"cobalt wren" OR "think"',
+        ),
+        # A person's message: the wrapper's words go, the speaker stays.
+        ('<|user_message user_id="local"|>', '"user id local"'),
+        # A word made only of system words goes; one that only starts with
+        # one stays whole, so its parts must still sit together.
+        ("send_channel_message channel_id fireworks", '"fireworks"'),
+        ("message-board", '"message board"'),
+        # A message of nothing but common and system words is searched as
+        # written, so an operator can still look for an event type.
+        ("task_assigned", '"task assigned"'),
+        ("is the message?", '"is" OR "the" OR "message"'),
+        ("NOT", '"not"'),
+    ],
+)
+def test_episode_search_drops_the_words_the_system_writes(raw, expected):
+    assert _episode_query(raw) == expected
+
+
+def test_notes_search_keeps_those_words():
+    """Notes hold only what was written into them, so nothing is dropped."""
+    assert fts5_match_query("channel message event") == (
+        '"channel" OR "message" OR "event"'
+    )
+
+
+def _words(text: str) -> set[str]:
+    return {w.lower() for w in re.findall(r"[A-Za-z0-9]+", text)}
+
+
+def test_the_system_words_cover_every_value_the_runtime_stores():
+    """Every event and action type, the usual close reasons, the scope
+    prefixes, the summary placeholders and the JSON literals reach episode
+    rows on most turns, so each must be on the list. The rare close reasons
+    (cost, topic shift, turn cap, shutdown, catch-up) are left off on
+    purpose: they reach few rows, and "cost" and "topic" are real words."""
+    stored: set[str] = set()
+    for value in [e.value for e in EventType] + [a.value for a in ActionType]:
+        stored |= _words(value)
+    for text in (
+        REASON_STRUCTURAL, REASON_IDLE_GAP, ROOM_CLOSE_TURN_KEY,
+        LIVE_DUPLICATE_TURN_KEY, SUMMARY_PENDING_TEXT,
+        SUMMARY_UNAVAILABLE_TEXT, "thread: group: dm:", "null true false",
+    ):
+        stored |= _words(text)
+    assert stored <= EPISODE_STRUCTURAL_WORDS
+    assert {"cost", "topic"}.isdisjoint(EPISODE_STRUCTURAL_WORDS)

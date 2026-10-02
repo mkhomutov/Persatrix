@@ -81,23 +81,45 @@ change). Episodic and notes recall share one MATCH builder,
   are trimmed from the end of a word, a lone single character is dropped,
   and only the first 40 phrases are searched. A message made only of common
   words is searched as written. A quoted phrase cannot be FTS5 syntax, so
-  `NOT` or `*` no longer reach the LIKE fallback.
+  `NOT` is searched as a word and no message raises a syntax error. Text
+  with no letter or digit, such as `*`, keeps each tier's old path: recency
+  for episodes, a LIKE search for notes.
+- **System words do not count for episodes.** Every closed conversation
+  stores its bookkeeping in the searched context column (`close_reason`,
+  `participant_type`, `channel_message`, …), and every single-turn event
+  stores `Event: … → Actions: […]` as its summary. An agent's message
+  reaches recall as "Message from X: …", so the word "message" alone would
+  bring back unrelated episodes and count each as used. Episode search
+  trims those words like common words; a test pins the list to the
+  runtime's event types, action types and close reasons, and another drives
+  a real persona and checks every word it stored is listed. A task's own
+  words still match, because they live only in the stored event.
 - **The floor is relative.** A row stays when its bm25 relevance is at
   least `min_score` times the best relevance among the candidates, the rows
   that pass the call's own filters (agent, importance, session wall,
   principal, epoch, and for notes the protection levels). A fixed floor
-  would empty small stores: FTS5 gives a word found in half the rows almost
-  no weight, so every bm25 there is about 1e-6. The defaults stay 0.20;
-  `1.0` now keeps the best match and its ties.
+  would empty small stores: FTS5 gives a word found in half the rows or
+  more almost no weight, so in a store of one or two rows every bm25 is
+  about 1e-6. The defaults stay 0.20; `1.0` now keeps the best match and
+  its ties.
+- **A withheld episode does not set the bar.** The §D gate judges episodes
+  after the search, so the persona passes the levels its turn may inject
+  and only those rows set the best. Otherwise a restricted episode could
+  push every admissible one below the floor, and its absence from the
+  prompt would hint that it exists. The withheld rows stay candidates: the
+  gate's §E projection branch serves cleared-down stand-ins for them.
 - **A tick searches nothing.** OR matching would let the tick sentence
   match ordinary rows and end the RFC 0017 §F short-circuit, one model call
   per tick in a public room. The builder returns no query for that exact
   sentence; a second copy of it lives in the memory package, pinned to the
   persona runtime's by a test.
 
-Measured on a replay of EXP-001's first practice run, the briefing reaches
-23 of arm D's 25 speaking turns in the three later meetings, every opening
-turn included, where the shipped code reached none. Three goldens gain the
+Measured on a replay of EXP-001's first practice run, each meeting replayed
+against the store it started with, the briefing reaches 23 of arm D's 25
+speaking turns in the three later meetings, every opening turn included,
+where the shipped code reached none. That replay predates the system-word
+and withheld-bar changes above, and runs again on them before the scored
+run. Three goldens gain the
 episode the fix recalls (EVAL-MEMORY-003, 004 and 005, re-recorded offline);
 EVAL-MEMORY-005 now judges the DM-taught episode beside the fact.
 
@@ -111,10 +133,12 @@ EVAL-MEMORY-005 now judges the DM-taught episode beside the fact.
 - **Ruling (b)** covers memory isolation, attribution and audience work.
   This is recall relevance: the §D gate and the audience check are
   unchanged, and they now judge more candidates.
-- **EXP-001.** Only arm D changes; B, C and D′ inject no memory and A has
-  no runtime memory. Check 2 of the pre-registration needs a briefing fact
-  to reach a later meeting's prompt through the shipped memory path, and
-  with the shipped search it never could. Unlike
+- **EXP-001.** Arm D changes most: it is the only arm whose prompt carries
+  injected memory. The `recall_notes` tool changes for every arm that has
+  it, B, C, D and D′ alike: it now finds a note that shares any word with
+  the query. A has no runtime memory. Check 2 of the pre-registration
+  needs a briefing fact to reach a later meeting's prompt through the
+  shipped memory path, and with the shipped search it never could. Unlike
   [ISSUE-0163](ISSUE-0163-withheld-episodes-reinforced-before-the-gate.md),
   which only re-ranks what already carries, this decides whether anything
   carries at all.
@@ -139,3 +163,12 @@ EVAL-MEMORY-005 now judges the DM-taught episode beside the fact.
 > stores returned no episode for any of them. Leg 4 of
 > MT-PERSONA-CONFIDENTIALITY-001 is reachable with the fix (v1.3) and has
 > not been re-run live.
+
+> 2026-10-02 — review of the fix. Two gaps closed in the same change: the
+> system words above, and the withheld bar. Known limits it leaves: an
+> episode the audience check withholds can still set the bar, because the
+> audience is known only after the search; withheld rows still take places
+> under the search's row limit, as they did before; bm25 weighs each word
+> over the whole table, every agent, tenant and level included, so the
+> filters choose the candidates but not the weights; and a sender's name
+> still matches the episodes that sender took part in.

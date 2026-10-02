@@ -12,6 +12,10 @@ joined with OR, and lets bm25 rank the rows that share any of them:
   turns "operator's" into "operator" but keeps "up-to-date" whole, and a
   word left as one single character is dropped; a message made only of
   common words is searched for those words as written;
+* episode search also trims :data:`EPISODE_STRUCTURAL_WORDS`, the words
+  the system itself writes into nearly every episode row, so "Message from
+  …" does not match every stored conversation; a message made only of
+  common and system words is still searched for them as written;
 * each phrase is searched once, and only the first :data:`MAX_MATCH_PHRASES`;
 * a quoted phrase holds only ``[a-z0-9 ]``, so no message can produce FTS5
   syntax (``NOT``, ``*``, a stray quote) or raise a syntax error.
@@ -25,6 +29,7 @@ from __future__ import annotations
 import re
 
 __all__ = [
+    "EPISODE_STRUCTURAL_WORDS",
     "FTS5_SANITIZE",
     "FTS5_STOPWORDS",
     "MAX_MATCH_PHRASES",
@@ -32,9 +37,11 @@ __all__ = [
     "fts5_match_query",
 ]
 
-# Strips everything but ASCII letters, digits and whitespace. Kept for the
-# callers that still sanitise a raw query themselves (the LIKE fallbacks'
-# logs and tests); the MATCH text is built from ``_RUN`` below.
+# Strips everything but ASCII letters, digits and whitespace: the character
+# class recall once cleaned the whole query with. No production code uses it
+# now; it stays for the tests that pin it under its old names
+# (``episodic_queries._FTS5_SANITIZE``, ``notes._FTS5_SPECIAL``). The MATCH
+# text is built from ``_RUN`` below.
 FTS5_SANITIZE = re.compile(r"[^a-zA-Z0-9\s]+")
 
 _RUN = re.compile(r"[A-Za-z0-9]+")
@@ -55,6 +62,25 @@ up ve very was wasn we were weren what when where which while who whom why
 will with won wouldn y you your yours yourself yourselves
 """.split())
 
+# The words the system writes into episode rows on most turns, never the
+# conversation's own: the stored context's keys ("close_reason", "turns",
+# "participant_type", …), its usual values (every event and action type, the
+# idle and structural close reasons, scope prefixes, participant types, JSON
+# literals), the "Event: … → Actions: […]" line a single-turn episode stores
+# as its summary, and the summary placeholders. They sit in nearly every row,
+# so a message sharing only these words with the store would bring back
+# unrelated episodes. Rare values (the cost, topic-shift, turn-cap, shutdown
+# and catch-up close reasons) are left off: they reach few rows, and "cost"
+# and "topic" are real words. A test pins the list to the runtime's values.
+EPISODE_STRUCTURAL_WORDS: frozenset[str] = frozenset("""
+actions agent approval assigned at channel close complete completed confidence
+count delegate deny do dm duplicate end event false gap governance grant group
+id idle interaction joined left live mention message nothing null participant
+payload pending pool reason request requested response room scope seconds send
+sender source spawn structural sub summary task thread tick timestamp tool true
+ttl turn turns type unavailable use user vote
+""".split())
+
 # Measured on EXP-001's arm D replay: 32 to 48 give the same recall, and the
 # cap mostly cuts the shared tail of a long template message.
 MAX_MATCH_PHRASES = 40
@@ -65,31 +91,38 @@ MAX_MATCH_PHRASES = 40
 TICK_TEXT = "Autonomous tick: review your goals and decide on next actions."
 
 
-def fts5_match_query(raw: str) -> str | None:
+def fts5_match_query(
+    raw: str, *, structural: frozenset[str] = frozenset(),
+) -> str | None:
     """Return the MATCH text for *raw*, ``""`` for no rows, or ``None``.
 
     ``None`` means *raw* holds no letter or digit: the caller keeps its own
     fallback (recency for episodes, a LIKE search for notes). ``""`` means
     search nothing: the caller returns no rows without querying.
+    *structural* words are trimmed like common words; episode search passes
+    :data:`EPISODE_STRUCTURAL_WORDS`.
     """
     if not _RUN.search(raw):
         return None
     if raw.strip() == TICK_TEXT:
         return ""
-    phrases = _phrases(raw, trim=True) or _phrases(raw, trim=False)
+    phrases = (
+        _phrases(raw, FTS5_STOPWORDS | structural, primary=True)
+        or _phrases(raw, frozenset(), primary=False)
+    )
     return " OR ".join(f'"{p}"' for p in phrases[:MAX_MATCH_PHRASES])
 
 
-def _phrases(raw: str, *, trim: bool) -> list[str]:
-    """One phrase per whitespace-separated word, de-duplicated in order."""
+def _phrases(raw: str, trimmed: frozenset[str], *, primary: bool) -> list[str]:
+    """One phrase per whitespace-separated word, de-duplicated in order,
+    with the *trimmed* words cut from the end of each word."""
     seen: dict[str, None] = {}
     for word in raw.split():
         runs = [r.lower() for r in _RUN.findall(word)]
-        if trim:
-            while runs and runs[-1] in FTS5_STOPWORDS:
-                runs.pop()
-            if len(runs) == 1 and len(runs[0]) == 1:
-                continue
+        while runs and runs[-1] in trimmed:
+            runs.pop()
+        if primary and len(runs) == 1 and len(runs[0]) == 1:
+            continue
         if runs:
             seen.setdefault(" ".join(runs), None)
     return list(seen)

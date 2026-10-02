@@ -339,3 +339,35 @@ class TestLiveCrossRoomInjection:
         assert "atlas deployment retro" not in rendered
         assert result.manifest == ()
         assert _shadow_traces(shadow_logs) == []
+
+
+@_asyncio
+async def test_a_withheld_episode_never_floors_out_an_admissible_one(
+    fact_store: FactStore, episodic: EpisodicMemory, gates,
+):
+    """ISSUE-0159: the floor keeps rows within a share of the best match.
+    A restricted episode the internal turn may not see used to be that
+    best match and push the internal episode below the floor, which also
+    told the caller that a hidden match existed. Now only rows the acting
+    level admits set the bar, and the withheld row still reaches the gate."""
+    secret = await episodic.store_episode(
+        f"{_QUERY} {RESTRICTED_EPISODE_FRAGMENT} atlas deployment retro",
+        {"k": "v"}, session_id=ROOM_A, protection_level="restricted",
+        interaction_id="ix-restricted",
+    )
+    # bm25 puts this row at about 0.15 of the restricted one, under the
+    # default floor of 0.20.
+    seen = await episodic.store_episode(
+        "retro snacks and drinks for the team party on friday", {"k": "v"},
+        session_id=ROOM_A, protection_level="internal",
+    )
+    for i in range(6):
+        await episodic.store_episode(
+            f"bakery flour order {i}", {"k": "v"}, session_id=ROOM_A,
+            protection_level="internal",
+        )
+    mixin = _build_mixin(fact_store, episodic)
+    await mixin._inject_memory_context(_channel_event(classification="internal"))
+
+    assert _judged(gates, "episodic") == {secret: False, seen: True}
+    assert "retro snacks and drinks" in _rendered(mixin)

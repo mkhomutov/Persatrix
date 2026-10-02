@@ -34,6 +34,7 @@ from .channel_history import (
     recall_channel_episodes,
 )
 from .channel_roster import inject_channel_roster, resolve_channel_roster
+from .classification import injectable_levels
 from .cross_room import (
     CROSS_ROOM_LIVE,
     DEFAULT_EPISODIC_CROSS_ROOM,
@@ -348,21 +349,24 @@ class _MemoryContextMixin:
             # (``sessions=None``; pinned by ``test_off_mode_keeps_the_wall``
             # in ``test_cross_room_live.py`` and ``TestShadowNeverEntersPrompt``
             # in ``test_episodes_shadow.py``) with shadow mode logging the
-            # widened delta.
+            # widened delta.  Only rows the acting level admits set the
+            # min_score bar, so the gate's withholds cannot floor out an
+            # admissible row (ISSUE-0159).
+            floor_levels = injectable_levels(acting_classification_for_event(event))
             try:
                 if self._episodic_cross_room == CROSS_ROOM_LIVE:
                     episodes = await recall_room_ranked(
                         self._episodic_memory, query,
                         limit=EPISODIC_RECALL_LIMIT,
                         min_score=DEFAULT_EPISODIC_MIN_SCORE,
-                        reinforce=True,
+                        reinforce=True, floor_protection_levels=floor_levels,
                     )
                 else:
                     episodes = await self._episodic_memory.recall(
                         query,
                         limit=EPISODIC_RECALL_LIMIT,
                         min_score=DEFAULT_EPISODIC_MIN_SCORE,
-                        sessions=None,
+                        sessions=None, floor_protection_levels=floor_levels,
                     )
             except Exception:
                 logger.warning(
