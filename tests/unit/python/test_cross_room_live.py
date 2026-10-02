@@ -12,6 +12,8 @@ widening**:
 * every widened candidate still passes the RFC 0037 §D gate BEFORE the
   RFC 0017 budget — a ``restricted``-stamped row on an internal-acting
   turn is withheld from prompt and manifest alike;
+* only the episodes that reach the prompt are reinforced (ISSUE-0163;
+  pinned in ``test_live_episode_reinforcement.py``);
 * live mode emits NO shadow trace — the widened read happens once, on
   the live path (the #783 "fold live+widened into one query"
   follow-up: shadow mode's doubled episodic read is gone in live); and
@@ -52,6 +54,7 @@ _QUERY = "atlas deployment retro"
 #: Every event in this file acts from room B; rows seeded in ``room-a``
 #: are cross-room relative to it.
 ROOM_A = "room-a"
+ROOM_B = "group:room-b"
 
 
 def _channel_event(
@@ -59,11 +62,12 @@ def _channel_event(
     *,
     sender: str = "bob",
     classification: str = "internal",
+    event_type: EventType = EventType.CHANNEL_MESSAGE,
 ) -> AgentEvent:
     return AgentEvent(
-        event_type=EventType.CHANNEL_MESSAGE,
+        event_type=event_type,
         payload={"content": content},
-        channel_id="group:room-b",
+        channel_id=ROOM_B,
         sender_id=sender,
         metadata={"channel_classification": classification},
     )
@@ -230,7 +234,7 @@ class TestLiveCrossRoomInjection:
         self, fact_store: FactStore, episodic: EpisodicMemory, shadow_logs,
     ):
         """A room-A episode is admissible on a room-B turn (ranked, not
-        walled), reinforced exactly like the pre-promotion live recall."""
+        walled), and reinforced once because it reached the prompt."""
         ep_id = await episodic.store_episode(
             "atlas deployment retro", {"k": "v"},
             importance=0.5, session_id=ROOM_A,
@@ -241,7 +245,9 @@ class TestLiveCrossRoomInjection:
         assert "atlas deployment retro" in _rendered(mixin)
         assert ep_id in {e.entry_id for e in result.manifest}
         row = await episodic.get_episode(ep_id)
-        assert row is not None and row.access_count >= 1
+        assert row is not None
+        assert row.access_count == 1
+        assert row.last_accessed_at is not None
         assert _shadow_traces(shadow_logs) == []
 
     async def test_gate_withholds_restricted_on_internal_turn(

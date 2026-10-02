@@ -336,21 +336,17 @@ class _MemoryContextMixin:
             else:
                 facts = []
 
-            # Tier 2 (priority 7): Episodic recall (TICK skip removed —
-            # RFC 0017 §D min_score + the PR 5 empty-context short-circuit).
-            # ``cross_room: live`` (RFC 0049 PR 4, the promoted default) =
-            # room-first-RANKED recall in ONE widened, reinforcing query
-            # (it counts a use of every row it returns, before the gate
-            # and the budget below choose what the prompt carries —
-            # ISSUE-0163; the shadow pass does not run in live mode, so live costs
-            # one episodic read per turn, like ``off``; ``shadow`` costs
-            # two on a channel turn: this walled read plus the widened
-            # shadow read); otherwise the RFC 0031 §D wall
-            # (``sessions=None``; pinned by ``test_off_mode_keeps_the_wall``
-            # in ``test_cross_room_live.py`` and ``TestShadowNeverEntersPrompt``
-            # in ``test_episodes_shadow.py``) with shadow mode logging the
-            # widened delta.  ISSUE-0159: a message is searched by its own
-            # words, and only rows the acting level admits set the min_score bar.
+            # Tier 2 (priority 7): Episodic recall (TICK skip removed — RFC 0017 §D min_score +
+            # the PR 5 empty-context short-circuit). ``cross_room: live`` (RFC 0049 PR 4, the
+            # promoted default) = room-first-RANKED recall in ONE widened read that counts no
+            # use (ISSUE-0163: what the budget admits is reinforced after the allocate-loop; the
+            # shadow pass does not run in live mode, so live costs one episodic read per turn,
+            # like ``off``; ``shadow`` costs two on a channel turn: this walled read plus the
+            # widened shadow read); otherwise the RFC 0031 §D wall (``sessions=None``; pinned by
+            # ``test_off_mode_keeps_the_wall`` in ``test_cross_room_live.py`` and
+            # ``TestShadowNeverEntersPrompt`` in ``test_episodes_shadow.py``) with shadow mode
+            # logging the widened delta.  ISSUE-0159: a message is searched by its own words,
+            # and only rows the acting level admits set the min_score bar.
             recall_query = recall_text_for_event(event, query)
             floor_levels = injectable_levels(acting_classification_for_event(event))
             try:
@@ -359,7 +355,7 @@ class _MemoryContextMixin:
                         self._episodic_memory, recall_query,
                         limit=EPISODIC_RECALL_LIMIT,
                         min_score=DEFAULT_EPISODIC_MIN_SCORE,
-                        reinforce=True, floor_protection_levels=floor_levels,
+                        reinforce=False, floor_protection_levels=floor_levels,
                     )
                 else:
                     episodes = await self._episodic_memory.recall(
@@ -479,6 +475,8 @@ class _MemoryContextMixin:
             budget=budget, now=now,
             rel=rel, channel_episodes=channel_episodes, facts=facts,
             episodes=episodes, notes=notes,
+            reinforce_episodes_in=self._episodic_memory  # ISSUE-0163
+            if self._episodic_cross_room == CROSS_ROOM_LIVE else None,
         )
 
         # Channel-roster tier (F-4, priority 9 — highest). Injected from the

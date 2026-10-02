@@ -19,7 +19,6 @@ import aiosqlite
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
-from ..clock import agent_now
 from ..epoch_id import resolve_epoch_id_silent
 from ..observability.spans import (
     EPISODIC_RECALL_SPAN,
@@ -41,6 +40,7 @@ from .episodic_crud import (
 from .episodic_crud import (
     get_episode as _get_episode,
 )
+from .episodic_crud import reinforce_episodes as _reinforce_episodes
 from .episodic_notes_api import _EpisodicNotesAPIMixin
 from .episodic_queries import (
     MAX_RECALL_LIMIT,
@@ -421,18 +421,11 @@ class EpisodicMemory(
                 ]
                 span.set_attribute("result.count", len(episodes))
 
-                # Increment access_count and update last_accessed_at
+                # Count a use of each returned row, then refresh the objects.
                 if episodes:
-                    now = agent_now()
-                    ids = [e.id for e in episodes]
-                    placeholders = ",".join("?" for _ in ids)
-                    await db.execute(
-                        f"UPDATE episodes SET access_count = access_count + 1, "
-                        f"last_accessed_at = ? WHERE id IN ({placeholders})",
-                        [now, *ids],
+                    now = await _reinforce_episodes(
+                        db, self._agent_id, [e.id for e in episodes],
                     )
-                    await db.commit()
-                    # Update in-memory objects to reflect the increment
                     for ep in episodes:
                         ep.access_count += 1
                         ep.last_accessed_at = now
@@ -442,6 +435,14 @@ class EpisodicMemory(
                 span.record_exception(exc)
                 span.set_status(Status(StatusCode.ERROR, str(exc)))
                 raise
+
+    async def reinforce(self, episode_ids: list[str]) -> None:
+        """Apply :meth:`recall`'s access bump to *episode_ids*, agent-scoped.
+
+        For callers that choose after reading which episodes they use: the
+        persona prompt path passes the ones its budget admitted (ISSUE-0163).
+        """
+        await _reinforce_episodes(self._ensure_db(), self._agent_id, episode_ids)
 
     async def get_episode(self, episode_id: str) -> Episode | None:
         """Retrieve a single episode by ID (agent-scoped)."""
