@@ -78,6 +78,13 @@ def test_builds_one_quoted_phrase_per_word_joined_with_or(raw, expected):
     assert fts5_match_query(raw) == expected
 
 
+@pytest.mark.parametrize(("raw", "expected"), [("a", '"a"'), ("x", '"x"'), ("I?", '"i"')])
+def test_a_lone_one_letter_word_is_still_searched_as_written(raw, expected):
+    """The one-letter rule applies to the first pass only: a message of a
+    single one-letter word falls back to that word, not to nothing."""
+    assert fts5_match_query(raw) == expected
+
+
 @pytest.mark.parametrize("raw", ["*", ".,<>|!@#$%", "", "   "])
 def test_text_without_letters_or_digits_builds_no_query(raw):
     """None tells the caller to keep its shipped fallback (recency for

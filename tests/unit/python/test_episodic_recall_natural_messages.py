@@ -283,6 +283,17 @@ async def test_the_tick_sentence_recalls_nothing_in_either_tier(memory: Episodic
     assert await memory.recall_notes(TICK_TEXT) == []
 
 
+async def test_the_tick_never_reaches_the_engine(memory: EpisodicMemory, caplog):
+    """An empty MATCH is an FTS5 syntax error, which would fall back to a
+    LIKE search for the whole tick sentence and log a warning every tick."""
+    await memory.store_episode(summary=f"Echoed: {TICK_TEXT}", context={})
+    await memory.store_note("tick", f"Echoed: {TICK_TEXT}")
+    with caplog.at_level(logging.WARNING):
+        assert await memory.recall(TICK_TEXT) == []
+        assert await memory.recall_notes(TICK_TEXT) == []
+    assert "falling back to LIKE" not in caplog.text
+
+
 # ─── An engine error still falls back to a LIKE search ───────────────────
 
 

@@ -371,3 +371,30 @@ async def test_a_withheld_episode_never_floors_out_an_admissible_one(
 
     assert _judged(gates, "episodic") == {secret: False, seen: True}
     assert "retro snacks and drinks" in _rendered(mixin)
+
+
+@_asyncio
+async def test_off_mode_also_floors_only_against_admissible_episodes(
+    fact_store: FactStore, episodic: EpisodicMemory, gates,
+):
+    """The walled ``off`` read takes the same bar as the live one. Rows sit
+    in ``legacy``, the carve-out the room wall always admits."""
+    secret = await episodic.store_episode(
+        f"{_QUERY} {RESTRICTED_EPISODE_FRAGMENT} atlas deployment retro",
+        {"k": "v"}, session_id="legacy", protection_level="restricted",
+        interaction_id="ix-restricted",
+    )
+    seen = await episodic.store_episode(
+        "retro snacks and drinks for the team party on friday", {"k": "v"},
+        session_id="legacy", protection_level="internal",
+    )
+    for i in range(6):
+        await episodic.store_episode(
+            f"bakery flour order {i}", {"k": "v"}, session_id="legacy",
+            protection_level="internal",
+        )
+    mixin = _build_mixin(fact_store, episodic)
+    mixin._episodic_cross_room = CROSS_ROOM_OFF
+    await mixin._inject_memory_context(_channel_event(classification="internal"))
+
+    assert _judged(gates, "episodic") == {secret: False, seen: True}
