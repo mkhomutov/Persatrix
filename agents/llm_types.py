@@ -61,6 +61,7 @@ class LLMCallPurpose(Enum):
     SUMMARY = "summary"  # an episode summary, with fact extraction at close
     COMPRESS = "compress"  # working-memory compression
     JUDGE = "judge"  # a rater scoring an answer: EXP-001's LLM judge, in the harness
+    KEEPALIVE = "keepalive"  # keeps a cached prompt prefix's entry alive through a quiet spell
 
 
 @dataclass

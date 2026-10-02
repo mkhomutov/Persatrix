@@ -64,6 +64,8 @@ class CallPurpose(enum.Enum):
     MEMO = "memo"  # the chair's memo turn
     SUMMARY = "summary"  # a memory summary or fact extraction
     JUDGE = "judge"  # the LLM judge scoring a memo or recall check
+    # Arm D′'s chair keeping the cached transcripts alive through a quiet spell
+    KEEPALIVE = "keepalive"
 
 
 @dataclass(frozen=True)

@@ -106,7 +106,14 @@ async def test_the_plan_meeting_carries_the_briefing_in_every_turn(
     assert {r.adviser for r in turns} == {a.id for a in panel.advisers}
     assert any(r.purpose is CallPurpose.MEMO for r in turns)
     assert {r.cache_prefix for r in turns} == {prefix_sha256(prefix)}
-    assert all(r.cache_prefix is None for r in calls if r.purpose not in _SPEAKING)
+    # No bid or summary carries it. The chair's keep-alive, sent only after
+    # four minutes of quiet, carries the turns' prefix to read their entry.
+    kept = {r.cache_prefix for r in calls if r.purpose is CallPurpose.KEEPALIVE}
+    assert kept <= {prefix_sha256(prefix)}
+    assert all(
+        r.cache_prefix is None for r in calls
+        if r.purpose not in _SPEAKING and r.purpose is not CallPurpose.KEEPALIVE
+    )
     assert {(r.arm, r.meeting, r.attempt, r.meeting_try) for r in calls} == {
         (ARM, plan.id, 1, 1),
     }

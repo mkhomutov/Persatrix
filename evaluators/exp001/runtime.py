@@ -12,15 +12,19 @@ such as arm A's, are tagged per meeting with :func:`call_log_scope`. In arm
 D-prime, from the series' second meeting on, a third setting names the file
 of earlier transcripts every turn carries as its cached prefix
 (:func:`prompt_prefix_env`); a call-log line names the prefix its call
-carried by its SHA-256.
+carried by its SHA-256. The chair alone gets a fourth, the keep-alive
+(:func:`prefix_keepalive_env`): once the room has made no call that
+carries the prefix for :data:`KEEPALIVE_QUIET`, it sends one that asks for
+no output, so the cache entry outlives the quiet spell before the memo.
 
 After the run, :func:`read_call_log` turns those lines into the
 :class:`~evaluators.exp001.costs.CallRecord` values ``costs`` prices. It
 maps the runtime's purposes onto the pre-registered ones. A reflexion critic
 or rewrite is part of the adviser's reply; working-memory compression is a
-memory summary. The chair's calls after the harness asks for the memo are
-the memo. A memory write in an arm with no memory is kept but does not
-count. A line the harness cannot place is refused, never guessed at.
+memory summary; a keep-alive is a purpose of its own, which counts in D′'s
+dollars. The chair's calls after the harness asks for the memo are the memo,
+its keep-alives apart. A memory write in an arm with no memory is kept but
+does not count. A line the harness cannot place is refused, never guessed at.
 """
 
 from __future__ import annotations
@@ -37,11 +41,15 @@ from typing import Any
 from agents import call_log
 from agents.call_log import CALL_LOG_ENV, CALL_TAGS_ENV
 from agents.clock import CLOCK_ANCHOR_ENV, CLOCK_START_ENV
-from agents.prompt_prefix import PROMPT_PREFIX_ENV
+from agents.prompt_prefix import PROMPT_PREFIX_ENV, PROMPT_PREFIX_KEEPALIVE_ENV
 from evaluators.exp001.costs import ARMS, CallPurpose, CallRecord
 from evaluators.exp001.materials import MeetingKind
 
 STORY_CLOCK_START = dt.time(10, 0, tzinfo=dt.UTC)
+# How long arm D′'s room may make no call that carries the prefix before the
+# chair keeps its cache entry alive: a minute inside the five it lives, so a
+# keep-alive that fails has time to be tried again.
+KEEPALIVE_QUIET = dt.timedelta(minutes=4)
 
 # Arms whose design has no memory: their memory writes are recorded, and
 # counted in real spend, but not in the arm's dollars per plan.
@@ -54,6 +62,7 @@ _PURPOSES = {
     "bid": CallPurpose.BID,
     "summary": CallPurpose.SUMMARY,
     "compress": CallPurpose.SUMMARY,
+    "keepalive": CallPurpose.KEEPALIVE,
 }
 # Purposes that are the chair speaking, so they become the memo once asked.
 _SPEAKING = frozenset({"turn", "critic", "revise"})
@@ -101,6 +110,12 @@ def call_log_env(
 def prompt_prefix_env(path: Path) -> dict[str, str]:
     """The setting that gives every turn the text in *path* as its cached prefix."""
     return {PROMPT_PREFIX_ENV: str(path)}
+
+
+def prefix_keepalive_env() -> dict[str, str]:
+    """The setting that has a process keep the prefix's cache entry alive
+    once the room has gone :data:`KEEPALIVE_QUIET` without using it."""
+    return {PROMPT_PREFIX_KEEPALIVE_ENV: f"{KEEPALIVE_QUIET.total_seconds():g}"}
 
 
 def call_log_scope(

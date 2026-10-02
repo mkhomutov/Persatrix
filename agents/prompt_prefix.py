@@ -22,15 +22,31 @@ and fixed for the life of the process. The agent server reads it at
 startup, so a setting that names a missing or empty file stops the agent
 there. Without the setting there is no prefix, and no call carries a cache
 marker.
+
+The provider keeps the entry for five minutes after the last call that
+wrote or read it began, and a group discussion can go quiet for longer.
+``PERSATRIX_PROMPT_PREFIX_KEEPALIVE`` names, in seconds, how long the room
+may go without a call that carries the prefix before this process keeps the
+entry alive (:mod:`agents.prefix_keepalive`). It needs the
+prefix, and the call log the room shares, which says when the prefix was
+last used; a setting without them, or one that does not fit inside the
+entry's five minutes, stops the agent at startup too.
 """
 
 from __future__ import annotations
 
 import functools
+import math
 import os
 from pathlib import Path
 
+from .call_log import CALL_LOG_ENV, call_log_path
+
 PROMPT_PREFIX_ENV = "PERSATRIX_PROMPT_PREFIX"
+PROMPT_PREFIX_KEEPALIVE_ENV = "PERSATRIX_PROMPT_PREFIX_KEEPALIVE"
+# A cache entry lives this long after the last call that wrote or read it
+# began: the provider's five-minute cache, whose write price EXP-001 fixes.
+CACHE_LIFETIME_SECONDS = 300.0
 
 
 @functools.cache
@@ -48,9 +64,49 @@ def prompt_prefix() -> str:
     return text
 
 
+@functools.cache
+def prefix_keepalive_seconds() -> float | None:
+    """How long the room may go without a call that carries the prefix
+    before this process keeps its cache entry alive; None without the setting."""
+    setting = os.environ.get(PROMPT_PREFIX_KEEPALIVE_ENV, "").strip()
+    if not setting:
+        return None
+    try:
+        seconds = float(setting)
+    except ValueError as exc:
+        raise ValueError(
+            f"{PROMPT_PREFIX_KEEPALIVE_ENV}: {setting!r} is not a number of seconds",
+        ) from exc
+    if not (math.isfinite(seconds) and 0 < seconds < CACHE_LIFETIME_SECONDS):
+        raise ValueError(
+            f"{PROMPT_PREFIX_KEEPALIVE_ENV}: {setting} seconds does not fit inside the "
+            f"{CACHE_LIFETIME_SECONDS:g} seconds a cache entry lives",
+        )
+    if not prompt_prefix():
+        raise ValueError(
+            f"{PROMPT_PREFIX_KEEPALIVE_ENV} is set, but {PROMPT_PREFIX_ENV} names no "
+            "prefix to keep",
+        )
+    if call_log_path() is None:
+        raise ValueError(
+            f"{PROMPT_PREFIX_KEEPALIVE_ENV} is set, but {CALL_LOG_ENV} names no call log "
+            "to read the room from",
+        )
+    return seconds
+
+
 def reset_prompt_prefix() -> None:
-    """Forget the prefix, so the next call reads the setting again (tests)."""
+    """Forget the prefix and the keep-alive, so the next call reads the
+    settings again (tests)."""
     prompt_prefix.cache_clear()
+    prefix_keepalive_seconds.cache_clear()
 
 
-__all__ = ["PROMPT_PREFIX_ENV", "prompt_prefix", "reset_prompt_prefix"]
+__all__ = [
+    "CACHE_LIFETIME_SECONDS",
+    "PROMPT_PREFIX_ENV",
+    "PROMPT_PREFIX_KEEPALIVE_ENV",
+    "prefix_keepalive_seconds",
+    "prompt_prefix",
+    "reset_prompt_prefix",
+]

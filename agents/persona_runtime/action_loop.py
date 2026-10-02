@@ -109,6 +109,19 @@ class _ActionLoopMixin(_ToolRoundMixin):
         def _has_active_goal_payload(self) -> bool: ...
         def _has_pending_turn(self) -> bool: ...
 
+    def _turn_request(self) -> dict[str, Any]:
+        """The model, tools and temperature every call of a turn is sent with.
+
+        A prompt-prefix keep-alive sends the same, so it reads the cache entry
+        the turn's calls share (:mod:`agents.prefix_keepalive`).
+        """
+        return {
+            "model": self.config["model"],
+            "model_alias": self.config.get("model_alias"),
+            "tools": self._llm_client.format_tool_definitions(self._build_tool_definitions()),
+            "temperature": self.config.get("temperature", 0.7),
+        }
+
     def _parse_actions(self, response: LLMResponse) -> list[AgentAction]:
         """Delegate to :func:`action_parser.parse_actions`.
 
@@ -285,9 +298,7 @@ class _ActionLoopMixin(_ToolRoundMixin):
         messages = seam_seed if seam_seed is not None else (
             await self._build_seed_messages(event, user_message)
         )
-        tool_defs = self._llm_client.format_tool_definitions(
-            self._build_tool_definitions()
-        )
+        request = self._turn_request()
 
         max_llm_calls = self.config.get("max_llm_calls", _PERSONA_DEFAULT_MAX_LLM_CALLS)
         max_tokens = self.config.get("max_tokens", _PERSONA_DEFAULT_MAX_TOKENS)
@@ -299,17 +310,14 @@ class _ActionLoopMixin(_ToolRoundMixin):
         for _ in range(max_llm_calls):
             try:
                 response = await self._llm_client.create_message(
-                    model=self.config["model"],
-                    model_alias=self.config.get("model_alias"),
+                    **request,
                     purpose=LLMCallPurpose.TURN,
                     # The turn is the prompt recalled memory reaches, so it
                     # alone carries an operator's cached prefix (EXP-001 D′).
                     cache_prefix=prompt_prefix(),
                     messages=messages,
                     system=system_prompt,
-                    tools=tool_defs,
                     max_tokens=max_tokens,
-                    temperature=self.config.get("temperature", 0.7),
                     cause=lease_cause,
                     agent_id=lease_agent_id,
                     interaction_id=lease_interaction_id,

@@ -96,6 +96,16 @@ class TestTheDiscussionsTokens:
         run = _run("D-prime", Try(PLAN.id, 1, 1, _kept({"closed_at": _at(8).isoformat()})))
         assert discussion_tokens(run, records) == {(PLAN.id, 1, 1): 3120 + 3055}
 
+    def test_a_keepalive_is_no_part_of_the_discussion(self) -> None:
+        """The chair's keep-alive (PR 5e) takes no lease, so the wallet never
+        charges it against the discussion's budget."""
+        records = [
+            _record(1, tokens=(100, 20, 3000, 0)),
+            _record(5, CallPurpose.KEEPALIVE, tokens=(329, 0, 0, 3000)),
+        ]
+        run = _run("D-prime", Try(PLAN.id, 1, 1, _kept({"closed_at": _at(8).isoformat()})))
+        assert discussion_tokens(run, records) == {(PLAN.id, 1, 1): 3120}
+
     def test_a_discussion_that_never_closed_counts_every_turn_and_bid(self) -> None:
         records = [_record(1, tokens=(10, 1, 0, 0)), _record(70, tokens=(10, 1, 0, 0))]
         run = _run("D-prime", Try(PLAN.id, 1, 1, _kept({"closed_at": None}, answer=None)))
