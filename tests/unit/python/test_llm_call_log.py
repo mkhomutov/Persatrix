@@ -170,6 +170,51 @@ class TestThePrefixACallCarried:
         assert call_log.prefix_sha256("") is None
 
 
+class TestWhenThePrefixWasLastUsed:
+    """The room's clock for arm D′'s keep-alive (PR 5e): the advisers share
+    the log, so its lines say when any of them last used the prefix's cache
+    entry. Only a call that answered surely reached the provider."""
+
+    _PREFIX = "Transcripts of your earlier meetings with the same members.\n"
+
+    @staticmethod
+    def _line(started: dt.datetime, sha256: str | None, error: str | None = None) -> str:
+        return json.dumps({
+            "purpose": "turn", "started_at": started.isoformat(),
+            "cache_prefix_sha256": sha256, "error": error,
+        }) + "\n"
+
+    def test_no_log_and_no_such_call_have_no_answer(self, tmp_path):
+        path = tmp_path / "calls.jsonl"
+        assert call_log.last_prefix_use(path, self._PREFIX) is None
+        path.write_text(self._line(dt.datetime.now(dt.UTC), None))
+        assert call_log.last_prefix_use(path, self._PREFIX) is None
+
+    def test_the_latest_call_that_carried_it_and_answered(self, tmp_path):
+        """Lines arrive as calls end, so a later line can hold an earlier start."""
+        t = dt.datetime(2036, 10, 13, 10, 0, tzinfo=dt.UTC)
+        mine = call_log.prefix_sha256(self._PREFIX)
+        other = call_log.prefix_sha256("Another meeting.\n")
+        path = tmp_path / "calls.jsonl"
+        path.write_text("".join([
+            self._line(t + dt.timedelta(seconds=40), mine),
+            self._line(t + dt.timedelta(seconds=10), mine),
+            self._line(t + dt.timedelta(seconds=90), mine, error="OverloadedError"),
+            self._line(t + dt.timedelta(seconds=95), other),
+            self._line(t + dt.timedelta(seconds=99), None),
+        ]))
+        assert call_log.last_prefix_use(path, self._PREFIX) == (
+            t + dt.timedelta(seconds=40)
+        ).timestamp()
+
+    def test_a_line_another_process_is_still_writing_is_passed_over(self, tmp_path):
+        t = dt.datetime(2036, 10, 13, 10, 0, tzinfo=dt.UTC)
+        mine = call_log.prefix_sha256(self._PREFIX)
+        path = tmp_path / "calls.jsonl"
+        path.write_text(self._line(t, mine) + self._line(t, mine)[:30])
+        assert call_log.last_prefix_use(path, self._PREFIX) == t.timestamp()
+
+
 class _CachingProvider(_Provider):
     supports_prompt_cache = True
 
@@ -233,6 +278,7 @@ _EXPECTED_PURPOSES = {
     "persona_runtime/summarize_close.py": {"SUMMARY"},
     "memory/episodic_retention.py": {"SUMMARY"},
     "memory/working.py": {"COMPRESS"},
+    "prefix_keepalive.py": {"KEEPALIVE"},
 }
 
 

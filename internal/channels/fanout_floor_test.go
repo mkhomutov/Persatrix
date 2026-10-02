@@ -36,6 +36,15 @@ type floorDispatcher struct {
 	// loop must advance on the per-turn timeout.
 	replies map[string]bool
 
+	// syncReplies publishes each auto-reply inline, before Dispatch returns,
+	// instead of on a fresh goroutine. The floor turn starts its per-turn
+	// timer only after Dispatch returns, so the reply is already waiting when
+	// the timer starts: a slow publish (SQLite under -race on a loaded CI
+	// runner) can no longer lose the race and be counted as a timeout. Tests
+	// that pin an exact replied/timeout split set it; the async default stays
+	// for tests that pin the production-shaped asynchronous reply.
+	syncReplies bool
+
 	mu                sync.Mutex
 	order             []string            // recipient dispatch order
 	historyAtDispatch map[string][]string // recipient -> sender ids visible in history when it was dispatched
@@ -76,16 +85,21 @@ func (d *floorDispatcher) Dispatch(ctx context.Context, env DispatchEnvelope, ms
 	d.mu.Unlock()
 
 	if d.replies[rid] {
-		// Simulate the agent composing and POSTing its reply on an
-		// independent goroutine — the loop awaits this via the waiter.
-		go func() {
+		reply := func() {
 			_ = d.router.Publish(context.Background(), ChannelMessage{
 				ID:        uuid.NewString(),
 				ChannelID: msg.ChannelID,
 				SenderID:  rid,
 				Content:   rid + " reply",
 			}, "")
-		}()
+		}
+		if d.syncReplies {
+			reply()
+		} else {
+			// Simulate the agent composing and POSTing its reply on an
+			// independent goroutine — the loop awaits this via the waiter.
+			go reply()
+		}
 	}
 
 	d.mu.Lock()

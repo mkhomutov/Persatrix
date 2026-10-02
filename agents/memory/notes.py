@@ -224,9 +224,11 @@ class NoteStore(_NoteMutationsMixin):
         Parameters
         ----------
         min_score:
-            Optional relevance floor in ``[0, 1]`` applied to FTS5 BM25
-            normalised scores.  ``None`` → no filtering.
-            LIKE-fallback path ignores this parameter per RFC 0017 Section C.
+            Optional relevance floor in ``[0, 1]``: the share of the best
+            candidate's bm25 relevance a note must reach, the best taken
+            over the notes this call may return (ISSUE-0159).  ``None`` → no
+            filtering.  LIKE-fallback path ignores this parameter per
+            RFC 0017 Section C.
         sessions:
             RFC 0031 §D recall filter.  ``None`` (default) → active
             session plus the ``legacy`` carve-out; a non-empty list →

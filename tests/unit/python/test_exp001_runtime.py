@@ -22,16 +22,23 @@ from agents.clock import CLOCK_ANCHOR_ENV, CLOCK_START_ENV
 from agents.llm_client import LLMClient, LLMResponse, Usage
 from agents.llm_types import LLMCallPurpose
 from agents.observability import metrics
-from agents.prompt_prefix import PROMPT_PREFIX_ENV
+from agents.prompt_prefix import (
+    CACHE_LIFETIME_SECONDS,
+    PROMPT_PREFIX_ENV,
+    PROMPT_PREFIX_KEEPALIVE_ENV,
+)
+from evaluators.exp001.arm_d_prime import CACHE_LIFETIME
 from evaluators.exp001.costs import CallPurpose, CallRecord
 from evaluators.exp001.materials import MeetingKind
 from evaluators.exp001.runtime import (
+    KEEPALIVE_QUIET,
     CallLogError,
     MemoTurn,
     call_log_env,
     call_log_scope,
     meeting_clock_env,
     merge_call_logs,
+    prefix_keepalive_env,
     prompt_prefix_env,
     read_call_log,
     story_start,
@@ -158,6 +165,7 @@ class TestReadCallLog:
         ("bid", CallPurpose.BID),
         ("summary", CallPurpose.SUMMARY),
         ("compress", CallPurpose.SUMMARY),
+        ("keepalive", CallPurpose.KEEPALIVE),
     ])
     def test_runtime_purposes_map_onto_the_pre_registered_ones(self, tmp_path, runtime, purpose):
         [record] = read_call_log(_write(tmp_path / "c.jsonl", _line(purpose=runtime))).records
@@ -311,6 +319,20 @@ class TestPromptPrefixEnv:
         assert prompt_prefix_env(tmp_path / "prefix.txt") == {
             PROMPT_PREFIX_ENV: str(tmp_path / "prefix.txt"),
         }
+
+    def test_the_keepalive_comes_a_minute_before_the_entry_would_go(self):
+        """Four minutes of quiet, inside the five an entry lives, leaves the
+        chair's keep-alive time to be tried again (PR 5e)."""
+        assert KEEPALIVE_QUIET == dt.timedelta(minutes=4)
+        assert prefix_keepalive_env() == {PROMPT_PREFIX_KEEPALIVE_ENV: "240"}
+        assert KEEPALIVE_QUIET.total_seconds() < CACHE_LIFETIME_SECONDS
+        assert CACHE_LIFETIME.total_seconds() == CACHE_LIFETIME_SECONDS
+
+    def test_a_keepalive_counts_in_the_arm(self, tmp_path):
+        [record] = read_call_log(_write(
+            tmp_path / "c.jsonl", _line(purpose="keepalive", arm="D-prime"),
+        )).records
+        assert (record.purpose, record.counts_in_arm) == (CallPurpose.KEEPALIVE, True)
 
 
 async def test_a_call_that_carried_a_prefix_reads_back_with_its_digest(tmp_path, monkeypatch):

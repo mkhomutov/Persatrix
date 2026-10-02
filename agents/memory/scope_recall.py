@@ -21,6 +21,8 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
+from .episodic_queries import relevance_by_id
+
 if TYPE_CHECKING:
     from .episodic import EpisodicMemory
     from .episodic_queries import Episode
@@ -74,7 +76,12 @@ async def recall_with_scope_filter(
         contract — do not change to OR without an RFC amendment).  An
         empty iterable matches everything.
     min_score:
-        Forwarded to :meth:`EpisodicMemory.recall`.
+        Forwarded to :meth:`EpisodicMemory.recall` when no filter is
+        active. It is a share of the best candidate's relevance
+        (ISSUE-0159), and the scope and tags filters run after the
+        search, so a strong match they drop would set the bar for the rows
+        they keep. A filtered call therefore searches with no floor and
+        applies it here, against the best row the filters keep.
     sessions:
         RFC 0031 §D recall filter (Phase 2 PR 2) — forwarded verbatim
         to :meth:`EpisodicMemory.recall`.  Orthogonal to ``scope`` /
@@ -85,17 +92,15 @@ async def recall_with_scope_filter(
         vice versa.
     """
     required_tags = frozenset(tags or ())
-    recall_limit = (
-        limit * TAG_SCOPE_OVERFETCH_FACTOR
-        if (required_tags or scope is not None)
-        else limit
-    )
+    filtered = bool(required_tags) or scope is not None
+    recall_limit = limit * TAG_SCOPE_OVERFETCH_FACTOR if filtered else limit
     episodes = await episodic.recall(
         query,
         limit=recall_limit,
-        min_score=min_score,
+        min_score=None if filtered else min_score,
         sessions=sessions,
     )
+    floor_after = filtered and bool(min_score) and bool(query) and episodic.has_fts5
     out: list[Episode] = []
     for ep in episodes:
         ep_tags = frozenset(ep.tags or ())
@@ -110,6 +115,10 @@ async def recall_with_scope_filter(
         if scope is not None and entry_scope != scope:
             continue
         out.append(ep)
-        if len(out) >= limit:
-            break
-    return out
+    if floor_after and out:
+        relevance = await relevance_by_id(
+            episodic._ensure_db(), query, [ep.id for ep in out],
+        )
+        best = max(relevance.values(), default=0.0)
+        out = [ep for ep in out if relevance.get(ep.id, 0.0) >= (min_score or 0.0) * best]
+    return out[:limit]

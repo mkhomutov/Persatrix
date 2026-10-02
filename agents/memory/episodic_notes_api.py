@@ -84,9 +84,10 @@ class _EpisodicNotesAPIMixin:
         Parameters
         ----------
         min_score:
-            Optional relevance floor in ``[0, 1]`` applied to FTS5 BM25
-            normalised scores.  ``None`` → no filtering (current behaviour).
-            LIKE-fallback path ignores this parameter per RFC 0017 Section C.
+            Optional relevance floor in ``[0, 1]``: the share of the best
+            note's bm25 relevance a note must reach (ISSUE-0159).  ``None``
+            → no filtering.  LIKE-fallback path ignores this parameter per
+            RFC 0017 Section C.
         sessions:
             RFC 0031 §D recall filter (Phase 2 PR 2) — forwarded
             verbatim to :meth:`NoteStore.recall_notes`.  See that

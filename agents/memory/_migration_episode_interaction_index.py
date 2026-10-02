@@ -9,7 +9,7 @@ under the project's 500-line review-friendly cap (see
 this migration both scanned the agent's whole partition through
 ``idx_episodes_agent``:
 
-* :func:`agents.memory.episodic_queries.update_episode_summary` — the
+* :func:`agents.memory.episodic_writes.update_episode_summary` — the
   close path's Phase 2, on EVERY close, live and replayed.  Since the
   ISSUE-0123 re-key that is once per SPEAKER per room rather than once
   per room, so its frequency grew in the same release; and

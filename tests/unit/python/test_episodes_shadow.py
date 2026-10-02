@@ -328,6 +328,21 @@ class TestEmitEpisodesShadow:
         assert calls == []
         assert _traces(shadow_log) == []
 
+    async def test_widened_read_floors_against_the_turns_own_levels(
+        self, episodic: EpisodicMemory, shadow_log, monkeypatch,
+    ):
+        """ISSUE-0159: like the live read, only rows the acting level may
+        inject set the min_score bar, so the comparison stays like for like."""
+        seen: list[object] = []
+
+        async def _spy(*args, **kwargs):
+            seen.append(kwargs.get("floor_protection_levels"))
+            return []
+
+        monkeypatch.setattr(episodes_shadow, "recall_room_ranked", _spy)
+        await _emit(episodic, _channel_event(classification="internal"))
+        assert seen == [("public", "internal")]
+
     async def test_missing_store_is_noop(self, shadow_log):
         await _emit(None, _channel_event())
         assert _traces(shadow_log) == []

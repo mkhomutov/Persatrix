@@ -15,9 +15,9 @@ RFC 0031 §D session filter becomes a ranking cue instead of a wall:
 * ``epoch`` and ``principal`` stay hard walls on the widened read;
 * the read is SIDE-EFFECT-FREE by default — no ``access_count`` bump —
   which is what lets the shadow pass observe without perturbing live
-  ranking, while ``reinforce=True`` (the PR 4 live prompt path) applies
-  exactly the :meth:`EpisodicMemory.recall` bump — on every row it
-  returns, before the caller gates it (ISSUE-0163); and
+  ranking and the live prompt path count only the episodes its prompt
+  used (ISSUE-0163), while ``reinforce=True`` applies exactly the
+  :meth:`EpisodicMemory.recall` bump; and
 * ``sessions`` / ``boost_sessions`` are mutually exclusive at the query
   helpers themselves (the #783 either-wall-or-boost follow-up).
 """
@@ -195,11 +195,11 @@ class TestRecallContract:
     async def test_reinforce_bumps_like_live_recall(
         self, memory: EpisodicMemory,
     ):
-        """``reinforce=True`` (the PR 4 live prompt path) applies the
-        :meth:`EpisodicMemory.recall` access bump to every returned row
-        — cross-room included, and before the caller's §D gate, audience
-        check and budget choose what the prompt carries (ISSUE-0163) —
-        and refreshes the in-memory objects."""
+        """``reinforce=True`` applies the :meth:`EpisodicMemory.recall`
+        access bump to every returned row, cross-room included, and
+        refreshes the in-memory objects.  The prompt path does not pass
+        it: it reads first and reinforces what its budget admitted
+        (ISSUE-0163)."""
         same = await _seed(memory, session_id=ROOM)
         cross = await _seed(memory, session_id=OTHER_ROOM)
         with session_scope(ROOM):
@@ -225,6 +225,21 @@ class TestRecallContract:
         )
         ids = [ep.id for ep in await _ranked(memory, query="")]
         assert ids == [kept_id]
+
+    async def test_a_withheld_row_does_not_set_the_bar(
+        self, memory: EpisodicMemory,
+    ):
+        """ISSUE-0159: only rows the acting turn may inject set the floor's
+        bar; the withheld row stays a candidate for the §D gate."""
+        secret = await _seed(
+            memory, "atlas deployment retro sealed", protection_level="restricted",
+        )
+        public = await _seed(memory, "atlas", protection_level="public")
+        got = await _ranked(
+            memory, "atlas deployment retro sealed", min_score=1.0,
+            floor_protection_levels=("public",),
+        )
+        assert [ep.id for ep in got] == [secret, public]
 
     async def test_limit_validated(self, memory: EpisodicMemory):
         with pytest.raises(ValueError, match="limit"):

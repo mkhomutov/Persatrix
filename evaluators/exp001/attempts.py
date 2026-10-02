@@ -9,9 +9,10 @@ module holds every arm's meetings by those rules.
   publishes nothing, so it looks like silence, and the harness reads them
   from the call log instead, where a failed call's line names the
   exception's class; a call the runtime cut off at its own time limit is
-  logged as cancelled. A channel-arm try ends at the first such line. If
-  the meeting still fails after three retries, the arm's series starts
-  again from its briefing as its second attempt. If that fails too, the
+  logged as cancelled. A channel-arm try ends at the first such line, but
+  not at a failed keep-alive (arm D′), which changes nothing the meeting
+  shows. If the meeting still fails after three retries, the arm's series
+  starts again from its briefing as its second attempt. If that fails too, the
   series is dropped from every arm's comparisons. With fewer than four
   series left, the run is incomplete.
 - **A failure the system causes** is not retried: the meeting stands as it
@@ -368,9 +369,20 @@ def channel_hold(
 def _bearing(failures: Iterable[FailedCall]) -> tuple[str, ...]:
     """The failed calls that bear on a meeting: every one of the arm's design,
     and any the harness cannot place. A memory write in an arm with no
-    memory changes nothing the meeting shows."""
+    memory changes nothing the meeting shows, and neither does a keep-alive
+    the provider failed or the runtime cut off: at worst the next turn
+    writes the prefix again, which check 3 names."""
     return tuple(
-        f.error for f in failures if f.counts_in_arm or error_kind(f.error) is ErrorKind.HARNESS
+        f.error for f in failures
+        if (f.counts_in_arm and not _keepalive_lapse(f))
+        or error_kind(f.error) is ErrorKind.HARNESS
+    )
+
+
+def _keepalive_lapse(failure: FailedCall) -> bool:
+    return (
+        failure.purpose is CallPurpose.KEEPALIVE
+        and error_kind(failure.error) is ErrorKind.PROVIDER
     )
 
 

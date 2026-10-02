@@ -265,6 +265,19 @@ class TestChannelArms:
         assert run.finished_tries()[IDS[1]] == 1
         assert run.finished()[IDS[1]].held.errors == ()
 
+    async def test_a_keepalive_that_failed_does_not_hold_the_meeting_again(
+        self, tmp_path: Path,
+    ) -> None:
+        """A keep-alive (PR 5e) changes nothing the meeting shows: one the
+        provider failed, or the runtime cut off, leaves at worst the next
+        turn to write the prefix again, which check 3 names."""
+        lapses = (("keepalive", "OverloadedError"), ("keepalive", "CancelledError"))
+        meetings = _Meetings((), lapses)
+        hold = channel_hold(PANEL, "D-prime", SERIES, tmp_path, run=meetings, watch_seconds=0.01)
+        run = await run_series("D-prime", SERIES, hold)
+        assert run.finished_tries()[IDS[1]] == 1
+        assert run.finished()[IDS[1]].held.errors == ()
+
     async def test_every_call_refused_is_a_harness_fault(self, tmp_path: Path) -> None:
         """A spend limit or an empty balance is refused with the same 400 as
         a malformed request, but it refuses every call."""

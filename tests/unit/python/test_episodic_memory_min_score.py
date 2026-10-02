@@ -16,9 +16,11 @@ from agents.memory.episodic import EpisodicMemory
 class TestRecallMinScore:
     """Tests for the min_score parameter on EpisodicMemory.recall().
 
-    FTS5 BM25 scores are normalised via 1/(1+|rank|). min_score filters
-    normalised scores below the threshold before limit is applied.
-    LIKE-fallback treats all matches as score 1.0 (no filtering).
+    min_score is relative (ISSUE-0159): a row stays when its bm25 relevance
+    is at least min_score times the best relevance among the call's
+    candidates, applied before limit. None and 0.0 mean no floor; 1.0 keeps
+    the best match and its ties. LIKE-fallback treats all matches as score
+    1.0 (no filtering).
     """
 
     async def test_min_score_none_same_as_default(self, memory: EpisodicMemory):
@@ -34,7 +36,7 @@ class TestRecallMinScore:
         assert {ep.id for ep in results_none} == {ep.id for ep in results_default}
 
     async def test_min_score_zero_admits_all_fts5_matches(self, memory: EpisodicMemory):
-        """min_score=0.0 passes every FTS5 match (all normalised scores are > 0)."""
+        """min_score=0.0 passes every FTS5 match (every share of the best is >= 0)."""
         for i in range(3):
             await memory.store_episode(
                 summary=f"xenolith geology expedition number {i}",
@@ -43,49 +45,53 @@ class TestRecallMinScore:
         results = await memory.recall("xenolith geology", min_score=0.0)
         assert len(results) == 3
 
-    async def test_min_score_one_filters_all_results(self, memory: EpisodicMemory):
-        """min_score=1.0 filters every row (FTS5 BM25 never produces score == 1.0)."""
-        await memory.store_episode(
+    async def test_min_score_one_keeps_only_the_best_match(self, memory: EpisodicMemory):
+        """min_score=1.0 keeps the best match and drops the weaker one."""
+        target = await memory.store_episode(
             summary="bioluminescent plankton coastal observation",
             context={},
             importance=0.9,
         )
+        await memory.store_episode(summary="plankton net maintenance", context={})
+        await memory.store_episode(summary="harbour weather log", context={})
         results = await memory.recall("bioluminescent plankton", min_score=1.0)
-        assert len(results) == 0
+        assert [ep.id for ep in results] == [target]
+        assert len(await memory.recall("bioluminescent plankton", min_score=0.0)) == 2
 
     async def test_min_score_filters_before_limit(self, memory: EpisodicMemory):
         """When min_score drops items, limit is applied to the post-filter set,
         not the pre-filter set — so the caller can never get more items than
         would pass the threshold."""
-        for i in range(5):
+        strong = [
             await memory.store_episode(
                 summary=f"quantum entanglement experiment session {i}",
                 context={"session": i},
+                importance=0.7,
+            )
+            for i in range(2)
+        ]
+        for i in range(4):
+            await memory.store_episode(
+                summary=f"quantum chemistry lecture {i}",
+                context={"lecture": i},
                 importance=0.7,
             )
         # min_score=0.0: no filter, limit=3 should return exactly 3.
         results = await memory.recall("quantum entanglement", limit=3, min_score=0.0)
         assert len(results) == 3
 
-        # min_score=1.0: filter all, limit=3 should return 0.
-        results = await memory.recall("quantum entanglement", limit=3, min_score=1.0)
-        assert len(results) == 0
+        # min_score=0.9: the four weak rows go before the limit, leaving two.
+        results = await memory.recall("quantum entanglement", limit=3, min_score=0.9)
+        assert sorted(ep.id for ep in results) == sorted(strong)
 
-    async def test_min_score_near_default_filters_weak_match(self, memory: EpisodicMemory):
-        """A high min_score filters items with a weak BM25 signal.
+    async def test_high_min_score_keeps_only_the_strong_match(self, memory: EpisodicMemory):
+        """A high min_score keeps the strong match and drops the weak ones.
 
-        This test checks that the SQL WHERE clause is actually wired:
-        a threshold of 0.95 requires |rank| < 0.053, which is only
-        achievable for a single-term match against a one-document corpus
-        where the match is trivially perfect — impossible in a realistic
-        multi-document corpus, so 0.95 should return 0.
+        This checks that the SQL floor is actually wired: the target shares
+        both query words, the ten distractors only "payment", so at 0.95 of
+        the best relevance only the target remains.
         """
-        # Realistic corpus: the target plus distractors that share at least
-        # one query term, so BM25 IDF is non-trivial and no document scores
-        # close to the |rank| < 0.053 ceiling required by min_score=0.95.
-        # (PR #147 review: a single-document corpus produces trivially
-        # perfect BM25 scores and would defeat this assertion.)
-        await memory.store_episode(
+        target = await memory.store_episode(
             summary="Reviewed pull request for payment gateway integration",
             context={"pr": 77},
             importance=0.8,
@@ -97,19 +103,15 @@ class TestRecallMinScore:
                 importance=0.5,
             )
 
-        # 0.95 threshold: effectively filters everything in a normal corpus.
         high_threshold_results = await memory.recall(
             "payment gateway", min_score=0.95
         )
-        # 0.0 threshold: admits everything.
+        # 0.0 threshold: admits every match, up to the default limit of 10.
         all_results = await memory.recall("payment gateway", min_score=0.0)
 
-        # All matches pass with 0.0; the 0.95 threshold filters to zero.
-        # Previous assertion `<= len(all_results)` was a tautology
-        # (filtering can never *add* results) and would not catch a
-        # regression where the SQL WHERE clause silently failed to apply.
-        assert len(all_results) >= 1
-        assert len(high_threshold_results) == 0
+        assert [ep.id for ep in high_threshold_results] == [target]
+        assert len(all_results) == 10
+        assert all_results[0].id == target
 
     async def test_min_score_empty_query_ignores_threshold(self, memory: EpisodicMemory):
         """Empty query uses recency path (no FTS5); min_score is ignored."""
@@ -170,14 +172,17 @@ class TestRecallNotesMinScore:
         results = await memory.recall_notes("palladium catalyst", min_score=0.0)
         assert len(results) == 3
 
-    async def test_min_score_one_filters_all_note_results(self, memory: EpisodicMemory):
-        """min_score=1.0 filters every note (FTS5 BM25 never produces score == 1.0)."""
-        await memory.store_note(
+    async def test_min_score_one_keeps_only_the_best_note(self, memory: EpisodicMemory):
+        """min_score=1.0 keeps the best note and drops the weaker one."""
+        target = await memory.store_note(
             "osmium processing",
             "osmium isotope separation via centrifuge",
         )
+        await memory.store_note("osmium prices", "osmium price sheet")
+        await memory.store_note("suppliers", "iridium supplier list")
         results = await memory.recall_notes("osmium isotope", min_score=1.0)
-        assert len(results) == 0
+        assert [n.id for n in results] == [target]
+        assert len(await memory.recall_notes("osmium isotope", min_score=0.0)) == 2
 
     async def test_min_score_like_fallback_notes_ignores_threshold(self):
         """LIKE fallback for notes treats all matches as score 1.0."""
