@@ -1,6 +1,6 @@
 # EXP-001 — The harness, second part: the judge and the practice run
 
-> **Status**: 🚧 **In Progress** — PRs 6a and 6b merged ([#1023](https://github.com/mkhomutov/Persatrix/pull/1023), [#1024](https://github.com/mkhomutov/Persatrix/pull/1024)); the practice run held on 2026-10-02 confirmed the quiet-spell gap PR 5d left, and PR 5e closes it.
+> **Status**: 🚧 **In Progress** — PRs 6a and 6b merged ([#1023](https://github.com/mkhomutov/Persatrix/pull/1023), [#1024](https://github.com/mkhomutov/Persatrix/pull/1024)); the practice run held on 2026-10-02 confirmed the quiet-spell gap PR 5d left, and PR 5e ([#1032](https://github.com/mkhomutov/Persatrix/pull/1032)) closes it.
 > **Last updated**: 2026-10-02
 > **Part of**: the [EXP-001 harness](EXP-001-harness.md), whose first part lists every harness PR and what PRs 1 to 5d leave the next
 
