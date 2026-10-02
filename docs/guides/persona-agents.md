@@ -249,7 +249,8 @@ prompt
 > facts + episodic + notes context (admitted in that priority order) into a
 > single event, and `recall` /
 > `recall_notes` accept
-> a `min_score` relevance threshold that drops weak matches before truncation.
+> a `min_score` relevance floor, a share of the best match's relevance, that
+> drops weak matches before truncation.
 > When an autonomous TICK fires with zero admitted memory, no active goal,
 > and no pending conversation turn, the LLM call is skipped entirely and
 > `idle_count` is incremented — see

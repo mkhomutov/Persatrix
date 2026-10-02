@@ -1,6 +1,6 @@
 ---
 id: ISSUE-0163
-summary: "Under the default `memory.episodic.cross_room: live`, the persona's episodic recall counts a use (`access_count + 1`) of every episode it returns, before the RFC 0037 §D gate, the ISSUE-0132 audience check and the RFC 0017 budget choose what the prompt carries. Uses multiply the ranking score by 1 + ln(1 + uses), so an episode the gate withholds gains one on each turn it ranks in: one use already outranks an equally ranked episode from another room, two beat the 2.0 same-room boost, and it can then hold one of the five recall slots on later matching turns while never reaching the prompt. Episodes the budget drops are counted too, as are the notes tier's and two other episodic reads' rows. The facts tier counts only what its budget admitted. A test-first fix for the live read is drafted and held: it changes an EXP-001 arm."
+summary: "Under the default `memory.episodic.cross_room: live`, the persona's episodic recall counts a use (`access_count + 1`) of every episode it returns, before the RFC 0037 §D gate, the ISSUE-0132 audience check and the RFC 0017 budget choose what the prompt carries. Uses multiply the ranking score by 1 + ln(1 + uses), so an episode the gate withholds gains one on each turn it ranks in: one use already outranks an equally ranked episode from another room, two beat the 2.0 same-room boost, and it can then hold one of the five recall slots on later matching turns while never reaching the prompt. Episodes the budget drops are counted too, as are the notes tier's and two other episodic reads' rows. The facts tier counts only what its budget admitted. A test-first fix for the live read is drafted (#972). It was held because it changes an EXP-001 arm; since the maintainer's call of 2026-10-02 it merges before the scored run."
 status: open
 severity: medium
 area: memory
@@ -193,8 +193,11 @@ Drafted test-first as draft PR [#972](https://github.com/mkhomutov/Persatrix/pul
   only in per-run episode and fact ids, which also differ between two runs
   of the same code, so no RFC 0044 golden moves.
 
-## Slot: not slotted, held behind EXP-001
+## Slot: held behind EXP-001 until 2026-10-02, now merges before it (see Notes)
 
+- **2026-10-02: unheld.** The maintainer's call has #972 rebased onto the
+  ISSUE-0159 fix, reviewed and merged before EXP-001's scored run (see
+  Notes). The bullets below record why it waited until then.
 - Ruling (a) of the [sequencing Amendment 2026-09-12](../v0.3.x-sequencing.md#amendment-2026-09-12--close-v0316-small-then-measure-before-any-train-opens)
   opens no plan before EXP-001 reports and the first strategy review logs
   its result.
@@ -225,3 +228,13 @@ Drafted test-first as draft PR [#972](https://github.com/mkhomutov/Persatrix/pul
 > `episodic_room_ranked.py` docstring, the test that pins the bump, the
 > live call site, the persona-agents guide and the RFC 0049 L1 amendment
 > now say what the recall counts and point here.
+
+> 2026-10-02 — unheld by the maintainer's call. The fix for
+> [ISSUE-0159](ISSUE-0159-episodic-score-inverts-bm25.md) makes the
+> episodic search match natural messages, so the live read now returns, and
+> counts as used, rows on nearly every turn, withheld ones included. Its
+> reason for waiting, that it changes an EXP-001 arm, applies equally to
+> that fix, which lands before the scored run on the same call. So #972 is
+> rebased onto the ISSUE-0159 fix, reviewed and merged before the scored
+> run; its measurements used single-word queries under the old floor and
+> are taken again.

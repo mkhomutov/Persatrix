@@ -74,6 +74,8 @@ The shadow verdict ran **green** and the ranked mode is LIVE: `memory.episodic.c
 
 FTS5's implicit-AND term semantics make cross-room episodic deltas naturally rare on full channel-turn queries (every query term must appear in a stored summary) — observed during the measurement, worth knowing when reading L1 trace volume: the flood risk the boost calibration guards is correspondingly low, and the L1 quantitative pins ride the deterministic unit/integration suites (`test_episodic_room_ranked.py`, `test_cross_room_live.py`) rather than eval-borne traces.
 
+> **Correction (2026-10-02), recorded not amended.** The implicit AND was a fault, [ISSUE-0159](../issues/ISSUE-0159-episodic-score-inverts-bm25.md), not a property to rely on. Since its fix, a channel turn matches every episode that shares a content word with it, so cross-room candidates are common and every one is judged by the RFC 0037 §D gate and the audience check. The low flood risk above no longer holds. The room boost doubles a same-room row's score, so same-room rows lead only where the relevance is close; a clearly better match from another room ranks above them. The relevance floor is taken over every room's candidates, counting only those the turn's acting level may inject.
+
 ## Security considerations
 
 - **Gate before trace.** Every cross-room candidate passes the §D gate *before* it is recorded — a `restricted`-stamped episode on a turn acting below `restricted` appears only as a withheld count (change item 2, pinned by test).

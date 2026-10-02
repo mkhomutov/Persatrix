@@ -391,7 +391,7 @@
           "minimum": 0.0,
           "maximum": 1.0,
           "default": 0.20,
-          "description": "RFC 0008 PR plan PR 2: default relevance floor passed to MemoryFacade.retrieve_relevant. PR 2a raises the default from null to 0.20 (matches DEFAULT_EPISODIC_MIN_SCORE) so low-score entries do not cross the system-prompt trust boundary (OWASP LLM01). Set to null to disable filtering — only safe when downstream consumers re-rank or sandbox the entries."
+          "description": "RFC 0008 PR plan PR 2: default relevance floor passed to MemoryFacade.retrieve_relevant, as the share of the best match's relevance an entry must reach (ISSUE-0159). PR 2a set the default to 0.20, matching DEFAULT_EPISODIC_MIN_SCORE. The floor is relative, so a query whose matches are all weak still admits its best match: it trims noise and is not a trust boundary for untrusted entries (OWASP LLM01). Set to null to disable filtering."
         },
         "episodic_cap": {
           "type": "integer",

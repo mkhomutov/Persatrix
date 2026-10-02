@@ -336,6 +336,15 @@ SELECT m.id, m.channel_id, m.sender_id, m.content, m.timestamp
 - **`LIKE` fallback** — when FTS5 is unavailable (§B) the same query
   runs with `m.content LIKE '%' || ? || '%'` in place of the FTS join,
   scope and narrowing clauses unchanged.
+
+> **Correction (2026-10-02), recorded not amended.** The episodic
+> normalisation the Ranking item points to, `_normalize_bm25`, ran
+> backwards and was removed by the fix for
+> [ISSUE-0159](../issues/ISSUE-0159-episodic-score-inverts-bm25.md); the
+> link above no longer resolves. Message recall never used it: as built it
+> orders by the bare bm25 `rank`. The episodic tier now keeps a row whose
+> relevance is at least `min_score` times the best candidate's.
+
 - **Run/test-isolation axes** — `messages` carries two scoping columns
   the §C query above omits, for two different reasons. `session_id`
   (migration v3, landed 2026-05-13) **already existed** when this RFC

@@ -34,6 +34,7 @@ from .channel_history import (
     recall_channel_episodes,
 )
 from .channel_roster import inject_channel_roster, resolve_channel_roster
+from .classification import injectable_levels
 from .cross_room import (
     CROSS_ROOM_LIVE,
     DEFAULT_EPISODIC_CROSS_ROOM,
@@ -62,6 +63,7 @@ from .notes_section import (
     recall_notes_for_event,
 )
 from .projection_branch import apply_episode_projections
+from .recall_query import recall_text_for_event
 from .relationship_section import (
     RELATIONSHIP_SECTION_NAME,
     recall_relationship_summary,
@@ -241,9 +243,12 @@ class _MemoryContextMixin:
         are truncated or dropped.
 
         RFC 0017 PR 4: recall runs for every event type; the DB-layer
-        ``min_score`` thresholds are the sole low-signal filters, and
-        zero-admission events short-circuit via PR 5's empty-context
-        guard on the returned ``memory_admitted_tokens``.
+        ``min_score`` floors are the low-signal filters, each a share of
+        the call's best match (ISSUE-0159), and zero-admission events
+        short-circuit via PR 5's empty-context guard on the returned
+        ``memory_admitted_tokens``.  A TICK admits nothing because the
+        FTS5 query builder searches nothing for the tick sentence
+        (:mod:`agents.memory._fts5_query`).
 
         Design: each memory tier is wrapped in a broad ``except
         Exception`` (deliberately not specific types — implementations
@@ -337,29 +342,31 @@ class _MemoryContextMixin:
             # room-first-RANKED recall in ONE widened, reinforcing query
             # (it counts a use of every row it returns, before the gate
             # and the budget below choose what the prompt carries —
-            # ISSUE-0163;
-            # the shadow pass does not run in live mode, so live costs
+            # ISSUE-0163; the shadow pass does not run in live mode, so live costs
             # one episodic read per turn, like ``off``; ``shadow`` costs
             # two on a channel turn: this walled read plus the widened
             # shadow read); otherwise the RFC 0031 §D wall
             # (``sessions=None``; pinned by ``test_off_mode_keeps_the_wall``
             # in ``test_cross_room_live.py`` and ``TestShadowNeverEntersPrompt``
             # in ``test_episodes_shadow.py``) with shadow mode logging the
-            # widened delta.
+            # widened delta.  ISSUE-0159: a message is searched by its own
+            # words, and only rows the acting level admits set the min_score bar.
+            recall_query = recall_text_for_event(event, query)
+            floor_levels = injectable_levels(acting_classification_for_event(event))
             try:
                 if self._episodic_cross_room == CROSS_ROOM_LIVE:
                     episodes = await recall_room_ranked(
-                        self._episodic_memory, query,
+                        self._episodic_memory, recall_query,
                         limit=EPISODIC_RECALL_LIMIT,
                         min_score=DEFAULT_EPISODIC_MIN_SCORE,
-                        reinforce=True,
+                        reinforce=True, floor_protection_levels=floor_levels,
                     )
                 else:
                     episodes = await self._episodic_memory.recall(
-                        query,
+                        recall_query,
                         limit=EPISODIC_RECALL_LIMIT,
                         min_score=DEFAULT_EPISODIC_MIN_SCORE,
-                        sessions=None,
+                        sessions=None, floor_protection_levels=floor_levels,
                     )
             except Exception:
                 logger.warning(
@@ -368,7 +375,7 @@ class _MemoryContextMixin:
                 )
                 episodes = []
             await emit_episodes_shadow(
-                self._episodic_memory, event, query=query,
+                self._episodic_memory, event, query=recall_query,
                 live_episode_ids={e.id for e in episodes},
                 agent_id=self.agent_id, mode=self._episodic_cross_room,
             )
@@ -378,7 +385,7 @@ class _MemoryContextMixin:
             # cross-room person identity rides the relationship tier (F-7).
             notes = await recall_notes_for_event(
                 self._episodic_memory,
-                query=query,
+                query=recall_query,
                 event=event,
                 agent_id=self.agent_id,
                 min_score=DEFAULT_NOTES_MIN_SCORE,

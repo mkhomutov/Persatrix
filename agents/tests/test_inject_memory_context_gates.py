@@ -41,9 +41,9 @@ class TestInjectMemoryContextTickBehavior:
     async def test_tick_calls_episodic_recall(self) -> None:
         """TICK events now call episodic.recall() — TICK skip removed (PR 4).
 
-        The recall-layer min_score threshold filters low-signal results at the
-        DB layer; zero-admission TICK events are handled by PR 5's empty-context
-        short-circuit.
+        The FTS5 query builder searches nothing for the tick sentence
+        (ISSUE-0159), so a real store returns no rows; zero-admission TICK
+        events are handled by PR 5's empty-context short-circuit.
         """
         mixin, event = _make_mixin(event_type="TICK")
         await mixin._inject_memory_context(event)
@@ -64,8 +64,8 @@ class TestInjectMemoryContextTickBehavior:
         """TICK event with no matching memory → memory_admitted_tokens == 0.
 
         Previously the TICK skip short-circuited before any recall; now the
-        threshold filters at the DB layer and the allocate-loop handles the
-        empty result naturally.
+        recall runs, a real store returns nothing for the tick sentence, and
+        the allocate-loop handles the empty result naturally.
         """
         mixin, event = _make_mixin(event_type="TICK")
         result = await mixin._inject_memory_context(event)
@@ -79,8 +79,8 @@ class TestInjectMemoryContextTickBehavior:
     async def test_tick_with_high_relevance_episode_admits_tokens(self) -> None:
         """TICK event with a high-relevance episode in the mock → content admitted.
 
-        (The mock returns the episode unconditionally; real DB would filter
-        low-signal TICK content via min_score.  This test verifies the path
+        (The mock returns the episode unconditionally; a real store returns
+        nothing for the tick sentence.  This test verifies the path
         from received episodes to admitted tokens is intact for TICK events.)
 
         The episode is pinned ``public`` deliberately.  A TICK is a
@@ -131,7 +131,7 @@ class TestInjectMemoryContextTickBehavior:
 
         Previously, empty notes + CHANNEL_MESSAGE + no episodes triggered a
         second recall_notes("", limit=3) fallback.  That path is deleted; the
-        min_score threshold is the only filter.
+        min_score floor is the only filter.
         """
         mixin, event = _make_mixin(
             episodes=[],

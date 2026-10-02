@@ -2,9 +2,9 @@
 
 **Test ID**: `MT-PERSONA-CONFIDENTIALITY-001`
 **Feature Area**: Memory confidentiality (RFC 0037 — classification lattice, protection levels, the §D egress gate, §E projections, §G tripwire)
-**Version**: 1.2
+**Version**: 1.3
 **Created**: 2026-07-29
-**Last Updated**: 2026-09-15
+**Last Updated**: 2026-10-02
 **Status**: Active — authored at RFC 0037 PR 8 (closeout), executed live at v0.3.12 release-prep. **v1.1 adds [Leg 5](#leg-5--the-audience-leg-issue-0132-the-audience-egress-amendment)** (v0.3.16 PR A2, authored before the paid arc per [scope lock 6](../v0.3.16-scope-locks.md); PR A3 flipped the shipped default to `live`, so Leg 5's live reading applies); the whole five-leg arc is a **v0.3.16 release-prep deliverable**, run once against a real provider per [v0.3.16-plan §Acceptance](../v0.3.16-plan.md#acceptance-for-v0316). Legs 1–4 run first as the regression baseline of the existing gate. **The whole arc ran 2026-09-15** — [v0.3.16 report](v0.3.16-execution-report.md): pass, Leg 5 under both auth modes; the §F recall side door ([ISSUE-0158](../issues/ISSUE-0158-recall-filter-audience-blind.md)) found by 5d's first run and fixed in the same PR. **v1.2 (2026-09-15, release-prep PR 2)** folds that run's [six corrections](v0.3.16-execution-report.md#mt-corrections--for-the-v12-header-bump-at-pr-2) into Legs 2–5 and the notes, splits the preconditions to a [setup doc](MT-PERSONA-CONFIDENTIALITY-001-setup.md) for the cap, and covers the un-bumped A3 edit of 2026-09-14 ([#950](https://github.com/mkhomutov/Persatrix/pull/950), Leg 5's `live` reading).
 
 ---
@@ -138,7 +138,7 @@ docker compose logs agent-ember-owl | grep confidentiality_tripwire
 
 **The message still sends** — §G is observability, not enforcement; a blocked publish here is a *fail* (something other than the tripwire intervened).
 
-**Inconclusive by construction until [ISSUE-0159](../issues/ISSUE-0159-episodic-score-inverts-bm25.md) lands (v1.2)**: the episodic score inverts BM25, so the stimulus that quotes the episode is the one that cannot surface it, and every word the proofread framing adds breaks the implicit FTS AND. Run the leg once, record the reply and its longest verbatim run, mark it inconclusive; do not retry hunting a hit. A real model may also decline or paraphrase (fewer than 8 verbatim words → no hit, by §G design). The deterministic firing is pinned in [`tests/integration/test_confidentiality_tripwire.py`](../../tests/integration/test_confidentiality_tripwire.py), and this leg's value is confirming the audit record is operator-visible on a live stack.
+**Reachable since [ISSUE-0159](../issues/ISSUE-0159-episodic-score-inverts-bm25.md)'s fix (v1.3), not yet re-run live**: the pasted bytes now make the restricted episode the best recall match, which the §D gate withholds and the §G tripwire watches. Run the leg once and record the reply and its longest verbatim run; do not retry hunting a hit. A real model may also decline or paraphrase (fewer than 8 verbatim words → no hit, by §G design). The deterministic firing is pinned in [`tests/integration/test_confidentiality_tripwire.py`](../../tests/integration/test_confidentiality_tripwire.py), and this leg's value is confirming the audit record is operator-visible on a live stack.
 
 ### Leg 5 — The audience leg (ISSUE-0132, the audience-egress amendment)
 
@@ -236,7 +236,7 @@ all: read the admitted set first, the audience verdict second.
 | 1 — Teach + close | `warroom` (`restricted`) | natural statement; ≥ 11 min idle + bridge turn | ack; `topic.*` fact row stamped `restricted` (query required if running Leg 4) | ☐ |
 | 2 — Internal ask | `planning` (`internal`) or the operator's DM — before Leg 4 | names `zephyr acquisition` verbatim, never the content | withheld **or** projected — no date/sign-off/location | ☐ |
 | 3 — War-room re-ask | `warroom` (`restricted`) | names `zephyr acquisition` verbatim | verbatim specifics return | ☐ |
-| 4 — Seeded tripwire | `planning` (`internal`), after Leg 2 | operator pastes the stored bytes | echo ⇒ audit record + metric; message not blocked — **inconclusive by construction until ISSUE-0159**; record the reply | ☐ |
+| 4 — Seeded tripwire | `planning` (`internal`), after Leg 2 | operator pastes the stored bytes | echo ⇒ audit record + metric; message not blocked — **reachable since ISSUE-0159's fix (v1.3)**; record the reply | ☐ |
 | 5 — Audience (×2: auth on, then off) | DM (`internal`) → `planning` (`internal`, Bob a member) | **Alice** asks about her own DM fact; ≥ 11 min idle + bridge first | `live`: her entry withheld and recorded `withhold-disjoint`. `shadow`: recorded only. Fetch-failed count reported either way | ☐ |
 
 **Overall pass**: Legs 2, 3 and 5 all pass (Leg 4 may be inconclusive per its criterion). A Leg 2 fail is a confidentiality regression — file immediately, release-blocking. A Leg 5 fail under `live` is the audience boundary failing — release-blocking, like Leg 2; under `shadow` it is the *measurement* that is broken.

@@ -68,6 +68,8 @@ from .episodic_queries import (
 from .interactions import SUMMARY_PENDING_TEXT
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from .episodic import EpisodicMemory
     from .episodic_queries import Episode
 
@@ -84,12 +86,16 @@ async def recall_room_ranked(
     min_importance: float = 0.0,
     min_score: float | None = None,
     reinforce: bool = False,
+    floor_protection_levels: Sequence[str] | None = None,
 ) -> list[Episode]:
     """Episodic recall with the §D room wall applied as ranking, not scope.
 
     Same query/limit/``min_score`` semantics as
     :meth:`EpisodicMemory.recall` (FTS5 → LIKE fallback → recency on an
-    empty query; unfinalised ``[summary pending]`` rows dropped at the
+    empty query; ``min_score`` is a share of the best candidate's
+    relevance, the candidates spanning every room of the epoch and
+    principal, so another room's strong match can floor out a weak
+    same-room one; unfinalised ``[summary pending]`` rows dropped at the
     same chokepoint), with the session axis widened to every room of the
     active epoch+principal and the resolved room list applied as the
     same-room score boost.  The boost set resolves exactly like the live
@@ -102,6 +108,12 @@ async def recall_room_ranked(
     (the live prompt path since the PR 4 promotion) applies the same
     access bump as :meth:`EpisodicMemory.recall` — see the module
     docstring for why the split is load-bearing.
+
+    ``floor_protection_levels`` (ISSUE-0159) are the levels the acting turn
+    may inject: only those rows set ``min_score``'s bar, so a row the §D
+    gate will withhold cannot floor out one it admits. Withheld rows stay
+    candidates, because the gate's §E projection branch serves stand-ins
+    for them.
     """
     if limit < 1:
         raise ValueError(f"limit must be >= 1, got {limit}")
@@ -124,6 +136,7 @@ async def recall_room_ranked(
             db, memory.agent_id, query, limit, min_importance, min_score,
             sessions=None, boost_sessions=boost,
             principal_id=active_principal, epoch_id=active_epoch,
+            floor_protection_levels=floor_protection_levels,
         )
     elif query:
         rows = await recall_like(
