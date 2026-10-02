@@ -89,7 +89,10 @@ async def recall_room_ranked(
 
     Same query/limit/``min_score`` semantics as
     :meth:`EpisodicMemory.recall` (FTS5 → LIKE fallback → recency on an
-    empty query; unfinalised ``[summary pending]`` rows dropped at the
+    empty query; ``min_score`` is a share of the best candidate's
+    relevance, the candidates spanning every room of the epoch and
+    principal, so another room's strong match can floor out a weak
+    same-room one; unfinalised ``[summary pending]`` rows dropped at the
     same chokepoint), with the session axis widened to every room of the
     active epoch+principal and the resolved room list applied as the
     same-room score boost.  The boost set resolves exactly like the live

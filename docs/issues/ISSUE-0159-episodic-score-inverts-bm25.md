@@ -12,8 +12,12 @@ refs:
   - docs/rfcs/0017-persona-memory-injection-budget.md
   - agents/memory/episodic_queries.py
   - agents/memory/episodic_room_ranked.py
+  - agents/memory/_fts5_query.py
+  - agents/memory/_notes_recall.py
   - agents/persona_runtime/memory_context.py
   - agents/persona_runtime/tripwire_watch.py
+  - docs/experiments/EXP-001-harness.md
+  - docs/issues/ISSUE-0163-withheld-episodes-reinforced-before-the-gate.md
 ---
 
 # ISSUE-0159: Episodic recall's score inverts BM25 — the better the match, the less likely the episode is recalled
@@ -65,9 +69,73 @@ consider OR-ing the query terms (or a prefix of the sanitised stimulus) so a
 natural sentence can match. Re-record whichever goldens shift, and give the
 MT's Leg 4 a seed that survives the fixed filter.
 
+## Fix
+
+The query side changes; the store does not (no tokenizer, table or trigger
+change). Episodic and notes recall share one MATCH builder,
+[`_fts5_query.py`](../../agents/memory/_fts5_query.py):
+
+- **Any shared word matches.** Each word of the message becomes one quoted
+  phrase of its letters and digits, and the phrases are joined with OR, so
+  an identifier such as `unique-alpha-xyzzy` stays one phrase. Common words
+  are trimmed from the end of a word, a lone single character is dropped,
+  and only the first 40 phrases are searched. A message made only of common
+  words is searched as written. A quoted phrase cannot be FTS5 syntax, so
+  `NOT` or `*` no longer reach the LIKE fallback.
+- **The floor is relative.** A row stays when its bm25 relevance is at
+  least `min_score` times the best relevance among the candidates, the rows
+  that pass the call's own filters (agent, importance, session wall,
+  principal, epoch, and for notes the protection levels). A fixed floor
+  would empty small stores: FTS5 gives a word found in half the rows almost
+  no weight, so every bm25 there is about 1e-6. The defaults stay 0.20;
+  `1.0` now keeps the best match and its ties.
+- **A tick searches nothing.** OR matching would let the tick sentence
+  match ordinary rows and end the RFC 0017 §F short-circuit, one model call
+  per tick in a public room. The builder returns no query for that exact
+  sentence; a second copy of it lives in the memory package, pinned to the
+  persona runtime's by a test.
+
+Measured on a replay of EXP-001's first practice run, the briefing reaches
+23 of arm D's 25 speaking turns in the three later meetings, every opening
+turn included, where the shipped code reached none. Three goldens gain the
+episode the fix recalls (EVAL-MEMORY-003, 004 and 005, re-recorded offline);
+EVAL-MEMORY-005 now judges the DM-taught episode beside the fact.
+
+## Slot: merges before EXP-001, by the maintainer's call of 2026-10-02
+
+- **No plan is needed.** Ruling (a) of the
+  [sequencing Amendment 2026-09-12](../v0.3.x-sequencing.md#amendment-2026-09-12--close-v0316-small-then-measure-before-any-train-opens)
+  opens no plan before EXP-001 reports; like
+  [#1014](https://github.com/mkhomutov/Persatrix/pull/1014), this is a
+  standalone fix. Ruling (f) holds: no store migration.
+- **Ruling (b)** covers memory isolation, attribution and audience work.
+  This is recall relevance: the §D gate and the audience check are
+  unchanged, and they now judge more candidates.
+- **EXP-001.** Only arm D changes; B, C and D′ inject no memory and A has
+  no runtime memory. Check 2 of the pre-registration needs a briefing fact
+  to reach a later meeting's prompt through the shipped memory path, and
+  with the shipped search it never could. Unlike
+  [ISSUE-0163](ISSUE-0163-withheld-episodes-reinforced-before-the-gate.md),
+  which only re-ranks what already carries, this decides whether anything
+  carries at all.
+- **Decision, 2026-10-02.** The maintainer ruled that arm D runs the memory
+  code as shipped when the scored run happens, as #979, #980 and #1014
+  were treated, so this fix lands before it. The same call unholds #972
+  (ISSUE-0163), whose reinforcement now runs on nearly every turn, and
+  has the facts tier's two faults, ISSUE-0180 and ISSUE-0181, fixed before
+  the scored run too.
+
 ## Notes
 
 > 2026-09-15 — filed from the v0.3.16 release-prep arc (F-3 in the execution
 > report). The MT's Leg 4 is recorded *inconclusive* citing this issue; the
 > deterministic firing stays pinned in
 > `tests/integration/test_confidentiality_tripwire.py`.
+
+> 2026-10-02 — found again by EXP-001's first paid practice run: arm D
+> stored its briefing in every adviser's memory and recalled none of it in
+> the three later meetings, answering "the panel does not know" to all three
+> recall questions. Replaying the practice messages against the advisers'
+> stores returned no episode for any of them. Leg 4 of
+> MT-PERSONA-CONFIDENTIALITY-001 is reachable with the fix (v1.3) and has
+> not been re-run live.

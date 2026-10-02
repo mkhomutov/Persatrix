@@ -193,7 +193,7 @@ Drafted test-first as draft PR [#972](https://github.com/mkhomutov/Persatrix/pul
   only in per-run episode and fact ids, which also differ between two runs
   of the same code, so no RFC 0044 golden moves.
 
-## Slot: not slotted, held behind EXP-001
+## Slot: held behind EXP-001 until 2026-10-02, now merges before it (see Notes)
 
 - Ruling (a) of the [sequencing Amendment 2026-09-12](../v0.3.x-sequencing.md#amendment-2026-09-12--close-v0316-small-then-measure-before-any-train-opens)
   opens no plan before EXP-001 reports and the first strategy review logs
@@ -225,3 +225,13 @@ Drafted test-first as draft PR [#972](https://github.com/mkhomutov/Persatrix/pul
 > `episodic_room_ranked.py` docstring, the test that pins the bump, the
 > live call site, the persona-agents guide and the RFC 0049 L1 amendment
 > now say what the recall counts and point here.
+
+> 2026-10-02 — unheld by the maintainer's call. The fix for
+> [ISSUE-0159](ISSUE-0159-episodic-score-inverts-bm25.md) makes the
+> episodic search match natural messages, so the live read now returns, and
+> counts as used, rows on nearly every turn, withheld ones included. Its
+> reason for waiting, that it changes an EXP-001 arm, applies equally to
+> that fix, which lands before the scored run on the same call. So #972 is
+> rebased onto the ISSUE-0159 fix, reviewed and merged before the scored
+> run; its measurements used single-word queries under the old floor and
+> are taken again.

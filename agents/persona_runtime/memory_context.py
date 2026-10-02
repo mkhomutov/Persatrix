@@ -241,9 +241,12 @@ class _MemoryContextMixin:
         are truncated or dropped.
 
         RFC 0017 PR 4: recall runs for every event type; the DB-layer
-        ``min_score`` thresholds are the sole low-signal filters, and
-        zero-admission events short-circuit via PR 5's empty-context
-        guard on the returned ``memory_admitted_tokens``.
+        ``min_score`` floors are the low-signal filters, each a share of
+        the call's best match (ISSUE-0159), and zero-admission events
+        short-circuit via PR 5's empty-context guard on the returned
+        ``memory_admitted_tokens``.  A TICK admits nothing because the
+        FTS5 query builder searches nothing for the tick sentence
+        (:mod:`agents.memory._fts5_query`).
 
         Design: each memory tier is wrapped in a broad ``except
         Exception`` (deliberately not specific types — implementations

@@ -139,36 +139,40 @@ class TestFTS5Ranking:
 
 
 class TestFTS5MalformedQueryFallback:
-    """FTS5 MATCH raises OperationalError on malformed syntax;
-    _recall_fts5 must catch it and fall back to LIKE."""
+    """Input that is invalid FTS5 syntax must not crash recall.
+
+    Since ISSUE-0159 the MATCH text is quoted phrases of letters and digits,
+    so no input reaches FTS5 as syntax: punctuation alone goes to recency,
+    and 'NOT' is searched as a word. LIKE runs only if FTS5 raises anyway,
+    pinned in ``test_episodic_recall_natural_messages.py``."""
 
     async def test_recall_lone_star(self, memory: EpisodicMemory):
-        """A lone '*' is invalid FTS5 syntax — should fall back, not crash."""
+        """A lone '*' is invalid FTS5 syntax — must not crash."""
         await memory.store_episode(summary="star test episode", context={})
         results = await memory.recall("*")
-        # Falls back to LIKE '%*%' — no match expected, but no crash
+        # No letter or digit to search for: recency ranking, no crash.
         assert isinstance(results, list)
 
     async def test_recall_bare_not(self, memory: EpisodicMemory):
-        """Bare 'NOT' is invalid FTS5 syntax — should fall back."""
+        """Bare 'NOT' is invalid FTS5 syntax — must not crash."""
         await memory.store_episode(summary="not test episode", context={})
         results = await memory.recall("NOT")
         assert isinstance(results, list)
 
     async def test_recall_unbalanced_quotes(self, memory: EpisodicMemory):
-        """Unbalanced quotes are invalid FTS5 syntax — should fall back."""
+        """Unbalanced quotes are invalid FTS5 syntax — must not crash."""
         await memory.store_episode(summary="quote test episode", context={})
         results = await memory.recall('"unclosed')
         assert isinstance(results, list)
 
     async def test_recall_fts5_fallback_still_finds_via_like(self, memory: EpisodicMemory):
-        """When FTS5 fails, LIKE fallback should still find matching episodes."""
+        """A query that is FTS5 syntax as typed still finds its episode."""
         await memory.store_episode(
             summary="recipe for NOT burning toast",
             context={},
         )
-        # "NOT" alone is invalid FTS5, but the episode summary contains "NOT"
-        # so LIKE fallback with '%NOT%' should still match
+        # "NOT" alone is invalid FTS5; it is now searched as the quoted word,
+        # which the summary contains.
         results = await memory.recall("NOT")
         assert len(results) >= 1
         assert "NOT" in results[0].summary
