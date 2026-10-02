@@ -78,11 +78,13 @@ change). Episodic and notes recall share one MATCH builder,
 [`_fts5_query.py`](../../agents/memory/_fts5_query.py):
 
 - **Any shared word matches.** Each word of the message becomes one quoted
-  phrase of its letters and digits, and the phrases are joined with OR, so
-  an identifier such as `unique-alpha-xyzzy` stays one phrase. Common words
-  are trimmed from the end of a word, a lone single character is dropped,
-  and only the first 40 phrases are searched. A message made only of common
-  words is searched as written. A quoted phrase cannot be FTS5 syntax, so
+  phrase of its letters and digits, in any script, and the phrases are
+  joined with OR, so an identifier such as `unique-alpha-xyzzy` stays one
+  phrase. Common words are trimmed from the end of a word, a lone single
+  character is dropped, and only the first 40 phrases are searched. A
+  one-word message made only of common words is searched as written; a
+  longer one searches nothing, since its words sit in nearly every row. A
+  quoted phrase cannot be FTS5 syntax, so
   `NOT` is searched as a word and no message raises a syntax error. Text
   with no letter or digit, such as `*`, keeps each tier's old path: recency
   for episodes, a LIKE search for notes.
@@ -96,6 +98,12 @@ change). Episodic and notes recall share one MATCH builder,
   runtime's event types, action types and close reasons, and another drives
   a real persona and checks every word it stored is listed. A task's own
   words still match, because they live only in the stored event.
+- **A message is searched by its own words.** The persona searches a
+  channel message or mention by its content, not by the prompt text around
+  it. A scripted turn (a convener opening, a chair escalation, a synthesis
+  turn) wraps the message in instructions long enough to fill all 40
+  phrases, so the meeting topic was never searched. Other events, and the
+  facts tier, still use the prompt text.
 - **The floor is relative.** A row stays when its bm25 relevance is at
   least `min_score` times the best relevance among the candidates, the rows
   that pass the call's own filters (agent, importance, session wall,
@@ -191,3 +199,20 @@ EVAL-MEMORY-005 now judges the DM-taught episode beside the fact.
 > read fills to its limit (nothing reads the pool yet); and the system
 > word list, drawn from what personas store, also trims task and pool
 > queries, so "the approval request" searches neither word.
+
+> 2026-10-02 — a third review pass, over the whole PR. Fixed here: scripted
+> turns' framing filled the phrase cap (the persona now searches a
+> message's own words); a facade call with a scope or tags filter now
+> applies its floor after the filter, against the best row it keeps,
+> instead of dropping the floor; letters outside ASCII are searched; and a
+> message of several common words searches nothing. Known limits it
+> leaves: the LIKE fallback, used when FTS5 is missing or fails, still
+> looks for the whole message; under `cross_room: live` the floor's best
+> is taken across every room before the same-room boost, so a strong match
+> elsewhere can floor out a weak one in the acting room; the OR query
+> ranks matches from every agent sharing the database before the agent
+> filter, so a turn's cost grows with the whole store; a word that ends in
+> a common or system word loses that part ("end-user" is dropped,
+> "pull-request" becomes "pull"); and the tick is recognised by its exact
+> sentence, a copy pinned by a test, because RFC 0017 PR 4 removed the
+> persona's tick skip on purpose.

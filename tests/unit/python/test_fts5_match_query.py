@@ -53,11 +53,18 @@ from agents.persona_types import ActionType, AgentEvent, EventType
         ("tick: scheduler", '"tick" OR "scheduler"'),
         # A word is searched once, whatever its case.
         ("Plan plan PLAN", '"plan"'),
-        # When trimming leaves nothing, the words are searched as written.
+        # When trimming leaves nothing, a single word is searched as
+        # written (an operator's lookup); several common words search
+        # nothing, since they sit in nearly every row and the floor would
+        # admit whichever matched best.
         ("from", '"from"'),
         ("NOT", '"not"'),
-        ("is it?", '"is" OR "it"'),
+        ("is it?", ""),
+        ("Do it now", ""),
         ("ok will do", '"ok"'),
+        # Letters of any script are searched, as the index stores them.
+        ("café menu", '"café" OR "menu"'),
+        ("Привет, мир", '"привет" OR "мир"'),
         # Delimiters and figures split into their runs of letters and digits.
         (
             '<|user_message user_id="local"|>',
@@ -136,10 +143,10 @@ def _episode_query(raw: str) -> str | None:
         # one stays whole, so its parts must still sit together.
         ("send_channel_message channel_id fireworks", '"fireworks"'),
         ("message-board", '"message board"'),
-        # A message of nothing but common and system words is searched as
-        # written, so an operator can still look for an event type.
+        # A single word of system words is searched as written, so an
+        # operator can still look for an event type; several search nothing.
         ("task_assigned", '"task assigned"'),
-        ("is the message?", '"is" OR "the" OR "message"'),
+        ("is the message?", ""),
         ("NOT", '"not"'),
     ],
 )

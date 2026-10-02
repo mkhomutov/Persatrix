@@ -274,3 +274,32 @@ async def test_a_stronger_match_outside_the_filter_does_not_floor_out_ours(
         episodic, "invoice reminder", limit=5, min_score=1.0, **filter_kwargs,
     )
     assert [ep.id for ep in got] == [ours]
+
+
+async def test_a_filtered_call_still_floors_against_the_rows_it_keeps(
+    episodic: EpisodicMemory,
+) -> None:
+    """The caller's ``min_score`` still applies, measured against the best
+    row the filter keeps, not against rows it drops."""
+    await episodic.store_episode(
+        summary="invoice invoice overdue invoice reminder", context={},
+        scope="channel:sales",
+    )
+    strong = await episodic.store_episode(
+        summary="invoice reminder sent for the overdue supplier", context={},
+        scope="channel:finance",
+    )
+    await episodic.store_episode(
+        summary="quarterly archive of supplier ledgers, one invoice among many "
+        "receipts, statements, contracts and audit notes", context={},
+        scope="channel:finance",
+    )
+    for i in range(4):
+        await episodic.store_episode(
+            summary=f"bakery flour order {i}", context={}, scope="channel:finance",
+        )
+    got = await recall_with_scope_filter(
+        episodic, "overdue invoice reminder", limit=5, min_score=0.5,
+        scope="channel:finance",
+    )
+    assert [ep.id for ep in got] == [strong]

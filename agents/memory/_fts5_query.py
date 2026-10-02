@@ -5,20 +5,24 @@ a list of words as "every word must appear", so a natural sentence matched
 nothing. :func:`fts5_match_query` sends one quoted phrase per word instead,
 joined with OR, and lets bm25 rank the rows that share any of them:
 
-* a word becomes the phrase of its runs of letters and digits, lower-cased,
-  so ``unique-alpha-xyzzy`` stays one phrase, ``"unique alpha xyzzy"``, and
-  its parts must sit together;
+* a word becomes the phrase of its runs of letters and digits, of any
+  script, lower-cased, so ``unique-alpha-xyzzy`` stays one phrase,
+  ``"unique alpha xyzzy"``, and its parts must sit together; accents stay
+  in, and the index's tokenizer folds them as it did when storing;
 * common words are trimmed from the end of a word, which drops "it's" and
   turns "operator's" into "operator" but keeps "up-to-date" whole, and a
-  word left as one single character is dropped; a message made only of
-  common words is searched for those words as written;
+  word left as one single character is dropped;
 * episode search also trims :data:`EPISODE_STRUCTURAL_WORDS`, the words
   the system itself writes into nearly every episode row, so "Message from
-  …" does not match every stored conversation; a message made only of
-  common and system words is still searched for them as written;
+  …" does not match every stored conversation;
+* when trimming leaves nothing, a message of one word is searched for it as
+  written, so an operator can still look up "NOT" or "task_assigned"; a
+  message of several such words searches nothing, because those words sit
+  in nearly every row and the relative floor would admit whichever matched
+  best;
 * each phrase is searched once, and only the first :data:`MAX_MATCH_PHRASES`;
-* a quoted phrase holds only ``[a-z0-9 ]``, so no message can produce FTS5
-  syntax (``NOT``, ``*``, a stray quote) or raise a syntax error.
+* a quoted phrase holds only letters, digits and spaces, so no message can
+  produce FTS5 syntax (``NOT``, ``*``, a stray quote) or raise a syntax error.
 
 Memory code never imports persona code, so the tick sentence is spelled here
 a second time; a test pins it to the persona runtime's own.
@@ -27,6 +31,7 @@ a second time; a test pins it to the persona runtime's own.
 from __future__ import annotations
 
 import re
+import unicodedata
 
 __all__ = [
     "EPISODE_STRUCTURAL_WORDS",
@@ -44,7 +49,10 @@ __all__ = [
 # text is built from ``_RUN`` below.
 FTS5_SANITIZE = re.compile(r"[^a-zA-Z0-9\s]+")
 
-_RUN = re.compile(r"[A-Za-z0-9]+")
+# Letters and digits of any script, matching the unicode61 tokenizer the
+# FTS tables use; text is NFC-normalised first so a combining accent stays
+# part of its letter.
+_RUN = re.compile(r"[^\W_]+")
 
 # NLTK's English stopword list without its 26 apostrophe forms ("don't",
 # "it's"), which can never equal a run of letters: their parts ("don", "t")
@@ -102,14 +110,14 @@ def fts5_match_query(
     *structural* words are trimmed like common words; episode search passes
     :data:`EPISODE_STRUCTURAL_WORDS`.
     """
+    raw = unicodedata.normalize("NFC", raw)
     if not _RUN.search(raw):
         return None
     if raw.strip() == TICK_TEXT:
         return ""
-    phrases = (
-        _phrases(raw, FTS5_STOPWORDS | structural, primary=True)
-        or _phrases(raw, frozenset(), primary=False)
-    )
+    phrases = _phrases(raw, FTS5_STOPWORDS | structural, primary=True)
+    if not phrases and len(raw.split()) == 1:
+        phrases = _phrases(raw, frozenset(), primary=False)
     return " OR ".join(f'"{p}"' for p in phrases[:MAX_MATCH_PHRASES])
 
 

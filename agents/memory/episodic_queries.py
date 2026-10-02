@@ -50,6 +50,7 @@ __all__ = [
     "recall_fts5",
     "recall_like",
     "recall_recency",
+    "relevance_by_id",
     "get_interaction_count",
     "increment_interaction_count",
     "reset_interaction_count",
@@ -275,6 +276,31 @@ async def recall_fts5(
             sessions=sessions, boost_sessions=boost_sessions,
             principal_id=principal_id, epoch_id=epoch_id,
         )
+
+
+async def relevance_by_id(
+    db: aiosqlite.Connection, query: str, episode_ids: list[str],
+) -> dict[str, float]:
+    """bm25 relevance (``-rank``) of *query* for each listed episode.
+
+    The episodes the query does not match are absent. For a caller that
+    filters rows after the search and so must apply ``min_score`` itself,
+    against the best row it keeps (:mod:`.scope_recall`).
+    """
+    match = fts5_match_query(query, structural=EPISODE_STRUCTURAL_WORDS)
+    if not match or not episode_ids:
+        return {}
+    placeholders = ",".join("?" for _ in episode_ids)
+    async with db.execute(
+        f"""
+        SELECT e.id, -fts.rank
+        FROM episodes_fts fts
+        CROSS JOIN episodes e ON e.rowid = fts.rowid
+        WHERE episodes_fts MATCH ? AND e.id IN ({placeholders})
+        """,
+        (match, *episode_ids),
+    ) as cursor:
+        return {row[0]: float(row[1]) for row in await cursor.fetchall()}
 
 
 async def recall_like(

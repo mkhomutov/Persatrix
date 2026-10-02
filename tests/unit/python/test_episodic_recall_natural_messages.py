@@ -93,6 +93,32 @@ async def test_a_word_of_common_words_is_searched_as_written(memory: EpisodicMem
     assert [ep.id for ep in await memory.recall("NOT")] == [hit]
 
 
+@pytest.mark.parametrize("stored", ["Menu planning at the café", "Menu planning at the cafe"])
+async def test_an_accented_word_finds_its_episode(memory: EpisodicMemory, stored: str):
+    """The index folds accents (unicode61), so the query must keep the
+    whole word for the tokenizer to fold, not cut it at the accent."""
+    hit = await memory.store_episode(summary=stored, context={})
+    await memory.store_episode(summary="Reviewed the bakery flour order", context={})
+    assert [ep.id for ep in await memory.recall("Which café did we pick?")] == [hit]
+
+
+async def test_a_message_in_another_script_is_searched(memory: EpisodicMemory):
+    """A message with no ASCII letter used to fall back to the most recent
+    episodes, whatever they were about."""
+    hit = await memory.store_episode(summary="Обсудили бюджет фестиваля", context={})
+    await memory.store_episode(summary="Reviewed the bakery flour order", context={})
+    assert [ep.id for ep in await memory.recall("Какой бюджет фестиваля?")] == [hit]
+
+
+async def test_several_common_words_recall_nothing(memory: EpisodicMemory):
+    """They match nearly every row, and the relative floor always admits the
+    best of them, so they would inject an arbitrary episode."""
+    await memory.store_episode(summary="We will do it now and then", context={})
+    await memory.store_note("plan", "Do it now, before the market opens")
+    assert await memory.recall("Do it now", min_score=DEFAULT_EPISODIC_MIN_SCORE) == []
+    assert await memory.recall_notes("Do it now", min_score=0.2) == []
+
+
 # ─── What min_score means now ────────────────────────────────────────────
 
 

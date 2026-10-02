@@ -63,6 +63,7 @@ from .notes_section import (
     recall_notes_for_event,
 )
 from .projection_branch import apply_episode_projections
+from .recall_query import recall_text_for_event
 from .relationship_section import (
     RELATIONSHIP_SECTION_NAME,
     recall_relationship_summary,
@@ -341,29 +342,28 @@ class _MemoryContextMixin:
             # room-first-RANKED recall in ONE widened, reinforcing query
             # (it counts a use of every row it returns, before the gate
             # and the budget below choose what the prompt carries —
-            # ISSUE-0163;
-            # the shadow pass does not run in live mode, so live costs
+            # ISSUE-0163; the shadow pass does not run in live mode, so live costs
             # one episodic read per turn, like ``off``; ``shadow`` costs
             # two on a channel turn: this walled read plus the widened
             # shadow read); otherwise the RFC 0031 §D wall
             # (``sessions=None``; pinned by ``test_off_mode_keeps_the_wall``
             # in ``test_cross_room_live.py`` and ``TestShadowNeverEntersPrompt``
             # in ``test_episodes_shadow.py``) with shadow mode logging the
-            # widened delta.  Only rows the acting level admits set the
-            # min_score bar, so the gate's withholds cannot floor out an
-            # admissible row (ISSUE-0159).
+            # widened delta.  ISSUE-0159: a message is searched by its own
+            # words, and only rows the acting level admits set the min_score bar.
+            recall_query = recall_text_for_event(event, query)
             floor_levels = injectable_levels(acting_classification_for_event(event))
             try:
                 if self._episodic_cross_room == CROSS_ROOM_LIVE:
                     episodes = await recall_room_ranked(
-                        self._episodic_memory, query,
+                        self._episodic_memory, recall_query,
                         limit=EPISODIC_RECALL_LIMIT,
                         min_score=DEFAULT_EPISODIC_MIN_SCORE,
                         reinforce=True, floor_protection_levels=floor_levels,
                     )
                 else:
                     episodes = await self._episodic_memory.recall(
-                        query,
+                        recall_query,
                         limit=EPISODIC_RECALL_LIMIT,
                         min_score=DEFAULT_EPISODIC_MIN_SCORE,
                         sessions=None, floor_protection_levels=floor_levels,
@@ -375,7 +375,7 @@ class _MemoryContextMixin:
                 )
                 episodes = []
             await emit_episodes_shadow(
-                self._episodic_memory, event, query=query,
+                self._episodic_memory, event, query=recall_query,
                 live_episode_ids={e.id for e in episodes},
                 agent_id=self.agent_id, mode=self._episodic_cross_room,
             )
@@ -385,7 +385,7 @@ class _MemoryContextMixin:
             # cross-room person identity rides the relationship tier (F-7).
             notes = await recall_notes_for_event(
                 self._episodic_memory,
-                query=query,
+                query=recall_query,
                 event=event,
                 agent_id=self.agent_id,
                 min_score=DEFAULT_NOTES_MIN_SCORE,
