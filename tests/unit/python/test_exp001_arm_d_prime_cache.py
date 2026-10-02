@@ -69,6 +69,25 @@ class TestCheckCache:
     def test_the_calls_are_taken_in_the_order_they_began(self) -> None:
         assert check_cache(list(reversed(_meeting_that_holds()))) == []
 
+    def test_keepalives_that_read_the_prefix_carry_the_meeting_to_its_memo(self) -> None:
+        """The chair's keep-alives (PR 5e) carry the prefix through the quiet
+        spell before the memo, so each reads it, and so does the memo."""
+        calls = [
+            *_meeting_that_holds()[:4],
+            _record(adviser="lunar-stoat", purpose=CallPurpose.KEEPALIVE, second=290, read=12_000),
+            _record(adviser="lunar-stoat", purpose=CallPurpose.KEEPALIVE, second=540, read=12_000),
+            _record(adviser="lunar-stoat", purpose=CallPurpose.MEMO, second=655, read=12_000),
+        ]
+        assert check_cache(calls) == []
+
+    def test_a_keepalive_that_wrote_the_prefix_again_is_a_finding(self) -> None:
+        """One sent after the entry had gone pays to write it again."""
+        late = _record(adviser="lunar-stoat", purpose=CallPurpose.KEEPALIVE, second=400,
+                       write=12_000)
+        [finding] = check_cache([*_meeting_that_holds()[:4], late])
+        assert "lunar-stoat's keepalive call" in finding
+        assert "wrote 12000 and read 0 tokens of the cache, 355 s after" in finding
+
     def test_a_first_call_that_wrote_nothing_is_a_finding(self) -> None:
         """A prefix under the model's minimum is cached silently not at all,
         so the call after it has nothing to read either."""

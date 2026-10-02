@@ -304,13 +304,30 @@ Process vocabulary (scope lock, cuttable, live arc, finding, …) lives in the
   ([`agents/prompt_prefix.py`](../agents/prompt_prefix.py)). Every call of
   the persona's turn carries it at the front of its prompt, marked for the
   provider's prompt cache. The turn is the one prompt recalled memory
-  reaches, so no bid, summary or critic call carries it. Calls that carry
+  reaches, so no bid, summary or critic call carries it; besides the turn,
+  only a [prefix keep-alive](#prefix-keep-alive) does. Calls that carry
   the same prefix after the same tools share one cache entry: the first
   writes it and later ones read it, at a fraction of the input price. A
   provider that cannot cache gets the same words at the front of the system
   prompt. Without the setting there is no prefix.
 - **Example:** "EXP-001's arm D′ has no memory; its advisers' prompt prefix
   is the full transcripts of the series' earlier meetings."
+
+### Prefix Keep-Alive
+- **Aliases:** "keep-alive" (where the prefix is clear)
+- **Disallowed:** "heartbeat", "ping" (it is a model call, logged and priced)
+- **Definition:** A model call that keeps a [prompt prefix](#prompt-prefix)'s
+  cache entry alive through a quiet spell
+  ([`agents/prefix_keepalive.py`](../agents/prefix_keepalive.py)). The
+  provider keeps an entry five minutes after the last call that used it
+  began. When `PERSATRIX_PROMPT_PREFIX_KEEPALIVE` names a number of seconds
+  and the [call log](#call-log) shows no call has carried the prefix for that
+  long, the process sends one that offers the turn's tools, carries the
+  prefix and asks for no output: the provider reads the entry, writes
+  nothing and answers nothing. The call log names its purpose `keepalive`.
+- **Example:** "In EXP-001's arm D′ the chair alone keeps the prefix alive,
+  so the memo after a 600-second idle close still reads the transcripts from
+  the cache."
 
 ### Trust Level
 - **Aliases:** "trust score"

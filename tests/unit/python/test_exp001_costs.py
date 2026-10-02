@@ -130,6 +130,18 @@ def test_dollars_per_plan_counts_only_the_try_that_finished() -> None:
     assert real_spend(records) == pytest.approx(9.0)
 
 
+def test_dollars_per_plan_counts_arm_d_primes_keepalives() -> None:
+    """The chair's keep-alives (PR 5e) are how D′ keeps its transcripts
+    cached through a quiet spell, so they are part of what the arm spends."""
+    records = [
+        _call(arm="D-prime"),  # $3
+        _call(arm="D-prime", purpose=CallPurpose.KEEPALIVE, input_tokens=0,
+              cache_read=1_000_000),  # $0.30
+    ]
+    got = dollars_per_plan(records, arm="D-prime", series="series-1", attempt=1, tries=_FINISHED)
+    assert got == pytest.approx(3.30 / 4)
+
+
 def test_dollars_per_plan_refuses_a_meeting_whose_finished_try_is_unknown() -> None:
     with pytest.raises(ValueError, match="series-1-x"):
         dollars_per_plan([_call()], arm="C", series="series-1", attempt=1, tries={})
@@ -197,10 +209,12 @@ def test_repriced_moves_only_bids_and_summaries_to_the_fast_model() -> None:
         _call(purpose=CallPurpose.SUMMARY),
         _call(purpose=CallPurpose.REPLY),
         _call(purpose=CallPurpose.MEMO),
+        _call(purpose=CallPurpose.KEEPALIVE),  # it reads the turns' entry, on their model
     ]
     assert [r.model for r in repriced(records)] == [
         REPRICE_MODEL,
         REPRICE_MODEL,
+        "claude-sonnet-4-6",
         "claude-sonnet-4-6",
         "claude-sonnet-4-6",
     ]
