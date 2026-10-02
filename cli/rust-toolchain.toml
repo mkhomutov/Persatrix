@@ -9,6 +9,6 @@
 # failing every open PR on release day. Dependabot changes this file and no
 # other, which is why no workflow names a version.
 [toolchain]
-channel = "1.98.1"
+channel = "1.99.0"
 profile = "minimal"
 components = ["clippy", "rustfmt"]
