@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0159
 summary: "Episodic recall scores an FTS5 match as 1/(1+|rank|) and drops it below min_score 0.20 — but FTS5's bm25 rank grows more negative the MORE of the summary a stimulus matches, so a one-word mention scores ~1.0 and a stimulus that quotes the summary scores ~0.04 and is discarded. The episodic tier therefore surfaces an episode only on thin, one-or-two-term mentions and never on the turns that engage with its content; the §G confidentiality tripwire, which watches withheld episode candidates, cannot be reached live by MT-PERSONA-CONFIDENTIALITY-001 Leg 4 because the seeded echo is exactly the stimulus the score discards."
-status: open
+status: resolved
 severity: medium
 area: memory
 created: 2026-09-15
+closed: 2026-10-02
+closed_pr: 1030
 refs:
   - docs/manual-tests/v0.3.16-execution-report.md
   - docs/manual-tests/MT-PERSONA-CONFIDENTIALITY-001.md
