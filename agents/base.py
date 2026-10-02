@@ -305,9 +305,9 @@ class BaseAgent(ABC):
         (b) operators control which tools can call ``store_observation``
         via the deny-by-default permission whitelist.  A relevance floor
         is plumbed via the facade's ``default_min_score`` (read from
-        ``config/agents.yaml`` ``memory.min_score``) so operators can
-        raise the bar without code change.  Scope-isolation and per-call
-        ``min_score`` enforcement land in RFC 0008 PR 5 once SQL-side
+        ``config/agents.yaml`` ``memory.min_score``): a share of the best
+        match's relevance, so it always admits the best (ISSUE-0159).
+        Scope-isolation and per-call ``min_score`` enforcement land in RFC 0008 PR 5 once SQL-side
         filtering is wired; until then any tool that persists
         attacker-controlled text is in scope for the trust assumption.
         """

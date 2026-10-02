@@ -170,5 +170,22 @@ EVAL-MEMORY-005 now judges the DM-taught episode beside the fact.
 > audience is known only after the search; withheld rows still take places
 > under the search's row limit, as they did before; bm25 weighs each word
 > over the whole table, every agent, tenant and level included, so the
-> filters choose the candidates but not the weights; and a sender's name
-> still matches the episodes that sender took part in.
+> filters choose the candidates but not the weights; and a sender's or
+> channel's name still matches the episodes that sender or channel took
+> part in.
+
+> 2026-10-02 — a second review pass, over the callers outside the
+> persona's episodic tier. Fixed here: the inner query let SQLite run the
+> full-text match once per stored row, seconds per recall on a few
+> thousand rows, so the join now keeps the full-text index as the outer
+> loop (a test counts SQLite's work); and the task-agent facade's scope
+> and tags filters run after the search, so a filtered call now takes no
+> floor rather than let a dropped match set the bar. Known limits it
+> leaves: a task agent's whole task text is the query, so it now recalls
+> memory on most tasks, procedure rows included, and the floor always
+> admits the best match, so it is no defence against a planted entry (no
+> shipped task agent enables memory); the shared pool passes no floor and
+> its context values (pool name, confidence) are searchable, so a pool
+> read fills to its limit (nothing reads the pool yet); and the system
+> word list, drawn from what personas store, also trims task and pool
+> queries, so "the approval request" searches neither word.

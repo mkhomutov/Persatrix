@@ -121,6 +121,9 @@ async def _recall_notes_fts5(
         # FTS5) always carries a stable rowid identical across record and replay.
         # The inner query holds the candidates and their best relevance; the
         # outer one floors each note against that best, then ranks.
+        # CROSS JOIN keeps the full-text index as the outer loop. Without it
+        # SQLite may walk the agent's rows by index and run the MATCH once
+        # per row, which costs seconds on a few thousand rows (ISSUE-0159).
         async with db.execute(
             f"""
             SELECT {", ".join(f"n.{c}" for c in note_cols)}
@@ -128,7 +131,7 @@ async def _recall_notes_fts5(
                 SELECT fts.rowid AS rid, fts.rank AS rank,
                        MAX(-fts.rank) OVER () AS best
                 FROM notes_fts fts
-                JOIN notes n ON n.rowid = fts.rowid
+                CROSS JOIN notes n ON n.rowid = fts.rowid
                 WHERE notes_fts MATCH ?
                   AND n.agent_id = ?
                   {sess_clause}

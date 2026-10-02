@@ -294,6 +294,61 @@ async def test_the_tick_never_reaches_the_engine(memory: EpisodicMemory, caplog)
     assert "falling back to LIKE" not in caplog.text
 
 
+# ─── The search index drives the query ───────────────────────────────────
+
+
+async def _search_work(memory: EpisodicMemory, search) -> int:
+    """SQLite virtual-machine steps (in hundreds) one search costs."""
+    steps = 0
+
+    def count() -> int:
+        nonlocal steps
+        steps += 1
+        return 0
+
+    assert memory._db is not None
+    await memory._db.set_progress_handler(count, 100)
+    try:
+        assert await search()
+    finally:
+        # sqlite3 clears the handler on None; aiosqlite types it as required.
+        await memory._db.set_progress_handler(None, 100)  # type: ignore[arg-type]
+    return steps
+
+
+_FORTY_WORDS = " ".join(f"word{i}" for i in range(38)) + " fireworks permit"
+
+
+@pytest.mark.parametrize("tier", ["episodes", "notes"])
+async def test_search_work_does_not_grow_with_rows_that_do_not_match(
+    memory: EpisodicMemory, tier: str,
+):
+    """With the relative floor's inner query, SQLite could walk the agent's
+    rows and run the full-text match once per row, so a 40-word message
+    over a few thousand episodes took seconds. The join is written so the
+    full-text index stays the outer loop: rows that share no word cost
+    nothing."""
+    async def store(text: str) -> None:
+        if tier == "episodes":
+            await memory.store_episode(summary=text, context={"k": "v"})
+        else:
+            await memory.store_note("topic", text)
+
+    async def search():
+        if tier == "episodes":
+            return await memory.recall(_FORTY_WORDS, min_score=0.2)
+        return await memory.recall_notes(_FORTY_WORDS, min_score=0.2)
+
+    await store(FIREWORKS)
+    for i in range(50):
+        await store(f"Reviewed the bakery flour supplier contract {i}")
+    small = await _search_work(memory, search)
+    for i in range(50, 450):
+        await store(f"Reviewed the bakery flour supplier contract {i}")
+    large = await _search_work(memory, search)
+    assert large < 2 * small + 10
+
+
 # ─── An engine error still falls back to a LIKE search ───────────────────
 
 

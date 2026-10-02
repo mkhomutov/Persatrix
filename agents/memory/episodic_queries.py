@@ -231,6 +231,9 @@ async def recall_fts5(
     try:
         # The inner query holds the candidates and their best relevance;
         # the outer one floors each row against that best, then ranks.
+        # CROSS JOIN keeps the full-text index as the outer loop. Without it
+        # SQLite may walk the agent's rows by index and run the MATCH once
+        # per row, which costs seconds on a few thousand rows (ISSUE-0159).
         async with db.execute(
             f"""
             SELECT {_EPISODE_SELECT_ALIASED}
@@ -238,7 +241,7 @@ async def recall_fts5(
                 SELECT fts.rowid AS rid, fts.rank AS rank,
                        {bar_expr} AS best
                 FROM episodes_fts fts
-                JOIN episodes e ON e.rowid = fts.rowid
+                CROSS JOIN episodes e ON e.rowid = fts.rowid
                 WHERE episodes_fts MATCH ?
                   AND e.agent_id = ?
                   AND e.importance >= ?

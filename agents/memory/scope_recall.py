@@ -74,7 +74,12 @@ async def recall_with_scope_filter(
         contract — do not change to OR without an RFC amendment).  An
         empty iterable matches everything.
     min_score:
-        Forwarded to :meth:`EpisodicMemory.recall`.
+        Forwarded to :meth:`EpisodicMemory.recall` when no filter is
+        active. It is a share of the best candidate's relevance
+        (ISSUE-0159), and the scope and tags filters run after the
+        search, so a strong match they drop would set the bar for the rows
+        they keep. A filtered call therefore takes no floor until the
+        filters move into SQL.
     sessions:
         RFC 0031 §D recall filter (Phase 2 PR 2) — forwarded verbatim
         to :meth:`EpisodicMemory.recall`.  Orthogonal to ``scope`` /
@@ -85,15 +90,12 @@ async def recall_with_scope_filter(
         vice versa.
     """
     required_tags = frozenset(tags or ())
-    recall_limit = (
-        limit * TAG_SCOPE_OVERFETCH_FACTOR
-        if (required_tags or scope is not None)
-        else limit
-    )
+    filtered = bool(required_tags) or scope is not None
+    recall_limit = limit * TAG_SCOPE_OVERFETCH_FACTOR if filtered else limit
     episodes = await episodic.recall(
         query,
         limit=recall_limit,
-        min_score=min_score,
+        min_score=None if filtered else min_score,
         sessions=sessions,
     )
     out: list[Episode] = []

@@ -250,3 +250,27 @@ async def test_recall_with_scope_filter_returns_episode_dataclass(
     assert isinstance(results[0], Episode)
     assert results[0].summary == "shape-check"
     assert results[0].scope == "group:planning"
+
+
+@pytest.mark.parametrize("filter_kwargs", [
+    {"scope": "channel:finance"}, {"tags": ["finance"]},
+])
+async def test_a_stronger_match_outside_the_filter_does_not_floor_out_ours(
+    episodic: EpisodicMemory, filter_kwargs: dict,
+) -> None:
+    """ISSUE-0159: ``min_score`` is a share of the best candidate's
+    relevance, and scope and tags are filtered after the search. A strong
+    match the filter then drops must not push the rows it keeps below the
+    floor, so a filtered call takes no floor."""
+    await episodic.store_episode(
+        summary="invoice invoice overdue invoice reminder", context={},
+        scope="channel:sales", tags=["sales"],
+    )
+    ours = await episodic.store_episode(
+        summary="quarterly invoice archive and supplier ledgers", context={},
+        scope="channel:finance", tags=["finance"],
+    )
+    got = await recall_with_scope_filter(
+        episodic, "invoice reminder", limit=5, min_score=1.0, **filter_kwargs,
+    )
+    assert [ep.id for ep in got] == [ours]
