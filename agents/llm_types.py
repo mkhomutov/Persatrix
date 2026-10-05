@@ -68,17 +68,24 @@ class LLMCallPurpose(Enum):
 class Usage:
     """Token usage from LLM response.
 
-    Only the Anthropic adapter fills the two cache counts. There,
-    ``input_tokens`` is the uncached input, and tokens written to or read
-    from the prompt cache are counted apart, since they are priced apart.
-    Every other adapter leaves both at zero, and its ``input_tokens`` is
-    the provider's whole prompt count, whatever that provider cached.
+    ``input_tokens`` is the uncached input. Tokens written to or read from a
+    provider's prompt cache are counted apart, since they are priced apart,
+    so the three add up to the whole prompt. Anthropic reports both kinds,
+    OpenAI its reads and (from GPT-5.6) its writes, Gemini its reads. An
+    adapter whose provider reports neither leaves both at zero.
     """
 
     input_tokens: int
     output_tokens: int
     cache_write_tokens: int = 0
     cache_read_tokens: int = 0
+
+    @property
+    def prompt_tokens(self) -> int:
+        """The whole prompt: the uncached input plus what the provider wrote
+        to and read from its cache. A total or a meter that counts input
+        takes this, so a cache hit does not read as a drop in usage."""
+        return self.input_tokens + self.cache_write_tokens + self.cache_read_tokens
 
 
 @dataclass
@@ -106,6 +113,11 @@ class LLMResponse:
     # Anthropic's "refusal", which stop_reason reads as END_TURN. None when
     # the adapter does not keep it.
     provider_stop_reason: str | None = None
+    # The assistant turn's content blocks as the provider returned them, kept
+    # when the text and tool calls alone would lose part of the turn: a Claude
+    # model's thinking blocks, which a tool round must send back unchanged.
+    # None otherwise; the adapter then rebuilds the turn from text and calls.
+    provider_content: list[dict[str, Any]] | None = None
 
 
 @runtime_checkable

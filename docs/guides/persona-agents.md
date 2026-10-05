@@ -600,8 +600,8 @@ Daily, per-workflow, and per-agent USD caps are declared in
 # budgets reference the alias, not a vendor id.
 models:
   aliases:
-    quality: { provider: anthropic, model: claude-sonnet-4-6,         input_per_1m_tokens: 3.00, output_per_1m_tokens: 15.00 }
-    fast:    { provider: anthropic, model: claude-haiku-4-5-20251001, input_per_1m_tokens: 0.80, output_per_1m_tokens:  4.00 }
+    quality: { provider: anthropic, model: claude-sonnet-5-5, input_per_1m_tokens: 2.00, output_per_1m_tokens: 10.00 }
+    fast:    { provider: anthropic, model: claude-haiku-4-5,  input_per_1m_tokens: 1.00, output_per_1m_tokens:  5.00 }
 
 cost:
   budgets:

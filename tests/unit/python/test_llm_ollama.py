@@ -27,8 +27,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agents.llm_client import LLMClient, create_provider
 from agents.llm_client import OllamaProvider as OllamaProviderReexport
-from agents.llm_client import create_provider
 from agents.llm_ollama import (
     DEFAULT_OLLAMA_BASE_URL,
     OllamaProvider,
@@ -268,3 +268,47 @@ def test_alias_declaring_ollama_resolves_through_same_branch() -> None:
 
 def test_ollama_provider_reexported_from_llm_client() -> None:
     assert OllamaProviderReexport is OllamaProvider
+
+
+# ─── request settings (ISSUE-0169) ──────────────────────────
+
+
+# A thinking model served by Ollama, told not to think.
+_THINKING_ALIAS = {
+    "quality": {
+        "provider": "ollama",
+        "model": "qwen3.5",
+        "input_per_1m_tokens": 0,
+        "output_per_1m_tokens": 0,
+        "provider_config": {"reasoning_effort": "none"},
+    },
+}
+
+
+async def test_create_provider_builds_ollama_with_its_alias_settings() -> None:
+    """A call that names no alias keeps the settings the provider was built
+    with, as it does on the OpenAI provider this one extends."""
+    mod, client = _mock_openai_module()
+    client.chat.completions.create = AsyncMock(return_value=_openai_response())
+    with use_alias_map(_THINKING_ALIAS), patch.dict(sys.modules, {"openai": mod}):
+        provider, model = create_provider({"id": "x", "model": "quality"})
+    await provider.create_message(
+        model=model, messages=[{"role": "user", "content": "hi"}], system="",
+        tools=[], max_tokens=64, temperature=0.2,
+    )
+    assert client.chat.completions.create.call_args[1]["reasoning_effort"] == "none"
+
+
+async def test_an_agents_own_turn_carries_its_alias_settings() -> None:
+    """The agent's own turns name its seat alias; they must carry that
+    alias's settings, as a lane's call through the same alias would."""
+    mod, client = _mock_openai_module()
+    client.chat.completions.create = AsyncMock(return_value=_openai_response())
+    with use_alias_map(_THINKING_ALIAS), patch.dict(sys.modules, {"openai": mod}):
+        provider, model = create_provider({"id": "x", "model": "quality"})
+        await LLMClient(provider, seat_alias="quality").create_message(
+            model=model, model_alias="quality",
+            messages=[{"role": "user", "content": "hi"}], system="",
+            tools=[], max_tokens=64, temperature=0.2,
+        )
+    assert client.chat.completions.create.call_args[1]["reasoning_effort"] == "none"

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Iterator
 from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
@@ -12,6 +13,8 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
+from agents.llm_client import LLMClient
+from agents.llm_types import LLMResponse, StopReason, Usage
 from agents.observability import metrics as pmetrics
 
 _TOOL_A: dict[str, Any] = {"agent.id": "t", "tool.name": "x", "tool.success": True}
@@ -325,6 +328,42 @@ class TestAgentActiveLifecycle:
             if dict(dp.attributes).get("agent.id") == "demo"
         )
         assert total == 0
+
+
+class TestLLMClientTokenCounter:
+    def test_input_tokens_count_the_whole_prompt(
+        self, metric_reader: InMemoryMetricReader,
+    ) -> None:
+        # A provider that caches reports what it wrote to and read from its
+        # cache apart from ``input_tokens`` (ISSUE-0169). The counter still
+        # takes the whole prompt, so a cache hit does not read as a drop in
+        # usage.
+        provider = AsyncMock()
+        provider.name = "openai"
+        provider.create_message = AsyncMock(
+            return_value=LLMResponse(
+                text="hello",
+                stop_reason=StopReason.END_TURN,
+                usage=Usage(
+                    input_tokens=52, output_tokens=5,
+                    cache_write_tokens=900, cache_read_tokens=2048,
+                ),
+            ),
+        )
+        asyncio.run(
+            LLMClient(provider).create_message(
+                model="gpt-6-sol", messages=[], system="", tools=[], max_tokens=10,
+                temperature=0.0,
+            ),
+        )
+
+        m = _collect(metric_reader).get("agent.llm.tokens")
+        assert m is not None
+        by_type = {
+            dict(dp.attributes)["gen_ai.token.type"]: cast("int", getattr(dp, "value", 0))
+            for dp in m.data.data_points
+        }
+        assert by_type == {"input": 3000, "output": 5}
 
 
 class TestInitIdempotent:

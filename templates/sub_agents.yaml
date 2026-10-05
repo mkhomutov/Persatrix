@@ -1,35 +1,38 @@
 # Reusable Sub-Agent Templates — a partial draft that nothing loads yet.
 # The planned loader, agents/sub_agents/templates.py, is a placeholder;
 # the plan is sketched in docs/persatrix-extension-spec.md §E3.2.5.
+# Models are named by alias (config/optimization.yaml models.aliases), as every
+# loaded config must be since RFC 0033 Phase 3, so the draft never pins a
+# vendor model that retires.
 
 sub_agent_templates:
   researcher:
     role: "research analyst"
     tools: [http_request, file_write]
-    model: "claude-sonnet-4-20250514"
+    model: "quality"
     temperature: 0.3
 
   coder:
     role: "implementation specialist"
     tools: [file_read, file_write, shell_exec]
-    model: "claude-sonnet-4-20250514"
+    model: "quality"
     temperature: 0.2
 
   code_reviewer:
     role: "code quality analyst"
     tools: [file_read]
-    model: "claude-sonnet-4-20250514"
+    model: "quality"
     temperature: 0.1
     restricted_permissions: ["filesystem:write", "shell:*"]
 
   writer:
     role: "content writer"
     tools: [file_read, file_write]
-    model: "claude-sonnet-4-20250514"
+    model: "quality"
     temperature: 0.7
 
   translator:
     role: "professional translator"
     tools: []
-    model: "claude-haiku-4-5-20251001"
+    model: "fast"
     temperature: 0.3

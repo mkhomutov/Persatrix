@@ -19,7 +19,7 @@ An agent's `model:` field is a **logical alias** — a role like `quality`,
 # config/agents.yaml
 - id: ember-owl
   type: persona
-  model: "quality"        # a role, resolved at call time — not "claude-sonnet-4-6"
+  model: "quality"        # a role, resolved at call time — not "claude-sonnet-5-5"
 ```
 
 The alias is defined once, in [`config/optimization.yaml`](../../config/optimization.yaml),
@@ -31,9 +31,9 @@ models:
   aliases:
     quality:
       provider: anthropic          # ← you choose this
-      model: claude-sonnet-4-6
-      input_per_1m_tokens: 3.00
-      output_per_1m_tokens: 15.00
+      model: claude-sonnet-5-5
+      input_per_1m_tokens: 2.00
+      output_per_1m_tokens: 10.00
 ```
 
 Because every agent, the routing defaults, and the summarisation path all
@@ -61,7 +61,7 @@ There are no per-provider force-knobs.
 |----------|-------------|-------|------|-------|
 | **Anthropic** | `anthropic` | `ANTHROPIC_API_KEY` | per-token | Claude. A peer, not a default — no provider is configured out of the box. |
 | **OpenAI** | `openai` | `OPENAI_API_KEY` | per-token | Also any OpenAI-compatible API (vLLM, Together, Groq, LM Studio) via `provider_config.base_url`. |
-| **Gemini** | `gemini` | `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) + the `google-genai` extra | per-token | Google Gemini on the native `google-genai` SDK ([`agents/llm_gemini.py`](../../agents/llm_gemini.py)) — a first-class `gemini` identity for cost/telemetry, not the OpenAI-compat endpoint (RFC 0053). Optional Vertex routing via `provider_config.project`/`location`. Install the SDK: `pip install 'google-genai>=1.0.0'` (or the extra: `pip install 'persatrix-agents[gemini]'`). |
+| **Gemini** | `gemini` | `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) + the `google-genai` extra | per-token | Google Gemini on the native `google-genai` SDK ([`agents/llm_gemini.py`](../../agents/llm_gemini.py)) — a first-class `gemini` identity for cost/telemetry, not the OpenAI-compat endpoint (RFC 0053). Optional Vertex routing via `provider_config.project`/`location`. Install the SDK: `pip install 'google-genai>=1.56.0'` (or the extra: `pip install 'persatrix-agents[gemini]'`). |
 | **watsonx.ai** | `watsonx` | `WATSONX_API_KEY` (secret) **+** a `project_id`/`space_id` (non-secret — `provider_config` **or** `WATSONX_PROJECT_ID`/`WATSONX_SPACE_ID` env) **+** optional `url` (`provider_config.url` or `WATSONX_URL`; defaults us-south) + the `ibm-watsonx-ai` extra | per-token | IBM watsonx.ai (Llama / Granite / Mistral hosts) on the native `ibm-watsonx-ai` SDK ([`agents/llm_watsonx.py`](../../agents/llm_watsonx.py)) — no broad OpenAI-compatible endpoint exists, so a native class is required (RFC 0053 §C). The **secret** key rides env; the non-secret `project_id`/`url` resolve from `provider_config` **or** a `WATSONX_*` env fallback, and the factory **fails closed at startup** if no id is set in either (see below). Install: `pip install 'ibm-watsonx-ai>=1.1.0'` (or the extra: `pip install 'persatrix-agents[watsonx]'`). |
 | **Ollama** | `ollama` | a local `ollama serve` | **$0** (local) | A real model on your machine; a thin OpenAI-compatible subclass ([`agents/llm_ollama.py`](../../agents/llm_ollama.py)). `provider_config.base_url` defaults to `http://localhost:11434/v1`. |
 | **Mock (offline)** | `mock` | nothing | **$0** | Scripted persona replies, no network, no key ([`agents/llm_offline.py`](../../agents/llm_offline.py)). For demos, CI smoke, and risk-free exploration. |
@@ -164,13 +164,13 @@ sweep across `agents.yaml`, the pricing table, and the docs. To move the
 ```diff
  quality:
 -  provider: anthropic
--  model: claude-sonnet-4-6
--  input_per_1m_tokens: 3.00
--  output_per_1m_tokens: 15.00
+-  model: claude-sonnet-5-5
 +  provider: openai
-+  model: gpt-4o
-+  input_per_1m_tokens: 2.50
-+  output_per_1m_tokens: 10.00
++  model: gpt-6-sol
+   input_per_1m_tokens: 2.00
+   output_per_1m_tokens: 10.00
+-  provider_config: {effort: low}
++  provider_config: {reasoning_effort: none}
 ```
 
 The quality-routed agents, unchanged, now run on OpenAI, and cost re-keys to
@@ -187,6 +187,12 @@ the config reverted clean.
 > [demo config](#zero-config-demos) does that in one file. Configure at least the
 > role aliases your run exercises: leaving `summarizer` `unconfigured` doesn't
 > break chat, but summarisation-on-close silently degrades to its fallback.
+
+> **Request settings ride the alias.** How much a model thinks and whether its
+> prompt is cached are keys of the alias's `provider_config` (`effort`,
+> `reasoning_effort`, `thinking_level`, `prompt_cache`), applied to every call
+> that names the alias — so they move with it, and each vendor has its own. See
+> [Model Request Settings](model-request-settings.md).
 
 > The alias entry is **authoritative**. If an agent sets its own `provider:`
 > field that *disagrees* with the alias it resolves to, the factory fails loud
@@ -298,7 +304,7 @@ distinguishable from a forgotten cloud price.
 
 When a call's model came in via an alias, the `agent.llm.call` span carries
 `persatrix.llm.model_alias` (e.g. `quality`) **alongside** the physical
-`gen_ai.request.model` (e.g. `claude-sonnet-4-6`) — never instead of it. So a
+`gen_ai.request.model` (e.g. `claude-sonnet-5-5`) — never instead of it. So a
 dashboard can group spend by logical role while the vendor ID stays visible.
 The alias is telemetry-only — it is never forwarded to the provider API. See
 [observability.md § 10.5](../observability.md#105-persatrix-specific-attribute-namespace).
@@ -315,6 +321,7 @@ counter that authorised this cutover are retired.
 ## Related
 
 - [RFC 0033 — Provider-Agnostic Model Alias Layer](../rfcs/0033-model-alias-layer.md) — the design.
+- [Model Request Settings](model-request-settings.md) — thinking, effort and the prompt cache, per alias.
 - [Persona agents guide](persona-agents.md) — `model:` and USD budgets in context.
 - [observability.md](../observability.md) — the `persatrix.llm.model_alias` span attribute.
 - Manual tests: [MT-ALIAS-001](../manual-tests/MT-ALIAS-001.md) (alias-routed cost), [MT-ALIAS-002](../manual-tests/MT-ALIAS-002.md) (one-line swap), [MT-OFFLINE-001](../manual-tests/MT-OFFLINE-001.md), [MT-OLLAMA-001](../manual-tests/MT-OLLAMA-001.md), [MT-PROVIDER-GEMINI-001](../manual-tests/MT-PROVIDER-GEMINI-001.md), [MT-PROVIDER-WATSONX-001](../manual-tests/MT-PROVIDER-WATSONX-001.md).

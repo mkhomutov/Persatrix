@@ -12,7 +12,7 @@
 > `summarizer` aliases **unconfigured** — there is no default provider, so a plain
 > `docker compose up` fails loud at agent startup. This test runs `make demo-anthropic`, which
 > mounts [`config/demo/anthropic/optimization.yaml`](../../config/demo/anthropic/optimization.yaml)
-> (pointing `quality` → `anthropic` / `claude-sonnet-4-6`, priced 3.00 / 15.00) over the stack's
+> (pointing `quality` → `anthropic` / `claude-sonnet-5-5`, priced 2.00 / 10.00) over the stack's
 > config ([amendment 2026-05-27](../v0.3.4-plan-amendment-2026-05-27.md)). Re-run live against the
 > config-driven HEAD (see [Test Results](#test-results)).
 
@@ -22,7 +22,7 @@
 
 **Purpose**: Verify the primary v0.3.4 user-facing promise — *agents reference models by
 logical alias, and cost attribution survives the indirection*. An agent whose `model:` is the
-`quality` alias must resolve to the physical vendor ID (`claude-sonnet-4-6`), complete a real
+`quality` alias must resolve to the physical vendor ID (`claude-sonnet-5-5`), complete a real
 turn, and report **non-zero, correctly-keyed** cost via `GET /api/v1/cost/summary`. The
 `agent.llm.call` span must carry `persatrix.llm.model_alias=quality` while
 `gen_ai.request.model` stays the physical ID — the alias is a telemetry-only annotation,
@@ -49,7 +49,7 @@ automated `cost-attribution gate` (`internal/server/cost_alias_gate_test.go` +
 - [docs/rfcs/0033-model-alias-layer.md](../rfcs/0033-model-alias-layer.md) — §D (resolver
   integration point), §F (pricing keyed by alias), §G (telemetry / `model_alias` span attr).
 - [config/optimization.yaml](../../config/optimization.yaml) — the `models.aliases` block
-  (`quality` → `anthropic` / `claude-sonnet-4-6`, priced) and the derived
+  (`quality` → `anthropic` / `claude-sonnet-5-5`, priced) and the derived
   `cost.pricing.models` table.
 - [agents/model_aliases.py](../../agents/model_aliases.py) — `resolve()` (alias → physical ID).
 - [agents/llm_factory.py](../../agents/llm_factory.py) — `create_provider()` (returns the
@@ -89,7 +89,7 @@ automated `cost-attribution gate` (`internal/server/cost_alias_gate_test.go` +
   (`docker compose -f docker-compose.yaml -f docker-compose.anthropic.yaml up -d --build` —
   orchestrator + agents + collector + jaeger + prometheus), all services healthy. The overlay
   mounts [`config/demo/anthropic/optimization.yaml`](../../config/demo/anthropic/optimization.yaml),
-  which configures `quality` → `anthropic` / `claude-sonnet-4-6` (priced `3.00` / `15.00`).
+  which configures `quality` → `anthropic` / `claude-sonnet-5-5` (priced `2.00` / `10.00`).
 - ☐ `make validate` exits 0 (base config valid; `schema_version: "0.2"`).
 - ☐ The base `config/optimization.yaml` ships `quality` **unconfigured** (no default provider) — a
   plain `docker compose up` (no demo overlay) fails loud at agent startup with the actionable
@@ -121,7 +121,7 @@ raw-ID deprecation warning fires (the agent is alias-routed, not on the §E pass
 docker logs persatrix-agent-ember-owl-1 2>&1 | grep -iE "DEPRECATION .RFC 0033.|model|provider" | head
 ```
 
-**Expected Result**: The agent boots an `AnthropicProvider` for the physical `claude-sonnet-4-6`.
+**Expected Result**: The agent boots an `AnthropicProvider` for the physical `claude-sonnet-5-5`.
 **No** `DEPRECATION (RFC 0033): agent … references a raw vendor model ID` line appears (that line
 fires only for raw-ID agents).
 
@@ -176,7 +176,7 @@ curl -s http://127.0.0.1:8080/api/v1/cost/summary | tee /tmp/alias-cost-after.js
 
 **Expected Result**: `daily_input_tokens` / `daily_output_tokens` / `daily_estimated_usd`
 **advanced from the baseline** and `daily_estimated_usd` is **strictly > 0** — proving the cost
-pipeline priced the physical `claude-sonnet-4-6` the alias resolved to (the derived pricing
+pipeline priced the physical `claude-sonnet-5-5` the alias resolved to (the derived pricing
 table). The `top_agents` breakdown attributes the spend to `ember-owl`. A $0 reading here would
 mean pricing was keyed to a model the alias does **not** resolve to (a migration mis-key) — the
 exact failure the alias-derived pricing table prevents.
@@ -194,14 +194,14 @@ exact failure the alias-derived pricing table prevents.
 for `ember-owl` (or query the collector), and inspect its attributes.
 
 **Expected Result**: The span carries **both**:
-- `gen_ai.request.model = claude-sonnet-4-6` (the physical ID sent to the vendor), and
+- `gen_ai.request.model = claude-sonnet-5-5` (the physical ID sent to the vendor), and
 - `persatrix.llm.model_alias = quality` (the logical alias, telemetry-only).
 
 The alias is added *alongside* the physical model, never substituted for it, and is never
 forwarded to the provider API.
 
 **Verification**:
-- [ ] `gen_ai.request.model` is the physical `claude-sonnet-4-6`
+- [ ] `gen_ai.request.model` is the physical `claude-sonnet-5-5`
 - [ ] `persatrix.llm.model_alias` equals `quality`
 
 ---
@@ -230,7 +230,7 @@ of the alias map (no stale hand-edit, no missing physical model).
 
 | Step | Expected Outcome | Pass/Fail |
 |------|------------------|-----------|
-| 1 | Agent resolves `quality` → `claude-sonnet-4-6`; no raw-ID warning | ☐ |
+| 1 | Agent resolves `quality` → `claude-sonnet-5-5`; no raw-ID warning | ☐ |
 | 2 | Cost baseline captured | ☐ |
 | 3 | One real turn returns `reply_status="ok"` | ☐ |
 | 4 | `daily_estimated_usd > 0`, tokens advanced, keyed to `ember-owl` | ☐ |

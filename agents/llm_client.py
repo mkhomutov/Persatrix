@@ -38,6 +38,7 @@ from .llm_types import (
     Usage,
 )
 from .llm_watsonx import WatsonxProvider
+from .model_aliases import ResolvedModel
 from .model_aliases import resolve as resolve_model
 from .observability.metrics import (
     current_agent_id,
@@ -109,12 +110,23 @@ _FACTORY_PROVIDER_CLASSES: tuple[type, ...] = (
 class LLMClient:
     """Provider-agnostic LLM client. Delegates to a concrete LLMProvider."""
 
-    def __init__(self, provider: LLMProvider, wallet: WalletClient | None = None):
+    def __init__(
+        self,
+        provider: LLMProvider,
+        wallet: WalletClient | None = None,
+        *,
+        seat_alias: str | None = None,
+        seat_provider_config: dict[str, Any] | None = None,
+    ):
         self._provider = provider
         # RFC 0023 — the wallet is optional and wired post-construction by
         # AgentServer.start() (see set_wallet); LLMClient is built at agent
         # load time, before the orchestrator gRPC channel exists.
         self._wallet = wallet
+        # The agent's own alias, and the ``provider_config`` its agent entry
+        # sets: a call through that alias carries both (see create_message).
+        self._seat_alias = seat_alias
+        self._seat_provider_config = dict(seat_provider_config or {})
 
     def set_wallet(self, wallet: WalletClient | None) -> None:
         """Attach (or replace) the RFC 0023 wallet client.
@@ -179,8 +191,24 @@ class LLMClient:
         (``supports_prompt_cache is True``) sends it marked for the cache,
         ahead of *system*; any other gets it joined onto the front of
         *system*, so the model reads the same words either way.
+
+        A provider that takes per-call settings (``accepts_provider_config
+        is True``) also gets *model_alias*'s ``provider_config``, the
+        thinking, effort and caching settings it applies to this request
+        (ISSUE-0169): a lane on the persona's own vendor rides the persona's
+        provider, which was built with the seat alias's settings, not the
+        lane's. A call through the agent's own (seat) alias gets that
+        alias's settings the same way, with the gaps filled from the agent
+        entry's own ``provider_config`` (RFC 0033 §D rule 2), so no call's
+        settings depend on how its provider was built. Only a call that
+        names no alias leaves the provider the settings it was built with.
         """
-        provider = self._provider_for_alias(model_alias)
+        provider, resolved = self._provider_for_alias(model_alias)
+        if resolved is not None and getattr(provider, "accepts_provider_config", False) is True:
+            settings = dict(resolved.provider_config)
+            if model_alias == self._seat_alias:
+                settings = {**self._seat_provider_config, **settings}
+            kwargs["provider_config"] = settings
         if cache_prefix:
             if getattr(provider, "supports_prompt_cache", False) is True:
                 kwargs["cache_prefix"] = cache_prefix
@@ -210,15 +238,17 @@ class LLMClient:
             # The wallet has no cache price, so it is charged every input
             # token the call carried, cached ones included.
             await lease.settle(
-                input_tokens=(
-                    usage.input_tokens + usage.cache_write_tokens + usage.cache_read_tokens
-                ),
-                output_tokens=usage.output_tokens,
+                input_tokens=usage.prompt_tokens, output_tokens=usage.output_tokens,
             )
             return response
 
-    def _provider_for_alias(self, model_alias: str | None) -> LLMProvider:
-        """The provider a call arriving via *model_alias* must ride (ISSUE-0113).
+    def _provider_for_alias(
+        self, model_alias: str | None,
+    ) -> tuple[LLMProvider, ResolvedModel | None]:
+        """The provider a call arriving via *model_alias* must ride (ISSUE-0113),
+        and the alias's resolved record, looked up once for both this choice
+        and the call's request settings. The record is None when the call
+        names no alias, the alias does not resolve, or nothing would read it.
 
         A persona holds ONE client, built from its own seat alias — but the
         shared role lanes (``fast`` bid / ``summarizer`` close / critic /
@@ -257,17 +287,21 @@ class LLMClient:
         callers degrade fail-closed instead of falling back to the primary
         provider's guaranteed 404.
         """
-        if not model_alias:
-            return self._provider
-        if not isinstance(self._provider, _FACTORY_PROVIDER_CLASSES):
-            return self._provider
+        primary = self._provider
+        factory = isinstance(primary, _FACTORY_PROVIDER_CLASSES)
+        # A wrapper or test double is never routed around; its alias is
+        # looked up only when it takes the alias's request settings.
+        if not model_alias or not (
+            factory or getattr(primary, "accepts_provider_config", False) is True
+        ):
+            return primary, None
         try:
             resolved = resolve_model(model_alias)
         except SystemExit:
-            return self._provider
-        if resolved.provider == self._provider.name:
-            return self._provider
-        return provider_for_resolved(resolved)
+            return primary, None
+        if not factory or resolved.provider == primary.name:
+            return primary, resolved
+        return provider_for_resolved(resolved), resolved
 
     async def _invoke_provider(
         self,
@@ -398,11 +432,13 @@ class LLMClient:
             canonical_reason = STOP_REASON_TO_GEN_AI.get(
                 response.stop_reason.value, "error",
             )
+            # Input is the whole prompt, cached part included, on the span and
+            # on the counter below: a cache hit is not a drop in usage.
             span.set_attributes(
                 gen_ai_attributes(
                     system=system_name,
                     request_model=model,
-                    input_tokens=response.usage.input_tokens,
+                    input_tokens=response.usage.prompt_tokens,
                     output_tokens=response.usage.output_tokens,
                     finish_reasons=[canonical_reason],
                 ),
@@ -418,7 +454,7 @@ class LLMClient:
                     ),
                 )
                 inst.llm_tokens.add(
-                    response.usage.input_tokens,
+                    response.usage.prompt_tokens,
                     attributes=llm_token_attrs(
                         agent_id=agent_id,
                         request_model=model,

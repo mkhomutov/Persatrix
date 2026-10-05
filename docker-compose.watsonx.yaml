@@ -10,7 +10,8 @@
 # Provider selection is config-driven (RFC 0033 — there is no force-knob): this
 # overlay mounts config/demo/watsonx/optimization.yaml over the stack's
 # optimization.yaml, which points the quality / fast / summarizer aliases at
-# `provider: watsonx` (meta-llama/llama-3-3-70b-instruct / ibm/granite-3-8b-instruct).
+# `provider: watsonx` (meta-llama/llama-4-maverick-17b-128e-instruct-fp8 /
+# ibm/granite-4-h-small).
 #
 # THE SECRET/CONFIG SPLIT (RFC 0053 §C/§E) — read before running:
 #   • SECRET  → WATSONX_API_KEY rides compose ENV (below), the same channel the

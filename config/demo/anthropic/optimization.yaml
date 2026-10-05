@@ -21,21 +21,34 @@ active_profile: "default"
 
 models:
   aliases:
+    # Claude Sonnet 5.5, the current Sonnet. It thinks before it answers by
+    # default, at effort `high`; `low` skips thinking on most simple requests,
+    # the closest match to the chat this society mostly does. Raise it to
+    # `medium` for tool-heavy workflow agents (give them their own alias).
+    # `prompt_cache` writes each prompt to Anthropic's cache: the tool
+    # definitions and a turn's later tool rounds then read it at a tenth of
+    # the input price, for a quarter more on the write. The cache's own counts
+    # are in every call's usage. Request settings: docs/guides/model-request-settings.md.
     quality:
       provider: anthropic
-      model: claude-sonnet-4-6
-      input_per_1m_tokens: 3.00
-      output_per_1m_tokens: 15.00
+      model: claude-sonnet-5-5
+      input_per_1m_tokens: 2.00
+      output_per_1m_tokens: 10.00
+      provider_config:
+        effort: low
+        prompt_cache: true
+    # Claude Haiku 4.5, the current Haiku. It does not think unless asked and
+    # rejects `effort`, so it carries no settings.
     fast:
       provider: anthropic
-      model: claude-haiku-4-5-20251001
-      input_per_1m_tokens: 0.80
-      output_per_1m_tokens: 4.00
+      model: claude-haiku-4-5
+      input_per_1m_tokens: 1.00
+      output_per_1m_tokens: 5.00
     summarizer:
       provider: anthropic
-      model: claude-haiku-4-5-20251001
-      input_per_1m_tokens: 0.80
-      output_per_1m_tokens: 4.00
+      model: claude-haiku-4-5
+      input_per_1m_tokens: 1.00
+      output_per_1m_tokens: 5.00
 
 default:
   model_routing:
@@ -60,12 +73,12 @@ cost:
   pricing:
     # Derived from the aliases above (RFC 0033 §F) — one row per physical model.
     models:
-      "claude-sonnet-4-6":
-        input_per_1m_tokens: 3.00
-        output_per_1m_tokens: 15.00
-      "claude-haiku-4-5-20251001":
-        input_per_1m_tokens: 0.80
-        output_per_1m_tokens: 4.00
+      "claude-sonnet-5-5":
+        input_per_1m_tokens: 2.00
+        output_per_1m_tokens: 10.00
+      "claude-haiku-4-5":
+        input_per_1m_tokens: 1.00
+        output_per_1m_tokens: 5.00
   budgets:
     global:
       max_daily_usd: 100.00

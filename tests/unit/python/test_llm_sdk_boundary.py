@@ -278,9 +278,10 @@ async def test_anthropic_normalizes_a_real_tool_use_response() -> None:
 async def test_openai_request_kwargs_survive_the_real_sdk() -> None:
     """The OpenAI half of the same contract.
 
-    ``max_tokens`` is the one to watch: the vendor has been steering callers
-    to ``max_completion_tokens`` for newer models, so a major that finally
-    removes it fails here rather than in production.
+    The reply cap goes out as ``max_completion_tokens``, the field OpenAI
+    moved callers to and its reasoning models require; ``reasoning_effort``
+    comes from the alias. A major that drops either fails here rather than
+    in production.
     """
     provider, recorder = _openai_against(_OPENAI_TEXT_BODY)
 
@@ -291,11 +292,13 @@ async def test_openai_request_kwargs_survive_the_real_sdk() -> None:
         tools=provider.format_tool_definitions(_TOOLS),
         max_tokens=64,
         temperature=0.4,
+        provider_config={"reasoning_effort": "none"},
     )
 
     sent = recorder.sent
     assert sent["model"] == "gpt-4o"
-    assert sent["max_tokens"] == 64
+    assert sent["max_completion_tokens"] == 64
+    assert sent["reasoning_effort"] == "none"
     assert sent["temperature"] == 0.4
     # The provider folds `system` into the message list rather than sending a
     # top-level field, so the contract here is ordering, not a key.
@@ -344,6 +347,85 @@ async def test_openai_normalizes_a_real_tool_call_response() -> None:
     assert call.id == "call_boundary"
     assert call.name == "lookup"
     assert call.input == {"query": "persatrix"}
+
+
+async def test_openai_cache_counts_parse_from_a_real_sdk_response() -> None:
+    """The cache reads and writes _normalize counts apart are fields the
+    SDK's parsed usage model still carries."""
+    body = {
+        **_OPENAI_TEXT_BODY,
+        "usage": {
+            "prompt_tokens": 3000,
+            "completion_tokens": 5,
+            "total_tokens": 3005,
+            "prompt_tokens_details": {"cached_tokens": 2048, "cache_write_tokens": 900},
+        },
+    }
+    provider, _ = _openai_against(body)
+
+    result = await provider.create_message(
+        model="gpt-6-sol", messages=[], system="", tools=[], max_tokens=64, temperature=1.0,
+    )
+
+    assert result.usage.cache_read_tokens == 2048
+    assert result.usage.cache_write_tokens == 900
+    assert result.usage.input_tokens == 52
+
+
+# ─── Request settings and thinking (ISSUE-0169) ─────────────
+
+
+async def test_anthropic_request_settings_survive_the_real_sdk() -> None:
+    """Thinking, effort and the cache markers an alias asks for reach the wire."""
+    provider, recorder = _anthropic_against(_ANTHROPIC_TEXT_BODY)
+
+    await provider.create_message(
+        model="claude-sonnet-5-5",
+        messages=[{"role": "user", "content": "hi"}],
+        system="be brief",
+        tools=provider.format_tool_definitions(_TOOLS),
+        max_tokens=64,
+        temperature=0.4,
+        provider_config={"thinking": "adaptive", "effort": "low", "prompt_cache": True},
+    )
+
+    sent = recorder.sent
+    assert sent["thinking"] == {"type": "adaptive"}
+    assert sent["output_config"] == {"effort": "low"}
+    assert sent["cache_control"] == {"type": "ephemeral"}
+    assert sent["system"][0]["cache_control"] == {"type": "ephemeral"}
+    assert sent["tools"][-1]["cache_control"] == {"type": "ephemeral"}
+
+
+async def test_anthropic_thinking_blocks_round_trip_through_the_real_sdk() -> None:
+    """A thinking block the SDK parses goes back in a tool round with its
+    signature, ahead of the tool call."""
+    body = {
+        **_ANTHROPIC_TOOL_BODY,
+        "content": [
+            {"type": "thinking", "thinking": "", "signature": "sig-boundary"},
+            {
+                "type": "tool_use",
+                "id": "toolu_boundary",
+                "name": "lookup",
+                "input": {"query": "persatrix"},
+            },
+        ],
+    }
+    provider, _ = _anthropic_against(body)
+
+    result = await provider.create_message(
+        model="claude-sonnet-5-5",
+        messages=[{"role": "user", "content": "look it up"}],
+        system="",
+        tools=provider.format_tool_definitions(_TOOLS),
+        max_tokens=64,
+        temperature=0.0,
+    )
+    replayed = provider.append_tool_round([], result, [])[0]["content"]
+
+    assert replayed[0] == {"type": "thinking", "thinking": "", "signature": "sig-boundary"}
+    assert replayed[1]["type"] == "tool_use"
 
 
 # ─── The seam itself ────────────────────────────────────────

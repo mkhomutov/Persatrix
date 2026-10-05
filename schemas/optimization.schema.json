@@ -51,7 +51,33 @@
               },
               "provider_config": {
                 "type": "object",
-                "description": "Provider-specific passthrough settings — e.g. `base_url` for an OpenAI-compatible local endpoint. Alias-level values are authoritative; an agent entry's provider_config fills only the gaps (RFC 0033 §D precedence rule 2)."
+                "description": "Provider-specific passthrough settings — e.g. `base_url` for an OpenAI-compatible local endpoint. Alias-level values are authoritative; an agent entry's provider_config fills only the gaps (RFC 0033 §D precedence rule 2). The request settings named below are applied per call from the alias the call names (ISSUE-0169), so a lane alias riding another seat's provider keeps its own; see docs/guides/model-request-settings.md. Other keys are left open.",
+                "properties": {
+                  "thinking": {
+                    "enum": ["adaptive", "disabled", "between_tools"],
+                    "description": "anthropic: the thinking type sent on every call. Claude Sonnet 5.5 and Opus 5.5 reject `disabled`; `between_tools` is Sonnet 5.5 only. Omit to leave the model default."
+                  },
+                  "effort": {
+                    "enum": ["low", "medium", "high", "xhigh", "max"],
+                    "description": "anthropic: output_config.effort — how much the model thinks and writes. Not every model takes every level; Claude Haiku 4.5 takes none. Omit to leave the model default."
+                  },
+                  "prompt_cache": {
+                    "type": "boolean",
+                    "description": "anthropic: true writes each prompt to Anthropic's cache (markers after the tools and the system prompt, plus the whole request) so later calls that share a prefix read it at a tenth of the input price; each write costs 1.25 times input. Omit or false: no cache marker."
+                  },
+                  "reasoning_effort": {
+                    "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+                    "description": "openai / ollama: reasoning_effort. GPT-6 Sol and Luna take tool calls on Chat Completions only at `none`, and only a model reasoning at `none` takes a temperature. Omit to leave the model default."
+                  },
+                  "thinking_level": {
+                    "enum": ["minimal", "low", "medium", "high"],
+                    "description": "gemini: thinking_level, the Gemini 3.x thinking control. Not every model takes every level (gemini-3.8-flash rejects `minimal`). Wins over thinking_budget when both are set."
+                  },
+                  "thinking_budget": {
+                    "type": "integer",
+                    "description": "gemini: the Gemini 2.5 thinking-token cap (0 turns thinking off on 2.5 Flash). Gemini 3.x prefers thinking_level."
+                  }
+                }
               },
               "notes": {
                 "type": "string",

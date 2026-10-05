@@ -55,8 +55,8 @@ is conversation, not tool use); reply *quality*.
   plumbs the secret `WATSONX_API_KEY` plus the non-secret `WATSONX_*` env fallbacks;
   `project_id`/`url`'s source of truth is the mounted config).
 - [config/demo/watsonx/optimization.yaml](../../config/demo/watsonx/optimization.yaml)
-  — the watsonx alias config (`quality` → `meta-llama/llama-3-3-70b-instruct`,
-  `fast`/`summarizer` → `ibm/granite-3-8b-instruct`, priced; `project_id`/`url` in
+  — the watsonx alias config (`quality` → `meta-llama/llama-4-maverick-17b-128e-instruct-fp8`,
+  `fast`/`summarizer` → `ibm/granite-4-h-small`, priced; `project_id`/`url` in
   `provider_config`).
 - [Makefile](../../Makefile) `demo-watsonx` target.
 - [agents/llm_watsonx.py](../../agents/llm_watsonx.py) — `WatsonxProvider`.
@@ -175,7 +175,7 @@ curl -s http://127.0.0.1:8080/api/v1/cost/summary | python3 -m json.tool
 
 **Expected Result**: The span reports **non-zero** `gen_ai.usage.input_tokens` /
 `output_tokens`, `gen_ai.system = watsonx`, and `gen_ai.request.model` a physical
-watsonx id (e.g. `meta-llama/llama-3-3-70b-instruct`, never an alias name).
+watsonx id (e.g. `meta-llama/llama-4-maverick-17b-128e-instruct-fp8`, never an alias name).
 `daily_estimated_usd` **increased** from the baseline — watsonx is a real per-token
 cloud provider, and the priced aliases keep the RFC 0023 budget/lease gate live
 (unlike the $0 offline / Ollama demos).

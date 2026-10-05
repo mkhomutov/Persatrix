@@ -95,10 +95,10 @@ While the discussion runs (and after it closes), read the OTEL traces / the orch
 
 | Seat | Persona | `gen_ai.system` | Physical model |
 |------|---------|-----------------|----------------|
-| convener | `nova-sparrow` | `anthropic` | `claude-sonnet-4-6` |
-| chair | `ember-owl` | `openai` | `gpt-4o` |
-| participant | `iron-fox` | `gemini` | `gemini-3.5-flash` |
-| participant | `slate-heron` | `watsonx` | `meta-llama/llama-3-3-70b-instruct` |
+| convener | `nova-sparrow` | `anthropic` | `claude-sonnet-5-5` |
+| chair | `ember-owl` | `openai` | `gpt-6-sol` |
+| participant | `iron-fox` | `gemini` | `gemini-3.8-flash` |
+| participant | `slate-heron` | `watsonx` | `meta-llama/llama-4-maverick-17b-128e-instruct-fp8` |
 
 **Pass**: every seat authored at least one turn, and each seat's LLM calls file under **its** `gen_ai.system` (four distinct vendors observed in one interaction) — no seat silently fell back to another provider, and no seat resolved to `mock`/`ollama`.
 

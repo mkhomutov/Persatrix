@@ -65,7 +65,7 @@ the deflection contract.
 - ☐ Linux (Ubuntu 22.04+)
 
 **Dependencies**:
-- A provider key for the live step (`OPENAI_API_KEY` for the demo `quality`→`gpt-4o` alias, or `ANTHROPIC_API_KEY`).
+- A provider key for the live step (`OPENAI_API_KEY` for the demo `quality`→`gpt-6-sol` alias, or `ANTHROPIC_API_KEY`).
 - Orchestrator + persona agent runnable via the docker-compose stack.
 
 ### Application State

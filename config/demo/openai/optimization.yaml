@@ -17,23 +17,35 @@ active_profile: "default"
 
 models:
   aliases:
-    # gpt-4o for the quality role; gpt-4o-mini for the cheaper fast /
-    # summarizer roles. OpenAI list pricing (USD per 1M tokens).
+    # GPT-6 Sol for the quality role; GPT-6 Luna, OpenAI's cheapest current
+    # model, for the fast / summarizer roles. OpenAI list pricing (USD per 1M
+    # tokens). Both reason, and on Chat Completions they take tool calls only
+    # at `reasoning_effort: none`, which also keeps the agents' temperature
+    # and leaves the short summary calls their whole token budget. OpenAI
+    # caches repeated prompt prefixes by itself (a read costs a tenth of the
+    # input price, a write a quarter more). GPT-6 Astra, the flagship, takes no
+    # tools on Chat Completions. Request settings: docs/guides/model-request-settings.md.
     quality:
       provider: openai
-      model: gpt-4o
-      input_per_1m_tokens: 2.50
+      model: gpt-6-sol
+      input_per_1m_tokens: 2.00
       output_per_1m_tokens: 10.00
+      provider_config:
+        reasoning_effort: none
     fast:
       provider: openai
-      model: gpt-4o-mini
-      input_per_1m_tokens: 0.15
-      output_per_1m_tokens: 0.60
+      model: gpt-6-luna
+      input_per_1m_tokens: 0.10
+      output_per_1m_tokens: 0.50
+      provider_config:
+        reasoning_effort: none
     summarizer:
       provider: openai
-      model: gpt-4o-mini
-      input_per_1m_tokens: 0.15
-      output_per_1m_tokens: 0.60
+      model: gpt-6-luna
+      input_per_1m_tokens: 0.10
+      output_per_1m_tokens: 0.50
+      provider_config:
+        reasoning_effort: none
 
 default:
   model_routing:
@@ -60,12 +72,12 @@ cost:
     # RFC 0023 budget/lease gate live (a real per-token cost accrues), so the
     # wallet-cap demo trips here, unlike the $0-local offline / ollama demos.
     models:
-      "gpt-4o":
-        input_per_1m_tokens: 2.50
+      "gpt-6-sol":
+        input_per_1m_tokens: 2.00
         output_per_1m_tokens: 10.00
-      "gpt-4o-mini":
-        input_per_1m_tokens: 0.15
-        output_per_1m_tokens: 0.60
+      "gpt-6-luna":
+        input_per_1m_tokens: 0.10
+        output_per_1m_tokens: 0.50
   budgets:
     global:
       max_daily_usd: 100.00

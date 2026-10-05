@@ -103,6 +103,22 @@ class TestRunLlmLoopEndTurn:
         assert output.metadata["tokens_used"] == "30"
         assert output.metadata["tool_calls"] == "0"
 
+    async def test_tokens_used_counts_the_cached_part_of_the_prompt(self):
+        # A provider that caches reports what it wrote to and read from its
+        # cache apart from input_tokens (ISSUE-0169); a step's total still
+        # counts the whole prompt.
+        agent = _make_agent(
+            responses=[
+                LLMResponse(
+                    text="Hello!",
+                    stop_reason=StopReason.END_TURN,
+                    usage=Usage(10, 20, cache_write_tokens=300, cache_read_tokens=4000),
+                )
+            ]
+        )
+        output = await agent.handle(_task())
+        assert output.metadata["tokens_used"] == "4330"
+
     async def test_empty_text_response(self):
         agent = _make_agent(
             responses=[LLMResponse(text=None, stop_reason=StopReason.END_TURN)]

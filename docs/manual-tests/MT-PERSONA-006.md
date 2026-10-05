@@ -61,7 +61,7 @@ cross-room memory (F-3 / PR 4–5); the transcript reconstruction itself
 ### Application State
 
 - ☐ Persona declared in [`config/agents.yaml`](../../config/agents.yaml) (e.g. `ember-owl`).
-- ☐ A provider key for the live step (`OPENAI_API_KEY` for the demo `quality`→`gpt-4o` alias, or `ANTHROPIC_API_KEY`).
+- ☐ A provider key for the live step (`OPENAI_API_KEY` for the demo `quality`→`gpt-6-sol` alias, or `ANTHROPIC_API_KEY`).
 - ☐ **Prompts are baked into the agent image** (not bind-mounted). After editing the snippet, rebuild before the live step: `docker compose up -d --build`.
 
 ---

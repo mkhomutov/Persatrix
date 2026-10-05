@@ -313,6 +313,21 @@ Process vocabulary (scope lock, cuttable, live arc, finding, …) lives in the
 - **Example:** "EXP-001's arm D′ has no memory; its advisers' prompt prefix
   is the full transcripts of the series' earlier meetings."
 
+### Request Settings
+- **Aliases:** none
+- **Disallowed:** "model options" (they belong to an alias, not a model)
+- **Definition:** The keys of a model alias's `provider_config` that a
+  provider applies to every request it sends through that alias: how much
+  the model thinks (`effort`, `thinking`, `reasoning_effort`,
+  `thinking_level`) and whether the prompt goes to the provider's cache
+  (`prompt_cache`). `LLMClient` hands them over per call, so a lane alias
+  (the `fast` bid, the `summarizer` close) that rides the provider built
+  for an agent's own alias still gets its own
+  ([model request settings guide](guides/model-request-settings.md)).
+- **Example:** "The anthropic demo's `quality` alias sets `effort: low`, so
+  Claude Sonnet 5.5 skips thinking on simple turns; the `fast` bids it
+  rides with set nothing, so Haiku gets no effort it would reject."
+
 ### Prefix Keep-Alive
 - **Aliases:** "keep-alive" (where the prefix is clear)
 - **Disallowed:** "heartbeat", "ping" (it is a model call, logged and priced)
