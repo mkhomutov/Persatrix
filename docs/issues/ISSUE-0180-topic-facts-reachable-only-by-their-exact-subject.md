@@ -109,4 +109,7 @@ Whichever lands, check which golden traces move and re-record them.
 > fix covers only facts from one extraction. If option 1 here makes
 > records reuse a stored subject, two records closed at the same instant
 > will write the same key routinely, and the one whose extraction
-> finishes later replaces the other's facts. Decide the two together.
+> finishes later replaces the other's facts. Two such writes that
+> overlap can leave neither live
+> ([ISSUE-0183](ISSUE-0183-overlapping-fact-writes-leave-no-live-fact.md)).
+> Decide them together.

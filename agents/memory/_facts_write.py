@@ -121,6 +121,10 @@ async def insert_fact(
     # caller passing the tracker's empty-string sentinel cannot mint a
     # third speaker state alongside NULL and a real id.
     speaker_id = speaker_id or None
+    # ISSUE-0181: the same fold for the source id.  Supersession now reads
+    # a non-NULL source as "written by one extraction", so an empty
+    # string must not become a source that unrelated rows share.
+    source_interaction_id = source_interaction_id or None
     if not subject or not subject.strip():
         raise ValueError("subject must not be empty")
     if not 0.0 <= certainty <= 1.0:

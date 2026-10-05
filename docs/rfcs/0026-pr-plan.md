@@ -282,6 +282,7 @@ The two items deferred from PR 1 review **both shipped in PR 5a** —
   equal-timestamp later-arrival wins, three-write out-of-order chain,
   cross-predicate isolation, per-agent ACL.  RFC §F was amended in the
   same PR to describe the symmetric shape.
+  > **Correction (2026-10-05), recorded not amended.** "Only one row per `(agent_id, subject, predicate)`" describes PR 5a as merged. The key has since gained the session ([ISSUE-0079](../issues/ISSUE-0079-cross-session-supersede-not-scoped.md)), the principal and the epoch, and since [ISSUE-0181](../issues/ISSUE-0181-facts-extracted-together-supersede-each-other.md) the facts one extraction wrote together stay live together. [RFC 0026 §F](0026-declarative-facts-tier.md#f-salience-and-reinforcement) holds the current rule.
 - **`source_interaction_id` nullability.** Decision locked in PR 5a:
   amend RFC §A to permit `NULL` rather than tighten the column.
   Rationale: three legitimate callers (test fixtures, future RFC 0013

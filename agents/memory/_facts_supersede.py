@@ -44,7 +44,8 @@ cannot reach across to another non-legacy session.  Two cases:
   supersedes on insert rather than joining the live rows.  Several
   live rows at the newest instant are normal since ISSUE-0181, so the
   forward pass breaks ties on ``rowid``: the new row points at the
-  last-inserted dominator, the row recall lists first.
+  last-inserted dominator, the one recall lists first among this
+  key's rows.
 
 **Facts written together coexist (ISSUE-0181).**  One interaction close
 stamps every fact it extracts with one ``source_interaction_id`` and
@@ -54,7 +55,8 @@ three constraints on one topic left one.  The older sweep now skips a
 live row when all three hold:
 
 * it has the new row's non-NULL ``source_interaction_id`` (NULL means
-  no known source, so unsourced rows are never "written together");
+  no known source, so unsourced rows are never "written together";
+  the write path stores an empty id as NULL);
 * it has the new row's ``asserted_at`` (source plus stamp identifies
   one extraction, so the same source at a later time is still an
   update);
@@ -195,8 +197,12 @@ async def apply_supersession(
     * **Older sweep** spans ``(session_id, legacy)`` — an active-session
       write absorbs older ``legacy`` predecessors (the upgrade hot-path:
       a pre-RFC fact reasserted under a pinned session), so the active
-      session sees a single live row rather than the legacy row and the
-      reassertion both surfacing through the carve-out.
+      session sees only the reassertion, not the legacy row beside it
+      through the carve-out.  The ISSUE-0181 exception is not scoped to
+      the session: a ``legacy`` row carrying the new row's source and
+      ``asserted_at`` with a different object is spared like any other
+      row written with it.  No extraction writes that (one close, one
+      session); only a direct caller can.
     * **Newer dominator** stays exact (``session_id`` only) — a
       ``legacy`` row never supersedes a named session's write ("but not
       vice versa").

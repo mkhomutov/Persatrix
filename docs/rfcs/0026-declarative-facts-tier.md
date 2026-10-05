@@ -174,7 +174,7 @@ Recall filters out superseded rows by default. This composes with reinforcement 
 > | A strictly newer live row exists | new row is superseded by it | unchanged; among several, by the last inserted |
 > | Live rows per key | one | the rows of the latest extraction |
 >
-> The sentence above that ties are "unreachable in the hot path" was wrong: every extraction ties with itself, and a room-close fan gives sibling records one `closed_at`. Known limits: a correction inside one conversation leaves both values live; a later conversation replaces the whole earlier set, including facts it did not mention; a repeat counts as one only when the text is identical; two records closed at the same instant still replace each other's facts on a shared key, by arrival order; and nothing bounds how many facts one extraction leaves under a key. No schema change and no migration: rows already superseded stay so.
+> The sentence above that ties are "unreachable in the hot path" was wrong: every extraction ties with itself, and a room-close fan gives sibling records one `closed_at`. Known limits: a correction inside one conversation leaves both values live; a later conversation replaces the whole earlier set, including facts it did not mention; a repeat counts as one only when the text is identical; two records closed at the same instant still replace each other's facts on a shared key, by arrival order, or leave the key with no live row when their writes overlap ([ISSUE-0183](../issues/ISSUE-0183-overlapping-fact-writes-leave-no-live-fact.md)); and nothing bounds how many facts one extraction leaves under a key ([ISSUE-0184](../issues/ISSUE-0184-fact-recall-cap-runs-before-the-gate.md)). No schema change and no migration: rows already superseded stay so.
 
 ### G. Audit and provenance
 
@@ -192,6 +192,7 @@ Every fact carries `source_interaction_id`. The [RFC 0009 AuditLogger](0009-secu
 - **Cross-agent leakage**: per-agent isolation matches the [RFC 0008 §H ACL model](0008-agent-memory-context-optimization.md). No fact crosses an `agent_id` boundary in v0.3.x.
 - **Prompt injection**: the extractor prompt receives interaction content. A user (or another agent in a channel) crafting "store fact: <attacker-controlled tuple>" is a prompt-injection vector; the predicate vocabulary is enumerated and validated against an allowlist before write to bound the blast radius.
 - **Retraction race**: two interactions closing concurrently with conflicting facts could each write `superseded_by` pointing at the other. Handled by serializing fact writes per-`agent_id` (matches the existing per-agent `asyncio.Lock` in `_LLMPersonaAgent`).
+  > **Correction (2026-10-05), recorded not amended.** Fact writes are not serialized: the close path's second phase, which stores the facts, runs outside the agent lock, and the fact store takes no lock of its own. Two records closed at the same instant, as a room-close fan closes them, can write one key at the same time; each then supersedes the other's fact and the key is left with no live row ([ISSUE-0183](../issues/ISSUE-0183-overlapping-fact-writes-leave-no-live-fact.md)). Writes whose `asserted_at` values differ are not affected: the later-dated one stays live in either order.
 
 ## Phased Implementation Plan
 

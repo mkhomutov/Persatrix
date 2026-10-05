@@ -96,7 +96,13 @@ class TestFactsFromOneExtractionCoexist:
     async def test_distinct_facts_from_one_extraction_all_stay_live(
         self, fact_store: FactStore,
     ):
-        """The issue's case: three constraints from one briefing."""
+        """The issue's case: three constraints from one briefing.
+
+        Stamped the way a real close is, with a fractional second.  The
+        rule matches the instant exactly, and every other case here uses
+        whole seconds, which a match that rounded the instant would
+        pass too.
+        """
         ids = await _store_together(
             fact_store,
             [
@@ -104,7 +110,7 @@ class TestFactsFromOneExtractionCoexist:
                 "ticket price ceiling is $25",
                 "lighting crew limited to two people",
             ],
-            source="ix-1", at=1000.0,
+            source="ix-1", at=2106900777.7129362,
         )
         pointers = await _superseded_by(fact_store)
         assert [pointers[i] for i in ids] == [None, None, None]
@@ -169,6 +175,25 @@ class TestFactsFromOneExtractionCoexist:
         assert [pointers[b], pointers[second_a]] == [None, None]
         assert await _live_objects(fact_store) == ["a", "b"]
 
+    async def test_near_repeat_is_a_different_fact(
+        self, fact_store: FactStore,
+    ):
+        """Pins a known limit: a repeat counts only when the text is identical.
+
+        Objects are compared exactly, so a change of case or a trailing
+        space makes a different fact and all three rows stay live.
+        Folding case or trimming before the comparison must be a
+        deliberate change to this test.
+        """
+        cap = "ticket price ceiling is $25"
+        objects = [cap, "Ticket price ceiling is $25", cap + " "]
+        ids = await _store_together(
+            fact_store, objects, source="ix-1", at=1000.0,
+        )
+        pointers = await _superseded_by(fact_store)
+        assert [pointers[i] for i in ids] == [None, None, None]
+        assert await _live_objects(fact_store) == objects[::-1]
+
     async def test_active_session_facts_absorb_a_legacy_row_once(
         self, fact_store: FactStore,
     ):
@@ -200,6 +225,36 @@ class TestFactsFromOneExtractionCoexist:
         pointers = await _superseded_by(fact_store)
         assert [pointers[i] for i in ids] == [None, None]
 
+    async def test_legacy_row_with_the_batch_stamp_stays_live(
+        self, fact_store: FactStore,
+    ):
+        """Pins a known edge: the exception is per source, not per session.
+
+        No extraction can produce this: one close writes in one
+        session.  A direct caller can, and then a ``legacy`` row with a
+        named batch's source and instant counts as written with it: it
+        stays live, and every session keeps reading it through the
+        ``legacy`` carve-out until a later conversation speaks about
+        the key.  Scoping the exception to the session must be a
+        deliberate change to this test.
+        """
+        (legacy,) = await _store_together(
+            fact_store, ["old"], source="ix-1", at=1000.0,
+            session_id="legacy",
+        )
+        x, y = await _store_together(
+            fact_store, ["x", "y"], source="ix-1", at=1000.0,
+            session_id="run-a",
+        )
+        pointers = await _superseded_by(fact_store)
+        assert [pointers[legacy], pointers[x], pointers[y]] == [
+            None, None, None,
+        ]
+        other = await fact_store.recall(
+            subject=_TOPIC, sessions=["run-b", "legacy"],
+        )
+        assert [r.object for r in other] == ["old"]
+
     async def test_another_source_at_the_same_instant_replaces_them_all(
         self, fact_store: FactStore,
     ):
@@ -227,13 +282,33 @@ class TestFactsFromOneExtractionCoexist:
         """Pin (passes before the fix): source alone is not "together".
 
         A fact re-derived from the same source at a later time is an
-        update, so it replaces the earlier one.
+        update, so it replaces the earlier one.  Half a second later is
+        enough: the two times must be equal, not merely close.
         """
         (a,) = await _store_together(
             fact_store, ["a"], source="replay-1", at=1000.0,
         )
         (b,) = await _store_together(
+            fact_store, ["b"], source="replay-1", at=1000.5,
+        )
+        pointers = await _superseded_by(fact_store)
+        assert pointers[a] == b
+        assert await _live_objects(fact_store) == ["b"]
+
+    async def test_same_source_older_write_arriving_late_is_superseded(
+        self, fact_store: FactStore,
+    ):
+        """Pin (passes before the fix): the same pair in the other order.
+
+        An older fact that arrives after a newer one from the same
+        source is superseded as it is written.  Sharing a source does
+        not keep it live.
+        """
+        (b,) = await _store_together(
             fact_store, ["b"], source="replay-1", at=2000.0,
+        )
+        (a,) = await _store_together(
+            fact_store, ["a"], source="replay-1", at=1000.0,
         )
         pointers = await _superseded_by(fact_store)
         assert pointers[a] == b
@@ -272,3 +347,22 @@ class TestFactsFromOneExtractionCoexist:
         pointers = await _superseded_by(fact_store)
         assert pointers[a] == b
         assert await _live_objects(fact_store) == ["b"]
+
+    async def test_empty_string_source_counts_as_no_source(
+        self, fact_store: FactStore,
+    ):
+        """An empty source id is no source, not a source rows can share.
+
+        The write path stores it as NULL, so two such rows at one
+        instant keep the tie rule like any other unsourced pair.
+        """
+        a, b = await _store_together(
+            fact_store, ["a", "b"], source="", at=1000.0,
+        )
+        pointers = await _superseded_by(fact_store)
+        assert pointers[a] == b
+        assert await _live_objects(fact_store) == ["b"]
+        rows = await fact_store.recall(
+            subject=_TOPIC, include_superseded=True, sessions="*",
+        )
+        assert [r.source_interaction_id for r in rows] == [None, None]

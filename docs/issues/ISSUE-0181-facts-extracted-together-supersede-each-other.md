@@ -19,9 +19,9 @@ refs:
 ## Summary
 
 When a fact is stored, older live rows with the same subject and predicate
-are pointed at it as superseded
-([`_facts_supersede.py`](../../agents/memory/_facts_supersede.py), lines
-174–236). The key is the agent, subject, predicate, session, principal and
+are pointed at it as superseded (`apply_supersession` in
+[`_facts_supersede.py`](../../agents/memory/_facts_supersede.py)). The key
+is the agent, subject, predicate, session, principal and
 epoch; the object, what the fact says, is never part of it. Equal times
 count as older, so the later arrival wins.
 
@@ -55,7 +55,8 @@ fact contradicted later loses its weight
 ([RFC 0026](../rfcs/0026-declarative-facts-tier.md), lines 156–162). It
 also says ties are "unreachable in the hot path" (line 160), which is no
 longer true: every batch ties. The supersede module accepts ties only for
-siblings restating the same claim (lines 46–68). Nothing covers siblings
+siblings restating the same claim (its paragraph that begins
+"Equal-timestamp ties"). Nothing covers siblings
 that say different things, or predicates that hold several true values at
 once, such as `topic.decided` or `topic.has_deadline`.
 [ISSUE-0079](ISSUE-0079-cross-session-supersede-not-scoped.md) scoped the
@@ -98,31 +99,39 @@ replaces the whole earlier set, an older write that arrives late is
 still superseded, and rows from another source, or with no source, keep
 the tie rule.
 
-Two choices go beyond the letter of option 1. Each is one line and can
-be dropped on its own:
+Three choices go beyond the letter of option 1. Each is one line and
+can be dropped on its own:
 
 - **A word-for-word repeat still leaves one row.** If one extraction
   lists the same object twice, the second copy supersedes the first, so
   the prompt does not print one fact twice.
 - **A late older write points at the last fact inserted.** Several rows
   can now be live at the newest instant. The row that supersedes a late
-  older write is the last one inserted, the one recall lists first.
+  older write is the last one inserted, the one recall lists first among
+  that key's rows.
+- **An empty source id is stored as no source.** The rule reads a
+  source id as "written by one extraction", so an empty string must
+  not become a source that unrelated rows share. No extraction writes
+  one; only a direct caller can.
 
 Measured on arm D's four practice stores: replaying their 121 fact rows
 through the fixed write path leaves none superseded, where the run had
-14. Eleven subject-and-predicate keys now hold two or three live rows,
-and the three briefing constraints are live in each of the three stores
-that extracted them. The same replay through the unfixed code reproduces
+14. Eleven subject-and-predicate keys now hold two or three live rows.
+The three `event planning | topic.decided` facts are live in each of
+the three stores that hold them. The fourth store filed the same
+constraints under `event plan`, and both `topic.decided` rows it wrote
+there are live too. The same replay through the unfixed code reproduces
 the 14.
 
 Tests:
 [`test_fact_store_written_together.py`](../../tests/unit/python/test_fact_store_written_together.py)
 pins the rule under each write order.
 [`test_facts_written_together.py`](../../tests/unit/python/test_facts_written_together.py)
-follows three facts from the extractor to the prompt and the audit
-trail. Eleven of the new tests fail on the unfixed code. No existing
-test changed its outcome, and the six stable golden traces replay
-unchanged.
+follows three facts from the extractor, through the recall step the
+runtime uses, to the prompt and the audit trail. Fourteen of the
+nineteen new tests fail on the unfixed code; the rest pin cases the
+rule must leave alone. No existing test changed its outcome, and the
+six stable golden traces replay unchanged.
 
 ## Slot: merges before EXP-001, by the maintainer's call of 2026-10-02
 
@@ -158,14 +167,35 @@ unchanged.
 >    order. Two such writes that overlap can supersede each other and
 >    leave no live row: two gathered store calls did so in 100 runs of
 >    100, with and without this fix, and the close path's second phase
->    runs outside the agent lock. The practice run had no such pair. It
+>    runs outside the agent lock
+>    ([ISSUE-0183](ISSUE-0183-overlapping-fact-writes-leave-no-live-fact.md)).
+>    The practice run had no such pair. It
 >    would become routine if
 >    [ISSUE-0180](ISSUE-0180-topic-facts-reachable-only-by-their-exact-subject.md)
 >    makes records reuse a stored subject, so the two are decided
 >    together.
 > 4. Nothing bounds how many facts one extraction leaves under a key,
 >    and the facts section shares one token budget across subjects.
+>    What does not fit is cut oldest first, and inside one extraction
+>    the facts it listed first are the first cut. Recall also reads
+>    only a subject's 20 newest live facts before the confidentiality
+>    gate runs, and one conversation can now fill those
+>    ([ISSUE-0184](ISSUE-0184-fact-recall-cap-runs-before-the-gate.md)).
 > 5. In arm D each meeting is its own session, so a later meeting never
 >    supersedes an earlier meeting's fact.
 > 6. Option 2 above, predicates that hold several values by design,
 >    stays open.
+> 7. A repeat counts as one only when the text is identical. A change
+>    of case or a trailing space makes a second live fact.
+> 8. The exception is not scoped to the session. A `legacy` row that
+>    carries a named session's source and time is kept beside that
+>    session's facts. No extraction writes that; a direct caller can.
+>
+> "Conversation" in limits 1 and 2 means one interaction record: one
+> speaker's turns in one channel between an open and a close. A group
+> channel holds one record per speaker heard, and a speaker can have
+> more than one in a meeting. So "a later conversation" includes
+> another record of the same meeting that closes later, and facts two
+> speakers state under one subject and predicate still replace each
+> other. Supersession is also per session, so per channel: a later
+> conversation in another channel replaces nothing.

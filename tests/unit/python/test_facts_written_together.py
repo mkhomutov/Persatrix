@@ -21,8 +21,12 @@ import pytest
 
 from agents.memory.facts import FactStore
 from agents.persona_runtime.fact_extractor import store_extracted_facts
-from agents.persona_runtime.facts_section import render_facts_section
+from agents.persona_runtime.facts_section import (
+    recall_facts_for_event,
+    render_facts_section,
+)
 from agents.persona_runtime.memory_budget import MemoryBudget
+from agents.persona_types import AgentEvent, EventType
 
 _TOPIC = "event planning"
 _BRIEFING = [
@@ -95,25 +99,32 @@ class TestOneCloseKeepsEveryFact:
             fact_store,
             facts=[
                 # The extractor canonicalises the subject, so a
-                # capitalised variant lands under the same key.
+                # capitalised variant lands under the same key.  Each
+                # tuple also carries its own certainty, the only other
+                # value that differs between the facts one close writes
+                # about one topic; it must not decide which stay live.
                 {
                     "subject": "Event Planning",
                     "predicate": "topic.decided",
                     "object": _BRIEFING[0],
+                    "certainty": 1.0,
                 },
                 {
                     "subject": _TOPIC,
                     "predicate": "topic.decided",
                     "object": _BRIEFING[1],
+                    "certainty": 0.95,
                 },
                 {
                     "subject": _TOPIC,
                     "predicate": "topic.decided",
                     "object": _BRIEFING[2],
+                    "certainty": 0.9,
                 },
             ],
             source_interaction_id="ix-1",
-            asserted_at=1000.0,
+            # A real close time has a fractional second.
+            asserted_at=2106900777.7129362,
             session_id="legacy",
         )
         assert stored == 3
@@ -146,9 +157,23 @@ class TestPromptListsFactsWrittenTogether:
     async def test_facts_section_lists_each_row_once_under_one_header(
         self, fact_store: FactStore,
     ):
-        """All three constraints reach the prompt, under one header."""
+        """All three constraints reach the prompt, under one header.
+
+        The facts come through the recall step the runtime uses,
+        which finds the topic from the words of the question.
+        """
         await _extract(fact_store, _BRIEFING)
-        facts = await fact_store.recall(subject=_TOPIC)
+        question = "Where are we on event planning?"
+        facts = await recall_facts_for_event(
+            fact_store,
+            AgentEvent(
+                event_type=EventType.CHANNEL_MESSAGE,
+                payload={"content": question},
+                channel_id="group:standup",
+                sender_id="bob",
+            ),
+            stimulus=question,
+        )
         budget = MemoryBudget(total_tokens=500)
         section = render_facts_section(
             facts, budget, facts_budget_tokens=500,
