@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 # SDK). Surface the same actionable install hint on both Ollama entry points.
 _OLLAMA_IMPORT_ERROR = (
     "Provider 'ollama' requires package 'openai' (Ollama speaks the "
-    "OpenAI-compatible API). Install with: pip install 'openai>=1.50.0'"
+    "OpenAI-compatible API). Install with: pip install 'openai>=1.58.0'"
 )
 
 
@@ -114,11 +114,13 @@ def create_provider(agent_config: dict[str, Any]) -> tuple[LLMProvider, str]:
         # PR-review SF1: Surface a clear install instruction instead of a
         # raw ImportError traceback when the SDK package is missing.
         try:
-            return AnthropicProvider(api_key=api_key), physical_model
+            return AnthropicProvider(
+                api_key=api_key, provider_config=provider_config,
+            ), physical_model
         except ImportError:
             raise SystemExit(
                 "Provider 'anthropic' requires package 'anthropic'. "
-                "Install with: pip install 'anthropic>=0.40.0'"
+                "Install with: pip install 'anthropic>=0.83.0'"
             )
     elif provider == "openai":
         openai_base_url = provider_config.get("base_url")
@@ -132,11 +134,12 @@ def create_provider(agent_config: dict[str, Any]) -> tuple[LLMProvider, str]:
             return OpenAIProvider(
                 api_key=api_key,
                 base_url=openai_base_url,
+                provider_config=provider_config,
             ), physical_model
         except ImportError:
             raise SystemExit(
                 "Provider 'openai' requires package 'openai'. "
-                "Install with: pip install 'openai>=1.50.0'"
+                "Install with: pip install 'openai>=1.58.0'"
             )
     elif provider == "gemini":
         # Native google-genai provider (RFC 0053 §B; OQ #1 → native, not the
@@ -162,7 +165,7 @@ def create_provider(agent_config: dict[str, Any]) -> tuple[LLMProvider, str]:
         except ImportError:
             raise SystemExit(
                 "Provider 'gemini' requires package 'google-genai'. "
-                "Install with: pip install 'google-genai>=1.0.0' "
+                "Install with: pip install 'google-genai>=1.56.0' "
                 "(or the extra: pip install 'persatrix-agents[gemini]')"
             )
     elif provider == "watsonx":

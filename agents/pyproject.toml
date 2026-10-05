@@ -52,14 +52,21 @@ dependencies = [
     # `.github/dependabot.yml`, which stops the monthly sweep re-proposing the
     # widening this cap exists to refuse. The port is tracked in
     # docs/issues/ISSUE-0144-anthropic-sdk-pinned-below-1x.md.
-    "anthropic>=0.40.0,<1",
-    # <4 admits openai 2.x and 3.x. Checked against 3.8.0 on the surface this
+    # The 0.83.0 floor is the first release whose `messages.create` takes the
+    # request settings an alias can ask for (ISSUE-0169): `thinking` of type
+    # adaptive and `output_config` (0.80.0), and the top-level `cache_control`
+    # that `prompt_cache` sends (0.83.0); older releases raise a TypeError.
+    "anthropic>=0.83.0,<1",
+    # <4 admits openai 2.x and 3.x. Checked against 3.19.2 on the surface this
     # tree actually touches — AsyncOpenAI(api_key, base_url),
-    # chat.completions.create(model, messages, max_tokens, temperature, tools),
-    # and the fields _normalize reads back (choices[].message.tool_calls[]
-    # .function, finish_reason, usage.prompt_tokens/completion_tokens) — all
-    # still present.
-    "openai>=1.50.0,<4",
+    # chat.completions.create(model, messages, max_tokens or
+    # max_completion_tokens, temperature, tools, reasoning_effort), and the
+    # fields _normalize reads back (choices[].message.tool_calls[].function,
+    # finish_reason, usage.prompt_tokens/completion_tokens and
+    # prompt_tokens_details.cached_tokens/cache_write_tokens) — all present.
+    # The 1.58.0 floor is the first release that takes `reasoning_effort`,
+    # which an alias can ask for (ISSUE-0169); older ones raise a TypeError.
+    "openai>=1.58.0,<4",
     "opentelemetry-api>=1.28.0,<2",
     "opentelemetry-sdk>=1.28.0,<2",
     "opentelemetry-exporter-otlp-proto-http>=1.28.0,<2",
@@ -127,8 +134,10 @@ dev = [
 # `create_provider` gemini branch surfaces an actionable `ImportError →
 # SystemExit` install hint when the extra is not present. The native
 # `google-genai` SDK (RFC 0053 OQ #1 — not the OpenAI-compat endpoint).
+# The 1.56.0 floor is the first release whose ThinkingConfig takes every
+# `thinking_level` an alias can ask for (`minimal` and `medium` arrived then).
 gemini = [
-    "google-genai>=1.0.0,<3",
+    "google-genai>=1.56.0,<3",
 ]
 # watsonx.ai native SDK — the `create_provider` watsonx branch surfaces the
 # actionable `ImportError → SystemExit` install hint when this extra is absent.

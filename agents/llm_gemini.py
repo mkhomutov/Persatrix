@@ -34,10 +34,11 @@ instead of degrading like ``AnthropicProvider`` does.
 
 **provider_config.** Optional. ``project`` + ``location`` route through Vertex
 AI (``genai.Client(vertexai=True, …)``); otherwise the default Gemini Developer
-API path uses the API key. An optional ``thinking_budget`` caps (or, at ``0`` on
-Flash, disables) the Gemini-2.5 reasoning reserve — see ``create_message``.
-These mirror OpenAI's ``base_url`` — provider *configuration* the factory
-threads from the alias/agent entry.
+API path uses the API key. These mirror OpenAI's ``base_url`` — provider
+*configuration* the factory threads from the alias/agent entry. An optional
+``thinking_level`` (Gemini 3.x) or ``thinking_budget`` (Gemini 2.5) sets the
+reasoning reserve — see ``create_message``; it is a request setting, applied
+per call from the alias the call names (ISSUE-0169).
 """
 
 from __future__ import annotations
@@ -73,11 +74,25 @@ _ROLE_MAP: dict[str, str] = {
     "model": "model",
 }
 
+# Google deprecated the sampling parameters for Gemini 3.x and asks callers to
+# leave temperature at its default (values below 1.0 can make the model loop).
+# These prefixes name the families that still take one; every other model is
+# sent none, so a newly released model works without a change here.
+_TEMPERATURE_MODEL_PREFIXES: tuple[str, ...] = ("gemini-1", "gemini-2", "gemma")
+
+# Models already warned about, so a dropped temperature is logged once per model.
+_warned_no_temperature: set[str] = set()
+# Thinking levels already warned about for an alias that also sets a budget.
+_warned_level_and_budget: set[str] = set()
+
 
 class GeminiProvider:
     """Wraps ``google.genai.Client``, translates to/from :class:`LLMResponse`."""
 
     name = "gemini"
+    # LLMClient hands the calling alias's ``provider_config`` only to a
+    # provider that says True here.
+    accepts_provider_config = True
 
     def __init__(
         self,
@@ -124,29 +139,54 @@ class GeminiProvider:
         tools: list,
         max_tokens: int,
         temperature: float,
+        provider_config: dict[str, Any] | None = None,
     ) -> LLMResponse:
-        config: dict[str, Any] = {
-            "temperature": temperature,
-            "max_output_tokens": max_tokens,
-        }
+        """Send one request. ``provider_config`` is the calling alias's,
+        which ``LLMClient`` hands over per call; its thinking setting
+        replaces the one this provider was built with. The client itself
+        (Vertex project and location) stays as built."""
+        settings = self._provider_config if provider_config is None else provider_config
+        config: dict[str, Any] = {"max_output_tokens": max_tokens}
+        if model.startswith(_TEMPERATURE_MODEL_PREFIXES):
+            config["temperature"] = temperature
+        elif model not in _warned_no_temperature:
+            _warned_no_temperature.add(model)
+            logger.warning(
+                "Sending %r no temperature (the caller asked for %s): Google "
+                "deprecated it for Gemini 3.x and asks for the default",
+                model, temperature,
+            )
         if system:
             config["system_instruction"] = system
         if tools:
             config["tools"] = tools
 
-        # Gemini 2.5 models think by default, and thinking tokens are drawn
-        # from the *same* ``max_output_tokens`` budget as the visible reply
-        # (see ``_map_usage``). So a low ``max_tokens`` — e.g. the 64–256 token
+        # Gemini models think by default, and thinking tokens are drawn from
+        # the *same* ``max_output_tokens`` budget as the visible reply (see
+        # ``_map_usage``). So a low ``max_tokens`` — e.g. the 64–256 token
         # working-memory / summarisation calls that route to the ``summarizer``
-        # / ``fast`` (Flash) aliases — can be consumed entirely by thinking and
+        # / ``fast`` aliases — can be consumed entirely by thinking and
         # truncate the reply to *empty* (finish_reason MAX_TOKENS, no candidate
-        # text). An optional ``thinking_budget`` on ``provider_config`` caps
-        # that reserve, or disables it at ``0`` (Flash only — Pro cannot turn
-        # thinking off, so ``0`` there is a request error); unset leaves the
-        # model default. Threaded as a plain dict — the SDK coerces it to
-        # ``ThinkingConfig`` the same way it coerces the rest of the request.
-        thinking_budget = self._provider_config.get("thinking_budget")
-        if thinking_budget is not None:
+        # text). ``thinking_level`` on ``provider_config`` sets how much a
+        # Gemini 3.x model thinks (``minimal`` is the least; Gemini 3.x cannot
+        # turn thinking off, and not every model takes every level).
+        # ``thinking_budget`` is the Gemini 2.5 control: it caps the reserve,
+        # or disables it at ``0`` on Flash. A request carrying both is
+        # rejected, so the level wins. Unset leaves the model default.
+        # Threaded as a plain dict — the SDK coerces it to ``ThinkingConfig``
+        # the same way it coerces the rest of the request.
+        thinking_level = settings.get("thinking_level")
+        thinking_budget = settings.get("thinking_budget")
+        if thinking_level:
+            config["thinking_config"] = {"thinking_level": thinking_level}
+            if thinking_budget is not None and thinking_level not in _warned_level_and_budget:
+                _warned_level_and_budget.add(thinking_level)
+                logger.warning(
+                    "Gemini alias sets both thinking_level and thinking_budget; "
+                    "sending thinking_level %r only (a request with both is rejected)",
+                    thinking_level,
+                )
+        elif thinking_budget is not None:
             config["thinking_config"] = {"thinking_budget": thinking_budget}
 
         response = await self._get_client().aio.models.generate_content(
@@ -261,8 +301,8 @@ class GeminiProvider:
         if meta is None:
             return Usage(0, 0)
         # Output tokens = visible candidate tokens + reasoning ("thoughts")
-        # tokens. On Gemini thinking models (this demo's gemini-3.5-flash
-        # aliases included) thinking is on by default and its tokens are
+        # tokens. On Gemini thinking models (every Gemini 3.x model, this
+        # demo's aliases included) thinking is on by default and its tokens are
         # reported in a *separate* ``thoughts_token_count`` field —
         # ``candidates_token_count`` covers only the visible reply. Google bills
         # thoughts at the output rate, so folding them in keeps the derived cost
@@ -272,9 +312,15 @@ class GeminiProvider:
         # absent when no thinking occurred.
         candidate_tokens = getattr(meta, "candidates_token_count", 0) or 0
         thought_tokens = getattr(meta, "thoughts_token_count", 0) or 0
+        # ``prompt_token_count`` includes the tokens Gemini served from its
+        # implicit cache, which are billed at a tenth of the input price, so
+        # they are counted apart, the way the Anthropic adapter counts them.
+        prompt_tokens = getattr(meta, "prompt_token_count", 0) or 0
+        cached_tokens = getattr(meta, "cached_content_token_count", 0) or 0
         return Usage(
-            input_tokens=getattr(meta, "prompt_token_count", 0) or 0,
+            input_tokens=max(prompt_tokens - cached_tokens, 0),
             output_tokens=candidate_tokens + thought_tokens,
+            cache_read_tokens=cached_tokens,
         )
 
     def format_tool_definitions(self, tools: list[dict]) -> list[dict]:

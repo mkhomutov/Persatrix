@@ -106,15 +106,36 @@ _FACTORY_PROVIDER_CLASSES: tuple[type, ...] = (
 )
 
 
+def _alias_provider_config(model_alias: str | None) -> dict[str, Any] | None:
+    """A copy of *model_alias*'s ``provider_config``, or None when the call
+    names no alias or one that does not resolve (the provider then keeps
+    the settings it was built with)."""
+    if not model_alias:
+        return None
+    try:
+        return dict(resolve_model(model_alias).provider_config)
+    except SystemExit:
+        return None
+
+
 class LLMClient:
     """Provider-agnostic LLM client. Delegates to a concrete LLMProvider."""
 
-    def __init__(self, provider: LLMProvider, wallet: WalletClient | None = None):
+    def __init__(
+        self,
+        provider: LLMProvider,
+        wallet: WalletClient | None = None,
+        *,
+        seat_alias: str | None = None,
+    ):
         self._provider = provider
         # RFC 0023 — the wallet is optional and wired post-construction by
         # AgentServer.start() (see set_wallet); LLMClient is built at agent
         # load time, before the orchestrator gRPC channel exists.
         self._wallet = wallet
+        # The alias the provider was built from: its own calls keep the
+        # settings the provider was built with (see create_message).
+        self._seat_alias = seat_alias
 
     def set_wallet(self, wallet: WalletClient | None) -> None:
         """Attach (or replace) the RFC 0023 wallet client.
@@ -179,8 +200,24 @@ class LLMClient:
         (``supports_prompt_cache is True``) sends it marked for the cache,
         ahead of *system*; any other gets it joined onto the front of
         *system*, so the model reads the same words either way.
+
+        A provider that takes per-call settings (``accepts_provider_config
+        is True``) also gets *model_alias*'s ``provider_config``, the
+        thinking, effort and caching settings it applies to this request
+        (ISSUE-0169): a lane on the persona's own vendor rides the persona's
+        provider, which was built with the seat alias's settings, not the
+        lane's. A call through the seat alias itself gets nothing: the
+        provider keeps the settings it was built with, which also hold the
+        agent entry's own ``provider_config`` (RFC 0033 §D rule 2).
         """
         provider = self._provider_for_alias(model_alias)
+        if (
+            getattr(provider, "accepts_provider_config", False) is True
+            and model_alias != self._seat_alias
+        ):
+            alias_config = _alias_provider_config(model_alias)
+            if alias_config is not None:
+                kwargs["provider_config"] = alias_config
         if cache_prefix:
             if getattr(provider, "supports_prompt_cache", False) is True:
                 kwargs["cache_prefix"] = cache_prefix

@@ -226,7 +226,7 @@ def load_agent(
         config_overrides["model_alias"] = configured_model
     if config_overrides:
         agent_config = {**agent_config, **config_overrides}
-    llm_client = LLMClient(provider)
+    llm_client = LLMClient(provider, seat_alias=agent_config.get("model_alias"))
 
     # Create agent based on type
     agent: BaseAgent

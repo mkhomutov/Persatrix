@@ -50,18 +50,60 @@ _TEMPERATURE_MODEL_PREFIXES: tuple[str, ...] = (
 # once per model rather than on every call.
 _warned_no_temperature: set[str] = set()
 
+_CACHE_MARKER: dict[str, str] = {"type": "ephemeral"}
+
+
+def _content_param(block: Any) -> dict[str, Any] | None:
+    """A response content block as the request param that sends it back
+    unchanged, or None for a kind a tool round never replays."""
+    if block.type == "thinking":
+        return {"type": "thinking", "thinking": block.thinking, "signature": block.signature}
+    if block.type == "redacted_thinking":
+        return {"type": "redacted_thinking", "data": block.data}
+    if block.type == "text":
+        return {"type": "text", "text": block.text}
+    if block.type == "tool_use":
+        return {"type": "tool_use", "id": block.id, "name": block.name, "input": block.input}
+    return None
+
 
 class AnthropicProvider:
-    """Wraps anthropic.AsyncAnthropic, translates to LLMResponse."""
+    """Wraps anthropic.AsyncAnthropic, translates to LLMResponse.
+
+    Three request settings come from an alias's ``provider_config``, and an
+    alias that sets none sends a request with none of these fields:
+
+    * ``thinking`` — the thinking type: ``adaptive``, ``disabled``, or (on
+      Claude Sonnet 5.5) ``between_tools``.
+    * ``effort`` — ``low`` to ``max``: how much the model thinks and writes.
+      Claude Sonnet 5.5 defaults to ``high`` and thinks before almost every
+      reply from ``medium`` up; ``low`` skips thinking on most simple ones.
+    * ``prompt_cache`` — ``true`` writes each request's prompt to Anthropic's
+      cache and reads whatever an earlier request already wrote: the last
+      tool definition and the system prompt get markers of their own, so
+      calls that share them read them, and the whole request is marked too,
+      so the next round of a tool loop, which extends it, reads all of it. A
+      write costs 1.25 times the input price and a read a tenth of it, so it
+      pays when calls share a prefix within five minutes, and costs a quarter
+      more on a prompt nothing reuses (ISSUE-0182).
+    """
 
     name = "anthropic"
     # LLMClient hands ``cache_prefix`` only to a provider that says True here.
     supports_prompt_cache = True
+    # ...and the calling alias's ``provider_config`` only to one that says so.
+    accepts_provider_config = True
 
-    def __init__(self, api_key: str | None = None):
+    def __init__(
+        self,
+        api_key: str | None = None,
+        provider_config: dict[str, Any] | None = None,
+    ):
         import anthropic
 
         self._client = anthropic.AsyncAnthropic(api_key=api_key)
+        # The settings for a call that names no alias (see create_message).
+        self._provider_config = dict(provider_config or {})
 
     async def create_message(
         self,
@@ -73,13 +115,20 @@ class AnthropicProvider:
         max_tokens: int,
         temperature: float,
         cache_prefix: str = "",
+        provider_config: dict[str, Any] | None = None,
     ) -> LLMResponse:
         """Send one request. A ``cache_prefix`` goes first in the system
         prompt, marked so Anthropic caches everything up to its end; the
         first call writes the cache and later ones with the same prefix read
-        it. Without one the request carries no cache marker at all.
-        ``temperature`` goes only to a model that accepts it (see
-        ``_TEMPERATURE_MODEL_PREFIXES``)."""
+        it. Without one, and without ``prompt_cache``, the request carries no
+        cache marker at all. ``temperature`` goes only to a model that
+        accepts it (see ``_TEMPERATURE_MODEL_PREFIXES``).
+
+        ``provider_config`` is the calling alias's, which ``LLMClient``
+        hands over per call; its settings replace the ones this provider was
+        built with, whole, so a lane alias that sets none sends none."""
+        settings = self._provider_config if provider_config is None else provider_config
+        cache = settings.get("prompt_cache") is True
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": messages,
@@ -94,18 +143,33 @@ class AnthropicProvider:
                 "in _TEMPERATURE_MODEL_PREFIXES; add it there if it accepts one",
                 model, temperature,
             )
-        if cache_prefix:
-            blocks: list[dict[str, Any]] = [{
-                "type": "text",
-                "text": cache_prefix,
-                "cache_control": {"type": "ephemeral"},
-            }]
+        if settings.get("thinking"):
+            kwargs["thinking"] = {"type": settings["thinking"]}
+        if settings.get("effort"):
+            kwargs["output_config"] = {"effort": settings["effort"]}
+        if cache_prefix or (cache and system):
+            blocks: list[dict[str, Any]] = []
+            if cache_prefix:
+                blocks.append(
+                    {"type": "text", "text": cache_prefix, "cache_control": _CACHE_MARKER},
+                )
             if system:
-                blocks.append({"type": "text", "text": system})
+                block: dict[str, Any] = {"type": "text", "text": system}
+                if cache:
+                    block["cache_control"] = _CACHE_MARKER
+                blocks.append(block)
             kwargs["system"] = blocks
         elif system:
             kwargs["system"] = system
-        if tools:
+        if cache:
+            # Top-level: the API marks the request's last block, so a later
+            # request that extends this one reads all of it.
+            kwargs["cache_control"] = _CACHE_MARKER
+        if tools and cache:
+            # Tools come first in the prompt and stay the same across an
+            # agent's calls, so a marker after them is read turn after turn.
+            kwargs["tools"] = [*tools[:-1], {**tools[-1], "cache_control": _CACHE_MARKER}]
+        elif tools:
             kwargs["tools"] = tools
         response = await self._client.messages.create(**kwargs)
         return self._normalize(response)
@@ -113,14 +177,21 @@ class AnthropicProvider:
     def _normalize(self, response: Any) -> LLMResponse:
         text_parts: list[str] = []
         tool_calls: list[ToolCall] = []
+        content: list[dict[str, Any]] = []
+        thought = False
 
         for block in response.content:
+            param = _content_param(block)
+            if param is not None:
+                content.append(param)
             if block.type == "text":
                 text_parts.append(block.text)
             elif block.type == "tool_use":
                 tool_calls.append(
                     ToolCall(id=block.id, name=block.name, input=block.input)
                 )
+            elif block.type in ("thinking", "redacted_thinking"):
+                thought = True
 
         stop_reason = _ANTHROPIC_STOP_MAP.get(response.stop_reason)
         if stop_reason is None:
@@ -143,6 +214,9 @@ class AnthropicProvider:
                 cache_read_tokens=getattr(usage, "cache_read_input_tokens", None) or 0,
             ),
             provider_stop_reason=response.stop_reason,
+            # A turn that thought goes back whole in a tool round; one that
+            # did not is rebuilt from its text and tool calls, as before.
+            provider_content=content if thought else None,
         )
 
     def format_tool_definitions(self, tools: list[dict]) -> list[dict]:
@@ -161,14 +235,18 @@ class AnthropicProvider:
         response: LLMResponse,
         tool_results: list[LLMToolResult],
     ) -> list:
-        # Build assistant content blocks from the response
+        # A turn that thought goes back exactly as it came: its thinking
+        # blocks, signatures and all, ahead of its tool calls.
         assistant_content: list[dict[str, Any]] = []
-        if response.text:
-            assistant_content.append({"type": "text", "text": response.text})
-        for tc in response.tool_calls:
-            assistant_content.append(
-                {"type": "tool_use", "id": tc.id, "name": tc.name, "input": tc.input}
-            )
+        if response.provider_content is not None:
+            assistant_content = list(response.provider_content)
+        else:
+            if response.text:
+                assistant_content.append({"type": "text", "text": response.text})
+            for tc in response.tool_calls:
+                assistant_content.append(
+                    {"type": "tool_use", "id": tc.id, "name": tc.name, "input": tc.input}
+                )
 
         # Build user message with tool_result blocks
         result_blocks: list[dict[str, Any]] = []
@@ -199,16 +277,39 @@ _OPENAI_STOP_MAP: dict[str | None, StopReason] = {
 }
 
 
+# OpenAI's reasoning models reject ``temperature`` with an HTTP 400 unless
+# they are told to reason at ``none``. These prefixes name the families that
+# do not reason and so always take it; every other model gets it only at
+# ``reasoning_effort: none``, so a newly released one works unchanged.
+_OPENAI_TEMPERATURE_MODEL_PREFIXES: tuple[str, ...] = ("gpt-3.5", "gpt-4", "chatgpt-4o")
+
+# Models already warned about, so a dropped temperature is logged once per model.
+_warned_no_openai_temperature: set[str] = set()
+
+
 class OpenAIProvider:
     """Wraps openai.AsyncOpenAI, translates to LLMResponse.
 
     Also supports any OpenAI-compatible API (Ollama, vLLM, Together, Groq,
     LM Studio) via base_url override.
+
+    One request setting comes from an alias's ``provider_config``:
+    ``reasoning_effort`` (``none`` to ``max``; not every model takes every
+    value). GPT-6 Sol and Luna answer tool calls on Chat Completions only at
+    ``none``, and only a model reasoning at ``none`` takes ``temperature``.
     """
 
     name = "openai"
+    # LLMClient hands the calling alias's ``provider_config`` only to a
+    # provider that says True here.
+    accepts_provider_config = True
 
-    def __init__(self, api_key: str | None = None, base_url: str | None = None):
+    def __init__(
+        self,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        provider_config: dict[str, Any] | None = None,
+    ):
         import openai
 
         kwargs: dict[str, Any] = {}
@@ -217,6 +318,10 @@ class OpenAIProvider:
         if base_url:
             kwargs["base_url"] = base_url
         self._client = openai.AsyncOpenAI(**kwargs)
+        # A server that only speaks the OpenAI wire format, not OpenAI itself.
+        self._compatible_server = bool(base_url)
+        # The settings for a call that names no alias (see create_message).
+        self._provider_config = dict(provider_config or {})
 
     async def create_message(
         self,
@@ -227,18 +332,37 @@ class OpenAIProvider:
         tools: list,
         max_tokens: int,
         temperature: float,
+        provider_config: dict[str, Any] | None = None,
     ) -> LLMResponse:
+        """Send one request. ``provider_config`` is the calling alias's,
+        which ``LLMClient`` hands over per call; its settings replace the
+        ones this provider was built with, whole."""
+        settings = self._provider_config if provider_config is None else provider_config
+        effort = settings.get("reasoning_effort")
         oai_messages: list[dict[str, Any]] = []
         if system:
             oai_messages.append({"role": "system", "content": system})
         oai_messages.extend(messages)
 
-        kwargs: dict[str, Any] = {
-            "model": model,
-            "messages": oai_messages,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-        }
+        kwargs: dict[str, Any] = {"model": model, "messages": oai_messages}
+        if self._compatible_server:
+            # The field every OpenAI-compatible server reads.
+            kwargs["max_tokens"] = max_tokens
+            kwargs["temperature"] = temperature
+        else:
+            # Counts reasoning tokens too; reasoning models reject max_tokens.
+            kwargs["max_completion_tokens"] = max_tokens
+            if model.startswith(_OPENAI_TEMPERATURE_MODEL_PREFIXES) or effort == "none":
+                kwargs["temperature"] = temperature
+            elif model not in _warned_no_openai_temperature:
+                _warned_no_openai_temperature.add(model)
+                logger.warning(
+                    "Sending %r no temperature (the caller asked for %s): only the "
+                    "GPT-4 families and a model reasoning at 'none' take one",
+                    model, temperature,
+                )
+        if effort:
+            kwargs["reasoning_effort"] = effort
         if tools:
             kwargs["tools"] = tools
         response = await self._client.chat.completions.create(**kwargs)
@@ -281,9 +405,19 @@ class OpenAIProvider:
 
         usage = Usage(0, 0)
         if response.usage:
+            # prompt_tokens includes what OpenAI read from its cache and what
+            # it wrote there (GPT-5.6 on); both are priced apart, so they are
+            # counted apart, as the Anthropic adapter counts them.
+            # A compatible server may send null counts; they read as zero.
+            details = getattr(response.usage, "prompt_tokens_details", None)
+            cache_read = getattr(details, "cached_tokens", None) or 0
+            cache_write = getattr(details, "cache_write_tokens", None) or 0
+            prompt_tokens = response.usage.prompt_tokens or 0
             usage = Usage(
-                input_tokens=response.usage.prompt_tokens,
-                output_tokens=response.usage.completion_tokens,
+                input_tokens=max(prompt_tokens - cache_read - cache_write, 0),
+                output_tokens=response.usage.completion_tokens or 0,
+                cache_write_tokens=cache_write,
+                cache_read_tokens=cache_read,
             )
 
         return LLMResponse(
