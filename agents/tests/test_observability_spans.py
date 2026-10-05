@@ -266,6 +266,35 @@ class TestLLMSpan:
         # NOT the Persatrix-internal enum value "end_turn".
         assert tuple(span.attributes["gen_ai.response.finish_reasons"]) == ("stop",)
 
+    async def test_llm_call_input_tokens_count_the_whole_prompt(
+        self, exporter: InMemorySpanExporter,
+    ) -> None:
+        # A provider that caches reports what it wrote to and read from its
+        # cache apart from ``input_tokens`` (ISSUE-0169). The span still
+        # carries the whole prompt, so a cache hit does not read as a drop
+        # in usage.
+        provider = AsyncMock()
+        provider.name = "openai"
+        provider.create_message = AsyncMock(
+            return_value=LLMResponse(
+                text="hello",
+                stop_reason=StopReason.END_TURN,
+                usage=Usage(
+                    input_tokens=52, output_tokens=5,
+                    cache_write_tokens=900, cache_read_tokens=2048,
+                ),
+            ),
+        )
+
+        await LLMClient(provider).create_message(
+            model="gpt-6-sol", messages=[], system="", tools=[], max_tokens=10,
+            temperature=0.0,
+        )
+
+        span = _span(exporter, LLM_CALL_SPAN)
+        assert span.attributes["gen_ai.usage.input_tokens"] == 3000
+        assert span.attributes["gen_ai.usage.output_tokens"] == 5
+
     @pytest.mark.parametrize(
         ("stop_reason", "expected"),
         [

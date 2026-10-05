@@ -158,9 +158,9 @@ how it reads a refusal.
 > thinks by default. An alias's `provider_config` now carries `thinking`,
 > `effort` and `prompt_cache` for Anthropic (and `reasoning_effort` for
 > OpenAI, `thinking_level` for Gemini). `LLMClient` hands the calling
-> alias's settings to the provider on every call except one through the
-> agent's own alias, which keeps what the provider was built with, agent
-> entry included. A response that holds thinking blocks keeps its content
+> alias's settings to the provider on every call that names an alias; a
+> call through the agent's own alias also carries the settings its agent
+> entry adds. A response that holds thinking blocks keeps its content
 > blocks on `LLMResponse.provider_content`, and `append_tool_round` sends
 > them back unchanged; a turn without them is rebuilt as before. An alias
 > that sets nothing sends none of the new fields, so EXP-001's arms, whose

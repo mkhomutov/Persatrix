@@ -29,6 +29,10 @@ recipes through these providers land in PR 3.
 :class:`ReplayCassetteMissError` when a request is not in the cassette — a drifted
 recipe or an incomplete recording must surface, never silently pass.
 
+The cassette's format on disk (a response as a payload, and the YAML file that
+holds the mapping) is in :mod:`evaluators.replay_cassette`; its four functions
+are re-exported here, where they used to live.
+
 This module depends only on :mod:`agents.llm_types` (the provider Protocol and
 data types) and the stdlib + ``pyyaml`` — no orchestrator or network coupling.
 """
@@ -43,14 +47,15 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 from agents.llm_types import (
     LLMResponse,
     LLMToolResult,
-    StopReason,
-    ToolCall,
-    Usage,
+)
+from evaluators.replay_cassette import (
+    dump_cassette,
+    load_cassette,
+    payload_to_response,
+    response_to_payload,
 )
 
 logger = logging.getLogger(__name__)
@@ -188,91 +193,6 @@ def hash_request(
     return hashlib.sha256(canon.encode("utf-8")).hexdigest()
 
 
-# ─── Response payload (de)serialization ──────────────────────────────────────
-
-
-def response_to_payload(response: LLMResponse) -> dict[str, Any]:
-    """Serialize an :class:`LLMResponse` to a YAML/JSON-safe cassette payload.
-
-    ``stop_reason`` becomes its string value; the opaque ``signature`` bytes on a
-    tool call become base64. Fields that are empty/default (no ``tool_calls``, no
-    ``signature``) are omitted so a recorded golden stays readable in review.
-    """
-    payload: dict[str, Any] = {
-        "text": response.text,
-        "stop_reason": response.stop_reason.value,
-        "usage": {
-            "input_tokens": response.usage.input_tokens,
-            "output_tokens": response.usage.output_tokens,
-        },
-    }
-    if response.tool_calls:
-        calls: list[dict[str, Any]] = []
-        for tc in response.tool_calls:
-            call: dict[str, Any] = {"id": tc.id, "name": tc.name, "input": tc.input}
-            if tc.signature is not None:
-                call["signature_b64"] = base64.b64encode(tc.signature).decode("ascii")
-            calls.append(call)
-        payload["tool_calls"] = calls
-    return payload
-
-
-def payload_to_response(payload: dict[str, Any]) -> LLMResponse:
-    """Inverse of :func:`response_to_payload`."""
-    usage = payload.get("usage") or {}
-    tool_calls: list[ToolCall] = []
-    for call in payload.get("tool_calls") or []:
-        sig_b64 = call.get("signature_b64")
-        tool_calls.append(
-            ToolCall(
-                id=call["id"],
-                name=call["name"],
-                input=call.get("input") or {},
-                signature=base64.b64decode(sig_b64) if sig_b64 is not None else None,
-            )
-        )
-    return LLMResponse(
-        text=payload.get("text"),
-        tool_calls=tool_calls,
-        stop_reason=StopReason(payload.get("stop_reason", StopReason.END_TURN.value)),
-        usage=Usage(
-            input_tokens=int(usage.get("input_tokens", 0)),
-            output_tokens=int(usage.get("output_tokens", 0)),
-        ),
-    )
-
-
-# ─── Cassette file I/O ───────────────────────────────────────────────────────
-
-
-def dump_cassette(cassette: dict[str, dict[str, Any]], path: str | Path) -> None:
-    """Write a ``{request_hash: response_payload}`` cassette to ``path`` as YAML.
-
-    YAML matches the OQ #1 sidecar decision (``<eval_id>.golden.yaml``); keys are
-    sorted so a re-recorded golden produces a minimal, reviewable diff.
-    """
-    text = yaml.safe_dump(cassette, sort_keys=True, allow_unicode=True, default_flow_style=False)
-    Path(path).write_text(text, encoding="utf-8")
-
-
-def load_cassette(path: str | Path) -> dict[str, dict[str, Any]]:
-    """Read a cassette written by :func:`dump_cassette`. An empty file → ``{}``."""
-    data = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
-    if data is None:
-        return {}
-    if not isinstance(data, dict):
-        raise ValueError(f"cassette at {path} is not a mapping: got {type(data).__name__}")
-    for key, payload in data.items():
-        # Validate values at load time so a malformed cassette fails here with a
-        # legible error, not a bare AttributeError deep inside payload_to_response.
-        if not isinstance(payload, dict):
-            raise ValueError(
-                f"cassette at {path} has a non-mapping payload for key "
-                f"{str(key)[:12]}…: got {type(payload).__name__}"
-            )
-    return data
-
-
 # ─── Tool-round message shape (shared by replay + record) ────────────────────
 
 
@@ -311,6 +231,32 @@ def _append_tool_round(
         {"role": "assistant", "content": assistant_content},
         {"role": "user", "content": result_blocks},
     ]
+
+
+#: Where a recorded tool round keeps the assistant turn as the live provider
+#: returned it: a Claude turn's thinking blocks, which the next request must
+#: send back unchanged. The live call sends it; the cassette key never sees it.
+_LIVE_CONTENT_KEY = "provider_content"
+
+
+def _hashed_and_live(messages: list) -> tuple[list, list]:
+    """*messages* as hashed, and as the live provider gets them.
+
+    A turn that carries its provider's own blocks is hashed in the canonical
+    shape and sent with those blocks, so a thinking turn goes back whole while
+    record and replay still key on one request.
+    """
+    hashed: list = []
+    live: list = []
+    for message in messages:
+        if isinstance(message, dict) and _LIVE_CONTENT_KEY in message:
+            canonical = {k: v for k, v in message.items() if k != _LIVE_CONTENT_KEY}
+            hashed.append(canonical)
+            live.append({**canonical, "content": message[_LIVE_CONTENT_KEY]})
+        else:
+            hashed.append(message)
+            live.append(message)
+    return hashed, live
 
 
 # ─── Providers ───────────────────────────────────────────────────────────────
@@ -398,6 +344,11 @@ class RecordingProvider:
     attribution stays correct during a record run. The cassette is single-slot
     per request; a second *differing* response (non-determinism or a retry) is
     lossy — the later wins and a warning is logged.
+
+    Two things reach the live call without entering the key, since replay has
+    neither: the calling alias's request settings (``provider_config``, which
+    ``LLMClient`` hands over when the wrapped provider takes them), and a
+    thinking turn's own content blocks (see :meth:`append_tool_round`).
     """
 
     def __init__(
@@ -409,6 +360,7 @@ class RecordingProvider:
         self._inner = inner
         self._drop_keys = drop_keys
         self.name = getattr(inner, "name", "recording")
+        self.accepts_provider_config = getattr(inner, "accepts_provider_config", False) is True
         self.cassette: dict[str, dict[str, Any]] = {}
 
     async def create_message(
@@ -420,6 +372,7 @@ class RecordingProvider:
         tools: list,
         max_tokens: int,
         temperature: float,
+        provider_config: dict[str, Any] | None = None,
     ) -> LLMResponse:
         # Hash the RAW request — the cassette key must be provider-agnostic so
         # ReplayProvider (which has no wrapped provider) recomputes it identically.
@@ -427,9 +380,10 @@ class RecordingProvider:
         # format_tool_definitions is a pass-through (see below), so the runtime's
         # ``format_tool_definitions() -> create_message(tools=...)`` sequence hands
         # create_message the raw defs, not the vendor-native shape.
+        hashed, live = _hashed_and_live(messages)
         key = hash_request(
             model=model,
-            messages=messages,
+            messages=hashed,
             system=system,
             tools=tools,
             max_tokens=max_tokens,
@@ -439,14 +393,18 @@ class RecordingProvider:
         # Apply the *live* provider's native tool formatting only for the real
         # call — Anthropic wants ``input_schema``, OpenAI a ``{type: function}``
         # wrapper, etc. (agents/llm_providers.py). This shaping stays out of the
-        # hash so record and replay key on the same request.
+        # hash so record and replay key on the same request. So do the alias's
+        # request settings, without which the live provider would fall back to
+        # the ones it was built with, the seat alias's, on a lane's call too.
+        settings = {} if provider_config is None else {"provider_config": provider_config}
         response = await self._inner.create_message(
             model=model,
-            messages=messages,
+            messages=live,
             system=system,
             tools=self._inner.format_tool_definitions(tools),
             max_tokens=max_tokens,
             temperature=temperature,
+            **settings,
         )
         payload = response_to_payload(response)
         prior = self.cassette.get(key)
@@ -494,5 +452,13 @@ class RecordingProvider:
         canonical shape matches the OQ #3 default record provider (Anthropic
         ``quality`` alias); recording a *multi-round tool loop* against a
         non-Anthropic live provider is out of Phase-1 scope.
+
+        A turn that thought (``response.provider_content``) also keeps its own
+        blocks beside the canonical ones: :meth:`create_message` sends those to
+        the live provider, which needs its thinking blocks back unchanged, and
+        hashes the canonical ones (ISSUE-0169).
         """
-        return _append_tool_round(messages, response, tool_results)
+        rebuilt = _append_tool_round(messages, response, tool_results)
+        if response.provider_content is not None:
+            rebuilt[-2] = {**rebuilt[-2], _LIVE_CONTENT_KEY: response.provider_content}
+        return rebuilt

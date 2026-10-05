@@ -228,6 +228,7 @@ def create_provider(agent_config: dict[str, Any]) -> tuple[LLMProvider, str]:
         try:
             return OllamaProvider(
                 base_url=resolve_ollama_base_url(provider_config),
+                provider_config=provider_config,
             ), ollama_model
         except ImportError:
             raise SystemExit(_OLLAMA_IMPORT_ERROR)

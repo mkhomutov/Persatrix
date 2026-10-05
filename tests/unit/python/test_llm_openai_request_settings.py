@@ -41,6 +41,8 @@ from agents.model_aliases import use_alias_map
 @pytest.fixture(autouse=True)
 def _no_model_warned_yet(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(llm_providers, "_warned_no_openai_temperature", set())
+    # The SDK's own endpoint variable, which a developer's shell may export.
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
 
 
 def _completion(usage: Any = None) -> SimpleNamespace:
@@ -96,6 +98,17 @@ class TestTheReplyCap:
         assert sent["max_tokens"] == 256
         assert "max_completion_tokens" not in sent
 
+    async def test_a_server_named_by_the_sdks_own_variable_keeps_max_tokens(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # With no base_url passed, the OpenAI SDK reads OPENAI_BASE_URL, so the
+        # client then talks to that server, not to OpenAI.
+        monkeypatch.setenv("OPENAI_BASE_URL", "http://vllm:8000/v1")
+        sent = await _sent(_provider(), "mistral-7b")
+        assert sent["max_tokens"] == 256
+        assert "max_completion_tokens" not in sent
+        assert sent["temperature"] == 0.7
+
     async def test_ollama_keeps_max_tokens(self) -> None:
         sdk = MagicMock()
         sdk.AsyncOpenAI.return_value = AsyncMock()
@@ -123,6 +136,11 @@ class TestReasoningEffortAndTemperature:
     @pytest.mark.parametrize("model", ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini"])
     async def test_the_gpt_4_families_keep_their_temperature(self, model: str) -> None:
         assert (await _sent(_provider(), model))["temperature"] == 0.7
+
+    async def test_a_fine_tuned_gpt_4_model_keeps_its_temperature(self) -> None:
+        # A fine-tune's ID names its family after an `ft:` prefix.
+        sent = await _sent(_provider(), "ft:gpt-4o-mini-2024-07-18:acme::abc123")
+        assert sent["temperature"] == 0.7
 
     async def test_a_model_reasoning_at_none_keeps_its_temperature(self) -> None:
         sent = await _sent(

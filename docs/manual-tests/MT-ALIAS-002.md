@@ -32,8 +32,8 @@ alias-block change with **no edit** to `config/agents.yaml`, the routing default
 code — and confirm the same `ember-owl` persona now calls OpenAI with correctly-keyed non-zero
 cost. In v0.3.4 each provider is a mounted alias config, so the swap is `make demo-anthropic` →
 `make demo-openai` (the `config/demo/anthropic` vs `config/demo/openai` diff is exactly the alias
-block); the equivalent manual form is editing the `quality` entry's `provider` / `model` / price in
-the active config. The local-target variant (Edge Case 1) flips to the `ollama` provider and
+block); the equivalent manual form is editing the `quality` entry's `provider` / `model` / price /
+`provider_config` in the active config. The local-target variant (Edge Case 1) flips to the `ollama` provider and
 documents the $0-local case.
 
 **Out of Scope**: First-time alias→cost wiring (that is [MT-ALIAS-001](MT-ALIAS-001.md)); the
@@ -124,12 +124,19 @@ block (`quality` → `openai` / `gpt-6-sol`, priced `2.00` / `10.00`); `config/a
 defaults, and all agent code are identical:
 
 ```bash
-diff <(grep -A4 'quality:' config/demo/anthropic/optimization.yaml) \
-     <(grep -A4 'quality:' config/demo/openai/optimization.yaml)
+diff <(grep -A7 'quality:' config/demo/anthropic/optimization.yaml) \
+     <(grep -A7 'quality:' config/demo/openai/optimization.yaml)
 ```
 
+The diff shows the entry's `provider` and `model`, and the
+[request settings](../guides/model-request-settings.md) under its `provider_config`, which belong
+to the vendor and move with it: `effort` and `prompt_cache` for Claude, `reasoning_effort: none`
+for GPT-6 Sol, which takes tool calls on Chat Completions only at `none`. The two models happen to
+share a price. The OpenAI entry is a line shorter, so its last line is the next alias's `fast:`.
+
 The equivalent **manual** one-line-class edit (without the demo overlay) is to flip the `quality`
-entry's `provider` / `model` / price in the active `config/optimization.yaml`, then
+entry's `provider` / `model` / price and replace its `provider_config` in the active
+`config/optimization.yaml`, then
 `docker compose ... up -d --force-recreate agent-ember-owl`. The OpenAI physical model (`gpt-6-sol`) is
 already priced in the derived `cost.pricing.models` table, so no table regeneration is needed.
 
@@ -137,7 +144,7 @@ already priced in the derived `cost.pricing.models` table, so no table regenerat
 the routing defaults, or any agent code. `gpt-6-sol` is already in the derived pricing table.
 
 **Verification**:
-- [ ] The swap changes only the alias `provider` / `model` / price (the `diff` above is the whole delta)
+- [ ] The swap changes only the alias entry — `provider` / `model` / price / `provider_config` (the `diff` above is the whole delta for `quality`)
 - [ ] `make validate` exits 0
 
 ---
@@ -171,7 +178,7 @@ agent**, the **same alias name**, a **different provider**.
 **Action**: Capture `GET /api/v1/cost/summary` before and after the Step 3 turn.
 
 **Expected Result**: `daily_estimated_usd` advanced by a non-zero amount priced at the **gpt-6-sol**
-rate (`2.50` / `10.00` per 1M), keyed to `ember-owl`. Cost followed the swap because the pricing
+rate (`2.00` / `10.00` per 1M), keyed to `ember-owl`. Cost followed the swap because the pricing
 table is derived from the alias map — not hand-keyed to the old physical model.
 
 **Verification**:
@@ -247,7 +254,8 @@ swap.
 
 ## Notes
 
-- "One-line edit" is shorthand for *one alias entry*: provider + model (+ its inline price). The
+- "One-line edit" is shorthand for *one alias entry*: provider + model (+ its inline price and its
+  request settings, which are the vendor's own). The
   point is that the swap is confined to the alias block — agents, routing defaults, and code are
   untouched (and `gpt-6-sol` is already in the derived pricing table).
 - The demo-overlay swap mutates no tracked file. If you demonstrate the swap by editing a config in

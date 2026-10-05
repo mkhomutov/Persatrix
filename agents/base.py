@@ -465,7 +465,7 @@ class BaseAgent(ABC):
                         "tool_calls": str(tool_calls_count),
                     },
                 )
-            total_tokens += response.usage.input_tokens + response.usage.output_tokens
+            total_tokens += response.usage.prompt_tokens + response.usage.output_tokens
 
             if response.stop_reason == StopReason.END_TURN:
                 return TaskOutput(

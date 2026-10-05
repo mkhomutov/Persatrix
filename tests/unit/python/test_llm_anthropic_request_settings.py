@@ -14,6 +14,7 @@ over per call), else the ones the provider was built with.
 
 from __future__ import annotations
 
+import logging
 import sys
 from types import SimpleNamespace
 from typing import Any
@@ -21,11 +22,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agents import llm_providers
 from agents.llm_factory import create_provider
 from agents.llm_providers import AnthropicProvider
 from agents.model_aliases import use_alias_map
 
 _PREFIX = "Transcript of the briefing: ..."
+
+
+@pytest.fixture(autouse=True)
+def _no_model_warned_yet(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The adapter warns once per model per process; each test starts fresh.
+    monkeypatch.setattr(llm_providers, "_warned_no_temperature", set())
 
 
 def _provider(provider_config: dict[str, Any] | None = None) -> AnthropicProvider:
@@ -48,7 +56,7 @@ def _provider(provider_config: dict[str, Any] | None = None) -> AnthropicProvide
 async def _sent(provider: AnthropicProvider, **extra: Any) -> dict[str, Any]:
     """The keyword arguments the adapter hands the SDK."""
     await provider.create_message(
-        model="claude-sonnet-5-5",
+        model=extra.pop("model", "claude-sonnet-5-5"),
         messages=[{"role": "user", "content": "hi"}],
         system=extra.pop("system", "You are an adviser."),
         tools=extra.pop("tools", []),
@@ -133,6 +141,33 @@ class TestThinkingAndEffort:
         provider._client = client
         sent = await _sent(provider)
         assert sent["output_config"] == {"effort": "low"}
+
+
+class TestThinkingAndTemperature:
+    """Anthropic takes a temperature only from a model that is not thinking.
+    An alias that turns thinking on therefore sends none, even to a model
+    family that otherwise takes one, and the adapter logs it once."""
+
+    @pytest.mark.parametrize("thinking", ["adaptive", "between_tools"])
+    async def test_a_model_told_to_think_gets_no_temperature(
+        self, thinking: str, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        config = {"thinking": thinking}
+        with caplog.at_level(logging.WARNING, logger="agents.llm_providers"):
+            sent = await _sent(_provider(), model="claude-sonnet-4-6", provider_config=config)
+            await _sent(_provider(), model="claude-sonnet-4-6", provider_config=config)
+        assert "temperature" not in sent
+        assert sent["thinking"] == {"type": thinking}
+        dropped = [r.getMessage() for r in caplog.records if "claude-sonnet-4-6" in r.getMessage()]
+        assert len(dropped) == 1
+        assert "thinking" in dropped[0]
+
+    @pytest.mark.parametrize("config", [{}, {"thinking": "disabled"}, {"effort": "low"}])
+    async def test_a_model_that_is_not_thinking_keeps_its_temperature(
+        self, config: dict[str, Any],
+    ) -> None:
+        sent = await _sent(_provider(), model="claude-sonnet-4-6", provider_config=config)
+        assert sent["temperature"] == 0.7
 
 
 class TestPromptCache:

@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from typing import Any
 
+from .llm_temperature import takes_temperature
 from .llm_types import (
     LLMResponse,
     LLMToolResult,
@@ -122,29 +124,33 @@ class AnthropicProvider:
         first call writes the cache and later ones with the same prefix read
         it. Without one, and without ``prompt_cache``, the request carries no
         cache marker at all. ``temperature`` goes only to a model that
-        accepts it (see ``_TEMPERATURE_MODEL_PREFIXES``).
+        accepts it (see ``_TEMPERATURE_MODEL_PREFIXES``) and is not told to
+        think.
 
         ``provider_config`` is the calling alias's, which ``LLMClient``
         hands over per call; its settings replace the ones this provider was
         built with, whole, so a lane alias that sets none sends none."""
         settings = self._provider_config if provider_config is None else provider_config
         cache = settings.get("prompt_cache") is True
+        thinking = settings.get("thinking")
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": messages,
             "max_tokens": max_tokens,
         }
-        if model.startswith(_TEMPERATURE_MODEL_PREFIXES):
+        # Anthropic takes a temperature only from a model that is not
+        # thinking, so an alias that turns thinking on leaves no family that
+        # takes one.
+        thinks = bool(thinking) and thinking != "disabled"
+        if takes_temperature(
+            model, () if thinks else _TEMPERATURE_MODEL_PREFIXES,
+            asked=temperature, warned=_warned_no_temperature, log=logger,
+            reason="Anthropic takes none from a model that is thinking" if thinks else
+            "it is not in _TEMPERATURE_MODEL_PREFIXES; add it there if it accepts one",
+        ):
             kwargs["temperature"] = temperature
-        elif model not in _warned_no_temperature:
-            _warned_no_temperature.add(model)
-            logger.warning(
-                "Sending %r no temperature (the caller asked for %s): it is not "
-                "in _TEMPERATURE_MODEL_PREFIXES; add it there if it accepts one",
-                model, temperature,
-            )
-        if settings.get("thinking"):
-            kwargs["thinking"] = {"type": settings["thinking"]}
+        if thinking:
+            kwargs["thinking"] = {"type": thinking}
         if settings.get("effort"):
             kwargs["output_config"] = {"effort": settings["effort"]}
         if cache_prefix or (cache and system):
@@ -319,7 +325,8 @@ class OpenAIProvider:
             kwargs["base_url"] = base_url
         self._client = openai.AsyncOpenAI(**kwargs)
         # A server that only speaks the OpenAI wire format, not OpenAI itself.
-        self._compatible_server = bool(base_url)
+        # The SDK reads OPENAI_BASE_URL when it is handed no base_url.
+        self._compatible_server = bool(base_url or os.environ.get("OPENAI_BASE_URL"))
         # The settings for a call that names no alias (see create_message).
         self._provider_config = dict(provider_config or {})
 
@@ -352,15 +359,12 @@ class OpenAIProvider:
         else:
             # Counts reasoning tokens too; reasoning models reject max_tokens.
             kwargs["max_completion_tokens"] = max_tokens
-            if model.startswith(_OPENAI_TEMPERATURE_MODEL_PREFIXES) or effort == "none":
+            if effort == "none" or takes_temperature(
+                model, _OPENAI_TEMPERATURE_MODEL_PREFIXES,
+                asked=temperature, warned=_warned_no_openai_temperature, log=logger,
+                reason="only the GPT-4 families and a model reasoning at 'none' take one",
+            ):
                 kwargs["temperature"] = temperature
-            elif model not in _warned_no_openai_temperature:
-                _warned_no_openai_temperature.add(model)
-                logger.warning(
-                    "Sending %r no temperature (the caller asked for %s): only the "
-                    "GPT-4 families and a model reasoning at 'none' take one",
-                    model, temperature,
-                )
         if effort:
             kwargs["reasoning_effort"] = effort
         if tools:

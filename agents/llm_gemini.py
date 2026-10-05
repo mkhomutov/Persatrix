@@ -46,6 +46,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from .llm_temperature import takes_temperature
 from .llm_types import (
     LLMResponse,
     LLMToolResult,
@@ -147,15 +148,12 @@ class GeminiProvider:
         (Vertex project and location) stays as built."""
         settings = self._provider_config if provider_config is None else provider_config
         config: dict[str, Any] = {"max_output_tokens": max_tokens}
-        if model.startswith(_TEMPERATURE_MODEL_PREFIXES):
+        if takes_temperature(
+            model, _TEMPERATURE_MODEL_PREFIXES,
+            asked=temperature, warned=_warned_no_temperature, log=logger,
+            reason="Google deprecated it for Gemini 3.x and asks for the default",
+        ):
             config["temperature"] = temperature
-        elif model not in _warned_no_temperature:
-            _warned_no_temperature.add(model)
-            logger.warning(
-                "Sending %r no temperature (the caller asked for %s): Google "
-                "deprecated it for Gemini 3.x and asks for the default",
-                model, temperature,
-            )
         if system:
             config["system_instruction"] = system
         if tools:

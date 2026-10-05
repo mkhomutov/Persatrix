@@ -122,8 +122,10 @@ class OllamaProvider(OpenAIProvider):
         *,
         base_url: str | None = None,
         api_key: str | None = None,
+        provider_config: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(
             api_key=api_key or _SENTINEL_API_KEY,
             base_url=base_url or DEFAULT_OLLAMA_BASE_URL,
+            provider_config=provider_config,
         )

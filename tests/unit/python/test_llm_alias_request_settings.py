@@ -10,11 +10,14 @@ is built would reach every call the persona makes, the lanes' included:
 ``quality`` seat, and ``effort: low`` on ``quality`` would reach Haiku, which
 rejects effort.
 
-``LLMClient`` therefore resolves the alias each call names and hands its
-``provider_config`` to a provider that says it takes one
+``LLMClient`` therefore resolves the alias each call names, once, and hands
+its ``provider_config`` to a provider that says it takes one
 (``accepts_provider_config is True``). The provider applies that call's
-settings in place of the ones it was built with. A call that names no alias
-sends nothing, and the provider keeps the settings it was built with.
+settings in place of the ones it was built with. A call through the agent's
+own (seat) alias gets them the same way, with the gaps filled from the agent
+entry's own ``provider_config`` (RFC 0033 §D rule 2), so no call's settings
+depend on how its provider was built. A call that names no alias sends
+nothing, and the provider keeps the settings it was built with.
 """
 
 from __future__ import annotations
@@ -29,6 +32,7 @@ import yaml
 from agents.llm_client import LLMClient
 from agents.llm_providers import AnthropicProvider
 from agents.llm_types import LLMResponse
+from agents.model_aliases import resolve as resolve_model
 from agents.model_aliases import use_alias_map
 from agents.server_persona import load_agent
 
@@ -114,30 +118,49 @@ class TestTheCallsAliasSettingsReachTheProvider:
         assert provider.calls[1]["provider_config"] == {"effort": "low"}
 
 
-class TestTheSeatsOwnCallsKeepTheBuiltSettings:
-    """The provider was built from the seat alias, with any gap the alias
-    left filled from the agent's own ``provider_config`` (RFC 0033 §D rule
-    2). A call through the seat alias keeps those settings; only a call
-    through another alias gets that alias's."""
+class TestTheSeatsOwnCallsCarryTheAgentEntrysSettings:
+    """A call through the agent's own (seat) alias gets that alias's
+    settings like any other call, with any gap the alias leaves filled from
+    the agent entry's own ``provider_config`` (RFC 0033 §D rule 2). The
+    client hands them over itself, so a provider built without them (Ollama)
+    or wrapped (the eval recorder) sends the same request. A call through
+    another alias gets that alias's settings alone."""
 
-    async def test_a_call_through_the_seat_alias_hands_over_nothing(self) -> None:
+    async def test_a_call_through_the_seat_alias_gets_the_alias_settings(self) -> None:
         provider = _RecordingAnthropic()
         with use_alias_map(_ALIASES):
             await _call(LLMClient(provider, seat_alias="quality"), model_alias="quality")
-        assert "provider_config" not in provider.calls[0]
+        assert provider.calls[0]["provider_config"] == {"effort": "low"}
 
-    async def test_a_lane_call_still_gets_its_own_alias_settings(self) -> None:
+    async def test_the_agent_entry_fills_what_the_seat_alias_leaves_unset(self) -> None:
         provider = _RecordingAnthropic()
+        client = LLMClient(
+            provider, seat_alias="quality",
+            seat_provider_config={"effort": "max", "prompt_cache": True},
+        )
         with use_alias_map(_ALIASES):
-            await _call(LLMClient(provider, seat_alias="quality"), model_alias="fast")
+            await _call(client, model_alias="quality")
+        # The alias wins where both set a key; the entry fills the rest.
+        assert provider.calls[0]["provider_config"] == {"effort": "low", "prompt_cache": True}
+
+    async def test_a_lane_call_gets_only_its_own_alias_settings(self) -> None:
+        provider = _RecordingAnthropic()
+        client = LLMClient(
+            provider, seat_alias="quality", seat_provider_config={"prompt_cache": True},
+        )
+        with use_alias_map(_ALIASES):
+            await _call(client, model_alias="fast")
         assert provider.calls[0]["provider_config"] == {}
 
-    async def test_a_loaded_agent_knows_its_seat(self, tmp_path: Path) -> None:
+    async def test_a_loaded_agent_knows_its_seat_and_its_entrys_settings(
+        self, tmp_path: Path,
+    ) -> None:
         provider = _RecordingAnthropic()
         config = tmp_path / "agents.yaml"
         config.write_text(yaml.safe_dump({"schema_version": "0.1", "agents": [{
             "id": "planner", "name": "Planner", "role": "Plans", "model": "quality",
             "type": "task", "instructions": "Plan.", "tools": [], "permissions": {},
+            "provider_config": {"prompt_cache": True},
         }]}))
         with use_alias_map(_ALIASES), patch(
             "agents.server_persona.create_provider", return_value=(provider, "claude-sonnet-5-5"),
@@ -146,8 +169,20 @@ class TestTheSeatsOwnCallsKeepTheBuiltSettings:
             assert agent._llm_client is not None
             await _call(agent._llm_client, model_alias="quality")
             await _call(agent._llm_client, model_alias="fast")
-        assert "provider_config" not in provider.calls[0]
+        assert provider.calls[0]["provider_config"] == {"effort": "low", "prompt_cache": True}
         assert provider.calls[1]["provider_config"] == {}
+
+
+class TestTheAliasIsResolvedOncePerCall:
+    async def test_one_call_looks_its_alias_up_once(self) -> None:
+        # The lookup that picks the provider also supplies the settings.
+        provider = _RecordingAnthropic()
+        with use_alias_map(_ALIASES), patch(
+            "agents.llm_client.resolve_model", wraps=resolve_model,
+        ) as lookup:
+            await _call(LLMClient(provider), model_alias="quality")
+        assert lookup.call_count == 1
+        assert provider.calls[0]["provider_config"] == {"effort": "low"}
 
 
 class TestProvidersThatTakeNoSettingsAreLeftAlone:

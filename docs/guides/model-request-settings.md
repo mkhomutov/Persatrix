@@ -70,11 +70,13 @@ Three things follow from the models, with no setting:
   tool call, the next request of the tool loop carries its thinking blocks back
   as they came, signatures included ([ISSUE-0169](../issues/ISSUE-0169-anthropic-adapter-ignores-default-thinking.md)).
 - **Temperature goes only where it is accepted.** Claude models from Opus 4.7
-  and Sonnet 5 on, OpenAI's reasoning models (unless reasoning at `none`) and
+  and Sonnet 5 on, any Claude model an alias tells to think (`thinking` other
+  than `disabled`), OpenAI's reasoning models (unless reasoning at `none`) and
   Gemini 3.x get none; the adapter logs that once per model.
 - **OpenAI's reply cap is `max_completion_tokens`**, which reasoning models
-  require. A server that only speaks the OpenAI format (any `base_url`:
-  Ollama, vLLM, LM Studio) still gets `max_tokens`.
+  require. A server that only speaks the OpenAI format (any `base_url`, or the
+  OpenAI SDK's own `OPENAI_BASE_URL`: Ollama, vLLM, LM Studio) still gets
+  `max_tokens`, and always its temperature.
 
 ---
 
@@ -108,7 +110,10 @@ write for it.
 apart from the uncached input, for Anthropic, OpenAI and Gemini, and the
 [call log](../ai-glossary.md#call-log) records them per call. Reads that stay
 at zero over calls that should share a prefix mean something at the front of
-the prompt changes between them.
+the prompt changes between them. Totals do not split them: a task's
+`tokens_used`, the `agent.llm.call` span and the `agent.llm.tokens` counter
+count the whole prompt as input, so a cache hit never reads as a drop in
+usage.
 
 The orchestrator's budget does not price the cache: it charges every input
 token at the input price, reads and writes alike.

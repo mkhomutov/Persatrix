@@ -112,6 +112,18 @@ class TestTemperature:
     async def test_older_gemini_and_gemma_keep_their_temperature(self, model: str) -> None:
         assert (await _config(_make_gemini_provider(), model))["temperature"] == 0.2
 
+    @pytest.mark.parametrize(
+        "model", ["models/gemini-2.5-flash", "publishers/google/models/gemini-2.0-flash"],
+    )
+    async def test_a_model_named_by_its_path_keeps_its_temperature(self, model: str) -> None:
+        # The Gemini API and Vertex AI also take a model by its resource path.
+        assert (await _config(_make_gemini_provider(), model))["temperature"] == 0.2
+
+    async def test_a_gemini_3_model_named_by_its_path_gets_no_temperature(self) -> None:
+        assert "temperature" not in await _config(
+            _make_gemini_provider(), "models/gemini-3.8-flash",
+        )
+
 
 class TestCacheCounts:
     async def _usage(self, **meta: Any) -> Usage:

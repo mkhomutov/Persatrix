@@ -80,6 +80,13 @@ class Usage:
     cache_write_tokens: int = 0
     cache_read_tokens: int = 0
 
+    @property
+    def prompt_tokens(self) -> int:
+        """The whole prompt: the uncached input plus what the provider wrote
+        to and read from its cache. A total or a meter that counts input
+        takes this, so a cache hit does not read as a drop in usage."""
+        return self.input_tokens + self.cache_write_tokens + self.cache_read_tokens
+
 
 @dataclass
 class LLMToolResult:
