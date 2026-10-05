@@ -18,7 +18,7 @@ anyio==4.15.1
     #   httpx
     #   httpx2
     #   openai
-ast-serialize==0.11.2
+ast-serialize==0.12.1
     # via mypy
 attrs==26.1.0
     # via
@@ -30,7 +30,7 @@ certifi==2026.7.22
     #   httpcore
     #   httpx
     #   requests
-charset-normalizer==3.5.1
+charset-normalizer==3.5.2
     # via requests
 click==8.5.0
     # via import-linter
@@ -87,7 +87,7 @@ jsonschema==4.26.0
     # via persatrix-agents (agents/pyproject.toml)
 jsonschema-specifications==2025.9.1
     # via jsonschema
-librt==0.15.0 ; platform_python_implementation != 'PyPy'
+librt==0.16.0 ; platform_python_implementation != 'PyPy'
     # via mypy
 markdown-it-py==4.2.0
     # via rich
@@ -97,13 +97,13 @@ multidict==6.9.1
     # via
     #   aiohttp
     #   yarl
-mypy==2.3.1
+mypy==2.4.0
     # via persatrix-agents (agents/pyproject.toml)
 mypy-extensions==1.1.0
     # via mypy
 mypy-protobuf==3.6.0
     # via persatrix-agents (agents/pyproject.toml)
-openai==3.19.2
+openai==3.24.0
     # via persatrix-agents (agents/pyproject.toml)
 opentelemetry-api==1.45.0
     # via
@@ -186,17 +186,17 @@ referencing==0.37.0
     # via
     #   jsonschema
     #   jsonschema-specifications
-regex==2026.9.10
+regex==2026.9.29
     # via tiktoken
 requests==2.34.2
     # via tiktoken
 rich==15.0.0
     # via import-linter
-rpds-py==2026.6.3
+rpds-py==2026.9.1
     # via
     #   jsonschema
     #   referencing
-ruff==0.16.9
+ruff==0.16.10
     # via persatrix-agents (agents/pyproject.toml)
 setuptools==84.0.0
     # via grpcio-tools
@@ -212,7 +212,7 @@ truststore==0.10.4 ; sys_platform != 'emscripten'
     # via
     #   httpcore2
     #   httpx2
-types-grpcio==1.83.0.20260730
+types-grpcio==1.84.0.20260928
     # via persatrix-agents (agents/pyproject.toml)
 types-protobuf==7.35.1.20260906
     # via
@@ -242,15 +242,15 @@ typing-extensions==4.16.0
     #   typing-inspection
 typing-inspection==0.4.4
     # via pydantic
-tzdata==2026.4
+tzdata==2026.5
     # via persatrix-agents (agents/pyproject.toml)
 urllib3==2.8.0
     # via
     #   opentelemetry-exporter-http-transport
     #   requests
-wcwidth==0.9.1
+wcwidth==0.9.2
     # via prettytable
-wrapt==2.4.1
+wrapt==2.5.0
     # via
     #   opentelemetry-instrumentation
     #   opentelemetry-instrumentation-grpc
