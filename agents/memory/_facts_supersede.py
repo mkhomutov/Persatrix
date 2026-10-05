@@ -9,9 +9,11 @@ imported by the parent module without exposing it to direct callers.
 
 Symmetric latest-asserted-wins rule (RFC 0026 §F)
 -------------------------------------------------
-When a fact tuple is written, the storage primitive enforces a single
-live row per ``(agent_id, subject, predicate, session_id)`` key, with
-the row carrying the greatest ``asserted_at`` winning.  The
+When a fact tuple is written, the storage primitive keeps, per
+``(agent_id, subject, predicate, session_id)`` key, only the rows of
+the latest assertion: the row carrying the greatest ``asserted_at``
+wins, and facts written together by one extraction stay live together
+(ISSUE-0181, below).  The
 ``session_id`` predicate is the RFC 0031 Phase 2 PR 5 §F amendment —
 each session keeps its own truth about ``(subject, predicate)`` rather
 than one global truth; cross-session writes never retroactively
@@ -27,21 +29,42 @@ cannot reach across to another non-legacy session.  Two cases:
 
 * **Older / equal live rows** (``asserted_at <= new.asserted_at`` in
   the same session *or* the ``legacy`` carve-out) are marked superseded
-  by the new row.  Pulling all qualifying rows cleans up older-side
-  legacy multi-live invariant violations from the pre-PR-5a ``<``
-  semantics on the same write, not just the most recent one.  Newer-side
-  legacy violations (multiple strictly-newer
-  live rows for the same key) are *not* healed by an in-band write —
-  the forward-pass ``LIMIT 1`` only points the new row at the topmost
-  dominator; the lower-but-still-newer siblings remain live alongside.
-  The production extractor (PR 2) uses monotonic
-  ``interaction.closed_at`` so newer-side legacy state is unreachable
-  in the hot path; an explicit reassertion sweep would be needed if a
-  fixture / seed path ever creates one.
+  by the new row, except rows written by the same extraction that say
+  something different (below).  Pulling all qualifying rows cleans up
+  older-side legacy multi-live invariant violations from the pre-PR-5a
+  ``<`` semantics on the same write, not just the most recent one.
+  Newer-side legacy violations (strictly-newer live rows at several
+  different instants for the same key) are *not* healed by an in-band
+  write — the forward-pass ``LIMIT 1`` only points the new row at the
+  topmost dominator; the lower-but-still-newer rows remain live
+  alongside.
 * **Strictly-newer live row** (``asserted_at > new.asserted_at``)
   dominates the new row: the new row is itself marked superseded by
   that newer row.  An out-of-order older write therefore self-
-  supersedes on insert rather than leaving two live rows.
+  supersedes on insert rather than joining the live rows.  Several
+  live rows at the newest instant are normal since ISSUE-0181, so the
+  forward pass breaks ties on ``rowid``: the new row points at the
+  last-inserted dominator, the row recall lists first.
+
+**Facts written together coexist (ISSUE-0181).**  One interaction close
+stamps every fact it extracts with one ``source_interaction_id`` and
+one ``asserted_at``, so the tie rule used to fire inside every
+extraction and only the last-listed fact survived: a briefing that set
+three constraints on one topic left one.  The older sweep now skips a
+live row when all three hold:
+
+* it has the new row's non-NULL ``source_interaction_id`` (NULL means
+  no known source, so unsourced rows are never "written together");
+* it has the new row's ``asserted_at`` (source plus stamp identifies
+  one extraction, so the same source at a later time is still an
+  update);
+* its ``object`` differs (a word-for-word repeat still leaves one row).
+
+The source comparison is NULL-safe (``IS``), so an unsourced write
+still supersedes a sourced tie.  Known limits, recorded in ISSUE-0181:
+a correction inside one conversation leaves both values live until a
+later conversation speaks about the key, and a later conversation
+replaces the whole earlier set, including facts it did not mention.
 
 Equal-timestamp ties break in favour of the later arrival (the row
 being inserted), matching the PR 5a deferred-item resolution from
@@ -65,14 +88,18 @@ That is accepted, not corrected — a single instant is the truthful
 timestamp for a single room event, and the alternative (skewing
 ``closed_at`` per sibling) would lie about when the conversation ended.
 The rule also still covers fixtures, the OQ #9 operator-seeded path, and
-the future RFC 0013 erasure backfill.
+the future RFC 0013 erasure backfill.  Sibling records have different
+source ids, so this tie rule, not the ISSUE-0181 exception, still
+decides between them.
 
 **Supersession rewrites attribution — stated, not corrected**
 (ISSUE-0131, PR #849 review).  ``speaker_id`` (migration 18) is
-deliberately NOT a chain-key column: RFC 0026 §F keeps ONE live row per
-``(agent, subject, predicate)``, so when speaker Y restates what
-speaker X asserted, Y's row supersedes X's and the only LIVE row now
-names Y as the speaker.  That is coherent with what the tier stores —
+deliberately NOT a chain-key column: RFC 0026 §F keeps only the latest
+assertion's rows per ``(agent, subject, predicate)``, so when speaker Y
+restates what speaker X asserted, Y's row supersedes X's and the only
+LIVE row now names Y as the speaker.  (Rows of one extraction share a
+speaker by construction, so letting them coexist changes nothing
+here.)  That is coherent with what the tier stores —
 current belief, where each assertion's speaker is the speaker of THAT
 assertion — but it means the live facts surface answers "who last said
 this", not "who ever said this": X's testimony survives only on the
@@ -99,8 +126,9 @@ class SupersessionResult(NamedTuple):
     """Outcome of the supersession sweep around a single :meth:`store` call.
 
     ``superseded_older_ids`` lists the existing live rows the new row
-    marked superseded (older or equal timestamp; chain target = new
-    row).  ``self_superseded_by`` is non-``None`` when a strictly-newer
+    marked superseded (older or equal timestamp, minus rows of the new
+    row's own extraction that say something different; chain target =
+    new row).  ``self_superseded_by`` is non-``None`` when a strictly-newer
     live row already existed, in which case the new row's
     ``superseded_by`` was pointed at that id.  Both fields can be
     populated for the same call (out-of-order write that bumps a
@@ -123,13 +151,24 @@ async def apply_supersession(
     session_id: str,
     principal_id: str,
     epoch_id: str,
+    source_interaction_id: str | None,
+    new_object: str,
 ) -> SupersessionResult:
-    """Sweep older + newer live rows for the symmetric latest-wins chain.
+    """Sweep older + newer live rows for the latest-wins chain, sparing
+    facts written together.
 
     Called by :meth:`agents.memory.facts.FactStore.store` immediately
     after the INSERT and before the per-statement ``commit``.  The
     helper issues the ``UPDATE`` writes itself but defers the commit to
     the caller so the INSERT and the chain land atomically.
+
+    ``source_interaction_id`` and ``new_object`` (ISSUE-0181) are the
+    new row's own values.  The older sweep uses them to leave alone the
+    rows its extraction wrote alongside it: same non-NULL source, same
+    ``asserted_at``, different object.  Both are required, so a caller
+    cannot skip the rule by leaving them out.  The newer-row pick breaks
+    ties on ``rowid`` (last inserted first), because several rows can
+    now be live at the newest instant.
 
     ``session_id`` (RFC 0031 Phase 2 PR 5 — RFC 0026 §F amendment): the
     supersede chain is keyed on ``(agent_id, subject, predicate,
@@ -189,10 +228,17 @@ async def apply_supersession(
           AND superseded_by IS NULL
           AND asserted_at <= ?
           AND fact_id != ?
+          AND NOT (
+              source_interaction_id IS NOT NULL
+              AND source_interaction_id IS ?
+              AND asserted_at = ?
+              AND object != ?
+          )
         """,  # noqa: S608 — placeholders only; values bound below.
         (
             agent_id, subject, predicate, *older_sessions,
             principal_id, epoch_id, asserted_at, new_fact_id,
+            source_interaction_id, asserted_at, new_object,
         ),
     ) as cursor:
         older_rows = await cursor.fetchall()
@@ -209,7 +255,7 @@ async def apply_supersession(
           AND epoch_id = ?
           AND superseded_by IS NULL
           AND asserted_at > ?
-        ORDER BY asserted_at DESC
+        ORDER BY asserted_at DESC, rowid DESC
         LIMIT 1
         """,
         (

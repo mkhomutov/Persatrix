@@ -81,8 +81,91 @@ Test-first, smallest change first:
 
 Then correct RFC 0026 §F's line about ties.
 
+## Fix
+
+Option 1. The store's shape does not change: no schema, index or
+migration, and no change to the extractor, its prompt or the chain key
+(agent, subject, predicate, session, principal, epoch). Rows already
+superseded stay superseded.
+
+The rule, in
+[`_facts_supersede.py`](../../agents/memory/_facts_supersede.py): a new
+fact no longer supersedes a live fact that the same extraction wrote and
+that says something different. "The same extraction" means the same
+source interaction and the same `asserted_at`, which is how one close
+stamps its batch. The rest is as before. A later conversation still
+replaces the whole earlier set, an older write that arrives late is
+still superseded, and rows from another source, or with no source, keep
+the tie rule.
+
+Two choices go beyond the letter of option 1. Each is one line and can
+be dropped on its own:
+
+- **A word-for-word repeat still leaves one row.** If one extraction
+  lists the same object twice, the second copy supersedes the first, so
+  the prompt does not print one fact twice.
+- **A late older write points at the last fact inserted.** Several rows
+  can now be live at the newest instant. The row that supersedes a late
+  older write is the last one inserted, the one recall lists first.
+
+Measured on arm D's four practice stores: replaying their 121 fact rows
+through the fixed write path leaves none superseded, where the run had
+14. Eleven subject-and-predicate keys now hold two or three live rows,
+and the three briefing constraints are live in each of the three stores
+that extracted them. The same replay through the unfixed code reproduces
+the 14.
+
+Tests:
+[`test_fact_store_written_together.py`](../../tests/unit/python/test_fact_store_written_together.py)
+pins the rule under each write order.
+[`test_facts_written_together.py`](../../tests/unit/python/test_facts_written_together.py)
+follows three facts from the extractor to the prompt and the audit
+trail. Eleven of the new tests fail on the unfixed code. No existing
+test changed its outcome, and the six stable golden traces replay
+unchanged.
+
+## Slot: merges before EXP-001, by the maintainer's call of 2026-10-02
+
+- **No plan is needed.** Ruling (a) of the
+  [sequencing Amendment 2026-09-12](../v0.3.x-sequencing.md#amendment-2026-09-12--close-v0316-small-then-measure-before-any-train-opens)
+  opens no plan before EXP-001 reports; like
+  [#1014](https://github.com/mkhomutov/Persatrix/pull/1014) and
+  [#1030](https://github.com/mkhomutov/Persatrix/pull/1030), this is a
+  standalone fix. Ruling (f) holds: no store migration.
+- **Ruling (b)** covers memory isolation, attribution and audience work.
+  This is none of them: the session, principal and epoch parts of the
+  chain key do not change.
+- **EXP-001.** Arm D is the only arm whose prompt carries injected
+  memory, so only its prompts can change. More fact lines now compete
+  for the facts section's token budget.
+
 ## Notes
 
 > 2026-10-02 — filed from EXP-001's first practice run. The maintainer
 > ruled the same day that it is fixed before the scored run, with
 > ISSUE-0159 and ISSUE-0180.
+
+> 2026-10-05 — limits the fix leaves, each as before it unless stated:
+>
+> 1. A correction inside one conversation ("Mira... no, Lila") leaves
+>    both values live until a later conversation speaks about the key.
+>    Before the fix the last-listed value won. The store cannot tell a
+>    correction from an addition; none of the 121 practice rows was one.
+> 2. A later conversation replaces the whole earlier set, including
+>    facts it did not mention.
+> 3. Two records closed at the same instant, as a room-close fan closes
+>    them, still replace each other's facts on a shared key, by arrival
+>    order. Two such writes that overlap can supersede each other and
+>    leave no live row: two gathered store calls did so in 100 runs of
+>    100, with and without this fix, and the close path's second phase
+>    runs outside the agent lock. The practice run had no such pair. It
+>    would become routine if
+>    [ISSUE-0180](ISSUE-0180-topic-facts-reachable-only-by-their-exact-subject.md)
+>    makes records reuse a stored subject, so the two are decided
+>    together.
+> 4. Nothing bounds how many facts one extraction leaves under a key,
+>    and the facts section shares one token budget across subjects.
+> 5. In arm D each meeting is its own session, so a later meeting never
+>    supersedes an earlier meeting's fact.
+> 6. Option 2 above, predicates that hold several values by design,
+>    stays open.

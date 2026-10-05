@@ -15,6 +15,11 @@ cap (see ``scripts/checks/file_size.py``).  These cases pin the
   self-superseded against it.
 * Equal-timestamp ties break in favour of the later arrival.
 
+Facts written together by one extraction (same source interaction, same
+``asserted_at``) are the exception: they stay live together unless they
+repeat each other word for word (ISSUE-0181) — see
+:mod:`tests.unit.python.test_fact_store_written_together`.
+
 The companion :mod:`test_fact_store_invariants` continues to pin
 input-validation guards, the ``supersede`` helper return contract, the
 ``prune`` retention primitive, ``delete_by_subject`` overlap + ACL, and
@@ -61,9 +66,10 @@ class TestSymmetricLatestAssertedWins:
     * If a strictly-newer live row already exists for the same key,
       the new row is itself marked superseded by that newer row.
 
-    The net effect: regardless of insert order or timestamp ties, only
-    the row with the greatest ``asserted_at`` stays live; if two rows
-    share the greatest timestamp the later arrival dominates.
+    The net effect: regardless of insert order or timestamp ties, across
+    different sources only the row with the greatest ``asserted_at``
+    stays live; if two rows from different sources share the greatest
+    timestamp the later arrival dominates.
 
     Replaces the earlier strict-less-than precondition (PR #339 review
     F-3); the resolution comes from PR 5a's "From PR 1 review" follow-up
@@ -123,7 +129,7 @@ class TestSymmetricLatestAssertedWins:
     async def test_equal_asserted_at_newer_arrival_wins(
         self, fact_store: FactStore,
     ):
-        """Equal timestamps: the later arrival dominates."""
+        """Equal timestamps from different sources: the later arrival dominates."""
         first_id = await fact_store.store(
             subject="bob",
             predicate="prefers",

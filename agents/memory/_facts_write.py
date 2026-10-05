@@ -88,14 +88,16 @@ async def insert_fact(
     construction — a superseding assertion is a NEW row stamped from its
     own source (§C item 3) — and reinforcement never touches the column.
 
-    Enforces RFC 0026 §F **symmetric latest-asserted-wins**: only one
-    live row per ``(agent_id, subject, predicate)`` survives, and the row
-    with the greatest ``asserted_at`` wins.  Out-of-order and
+    Enforces RFC 0026 §F **symmetric latest-asserted-wins**: per
+    ``(agent_id, subject, predicate, session, principal, epoch)`` the
+    latest assertion wins, and the facts one extraction wrote together
+    stay live together (ISSUE-0181).  Out-of-order and
     equal-timestamp writes resolve deterministically — see
     :mod:`agents.memory._facts_supersede` for the chain rule (including
     why equal timestamps are now REACHABLE in production) and
     :class:`tests.unit.python.test_fact_store_supersede.TestSymmetricLatestAssertedWins`
-    for the pinned cases.
+    and :mod:`tests.unit.python.test_fact_store_written_together` for
+    the pinned cases.
 
     Predicate validation runs through the injected validator (PR 2 wires
     the enumerated allowlist).
@@ -158,6 +160,7 @@ async def insert_fact(
         db, agent_id=agent_id, subject=subject, predicate=predicate,
         asserted_at=asserted_at, new_fact_id=fact_id,
         session_id=session_id, principal_id=principal_id, epoch_id=epoch_id,
+        source_interaction_id=source_interaction_id, new_object=object,
     )
     await db.commit()
 

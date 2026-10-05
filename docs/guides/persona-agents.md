@@ -296,7 +296,9 @@ prompt
 > the persona recalls those facts directly into its prompt via
 > [`facts_section.py`](../../agents/persona_runtime/facts_section.py),
 > so it references them without keyword-overlap seeding. Facts are
-> reinforced when restated and retracted when contradicted. Recall is
+> reinforced when restated. A later conversation that speaks about the
+> same subject and predicate replaces the earlier facts; facts learned
+> in the same conversation are kept side by side. Recall is
 > on by default; `memory.facts.enabled: false` turns off fact recall
 > and prompt injection per-agent — the close-path extractor still
 > writes facts regardless. See [RFC 0026](../rfcs/0026-declarative-facts-tier.md).

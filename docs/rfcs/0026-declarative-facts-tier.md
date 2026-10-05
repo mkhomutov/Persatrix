@@ -163,6 +163,19 @@ The `session_id` predicate is the **RFC 0031 Phase 2 PR 5 §F amendment** (2026-
 
 Recall filters out superseded rows by default. This composes with reinforcement — a fact contradicted at the next interaction loses its salience boost. The symmetric shape was settled by PR 5a per [`docs/rfcs/0026-pr-plan.md` PR 5a §From PR 1 review](0026-pr-plan.md#from-pr-1-review); the PR 1 implementation initially shipped a strict-less-than SELECT that left two live rows on out-of-order or equal-timestamp writes.
 
+> **Amendment (2026-10-05 — [ISSUE-0181](../issues/ISSUE-0181-facts-extracted-together-supersede-each-other.md)): facts written together by one extraction stay live together.** One interaction close stamps every fact it extracts with one `asserted_at` and one `source_interaction_id`. So the tie rule fired inside every extraction, and each fact superseded the one before it: a briefing that set three constraints on one topic left one. In EXP-001's first practice run, all 14 superseded rows in arm D's four stores were lost this way, and none was an update.
+>
+> | Case | Before | Now |
+> |---|---|---|
+> | Same source interaction, same `asserted_at`, different object | later arrival supersedes | both stay live |
+> | Same source interaction, same `asserted_at`, same object | later arrival supersedes | unchanged |
+> | A later `asserted_at`, any source | supersedes every earlier live row | unchanged |
+> | Another source, or no source, at the same `asserted_at` | later arrival supersedes | unchanged |
+> | A strictly newer live row exists | new row is superseded by it | unchanged; among several, by the last inserted |
+> | Live rows per key | one | the rows of the latest extraction |
+>
+> The sentence above that ties are "unreachable in the hot path" was wrong: every extraction ties with itself, and a room-close fan gives sibling records one `closed_at`. Known limits: a correction inside one conversation leaves both values live; a later conversation replaces the whole earlier set, including facts it did not mention; a repeat counts as one only when the text is identical; two records closed at the same instant still replace each other's facts on a shared key, by arrival order; and nothing bounds how many facts one extraction leaves under a key. No schema change and no migration: rows already superseded stay so.
+
 ### G. Audit and provenance
 
 Every fact carries `source_interaction_id`. The [RFC 0009 AuditLogger](0009-security-sandboxing.md) records fact extraction events at `INFO` level; redaction policy follows the existing `RedactStruct` rules (no raw PII in audit metadata). A `superseded_by` write is also audited. Use-based reinforcement (`mark_recalled`) emits one bounded `fact.recalled` audit record per call — naming every reinforced `fact_id` as a field rather than one record per id — so the audit log is not blind to which facts a turn reinforced. The reinforcement-audit event was added by PR 5e per [`docs/rfcs/0026-pr-plan.md` PR 5e §From PR 4 review — second-pass deferrals](0026-pr-plan.md#from-pr-4-review--second-pass-deferrals); the PR 4 implementation initially shipped the `last_recalled_at` write with no audit emission.

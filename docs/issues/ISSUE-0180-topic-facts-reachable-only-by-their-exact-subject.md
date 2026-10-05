@@ -104,3 +104,9 @@ Whichever lands, check which golden traces move and re-record them.
 > ruled the same day that the facts tier is fixed before the scored run,
 > with ISSUE-0159 and ISSUE-0181; the choice among the options above comes
 > back to the maintainer.
+
+> 2026-10-05 — [ISSUE-0181](ISSUE-0181-facts-extracted-together-supersede-each-other.md)'s
+> fix covers only facts from one extraction. If option 1 here makes
+> records reuse a stored subject, two records closed at the same instant
+> will write the same key routinely, and the one whose extraction
+> finishes later replaces the other's facts. Decide the two together.
