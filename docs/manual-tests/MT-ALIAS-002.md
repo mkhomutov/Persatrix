@@ -27,7 +27,7 @@ same agent, unchanged, must route to a **different provider** after re-pointing 
 documented-$0 for a local target).
 
 **Scope**: The RFC 0033 §D promise that model identity lives in **one** place. We re-point the
-`quality` / `fast` / `summarizer` aliases from Anthropic to a priced OpenAI peer (`gpt-4o`) — an
+`quality` / `fast` / `summarizer` aliases from Anthropic to a priced OpenAI peer (`gpt-6-sol`) — an
 alias-block change with **no edit** to `config/agents.yaml`, the routing defaults, or any agent
 code — and confirm the same `ember-owl` persona now calls OpenAI with correctly-keyed non-zero
 cost. In v0.3.4 each provider is a mounted alias config, so the swap is `make demo-anthropic` →
@@ -74,7 +74,7 @@ mounted alias config; this test exercises the *user-facing* one-line edit to the
 ### System Requirements
 
 - ☐ Windows / macOS / Linux with Docker + Docker Compose
-- ☐ A real `OPENAI_API_KEY` (the swap target resolves to OpenAI `gpt-4o`). For the local
+- ☐ A real `OPENAI_API_KEY` (the swap target resolves to OpenAI `gpt-6-sol`). For the local
   variant (Edge Case 1) a running Ollama daemon instead — no key.
 - ☐ `curl` + `jq` in PATH.
 
@@ -89,8 +89,8 @@ mounted alias config; this test exercises the *user-facing* one-line edit to the
 ### Test Data
 
 The Anthropic alias config (`config/demo/anthropic`) resolves `quality` → `anthropic` /
-`claude-sonnet-4-6` (priced `3.00` / `15.00`); the OpenAI alias config (`config/demo/openai`)
-resolves `quality` → `openai` / `gpt-4o` (priced `2.50` / `10.00`). The unchanged `ember-owl`
+`claude-sonnet-5-5` (priced `2.00` / `10.00`); the OpenAI alias config (`config/demo/openai`)
+resolves `quality` → `openai` / `gpt-6-sol` (priced `2.00` / `10.00`). The unchanged `ember-owl`
 (which references `quality`) follows whichever provider the active `quality` entry names — without
 touching the agent, the routing defaults, or any code.
 
@@ -102,10 +102,10 @@ touching the agent, the routing defaults, or any code.
 
 **Action**: With `make demo-anthropic` up, drive one turn and confirm the provider (per
 [MT-ALIAS-001](MT-ALIAS-001.md) Steps 3–5): `gen_ai.system=anthropic`,
-`gen_ai.request.model=claude-sonnet-4-6`, `model_alias=quality`.
+`gen_ai.request.model=claude-sonnet-5-5`, `model_alias=quality`.
 
 **Verification**:
-- [ ] Turn routes to Anthropic on `claude-sonnet-4-6`
+- [ ] Turn routes to Anthropic on `claude-sonnet-5-5`
 
 ---
 
@@ -120,7 +120,7 @@ make demo-openai
 
 This mounts [`config/demo/openai/optimization.yaml`](../../config/demo/openai/optimization.yaml) in
 place of the Anthropic one. The **only** thing that differs between the two configs is the alias
-block (`quality` → `openai` / `gpt-4o`, priced `2.50` / `10.00`); `config/agents.yaml`, the routing
+block (`quality` → `openai` / `gpt-6-sol`, priced `2.00` / `10.00`); `config/agents.yaml`, the routing
 defaults, and all agent code are identical:
 
 ```bash
@@ -130,11 +130,11 @@ diff <(grep -A4 'quality:' config/demo/anthropic/optimization.yaml) \
 
 The equivalent **manual** one-line-class edit (without the demo overlay) is to flip the `quality`
 entry's `provider` / `model` / price in the active `config/optimization.yaml`, then
-`docker compose ... up -d --force-recreate agent-ember-owl`. The OpenAI physical model (`gpt-4o`) is
+`docker compose ... up -d --force-recreate agent-ember-owl`. The OpenAI physical model (`gpt-6-sol`) is
 already priced in the derived `cost.pricing.models` table, so no table regeneration is needed.
 
 **Expected Result**: The swap is confined to the alias block — **no edit** to `config/agents.yaml`,
-the routing defaults, or any agent code. `gpt-4o` is already in the derived pricing table.
+the routing defaults, or any agent code. `gpt-6-sol` is already in the derived pricing table.
 
 **Verification**:
 - [ ] The swap changes only the alias `provider` / `model` / price (the `diff` above is the whole delta)
@@ -156,12 +156,12 @@ curl -s -X POST "http://127.0.0.1:8080/api/v1/agents/ember-owl/chat" \
 Then inspect the latest `agent.llm.call` span for `ember-owl`.
 
 **Expected Result**: HTTP 200, `reply_status="ok"`. The span now shows `gen_ai.system=openai`,
-`gen_ai.request.model=gpt-4o`, and still `persatrix.llm.model_alias=quality` — the **same
+`gen_ai.request.model=gpt-6-sol`, and still `persatrix.llm.model_alias=quality` — the **same
 agent**, the **same alias name**, a **different provider**.
 
 **Verification**:
 - [ ] `reply_status="ok"`
-- [ ] `gen_ai.system=openai`, `gen_ai.request.model=gpt-4o`
+- [ ] `gen_ai.system=openai`, `gen_ai.request.model=gpt-6-sol`
 - [ ] `persatrix.llm.model_alias` still `quality`
 
 ---
@@ -170,7 +170,7 @@ agent**, the **same alias name**, a **different provider**.
 
 **Action**: Capture `GET /api/v1/cost/summary` before and after the Step 3 turn.
 
-**Expected Result**: `daily_estimated_usd` advanced by a non-zero amount priced at the **gpt-4o**
+**Expected Result**: `daily_estimated_usd` advanced by a non-zero amount priced at the **gpt-6-sol**
 rate (`2.50` / `10.00` per 1M), keyed to `ember-owl`. Cost followed the swap because the pricing
 table is derived from the alias map — not hand-keyed to the old physical model.
 
@@ -203,10 +203,10 @@ If you used the **manual** in-place edit instead, revert it
 
 | Step | Expected Outcome | Pass/Fail |
 |------|------------------|-----------|
-| 1 | Stock agent routes to Anthropic `claude-sonnet-4-6` | ☐ |
+| 1 | Stock agent routes to Anthropic `claude-sonnet-5-5` | ☐ |
 | 2 | Swap confined to the alias block (overlay switch or one-entry edit); `make validate` clean | ☐ |
-| 3 | Same agent now routes to OpenAI `gpt-4o`; alias name unchanged | ☐ |
-| 4 | Cost re-keyed to gpt-4o rate, non-zero, keyed to `ember-owl` | ☐ |
+| 3 | Same agent now routes to OpenAI `gpt-6-sol`; alias name unchanged | ☐ |
+| 4 | Cost re-keyed to gpt-6-sol rate, non-zero, keyed to `ember-owl` | ☐ |
 | 5 | Working tree clean (overlay leaves no tracked edit; revert any in-place edit) | ☐ |
 
 ---
@@ -249,6 +249,6 @@ swap.
 
 - "One-line edit" is shorthand for *one alias entry*: provider + model (+ its inline price). The
   point is that the swap is confined to the alias block — agents, routing defaults, and code are
-  untouched (and `gpt-4o` is already in the derived pricing table).
+  untouched (and `gpt-6-sol` is already in the derived pricing table).
 - The demo-overlay swap mutates no tracked file. If you demonstrate the swap by editing a config in
   place instead, revert it (`git checkout`) so the working tree stays clean.

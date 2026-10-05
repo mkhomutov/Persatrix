@@ -23,7 +23,7 @@
 
 **Purpose**: Verify the native Gemini path end to end — *the whole society runs on
 Google's Gemini models*, a chat turn completes with **real** token counts, cost
-attributes to the priced `gemini-3.5-flash` aliases, and the telemetry files the traffic
+attributes to the priced `gemini-3.8-flash` / `gemini-3.5-flash-lite` aliases, and the telemetry files the traffic
 under `gen_ai.system = gemini` (not `openai`).
 
 **Scope**: The `provider: gemini` path through
@@ -51,8 +51,8 @@ brainstorm (`MT-AUTONOMOUS-MULTIPROVIDER-001`, RFC 0052 PR 9); Vertex AI routing
   (mounts `config/demo/gemini/optimization.yaml`; sets `AGENT_EXTRAS: gemini`;
   plumbs `GEMINI_API_KEY` / `GOOGLE_API_KEY`).
 - [config/demo/gemini/optimization.yaml](../../config/demo/gemini/optimization.yaml)
-  — the Gemini alias config (`quality` / `fast` / `summarizer` → `gemini-3.5-flash`,
-  priced).
+  — the Gemini alias config (`quality` → `gemini-3.8-flash`, `fast` / `summarizer` →
+  `gemini-3.5-flash-lite`, priced).
 - [Makefile](../../Makefile) `demo-gemini` target.
 - [agents/llm_gemini.py](../../agents/llm_gemini.py) — `GeminiProvider`.
 - [agents/llm_factory.py](../../agents/llm_factory.py) — the `provider: gemini` branch.
@@ -157,12 +157,12 @@ curl -s http://127.0.0.1:8080/api/v1/cost/summary | python3 -m json.tool
 
 **Expected Result**: The span reports **non-zero** `gen_ai.usage.input_tokens` /
 `output_tokens`, `gen_ai.system = gemini`, and `gen_ai.request.model` a physical
-`gemini-3.5-flash` id (never an alias name). `daily_estimated_usd` **increased** from
+`gemini-3.8-flash` id (never an alias name). `daily_estimated_usd` **increased** from
 the baseline — Gemini is a real per-token cloud provider, and the priced aliases
 keep the RFC 0023 budget/lease gate live (unlike the $0 offline / Ollama demos).
 
 **Verification**:
-- [ ] `gen_ai.system=gemini`; `gen_ai.request.model` is a physical `gemini-3.5-flash` id.
+- [ ] `gen_ai.system=gemini`; `gen_ai.request.model` is a physical `gemini-3.8-flash` id.
 - [ ] `gen_ai.usage.*_tokens` non-zero; `daily_estimated_usd` increased.
 
 ---
@@ -194,7 +194,7 @@ request** (an auth error), not at construction. The society does not crash on bo
 image without `AGENT_EXTRAS: gemini`).
 
 **Expected Behavior**: `create_provider()` raises a loud, actionable `SystemExit`
-naming the install (`pip install 'google-genai>=1.0.0'`, or the extra
+naming the install (`pip install 'google-genai>=1.56.0'`, or the extra
 `pip install 'persatrix-agents[gemini]'`), not a raw `ImportError` traceback.
 
 ### Edge Case 3: Unpriced Alias
@@ -228,3 +228,8 @@ disabling the budget gate. Every shipped demo alias is priced.
   to `gemini-3.5-flash` for all three aliases. If this smoke ever regresses to
   `DEADLINE_EXCEEDED` with a 404 in the agent logs, re-check the alias models against
   Google's currently-available list and repoint `config/demo/gemini/optimization.yaml`.
+- **Model lifecycle (2026-10-05):** `gemini-3.5-flash` became a legacy model, and Google
+  recommends `gemini-3.8-flash` (chat and agent work) and `gemini-3.5-flash-lite`
+  (cheap, high-volume calls). The demo config moved `quality` to the first and
+  `fast` / `summarizer` to the second, with `thinking_level: minimal` on the latter.
+  Gemini 3.x takes no temperature; the adapter stops sending one.

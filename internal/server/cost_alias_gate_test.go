@@ -22,7 +22,7 @@ import (
 // end. (v0.3.4 "no default provider": the base config/optimization.yaml ships
 // aliases UNCONFIGURED, so the configured config lives under config/demo/.) The
 // usage is keyed by the physical model the `quality` alias resolves to
-// (claude-sonnet-4-6) — the value the Python agent sends on LeaseRequest.model
+// (claude-sonnet-5-5) — the value the Python agent sends on LeaseRequest.model
 // for an alias-routed agent. Before PR 5 this read $0 because the pricing table
 // still keyed the retired claude-sonnet-4-20250514.
 func TestCostSummary_AliasRoutedAgent_ReportsNonZeroCost(t *testing.T) {
@@ -35,7 +35,7 @@ func TestCostSummary_AliasRoutedAgent_ReportsNonZeroCost(t *testing.T) {
 	counter.RecordUsage(cost.UsageRecord{
 		WorkflowID:   "wf-1",
 		AgentID:      "planner",
-		Model:        "claude-sonnet-4-6", // physical id behind the `quality` alias
+		Model:        "claude-sonnet-5-5", // physical id behind the `quality` alias
 		InputTokens:  1000,
 		OutputTokens: 500,
 	})

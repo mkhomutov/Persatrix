@@ -568,7 +568,7 @@ demo-ollama: ## Run the demo society on a REAL local model via Ollama — no API
 	@echo "  Stop with: make docker-down  (the pulled model persists in the ollama-models volume)"
 
 demo-openai: ## Run the demo society on OpenAI (cloud peer) — needs OPENAI_API_KEY; spends real money
-	@echo "→ Starting Persatrix on OpenAI (gpt-4o / gpt-4o-mini) — REAL cloud calls, REAL spend."
+	@echo "→ Starting Persatrix on OpenAI (gpt-6-sol / gpt-6-luna) — REAL cloud calls, REAL spend."
 	@echo "  Needs OPENAI_API_KEY in your environment or .env. Set a hard cap at https://platform.openai.com/ first."
 	@# Provider selection is config-driven (RFC 0033 — no force-knob): the
 	@# openai overlay mounts an alias config pointing every agent at
@@ -580,7 +580,7 @@ demo-openai: ## Run the demo society on OpenAI (cloud peer) — needs OPENAI_API
 	@echo "  Stop with: make docker-down"
 
 demo-gemini: ## Run the demo society on Google Gemini (cloud peer) — needs GEMINI_API_KEY (or GOOGLE_API_KEY); spends real money
-	@echo "→ Starting Persatrix on Gemini (gemini-3.5-flash) — REAL cloud calls, REAL spend."
+	@echo "→ Starting Persatrix on Gemini (gemini-3.8-flash / gemini-3.5-flash-lite) — REAL cloud calls, REAL spend."
 	@echo "  Needs GEMINI_API_KEY (or GOOGLE_API_KEY) in your environment or .env. Set a hard cap in Google AI Studio first."
 	@# Provider selection is config-driven (RFC 0033 — no force-knob): the
 	@# gemini overlay mounts an alias config pointing every agent at
@@ -594,7 +594,7 @@ demo-gemini: ## Run the demo society on Google Gemini (cloud peer) — needs GEM
 	@echo "  Stop with: make docker-down"
 
 demo-watsonx: ## Run the demo society on IBM watsonx.ai (cloud peer) — needs WATSONX_API_KEY + WATSONX_PROJECT_ID (non-secret); spends real money
-	@echo "→ Starting Persatrix on watsonx.ai (llama-3-3-70b / granite-3-8b) — REAL cloud calls, REAL spend."
+	@echo "→ Starting Persatrix on watsonx.ai (llama-4-maverick / granite-4-h-small) — REAL cloud calls, REAL spend."
 	@echo "  Needs, in your environment or .env: WATSONX_API_KEY (secret) AND WATSONX_PROJECT_ID"
 	@echo "  (non-secret; or WATSONX_SPACE_ID). WATSONX_URL is optional (defaults to us-south)."
 	@echo "  Set a cap in IBM Cloud first."

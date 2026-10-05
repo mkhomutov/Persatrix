@@ -102,3 +102,17 @@ defence and the only one that is current by construction.
 > omitted Lite's limits), which is the concrete evidence that this class
 > of fact is easy to get wrong even when written carefully and checked
 > against the vendor's own documentation on the day.
+
+> 2026-10-05 — the drift this issue predicts, measured. A re-check of every
+> demo alias against each vendor's current list found: `gemini-3.5-flash`
+> priced at $0.30 / $2.50 against a real $1.50 / $9.00, so the wallet saw a
+> fifth of the input spend; Claude Haiku 4.5 at $0.80 / $4.00 against
+> $1.00 / $5.00; `ibm/granite-3-8b-instruct`, the watsonx `fast` and
+> `summarizer` model, withdrawn on 2026-02-22, so those roles would fail;
+> and `meta-llama/llama-3-3-70b-instruct` at $1.80 against about $0.75. The
+> model refresh that found them repriced every demo alias. One rate already
+> has a date on it: `gemini-3.8-flash` is $0.75 / $3.75 through 2026-12-31
+> and $1.50 / $7.50 from 2027-01-01, noted where it is configured. The
+> watsonx rates come from IBM's pricing page, which this sandbox could only
+> read through search results, and watsonx bills in resource units, so they
+> carry the most doubt. Option 1 above would have caught all of it.

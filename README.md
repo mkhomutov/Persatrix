@@ -119,7 +119,7 @@ make build-cli
 make demo-offline     # free: scripted mock, no key, no network  ← start here
 #   make demo-ollama    # free: a real local model via Ollama, no cloud spend
 #   make demo-anthropic # Claude  (needs ANTHROPIC_API_KEY; spends real money)
-#   make demo-openai    # GPT-4o  (needs OPENAI_API_KEY; spends real money)
+#   make demo-openai    # GPT-6   (needs OPENAI_API_KEY; spends real money)
 #   make demo-gemini    # Gemini  (needs GEMINI_API_KEY / GOOGLE_API_KEY; spends real money)
 #   make demo-watsonx   # watsonx (needs WATSONX_API_KEY + a project_id; spends real money)
 
@@ -247,10 +247,10 @@ role aliases (`quality` / `fast` / `summarizer`) move the same way — not a cod
 change, and each provider has a one-command demo that configures all three:
 
 ```bash
-make demo-anthropic               # Claude  (needs ANTHROPIC_API_KEY)
-make demo-openai                  # GPT-4o / gpt-4o-mini (needs OPENAI_API_KEY)
-make demo-gemini                  # gemini-3.5-flash (needs GEMINI_API_KEY / GOOGLE_API_KEY)
-make demo-watsonx                 # llama-3-3-70b / granite-3-8b (needs WATSONX_API_KEY + a project_id)
+make demo-anthropic               # claude-sonnet-5-5 / claude-haiku-4-5 (needs ANTHROPIC_API_KEY)
+make demo-openai                  # gpt-6-sol / gpt-6-luna (needs OPENAI_API_KEY)
+make demo-gemini                  # gemini-3.8-flash / gemini-3.5-flash-lite (needs GEMINI_API_KEY / GOOGLE_API_KEY)
+make demo-watsonx                 # llama-4-maverick / granite-4-h-small (needs WATSONX_API_KEY + a project_id)
 ```
 
 The cloud demos spend real money — set a cap first. See the

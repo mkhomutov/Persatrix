@@ -152,3 +152,19 @@ how it reads a refusal.
 > now also carries the provider's own stop reason, `provider_stop_reason`,
 > and the judge's kept answer records that one. The rest of this issue is
 > still open.
+
+> 2026-10-05 — items 1 and 2 land with the model refresh that moves the
+> shipped Anthropic demo's `quality` alias to `claude-sonnet-5-5`, which
+> thinks by default. An alias's `provider_config` now carries `thinking`,
+> `effort` and `prompt_cache` for Anthropic (and `reasoning_effort` for
+> OpenAI, `thinking_level` for Gemini). `LLMClient` hands the calling
+> alias's settings to the provider on every call except one through the
+> agent's own alias, which keeps what the provider was built with, agent
+> entry included. A response that holds thinking blocks keeps its content
+> blocks on `LLMResponse.provider_content`, and `append_tool_round` sends
+> them back unchanged; a turn without them is rebuilt as before. An alias
+> that sets nothing sends none of the new fields, so EXP-001's arms, whose
+> aliases set nothing, send what they sent before. Item 3, the `refusal`
+> stop reason, stays open: arm A's reading of it is frozen in the harness
+> choices. The settings are described in
+> [the model request settings guide](../guides/model-request-settings.md).

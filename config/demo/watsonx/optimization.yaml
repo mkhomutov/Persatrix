@@ -43,15 +43,20 @@ active_profile: "default"
 
 models:
   aliases:
-    # Llama-3.3-70B for the quality role; Granite-3-8B for the cheaper
-    # fast / summarizer roles. watsonx list pricing (USD per 1M tokens); the
-    # RFC 0033 §F missing-price guard fails closed on an unpriced non-local
-    # alias, so every entry carries explicit pricing.
+    # Llama 4 Maverick for the quality role; Granite 4.0 H Small, IBM's
+    # current pay-as-you-go Granite chat model, for the cheaper fast /
+    # summarizer roles. ibm/granite-3-8b-instruct, which these roles used, was
+    # withdrawn on 2026-02-22 with granite-4-h-small as its replacement. Both
+    # take tool calls on the chat API. watsonx list pricing (USD per 1M
+    # tokens, from IBM's pricing page on 2026-10-05; watsonx bills in resource
+    # units, so check the rate in your own account); the RFC 0033 §F
+    # missing-price guard fails closed on an unpriced non-local alias, so
+    # every entry carries explicit pricing. watsonx has no prompt cache.
     quality:
       provider: watsonx
-      model: meta-llama/llama-3-3-70b-instruct
-      input_per_1m_tokens: 1.80
-      output_per_1m_tokens: 1.80
+      model: meta-llama/llama-4-maverick-17b-128e-instruct-fp8
+      input_per_1m_tokens: 0.371
+      output_per_1m_tokens: 1.484
       provider_config:
         # Your watsonx project id (or set `space_id` instead). Ships EMPTY →
         # resolved from WATSONX_PROJECT_ID in .env (the recommended path, keeps
@@ -65,18 +70,18 @@ models:
         url: ""
     fast:
       provider: watsonx
-      model: ibm/granite-3-8b-instruct
-      input_per_1m_tokens: 0.20
-      output_per_1m_tokens: 0.20
+      model: ibm/granite-4-h-small
+      input_per_1m_tokens: 0.0636
+      output_per_1m_tokens: 0.265
       provider_config:
         # Env-driven by default (WATSONX_PROJECT_ID / WATSONX_URL) — see `quality`.
         project_id: ""
         url: ""
     summarizer:
       provider: watsonx
-      model: ibm/granite-3-8b-instruct
-      input_per_1m_tokens: 0.20
-      output_per_1m_tokens: 0.20
+      model: ibm/granite-4-h-small
+      input_per_1m_tokens: 0.0636
+      output_per_1m_tokens: 0.265
       provider_config:
         # Env-driven by default (WATSONX_PROJECT_ID / WATSONX_URL) — see `quality`.
         project_id: ""
@@ -107,12 +112,12 @@ cost:
     # RFC 0023 budget/lease gate live (a real per-token cost accrues), so the
     # wallet-cap demo trips here, unlike the $0-local offline / ollama demos.
     models:
-      "meta-llama/llama-3-3-70b-instruct":
-        input_per_1m_tokens: 1.80
-        output_per_1m_tokens: 1.80
-      "ibm/granite-3-8b-instruct":
-        input_per_1m_tokens: 0.20
-        output_per_1m_tokens: 0.20
+      "meta-llama/llama-4-maverick-17b-128e-instruct-fp8":
+        input_per_1m_tokens: 0.371
+        output_per_1m_tokens: 1.484
+      "ibm/granite-4-h-small":
+        input_per_1m_tokens: 0.0636
+        output_per_1m_tokens: 0.265
   budgets:
     global:
       max_daily_usd: 100.00

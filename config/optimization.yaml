@@ -23,12 +23,12 @@ active_profile: "default"
 # alias config from config/demo/<provider>/optimization.yaml):
 #
 #   make demo-anthropic   # Claude  (needs ANTHROPIC_API_KEY)
-#   make demo-openai      # GPT-4o  (needs OPENAI_API_KEY)
+#   make demo-openai      # GPT-6   (needs OPENAI_API_KEY)
 #   make demo-ollama      # a real local model — $0, no key, no cloud
 #   make demo-offline     # scripted mock — $0, no key, no network
 #
 # — or configure here directly: set provider / model / pricing on each alias
-# below (e.g. provider: anthropic, model: claude-sonnet-4-6, with its prices).
+# below (e.g. provider: anthropic, model: claude-sonnet-5-5, with its prices).
 # Every provider is selected the same standard way; a swap is a one-line edit.
 # See docs/guides/model-providers.md.
 #

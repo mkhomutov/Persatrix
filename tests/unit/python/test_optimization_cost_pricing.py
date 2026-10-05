@@ -306,22 +306,22 @@ class TestShippedCostPricingDerivedFromAliases:
     def test_anthropic_demo_prices_quality_physical_model(self) -> None:
         # The base ships `quality` UNCONFIGURED; the anthropic demo is the
         # configured artifact that prices the physical model it resolves to
-        # (claude-sonnet-4-6) so the RFC 0023 gate is not $0, retired id gone.
+        # (claude-sonnet-5-5) so the RFC 0023 gate is not $0, retired id gone.
         # This is also what the Go alias cost-attribution gate pins against
         # (internal/server/cost_alias_gate_test.go loads config/demo/anthropic).
         pricing = self._demo("anthropic", optimization.cost_pricing_models)
-        assert "claude-sonnet-4-6" in pricing
-        assert pricing["claude-sonnet-4-6"]["input_per_1m_tokens"] > 0
-        assert pricing["claude-sonnet-4-6"]["output_per_1m_tokens"] > 0
+        assert "claude-sonnet-5-5" in pricing
+        assert pricing["claude-sonnet-5-5"]["input_per_1m_tokens"] > 0
+        assert pricing["claude-sonnet-5-5"]["output_per_1m_tokens"] > 0
         assert "claude-sonnet-4-20250514" not in pricing
 
     def test_openai_demo_prices_physical_model(self) -> None:
         # The OpenAI peer ships as a configured demo, priced so the one-line
         # swap resolves to a priced target (amendment 2026-05-24 item 2).
         pricing = self._demo("openai", optimization.cost_pricing_models)
-        assert "gpt-4o" in pricing
-        assert pricing["gpt-4o"]["input_per_1m_tokens"] > 0
-        assert pricing["gpt-4o"]["output_per_1m_tokens"] > 0
+        assert "gpt-6-sol" in pricing
+        assert pricing["gpt-6-sol"]["input_per_1m_tokens"] > 0
+        assert pricing["gpt-6-sol"]["output_per_1m_tokens"] > 0
 
 
 def test_module_exports_cost_pricing_accessors() -> None:

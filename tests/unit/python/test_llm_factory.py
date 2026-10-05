@@ -278,7 +278,7 @@ class TestStockConfigMigration:
             with patch.dict(sys.modules, {"anthropic": _mock_anthropic_module()}):
                 for agent in agents:
                     _, model = create_provider(agent)
-                    assert model == "claude-sonnet-4-6", agent["id"]
+                    assert model == "claude-sonnet-5-5", agent["id"]
         finally:
             os.environ.pop("PERSATRIX_OPTIMIZATION_CONFIG", None)
             optimization.reset_cache()

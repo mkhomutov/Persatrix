@@ -233,12 +233,12 @@ class TestShippedYamlModelAliases:
         aliases = self._aliases_for("config/demo/anthropic/optimization.yaml")
         if not aliases:
             pytest.skip("config/demo/anthropic absent in this checkout")
-        # quality → Sonnet 4.6; fast / summarizer → Haiku.
+        # quality → Sonnet 5.5; fast / summarizer → Haiku 4.5.
         assert aliases["quality"]["provider"] == "anthropic"
-        assert aliases["quality"]["model"] == "claude-sonnet-4-6"
+        assert aliases["quality"]["model"] == "claude-sonnet-5-5"
         for alias in ("fast", "summarizer"):
             assert aliases[alias]["provider"] == "anthropic"
-            assert aliases[alias]["model"] == "claude-haiku-4-5-20251001"
+            assert aliases[alias]["model"] == "claude-haiku-4-5"
 
     def test_openai_demo_ships_priced_peer(self) -> None:
         aliases = self._aliases_for("config/demo/openai/optimization.yaml")
