@@ -12,6 +12,7 @@ refs:
   - docs/rfcs/0026-declarative-facts-tier.md
   - docs/rfcs/0037-memory-confidentiality-channel-classification.md
   - docs/issues/ISSUE-0181-facts-extracted-together-supersede-each-other.md
+  - https://github.com/mkhomutov/Persatrix/pull/1034
 ---
 
 # ISSUE-0184: Fact recall's 20-row cap runs before the gate

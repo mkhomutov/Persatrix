@@ -13,6 +13,7 @@ refs:
   - docs/rfcs/0026-declarative-facts-tier.md
   - docs/issues/ISSUE-0180-topic-facts-reachable-only-by-their-exact-subject.md
   - docs/issues/ISSUE-0181-facts-extracted-together-supersede-each-other.md
+  - https://github.com/mkhomutov/Persatrix/pull/1034
 ---
 
 # ISSUE-0183: Two overlapping fact writes can leave no live fact

@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0181
 summary: "Facts extracted together overwrite each other. Supersession keys on (subject, predicate) and never on the object, and one extraction stamps every fact with the same time, so several distinct facts under one subject and predicate leave only the last one live: three 'event planning | topic.decided' facts from one briefing became one. In EXP-001's first practice run, all 14 superseded rows in arm D's four stores were siblings from the same conversation, not updates."
-status: open
+status: resolved
 severity: medium
 area: memory
 created: 2026-10-02
+closed: 2026-10-05
+closed_pr: 1034
 refs:
   - agents/memory/_facts_supersede.py
   - agents/memory/_facts_write.py
@@ -12,6 +14,8 @@ refs:
   - docs/rfcs/0026-declarative-facts-tier.md
   - docs/issues/ISSUE-0180-topic-facts-reachable-only-by-their-exact-subject.md
   - docs/issues/ISSUE-0079-cross-session-supersede-not-scoped.md
+  - tests/unit/python/test_fact_store_written_together.py
+  - tests/unit/python/test_facts_written_together.py
 ---
 
 # ISSUE-0181: Facts extracted together supersede each other
