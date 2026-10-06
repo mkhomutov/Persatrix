@@ -104,3 +104,91 @@ Whichever lands, check which golden traces move and re-record them.
 > ruled the same day that the facts tier is fixed before the scored run,
 > with ISSUE-0159 and ISSUE-0181; the choice among the options above comes
 > back to the maintainer.
+
+> 2026-10-05 — [ISSUE-0181](ISSUE-0181-facts-extracted-together-supersede-each-other.md)'s
+> fix covers only facts from one extraction. If option 1 here makes
+> records reuse a stored subject, two records closed at the same instant
+> will write the same key routinely, and the one whose extraction
+> finishes later replaces the other's facts. Two such writes that
+> overlap can leave neither live
+> ([ISSUE-0183](ISSUE-0183-overlapping-fact-writes-leave-no-live-fact.md)).
+> Decide them together.
+
+> 2026-10-06 — the four options were measured on the first practice run,
+> with no model calls. Each of the 25 turns where an arm D adviser spoke
+> in the three later meetings was replayed through the shipped recall and
+> prompt code, against the store that adviser held when the meeting
+> began, written again with ISSUE-0181's fix
+> ([#1034](https://github.com/mkhomutov/Persatrix/pull/1034)). Only the
+> rule under test was swapped. As a check, the shipped rule on the run's
+> own stores brings back the same two facts the run recalled, at the same
+> times. The count is of prompts that hold a briefing fact: the hall
+> booking, the $25 cap or the lighting crew. As shipped, none of the 25
+> does.
+>
+> 1. **Option 1 changes nothing here.** An adviser's store gained a
+>    topic subject 49 times. Sixteen were at the first close, when the
+>    store was empty, and these hold every briefing fact. Twelve named
+>    something that only a record closed with them had just named; those
+>    extractions run side by side and cannot see each other's subjects.
+>    Fifteen named a new topic. Six could have reused a stored subject,
+>    all at the last close, and renaming those six leaves every count as
+>    it was. Ideal naming does little for the shipped rule either: with
+>    everything about the theatre under "harbour players", 3 of 25
+>    prompts hold the briefing, because a message must still say
+>    "Harbour Players". Merged subjects also cost facts under the
+>    current write rule. Of the 121 stored facts, 31 to 44 stop being
+>    live, nearly all because records closed together replace each
+>    other's facts on a shared subject and predicate (the 2026-10-05
+>    note above).
+> 2. **Option 2 helps, mostly through one word.** Seeding a subject when
+>    the message shares any one of its content words puts a briefing
+>    fact in 17 of 25 prompts and all three in 8. But the advisers filed
+>    the briefing under "event plan" or "event planning", and every
+>    opening message says "plan". With that word ignored, the $25 cap
+>    falls from 15 prompts to 3 and the lighting crew from 15 to 4. The
+>    recall questions' own words match no subject, and the chair's memo
+>    turns get nothing. Asking for every word, or most, reaches 3 or 4
+>    prompts. A made-up subject such as "plan review" would be seeded on
+>    18 of 25 turns, where today it needs the whole phrase.
+> 3. **Option 3 as written gives one fact.** Only the subject "harbour
+>    players" appears whole in the room's description, and it holds the
+>    lighting crew for two advisers: 9 of 25 prompts, none of them the
+>    chair's. Seeding a subject when all its words are in the
+>    description adds the hall booking to all 25, the chair's memo turns
+>    included, but only because the description says "hall". With half
+>    its words, up to five "harbour players …" subjects compete for
+>    three seeds once the first plan meeting has added its own, and the
+>    newest ones win, so the $25 cap reaches 6 prompts. The description
+>    already reaches the agent on every channel turn, with the roster,
+>    but after fact recall has run. A planted subject that is a phrase
+>    of the description would be seeded on every turn in the room.
+> 4. **Option 4 adds routes, not facts.** Five briefing rows sit under a
+>    person predicate, `avoids`. With ISSUE-0181's fix, each of those
+>    facts is also live under a topic predicate in the same store. Alone
+>    it changes nothing. With option 2 the hall booking goes from 10
+>    prompts to 17, and with option 3 as written the $25 cap goes from 0
+>    to 9. The chair gains nothing. Reading every row fails
+>    `test_topic_seed_reads_only_topic_rows`, the test that pins the
+>    bound, and so do two of the three narrower forms tried. Reading
+>    only preference and commitment predicates passes it. In a check
+>    with one planted topic tuple naming a colleague, that form still
+>    showed the colleague's stated dislike on 3 of 20 turns from other
+>    senders once option 2 was in.
+>
+> No option, alone or paired with another, puts all three facts into the
+> chair's memo prompt in the recall meeting within the cap of three
+> seeds. One combination does, in all 25 prompts: one subject per
+> organisation from the first close, option 3 as written, and
+> ISSUE-0181's fix. A list of stored subjects cannot produce that
+> naming, since it is chosen while the store is empty. Whether a line in
+> the extractor prompt can is untested and needs model calls.
+>
+> What this does not show: the transcripts are held fixed, so it counts
+> which facts reach a prompt, not what the advisers would then say. It
+> is one run and four stores, and the rules were tried on the practice
+> series only. In the unit and integration suites no test fails under
+> option 2, and option 4 fails only the test named above. No golden
+> trace moves under options 2 or 4, and option 3 cannot move one, since
+> no room in a golden has a description. None of them covers these
+> cases: the goldens hold one-word subjects.

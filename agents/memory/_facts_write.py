@@ -88,14 +88,16 @@ async def insert_fact(
     construction — a superseding assertion is a NEW row stamped from its
     own source (§C item 3) — and reinforcement never touches the column.
 
-    Enforces RFC 0026 §F **symmetric latest-asserted-wins**: only one
-    live row per ``(agent_id, subject, predicate)`` survives, and the row
-    with the greatest ``asserted_at`` wins.  Out-of-order and
+    Enforces RFC 0026 §F **symmetric latest-asserted-wins**: per
+    ``(agent_id, subject, predicate, session, principal, epoch)`` the
+    latest assertion wins, and the facts one extraction wrote together
+    stay live together (ISSUE-0181).  Out-of-order and
     equal-timestamp writes resolve deterministically — see
     :mod:`agents.memory._facts_supersede` for the chain rule (including
     why equal timestamps are now REACHABLE in production) and
     :class:`tests.unit.python.test_fact_store_supersede.TestSymmetricLatestAssertedWins`
-    for the pinned cases.
+    and :mod:`tests.unit.python.test_fact_store_written_together` for
+    the pinned cases.
 
     Predicate validation runs through the injected validator (PR 2 wires
     the enumerated allowlist).
@@ -119,6 +121,11 @@ async def insert_fact(
     # caller passing the tracker's empty-string sentinel cannot mint a
     # third speaker state alongside NULL and a real id.
     speaker_id = speaker_id or None
+    # ISSUE-0181: the same fold for the source id.  Supersession now reads
+    # a non-NULL source as "written by one extraction", so an empty or
+    # blank string must not become a source that unrelated rows share.
+    if source_interaction_id is not None and not source_interaction_id.strip():
+        source_interaction_id = None
     if not subject or not subject.strip():
         raise ValueError("subject must not be empty")
     if not 0.0 <= certainty <= 1.0:
@@ -158,6 +165,7 @@ async def insert_fact(
         db, agent_id=agent_id, subject=subject, predicate=predicate,
         asserted_at=asserted_at, new_fact_id=fact_id,
         session_id=session_id, principal_id=principal_id, epoch_id=epoch_id,
+        source_interaction_id=source_interaction_id, new_object=object,
     )
     await db.commit()
 
