@@ -56,17 +56,24 @@ live row when all three hold:
 
 * it has the new row's non-NULL ``source_interaction_id`` (NULL means
   no known source, so unsourced rows are never "written together";
-  the write path stores an empty id as NULL);
+  the write path stores an empty or blank id as NULL);
 * it has the new row's ``asserted_at`` (source plus stamp identifies
   one extraction, so the same source at a later time is still an
   update);
 * its ``object`` differs (a word-for-word repeat still leaves one row).
 
+Predicates that hold one value at a time
+(:data:`.fact_predicates.SINGLE_VALUED_PREDICATES`: a name, an age, a
+home, a topic's owner) get no exception.  There a second value in one
+extraction is a correction or a change, so the last-listed fact still
+replaces the earlier one.
+
 The source comparison is NULL-safe (``IS``), so an unsourced write
 still supersedes a sourced tie.  Known limits, recorded in ISSUE-0181:
-a correction inside one conversation leaves both values live until a
-later conversation speaks about the key, and a later conversation
-replaces the whole earlier set, including facts it did not mention.
+under any other predicate a correction inside one conversation leaves
+both values live until a later conversation speaks about the key, and
+a later conversation replaces the whole earlier set, including facts
+it did not mention.
 
 Equal-timestamp ties break in favour of the later arrival (the row
 being inserted), matching the PR 5a deferred-item resolution from
@@ -117,6 +124,7 @@ from typing import TYPE_CHECKING, NamedTuple
 
 from ..session_id import LEGACY_SESSION_ID
 from ._facts_audit import emit_audit
+from .fact_predicates import SINGLE_VALUED_PREDICATES
 
 if TYPE_CHECKING:
     import aiosqlite
@@ -167,7 +175,8 @@ async def apply_supersession(
     ``source_interaction_id`` and ``new_object`` (ISSUE-0181) are the
     new row's own values.  The older sweep uses them to leave alone the
     rows its extraction wrote alongside it: same non-NULL source, same
-    ``asserted_at``, different object.  Both are required, so a caller
+    ``asserted_at``, different object, and a ``predicate`` outside
+    ``SINGLE_VALUED_PREDICATES``.  Both are required, so a caller
     cannot skip the rule by leaving them out.  The newer-row pick breaks
     ties on ``rowid`` (last inserted first), because several rows can
     now be live at the newest instant.
@@ -222,6 +231,13 @@ async def apply_supersession(
         else (session_id, LEGACY_SESSION_ID)
     )
     older_placeholders = ",".join("?" for _ in older_sessions)
+    # A predicate that holds one value at a time gets no exception: the
+    # query reads a NULL source as "not written together", so the
+    # last-listed value of one extraction still replaces the earlier one.
+    together_source = (
+        None if predicate in SINGLE_VALUED_PREDICATES
+        else source_interaction_id
+    )
     async with db.execute(
         f"""
         SELECT fact_id FROM facts
@@ -244,7 +260,7 @@ async def apply_supersession(
         (
             agent_id, subject, predicate, *older_sessions,
             principal_id, epoch_id, asserted_at, new_fact_id,
-            source_interaction_id, asserted_at, new_object,
+            together_source, asserted_at, new_object,
         ),
     ) as cursor:
         older_rows = await cursor.fetchall()

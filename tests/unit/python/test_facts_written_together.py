@@ -28,6 +28,8 @@ from agents.persona_runtime.facts_section import (
 from agents.persona_runtime.memory_budget import MemoryBudget
 from agents.persona_types import AgentEvent, EventType
 
+from ._fact_audit_test_helpers import event_dict
+
 _TOPIC = "event planning"
 _BRIEFING = [
     "Saturdays in May are unavailable",
@@ -69,25 +71,9 @@ async def _extract(
 def _supersede_events(
     caplog: pytest.LogCaptureFixture,
 ) -> list[dict[str, Any]]:
-    """The ``fact.supersede`` audit events captured so far.
-
-    The audit logger hands the event to stdlib logging either as a dict
-    in ``record.msg`` or as a string with the fields as attributes; both
-    shapes are read.
-    """
-    events: list[dict[str, Any]] = []
-    for rec in caplog.records:
-        if isinstance(rec.msg, dict):
-            event = dict(rec.msg)
-        else:
-            event = {
-                "event": rec.msg,
-                "superseded_fact_id": getattr(rec, "superseded_fact_id", None),
-                "by_fact_id": getattr(rec, "by_fact_id", None),
-            }
-        if event.get("event") == "fact.supersede":
-            events.append(event)
-    return events
+    """The ``fact.supersede`` audit events captured so far."""
+    events = [event_dict(rec) for rec in caplog.records]
+    return [e for e in events if e.get("event") == "fact.supersede"]
 
 
 class TestOneCloseKeepsEveryFact:

@@ -169,12 +169,13 @@ Recall filters out superseded rows by default. This composes with reinforcement 
 > |---|---|---|
 > | Same source interaction, same `asserted_at`, different object | later arrival supersedes | both stay live |
 > | Same source interaction, same `asserted_at`, same object | later arrival supersedes | unchanged |
+> | Same source interaction, same `asserted_at`, a predicate that holds one value (`has_name`, `has_age`, `lives_in`, `topic.owned_by`) | later arrival supersedes | unchanged |
 > | A later `asserted_at`, any source | supersedes every earlier live row | unchanged |
 > | Another source, or no source, at the same `asserted_at` | later arrival supersedes | unchanged |
 > | A strictly newer live row exists | new row is superseded by it | unchanged; among several, by the last inserted |
 > | Live rows per key | one | the rows of the latest extraction |
 >
-> The sentence above that ties are "unreachable in the hot path" was wrong: every extraction ties with itself, and a room-close fan gives sibling records one `closed_at`. Known limits: a correction inside one conversation leaves both values live; a later conversation replaces the whole earlier set, including facts it did not mention; a repeat counts as one only when the text is identical; two records closed at the same instant still replace each other's facts on a shared key, by arrival order, or leave the key with no live row when their writes overlap ([ISSUE-0183](../issues/ISSUE-0183-overlapping-fact-writes-leave-no-live-fact.md)); and nothing bounds how many facts one extraction leaves under a key ([ISSUE-0184](../issues/ISSUE-0184-fact-recall-cap-runs-before-the-gate.md)). No schema change and no migration: rows already superseded stay so.
+> The sentence above that ties are "unreachable in the hot path" was wrong: every extraction ties with itself, and a room-close fan gives sibling records one `closed_at`. Known limits: a correction inside one conversation leaves both values live, except under those four predicates; a later conversation replaces the whole earlier set, including facts it did not mention; a repeat counts as one only when the text is identical; two records closed at the same instant still replace each other's facts on a shared key, by arrival order, or leave the key with no live row when their writes overlap ([ISSUE-0183](../issues/ISSUE-0183-overlapping-fact-writes-leave-no-live-fact.md)); and nothing bounds how many facts one extraction leaves under a key ([ISSUE-0184](../issues/ISSUE-0184-fact-recall-cap-runs-before-the-gate.md)). No schema change and no migration: rows already superseded stay so.
 
 ### G. Audit and provenance
 

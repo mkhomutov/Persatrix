@@ -299,7 +299,8 @@ prompt
 > reinforced when restated. A later conversation in the same channel
 > that speaks about the same subject and predicate replaces that
 > channel's earlier facts; facts taken from one interaction are kept
-> side by side. A group channel closes one interaction per speaker
+> side by side, except a second name, age, home or topic owner, which
+> replaces the first. A group channel closes one interaction per speaker
 > heard, so two speakers' facts under one subject and predicate still
 > replace each other there. Recall is
 > on by default; `memory.facts.enabled: false` turns off fact recall

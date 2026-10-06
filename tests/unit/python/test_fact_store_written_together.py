@@ -348,16 +348,47 @@ class TestFactsFromOneExtractionCoexist:
         assert pointers[a] == b
         assert await _live_objects(fact_store) == ["b"]
 
-    async def test_empty_string_source_counts_as_no_source(
+    async def test_one_value_predicates_keep_the_last_listed_value(
         self, fact_store: FactStore,
     ):
-        """An empty source id is no source, not a source rows can share.
+        """Pin (passes before the fix): one value at a time means one row.
+
+        A name, an age, a home and a topic's owner hold one value.
+        When one extraction lists two, the second is a correction or a
+        change ("41... sorry, 42"), so the last-listed still replaces
+        the earlier one.  The predicates are spelled out here, not
+        imported, so the file still loads on the unfixed code.
+        """
+        one_value = ["has_name", "has_age", "lives_in", "topic.owned_by"]
+        for predicate in one_value:
+            first, final = [
+                await fact_store.store(
+                    subject="launch", predicate=predicate, object=obj,
+                    source_interaction_id="ix-1",
+                    asserted_at=2106900777.7129362, session_id="run-a",
+                )
+                for obj in ("first value", "final value")
+            ]
+            rows = await fact_store.recall(
+                subject="launch", predicates=[predicate],
+                include_superseded=True, sessions="*",
+            )
+            pointers = {r.fact_id: r.superseded_by for r in rows}
+            assert (predicate, pointers[first], pointers[final]) == (
+                predicate, final, None,
+            )
+
+    @pytest.mark.parametrize("blank", ["", " ", "\t\n"])
+    async def test_empty_string_source_counts_as_no_source(
+        self, fact_store: FactStore, blank: str,
+    ):
+        """An empty or blank source id is no source, not one rows can share.
 
         The write path stores it as NULL, so two such rows at one
         instant keep the tie rule like any other unsourced pair.
         """
         a, b = await _store_together(
-            fact_store, ["a", "b"], source="", at=1000.0,
+            fact_store, ["a", "b"], source=blank, at=1000.0,
         )
         pointers = await _superseded_by(fact_store)
         assert pointers[a] == b

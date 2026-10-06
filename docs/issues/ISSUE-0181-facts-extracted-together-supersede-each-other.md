@@ -5,7 +5,7 @@ status: resolved
 severity: medium
 area: memory
 created: 2026-10-02
-closed: 2026-10-05
+closed: 2026-10-06
 closed_pr: 1034
 refs:
   - agents/memory/_facts_supersede.py
@@ -103,9 +103,17 @@ replaces the whole earlier set, an older write that arrives late is
 still superseded, and rows from another source, or with no source, keep
 the tie rule.
 
-Three choices go beyond the letter of option 1. Each is one line and
-can be dropped on its own:
+Four choices go beyond the letter of option 1. Each is a line or two
+and can be dropped on its own:
 
+- **A predicate that holds one value keeps the last-listed one.** A
+  name, an age, a home and a topic's owner (`has_name`, `has_age`,
+  `lives_in`, `topic.owned_by`) get no exception, so a correction
+  inside one conversation ("41... sorry, 42") still leaves one row.
+  `topic.has_status` and `works_at` are left out on purpose. The
+  practice run used both to describe an organisation, and two of its
+  eleven sibling groups were `harbour players | topic.has_status`
+  pairs in which both facts were true.
 - **A word-for-word repeat still leaves one row.** If one extraction
   lists the same object twice, the second copy supersedes the first, so
   the prompt does not print one fact twice.
@@ -113,10 +121,10 @@ can be dropped on its own:
   can now be live at the newest instant. The row that supersedes a late
   older write is the last one inserted, the one recall lists first among
   that key's rows.
-- **An empty source id is stored as no source.** The rule reads a
-  source id as "written by one extraction", so an empty string must
-  not become a source that unrelated rows share. No extraction writes
-  one; only a direct caller can.
+- **An empty or blank source id is stored as no source.** The rule
+  reads a source id as "written by one extraction", so an empty or
+  whitespace-only string must not become a source that unrelated rows
+  share. No extraction writes one; only a direct caller can.
 
 Measured on arm D's four practice stores: replaying their 121 fact rows
 through the fixed write path leaves none superseded, where the run had
@@ -132,9 +140,9 @@ Tests:
 pins the rule under each write order.
 [`test_facts_written_together.py`](../../tests/unit/python/test_facts_written_together.py)
 follows three facts from the extractor, through the recall step the
-runtime uses, to the prompt and the audit trail. Fourteen of the
-nineteen new tests fail on the unfixed code; the rest pin cases the
-rule must leave alone. No existing test changed its outcome, and the
+runtime uses, to the prompt and the audit trail. Sixteen of the
+twenty-two tests in these two files fail on the unfixed code; the rest
+pin cases the rule must leave alone. No existing test changed its outcome, and the
 six stable golden traces replay unchanged.
 
 ## Slot: merges before EXP-001, by the maintainer's call of 2026-10-02
@@ -161,9 +169,11 @@ six stable golden traces replay unchanged.
 > 2026-10-05 — limits the fix leaves, each as before it unless stated:
 >
 > 1. A correction inside one conversation ("Mira... no, Lila") leaves
->    both values live until a later conversation speaks about the key.
->    Before the fix the last-listed value won. The store cannot tell a
->    correction from an addition; none of the 121 practice rows was one.
+>    both values live until a later conversation speaks about the key,
+>    unless the predicate is one of the four that hold one value (see
+>    Fix). Before the fix the last-listed value won. The store cannot
+>    tell a correction from an addition; none of the 121 practice rows
+>    was one.
 > 2. A later conversation replaces the whole earlier set, including
 >    facts it did not mention.
 > 3. Two records closed at the same instant, as a room-close fan closes
@@ -179,9 +189,17 @@ six stable golden traces replay unchanged.
 >    makes records reuse a stored subject, so the two are decided
 >    together.
 > 4. Nothing bounds how many facts one extraction leaves under a key,
->    and the facts section shares one token budget across subjects.
->    What does not fit is cut oldest first, and inside one extraction
->    the facts it listed first are the first cut. Recall also reads
+>    and the facts section shares one token budget across subjects. It
+>    fills subject by subject: the persona's own facts, then the
+>    sender's, then each topic's. So what does not fit is cut from the
+>    last topic backwards, whatever its age. Inside one subject the
+>    oldest facts go first, and inside one extraction the ones it
+>    listed first. The extra facts this fix keeps about the persona and
+>    the sender therefore push topic facts out: one close that left 14
+>    long facts about the persona, 6 about the sender and the 3
+>    briefing facts put none of the 3 in the next prompt, where the
+>    unfixed code put 1. With short facts, 13 lines fit and all 3 were
+>    there. Recall also reads
 >    only a subject's 20 newest live facts before the confidentiality
 >    gate runs, and one conversation can now fill those
 >    ([ISSUE-0184](ISSUE-0184-fact-recall-cap-runs-before-the-gate.md)).

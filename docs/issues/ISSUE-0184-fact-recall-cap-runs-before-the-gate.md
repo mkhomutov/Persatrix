@@ -9,6 +9,7 @@ refs:
   - agents/persona_runtime/facts_section.py
   - agents/persona_runtime/memory_context.py
   - agents/memory/facts.py
+  - evaluators/shadow_measurement.py
   - docs/rfcs/0026-declarative-facts-tier.md
   - docs/rfcs/0037-memory-confidentiality-channel-classification.md
   - docs/issues/ISSUE-0181-facts-extracted-together-supersede-each-other.md
@@ -48,6 +49,16 @@ subject's facts newest first, and the facts section admits them in that
 order until its token budget, 200 by default, is used. Facts of one
 extraction share a time and are listed last-written first, so the ones
 the extraction listed first are the first cut.
+
+The shadow measurement assumes the same width. Its `bounded_volume`
+check reads more than 20 admitted facts in one turn as seed-flooding
+(`DEFAULT_TIER_BOUNDS` in
+[`shadow_measurement.py`](../../evaluators/shadow_measurement.py)), a
+number chosen when a subject and predicate held one live fact. A turn
+that seeds the persona, the sender and three topics can now pass it
+with no flood. Nothing runs in shadow today, and this was read from the
+code, not run; check the number before the next shadow measurement of
+fact recall.
 
 ## Impact
 

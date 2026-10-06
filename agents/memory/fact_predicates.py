@@ -30,6 +30,7 @@ __all__ = [
     "MAX_OBJECT_CHARS",
     "MAX_SUBJECT_CHARS",
     "PREDICATE_ALLOWLIST",
+    "SINGLE_VALUED_PREDICATES",
     "TOPIC_PREDICATES",
     "canonicalize_subject",
     "validate_object",
@@ -101,6 +102,22 @@ TOPIC_PREDICATES: frozenset[str] = frozenset({
 })
 
 PREDICATE_ALLOWLIST = PREDICATE_ALLOWLIST | TOPIC_PREDICATES
+
+# Predicates that hold one value at a time (ISSUE-0181).  Facts one
+# extraction writes together stay live together, except under these:
+# a second name, age, home or owner in one conversation is a correction
+# or a change, so the last-listed value still replaces the earlier one
+# (:mod:`._facts_supersede`).  ``topic.has_status`` and ``works_at`` are
+# left out on purpose: EXP-001's first practice run used both to
+# describe an organisation, and twice filed two different facts under
+# ``topic.has_status`` in one conversation.  The drift pin in
+# ``test_fact_predicates.py`` holds the exact set.
+SINGLE_VALUED_PREDICATES: frozenset[str] = frozenset({
+    "has_name",
+    "has_age",
+    "lives_in",
+    "topic.owned_by",
+})
 
 
 # ─── Blast-radius bounds (topic amendment §Security gate) ───

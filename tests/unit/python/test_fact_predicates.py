@@ -26,6 +26,7 @@ from agents.memory.fact_predicates import (
     MAX_OBJECT_CHARS,
     MAX_SUBJECT_CHARS,
     PREDICATE_ALLOWLIST,
+    SINGLE_VALUED_PREDICATES,
     TOPIC_PREDICATES,
     canonicalize_subject,
     validate_object,
@@ -129,6 +130,19 @@ class TestPredicateAllowlistShape:
         assert TOPIC_PREDICATES == frozenset(
             p for p in PREDICATE_ALLOWLIST if p.startswith("topic.")
         )
+
+    def test_single_valued_predicates_are_a_pinned_allowlist_subset(
+        self,
+    ) -> None:
+        """``SINGLE_VALUED_PREDICATES`` (ISSUE-0181) is exactly these
+        four real verbs.  A misspelt one would match no fact; adding
+        ``topic.has_status`` or ``works_at`` would lose facts again,
+        since extractions file several different ones under each."""
+        assert isinstance(SINGLE_VALUED_PREDICATES, frozenset)
+        assert SINGLE_VALUED_PREDICATES == frozenset({
+            "has_name", "has_age", "lives_in", "topic.owned_by",
+        })
+        assert SINGLE_VALUED_PREDICATES <= PREDICATE_ALLOWLIST
 
     def test_topic_namespace_rejects_unknown(self) -> None:
         """The ``topic.`` prefix grants no free pass — same closed-set

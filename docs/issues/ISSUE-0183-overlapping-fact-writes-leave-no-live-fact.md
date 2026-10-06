@@ -1,6 +1,6 @@
 ---
 id: ISSUE-0183
-summary: "Two fact writes that overlap can each supersede the other and leave no live fact. Storing a fact is several steps with nothing serializing them, so when two records closed at the same instant store a fact under one subject and predicate at the same moment, each write marks the other's row superseded and the persona recalls nothing for that key. RFC 0026 says fact writes are serialized per agent; the close path writes them outside the agent lock. Not seen in a run: both inserts must land before either write looks for older rows."
+summary: "Two fact writes that overlap can each supersede the other and leave no live fact. Storing a fact is several steps with nothing serializing them, so when two records closed at the same instant store a fact under one subject and predicate at the same moment, each write marks the other's row superseded and the persona recalls nothing for that key. RFC 0026 says fact writes are serialized per agent; the close path writes them outside the agent lock. Not seen in a run. The window is a whole extraction's writes, not one pair: two three-fact extractions started together left none of their six facts live."
 status: open
 severity: low
 area: memory
@@ -69,10 +69,16 @@ writes per agent. Nothing on the close path does that.
 ## Impact
 
 The persona loses every fact under that subject and predicate until a
-later conversation states one again. The window is narrow: both inserts
-must land before either write looks for older rows, so the two
-extractions have to finish at the same moment and reach the shared key
-together. In EXP-001's first practice run, 13 of the 16 sessions in arm
+later conversation states one again. The window is wider than one pair
+of writes. An extraction stores its facts one after another, so two
+extractions that overlap at all keep superseding each other's rows. Two
+three-fact extractions started together left none of their six facts
+live, with and without the ISSUE-0181 fix. Five facts written strictly
+in turn from two records (A, B, A, B, A) leave one. The background
+tasks of one room-close fan all start at that close. With a live model
+their replies usually arrive apart and the writes do not overlap; when
+the replies arrive together, as recorded or cached responses do, the
+writes overlap every time. In EXP-001's first practice run, 13 of the 16 sessions in arm
 D's four stores held facts from more than one record closed at one
 instant, and no two records in a session wrote the same subject and
 predicate. Option 1 of
@@ -93,3 +99,9 @@ replaces the other record's facts.
 > 2026-10-05 — filed from the review of the ISSUE-0181 fix. Not slotted:
 > whether it is fixed before EXP-001's scored run is the maintainer's
 > call.
+
+> 2026-10-06 — Impact first called the window narrow, counting one pair
+> of writes. The review of
+> [#1034](https://github.com/mkhomutov/Persatrix/pull/1034) measured
+> whole extractions, as above. Severity is left at `low` for the
+> maintainer: it rests on how often a fan's replies arrive together.

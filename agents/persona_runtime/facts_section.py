@@ -317,8 +317,8 @@ def render_facts_section(
     ``recall_facts_for_event`` appends topic seeds *after* the person
     seeds, and why the sender competes for the **remainder**.
     Operators tuning ``memory.facts.budget_tokens`` should leave
-    headroom past a typical ``self.*`` load (~3-5 rows): under-sizing
-    shows up as missing sender/topic rows, never missing ``self.*``.
+    headroom past the ``self.*`` load (one close can leave several rows
+    per key, ISSUE-0181): too small loses sender/topic rows, not ``self.*``.
 
     Soft-slice overage scales with subject count
     --------------------------------------------
