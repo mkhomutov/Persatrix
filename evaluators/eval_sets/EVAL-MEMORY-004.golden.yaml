@@ -4,6 +4,15 @@
   usage:
     input_tokens: 2127
     output_tokens: 15
+348d4c5e918e236be90902a796e0a25f5939f046b27620859b38f94aa42d1dca:
+  stop_reason: end_turn
+  text: '{"summary": "Sam shared in the war room that the Zephyr acquisition closes
+    March 3; ember-owl acknowledged it stays in the room.", "facts": [{"subject":
+    "zephyr", "predicate": "topic.has_deadline", "object": "the acquisition closes
+    March 3", "certainty": 0.9}]}'
+  usage:
+    input_tokens: 822
+    output_tokens: 65
 356bf8b36fedabb071c022a2c86a6c5d67a0a237f516df7f0872e42bc5c4dad9:
   stop_reason: end_turn
   text: Understood — the Zephyr acquisition closes March 3. That stays inside this
@@ -18,15 +27,6 @@
   usage:
     input_tokens: 2018
     output_tokens: 24
-9c721daf763ffb1b456743d575002caee877669674764862887228e5a193ecf2:
-  stop_reason: end_turn
-  text: '{"summary": "Sam shared in the war room that the Zephyr acquisition closes
-    March 3; ember-owl acknowledged it stays in the room.", "facts": [{"subject":
-    "zephyr", "predicate": "topic.has_deadline", "object": "the acquisition closes
-    March 3", "certainty": 0.9}]}'
-  usage:
-    input_tokens: 752
-    output_tokens: 65
 bf11491769903a79bf4c5cbbed289a8d859ff8a65ffd0747187240096c1f2423:
   stop_reason: end_turn
   text: Morning! Nothing pressing from my side — what's on the standup agenda?

@@ -433,7 +433,12 @@ class TestShippedSnippetsByteIdentity:
             "For `topic.*` predicates, use the canonical short name of "
             "the project, artifact, or initiative discussed as the "
             "subject (e.g. `atlas`, `q3 roadmap`) — a few words at "
-            "most, never a sentence or a quote. Keep every `object` a "
+            "most, never a sentence or a quote. When the interaction is "
+            "about one organisation, team or client, use that "
+            "organisation's own name as the subject of every `topic.*` "
+            "tuple about it (e.g. `riverside clinic`, not `riverside "
+            "clinic parking` or `staffing plan`), and say which part, "
+            "event or document in the `object`. Keep every `object` a "
             "single short phrase."
         )
         assert load_snippet(

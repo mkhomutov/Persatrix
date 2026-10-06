@@ -204,3 +204,24 @@ seeding silently failing) and byte re-pins for the prompt. Both RFC
 `EVAL-MEMORY-001` actually shifted — the widened `{predicate_list}`
 moves close-path request hashes, and it is the recipe with close-path
 calls), preserving the dementia-continuity tripwire.
+
+## Amendment (2026-10-06) — the room's own subject
+
+> **Amendment (2026-10-06 — [ISSUE-0180](../issues/ISSUE-0180-topic-facts-reachable-only-by-their-exact-subject.md)): a subject the room's description names seeds recall on every turn there.** Recall seeding as landed reaches a topic fact only when the message repeats its stored subject word for word. A message such as "please critique this plan" names nothing, so a fact about what a room is for was stored and never recalled in it. In EXP-001's first practice run none of the briefing's facts reached a later meeting's prompt.
+>
+> | | As landed (items 2 and 3 above) | Now |
+> |---|---|---|
+> | Extractor prompt | topic tuples use the short name of the project, artifact or initiative | the same, and when the interaction is about one organisation, team or client, that organisation's own name is the subject of every topic tuple about it, with the part, event or document in the object |
+> | Texts the stored subjects are matched against | the message | the acting room's description, then the message, by the same whole-subject rule |
+> | Seed slots | three, all the message's | still three; the room's subjects come first and take at most two (`ROOM_SEED_LIMIT`) |
+> | Order a seeded subject's facts are read in | newest first | newest first for a subject the message names; from both ends for a subject the room names: the newest, the oldest, the second newest, the second oldest, and so on (`FactStore.recall(order="both_ends")`) |
+>
+> Why the room's subject is read from both ends: it is recalled on every turn and every later room adds to its list, while a read stops at 20 rows and the facts section at its token slice. Read newest first, what the first room said would be the first thing cut. Both ends keeps it, and drops the middle of a long list instead. Which rows a read can reach does not change, only which ones a cap keeps.
+>
+> What this does to the bounds in [Security](#security--the-allowlist-blast-radius-re-review-the-named-gate):
+>
+> * **No new text reaches a prompt.** The description is configured by the operator and is only matched against. The subjects still come from the store, and a seed from the room reads topic rows alone, as every topic seed does. Each recalled row still passes the RFC 0037 §D gate.
+> * **A seed can now stand.** Before, a stored subject seeded only on a turn whose message said it. One that is a phrase of a room's description now seeds on every turn in that room, so an induced tuple with such a subject needs nobody to repeat it. The eligibility rule applies to the description as it does to the message, and the room's subjects take at most two of the three slots, so the message's own subject always keeps one. What a standing seed costs is bounded by the facts section's token slice, as before.
+> * **The 20-row cap still runs before the gate** ([ISSUE-0184](../issues/ISSUE-0184-fact-recall-cap-runs-before-the-gate.md)); for a subject the room names it keeps ten rows from each end.
+>
+> Only the description is matched, not the channel's name or its autonomous topic. The roster carries it, so a turn now waits for the roster before it recalls facts. ISSUE-0180 lists what the change leaves: a record that does not name the organisation still files under another subject, and records closed in one meeting still replace each other's facts on a shared subject and predicate. Tests: `test_room_topic_seeds.py`, `test_memory_context_room_seeds.py` and the both-ends cases in `test_fact_store_recall_order.py`. Five of the six RFC 0044 goldens moved with the prompt and were re-recorded offline; `EVAL-WORKING-001` has no close-path call.

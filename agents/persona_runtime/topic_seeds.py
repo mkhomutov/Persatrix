@@ -17,18 +17,33 @@ and principal — from any room when ``memory.facts.cross_room`` is
 ``live``, from the current room otherwise — and every recalled row
 still passes the RFC 0037 §D injection gate downstream.
 
+The room's own subject (ISSUE-0180).  A message rarely repeats a stored
+subject word for word — "please critique this plan" names nothing — so
+a fact about what a room is for was stored and never recalled there.
+The room's description is therefore a second text the stored subjects
+are matched against, by the same rule: a subject it names seeds on
+every turn in that room, whatever the message says.  Such a seed comes
+ahead of the message's, and its facts are read from both ends, the
+newest and the oldest in turn, because it is recalled every turn and
+its list only grows: read newest first, the facts a room was first told
+would be the first a later room pushes out
+(:func:`topic_recall_seeds`).
+
 Bounds (amendment §Security):
 
 * the store enumeration is capped (``TOPIC_SUBJECT_SCAN_LIMIT``) so
   per-event matching cost cannot scale with total store size;
 * at most ``TOPIC_SEED_LIMIT`` topic seeds join the person seeds, so
   the per-seed recall fan-out and the per-subject header overage in
-  ``render_facts_section`` stay bounded;
-* a topic seed recalls ONLY topic rows (the caller passes
-  ``TOPIC_PREDICATES``), so an induced ``topic.*`` tuple about a
-  person cannot turn that person's name into a general fact-read key;
+  ``render_facts_section`` stay bounded.  The room's description adds
+  no slot: its subjects share that cap and take at most
+  ``ROOM_SEED_LIMIT`` of it, so one slot is always the message's;
+* a topic seed recalls ONLY topic rows (every seed this module returns
+  carries ``TOPIC_PREDICATES`` as its filter), so an induced ``topic.*``
+  tuple about a person cannot turn that person's name into a general
+  fact-read key;
 * subjects below ``TOPIC_SEED_MIN_CHARS`` or in the function-word set
-  never seed — see ``_seed_eligible``;
+  never seed, from either text — see ``_seed_eligible``;
 * matching is word-boundary on the canonical fold, so ``atlas`` does
   not fire inside ``atlases`` (over-seeding burns budget, not safety —
   but bounded is bounded).
@@ -41,17 +56,26 @@ import re
 from collections.abc import Collection, Iterable
 from typing import TYPE_CHECKING
 
+from ..memory.fact_predicates import TOPIC_PREDICATES
+
 if TYPE_CHECKING:
-    from ..memory.facts import FactStore
+    from ..memory.facts import FactStore, RecallOrder
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "ROOM_SEED_LIMIT",
     "TOPIC_SEED_LIMIT",
     "TOPIC_SUBJECT_SCAN_LIMIT",
+    "TopicSeed",
     "match_topic_subjects",
+    "topic_recall_seeds",
     "topic_subject_seeds",
 ]
+
+#: A topic seed as the recall loop takes it: the subject, the predicates
+#: its read is confined to, and the order its facts come back in.
+TopicSeed = tuple[str, frozenset[str], "RecallOrder"]
 
 
 # Maximum topic seeds appended to the person seed list per event.  Each
@@ -61,6 +85,12 @@ __all__ = [
 # keeps a multi-topic stimulus useful without letting a keyword-stuffed
 # message fan out unboundedly.
 TOPIC_SEED_LIMIT: int = 3
+
+# How many of those slots the room's description may fill (ISSUE-0180).
+# One fewer than the cap, so a description that names many stored
+# subjects cannot stop the message's own subject from seeding in that
+# room.  Most rooms name one.
+ROOM_SEED_LIMIT: int = TOPIC_SEED_LIMIT - 1
 
 # Bound on the distinct-subject enumeration pulled from the store per
 # event.  Matching cost is O(scan × stimulus length); 200 recent topics
@@ -131,21 +161,53 @@ def match_topic_subjects(
     return matched
 
 
-async def topic_subject_seeds(
+def _text(value: object) -> str:
+    """``value`` if it is text worth matching against, else ``""``.
+
+    ``isinstance`` and not truthiness alone: a bridge may hand a non-str
+    ``content`` through (``channel_ingest`` deliberately passes malformed
+    wire values unchanged), a room's description comes off a REST body,
+    and this runs OUTSIDE the tier's try-block — an ``AttributeError``
+    here would escape ``_inject_memory_context``'s "never fail the
+    event" contract and fail the whole turn.
+    """
+    return value if isinstance(value, str) and value.strip() else ""
+
+
+async def topic_recall_seeds(
     fact_store: FactStore | None,
     stimulus: str | None,
     *,
     exclude: Collection[str],
+    room_text: str | None = None,
     limit: int = TOPIC_SEED_LIMIT,
     sessions: list[str] | str | None = None,
-) -> list[str]:
-    """Derive topic seeds for one event, fail-open to ``[]``.
+) -> list[TopicSeed]:
+    """Derive one event's topic seeds, each with how to read it.
 
-    Mirrors the facts tier's log-and-continue idiom: a backend failure
-    degrades to person-only seeding rather than blocking the event.
-    Callers gate on the person-seed short-circuit first (sender-less
-    events never reach here), so the empty-context cost guard for TICK
-    events is preserved one layer up.
+    Two texts name subjects.  ``room_text`` is the acting room's
+    description: the stored subjects it names come first, at most
+    ``ROOM_SEED_LIMIT`` of them, and are read ``"both_ends"``.
+    ``stimulus`` is the turn's memory query: the subjects it names fill
+    the slots that are left and are read ``"newest"``, as before.  A
+    subject both name seeds once, as the room's.  Every seed carries
+    ``TOPIC_PREDICATES``, so no caller can read a topic seed wider than
+    topic rows.  With no ``room_text`` the result is the shipped
+    message-only seeding.
+
+    Why the two orders differ: a message seed answers what was just
+    said, where the latest facts matter most.  A room seed is recalled
+    on every turn and its list grows with every room that files under
+    the subject, so the facts tier's row cap and token budget would
+    otherwise cut what the room was first told
+    (:meth:`FactStore.recall`, ``order``).
+
+    Fail-open to ``[]``, mirroring the facts tier's log-and-continue
+    idiom: a backend failure degrades to person-only seeding rather
+    than blocking the event.  Callers gate on the person-seed
+    short-circuit first (sender-less events never reach here), so the
+    empty-context cost guard for TICK events is preserved one layer up;
+    with neither text the store is not read at all.
 
     ``sessions`` is forwarded unchanged to
     :meth:`FactStore.topic_subjects`: ``None`` keeps the §D default
@@ -158,17 +220,8 @@ async def topic_subject_seeds(
     ``"*"`` for its own read.  The mode's default is
     :data:`~agents.persona_runtime.cross_room.DEFAULT_FACTS_CROSS_ROOM`.
     """
-    if (
-        fact_store is None
-        or not isinstance(stimulus, str)
-        or not stimulus.strip()
-    ):
-        # ``isinstance`` and not truthiness alone: a bridge may hand a
-        # non-str ``content`` through (``channel_ingest`` deliberately
-        # passes malformed wire values unchanged), and this runs
-        # OUTSIDE the tier's try-block — an ``AttributeError`` here
-        # would escape ``_inject_memory_context``'s "never fail the
-        # event" contract and fail the whole turn.
+    room, message = _text(room_text), _text(stimulus)
+    if fact_store is None or not (room or message):
         return []
     try:
         subjects = await fact_store.topic_subjects(
@@ -182,6 +235,31 @@ async def topic_subject_seeds(
             fact_store.agent_id, exc_info=True,
         )
         return []
-    return match_topic_subjects(
-        stimulus, subjects, limit=limit, exclude=exclude,
+    room_seeds = match_topic_subjects(
+        room, subjects, limit=min(limit, ROOM_SEED_LIMIT), exclude=exclude,
     )
+    message_seeds = match_topic_subjects(
+        message, subjects, limit=limit - len(room_seeds),
+        exclude={*exclude, *room_seeds},
+    )
+    return [
+        *((subject, TOPIC_PREDICATES, "both_ends") for subject in room_seeds),
+        *((subject, TOPIC_PREDICATES, "newest") for subject in message_seeds),
+    ]
+
+
+async def topic_subject_seeds(
+    fact_store: FactStore | None,
+    stimulus: str | None,
+    *,
+    exclude: Collection[str],
+    limit: int = TOPIC_SEED_LIMIT,
+    sessions: list[str] | str | None = None,
+    room_text: str | None = None,
+) -> list[str]:
+    """The subjects :func:`topic_recall_seeds` would seed, in slot order."""
+    seeds = await topic_recall_seeds(
+        fact_store, stimulus, exclude=exclude, room_text=room_text,
+        limit=limit, sessions=sessions,
+    )
+    return [subject for subject, _predicates, _order in seeds]

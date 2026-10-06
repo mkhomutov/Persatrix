@@ -105,3 +105,16 @@ replaces the other record's facts.
 > [#1034](https://github.com/mkhomutov/Persatrix/pull/1034) measured
 > whole extractions, as above. Severity is left at `low` for the
 > maintainer: it rests on how often a fan's replies arrive together.
+
+> 2026-10-06 — measured with
+> [ISSUE-0180](ISSUE-0180-topic-facts-reachable-only-by-their-exact-subject.md)'s
+> probe, whose fix files an organisation's facts under one subject and
+> so makes a shared key likelier. In its re-extractions of the practice
+> run, no record closed in the briefing meeting wrote the organisation's
+> subject besides the operator's (0 of 48), and shuffling the order in
+> which records closed together were written left all 25 later prompts
+> as they were. That is because no adviser's reply to the briefing named
+> the theatre. In the later meetings 7 of 25 replies did, so a briefing
+> in which a reply names the organisation would share the operator's
+> key. The probe wrote records one after another; it did not overlap
+> them. Severity is still the maintainer's.

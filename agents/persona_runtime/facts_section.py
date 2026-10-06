@@ -7,7 +7,7 @@ end-state).  Two helpers:
 - :func:`recall_facts_for_event` issues
   :meth:`agents.memory.facts.FactStore.recall` per seeded subject —
   the canonicalised ``sender_id`` + ``self``, plus (RFC 0049 P1) topic
-  subjects the stimulus mentions.  Returns ``[]`` for events with no
+  subjects the stimulus or the room names.  Returns ``[]`` for events with no
   resolvable subject, for missing / mis-initialised ``FactStore``, and
   on backend failure (logged at WARNING so the budget pipeline runs).
 
@@ -30,15 +30,15 @@ import logging
 from collections.abc import Collection
 from typing import TYPE_CHECKING
 
-from ..memory.fact_predicates import TOPIC_PREDICATES, canonicalize_subject
+from ..memory.fact_predicates import canonicalize_subject
 from ..memory.working import ContextSection, estimate_tokens
 from ..observability.metrics import current_agent_id, try_get_instruments
 from .facts_render import bounded_header_subject, format_fact_line
 from .memory_budget import MemoryBudget
-from .topic_seeds import topic_subject_seeds
+from .topic_seeds import topic_recall_seeds
 
 if TYPE_CHECKING:
-    from ..memory.facts import Fact, FactStore
+    from ..memory.facts import Fact, FactStore, RecallOrder
     from ..persona_types import AgentEvent
 
 logger = logging.getLogger(__name__)
@@ -180,6 +180,7 @@ async def recall_facts_for_event(
     limit: int = FACTS_RECALL_LIMIT,
     stimulus: str | None = None,
     sessions: list[str] | str | None = None,
+    room_text: str | None = None,
 ) -> list[Fact]:
     """Recall declarative facts for every subject derived from *event*.
 
@@ -200,6 +201,9 @@ async def recall_facts_for_event(
     turn's memory query; topic subjects mentioned in it join the
     person seeds via :mod:`.topic_seeds`, BEHIND the person-seed
     short-circuit so a TICK still issues zero DB round-trips.
+    ``room_text`` (ISSUE-0180) — the acting room's description; the
+    topic subjects it names seed too, ahead of the stimulus's, and are
+    read from both ends so their oldest facts outlast the row cap.
 
     ``sessions`` (RFC 0049 PR 4 — the fact-scope amendment's live flip)
     forwards to the topic enumeration and every per-seed recall.
@@ -217,27 +221,24 @@ async def recall_facts_for_event(
     person_seeds = _subject_seeds(event)
     if not person_seeds:
         return []
-    # (subject, predicate filter) pairs.  Person seeds read every
+    # (subject, predicate filter, order) seeds.  Person seeds read every
     # predicate class; topic seeds read ONLY topic rows — the seed set
     # bounds which subjects a stimulus reaches, so an induced topic
     # tuple naming a person must not unlock that person's facts.
-    seeds: list[tuple[str, Collection[str] | None]] = [
-        (subject, None) for subject in person_seeds
+    seeds: list[tuple[str, Collection[str] | None, RecallOrder]] = [
+        (subject, None, "newest") for subject in person_seeds
     ]
-    seeds += [
-        (subject, TOPIC_PREDICATES)
-        for subject in await topic_subject_seeds(
-            fact_store, stimulus, exclude=set(person_seeds),
-            sessions=sessions,
-        )
-    ]
+    seeds += await topic_recall_seeds(
+        fact_store, stimulus, room_text=room_text,
+        exclude=set(person_seeds), sessions=sessions,
+    )
     collected: list[Fact] = []
     seen_ids: set[str] = set()
-    for subject, predicates in seeds:
+    for subject, predicates, order in seeds:
         try:
             rows = await fact_store.recall(
                 subject=subject, limit=limit, predicates=predicates,
-                sessions=sessions,
+                sessions=sessions, order=order,
             )
         except Exception:
             logger.warning(

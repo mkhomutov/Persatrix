@@ -1,12 +1,3 @@
-117f077aecc98e78241ba1b497d5e7661fdd9dd9cfa08a51c383f203d1c73efa:
-  stop_reason: end_turn
-  text: '{"summary": "Sam said the Atlas launch ships Friday; ember-owl acknowledged
-    the hard deadline.", "facts": [{"subject": "atlas", "predicate": "topic.has_deadline",
-    "object": "ships Friday", "certainty": 0.9}, {"subject": "sam", "predicate": "committed_to",
-    "object": "shipping Atlas by Friday", "certainty": 0.85}]}'
-  usage:
-    input_tokens: 551
-    output_tokens: 78
 39291bc4d2816cf975705651c474f1c83b66d0740a661f4c9e7c951875f9adf3:
   stop_reason: end_turn
   text: Atlas ships Friday — that's the deadline we're working toward; Sam committed
@@ -14,6 +5,15 @@
   usage:
     input_tokens: 2076
     output_tokens: 23
+61af99ca208f89a4ffeefaf15cafaa9ac11e8195c3a09820aeb02bc572b1206d:
+  stop_reason: end_turn
+  text: '{"summary": "Sam said the Atlas launch ships Friday; ember-owl acknowledged
+    the hard deadline.", "facts": [{"subject": "atlas", "predicate": "topic.has_deadline",
+    "object": "ships Friday", "certainty": 0.9}, {"subject": "sam", "predicate": "committed_to",
+    "object": "shipping Atlas by Friday", "certainty": 0.85}]}'
+  usage:
+    input_tokens: 621
+    output_tokens: 78
 d845780b8d6a35507f814ebe888de7efe0df6419221adb7a6a93d3fb3af06fda:
   stop_reason: end_turn
   text: Morning! Nothing blocking on my plate — what's up in this standup?

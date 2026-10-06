@@ -424,7 +424,8 @@ prompt
 > keystone). Three pieces: **capture** — the close-path extractor also
 > proposes *topic* facts under the closed `topic.*` predicate namespace
 > ("Atlas ships Friday" → `(atlas, topic.has_deadline, …)`), and an inbound
-> turn that names a known topic seeds its recall deterministically
+> turn that names a known topic seeds its recall deterministically, as
+> does every turn in a channel whose description names it
 > ([0026 amendment](../rfcs/0026-amendment-topic-subject-predicates.md));
 > **facts cross rooms** — fact recall is cross-room by default
 > ([0031 fact-scope amendment](../rfcs/0031-amendment-fact-scope-by-consolidation-level.md)),
