@@ -4,7 +4,9 @@ PR A1 moved the roster fetch ahead of the RFC 0037 §D gate without moving
 the prompt: only a group turn whose agent directory answered injects a
 section, and it is byte-identical to v0.3.15. These tests pin that, and
 pin the wiring order the audience check (PR A2) depends on — the roster
-resolves before the gate runs, concurrently with the tier recalls.
+resolves before the gate runs, concurrently with the tier recalls ahead
+of the facts tier, which has waited for it since ISSUE-0180
+(``test_memory_context_room_seeds.py``).
 """
 
 from __future__ import annotations

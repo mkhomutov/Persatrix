@@ -34,7 +34,10 @@ functions below point back rather than restate it.
 
 *Cost*: one round trip per channel turn, two on a group turn, where
 before only group turns paid anything. ``_inject_memory_context`` issues
-it concurrently with the tier recalls, off the critical path.
+it concurrently with the tier recalls. Since ISSUE-0180 the facts tier
+waits for it, because its topic seeds read the room's description
+(:func:`room_description`), so it overlaps the recalls ahead of that
+tier and no longer the ones after.
 """
 
 from __future__ import annotations
@@ -193,6 +196,23 @@ def member_ids_from_meta(
         if isinstance(m, dict) and isinstance(m.get("id"), str) and m["id"]
     }
     return frozenset(ids) or None
+
+
+def room_description(roster: ChannelRoster | None) -> str | None:
+    """The acting room's configured description, or ``None`` without one.
+
+    The second reader of the description beside the roster section: fact
+    recall matches stored topic subjects against it, so a fact about what
+    the room is for is recalled there whatever the message says
+    (ISSUE-0180, :mod:`.topic_seeds`).  Unlike the section it is wanted on
+    every channel turn, DMs included, and needs no agent directory.  A
+    turn with no roster, and a value that is not text, give ``None``:
+    this feeds the turn's memory read and must not raise.
+    """
+    if roster is None:
+        return None
+    description = roster.channel_meta.get("description")
+    return description if isinstance(description, str) else None
 
 
 def render_roster_section(

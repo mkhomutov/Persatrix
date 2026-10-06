@@ -91,8 +91,9 @@ Test first, with the two gathered calls above expecting one live row.
 Then serialize the write, as the RFC already says: one lock per
 `FactStore`, held across the insert, the supersession pass and the
 commit. What two records closed at one instant should do on a shared key
-is a separate choice, decided with ISSUE-0180: today the later arrival
-replaces the other record's facts.
+is a separate choice: today the later arrival replaces the other
+record's facts. It was to be decided with ISSUE-0180, whose fix landed
+without deciding it, so it is open here on its own.
 
 ## Notes
 
@@ -105,3 +106,30 @@ replaces the other record's facts.
 > [#1034](https://github.com/mkhomutov/Persatrix/pull/1034) measured
 > whole extractions, as above. Severity is left at `low` for the
 > maintainer: it rests on how often a fan's replies arrive together.
+
+> 2026-10-06 — measured with
+> [ISSUE-0180](ISSUE-0180-topic-facts-reachable-only-by-their-exact-subject.md)'s
+> probe, whose fix files an organisation's facts under one subject and
+> so makes a shared key likelier. In its re-extractions of the practice
+> run, no record closed in the briefing meeting wrote the organisation's
+> subject besides the operator's (0 of 48), and shuffling the order in
+> which records closed together were written left all 25 later prompts
+> as they were. That is because no adviser's reply to the briefing named
+> the theatre. In the later meetings 7 of 25 replies did, so a briefing
+> in which a reply names the organisation would share the operator's
+> key. The probe wrote records one after another; it did not overlap
+> them. Severity is still the maintainer's.
+
+> 2026-10-06 — the review of that fix counted the keys the note above
+> left out. The count in Impact, no two records in a session writing the
+> same subject and predicate, held for the run's own extractions. With
+> the fix's new extractor sentence it no longer does: in each of the two
+> re-extractions, 2 of the 15 groups of records closed at one instant
+> hold two records that write one subject and predicate, both in the
+> first plan meeting and both under the plan's name ("spring gala"), not
+> the organisation's. Written in close order, 8 and 7 rows of a pass are
+> replaced by another record's, 4 of them each time by a record closed
+> at the same instant; with the shipped wording, none. So the
+> precondition of this issue now occurs in every pass. Whether the
+> writes also overlap in time, which is what leaves no fact live, was
+> not measured.

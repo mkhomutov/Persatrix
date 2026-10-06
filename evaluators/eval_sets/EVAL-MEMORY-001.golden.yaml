@@ -1,3 +1,10 @@
+172ad4b9d0fb2c763d414d39e0a2043e98dfd2a8093b9db26bc1b10d22b078d0:
+  stop_reason: end_turn
+  text: For a seven-year-old like Mira, a hands-on children's museum or a short nature
+    walk tends to land well.
+  usage:
+    input_tokens: 614
+    output_tokens: 25
 2fc4d5c9e8518042b999601c59d8b03bea638c564f31bdb43e4f28d5e755f92b:
   stop_reason: end_turn
   text: That's lovely — Mira must be glad you're picking her up. Seven is a wonderful
@@ -12,6 +19,13 @@
   usage:
     input_tokens: 2069
     output_tokens: 28
+7ee32419fd3dbb23bc94a013b78a31637337467660b4d5692b0472680ad28150:
+  stop_reason: end_turn
+  text: That's lovely — Mira must be glad you're picking her up. Seven is a wonderful
+    age.
+  usage:
+    input_tokens: 693
+    output_tokens: 20
 b6bda79f3bfb6de4ec468b8de3234844d08f9c71e22da895eb0f55e680e4f5c3:
   stop_reason: end_turn
   text: Understood — I'll keep things to concise written threads rather than long
@@ -31,18 +45,4 @@ cfc8c0b3968e5b599b27bb96e9b6a04527f228b8466062a1f7782054604c0443:
     walk tends to land well.
   usage:
     input_tokens: 2008
-    output_tokens: 25
-fa5f2411a95344718eba02b99860bed4b8d162372aaece2a36c548645ffdba49:
-  stop_reason: end_turn
-  text: That's lovely — Mira must be glad you're picking her up. Seven is a wonderful
-    age.
-  usage:
-    input_tokens: 623
-    output_tokens: 20
-fac270e962a3081c0ec9e9c0e700756833c2bfc9b1ef97eb764454abca221782:
-  stop_reason: end_turn
-  text: For a seven-year-old like Mira, a hands-on children's museum or a short nature
-    walk tends to land well.
-  usage:
-    input_tokens: 544
     output_tokens: 25

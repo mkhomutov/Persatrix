@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Collection, Iterable
+from typing import Literal, assert_never, get_args
 
 import aiosqlite
 
@@ -56,7 +57,7 @@ logger = logging.getLogger(__name__)
 # ``Fact`` / column constants moved to :mod:`agents.memory.fact_types`
 # (ISSUE-0085 PR 3 — keep this module under the 500-line cap); re-exported
 # here so ``from agents.memory.facts import Fact`` is unchanged.
-__all__ = ["Fact", "FactStore", "_FACT_COLS", "_FACT_SELECT"]
+__all__ = ["Fact", "FactStore", "RecallOrder", "_FACT_COLS", "_FACT_SELECT"]
 
 
 # Recall limit ceiling — mirrors :data:`agents.memory.notes._MAX_RECALL_LIMIT`
@@ -64,6 +65,10 @@ __all__ = ["Fact", "FactStore", "_FACT_COLS", "_FACT_SELECT"]
 # prompt (RFC 0017 budget allocator owns the per-tier slice; this is the
 # hard upper bound on row count regardless of token shape).
 _MAX_RECALL_LIMIT = 100
+
+# The orders :meth:`FactStore.recall` can list a subject's facts in; its
+# docstring says what each is for.
+RecallOrder = Literal["newest", "both_ends"]
 
 
 # Predicate validation seam — PR 2 swapped the Phase-1 permissive
@@ -233,8 +238,21 @@ class FactStore:
         include_superseded: bool = False,
         sessions: list[str] | str | None = None,
         predicates: Collection[str] | None = None,
+        order: RecallOrder = "newest",
     ) -> list[Fact]:
-        """Return facts about ``subject`` ordered most-recent-first.
+        """Return facts about ``subject``, most recent first by default.
+
+        ``order`` (ISSUE-0180): ``"newest"`` lists the most recent fact
+        first.  ``"both_ends"`` takes from the two ends in turn — the
+        newest, the oldest, the second newest, the second oldest and so
+        on — so ``limit`` here, or a token budget applied to the result,
+        drops the middle of a long list and keeps what the subject was
+        first told beside what it was told last.  The facts tier reads
+        the room's own subject this way (see
+        :mod:`agents.persona_runtime.topic_seeds`): newest-first alone
+        would let later rooms push the first room's facts out.  Either
+        way the same rows are read; only their order, and so which ones
+        a cap keeps, differs.
 
         ``predicates`` (RFC 0026 topic amendment) narrows to a
         predicate class; ``None`` = every class, the person-seed
@@ -267,6 +285,10 @@ class FactStore:
         """
         if limit < 1:
             raise ValueError(f"limit must be >= 1, got {limit}")
+        if order not in get_args(RecallOrder):
+            raise ValueError(
+                f"order must be one of {get_args(RecallOrder)}, got {order!r}",
+            )
         limit = min(limit, _MAX_RECALL_LIMIT)
         subject = canonicalize_subject(subject)
         session_list = _resolve_session_list(
@@ -299,21 +321,32 @@ class FactStore:
         # supersede/delete never renumber survivors, nothing VACUUMs). It is not
         # selected, only sorted on. `fact_id` is a random uuid4 (see `store`), so it
         # is NOT a portable tiebreak.
-        if include_superseded:
+        live = "" if include_superseded else " AND superseded_by IS NULL"
+        where = (
+            "WHERE agent_id = ? AND subject = ?"
+            f"{live}{pred_clause}{sess_clause}{princ_clause}{epoch_clause}"
+        )
+        if order == "both_ends":
+            # Each row's place counted from the newest end and from the oldest;
+            # the smaller of the two is how near it is to an end. The oldest end
+            # breaks ties the same way turned round (`rowid ASC`), so the rows it
+            # gives are the first an extraction listed, in the order it listed them.
+            # The ends still take turns: three facts written together, with nothing
+            # else under the subject, come back third, first, second.
             sql = (
-                f"SELECT {_FACT_SELECT} FROM facts "
-                "WHERE agent_id = ? AND subject = ?"
-                f"{pred_clause}{sess_clause}{princ_clause}{epoch_clause} "
+                f"SELECT {_FACT_SELECT} FROM (SELECT {_FACT_SELECT}, "
+                "ROW_NUMBER() OVER (ORDER BY asserted_at DESC, rowid DESC) AS from_newest, "
+                "ROW_NUMBER() OVER (ORDER BY asserted_at ASC, rowid ASC) AS from_oldest "
+                f"FROM facts {where}) "
+                "ORDER BY MIN(from_newest, from_oldest), from_newest LIMIT ?"
+            )
+        elif order == "newest":
+            sql = (
+                f"SELECT {_FACT_SELECT} FROM facts {where} "
                 "ORDER BY asserted_at DESC, rowid DESC LIMIT ?"
             )
-        else:
-            sql = (
-                f"SELECT {_FACT_SELECT} FROM facts "
-                "WHERE agent_id = ? AND subject = ? "
-                "AND superseded_by IS NULL"
-                f"{pred_clause}{sess_clause}{princ_clause}{epoch_clause} "
-                "ORDER BY asserted_at DESC, rowid DESC LIMIT ?"
-            )
+        else:  # a new RecallOrder value needs a branch of its own, not this one
+            assert_never(order)
         async with db.execute(
             sql, (
                 self._agent_id, subject, *pred_params, *sess_params,

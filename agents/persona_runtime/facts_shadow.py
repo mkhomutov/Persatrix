@@ -51,7 +51,6 @@ import logging
 from typing import TYPE_CHECKING, Final
 
 from ..memory._session_filter import SESSIONS_ALL
-from ..memory.fact_predicates import TOPIC_PREDICATES
 from .cross_room import (
     CROSS_ROOM_MODES,
     CROSS_ROOM_OFF,
@@ -59,9 +58,8 @@ from .cross_room import (
     DEFAULT_FACTS_CROSS_ROOM,
     resolve_facts_cross_room,
 )
-from .facts_section import FACTS_RECALL_LIMIT, _subject_seeds
+from .facts_section import recall_facts_for_event
 from .injection_gate import TurnInjectionGate, acting_classification_for_event
-from .topic_seeds import topic_subject_seeds
 
 if TYPE_CHECKING:
     from collections.abc import Collection
@@ -103,57 +101,36 @@ async def _widened_candidates(
     event: AgentEvent,
     *,
     stimulus: str | None,
+    room_text: str | None,
     live_fact_ids: Collection[str],
 ) -> list[Fact]:
     """The cross-room delta: widened-recall rows not reachable live.
 
-    Mirrors ``recall_facts_for_event``'s seed derivation — person seeds
+    The live read itself, ``recall_facts_for_event`` — person seeds
     (every predicate class) plus topic seeds (``TOPIC_PREDICATES``
-    only) — with both the topic enumeration and the per-seed recall
+    only; the room's own subjects among them, read in their own order,
+    ISSUE-0180) — with both the topic enumeration and the per-seed recall
     widened to ``sessions="*"``.  Rows whose ``fact_id`` the live
     (room-scoped) recall already returned are dropped: the delta is the
     widening's *contribution*, and a same-room-but-gate-withheld row
     must not be re-reported as cross-room.
 
-    Per-seed failures log-and-continue, the live path's idiom: on a
-    partially-failing backend the live prompt still gets the surviving
-    seeds' facts, so a whole-turn abort here would skew the PR 4
-    shadow-vs-live measurement against that partial recall.
+    The two reads list the store's topic subjects at different widths,
+    so the widened one can seed a subject the walled one did not; a row
+    of this room under such a subject is then in the delta as well.
+    Each candidate's ``session_id`` in the trace says where it is from.
+
+    Per-seed failures log-and-continue inside that read, the live path's
+    idiom: on a partially-failing backend the live prompt still gets the
+    surviving seeds' facts, so a whole-turn abort here would skew the
+    PR 4 shadow-vs-live measurement against that partial recall.
     """
-    person_seeds = _subject_seeds(event)
-    if not person_seeds:
-        return []
-    seeds: list[tuple[str, Collection[str] | None]] = [
-        (subject, None) for subject in person_seeds
-    ]
-    seeds += [
-        (subject, TOPIC_PREDICATES)
-        for subject in await topic_subject_seeds(
-            fact_store, stimulus, exclude=set(person_seeds),
-            sessions=SESSIONS_ALL,
-        )
-    ]
-    delta: list[Fact] = []
-    seen: set[str] = set(live_fact_ids)
-    for subject, predicates in seeds:
-        try:
-            rows = await fact_store.recall(
-                subject=subject, limit=FACTS_RECALL_LIMIT,
-                predicates=predicates, sessions=SESSIONS_ALL,
-            )
-        except Exception:
-            logger.warning(
-                "Agent %s: shadow facts recall for subject=%r failed; "
-                "skipping seed",
-                fact_store.agent_id, subject, exc_info=True,
-            )
-            continue
-        for fact in rows:
-            if fact.fact_id in seen:
-                continue
-            seen.add(fact.fact_id)
-            delta.append(fact)
-    return delta
+    widened = await recall_facts_for_event(
+        fact_store, event, stimulus=stimulus, room_text=room_text,
+        sessions=SESSIONS_ALL,
+    )
+    live = set(live_fact_ids)
+    return [fact for fact in widened if fact.fact_id not in live]
 
 
 async def emit_facts_shadow(
@@ -164,8 +141,13 @@ async def emit_facts_shadow(
     live_fact_ids: Collection[str],
     agent_id: str,
     mode: str = DEFAULT_FACTS_CROSS_ROOM,
+    room_text: str | None = None,
 ) -> None:
     """Compute and record the turn's L2 cross-room shadow trace.
+
+    ``stimulus`` and ``room_text`` are the two texts the live read took
+    its topic seeds from; the shadow read has to take the same ones, or
+    the delta would count a room-seeded fact as missing.
 
     Does nothing unless ``mode`` is ``"shadow"`` (:mod:`.cross_room`
     says what the other modes do).  In shadow mode: one structured INFO
@@ -189,7 +171,7 @@ async def emit_facts_shadow(
         return
     try:
         delta = await _widened_candidates(
-            fact_store, event, stimulus=stimulus,
+            fact_store, event, stimulus=stimulus, room_text=room_text,
             live_fact_ids=live_fact_ids,
         )
         if not delta:

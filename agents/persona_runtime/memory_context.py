@@ -33,7 +33,7 @@ from .channel_history import (
     CHANNEL_HISTORY_SECTION_NAME,
     recall_channel_episodes,
 )
-from .channel_roster import inject_channel_roster, resolve_channel_roster
+from .channel_roster import inject_channel_roster, resolve_channel_roster, room_description
 from .classification import injectable_levels
 from .cross_room import (
     CROSS_ROOM_LIVE,
@@ -283,13 +283,14 @@ class _MemoryContextMixin:
         # tiers below, which share a single aiosqlite connection and
         # serialise anyway.  (The audience resolution after them adds one
         # GET per other source room, on the turn's critical path — see
-        # ``resolve_turn_audience``.)  Issued here and awaited just before
-        # the gate (v0.3.16 PR A1) — it MUST precede the gate, but it need
-        # not sit on the turn's critical path, and a DM turn now pays for
-        # it where before it fetched no roster at all.
-        # ``resolve_channel_roster`` never raises; the ``finally`` is what
-        # keeps a failing tier recall from leaving the task orphaned
-        # (asyncio logs a pending task destroyed at GC).
+        # ``resolve_turn_audience``.)  Issued here (v0.3.16 PR A1; a DM turn
+        # now pays for it where before it fetched no roster at all) and
+        # awaited where first needed.  With facts on that is the facts tier,
+        # whose topic seeds read the room's description (ISSUE-0180), so it
+        # overlaps only the two recalls ahead of it; otherwise just before
+        # the gate, which it MUST precede.  ``resolve_channel_roster`` never
+        # raises; the ``finally`` is what keeps a failing tier recall from
+        # leaving the task orphaned (asyncio logs a pending task destroyed at GC).
         roster_task = asyncio.create_task(
             resolve_channel_roster(self._roster_fetcher, event, self.agent_id),
         )
@@ -316,20 +317,21 @@ class _MemoryContextMixin:
             # Facts tier (RFC 0026 PR 3) — declarative facts about the
             # canonical sender (dementia-test invariant: stored at N,
             # injects at N+1 without subject-string overlap) plus topic
-            # subjects ``query`` mentions (RFC 0049 P1).  Returns ``[]``
-            # when disabled / sender-less / backend raises — all non-fatal.
+            # subjects ``query`` or the room's description names (RFC 0049 P1, ISSUE-0180).
+            # Returns ``[]`` when disabled / sender-less / backend raises — all non-fatal.
             # ``cross_room: live`` (RFC 0049 PR 4, the promoted default)
             # widens the ONE live read past the §D room wall — visibility
             # belongs to the RFC 0037 gate below; shadow mode keeps the
             # walled read and logs the widened delta instead.
             if self._facts_enabled:
+                room_text = room_description(await roster_task)
                 facts = await recall_facts_for_event(
-                    self._fact_store, event, stimulus=query,
+                    self._fact_store, event, stimulus=query, room_text=room_text,
                     sessions=SESSIONS_ALL
                     if self._facts_cross_room == CROSS_ROOM_LIVE else None,
                 )
                 await emit_facts_shadow(
-                    self._fact_store, event, stimulus=query,
+                    self._fact_store, event, stimulus=query, room_text=room_text,
                     live_fact_ids={f.fact_id for f in facts},
                     agent_id=self.agent_id, mode=self._facts_cross_room,
                 )
@@ -390,11 +392,11 @@ class _MemoryContextMixin:
             # ── Channel roster (F-4 tier; the ISSUE-0132 audience rail) ────
             # Resolved BEFORE the §D gate and for every channel-anchored
             # turn, DMs included: the gate cannot ask who is listening if
-            # the roster arrives after it has decided (scope lock 3).  Two
-            # consumers since A2 — the audience resolution below reads its
-            # member ids as the ACTING audience (and as the pre-seeded
-            # cache entry that makes a same-room recall free), and the
-            # prompt section below consumes it unchanged.
+            # the roster arrives after it has decided (scope lock 3).  Three consumers:
+            # the facts tier above took the room's description from it, so with facts on this
+            # await is already done (ISSUE-0180); the audience resolution below reads its member
+            # ids as the ACTING audience (and as the pre-seeded cache entry that makes a same-room
+            # recall free); and the prompt section below consumes it unchanged.
             roster = await roster_task
 
         # ── ISSUE-0132: who is listening ───────────────────────────────────
