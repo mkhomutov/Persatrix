@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0180
 summary: "A topic fact reaches a later prompt only when the incoming message repeats its stored subject word for word. The extractor invents a subject at every close (\"harbour players hall\"), so paraphrase, a partial name or a subject that splintered across closes all miss; seeds are capped at three, newest first, and a short subject also matches inside a longer one. In EXP-001's first practice run, none of the 23 rows arm D's four advisers stored from the briefing reached a later meeting's prompt."
-status: in_progress
+status: resolved
 severity: medium
 area: memory
 created: 2026-10-02
+closed: 2026-10-06
+closed_pr: 1035
 refs:
   - agents/persona_runtime/topic_seeds.py
   - agents/persona_runtime/facts_section.py
