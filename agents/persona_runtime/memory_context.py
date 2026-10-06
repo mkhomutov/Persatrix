@@ -392,11 +392,11 @@ class _MemoryContextMixin:
             # ── Channel roster (F-4 tier; the ISSUE-0132 audience rail) ────
             # Resolved BEFORE the §D gate and for every channel-anchored
             # turn, DMs included: the gate cannot ask who is listening if
-            # the roster arrives after it has decided (scope lock 3).  Two
-            # consumers since A2 — the audience resolution below reads its
-            # member ids as the ACTING audience (and as the pre-seeded
-            # cache entry that makes a same-room recall free), and the
-            # prompt section below consumes it unchanged.
+            # the roster arrives after it has decided (scope lock 3).  Three consumers:
+            # the facts tier above took the room's description from it, so with facts on this
+            # await is already done (ISSUE-0180); the audience resolution below reads its member
+            # ids as the ACTING audience (and as the pre-seeded cache entry that makes a same-room
+            # recall free); and the prompt section below consumes it unchanged.
             roster = await roster_task
 
         # ── ISSUE-0132: who is listening ───────────────────────────────────

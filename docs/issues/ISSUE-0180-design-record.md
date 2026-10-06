@@ -11,10 +11,10 @@ limit. Splitting rather than trimming follows the precedent of
 choice among the options rests on, and a resolved issue that has lost them
 is a worse record than a longer one.
 
-Both notes are moved whole and in order, as they stood in the issue's
-Notes. "The note above" in the second is the first. "The 2026-10-05 note
-above" in the first is the issue's own note of that date, which stays
-there.
+The first note is moved whole, as it stood in the issue's Notes. The
+second was written with the fix and has only ever stood here. "The note
+above" in the second is the first. "The 2026-10-05 note above" in the
+first is the issue's own note of that date, which stays there.
 
 ---
 
@@ -139,11 +139,20 @@ there.
 > meeting did, the briefing is cut for two or three of the four advisers,
 > the chair included, because the section lists a subject's newest facts
 > first. The fix reads such a subject from both ends for that reason.
+> That keeps the briefing only because nothing was filed under the
+> organisation before it: in all 28 extractions of the operator's
+> briefing record with the added sentence, its three facts are the
+> subject's three oldest rows.
 >
-> A side effect: on the chair's memo-request record, whose text names no
-> organisation, the added sentence made the extractor use the channel's
-> own name (`advice-2`), three tuples a pass. The rewrite did not, in its
-> one pass.
+> Two side effects. On the chair's memo-request record, whose text names
+> no organisation, the added sentence made the extractor use the
+> channel's own name (`advice-2`), three tuples a pass. The rewrite did
+> not, in its one pass. And records write over each other more: written
+> in close order, 8 and 7 rows of the two full passes were replaced by
+> another record's, none with the shipped wording, and in 2 of the 15
+> groups of records closed at one instant two records wrote one subject
+> and predicate, none before (both under "spring gala", in the first
+> plan meeting).
 >
 > Cost: 230 calls, 212 705 input and 44 905 output tokens, $1.31 at the
 > experiment's prices. They were made with the experiment's key and are in

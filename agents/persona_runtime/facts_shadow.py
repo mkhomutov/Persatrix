@@ -58,14 +58,13 @@ from .cross_room import (
     DEFAULT_FACTS_CROSS_ROOM,
     resolve_facts_cross_room,
 )
-from .facts_section import FACTS_RECALL_LIMIT, _subject_seeds
+from .facts_section import recall_facts_for_event
 from .injection_gate import TurnInjectionGate, acting_classification_for_event
-from .topic_seeds import topic_recall_seeds
 
 if TYPE_CHECKING:
     from collections.abc import Collection
 
-    from ..memory.facts import Fact, FactStore, RecallOrder
+    from ..memory.facts import Fact, FactStore
     from ..persona_types import AgentEvent
 
 logger = logging.getLogger(__name__)
@@ -107,7 +106,7 @@ async def _widened_candidates(
 ) -> list[Fact]:
     """The cross-room delta: widened-recall rows not reachable live.
 
-    Mirrors ``recall_facts_for_event``'s seed derivation — person seeds
+    The live read itself, ``recall_facts_for_event`` — person seeds
     (every predicate class) plus topic seeds (``TOPIC_PREDICATES``
     only; the room's own subjects among them, read in their own order,
     ISSUE-0180) — with both the topic enumeration and the per-seed recall
@@ -116,42 +115,22 @@ async def _widened_candidates(
     widening's *contribution*, and a same-room-but-gate-withheld row
     must not be re-reported as cross-room.
 
-    Per-seed failures log-and-continue, the live path's idiom: on a
-    partially-failing backend the live prompt still gets the surviving
-    seeds' facts, so a whole-turn abort here would skew the PR 4
-    shadow-vs-live measurement against that partial recall.
+    The two reads list the store's topic subjects at different widths,
+    so the widened one can seed a subject the walled one did not; a row
+    of this room under such a subject is then in the delta as well.
+    Each candidate's ``session_id`` in the trace says where it is from.
+
+    Per-seed failures log-and-continue inside that read, the live path's
+    idiom: on a partially-failing backend the live prompt still gets the
+    surviving seeds' facts, so a whole-turn abort here would skew the
+    PR 4 shadow-vs-live measurement against that partial recall.
     """
-    person_seeds = _subject_seeds(event)
-    if not person_seeds:
-        return []
-    seeds: list[tuple[str, Collection[str] | None, RecallOrder]] = [
-        (subject, None, "newest") for subject in person_seeds
-    ]
-    seeds += await topic_recall_seeds(
-        fact_store, stimulus, room_text=room_text,
-        exclude=set(person_seeds), sessions=SESSIONS_ALL,
+    widened = await recall_facts_for_event(
+        fact_store, event, stimulus=stimulus, room_text=room_text,
+        sessions=SESSIONS_ALL,
     )
-    delta: list[Fact] = []
-    seen: set[str] = set(live_fact_ids)
-    for subject, predicates, order in seeds:
-        try:
-            rows = await fact_store.recall(
-                subject=subject, limit=FACTS_RECALL_LIMIT,
-                predicates=predicates, sessions=SESSIONS_ALL, order=order,
-            )
-        except Exception:
-            logger.warning(
-                "Agent %s: shadow facts recall for subject=%r failed; "
-                "skipping seed",
-                fact_store.agent_id, subject, exc_info=True,
-            )
-            continue
-        for fact in rows:
-            if fact.fact_id in seen:
-                continue
-            seen.add(fact.fact_id)
-            delta.append(fact)
-    return delta
+    live = set(live_fact_ids)
+    return [fact for fact in widened if fact.fact_id not in live]
 
 
 async def emit_facts_shadow(

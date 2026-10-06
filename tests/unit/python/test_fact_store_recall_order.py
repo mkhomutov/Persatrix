@@ -11,6 +11,8 @@ Split out of :mod:`tests.unit.python.test_fact_store` to keep that file under th
 
 from __future__ import annotations
 
+from typing import get_args
+
 import pytest
 
 from agents.memory.facts import FactStore
@@ -170,3 +172,16 @@ async def test_both_ends_honours_the_predicate_and_live_filters(
 async def test_unknown_order_is_refused(fact_store: FactStore):
     with pytest.raises(ValueError, match="order"):
         await fact_store.recall(subject="atlas", order="oldest")  # type: ignore[arg-type]
+
+
+async def test_every_declared_order_has_a_read_of_its_own(fact_store: FactStore):
+    """A value added to ``RecallOrder`` must get its own branch in ``recall``
+    rather than read newest-first under another name: every declared value
+    reads, and no two of them give the same order."""
+    from agents.memory.facts import RecallOrder
+
+    for n in range(1, 4):
+        await _room_fact(fact_store, n)
+    orders = get_args(RecallOrder)
+    reads = {tuple(await _objects(fact_store, order=order)) for order in orders}
+    assert len(reads) == len(orders) == 2

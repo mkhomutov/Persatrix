@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Collection, Iterable
-from typing import Literal, get_args
+from typing import Literal, assert_never, get_args
 
 import aiosqlite
 
@@ -329,8 +329,10 @@ class FactStore:
         if order == "both_ends":
             # Each row's place counted from the newest end and from the oldest;
             # the smaller of the two is how near it is to an end. The oldest end
-            # breaks ties the same way turned round (`rowid ASC`), so the facts
-            # one extraction wrote together come back in the order it listed them.
+            # breaks ties the same way turned round (`rowid ASC`), so the rows it
+            # gives are the first an extraction listed, in the order it listed them.
+            # The ends still take turns: three facts written together, with nothing
+            # else under the subject, come back third, first, second.
             sql = (
                 f"SELECT {_FACT_SELECT} FROM (SELECT {_FACT_SELECT}, "
                 "ROW_NUMBER() OVER (ORDER BY asserted_at DESC, rowid DESC) AS from_newest, "
@@ -338,11 +340,13 @@ class FactStore:
                 f"FROM facts {where}) "
                 "ORDER BY MIN(from_newest, from_oldest), from_newest LIMIT ?"
             )
-        else:
+        elif order == "newest":
             sql = (
                 f"SELECT {_FACT_SELECT} FROM facts {where} "
                 "ORDER BY asserted_at DESC, rowid DESC LIMIT ?"
             )
+        else:  # a new RecallOrder value needs a branch of its own, not this one
+            assert_never(order)
         async with db.execute(
             sql, (
                 self._agent_id, subject, *pred_params, *sess_params,

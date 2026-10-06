@@ -21,13 +21,22 @@ The room's own subject (ISSUE-0180).  A message rarely repeats a stored
 subject word for word — "please critique this plan" names nothing — so
 a fact about what a room is for was stored and never recalled there.
 The room's description is therefore a second text the stored subjects
-are matched against, by the same rule: a subject it names seeds on
-every turn in that room, whatever the message says.  Such a seed comes
-ahead of the message's, and its facts are read from both ends, the
-newest and the oldest in turn, because it is recalled every turn and
-its list only grows: read newest first, the facts a room was first told
-would be the first a later room pushes out
-(:func:`topic_recall_seeds`).
+are matched against, by the same rule: a subject it names seeds on a
+turn in that room whatever the message says.  The description's
+first-named subject seeds first, and a subject it names is read from
+both ends, the newest fact and the oldest in turn: it is recalled turn
+after turn while every room that files under it adds to its list, so
+read newest first, the facts a room was first told would be the first
+a later room pushes out (:func:`topic_recall_seeds`).
+
+That seed is only as good as the match, and nothing above DEBUG says
+when it does not fire: the description and the stored subject differ by
+a word, an article or a spelling; the subject is not among the
+``TOPIC_SUBJECT_SCAN_LIMIT`` most recently asserted; its name is too
+short or a function word (``_seed_eligible``); the turn's roster fetch
+failed, since the description comes with the roster; or the subject was
+taught in another room and ``memory.facts.cross_room`` is ``shadow`` or
+``off``.
 
 Bounds (amendment §Security):
 
@@ -36,8 +45,11 @@ Bounds (amendment §Security):
 * at most ``TOPIC_SEED_LIMIT`` topic seeds join the person seeds, so
   the per-seed recall fan-out and the per-subject header overage in
   ``render_facts_section`` stay bounded.  The room's description adds
-  no slot: its subjects share that cap and take at most
-  ``ROOM_SEED_LIMIT`` of it, so one slot is always the message's;
+  no slot: its subjects share that cap, and beside a subject the
+  message names they take at most ``ROOM_SEED_LIMIT`` of it.  A slot is
+  not a line, though: the facts section spends its tokens in seed order
+  with no share per subject, so on such a turn the room's first subject
+  is read only ``ROOM_SEED_ROWS_BESIDE_MESSAGE`` rows deep;
 * a topic seed recalls ONLY topic rows (every seed this module returns
   carries ``TOPIC_PREDICATES`` as its filter), so an induced ``topic.*``
   tuple about a person cannot turn that person's name into a general
@@ -65,17 +77,17 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "ROOM_SEED_LIMIT",
+    "ROOM_SEED_ROWS_BESIDE_MESSAGE",
     "TOPIC_SEED_LIMIT",
     "TOPIC_SUBJECT_SCAN_LIMIT",
-    "TopicSeed",
     "match_topic_subjects",
     "topic_recall_seeds",
-    "topic_subject_seeds",
 ]
 
-#: A topic seed as the recall loop takes it: the subject, the predicates
-#: its read is confined to, and the order its facts come back in.
-TopicSeed = tuple[str, frozenset[str], "RecallOrder"]
+# A topic seed as the recall loop takes it: the subject, the predicates
+# its read is confined to, the order its facts come back in, and a row
+# cap of its own (``None`` for the caller's).
+_TopicSeed = tuple[str, frozenset[str], "RecallOrder", int | None]
 
 
 # Maximum topic seeds appended to the person seed list per event.  Each
@@ -86,11 +98,21 @@ TopicSeed = tuple[str, frozenset[str], "RecallOrder"]
 # message fan out unboundedly.
 TOPIC_SEED_LIMIT: int = 3
 
-# How many of those slots the room's description may fill (ISSUE-0180).
-# One fewer than the cap, so a description that names many stored
-# subjects cannot stop the message's own subject from seeding in that
-# room.  Most rooms name one.
+# How many of those slots the room's description may fill beside a
+# subject the message names (ISSUE-0180).  One fewer than the cap, so a
+# description that names many stored subjects cannot stop the message's
+# own subject from seeding in that room.  Most rooms name one.  A turn
+# whose message names nothing leaves the description every slot.
 ROOM_SEED_LIMIT: int = TOPIC_SEED_LIMIT - 1
+
+# How deep the room's first subject is read on a turn whose message
+# names a subject of its own: three facts from each end.
+# ``render_facts_section`` spends the tier's tokens in seed order and
+# gives no subject a share, so read to the full row cap, a dozen facts
+# under the room's subject would leave the message's subject, which is
+# printed after it, no line at all.  Six lines are about half of what
+# the default 200-token slice prints.
+ROOM_SEED_ROWS_BESIDE_MESSAGE: int = 6
 
 # Bound on the distinct-subject enumeration pulled from the store per
 # event.  Matching cost is O(scan × stimulus length); 200 recent topics
@@ -127,6 +149,12 @@ def _seed_eligible(subject: str) -> bool:
     )
 
 
+def _mention(folded: str, subject: str) -> int | None:
+    """Where ``folded`` first names ``subject`` as whole words, or ``None``."""
+    found = re.search(rf"(?<!\w){re.escape(subject)}(?!\w)", folded)
+    return found.start() if found else None
+
+
 def match_topic_subjects(
     stimulus: str,
     subjects: Iterable[str],
@@ -156,9 +184,34 @@ def match_topic_subjects(
             continue
         if not _seed_eligible(subject):
             continue
-        if re.search(rf"(?<!\w){re.escape(subject)}(?!\w)", folded):
+        if _mention(folded, subject) is not None:
             matched.append(subject)
     return matched
+
+
+def _named_in_order(
+    text: str, subjects: Iterable[str], *, exclude: Collection[str],
+) -> list[str]:
+    """Every subject ``text`` names, in the order it first names them.
+
+    The same match and the same eligibility rule as
+    :func:`match_topic_subjects`, with a different order and no cap: a
+    room's description is short, fixed text whose first words say what
+    the room is for, so its own order ranks its subjects better than
+    which of them the store heard of last.  Ranked by recency, one fact
+    filed under a part the description goes on to mention would take the
+    seed from the organisation it names first.  Where two subjects start
+    at the same word, the longer, more exact name comes first.
+    """
+    folded = " ".join(text.casefold().split())
+    found: dict[str, int] = {}
+    for subject in subjects:
+        if subject in exclude or subject in found or not _seed_eligible(subject):
+            continue
+        at = _mention(folded, subject)
+        if at is not None:
+            found[subject] = at
+    return sorted(found, key=lambda subject: (found[subject], -len(subject)))
 
 
 def _text(value: object) -> str:
@@ -180,27 +233,35 @@ async def topic_recall_seeds(
     *,
     exclude: Collection[str],
     room_text: str | None = None,
-    limit: int = TOPIC_SEED_LIMIT,
     sessions: list[str] | str | None = None,
-) -> list[TopicSeed]:
+) -> list[_TopicSeed]:
     """Derive one event's topic seeds, each with how to read it.
 
-    Two texts name subjects.  ``room_text`` is the acting room's
-    description: the stored subjects it names come first, at most
-    ``ROOM_SEED_LIMIT`` of them, and are read ``"both_ends"``.
-    ``stimulus`` is the turn's memory query: the subjects it names fill
-    the slots that are left and are read ``"newest"``, as before.  A
-    subject both name seeds once, as the room's.  Every seed carries
-    ``TOPIC_PREDICATES``, so no caller can read a topic seed wider than
-    topic rows.  With no ``room_text`` the result is the shipped
-    message-only seeding.
+    A seed is ``(subject, predicates, order, rows)``.  Every seed
+    carries ``TOPIC_PREDICATES``, so no caller can read a topic seed
+    wider than topic rows; ``rows`` is a row cap of the seed's own, or
+    ``None`` for the caller's.
 
-    Why the two orders differ: a message seed answers what was just
-    said, where the latest facts matter most.  A room seed is recalled
-    on every turn and its list grows with every room that files under
-    the subject, so the facts tier's row cap and token budget would
-    otherwise cut what the room was first told
-    (:meth:`FactStore.recall`, ``order``).
+    Two texts name subjects.  ``room_text`` is the acting room's
+    description, and the stored subjects it names are taken in the order
+    it names them (:func:`_named_in_order`): the first always seeds, and
+    seeds first.  ``stimulus`` is the turn's memory query: the subjects
+    it names come next, most recently asserted first as before, and
+    beside them the description keeps at most ``ROOM_SEED_LIMIT`` slots.
+    The description's other subjects come last, and take any slot the
+    message leaves.  A subject both name seeds once.  With no
+    ``room_text`` the result is the shipped message-only seeding.
+
+    How a subject is read depends on the two texts alone, never on the
+    slot it won.  One only the message names is read ``"newest"``: it
+    answers what was just said, where the latest facts matter most.  One
+    the description names is read ``"both_ends"``: it is recalled turn
+    after turn while every room that files under it adds to its list, so
+    the facts tier's row cap and token budget would otherwise cut what
+    the room was first told (:meth:`FactStore.recall`, ``order``).  On a
+    turn whose message names a subject of its own, the room's first
+    subject is read only ``ROOM_SEED_ROWS_BESIDE_MESSAGE`` rows deep, so
+    that the message's subject, printed after it, still gets its lines.
 
     Fail-open to ``[]``, mirroring the facts tier's log-and-continue
     idiom: a backend failure degrades to person-only seeding rather
@@ -235,31 +296,28 @@ async def topic_recall_seeds(
             fact_store.agent_id, exc_info=True,
         )
         return []
-    room_seeds = match_topic_subjects(
-        room, subjects, limit=min(limit, ROOM_SEED_LIMIT), exclude=exclude,
-    )
+    named = _named_in_order(room, subjects, exclude=exclude)
+    if room and not named:
+        logger.debug(
+            "Agent %s: the channel's description names no stored topic "
+            "subject; nothing seeds from it",
+            fact_store.agent_id,
+        )
+    kept = named[:ROOM_SEED_LIMIT]
     message_seeds = match_topic_subjects(
-        message, subjects, limit=limit - len(room_seeds),
-        exclude={*exclude, *room_seeds},
+        message, subjects, limit=TOPIC_SEED_LIMIT - len(kept),
+        exclude={*exclude, *kept},
     )
+    room_seeds = named[:TOPIC_SEED_LIMIT - len(message_seeds)]
+    described = set(named)
+
+    def seed(subject: str, rows: int | None = None) -> _TopicSeed:
+        order: RecallOrder = "both_ends" if subject in described else "newest"
+        return subject, TOPIC_PREDICATES, order, rows
+
+    beside = ROOM_SEED_ROWS_BESIDE_MESSAGE if message_seeds else None
     return [
-        *((subject, TOPIC_PREDICATES, "both_ends") for subject in room_seeds),
-        *((subject, TOPIC_PREDICATES, "newest") for subject in message_seeds),
+        *(seed(subject, beside) for subject in room_seeds[:1]),
+        *(seed(subject) for subject in message_seeds),
+        *(seed(subject) for subject in room_seeds[1:]),
     ]
-
-
-async def topic_subject_seeds(
-    fact_store: FactStore | None,
-    stimulus: str | None,
-    *,
-    exclude: Collection[str],
-    limit: int = TOPIC_SEED_LIMIT,
-    sessions: list[str] | str | None = None,
-    room_text: str | None = None,
-) -> list[str]:
-    """The subjects :func:`topic_recall_seeds` would seed, in slot order."""
-    seeds = await topic_recall_seeds(
-        fact_store, stimulus, exclude=exclude, room_text=room_text,
-        limit=limit, sessions=sessions,
-    )
-    return [subject for subject, _predicates, _order in seeds]

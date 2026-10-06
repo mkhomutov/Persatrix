@@ -28,7 +28,7 @@ from agents.persona_runtime.facts_section import recall_facts_for_event
 from agents.persona_runtime.topic_seeds import (
     TOPIC_SEED_LIMIT,
     match_topic_subjects,
-    topic_subject_seeds,
+    topic_recall_seeds,
 )
 from agents.persona_types import AgentEvent, EventType
 
@@ -266,32 +266,35 @@ class TestMatchTopicSubjects:
         assert match_topic_subjects("ok ai v2 go", ["ai", "v2"]) == []
 
 
-# ─── topic_subject_seeds (store-backed) ─────────────────────
+# ─── topic_recall_seeds (store-backed) ──────────────────────
+
+
+async def _seeded_subjects(store, stimulus: str) -> list[str]:
+    seeds = await topic_recall_seeds(store, stimulus, exclude=set())
+    return [subject for subject, *_how_to_read in seeds]
 
 
 @_asyncio
 class TestTopicSubjectSeeds:
     async def test_seeds_from_store(self, fact_store: FactStore):
         await _seed_topic_fact(fact_store)
-        assert await topic_subject_seeds(
-            fact_store, "any news on atlas?", exclude=set(),
-        ) == ["atlas"]
+        assert await _seeded_subjects(fact_store, "any news on atlas?") == ["atlas"]
 
     async def test_none_store_returns_empty(self):
-        assert await topic_subject_seeds(
-            None, "any news on atlas?", exclude=set(),
-        ) == []
+        assert await _seeded_subjects(None, "any news on atlas?") == []
 
     async def test_backend_failure_returns_empty(self):
+        calls: list[dict] = []
+
         class _Boom:
             agent_id = "test-agent"
 
-            async def topic_subjects(self, *, limit):
+            async def topic_subjects(self, **kwargs):
+                calls.append(kwargs)
                 raise RuntimeError("db gone")
 
-        assert await topic_subject_seeds(
-            _Boom(), "any news on atlas?", exclude=set(),
-        ) == []
+        assert await _seeded_subjects(_Boom(), "any news on atlas?") == []
+        assert len(calls) == 1      # the store's own failure, not a bad call
 
 
 # ─── recall_facts_for_event wiring ──────────────────────────
@@ -392,11 +395,11 @@ class TestRecallFactsTopicSeeding:
         calls: list[str] = []
         original = fact_store.topic_subjects
 
-        async def _spy(*, limit):
+        async def _spy(**kwargs):
             calls.append("topic_subjects")
-            return await original(limit=limit)
+            return await original(**kwargs)
 
-        fact_store.topic_subjects = _spy  # type: ignore[assignment, method-assign]
+        fact_store.topic_subjects = _spy  # type: ignore[method-assign]
         tick = AgentEvent(event_type=EventType.TICK, payload={})
         facts = await recall_facts_for_event(
             fact_store, tick, stimulus="atlas atlas atlas",

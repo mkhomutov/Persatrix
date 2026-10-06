@@ -202,8 +202,8 @@ async def recall_facts_for_event(
     person seeds via :mod:`.topic_seeds`, BEHIND the person-seed
     short-circuit so a TICK still issues zero DB round-trips.
     ``room_text`` (ISSUE-0180) — the acting room's description; the
-    topic subjects it names seed too, ahead of the stimulus's, and are
-    read from both ends so their oldest facts outlast the row cap.
+    topic subjects it names seed too, its first ahead of the stimulus's,
+    and are read from both ends so their oldest facts outlast the caps.
 
     ``sessions`` (RFC 0049 PR 4 — the fact-scope amendment's live flip)
     forwards to the topic enumeration and every per-seed recall.
@@ -221,12 +221,12 @@ async def recall_facts_for_event(
     person_seeds = _subject_seeds(event)
     if not person_seeds:
         return []
-    # (subject, predicate filter, order) seeds.  Person seeds read every
-    # predicate class; topic seeds read ONLY topic rows — the seed set
-    # bounds which subjects a stimulus reaches, so an induced topic
-    # tuple naming a person must not unlock that person's facts.
-    seeds: list[tuple[str, Collection[str] | None, RecallOrder]] = [
-        (subject, None, "newest") for subject in person_seeds
+    # (subject, predicate filter, order, own row cap) seeds.  Person seeds
+    # read every predicate class; topic seeds read ONLY topic rows — the
+    # seed set bounds which subjects a stimulus reaches, so an induced
+    # topic tuple naming a person must not unlock that person's facts.
+    seeds: list[tuple[str, Collection[str] | None, RecallOrder, int | None]] = [
+        (subject, None, "newest", None) for subject in person_seeds
     ]
     seeds += await topic_recall_seeds(
         fact_store, stimulus, room_text=room_text,
@@ -234,11 +234,11 @@ async def recall_facts_for_event(
     )
     collected: list[Fact] = []
     seen_ids: set[str] = set()
-    for subject, predicates, order in seeds:
+    for subject, predicates, order, depth in seeds:
         try:
             rows = await fact_store.recall(
-                subject=subject, limit=limit, predicates=predicates,
-                sessions=sessions, order=order,
+                subject=subject, limit=min(limit, depth or limit),
+                predicates=predicates, sessions=sessions, order=order,
             )
         except Exception:
             logger.warning(

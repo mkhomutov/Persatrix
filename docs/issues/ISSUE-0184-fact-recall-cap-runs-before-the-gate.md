@@ -85,6 +85,8 @@ of the token budget, are separate choices in the same place.
 > 2026-10-06 — [ISSUE-0180](ISSUE-0180-topic-facts-reachable-only-by-their-exact-subject.md)'s
 > fix reads a subject the room's description names from both ends, so
 > for such a subject the cap keeps the ten newest and the ten oldest
-> rows, not the twenty newest. The cap still runs before the gate. What
+> rows, not the twenty newest (three of each for the room's first
+> subject on a turn whose message names a subject of its own). The cap
+> still runs before the gate. What
 > newer withheld facts can crowd out there is the middle of the list,
 > no longer its oldest end; every other subject is read as before.

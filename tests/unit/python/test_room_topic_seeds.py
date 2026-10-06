@@ -40,17 +40,20 @@ from agents.persona_runtime.facts_shadow import (
 from agents.persona_runtime.memory_budget import MemoryBudget
 from agents.persona_runtime.topic_seeds import (
     ROOM_SEED_LIMIT,
+    ROOM_SEED_ROWS_BESIDE_MESSAGE,
     TOPIC_SEED_LIMIT,
     topic_recall_seeds,
-    topic_subject_seeds,
 )
 from agents.persona_types import AgentEvent, EventType
+from agents.session_id import session_scope
 
 _asyncio = pytest.mark.asyncio
 
 ROOM = "Riverside Clinic, a walk-in practice with twelve staff"
+PARTS_ROOM = "Riverside Clinic: reception, pharmacy and car park"
 CLINIC = "riverside clinic"
 PLAN_MESSAGE = "Please critique this plan and recommend one option."
+GALA_MESSAGE = "What did we settle for the spring gala?"
 BRIEFING = (
     "car park closes at six every evening",
     "no appointment may cost more than $40",
@@ -111,6 +114,11 @@ async def _seeds(store, stimulus, **kwargs):
     return await topic_recall_seeds(store, stimulus, **kwargs)
 
 
+def _slots(seeds) -> list[tuple[str, str]]:
+    """Each seed's subject and read order, without its filter and row cap."""
+    return [(subject, order) for subject, _predicates, order, _rows in seeds]
+
+
 # ─── topic_recall_seeds ─────────────────────────────────────
 
 
@@ -120,7 +128,7 @@ class TestRoomSeeds:
         """The ISSUE-0180 case: nothing in the message names the subject."""
         await _topic(fact_store, CLINIC, BRIEFING[0], at=1000.0)
         assert await _seeds(fact_store, PLAN_MESSAGE, room_text=ROOM) == [
-            (CLINIC, TOPIC_PREDICATES, "both_ends"),
+            (CLINIC, TOPIC_PREDICATES, "both_ends", None),
         ]
 
     async def test_without_room_text_only_the_message_seeds(self, fact_store):
@@ -128,62 +136,132 @@ class TestRoomSeeds:
         await _topic(fact_store, CLINIC, BRIEFING[0], at=1000.0)
         assert await _seeds(fact_store, PLAN_MESSAGE) == []
         assert await _seeds(fact_store, "any news on Riverside Clinic?") == [
-            (CLINIC, TOPIC_PREDICATES, "newest"),
+            (CLINIC, TOPIC_PREDICATES, "newest", None),
         ]
 
-    async def test_room_seeds_come_before_the_messages(self, fact_store):
+    async def test_the_rooms_subject_comes_first_and_leaves_the_message_room(self, fact_store):
         """The store lists ``atlas`` first, as the more recent subject.  The
-        room's own subject still takes the first slot, so the facts section,
-        which spends its budget in seed order, reaches it first."""
+        room's own subject still takes the first slot.  The facts section
+        spends its tokens in seed order with no share per subject, so beside
+        a subject the message names the room's is read only a few rows deep."""
         await _topic(fact_store, CLINIC, BRIEFING[0], at=1000.0)
         await _topic(fact_store, "atlas", "ships friday", at=2000.0)
         assert await _seeds(
             fact_store, "where are we on atlas?", room_text=ROOM,
         ) == [
-            (CLINIC, TOPIC_PREDICATES, "both_ends"),
-            ("atlas", TOPIC_PREDICATES, "newest"),
+            (CLINIC, TOPIC_PREDICATES, "both_ends", ROOM_SEED_ROWS_BESIDE_MESSAGE),
+            ("atlas", TOPIC_PREDICATES, "newest", None),
         ]
+        assert ROOM_SEED_ROWS_BESIDE_MESSAGE == 6      # three from each end
 
     async def test_a_subject_both_texts_name_seeds_once_as_the_rooms(self, fact_store):
+        """The message names no subject of its own, so nothing is capped."""
         await _topic(fact_store, CLINIC, BRIEFING[0], at=1000.0)
         assert await _seeds(
             fact_store, "what does Riverside Clinic need?", room_text=ROOM,
-        ) == [(CLINIC, TOPIC_PREDICATES, "both_ends")]
+        ) == [(CLINIC, TOPIC_PREDICATES, "both_ends", None)]
 
     async def test_three_seeds_in_all_and_one_slot_stays_the_messages(self, fact_store):
         """A description that names many stored subjects cannot silence the
-        message: the room takes at most ``ROOM_SEED_LIMIT`` slots, its most
-        recently asserted subjects first, and the cap on the whole is the
-        amendment's three."""
-        room = "Riverside Clinic: reception, pharmacy and car park"
+        message: beside a subject the message names, the room takes at most
+        ``ROOM_SEED_LIMIT`` slots, and the cap on the whole is the amendment's
+        three.  The message's subject is read straight after the room's first,
+        ahead of the room's others."""
         for at, subject in enumerate(
                 ["reception", "pharmacy", "car park", "atlas", "borealis"]):
             await _topic(fact_store, subject, "open", at=1000.0 + at)
         seeds = await _seeds(
-            fact_store, "atlas and borealis both slipped", room_text=room,
+            fact_store, "atlas and borealis both slipped", room_text=PARTS_ROOM,
         )
-        assert [(s, order) for s, _p, order in seeds] == [
-            ("car park", "both_ends"), ("pharmacy", "both_ends"),
-            ("borealis", "newest"),
+        assert _slots(seeds) == [
+            ("reception", "both_ends"), ("borealis", "newest"),
+            ("pharmacy", "both_ends"),
         ]
+        assert [rows for *_s, rows in seeds] == [ROOM_SEED_ROWS_BESIDE_MESSAGE, None, None]
         assert ROOM_SEED_LIMIT == 2
         assert len(seeds) == TOPIC_SEED_LIMIT == 3
+
+    async def test_the_room_takes_the_slot_a_message_leaves(self, fact_store):
+        """A message that names nothing leaves all three slots to the
+        description, and with no subject waiting behind them none is capped."""
+        for at, subject in enumerate(["reception", "pharmacy", "car park", "annexe"]):
+            await _topic(fact_store, subject, "open", at=1000.0 + at)
+        assert await _seeds(
+            fact_store, PLAN_MESSAGE,
+            room_text=PARTS_ROOM + " (the annexe is closed)",
+        ) == [
+            (subject, TOPIC_PREDICATES, "both_ends", None)
+            for subject in ("reception", "pharmacy", "car park")
+        ]
+
+    async def test_the_room_seeds_in_the_order_its_description_names_them(self, fact_store):
+        """Not in the order the store last heard of them.  A briefing filed
+        under the organisation keeps its seed however many facts are later
+        filed under the parts the description goes on to name; where two
+        subjects start at one word, the longer name comes first."""
+        await _briefing(fact_store)
+        for at, subject in enumerate(["reception", "pharmacy", "riverside"]):
+            await _topic(fact_store, subject, "open", at=2000.0 + at)
+        assert _slots(await _seeds(fact_store, PLAN_MESSAGE, room_text=PARTS_ROOM)) == [
+            (CLINIC, "both_ends"), ("riverside", "both_ends"),
+            ("reception", "both_ends"),
+        ]
+        assert _slots(await _seeds(
+            fact_store, "is the pharmacy open?", room_text=PARTS_ROOM,
+        )) == [
+            (CLINIC, "both_ends"), ("pharmacy", "both_ends"),
+            ("riverside", "both_ends"),
+        ]
+
+    async def test_a_subject_the_description_names_reads_one_way_in_any_slot(self, fact_store):
+        """``car park`` is the description's third subject, so here it seeds
+        as the message's.  It is still read from both ends: how a subject is
+        read must not depend on which slot it won, or two reads of one turn
+        that list the store's subjects differently would return different
+        rows for it (the shadow pass and the live read do)."""
+        for at, subject in enumerate(["reception", "pharmacy", "car park"]):
+            await _topic(fact_store, subject, "open", at=1000.0 + at)
+        assert _slots(await _seeds(
+            fact_store, "is the car park full?", room_text=PARTS_ROOM,
+        )) == [
+            ("reception", "both_ends"), ("car park", "both_ends"),
+            ("pharmacy", "both_ends"),
+        ]
 
     async def test_the_message_fills_slots_the_room_leaves(self, fact_store):
         await _topic(fact_store, CLINIC, BRIEFING[0], at=1000.0)
         for at, subject in enumerate(["atlas", "borealis", "cygnus"]):
             await _topic(fact_store, subject, "open", at=2000.0 + at)
-        seeds = await _seeds(
-            fact_store, "atlas, borealis and cygnus", room_text=ROOM,
-        )
-        assert [s for s, _p, _o in seeds] == [CLINIC, "cygnus", "borealis"]
+        seeds = await _seeds(fact_store, "atlas, borealis and cygnus", room_text=ROOM)
+        assert _slots(seeds) == [
+            (CLINIC, "both_ends"), ("cygnus", "newest"), ("borealis", "newest"),
+        ]
 
     async def test_a_turn_with_no_message_text_still_seeds_the_room(self, fact_store):
         await _topic(fact_store, CLINIC, BRIEFING[0], at=1000.0)
         for stimulus in (None, "", "   ", 123):
             assert await _seeds(fact_store, stimulus, room_text=ROOM) == [
-                (CLINIC, TOPIC_PREDICATES, "both_ends"),
+                (CLINIC, TOPIC_PREDICATES, "both_ends", None),
             ]
+
+    async def test_a_description_that_names_nothing_stored_says_so_at_debug(
+        self, fact_store, caplog: pytest.LogCaptureFixture,
+    ):
+        """Why a described room recalls nothing is otherwise invisible: the
+        description and the stored subject may differ by one word."""
+        await _topic(fact_store, CLINIC, BRIEFING[0], at=1000.0)
+        logger_name = "agents.persona_runtime.topic_seeds"
+        with caplog.at_level(logging.DEBUG, logger=logger_name):
+            assert await _seeds(fact_store, PLAN_MESSAGE, room_text=ROOM) != []
+            assert await _seeds(fact_store, PLAN_MESSAGE) == []
+            assert [r for r in caplog.records if r.name == logger_name] == []
+            assert await _seeds(
+                fact_store, PLAN_MESSAGE, room_text="The Riverside walk-in clinic",
+            ) == []
+        (record,) = [r for r in caplog.records if r.name == logger_name]
+        assert record.levelno == logging.DEBUG
+        assert "test-agent" in record.getMessage()
+        assert "names no stored topic subject" in record.getMessage()
 
     async def test_with_neither_text_the_store_is_not_read(self, fact_store):
         calls: list[str] = []
@@ -210,7 +288,7 @@ class TestRoomSeeds:
     async def test_room_matching_is_whole_subject_whole_word_and_folded(self, fact_store):
         await _topic(fact_store, CLINIC, BRIEFING[0], at=1000.0)
         for room in ("RIVERSIDE   CLINIC (north site)", "the riverside clinic's annexe"):
-            assert [s for s, _p, _o in await _seeds(fact_store, "", room_text=room)] == [CLINIC]
+            assert _slots(await _seeds(fact_store, "", room_text=room)) == [(CLINIC, "both_ends")]
         for room in ("Riverside Clinics group", "Riverside walk-in clinic", "Riverside"):
             assert await _seeds(fact_store, "", room_text=room) == []
 
@@ -230,18 +308,6 @@ class TestRoomSeeds:
 
         assert await _seeds(_Boom(), PLAN_MESSAGE, room_text=ROOM) == []
         assert await _seeds(None, PLAN_MESSAGE, room_text=ROOM) == []
-
-    async def test_the_subject_list_view_matches(self, fact_store):
-        """``topic_subject_seeds`` is the same seeds without how to read them."""
-        await _topic(fact_store, CLINIC, BRIEFING[0], at=1000.0)
-        await _topic(fact_store, "atlas", "ships friday", at=2000.0)
-        assert await topic_subject_seeds(
-            fact_store, "where are we on atlas?", exclude=set(),
-            sessions="*", room_text=ROOM,
-        ) == [CLINIC, "atlas"]
-        assert await topic_subject_seeds(
-            fact_store, "where are we on atlas?", exclude=set(), sessions="*",
-        ) == ["atlas"]
 
 
 # ─── recall_facts_for_event(room_text=) ─────────────────────
@@ -323,23 +389,54 @@ class TestRecallWithRoomText:
     async def test_the_first_told_facts_survive_the_token_budget(self, fact_store):
         """The facts section stops at its 200 tokens.  Read from both ends,
         the room's subject keeps the briefing; the same rows read newest
-        first, as a message seed reads them, lose all three."""
+        first, as a message seed reads them, lose all three.  Eighteen rows,
+        under the row cap, so the budget alone decides the second read."""
         await _briefing(fact_store)
-        await _later_rooms(fact_store, rooms=4, facts_each=5)
+        await _later_rooms(fact_store, rooms=3, facts_each=5)
         room_seeded = _render(await recall_facts_for_event(
             fact_store, _event(), stimulus=PLAN_MESSAGE, sessions="*", room_text=ROOM,
         ))
         for obj in BRIEFING:
             assert obj in room_seeded
-        assert "plan 4 point 4" in room_seeded      # the newest is kept too
+        assert "plan 3 point 4" in room_seeded      # the newest is kept too
 
         named = "what did Riverside Clinic agree?"
-        message_seeded = _render(await recall_facts_for_event(
+        newest_first = await recall_facts_for_event(
             fact_store, _event(named), stimulus=named, sessions="*",
-        ))
-        assert "plan 4 point 4" in message_seeded
+        )
+        assert set(BRIEFING) <= {f.object for f in newest_first}     # all were read
+        message_seeded = _render(newest_first)
+        assert "plan 3 point 4" in message_seeded
         for obj in BRIEFING:
             assert obj not in message_seeded
+
+    async def test_a_long_list_under_the_rooms_subject_leaves_the_message_lines(self, fact_store):
+        """Twenty-three facts under the room's subject and three under the
+        subject the message names.  The section prints both: the room's
+        newest and first-told facts, then everything the message asked for.
+        Read to the full row cap, the room's subject would take the whole
+        200 tokens and the message's subject would get no line."""
+        await _briefing(fact_store)
+        await _later_rooms(fact_store, rooms=4, facts_each=5)
+        gala = ("venue booked for 14 june", "budget set at $9 000", "ann runs the auction")
+        for obj in gala:            # one record's facts, so all three stay live
+            await _topic(fact_store, "spring gala", obj, at=1500.0, room="gala", source="gala")
+        facts = await recall_facts_for_event(
+            fact_store, _event(GALA_MESSAGE), stimulus=GALA_MESSAGE,
+            sessions="*", room_text=ROOM,
+        )
+        assert [f.subject for f in facts] == (
+            [CLINIC] * ROOM_SEED_ROWS_BESIDE_MESSAGE + ["spring gala"] * 3
+        )
+        section = _render(facts)
+        for obj in (*gala, *BRIEFING, "plan 4 point 4"):
+            assert obj in section
+        # The same store on a turn that names nothing of its own: the room's
+        # subject is read to the full depth again.
+        alone = await recall_facts_for_event(
+            fact_store, _event(), stimulus=PLAN_MESSAGE, sessions="*", room_text=ROOM,
+        )
+        assert len(alone) == 20
 
 
 # ─── the shadow pass counts the same seeds ──────────────────
@@ -365,22 +462,38 @@ class TestShadowPassSeesRoomSeeds:
         assert {c["subject"] for c in traces[0]["candidates"]} == {CLINIC}
         assert len(traces[0]["candidates"]) == len(BRIEFING)
 
-    async def test_the_shadow_read_keeps_the_same_rows_under_the_cap(
+    async def test_the_shadow_delta_is_what_the_walled_read_did_not_return(
         self, fact_store, caplog: pytest.LogCaptureFixture,
     ):
-        """Past twenty rows the order decides which ones a read returns.
-        The shadow pass reads the room's subject from both ends too, so its
-        candidates are the rows the live read would have had."""
+        """As shadow mode runs: the live read stays inside the room, and the
+        shadow pass reports the widened read's rows the live one lacked.
+        Past twenty rows the order decides which rows a read returns, so the
+        room's subject is read from both ends in both.  Twenty-five facts in
+        this room and eight elsewhere: every candidate is from elsewhere."""
         await _briefing(fact_store)
-        await _later_rooms(fact_store, rooms=5, facts_each=5)
-        live = await recall_facts_for_event(
-            fact_store, _event(), stimulus=PLAN_MESSAGE, sessions="*", room_text=ROOM,
-        )
-        with caplog.at_level(logging.INFO, logger=SHADOW_LOGGER_NAME):
-            await emit_facts_shadow(
+        await _later_rooms(fact_store, rooms=1, facts_each=5)
+        for n in range(25):         # one record's facts, so all stay live
+            await _topic(fact_store, CLINIC, f"point {n} from this room",
+                         at=1500.0, room="plan-9", source="plan-9")
+        with session_scope("plan-9"):
+            walled = await recall_facts_for_event(
                 fact_store, _event(), stimulus=PLAN_MESSAGE, room_text=ROOM,
-                live_fact_ids=set(), agent_id="test-agent", mode=CROSS_ROOM_SHADOW,
             )
+            widened = await recall_facts_for_event(
+                fact_store, _event(), stimulus=PLAN_MESSAGE, sessions="*",
+                room_text=ROOM,
+            )
+            with caplog.at_level(logging.INFO, logger=SHADOW_LOGGER_NAME):
+                await emit_facts_shadow(
+                    fact_store, _event(), stimulus=PLAN_MESSAGE, room_text=ROOM,
+                    live_fact_ids={f.fact_id for f in walled},
+                    agent_id="test-agent", mode=CROSS_ROOM_SHADOW,
+                )
+        assert len(walled) == 20 and {f.session_id for f in walled} == {"plan-9"}
         (trace,) = [getattr(r, SHADOW_TRACE_ATTR) for r in caplog.records
                     if hasattr(r, SHADOW_TRACE_ATTR)]
-        assert [c["fact_id"] for c in trace["candidates"]] == [f.fact_id for f in live]
+        seen = {f.fact_id for f in walled}
+        assert [c["fact_id"] for c in trace["candidates"]] == [
+            f.fact_id for f in widened if f.fact_id not in seen
+        ]
+        assert {c["session_id"] for c in trace["candidates"]} == {"briefing", "plan-1"}
