@@ -382,7 +382,7 @@ class TestTheSevenDayWindow:
     async def test_it_opens_as_its_first_try_begins_and_says_when_it_closes(
         self, tmp_path: Path,
     ) -> None:
-        clock, said = _Clock(), []
+        clock, said = _Clock(), list[str]()
         await run_scored(
             tmp_path, panel=PANEL, series=SCORED, names=NAMES, client=LLMClient(_Judge()),
             binary=_BINARY, prompts=PROMPTS, sleep=no_wait, now=clock, progress=said.append,
