@@ -1,6 +1,6 @@
 # EXP-001 — The harness's frozen choices: the practice run
 
-> **Status**: 🚧 **In Progress** — PR 6b's rows froze when it merged ([#1024](https://github.com/mkhomutov/Persatrix/pull/1024)); PR 6c changes the practice report's projection of the scored judging, before any meeting is scored.
+> **Status**: 🚧 **In Progress** — PR 6b's rows froze when it merged ([#1024](https://github.com/mkhomutov/Persatrix/pull/1024)); PR 6c ([#1036](https://github.com/mkhomutov/Persatrix/pull/1036)) changes the practice report's projection of the scored judging, before any meeting is scored.
 > **Last updated**: 2026-10-07
 > **Part of**: the [EXP-001 harness](EXP-001-harness.md); the [first part](EXP-001-harness-choices.md) holds the choices of PRs 1 to 4 and the arm order, the [second part](EXP-001-harness-choices-meetings.md) those of PRs 5a to 5c, the [third part](EXP-001-harness-choices-d-prime.md) those of PRs 5d and 5e, the [fourth part](EXP-001-harness-choices-judge.md) PR 6a's, and the [sixth part](EXP-001-harness-choices-scored.md) PR 6c's
 
