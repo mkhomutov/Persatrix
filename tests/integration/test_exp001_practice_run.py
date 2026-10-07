@@ -48,9 +48,10 @@ def binary() -> Path:
 
 
 async def _practice(root: Path, binary: Path) -> dict[str, Any]:
+    materials = load_materials(_EXP)
     return await run_practice(
-        root, ("A", "B"), panel=load_panel(_EXP / "panel.yaml"),
-        series=load_materials(_EXP).practice, names=load_adviser_names(_EXP / "panel.yaml"),
+        root, ("A", "B"), panel=load_panel(_EXP / "panel.yaml"), series=materials.practice,
+        scored=materials.series, names=load_adviser_names(_EXP / "panel.yaml"),
         client=LLMClient(MockProvider()), binary=binary, alias=OFFLINE, prompts=None,
     )
 

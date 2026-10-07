@@ -20,8 +20,12 @@ practice run's kept tries and call records into those figures:
 - **Check 2's first half**: the judge's marks on each arm's recall check.
   Each meeting is a new channel, so D's chair can answer only from memory.
 - **The judge**: its calls' output tokens against their 16 000 limit, and
-  the scored judging's spend projected from the practice batch, 100 memo
-  packets and 25 recall packets at the practice means, against the $25 cap.
+  the scored judging's spend projected from the practice batch against the
+  $25 cap, each of the 100 memo packets and 25 recall packets at its own
+  size: a scored packet holds more of the operator's messages than a
+  practice one (PR 6b's review, F-8). Longer packets may also take more
+  thinking, which no practice packet shows, so the report also gives the
+  mean output a call at which the cap would be reached.
 - **Check 4 and the provider's usage report**: every call's tokens,
   totalled by model and priced with the fixed table, the failed calls
   counted, and the window from the first call to the last, to compare by
@@ -37,21 +41,29 @@ import datetime as dt
 import statistics
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from evaluators.exp001.arm_d_prime import TryKey, check_cache
 from evaluators.exp001.attempts import SeriesRun
 from evaluators.exp001.costs import ARMS, PRICES, CallPurpose, CallRecord, price_call
-from evaluators.exp001.judge import JUDGING_CAP, MAX_TOKENS, Judged
+from evaluators.exp001.judge import (
+    JUDGE_MODEL,
+    JUDGING_CAP,
+    MAX_TOKENS,
+    Judged,
+    JudgePrompts,
+    Packet,
+)
 from evaluators.exp001.materials import (
     PLANS_PER_SCORED_SERIES,
     SCORED_SERIES,
     MeetingKind,
     Series,
 )
+from evaluators.exp001.packets import MemoPacket, RecallPacket
 from evaluators.exp001.pairs import Kept
-from evaluators.exp001.rating import Seal
+from evaluators.exp001.rating import Seal, packet_text
 from evaluators.exp001.runtime import CallLog
 
 # The discussion budget is raised to 2 000 000 tokens, and the cost close
@@ -72,16 +84,31 @@ Tokens = dict[tuple[str, int, int], int]
 
 @dataclass(frozen=True)
 class Projection:
-    """The scored judging's spend, from the practice batch's mean per packet."""
+    """The scored judging's spend, projected from the practice batch at the
+    scored packets' own sizes. Each figure is None when the batch judged no
+    packet of a kind."""
 
-    memo_packet: float | None  # None when the batch judged no packet of that kind
+    memo_packet: float | None  # a scored memo packet's mean projected cost
     recall_packet: float | None
     scored: float | None
+    # The mean output tokens a call, thinking included, at which the scored
+    # judging would reach its cap.
+    output_headroom: int | None
     cap: float = JUDGING_CAP
 
     @property
     def fits(self) -> bool:
         return self.scored is not None and self.scored <= self.cap
+
+
+@dataclass
+class _Practice:
+    """What the practice batch shows of one kind of packet."""
+
+    tokens: int = 0  # input tokens its calls read
+    characters: int = 0  # characters of the requests they read
+    outputs: list[int] = field(default_factory=list)  # each packet's output, every call
+    answers: list[int] = field(default_factory=list)  # each memo's or reply's characters
 
 
 def discussion_tokens(run: SeriesRun[Kept], records: Iterable[CallRecord]) -> Tokens:
@@ -143,24 +170,78 @@ def _counted(record: CallRecord) -> int:
     )
 
 
-def project_judging(records: Iterable[CallRecord]) -> Projection:
-    """The scored judging's spend at the practice batch's mean cost of a memo
-    packet and of a recall packet: every call a packet made, priced."""
-    cost: dict[str, float] = defaultdict(float)
-    recall: set[str] = set()
+def project_judging(
+    records: Iterable[CallRecord],
+    packets: Mapping[str, Packet],
+    prompts: JudgePrompts,
+    scored: Sequence[Series],
+) -> Projection:
+    """The scored judging's spend, projected from the practice batch's calls
+    to the judge, *records*, on the practice *packets*.
+
+    Each scored packet is projected at its own size: the judge's prompt and
+    the packet as every rater reads it, at the practice calls' input tokens
+    a character, with the practice answers' mean length standing in for the
+    memo or reply not yet written. Its output is the practice batch's mean
+    for a packet of its kind, every call a packet made counted. Each plan
+    and recall check of *scored* is one packet per arm.
+    """
+    judged: dict[str, list[CallRecord]] = defaultdict(list)
     for record in records:
-        cost[record.meeting] += price_call(record)
-        if record.meeting_kind is MeetingKind.RECALL:
-            recall.add(record.meeting)
-    memos = [c for packet, c in cost.items() if packet not in recall]
-    recalls = [c for packet, c in cost.items() if packet in recall]
-    memo = statistics.fmean(memos) if memos else None
-    reply = statistics.fmean(recalls) if recalls else None
-    scored = (
-        None if memo is None or reply is None
-        else SCORED_MEMO_PACKETS * memo + SCORED_RECALL_PACKETS * reply
+        judged[record.meeting].append(record)
+    kinds = {False: _Practice(), True: _Practice()}  # by whether it is a recall packet
+    for pid, calls in judged.items():
+        packet = packets[pid]
+        practice = kinds[isinstance(packet, RecallPacket)]
+        practice.tokens += sum(call.input_tokens for call in calls)
+        practice.characters += len(calls) * _request_length(packet, prompts)
+        practice.outputs.append(sum(call.output_tokens for call in calls))
+        practice.answers.append(len(_answer(packet)))
+    if not all(kind.outputs for kind in kinds.values()):
+        return Projection(None, None, None, None)
+    reads: list[float] = []  # each scored packet's projected input tokens
+    costs: dict[bool, list[float]] = {False: [], True: []}
+    for series in scored:
+        for number, meeting in enumerate(series.meetings):
+            blank: Packet
+            if meeting.plan_key is not None:
+                upto = tuple(m.message for m in series.meetings[: number + 1])
+                blank = MemoPacket("", series.organisation, upto, meeting.plan_key, "")
+            elif meeting.recall_key is not None:
+                blank = RecallPacket("", series.organisation, meeting.recall_key, "")
+            else:
+                continue
+            practice = kinds[isinstance(blank, RecallPacket)]
+            read = practice.tokens / practice.characters * (
+                _request_length(blank, prompts) + statistics.fmean(practice.answers)
+            )
+            output = statistics.fmean(practice.outputs)
+            reads += [read] * len(ARMS)
+            costs[isinstance(blank, RecallPacket)] += [_judge_cost(read, output)] * len(ARMS)
+    price = PRICES[JUDGE_MODEL]
+    reading = sum(reads) * price.input / 1_000_000
+    headroom = (JUDGING_CAP - reading) / (len(reads) * price.output / 1_000_000)
+    return Projection(
+        memo_packet=statistics.fmean(costs[False]),
+        recall_packet=statistics.fmean(costs[True]),
+        scored=sum(costs[False]) + sum(costs[True]),
+        output_headroom=max(0, int(headroom)),
     )
-    return Projection(memo, reply, scored)
+
+
+def _request_length(packet: Packet, prompts: JudgePrompts) -> int:
+    """The characters the judge reads for *packet*: its prompt and the packet."""
+    system = prompts.recall if isinstance(packet, RecallPacket) else prompts.memo
+    return len(system) + len(packet_text(packet))
+
+
+def _answer(packet: Packet) -> str:
+    return packet.reply if isinstance(packet, RecallPacket) else packet.memo
+
+
+def _judge_cost(input_tokens: float, output_tokens: float) -> float:
+    price = PRICES[JUDGE_MODEL]
+    return (input_tokens * price.input + output_tokens * price.output) / 1_000_000
 
 
 def usage_totals(calls: CallLog) -> dict[str, Any]:
@@ -226,12 +307,14 @@ def build(
     judge_calls: CallLog | None,
     judged: Judged | None,
     seal: Seal | None,
+    projection: Projection | None,
 ) -> dict[str, Any]:
     """The report of a practice run: *runs* and *calls* by arm, the pairs held
     to the end; *written*, the prefixes the harness wrote for D′'s tries;
     *everything*, every arm call the run made, pairs set aside included,
     but for those of *unread*, the set-aside logs it could not read; and the
-    judge's calls and marks, none when the run was not judged."""
+    judge's calls and marks, and the scored judging's projected spend, none
+    when the run was not judged."""
     records = [r for log in calls.values() for r in log.records]
     failures = [f for log in calls.values() for f in log.failures]
     d_prime = runs.get("D-prime")
@@ -258,7 +341,10 @@ def build(
         "recall_marks": (
             None if judged is None or seal is None else recall_marks_by_arm(judged, seal)
         ),
-        "judge": None if judge_calls is None or judged is None else _judge(judge_calls, judged),
+        "judge": (
+            None if judge_calls is None or judged is None
+            else _judge(judge_calls, judged, projection)
+        ),
         "usage": {
             **usage_totals(CallLog(
                 (*everything.records, *judge_records), (*everything.failures, *judge_failures),
@@ -268,9 +354,8 @@ def build(
     }
 
 
-def _judge(calls: CallLog, judged: Judged) -> dict[str, Any]:
+def _judge(calls: CallLog, judged: Judged, projection: Projection | None) -> dict[str, Any]:
     output = [r.output_tokens for r in calls.records]
-    projection = project_judging(calls.records)
     return {
         "calls": len(calls.records),
         "failed_calls": len(calls.failures),
@@ -280,7 +365,7 @@ def _judge(calls: CallLog, judged: Judged) -> dict[str, Any]:
         "spend": judged.spend,
         "cap_reached": judged.cap_reached,
         "left": list(judged.left),
-        "projection": {
+        "projection": None if projection is None else {
             "memo_packet": projection.memo_packet,
             "recall_packet": projection.recall_packet,
             "scored_memo_packets": SCORED_MEMO_PACKETS,
@@ -288,6 +373,7 @@ def _judge(calls: CallLog, judged: Judged) -> dict[str, Any]:
             "scored": projection.scored,
             "cap": projection.cap,
             "fits": projection.fits,
+            "output_headroom": projection.output_headroom,
         },
     }
 
@@ -298,7 +384,7 @@ def summary(report: Mapping[str, Any]) -> str:
              "", "Meetings:"]
     for row in report["meetings"]:
         lines.append(f"  {row['arm']} {row['meeting']}, attempt {row['attempt']}, "
-                     f"try {row['try']}: {_meeting_words(row)}")
+                     f"try {row['try']}: {meeting_words(row)}")
     findings = report["check_3"]["findings"]
     lines += ["", f"Check 3: {len(findings)} finding{'' if len(findings) == 1 else 's'}"
               if findings else "Check 3: no findings"]
@@ -315,11 +401,12 @@ def summary(report: Mapping[str, Any]) -> str:
                      else f"; projected {_n(t['projected'])}{_over(t['projected'], close)}")
                   for t in discussions["tries"]]
     lines += ["", *_judge_words(report)]
-    lines += ["", *_usage_words(report["usage"])]
+    lines += ["", *usage_words(report["usage"])]
     return "\n".join(lines) + "\n"
 
 
-def _meeting_words(row: Mapping[str, Any]) -> str:
+def meeting_words(row: Mapping[str, Any]) -> str:
+    """What one try's row shows, in plain words: what closed it, or why it was held again."""
     if row["cut_short"]:
         return f"cut short ({', '.join(row['errors']) or 'did not start'})"
     words = [f"closed by {row['closed_by']}" if row["closed_by"] else "held"]
@@ -340,16 +427,21 @@ def _judge_words(report: Mapping[str, Any]) -> list[str]:
         f"up to {_n(judge['output_tokens_max'])} of {_n(judge['max_tokens'])}; "
         f"spend ${judge['spend']:.2f}" + ("; its cap was reached" if judge["cap_reached"] else ""),
     ]
-    if projection["scored"] is None:
+    if projection is None or projection["scored"] is None:
         lines.append("  no projection: the batch judged no memo packet or no recall packet")
     else:
         verdict = "within" if projection["fits"] else "OVER"
-        lines.append(
-            f"  scored judging, projected: {projection['scored_memo_packets']} × "
-            f"${projection['memo_packet']:.4f} + {projection['scored_recall_packets']} × "
-            f"${projection['recall_packet']:.4f} = ${projection['scored']:.2f}, "
-            f"{verdict} the ${projection['cap']:.0f} cap",
-        )
+        calls = projection["scored_memo_packets"] + projection["scored_recall_packets"]
+        lines += [
+            f"  scored judging, projected at the scored packets' own sizes: "
+            f"{projection['scored_memo_packets']} memo packets at "
+            f"${projection['memo_packet']:.4f} and {projection['scored_recall_packets']} recall "
+            f"packets at ${projection['recall_packet']:.4f} on average, "
+            f"${projection['scored']:.2f} in all, {verdict} the ${projection['cap']:.0f} cap",
+            f"  it reaches the cap only if its {calls} calls average "
+            f"{_n(projection['output_headroom'])} output tokens or more, thinking included; "
+            f"the practice batch's largest answer used {_n(judge['output_tokens_max'])}",
+        ]
     marks = report["recall_marks"] or {}
     lines.append("Recall checks as the judge marked them (check 2: D answers only from memory):")
     lines += [f"  {arm}: " + ", ".join(f"{q} {'right' if right else 'wrong'}"
@@ -358,7 +450,8 @@ def _judge_words(report: Mapping[str, Any]) -> list[str]:
     return lines
 
 
-def _usage_words(usage: Mapping[str, Any]) -> list[str]:
+def usage_words(usage: Mapping[str, Any]) -> list[str]:
+    """The usage totals in plain words, to compare with the provider's report."""
     lines = ["Usage, to compare with the provider's report for this run's API key:"]
     window = usage["window"]
     lines.append(f"  from {window['first']} to {window['last']}" if window else "  no calls")

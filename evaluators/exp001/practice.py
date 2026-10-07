@@ -73,6 +73,7 @@ async def run_practice(
     *,
     panel: Panel,
     series: Series,
+    scored: Sequence[Series],
     names: Sequence[str],
     client: LLMClient,
     binary: Path,
@@ -87,9 +88,11 @@ async def run_practice(
 
     *client* makes arm A's calls and the judge's. The channel arms run
     *binary*, the orchestrator, with every model alias on *alias*. With no
-    *prompts* nothing is judged, as offline. *names* are the advisers' IDs
-    and names, which no rater reads. *make_hold* builds each arm's hold for
-    the directory it is held in, by default :func:`evaluators.exp001.pairs.arm_hold`.
+    *prompts* nothing is judged, as offline; judged, the report projects the
+    scored judging's spend at the packets of the *scored* series. *names*
+    are the advisers' IDs and names, which no rater reads. *make_hold*
+    builds each arm's hold for the directory it is held in, by default
+    :func:`evaluators.exp001.pairs.arm_hold`.
     *root* keeps the arms it was first started with and *alias*: a start
     with other arms or on another alias, after a harness fault closed it, or
     while another run holds it, is :class:`RefusedError`.
@@ -143,19 +146,22 @@ async def run_practice(
                 raise
         drawn = draw_packets(root, [series], gather_answers(runs.values(), {series.id: series}),
                              names)
-        judged = judge_calls = seal = None
+        judged = judge_calls = seal = projection = None
         if prompts is not None:
             batch = root / JUDGING / BATCH
             judged = await judge_batch(client, drawn.order(RATER), prompts, batch, batch=BATCH,
                                        sleep=sleep)
             judge_calls, seal = read_judge_log(batch / CALL_LOG), read_seal(root)
+            projection = practice_report.project_judging(
+                judge_calls.records, drawn.packets, prompts, scored,
+            )
         calls = {arm: pair_calls(_pair_directory(root, series, arm), run)
                  for arm, run in runs.items()}
         set_aside, unread = _set_aside_calls(root)
         report = practice_report.build(
             series=series, runs=runs, calls=calls, written=_written(root, series, runs),
             everything=merge_call_logs([*calls.values(), set_aside]), unread=unread,
-            judge_calls=judge_calls, judged=judged, seal=seal,
+            judge_calls=judge_calls, judged=judged, seal=seal, projection=projection,
         )
         write_json(root / REPORT, report)
         (root / SUMMARY).write_text(practice_report.summary(report))

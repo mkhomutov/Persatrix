@@ -43,7 +43,15 @@ from evaluators.exp001.practice import (
 from evaluators.exp001.rating import packet_text, read_packets
 
 from ._exp001_judge_test_helpers import _RECALL_JSON, PROMPTS, _memo_json
-from ._exp001_run_test_helpers import EXP, PANEL, SERIES, arm_a_reply, channel_meeting, no_wait
+from ._exp001_run_test_helpers import (
+    EXP,
+    PANEL,
+    SCORED,
+    SERIES,
+    arm_a_reply,
+    channel_meeting,
+    no_wait,
+)
 
 NAMES = load_adviser_names(EXP / "panel.yaml")
 _BINARY = Path("/repo/bin/persatrix-server")
@@ -143,7 +151,7 @@ async def _practice(
     alias: Alias = ARMS_ALIAS,
 ) -> dict[str, Any]:
     return await run_practice(
-        root, arms, panel=PANEL, series=SERIES, names=NAMES,
+        root, arms, panel=PANEL, series=SERIES, scored=SCORED, names=NAMES,
         client=LLMClient(judge or _Judge()), binary=_BINARY, alias=alias,
         prompts=None if judge is None else PROMPTS, sleep=no_wait, make_hold=holds,
     )
@@ -175,6 +183,7 @@ class TestAPracticeRun:
         text = (tmp_path / SUMMARY).read_text()
         assert text.startswith(f"EXP-001 practice run, series {SERIES.id}: arms A, C")
         assert report["judge"]["calls"] == 6 and report["judge"]["projection"]["fits"]
+        assert report["judge"]["projection"]["output_headroom"] > 0  # at the scored sizes
         assert set(report["recall_marks"]) == {"A", "C"}
 
     async def test_the_people_get_their_packets_and_the_seal_is_kept_apart(

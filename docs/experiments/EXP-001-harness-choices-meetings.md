@@ -1,8 +1,8 @@
 # EXP-001 — The harness's frozen choices: holding the meetings
 
-> **Status**: 🚧 **In Progress** — PR 5a's, PR 5b's and PR 5c's rows froze when they merged; the review of PR 5c changed its rows before any meeting was scored, and PR 5e changes one row of PR 5b's.
-> **Last updated**: 2026-10-02
-> **Part of**: the [EXP-001 harness](EXP-001-harness.md); the [first part](EXP-001-harness-choices.md) holds the choices of PRs 1 to 4 and the arm order, the [third part](EXP-001-harness-choices-d-prime.md) those of PRs 5d and 5e, the [fourth part](EXP-001-harness-choices-judge.md) PR 6a's, and the [fifth part](EXP-001-harness-choices-practice.md) PR 6b's
+> **Status**: 🚧 **In Progress** — PR 5a's, PR 5b's and PR 5c's rows froze when they merged; the review of PR 5c changed its rows before any meeting was scored, and PR 5e changed one row of PR 5b's when it merged ([#1032](https://github.com/mkhomutov/Persatrix/pull/1032)).
+> **Last updated**: 2026-10-07
+> **Part of**: the [EXP-001 harness](EXP-001-harness.md); the [first part](EXP-001-harness-choices.md) holds the choices of PRs 1 to 4 and the arm order, the [third part](EXP-001-harness-choices-d-prime.md) those of PRs 5d and 5e, the [fourth part](EXP-001-harness-choices-judge.md) PR 6a's, the [fifth part](EXP-001-harness-choices-practice.md) PR 6b's, and the [sixth part](EXP-001-harness-choices-scored.md) PR 6c's
 
 These are the frozen choices of the harness PRs that hold the meetings: how
 arms B and C deploy their advisers and hold each meeting (PR 5a), what the
@@ -48,6 +48,8 @@ harness PR that says what changed and why, and from then on nothing changes.
   the judge.
 - [Frozen choices, fifth part](EXP-001-harness-choices-practice.md) — PR 6b,
   the practice run.
+- [Frozen choices, sixth part](EXP-001-harness-choices-scored.md) — PR 6c,
+  the scored run.
 - [EXP-001 harness](EXP-001-harness.md) — the harness PRs, and what each
   leaves the next.
 - [EXP-001 pre-registration](EXP-001-preregistration.md) — materials, arms

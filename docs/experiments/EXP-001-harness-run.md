@@ -1,12 +1,13 @@
-# EXP-001 — The harness, second part: the judge and the practice run
+# EXP-001 — The harness, second part: the judge, the practice run and the scored run
 
-> **Status**: 🚧 **In Progress** — PRs 6a and 6b merged ([#1023](https://github.com/mkhomutov/Persatrix/pull/1023), [#1024](https://github.com/mkhomutov/Persatrix/pull/1024)); the practice run held on 2026-10-02 confirmed the quiet-spell gap PR 5d left, and PR 5e ([#1032](https://github.com/mkhomutov/Persatrix/pull/1032)) closes it.
-> **Last updated**: 2026-10-02
+> **Status**: 🚧 **In Progress** — PRs 6a, 6b and 5e merged ([#1023](https://github.com/mkhomutov/Persatrix/pull/1023), [#1024](https://github.com/mkhomutov/Persatrix/pull/1024), [#1032](https://github.com/mkhomutov/Persatrix/pull/1032)): the practice run held on 2026-10-02 confirmed the quiet-spell gap PR 5d left, and PR 5e closed it. PR 6c holds the scored run.
+> **Last updated**: 2026-10-07
 > **Part of**: the [EXP-001 harness](EXP-001-harness.md), whose first part lists every harness PR and what PRs 1 to 5d leave the next
 
 The [first part](EXP-001-harness.md) reached its size limit, so the account
 of the judge and the practice run moved here as it was. What the practice
 run then showed follows it, and so does PR 5e, which the run asked for.
+PR 6c, the scored run, comes last.
 
 ## The judge
 
@@ -142,6 +143,78 @@ them, read the prefix (1 665, 5 721 and 10 155 tokens) instead of writing
 it. The six keep-alives cost under two cents in all, and D′'s chair again
 answered all three recall questions from its prefix.
 
+## PR 6c: the scored run
+
+PR 6c holds the scored run, the last of the harness PRs. Once a practice
+run on the same code shows the eight checks pass, it is held as the
+practice run is, with a key used by nothing else and in a directory outside
+the repository:
+
+```bash
+python -m evaluators.exp001 scored ~/exp001/scored --provider anthropic
+```
+
+Pre-registration §3 runs the scored series in order, 1 to 5, each series'
+five arms one at a time in the order drawn for it, and every scored meeting
+within seven days of the first. The run holds each arm's series as a pair,
+each try kept as it ends, as the practice run does, in a window: a
+directory of its own, `window-1`, whose seven days open as its first try
+begins. Before each try, the harness prices every arm call the run has
+made with the fixed table, and begins no try once they reach $150. A series
+dropped in any arm is dropped from every arm's comparisons, so the arms
+after it in that series' order never hold it. Once two series are dropped
+the run stops, since fewer than four can still be kept.
+
+A harness fault stops the run and closes its window. Every scored output so
+far is discarded: it stays where it is, is never gathered or judged, and is
+published with the result. Once the fix has merged through a reviewed PR,
+the same command with `--fixed-by` naming that PR starts the next window,
+which holds every series again from series 1, its seven days opening again.
+Without `--fixed-by` a start after a fault is refused, so a run started
+again by mistake holds no window on the code that faulted. The $150 cap
+counts every window, discarded or not, and a third fault ends the run,
+incomplete.
+
+Once a window's meetings end with four series or more kept, the harness
+draws the packets of those series' answers, each person's in a file of their
+own and the seal apart, and the judge scores them as batch `scored` within
+its $25 cap. The report then says how the run ended, and gives each window,
+the series kept, each arm's dollars per plan, real spend against $150, the
+judge's spend, and the date scoring is due: 21 days after the last scored
+meeting ended. It never reads the seal. `--provider offline` rehearses the
+whole run on the mock provider at no cost, and judges nothing.
+
+Three of PR 6c's choices read the pre-registration where it says nothing;
+[its frozen choices](EXP-001-harness-choices-scored.md) give each in full.
+
+- A series not held in every arm before the window's seven days pass is
+  lost as a dropped series is. Part 2 §6 makes a run incomplete only by a
+  spend cap, a third harness fault or fewer than four series, so with four
+  kept the run goes on to its scoring.
+- Each window's judging is a batch of its own with its own $25 cap, since
+  PR 6a's cap reads only its batch's calls. A discarded window's judge
+  calls are reported, and count toward no later window's cap.
+- A crash or Ctrl-C is no harness fault: the pair it stopped is set aside
+  whole and held again from its briefing in the same window, as in a
+  practice run.
+
+PR 6c also settles F-8 of PR 6b's review. The practice report projected the
+scored judging from the practice packets' mean cost, but a scored memo
+packet holds more of the operator's messages. The report now projects each
+scored packet at its own size: the judge's prompt and the packet, at the
+practice calls' input tokens a character, with the practice answers' mean
+length standing in for the memo or reply not yet written. Longer packets
+may also take more thinking, which no practice packet can show, so the
+report also gives the mean output tokens a call at which the 125 scored
+calls would reach $25, beside the practice batch's largest answer. The next
+practice run shows both.
+
+PR 6c leaves the scoring to a harness PR of its own: reading the people's
+scores and the judge's, opening the seal once every score is in, and the
+figures part 2 names, quality, agreement, the decision and what its §7
+reports, minutes per plan among them. It is step 4 of
+[pre-registration §6](EXP-001-preregistration.md#6-from-here-to-the-result).
+
 ## Related documentation
 
 - [EXP-001 harness](EXP-001-harness.md) — the first part: every harness PR,
@@ -152,5 +225,7 @@ answered all three recall questions from its prefix.
   of PR 6a.
 - [Frozen choices: the practice run](EXP-001-harness-choices-practice.md) —
   the choices of PR 6b.
+- [Frozen choices: the scored run](EXP-001-harness-choices-scored.md) — the
+  choices of PR 6c.
 - [EXP-001 pre-registration](EXP-001-preregistration.md) — the arms, and the
   eight checks the harness must pass before any scored meeting.

@@ -20,14 +20,21 @@ import pytest
 
 from evaluators.exp001.attempts import Held, SeriesRun, Try
 from evaluators.exp001.costs import ARMS_MODEL, CallPurpose, CallRecord, price_call
-from evaluators.exp001.judge import JUDGE_MODEL, MAX_TOKENS, Judged
-from evaluators.exp001.materials import MeetingKind, load_series
+from evaluators.exp001.judge import JUDGE_MODEL, MAX_TOKENS, Judged, Packet, load_prompts
+from evaluators.exp001.materials import MeetingKind, load_materials, load_series
+from evaluators.exp001.packets import (
+    MemoPacket,
+    RecallPacket,
+    memo_packet_text,
+    recall_packet_text,
+)
 from evaluators.exp001.pairs import Kept
 from evaluators.exp001.practice_report import (
     COST_CLOSE_TOKENS,
     SCORED_MEMO_PACKETS,
     SCORED_RECALL_PACKETS,
     SCORED_TRANSCRIPTS,
+    Projection,
     build,
     discussion_tokens,
     project_judging,
@@ -36,13 +43,15 @@ from evaluators.exp001.practice_report import (
     summary,
     usage_totals,
 )
-from evaluators.exp001.rating import Seal
+from evaluators.exp001.rating import Seal, packet_text
 from evaluators.exp001.runtime import CallLog, FailedCall
 from evaluators.exp001.scoring import MemoRef
 
 _EXP = Path(__file__).resolve().parents[3] / "evaluators" / "experiments" / "EXP-001"
 SERIES = load_series(_EXP / "practice.yaml")
 BRIEFING, PLAN, CONTROL, RECALL = SERIES.meetings
+SCORED = load_materials(_EXP).series
+PROMPTS = load_prompts(_EXP / "rubric.yaml")
 _T0 = dt.datetime(2026, 10, 1, 9, 0, tzinfo=dt.UTC)
 _PREFIX = "a" * 64
 
@@ -145,48 +154,90 @@ class TestTheDiscussionsTokens:
         assert SCORED_TRANSCRIPTS == 5
 
 
+def _practice_packets() -> tuple[MemoPacket, RecallPacket]:
+    """A practice memo packet and recall packet, as the judge read them."""
+    assert PLAN.plan_key is not None and RECALL.recall_key is not None
+    return (
+        MemoPacket("m1", SERIES.organisation, (BRIEFING.message, PLAN.message), PLAN.plan_key,
+                   "A memo of a few words."),
+        RecallPacket("r1", SERIES.organisation, RECALL.recall_key, "R1: the answer. R2: another."),
+    )
+
+
 class TestTheJudgesProjection:
-    def _judged(self, pid: str, kind: MeetingKind, cost_output_tokens: int) -> CallRecord:
-        return _record(0, CallPurpose.JUDGE, arm="", meeting=pid, kind=kind, model=JUDGE_MODEL,
-                       tokens=(0, cost_output_tokens, 0, 0))
+    """PR 6b's review, F-8: a scored packet holds more of the operator's
+    messages than a practice one, so the scored judging is projected at the
+    scored packets' own sizes (PR 6c)."""
+
+    MEMO, RECALL_PACKET = _practice_packets()
+
+    def _judged(self, packet: Packet, output_tokens: int) -> CallRecord:
+        """The judge's call for *packet*, one input token a character of its request."""
+        recall = isinstance(packet, RecallPacket)
+        system = PROMPTS.recall if recall else PROMPTS.memo
+        return _record(0, CallPurpose.JUDGE, arm="", meeting=packet.id, model=JUDGE_MODEL,
+                       kind=MeetingKind.RECALL if recall else MeetingKind.PLAN,
+                       tokens=(len(system) + len(packet_text(packet)), output_tokens, 0, 0))
+
+    def _project(self, *records: CallRecord) -> Projection:
+        packets: dict[str, Packet] = {"m1": self.MEMO, "r1": self.RECALL_PACKET}
+        return project_judging(records, packets, PROMPTS, SCORED)
 
     def test_the_scored_count_is_every_arms_memos_and_recall_checks(self) -> None:
         assert (SCORED_MEMO_PACKETS, SCORED_RECALL_PACKETS) == (100, 25)
 
-    def test_it_is_a_hundred_memo_packets_and_twenty_five_recall_packets_at_their_means(
-        self,
-    ) -> None:
-        records = [
-            self._judged("m1", MeetingKind.PLAN, 4_000),  # $0.10
-            self._judged("m2", MeetingKind.CONTROL, 12_000),  # $0.30
-            self._judged("r1", MeetingKind.RECALL, 2_000),  # $0.05
-        ]
-        projection = project_judging(records)
-        assert projection.memo_packet == pytest.approx(0.20)
-        assert projection.recall_packet == pytest.approx(0.05)
-        assert projection.scored == pytest.approx(100 * 0.20 + 25 * 0.05)
+    def test_each_scored_packet_is_read_at_its_own_size(self) -> None:
+        """Its request's characters at the practice batch's tokens a
+        character, with the practice answers' mean length standing in for
+        the answer not yet written; the output is the practice batch's."""
+        projection = self._project(self._judged(self.MEMO, 1000),
+                                   self._judged(self.RECALL_PACKET, 400))
+        expected = 0.0
+        for series in SCORED:
+            for number, meeting in enumerate(series.meetings):
+                upto = tuple(m.message for m in series.meetings[: number + 1])
+                if meeting.plan_key is not None:
+                    text = memo_packet_text(MemoPacket(
+                        "", series.organisation, upto, meeting.plan_key, self.MEMO.memo,
+                    ))
+                    read, output = len(PROMPTS.memo) + len(text), 1000
+                elif meeting.recall_key is not None:
+                    text = recall_packet_text(RecallPacket(
+                        "", series.organisation, meeting.recall_key, self.RECALL_PACKET.reply,
+                    ))
+                    read, output = len(PROMPTS.recall) + len(text), 400
+                else:
+                    continue
+                expected += 5 * (read * 5.00 + output * 25.00) / 1_000_000  # one per arm
+        assert projection.scored == pytest.approx(expected)
         assert projection.fits
 
+    def test_a_scored_memo_packet_costs_more_to_read_than_a_practice_one(self) -> None:
+        practice = self._judged(self.MEMO, 0)
+        projection = self._project(practice, self._judged(self.RECALL_PACKET, 0))
+        assert projection.memo_packet is not None
+        assert projection.memo_packet > price_call(practice)
+
+    def test_it_names_the_mean_output_at_which_the_scored_judging_reaches_its_cap(
+        self,
+    ) -> None:
+        """Longer packets may take more thinking, which no practice packet shows."""
+        projection = self._project(self._judged(self.MEMO, 1000),
+                                   self._judged(self.RECALL_PACKET, 400))
+        assert projection.scored is not None
+        reading = projection.scored - (100 * 1000 + 25 * 400) * 25.00 / 1_000_000
+        assert projection.output_headroom == int((25 - reading) / (125 * 25.00 / 1_000_000))
+
     def test_a_projection_over_the_cap_does_not_fit(self) -> None:
-        records = [self._judged("m1", MeetingKind.PLAN, 10_400),
-                   self._judged("r1", MeetingKind.RECALL, 1)]
-        projection = project_judging(records)
+        projection = self._project(self._judged(self.MEMO, 10_400),
+                                   self._judged(self.RECALL_PACKET, 1))
         assert projection.scored is not None and projection.scored > 25
         assert not projection.fits
 
-    def test_a_packet_asked_twice_costs_both_calls(self) -> None:
-        """A second call for one packet happens only across a provider error
-        whose request was billed; the packet's cost is what it cost."""
-        records = [self._judged("m1", MeetingKind.PLAN, 4_000),
-                   self._judged("m1", MeetingKind.PLAN, 4_000),
-                   self._judged("r1", MeetingKind.RECALL, 0)]
-        assert project_judging(records).memo_packet == pytest.approx(
-            2 * price_call(records[0]),
-        )
-
     def test_with_no_packet_of_a_kind_there_is_no_projection(self) -> None:
-        projection = project_judging([self._judged("m1", MeetingKind.PLAN, 4_000)])
-        assert projection.scored is None and not projection.fits
+        projection = self._project(self._judged(self.MEMO, 4_000))
+        assert (projection.scored, projection.output_headroom) == (None, None)
+        assert not projection.fits
 
 
 class TestTheUsageTotals:
@@ -252,7 +303,7 @@ class TestTheReport:
             "series": SERIES, "runs": runs, "calls": calls,
             "written": {("D-prime", SERIES.id, PLAN.id, 1, 1): _PREFIX},
             "everything": CallLog(tuple(calls["D-prime"].records), ()),
-            "judge_calls": None, "judged": None, "seal": None,
+            "judge_calls": None, "judged": None, "seal": None, "projection": None,
         }
         arguments.update(overrides)
         return build(**arguments)
@@ -315,12 +366,24 @@ class TestTheReport:
         ), ())
         judged = Judged({}, {"r1": {"R1": True}}, spend=0.2, cap_reached=False, left=())
         seal = Seal({"r1": MemoRef("D", SERIES.id, RECALL.id)}, (), {})
-        report = self._build(judge_calls=judge_calls, judged=judged, seal=seal)
+        projection = Projection(memo_packet=0.04, recall_packet=0.01, scored=4.25,
+                                output_headroom=7_213)
+        report = self._build(judge_calls=judge_calls, judged=judged, seal=seal,
+                             projection=projection)
         assert report["judge"]["calls"] == 2
         assert report["judge"]["output_tokens_max"] == 6000
         assert report["judge"]["max_tokens"] == MAX_TOKENS
-        assert report["judge"]["projection"]["fits"] is True
+        assert report["judge"]["projection"] == {
+            "memo_packet": 0.04, "recall_packet": 0.01, "scored_memo_packets": 100,
+            "scored_recall_packets": 25, "scored": 4.25, "cap": 25.0, "fits": True,
+            "output_headroom": 7_213,
+        }
         assert report["recall_marks"] == {"D": {"R1": True}}
+        text = summary(report)
+        assert "projected at the scored packets' own sizes" in text
+        assert "$4.25 in all, within the $25 cap" in text
+        assert "only if its 125 calls average 7 213 output tokens or more" in text
+        assert "the practice batch's largest answer used 6 000" in text
 
     def test_the_summary_names_what_the_run_shows(self) -> None:
         text = summary(self._build())
