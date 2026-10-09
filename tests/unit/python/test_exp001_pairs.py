@@ -36,6 +36,7 @@ from evaluators.exp001.pairs import (
     hold_pair,
     pair_calls,
     read_pair,
+    read_tries,
 )
 
 from ._exp001_run_test_helpers import IDS, PANEL, SERIES, T0, arm_a_reply, channel_meeting, no_wait
@@ -190,6 +191,17 @@ class TestKeepingEachTry:
         assert [k["meeting"] for k in _lines(directory)] == [BRIEFING.id]
         assert not (directory / PAIR).exists()
         assert read_pair(directory) is None
+
+    async def test_a_pair_stopped_partway_reads_back_its_tries_so_far(
+        self, tmp_path: Path,
+    ) -> None:
+        """The scored run reports the tries of a pair its cap or window stopped."""
+        script = _Script({(PLAN.id, 1, 1): HarnessFault("C, practice: the call log is unreadable")})
+        with pytest.raises(HarnessFault):
+            await _hold(tmp_path, script)
+        (briefing,) = read_tries(tmp_path / "pairs" / SERIES.id / "C")
+        assert (briefing.meeting, briefing.attempt, briefing.meeting_try) == (BRIEFING.id, 1, 1)
+        assert briefing.held.result is not None
 
 
 class TestResuming:

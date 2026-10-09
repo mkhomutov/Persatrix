@@ -44,7 +44,9 @@ def _window(
         "window": number, "fixed_by": fixed_by, "opened_at": _T0.isoformat(),
         "fault": None if fault is None else {"message": fault, "at": _T0.isoformat()},
         "ended": None if not ended else {
-            "at": (_T0 + dt.timedelta(days=2)).isoformat(), "kept": kept, "dropped": dropped,
+            "at": (_T0 + dt.timedelta(days=2)).isoformat(),
+            "last_scored_meeting_at": (_T0 + dt.timedelta(days=1)).isoformat(),
+            "kept": kept, "dropped": dropped,
             "not_held": [s for s in _ALL if s not in kept and s not in dropped],
             "stopped_by": stopped_by,
         },
@@ -162,11 +164,44 @@ class TestTheReport:
         ]
 
     def test_scoring_is_due_21_days_after_the_last_scored_meeting(self) -> None:
-        ended = _T0 + dt.timedelta(days=2)
+        """Not after the window's last try: series 5 may have been begun and never kept."""
+        ended = _T0 + dt.timedelta(days=1)
         assert _report()["scoring_due"] == {
             "last_meeting_ended_at": ended.isoformat(),
             "by": (ended + dt.timedelta(days=21)).isoformat(),
         }
+
+    def test_the_tries_of_a_pair_the_cap_or_window_stopped_are_listed_with_no_dollars(
+        self,
+    ) -> None:
+        stopped: SeriesRun[Kept] = SeriesRun("D", S1.id, _finished("D").tries[:2], None)
+        report = _report(stopped=[stopped], windows=[_window(kept=_ALL[1:], stopped_by="window")])
+        rows = [(r["arm"], r["meeting"]) for r in report["meetings"]]
+        assert rows[-2:] == [("D", S1.meetings[0].id), ("D", S1.meetings[1].id)]
+        assert "D" not in report["dollars_per_plan"]
+
+    def test_calls_the_fixed_table_cannot_price_are_named_and_left_out(self) -> None:
+        unpriced = [{"window": 1, "model": "claude-unlisted-1", "calls": 2}]
+        windows = [_window(1, fault="bad", ended=False), _window(2, fixed_by="#2001")]
+        report = _report(windows=windows, spend=[0.5, 40.0], unpriced=unpriced)
+        assert report["real_spend"]["unpriced"] == unpriced
+        assert report["real_spend"]["dollars"] == pytest.approx(40.5)
+        assert ("left out of real spend, as the fixed table cannot price them: window 1, "
+                "2 calls on claude-unlisted-1") in summary(report)
+
+    def test_a_judge_log_the_harness_cannot_read_is_named_in_the_usage_alone(self) -> None:
+        named = "window-1/judging/scored/calls.jsonl"
+        report = _report(unread=["window-1/pairs/x/calls.jsonl"], judge_unread=[named])
+        assert report["usage"]["unread"] == ["window-1/pairs/x/calls.jsonl", named]
+        assert report["real_spend"]["unread"] == ["window-1/pairs/x/calls.jsonl"]
+        assert named in summary(report)
+
+    def test_judging_a_provider_error_stopped_is_said_and_resumed_by_a_start(self) -> None:
+        report = _report(judging_stopped="RateLimitError: overloaded")
+        assert report["judging_stopped"] == "RateLimitError: overloaded"
+        assert ("The judge: stopped by a provider error its retries did not clear "
+                "(RateLimitError: overloaded); start the run again to resume it") in summary(report)
+        assert _report()["judging_stopped"] is None
 
     def test_an_incomplete_run_is_not_scored(self) -> None:
         report = _report(windows=[_window(stopped_by="cap")])

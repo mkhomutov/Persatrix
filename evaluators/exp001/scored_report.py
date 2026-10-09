@@ -13,14 +13,18 @@ people who score need from it:
   the fault that closed it, how its meetings ended, and its real spend.
 - **The window whose meetings ended**: the series every arm's comparisons
   keep, those dropped and those not held; each try as its record left it,
-  with no memo or transcript text; and each arm's dollars per plan for every
-  series it held to the end, at the fixed table and with bids and
-  summaries repriced (part 2 §7).
-- **Real spend** against the cap, every window counted; the judge's spend
-  against its own cap; and every call's tokens by model, to compare by hand
-  with the provider's usage report.
+  with no memo or transcript text, those of a pair the cap or the seven days
+  stopped included; and each arm's dollars per plan for every series it held
+  to the end, at the fixed table and with bids and summaries repriced (part
+  2 §7).
+- **Real spend** against the cap, every window counted, and the calls a
+  closed window holds that the fixed table cannot price; the judge's spend
+  against its own cap, or the provider error that stopped it; and every
+  call's tokens by model, to compare by hand with the provider's usage
+  report.
 - **When scoring is due**: 21 days after the last scored meeting ended
-  (part 2 §4).
+  (part 2 §4): the last try of the last series kept, not a later one of a
+  series never held in every arm.
 
 The report never reads the seal, so it names no arm's scores. Building it
 reads no file: the scored run gathers what it reads.
@@ -112,19 +116,27 @@ def build(
     priced: bool,
     spend: Sequence[float | None],
     everything: CallLog,
+    stopped: Sequence[SeriesRun[Kept]] = (),
+    unpriced: Sequence[Mapping[str, Any]] = (),
     unread: Sequence[str] = (),
+    judge_unread: Sequence[str] = (),
     judge_calls: CallLog | None = None,
     judged: Judged | None = None,
+    judging_stopped: str | None = None,
 ) -> dict[str, Any]:
     """The report of a scored run held on *alias*, in *windows*.
 
     *runs* are the pairs the last window held to the end, once its meetings
     ended and no fault closed it, and *calls* each one's calls, by series and
-    arm. *spend* is each window's real spend; nothing is priced unless
-    *priced*. *everything* is every call of the run, the arms' and the
-    judge's, in every window, but for the logs of *unread*, which the
-    harness could not read. *judge_calls* and *judged* are the last window's
-    scored judging, when it was judged.
+    arm; *stopped* are the pairs there the cap or the seven days stopped
+    partway, with their tries so far. *spend* is each window's real spend,
+    but for the calls of *unpriced*, by window and model, which the fixed
+    table cannot price; nothing is priced unless *priced*. *everything* is
+    every call of the run, the arms' and the judge's, in every window, but
+    for the arms' logs of *unread* and the judge's of *judge_unread*, which
+    the harness could not read. *judge_calls* and *judged* are the last
+    window's scored judging, when it was judged, and *judging_stopped* the
+    provider error that stopped it, when one did.
     """
     state, why = outcome(windows)
     last = windows[-1]
@@ -140,19 +152,24 @@ def build(
             "kept": list(ended["kept"]), "dropped": list(ended["dropped"]),
             "not_held": list(ended["not_held"]),
         },
-        "meetings": _meetings(runs, series),
+        "meetings": _meetings([*runs, *stopped], series),
         "dollars_per_plan": _dollars(runs, calls, repricing=False) if dollars else None,
         "dollars_per_plan_repriced": _dollars(runs, calls, repricing=True) if dollars else None,
         "real_spend": {
             "dollars": sum(s or 0.0 for s in spend) if priced else None,
             "cap": SPEND_CAP,
             "unread": list(unread),
+            "unpriced": [dict(u) for u in unpriced],
         },
         "judging": (
             None if judge_calls is None or judged is None else _judging(judge_calls, judged)
         ),
-        "scoring_due": None if state != COMPLETE or ended is None else _scoring_due(ended),
-        "usage": {**usage_totals(everything), "unread": list(unread)},
+        "judging_stopped": judging_stopped,
+        "scoring_due": (
+            None if state != COMPLETE or ended is None or ended["last_scored_meeting_at"] is None
+            else _scoring_due(ended)
+        ),
+        "usage": {**usage_totals(everything), "unread": [*unread, *judge_unread]},
     }
 
 
@@ -198,7 +215,7 @@ def _judging(calls: CallLog, judged: Judged) -> dict[str, Any]:
 
 
 def _scoring_due(ended: Mapping[str, Any]) -> dict[str, str]:
-    at = dt.datetime.fromisoformat(ended["at"])
+    at = dt.datetime.fromisoformat(ended["last_scored_meeting_at"])
     return {"last_meeting_ended_at": at.isoformat(), "by": (at + SCORING_DAYS).isoformat()}
 
 
@@ -212,6 +229,11 @@ def summary(report: Mapping[str, Any]) -> str:
     lines += ["", "Real spend: not priced" if spend["dollars"] is None else
               f"Real spend: ${spend['dollars']:.2f} of the ${spend['cap']:.0f} cap, "
               "every window counted"]
+    if spend["unpriced"]:
+        lines.append("  left out of real spend, as the fixed table cannot price them: " + "; ".join(
+            f"window {u['window']}, {u['calls']} call{'' if u['calls'] == 1 else 's'} on "
+            f"{u['model']}" for u in spend["unpriced"]
+        ))
     if report["series"] is not None:
         lines += ["", "Series " + "; ".join(
             f"{part.replace('_', ' ')}: {', '.join(ids) or 'none'}"
@@ -230,7 +252,7 @@ def summary(report: Mapping[str, Any]) -> str:
             lines += ["", f"{title}:"]
             lines += [f"  {arm}: " + ", ".join(f"{s} ${d:.4f}" for s, d in by_series.items())
                       for arm, by_series in report[key].items()]
-    lines += ["", _judging_words(report["judging"])]
+    lines += ["", _judging_words(report["judging"], report["judging_stopped"])]
     due = report["scoring_due"]
     if due is not None:
         lines.append(f"Scoring: the last scored meeting ended at {due['last_meeting_ended_at']}; "
@@ -258,7 +280,10 @@ def _window_words(window: Mapping[str, Any]) -> str:
     return "; ".join(words)
 
 
-def _judging_words(judging: Mapping[str, Any] | None) -> str:
+def _judging_words(judging: Mapping[str, Any] | None, stopped: str | None) -> str:
+    if stopped is not None:
+        return (f"The judge: stopped by a provider error its retries did not clear ({stopped}); "
+                "start the run again to resume it")
     if judging is None:
         return "The judge: not judged"
     largest = f"{judging['output_tokens_max']:,}".replace(",", " ")

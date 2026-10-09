@@ -32,6 +32,7 @@ from evaluators.exp001.costs import CallPurpose, CallRecord
 from evaluators.exp001.materials import MeetingKind
 from evaluators.exp001.runtime import (
     KEEPALIVE_QUIET,
+    CallLog,
     CallLogError,
     MemoTurn,
     call_log_env,
@@ -41,6 +42,7 @@ from evaluators.exp001.runtime import (
     prefix_keepalive_env,
     prompt_prefix_env,
     read_call_log,
+    read_call_logs,
     story_start,
 )
 
@@ -312,6 +314,30 @@ class TestMergeCallLogs:
 
     def test_no_logs_are_an_empty_log(self):
         assert merge_call_logs([]) == read_call_log(Path("/nonexistent/calls.jsonl"))
+
+
+class TestReadCallLogs:
+    def test_the_logs_read_are_merged_and_those_that_cannot_be_named(self, tmp_path):
+        """A crash can stop a line half written: that log is named, by its
+        path within the run's directory, and the report is still written."""
+        for part in ("pairs", "interrupted"):
+            (tmp_path / part).mkdir()
+        whole = _write(tmp_path / "pairs" / "a.jsonl", _line())
+        cut = tmp_path / "interrupted" / "b.jsonl"
+        cut.write_text(json.dumps(_line()) + "\n" + '{"tags": {"arm"')
+        merged, unread = read_call_logs([whole, cut], tmp_path)
+        assert merged == read_call_log(whole)
+        assert unread == [str(Path("interrupted") / "b.jsonl")]
+
+    def test_each_log_is_read_by_the_reader_given(self, tmp_path):
+        """The judge's log has a reader of its own."""
+        def refuse(path: Path) -> CallLog:
+            raise CallLogError(f"{path.name}: not a judge's line")
+
+        path = _write(tmp_path / "calls.jsonl", _line())
+        assert read_call_logs([path], tmp_path, read=refuse) == (
+            merge_call_logs([]), ["calls.jsonl"],
+        )
 
 
 class TestPromptPrefixEnv:

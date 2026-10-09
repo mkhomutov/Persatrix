@@ -85,8 +85,8 @@ Tokens = dict[tuple[str, int, int], int]
 @dataclass(frozen=True)
 class Projection:
     """The scored judging's spend, projected from the practice batch at the
-    scored packets' own sizes. Each figure is None when the batch judged no
-    packet of a kind."""
+    scored packets' own sizes. A kind's figure is None when the batch judged
+    no packet of that kind, and the total and the headroom are then None too."""
 
     memo_packet: float | None  # a scored memo packet's mean projected cost
     recall_packet: float | None
@@ -197,8 +197,6 @@ def project_judging(
         practice.characters += len(calls) * _request_length(packet, prompts)
         practice.outputs.append(sum(call.output_tokens for call in calls))
         practice.answers.append(len(_answer(packet)))
-    if not all(kind.outputs for kind in kinds.values()):
-        return Projection(None, None, None, None)
     reads: list[float] = []  # each scored packet's projected input tokens
     costs: dict[bool, list[float]] = {False: [], True: []}
     for series in scored:
@@ -211,19 +209,26 @@ def project_judging(
                 blank = RecallPacket("", series.organisation, meeting.recall_key, "")
             else:
                 continue
-            practice = kinds[isinstance(blank, RecallPacket)]
+            recall = isinstance(blank, RecallPacket)
+            practice = kinds[recall]
+            if not practice.outputs:
+                continue  # the batch judged no packet of its kind to project it from
             read = practice.tokens / practice.characters * (
                 _request_length(blank, prompts) + statistics.fmean(practice.answers)
             )
             output = statistics.fmean(practice.outputs)
             reads += [read] * len(ARMS)
-            costs[isinstance(blank, RecallPacket)] += [_judge_cost(read, output)] * len(ARMS)
+            costs[recall] += [_judge_cost(read, output)] * len(ARMS)
+    memo = statistics.fmean(costs[False]) if costs[False] else None
+    reply = statistics.fmean(costs[True]) if costs[True] else None
+    if memo is None or reply is None:
+        return Projection(memo, reply, None, None)
     price = PRICES[JUDGE_MODEL]
     reading = sum(reads) * price.input / 1_000_000
     headroom = (JUDGING_CAP - reading) / (len(reads) * price.output / 1_000_000)
     return Projection(
-        memo_packet=statistics.fmean(costs[False]),
-        recall_packet=statistics.fmean(costs[True]),
+        memo_packet=memo,
+        recall_packet=reply,
         scored=sum(costs[False]) + sum(costs[True]),
         output_headroom=max(0, int(headroom)),
     )
@@ -466,8 +471,8 @@ def usage_words(usage: Mapping[str, Any]) -> list[str]:
     if failed:
         lines.append("  failed calls: " + ", ".join(f"{e} {n}" for e, n in failed.items()))
     if usage.get("unread"):
-        lines.append("  set-aside logs the harness cannot read, their calls left out of these "
-                     "totals: " + ", ".join(usage["unread"]))
+        lines.append("  logs the harness cannot read, their calls left out of these totals: "
+                     + ", ".join(usage["unread"]))
     return lines
 
 

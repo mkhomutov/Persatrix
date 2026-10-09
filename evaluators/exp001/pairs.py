@@ -143,8 +143,14 @@ def read_pair(directory: Path) -> SeriesRun[Kept] | None:
         marked = json.loads((directory / PAIR).read_text())
     except FileNotFoundError:
         return None
-    tries = tuple(_try(line) for line in _lines(directory / TRIES))
-    return SeriesRun(marked["arm"], marked["series"], tries, marked["finished_attempt"])
+    return SeriesRun(
+        marked["arm"], marked["series"], read_tries(directory), marked["finished_attempt"],
+    )
+
+
+def read_tries(directory: Path) -> tuple[Try[Kept], ...]:
+    """The tries kept in *directory* so far, whether or not the pair was held to the end."""
+    return tuple(_try(line) for line in _lines(directory / TRIES))
 
 
 def pair_calls(directory: Path, run: SeriesRun[Kept]) -> CallLog:

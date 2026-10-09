@@ -239,6 +239,14 @@ class TestTheJudgesProjection:
         assert (projection.scored, projection.output_headroom) == (None, None)
         assert not projection.fits
 
+    def test_with_no_packet_of_a_kind_the_other_kind_is_still_projected(self) -> None:
+        """A batch its cap stopped before any recall packet still shows what
+        a scored memo packet would cost, as the report did before PR 6c."""
+        alone = self._project(self._judged(self.MEMO, 4_000))
+        both = self._project(self._judged(self.MEMO, 4_000), self._judged(self.RECALL_PACKET, 1))
+        assert alone.memo_packet == pytest.approx(both.memo_packet)
+        assert alone.recall_packet is None
+
 
 class TestTheUsageTotals:
     def test_each_models_calls_and_tokens_are_totalled_with_their_dollars(self) -> None:

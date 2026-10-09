@@ -1,7 +1,7 @@
 # EXP-001 — The harness, second part: the judge, the practice run and the scored run
 
 > **Status**: 🚧 **In Progress** — PRs 6a, 6b and 5e merged ([#1023](https://github.com/mkhomutov/Persatrix/pull/1023), [#1024](https://github.com/mkhomutov/Persatrix/pull/1024), [#1032](https://github.com/mkhomutov/Persatrix/pull/1032)): the practice run held on 2026-10-02 confirmed the quiet-spell gap PR 5d left, and PR 5e closed it. PR 6c ([#1036](https://github.com/mkhomutov/Persatrix/pull/1036)) holds the scored run.
-> **Last updated**: 2026-10-07
+> **Last updated**: 2026-10-09
 > **Part of**: the [EXP-001 harness](EXP-001-harness.md), whose first part lists every harness PR and what PRs 1 to 5d leave the next
 
 The [first part](EXP-001-harness.md) reached its size limit, so the account
@@ -181,10 +181,14 @@ own and the seal apart, and the judge scores them as batch `scored` within
 its $25 cap. The report then says how the run ended, and gives each window,
 the series kept, each arm's dollars per plan, real spend against $150, the
 judge's spend, and the date scoring is due: 21 days after the last scored
-meeting ended. It never reads the seal. `--provider offline` rehearses the
-whole run on the mock provider at no cost, and judges nothing.
+meeting ended. It never reads the seal. A provider error the judge's
+retries do not clear stops the run with its report written; it is no fault,
+so the same command, with no `--fixed-by`, resumes the judging.
+`--provider offline` rehearses the whole run on the mock provider at no
+cost, and judges nothing.
 
-Three of PR 6c's choices read the pre-registration where it says nothing;
+Six of PR 6c's choices read the pre-registration where it says nothing, the
+last three settled in its review;
 [its frozen choices](EXP-001-harness-choices-scored.md) give each in full.
 
 - A series not held in every arm before the window's seven days pass is
@@ -197,6 +201,15 @@ Three of PR 6c's choices read the pre-registration where it says nothing;
 - A crash or Ctrl-C is no harness fault: the pair it stopped is set aside
   whole and held again from its briefing in the same window, as in a
   practice run.
+- A try begun within the seven days is held to its end, even past them:
+  "every scored meeting happens within seven days of the first" is read as
+  every one begins within them.
+- The cap makes a run incomplete only when it refuses a try. A last try
+  that crosses $150 leaves none to refuse, so that run is complete, and the
+  report shows the spend over $150.
+- A call the fixed table cannot price is a harness fault in its window. No
+  fix can price a call already made, so once that window is closed its
+  unpriced calls are named in the report and left out of real spend.
 
 PR 6c also settles F-8 of PR 6b's review. The practice report projected the
 scored judging from the practice packets' mean cost, but a scored memo

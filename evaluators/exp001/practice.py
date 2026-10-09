@@ -50,7 +50,7 @@ from evaluators.exp001.materials import Series
 from evaluators.exp001.pairs import Kept, arm_hold, hold_pair, pair_calls, write_json
 from evaluators.exp001.panel import Panel
 from evaluators.exp001.rating import draw_packets, gather_answers, read_seal
-from evaluators.exp001.runtime import CallLog, merge_call_logs, read_call_log
+from evaluators.exp001.runtime import CallLog, merge_call_logs, read_call_logs
 
 RUN = "run.json"
 PAIRS = "pairs"
@@ -64,7 +64,7 @@ SUMMARY = "report.txt"
 class RefusedError(RuntimeError):
     """The practice run in this directory cannot go on as asked: a harness
     fault closed it, it was started with other arms or on another model
-    alias, or another run holds it."""
+    alias, another run holds it, or the directory holds a scored run."""
 
 
 async def run_practice(
@@ -102,6 +102,11 @@ async def run_practice(
     root.mkdir(parents=True, exist_ok=True)
     with sole_run(root, RefusedError(f"{root}: another run is holding this practice run")):
         state = _state(root)
+        if "windows" in state:
+            raise RefusedError(
+                f"{root}: this directory holds a scored run, not a practice run; hold the "
+                "practice run in a directory of its own",
+            )
         closed = state.get("fault")
         if closed is not None:
             raise RefusedError(
@@ -206,11 +211,4 @@ def _set_aside_calls(root: Path) -> tuple[CallLog, list[str]]:
     cannot read, by path within *root*. A pair stopped partway can have
     stopped a line half written: that log's calls are left out of the
     totals, and it is named, rather than keep the report from being written."""
-    logs: list[CallLog] = []
-    unread: list[str] = []
-    for path in sorted((root / INTERRUPTED).rglob(CALL_LOG)):
-        try:
-            logs.append(read_call_log(path))
-        except ValueError:  # a CallLogError, or text cut inside a character
-            unread.append(str(path.relative_to(root)))
-    return merge_call_logs(logs), unread
+    return read_call_logs(sorted((root / INTERRUPTED).rglob(CALL_LOG)), root)

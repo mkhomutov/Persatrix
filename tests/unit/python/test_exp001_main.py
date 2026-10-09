@@ -235,3 +235,23 @@ class TestTheScoredRun:
         captured = capsys.readouterr()
         assert "harness fault: C, series-1, series-1-plan-1" in captured.err
         assert "SCORED SUMMARY of {'the': 'stopped report'}" in captured.out
+
+    def test_judging_a_provider_error_stopped_says_so_and_what_the_report_says(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, binary: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """No traceback: a later start resumes the judging."""
+        async def run_scored(root: Path, **kwargs: Any) -> dict[str, Any]:
+            (root / scored.REPORT).write_text('{"the": "stopped report"}')
+            raise scored.JudgingStopped("RateLimitError: overloaded")
+
+        monkeypatch.setattr(scored, "run_scored", run_scored)
+        monkeypatch.setattr(scored_report, "summary",
+                            lambda report: f"SCORED SUMMARY of {report}\n")
+        code = command.main(["scored", str(tmp_path), "--provider", "offline",
+                             "--binary", str(binary)])
+        assert code == 2
+        captured = capsys.readouterr()
+        assert "RateLimitError: overloaded" in captured.err
+        assert "start the run again to resume it" in captured.err
+        assert "SCORED SUMMARY of {'the': 'stopped report'}" in captured.out

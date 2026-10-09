@@ -269,6 +269,22 @@ class TestStartedAgain:
             "arms": ["A", "C"], "alias": dataclasses.asdict(ARMS_ALIAS),
         }
 
+    async def test_a_scored_run_s_directory_is_refused_and_left_as_it_is(
+        self, tmp_path: Path,
+    ) -> None:
+        """Both runs keep their state in run.json: a practice run started on a
+        scored run's would overwrite the windows, and the faults, it records."""
+        scored = {"alias": dataclasses.asdict(ARMS_ALIAS), "windows": [
+            {"window": 1, "fixed_by": None, "opened_at": None, "fault": {"message": "bad"},
+             "ended": None},
+        ]}
+        (tmp_path / RUN).write_text(json.dumps(scored))
+        holds = _Holds()
+        with pytest.raises(RefusedError, match="scored run"):
+            await _practice(tmp_path, holds, _Judge())
+        assert holds.held == []
+        assert json.loads((tmp_path / RUN).read_text()) == scored
+
     async def test_a_run_started_again_on_another_provider_is_refused(
         self, tmp_path: Path,
     ) -> None:

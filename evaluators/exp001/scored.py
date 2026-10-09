@@ -10,7 +10,9 @@ pair, each try kept as it ends (:mod:`evaluators.exp001.pairs`).
   The run is held in windows, each in a directory of its own, ``window-N``.
   A window's seven days open as its first try begins, and no try begins
   once they have passed: a series not yet held in every arm is then not
-  held, and the window's meetings end.
+  held, and the window's meetings end. As each try ends, ``run.json`` keeps
+  the moment for its series, so the last scored meeting's end, from which
+  scoring is due, holds however late the run is started again.
 - **A harness fault**, while the meetings are held or while the judge
   scores them, stops the run and closes its window: every scored output so
   far is discarded, kept whole where it is and published with the result.
@@ -20,7 +22,10 @@ pair, each try kept as it ends (:mod:`evaluators.exp001.pairs`).
 - **The $150 cap.** Before each try, the harness prices every arm call the
   run's call logs hold, in every window, pairs set aside included. Once they
   reach the cap no try begins, so the try that crossed it is the last, and
-  the run is incomplete.
+  the run is incomplete. A call the fixed table cannot price is a harness
+  fault in the window that logged it, found before the next try or, after
+  the window's last, before anything is drawn. No fix can price the calls
+  already made, so a closed window's are left out of real spend and named.
 - **A dropped series** is dropped from every arm's comparisons, so the arms
   after it in that series' order never hold it. Once fewer than four series
   can still be kept, the run stops, incomplete.
@@ -29,16 +34,18 @@ Once a window's meetings end with four series or more kept, the harness
 gathers the answers of those series alone, draws the packets once
 (:mod:`evaluators.exp001.rating`), and the judge scores them as batch
 ``scored`` within its own $25 cap. Then it writes the report
-(:mod:`evaluators.exp001.scored_report`), as it does whenever the run stops.
+(:mod:`evaluators.exp001.scored_report`), as it does whenever the run stops,
+a provider error the judge's retries do not clear included: that is no
+fault, and the next start resumes the judging.
 
 A scored run started again in the same directory goes on where it stopped,
 as a practice run does: a pair held to the end is read back, one stopped
 partway is set aside in its window and held again from its briefing, and
 neither the packets nor the judge's answers are asked for twice. The
-directory keeps the model alias its meetings are held on, and one run at a
-time holds it. Offline, every model alias points at the offline mock
-provider: a rehearsal of the run at no cost, which prices nothing, so the
-cap never stops it, and judges nothing.
+directory keeps the model alias its meetings are held on, one run at a time
+holds it, and a practice run's directory is refused. Offline, every model
+alias points at the offline mock provider: a rehearsal of the run at no
+cost, which prices nothing, so the cap never stops it, and judges nothing.
 """
 
 from __future__ import annotations
@@ -58,34 +65,43 @@ from evaluators.exp001 import scored_report
 from evaluators.exp001.attempts import (
     HARNESS_FAULTS,
     MIN_SERIES,
+    ErrorKind,
     HarnessFault,
     Held,
     Hold,
     RunStopped,
     SeriesRun,
+    error_kind,
 )
-from evaluators.exp001.costs import ARMS, PRICES, SPEND_CAP, arm_orders, real_spend
-from evaluators.exp001.deployed_meeting import CALL_LOG
+from evaluators.exp001.costs import ARMS, PRICES, SPEND_CAP, arm_orders
 from evaluators.exp001.deployment import ARMS_ALIAS, Alias
-from evaluators.exp001.judge import (
-    RATER,
-    Judged,
-    JudgePrompts,
-    judge_batch,
-    read_judge_log,
-    sole_run,
-)
+from evaluators.exp001.judge import RATER, Judged, JudgePrompts, judge_batch, sole_run
 from evaluators.exp001.materials import SCORED_SERIES, Meeting, Series
-from evaluators.exp001.pairs import Kept, arm_hold, hold_pair, pair_calls, read_pair, write_json
+from evaluators.exp001.pairs import (
+    Kept,
+    arm_hold,
+    hold_pair,
+    pair_calls,
+    read_pair,
+    read_tries,
+    write_json,
+)
 from evaluators.exp001.panel import Panel
 from evaluators.exp001.rating import draw_packets, gather_answers
-from evaluators.exp001.runtime import CallLog, merge_call_logs, read_call_log
+from evaluators.exp001.runtime import merge_call_logs
+from evaluators.exp001.scored_logs import (
+    BATCH,
+    INTERRUPTED,
+    JUDGING,
+    PAIRS,
+    judge_calls,
+    priced,
+    spend_so_far,
+    window_calls,
+    window_directory,
+)
 
 RUN = "run.json"
-PAIRS = "pairs"
-INTERRUPTED = "interrupted"
-JUDGING = "judging"
-BATCH = "scored"
 REPORT = "report.json"
 SUMMARY = "report.txt"
 WINDOW = dt.timedelta(days=7)
@@ -97,8 +113,21 @@ MakeHold = Callable[[str, Series, Path], Hold[Any]]
 class RefusedError(RuntimeError):
     """The scored run in this directory cannot go on as asked: a harness
     fault awaits its fix, a fix was named with no fault to fix, a third
-    fault ended the run, it is held on another model alias, or another run
-    holds it."""
+    fault ended the run, it is held on another model alias, another run
+    holds it, or the directory holds a practice run."""
+
+
+class JudgingStopped(RuntimeError):  # noqa: N818 — named for what the operator sees
+    """A provider error the judge's retries did not clear stopped the scored
+    judging. It is no harness fault: the run is started again to resume it.
+    *error* names the error, as the report gives it."""
+
+    def __init__(self, error: str) -> None:
+        super().__init__(
+            f"a provider error the judge's retries did not clear stopped the scored judging "
+            f"({error}); start the run again to resume it",
+        )
+        self.error = error
 
 
 class CapReached(RunStopped):
@@ -107,11 +136,6 @@ class CapReached(RunStopped):
 
 class WindowClosed(RunStopped):
     """A try would begin seven days or more after its window's first."""
-
-
-def window_directory(root: Path, number: int) -> Path:
-    """Where the scored run's *number*-th window keeps its pairs, packets and judging."""
-    return root / f"window-{number}"
 
 
 def _real_now() -> dt.datetime:
@@ -155,6 +179,7 @@ async def run_scored(
         state = _open(root, alias, fixed_by)
         window = state["windows"][-1]
         directory = window_directory(root, window["window"])
+        pricing = alias.model in PRICES
         judged: Judged | None = None
         if scored_report.outcome(state["windows"])[0] != scored_report.INCOMPLETE:
             def build(arm: str, held: Series, at: Path) -> Hold[Any]:
@@ -163,12 +188,14 @@ async def run_scored(
             try:
                 if window.get("ended") is None:
                     say = progress or (lambda _: None)
-                    check = _check(root, state, window, priced=alias.model in PRICES, now=now,
-                                   progress=say)
+                    check = _check(root, state, window, priced=pricing, now=now, progress=say)
                     stopped_by = await _hold(
-                        directory, series, make_hold or build, check, sleep=sleep, progress=say,
+                        directory, series, make_hold or build, check,
+                        _tried(root, state, window, now), sleep=sleep, progress=say,
                     )
-                    window["ended"] = _ended(directory, series, stopped_by, now())
+                    if pricing:  # the last try's calls, which no check has priced
+                        spend_so_far(root, state["windows"], window)
+                    window["ended"] = _ended(directory, series, stopped_by, window, now)
                     write_json(root / RUN, state)
                 if scored_report.is_scored(window):
                     judged = await _draw_and_judge(
@@ -181,6 +208,10 @@ async def run_scored(
                 # written now is written by the next start.
                 with contextlib.suppress(Exception):
                     _write_report(root, state, series, alias, None)
+                raise
+            except JudgingStopped as stop:
+                with contextlib.suppress(Exception):  # as for a fault
+                    _write_report(root, state, series, alias, None, judging_stopped=stop.error)
                 raise
         return _write_report(root, state, series, alias, judged)
 
@@ -204,6 +235,11 @@ def _open(root: Path, alias: Alias, fixed_by: str | None) -> dict[str, Any]:
         state = {"alias": held_on, "windows": [_window(1, None)]}
         write_json(root / RUN, state)
         return state
+    if "windows" not in state:
+        raise RefusedError(
+            f"{root}: this directory holds a practice run, not a scored run; hold the scored "
+            "run in a directory of its own",
+        )
     if state["alias"] != held_on:
         was = state["alias"]
         raise RefusedError(
@@ -237,7 +273,7 @@ def _open(root: Path, alias: Alias, fixed_by: str | None) -> dict[str, Any]:
 
 def _window(number: int, fixed_by: str | None) -> dict[str, Any]:
     return {"window": number, "fixed_by": fixed_by, "opened_at": None, "fault": None,
-            "ended": None}
+            "ended": None, "last_try_ended": {}}
 
 
 def _check(
@@ -249,7 +285,7 @@ def _check(
     which the first try opens, have passed."""
     def check() -> None:
         if priced:
-            spent = sum(real_spend(_window_calls(root, w)[0].records) for w in state["windows"])
+            spent = spend_so_far(root, state["windows"], window)
             if spent >= SPEND_CAP:
                 raise CapReached(f"real spend has reached ${spent:.2f}, the ${SPEND_CAP:.0f} cap")
         at = now()
@@ -264,9 +300,21 @@ def _check(
     return check
 
 
+def _tried(
+    root: Path, state: dict[str, Any], window: dict[str, Any], now: Callable[[], dt.datetime],
+) -> Callable[[str], None]:
+    """What the harness keeps as each try ends: the moment, for the try's series."""
+    def tried(series_id: str) -> None:
+        window["last_try_ended"][series_id] = now().isoformat()
+        write_json(root / RUN, state)
+
+    return tried
+
+
 async def _hold(
     directory: Path, series: Sequence[Series], make_hold: MakeHold, check: Callable[[], None],
-    *, sleep: Callable[[float], Awaitable[None]], progress: Callable[[str], None],
+    tried: Callable[[str], None], *, sleep: Callable[[float], Awaitable[None]],
+    progress: Callable[[str], None],
 ) -> str | None:
     """Hold the window's series in order, each one's arms in its drawn order;
     what stopped the meetings before every series was held, if anything."""
@@ -276,7 +324,8 @@ async def _hold(
             for arm in order:
                 run = await hold_pair(
                     arm, held, directory / PAIRS / held.id / arm,
-                    _checked(functools.partial(make_hold, arm, held), check),
+                    _checked(functools.partial(make_hold, arm, held), check,
+                             functools.partial(tried, held.id)),
                     interrupted=directory / INTERRUPTED, sleep=sleep, progress=progress,
                 )
                 if run.dropped:
@@ -295,43 +344,64 @@ async def _hold(
 
 
 def _checked(
-    make: Callable[[Path], Hold[Any]], check: Callable[[], None],
+    make: Callable[[Path], Hold[Any]], check: Callable[[], None], tried: Callable[[], None],
 ) -> Callable[[Path], Hold[Any]]:
-    """*make*, with each try it holds begun only once *check* allows it."""
+    """*make*, with each try it holds begun only once *check* allows it, and
+    *tried* told as each one ends."""
     def build(directory: Path) -> Hold[Any]:
         hold = make(directory)
 
         async def checked(meeting: Meeting, attempt: int, meeting_try: int) -> Held[Any]:
             check()
-            return await hold(meeting, attempt, meeting_try)
+            held = await hold(meeting, attempt, meeting_try)
+            tried()
+            return held
 
         return checked
 
     return build
 
 
+def _pairs(directory: Path, series: Sequence[Series]) -> list[tuple[str, str, Path]]:
+    """Each pair of the window, as series, arm and directory, in the order held."""
+    return [
+        (held.id, arm, directory / PAIRS / held.id / arm)
+        for held, order in zip(series, arm_orders(len(series)), strict=True) for arm in order
+    ]
+
+
 def _held(directory: Path, series: Sequence[Series]) -> list[SeriesRun[Kept]]:
     """The window's pairs held to the end, in the order held."""
-    runs = []
-    for held, order in zip(series, arm_orders(len(series)), strict=True):
-        for arm in order:
-            run = read_pair(directory / PAIRS / held.id / arm)
-            if run is not None:
-                runs.append(run)
-    return runs
+    return [run for _, _, path in _pairs(directory, series) if (run := read_pair(path)) is not None]
+
+
+def _stopped(directory: Path, series: Sequence[Series]) -> list[SeriesRun[Kept]]:
+    """The window's pairs begun and never held to the end, as the cap or the
+    seven days left them, with their tries so far and no attempt finished."""
+    return [
+        SeriesRun(arm, held, tries, None) for held, arm, path in _pairs(directory, series)
+        if read_pair(path) is None and (tries := read_tries(path))
+    ]
 
 
 def _ended(
-    directory: Path, series: Sequence[Series], stopped_by: str | None, at: dt.datetime,
+    directory: Path, series: Sequence[Series], stopped_by: str | None, window: dict[str, Any],
+    now: Callable[[], dt.datetime],
 ) -> dict[str, Any]:
     """How the window's meetings ended: a series is kept when every arm held
-    it to the end, dropped when any arm dropped it, and otherwise not held."""
+    it to the end, dropped when any arm dropped it, and otherwise not held.
+    They ended as the window's last try did, and its last scored meeting as
+    the last try of the last series kept."""
     runs = _held(directory, series)
     finished = {(run.series, run.arm) for run in runs if not run.dropped}
     dropped = [s.id for s in series if any(r.series == s.id and r.dropped for r in runs)]
     kept = [s.id for s in series if all((s.id, arm) in finished for arm in ARMS)]
+    ends = {s: dt.datetime.fromisoformat(at) for s, at in window["last_try_ended"].items()}
+    scored = [ends[s] for s in kept if s in ends]
     return {
-        "at": at.isoformat(), "kept": kept, "dropped": dropped,
+        "at": max(ends.values(), default=now()).isoformat(),
+        "last_scored_meeting_at": max(scored).isoformat() if scored else None,
+        "kept": kept, "dropped": dropped,
         "not_held": [s.id for s in series if s.id not in kept and s.id not in dropped],
         "stopped_by": stopped_by,
     }
@@ -342,7 +412,8 @@ async def _draw_and_judge(
     client: LLMClient, prompts: JudgePrompts | None, sleep: Callable[[float], Awaitable[None]],
 ) -> Judged | None:
     """Draw the packets of the kept series' answers, once, and have the
-    judge score them as batch ``scored``; nothing is judged with no *prompts*."""
+    judge score them as batch ``scored``; nothing is judged with no *prompts*.
+    A provider error its retries do not clear is :class:`JudgingStopped`."""
     kept = set(window["ended"]["kept"])
     runs = [run for run in _held(directory, series) if run.series in kept]
     drawn = draw_packets(
@@ -351,52 +422,52 @@ async def _draw_and_judge(
     if prompts is None:
         return None
     batch = directory / JUDGING / BATCH
-    return await judge_batch(client, drawn.order(RATER), prompts, batch, batch=BATCH, sleep=sleep)
-
-
-def _window_calls(root: Path, window: dict[str, Any]) -> tuple[CallLog, list[str]]:
-    """Every arm call the window's pairs logged, those set aside included,
-    and the logs the harness cannot read, by path within *root*. A pair
-    stopped by a crash can have stopped a line half written: that log's calls
-    are left out and it is named, as in a practice run."""
-    directory = window_directory(root, window["window"])
-    logs: list[CallLog] = []
-    unread: list[str] = []
-    for part in (PAIRS, INTERRUPTED):
-        for path in sorted((directory / part).rglob(CALL_LOG)):
-            try:
-                logs.append(read_call_log(path))
-            except ValueError:  # a CallLogError, or text cut inside a character
-                unread.append(str(path.relative_to(root)))
-    return merge_call_logs(logs), unread
+    try:
+        return await judge_batch(
+            client, drawn.order(RATER), prompts, batch, batch=BATCH, sleep=sleep,
+        )
+    except HarnessFault:
+        raise
+    except Exception as exc:
+        if error_kind(type(exc).__name__) is not ErrorKind.PROVIDER:
+            raise
+        raise JudgingStopped(f"{type(exc).__name__}: {exc}") from exc
 
 
 def _write_report(
     root: Path, state: dict[str, Any], series: Sequence[Series], alias: Alias,
-    judged: Judged | None,
+    judged: Judged | None, *, judging_stopped: str | None = None,
 ) -> dict[str, Any]:
     """Gather what the report reads, write it, and return it."""
     windows = state["windows"]
-    priced = alias.model in PRICES
-    logs = [_window_calls(root, window) for window in windows]
-    judging = [read_judge_log(window_directory(root, w["window"]) / JUDGING / BATCH / CALL_LOG)
-               for w in windows]
+    pricing = alias.model in PRICES
+    logs = [window_calls(root, window) for window in windows]
+    judging = [judge_calls(root, window) for window in windows]
+    spent = [priced(log) for log, _ in logs]
     last = windows[-1]
     directory = window_directory(root, last["window"])
-    runs = [] if last["fault"] or last["ended"] is None else _held(directory, series)
+    ended = not last["fault"] and last["ended"] is not None
+    runs = _held(directory, series) if ended else []
     report = scored_report.build(
         alias=alias,
         windows=windows,
         runs=runs,
+        stopped=_stopped(directory, series) if ended else [],
         calls={(run.series, run.arm): pair_calls(directory / PAIRS / run.series / run.arm, run)
                for run in runs},
         series=series,
-        priced=priced,
-        spend=[real_spend(log.records) if priced else None for log, _ in logs],
-        everything=merge_call_logs([*(log for log, _ in logs), *judging]),
+        priced=pricing,
+        spend=[s.dollars if pricing else None for s in spent],
+        unpriced=[
+            {"window": w["window"], "model": model, "calls": n}
+            for w, s in zip(windows, spent, strict=True) for model, n in s.unpriced.items()
+        ] if pricing else [],
+        everything=merge_call_logs([*(log for log, _ in logs), *(log for log, _ in judging)]),
         unread=[path for _, paths in logs for path in paths],
-        judge_calls=None if judged is None else judging[-1],
+        judge_unread=[path for _, paths in judging for path in paths],
+        judge_calls=None if judged is None else judging[-1][0],
         judged=judged,
+        judging_stopped=judging_stopped,
     )
     write_json(root / REPORT, report)
     (root / SUMMARY).write_text(scored_report.summary(report))
