@@ -29,6 +29,8 @@ ARMS = ("A", "B", "C", "D", "D-prime")
 # The one model every arm calls, for every purpose (pre-registration §2).
 ARMS_MODEL = "claude-sonnet-4-6"
 ORDER_SEED = 2026
+# The scored run stops once its real spend reaches this (pre-registration §3).
+SPEND_CAP = 150.0
 _PER_MILLION = 1_000_000
 
 

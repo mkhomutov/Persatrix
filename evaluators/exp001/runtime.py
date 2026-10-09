@@ -32,7 +32,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
@@ -228,6 +228,23 @@ def merge_call_logs(logs: Iterable[CallLog]) -> CallLog:
         tuple(sorted((r for log in every for r in log.records), key=lambda r: r.started_at)),
         tuple(sorted((f for log in every for f in log.failures), key=lambda f: f.started_at)),
     )
+
+
+def read_call_logs(
+    paths: Iterable[Path], root: Path, read: Callable[[Path], CallLog] = read_call_log,
+) -> tuple[CallLog, list[str]]:
+    """Every call the logs at *paths* hold, as one log, and the logs that
+    cannot be read, by path within *root*, each read by *read*. A run stopped
+    by a crash can have stopped a line half written: that log's calls are
+    left out and it is named, rather than keep a report from being written."""
+    logs: list[CallLog] = []
+    unread: list[str] = []
+    for path in paths:
+        try:
+            logs.append(read(path))
+        except ValueError:  # a CallLogError, or text cut inside a character
+            unread.append(str(path.relative_to(root)))
+    return merge_call_logs(logs), unread
 
 
 def _record(

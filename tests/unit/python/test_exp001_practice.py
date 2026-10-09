@@ -43,7 +43,15 @@ from evaluators.exp001.practice import (
 from evaluators.exp001.rating import packet_text, read_packets
 
 from ._exp001_judge_test_helpers import _RECALL_JSON, PROMPTS, _memo_json
-from ._exp001_run_test_helpers import EXP, PANEL, SERIES, arm_a_reply, channel_meeting, no_wait
+from ._exp001_run_test_helpers import (
+    EXP,
+    PANEL,
+    SCORED,
+    SERIES,
+    arm_a_reply,
+    channel_meeting,
+    no_wait,
+)
 
 NAMES = load_adviser_names(EXP / "panel.yaml")
 _BINARY = Path("/repo/bin/persatrix-server")
@@ -143,7 +151,7 @@ async def _practice(
     alias: Alias = ARMS_ALIAS,
 ) -> dict[str, Any]:
     return await run_practice(
-        root, arms, panel=PANEL, series=SERIES, names=NAMES,
+        root, arms, panel=PANEL, series=SERIES, scored=SCORED, names=NAMES,
         client=LLMClient(judge or _Judge()), binary=_BINARY, alias=alias,
         prompts=None if judge is None else PROMPTS, sleep=no_wait, make_hold=holds,
     )
@@ -175,6 +183,7 @@ class TestAPracticeRun:
         text = (tmp_path / SUMMARY).read_text()
         assert text.startswith(f"EXP-001 practice run, series {SERIES.id}: arms A, C")
         assert report["judge"]["calls"] == 6 and report["judge"]["projection"]["fits"]
+        assert report["judge"]["projection"]["output_headroom"] > 0  # at the scored sizes
         assert set(report["recall_marks"]) == {"A", "C"}
 
     async def test_the_people_get_their_packets_and_the_seal_is_kept_apart(
@@ -259,6 +268,22 @@ class TestStartedAgain:
         assert json.loads((tmp_path / RUN).read_text()) == {
             "arms": ["A", "C"], "alias": dataclasses.asdict(ARMS_ALIAS),
         }
+
+    async def test_a_scored_run_s_directory_is_refused_and_left_as_it_is(
+        self, tmp_path: Path,
+    ) -> None:
+        """Both runs keep their state in run.json: a practice run started on a
+        scored run's would overwrite the windows, and the faults, it records."""
+        scored = {"alias": dataclasses.asdict(ARMS_ALIAS), "windows": [
+            {"window": 1, "fixed_by": None, "opened_at": None, "fault": {"message": "bad"},
+             "ended": None},
+        ]}
+        (tmp_path / RUN).write_text(json.dumps(scored))
+        holds = _Holds()
+        with pytest.raises(RefusedError, match="scored run"):
+            await _practice(tmp_path, holds, _Judge())
+        assert holds.held == []
+        assert json.loads((tmp_path / RUN).read_text()) == scored
 
     async def test_a_run_started_again_on_another_provider_is_refused(
         self, tmp_path: Path,

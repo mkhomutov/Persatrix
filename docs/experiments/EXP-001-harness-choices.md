@@ -1,7 +1,7 @@
 # EXP-001 — The harness's frozen choices
 
-> **Status**: 🚧 **In Progress** — the rows of PRs 1 to 4 froze when each merged; those of PRs 5a to 5c are in [holding the meetings](EXP-001-harness-choices-meetings.md), PRs 5d's and 5e's in [arm D′'s transcript prefix](EXP-001-harness-choices-d-prime.md), PR 6a's in [the judge](EXP-001-harness-choices-judge.md), and PR 6b's in [the practice run](EXP-001-harness-choices-practice.md).
-> **Last updated**: 2026-10-02
+> **Status**: 🚧 **In Progress** — the rows of PRs 1 to 4 froze when each merged; those of PRs 5a to 5c are in [holding the meetings](EXP-001-harness-choices-meetings.md), PRs 5d's and 5e's in [arm D′'s transcript prefix](EXP-001-harness-choices-d-prime.md), PR 6a's in [the judge](EXP-001-harness-choices-judge.md), PR 6b's in [the practice run](EXP-001-harness-choices-practice.md), and PR 6c's in [the scored run](EXP-001-harness-choices-scored.md).
+> **Last updated**: 2026-10-07
 > **Part of**: the [EXP-001 harness](EXP-001-harness.md), which lists the harness PRs and what each leaves the next
 
 [Pre-registration §3](EXP-001-preregistration.md#3-running-it) says every
@@ -49,8 +49,9 @@ nothing changes.
 The choices of PRs 5a to 5c, which hold the meetings, are in
 [their own document](EXP-001-harness-choices-meetings.md), those of PRs 5d
 and 5e, arm D′'s transcript prefix, in [a third](EXP-001-harness-choices-d-prime.md),
-PR 6a's, the judge, in [a fourth](EXP-001-harness-choices-judge.md), and PR
-6b's, the practice run, in [a fifth](EXP-001-harness-choices-practice.md).
+PR 6a's, the judge, in [a fourth](EXP-001-harness-choices-judge.md), PR
+6b's, the practice run, in [a fifth](EXP-001-harness-choices-practice.md),
+and PR 6c's, the scored run, in [a sixth](EXP-001-harness-choices-scored.md).
 
 ## The arm order
 
@@ -74,6 +75,8 @@ The arm order each series runs in:
   PR 6a.
 - [The practice run](EXP-001-harness-choices-practice.md) — the frozen
   choices of PR 6b.
+- [The scored run](EXP-001-harness-choices-scored.md) — the frozen choices
+  of PR 6c.
 - [EXP-001 harness](EXP-001-harness.md) — the harness PRs, and what each
   leaves the next.
 - [EXP-001 pre-registration](EXP-001-preregistration.md) — materials, arms

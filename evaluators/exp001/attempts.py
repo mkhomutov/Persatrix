@@ -31,6 +31,9 @@ A deployment that does not start is held again: the operator had not
 spoken, so nothing of the meeting happened, and it uses none of the
 retries. One that does not start four times is a harness fault.
 
+A rule of the scored run can refuse a try too, once its $150 cap is reached
+or its seven-day window has closed: :class:`RunStopped`, which is no fault.
+
 Every try is kept, in the series' run or on the fault that stopped it, so a
 cut-short try's spend is reported; dollars per plan count only the try that
 finished (:meth:`SeriesRun.finished_tries`).
@@ -63,6 +66,7 @@ T = TypeVar("T")
 RETRIES = 3
 ATTEMPTS = 2  # the first, and one start again from the briefing
 MIN_SERIES = 4
+HARNESS_FAULTS = 3  # the third ends the run, incomplete
 # Seconds before a meeting's next try, and before a series starts again, so
 # a provider outage of a few minutes does not use up the retries.
 RETRY_WAITS = (60.0, 300.0, 900.0)
@@ -106,6 +110,15 @@ class HarnessFault(RuntimeError):  # noqa: N818 — pre-registration §3 vocabul
     """The harness proved wrong: the run stops, and the fix goes through a
     reviewed PR (pre-registration §3). *tries* holds the stopped series'
     tries so far: outputs set aside, and published with the result."""
+
+    tries: tuple[Try[Any], ...] = ()
+
+
+class RunStopped(RuntimeError):  # noqa: N818 — pre-registration §3 vocabulary
+    """A rule of the run refused a try: the scored run's spend cap was
+    reached, or its seven-day window closed (pre-registration §3). It is no
+    harness fault, so nothing is discarded. *tries* holds the stopped
+    series' tries so far, as a fault's does."""
 
     tries: tuple[Try[Any], ...] = ()
 
@@ -180,8 +193,8 @@ async def run_series(
                 await sleep(RESTART_WAIT)
             if await _attempt(arm, series, hold, attempt, retries, tries, sleep):
                 return SeriesRun(arm, series.id, tuple(tries), attempt)
-    except HarnessFault as fault:
-        fault.tries = tuple(tries)
+    except (HarnessFault, RunStopped) as stop:
+        stop.tries = tuple(tries)
         raise
     return SeriesRun(arm, series.id, tuple(tries), None)
 
@@ -197,7 +210,7 @@ async def _attempt(
             where = _where(arm, series, meeting, attempt, meeting_try)
             try:
                 held = await hold(meeting, attempt, meeting_try)
-            except HarnessFault:
+            except (HarnessFault, RunStopped):
                 raise
             except Exception as exc:
                 raise HarnessFault(f"{where}: {type(exc).__name__}: {exc}") from exc

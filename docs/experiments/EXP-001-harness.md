@@ -1,7 +1,7 @@
 # EXP-001 — The harness
 
-> **Status**: 🚧 **In Progress** — PRs 1, 2, 3a, 3b, 4, 5a, 5b, 5c, 5d, 6a and 6b merged ([#984](https://github.com/mkhomutov/Persatrix/pull/984), [#986](https://github.com/mkhomutov/Persatrix/pull/986), [#987](https://github.com/mkhomutov/Persatrix/pull/987), [#988](https://github.com/mkhomutov/Persatrix/pull/988), [#992](https://github.com/mkhomutov/Persatrix/pull/992), [#993](https://github.com/mkhomutov/Persatrix/pull/993), [#1013](https://github.com/mkhomutov/Persatrix/pull/1013), [#1015](https://github.com/mkhomutov/Persatrix/pull/1015), [#1021](https://github.com/mkhomutov/Persatrix/pull/1021), [#1023](https://github.com/mkhomutov/Persatrix/pull/1023), [#1024](https://github.com/mkhomutov/Persatrix/pull/1024)); the practice run was held on 2026-10-02, and [what it showed](EXP-001-harness-run.md#what-the-practice-run-showed) asks for PR 5e.
-> **Last updated**: 2026-10-02
+> **Status**: 🚧 **In Progress** — PRs 1, 2, 3a, 3b, 4, 5a, 5b, 5c, 5d, 5e, 6a and 6b merged ([#984](https://github.com/mkhomutov/Persatrix/pull/984), [#986](https://github.com/mkhomutov/Persatrix/pull/986), [#987](https://github.com/mkhomutov/Persatrix/pull/987), [#988](https://github.com/mkhomutov/Persatrix/pull/988), [#992](https://github.com/mkhomutov/Persatrix/pull/992), [#993](https://github.com/mkhomutov/Persatrix/pull/993), [#1013](https://github.com/mkhomutov/Persatrix/pull/1013), [#1015](https://github.com/mkhomutov/Persatrix/pull/1015), [#1021](https://github.com/mkhomutov/Persatrix/pull/1021), [#1032](https://github.com/mkhomutov/Persatrix/pull/1032), [#1023](https://github.com/mkhomutov/Persatrix/pull/1023), [#1024](https://github.com/mkhomutov/Persatrix/pull/1024)); PR 6c, the scored run ([#1036](https://github.com/mkhomutov/Persatrix/pull/1036)), is the last. The practice run held on 2026-10-02 asked for PR 5e ([what it showed](EXP-001-harness-run.md#what-the-practice-run-showed)).
+> **Last updated**: 2026-10-07
 > **Carries out**: the [EXP-001 pre-registration](EXP-001-preregistration.md) and its [part 2](EXP-001-preregistration-scoring.md)
 > **Code**: [`evaluators/exp001/`](../../evaluators/exp001/)
 
@@ -16,9 +16,10 @@ leave it open, is listed in the PR and frozen when it merges. The
 [frozen choices](EXP-001-harness-choices.md) document, its second part,
 [holding the meetings](EXP-001-harness-choices-meetings.md), its third,
 [arm D′'s transcript prefix](EXP-001-harness-choices-d-prime.md), its
-fourth, [the judge](EXP-001-harness-choices-judge.md), and its fifth,
-[the practice run](EXP-001-harness-choices-practice.md), collect them, so
-the result can cite them.
+fourth, [the judge](EXP-001-harness-choices-judge.md), its fifth,
+[the practice run](EXP-001-harness-choices-practice.md), and its sixth,
+[the scored run](EXP-001-harness-choices-scored.md), collect them, so the
+result can cite them.
 
 ## The PRs
 
@@ -36,7 +37,7 @@ the result can cite them.
 | 5e ([#1032](https://github.com/mkhomutov/Persatrix/pull/1032)) | Arm D′'s cache entry kept alive: once the room has made no call that carries the prefix for four minutes, the chair sends one that asks for no output, so the memo after an idle close reads the prefix | 3, for D′'s memo turns |
 | 6a ([#1023](https://github.com/mkhomutov/Persatrix/pull/1023)) | The judge: its prompts from the rubric, one pass per packet, a call purpose and call log of its own that never name an arm, and the $25 cap | — (part 2 §2) |
 | 6b ([#1024](https://github.com/mkhomutov/Persatrix/pull/1024)) | The practice run: every arm's practice series, each try kept, so a run started again goes on where it stopped; the practice memos judged in a batch of their own; and a report of what the checks show, the scored judging's projected spend and the call log's totals for the provider's usage report | all eight, on the practice series, once it is held |
-| 6c | The scored run: every arm's series in its drawn order, harness faults counted and outputs set aside, the $150 cap and the seven-day window; dollars per plan, and the series every arm's comparisons keep; and, from PR 6b's review, the scored judging's projected spend at the scored packets' own sizes | — (§3, the run) |
+| 6c ([#1036](https://github.com/mkhomutov/Persatrix/pull/1036)) | The scored run: every arm's series in its drawn order, in seven-day windows; harness faults counted and outputs set aside; the $150 cap; dollars per plan, the series every arm's comparisons keep, their packets and the scored judging; and, from PR 6b's review, the scored judging's projected spend at the scored packets' own sizes | — (§3, the run) |
 
 Each PR is test-first, like all unit-level code here. The practice run PR
 6b holds is the evidence that the eight checks pass before any scored
@@ -154,8 +155,8 @@ The practice run adds up each D′ discussion's tokens against that mark
 before any scored meeting. A prefix shorter than the model's minimum of
 1 024 tokens is not cached at all, and the check names that too.
 
-What PRs 6a and 6b add, the judge and the practice run, and what the
-practice run showed, are in the
+What PRs 6a, 6b and 6c add, the judge, the practice run and the scored
+run, and what the practice run showed, are in the
 [second part](EXP-001-harness-run.md), which this document's size limit
 asked for; so is PR 5e, which the run asked for.
 
@@ -166,8 +167,9 @@ in [their own document](EXP-001-harness-choices.md), so the result can cite
 them. Those of PRs 5a to 5c, which hold the meetings, are in its second part,
 [holding the meetings](EXP-001-harness-choices-meetings.md), PRs 5d's and
 5e's in its third, [arm D′'s transcript prefix](EXP-001-harness-choices-d-prime.md),
-PR 6a's in its fourth, [the judge](EXP-001-harness-choices-judge.md), and
-PR 6b's in its fifth, [the practice run](EXP-001-harness-choices-practice.md).
+PR 6a's in its fourth, [the judge](EXP-001-harness-choices-judge.md),
+PR 6b's in its fifth, [the practice run](EXP-001-harness-choices-practice.md),
+and PR 6c's in its sixth, [the scored run](EXP-001-harness-choices-scored.md).
 
 ## Related documentation
 
@@ -175,7 +177,7 @@ PR 6b's in its fifth, [the practice run](EXP-001-harness-choices-practice.md).
   and the run.
 - [Part 2: scoring and the decision](EXP-001-preregistration-scoring.md).
 - [The harness, second part](EXP-001-harness-run.md) — the judge, the
-  practice run, what it showed, and PR 5e.
+  practice run, what it showed, PR 5e and the scored run.
 - [Frozen choices](EXP-001-harness-choices.md) — the choices of PRs 1 to 4,
   and the arm order.
 - [Frozen choices: holding the meetings](EXP-001-harness-choices-meetings.md)
@@ -186,5 +188,7 @@ PR 6b's in its fifth, [the practice run](EXP-001-harness-choices-practice.md).
   of PR 6a.
 - [Frozen choices: the practice run](EXP-001-harness-choices-practice.md) —
   the choices of PR 6b.
+- [Frozen choices: the scored run](EXP-001-harness-choices-scored.md) — the
+  choices of PR 6c.
 - [Evaluators guide](../evaluators-guide.md) — the golden-trace harness this
   one sits beside.

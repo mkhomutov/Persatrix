@@ -48,6 +48,10 @@ and its part 2; this package only carries those documents out.
   practice series, judged, then reported by
   :mod:`evaluators.exp001.practice_report`. ``python -m evaluators.exp001
   practice`` runs it.
+- :mod:`evaluators.exp001.scored` holds the scored run: every arm's scored
+  series in its drawn order, in seven-day windows, within the $150 cap, then
+  the scored judging, reported by :mod:`evaluators.exp001.scored_report`.
+  ``python -m evaluators.exp001 scored`` runs it.
 
 Only ``runtime``, ``arm_a``, ``deployment`` and the modules that use them
 import from the agents' runtime: the call log and the clock; for arm A the

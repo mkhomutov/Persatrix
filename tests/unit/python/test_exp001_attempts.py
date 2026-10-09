@@ -29,6 +29,7 @@ from evaluators.exp001.attempts import (
     ErrorKind,
     HarnessFault,
     Held,
+    RunStopped,
     SeriesRun,
     Try,
     error_kind,
@@ -238,6 +239,22 @@ class TestRunSeries:
         )) as caught:
             await run_series("C", SERIES, hold)
         assert caught.value.__cause__ is error
+
+    async def test_a_rule_of_the_run_stops_it_with_no_fault(self) -> None:
+        """The scored run's spend cap, or its seven-day window, refuses a try
+        (PR 6c). That is no harness fault, and the tries before it ride on it
+        as they ride on one."""
+        stop = RunStopped("the $150 cap was reached")
+
+        async def hold(meeting: Meeting, attempt: int, meeting_try: int) -> Held[str]:
+            if meeting.id == IDS[1]:
+                raise stop
+            return Held(meeting.id)
+
+        with pytest.raises(RunStopped) as caught:
+            await run_series("C", SERIES, hold)
+        assert caught.value is stop and not isinstance(stop, HarnessFault)
+        assert stop.tries == (Try(IDS[0], 1, 1, Held(IDS[0])),)
 
 
 def _run(series: str, finished_attempt: int | None) -> SeriesRun[str]:

@@ -1,8 +1,8 @@
 # EXP-001 — The harness's frozen choices: arm D′'s transcript prefix
 
-> **Status**: 🚧 **In Progress** — PR 5d's rows froze when it merged ([#1021](https://github.com/mkhomutov/Persatrix/pull/1021)), its review's changes included; PR 5e's rows, and its changes to two of PR 5d's, freeze when it merges ([#1032](https://github.com/mkhomutov/Persatrix/pull/1032)).
-> **Last updated**: 2026-10-02
-> **Part of**: the [EXP-001 harness](EXP-001-harness.md); the [first part](EXP-001-harness-choices.md) holds the choices of PRs 1 to 4 and the arm order, the [second part](EXP-001-harness-choices-meetings.md) those of PRs 5a to 5c, the [fourth part](EXP-001-harness-choices-judge.md) PR 6a's, and the [fifth part](EXP-001-harness-choices-practice.md) PR 6b's
+> **Status**: 🚧 **In Progress** — PR 5d's rows froze when it merged ([#1021](https://github.com/mkhomutov/Persatrix/pull/1021)), its review's changes included; PR 5e's rows, and its changes to two of PR 5d's, froze when it merged ([#1032](https://github.com/mkhomutov/Persatrix/pull/1032)).
+> **Last updated**: 2026-10-07
+> **Part of**: the [EXP-001 harness](EXP-001-harness.md); the [first part](EXP-001-harness-choices.md) holds the choices of PRs 1 to 4 and the arm order, the [second part](EXP-001-harness-choices-meetings.md) those of PRs 5a to 5c, the [fourth part](EXP-001-harness-choices-judge.md) PR 6a's, the [fifth part](EXP-001-harness-choices-practice.md) PR 6b's, and the [sixth part](EXP-001-harness-choices-scored.md) PR 6c's
 
 These are the frozen choices of PR 5d, which holds arm D′: the
 [prompt prefix](../ai-glossary.md#prompt-prefix) its advisers' turns carry
@@ -44,5 +44,7 @@ says what changed and why, and from then on nothing changes.
   the judge.
 - [Frozen choices, fifth part](EXP-001-harness-choices-practice.md) — PR 6b,
   the practice run.
+- [Frozen choices, sixth part](EXP-001-harness-choices-scored.md) — PR 6c,
+  the scored run.
 - [EXP-001 pre-registration](EXP-001-preregistration.md) — the arms, and the
   eight checks the harness must pass before any scored meeting.
