@@ -26,7 +26,9 @@ a killed run looks identical to a live one.
 
 Use the repo's `.venv` Python for Python gates (`make … PYTHON=.venv/bin/python`,
 or `.venv/bin/python scripts/…`); the system `python3` lacks the dev
-dependencies. Proto regeneration must use the CI-pinned toolchain (protoc
+dependencies. In a cloud session, the SessionStart hook
+(`.claude/hooks/session-start.sh`) has already created `.venv`, built
+`bin/persatrix-server` and installed the pre-commit hook. Proto regeneration must use the CI-pinned toolchain (protoc
 34.1, protoc-gen-go 1.36.11, protoc-gen-go-grpc 1.6.1) — newer local tools
 produce stubs that fail the staleness gate.
 

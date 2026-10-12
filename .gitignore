@@ -15,7 +15,10 @@ __pycache__/
 # IDE
 .vscode/
 .idea/
-.claude/
+.claude/*
+# Shared Claude Code settings and the cloud-session setup hook are tracked.
+!.claude/settings.json
+!.claude/hooks/
 *.swp
 *.swo
 *~
