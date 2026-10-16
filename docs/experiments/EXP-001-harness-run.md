@@ -1,13 +1,14 @@
 # EXP-001 — The harness, second part: the judge, the practice run and the scored run
 
-> **Status**: 🚧 **In Progress** — PRs 6a, 6b and 5e merged ([#1023](https://github.com/mkhomutov/Persatrix/pull/1023), [#1024](https://github.com/mkhomutov/Persatrix/pull/1024), [#1032](https://github.com/mkhomutov/Persatrix/pull/1032)): the practice run held on 2026-10-02 confirmed the quiet-spell gap PR 5d left, and PR 5e closed it. PR 6c ([#1036](https://github.com/mkhomutov/Persatrix/pull/1036)) holds the scored run.
-> **Last updated**: 2026-10-09
+> **Status**: 🚧 **In Progress** — PRs 6a, 6b, 5e and 6c merged ([#1023](https://github.com/mkhomutov/Persatrix/pull/1023), [#1024](https://github.com/mkhomutov/Persatrix/pull/1024), [#1032](https://github.com/mkhomutov/Persatrix/pull/1032), [#1036](https://github.com/mkhomutov/Persatrix/pull/1036)): the practice run held on 2026-10-02 confirmed the quiet-spell gap PR 5d left, and PR 5e closed it. The practice run held again on 2026-10-16, on PR 6c's code, asked for no harness PR ([what it showed](#the-practice-run-on-pr-6cs-code)), so the scored run is next.
+> **Last updated**: 2026-10-16
 > **Part of**: the [EXP-001 harness](EXP-001-harness.md), whose first part lists every harness PR and what PRs 1 to 5d leave the next
 
 The [first part](EXP-001-harness.md) reached its size limit, so the account
 of the judge and the practice run moved here as it was. What the practice
 run then showed follows it, and so does PR 5e, which the run asked for.
-PR 6c, the scored run, comes last.
+PR 6c, the scored run, comes next, and last what the practice run held on
+its code showed.
 
 ## The judge
 
@@ -227,6 +228,36 @@ scores and the judge's, opening the seal once every score is in, and the
 figures part 2 names, quality, agreement, the decision and what its §7
 reports, minutes per plan among them. It is step 4 of
 [pre-registration §6](EXP-001-preregistration.md#6-from-here-to-the-result).
+
+## The practice run on PR 6c's code
+
+The practice run was held again on the real provider on 2026-10-16, every
+arm in turn, on the code the scored run will use: PR 6c, with PR 5e and the
+fix for [ISSUE-0180](../issues/ISSUE-0180-topic-facts-reachable-only-by-their-exact-subject.md)
+in place. All 20 meetings were held at their first try, with no provider
+error and no harness fault. The report showed:
+
+- **Check 3** named nothing. Each D′ discussion after the briefing closed
+  by its idle window, as before, and in each the chair sent two
+  keep-alives, 241 to 243 seconds apart, each reading the whole prefix and
+  writing nothing. The memo turn, 119 to 125 seconds after the last of
+  them, read the prefix (1 637, 6 210 and 10 216 tokens) instead of
+  writing it.
+- **Check 2** held: the judge marked right all three of D's recall
+  answers, which its chair gave from memory, and all three of D′'s, given
+  from its prefix. A, B and C, which carry nothing from the briefing,
+  answered none.
+- **The cost close** is far off: the largest D′ discussion came to 121 167
+  tokens, projected to 225 935 with five transcripts, against 1 776 000.
+- **The judge** answered all 15 packets readably. Its largest answer used
+  1 163 of its 16 000 output tokens, and the scored judging, projected at
+  the scored packets' own sizes, comes to $4.02 within its $25 cap. It
+  would reach the cap only if its 125 calls averaged 7 454 output tokens
+  or more, over six times the largest practice answer.
+- **The call log** totalled $5.54: $5.17 for the arms' 508 calls, all on
+  `claude-sonnet-4-6`, and $0.37 for the judge's 15 on `claude-opus-5`.
+
+Nothing in the report asks for a harness PR before the scored run.
 
 ## Related documentation
 
