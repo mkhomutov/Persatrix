@@ -21,7 +21,7 @@ depends_on:
 **Status**: 📋 Proposed
 **Author**: Maksim Khomutov
 **Date**: 2026-05-01
-**Target**: v0.4.0
+**Target**: unslotted, left v0.4.0 by [v0.4.x sequencing ruling (m)](../v0.4.x-sequencing.md#rulings)
 **Depends on**: RFC 0005, RFC 0008, RFC 0009, RFC 0013, RFC 0026
 
 ---

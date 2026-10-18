@@ -209,7 +209,7 @@ after inactivity (`idle_after_ticks`).
 > and `timers` are set, **`timers` wins** — the legacy field is ignored with
 > a one-time INFO log. An absent block means `timers: []`. The
 > `tick_interval_seconds` deprecation **warning** is RFC 0024 Phase 5
-> (v0.4.0); its removal is Phase 6 (v0.5+). The `agent.wake.*` counters and
+> (unslotted); its removal is Phase 6 (v0.5+). The `agent.wake.*` counters and
 > the two salience knobs (`autonomy.salience_threshold`,
 > `autonomy.salience_rate_max_per_sec`) are documented in
 > [observability.md §10.5](../observability.md#105-persatrix-specific-attribute-namespace).
@@ -286,7 +286,7 @@ prompt
 > another moment, as EXP-001 does to put each adviser on its meeting's date. This is Phase 1 only; structured commitment tracking,
 > scheduled callbacks, and conversation-thread temporal grounding land in
 > Phases 2–4 ([RFC 0021](../rfcs/0021-persona-temporal-awareness.md);
-> v0.4.0).
+> Phase 2 in v0.4.0, Phases 3–4 unslotted).
 
 > **v0.3.1 — stated facts are remembered.** When you tell a persona
 > something durable about yourself or a named entity — "my daughter
@@ -369,7 +369,7 @@ prompt
 > X") *nudges* the bar but is never a hard filter. A **`chair`** is a
 > `participant` with a low default threshold — it clears the bid readily and
 > keeps a discussion moving, but **cannot close, wrap up, or terminate** a
-> conversation in v0.3.8 (that moderator half is Layer 5, v0.4.0). The bid is
+> conversation in v0.3.8 (that moderator half is Layer 5, unslotted). The bid is
 > downstream of the free Tier A directedness gate and leased like any LLM
 > call (fails closed to silence on a denied lease). See the
 > [channels guide §2](channels.md#per-membership-respond-dispositions) and

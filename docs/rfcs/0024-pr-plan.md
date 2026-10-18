@@ -740,10 +740,10 @@ No code changes; doc-only. `CHANGELOG.md` is **deferred to the v0.3.3 release pr
 
 Out of scope for v0.3.3; recorded here so future readers can see the full RFC arc without re-reading the RFC body.
 
-- **Phase 5 — v0.4.0**: `tick_interval_seconds` emits a deprecation warning at config load; [RFC 0017 §F](0017-persona-memory-injection-budget.md#f-empty-context-tick-short-circuit) gains an explicit "vestigial — superseded by RFC 0024" note (the v0.3.3 work added the inline cross-link in `action_loop.py`; the RFC 0017 file amendment is Phase 5's deliverable). Behaviour unchanged.
+- **Phase 5 — unslotted** (was v0.4.0; [v0.4.x sequencing ruling (m)](../v0.4.x-sequencing.md#rulings)): `tick_interval_seconds` emits a deprecation warning at config load; [RFC 0017 §F](0017-persona-memory-injection-budget.md#f-empty-context-tick-short-circuit) gains an explicit "vestigial — superseded by RFC 0024" note (the v0.3.3 work added the inline cross-link in `action_loop.py`; the RFC 0017 file amendment is Phase 5's deliverable). Behaviour unchanged.
 - **Phase 6 — v0.5+**: remove `tick_interval_seconds`; delete the §F guard code; delete the `TickScheduler` legacy adapter; remove `EventType.TICK` from the event taxonomy. Breaking — minor version bump (pre-1.0). Gated on the [Phase 6 entrance criteria](0024-event-driven-scheduling.md#phased-implementation-plan): (1) every persona in `config/agents.yaml` migrated to `autonomy.timers`; (2) Phase 5 deprecation-warning counter reports zero hits across one full minor-version cycle in any monitored deployment Persatrix is aware of; (3) [RFC 0017 §F regression tests](../../agents/tests/test_persona_tick_shortcircuit.py) retitled to assert vestigial behaviour (`test_*_no_longer_reachable`). If any criterion is unmet at v0.5 cut, Phase 6 slips one minor version.
 
-No PR rows for these phases in this plan — Phase 5 lands in a v0.4.0 PR plan (separate file); Phase 6 lands in v0.5+. Cross-link from each future plan to this one when it opens.
+No PR rows for these phases in this plan — Phase 5 lands in its own PR plan (separate file) once an amendment slots it; Phase 6 lands in v0.5+. Cross-link from each future plan to this one when it opens.
 
 ---
 

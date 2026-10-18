@@ -95,7 +95,7 @@ protocol** scaffolding and inter-organization federation — the
 
 ### Organizations are the v0.4.0 product
 
-Every v0.4.0 RFC — sub-agent spawning (RFC 0010), the skill registry
+Every RFC that builds on it — sub-agent spawning (RFC 0010), the skill registry
 (RFC 0014), the decision policy engine (RFC 0028) — assumes a structure
 the personas operate *within*. Without an organization model, "the
 mobile team", "your manager", "escalate this" are prompt fictions with
@@ -694,8 +694,9 @@ Dependencies: RFC 0011 external bridges, Phase 4.
    pre-act constraint input; the egress gate as a mandatory-HITL class;
    the §G reference de-placeholdered) — see RFC 0028's revised Section E
    and Section G.
-4. Sequence Phase 1 after RFC 0010 and the RFC 0029 society-store facade,
-   per the ROADMAP v0.4.0 dependency chain.
+4. Sequence Phase 1 after the RFC 0029 society store, per the v0.4.0
+   [dependency chain](../v0.4.x-sequencing.md#dependency-chain); it does not
+   wait on RFC 0010.
 5. Create `docs/rfcs/0012-pr-plan.md` once this RFC is accepted; PR 1
    must add the glossary entries for *organization*, *topology*,
    *authority axis*, *directive*, *cross-context influence record*,

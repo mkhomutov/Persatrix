@@ -36,6 +36,7 @@ released documents built from them stay in place as evidence.
   progress legends inside a table use ⬜ · 🔄 · 🔀 · ✅ · ✂️ Cut.
 - **Word cap** is 3 000 words. A version plan holds its release under it: a
   release that does not fit is cut or re-scoped by amendment, never split into
-  a second file, and `make plan-status-check` fails one.
+  a second file, and `make plan-status-check` fails one for a patch release
+  (review holds a minor release's plan to one file).
 - **Every claim carries a citation**: a PR number, a commit, a path, or a
   section anchor. "Green" without an artifact is not a result.

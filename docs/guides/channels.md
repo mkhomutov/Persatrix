@@ -118,7 +118,7 @@ Tier A + Tier B):
   more often stay silent. The default `bid` rung does not use `threshold`, so
   there a `chair` behaves like a `participant`.
   A `chair` is **not a moderator** in v0.3.8: it *cannot* close, wrap up, or
-  terminate a conversation — that is Layer 5, deferred to v0.4.0. Convergence
+  terminate a conversation — that is Layer 5, unslotted. Convergence
   comes from the governance layers (§4), not the chair.
 - **`observer`** — ingests history into memory but never replies. Listener role.
 
@@ -540,7 +540,7 @@ channels:
 > then set bounds. The `chair` disposition ships in v0.3.8 as a low-threshold
 > **facilitator** (§2) — it keeps a discussion moving but **cannot** close it.
 > The Layer 5 **moderator** (a persona that reads the transcript and actively
-> wraps up / terminates) is **v0.4.0** — v0.3.8 convergence is deliberately
+> wraps up / terminates) is **unslotted** — v0.3.8 convergence is deliberately
 > deterministic (Layers 1/2/4), so it needs no moderator.
 
 ### Editing governance config at runtime — `channel config` (RFC 0050 Phase 1)
@@ -1088,7 +1088,7 @@ deferrals, not implementation oversights:
   [OQ #8](../rfcs/0011-channels-bridges.md#open-questions).
 - **Persona name discovery / dynamic membership** → v0.4.0 (RFC 0011 OQ #1).
 - **The Layer 5 moderator** (the `chair`'s *active* half — a persona that reads
-  the transcript and decides to wrap up / terminate) → v0.4.0. v0.3.8 ships the
+  the transcript and decides to wrap up / terminate) → unslotted. v0.3.8 ships the
   `chair` as a low-threshold **facilitator** only (§2); its moderator seam is
   present but inert — a typed attach point no runtime path calls
   ([RFC 0030 §"Layer 5"](../rfcs/0030-multi-agent-conversation-governance.md)).

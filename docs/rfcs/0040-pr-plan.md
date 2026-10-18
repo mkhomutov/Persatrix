@@ -5,7 +5,7 @@
 **Branch prefix**: `feature/v03x-rfc0040-` (Phase 1, v0.3.x) · `feature/v040-rfc0040-` (Phases 2–4, v0.4.0)
 **Target**: `main`
 **Merge strategy**: Squash merge per [BRANCHING.md](../BRANCHING.md)
-**Master plan**: TBD — Phase 1 rides an open v0.3.x patch (v0.3.12 the last open slot); Phases 2–4 belong to the not-yet-opened v0.4.0 plan
+**Master plan**: TBD — Phase 1 rides an open v0.3.x patch (v0.3.12 the last open slot); Phases 2–3 board the not-yet-opened v0.4.0 plan only if its agent-identity lock picks gRPC; Phase 4 is unslotted ([v0.4.x sequencing ruling (m)](../v0.4.x-sequencing.md#rulings))
 
 > ⚠️ **SKELETON — not yet actionable.** This plan is drafted ahead of RFC acceptance so the shape is visible. RFC 0040 is **📋 Proposed**; per its [Decision / Next Steps](0040-agent-orchestrator-transport-unification.md#decision--next-steps) **the RFC must reach Accepted before PR 2 (the proto) opens** — PR 1 (v0.3.x hygiene) may proceed now, since it carries no proto change or scope dependency. The [Phase 0 Hard Gate](#phase-0-hard-gate) below lists the scope decisions that must resolve before PR 2. Sizes are calibrated estimates; PR numbers, merge dates, and checklists are placeholders.
 
@@ -49,9 +49,9 @@ RFC 0040 is **📋 Proposed** with unresolved scope decisions that are **non-add
 | 3 | Orchestrator handlers over `publishCommit`/registry + dual-transport test | RFC Ph 2 | v0.4.0 | PR 2 | ~350–500 | ⬜ Blocked |
 | 4 | `GRPCChannelPublisher` + register/deregister + sticky transport selection | RFC Ph 3 | v0.4.0 | PR 3, G4 | ~350–500 | ⬜ Blocked |
 | 5 | `GrpcChannelHistoryFetcher` (history migration) | RFC Ph 3 | v0.4.0 | PR 3 | ~200–350 | ⬜ Blocked (G2 — droppable) |
-| 6 | Retire agent-only REST register + drop aiohttp control-plane client | RFC Ph 4 | v0.4.0 | PR 4 (+ PR 5 if taken) | ~200–350 | ⬜ Blocked |
-| 7 | Review follow-ups | — | v0.4.0 | PR 6 | ~150–300 | ⬜ Not started |
-| 8 | Full-RFC closeout (status → ✅ Implemented) | — | v0.4.0 | PR 7 | ~50–100 | ⬜ Not started |
+| 6 | Retire agent-only REST register + drop aiohttp control-plane client | RFC Ph 4 | unslotted | PR 4 (+ PR 5 if taken) | ~200–350 | ⬜ Blocked |
+| 7 | Review follow-ups | — | unslotted | PR 6 | ~150–300 | ⬜ Not started |
+| 8 | Full-RFC closeout (status → ✅ Implemented) | — | unslotted | PR 7 | ~50–100 | ⬜ Not started |
 
 ---
 
@@ -264,7 +264,7 @@ PR 1 is fully independent. PRs 2–3 add no agent-side change — the contract a
 ### PR 6: `feature/v040-rfc0040-retire-rest-surface` — Retire the Agent-Only REST Surface
 
 **Depends on**: PR 4 merged (+ PR 5 if taken), verified in a release.
-**Purpose**: Remove what is now unused and document the two-surface model. Implements [RFC Phase 4](0040-agent-orchestrator-transport-unification.md#phase-4-retire-the-agent-only-rest-surface-v040).
+**Purpose**: Remove what is now unused and document the two-surface model. Implements [RFC Phase 4](0040-agent-orchestrator-transport-unification.md#phase-4-retire-the-agent-only-rest-surface-unslotted).
 
 #### Scope
 

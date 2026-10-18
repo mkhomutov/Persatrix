@@ -4,7 +4,7 @@
 **Status**: 📋 Proposed — **stub**. Authorised by [RFC 0049 §G](0049-memory-consolidation-gradient.md#g-the-experiential-tier--decisions-become-memory); to be expanded into a full amendment when its v0.4.0 PR plan opens.
 **Author**: Maksim Khomutov
 **Date**: 2026-06-06
-**Target**: v0.4.0 — with the RFC 0028 base engine; behind the [RFC 0037 keystone](0037-memory-confidentiality-channel-classification.md); no v0.3.7 code.
+**Target**: unslotted with RFC 0049 Phase 3 ([v0.4.x sequencing ruling (o)](../v0.4.x-sequencing.md#rulings)); was v0.4.0 with the RFC 0028 base engine; behind the [RFC 0037 keystone](0037-memory-confidentiality-channel-classification.md); no v0.3.7 code.
 **Authoritative model**: [RFC 0049 — Memory Consolidation Gradient & Scope Reconciliation](0049-memory-consolidation-gradient.md)
 
 ---

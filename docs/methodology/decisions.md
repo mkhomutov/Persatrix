@@ -141,7 +141,7 @@ entry, a scope lock, an RFC's phased plan, or a plan's own structure. Shape:
 
 | What is being changed | Where the amendment goes |
 |---|---|
-| Version scope, ordering, next version | New dated section in the current line's sequencing document, [v0.4.x-sequencing.md](../v0.4.x-sequencing.md) |
+| Version scope, ordering, next version | New dated section in the current line's sequencing document, [v0.4.x-sequencing.md](../v0.4.x-sequencing.md), or a file of its own beside it once that document nears its size cap ([ruling s](../v0.4.x-sequencing.md#rulings)) |
 | A version plan's locks or PR list, mid-cycle | A dated **§Amendment** section in the plan — never a second file (ruling (e); v0.3.1 and v0.3.4 wrote `docs/vX.Y.Z-plan-amendment-YYYY-MM-DD.md` before it) |
 | An RFC's design or phase table | A dated **§Amendment** section in the RFC; the RFC's status marker and the ROADMAP RFC Master Index reflect it |
 | An issue's disposition | A dated **Notes** entry on the issue (`> YYYY-MM-DD — …`) |

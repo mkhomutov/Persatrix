@@ -19,7 +19,7 @@ depends_on:
 **Status**: 📋 Proposed
 **Author**: Maksim Khomutov
 **Date**: 2026-05-17
-**Target**: v0.3.x (Phase 1) + v0.4.0 (Phases 2–4)
+**Target**: v0.3.x (Phase 1) + v0.4.0 (Phases 2–3, only if v0.4.0's agent-identity lock picks gRPC) + unslotted (Phase 4)
 **Depends on**: RFC 0002 (REST API Server — the surface this RFC re-scopes to clients-only), RFC 0004 (Python Agent gRPC Server — the existing `AgentService` this RFC mirrors in the reverse direction), RFC 0011 (Channels & Internal Agent Messaging — the channel publish/history endpoints being migrated)
 **Relates to**: RFC 0023 (LLM Call Leasing — shipped v0.3.2; already runs a gRPC `WalletService` round-trip on the agent→orchestrator path, so the wallet proto and this RFC's `OrchestratorService` share a transport story), RFC 0009 (Agent Identity, Security & Sandboxing — Phase 4 agent-identity tokens are the primitive that authentic-`sender_id` enforcement needs, deferred to v0.4.0 — see §D), RFC 0029 (Personal/Society Storage Split — Phase 2 is the co-sequenced first consumer that carries the RFC 0009 Phase 4 capability token onto this path as wire-auth; co-sequencing target — see §Open Questions 4), RFC 0039 (User Accounts & Authentication — the REST surface's auth story, which this RFC narrows to the client edge), RFC 0032 (Wire-Level Channel Interaction Layer — an *orthogonal* channel-wire change: it adds a conversation `interaction_id` to the message payload, this RFC changes the *transport* the payload travels over; the two compose without conflict), the v0.6.0 Distributed Mesh milestone (multi-node message routing via `internal/mesh/`, explicitly out of scope here — this is *not* RFC 0006, which is the already-shipped Efficiency & Execution Limits work)
 
@@ -262,7 +262,7 @@ The migration is structured so the codebase is shippable after every phase and n
 
 **Dependencies.** Phase 2 (orchestrator must serve gRPC first).
 
-### Phase 4: Retire the Agent-Only REST Surface (v0.4.0)
+### Phase 4: Retire the Agent-Only REST Surface (unslotted)
 
 **Summary.** Remove what is now unused; document the final shape.
 

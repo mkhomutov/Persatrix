@@ -24,7 +24,7 @@ relates_to:
 **Status**: 📋 Proposed
 **Author**: Maksim Khomutov
 **Date**: 2026-05-20
-**Target**: v0.4.0+
+**Target**: v0.4.0 (Phase 1, cuttable) + unslotted (later phases)
 **Depends on**: RFC 0004 (Python Agent gRPC Server — the agent loop this RFC threads typed events through), RFC 0044 (Eval-Set Shape with Golden Traces — its golden-trace format is the Phase-1 test surface this RFC records against; the format shipped in v0.3.11, so this precondition is already met)
 **Relates to**: RFC 0023 (LLM Call Leasing — the wallet pre-charge / refund work becomes a `before_model` / `after_model` callback), RFC 0031 (Per-Session Namespacing — the F-3 recall filter becomes a `before_model` callback), RFC 0009 (Security & Sandboxing — the input sanitizer / output redactor become `before_model` / `after_model` callbacks), RFC 0042 (State Namespacing by Scope — finalizes `StateDelta.scope` and the `ScopedState` type, both shipped here as forward-compatible transitional forms), RFC 0040 (Agent–Orchestrator Transport Unification — **Phase-2-only, soft**: the Go-orchestrator consumer migration rides RFC 0040's `OrchestratorService`. Phase 1 is entirely in-process Python with no transport surface, so it does **not** depend on RFC 0040; the `AgentService` reply path these events can also ride is already gRPC via RFC 0004 and RFC 0040 leaves it unchanged)
 **Spawned from**: [agent-runtime-vocabulary-roadmap.md §Seam 1 + §Seam 2](../agent-runtime-vocabulary-roadmap.md#seam-1--typed-events-as-the-agent-turn-primitive)

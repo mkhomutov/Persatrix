@@ -1,7 +1,7 @@
 ---
 id: RFC-0021
 title: Persona Temporal Awareness
-summary: Gives personas a now-anchor in the system prompt and temporal-prefix rendering on recall — Phase 1 in v0.3.0; Phases 2–4 (commitments, REMINDER, duration calibration) in v0.4.0.
+summary: Gives personas a now-anchor in the system prompt and temporal-prefix rendering on recall — Phase 1 in v0.3.0; Phase 2 (commitments) in v0.4.0; Phases 3–4 (REMINDER, duration calibration) unslotted.
 type: architecture
 status: partially_implemented
 author: Maksim Khomutov
@@ -19,7 +19,7 @@ depends_on:
 **Status**: ⚠️ Partially Implemented (Phase 1)
 **Author**: Maksim Khomutov
 **Date**: 2026-04-25
-**Target**: v0.3.0 (Phase 1) + v0.4.0 (Phases 2–4)
+**Target**: v0.3.0 (Phase 1) + v0.4.0 (Phase 2) + unslotted (Phases 3–4)
 **Depends on**: RFC 0005 (persona memory substrate); RFC 0017 (memory budget — composes, no API change); RFC 0020 (interaction lifecycle — Phase 1 consumes its `started_at` / `closed_at` columns)
 **Consumed by**: RFC 0008 (§D Context Packaging — adds temporal-prefix rendering to recall output); RFC 0011 (channel recall inherits temporal annotation in v0.3.0)
 
@@ -471,7 +471,7 @@ The total worst-case temporal overhead for a typical prompt is ~400–500 tokens
 
 **Dependencies**: Phase 1 (uses the `Clock` and the rendering helpers).
 
-### Phase 3: REMINDER Event + Tick-Loop Janitor (v0.4.0)
+### Phase 3: REMINDER Event + Tick-Loop Janitor (unslotted)
 
 **Summary**: Couple commitments to the autonomous tick loop. Pre-tick scan emits `REMINDER` events for proximate commitments; missed-commitment janitor transitions overdue rows.
 
@@ -487,7 +487,7 @@ The total worst-case temporal overhead for a typical prompt is ~400–500 tokens
 
 **Dependencies**: Phase 2.
 
-### Phase 4: Duration Calibration (v0.4.0)
+### Phase 4: Duration Calibration (unslotted)
 
 **Summary**: Add the `duration_records` table and `recall_typical_duration` tool. Auto-populate from task completions and closed multi-turn interactions. Optional implicit injection of duration priors for tasks with calibration data.
 

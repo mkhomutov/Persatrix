@@ -151,7 +151,7 @@ Some RFC numbers are reserved for previously scoped topics that do not yet have 
 
 | RFC | Reserved for | Target version |
 |-----|--------------|----------------|
-| 0010 | Sub-Agent Spawning | v0.4.0 |
+| 0010 | Sub-Agent Spawning | unslotted (was v0.4.0) |
 | 0011 | Channels + Bridges | v0.3.0 (internal) + v0.5.0 (external) |
 | 0012 | Protocols + Organizations | v0.4.0 (partial) + v0.5.0 (remainder) |
 | 0023 | Episodic Memory Quality (JSON summary schema only — narrowed scope; recency boost moved to [0008 calibration review](0008-calibration-review.md), `key_facts` carved out into [RFC 0026](0026-declarative-facts-tier.md)) | v0.3.x |

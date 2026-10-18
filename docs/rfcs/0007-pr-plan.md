@@ -15,7 +15,7 @@
 
 ## Overview
 
-RFC 0007 introduces conditional steps, repeat-until loops, and for-each expansion to the workflow language. Full RFC scope ships in v0.4.0.
+RFC 0007 introduces conditional steps, repeat-until loops, and for-each expansion to the workflow language. Full RFC scope was v0.4.0; the RFC is unslotted since [v0.4.x sequencing ruling (m)](../v0.4.x-sequencing.md#rulings).
 
 This plan splits the work into **5 PRs**.
 
