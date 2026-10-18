@@ -256,7 +256,7 @@ ratified by the sequencing amendment that acts on it, not by this file.
 |------|------|--------------|----------------------|
 | 2026-09-11 | `cbeea7bc` | Written from PRs #895–#898, all closed unmerged. | None; the experiment has not run. |
 | 2026-09-12 | `604fab72` | The maintainer chose the product reading. [Amendment 2026-09-12](v0.3.x-sequencing.md#amendment-2026-09-12--close-v0316-small-then-measure-before-any-train-opens) ratifies §6 items 1–4, §7 items 1–4 as rulings, and §8's RFC 0046 row; K1 rides v0.3.16 as a cuttable fold-in. | None; the experiment has not run. |
-| 2026-10-18 | `c6ef01d5` | The maintainer named the project's goal: a society of AI agents that pursues long, hard goals. [Amendment 2026-10-18](v0.3.x-sequencing.md#amendment-2026-10-18--a-society-that-pursues-long-goals-exp-001-measures-v040-opens) ratifies it, turns EXP-001 from the gate into a measurement and opens v0.4.0 as already defined. Only the outside-use figures were measured again. | None; the scored run has not started. |
+| 2026-10-18 | `c6ef01d5` | The maintainer named the project's goal: a society of AI agents that pursues long, hard goals. [Amendment 2026-10-18](v0.3.x-sequencing.md#amendment-2026-10-18--a-society-that-pursues-long-goals-exp-001-measures-v040-opens) ratifies it, turns EXP-001 from the gate into a measurement and opens v0.4.0 as already defined. By the route EXP-001's pre-registration §5 sets, this review also changes two things the pre-registration's part 2 says: what a fired rule decides, alike for all four rules, and that the first review after the result receives it. Only the outside-use figures were measured again. | None; the scored run has not started. |
 
 ## Related documentation
 
