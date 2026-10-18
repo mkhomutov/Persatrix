@@ -6,7 +6,7 @@ type: architecture
 status: proposed
 author: Maksim Khomutov
 created: 2026-04-16
-target: v0.4.0
+target: unslotted, left v0.4.0 by v0.4.x sequencing ruling (m)
 depends_on:
   - RFC-0008
   - RFC-0009

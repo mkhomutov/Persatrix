@@ -7,8 +7,9 @@
 > canonical term, define a new one here in the same change.
 
 ### Sequencing amendment
-A dated section appended to [v0.3.x-sequencing.md](../v0.3.x-sequencing.md)
-that assigns issues and RFC phases to concrete versions and names the next
+A dated section appended to the current line's sequencing document,
+[v0.4.x-sequencing.md](../v0.4.x-sequencing.md) (the v0.3.x line's,
+[v0.3.x-sequencing.md](../v0.3.x-sequencing.md), is frozen), that assigns issues and RFC phases to concrete versions and names the next
 version. The citation for "why is this in scope". Never edited; superseded by
 a later amendment. See [decisions.md](decisions.md#sequencing-amendments).
 

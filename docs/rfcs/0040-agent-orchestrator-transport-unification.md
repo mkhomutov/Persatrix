@@ -6,7 +6,7 @@ type: protocol
 status: proposed
 author: Maksim Khomutov
 created: 2026-05-17
-target: v0.3.x (Phase 1) + v0.4.0 (Phases 2–4)
+target: v0.3.x (Phase 1) + v0.4.0 (Phases 2–3, only if v0.4.0's agent-identity lock picks gRPC) + unslotted (Phase 4)
 depends_on:
   - RFC-0002
   - RFC-0004

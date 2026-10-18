@@ -15,10 +15,11 @@ way any of the three changes.
 
 ## Sequencing amendments
 
-**What**: a dated section appended to
-[v0.3.x-sequencing.md](../v0.3.x-sequencing.md) that assigns issues and RFC
-phases to concrete versions, states each version's one-line story, and names
-the next version after it.
+**What**: a dated section appended to the current line's sequencing
+document — [v0.4.x-sequencing.md](../v0.4.x-sequencing.md) for the v0.4 line;
+[v0.3.x-sequencing.md](../v0.3.x-sequencing.md), frozen, holds every decision
+before it — that assigns issues and RFC phases to concrete versions, states
+each version's one-line story, and names the next version after it.
 
 **Rules**
 
@@ -140,7 +141,7 @@ entry, a scope lock, an RFC's phased plan, or a plan's own structure. Shape:
 
 | What is being changed | Where the amendment goes |
 |---|---|
-| Version scope, ordering, next version | New dated section in [v0.3.x-sequencing.md](../v0.3.x-sequencing.md) |
+| Version scope, ordering, next version | New dated section in the current line's sequencing document, [v0.4.x-sequencing.md](../v0.4.x-sequencing.md) |
 | A version plan's locks or PR list, mid-cycle | A dated **§Amendment** section in the plan — never a second file (ruling (e); v0.3.1 and v0.3.4 wrote `docs/vX.Y.Z-plan-amendment-YYYY-MM-DD.md` before it) |
 | An RFC's design or phase table | A dated **§Amendment** section in the RFC; the RFC's status marker and the ROADMAP RFC Master Index reflect it |
 | An issue's disposition | A dated **Notes** entry on the issue (`> YYYY-MM-DD — …`) |
@@ -187,5 +188,5 @@ exercise the surface and is re-run once the preflight condition is met.
 
 - [release-cycle.md](release-cycle.md) — where each mechanism is used
 - [review-process.md](review-process.md) — how findings feed amendments and issues
-- [v0.3.x-sequencing.md](../v0.3.x-sequencing.md) — the live sequencing record
+- [v0.4.x-sequencing.md](../v0.4.x-sequencing.md) — the live sequencing record; [v0.3.x-sequencing.md](../v0.3.x-sequencing.md) holds the v0.3.x line's, frozen
 - [rfcs/README.md §Divergence Tracking](../rfcs/README.md#divergence-tracking) — the RFC-level cousin of an amendment

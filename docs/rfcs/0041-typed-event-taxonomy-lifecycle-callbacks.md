@@ -6,7 +6,7 @@ type: architecture
 status: proposed
 author: Maksim Khomutov
 created: 2026-05-20
-target: v0.4.0+
+target: v0.4.0 (Phase 1, cuttable) + unslotted (later phases)
 depends_on:
   - RFC-0004
   - RFC-0044

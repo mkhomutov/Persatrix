@@ -6,7 +6,7 @@ type: architecture
 status: partially_implemented
 author: Maksim Khomutov
 created: 2026-06-06
-target: v0.3.12 (Phases 0–1) + v0.4.0 (Phases 2–4); design ratified v0.3.7
+target: v0.3.12 (Phases 0–1) + unslotted (Phases 2–4); design ratified v0.3.7
 depends_on:
   - RFC-0031
   - RFC-0037

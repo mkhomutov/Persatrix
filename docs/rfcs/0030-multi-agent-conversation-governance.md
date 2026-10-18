@@ -6,7 +6,7 @@ type: architecture
 status: implementing
 author: Maksim Khomutov
 created: 2026-05-11
-target: v0.3.6 (Layer 2.5 — shipped); v0.3.7–v0.3.9 (Phase 1 — relevance gate + deterministic layers); v0.4.0 (Phase 2 — moderator); v0.5.0+ (Phase 3)
+target: v0.3.6 (Layer 2.5 — shipped); v0.3.7–v0.3.9 (Phase 1 — relevance gate + deterministic layers); unslotted (Phase 2 — moderator); v0.5.0+ (Phase 3)
 depends_on:
   - RFC-0011
   - RFC-0020

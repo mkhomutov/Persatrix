@@ -6,7 +6,7 @@ type: architecture
 status: partially_implemented
 author: Maksim Khomutov
 created: 2026-05-10
-target: Phase 1 v0.3.2 (facade + tier rename); Phases 2–6 v0.4.0 — see docs/v0.3.2-plan.md and docs/rfcs/0029-pr-plan.md
+target: Phase 1 v0.3.2 (facade + tier rename); Phase 3 v0.4.0 (in the form v0.4.0's scope lock rules; Phase 4 with it only if the lock keeps the channels-store swap); Phases 2, 5–6 unslotted — see docs/v0.3.2-plan.md and docs/rfcs/0029-pr-plan.md
 depends_on:
   - RFC-0005
   - RFC-0008
