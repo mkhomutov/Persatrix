@@ -1,6 +1,6 @@
 # EXP-001 — The harness, second part: the judge, the practice run and the scored run
 
-> **Status**: 🚧 **In Progress** — PRs 6a, 6b, 5e and 6c merged ([#1023](https://github.com/mkhomutov/Persatrix/pull/1023), [#1024](https://github.com/mkhomutov/Persatrix/pull/1024), [#1032](https://github.com/mkhomutov/Persatrix/pull/1032), [#1036](https://github.com/mkhomutov/Persatrix/pull/1036)): the practice run held on 2026-10-02 confirmed the quiet-spell gap PR 5d left, and PR 5e closed it. The practice run held again on 2026-10-16, on PR 6c's code, asked for no harness PR ([what it showed](#the-practice-run-on-pr-6cs-code)), so the scored run is next.
+> **Status**: 🚧 **In Progress** — PRs 6a, 6b, 5e and 6c merged ([#1023](https://github.com/mkhomutov/Persatrix/pull/1023), [#1024](https://github.com/mkhomutov/Persatrix/pull/1024), [#1032](https://github.com/mkhomutov/Persatrix/pull/1032), [#1036](https://github.com/mkhomutov/Persatrix/pull/1036)): the practice run held on 2026-10-02 confirmed the quiet-spell gap PR 5d left, and PR 5e closed it. The practice run held again on 2026-10-16, on PR 6c's code, showed the eight checks pass and asked for no harness PR ([what it showed](#the-practice-run-on-pr-6cs-code)), so the scored run is next.
 > **Last updated**: 2026-10-16
 > **Part of**: the [EXP-001 harness](EXP-001-harness.md), whose first part lists every harness PR and what PRs 1 to 5d leave the next
 
@@ -146,7 +146,7 @@ answered all three recall questions from its prefix.
 
 ## PR 6c: the scored run
 
-PR 6c holds the scored run, the last of the harness PRs. Once a practice
+PR 6c holds the scored run, the last harness PR before it. Once a practice
 run on the same code shows the eight checks pass, it is held as the
 practice run is, with a key used by nothing else and in a directory outside
 the repository:
@@ -232,8 +232,10 @@ reports, minutes per plan among them. It is step 4 of
 ## The practice run on PR 6c's code
 
 The practice run was held again on the real provider on 2026-10-16, every
-arm in turn, on the code the scored run will use: PR 6c, with PR 5e and the
-fix for [ISSUE-0180](../issues/ISSUE-0180-topic-facts-reachable-only-by-their-exact-subject.md)
+arm in turn, on the code the scored run will use: `main` at `c6ef01d`, PR
+6c's merge, with PR 5e and the fixes for
+[ISSUE-0180](../issues/ISSUE-0180-topic-facts-reachable-only-by-their-exact-subject.md)
+and [ISSUE-0181](../issues/ISSUE-0181-facts-extracted-together-supersede-each-other.md)
 in place. All 20 meetings were held at their first try, with no provider
 error and no harness fault. The report showed:
 
@@ -257,7 +259,17 @@ error and no harness fault. The report showed:
 - **The call log** totalled $5.54: $5.17 for the arms' 508 calls, all on
   `claude-sonnet-4-6`, and $0.37 for the judge's 15 on `claude-opus-5`.
 
-Nothing in the report asks for a harness PR before the scored run.
+The other checks held too. No meeting's line in the report named a failure,
+so no memo turn started a discussion (check 5), and the judge's 15 packets
+mean every memo and recall answer was written. A refusal by a spending
+limit (check 6), or a restart that changed arm D's memory (check 2), is a
+harness fault, and there was none. Checks 1, 7 and 8, and the rest of
+checks 4 and 5, rest on the tests of [PRs 1 to 5e](EXP-001-harness.md#the-prs).
+The call log was not compared with the provider's usage report for the
+run's key, so that it holds every call (check 4) rests on those tests too.
+
+So the eight checks pass on the scored run's code, and nothing in the
+report asks for a harness PR before it.
 
 ## Related documentation
 
