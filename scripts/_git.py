@@ -6,7 +6,8 @@ encoding, and error handling. New call sites use this one; the older sites
 migrate as they are touched.
 
 Deliberately narrow: stdout or ``None``. A caller that needs the exit code or
-stderr is doing something this helper is not for.
+stderr is doing something this helper is not for. ``is_shallow`` is built on
+it: a script that reads the whole log asks it first.
 """
 
 from __future__ import annotations
@@ -42,3 +43,14 @@ def git_output(repo_root: Path, *args: str) -> str | None:
         ).stdout
     except (OSError, subprocess.SubprocessError):
         return None
+
+
+def is_shallow(repo_root: Path) -> bool:
+    """Whether *repo_root* is a shallow clone, whose log stops at its oldest fetched commit.
+
+    Anything built from the whole log comes out cut short there (cloud
+    sessions clone with ``--depth 50``). ``False`` when git cannot answer: the
+    caller's own git call then fails the way it always did.
+    """
+    out = git_output(repo_root, "rev-parse", "--is-shallow-repository")
+    return out is not None and out.strip() == "true"

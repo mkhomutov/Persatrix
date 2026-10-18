@@ -116,6 +116,7 @@ def run_index_cli(
     build_content: Callable[[], tuple[str, int, list[str]]],
     make_target: str,
     compare: Callable[[str, str], str | None] | None = None,
+    skip: Callable[[], str | None] | None = None,
 ) -> int:
     """Drive the standard ``--check`` / ``--print`` CLI for an INDEX generator.
 
@@ -127,6 +128,11 @@ def run_index_cli(
     comparison: it returns ``None`` when the committed file is acceptable and
     a reason string otherwise. The merged-PR history uses it, because that
     file can never contain the merge that lands it.
+
+    ``skip()`` may return a notice that the table cannot be built in this
+    checkout; the runner prints it and exits 0, neither writing nor checking
+    ``index_file``. The merged-PR history uses it in a shallow clone, whose
+    log is cut short.
     """
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -145,6 +151,11 @@ def run_index_cli(
         help=f"print the table to stdout in addition to writing {index_file.name}",
     )
     args = parser.parse_args()
+
+    notice = skip() if skip else None
+    if notice is not None:
+        print(notice)
+        return 0
 
     new_content, row_count, errors = build_content()
     if errors:

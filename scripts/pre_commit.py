@@ -5,7 +5,9 @@ Runs a fast subset of checks (target: <10 s) sequentially and prints a
 summary at the end.  Exits 0 if all pass, 1 if any fail.
 
 Checks executed:
-  0. Regenerate FILEMAP.md and docs/merged-prs.md and ``git add`` them
+  0. Regenerate FILEMAP.md and docs/merged-prs.md and ``git add`` them — in a
+     shallow clone, whose log is cut short, docs/merged-prs.md is skipped
+     with a notice instead of being written without its older rows
   1. ``go fmt`` check (Go orchestrator)
   2. ``ruff check`` (Python agents)
   3. ``cargo fmt --check`` (Rust CLI)
@@ -41,7 +43,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from scripts._git import is_shallow  # noqa: E402
 from scripts.checks import ensure_utf8_streams  # noqa: E402
+from scripts.merged_prs import SHALLOW_NOTICE  # noqa: E402
 
 _FMT_LABELS = {"go fmt", "cargo fmt"}
 
@@ -127,11 +131,14 @@ def _resolve_argv(argv: list[str]) -> list[str]:
     return [sys.executable if tok == "{python}" else tok for tok in argv]
 
 
-_GENERATED = (
-    # (label, generator script, output path to stage) — regenerated before the
-    # checks so the commit carries the current file map and merged-PR history.
-    ("filemap", "scripts/generate_filemap.py", "FILEMAP.md"),
-    ("merged prs", "scripts/merged_prs.py", "docs/merged-prs.md"),
+_GENERATED: tuple[tuple[str, str, str, str | None], ...] = (
+    # (label, generator script, output path to stage, shallow-clone notice) —
+    # regenerated before the checks so the commit carries the current file map
+    # and merged-PR history. A generator with a notice reads the whole log,
+    # which a shallow clone cuts short: there it is neither run nor staged,
+    # and the notice says why.
+    ("filemap", "scripts/generate_filemap.py", "FILEMAP.md", None),
+    ("merged prs", "scripts/merged_prs.py", "docs/merged-prs.md", SHALLOW_NOTICE),
 )
 
 
@@ -199,10 +206,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--skip-fmt", action="store_true", help="Skip formatting checks.")
     args = parser.parse_args(argv)
 
-    # Always regenerate the derived files first (and stage them).
-    # Track results in the summary so failures are visible.
+    # Always regenerate the derived files first (and stage them), bar the
+    # log-derived ones in a shallow clone. Track results in the summary so
+    # failures are visible.
     results: list[tuple[str, bool, float]] = []
-    for label, script, output in _GENERATED:
+    shallow = is_shallow(REPO_ROOT)
+    for label, script, output, shallow_notice in _GENERATED:
+        if shallow and shallow_notice is not None:
+            print(f"\n▶ {label}\n  – SKIP  {shallow_notice}")
+            continue
         t0 = time.monotonic()
         ok = _regenerate(label, script, output)
         results.append((label, ok, time.monotonic() - t0))

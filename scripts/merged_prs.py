@@ -25,6 +25,12 @@ are a *suffix* of the generated rows — behind by the newest merges only —
 and fails on anything else (a hand edit, a format change, a lost row). The
 hook catches the file up on the next commit anywhere.
 
+A shallow clone is the exception (cloud sessions clone with ``--depth 50``):
+its log stops at the clone's oldest commit, so the table built there would
+lose every older row, and ``--check`` would call the committed file a hand
+edit. There the script neither writes nor checks the file; it prints a notice
+naming ``git fetch --unshallow``, and the hook skips it with the same notice.
+
 Requires: git on PATH. Uses only Python stdlib.
 """
 
@@ -43,11 +49,13 @@ for _p in (str(REPO_ROOT), str(_SCRIPTS_DIR)):
 
 from _doc_index import REPO_URL, run_index_cli  # noqa: E402  (same style as rfcs.py / issues.py)
 
-from scripts._git import git_output  # noqa: E402
+from scripts._git import git_output, is_shallow  # noqa: E402
 
 OUTPUT_FILE = REPO_ROOT / "docs" / "merged-prs.md"
 BEGIN_MARKER = "<!-- BEGIN merged-prs:auto -->"
 END_MARKER = "<!-- END merged-prs:auto -->"
+#: Printed in a shallow clone instead of writing or checking the file.
+SHALLOW_NOTICE = "shallow clone: run `git fetch --unshallow` to regenerate docs/merged-prs.md"
 
 _SUBJECT_RE = re.compile(r"^(?P<title>.*?)\s*\(#(?P<number>\d+)\)$")
 _SCOPE_RE = re.compile(r"^[a-z]+\(([^)]*)\)")
@@ -197,6 +205,10 @@ def _build() -> tuple[str, int, list[str]]:
     return render(prs), len(prs), []
 
 
+def _shallow_notice() -> str | None:
+    return SHALLOW_NOTICE if is_shallow(REPO_ROOT) else None
+
+
 def main() -> int:
     return run_index_cli(
         description="Regenerate docs/merged-prs.md from squash-merge subjects.",
@@ -205,6 +217,7 @@ def main() -> int:
         build_content=_build,
         make_target="merged-prs",
         compare=compare,
+        skip=_shallow_notice,
     )
 
 

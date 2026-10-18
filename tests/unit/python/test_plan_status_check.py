@@ -338,3 +338,35 @@ def test_a_shallow_clones_oldest_commit_is_not_credited_with_older_lines(tmp_pat
 
     assert pr_that_wrote(origin, REL, 4) == 2
     assert pr_that_wrote(tmp_path / "shallow", REL, 4) is None
+
+
+def test_a_shallow_clone_skips_the_stale_row_check_and_says_why(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A shallow clone's log stops at its oldest commit, so a PR merged before it looks open.
+
+    #1 merged with its row still open and #2 merged after it. The full
+    history flags the row; a clone holding only #2 would pass it and say
+    nothing was stale. It skips the stale-row check and says why instead.
+    """
+    origin = tmp_path / "origin"
+    _plan_repo(origin, PLAN.replace("✅ Merged", "🔀 PR open"), "docs(rfc0099): the plan (#1)")
+    _git(origin, "commit", "-q", "--allow-empty", "-m", "fix: an unrelated change (#2)")
+    _git(tmp_path, "clone", "-q", "--depth", "1", origin.as_uri(), "shallow")
+    assert check_plan_status(origin) == 1
+    capsys.readouterr()
+
+    assert check_plan_status(tmp_path / "shallow") == 0
+    out = capsys.readouterr().out
+    assert "shallow clone" in out and "`git fetch --unshallow`" in out
+    assert "[OK]" not in out
+
+
+def test_a_second_document_still_fails_on_a_shallow_clone(tmp_path: Path) -> None:
+    """The release-document rule reads the tree, not the log, so a shallow clone still runs it."""
+    origin = tmp_path / "origin"
+    _plan_repo(origin, PLAN, "docs(rfc0099): the plan (#1)")
+    _git(tmp_path, "clone", "-q", "--depth", "1", origin.as_uri(), "shallow")
+    _touch(tmp_path / "shallow", "docs/v0.3.17-plan.md", "docs/v0.3.17-scope-locks.md")
+
+    assert check_plan_status(tmp_path / "shallow") == 1

@@ -1,6 +1,6 @@
 # Automation Catalogue
 
-> **Last updated**: 2026-09-29
+> **Last updated**: 2026-10-18
 > Everything that runs without a human typing the steps: `make` targets,
 > scripts, the pre-commit hook, and the GitHub workflows — grouped by
 > purpose, with **when it runs**. `make help` is the live list of targets;
@@ -38,7 +38,7 @@ dependencies.
 | `make notices` (`scripts/generate_third_party_notices.py`) | Regenerate `THIRD_PARTY_NOTICES.md` from the three dependency graphs, with go-licenses and cargo-license at the Makefile pins (`GO_LICENSES_VERSION`, `CARGO_LICENSE_VERSION`): each is installed when missing, and any other version is refused (`make go-licenses-install` / `cargo-license-install`) | `notices-check` | Make-only; the tag PR |
 | `make rfcs` (`scripts/rfcs.py`) | Regenerate `docs/rfcs/INDEX.md` from RFC YAML front-matter; fail when an RFC's `**Status**` header line disagrees with it | `rfcs-check` | CI (`Validate configs`) + pre-commit |
 | `make issues` (`scripts/issues.py`) | Regenerate `docs/issues/INDEX.md` from issue front-matter | `issues-check` | CI (`Validate configs`) |
-| `make merged-prs` (`scripts/merged_prs.py`) | Regenerate `docs/merged-prs.md` from the first-parent squash subjects on `main` (Area column derived from the title). Replaced ROADMAP's hand-kept table, which had stopped at #708 | `merged-prs-check` — passes when behind by the newest merges only | Pre-commit regenerates + stages it; CI (`Docs hygiene`) checks it |
+| `make merged-prs` (`scripts/merged_prs.py`) | Regenerate `docs/merged-prs.md` from the first-parent squash subjects on `main` (Area column derived from the title). Replaced ROADMAP's hand-kept table, which had stopped at #708 | `merged-prs-check` — passes when behind by the newest merges only | Pre-commit regenerates + stages it; CI (`Docs hygiene`) checks it. In a shallow clone, whose log is cut short, the script and the hook leave it alone and print a `git fetch --unshallow` notice |
 | `scripts/generate_filemap.py` | Regenerate `FILEMAP.md` from `git ls-files` (tracked files only — `git add` new files first). **Kept on purpose** (decision 2026-09-06): it is the one-read index assistants load before touching the tree, and the writer now leaves the date alone so it no longer churns on every commit | `--check` (ignores the header date) | Pre-commit regenerates and stages it; CI (`Docs hygiene`) checks it |
 | `make generate-persona-nickname COUNT= SEED=` (`scripts/persona_nickname_generator.py`) | Nickname-style persona id/name pairs | — | On demand |
 | `make bump-version VERSION=X.Y.Z [DRY_RUN=--dry-run]` (`scripts/bump_version.py`) | Bump the five version strings ([guide](../guides/version-bump.md)) | — | The tag PR |
@@ -77,7 +77,7 @@ dependencies.
 | `scripts/checks/doc_links.py` | Relative links and `#anchors` in every tracked `.md` | CI (`Docs hygiene`) + pre-commit |
 | `scripts/checks/doc_status_markers.py` | Only the standard status markers | CI (`Docs hygiene`) + pre-commit |
 | `scripts/checks/doc_leaked_markup.py` | No tool-call markup fragments in docs | CI (`Docs hygiene`) + pre-commit |
-| `scripts/checks/plan_status.py` (`make plan-status-check`) | A 🔀 / ⬜ progress row whose linked PRs have all merged is stale; a 🔀 row that links no PR — a PR's own row, written before its number existed — is stale once the squash-merge that wrote it is on `main` (`git blame --first-parent`); released versions' plans are skipped, 🔄 rows are not judged. It also fails any `docs/vX.Y.Z-*.md` file but the plan and a test-findings PR plan, for a patch release after v0.3.16 (ruling (e)) | CI (`Docs hygiene`) + pre-commit |
+| `scripts/checks/plan_status.py` (`make plan-status-check`) | A 🔀 / ⬜ progress row whose linked PRs have all merged is stale; a 🔀 row that links no PR — a PR's own row, written before its number existed — is stale once the squash-merge that wrote it is on `main` (`git blame --first-parent`); released versions' plans are skipped, 🔄 rows are not judged; in a shallow clone, where a PR merged before the oldest commit looks open, the stale-row check is skipped with a `git fetch --unshallow` notice. It also fails any `docs/vX.Y.Z-*.md` file but the plan and a test-findings PR plan, for a patch release after v0.3.16 (ruling (e)) | CI (`Docs hygiene`) + pre-commit |
 | `scripts/checks/amendment_evidence.py` (`make amendment-evidence-check`) | Every `## Amendment YYYY-MM-DD` in a tracked `docs/**/v*-sequencing*.md`, dated 2026-09-12 or later, has an External evidence section whose five rows (installs, outside issues/PRs, demos, conversations, experiment results) each appear once and are not blank, a placeholder or "TBD", bare or wrapped in code or brackets — "none" counts; the rows, and the template's other `##` sections that stay inside an amendment, are pinned to the amendment template's by a test. A heading from that date that names an amendment in another form (level, case, word order, extra words, markup, date dashes, a setext heading) fails rather than being skipped, unless it is a sub-heading of an amendment at least as recent; so does a code fence or HTML comment that never closes, and those messages print even when no amendment could be read. Earlier amendments stay verbatim and are not judged; finding none from that date fails. It knows the sequencing record's layout and the rule's date, so the manifest lists it as Persatrix-specific, and a unit test pins its CI step and make target instead | CI (`Docs hygiene`) + pre-commit |
 | `scripts/checks/methodology_conformance.py` (`make conformance-check`) | The checkout has every document, tool, make target and Docs-hygiene step `docs/methodology/conformance.json` names; the manifest names the checker itself | CI (`Docs hygiene`) + pre-commit |
 | `scripts/checks/roadmap_status.py` (`make roadmap-status-check`) | A ROADMAP Component Status row that says less than the RFCs its Status cell names: 🚧 once they have all shipped, even in part; anything short of ✅ once all are implemented. It knows ROADMAP's layout, so the manifest lists it as Persatrix-specific | CI (`Validate configs`) + pre-commit |
@@ -95,7 +95,8 @@ directory `git rev-parse --git-path hooks` names (so linked worktrees and
 **version-controlled** and warns when the installed hook has drifted from the
 installer. Fourteen steps, target under 10 s:
 
-0. regenerate `FILEMAP.md` and `docs/merged-prs.md` and `git add` them ·
+0. regenerate `FILEMAP.md` and `docs/merged-prs.md` and `git add` them
+(`docs/merged-prs.md` is skipped, with a notice, in a shallow clone) ·
 1. `gofmt -l` on staged Go blobs (CRLF-safe) · 2. `ruff check agents/` ·
 3. `cargo fmt --check` · 4. doc links · 5. leaked markup · 6. status markers ·
 7. RFC index freshness · 8. ROADMAP status rows · 9. file sizes (`--strict`) ·

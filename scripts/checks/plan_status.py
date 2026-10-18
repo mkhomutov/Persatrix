@@ -20,6 +20,13 @@ PRs ("PR 0 merged (#854), PR 1 open (#855)"). Released versions' plans are
 frozen evidence and are skipped; which versions are released is read from
 ``CHANGELOG.md`` the same way the size checker does.
 
+A shallow clone's log stops at its oldest commit (cloud sessions clone with
+``--depth 50``), so a PR merged before it looks open and its stale row would
+pass. There, as when the log holds no squash merge at all, no row is judged —
+nor is a plan that hides its rows — and a notice names
+``git fetch --unshallow``. The one-document rule below reads the tree, so it
+still runs.
+
 The check also holds a patch release to one document. Since ruling (e) of the
 sequencing Amendment 2026-09-12 a patch release keeps its plan, scope locks
 and release checklist in ``docs/vX.Y.Z-plan.md``, so any other
@@ -50,7 +57,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts._git import git_output  # noqa: E402
+from scripts._git import git_output, is_shallow  # noqa: E402
 from scripts.checks import ensure_utf8_stdout, markdown_page  # noqa: E402
 from scripts.checks.released import is_released_version_doc, released_versions  # noqa: E402
 
@@ -201,6 +208,10 @@ def check_plan_status(repo_root: Path, verbose: bool = False) -> int:
         for rel in extra:
             # The version holds no hyphen, so the first one ends it: docs/vX.Y.Z-plan.md.
             print(f"  {rel}: fold it into {rel.split('-', 1)[0]}-plan.md")
+    if is_shallow(repo_root):
+        print("[WARN] shallow clone — skipping the stale-row check; run `git fetch --unshallow`"
+              " to check plan rows against every merged PR")
+        return 1 if extra else 0
     merged = merged_pr_numbers(repo_root)
     if not merged:
         print("[WARN] no squash-merge subjects found in git log — skipping the stale-row check")
