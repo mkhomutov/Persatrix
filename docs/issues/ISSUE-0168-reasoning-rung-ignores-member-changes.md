@@ -170,3 +170,11 @@ channel changes between governed and ungoverned.
 > was reproduced with a throwaway test and checked against a control. #990
 > rewrote the comments that described the default as following membership
 > live.
+
+> 2026-10-18 — v0.4.0 planning-readiness: **still not slotted.** Ruling (a),
+> which the Slot paragraph cites, is superseded: [the amendment that opened
+> v0.4.0](../v0.3.x-sequencing.md#amendment-2026-10-18--a-society-that-pursues-long-goals-exp-001-measures-v040-opens)
+> opens its plan. [v0.4.0's
+> shape](../v0.4.x-sequencing.md#amendment-2026-10-18--v040s-shape-its-prerequisites-its-cuts-and-the-end-of-the-v03x-line)
+> does not take it in: its [ruling (q)](../v0.4.x-sequencing.md#rulings)
+> boards an issue only when a phase in the release is its fix.

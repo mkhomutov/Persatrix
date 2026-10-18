@@ -170,3 +170,11 @@ judged. So what holds it is the absence of an open plan.
 > [#976](https://github.com/mkhomutov/Persatrix/pull/976) as finding F-6,
 > outside that PR's tests-only scope. The bypass above was run at
 > `68336102` and reverted; no production code lands with this issue.
+
+> 2026-10-18 — v0.4.0 planning-readiness: **still not slotted.** Ruling (a),
+> which the Slot paragraph cites, is superseded: [the amendment that opened
+> v0.4.0](../v0.3.x-sequencing.md#amendment-2026-10-18--a-society-that-pursues-long-goals-exp-001-measures-v040-opens)
+> opens its plan. [v0.4.0's
+> shape](../v0.4.x-sequencing.md#amendment-2026-10-18--v040s-shape-its-prerequisites-its-cuts-and-the-end-of-the-v03x-line)
+> does not take it in: its [ruling (q)](../v0.4.x-sequencing.md#rulings)
+> boards an issue only when a phase in the release is its fix.

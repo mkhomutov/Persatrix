@@ -257,3 +257,12 @@ after `wire_recall_tools`.
 > issue's warning is still unwritten and extends that module. #913 does log a
 > `tools` value that is not a list, and entries that are not strings, as
 > warnings; an entry that names no registered tool is still dropped silently.
+
+> 2026-10-18 — **v0.4.0 planning-readiness: moved — not slotted.** The slot
+> above leaned on the ROADMAP placing the MCP bridge in v0.4.0. That bridge
+> was RFC 0010's component, which ruling (m) of [v0.4.0's
+> shape](../v0.4.x-sequencing.md#amendment-2026-10-18--v040s-shape-its-prerequisites-its-cuts-and-the-end-of-the-v03x-line)
+> unslots, and the ROADMAP's v0.4.0 components no longer list it. [v0.4.0's
+> shape](../v0.4.x-sequencing.md#amendment-2026-10-18--v040s-shape-its-prerequisites-its-cuts-and-the-end-of-the-v03x-line)
+> does not take it in: its [ruling (q)](../v0.4.x-sequencing.md#rulings)
+> boards an issue only when a phase in the release is its fix.

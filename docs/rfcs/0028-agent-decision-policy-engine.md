@@ -283,6 +283,7 @@ Integration seams for this extension:
 6. *(Phase 4 / v0.5.0+)* How should dissent be persisted and surfaced so collective decisions remain explainable to operators?
 7. *(Phase 2a)* Which action classes are globally non-delegable and require mandatory HITL in every environment?
 8. *(Phase 2a)* ~~Should HITL approval issuance live in orchestrator security services first, with agents only consuming signed tokens?~~ **Resolved:** yes — see Phase 2a step 2.
+9. *(Phase 2a)* Which key signs approval tokens? Phase 2a step 2 says "the same audit-key material used for RFC 0009 audit-log integrity". But RFC 0009's audit chain is an unkeyed SHA-256 checksum, and the RFC 0009 §H it names as issuer defines no token authority. RFC 0009's capability-token key is generated per process and changes on every restart, while a pending approval lives 24 h. **Plan-opening default** (2026-10-18, readiness audit for [v0.4.0's shape](../v0.4.x-sequencing.md#amendment-2026-10-18--v040s-shape-its-prerequisites-its-cuts-and-the-end-of-the-v03x-line)): a dedicated approval-signing key held by the orchestrator, generated once and persisted beside the society backend, so an approval survives a restart. Step 2's wording is corrected when this RFC is accepted.
 
 ## Decision / Next Steps
 

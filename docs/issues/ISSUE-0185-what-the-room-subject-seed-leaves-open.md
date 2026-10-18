@@ -132,3 +132,11 @@ and a recipe cannot declare one.
 > 2026-10-06 — filed from the review of the ISSUE-0180 fix. Not slotted.
 > Severity is left at `low` for the maintainer, who may rate item 3
 > higher: it is the only one about who sees a fact.
+
+> 2026-10-18 — v0.4.0 planning-readiness: **still not slotted.** [v0.4.0's
+> shape](../v0.4.x-sequencing.md#amendment-2026-10-18--v040s-shape-its-prerequisites-its-cuts-and-the-end-of-the-v03x-line)
+> does not take it in: its [ruling (q)](../v0.4.x-sequencing.md#rulings)
+> boards an issue only when a phase in the release is its fix. Item 3, about
+> who sees a fact, is also audience work, which ruling (b) holds back unless
+> an amendment records an outside ask for it. Severity is still the
+> maintainer's.

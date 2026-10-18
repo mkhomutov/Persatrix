@@ -79,3 +79,11 @@ handler's response shape to surface multi-part replies (the current
 > "future fixes" hint in the `replyWaiter` doc-comment to a tracked
 > issue so the constraint surfaces in `docs/issues/INDEX.md` rather
 > than relying on contributors to grep the source.
+
+> 2026-10-18 — v0.4.0 planning-readiness: **not slotted.** The 2026-08-19
+> amendment kept this with RFC 0009 Phase 4, "v0.4.0+". Phase 4 now boards
+> v0.4.0 for its tokens and approval queue, but neither changes the waiter,
+> which still returns one message. [v0.4.0's
+> shape](../v0.4.x-sequencing.md#amendment-2026-10-18--v040s-shape-its-prerequisites-its-cuts-and-the-end-of-the-v03x-line)
+> does not take it in: its [ruling (q)](../v0.4.x-sequencing.md#rulings)
+> boards an issue only when a phase in the release is its fix.

@@ -593,6 +593,8 @@ Dependencies: Phases 1 and 3.
 
 4. **Token revocation list.** Short TTLs mitigate but do not eliminate replay risk for compromised tokens. The proposed in-memory hash set keyed by `(AgentID, IssuedAt)` with TTL = `max_token_ttl` remains the right shape, but the question of whether the list is per-orchestrator-process (simple) or shared across orchestrator replicas (requires Redis / etcd) is bound to the v0.4.0 multi-node story (RFC TBD). Decision deferred to Phase 4.
 
+9. **Which agent calls carry the token (2026-10-18).** Phase 4 validates tokens on the gRPC path, but agents publish, fetch channel history and register over REST. v0.4.0's agent-identity scope lock ([v0.4.0's shape](../v0.4.x-sequencing.md#amendment-2026-10-18--v040s-shape-its-prerequisites-its-cuts-and-the-end-of-the-v03x-line), ruling n) rules between two routes: check the tokens on those REST calls too, or move the calls to gRPC first with RFC 0040 Phases 2–3. **Plan-opening default:** check them on REST, with a token-validation middleware on the agent-facing REST routes, added to this phase when its PR plan opens. RFC 0040 Phases 2–3 then stay unslotted.
+
 ### New questions surfaced by current realities (2026-04-29)
 
 These arose from RFCs 0008, 0011, and 0020 landing or partly landing during v0.3.0. Each is resolved below; the resolutions are folded into the relevant phase scope.

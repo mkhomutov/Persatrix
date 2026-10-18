@@ -100,3 +100,13 @@ attribution axes — and is carried as a Known Gap on the
 > fetch, zero *fetch-failed*) and both DM-taught entries were withheld at
 > *withhold-disjoint*. The recall route is one more caller of the fix shape
 > decided with RFC 0009; nothing changes here for v0.3.16.
+
+> 2026-10-18 — **v0.4.0 planning-readiness: slotted v0.4.0** by [ruling
+> (q)](../v0.4.x-sequencing.md#rulings) of [v0.4.0's
+> shape](../v0.4.x-sequencing.md#amendment-2026-10-18--v040s-shape-its-prerequisites-its-cuts-and-the-end-of-the-v03x-line):
+> shape 3 above, agent authentication through RFC 0009, is the designed fix,
+> and v0.4.0 now builds it (ruling n). Plan-opening default: shape 3, by the
+> agent-identity lock's default route, which checks RFC 0009's tokens on the
+> agents' REST calls. The directory and `channels:recall` routes stay
+> `policyAuthenticated`, and the fleet authenticates to them. Shapes 1 and 2
+> are not taken.
