@@ -59,3 +59,20 @@ follow-up amendment to RFC 0039 if 0009 Phase 4 stays parked.
 > 2026-07-30 — captured from the PR #793 review (the "load-bearing judgment
 > call" focus item): the carve-out itself was judged correct as scoped; this
 > knob is the recorded escape hatch for fleet-less deployments.
+
+> 2026-10-18 — **v0.4.0 planning-readiness: slotted v0.4.0** by [ruling
+> (q)](../v0.4.x-sequencing.md#rulings) of [v0.4.0's
+> shape](../v0.4.x-sequencing.md#amendment-2026-10-18--v040s-shape-its-prerequisites-its-cuts-and-the-end-of-the-v03x-line).
+> The carve-out exists because agents hold no credentials. RFC 0009 Phase 4
+> gives them one, and under the agent-identity lock's default route their REST
+> calls carry it. Plan-opening default: once agents send tokens, each
+> carve-out route takes an agent token or the account role it would need
+> without the carve-out. That is any signed-in account for the reads
+> (channels list and get, message history) and for publish, which the CLI's
+> channel send also uses. It is the operator role for registration,
+> deregistration and convene, as for every other mutation, since
+> registration overwrites an agent's stored address. Registration takes the
+> fleet enrollment secret in place of a token ([RFC 0009 open question
+> 9](../rfcs/0009-security-sandboxing.md#genuinely-open-deferred-to-phase-4--v040)).
+> The `auth.agent_ingress` knob above, the interim hardening until Phase 4, is
+> not built.

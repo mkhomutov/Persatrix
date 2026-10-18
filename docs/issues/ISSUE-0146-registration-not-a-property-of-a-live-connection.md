@@ -87,3 +87,12 @@ planning-readiness audit.
 > reported as done without doing. RFC 0040 §C and OQ 6 now point here
 > instead of at the resolved ISSUE-0125. Slotted **v0.4.0** with RFC 0040
 > Phase 2; explicitly out of v0.3.16 scope.
+
+> 2026-10-18 — **v0.4.0 planning-readiness: not slotted under the default.**
+> [ruling (q)](../v0.4.x-sequencing.md#rulings) of [v0.4.0's
+> shape](../v0.4.x-sequencing.md#amendment-2026-10-18--v040s-shape-its-prerequisites-its-cuts-and-the-end-of-the-v03x-line)
+> boards this only if v0.4.0's agent-identity lock picks the gRPC route, which
+> brings RFC 0040 Phases 2–3 with it. The lock's default checks RFC 0009's
+> tokens on the agents' REST calls instead, which leaves RFC 0040 Phases 2–3,
+> and this issue, unslotted. The slot above, "v0.4.0 with RFC 0040 Phase 2",
+> holds only if the lock picks gRPC.

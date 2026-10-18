@@ -168,3 +168,14 @@ how it reads a refusal.
 > stop reason, stays open: arm A's reading of it is frozen in the harness
 > choices. The settings are described in
 > [the model request settings guide](../guides/model-request-settings.md).
+
+> 2026-10-18 — v0.4.0 planning-readiness: **still not slotted.** Ruling (a),
+> which the Slot paragraph cites, is superseded: [the amendment that opened
+> v0.4.0](../v0.3.x-sequencing.md#amendment-2026-10-18--a-society-that-pursues-long-goals-exp-001-measures-v040-opens)
+> opens its plan. [v0.4.0's
+> shape](../v0.4.x-sequencing.md#amendment-2026-10-18--v040s-shape-its-prerequisites-its-cuts-and-the-end-of-the-v03x-line)
+> does not take it in: its [ruling (q)](../v0.4.x-sequencing.md#rulings)
+> boards an issue only when a phase in the release is its fix. Item 3 no
+> longer needs to wait on the harness: the amendment that opened v0.4.0
+> holds EXP-001's scored run from a checkout pinned at `c6ef01d5`, so a
+> change on `main` does not reach it.

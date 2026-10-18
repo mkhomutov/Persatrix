@@ -133,3 +133,14 @@ without deciding it, so it is open here on its own.
 > precondition of this issue now occurs in every pass. Whether the
 > writes also overlap in time, which is what leaves no fact live, was
 > not measured.
+
+> 2026-10-18 — v0.4.0 planning-readiness: **still not slotted.** Whether to
+> fix this before EXP-001's scored run no longer changes the run: [the
+> amendment that opened
+> v0.4.0](../v0.3.x-sequencing.md#amendment-2026-10-18--a-society-that-pursues-long-goals-exp-001-measures-v040-opens)
+> holds it from a checkout pinned at `c6ef01d5`, so a fix on `main` does not
+> reach it. [v0.4.0's
+> shape](../v0.4.x-sequencing.md#amendment-2026-10-18--v040s-shape-its-prerequisites-its-cuts-and-the-end-of-the-v03x-line)
+> does not take it in: its [ruling (q)](../v0.4.x-sequencing.md#rulings)
+> boards an issue only when a phase in the release is its fix. Severity is
+> still the maintainer's.

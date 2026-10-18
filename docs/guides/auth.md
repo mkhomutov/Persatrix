@@ -70,10 +70,12 @@ becomes a verified claim instead of a body field.
 >   is unaffected: the transcript and RFC 0036 verbatim history are scoped by
 >   neither axis, so everyone still sees the same conversation.
 >
-> The residual that remains is **capacity**, not recall: the agent-global
-> capacity paths are not principal-partitioned (ISSUE-0082 Part 2, deferred to
-> v0.4.0). If you need a harder guarantee than that, keep giving users who must
-> not share a persona's memory separate rooms — and classify those rooms.
+> The residual that remains is **capacity**, not recall: no clean-up pass
+> bounds a persona's memory yet, and the quota design that decides whether a
+> bound counts per person is unscheduled
+> ([ISSUE-0186](../issues/ISSUE-0186-persona-memory-has-no-capacity-bound.md)).
+> If you need a harder guarantee than that, keep giving users who must not
+> share a persona's memory separate rooms — and classify those rooms.
 
 ---
 

@@ -126,3 +126,9 @@ Landed with the v0.3.11 release-prep MT-execution PR (TDD,
 > and logged before the publish. The harness now turns the limiter
 > off for its own deployments (EXP-001 harness PR 5a), so no adviser's reply
 > is refused; the residual above is still the fix for everyone else.
+
+> 2026-10-18 — v0.4.0 planning-readiness: still not slotted.
+> [ISSUE-0152](ISSUE-0152-one-quarantine-refuses-every-anonymous-caller.md)
+> boards v0.4.0, and by its plan-opening default its step 3 agent half rides
+> with its early PR. Each agent then gets its own REST budget, which closes
+> the REST half of the residuals above.

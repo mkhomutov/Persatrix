@@ -233,7 +233,7 @@ Integration seams for this extension:
 ### Phase 2a: Human-in-the-loop enforcement (security-coupled)
 
 1. Add required-HITL action class registry in configuration and schema.
-2. Implement signed, scoped, expiring approval tokens and replay checks. **Issuer:** the orchestrator security service (Go-side, RFC 0009 §H) is the sole token authority; agents only consume and verify tokens. Tokens are signed with the same audit-key material used for RFC 0009 audit-log integrity, scoped to `(action_hash, actor_id, scope, expires_at, nonce)`, and replay-protected by the orchestrator-side nonce store.
+2. Implement signed, scoped, expiring approval tokens and replay checks. **Issuer:** the orchestrator security service (Go-side, RFC 0009 §H) is the sole token authority; agents only consume and verify tokens. Tokens are signed with the same audit-key material used for RFC 0009 audit-log integrity *(no such key exists; see Open Question 9)*, scoped to `(action_hash, actor_id, scope, expires_at, nonce)`, and replay-protected by the orchestrator-side nonce store.
 3. Enforce fail-closed runtime behavior when approval is absent or invalid.
 4. Add RFC 0009-aligned audit events: `decision.hitl_requested`, `decision.hitl_approved`, `decision.hitl_denied`, `decision.hitl_expired`.
 
@@ -283,6 +283,7 @@ Integration seams for this extension:
 6. *(Phase 4 / v0.5.0+)* How should dissent be persisted and surfaced so collective decisions remain explainable to operators?
 7. *(Phase 2a)* Which action classes are globally non-delegable and require mandatory HITL in every environment?
 8. *(Phase 2a)* ~~Should HITL approval issuance live in orchestrator security services first, with agents only consuming signed tokens?~~ **Resolved:** yes — see Phase 2a step 2.
+9. *(Phase 2a)* Which key signs approval tokens? Phase 2a step 2 says "the same audit-key material used for RFC 0009 audit-log integrity". But RFC 0009's audit chain is an unkeyed SHA-256 checksum, and the RFC 0009 §H it names as issuer defines no token authority. RFC 0009's capability-token key is generated per process and changes on every restart, while a pending approval lives 24 h. **Plan-opening default** (2026-10-18, readiness audit for [v0.4.0's shape](../v0.4.x-sequencing.md#amendment-2026-10-18--v040s-shape-its-prerequisites-its-cuts-and-the-end-of-the-v03x-line)): a dedicated approval-signing key held by the orchestrator, generated once and persisted beside the society backend, so a pending approval and its token survive a restart. That holds because the pending approvals are persisted there too ([RFC 0029 Open Question 2](0029-personal-society-storage-split.md#open-questions), [RFC 0009 open question 10](0009-security-sandboxing.md#genuinely-open-deferred-to-phase-4--v040)). Step 2's nonce store is persisted in the same place. Held in memory, it would forget every used nonce on restart, and a used approval token would verify again until it expired. A token expires no later than the pending approval it answers (RFC 0009's 24 h default), and its used nonce is kept until then. Step 2's wording is corrected when this RFC is accepted.
 
 ## Decision / Next Steps
 

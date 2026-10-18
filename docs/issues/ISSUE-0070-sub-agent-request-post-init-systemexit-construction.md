@@ -79,3 +79,9 @@ Decide when wiring `SPAWN_SUB_AGENT`:
 > path is latent (`SPAWN_SUB_AGENT` stubbed) and the shipped config always
 > declares `sub_agents`. The decision belongs with the PR that wires
 > `SPAWN_SUB_AGENT`.
+
+> 2026-10-18 — v0.4.0 planning-readiness: **not slotted.** The decision
+> belongs with the PR that wires `SPAWN_SUB_AGENT`, which is RFC 0010's work.
+> Ruling (m) of [v0.4.0's
+> shape](../v0.4.x-sequencing.md#amendment-2026-10-18--v040s-shape-its-prerequisites-its-cuts-and-the-end-of-the-v03x-line)
+> unslots RFC 0010, so this stays unslotted with it.

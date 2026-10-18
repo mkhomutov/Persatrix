@@ -50,3 +50,11 @@ Defer to v0.4.0; capture the design here before the call-sites diverge.
 ## Notes
 
 > 2026-05-05 — initial capture during PR #250 review.
+
+> 2026-10-18 — v0.4.0 planning-readiness: **not slotted.** "Defer to v0.4.0"
+> above, and "for v0.4.0" in the summary, predate [v0.4.0's
+> shape](../v0.4.x-sequencing.md#amendment-2026-10-18--v040s-shape-its-prerequisites-its-cuts-and-the-end-of-the-v03x-line),
+> which does not take it in: its [ruling (q)](../v0.4.x-sequencing.md#rulings)
+> boards an issue only when a phase in the release is its fix. RFC 0009 Phase
+> 4 now boards v0.4.0, but for capability tokens; it does not bring the mTLS
+> the Impact section counts on, so the cost argument there is unchanged.

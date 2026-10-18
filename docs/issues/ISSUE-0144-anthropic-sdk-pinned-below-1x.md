@@ -130,3 +130,10 @@ installing the provider extras in CI or accepting the gap explicitly.
 > with no v0.3.16 story; the Dependabot rule keeps holding the line.
 > Re-decide at the v0.4.0 plan opening, or earlier if a provider feature
 > the 1.x line gates becomes wanted.
+
+> 2026-10-18 — **v0.4.0 planning-readiness: default = out of scope, deferred
+> explicitly**: the re-decision promised above. [v0.4.0's
+> shape](../v0.4.x-sequencing.md#amendment-2026-10-18--v040s-shape-its-prerequisites-its-cuts-and-the-end-of-the-v03x-line)
+> does not take it in: its [ruling (q)](../v0.4.x-sequencing.md#rulings)
+> boards an issue only when a phase in the release is its fix. No v0.4.0 phase
+> needs a feature the 1.x line gates. Re-decide when one does, by amendment.

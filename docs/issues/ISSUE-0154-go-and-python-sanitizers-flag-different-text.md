@@ -309,3 +309,10 @@ it waits for the v0.3.16 tag unless a dated amendment takes it in.
 > Also seen: the persona prompt tells the model the flag comes from "the
 > orchestrator's input sanitiser"; today it comes from the agent's Python copy.
 > Left alone here, because prompt text changes model behaviour.
+
+> 2026-10-18 — v0.4.0 planning-readiness: **not slotted.** v0.3.16 is tagged,
+> so "unless a dated amendment takes it in" above is the only route left.
+> [v0.4.0's
+> shape](../v0.4.x-sequencing.md#amendment-2026-10-18--v040s-shape-its-prerequisites-its-cuts-and-the-end-of-the-v03x-line)
+> does not take it in: its [ruling (q)](../v0.4.x-sequencing.md#rulings)
+> boards an issue only when a phase in the release is its fix.

@@ -112,3 +112,9 @@ introduced the dead-but-wired state) and this issue.
 > `CAUSE_CHAT` arm goes with `SendChatMessage`. The table and step 2 now
 > include the `cause_for_event` arm and the tests that pin it; the enum
 > value stays in the proto for wire compatibility.
+
+> 2026-10-18 — v0.4.0 planning-readiness: **not slotted.** "Target: v0.4.0
+> milestone" above was a reminder, not a slot. [v0.4.0's
+> shape](../v0.4.x-sequencing.md#amendment-2026-10-18--v040s-shape-its-prerequisites-its-cuts-and-the-end-of-the-v03x-line)
+> does not take it in: its [ruling (q)](../v0.4.x-sequencing.md#rulings)
+> boards an issue only when a phase in the release is its fix.

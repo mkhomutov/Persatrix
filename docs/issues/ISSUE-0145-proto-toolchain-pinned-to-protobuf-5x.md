@@ -119,3 +119,12 @@ what it is rather than one that has to be re-derived.
 > deferred explicitly.** Lifting the pair regenerates every committed stub
 > and moves the CI-pinned toolchain in the same PR — a train-boundary
 > change, not patch-release work. Re-decide at the v0.4.0 plan opening.
+
+> 2026-10-18 — **v0.4.0 planning-readiness: default = out of scope, deferred
+> explicitly**: the re-decision promised above. v0.4.0 is the train boundary
+> this issue names, and RFC 0012 adds a proto field, so stubs regenerate this
+> cycle anyway. But [v0.4.0's
+> shape](../v0.4.x-sequencing.md#amendment-2026-10-18--v040s-shape-its-prerequisites-its-cuts-and-the-end-of-the-v03x-line)
+> does not take it in: its [ruling (q)](../v0.4.x-sequencing.md#rulings)
+> boards an issue only when a phase in the release is its fix. Lifting the
+> pins stays its own change, boarded by amendment if wanted.

@@ -679,6 +679,18 @@ Dependencies: RFC 0011 external bridges, Phase 4.
    `directive`)? Proposed resolution: keep them independent; an operator
    may always set both, and co-variation as a constraint can be added
    later without a model change.
+6. **What writes a directive to the commitments tier?** *(2026-10-18,
+   v0.4.0 planning-readiness audit.)* Phase 2 flags directives "in
+   fact/commitment extraction" and keeps them on the RFC 0021 commitments
+   tier, but no extraction writes that tier. RFC 0021 Phase 2 fills it only
+   through its tools (`set_reminder` and the rest), and RFC 0026's
+   close-time extraction files commitment-class facts (`committed_to`,
+   `agreed_to`) in the facts tier. Plan-opening default: the RFC 0026
+   extraction pass is the writer. When it finds an instruction aimed at the
+   persona, it also writes a directive to the commitments tier with its
+   cross-context influence record, so RFC 0021 Phase 2's store takes writes
+   from outside its tools. Accepting this RFC and RFC 0021 Phase 2 settles
+   it.
 
 ## Decision / Next Steps
 

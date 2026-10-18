@@ -271,3 +271,13 @@ only after v0.3.16 is tagged.
 > its F-8 left the defect to an issue of its own. Gap 2 turned up while tracing where a workflow's id comes from.
 > RFC 0023's Decision section and ISSUE-0063's notes now link here. Docs
 > only: no code changes.
+
+> 2026-10-18 — v0.4.0 planning-readiness: **not slotted.** "The next amendment
+> slots it" above did not happen: neither the amendment that opened v0.4.0 nor
+> [v0.4.0's
+> shape](../v0.4.x-sequencing.md#amendment-2026-10-18--v040s-shape-its-prerequisites-its-cuts-and-the-end-of-the-v03x-line)
+> took it in, and the latter's [ruling (q)](../v0.4.x-sequencing.md#rulings)
+> boards an issue only when a phase in the release is its fix. A society meant
+> to run for weeks stops at about $10 of persona calls per orchestrator
+> process, so this is a candidate for the plan's goal audit, which may propose
+> it by amendment.
