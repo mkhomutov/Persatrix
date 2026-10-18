@@ -1,4 +1,4 @@
-"""RFC 0030 Layer 5 (v0.4.0) — the inert ``chair``-moderation seam.
+"""RFC 0030 Layer 5 (unslotted) — the inert ``chair``-moderation seam.
 
 The ``chair`` disposition ships in **v0.3.8** as a low-threshold *facilitator*
 only (RFC 0030 Tier B): on the wire a ``chair`` is just a ``participant`` whose
@@ -12,7 +12,7 @@ delivered over the ``ChannelMessageEvent.threshold`` wire field.
 
 This module is the chair's *other* half — the **moderator** that reads the
 transcript and decides whether the conversation should continue, wrap up, or
-terminate. That is **Layer 5, deferred to v0.4.0** (master plan
+terminate. That is **Layer 5, unslotted** (master plan
 §Open-question status; the governance RFC 0030 §"Layer 5",
 ``docs/rfcs/0030-multi-agent-conversation-governance.md``). v0.3.8 wires the
 seam but leaves it **inert**, the same

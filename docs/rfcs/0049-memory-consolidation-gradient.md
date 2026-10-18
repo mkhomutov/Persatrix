@@ -6,7 +6,7 @@ type: architecture
 status: partially_implemented
 author: Maksim Khomutov
 created: 2026-06-06
-target: v0.3.12 (Phases 0–1) + v0.4.0 (Phases 2–4); design ratified v0.3.7
+target: v0.3.12 (Phases 0–1) + unslotted (Phases 2–4); design ratified v0.3.7
 depends_on:
   - RFC-0031
   - RFC-0037
@@ -18,10 +18,10 @@ depends_on:
 # RFC 0049 — Memory Consolidation Gradient & Scope Reconciliation
 
 **Type**: architecture (memory model — meta-RFC over the memory tier RFCs)
-**Status**: ⚠️ Partially Implemented — **Phases 0–1 ✅ v0.3.12, LIVE** (closeout 2026-07-28; [PR plan](0049-pr-plan.md) PRs 1–5 = [#781](https://github.com/mkhomutov/Persatrix/pull/781)/[#782](https://github.com/mkhomutov/Persatrix/pull/782)/[#783](https://github.com/mkhomutov/Persatrix/pull/783)/[#784](https://github.com/mkhomutov/Persatrix/pull/784) + the closeout: the `topic.*` capture path + both widenings, shadow→live on the green measurement verdict — see the amendments' Promotion sections); **Phases 2–4 stay v0.4.0** (they need the unimplemented RFC 0027/0028 engines). The gradient, the one law, and the §D re-rooting (cross-room topic knowledge) are **ratified** (2026-06-06). The 2026-07-15 lock also reversed ratified Non-Goal #1 — applied via the [L1 amendment](0049-amendment-l1-cross-room-availability.md) (raw episodic recall cross-room *available* behind the RFC 0037 gate, room-first-ranked).
+**Status**: ⚠️ Partially Implemented — **Phases 0–1 ✅ v0.3.12, LIVE** (closeout 2026-07-28; [PR plan](0049-pr-plan.md) PRs 1–5 = [#781](https://github.com/mkhomutov/Persatrix/pull/781)/[#782](https://github.com/mkhomutov/Persatrix/pull/782)/[#783](https://github.com/mkhomutov/Persatrix/pull/783)/[#784](https://github.com/mkhomutov/Persatrix/pull/784) + the closeout: the `topic.*` capture path + both widenings, shadow→live on the green measurement verdict — see the amendments' Promotion sections); **Phases 2–4 are unslotted** (they need the unimplemented RFC 0027/0028 engines). The gradient, the one law, and the §D re-rooting (cross-room topic knowledge) are **ratified** (2026-06-06). The 2026-07-15 lock also reversed ratified Non-Goal #1 — applied via the [L1 amendment](0049-amendment-l1-cross-room-availability.md) (raw episodic recall cross-room *available* behind the RFC 0037 gate, room-first-ranked).
 **Author**: Maksim Khomutov
 **Date**: 2026-06-06
-**Target**: v0.3.12 (Phases 0–1) + v0.4.0 (Phases 2–4); **design ratified in v0.3.7** (docs-only, no code before v0.3.12 opens)
+**Target**: v0.3.12 (Phases 0–1) + unslotted (Phases 2–4); **design ratified in v0.3.7** (docs-only, no code before v0.3.12 opens)
 **Depends on**: RFC 0031 (Per-Session Namespacing — the `session = room` axis this RFC keeps and reframes), RFC 0037 (Memory Confidentiality — the egress gate that is this RFC's keystone), RFC 0027 (Reflection-Driven Consolidation — the pump that moves memory up the gradient), RFC 0028 (Agent Decision Policy Engine — the source of the experiential tier), RFC 0029 (Personal/Society Storage Split — the physical-storage axis this RFC is orthogonal to)
 **Relates to**: RFC 0026 (Declarative Facts Tier — the tier whose scope this RFC re-decides), RFC 0038 (Concurrent-Context Awareness & Cross-Channel Relay — the runtime surface of cross-room knowledge), RFC 0042 (State Namespacing by Scope — the runtime-state vocabulary this RFC's memory vocabulary must agree with), RFC 0014/0015 (Skill Registry / Pattern Extraction — the procedural tier, already cross-scope)
 **Spawned from**: [memory-scope-axes.md](../memory-scope-axes.md) (which settled the *horizontal* axes and asked to be promoted to an RFC) + the v0.3.7 cross-room behaviour review (the "personas should behave like real people" finding)
@@ -208,7 +208,7 @@ The scenarios from the v0.3.7 review, traced through the model:
 
 ## Sequencing & Phased Plan
 
-Phases 0–1 target **v0.3.12**; Phases 2–4 stay **v0.4.0** (Phase 2 needs the unimplemented RFC 0027 reflection engine; Phase 3 needs the unimplemented RFC 0028 decision engine). The order is forced by §E.
+Phases 0–1 target **v0.3.12**; Phases 2–4 are **unslotted** (Phase 2 needs the unimplemented RFC 0027 reflection engine; Phase 3 needs the unimplemented RFC 0028 decision engine). The order is forced by §E.
 
 - **Phase 0 — RFC 0037 confidentiality gate (keystone).** Classification on channels; protection level stamped on memory rows (fail-closed `internal`); the deterministic egress gate at injection + recall. Nothing below may ship first. *(The roadmap now places 0037 in v0.3.12 alongside this RFC's Phases 0–1 — both pulled forward per the 2026-07-15 decision.)*
 - **Phase 1 — Name the gradient + re-root ISSUE-0084 + capture topic facts.** Promote this RFC's law; reframe ISSUE-0084 from subject-classification to "L2 = cross-room, visibility = 0037 level." Widen topic-fact recall to cross-room *behind the Phase-0 gate* — **and land the capture path** ([RFC 0026 topic-predicate amendment](0026-amendment-topic-subject-predicates.md): `topic.*` predicate namespace + extractor-prompt + recall-seeding, behind the allowlist blast-radius re-review), without which the widening reads an empty tier.

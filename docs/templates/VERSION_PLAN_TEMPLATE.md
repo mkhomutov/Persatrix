@@ -19,7 +19,8 @@ whose next-steps item <n> this executes.
 > Amendment 2026-09-12, ruling (e)). Designs stay in their RFCs and issues,
 > the gate list in `scripts/release/sweep.py`, the evidence in the execution
 > report. A release that does not fit is cut or re-scoped by amendment, never
-> split into a second file: `make plan-status-check` fails one.
+> split into a second file: `make plan-status-check` fails one for a patch
+> release, and review holds a minor release to it.
 
 ## vX.Y.(Z-1) follow-up
 

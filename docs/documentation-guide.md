@@ -112,7 +112,7 @@ One canonical document per topic. Link to it; do not copy from it.
 | Internal issue tracker; live issue table | `docs/issues/README.md`; `docs/issues/INDEX.md` (generated) |
 | Manual tests index and conventions | `docs/manual-tests/README.md` |
 | Version status, RFC master index, merged PRs | `ROADMAP.md` |
-| Version scope decisions | `docs/v0.3.x-sequencing.md` (active amendment at the top) |
+| Version scope decisions | `docs/v0.4.x-sequencing.md`, the current line's (active amendment at the top); `docs/v0.3.x-sequencing.md` holds the v0.3.x line's, frozen |
 | One version's plan (scope locks and release checklist inside) and its evidence | `docs/vX.Y.Z-plan.md` and `docs/manual-tests/vX.Y.Z-execution-report.md` |
 | Operator and user guides | `docs/guides/` (auth, autonomous channels, channels, epochs, model providers, persona agents, sessions, web console and its channel settings, version bump, demo) |
 | Log schema and observability | `docs/observability.md` |

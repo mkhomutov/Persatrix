@@ -15,7 +15,8 @@
 #                   ignores the threshold, so there a chair acts as a
 #                   participant. A chair CANNOT close an interaction —
 #                   convergence is owned by the governance layers — and its
-#                   Layer 5 moderator hooks are reserved/inert until v0.4.0.
+#                   Layer 5 moderator hooks are reserved/inert (RFC 0030
+#                   Phase 2 is unslotted).
 #   - addressed   — speaks only when @-mentioned (or replied to in-thread)
 #   - observer    — never speaks
 # The legacy values `always` / `when_mentioned` / `never` still load and map

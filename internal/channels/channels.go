@@ -81,7 +81,7 @@ const (
 	// persistence/wire gap noted on [MemberConfig.Threshold] is closed. A
 	// v0.3.8 `chair` CANNOT close an interaction
 	// — convergence is owned by the deterministic governance layers — and its
-	// Layer 5 moderator hooks are reserved/inert until v0.4.0.
+	// Layer 5 moderator hooks are reserved/inert; RFC 0030 Phase 2 is unslotted.
 	RespondChair RespondPolicy = "chair"
 )
 

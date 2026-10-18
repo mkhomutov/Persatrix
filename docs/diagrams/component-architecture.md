@@ -225,8 +225,8 @@ The `DISPATCH -. planned .-> SUB` edge is dashed for a similar reason.
 [sub-agent](../ai-glossary.md#sub-agent) and merging its result back
 (RFC 0008), so the box is solid. But nothing starts a sub-agent yet: when a
 persona picks the `SPAWN_SUB_AGENT` action, `action_executor.py` answers
-`not_implemented`, and ROADMAP plans spawning for
-[v0.4.0](../../ROADMAP.md#planned-components-v040).
+`not_implemented`, and ROADMAP lists spawning as unslotted in its
+[v0.4.0 section](../../ROADMAP.md#what-ships-in-v040).
 
 The `WALLET --> COST` edge is solid: RFC 0023 PR 2 ([#384](https://github.com/mkhomutov/Persatrix/pull/384))
 composes `cost.BudgetEnforcer` and `cost.TokenCounter` into the
@@ -261,8 +261,9 @@ The `EXECUTOR -. planned .-> MCPG` and `EXECUTOR -. planned .-> PROTOS` edges
 are dashed, and those two boxes and `mcp_bridge.py` are stubs, because none of
 them is built. The [MCP bridge](../ai-glossary.md#mcp-bridge) is planned, and
 `protocols/` holds only `TODO` comments that no Go code imports yet. ROADMAP
-lists both among the
-[v0.4.0 planned components](../../ROADMAP.md#planned-components-v040).
+lists `protocols/` among the
+[v0.4.0 planned components](../../ROADMAP.md#planned-components-v040) and the
+MCP bridge as unslotted with RFC 0010.
 
 The stub packages are placeholders with `TODO` comments that compile but do not
 implement behaviour. They are intentional — removing them is a policy violation

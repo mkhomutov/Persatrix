@@ -1,12 +1,12 @@
 ---
 id: RFC-0030
 title: Multi-Agent Conversation Governance
-summary: Deterministic anti-thrash governance for multi-persona channel conversations — Phase 1 cascade depth/quiet windows in v0.3.x, moderator role in v0.4.0, declarative conversation types in v0.5.0+.
+summary: Deterministic anti-thrash governance for multi-persona channel conversations — Phase 1 cascade depth/quiet windows in v0.3.x, moderator role unslotted, declarative conversation types in v0.5.0+.
 type: architecture
 status: implementing
 author: Maksim Khomutov
 created: 2026-05-11
-target: v0.3.6 (Layer 2.5 — shipped); v0.3.7–v0.3.9 (Phase 1 — relevance gate + deterministic layers); v0.4.0 (Phase 2 — moderator); v0.5.0+ (Phase 3)
+target: v0.3.6 (Layer 2.5 — shipped); v0.3.7–v0.3.9 (Phase 1 — relevance gate + deterministic layers); unslotted (Phase 2 — moderator); v0.5.0+ (Phase 3)
 depends_on:
   - RFC-0011
   - RFC-0020
@@ -15,10 +15,10 @@ depends_on:
 # RFC 0030 — Multi-Agent Conversation Governance
 
 **Type**: architecture
-**Status**: 🚧 Implementing — Layer 2.5 (floor control) shipped v0.3.6; the relevance-gate **Tier A + `respond_policy → disposition` reframe** shipped v0.3.7 (the [relevance amendment](0030-amendment-relevance-gated-response.md)). **Deterministic Layers 1/2/4 (cost ceiling + reply budget + end-of-interaction vote) landed v0.3.8** — wired, composed, and tested behind opt-in/uncapped defaults ahead of the `interaction_id` producer. **Tier B salience also landed v0.3.8** (the sibling workstream — the leased `fast`-model salience bid + live per-disposition `threshold` + the `chair` low-threshold facilitator + NL-addressing-as-a-signal; [relevance amendment](0030-amendment-relevance-gated-response.md), acceptance [MT-CHANNEL-RELEVANCE-002](../manual-tests/MT-CHANNEL-RELEVANCE-002.md)). The `chair` ships as a facilitator only; the moderator (Layer 5 — the chair's active wrap-up/terminate half) and declarative conversation types (Layer 6) remain v0.4.0 / v0.5.0+.
+**Status**: 🚧 Implementing — Layer 2.5 (floor control) shipped v0.3.6; the relevance-gate **Tier A + `respond_policy → disposition` reframe** shipped v0.3.7 (the [relevance amendment](0030-amendment-relevance-gated-response.md)). **Deterministic Layers 1/2/4 (cost ceiling + reply budget + end-of-interaction vote) landed v0.3.8** — wired, composed, and tested behind opt-in/uncapped defaults ahead of the `interaction_id` producer. **Tier B salience also landed v0.3.8** (the sibling workstream — the leased `fast`-model salience bid + live per-disposition `threshold` + the `chair` low-threshold facilitator + NL-addressing-as-a-signal; [relevance amendment](0030-amendment-relevance-gated-response.md), acceptance [MT-CHANNEL-RELEVANCE-002](../manual-tests/MT-CHANNEL-RELEVANCE-002.md)). The `chair` ships as a facilitator only; the moderator (Layer 5 — the chair's active wrap-up/terminate half) and declarative conversation types (Layer 6) remain unslotted / v0.5.0+.
 **Author**: Maksim Khomutov
 **Date**: 2026-05-11
-**Target**: v0.3.6 (Layer 2.5 — floor control, shipped); v0.3.7–v0.3.9 (Phase 1 — [relevance gate](0030-amendment-relevance-gated-response.md) + cost/reply-budget/end-of-interaction layers); v0.4.0 (Phase 2 — moderator role / bid-and-select); v0.5.0+ (Phase 3 — declarative conversation types + topic-drift)
+**Target**: v0.3.6 (Layer 2.5 — floor control, shipped); v0.3.7–v0.3.9 (Phase 1 — [relevance gate](0030-amendment-relevance-gated-response.md) + cost/reply-budget/end-of-interaction layers); unslotted (Phase 2 — moderator role / bid-and-select); v0.5.0+ (Phase 3 — declarative conversation types + topic-drift)
 **Depends on**: RFC 0011 (Channels), RFC 0011 amendment (Cascade-Depth Wire Propagation), RFC 0020 (Interaction Lifecycle)
 **Integrates with**: RFC 0023 (LLM Call Leasing), RFC 0028 (Agent Decision Policy Engine), RFC 0024 (Event-Driven Scheduling) — composition, not hard gates
 
@@ -129,7 +129,7 @@ Six layers, ordered by cheap-and-unfailable → expensive-and-judgement-based:
 | **2.5** | Floor control / speaker serialization | Floor-holder stalls → per-turn timeout advances | one in-flight dispatch + a parked waiter | ✅ Shipped ([floor-control amendment](0030-amendment-floor-control-speaker-serialization.md), v0.3.6; telemetry PR 4 fast-follow) |
 | **3** | Per-membership response gate (`respond_policy`) | None — config lookup | ~free | ✅ Shipped (RFC 0011 §D) |
 | **4** | End-of-interaction signal (K consecutive votes) | Agent must opt in; falls back to lower layers | message accounting | ✅ Phase 1 (v0.3.8) |
-| **5** | Moderator role | Moderator can be wrong or time out; falls back to lower layers | ~1 LLM call per N turns | 📋 This RFC, Phase 2 (v0.4.0) |
+| **5** | Moderator role | Moderator can be wrong or time out; falls back to lower layers | ~1 LLM call per N turns | 📋 This RFC, Phase 2 (unslotted) |
 | **6** | Declarative conversation type / phases | N/A for runtime termination — sets defaults for Layers 1–5 | trivial | 📋 This RFC, Phase 3 (v0.5.0+) |
 
 > **Layer 2.5 note (added by the [floor-control amendment](0030-amendment-floor-control-speaker-serialization.md)).** Layers 0–2 and 4–6 all answer *volume / termination* questions ("how many," "how much," "are we done"). None answers *ordering* — "who speaks next, and does each responder see the previous one." Sub-problem §A(c) conflated that with the reply *budget*; the amendment splits it and adds **Layer 2.5**, which serializes concurrent responders into a deterministic, mutually-visible speaker round. It is brought forward to **v0.3.6** as a usability blocker, ahead of the rest of this RFC's Phase 1.
@@ -453,7 +453,7 @@ Phasing matches the user's request: Phase 1 in v0.3.x, Phase 2 in v0.4.0, Phase 
 
 **Dependencies.** RFC 0011 amendment (shipped); RFC 0020 Interaction (shipped). Layer 1 (lease budget) soft-depends on RFC 0023 landing — until then the field is wire-reserved and inert.
 
-### Phase 2 — Moderator role (v0.4.0)
+### Phase 2 — Moderator role (unslotted)
 
 **Summary.** Layer 5 — a pluggable moderator agent reading the open-interaction transcript every N turns and emitting continue/wrap_up/terminate decisions.
 

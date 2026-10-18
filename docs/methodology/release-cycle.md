@@ -25,9 +25,10 @@ Phase 2  Tag PR                version bump, changelog, gate sweep, statuses →
 
 Each phase below states its **entry**, **exit**, **artifacts**, and **failure
 path**. The vocabulary is defined in the [process glossary](process-glossary.md).
-Ruling (e) sets this shape for a **patch release**. No minor release has
-opened since; the amendment that opens one says whether it keeps the one
-document.
+Ruling (e) sets this shape for a **patch release**. The amendment that opens
+a minor release says whether it keeps the one document; v0.4.0 keeps it, with
+each phase's PR breakdown in its RFC's PR plan
+([ruling r](../v0.4.x-sequencing.md#rulings)).
 
 ---
 
@@ -36,7 +37,8 @@ document.
 ### Sequencing amendment
 
 The version's scope is ratified in a dated amendment to the sequencing
-document ([v0.3.x-sequencing.md](../v0.3.x-sequencing.md)), never by editing
+document of the current line ([v0.4.x-sequencing.md](../v0.4.x-sequencing.md);
+the v0.3.x line's is [v0.3.x-sequencing.md](../v0.3.x-sequencing.md), frozen), never by editing
 an earlier decision. The amendment names the version, its codename, its
 one-line story, the issues and RFC phases it carries, which of them are
 **cuttable**, and the next version after it. It is the citation every later

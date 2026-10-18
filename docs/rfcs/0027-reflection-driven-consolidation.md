@@ -6,7 +6,7 @@ type: feature
 status: proposed
 author: Maksim Khomutov
 created: 2026-05-01
-target: v0.4.0
+target: unslotted, left v0.4.0 by v0.4.x sequencing ruling (m)
 depends_on:
   - RFC-0005
   - RFC-0008
@@ -21,7 +21,7 @@ depends_on:
 **Status**: 📋 Proposed
 **Author**: Maksim Khomutov
 **Date**: 2026-05-01
-**Target**: v0.4.0
+**Target**: unslotted, left v0.4.0 by [v0.4.x sequencing ruling (m)](../v0.4.x-sequencing.md#rulings)
 **Depends on**: RFC 0005, RFC 0008, RFC 0009, RFC 0013, RFC 0026
 
 ---

@@ -6,7 +6,7 @@ type: architecture
 status: partially_implemented
 author: Maksim Khomutov
 created: 2026-05-09
-target: v0.3.3 (Phases 1–4) + v0.4.0 (Phase 5) + v0.5+ (Phase 6)
+target: v0.3.3 (Phases 1–4) + unslotted (Phase 5) + v0.5+ (Phase 6)
 depends_on:
   - RFC-0005
   - RFC-0011
@@ -19,7 +19,7 @@ depends_on:
 **Status**: ⚠️ Partially Implemented (Phases 1–4)
 **Author**: Maksim Khomutov
 **Date**: 2026-05-09
-**Target**: v0.3.3 (Phases 1–4) + v0.4.0 (Phase 5) + v0.5+ (Phase 6) — PR plan: [`0024-pr-plan.md`](0024-pr-plan.md)
+**Target**: v0.3.3 (Phases 1–4) + unslotted (Phase 5) + v0.5+ (Phase 6) — PR plan: [`0024-pr-plan.md`](0024-pr-plan.md)
 **Depends on**: RFC 0005 (Persona Agent + Memory), RFC 0011 (Channels & Bridges), RFC 0017 (Memory Injection Budget)
 **Soft-depends on (Phase 2+)**: SA-1 (Personal/Society Storage Split) — tracked as a v0.4.0 RFC in [storage-architecture-roadmap.md](../storage-architecture-roadmap.md) (📋 Pending RFC at SA-1); see Open Question §1. Phase 2 ships in v0.3.x and therefore *before* SA-1; the soft-dependency is forward-only — once SA-1 lands, Phase 2's timer-persistence backend migrates as a follow-up.
 **Relates to**: RFC 0023 (LLM Call Leasing), RFC 0027 (Reflection-Driven Consolidation) — see §D for salience-signal ownership.
@@ -282,7 +282,7 @@ The §F guard becomes vestigial because the "empty context" condition can no lon
 | 5 | `tick_interval_seconds` emits a deprecation warning at config load. Document the path to `timers: []` (the no-timers case). Update RFC 0017 §F with a note that the guard is now vestigial. | Yes — warning only, behaviour unchanged. |
 | 6 | Remove `tick_interval_seconds`. Delete §F guard code. Delete the `TickScheduler` legacy adapter. Remove `EventType.TICK` from the event taxonomy. | Breaking — minor version bump (pre-1.0). |
 
-Phases 1–4 ship inside the v0.3.x window. Phase 5 lands in v0.4.0. Phase 6 deferred to v0.5+ once no consumer uses the legacy config.
+Phases 1–4 ship inside the v0.3.x window. Phase 5 is unslotted (it was v0.4.0). Phase 6 deferred to v0.5+ once no consumer uses the legacy config.
 
 **Phase 6 entrance criteria.** "No consumer uses the legacy config" is operationalised as all of:
 
@@ -355,7 +355,7 @@ If accepted:
 
 Phases 1–4 shipped under the v0.3.3 umbrella per [`0024-pr-plan.md`](0024-pr-plan.md) — PRs 1 ([#406](https://github.com/mkhomutov/Persatrix/pull/406)), 2 ([#407](https://github.com/mkhomutov/Persatrix/pull/407)), 2.1 ([#408](https://github.com/mkhomutov/Persatrix/pull/408)), 3a ([#409](https://github.com/mkhomutov/Persatrix/pull/409)), 3b ([#410](https://github.com/mkhomutov/Persatrix/pull/410)), 4 ([#411](https://github.com/mkhomutov/Persatrix/pull/411)), 5 ([#412](https://github.com/mkhomutov/Persatrix/pull/412)), 5.1 ([#413](https://github.com/mkhomutov/Persatrix/pull/413)). The agent autonomy loop is now structurally event-driven: `agents/event_loop.py` owns a per-agent `asyncio.Queue[WakeEvent]`; `TickScheduler` is a thin adapter that synthesises `ScheduledWake(timer_id="legacy_tick")` from the legacy `tick_interval_seconds`; `EventDispatcher.dispatch()` preserves its synchronous-return contract via `SyncDispatchHandle`. `autonomy.timers` config + a per-agent SQLite `scheduled_wakes` cache (wired into `initialize_persona_agents`) back scheduled wakes; write-side `salience` + `source_span_id` back the `SalienceWake` path (default-off at threshold `0.95`, above the conservative `0.6` scoring max, with a loop-back guard and per-agent rate-limit); the channel-message dispatch path enqueues `InboundEventWake` fire-and-forget; and the "bored persona costs nothing" cost-regression CI gate is wired as a release-blocker on the wake-path file set. [RFC 0017 §F](0017-persona-memory-injection-budget.md#f-empty-context-tick-short-circuit) is now structurally unreachable but stays in place — an inline cross-link in `agents/persona_runtime/action_loop.py` names this RFC's Phase 5/6 as its deletion path.
 
-**Still scheduled**: Phase 5 (`tick_interval_seconds` deprecation warning at config load; the RFC 0017 §F file amendment) ships in v0.4.0; Phase 6 (`tick_interval_seconds` removal, §F guard deletion, `TickScheduler` adapter removal, `EventType.TICK` removal — breaking, minor bump pre-1.0) ships in v0.5+, gated on the [Phase 6 entrance criteria](#phased-implementation-plan). This is a partial-RFC closeout; the full-RFC closeout waits for Phase 6.
+**Still scheduled**: Phase 5 (`tick_interval_seconds` deprecation warning at config load; the RFC 0017 §F file amendment) is unslotted (it was v0.4.0); Phase 6 (`tick_interval_seconds` removal, §F guard deletion, `TickScheduler` adapter removal, `EventType.TICK` removal — breaking, minor bump pre-1.0) ships in v0.5+, gated on the [Phase 6 entrance criteria](#phased-implementation-plan). This is a partial-RFC closeout; the full-RFC closeout waits for Phase 6.
 
 ## Related Documentation
 

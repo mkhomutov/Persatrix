@@ -310,7 +310,7 @@
           "type": "integer",
           "minimum": 1,
           "default": 60,
-          "description": "Seconds between autonomous tick cycles. RFC 0024 PR 2 introduces `autonomy.timers` as the per-agent replacement; both knobs are accepted side-by-side through v0.3.3 — `timers` wins when both are present. Phase 5 (v0.4.0) emits a deprecation warning on this field; Phase 6 (v0.5+) removes it."
+          "description": "Seconds between autonomous tick cycles. RFC 0024 PR 2 introduces `autonomy.timers` as the per-agent replacement; both knobs are accepted side-by-side through v0.3.3 — `timers` wins when both are present. Phase 5 (unslotted) is to emit a deprecation warning on this field; Phase 6 (v0.5+) removes it."
         },
         "timers": {
           "type": "array",

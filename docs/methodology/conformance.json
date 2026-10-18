@@ -90,6 +90,7 @@
   "persatrix_specific": [
     "docs/ai-glossary.md",
     "docs/v0.3.x-sequencing.md",
+    "docs/v0.4.x-sequencing.md",
     "ROADMAP.md",
     "scripts/checks/roadmap_status.py",
     "scripts/checks/amendment_evidence.py",

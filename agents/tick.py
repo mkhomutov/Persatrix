@@ -11,8 +11,8 @@ wiring live in the adapter's ``on_tick`` callback so existing tests
 Back-compat contract:
 
 * ``tick_interval_seconds`` in ``agents.yaml`` continues to work — Phase 2
-  introduces ``autonomy.timers`` and Phase 5 / v0.4.0 emits the deprecation
-  warning.
+  introduces ``autonomy.timers``, and Phase 5 (unslotted) is to emit the
+  deprecation warning.
 * ``wake()`` resets ``idle_count`` and enqueues a single ``ScheduledWake``
   so woken agents fire on_tick immediately instead of waiting the rest of
   the interval — preserves the v0.3.2 "event arrived, tick now" semantics

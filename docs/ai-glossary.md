@@ -108,7 +108,7 @@ Process vocabulary (scope lock, cuttable, live arc, finding, …) lives in the
   reasoning patterns, domain knowledge, procedural workflows, and
   meta-cognitive behaviors. Versioned and tracked in the Skill Registry.
   Reserved term — see [RFC 0014](rfcs/0014-agent-skill-registry-lifecycle.md);
-  📋 Proposed for v0.4.0, not yet implemented. Do not use "skill" to mean
+  📋 Proposed, unslotted (was v0.4.0), not yet implemented. Do not use "skill" to mean
   "tool" in v0.3.0 code or docs.
 - **Example:** "RFC 0014 introduces the `code-review` skill, composed from the
   `file_read` and `lint` tools."
@@ -174,13 +174,13 @@ Process vocabulary (scope lock, cuttable, live arc, finding, …) lives in the
 
 ### Chair
 - **Aliases:** "chair disposition", "facilitator"
-- **Disallowed:** "moderator" (the v0.4.0 Layer 5 role that can *close* a
+- **Disallowed:** "moderator" (the unslotted Layer 5 role that can *close* a
   conversation — the chair's deferred active half), "admin", "owner"
 - **Definition:** A channel **disposition** (v0.3.8): a `participant` with a low
   **disposition threshold**, so it clears the **salience bid** readily and keeps a
   discussion moving. In v0.3.8 a chair is a *facilitator only* — it **cannot**
   close, wrap up, or terminate an interaction (that is the Layer 5 moderator,
-  v0.4.0). Convergence comes from the governance layers, not the chair.
+  unslotted). Convergence comes from the governance layers, not the chair.
   Under the default `reasoning.mode: bid` the threshold is not read, so a chair
   acts as a plain `participant`.
   **v0.3.11 (RFC 0052 §D)** adds one bounded exception on *autonomous* channels:
@@ -210,7 +210,7 @@ Process vocabulary (scope lock, cuttable, live arc, finding, …) lives in the
   from external Model Context Protocol (MCP) servers, configured in
   `config/mcp-servers.yaml` (design:
   [orchestration spec §5.2](ai-agents-orchestration-spec.md#52-mcp-model-context-protocol-support);
-  ROADMAP: [v0.4.0](../ROADMAP.md#planned-components-v040)). Nothing connects
+  ROADMAP: unslotted with RFC 0010, [v0.4.0](../ROADMAP.md#what-ships-in-v040)). Nothing connects
   to an MCP server today: [`agents/tools/mcp_bridge.py`](../agents/tools/mcp_bridge.py)
   and [`internal/mcp/mcp.go`](../internal/mcp/mcp.go) are TODO placeholders,
   nothing reads the config file, and an `mcp:` entry in an agent's `tools`

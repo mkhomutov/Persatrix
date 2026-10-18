@@ -1,12 +1,12 @@
 ---
 id: RFC-0029
 title: Personal/Society Storage Split
-summary: Splits persona-personal memory from cross-agent society memory behind a facade — Phase 1 (facade + tier rename) in v0.3.x; Phases 2–4 (Postgres society store, migration) in v0.4.0.
+summary: Splits persona-personal memory from cross-agent society memory behind a facade — Phase 1 (facade + tier rename) in v0.3.x; Phase 3 (society store) in v0.4.0, with Phase 4 (migration) only if its scope lock keeps the channels-store swap.
 type: architecture
 status: partially_implemented
 author: Maksim Khomutov
 created: 2026-05-10
-target: Phase 1 v0.3.2 (facade + tier rename); Phases 2–6 v0.4.0 — see docs/v0.3.2-plan.md and docs/rfcs/0029-pr-plan.md
+target: Phase 1 v0.3.2 (facade + tier rename); Phase 3 v0.4.0 (in the form v0.4.0's scope lock rules; Phase 4 with it only if the lock keeps the channels-store swap); Phases 2, 5–6 unslotted — see docs/v0.3.2-plan.md and docs/rfcs/0029-pr-plan.md
 depends_on:
   - RFC-0005
   - RFC-0008
@@ -21,7 +21,7 @@ depends_on:
 **Status**: ⚠️ Partially Implemented (Phase 1)
 **Author**: Maksim Khomutov
 **Date**: 2026-05-10
-**Target**: Phase 1 v0.3.2 (facade + tier rename) — see [v0.3.2 plan](../v0.3.2-plan.md) and [PR plan](0029-pr-plan.md); Phases 2–6 v0.4.0 (Postgres society store, migration tooling)
+**Target**: Phase 1 v0.3.2 (facade + tier rename) — see [v0.3.2 plan](../v0.3.2-plan.md) and [PR plan](0029-pr-plan.md); Phase 3 v0.4.0 (the society backend, in the form v0.4.0's scope lock rules; Phase 4's migration tooling with it only if the lock keeps the channels-store swap); Phases 2, 5–6 unslotted
 **Depends on**: RFC 0005 (Persona Agent + Memory), RFC 0008 (Memory & Context Optimization), RFC 0011 (Channels & Bridges)
 **Soft-depends on (Phase 2+)**: RFC 0009 Phase 4 (Agent Identity Tokens & HITL Gates) — Phase 2 of this RFC consumes the token-verifier API for cross-agent reads (§E); a mock verifier is acceptable for unit tests until 0009 Phase 4 ships.
 **Relates to**: RFC 0009 (Security & Sandboxing), RFC 0013 (Legal & Ethical Compliance), RFC 0026 (Declarative Facts Tier), RFC 0027 (Reflection-Driven Consolidation), RFC 0028 (Agent Decision Policy Engine)
@@ -517,7 +517,7 @@ The migration is reversible during the deprecation window: `persatrix memory rol
 
 ## Decision / Next Steps
 
-**Status**: ⚠️ Partially Implemented — Phase 1 shipped in v0.3.2 (RFC 0029 Phase 1 PRs 1–5). Phases 2–6 reserved for v0.4.0.
+**Status**: ⚠️ Partially Implemented — Phase 1 shipped in v0.3.2 (RFC 0029 Phase 1 PRs 1–5). Phase 3 is v0.4.0 (Phase 4 only with the channels-store swap); Phases 2, 5–6 are unslotted.
 
 **Phase 1 implemented (v0.3.2).** The `MemoryStore` facade promotion landed across RFC 0029 Phase 1 PRs 1–5 ([PR plan](0029-pr-plan.md)): the typed facade in `agents/memory/store.py`, the `MemoryFacade` one-minor-version alias shim, the RFC 0011 channel-history caller migration, the lint rule + `DeprecationWarning` guarding the personal/society boundary, the `persona_runtime/` + `sub_agents/` + RFC 0026 facts-tier call-site sweep, and the `tests/perf/personal_tier_latency.py` personal-tier recall-latency regression gate. No Postgres dependency was added — society-tier methods raise the `SocietyBackendUnavailable` hierarchy. The step-1 ordering prerequisite below ("before RFC 0028 implementation begins") is now satisfied; Phases 2–6 (capability tokens, Postgres society backend, migration tooling, society-tier consumers, conditional file split) are reserved for v0.4.0.
 

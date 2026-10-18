@@ -65,17 +65,15 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # carries the version's dated heading (ISSUE-0139 — the archival mechanism
     # #838 found missing). Only the OPEN cycle's plan may appear below, as the
     # last resort at the cap, and its tag PR drops the entry.
-    # docs/v0.3.x-sequencing.md is the LIVING sequencing record for the whole
-    # v0.3.x line: the original 2026-05-10 decision is preserved verbatim and
-    # every later scope decision lands as a dated amendment appended below it
-    # (eight so far, through 2026-08-19). That "preserve original + append
-    # amendment" shape is the load-bearing property — trimming an earlier body
-    # to fit the cap would defeat the comparison each amendment depends on —
-    # and, unlike a single version's plan, no single release ever freezes it,
-    # so the released-version exclusion does not apply. Exit condition: when the
-    # v0.3.x line closes (the v0.4.0 train opens a new sequencing doc) this
-    # file freezes and the entry goes; or earlier if the amendments are split
-    # into their own file.
+    # docs/v0.3.x-sequencing.md is the sequencing record for the whole v0.3.x
+    # line: the original 2026-05-10 decision is preserved verbatim and every
+    # later scope decision is a dated amendment appended below it. That
+    # "preserve original + append amendment" shape is the load-bearing
+    # property — trimming an earlier body to fit the cap would defeat the
+    # comparison each amendment depends on. The line closed with v0.3.16 and
+    # the file froze when docs/v0.4.x-sequencing.md opened (ruling (s) there),
+    # so it no longer grows. The entry stays: the released-version exclusion
+    # matches version-cycle docs only, not a line's sequencing record.
     "docs/v0.3.x-sequencing.md",
     "docs/rfcs/0005-persona-agent-memory.md",
     "docs/rfcs/0005-pr-plan.md",

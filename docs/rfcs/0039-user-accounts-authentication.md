@@ -6,7 +6,7 @@ type: architecture
 status: partially_implemented
 author: Maksim Khomutov
 created: 2026-05-16
-target: v0.3.12 (Phases 1–2) + v0.4.0 (Phase 3)
+target: v0.3.12 (Phases 1–2) + v0.4.0 (Phase 3's server half; its CLI commands stay out under the Rust CLI freeze)
 depends_on:
   - RFC-0002
   - RFC-0016
@@ -18,7 +18,7 @@ depends_on:
 **Status**: ⚠️ Partially Implemented — **Phases 1–2 shipped in v0.3.12** (PRs [#779](https://github.com/mkhomutov/Persatrix/pull/779) accounts store, [#780](https://github.com/mkhomutov/Persatrix/pull/780) sessions, [#790](https://github.com/mkhomutov/Persatrix/pull/790) REST + middleware + [amendment](0039-amendment-enabled-mode-exposure.md) browser posture, [#791](https://github.com/mkhomutov/Persatrix/pull/791) bootstrap + CLI — Phase 1 complete, inert, [#793](https://github.com/mkhomutov/Persatrix/pull/793) Phase 2 enforcement + verified claim + console login; per the [PR plan](0039-pr-plan.md)): enforcement is opt-in behind `auth.mode: enabled`, the shipped default stays `disabled`. Phase 3 (account administration REST API, self-service password change, failed-login lockout) targets v0.4.0. Operator surface: [auth guide](../guides/auth.md)
 **Author**: Maksim Khomutov
 **Date**: 2026-05-16
-**Target**: v0.3.12 (Phases 1–2) + v0.4.0 (Phase 3)
+**Target**: v0.3.12 (Phases 1–2) + v0.4.0 (Phase 3's server half; its CLI commands stay out under the Rust CLI freeze)
 **Depends on**: RFC 0002 (REST API Server — the surface this RFC authenticates), RFC 0016 (Human Participant & Chat Interface — the `UserParticipant` an account binds to)
 **Relates to**: RFC 0009 (Agent Identity, Security & Sandboxing — the *agent* identity axis this RFC is the human counterpart of; the `AuditLogger` and `RateLimiter` it reuses), RFC 0012 (Protocols & Organizations — organizational clearance attaches to an account; the §I extension seam), RFC 0037 (Memory Confidentiality & Channel Classification — its confidentiality model presupposes a verified human identity), RFC 0001 (Core Orchestration Pipeline — the orchestrator `Store` pattern)
 

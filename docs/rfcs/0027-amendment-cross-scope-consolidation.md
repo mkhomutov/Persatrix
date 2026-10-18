@@ -4,7 +4,7 @@
 **Status**: 📋 Proposed — **stub**. Authorised by [RFC 0049 §F](0049-memory-consolidation-gradient.md#f-the-consolidation-pump); to be expanded into a full amendment when its v0.4.0 PR plan opens.
 **Author**: Maksim Khomutov
 **Date**: 2026-06-06
-**Target**: v0.4.0 — after the [RFC 0037 keystone](0037-memory-confidentiality-channel-classification.md) and alongside the [fact-scope re-root](0031-amendment-fact-scope-by-consolidation-level.md); no v0.3.7 code.
+**Target**: unslotted with RFC 0049 Phase 2 ([v0.4.x sequencing ruling (o)](../v0.4.x-sequencing.md#rulings)); was v0.4.0, after the [RFC 0037 keystone](0037-memory-confidentiality-channel-classification.md) and alongside the [fact-scope re-root](0031-amendment-fact-scope-by-consolidation-level.md); no v0.3.7 code.
 **Authoritative model**: [RFC 0049 — Memory Consolidation Gradient & Scope Reconciliation](0049-memory-consolidation-gradient.md)
 
 ---

@@ -171,7 +171,7 @@ agents:
       level: "semi-autonomous"
       # RFC 0024 PR 2: ``timers: []`` is the v0.3.3 stock-persona default —
       # idle personas pay nothing.  ``tick_interval_seconds`` is still
-      # accepted by the schema (Phase 5 / v0.4.0 emits the deprecation
+      # accepted by the schema (Phase 5, unslotted, is to emit the deprecation
       # warning; v0.5+ removes it) but is intentionally omitted here so
       # the stock config does not trigger the precedence INFO log on
       # every startup.  When the RFC 0027 memory-consolidation policy
