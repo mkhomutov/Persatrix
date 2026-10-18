@@ -224,8 +224,9 @@ tagged.
 > in with [RFC 0009 Phase
 > 4](../rfcs/0009-security-sandboxing.md#phase-4-agent-identity-tokens--hitl-gates).
 > Plan-opening defaults: steps 1 and 2 land as one early Go PR, test first, as
-> recommended above. Step 3's agent half may ride with them; it gives each
-> agent its own REST budget and so closes the REST half of
+> recommended above. Step 3's agent half rides with them, as its own small
+> Python change beside the Go one, since the recommendation takes it either
+> way. It gives each agent its own REST budget and so closes the REST half of
 > [ISSUE-0111](ISSUE-0111-anonymous-wallet-rpcs-share-rate-limit-bucket.md)'s
 > residuals. Step 3's CLI half stays out under the Rust CLI freeze. Step 4 is
 > not taken by default: it changes RFC 0009 §H and stays the owner's call.

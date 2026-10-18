@@ -114,8 +114,10 @@ class and are *not* covered here — they stay agent-global as a named
 Known Gap scoped to v0.4.0 per the ISSUE-0081 plan-opening split
 (capacity policy, not read-confidentiality).
 
-> 2026-10-18 — v0.4.0 planning-readiness: the agent-global capacity sweeps
-> named just above as "a named Known Gap scoped to v0.4.0" had no issue of
-> their own, and v0.3.16's Known Gaps dropped them. They are now
-> [ISSUE-0186](ISSUE-0186-capacity-sweeps-not-per-principal.md). This issue's
-> v0.5.0 slot is unchanged.
+> 2026-10-18 — v0.4.0 planning-readiness: the capacity sweeps named just
+> above as "a named Known Gap scoped to v0.4.0" had no issue of their own,
+> and v0.3.16's Known Gaps dropped them. Episode TTL, size-cap eviction,
+> procedural decay and the superseded-fact prune are now
+> [ISSUE-0186](ISSUE-0186-persona-memory-has-no-capacity-bound.md). Note
+> prune did not belong in that list: `agents/memory/notes.py` already prunes
+> per principal. This issue's v0.5.0 slot is unchanged.

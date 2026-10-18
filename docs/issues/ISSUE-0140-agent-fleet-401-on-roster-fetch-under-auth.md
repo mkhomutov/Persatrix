@@ -107,6 +107,11 @@ attribution axes — and is carried as a Known Gap on the
 > shape 3 above, agent authentication through RFC 0009, is the designed fix,
 > and v0.4.0 now builds it (ruling n). Plan-opening default: shape 3, by the
 > agent-identity lock's default route, which checks RFC 0009's tokens on the
-> agents' REST calls. The directory and `channels:recall` routes stay
-> `policyAuthenticated`, and the fleet authenticates to them. Shapes 1 and 2
-> are not taken.
+> agents' REST calls. The directory route stays `policyAuthenticated` and
+> accepts an agent token as well as a signed-in account. The
+> `channels:recall` route is `policyOperator`, not `policyAuthenticated` as
+> the 2026-09-15 note says, because it exposes persona memory; a token alone
+> would turn its `401` into a `403`. So an agent token there admits only the
+> persona the path names, which is the persona's own memory (the tool sends
+> its own agent ID), and accounts still need the operator role. Shapes 1 and
+> 2 are not taken.

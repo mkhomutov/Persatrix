@@ -4,7 +4,7 @@
 **Feature Area**: Memory scope axes (the tenant/principal axis — ISSUE-0081 storage + ISSUE-0082 Part 2 emission)
 **Version**: 1.1
 **Created**: 2026-08-06
-**Last Updated**: 2026-08-18
+**Last Updated**: 2026-10-18
 **Status**: Active — **executed live at v0.3.14 release-prep PR 1** ([execution report](v0.3.14-execution-report.md)); v1.1 folds in that run's F-3 (the fresh-room rule below) and F-4 (the operator notes) so a re-run does not repeat them.
 
 ---
@@ -19,7 +19,7 @@ Every axis before this one isolated *rooms* (session) or *runs* (epoch). Neither
 
 **Out of Scope** — deferred, **not asserted** here:
 
-- **Per-principal capacity sweeps / quota** — episode TTL, size-cap eviction, procedural decay and note prune stay agent-global (a named Known Gap, v0.4.0). Recall stays principal-filtered either way, so this MT's absence bars are unaffected.
+- **Per-principal capacity sweeps / quota** — no clean-up pass bounds a persona's memory yet, and the per-person quota is unscheduled ([ISSUE-0186](../issues/ISSUE-0186-persona-memory-has-no-capacity-bound.md)). Recall stays principal-filtered either way, so this MT's absence bars are unaffected.
 - **The auth substrate itself** — [MT-AUTH-001](MT-AUTH-001.md) owns bootstrap, the §E matrix, the browser session; it re-runs beside this MT as the substrate regression.
 - **Concurrent sessions for two accounts** — see the two-account note below.
 - **The two stated residuals** ([ISSUE-0082](../issues/ISSUE-0082-orchestrator-per-request-session-principal-emission.md) R-1 / R-2), neither of which this MT can reach: it drives `persatrix chat` against a **single** persona, so there is no second speaker for the close-time summary to aggregate (R-1) and no agent-to-agent cascade across the orchestrator hop (R-2). Both are owned by [MT-MEMORY-GROUP-TENANT-001](MT-MEMORY-GROUP-TENANT-001.md) (designs: [ISSUE-0123](../issues/ISSUE-0123-per-speaker-interaction-scope.md) / [ISSUE-0124](../issues/ISSUE-0124-orchestrator-hop-drops-tenant-on-agent-cascade.md)), a v0.3.15 deliverable — not a gap in this arc. Do not read a green run here as evidence about either.

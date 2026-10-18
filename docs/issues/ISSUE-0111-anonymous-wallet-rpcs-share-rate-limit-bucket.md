@@ -129,6 +129,6 @@ Landed with the v0.3.11 release-prep MT-execution PR (TDD,
 
 > 2026-10-18 — v0.4.0 planning-readiness: still not slotted.
 > [ISSUE-0152](ISSUE-0152-one-quarantine-refuses-every-anonymous-caller.md)
-> boards v0.4.0, and if its step 3 agent half rides with its early PR, each
-> agent gets its own REST budget, which closes the REST half of the residuals
-> above.
+> boards v0.4.0, and by its plan-opening default its step 3 agent half rides
+> with its early PR. Each agent then gets its own REST budget, which closes
+> the REST half of the residuals above.

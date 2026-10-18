@@ -176,6 +176,6 @@ how it reads a refusal.
 > shape](../v0.4.x-sequencing.md#amendment-2026-10-18--v040s-shape-its-prerequisites-its-cuts-and-the-end-of-the-v03x-line)
 > does not take it in: its [ruling (q)](../v0.4.x-sequencing.md#rulings)
 > boards an issue only when a phase in the release is its fix. Item 3 no
-> longer needs to wait on the harness: that amendment holds EXP-001's scored
-> run from a checkout pinned at `c6ef01d5`, so a change on `main` does not
-> reach it.
+> longer needs to wait on the harness: the amendment that opened v0.4.0
+> holds EXP-001's scored run from a checkout pinned at `c6ef01d5`, so a
+> change on `main` does not reach it.

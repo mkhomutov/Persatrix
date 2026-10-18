@@ -99,7 +99,11 @@ larger change to what the model reads and wants its own measurement.
 > still. [The amendment that opened
 > v0.4.0](../v0.3.x-sequencing.md#amendment-2026-10-18--a-society-that-pursues-long-goals-exp-001-measures-v040-opens)
 > now holds the scored run from a checkout pinned at `c6ef01d5`, so a change
-> on `main` does not reach it. What is left is the slot, and [v0.4.0's
+> on `main` does not reach it. Two things are left. The other constraint
+> above still holds: moving the clock line takes an RFC 0021 §C amendment.
+> And there is no slot: [v0.4.0's
 > shape](../v0.4.x-sequencing.md#amendment-2026-10-18--v040s-shape-its-prerequisites-its-cuts-and-the-end-of-the-v03x-line)
-> does not take it in: its [ruling (q)](../v0.4.x-sequencing.md#rulings)
-> boards an issue only when a phase in the release is its fix.
+> does not take it in, because its [ruling (q)](../v0.4.x-sequencing.md#rulings)
+> boards an issue only when a phase in the release is its fix. RFC 0021
+> Phase 2 does board, so if the plan's goal audit proposes this change, the
+> amendment can ride with that phase.

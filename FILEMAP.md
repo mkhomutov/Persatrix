@@ -786,7 +786,7 @@
 │   │   ├── ISSUE-0183-overlapping-fact-writes-leave-no-live-fact.md
 │   │   ├── ISSUE-0184-fact-recall-cap-runs-before-the-gate.md
 │   │   ├── ISSUE-0185-what-the-room-subject-seed-leaves-open.md
-│   │   ├── ISSUE-0186-capacity-sweeps-not-per-principal.md
+│   │   ├── ISSUE-0186-persona-memory-has-no-capacity-bound.md
 │   │   ├── ISSUE-TEMPLATE.md
 │   │   └── README.md
 │   ├── manual-tests/
