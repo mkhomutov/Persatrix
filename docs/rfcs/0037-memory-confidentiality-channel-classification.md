@@ -162,8 +162,9 @@ schema columns plus an injection-layer rule.
 The **authority** axis is not local — "a directive from context A
 outranks a directive from context B" is meaningless without roles and a
 hierarchy to rank A and B. That axis, and the *enforced* (blocking)
-egress gate, depend on the organization model and ship in
-[RFC 0012](0012-protocols-organizations.md) for v0.4.0. This RFC and
+egress gate, depend on the organization model and belong to
+[RFC 0012](0012-protocols-organizations.md) (the gate unslotted since
+[2026-10-20](0012-protocols-organizations.md#amendment-2026-10-20--the-v040-plans-ruling-b-audit)). This RFC and
 RFC 0012 are deliberately split along the line of *what is enforceable
 without organizations*.
 

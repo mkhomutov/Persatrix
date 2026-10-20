@@ -6,7 +6,7 @@ type: architecture
 status: proposed
 author: Maksim Khomutov
 created: 2026-05-16
-target: v0.4.0 (Phases 1–3 — organizations & authority); v0.5.0 (Phases 4–5 — meeting/negotiation protocols, inter-org federation)
+target: v0.4.0 (Phases 1–3 — organizations & authority, less §G's clearance check and §H, unslotted by the 2026-10-20 amendment); v0.5.0 (Phases 4–5 — meeting/negotiation protocols, inter-org federation)
 depends_on:
   - RFC-0009
   - RFC-0011
@@ -20,7 +20,7 @@ depends_on:
 **Status**: 📋 Proposed
 **Author**: Maksim Khomutov
 **Date**: 2026-05-16
-**Target**: v0.4.0 (Phases 1–3 — organizations & authority); v0.5.0 (Phases 4–5 — meeting/negotiation protocols, inter-org federation)
+**Target**: v0.4.0 (Phases 1–3 — organizations & authority, less §G's clearance check and §H, unslotted by the [2026-10-20 amendment](#amendment-2026-10-20--the-v040-plans-ruling-b-audit)); v0.5.0 (Phases 4–5 — meeting/negotiation protocols, inter-org federation)
 **Depends on**: RFC 0009 (Agent Identity, Security & Sandboxing — identity tokens, the mandatory-HITL gate, capability tokens, audit), RFC 0011 (Channels — the channel surface the authority axis annotates), RFC 0028 (Agent Decision Policy Engine — the cross-context influence decision is evaluated through its checkpoints), RFC 0037 (Memory Confidentiality & Channel Classification — the *confidentiality* axis this RFC is the integrity counterpart to)
 **Relates to**: RFC 0010 (Sub-Agent Spawning — reserved, not yet written; spawned sub-agents inherit org context), RFC 0021 (Persona Temporal Awareness — the commitments memory class a directive provenance record rides on), RFC 0029 (Personal/Society Storage Split — the org graph is society state and lives in the society store), RFC 0005 (Persona Agent & Memory System — persona definition gains an org role)
 
@@ -497,8 +497,10 @@ lives in the **society store**, the Postgres backend
 [RFC 0029](0029-personal-society-storage-split.md) introduces in v0.4.0.
 *(2026-10-20: for v0.4.0 the society store is a set of society tables in
 `data/channels.db`, by
-[RFC 0029's amendment](0029-personal-society-storage-split.md#amendment-2026-10-20--v040s-society-backend);
-this dependency is unchanged.)*
+[RFC 0029's amendment](0029-personal-society-storage-split.md#amendment-2026-10-20--v040s-society-backend).
+The organization tables are that RFC's Phase 3 migration, row A1 of the
+[v0.4.0 plan](../v0.4.0-plan.md); Phase 1 item 3 loads the graph through its
+society-store interface.)*
 This RFC's Phase 1 depends on RFC 0029's society-store facade being in
 place. The cross-context influence record (§E), by contrast, is
 *personal* memory — it is *this persona's* record of a directive *it*
@@ -556,8 +558,9 @@ The [v0.4.0 plan](../v0.4.0-plan.md#scope-locks) audited this RFC's v0.4.0
 phases against ruling (b) of the
 [sequencing Amendment 2026-09-12](../v0.3.x-sequencing.md#amendment-2026-09-12--close-v0316-small-then-measure-before-any-train-opens),
 as ruling (o) of [v0.4.0's shape](../v0.4.x-sequencing.md#rulings) asks. No
-amendment records an outside ask for confidentiality or audience work, so two
-deliverables leave the v0.4.0 phases and become **unslotted, not cut**:
+amendment records an outside ask for memory isolation, attribution or
+audience work, so two deliverables leave the v0.4.0 phases and become
+**unslotted, not cut**:
 
 - Phase 1 item 5, §G's membership-time clearance check. §G's role `authority`
   ceiling stays in Phase 1, because the authority axis (§D) computes the
@@ -567,6 +570,12 @@ deliverables leave the v0.4.0 phases and become **unslotted, not cut**:
 
 Each comes back only by an amendment whose External evidence section records
 an outside ask. The rest of the design is unchanged.
+
+| What | Before | After (v0.4.0) |
+|------|--------|----------------|
+| Phase 1 item 5 | §G's clearance check, static and runtime | Unslotted |
+| Phase 3 item 2 | §H's enforced egress gate | Unslotted; RFC 0037 §G's tripwire logs |
+| §G's role `authority` ceiling | Phase 1 | Phase 1, unchanged |
 
 ### Phase 1: The organization model (v0.4.0)
 
@@ -600,6 +609,8 @@ Dependencies: Phase 1, RFC 0021 (commitments tier), RFC 0037 §B
 (channel-event classification plumbing the authority field reuses).
 
 ### Phase 3: Cross-context influence decisions and the enforced gate (v0.4.0)
+
+*Item 2, the enforced gate, is unslotted by the 2026-10-20 amendment above.*
 
 1. The accept / adapt / refuse evaluation (§F) wired into the RFC 0028
    pre-act checkpoint as a constraint input; conflict resolution and tie

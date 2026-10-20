@@ -25,7 +25,7 @@ Legs 1b/2b add the **person** tier: the [RFC 0031 F-7 identity read](../issues/I
 
 - **The confidentiality matrix** (learn-`restricted` / act-`public` withhold, the tripwire leg) — `MT-PERSONA-CONFIDENTIALITY-001`, the RFC 0037 closeout artifact; the deterministic backbone is already pinned in [`tests/integration/test_confidentiality_gate.py`](../../tests/integration/test_confidentiality_gate.py).
 - **The shadow measurement gate** — the promotion verdict is re-executed on every CI run ([`tests/integration/test_cross_room_seed_replay.py`](../../tests/integration/test_cross_room_seed_replay.py)); this MT does not re-derive it.
-- **Live cross-channel relay** (RFC 0038 §C–§E) — v0.4.0; this MT is the *persisted-memory* complement.
+- **Live cross-channel relay** (RFC 0038 §C–§E) — §C is cuttable in v0.4.0, §D–§E unslotted; this MT is the *persisted-memory* complement.
 - **A dedicated L1 episodic leg** — room-first ranking has no clean human-observable trigger (until [ISSUE-0159](../issues/ISSUE-0159-episodic-score-inverts-bm25.md)'s fix, FTS on natural channel turns matched almost no episode; it now matches any shared content word, so a leg is writable); the ranking property is pinned quantitatively in the unit/integration suites and the `EVAL-MEMORY-001` continuity goldens.
 
 ---

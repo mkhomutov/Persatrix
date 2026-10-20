@@ -239,7 +239,7 @@ The migration is structured so the codebase is shippable after every phase and n
 
 **Note.** The JSON Schema is not throwaway. The REST channel publish/history endpoints remain the client edge after Phase 2 (they are never removed — see [Migration Path](#migration-path)), so the schema keeps validating the REST payload for the lifetime of that surface. Phase 2 adds a *separate* protobuf contract for the agent gRPC path; it does not retire the JSON Schema.
 
-### Phase 2: `OrchestratorService` Proto + Orchestrator Handlers (v0.4.0)
+### Phase 2: `OrchestratorService` Proto + Orchestrator Handlers (unslotted)
 
 **Summary.** Introduce the gRPC surface; the orchestrator serves both transports.
 
@@ -251,7 +251,7 @@ The migration is structured so the codebase is shippable after every phase and n
 
 **Dependencies.** Phase 1 (verified contract to mirror into proto).
 
-### Phase 3: Agent-Side gRPC Migration (v0.4.0)
+### Phase 3: Agent-Side gRPC Migration (unslotted)
 
 **Summary.** Agents use gRPC for control-plane calls; REST remains a fallback.
 
@@ -302,7 +302,7 @@ The migration is structured so the codebase is shippable after every phase and n
 1. **New `OrchestratorService` vs. extending an existing service.** This RFC proposes a new service. The alternative — folding the RPCs into a broadened service — was rejected to keep each service single-direction and single-concern. Confirm at review.
 2. **Transport selection mechanism during the Phase 3 rollout.** Options: (a) explicit agent config flag; (b) capability detection (try gRPC, fall back to REST on `UNIMPLEMENTED`). Recommend (a) — explicit, observable, no per-call probe cost. Decide at `0040-pr-plan.md` authoring time.
 3. **Does `GetChannelHistory` need to move at all?** History fetch is read-only and lower-stakes than publish. One option is to migrate publish + registration to gRPC and leave history on REST. Recommend migrating it too, for a uniform agent path — but flag it as the most droppable scope if Phase 3 needs trimming. **Ties directly to Goal 1** (now written as marking history optional pending this decision) — resolve both together before the pr-plan is written.
-4. **Co-sequencing with [RFC 0029](0029-personal-society-storage-split.md) Phase 2.** RFC 0029 Phase 2 adds capability tokens — wire auth on this exact path. Phases 2–3 here and RFC 0029 Phase 2 touch the same proto/handlers. Should they share one v0.4.0 PR train so the surface is touched once? Resolve when the v0.4.0 plan opens.
+4. **Co-sequencing with [RFC 0029](0029-personal-society-storage-split.md) Phase 2.** RFC 0029 Phase 2 adds capability tokens — wire auth on this exact path. Phases 2–3 here and RFC 0029 Phase 2 touch the same proto/handlers. Should they share one PR train so the surface is touched once? Resolve when an amendment slots either; the v0.4.0 plan opened with neither (its agent-identity lock picked REST).
 5. ~~**Registration over gRPC — bootstrap ordering.**~~ **Resolved (2026-07-15):** the gRPC address config field already exists (`orchestrator_grpc` param / `--orchestrator-grpc` flag, default host `:9090`), and the agent already opens a shared outbound gRPC channel the new client stubs can reuse ([`agents/server.py`](../../agents/server.py)). No new config surface is needed; the registration RPCs reuse the existing channel. The remaining bootstrap concern (agent dials before the listener is up) is covered by the retry-with-backoff in [Failure Modes](#f-failure-modes).
 6. **Should `RegisterAgent` be connection-scoped or streaming rather than unary?** §C sketches it unary, which migrates the transport but keeps registration a one-shot at agent startup — leaving the liveness half of [ISSUE-0125](../issues/ISSUE-0125-agents-never-reregister-after-orchestrator-restart.md) (resolved 2026-09-03 on the interim reconnect watcher, shape (4)) open through Phase 2 — tracked as [ISSUE-0146](../issues/ISSUE-0146-registration-not-a-property-of-a-live-connection.md). A stream makes the connection itself the registration, so a break is both the re-register trigger and the liveness signal — one mechanism for "who is here" and "is it still here", which also gives the undriven `Registry.UpdateStatus` something to drive. Cost: it is the one non-unary RPC on the service, and it forfeits the "unary RPCs inherit the middleware for free" property in §C. Resolve before the proto lands in Phase 2 — the shape is non-additive once it ships. `Register` has been an upsert since ISSUE-0125 shape (4) landed (2026-08-23); the remaining question is the stream.
 
@@ -313,9 +313,9 @@ The migration is structured so the codebase is shippable after every phase and n
 1. Resolve Open Questions 1 and 2 (service shape, transport selection) in the review thread — both are non-additive once the proto ships.
 2. Decide the §D `sender_id` scope question — authentic-sender enforcement in scope, or deferred to its owner [RFC 0009](0009-security-sandboxing.md) Phase 4 (co-sequenced via RFC 0029 Phase 2) (recommended). Membership and the cascade clamp already sit below both transports (§D), so **no relocation audit is required**.
 3. Resolve Open Question 3 / Goal 1 — whether `GetChannelHistory` migrates — which fixes Phase 3 scope.
-4. Decide the co-sequencing with RFC 0029 Phase 2 (Open Question 4) when the v0.4.0 plan opens.
+4. Decide the co-sequencing with RFC 0029 Phase 2 (Open Question 4) when an amendment slots either; the v0.4.0 plan opened with neither.
 
-If accepted: file `docs/rfcs/0040-pr-plan.md` with Phase 1 as a standalone v0.3.x hygiene PR and Phases 2–4 as a v0.4.0 PR train, modeled on the [RFC 0017 PR plan](0017-pr-plan.md) structure.
+If accepted: file `docs/rfcs/0040-pr-plan.md` with Phase 1 as a standalone v0.3.x hygiene PR and Phases 2–4 as one PR train (unslotted since 2026-10-20), modeled on the [RFC 0017 PR plan](0017-pr-plan.md) structure.
 
 ## Related Documentation
 
@@ -328,6 +328,6 @@ If accepted: file `docs/rfcs/0040-pr-plan.md` with Phase 1 as a standalone v0.3.
 - [RFC 0032 — Wire-Level Channel Interaction Layer](0032-channel-interaction-layer.md) — orthogonal channel-wire change (conversation `interaction_id`); composes with this transport change without conflict.
 - [RFC 0012 — Protocols & Organizations](0012-protocols-organizations.md) — v0.4.0 org/hierarchy traffic that would otherwise land on the untyped REST agent path.
 - [ROADMAP.md](../../ROADMAP.md) — the v0.6.0 Distributed Mesh milestone (`internal/mesh/`) owns multi-node message routing, explicitly out of scope here.
-- [v0.3.x-sequencing.md](../v0.3.x-sequencing.md) — the one-story-per-version discipline that places Phase 1 in v0.3.x and Phases 2–4 in v0.4.0.
+- [v0.3.x-sequencing.md](../v0.3.x-sequencing.md) — the one-story-per-version discipline that placed Phase 1 in v0.3.x; Phases 2–4 are unslotted since v0.4.0's agent-identity lock picked REST.
 - [`internal/channels/router.go`](../../internal/channels/router.go) — `ChannelRouter`, the shared business-logic core.
 - [`agents/channel_publisher.py`](../../agents/channel_publisher.py) · [`agents/channel_history_fetcher.py`](../../agents/channel_history_fetcher.py) — the agent-side REST callers being migrated.

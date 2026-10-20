@@ -58,7 +58,7 @@ about 2.5 % of the prose.
 | Views, 14 days | 254 from 23 unique visitors | 86 from 4 unique visitors | `gh api repos/mkhomutov/Persatrix/traffic/views` |
 | Referrers | github.com 129 views from 3 people; Google 1 | github.com 11 views from 1 person | `…/traffic/popular/referrers` |
 | Clones, 14 days | 3 869 from 328 cloners — CI checkouts | 765 from 164 cloners | `…/traffic/clones` |
-| Release assets, v0.3.15 | 0 | 0 on v0.3.16 | `gh release view v0.3.15 --json assets` |
+| Release assets, latest release | 0 (v0.3.15) | 0 (v0.3.16) | `gh release view --json assets,tagName` |
 | Image or binary publishing in CI | none | none | `grep -nE 'ghcr\|docker push\|upload-release' .github/workflows/*.yml` |
 | Open PRs from anyone else | 0 | 0 (the author's two drafts) | `gh pr list --state open` |
 
@@ -85,13 +85,15 @@ commits — 21 `docs`, 12 `fix`, 2 `ci`, 0 `feat`. From `cbeea7bc` to
 `04bc24d0`: 107 — 32 `fix`, 32 `docs`, 19 `feat`, 10 `ci`, 9 `chore`, 4
 `test`, 1 `revert`.
 
-The `agents/memory/` tree, `internal/mcp/`, `internal/a2a/` and the workflow
+`agents/tools/mcp_bridge.py`, `internal/mcp/`, `internal/a2a/` and the workflow
 engine (`internal/planner`, `scheduler`, `executor`, `state`) took no
 functional commit between 2026-07-01 and this measurement; the two commits
 touching the workflow engine are comment fixes
 (`git log --since=2026-07-01 --oneline -- internal/planner internal/scheduler internal/executor internal/state`).
-At 2026-10-20 that still holds: the two commits since are a lint pass and a
-comment fix.
+(Corrected 2026-10-20: this sentence named `agents/memory/`, which took
+functional commits throughout.) At 2026-10-20 it still holds: one commit since,
+a lint fix in four executor test files (#945); the command now prints three
+lines.
 
 ## 4. Size-cap pressure
 
@@ -99,7 +101,9 @@ comment fix.
 **100** within 3 % of one (the 24 included). #898 measured 24 and 101 at `f52e7ff6`, before
 v0.3.16 PRs D1 and D2 split two at-cap files; the at-cap count did not move.
 At 2026-10-20, under ruling (e)'s code caps (a warning at 500 lines, a failure
-at 800): **1** file at a limit, a doc, and **14** within 3 %.
+at 800): **1** file at a limit, a doc, and **14** within 3 %. Against 500, like
+for like (`--max-code-lines 500 --near-cap`): **18** at a limit, **97** within
+3 %.
 
 ## 5. Interop and stubs
 
@@ -121,10 +125,10 @@ at 2026-10-20.
 
 | Claim | Evidence |
 |-------|----------|
-| The memory budget was a hardcoded constant | `agents/persona_runtime/memory_budget.py:107` — `MEMORY_BUDGET_TOKENS: int = 1500`; no key in `config/optimization.yaml`. Since v0.3.16 K1 ([#944](https://github.com/mkhomutov/Persatrix/pull/944)), `memory_budget.tokens` there sets it |
-| `agents/memory/` stands alone | Its imports are the standard library, `aiosqlite` and `opentelemetry` only: `git ls-files 'agents/memory/*.py' \| xargs grep -hoE '^(from\|import) [a-zA-Z_.]+' \| sort \| uniq -c` |
-| No ablation or baseline exists | `git grep -niE 'ablat' -- docs/ evaluators/ tests/` → 0; `git grep -niE 'baseline\|single[- ]call' -- evaluators/` → 0. At 2026-10-20 EXP-001's harness builds the baseline, arm A (`evaluators/exp001/arm_a.py`), but no result exists |
-| Trust reaches the model as one prompt line | `agents/persona_runtime/relationship_section.py:224-226` injects the score only when it differs from 0.5; `EVAL-MEMORY-001.yaml:58-62` settles for `> 0.0` and notes the increase form "needs live" |
+| The memory budget was a hardcoded constant | `agents/persona_runtime/memory_budget.py:107` — `MEMORY_BUDGET_TOKENS: int = 1500`; no key in `config/optimization.yaml`. Since v0.3.16 K1 ([#944](https://github.com/mkhomutov/Persatrix/pull/944)), `memory_budget.tokens` there sets it (the constant is now at :111) |
+| `agents/memory/` leans on sibling modules | Besides the standard library, `aiosqlite` and `opentelemetry`, it imports `..llm_client`, `..principal_id`, `..session_id`, `..epoch_id`, `..prompt_loader` and `..model_aliases`, and since 2026-09-11 `..clock` and `..llm_types` (corrected 2026-10-20; the row said it stood alone): `git ls-files 'agents/memory/*.py' \| xargs grep -hoE '^(from\|import) [a-zA-Z_.]+' \| sort \| uniq -c` |
+| No ablation or baseline result exists | `git grep -niE 'ablat' -- docs/ evaluators/ tests/` → 0; `git grep -niE 'baseline\|single[- ]call' -- evaluators/` → 0. At 2026-10-20 the greps return 3 (the strategy docs' own text) and 1 (a comment in `evaluators/exp001/costs.py`); EXP-001's harness builds the baseline, arm A (`evaluators/exp001/arm_a.py`), but no result exists |
+| Trust reaches the model as one prompt line | `agents/persona_runtime/relationship_section.py:224-226` (now :281-284) injects the score only when it differs from 0.5; `EVAL-MEMORY-001.yaml:58-62` settles for `> 0.0` and notes the increase form "needs live" |
 | The audience gate was shadow-only | [RFC 0037 audience amendment](rfcs/0037-amendment-audience-egress.md) status 🔄 Shadow; flip is verdict-gated (v0.3.16 PR A3). Live since A3 ([#950](https://github.com/mkhomutov/Persatrix/pull/950)) |
 | Live arcs cost cents | v0.3.11 autonomous arc $0.17, 99 s, about 47 000 tokens; v0.3.15 ten-leg arc $0.13 ([execution reports](manual-tests/)) |
 | Extraction RFCs are parked | RFC 0046 and 0047: 📋 Proposed, target v0.4.0+, gated on RFC 0045 and the MIT↛BUSL CI gate |
@@ -209,7 +213,7 @@ the first review.
 | #897 S1 | Run the ablation before repositioning | Adopted; widened to the five-arm experiment (§4) |
 | #897 S2 | Make `MEMORY_BUDGET_TOKENS` configurable first | Adopted as §6.2 |
 | #897 S3 | Reposition on the gate, not on memory | Changed — the gate is the fallback wedge if C does not beat A (§4) |
-| #897 S4 | Decide the fate of the other 86 % | Changed — decided per component at the first review, not by an amendment now (§8) |
+| #897 S4 | Decide the fate of the other 86 % | Changed — decided per component at the first review, not by an amendment now (§8); at the first review (2026-10-20) no extraction was ordered |
 | #897 S5 | Retire the trust score or evidence it | Adopted as §8 last row |
 | #897 S6 | Adopt #896's external-evidence gate | Adopted as §7.1 |
 | #898 R1 | Pause v0.4.0; finish v0.3.16 small | Adopted as §6.1 |
@@ -217,7 +221,7 @@ the first review.
 | #898 R3 | Name one first user and job in the README | Changed — named as a hypothesis (§5); README after the result |
 | #898 R4 | First contact in five minutes: images, binaries, demo, transcript | Adopted as §6.5 |
 | #898 R5 | MCP client and an A2A endpoint | Changed — one slice, RFC 0043 preferred (§3.4, §6.7) |
-| #898 R6 | Release the governance core and budget lease permissively now | Changed — lease not alone; the core's extraction is decided at the first review (§8) |
+| #898 R6 | Release the governance core and budget lease permissively now | Changed — lease not alone; the core's extraction is decided at the first review (§8), which (2026-10-20) ordered none |
 | #898 R7 | Process diet; cap as a warning | Adopted as §7.3–§7.4 |
 | #898 R8 | Review on 2026-11-30 against outcomes | Adopted as the first review date (§10) |
 

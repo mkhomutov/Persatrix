@@ -1,7 +1,7 @@
 ---
 id: RFC-0029
 title: Personal/Society Storage Split
-summary: Splits persona-personal memory from cross-agent society memory behind a facade — Phase 1 (facade + tier rename) in v0.3.x; Phase 3 (society store) in v0.4.0, with Phase 4 (migration) only if its scope lock keeps the channels-store swap.
+summary: Splits persona-personal memory from cross-agent society memory behind a facade — Phase 1 (facade + tier rename) in v0.3.x; Phase 3 (society store) in v0.4.0 as society tables in the SQLite channels store; Phases 2 and 4–6 unslotted.
 type: architecture
 status: partially_implemented
 author: Maksim Khomutov
@@ -57,7 +57,7 @@ depends_on:
 
 Today every memory tier — episodes, notes, relationships, shared pools — is a table in a single per-agent SQLite file at `data/memory.db` ([`agents/memory/episodic.py:98`](../../agents/memory/episodic.py#L98), [`agents/memory/relationship.py:73`](../../agents/memory/relationship.py#L73), [`agents/memory/facade.py:128`](../../agents/memory/facade.py#L128)). That model fits v0.2's per-agent private memory exactly. It does not fit v0.3 channels (RFC 0011 already carved out a separate `data/channels.db` because the agent-DB shape was wrong) and it actively obstructs v0.4 organisational topology, decision audit (RFC 0028), and compliance erasure (RFC 0013): each lands as "another table in `memory.db`" and the cost of carving the society state out grows with every PR.
 
-This RFC formalises the personal/society storage boundary recommended by [`docs/storage-architecture-roadmap.md`](../storage-architecture-roadmap.md) (SA-1) into an actionable implementation plan. **Personal memory** (one writer, one logical owner — the persona's brain) stays in per-agent SQLite. **Society state** (cross-agent consistency, external query, compliance erasure) moves to a Postgres society store. A `MemoryStore` facade owns both — callers see a typed API and never reach into a tier-specific DSN. Phase 1 (v0.3.x) ships the facade and locks in the API surface so v0.3 channels integrate against a stable boundary; Phases 2–4 (v0.4.0) add the Postgres backend, capability-token-mediated cross-agent reads, and the `persatrix memory migrate` one-shot.
+This RFC formalises the personal/society storage boundary recommended by [`docs/storage-architecture-roadmap.md`](../storage-architecture-roadmap.md) (SA-1) into an actionable implementation plan. **Personal memory** (one writer, one logical owner — the persona's brain) stays in per-agent SQLite. **Society state** (cross-agent consistency, external query, compliance erasure) moves to a Postgres society store. A `MemoryStore` facade owns both — callers see a typed API and never reach into a tier-specific DSN. Phase 1 (v0.3.x) ships the facade and locks in the API surface so v0.3 channels integrate against a stable boundary; Phases 2–4 (v0.4.0) add the Postgres backend, capability-token-mediated cross-agent reads, and the `persatrix memory migrate` one-shot. *(Since 2026-10-20, v0.4.0 takes Phase 3 only, as SQLite society tables — [amendment under §D](#amendment-2026-10-20--v040s-society-backend).)*
 
 ## Motivation
 
@@ -375,10 +375,18 @@ above as the target for when one is needed.
 - **It stands only while SQLite holds.** The
   [storage roadmap](../storage-architecture-roadmap.md#open-questions)'s
   benchmark, ten agents writing to one channel at one message a second each,
-  is Phase 3's first PR. If it fails, or a deployment needs more than one
-  node, an amendment takes a Postgres form before any society table lands.
+  runs before Phase 3's PR plan is written. If it fails, or a deployment needs
+  more than one node, an amendment takes a Postgres form before any society
+  table lands.
 - Decision records stay runtime-local (RFC 0028 §D), so Phase 5 stays
   unslotted, and Open Questions 4 and 7 do not arise in v0.4.0.
+
+| What | Before | After (v0.4.0) |
+|------|--------|----------------|
+| Society backend | Postgres, single instance (above) | Society tables in `data/channels.db` |
+| Phase 3 | `asyncpg` pool, pools, bonds projection, Postgres channels store | The society-store interface and its tables |
+| Phase 4 | v0.4.0 only with the channels-store swap | Unslotted |
+| Target and Status lines | "in the form v0.4.0's scope lock rules" | "as society tables in the SQLite channels store" |
 
 ### E. Cross-Agent Read Path and Capability Tokens
 
@@ -482,7 +490,7 @@ The migration is reversible during the deprecation window: `persatrix memory rol
 | Phase | Scope | Target | Reviewable on its own? |
 |---|---|---|---|
 | **1** | `MemoryStore` facade promotion: rewrite `MemoryFacade` as `MemoryStore`, route every personal-tier call through it, deprecate direct `EpisodicMemory`/`RelationshipMemory` construction outside the facade. No Postgres yet — society-tier methods raise `SocietyBackendUnavailable`. Lint rule blocks new direct-aiosqlite imports outside `agents/memory/`. The channel-history caller landed by [RFC 0011 PR 5](0011-pr-plan.md#pr-5-featurev030-rfc0011-memory-integration--phase-3-joint-with-rfc-0020-pr-5) (merged 2026-05-07) is migrated from `MemoryFacade.retrieve_relevant(...)` to `MemoryStore.retrieve_relevant(...)` as part of the facade rename — the legacy facade method survives one minor version as a thin shim for any downstream caller PR-309 missed. | v0.3.x | Yes — pure refactor; behaviour identical; existing tests pin the API surface |
-| **2** | Capability-token plumbing in the facade (RFC 0009 Phase 4 dependency): typed `StoreConfig.capability_token`, `CapabilityDenied` raised on missing scope. No backend yet; tests use a mock verifier. | v0.4.0 | Yes — depends on Phase 1 only |
+| **2** | Capability-token plumbing in the facade (RFC 0009 Phase 4 dependency): typed `StoreConfig.capability_token`, `CapabilityDenied` raised on missing scope. No backend yet; tests use a mock verifier. | unslotted (ruling m) | Yes — depends on Phase 1 only |
 | **3** | Postgres society backend: `asyncpg` pool, `shared_pools`/`pool_entries`/`bonds_inbound` schema, write-through projection from personal-tier `update_trust`, Postgres backend for `internal/channels/` replacing the SQLite store. *v0.4.0 takes the SQLite form instead: society tables in `data/channels.db` ([amendment under §D](#amendment-2026-10-20--v040s-society-backend)).* | v0.4.0 | Depends on Phase 1; Go side depends on Phase 1 facade contract |
 | **4** | Migration tooling (`persatrix memory migrate`, `persatrix memory rollback`) + read-only SQLite fallback; deprecation-window warnings. | unslotted (v0.4.0 keeps the SQLite store) | Depends on Phase 3 |
 | **5** | RFC 0028 `decision_records` and RFC 0013 `audit_chain` schemas land directly in the society Postgres — no per-agent intermediate. (Tracked here as a downstream consumer of the boundary; the schemas themselves live in their own RFCs.) | v0.4.0+ | Depends on Phase 3 |
@@ -549,7 +557,7 @@ The migration is reversible during the deprecation window: `persatrix memory rol
 
 **Status**: ⚠️ Partially Implemented — Phase 1 shipped in v0.3.2 (RFC 0029 Phase 1 PRs 1–5). Phase 3 is v0.4.0, as society tables in the SQLite channels store ([amendment under §D](#amendment-2026-10-20--v040s-society-backend)); Phases 2 and 4–6 are unslotted.
 
-**Phase 1 implemented (v0.3.2).** The `MemoryStore` facade promotion landed across RFC 0029 Phase 1 PRs 1–5 ([PR plan](0029-pr-plan.md)): the typed facade in `agents/memory/store.py`, the `MemoryFacade` one-minor-version alias shim, the RFC 0011 channel-history caller migration, the lint rule + `DeprecationWarning` guarding the personal/society boundary, the `persona_runtime/` + `sub_agents/` + RFC 0026 facts-tier call-site sweep, and the `tests/perf/personal_tier_latency.py` personal-tier recall-latency regression gate. No Postgres dependency was added — society-tier methods raise the `SocietyBackendUnavailable` hierarchy. The step-1 ordering prerequisite below ("before RFC 0028 implementation begins") is now satisfied; Phases 2–6 (capability tokens, Postgres society backend, migration tooling, society-tier consumers, conditional file split) are reserved for v0.4.0.
+**Phase 1 implemented (v0.3.2).** The `MemoryStore` facade promotion landed across RFC 0029 Phase 1 PRs 1–5 ([PR plan](0029-pr-plan.md)): the typed facade in `agents/memory/store.py`, the `MemoryFacade` one-minor-version alias shim, the RFC 0011 channel-history caller migration, the lint rule + `DeprecationWarning` guarding the personal/society boundary, the `persona_runtime/` + `sub_agents/` + RFC 0026 facts-tier call-site sweep, and the `tests/perf/personal_tier_latency.py` personal-tier recall-latency regression gate. No Postgres dependency was added — society-tier methods raise the `SocietyBackendUnavailable` hierarchy. The step-1 ordering prerequisite below ("before RFC 0028 implementation begins") is now satisfied; Phases 2–6 (capability tokens, Postgres society backend, migration tooling, society-tier consumers, conditional file split) were then reserved for v0.4.0; since 2026-10-20 only Phase 3 is, as society tables ([amendment under §D](#amendment-2026-10-20--v040s-society-backend)).
 
 The list below records the on-ratification plan as authored; it is retained for traceability.
 
