@@ -20,7 +20,9 @@
 Four independent reviews reached one diagnosis: excellent engineering, no
 users, and a process that cannot notice the difference. They disagreed about
 what to do next. This document settles those disagreements, adds what a fifth
-check found, and turns the result into a plan with dates and decision rules.
+check found (§1–§3, kept in its
+[four-reviews companion](project-strategy-four-reviews.md)), and turns the
+result into a plan with dates and decision rules.
 
 The decision in one paragraph: **finish v0.3.16 by its own cut clauses, then
 run one pre-registered experiment before any new release train opens.** The
@@ -33,8 +35,7 @@ decided on its result at the first review, not before.
 
 Nine findings, F1 to F9, that all four reviews agreed on, and what all four
 would keep. They are in
-[the four-reviews companion §1](project-strategy-four-reviews.md#1-what-the-four-reviews-established),
-where every review re-verifies them.
+[the four-reviews companion §1](project-strategy-four-reviews.md#1-what-the-four-reviews-established).
 
 ## 2. Where they disagreed, and the resolution
 
@@ -42,11 +43,14 @@ Six questions the reviews split on, and how each was settled: the budget
 lease, the memory-boundary work, the wedge, the v0.3.x train, the Rust CLI
 and the licence. They are in
 [the four-reviews companion §2](project-strategy-four-reviews.md#2-where-they-disagreed-and-the-resolution).
+The wedge was settled on #898's sentence, which
+[§5](#5-direction-the-working-hypothesis) adopts as the working hypothesis; it
+is the sentence §4's last rule names.
 
 ## 3. What this synthesis adds
 
-Five checks the reviews did not make, in
-[the four-reviews companion §3](project-strategy-four-reviews.md#3-what-this-synthesis-adds).
+Five checks the reviews did not make, written with this review on
+2026-09-11, in [the four-reviews companion §3](project-strategy-four-reviews.md#3-what-this-synthesis-adds).
 
 ## 4. The decision framework
 
@@ -207,8 +211,9 @@ This is a standing document. It is reviewed:
 A review re-runs the evidence companion's commands, updates the verification
 column in the four-reviews companion's
 [§1](project-strategy-four-reviews.md#1-what-the-four-reviews-established),
-records any decision rule that fired, and appends a row below. A review that changes a decision is
-ratified by the sequencing amendment that acts on it, not by this file.
+records any decision rule that fired, and appends a row below. A review that
+changes a decision is ratified by the sequencing amendment that acts on it,
+not by this file.
 
 | Date | Tree | What changed | Decision rules fired |
 |------|------|--------------|----------------------|
@@ -218,18 +223,17 @@ ratified by the sequencing amendment that acts on it, not by this file.
 
 ## Related documentation
 
-- [The four reviews](project-strategy-four-reviews.md) — §1–§3 in full: the
-  nine findings each review re-verifies, the six disagreements and how each
-  was settled, and the five checks this synthesis adds.
-- [Evidence companion](project-strategy-evidence.md) — every number with its
-  command, the four reviews' recommendation ledger, and the perishable market
-  claims.
-- [v0.3.x sequencing](v0.3.x-sequencing.md) — the decision log F3 reads.
+- [The four reviews](project-strategy-four-reviews.md) — §1–§3 in full.
+- [Evidence companion](project-strategy-evidence.md) — the commands behind
+  most numbers, the four reviews' recommendation ledger, and the perishable
+  market claims.
+- [v0.3.x sequencing](v0.3.x-sequencing.md) — the amendments the §10 log
+  cites.
 - [Release cycle](methodology/release-cycle.md) and
   [Decisions](methodology/decisions.md) — the process §7 changes.
 - [RFC 0045](rfcs/0045-open-core-extraction-policy.md),
   [RFC 0046](rfcs/0046-budget-lease-extraction.md),
-  [RFC 0043](rfcs/0043-inbound-agent-interop-endpoint.md) — the RFCs §2 and
-  §8 re-target.
+  [RFC 0043](rfcs/0043-inbound-agent-interop-endpoint.md) — the RFCs §4 and
+  §8 name.
 - [MT-MEMORY-005](manual-tests/MT-MEMORY-005-dementia-test.md) — the recall
   questions the experiment reuses.

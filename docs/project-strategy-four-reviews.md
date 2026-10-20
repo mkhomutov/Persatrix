@@ -1,23 +1,32 @@
 # Project Strategy — The Four Reviews
 
-> Companion to the [standing strategy review](project-strategy.md). Its
-> §1–§3 moved here word for word; only their links into the rest of it were
-> re-pointed. The split keeps the standing review's decision framework and
-> review log in one file, with room for the first strategy review, which
-> ruling (r) of the
-> [v0.4.x sequencing](v0.4.x-sequencing.md#amendment-2026-10-18--v040s-shape-its-prerequisites-its-cuts-and-the-end-of-the-v03x-line)
-> places there. The standing review keeps a short entry under each of the
-> three numbers, so links to them still land.
->
-> This file holds what the four September 2026 strategy reviews —
+> Companion to the [standing strategy review](project-strategy.md). This file
+> holds what the four September 2026 strategy reviews —
 > [#895](https://github.com/mkhomutov/Persatrix/pull/895),
 > [#896](https://github.com/mkhomutov/Persatrix/pull/896),
 > [#897](https://github.com/mkhomutov/Persatrix/pull/897) and
-> [#898](https://github.com/mkhomutov/Persatrix/pull/898) — agreed on, where
-> they disagreed and how each disagreement was settled, and five checks they
-> did not make. Every strategy review re-verifies the findings in
-> [§1](#1-what-the-four-reviews-established); the numbers behind them, with
-> their commands, are in the [evidence companion](project-strategy-evidence.md).
+> [#898](https://github.com/mkhomutov/Persatrix/pull/898) — found, how their
+> disagreements were settled, and the five checks the synthesis added. A
+> strategy review updates [§1](#1-what-the-four-reviews-established)'s
+> verification column, as the standing review's
+> [§10](project-strategy.md#10-review-cadence-and-log) sets out. The
+> [evidence companion](project-strategy-evidence.md) holds the commands behind
+> most of the numbers here; F1's outside-issue count, F4's commit ratio and
+> per-release PR count, F5's 21-line band and F7's counts are the four
+> reviews' own and have no command there yet.
+>
+> These sections were the standing review's
+> [§1](project-strategy.md#1-what-the-four-reviews-established),
+> [§2](project-strategy.md#2-where-they-disagreed-and-the-resolution) and
+> [§3](project-strategy.md#3-what-this-synthesis-adds), written with it on
+> 2026-09-11 at `cbeea7bc`
+> ([#936](https://github.com/mkhomutov/Persatrix/pull/936)), so in them "this
+> document", "this synthesis", "today" and "this fifth one" mean that review,
+> that date and #936. They moved here word for word on 2026-10-20, only their
+> links re-pointed, when that file neared its word cap. Like it, they are an
+> opinion synthesis that ratifies nothing; what the sequencing amendments have
+> since ratified or superseded is in its
+> [review log](project-strategy.md#10-review-cadence-and-log).
 
 ## 1. What the four reviews established
 
@@ -87,8 +96,8 @@ Five checks the reviews did not make, or could not.
 
 - [Project strategy — standing review](project-strategy.md) — the decision
   framework, plan and review log these sections feed.
-- [Evidence companion](project-strategy-evidence.md) — every number here with
-  its command, and the four reviews' recommendation ledger.
+- [Evidence companion](project-strategy-evidence.md) — the commands behind
+  most numbers here, and the four reviews' recommendation ledger.
 - [v0.3.x sequencing](v0.3.x-sequencing.md) — the decision log F3 reads.
 - [RFC 0046](rfcs/0046-budget-lease-extraction.md), which §2 re-targets, and
   [RFC 0043](rfcs/0043-inbound-agent-interop-endpoint.md), the interop slice

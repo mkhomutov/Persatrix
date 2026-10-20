@@ -1,10 +1,10 @@
 # Project Strategy — Evidence
 
-> Companion to the [standing strategy review](project-strategy.md). Every
-> number there, and in its
-> [four-reviews companion](project-strategy-four-reviews.md), is here with
-> the command that produced it, so each review re-runs the commands and sees
-> what moved. Measured at `main` = `cbeea7bc`
+> Companion to the [standing strategy review](project-strategy.md). Most
+> numbers there and in its
+> [four-reviews companion](project-strategy-four-reviews.md) are here with the
+> command that produced them; the rest are the four reviews' own. Each review
+> re-runs the commands and sees what moved. Measured at `main` = `cbeea7bc`
 > on 2026-09-11 unless a row says otherwise.
 >
 > The four reviews this file preserves —
@@ -166,11 +166,11 @@ copied here; a review that relies on one re-fetches it.
 ## 9. Recommendation ledger
 
 Every recommendation the four reviews made, with its disposition in the
-[standing review](project-strategy.md); its §2 and §3 are in the
-[four-reviews companion](project-strategy-four-reviews.md), under the same
-numbers. *Adopted* means carried as written;
-*changed* means carried with the stated modification; *rejected* names the
-reason; *deferred* means decided at the first review.
+[standing review](project-strategy.md); the standing review's §2 and §3 are in
+the [four-reviews companion](project-strategy-four-reviews.md), under the same
+numbers. *Adopted* means carried as written; *changed* means carried with the
+stated modification; *rejected* names the reason; *deferred* means decided at
+the first review.
 
 | Source | Recommendation | Disposition |
 |--------|----------------|-------------|
