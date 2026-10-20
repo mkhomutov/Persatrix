@@ -675,10 +675,10 @@ merged-prs: ## Regenerate docs/merged-prs.md from the squash-merge subjects on m
 amendment-evidence-check: ## Fail if a sequencing amendment since 2026-09-12 has no filled-in External evidence section (CI)
 	$(PYTHON) scripts/checks/amendment_evidence.py
 
-merged-prs-check: ## Fail if docs/merged-prs.md is behind git log (CI)
+merged-prs-check: ## Fail if docs/merged-prs.md does not match git log, or (exit 3) a shallow clone cannot tell (CI)
 	$(PYTHON) scripts/merged_prs.py --check
 
-plan-status-check: ## Fail if a plan's progress table says "PR open" for a PR that has merged (CI)
+plan-status-check: ## Fail if a plan's progress table says "PR open" for a PR that has merged, or (exit 3) a shallow clone cannot tell (CI)
 	$(PYTHON) scripts/checks/plan_status.py
 
 rfcs-check: ## Fail if docs/rfcs/INDEX.md is stale, front-matter is invalid, or an RFC's **Status** header line disagrees with it (CI)

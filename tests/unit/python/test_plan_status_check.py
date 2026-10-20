@@ -15,12 +15,12 @@ fails (sequencing Amendment 2026-09-12, ruling (e)).
 
 from __future__ import annotations
 
-import os
-import subprocess
 from pathlib import Path
 
 import pytest
+from _git_fixture_helpers import git as _git
 
+from scripts.checks import SKIPPED
 from scripts.checks.plan_status import (
     check_plan_status,
     find_stale_rows,
@@ -238,18 +238,6 @@ def test_a_row_inside_a_code_fence_or_an_html_comment_is_not_judged() -> None:
     assert [s.line for s in find_stale_rows(doc, MERGED)] == [7]
 
 
-#: Fixture commits carry a fixed identity and nothing from the caller's git
-#: setup — no hooks, signing or templates, no GIT_DIR pointing elsewhere.
-_GIT_ENV = {
-    **{k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
-    "GIT_CONFIG_GLOBAL": os.devnull,
-    "GIT_CONFIG_NOSYSTEM": "1",
-    "GIT_AUTHOR_NAME": "test",
-    "GIT_AUTHOR_EMAIL": "test@example.com",
-    "GIT_COMMITTER_NAME": "test",
-    "GIT_COMMITTER_EMAIL": "test@example.com",
-}
-
 REL = "docs/rfcs/0099-pr-plan.md"
 PLAN = (
     "| # | Title | Branch | Status | GitHub PR |\n"
@@ -257,10 +245,6 @@ PLAN = (
     "| 1 | leaf | `feature/x-leaf` | ✅ Merged | [#1](https://github.com/x/pull/1) |\n"
 )
 OWN_ROW = "| 2 | closeout | `feature/x-close` | 🔀 PR open | — (this PR) |\n"  # line 4
-
-
-def _git(repo: Path, *args: str) -> None:
-    subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, env=_GIT_ENV)
 
 
 def _plan_repo(repo: Path, plan: str, subject: str) -> Path:
@@ -338,3 +322,50 @@ def test_a_shallow_clones_oldest_commit_is_not_credited_with_older_lines(tmp_pat
 
     assert pr_that_wrote(origin, REL, 4) == 2
     assert pr_that_wrote(tmp_path / "shallow", REL, 4) is None
+
+
+def test_a_shallow_clone_skips_the_stale_row_check_and_says_why(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A shallow clone's log stops at its oldest commit, so a PR merged before it looks open.
+
+    #1 merged with its row still open and #2 merged after it. The full
+    history flags the row; a clone holding only #2 would pass it and say
+    nothing was stale. It skips the stale-row check, says why on its last
+    line, and exits ``SKIPPED``: the release sweep must not record a pass.
+    """
+    origin = tmp_path / "origin"
+    _plan_repo(origin, PLAN.replace("✅ Merged", "🔀 PR open"), "docs(rfc0099): the plan (#1)")
+    _git(origin, "commit", "-q", "--allow-empty", "-m", "fix: an unrelated change (#2)")
+    _git(tmp_path, "clone", "-q", "--depth", "1", origin.as_uri(), "shallow")
+    assert check_plan_status(origin) == 1
+    capsys.readouterr()
+
+    assert check_plan_status(tmp_path / "shallow") == SKIPPED
+    out = capsys.readouterr().out
+    last = out.strip().splitlines()[-1]
+    assert "shallow clone" in last and "`git fetch --unshallow`" in last
+    assert "[OK]" not in out
+
+
+def test_a_plan_that_hides_its_rows_still_fails_on_a_shallow_clone(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The unclosed-comment guard reads the tree, so a shallow clone still runs it."""
+    origin = tmp_path / "origin"
+    _plan_repo(origin, "<!-- draft\n" + PLAN + OWN_ROW, "docs(rfc0099): closeout (#2)")
+    _git(tmp_path, "clone", "-q", "--depth", "1", origin.as_uri(), "shallow")
+    capsys.readouterr()
+
+    assert check_plan_status(tmp_path / "shallow") == 1
+    assert f"{REL}:1: opened here" in capsys.readouterr().out
+
+
+def test_a_second_document_still_fails_on_a_shallow_clone(tmp_path: Path) -> None:
+    """The release-document rule reads the tree, not the log, so a shallow clone still runs it."""
+    origin = tmp_path / "origin"
+    _plan_repo(origin, PLAN, "docs(rfc0099): the plan (#1)")
+    _git(tmp_path, "clone", "-q", "--depth", "1", origin.as_uri(), "shallow")
+    _touch(tmp_path / "shallow", "docs/v0.3.17-plan.md", "docs/v0.3.17-scope-locks.md")
+
+    assert check_plan_status(tmp_path / "shallow") == 1

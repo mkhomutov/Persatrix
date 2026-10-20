@@ -20,6 +20,13 @@ PRs ("PR 0 merged (#854), PR 1 open (#855)"). Released versions' plans are
 frozen evidence and are skipped; which versions are released is read from
 ``CHANGELOG.md`` the same way the size checker does.
 
+A shallow clone's log stops at its oldest commit (cloud sessions clone with
+``--depth 50``), so a PR merged before it looks open and its stale row would
+pass. There no row is judged: a notice names ``git fetch --unshallow`` and the
+check exits 3 (``SKIPPED``), which the hook reports as a skip and CI and the
+release sweep as a failure. The guard against a plan that hides its rows and
+the one-document rule below read the tree, so they still run and still fail.
+
 The check also holds a patch release to one document. Since ruling (e) of the
 sequencing Amendment 2026-09-12 a patch release keeps its plan, scope locks
 and release checklist in ``docs/vX.Y.Z-plan.md``, so any other
@@ -33,7 +40,8 @@ Usage::
 
 Exit code: 0 clean, 1 if any stale row, if a plan opens a code fence or HTML
 comment that never closes — every row after it is off the page, so none of
-them would be judged — or if a patch release has a second document.
+them would be judged — or if a patch release has a second document; 3 in a
+shallow clone that has none of those failures.
 """
 
 from __future__ import annotations
@@ -50,8 +58,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts._git import git_output  # noqa: E402
-from scripts.checks import ensure_utf8_stdout, markdown_page  # noqa: E402
+from scripts._git import git_output, is_shallow  # noqa: E402
+from scripts.checks import SKIPPED, ensure_utf8_stdout, markdown_page  # noqa: E402
 from scripts.checks.released import is_released_version_doc, released_versions  # noqa: E402
 
 #: A version-cycle file: groups 1-3 are the version's numbers, group 4 its kind.
@@ -201,10 +209,16 @@ def check_plan_status(repo_root: Path, verbose: bool = False) -> int:
         for rel in extra:
             # The version holds no hyphen, so the first one ends it: docs/vX.Y.Z-plan.md.
             print(f"  {rel}: fold it into {rel.split('-', 1)[0]}-plan.md")
-    merged = merged_pr_numbers(repo_root)
-    if not merged:
-        print("[WARN] no squash-merge subjects found in git log — skipping the stale-row check")
-        return 1 if extra else 0
+    shallow = is_shallow(repo_root)
+    if shallow:
+        print("[WARN] shallow clone — skipping the stale-row check; run `git fetch --unshallow`"
+              " to check plan rows against every merged PR")
+        merged: frozenset[int] = frozenset()
+    else:
+        merged = merged_pr_numbers(repo_root)
+        if not merged:
+            print("[WARN] no squash-merge subjects found in git log — skipping the stale-row check")
+            return 1 if extra else 0
     stale: list[StaleRow] = []
     docs = target_docs(repo_root)
     hidden: list[str] = []
@@ -215,11 +229,14 @@ def check_plan_status(repo_root: Path, verbose: bool = False) -> int:
         opened = markdown_page.unclosed(text.split("\n"))
         if opened is not None:
             hidden.append(f"{rel}:{opened + 1}")
-        written_by = partial(pr_that_wrote, repo_root, rel)
-        stale += [s._replace(file=rel) for s in find_stale_rows(text, merged, written_by)]
+        if not shallow:
+            written_by = partial(pr_that_wrote, repo_root, rel)
+            stale += [s._replace(file=rel) for s in find_stale_rows(text, merged, written_by)]
         if verbose:
             print(f"  scanned {rel}")
-    print(f"[SCAN] Checked progress tables in {len(docs)} plan(s) against {len(merged)} merged PRs")
+    if not shallow:
+        print(f"[SCAN] Checked progress tables in {len(docs)} plan(s) against {len(merged)}"
+              " merged PRs")
     if hidden:
         print(f"\n[FAIL] {len(hidden)} plan(s) hide every row after a code fence or HTML comment"
               " that never closes:")
@@ -236,6 +253,8 @@ def check_plan_status(repo_root: Path, verbose: bool = False) -> int:
                 print(f"  {s.file}:{s.line}: {s.cell!r} links {prs}, all merged — flip the row")
     if stale or hidden or extra:
         return 1
+    if shallow:
+        return SKIPPED
     print("[OK] No plan row announces an open PR that has already merged, and no patch"
           " release has a second release document.")
     return 0

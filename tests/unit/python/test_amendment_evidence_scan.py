@@ -8,12 +8,11 @@ count as the sequencing record, which headings fail, and what it prints.
 
 from __future__ import annotations
 
-import os
-import subprocess
 from pathlib import Path
 
 import pytest
 from _amendment_evidence_helpers import FILLED, _amendment, _evidence
+from _git_fixture_helpers import git
 from _test_infra import ci_job_steps, makefile_recipe_body
 
 from scripts.checks import amendment_evidence
@@ -207,14 +206,6 @@ def test_a_local_only_review_report_is_not_read(docs: Path) -> None:
     assert amendment_evidence.main([]) == 0
 
 
-#: The fixture repository ignores the caller's git setup.
-_GIT_ENV = {
-    **{k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
-    "GIT_CONFIG_GLOBAL": os.devnull,
-    "GIT_CONFIG_NOSYSTEM": "1",
-}
-
-
 def test_in_a_checkout_only_tracked_docs_are_read(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -222,8 +213,8 @@ def test_in_a_checkout_only_tracked_docs_are_read(
     docs = tmp_path / "docs"
     docs.mkdir()
     _with_first_amendment(docs)
-    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True, env=_GIT_ENV)
-    subprocess.run(["git", "add", "docs"], cwd=tmp_path, check=True, env=_GIT_ENV)
+    git(tmp_path, "init", "-q")
+    git(tmp_path, "add", "docs")
     (docs / "v0.4.x-sequencing.md").write_text("# Seq\n\n" + _amendment("", "2026-12-01"))
     monkeypatch.setattr(amendment_evidence, "DOCS_DIR", docs)
     assert amendment_evidence.main([]) == 0

@@ -1,6 +1,6 @@
 # Enforcement Matrix
 
-> **Last updated**: 2026-09-29
+> **Last updated**: 2026-10-20
 > Every rule the project states, with the document that states it, the check
 > that enforces it, and how hard the enforcement is. Read the **Enforcement**
 > column literally: a rule is only as strong as the weakest place it is
@@ -90,8 +90,8 @@ the twelve, and the job is named where it is not one of the original six.
 | Only the standard status markers | documentation-guide §Status Markers | `doc_status_markers.py` | Required (`Docs hygiene`) + Pre-commit |
 | No leaked tool-call markup in docs | — | `doc_leaked_markup.py` | Required (`Docs hygiene`) + Pre-commit |
 | `FILEMAP.md` matches `git ls-files` | `generate_filemap.py` | `--check` (date-insensitive; on a PR it compares against the merge tree, so a PR behind a file-adding merge fails until updated) | Required (`Docs hygiene`) + Pre-commit regenerates — closed [ISSUE-0133](../issues/ISSUE-0133-no-ci-gate-on-filemap-freshness.md) |
-| Merged-PR history (`docs/merged-prs.md`) matches the squash log, allowing only the newest merges to be missing | automation-catalogue | `scripts/merged_prs.py --check` | Required (`Docs hygiene`) + Pre-commit regenerates |
-| No plan row says "PR open" / "not started" for a PR that has merged | release-cycle §Phase 1 | `scripts/checks/plan_status.py` (`make plan-status-check`) | Required (`Docs hygiene`) + Pre-commit — first run found ten stale rows; judging an unlinked 🔀 row by the commit that wrote it found eight more |
+| Merged-PR history (`docs/merged-prs.md`) matches the squash log, allowing only the newest merges to be missing | automation-catalogue | `scripts/merged_prs.py --check` | Required (`Docs hygiene`) + Pre-commit regenerates (a shallow clone may skip) |
+| No plan row says "PR open" / "not started" for a PR that has merged | release-cycle §Phase 1 | `scripts/checks/plan_status.py` (`make plan-status-check`) | Required (`Docs hygiene`) + Pre-commit (skipped when shallow) — first run found ten stale rows; judging an unlinked 🔀 row by the commit that wrote it found eight more |
 | A patch release keeps one document: no `docs/vX.Y.Z-*.md` file beside its plan but a test-findings PR plan | release-cycle §Phase 0 (sequencing Amendment 2026-09-12, ruling (e)) | `scripts/checks/plan_status.py` (`make plan-status-check`) fails one for any `X.Y.Z` after 0.3.16 with `Z` above 0, dated or not; v0.3.16 and earlier keep their files, a minor release is not judged | Required (`Docs hygiene`) + Pre-commit |
 | Every artifact the methodology names exists (documents, tools, make targets, Docs-hygiene steps) | [conformance.json](conformance.json) | `make conformance-check` | Required (`Docs hygiene`) + Pre-commit |
 | No ROADMAP Component Status row says less than the RFC it names | ROADMAP §How to Update | `scripts/checks/roadmap_status.py` (`make roadmap-status-check`) | Required (`Validate configs`) + Pre-commit — its first run found `internal/security/` still "In progress" four months after RFC 0009 closed part-way |

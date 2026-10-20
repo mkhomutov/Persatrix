@@ -20,6 +20,12 @@ Checks executed:
  11. Amendment evidence (each sequencing amendment records its external evidence)
  12. Methodology conformance (every artifact the manifest names exists)
 
+A step that exits ``SKIPPED`` (3) could not run in this checkout and changed
+nothing — in a shallow clone, whose log is cut short, docs/merged-prs.md when
+the log stops short of its rows, and the plan-status stale-row check. It is
+reported as skipped rather than failed, its file is not staged, and the reason
+it printed last is repeated after the results.
+
 Usage::
 
     python scripts/pre_commit.py [--skip-fmt]
@@ -41,7 +47,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.checks import ensure_utf8_streams  # noqa: E402
+from scripts.checks import SKIPPED, ensure_utf8_streams  # noqa: E402
 
 _FMT_LABELS = {"go fmt", "cargo fmt"}
 
@@ -135,25 +141,48 @@ _GENERATED = (
 )
 
 
-def _regenerate(label: str, script: str, output: str) -> bool:
-    """Run one generator and stage its output.  Returns True on success."""
+def _run_step(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+    """Run one step, echo its output, and keep it for a skip's reason."""
+    proc = subprocess.run(
+        cmd, cwd=REPO_ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        encoding="utf-8", errors="replace",
+    )
+    print(proc.stdout, end="")
+    return proc
+
+
+def _skip_note(label: str, output: str) -> str:
+    """A skipped step's summary line: its label and the reason it printed last."""
+    lines = output.strip().splitlines()
+    return f"{label}: {lines[-1] if lines else 'no reason given'}"
+
+
+def _regenerate(label: str, script: str, output: str) -> tuple[bool, str | None]:
+    """Run one generator and stage its output.
+
+    Returns ``(passed, None)``, or ``(True, note)`` when the generator exited
+    ``SKIPPED``: it left its file alone, so the file is not staged.
+    """
     print(f"\n▶ {label}")
     t0 = time.monotonic()
     try:
-        proc = subprocess.run([sys.executable, script], cwd=REPO_ROOT)
+        proc = _run_step([sys.executable, script])
+        if proc.returncode == SKIPPED:
+            print(f"  – SKIP  ({time.monotonic() - t0:.1f}s)")
+            return True, _skip_note(label, proc.stdout)
         if proc.returncode != 0:
             elapsed = time.monotonic() - t0
             print(f"  ✗ FAIL  ({elapsed:.1f}s)")
-            return False
+            return False, None
         # Stage the updated file so it's included in the commit.
         subprocess.run(["git", "add", output], cwd=REPO_ROOT, check=True)
         elapsed = time.monotonic() - t0
         print(f"  ✓ PASS  ({elapsed:.1f}s)")
-        return True
+        return True, None
     except FileNotFoundError:
         elapsed = time.monotonic() - t0
         print(f"  ✗ FAIL  (git or python not found) ({elapsed:.1f}s)")
-        return False
+        return False, None
 
 
 def _stale_hook_warning() -> str | None:
@@ -200,11 +229,15 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     # Always regenerate the derived files first (and stage them).
-    # Track results in the summary so failures are visible.
+    # Track results in the summary so failures and skips are visible.
     results: list[tuple[str, bool, float]] = []
+    skipped: list[str] = []
     for label, script, output in _GENERATED:
         t0 = time.monotonic()
-        ok = _regenerate(label, script, output)
+        ok, note = _regenerate(label, script, output)
+        if note is not None:
+            skipped.append(note)
+            continue
         results.append((label, ok, time.monotonic() - t0))
 
     checks = _CHECKS if not args.skip_fmt else [c for c in _CHECKS if c[0] not in _FMT_LABELS]
@@ -243,13 +276,17 @@ def main(argv: list[str] | None = None) -> int:
             results.append((label, passed, elapsed))
             continue
         try:
-            proc = subprocess.run(cmd, cwd=REPO_ROOT)
+            proc = _run_step(cmd)
         except FileNotFoundError:
             elapsed = time.monotonic() - t0
             print(f"  ✗ FAIL  (command not found: {cmd[0]})")
             results.append((label, False, elapsed))
             continue
         elapsed = time.monotonic() - t0
+        if proc.returncode == SKIPPED:
+            print(f"  – SKIP  ({elapsed:.1f}s)")
+            skipped.append(_skip_note(label, proc.stdout))
+            continue
         passed = proc.returncode == 0
         status = "✓ PASS" if passed else "✗ FAIL"
         print(f"  {status}  ({elapsed:.1f}s)")
@@ -260,7 +297,13 @@ def main(argv: list[str] | None = None) -> int:
     failed = [r for r in results if not r[1]]
 
     print("\n" + "=" * 60)
-    print(f"Results: {len(results) - len(failed)}/{len(results)} passed  ({total_time:.1f}s)")
+    tally = f"{len(results) - len(failed)}/{len(results)} passed"
+    skips = f", {len(skipped)} skipped" if skipped else ""
+    print(f"Results: {tally}{skips}  ({total_time:.1f}s)")
+    # A skip's reason was printed among the checks above; repeat it here, where
+    # it is not scrolled away.
+    for note in skipped:
+        print(f"  – skipped {note}")
 
     # After the results line so it is the last thing on screen on success, and
     # is not mistaken for one of the checks.
