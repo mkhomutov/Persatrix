@@ -119,7 +119,7 @@ One canonical document per topic. Link to it; do not copy from it.
 | Golden-trace evals | `docs/evaluators-guide.md`; `evaluators/eval_sets/README.md` |
 | Prompt assets | `docs/prompt-organization.md` |
 | Open-core licence tiers | `docs/open-core-reserved-seams.md` (policy in RFC 0045) |
-| Project strategy — standing review (direction, decision rules, review log) | `docs/project-strategy.md`; numbers and commands in `docs/project-strategy-evidence.md` |
+| Project strategy — standing review (direction, decision rules, review log) | `docs/project-strategy.md`; what the four September reviews found, how their disagreements were settled, and the five checks the synthesis added in `docs/project-strategy-four-reviews.md`; numbers and commands in `docs/project-strategy-evidence.md` |
 | Pre-registered experiments (materials, arms, scoring, result) | `docs/experiments/EXP-NNN-*.md`; materials in `evaluators/experiments/EXP-NNN/` |
 | Companion discussion documents (spawn RFCs, own no code) | `docs/memory-quality-roadmap.md`, `docs/storage-architecture-roadmap.md`, `docs/agent-runtime-vocabulary-roadmap.md`, `docs/memory-scope-axes.md` |
 | Branching, commits, PR titles | `docs/BRANCHING.md` |
