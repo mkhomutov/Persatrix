@@ -11,7 +11,8 @@
 > [#896](https://github.com/mkhomutov/Persatrix/pull/896),
 > [#897](https://github.com/mkhomutov/Persatrix/pull/897) and
 > [#898](https://github.com/mkhomutov/Persatrix/pull/898). They are closed
-> unmerged; everything load-bearing in them is carried here or in the
+> unmerged; everything load-bearing in them is carried here, in the
+> [four-reviews companion](project-strategy-four-reviews.md) or in the
 > [evidence companion](project-strategy-evidence.md).
 
 ## Summary
@@ -30,66 +31,22 @@ decided on its result at the first review, not before.
 
 ## 1. What the four reviews established
 
-All four measured the same tree at `f52e7ff6` (2026-09-09). Their agreed
-findings, re-verified at `cbeea7bc` on 2026-09-11 (commands in the
-[evidence companion](project-strategy-evidence.md)):
-
-| # | Finding | Verified 2026-09-11 |
-|---|---------|---------------------|
-| F1 | No external use: 4 stars, 0 forks, 0 outside issues or PRs, no downloadable release. | ✔ unchanged; 23 unique visitors in 14 days |
-| F2 | The loop is closed: every CI job and the Before-Phase-0 step measure the repository against itself. Nothing can go red because of something a person outside did or did not do. | ✔ 11 jobs, 12 required checks, all internal |
-| F3 | The direction reverted: the [2026-06-04 amendment](v0.3.x-sequencing.md#amendment-2026-06-04--re-sequence-the-v03x-tail-for-conversation-realism--usefulness-ahead-of-v040) put adoption first and deferred confidentiality as "invisible to a prospective user"; the [2026-07-25 amendment](v0.3.x-sequencing.md#amendment-2026-07-25--add-v0312-memory-that-travels-cross-channel-experience--accounts) pulled it back on three internal reasons. No adoption step was ever recorded. | ✔ |
-| F4 | The process outgrew its team: about 3.5 process commits per feature commit across v0.3.12–v0.3.15; monthly merged PRs fell from 228 (June) to 52 (August); about seven non-implementation PRs per release. | ✔ and continuing ([§3](#3-what-this-synthesis-adds)) |
-| F5 | The 500-line cap inverted: files cluster in the last 21 lines under it, and [ISSUE-0143](issues/ISSUE-0143-debt-sweep-26-files-at-size-cap.md) records the cap blocking a test. | ✔ 24 files at a cap, 100 within 3 % |
-| F6 | The core claim is untested: no eval, test or manual test compares the system against not having it. | ✔ zero hits for ablation, baseline or single-call under `evaluators/` |
-| F7 | The wedge is unnamed: the [extension spec](persatrix-extension-spec.md) promises eight domains "without code changes"; the README sells three products. | ✔ |
-| F8 | The interop surface is empty: MCP is 24 lines of TODO across both sides of the gRPC boundary; no A2A. | ✔ |
-| F9 | The polyglot split is a per-change tax paid by one person: Go, Python, Rust and Svelte; proto pins; sanitizer mirrors; frozen SDKs. | ✔ |
-
-All four also agree on what is worth protecting: the five-axis memory scoping
-model and its deterministic egress gate; lease-before-call cost control with a
-construction-time cap on autonomy; the offline $0 mode and provider aliases;
-the test and review discipline.
+Nine findings, F1 to F9, that all four reviews agreed on, and what all four
+would keep. They are in
+[the four-reviews companion §1](project-strategy-four-reviews.md#1-what-the-four-reviews-established),
+where every review re-verifies them.
 
 ## 2. Where they disagreed, and the resolution
 
-| Question | Positions | Resolution |
-|----------|-----------|------------|
-| Extract the budget lease now ([RFC 0046](rfcs/0046-budget-lease-extraction.md))? | #895: yes, first. #896: no — the pre-call budget-gate market closed between May and September. #898: yes, bundled with the governance core. | **No standalone extraction.** The distinctive part is not "budget before the call" but budgets that understand agents, conversations and a closing reserve. That is a property of the governance core and travels with it. Re-target RFC 0046; do not retire it. |
-| The memory-boundary work: stop, ship over MCP, or split? | #895: stop after the v0.3.16 shadow gate. #896: it is the differentiator; ship it over MCP. #897: only the gate half is durable; the 1 500-token allocator is eroded by cheap context. | **Split as #897 says, then stop.** The gate (classification, principal, speaker, audience) stays and is the confidentiality story. No further isolation work after v0.3.16 until a user asks. The allocator is an experiment question, not a bet ([§3](#3-what-this-synthesis-adds)). |
-| What is the wedge? | #895, #896: memory and cost control, reachable over MCP. #897: do not commit until measured. #898: discussions that finish, within budget, respecting who is listening. | **#898's framing is the hypothesis; #897's rule governs.** It is the only candidate that uses the largest built asset (20 000 lines of channel governance), has a working demo (the v0.3.11 autonomous channel, $0.17) and is not a commodity. It is tested in [§4](#4-the-decision-framework) before the README changes. |
-| Pause v0.4.0, or cap the v0.3.x train? | #898: pause; finish v0.3.16 small. #896: an amendment that adds a release must name what it removes. | **Both.** v0.3.16 closes by its own cut clauses; no train opens before the experiment reports; the "name what you remove" rule goes into the amendment template. |
-| Retire the Rust CLI? | #895, #896: retire. #898: four languages is the problem, not one of them. | **Freeze; do not delete yet.** Deleting 11 000 lines is a week nobody has; frozen, it costs one clippy job. Drop it from the quickstart now; remove it when the wedge decision says it is off the path. |
-| The licence | All four: reconsider BUSL. | **Decide on a date, not now.** Nobody has been turned away by it because nobody has arrived. Whatever is built to be reached ([§8](#8-implementation-changes)) is MIT from day one; the product licence is decided at the first review with a stated default ([§4](#4-the-decision-framework)). |
+Six questions the reviews split on, and how each was settled: the budget
+lease, the memory-boundary work, the wedge, the v0.3.x train, the Rust CLI
+and the licence. They are in
+[the four-reviews companion §2](project-strategy-four-reviews.md#2-where-they-disagreed-and-the-resolution).
 
 ## 3. What this synthesis adds
 
-Five checks the reviews did not make, or could not.
-
-1. **The pattern continues in real time.** Between the reviews' baseline and
-   this document, 35 commits merged: 21 docs, 12 fixes, 2 CI, no features.
-   September so far: 77 merged PRs, 7 of them features. The strategy reviews
-   themselves became four PRs and this fifth one. Process is generating
-   process.
-2. **The cap is a treadmill, not a backlog.** v0.3.16 opened with two
-   mandatory splits. After them the near-cap count is unchanged: 24 files
-   exactly at a limit, 100 within 3 %. Splitting refills the band because the
-   seam is chosen by line count.
-3. **The allocator is a cost lever, not only a recall lever.** #897 argues
-   that cheap long context erodes the 1 500-token budget. In a single chat it
-   does. In a channel every persona re-reads context on every turn, so prompt
-   size multiplies by members and turns; the v0.3.11 arc spent about 47 000
-   tokens in 99 seconds with the allocator on. Whether the allocator earns
-   its share of the memory tree is a quality-per-dollar question, so the
-   experiment measures cost, not only recall.
-4. **A2A is cheaper than it looks.** [RFC 0043](rfcs/0043-inbound-agent-interop-endpoint.md)
-   already drafts a bounded inbound endpoint that lets a foreign agent join a
-   channel. That is the interop slice the wedge needs, and it is smaller than
-   a full A2A implementation.
-5. **The visitors are the author.** Of 23 unique visitors in 14 days, 3 came
-   from GitHub referrals and 1 from Google; the 328 unique cloners are CI.
-   Any adoption number counted from today starts at zero, which makes the
-   outer-loop gate ([§7](#7-methodology-changes)) easy to define honestly.
+Five checks the reviews did not make, in
+[the four-reviews companion §3](project-strategy-four-reviews.md#3-what-this-synthesis-adds).
 
 ## 4. The decision framework
 
@@ -222,9 +179,9 @@ gate and forgets every priority.
 | `MEMORY_BUDGET_TOKENS` read from `config/optimization.yaml` | The experiment's knob; the first thing a long-context user changes. | Week 2 |
 | Experiment harness: a per-run switch for governance and memory, plus a scorer | [§4](#4-the-decision-framework) | Weeks 3–5 |
 | Release artifacts: image, binary, one-command demo, committed transcript | [§6](#6-plan-for-the-next-ten-weeks) item 5 | Weeks 5–7 |
-| Rust CLI frozen and removed from the quickstart | [§2](#2-where-they-disagreed-and-the-resolution) | Week 5, with the artifacts |
+| Rust CLI frozen and removed from the quickstart | [four reviews §2](project-strategy-four-reviews.md#2-where-they-disagreed-and-the-resolution) | Week 5, with the artifacts |
 | Workflow engine frozen and removed from the README pitch | No functional change since June; on no candidate wedge | First review |
-| RFC 0046 re-targeted: the lease ships inside the governance core's extraction, not alone | [§2](#2-where-they-disagreed-and-the-resolution) | First review |
+| RFC 0046 re-targeted: the lease ships inside the governance core's extraction, not alone | [four reviews §2](project-strategy-four-reviews.md#2-where-they-disagreed-and-the-resolution) | First review |
 | One interop slice: RFC 0043 or an MCP memory server | [§6](#6-plan-for-the-next-ten-weeks) item 7 | Weeks 8–10 |
 | Trust score: evidenced by the experiment, or the schema and decay logic retired | #897: a float rendered as one prompt line; no eval shows it changes behaviour | First review |
 
@@ -248,8 +205,9 @@ This is a standing document. It is reviewed:
 - whenever an experiment reports or a first outside user appears.
 
 A review re-runs the evidence companion's commands, updates the verification
-column in [§1](#1-what-the-four-reviews-established), records any decision
-rule that fired, and appends a row below. A review that changes a decision is
+column in the four-reviews companion's
+[§1](project-strategy-four-reviews.md#1-what-the-four-reviews-established),
+records any decision rule that fired, and appends a row below. A review that changes a decision is
 ratified by the sequencing amendment that acts on it, not by this file.
 
 | Date | Tree | What changed | Decision rules fired |
@@ -260,6 +218,9 @@ ratified by the sequencing amendment that acts on it, not by this file.
 
 ## Related documentation
 
+- [The four reviews](project-strategy-four-reviews.md) — §1–§3 in full: the
+  nine findings each review re-verifies, the six disagreements and how each
+  was settled, and the five checks this synthesis adds.
 - [Evidence companion](project-strategy-evidence.md) — every number with its
   command, the four reviews' recommendation ledger, and the perishable market
   claims.

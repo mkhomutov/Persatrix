@@ -1,8 +1,10 @@
 # Project Strategy — Evidence
 
 > Companion to the [standing strategy review](project-strategy.md). Every
-> number there is here with the command that produced it, so each review
-> re-runs the commands and sees what moved. Measured at `main` = `cbeea7bc`
+> number there, and in its
+> [four-reviews companion](project-strategy-four-reviews.md), is here with
+> the command that produced it, so each review re-runs the commands and sees
+> what moved. Measured at `main` = `cbeea7bc`
 > on 2026-09-11 unless a row says otherwise.
 >
 > The four reviews this file preserves —
@@ -164,7 +166,9 @@ copied here; a review that relies on one re-fetches it.
 ## 9. Recommendation ledger
 
 Every recommendation the four reviews made, with its disposition in the
-[standing review](project-strategy.md). *Adopted* means carried as written;
+[standing review](project-strategy.md); its §2 and §3 are in the
+[four-reviews companion](project-strategy-four-reviews.md), under the same
+numbers. *Adopted* means carried as written;
 *changed* means carried with the stated modification; *rejected* names the
 reason; *deferred* means decided at the first review.
 
@@ -204,7 +208,8 @@ reason; *deferred* means decided at the first review.
 ## Related documentation
 
 - [Project strategy — standing review](project-strategy.md) — the argument
-  these numbers support.
+  these numbers support, with the four reviews' findings in its
+  [four-reviews companion](project-strategy-four-reviews.md).
 - [v0.3.x sequencing](v0.3.x-sequencing.md) — the decision log in §7.
 - [Documentation guide § Size limits](documentation-guide.md#size-limits) —
   the caps §4 measures against.
