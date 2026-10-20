@@ -346,3 +346,7 @@ only after v0.3.16 is tagged.
 > boards an issue only when a phase in the release is its fix. A society meant
 > to run for weeks meets an unbounded standing timer directly, so this is a
 > candidate for the plan's goal audit, which may propose it by amendment.
+
+> 2026-10-20 — **proposed by the [v0.4.0 plan's goal audit](../v0.4.0-plan.md#the-goal-audit-and-the-first-strategy-review)**,
+> with ISSUE-0157: the persona-call budget is all that stops a runaway
+> standing timer. Not slotted; only an amendment boards it.

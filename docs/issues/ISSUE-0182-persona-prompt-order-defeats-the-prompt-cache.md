@@ -107,3 +107,6 @@ larger change to what the model reads and wants its own measurement.
 > boards an issue only when a phase in the release is its fix. RFC 0021
 > Phase 2 does board, so if the plan's goal audit proposes this change, the
 > amendment can ride with that phase.
+
+> 2026-10-20 — **weighed and not proposed** by the [v0.4.0 plan's goal
+> audit](../v0.4.0-plan.md#the-goal-audit-and-the-first-strategy-review): it saves cost, which the goal does not need. Not slotted.

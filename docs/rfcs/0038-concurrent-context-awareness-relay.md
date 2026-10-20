@@ -6,7 +6,7 @@ type: architecture
 status: partially_implemented
 author: Maksim Khomutov
 created: 2026-05-16
-target: "v0.3.12 (§B single-channel-turn enforcement only, carved forward per RFC 0037 Decision #3) + v0.4.0 (§C–§E)"
+target: "v0.3.12 (§B single-channel-turn enforcement only, carved forward per RFC 0037 Decision #3) + v0.4.0 (§C, cuttable); §D–§E unslotted by the v0.4.0 plan's ruling (b) audit"
 depends_on:
   - RFC-0011
   - RFC-0034
@@ -17,10 +17,10 @@ depends_on:
 # RFC 0038 — Persona Concurrent-Context Awareness & Cross-Channel Relay
 
 **Type**: architecture
-**Status**: ⚠️ Partially Implemented — **§B (the single-channel-turn guard) ✅ shipped v0.3.12** via [RFC 0037](0037-memory-confidentiality-channel-classification.md) Phase 1 (its PR 4, [#776](https://github.com/mkhomutov/Persatrix/pull/776), per Decision #3 — this section remains the owning spec); **§C–§E (contexts / awareness / relay) stay 📋 proposed for v0.4.0**
+**Status**: ⚠️ Partially Implemented — **§B (the single-channel-turn guard) ✅ shipped v0.3.12** via [RFC 0037](0037-memory-confidentiality-channel-classification.md) Phase 1 (its PR 4, [#776](https://github.com/mkhomutov/Persatrix/pull/776), per Decision #3 — this section remains the owning spec); **§C (contexts) stays 📋 proposed for v0.4.0, cuttable; §D–§E (awareness / relay) are unslotted by the [v0.4.0 plan](../v0.4.0-plan.md#scope-locks)'s ruling (b) audit (2026-10-20)**
 **Author**: Maksim Khomutov
 **Date**: 2026-05-16
-**Target**: v0.3.12 (**§B only** — the single-channel-turn guard is carved forward into [RFC 0037](0037-memory-confidentiality-channel-classification.md)'s Phase 1 per its Decision #3, 2026-07-19 decision; 0037 owns that PR slice against this section's spec) + v0.4.0 (§C–§E — contexts, awareness, relay; deferred from v0.3.x per the [2026-06-04 sequencing amendment](../v0.3.x-sequencing.md#amendment-2026-06-04--re-sequence-the-v03x-tail-for-conversation-realism--usefulness-ahead-of-v040))
+**Target**: v0.3.12 (**§B only** — the single-channel-turn guard is carved forward into [RFC 0037](0037-memory-confidentiality-channel-classification.md)'s Phase 1 per its Decision #3, 2026-07-19 decision; 0037 owns that PR slice against this section's spec) + v0.4.0 (§C, contexts, cuttable; deferred from v0.3.x per the [2026-06-04 sequencing amendment](../v0.3.x-sequencing.md#amendment-2026-06-04--re-sequence-the-v03x-tail-for-conversation-realism--usefulness-ahead-of-v040)); §D–§E unslotted by the [v0.4.0 plan](../v0.4.0-plan.md#scope-locks)'s ruling (b) audit, back only with an outside ask
 **Depends on**: RFC 0011 (Channels — the channel surface, the event/action types, and the durable message store), RFC 0034 (Persona Conversational Working Memory — the conversation window this RFC generalises to multi-channel), RFC 0035 (Channel Membership Interval Ledger — the membership roster the awareness section is computed from), RFC 0037 (Memory Confidentiality & Channel Classification — the hard gate every relay turn re-runs; the §B single-channel-turn guard its §D/§H assume is carved into RFC 0037's own Phase 1 per its Decision #3, with this RFC's §B as the owning spec)
 **Relates to**: RFC 0012 (Protocols & Organizations — the *authority* axis that decides whether a relay *request* binds; the obligation half of this RFC's mechanism), RFC 0028 (Agent Decision Policy Engine — a relay request evaluated through accept/adapt/refuse, v0.4.0), RFC 0017 (Persona Memory Injection Token Budget — the awareness section is a budgeted prompt section), RFC 0022 (Persona Prompt Section Templating — the awareness section is a templated section), RFC 0024 (Event-Driven Agent Scheduling — the relay event rides the orchestrator's event-delivery path RFC 0024 may later generalise), RFC 0021 (Persona Temporal Awareness — a relay request received from a peer is a commitment), RFC 0009 (Agent Identity, Security & Sandboxing — the audit subsystem)
 

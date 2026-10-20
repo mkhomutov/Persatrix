@@ -96,3 +96,7 @@ planning-readiness audit.
 > tokens on the agents' REST calls instead, which leaves RFC 0040 Phases 2–3,
 > and this issue, unslotted. The slot above, "v0.4.0 with RFC 0040 Phase 2",
 > holds only if the lock picks gRPC.
+
+> 2026-10-20 — **not slotted.** The [v0.4.0 plan](../v0.4.0-plan.md#scope-locks)'s
+> agent-identity lock picked the REST route, so RFC 0040 Phases 2–3 and this
+> issue stay unslotted.

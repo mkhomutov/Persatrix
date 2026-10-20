@@ -11,7 +11,7 @@
 
 ## Overview
 
-RFC 0029 draws the personal/society storage boundary behind a `MemoryStore` facade so every later cross-agent RFC pins against one decision instead of re-litigating "another table in `memory.db`". The RFC spans six phases; **only Phase 1 lands in v0.3.2** — facade promotion, no Postgres. Phases 2–6 (capability tokens, Postgres society backend, migration tooling, society-tier consumers, conditional file split) are reserved for v0.4.0 and carry no PR rows here — see [§Future Phases](#future-phases).
+RFC 0029 draws the personal/society storage boundary behind a `MemoryStore` facade so every later cross-agent RFC pins against one decision instead of re-litigating "another table in `memory.db`". The RFC spans six phases; **only Phase 1 lands in v0.3.2** — facade promotion, no Postgres. Phases 2–6 (capability tokens, Postgres society backend, migration tooling, society-tier consumers, conditional file split) carry no PR rows here; v0.4.0 takes only Phase 3, as society tables in the SQLite channels store — see [§Future Phases](#future-phases).
 
 Phase 1 is a **pure refactor**: behaviour is identical, existing tests pin the API surface and must pass unchanged ([RFC §Test Strategy](0029-personal-society-storage-split.md#test-strategy)). Its load-bearing value is for v0.4.0 — [RFC 0028](0028-agent-decision-policy-engine.md) is hard-blocked on the frozen facade ([RFC §Phased Implementation Plan ordering invariant](0029-personal-society-storage-split.md#phased-implementation-plan)), which is why the [v0.3.2 master plan](../v0.3.2-plan.md#acceptance-for-v032) promotes "facade frozen" to a plan-level acceptance gate.
 
@@ -332,15 +332,15 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 
 ## Future Phases
 
-Phase 3 is v0.4.0, with Phase 4 only if its scope lock keeps the channels-store swap; Phases 2, 5–6 are unslotted ([v0.4.x sequencing ruling (m)](../v0.4.x-sequencing.md#rulings)). Out of scope for this plan; tracking notes only — no PR rows. The canonical breakdown is [RFC §Phased Implementation Plan](0029-personal-society-storage-split.md#phased-implementation-plan).
+Phase 3 is v0.4.0, as society tables in the SQLite channels store ([RFC 0029's 2026-10-20 amendment](0029-personal-society-storage-split.md#amendment-2026-10-20--v040s-society-backend)); Phases 2 and 4–6 are unslotted ([v0.4.x sequencing ruling (m)](../v0.4.x-sequencing.md#rulings)). Out of scope for this plan; tracking notes only — no PR rows. The canonical breakdown is [RFC §Phased Implementation Plan](0029-personal-society-storage-split.md#phased-implementation-plan).
 
 - **Phase 2 — Capability-token plumbing.** Typed `StoreConfig.capability_token`, `CapabilityDenied` on missing scope. Soft-depends on RFC 0009 Phase 4; mock verifier until then.
-- **Phase 3 — Postgres society backend.** `asyncpg` pool, `shared_pools` / `pool_entries` / `bonds_inbound` schema, write-through projection with the local outbox, Postgres backend for `internal/channels/`.
+- **Phase 3 — Society backend.** v0.4.0 takes the SQLite form: a society-store interface and its tables in `data/channels.db`. The Postgres form (`asyncpg` pool, `shared_pools` / `pool_entries` / `bonds_inbound` schema, write-through projection with the local outbox, Postgres backend for `internal/channels/`) stays unslotted.
 - **Phase 4 — Migration tooling.** `persatrix memory migrate` / `rollback`, read-only SQLite fallback, deprecation-window warnings.
 - **Phase 5 — Society-tier consumers.** RFC 0028 `decision_records` and RFC 0013 `audit_chain` schemas land directly in the society Postgres.
 - **Phase 6 — Conditional per-tier SQLite file split (SA-5).** Gated on a Phase 3 contention benchmark; default outcome is "not needed".
 
-The v0.4.0 PR plan for Phase 3 (and Phase 4 if it boards) opens when the v0.4.0 plan opens; the [RFC 0029 PR plan](0029-pr-plan.md) is extended there, not replaced.
+The v0.4.0 PR plan for Phase 3 is the [v0.4.0 plan](../v0.4.0-plan.md)'s row R2, after its benchmark; the [RFC 0029 PR plan](0029-pr-plan.md) is extended there, not replaced.
 
 ---
 

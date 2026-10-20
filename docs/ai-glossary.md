@@ -576,14 +576,14 @@ Terms introduced by [docs/storage-architecture-roadmap.md](storage-architecture-
 ### Personal/Society Storage Boundary
 - **Aliases:** "the storage split", "personal/society split"
 - **Disallowed:** "agent/world split", "private/shared boundary"
-- **Definition:** The architectural rule that data with one logical writer and one logical owner (a single agent's memory) lives in per-agent SQLite, while data requiring cross-agent consistency or external query (the *society state*) lives in shared Postgres. Established by [storage-architecture-roadmap.md](storage-architecture-roadmap.md) (SA-1) for v0.4.0.
-- **Example:** "Channel messages cross the personal/society storage boundary into Postgres; per-agent episodes do not."
+- **Definition:** The architectural rule that data with one logical writer and one logical owner (a single agent's memory) lives in per-agent SQLite, while data requiring cross-agent consistency or external query (the *society state*) lives in shared Postgres. Established by [storage-architecture-roadmap.md](storage-architecture-roadmap.md) (SA-1). In v0.4.0 the society state is a set of society tables in the SQLite channels store, not Postgres ([RFC 0029's 2026-10-20 amendment](rfcs/0029-personal-society-storage-split.md#amendment-2026-10-20--v040s-society-backend)).
+- **Example:** "Channel messages cross the personal/society storage boundary; per-agent episodes do not."
 
 ### Society State
 - **Aliases:** —
 - **Disallowed:** "shared state", "global state", "world state"
 - **Definition:** Cross-agent persistent state that no single agent owns: channels, org topology, decision audit, HITL approvals, shared facts, procedural patterns, the audit chain. Backed by Postgres in the SA-1 target picture. Distinct from a single agent's personal memory.
-- **Example:** "The decision audit chain is society state and lives in the society Postgres."
+- **Example:** "The organization graph is society state; in v0.4.0 it lives in the society tables, not in a persona's memory."
 
 ### Vectors-as-Accelerator-Only
 - **Aliases:** —

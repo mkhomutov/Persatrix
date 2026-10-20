@@ -397,7 +397,7 @@ If real use cases demand it: more granular capability scopes (per-message-type, 
 ### New open questions surfaced by the readiness review
 
 - **NEW-1 — Credential shape confirmation.** The credential track is decided (RFC 0009 Phase 4 model, HTTP variant, denylist revocation — [§C](#c-auth-identity-and-credentials)). Confirm at the security review that the HTTP HMAC variant + denylist is preferred over waiting for a full RFC 0039 machine-principal amendment.
-- **NEW-2 — Admission gate sequencing.** `external_participants_allowed` is owned by RFC 0012 §G (v0.4.0). Confirm no external credential is issued before that gate exists, and that Phase 1a provisioning stays operator-only until then. **Blocks the security review.**
+- **NEW-2 — Admission gate sequencing.** `external_participants_allowed` is owned by RFC 0012 §G, whose clearance check is unslotted since its [2026-10-20 amendment](0012-protocols-organizations.md#amendment-2026-10-20--the-v040-plans-ruling-b-audit). Confirm no external credential is issued before that gate exists, and that Phase 1a provisioning stays operator-only until then. **Blocks the security review.**
 - **NEW-3 — Governance disposition.** External participants are `RespondNever` members ([§D](#d-capability-scope-and-membership)); confirm they are governance-*subject* for budget accounting but consume no reply budget, and add `external_agent` (or a generic `external`) to the `exempt_principals` reasoning if needed ([§G](#g-governance-and-delivery-mechanics)).
 - **NEW-4 — Storage home + RFC 0029 tier.** `channels.db` vs. a dedicated DB, and the migration number (RFC 0037's v0.3.12 migration is projected to take v11 first); every new store is society-scoped ([§E](#e-storage-and-provisioning)). **Blocks the store PRs.**
 - **NEW-5 — Memory-poisoning policy.** Provenance-tag external-derived memory / exclude from fact extraction in Phase 1 / operator forget-path ([§Security](#security-considerations)).
@@ -425,7 +425,7 @@ Draft. This RFC stays 🔨 **Draft** until the leave-Draft checklist below is di
 - **Phase 1b**: RFC 0039 Phases 1–2 (the account/session substrate + the Phase 2 REST enforcement that authenticates the adjacent channel surface) and the credential-track confirmation. (0039 Phase 3 — account administration & hardening — is *not* on this path: the credential is an RFC 0009-track token, not an 0039 account.)
 - **Phase 1c**: OQ 1 resolved + `/api/v1/channels/*` authenticated (RFC 0039 Phase 2) + the RFC 0012 §G admission gate.
 
-This RFC remains sequenced after the other three umbrella RFCs, but is otherwise **independent of RFC 0040 and RFC 0041** (neither is a build dependency — see [Related Documentation](#related-documentation)). Realistic landing zone: **v0.4.x** — its critical path runs through RFC 0039 Phase 2 (targeted v0.3.x but 📋 Proposed with zero implementation today) and the RFC 0012 §G admission gate (v0.4.0).
+This RFC remains sequenced after the other three umbrella RFCs, but is otherwise **independent of RFC 0040 and RFC 0041** (neither is a build dependency — see [Related Documentation](#related-documentation)). Realistic landing zone: **v0.4.x** — its critical path runs through RFC 0039 Phase 2 (targeted v0.3.x but 📋 Proposed with zero implementation today) and the RFC 0012 §G admission gate (unslotted since 2026-10-20).
 
 ## Related Documentation
 

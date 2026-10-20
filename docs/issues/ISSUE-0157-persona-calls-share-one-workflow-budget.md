@@ -281,3 +281,7 @@ only after v0.3.16 is tagged.
 > to run for weeks stops at about $10 of persona calls per orchestrator
 > process, so this is a candidate for the plan's goal audit, which may propose
 > it by amendment.
+
+> 2026-10-20 — **proposed by the [v0.4.0 plan's goal audit](../v0.4.0-plan.md#the-goal-audit-and-the-first-strategy-review)**:
+> three personas on stock budgets stop at about $10 of calls per orchestrator
+> process. Not slotted; only an amendment boards it.

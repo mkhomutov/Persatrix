@@ -2,10 +2,10 @@
 
 **RFC**: [0040-agent-orchestrator-transport-unification.md](0040-agent-orchestrator-transport-unification.md)
 **Created**: 2026-07-15
-**Branch prefix**: `feature/v03x-rfc0040-` (Phase 1, v0.3.x) · `feature/v040-rfc0040-` (Phases 2–4, v0.4.0)
+**Branch prefix**: `feature/v03x-rfc0040-` (Phase 1, v0.3.x) · `feature/v0NN-rfc0040-` (Phases 2–4, once slotted)
 **Target**: `main`
 **Merge strategy**: Squash merge per [BRANCHING.md](../BRANCHING.md)
-**Master plan**: TBD — Phase 1 rides an open v0.3.x patch (v0.3.12 the last open slot); Phases 2–3 board the not-yet-opened v0.4.0 plan only if its agent-identity lock picks gRPC; Phase 4 is unslotted ([v0.4.x sequencing ruling (m)](../v0.4.x-sequencing.md#rulings))
+**Master plan**: TBD — Phase 1 rides an open v0.3.x patch (v0.3.12 the last open slot); Phases 2–4 are unslotted since the [v0.4.0 plan](../v0.4.0-plan.md#scope-locks)'s agent-identity lock picked REST (2026-10-20) ([v0.4.x sequencing ruling (m)](../v0.4.x-sequencing.md#rulings))
 
 > ⚠️ **SKELETON — not yet actionable.** This plan is drafted ahead of RFC acceptance so the shape is visible. RFC 0040 is **📋 Proposed**; per its [Decision / Next Steps](0040-agent-orchestrator-transport-unification.md#decision--next-steps) **the RFC must reach Accepted before PR 2 (the proto) opens** — PR 1 (v0.3.x hygiene) may proceed now, since it carries no proto change or scope dependency. The [Phase 0 Hard Gate](#phase-0-hard-gate) below lists the scope decisions that must resolve before PR 2. Sizes are calibrated estimates; PR numbers, merge dates, and checklists are placeholders.
 
@@ -15,13 +15,13 @@
 
 RFC 0040 migrates the remaining agent→orchestrator **control-plane** calls — channel publish, channel-history fetch, agent registration/deregistration — off REST and onto a new gRPC `OrchestratorService`, leaving REST as the dedicated client edge (CLI + future Web UI). The agent→orchestrator path is already mixed today (gRPC for `LogService` logs and the RFC 0023 `WalletService` lease, REST for channels/registration); this RFC makes it uniform. Both transports become thin adapters over one shared publish core (`publishCommit`), so no invariant can be bypassed by picking a transport.
 
-The RFC ships in **4 phases** ([RFC §Phased Implementation Plan](0040-agent-orchestrator-transport-unification.md#phased-implementation-plan)): Phase 1 (contract hardening, v0.3.x hygiene, no transport change) is independent and lands first; Phases 2–4 (proto + orchestrator handlers → agent migration → retire the agent-only REST surface) form a v0.4.0 PR train. This plan splits the work into **8 PRs**, mirroring the [RFC 0017](0017-pr-plan.md) / [RFC 0023](0023-pr-plan.md) PR-plan structure. Each PR leaves the repo in a passing-tests, lint-clean state and stays within the [BRANCHING.md](../BRANCHING.md) < 500-line size guidance.
+The RFC ships in **4 phases** ([RFC §Phased Implementation Plan](0040-agent-orchestrator-transport-unification.md#phased-implementation-plan)): Phase 1 (contract hardening, v0.3.x hygiene, no transport change) is independent and lands first; Phases 2–4 (proto + orchestrator handlers → agent migration → retire the agent-only REST surface) form one PR train, unslotted. This plan splits the work into **8 PRs**, mirroring the [RFC 0017](0017-pr-plan.md) / [RFC 0023](0023-pr-plan.md) PR-plan structure. Each PR leaves the repo in a passing-tests, lint-clean state and stays within the [BRANCHING.md](../BRANCHING.md) < 500-line size guidance.
 
 > **Estimate calibration**: RFC 0017 and RFC 0023 PRs landed within a ~1.7× calibration factor of their initial estimates. This plan applies the same factor. Sizes below are calibrated estimates.
 
 **Prerequisite**: RFC 0002 (REST API Server — Implemented), RFC 0004 (Python Agent gRPC Server — Implemented), RFC 0011 (Channels & Internal Agent Messaging — the publish/history surface being migrated) merged. RFC 0023 (LLM Call Leasing — Implemented, v0.3.2) is the live architectural precedent: `WalletService` already shares the `:9090` agent-facing listener and the agent's shared outbound gRPC channel, both of which this RFC reuses.
 
-**Recommended merge order**: **PR 1** (any open v0.3.x patch) → *[v0.4.0 opens]* → **PR 2 → PR 3 → PR 4 → PR 5 → PR 6 → PR 7 → PR 8**. PR 1 is a standalone v0.3.x hygiene PR with no dependency on the rest. PRs 2–3 land the gRPC contract and orchestrator handlers with no agent-side change. PRs 4–6 migrate the agent and retire the old surface. The only hard cross-process ordering constraint is **orchestrator (PR 3) before agent (PR 4)** — the orchestrator must serve gRPC before agents dial it.
+**Recommended merge order**: **PR 1** (any open v0.3.x patch) → *[an amendment slots Phases 2–4]* → **PR 2 → PR 3 → PR 4 → PR 5 → PR 6 → PR 7 → PR 8**. PR 1 is a standalone v0.3.x hygiene PR with no dependency on the rest. PRs 2–3 land the gRPC contract and orchestrator handlers with no agent-side change. PRs 4–6 migrate the agent and retire the old surface. The only hard cross-process ordering constraint is **orchestrator (PR 3) before agent (PR 4)** — the orchestrator must serve gRPC before agents dial it.
 
 ---
 
@@ -36,7 +36,7 @@ RFC 0040 is **📋 Proposed** with unresolved scope decisions that are **non-add
 | G3 | **Service shape** — [RFC OQ 1](0040-agent-orchestrator-transport-unification.md#open-questions) | Pins the proto in PR 2 (new `OrchestratorService` vs. folding into an existing service). Non-additive once stubs generate. | New dedicated `OrchestratorService` (keeps each service single-direction, single-concern). Confirm at review. |
 | G4 | **Transport selection** — [RFC OQ 2](0040-agent-orchestrator-transport-unification.md#open-questions) | Shapes the agent config surface + fallback logic in **PR 4**. | (a) explicit agent config flag (recommended — observable, no per-call probe) vs. (b) capability detection on `UNIMPLEMENTED`. Decide before PR 4. |
 
-**Not blocking** (resolvable during implementation, recorded here for tracking): OQ 4 co-sequencing with RFC 0029 Phase 2 — decide when the v0.4.0 plan opens (may share a PR train so the proto/handlers are touched once); OQ 5 — **resolved** in the RFC (the `orchestrator_grpc` config field and shared outbound channel already exist).
+**Not blocking** (resolvable during implementation, recorded here for tracking): OQ 4 co-sequencing with RFC 0029 Phase 2 — decide when an amendment slots RFC 0040 Phases 2–3 or RFC 0029 Phase 2 (the v0.4.0 plan opened with neither) (may share a PR train so the proto/handlers are touched once); OQ 5 — **resolved** in the RFC (the `orchestrator_grpc` config field and shared outbound channel already exist).
 
 ---
 
@@ -45,10 +45,10 @@ RFC 0040 is **📋 Proposed** with unresolved scope decisions that are **non-add
 | PR | Title | Phase | Version | Depends on | Est. size | Status |
 |----|-------|-------|---------|------------|-----------|--------|
 | 1 | Contract hardening (JSON Schema + contract test) | RFC Ph 1 | v0.3.x | — | ~250–400 | ⬜ Not started |
-| 2 | `orchestrator.proto` + stubs + no-op servicer | RFC Ph 2 | v0.4.0 | G1–G3, PR 1 | ~200–350 | ⬜ Blocked (Phase 0) |
-| 3 | Orchestrator handlers over `publishCommit`/registry + dual-transport test | RFC Ph 2 | v0.4.0 | PR 2 | ~350–500 | ⬜ Blocked |
-| 4 | `GRPCChannelPublisher` + register/deregister + sticky transport selection | RFC Ph 3 | v0.4.0 | PR 3, G4 | ~350–500 | ⬜ Blocked |
-| 5 | `GrpcChannelHistoryFetcher` (history migration) | RFC Ph 3 | v0.4.0 | PR 3 | ~200–350 | ⬜ Blocked (G2 — droppable) |
+| 2 | `orchestrator.proto` + stubs + no-op servicer | RFC Ph 2 | unslotted | G1–G3, PR 1 | ~200–350 | ⬜ Blocked (Phase 0) |
+| 3 | Orchestrator handlers over `publishCommit`/registry + dual-transport test | RFC Ph 2 | unslotted | PR 2 | ~350–500 | ⬜ Blocked |
+| 4 | `GRPCChannelPublisher` + register/deregister + sticky transport selection | RFC Ph 3 | unslotted | PR 3, G4 | ~350–500 | ⬜ Blocked |
+| 5 | `GrpcChannelHistoryFetcher` (history migration) | RFC Ph 3 | unslotted | PR 3 | ~200–350 | ⬜ Blocked (G2 — droppable) |
 | 6 | Retire agent-only REST register + drop aiohttp control-plane client | RFC Ph 4 | unslotted | PR 4 (+ PR 5 if taken) | ~200–350 | ⬜ Blocked |
 | 7 | Review follow-ups | — | unslotted | PR 6 | ~150–300 | ⬜ Not started |
 | 8 | Full-RFC closeout (status → ✅ Implemented) | — | unslotted | PR 7 | ~50–100 | ⬜ Not started |
@@ -60,7 +60,7 @@ RFC 0040 is **📋 Proposed** with unresolved scope decisions that are **non-add
 ```
 PR 1 (JSON Schema + contract test over today's REST path)              [RFC Phase 1, v0.3.x]
       — independent hygiene; no dependency on the rest —
-· · · · · · · · · · · · · [Phase 0 Hard Gate: G1–G4 resolved, RFC Accepted, v0.4.0 opens] · · · · · · · · · · · · ·
+· · · · · · · · · · · · · [Phase 0 Hard Gate: G1–G4 resolved, RFC Accepted, Phases 2–4 slotted] · · · · · · · · · · · · ·
   ↓
 PR 2 (proto/orchestrator.proto + Go/Python stubs + no-op servicer skeleton)   [RFC Phase 2]
   ↓
@@ -123,7 +123,7 @@ PR 1 is fully independent. PRs 2–3 add no agent-side change — the contract a
 ### PR 2: `feature/v040-rfc0040-proto-skeleton` — `OrchestratorService` Proto + No-Op Servicer
 
 **Depends on**: [Phase 0 Hard Gate](#phase-0-hard-gate) (G1 sender_id scope, G3 service shape) resolved; RFC Accepted; PR 1 merged (verified contract to mirror into proto).
-**Purpose**: Land the `OrchestratorService` gRPC contract and a thin/no-op servicer skeleton registered on the existing `:9090` listener. No handler logic, no agent-side change — the cross-language contract is reviewable in isolation. Implements [RFC Phase 2](0040-agent-orchestrator-transport-unification.md#phase-2-orchestratorservice-proto--orchestrator-handlers-v040) (proto half).
+**Purpose**: Land the `OrchestratorService` gRPC contract and a thin/no-op servicer skeleton registered on the existing `:9090` listener. No handler logic, no agent-side change — the cross-language contract is reviewable in isolation. Implements [RFC Phase 2](0040-agent-orchestrator-transport-unification.md#phase-2-orchestratorservice-proto--orchestrator-handlers-unslotted) (proto half).
 
 #### Scope
 
@@ -160,7 +160,7 @@ PR 1 is fully independent. PRs 2–3 add no agent-side change — the contract a
 ### PR 3: `feature/v040-rfc0040-orchestrator-handlers` — Handlers over `publishCommit` + Dual-Transport Test
 
 **Depends on**: PR 2 merged (proto + stubs available).
-**Purpose**: Implement the orchestrator-side gRPC handlers as thin adapters over the shared publish core and the registry, and prove neither transport bypasses a shared-core invariant. Implements [RFC Phase 2](0040-agent-orchestrator-transport-unification.md#phase-2-orchestratorservice-proto--orchestrator-handlers-v040) (handler half) + [RFC §D](0040-agent-orchestrator-transport-unification.md#d-shared-core-invariant-enforcement).
+**Purpose**: Implement the orchestrator-side gRPC handlers as thin adapters over the shared publish core and the registry, and prove neither transport bypasses a shared-core invariant. Implements [RFC Phase 2](0040-agent-orchestrator-transport-unification.md#phase-2-orchestratorservice-proto--orchestrator-handlers-unslotted) (handler half) + [RFC §D](0040-agent-orchestrator-transport-unification.md#d-shared-core-invariant-enforcement).
 
 #### Scope
 
@@ -201,7 +201,7 @@ PR 1 is fully independent. PRs 2–3 add no agent-side change — the contract a
 ### PR 4: `feature/v040-rfc0040-agent-publish-register` — Agent Publish + Register over gRPC
 
 **Depends on**: PR 3 merged (orchestrator must serve gRPC first — the one hard cross-process ordering constraint); G4 (transport selection) resolved.
-**Purpose**: Flip the agent's publish and registration control-plane calls to `OrchestratorService`, with REST as a sticky per-process fallback. Implements [RFC Phase 3](0040-agent-orchestrator-transport-unification.md#phase-3-agent-side-grpc-migration-v040) (publish + registration).
+**Purpose**: Flip the agent's publish and registration control-plane calls to `OrchestratorService`, with REST as a sticky per-process fallback. Implements [RFC Phase 3](0040-agent-orchestrator-transport-unification.md#phase-3-agent-side-grpc-migration-unslotted) (publish + registration).
 
 #### Scope
 
@@ -240,7 +240,7 @@ PR 1 is fully independent. PRs 2–3 add no agent-side change — the contract a
 ### PR 5: `feature/v040-rfc0040-agent-history` — `GrpcChannelHistoryFetcher` *(gated by G2 — droppable)*
 
 **Depends on**: PR 3 merged. **Gated by [G2](#phase-0-hard-gate)** — exists only if history migrates; the most droppable scope if the train needs trimming ([RFC OQ 3](0040-agent-orchestrator-transport-unification.md#open-questions)). Can land in parallel with PR 4.
-**Purpose**: Migrate channel-history fetch to `OrchestratorService.GetChannelHistory`. Implements [RFC Phase 3](0040-agent-orchestrator-transport-unification.md#phase-3-agent-side-grpc-migration-v040) (history).
+**Purpose**: Migrate channel-history fetch to `OrchestratorService.GetChannelHistory`. Implements [RFC Phase 3](0040-agent-orchestrator-transport-unification.md#phase-3-agent-side-grpc-migration-unslotted) (history).
 
 #### Scope
 
@@ -341,7 +341,7 @@ Populated as PRs are reviewed.
 These are tracked here so the plan and the RFC stay in sync until the gate clears:
 
 1. **G1 — `sender_id` scope** ([RFC §D TODO](0040-agent-orchestrator-transport-unification.md#d-shared-core-invariant-enforcement)): confirm out-of-scope (the enforcement primitive is RFC 0009 Phase 4, co-sequenced onto this path via RFC 0029 Phase 2). Blocks PR 2.
-2. **G2 — history migration** ([RFC OQ 3 / Goal 1](0040-agent-orchestrator-transport-unification.md#open-questions)): decides whether PR 5 exists. Resolve before the v0.4.0 train opens.
+2. **G2 — history migration** ([RFC OQ 3 / Goal 1](0040-agent-orchestrator-transport-unification.md#open-questions)): decides whether PR 5 exists. Resolve before Phases 2–3 are slotted.
 3. **G3 — service shape** ([RFC OQ 1](0040-agent-orchestrator-transport-unification.md#open-questions)): pins the PR 2 proto. Blocks PR 2.
 4. **G4 — transport selection** ([RFC OQ 2](0040-agent-orchestrator-transport-unification.md#open-questions)): shapes PR 4 config. Blocks PR 4.
-5. **OQ 4 — co-sequencing with RFC 0029 Phase 2**: decide when the v0.4.0 plan opens; the two workstreams touch the same proto/handlers and may share one PR train (touch the surface once).
+5. **OQ 4 — co-sequencing with RFC 0029 Phase 2**: decide when an amendment slots either (the v0.4.0 plan opened with neither); the two workstreams touch the same proto/handlers and may share one PR train (touch the surface once).
