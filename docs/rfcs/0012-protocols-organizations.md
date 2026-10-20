@@ -495,6 +495,10 @@ The organization graph is **society state**, not personal state — it is
 shared across every persona in the org and is authoritative. It therefore
 lives in the **society store**, the Postgres backend
 [RFC 0029](0029-personal-society-storage-split.md) introduces in v0.4.0.
+*(2026-10-20: for v0.4.0 the society store is a set of society tables in
+`data/channels.db`, by
+[RFC 0029's amendment](0029-personal-society-storage-split.md#amendment-2026-10-20--v040s-society-backend);
+this dependency is unchanged.)*
 This RFC's Phase 1 depends on RFC 0029's society-store facade being in
 place. The cross-context influence record (§E), by contrast, is
 *personal* memory — it is *this persona's* record of a directive *it*
@@ -546,6 +550,24 @@ any channel-derived memory entry.
 
 ## Phased Implementation Plan
 
+### Amendment 2026-10-20 — the v0.4.0 plan's ruling (b) audit
+
+The [v0.4.0 plan](../v0.4.0-plan.md#scope-locks) audited this RFC's v0.4.0
+phases against ruling (b) of the
+[sequencing Amendment 2026-09-12](../v0.3.x-sequencing.md#amendment-2026-09-12--close-v0316-small-then-measure-before-any-train-opens),
+as ruling (o) of [v0.4.0's shape](../v0.4.x-sequencing.md#rulings) asks. No
+amendment records an outside ask for confidentiality or audience work, so two
+deliverables leave the v0.4.0 phases and become **unslotted, not cut**:
+
+- Phase 1 item 5, §G's membership-time clearance check. §G's role `authority`
+  ceiling stays in Phase 1, because the authority axis (§D) computes the
+  effective level from it.
+- Phase 3 item 2, §H's enforced egress gate. RFC 0037 §G's tripwire keeps
+  logging.
+
+Each comes back only by an amendment whose External evidence section records
+an outside ask. The rest of the design is unchanged.
+
 ### Phase 1: The organization model (v0.4.0)
 
 1. `config/organizations.yaml` schema (`schemas/organization.schema.json`)
@@ -558,7 +580,8 @@ any channel-derived memory entry.
 4. Persona org-membership + role surfaced on the persona definition
    (`config/agents.yaml`, `schemas/agent.schema.json`).
 5. The membership-time clearance check (§G) against RFC 0037
-   classifications, static (`make validate`) and runtime.
+   classifications, static (`make validate`) and runtime. *Unslotted by the
+   2026-10-20 amendment above.*
 
 Dependencies: RFC 0011, RFC 0029 (society-store facade), RFC 0037
 (classification to check clearance against).
@@ -583,7 +606,7 @@ Dependencies: Phase 1, RFC 0021 (commitments tier), RFC 0037 §B
    escalation.
 2. The enforced confidentiality-egress gate (§H): RFC 0037's tripwire
    signal routed through the RFC 0028 mandatory-HITL path with
-   manager-based routing.
+   manager-based routing. *Unslotted by the 2026-10-20 amendment above.*
 3. Org-graph mutation as an RFC 0028 §H mandatory-HITL class.
 
 Dependencies: Phase 2, RFC 0028 (Phases 1–2a — checkpoints, guardrails,

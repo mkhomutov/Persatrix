@@ -74,3 +74,9 @@ turn, and pin the shape in `autonomous_continuation_test.go`.
 > 2026-09-15 — filed from the ISSUE-0160 fix's booted verification; not a
 > v0.3.16 tag blocker (unreachable on the shipped mock), listed in the release
 > checklist's Known Gaps.
+
+> 2026-10-20 — **not slotted** (the [v0.4.0 plan](../v0.4.0-plan.md#v0316-follow-up)'s
+> follow-up). Ruling (q) of [v0.4.0's shape](../v0.4.x-sequencing.md#rulings)
+> boards an issue only when a phase that boards fixes it, and none does. The
+> plan's goal audit proposes it for a later amendment, since a stalled
+> autonomous turn stops a society that is meant to keep working.

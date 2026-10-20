@@ -31,20 +31,21 @@
 ## 1. What the four reviews established
 
 All four measured the same tree at `f52e7ff6` (2026-09-09). Their agreed
-findings, re-verified at `cbeea7bc` on 2026-09-11 (commands in the
+findings, re-verified at `cbeea7bc` on 2026-09-11 and at `04bc24d0` on
+2026-10-20, the first review (commands in the
 [evidence companion](project-strategy-evidence.md)):
 
-| # | Finding | Verified 2026-09-11 |
-|---|---------|---------------------|
-| F1 | No external use: 4 stars, 0 forks, 0 outside issues or PRs, no downloadable release. | ✔ unchanged; 23 unique visitors in 14 days |
-| F2 | The loop is closed: every CI job and the Before-Phase-0 step measure the repository against itself. Nothing can go red because of something a person outside did or did not do. | ✔ 11 jobs, 12 required checks, all internal |
-| F3 | The direction reverted: the [2026-06-04 amendment](v0.3.x-sequencing.md#amendment-2026-06-04--re-sequence-the-v03x-tail-for-conversation-realism--usefulness-ahead-of-v040) put adoption first and deferred confidentiality as "invisible to a prospective user"; the [2026-07-25 amendment](v0.3.x-sequencing.md#amendment-2026-07-25--add-v0312-memory-that-travels-cross-channel-experience--accounts) pulled it back on three internal reasons. No adoption step was ever recorded. | ✔ |
-| F4 | The process outgrew its team: about 3.5 process commits per feature commit across v0.3.12–v0.3.15; monthly merged PRs fell from 228 (June) to 52 (August); about seven non-implementation PRs per release. | ✔ and continuing ([§3](#3-what-this-synthesis-adds)) |
-| F5 | The 500-line cap inverted: files cluster in the last 21 lines under it, and [ISSUE-0143](issues/ISSUE-0143-debt-sweep-26-files-at-size-cap.md) records the cap blocking a test. | ✔ 24 files at a cap, 100 within 3 % |
-| F6 | The core claim is untested: no eval, test or manual test compares the system against not having it. | ✔ zero hits for ablation, baseline or single-call under `evaluators/` |
-| F7 | The wedge is unnamed: the [extension spec](persatrix-extension-spec.md) promises eight domains "without code changes"; the README sells three products. | ✔ |
-| F8 | The interop surface is empty: MCP is 24 lines of TODO across both sides of the gRPC boundary; no A2A. | ✔ |
-| F9 | The polyglot split is a per-change tax paid by one person: Go, Python, Rust and Svelte; proto pins; sanitizer mirrors; frozen SDKs. | ✔ |
+| # | Finding | Verified 2026-09-11 | Re-verified 2026-10-20 |
+|---|---------|---------------------|------------------------|
+| F1 | No external use: 4 stars, 0 forks, 0 outside issues or PRs, no downloadable release. | ✔ unchanged; 23 unique visitors in 14 days | ✔ unchanged; 4 unique visitors in 14 days; 0 assets on v0.3.16 |
+| F2 | The loop is closed: every CI job and the Before-Phase-0 step measure the repository against itself. Nothing can go red because of something a person outside did or did not do. | ✔ 11 jobs, 12 required checks, all internal | ✔ unchanged |
+| F3 | The direction reverted: the [2026-06-04 amendment](v0.3.x-sequencing.md#amendment-2026-06-04--re-sequence-the-v03x-tail-for-conversation-realism--usefulness-ahead-of-v040) put adoption first and deferred confidentiality as "invisible to a prospective user"; the [2026-07-25 amendment](v0.3.x-sequencing.md#amendment-2026-07-25--add-v0312-memory-that-travels-cross-channel-experience--accounts) pulled it back on three internal reasons. No adoption step was ever recorded. | ✔ | ✔ no adoption step since either |
+| F4 | The process outgrew its team: about 3.5 process commits per feature commit across v0.3.12–v0.3.15; monthly merged PRs fell from 228 (June) to 52 (August); about seven non-implementation PRs per release. | ✔ and continuing ([§3](#3-what-this-synthesis-adds)) | ✔ September 163 merged PRs, 22 features; October to the 20th, 21 and 4 |
+| F5 | The 500-line cap inverted: files cluster in the last 21 lines under it, and [ISSUE-0143](issues/ISSUE-0143-debt-sweep-26-files-at-size-cap.md) records the cap blocking a test. | ✔ 24 files at a cap, 100 within 3 % | ✘ no longer holds: a warning at 500 lines and a gate at 800 since ruling (e); 1 file at a limit, 14 within 3 % |
+| F6 | The core claim is untested: no eval, test or manual test compares the system against not having it. | ✔ zero hits for ablation, baseline or single-call under `evaluators/` | ✔ until EXP-001 reports: its harness is built, its scored run not started |
+| F7 | The wedge is unnamed: the [extension spec](persatrix-extension-spec.md) promises eight domains "without code changes"; the README sells three products. | ✔ | ✔ the README is unchanged until EXP-001 reports (ruling (j)) |
+| F8 | The interop surface is empty: MCP is 24 lines of TODO across both sides of the gRPC boundary; no A2A. | ✔ | ✔ unchanged |
+| F9 | The polyglot split is a per-change tax paid by one person: Go, Python, Rust and Svelte; proto pins; sanitizer mirrors; frozen SDKs. | ✔ | ✔ unchanged |
 
 All four also agree on what is worth protecting: the five-axis memory scoping
 model and its deterministic egress gate; lease-before-call cost control with a
