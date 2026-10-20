@@ -24,6 +24,7 @@ from scripts.checks.analysis import (  # noqa: F401
 
 # --- patterns / reporting / encoding ---------------------------------------
 from scripts.checks.patterns import (  # noqa: F401
+    SKIPPED,
     Pattern,
     Violation,
     check_patterns,
@@ -40,6 +41,7 @@ from scripts.checks.walking import (  # noqa: F401
 
 __all__ = [
     "DEFAULT_EXCLUDES",
+    "SKIPPED",
     "Pattern",
     "Violation",
     "check_patterns",

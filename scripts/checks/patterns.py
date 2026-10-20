@@ -23,6 +23,7 @@ from typing import TextIO
 from scripts.checks.analysis import has_allow_comment
 
 __all__ = [
+    "SKIPPED",
     "Pattern",
     "Violation",
     "check_patterns",
@@ -175,6 +176,12 @@ def check_patterns(
 # ---------------------------------------------------------------------------
 # Reporting
 # ---------------------------------------------------------------------------
+
+#: The exit code of a check or generator that could not run in this checkout
+#: and changed nothing, its last output line saying why: a shallow clone,
+#: whose log is cut short. CI and the release sweep fail on it like any other
+#: non-zero code; the pre-commit hook reports a skip and repeats the reason.
+SKIPPED = 3
 
 
 def report_violations(

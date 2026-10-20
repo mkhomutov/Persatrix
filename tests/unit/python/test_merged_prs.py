@@ -8,27 +8,32 @@ hand goes stale. The generator reads ``git log`` and writes
 issue indexes, so a ``--check`` can fail CI when it is stale.
 
 A shallow clone's log stops at its oldest commit (cloud sessions clone with
-``--depth 50``), so the table generated there loses every older row. The
-generator, and the pre-commit hook that runs it, leave the file alone there
-and say why; the last tests run both in real clones, shallow and full.
+``--depth 50``), so a table generated from it alone loses every older row.
+There the generator adds the committed rows older than the log; when the log
+does not reach them, it and the pre-commit hook that runs it leave the file
+alone and say why. The last tests run both in real clones, shallow and full.
 """
 
 from __future__ import annotations
 
-import os
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+from _git_fixture_helpers import git as _git
+from _git_fixture_helpers import run as _run
 
+from scripts._git import is_shallow
+from scripts.checks import SKIPPED
 from scripts.merged_prs import (
     REPO_ROOT,
+    SHALLOW_NOTICE,
     MergedPR,
     behind_by,
     classify,
     compare,
+    overlay,
     parse_log,
     render,
 )
@@ -133,33 +138,36 @@ def test_check_fails_on_a_hand_edit_or_a_lost_row() -> None:
     assert compare(edited, _table(3, 2, 1)) is not None
 
 
-#: Fixture repositories commit as a fixed identity and take nothing from the
-#: caller's git setup — no hooks, signing or templates, no GIT_DIR pointing
-#: elsewhere. The scripts run under it too, since they call git themselves.
-_GIT_ENV = {
-    **{k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
-    "GIT_CONFIG_GLOBAL": os.devnull,
-    "GIT_CONFIG_NOSYSTEM": "1",
-    "GIT_AUTHOR_NAME": "test",
-    "GIT_AUTHOR_EMAIL": "test@example.com",
-    "GIT_COMMITTER_NAME": "test",
-    "GIT_COMMITTER_EMAIL": "test@example.com",
-}
+def test_overlay_rebuilds_the_whole_table_from_a_shallow_log_and_the_committed_rows() -> None:
+    """The log holds #5 to #3; the committed rows older than #3 supply the rest."""
+    assert overlay(_table(3, 2, 1), _table(5, 4, 3)) == _table(5, 4, 3, 2, 1)
+    assert overlay(_table(4, 3, 2, 1), _table(5, 4, 3)) == _table(5, 4, 3, 2, 1)
+
+
+def test_overlay_takes_the_logs_rows_so_the_check_still_sees_a_hand_edit() -> None:
+    edited = _table(4, 3, 2, 1).replace("feat: pr 4", "feat: pr four")
+    whole = overlay(edited, _table(5, 4, 3))
+    assert whole == _table(5, 4, 3, 2, 1)
+    assert compare(edited, whole) is not None
+
+
+def test_overlay_gives_up_when_the_log_stops_short_of_the_committed_rows() -> None:
+    """Nothing says no row falls between #3, the log's oldest, and #2, the file's newest."""
+    assert overlay(_table(2, 1), _table(5, 4, 3)) is None
+    assert overlay("", _table(5, 4, 3)) is None
+    assert overlay(_table(3, 2, 1), _table()) is None
+
+
+def test_is_shallow_is_false_where_git_cannot_answer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Outside a repository git fails; callers then keep their full-clone behaviour."""
+    monkeypatch.delenv("GIT_DIR", raising=False)
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.parent))
+    assert is_shallow(tmp_path) is False
+
 
 HISTORY = "docs/merged-prs.md"
-NOTICE = "shallow clone: run `git fetch --unshallow` to regenerate docs/merged-prs.md"
-
-
-def _run(repo: Path, *argv: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        argv, cwd=repo, capture_output=True, encoding="utf-8", check=False, env=_GIT_ENV
-    )
-
-
-def _git(repo: Path, *args: str) -> str:
-    proc = _run(repo, "git", *args)
-    assert proc.returncode == 0, proc.stderr
-    return proc.stdout
 
 
 @pytest.fixture(scope="module")
@@ -191,21 +199,54 @@ def _clone(origin: Path, dest: Path, *flags: str) -> Path:
     return dest
 
 
-def test_a_shallow_clone_neither_rewrites_nor_fails_the_history(
+def _full_history(origin: Path, tmp_path: Path) -> bytes:
+    """The table a full clone writes: all four rows."""
+    full = _clone(origin, tmp_path / "reference")
+    assert _run(full, sys.executable, "scripts/merged_prs.py").returncode == 0
+    return (full / HISTORY).read_bytes()
+
+
+def test_a_shallow_clone_whose_log_stops_short_neither_rewrites_nor_passes_the_history(
     origin: Path, tmp_path: Path
 ) -> None:
-    """The clone's log holds only #4, so the table it would write keeps one row of four.
+    """The clone's log holds only #4, newer than every committed row: the rows between are unknown.
 
-    Writing that table loses every older row, and ``--check`` would call the
-    committed one a hand edit. Both leave the file alone and say why.
+    Writing would lose every older row, and a check that passed would let the
+    release sweep record a gate that never ran. Both leave the file alone,
+    say why, and exit ``SKIPPED``.
     """
     shallow = _clone(origin, tmp_path / "shallow", "--depth", "1")
+    assert is_shallow(shallow)
     committed = (shallow / HISTORY).read_bytes()
 
     for flags in ([], ["--check"]):
         proc = _run(shallow, sys.executable, "scripts/merged_prs.py", *flags)
-        assert (proc.returncode, proc.stdout, proc.stderr) == (0, f"{NOTICE}\n", "")
+        assert (proc.returncode, proc.stdout, proc.stderr) == (SKIPPED, "", f"{SHALLOW_NOTICE}\n")
     assert (shallow / HISTORY).read_bytes() == committed
+
+
+def test_a_shallow_clone_whose_log_reaches_the_table_checks_and_rebuilds_all_of_it(
+    origin: Path, tmp_path: Path
+) -> None:
+    """The log holds #4 and #3, the newest committed row: the older rows come from the file."""
+    shallow = _clone(origin, tmp_path / "shallow", "--depth", "2")
+
+    assert _run(shallow, sys.executable, "scripts/merged_prs.py", "--check").returncode == 0
+    proc = _run(shallow, sys.executable, "scripts/merged_prs.py")
+    assert (proc.returncode, proc.stdout) == (0, f"wrote {HISTORY} (4 row(s))\n")
+    assert (shallow / HISTORY).read_bytes() == _full_history(origin, tmp_path)
+
+
+def test_a_shallow_clone_still_fails_a_hand_edit_its_log_can_see(
+    origin: Path, tmp_path: Path
+) -> None:
+    shallow = _clone(origin, tmp_path / "shallow", "--depth", "2")
+    path = shallow / HISTORY
+    path.write_text(path.read_text(encoding="utf-8").replace("change 3", "change three"),
+                    encoding="utf-8")
+
+    proc = _run(shallow, sys.executable, "scripts/merged_prs.py", "--check")
+    assert proc.returncode == 1 and "hand edit" in proc.stderr
 
 
 def test_a_full_clone_checks_and_regenerates_the_history_as_before(
@@ -213,23 +254,47 @@ def test_a_full_clone_checks_and_regenerates_the_history_as_before(
 ) -> None:
     """The committed table lacks only #4, which landed it: the check passes and a write adds it."""
     full = _clone(origin, tmp_path / "full")
+    assert not is_shallow(full)
 
     assert _run(full, sys.executable, "scripts/merged_prs.py", "--check").returncode == 0
     proc = _run(full, sys.executable, "scripts/merged_prs.py")
     assert (proc.returncode, proc.stdout) == (0, f"wrote {HISTORY} (4 row(s))\n")
 
 
-def test_the_hook_leaves_a_shallow_clones_history_unstaged_and_says_why(
+def test_the_hook_leaves_a_skipped_history_unstaged_and_says_why_last(
     origin: Path, tmp_path: Path
 ) -> None:
-    """The pre-commit run skips the regeneration and the ``git add``, printing the same notice."""
+    """A generator that exits ``SKIPPED`` left its file alone, so the hook must not stage it.
+
+    The working copy carries an unstaged edit: a ``git add`` would sweep it
+    into the commit. The reason is repeated after the results, where it is
+    not scrolled away, and so is plan status's, which skips there too.
+    """
     shallow = _clone(origin, tmp_path / "shallow", "--depth", "1")
+    path = shallow / HISTORY
+    path.write_text(path.read_text(encoding="utf-8") + "a local note\n", encoding="utf-8")
 
     proc = _run(shallow, sys.executable, "scripts/pre_commit.py", "--skip-fmt")
 
-    assert NOTICE in proc.stdout
     assert f"wrote {HISTORY}" not in proc.stdout
-    assert _git(shallow, "status", "--porcelain", "--", HISTORY) == ""
+    assert "✗ merged prs" not in proc.stdout
+    assert HISTORY not in _git(shallow, "diff", "--cached", "--name-only").splitlines()
+    assert path.read_text(encoding="utf-8").endswith("a local note\n")
+    summary = proc.stdout.split("Results:", 1)[1]
+    assert f"skipped merged prs: {SHALLOW_NOTICE}" in summary
+    assert "skipped plan status: [WARN] shallow clone" in summary
+
+
+def test_the_hook_catches_up_a_shallow_clones_history_when_its_log_reaches_it(
+    origin: Path, tmp_path: Path
+) -> None:
+    shallow = _clone(origin, tmp_path / "shallow", "--depth", "2")
+
+    proc = _run(shallow, sys.executable, "scripts/pre_commit.py", "--skip-fmt")
+
+    assert f"wrote {HISTORY} (4 row(s))" in proc.stdout
+    assert HISTORY in _git(shallow, "diff", "--cached", "--name-only").splitlines()
+    assert (shallow / HISTORY).read_bytes() == _full_history(origin, tmp_path)
 
 
 def test_the_hook_regenerates_and_stages_a_full_clones_history(
@@ -241,5 +306,5 @@ def test_the_hook_regenerates_and_stages_a_full_clones_history(
     proc = _run(full, sys.executable, "scripts/pre_commit.py", "--skip-fmt")
 
     assert f"wrote {HISTORY} (4 row(s))" in proc.stdout
-    assert NOTICE not in proc.stdout
+    assert "skipped merged prs" not in proc.stdout
     assert HISTORY in _git(full, "diff", "--cached", "--name-only").splitlines()
