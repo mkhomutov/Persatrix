@@ -134,7 +134,7 @@ Landed with the v0.3.11 release-prep MT-execution PR (TDD,
 > the REST half of the residuals above.
 
 > 2026-10-21 — **the REST half of the residuals is fixed** by
-> [#PRNUM](https://github.com/mkhomutov/Persatrix/pull/PRNUM) (ISSUE-0152's
+> [#1050](https://github.com/mkhomutov/Persatrix/pull/1050) (ISSUE-0152's
 > step 3, agent half): the agents' shared REST session now sends the hosted
 > agent's `X-Agent-ID`, so registration, channel reads and publishes,
 > convene callbacks and recall each count against that agent's own budget,

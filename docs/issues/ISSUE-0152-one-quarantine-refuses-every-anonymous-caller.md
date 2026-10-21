@@ -241,7 +241,7 @@ tagged.
 > calls to gRPC first.
 
 > 2026-10-21 — **steps 1 and 2, and step 3's agent half, fixed** by
-> [#PRNUM](https://github.com/mkhomutov/Persatrix/pull/PRNUM), the early Go
+> [#1050](https://github.com/mkhomutov/Persatrix/pull/1050), the early Go
 > PR the [v0.4.0 plan](../v0.4.0-plan.md#implementation-prs) schedules under
 > A3, A4, with its Python half in the same PR. A quarantine now refuses only
 > the ID it names, on REST and gRPC: a caller with no ID stays in the shared
