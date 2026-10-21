@@ -27,6 +27,7 @@ from .observability.log_shipper import (
     queue_capacity_from_env,
     set_active_shipper,
 )
+from .orchestrator_session import new_orchestrator_session
 from .persona_runtime import _LLMPersonaAgent
 from .prefix_keepalive import start_prefix_keepalive
 from .server_persona import (
@@ -186,11 +187,11 @@ class AgentServer:
                     "Failed to init memory for task agent %s", agent_id,
                 )
 
-        # Deep-review D4: shared aiohttp session for self-registration and
-        # http_request tool (via builtin.http_session). RFC 0011 PR 4a-ii-β-1
-        # wires the REST channel publisher onto it (chat-reply path keeps
-        # using the in-process cascade until PR 4a-ii-β-2).
-        self._session = aiohttp.ClientSession()
+        # Deep-review D4: one shared aiohttp session for every REST call to
+        # the orchestrator, sending the hosted agent's ID so each agent gets
+        # its own rate-limit budget (ISSUE-0152). RFC 0011 PR 4a-ii-β-1
+        # wires the REST channel publisher onto it.
+        self._session = new_orchestrator_session(next(iter(self.agents), None))
         self._dispatcher.set_channel_publisher(HTTPChannelPublisher(
             orchestrator_url=self.orchestrator_url, session=self._session,
         ))
