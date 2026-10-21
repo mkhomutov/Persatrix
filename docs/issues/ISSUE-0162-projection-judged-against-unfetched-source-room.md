@@ -111,29 +111,31 @@ episode §E can stand in for.
   transient cause that clears on the next turn. This one repeats on every
   turn that serves such a projection. It also keeps these
   cases out of the *disjoint* count that the shadow measurement reads.
-- **Severity is `medium` on the amendment's reading** — the open question
-  below can move it.
+- **Severity is `medium`.** A projection discloses that a fact exists
+  (see the ruling below), so this is the ISSUE-0132 leak at the
+  projection's level, not only a misleading count.
 
-## Open question — does a projection disclose anything?
+## Ruling — a projection discloses that a fact exists
 
-The project's documents disagree, and the severity — and whether the fix
-should withhold — follows the answer.
+The project's documents disagreed, and the severity, and whether the fix
+should withhold, followed the answer.
 
 - **Yes.** The [audience amendment §E](../rfcs/0037-amendment-audience-egress.md#e--an-audience-withhold-is-terminal)
   says an abstraction "still tells Bob that Alice raised a rollout
   decision", and the `audience_admits_projection` docstring says the
-  same of a projection served in Bob's room. On this reading the gap is
-  the ISSUE-0132 leak at the projection's level, and the fix below is
-  right.
-- **No.** The release checklist §6 and the execution report both call a
-  projection "non-disclosing by construction" and say nothing leaked. On
-  this reading only the recorded verdict is wrong (`low`), and the
-  consistent fix is to exempt projections from the audience check the
-  way `public` entries are exempt, which also removes the reason for the
-  amendment's "an audience withhold is terminal" rule.
+  same of a projection served in Bob's room.
+- **No.** The release checklist §6 and the execution report both called a
+  projection "non-disclosing by construction" and said nothing leaked.
+  On that reading only the recorded verdict would have been wrong
+  (`low`), and the consistent fix would have been to exempt projections
+  from the audience check the way `public` entries are exempt.
 
-The maintainer's answer decides which. Until then this issue follows the
-amendment, the design document of record.
+**The maintainer ruled on 2026-10-21: yes, a projection discloses.** The
+amendment §E and the docstring stand. The checklist §6 row and the
+execution report line, which said otherwise, are corrected. The gap is
+the ISSUE-0132 leak at the projection's level, the severity is `medium`,
+and the fix is to fetch the source room of a withheld episode, as below.
+Exempting projections is not taken.
 
 ## Proposed fix / investigation path
 
@@ -198,6 +200,8 @@ amendment can weigh them.
 > 2026-10-21 — filed. Re-checked at `main` `435acc6a`: `_distinct_source_rooms`
 > is unchanged and the reproduction gives the same result in both episode
 > tiers. The misstated cause in the CHANGELOG, the release checklist §6 and
-> the execution report is corrected where it is stated; the question of
-> whether a projection discloses anything is left to the maintainer, as
-> above.
+> the execution report is corrected where it is stated.
+>
+> 2026-10-21 — the maintainer ruled that a projection discloses that a
+> fact exists (the ruling above). The checklist §6 row and the execution
+> report line no longer call a projection non-disclosing.
