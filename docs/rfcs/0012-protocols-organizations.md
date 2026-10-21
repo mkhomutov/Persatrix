@@ -571,28 +571,42 @@ audience work, so two deliverables leave the v0.4.0 phases and become
   logging.
 
 Each comes back only by an amendment whose External evidence section records
-an outside ask. The rest of the design is unchanged by this amendment.
-
-> 2026-10-20 — The [PR plan](0012-pr-plan.md#phase-0--open-questions-and-design-points)
-> settles four points differently from this RFC's text, which stands corrected
-> by it:
-> - Membership is declared once, in `config/organizations.yaml`; Phase 1
->   item 4 and the `config/agents.yaml` / `schemas/agent.schema.json` rows of
->   Files Touched mean the persona's runtime state, not a second key (D-2).
-> - The v0.4.0 schema rejects a role's `clearance` key until §G's check
->   returns, which is why §B's example comments it out (D-3).
-> - Every authority tie goes to a person, one pending approval per tied
->   directive; §F's escalation to the recipient's manager is not built in
->   v0.4.0 (D-8).
-> - An accepted directive constrains the turn's candidates only through the
->   structured form extraction gives it; a directive with free text only
->   stays prompt guidance (§F; PR 10).
+an outside ask. The rest of the design is unchanged.
 
 | What | Before | After (v0.4.0) |
 |------|--------|----------------|
 | Phase 1 item 5 | §G's clearance check, static and runtime | Unslotted |
 | Phase 3 item 2 | §H's enforced egress gate | Unslotted; RFC 0037 §G's tripwire logs |
 | §G's role `authority` ceiling | Phase 1 | Phase 1, unchanged |
+
+> 2026-10-20 — The [PR plan](0012-pr-plan.md#phase-0--open-questions-and-design-points)
+> settles these points differently from this RFC's text, which stands
+> corrected by it:
+> - Membership is declared once, in `config/organizations.yaml`; Phase 1
+>   item 4 and the `config/agents.yaml` / `schemas/agent.schema.json` rows of
+>   Files Touched mean the persona's runtime state, not a second key (D-2).
+> - The v0.4.0 schema rejects a role's `clearance` key until §G's check
+>   returns, which is why §B's example comments it out (D-3).
+> - A member of the same organization with no `directs` relation makes a
+>   *request* in a `peer` channel or higher, where §D would call it an
+>   observation (D-1).
+> - `scope` is one of the organization's scope labels or `general`, not
+>   free text, so `directs` can match it (D-9).
+> - A directive's status adds `escalated`, `superseded` and `fulfilled` to
+>   §E's three. The loser of a conflict still gets §F's refuse record with
+>   `reason=outranked`; its row reads `superseded` if it had been accepted
+>   (D-6, D-10).
+> - Every authority tie goes to a person, one pending approval per tied
+>   directive; §F's escalation to the recipient's manager is not built in
+>   v0.4.0 (D-8).
+> - An accepted directive constrains the turn's candidates only through a
+>   "do not" structured form; a "do" form and free text stay prompt
+>   guidance (§F; D-10).
+> - The directives prompt block passes RFC 0037's injection gate like any
+>   channel-derived tier, so a directive whose text the gate withholds binds
+>   by its constraint only (§J; D-11).
+> - Next step 3's egress gate as a mandatory-HITL class is unslotted with
+>   §H.
 
 ### Phase 1: The organization model (v0.4.0)
 

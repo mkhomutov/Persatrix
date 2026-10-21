@@ -333,6 +333,8 @@ When an agent requests an `irreversible` tool call:
 5. On approval: the tool executes and the workflow resumes.
 6. On rejection or timeout: the tool call returns an explicit rejection result to the agent, which can handle it like any other tool error.
 
+> 2026-10-21 — For v0.4.0, RFC 0028's [PR plan](0028-pr-plan.md#phase-0--open-questions-and-design-points) (E-9) replaces this pause with its decision hold, so a tool is held once. A task agent's held call still waits inside its step and resumes as steps 5–6 say; a persona's returns at once and is released into a later turn. Phase 4 builds the pending-approval queue for both, not a second pause, and emits no `hitl.*` event.
+
 This mechanism is **opt-in per deployment** — a `hitl_enabled: false` config flag disables the gate for non-production environments.
 
 **Scope**: HITL gates apply to built-in tools tagged `irreversible` and to any custom tools that declare `irreversible: true`. They do not apply to `file_read`, `shell_exec`, or memory tools in this RFC; those are addressed by `ResourceLimiter` and `PermissionGate`.

@@ -102,7 +102,13 @@ Checkpoints are strictly sequential within a tick: `pre-act → (pre-tool | pre-
 
 All modes share the same guardrail pipeline. Automation changes who selects among valid candidates, not what is permitted.
 
-> 2026-10-20 — The [PR plan](0028-pr-plan.md#phase-0--open-questions-and-design-points) settles three points differently from this RFC's text, which stands corrected by it. The default mode is manual, and semi-automated is opt-in per agent (E-1; this table's last column). The autonomy level does not set the mode, and `autonomy.requires_approval_for` is the approval list (E-3; Goal 4). In manual mode the existing permission, channel-access and wallet gates enforce after selection; from semi-automated mode on, the constraint stage calls them before selection (E-2; §C step 2 and Security Considerations).
+> 2026-10-20 — The [PR plan](0028-pr-plan.md#phase-0--open-questions-and-design-points) settles these points differently from this RFC's text, which stands corrected by it:
+> - The default mode is manual, and semi-automated is opt-in per agent (E-1; this table's last column).
+> - The autonomy level does not set the mode, and `autonomy.requires_approval_for` is the approval list (E-3; Goal 4).
+> - In manual mode the existing permission, channel-access and wallet gates enforce after selection. From semi-automated mode on, the constraint stage calls the permission and channel-access gates before selection; the wallet, which has no read-only check, keeps refusing at the lease (E-2; §C step 2 and Security Considerations).
+> - For a persona, pre-tool runs inside the model loop, before pre-act sees the final action list — the reverse of §A's order (E-6).
+> - The hold replaces RFC 0009 §F's agent-side pause: a task agent waits inside its step, a persona is released into a later turn (E-9).
+> - The confidentiality-egress gate that §E's RFC 0012 row wires as a mandatory-HITL class is unslotted with RFC 0012 §H, so in v0.4.0 §H's external-communications class covers no shipped action (OQ 7).
 
 ### C. Guardrail and selection pipeline
 
