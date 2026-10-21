@@ -1,6 +1,6 @@
 ---
 id: ISSUE-0162
-summary: "The v0.3.16 audience check cannot stop a §E projection. When §D withholds an episode on classification, §E serves a lower-level projection in its place, and the stand-in is judged against the original episode's source room (TurnInjectionGate.audience_admits_projection). But resolve_turn_audience fetches only the rooms of entries §D admits — _distinct_source_rooms skips every entry ranked above the acting level or carrying an unreadable label — so that room is never fetched, the verdict is withhold-unknown-fetch-failed, and live admits it. Every projection of an episode from another room reaches the prompt with no membership comparison, even when the acting roster resolved. The v0.3.16 docs recorded the gap but blamed a missing acting member set."
+summary: "A persona can pass the gist of a private-room memory on to a room that adds someone new. The v0.3.16 audience check judges a §E projection against the original episode's source room, but the turn fetches only the rooms of entries §D admits, so that room reads fetch-failed and live admits the projection. It happens whenever no other admitted entry of the turn comes from that room. The v0.3.16 documents blamed a missing acting member set."
 status: open
 severity: medium
 area: memory
@@ -43,10 +43,12 @@ ranked above the acting level, and every entry whose label rule (c) cannot
 read. Those are exactly the entries §E stands in for. So the room is
 missing from `TurnAudience.rooms`, `TurnAudience.verdict` answers
 `withhold-unknown-fetch-failed`, and `live` admits that verdict, because
-`ENFORCED_VERDICTS` holds `withhold-disjoint` only. Every projection of an
-episode from another room reaches the prompt with no membership
-comparison. The acting room's roster makes no difference: it resolves,
-and the verdict is *fetch-failed* all the same.
+`ENFORCED_VERDICTS` holds `withhold-disjoint` only. A projection of an
+episode from another room therefore reaches the prompt with no
+membership comparison, unless another entry that §D admits in the same
+turn comes from the same source room, which fetches it. The acting
+room's roster makes no difference: it resolves, and the verdict is
+*fetch-failed* all the same.
 
 ## Context
 
@@ -82,6 +84,10 @@ served. The standup adds Bob, so the verdict should be
 `withhold-disjoint`, with nothing served. The same happened in both
 episode tiers (`episodic` and `channel_history`), for an episode whose
 level is above the room's and for one whose label rule (c) cannot read.
+Add a second episode from the same DM that §D admits and the picture
+changes: the DM is fetched once, the projection reads *disjoint* and
+nothing is served. So the gap needs a turn in which no admitted entry
+comes from the projection's source room.
 
 **Why the tests missed it.** `test_audience_composition.py` builds
 `TurnAudience` by hand with the DM's members already in `rooms`, so it
@@ -93,7 +99,8 @@ episode §E can stand in for.
 
 - **The audience condition does not hold for projections.** Under
   `live`, the shipped default, an episode withheld on classification is
-  served as its projection in any room, whoever is in it. That inverts
+  served as its projection whoever is in the room, on any turn where no
+  other entry §D admits comes from the same source room. That inverts
   the release's promise by level: an `internal` fact Alice tells the
   persona in her DM is withheld from the standup with Bob, while a
   `restricted` one reaches it, as its `internal` abstraction. Only the
@@ -102,7 +109,7 @@ episode §E can stand in for.
   ([`finalize_close.py`](../../agents/persona_runtime/finalize_close.py)).
 - **The record misreports it.** *Fetch-failed* is meant to be a
   transient cause that clears on the next turn. This one repeats on every
-  turn, for every projection from another room. It also keeps these
+  turn that serves such a projection. It also keeps these
   cases out of the *disjoint* count that the shadow measurement reads.
 - **Severity is `medium` on the amendment's reading** — the open question
   below can move it.
@@ -118,8 +125,8 @@ should withhold — follows the answer.
   same of a projection served in Bob's room. On this reading the gap is
   the ISSUE-0132 leak at the projection's level, and the fix below is
   right.
-- **No.** The release checklist §6 and the execution report say "a
-  projection is non-disclosing by construction, so nothing leaks". On
+- **No.** The release checklist §6 and the execution report both call a
+  projection "non-disclosing by construction" and say nothing leaked. On
   this reading only the recorded verdict is wrong (`low`), and the
   consistent fix is to exempt projections from the audience check the
   way `public` entries are exempt, which also removes the reason for the
@@ -160,7 +167,9 @@ and one fetch; it fails without the fix. The second pins the widened
 fetch set: a withheld episode with an interaction id is fetched, while
 one without an interaction id, or a withheld fact, is not. With the fix,
 `make eval-replay` still passes all six stable golden traces, so no
-recorded prompt moves.
+recorded prompt moves. Neither the scratch code nor its tests are kept,
+since ruling (b) holds the code; the shared fetch rule and these two
+tests are the record of what the fix needs.
 
 ## Sequencing
 
