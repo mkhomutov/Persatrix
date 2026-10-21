@@ -14,7 +14,7 @@
 
 ## Overview
 
-RFC 0009 spans four phases. **Only Phases 1–2 land in v0.3.0**: audit logging + rate limiting + secret redaction (Phase 1), and input sanitization + provenance tagging (Phase 2). Phases 3–4 (tool output validation, agent identity tokens, HITL gates) are deferred to v0.4.0 per the [RFC's Phased Implementation Plan](0009-security-sandboxing.md#phased-implementation-plan).
+RFC 0009 spans four phases. **Only Phases 1–2 land in v0.3.0**: audit logging + rate limiting + secret redaction (Phase 1), and input sanitization + provenance tagging (Phase 2). Phases 3–4 (tool output validation, agent identity tokens, HITL gates) are deferred to v0.4.0 per the [RFC's Phased Implementation Plan](0009-security-sandboxing.md#phased-implementation-plan); their plan is [0009-phases-3-4-pr-plan.md](0009-phases-3-4-pr-plan.md).
 
 This plan splits Phases 1–2 into **4 PRs**.
 
