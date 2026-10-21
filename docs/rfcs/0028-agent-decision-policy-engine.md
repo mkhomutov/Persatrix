@@ -3,7 +3,7 @@ id: RFC-0028
 title: Agent Decision Policy Engine
 summary: Per-agent declarative policy engine governing tool selection, delegation, and channel-publish decisions — Phases 1–3 in v0.4.0, collective extension in v0.5.0+.
 type: architecture
-status: proposed
+status: accepted
 author: Maksim Khomutov
 created: 2026-05-02
 target: v0.4.0 (Phases 1–3); v0.5.0+ (Phase 4 collective extension)
@@ -15,7 +15,9 @@ depends_on:
 # RFC 0028 - Agent Decision Policy Engine
 
 **Type**: architecture
-**Status**: 📋 Proposed
+**Status**: 👍 Accepted — Phases 1, 2 and 2a for v0.4.0, Phase 3 cuttable; Phase 4 for v0.5.0+
+**PR plan**: [0028-pr-plan.md](0028-pr-plan.md) — Phases 1–3, the v0.4.0 plan's rows B1–B3 and D1
+**Accepted**: by the maintainer's review approval of [#1047](https://github.com/mkhomutov/Persatrix/pull/1047), row R1 of the [v0.4.0 plan](../v0.4.0-plan.md#progress)
 **Author**: Maksim Khomutov
 **Date**: 2026-05-02
 **Target**: v0.4.0 (Phases 1–3); v0.5.0+ (Phase 4 collective extension)
@@ -99,6 +101,8 @@ Checkpoints are strictly sequential within a tick: `pre-act → (pre-tool | pre-
 | Automated | Policy selects highest valid action directly | Optional, only for whitelisted low-risk classes | Mature, well-calibrated paths |
 
 All modes share the same guardrail pipeline. Automation changes who selects among valid candidates, not what is permitted.
+
+> 2026-10-20 — The [PR plan](0028-pr-plan.md#phase-0--open-questions-and-design-points) settles three points differently from this RFC's text, which stands corrected by it. The default mode is manual, and semi-automated is opt-in per agent (E-1; this table's last column). The autonomy level does not set the mode, and `autonomy.requires_approval_for` is the approval list (E-3; Goal 4). In manual mode the existing permission, channel-access and wallet gates enforce after selection; from semi-automated mode on, the constraint stage calls them before selection (E-2; §C step 2 and Security Considerations).
 
 ### C. Guardrail and selection pipeline
 
@@ -233,7 +237,7 @@ Integration seams for this extension:
 ### Phase 2a: Human-in-the-loop enforcement (security-coupled)
 
 1. Add required-HITL action class registry in configuration and schema.
-2. Implement signed, scoped, expiring approval tokens and replay checks. **Issuer:** the orchestrator security service (Go-side, RFC 0009 §H) is the sole token authority; agents only consume and verify tokens. Tokens are signed with the same audit-key material used for RFC 0009 audit-log integrity *(no such key exists; see Open Question 9)*, scoped to `(action_hash, actor_id, scope, expires_at, nonce)`, and replay-protected by the orchestrator-side nonce store.
+2. Implement signed, scoped, expiring approval tokens and replay checks. **Issuer:** the orchestrator (Go-side, the security boundary of RFC 0009 §H) is the sole token authority; agents only consume tokens, and the orchestrator verifies each one when it is spent. Tokens are signed with a dedicated approval-signing key that the orchestrator generates once and keeps in the society tables in `data/channels.db`, beside the pending approvals ([RFC 0029 amendment](0029-personal-society-storage-split.md#amendment-2026-10-20--v040s-society-backend)), so a pending approval and its token survive a restart *(Open Question 9)*. They are scoped to `(action_hash, actor_id, scope, expires_at, nonce)` and replay-protected by the pending approval itself: a spend finds the approval by the token's nonce, requires it approved, unexpired and for the calling agent, and flips it to spent in the same transaction. A token expires no later than the pending approval it answers.
 3. Enforce fail-closed runtime behavior when approval is absent or invalid.
 4. Add RFC 0009-aligned audit events: `decision.hitl_requested`, `decision.hitl_approved`, `decision.hitl_denied`, `decision.hitl_expired`.
 
@@ -275,6 +279,10 @@ Integration seams for this extension:
 
 ## Open Questions
 
+> 2026-10-20 — The [PR plan](0028-pr-plan.md#phase-0--open-questions-and-design-points)
+> settles questions 1–3, 7 and 9 for v0.4.0 and names the PR that confirms
+> each default; 5 and 6 stay with Phase 4.
+
 1. *(Phase 3)* Which action classes are eligible for automated mode in v0.4.0 versus v0.5.0?
 2. *(Phase 2)* Should approval routing be centralized in orchestrator policy services or remain Python-runtime local first?
 3. *(Phase 3)* What confidence metric threshold is robust enough for promotion decisions across different persona types?
@@ -283,12 +291,12 @@ Integration seams for this extension:
 6. *(Phase 4 / v0.5.0+)* How should dissent be persisted and surfaced so collective decisions remain explainable to operators?
 7. *(Phase 2a)* Which action classes are globally non-delegable and require mandatory HITL in every environment?
 8. *(Phase 2a)* ~~Should HITL approval issuance live in orchestrator security services first, with agents only consuming signed tokens?~~ **Resolved:** yes — see Phase 2a step 2.
-9. *(Phase 2a)* Which key signs approval tokens? Phase 2a step 2 says "the same audit-key material used for RFC 0009 audit-log integrity". But RFC 0009's audit chain is an unkeyed SHA-256 checksum, and the RFC 0009 §H it names as issuer defines no token authority. RFC 0009's capability-token key is generated per process and changes on every restart, while a pending approval lives 24 h. **Plan-opening default** (2026-10-18, readiness audit for [v0.4.0's shape](../v0.4.x-sequencing.md#amendment-2026-10-18--v040s-shape-its-prerequisites-its-cuts-and-the-end-of-the-v03x-line)): a dedicated approval-signing key held by the orchestrator, generated once and persisted beside the society backend, so a pending approval and its token survive a restart. That holds because the pending approvals are persisted there too ([RFC 0029 Open Question 2](0029-personal-society-storage-split.md#open-questions), [RFC 0009 open question 10](0009-security-sandboxing.md#genuinely-open-deferred-to-phase-4--v040)). Step 2's nonce store is persisted in the same place. Held in memory, it would forget every used nonce on restart, and a used approval token would verify again until it expired. A token expires no later than the pending approval it answers (RFC 0009's 24 h default), and its used nonce is kept until then. Step 2's wording is corrected when this RFC is accepted.
+9. *(Phase 2a)* ~~Which key signs approval tokens?~~ **Resolved** on acceptance (2026-10-20): the plan-opening default below, confirmed by the society-backend scope lock of the [v0.4.0 plan](../v0.4.0-plan.md#scope-locks); Phase 2a step 2 now says so. *As recorded 2026-10-18:* Phase 2a step 2 said "the same audit-key material used for RFC 0009 audit-log integrity". But RFC 0009's audit chain is an unkeyed SHA-256 checksum, and the RFC 0009 §H it names as issuer defines no token authority. RFC 0009's capability-token key is generated per process and changes on every restart, while a pending approval lives 24 h. **Plan-opening default** (2026-10-18, readiness audit for [v0.4.0's shape](../v0.4.x-sequencing.md#amendment-2026-10-18--v040s-shape-its-prerequisites-its-cuts-and-the-end-of-the-v03x-line)): a dedicated approval-signing key held by the orchestrator, generated once and persisted beside the society backend, so a pending approval and its token survive a restart. That holds because the pending approvals are persisted there too ([RFC 0029 Open Question 2](0029-personal-society-storage-split.md#open-questions), [RFC 0009 open question 10](0009-security-sandboxing.md#genuinely-open-deferred-to-phase-4--v040)). Step 2's nonce store is persisted in the same place. Held in memory, it would forget every used nonce on restart, and a used approval token would verify again until it expired. A token expires no later than the pending approval it answers (RFC 0009's 24 h default), and its used nonce is kept until then. Step 2's wording is corrected when this RFC is accepted.
 
 ## Decision / Next Steps
 
 1. Review and accept this RFC as the canonical architecture for agent decision-making.
-2. Create `docs/rfcs/0028-pr-plan.md` with PR slices targeting v0.4.0. PR 1 (Phase 1 contract + types) must include canonical glossary entries in `docs/ai-glossary.md` for: *Decision Policy Engine*, *decision checkpoint*, *DecisionRecord*, *human-in-the-loop / HITL*, *approval token*, *agent society*, *collective scope*, *individual scope*.
+2. Create `docs/rfcs/0028-pr-plan.md` with PR slices targeting v0.4.0 — written as [0028-pr-plan.md](0028-pr-plan.md), proposed with the acceptance. PR 1 (Phase 1 contract + types) must include canonical glossary entries in `docs/ai-glossary.md` for: *Decision Policy Engine*, *decision checkpoint*, *DecisionRecord*, *human-in-the-loop / HITL*, *approval token*, *agent society*, *collective scope*, *individual scope*.
 3. Start Phase 1 in manual mode only; collect baseline telemetry before enabling semi-automated mode.
 4. Add roadmap dependency notes so RFC 0028 implementation is sequenced after active v0.3.0 critical-path RFC work. Recommended (not hard-gated) sequencing: land RFC 0008/0011/0020/0021 surfaces before promoting checkpoints from manual to semi-automated.
 5. Track collective decision scope as a follow-on for society support (v0.5.0+), aligned with organizations planning.

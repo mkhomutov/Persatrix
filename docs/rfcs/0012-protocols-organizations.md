@@ -3,7 +3,7 @@ id: RFC-0012
 title: Protocols & Organizations
 summary: Define the organization model — a named graph of personas with roles and a hierarchy / flat / matrix topology — and, on top of it, the authority axis: a persona reasoning about whether a directive issued in one context should influence its behaviour in another, and accepting, adapting, or refusing it. The integrity counterpart to RFC 0037's confidentiality axis. Phases 1–3 (organizations & authority) target v0.4.0; Phases 4–5 (meeting / negotiation protocols, inter-org federation) target v0.5.0.
 type: architecture
-status: proposed
+status: accepted
 author: Maksim Khomutov
 created: 2026-05-16
 target: v0.4.0 (Phases 1–3 — organizations & authority, less §G's clearance check and §H, unslotted by the 2026-10-20 amendment); v0.5.0 (Phases 4–5 — meeting/negotiation protocols, inter-org federation)
@@ -17,7 +17,9 @@ depends_on:
 # RFC 0012 — Protocols & Organizations
 
 **Type**: architecture
-**Status**: 📋 Proposed
+**Status**: 👍 Accepted — Phases 1–3 for v0.4.0, less the two items the [2026-10-20 amendment](#amendment-2026-10-20--the-v040-plans-ruling-b-audit) unslots; Phases 4–5 stay a sketch until v0.5.0 is planned
+**PR plan**: [0012-pr-plan.md](0012-pr-plan.md) — Phases 1–3, the v0.4.0 plan's rows C1–C3
+**Accepted**: by the maintainer's review approval of [#1047](https://github.com/mkhomutov/Persatrix/pull/1047), row R1 of the [v0.4.0 plan](../v0.4.0-plan.md#progress)
 **Author**: Maksim Khomutov
 **Date**: 2026-05-16
 **Target**: v0.4.0 (Phases 1–3 — organizations & authority, less §G's clearance check and §H, unslotted by the [2026-10-20 amendment](#amendment-2026-10-20--the-v040-plans-ruling-b-audit)); v0.5.0 (Phases 4–5 — meeting/negotiation protocols, inter-org federation)
@@ -247,13 +249,13 @@ organizations:
     topology: hierarchy            # hierarchy | flat | matrix
     roles:
       - id: vp-engineering
-        clearance: secret          # max RFC 0037 classification (§G)
+        # clearance: secret        # max RFC 0037 classification (§G); unslotted, see below
         authority: directive       # max channel authority it can wield (§D)
       - id: staff-engineer
-        clearance: restricted
+        # clearance: restricted
         authority: operational
       - id: product-manager
-        clearance: restricted
+        # clearance: restricted
         authority: operational
     members:
       - agent_id: ember-owl
@@ -569,7 +571,22 @@ audience work, so two deliverables leave the v0.4.0 phases and become
   logging.
 
 Each comes back only by an amendment whose External evidence section records
-an outside ask. The rest of the design is unchanged.
+an outside ask. The rest of the design is unchanged by this amendment.
+
+> 2026-10-20 — The [PR plan](0012-pr-plan.md#phase-0--open-questions-and-design-points)
+> settles four points differently from this RFC's text, which stands corrected
+> by it:
+> - Membership is declared once, in `config/organizations.yaml`; Phase 1
+>   item 4 and the `config/agents.yaml` / `schemas/agent.schema.json` rows of
+>   Files Touched mean the persona's runtime state, not a second key (D-2).
+> - The v0.4.0 schema rejects a role's `clearance` key until §G's check
+>   returns, which is why §B's example comments it out (D-3).
+> - Every authority tie goes to a person, one pending approval per tied
+>   directive; §F's escalation to the recipient's manager is not built in
+>   v0.4.0 (D-8).
+> - An accepted directive constrains the turn's candidates only through the
+>   structured form extraction gives it; a directive with free text only
+>   stays prompt guidance (§F; PR 10).
 
 | What | Before | After (v0.4.0) |
 |------|--------|----------------|
@@ -692,6 +709,10 @@ Dependencies: RFC 0011 external bridges, Phase 4.
 
 ## Open Questions
 
+> 2026-10-20 — The [PR plan](0012-pr-plan.md#phase-0--open-questions-and-design-points)
+> settles each question below for Phases 1–3, names the PR that confirms
+> each default, and confirms question 6's plan-opening default.
+
 1. **Role-defined vs. derived authority levels.** §G makes role
    `authority` an explicit ceiling. Should it instead be *derived* purely
    from topology depth? Proposed resolution: keep it explicit — a flat
@@ -724,7 +745,8 @@ Dependencies: RFC 0011 external bridges, Phase 4.
    persona, it also writes a directive to the commitments tier with its
    cross-context influence record, so RFC 0021 Phase 2's store takes writes
    from outside its tools. Accepting this RFC and RFC 0021 Phase 2 settles
-   it.
+   it. *(2026-10-20: confirmed by the [PR plan](0012-pr-plan.md#phase-0--open-questions-and-design-points),
+   for organization members only; C2 PR 8 writes the directives.)*
 
 ## Decision / Next Steps
 
@@ -743,7 +765,8 @@ Dependencies: RFC 0011 external bridges, Phase 4.
 4. Sequence Phase 1 after the RFC 0029 society store, per the v0.4.0
    [dependency chain](../v0.4.x-sequencing.md#dependency-chain); it does not
    wait on RFC 0010.
-5. Create `docs/rfcs/0012-pr-plan.md` once this RFC is accepted; PR 1
+5. Create `docs/rfcs/0012-pr-plan.md` once this RFC is accepted — written
+   as [0012-pr-plan.md](0012-pr-plan.md), proposed with the acceptance; PR 1
    must add the glossary entries for *organization*, *topology*,
    *authority axis*, *directive*, *cross-context influence record*,
    *clearance*.
