@@ -6,7 +6,7 @@ type: architecture
 status: proposed
 author: Maksim Khomutov
 created: 2026-04-16
-target: unslotted, left v0.4.0 by v0.4.x sequencing ruling (m)
+target: unslotted, left v0.4.0 by v0.4.x sequencing ruling (m); Phases 2–3 board only with an amendment that also unfreezes the workflow engine (v0.4.x sequencing ruling (x))
 depends_on:
   - RFC-0008
   - RFC-0009
@@ -18,7 +18,7 @@ depends_on:
 **Status**: 📋 Proposed  
 **Author**: Maksim Khomutov  
 **Date**: 2026-04-16  
-**Target**: unslotted, left v0.4.0 by [v0.4.x sequencing ruling (m)](../v0.4.x-sequencing.md#rulings)  
+**Target**: unslotted, left v0.4.0 by [v0.4.x sequencing ruling (m)](../v0.4.x-sequencing.md#rulings); Phases 2–3 board only with an amendment that also unfreezes the workflow engine ([ruling x](../v0.4.x-sequencing-2026-10-21.md#rulings))  
 **Depends on**: RFC 0008, RFC 0009
 
 ---

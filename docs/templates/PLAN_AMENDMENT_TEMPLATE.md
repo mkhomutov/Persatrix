@@ -11,7 +11,13 @@
 > a version plan (a patch release's plan keeps one document, ruling (e)),
 > this becomes a dated `## Amendment YYYY-MM-DD — <title>` section appended
 > to it instead of a separate file, and the document's reading-order note at
-> the top is repointed at it.
+> the top is repointed at it. A sequencing amendment that would take its
+> document past its split point goes instead in a dated file beside it, if
+> the line's sequencing rules allow one (in Persatrix, ruling (s) of the
+> v0.4.x sequencing: `v0.4.x-sequencing-YYYY-MM-DD.md`). That file keeps an
+> undated H1 and holds the amendment under one
+> `## Amendment YYYY-MM-DD — <title>` heading, and the reading-order note
+> points at it.
 
 ## Context
 

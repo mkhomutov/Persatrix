@@ -1,6 +1,6 @@
 # Decisions — how scope is frozen, changed, and shrunk
 
-> **Last updated**: 2026-09-17
+> **Last updated**: 2026-10-21
 > Companion to [release-cycle.md](release-cycle.md). Terms are defined in the
 > [process glossary](process-glossary.md).
 
@@ -18,8 +18,11 @@ way any of the three changes.
 **What**: a dated section appended to the current line's sequencing
 document — [v0.4.x-sequencing.md](../v0.4.x-sequencing.md) for the v0.4 line;
 [v0.3.x-sequencing.md](../v0.3.x-sequencing.md), frozen, holds every decision
-before it — that assigns issues and RFC phases to concrete versions, states
-each version's one-line story, and names the next version after it.
+before it — or, once that document nears its cap, a dated file of its own
+beside it ([ruling s](../v0.4.x-sequencing.md#rulings)), that assigns issues
+and RFC phases to concrete versions, states each version's one-line story,
+and names the next version after it, or ratifies what a strategy review
+decided ([strategy §10](../project-strategy.md#10-review-cadence-and-log)).
 
 **Rules**
 
@@ -47,9 +50,18 @@ each version's one-line story, and names the next version after it.
    placeholder or "TBD", and when a heading from that date names an amendment
    in any other form; "none" is an answer.
    Whether the amendment then obeys the rule is left to review.
+   A dependency that a scoped phase states in its own plan is not internal
+   correctness alone, and neither, under the project's goal, is an addition
+   that meets the conditions of
+   [ruling (u)](../v0.4.x-sequencing-2026-10-21.md#rulings), which also
+   says what earlier scope carries over, what an issue boarded that way
+   needs, and how a strategy review checks what boarded that way. Neither clears
+   a ruling that requires an outside ask, such as
+   [ruling (b)](../v0.3.x-sequencing.md#rulings). Ratified by the
+   [Amendment 2026-10-21](../v0.4.x-sequencing-2026-10-21.md#rulings).
 7. An amendment that **adds a release** to a train names the release it
    removes, or the train closes and the remainder moves to the next minor.
-   Same ratification.
+   Ratified by the same Amendment 2026-09-12.
 
 **Why not a ticket tracker?** The amendment is one page a reviewer can read in
 order; the reasoning that made the ordering is next to the ordering.
