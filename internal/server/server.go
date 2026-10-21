@@ -367,10 +367,10 @@ func (s *Server) registerRoutes() {
 // The rate-limit/circuit-breaker layer is mounted **only on `/api/v1/*`**
 // (PR #244 round-2 review H-03). Mounting it on the root would catch
 // `/healthz`, which Kubernetes liveness probes call without an
-// `X-Agent-ID` header — combined with the H-01 anonymous-deny that
-// fires while a quarantine is active, a single quarantined agent would
-// 403 the probe → restart the pod → drop the in-memory quarantine state
-// → re-quarantine on the next request → crashloop.
+// `X-Agent-ID` header, so the probe would share the anonymous budget: a
+// flood of anonymous calls would 429 it → restart the pod → drop the
+// in-memory quarantine state. (Until ISSUE-0152's fix, any quarantine
+// also refused every anonymous call, which crashlooped the pod.)
 //
 // `/healthz` therefore bypasses the limiter+breaker (rate limiting a
 // liveness probe is meaningless anyway). All other routes — including
@@ -379,8 +379,8 @@ func (s *Server) registerRoutes() {
 //
 // The embedded web console (RFC 0048, WithUI) is the one deliberate exception:
 // it registers on this root mux too, so its anonymous operator traffic also
-// bypasses the limiter+breaker — leaving it under the H-01 deny would 403 the
-// console whenever an agent is quarantined. See registerUIRoutes.
+// bypasses the limiter+breaker and never competes for the anonymous budget
+// when an operator needs the console. See registerUIRoutes.
 //
 // The 429/403 short-circuit responses still flow back through
 // loggingMiddleware and appear in the access log with their

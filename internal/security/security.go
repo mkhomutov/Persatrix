@@ -11,21 +11,23 @@
 //   - [RateLimiter] and [CircuitBreaker]: count calls under the agent ID
 //     the caller sends, refuse calls over the cap, and quarantine an agent
 //     that keeps hitting it. A quarantined agent's calls are refused until
-//     an operator releases it, and while any agent is quarantined, calls
-//     that send no agent ID are refused too. The hooks in middleware.go
-//     apply them to every REST API call except /healthz, the login routes
-//     and the web console's own routes, and to every call on the
-//     agent-facing gRPC server that sends one request and gets one reply.
-//     The login routes use two RateLimiters of their own.
+//     an operator releases it. A quarantine refuses only the ID it names,
+//     never calls that send no agent ID (ISSUE-0152). The hooks in
+//     middleware.go apply them to every REST API call except /healthz,
+//     the login routes and the web console's own routes, and to every
+//     call on the agent-facing gRPC server that sends one request and
+//     gets one reply. The login routes use two RateLimiters of their own.
 //   - [GRPCRecoveryInterceptor] and [GRPCStreamRecoveryInterceptor]: stop a
 //     panic in a gRPC handler from crashing the orchestrator.
 //
-// The rate limiter has gaps. Callers that send no agent ID share one
-// bucket, and today that means the CLI and every REST call from the agents,
-// which send their ID only on wallet calls (ISSUE-0111). The stream that
-// carries agents' logs to the orchestrator skips both checks. And a
-// quarantine does not stop the orchestrator sending the agent tasks, though
-// RFC 0009 says it should.
+// The rate limiter has gaps. Agent IDs are self-reported, so a caller can
+// invent one to get a fresh budget, or send a real agent's ID to get that
+// agent quarantined (ISSUE-0152). Callers that send no agent ID share one
+// bucket: today the CLI and any other client that sends none, since the
+// agents send theirs on REST and wallet calls. The stream that carries
+// agents' logs to the orchestrator skips both checks. And a quarantine
+// does not stop the orchestrator sending the agent tasks, though RFC 0009
+// says it should.
 //
 // Built but not called by the orchestrator yet:
 //

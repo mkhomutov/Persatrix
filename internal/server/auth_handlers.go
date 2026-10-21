@@ -16,12 +16,12 @@ import (
 //
 // They register on the security-bypass ROOT mux (beside /healthz and
 // the RFC 0048 console), NOT behind RESTRateLimitMiddleware: login is
-// anonymous human traffic, and the PR #244 H-01 anonymous-deny fires
-// whenever any agent is quarantined — routing login through that layer
-// would lock operators out exactly when they need a session to
-// investigate (the registerUIRoutes argument, verbatim). The surface is
-// instead defended by its own §B limiters, which unlike the agent
-// limiter are sized for and keyed to login attempts.
+// anonymous human traffic, and routing it through that layer would put
+// it in the anonymous budget every caller with no X-Agent-ID shares, so
+// a flood could lock operators out exactly when they need a session to
+// investigate (the registerUIRoutes argument). The surface is instead
+// defended by its own §B limiters, which unlike the agent limiter are
+// sized for and keyed to login attempts.
 
 // loginRequest is the §K login body. `session_transport` (§A1) chooses
 // how the session comes back — explicit beats sniffing Origin to guess

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -75,21 +74,6 @@ type CircuitBreaker struct {
 	// exempt is the immutable set built from [CircuitBreakerConfig.ExemptAgentIDs]
 	// at construction. Read-only after NewCircuitBreaker, so it needs no lock.
 	exempt map[string]struct{}
-
-	// quarantinedCount mirrors len(quarantined) for lock-free reads on
-	// the request hot path (PR #244 round-2 review L-05). Without this,
-	// every anonymous REST/gRPC request acquires `cb.mu` purely to
-	// answer HasAnyQuarantined(), which serialises an otherwise
-	// independent flow of traffic — a noticeable contention source
-	// under the exact DoS conditions the breaker is meant to handle.
-	//
-	// Invariant: quarantinedCount.Load() == int32(len(quarantined)) at
-	// every point where `cb.mu` is not held by another goroutine.
-	// Both write sites (open in RecordViolation, decrement in
-	// Unquarantine) bracket the map mutation under `cb.mu`, so a
-	// concurrent reader can observe at most a one-event lag — which is
-	// the same TOCTOU window the existing mutex-guarded reader had.
-	quarantinedCount atomic.Int32
 }
 
 type quarantineEntry struct {
@@ -193,7 +177,6 @@ func (cb *CircuitBreaker) RecordViolation(ctx context.Context, agentID string, v
 	shouldOpen := len(kept) >= rule.Count
 	if shouldOpen {
 		cb.quarantined[agentID] = quarantineEntry{since: now, reason: vt}
-		cb.quarantinedCount.Store(int32(len(cb.quarantined)))
 		// PR #244 review M-03 (partial): clear the per-agent violation
 		// history when the breaker opens so the entry does not linger
 		// after a future Unquarantine restores the agent. A full LRU/TTL
@@ -230,23 +213,6 @@ func (cb *CircuitBreaker) IsQuarantined(agentID string) bool {
 	return ok
 }
 
-// HasAnyQuarantined reports whether at least one agent is currently
-// quarantined. Used by the REST/gRPC middleware to close the
-// header-omission bypass (PR #244 review H-01): when a quarantine is
-// active, anonymous (empty-X-Agent-ID) calls must be denied so a
-// quarantined caller cannot drop their header to slip past
-// IsQuarantined and re-enter via the anonymous bucket.
-//
-// Lock-free atomic load (PR #244 round-2 review L-05). The
-// `quarantinedCount` field mirrors len(quarantined) and is updated
-// under `cb.mu` at both write sites — see the field's invariant
-// comment. Suitable for the request hot path because the steady-state
-// answer (no quarantine) is the overwhelmingly common case and must
-// not contend on the breaker mutex.
-func (cb *CircuitBreaker) HasAnyQuarantined() bool {
-	return cb.quarantinedCount.Load() > 0
-}
-
 // Unquarantine releases agentID and clears its violation history.
 // Returns true when the agent was quarantined; false on no-op.
 // `actor` is recorded on the audit event for forensics.
@@ -261,7 +227,6 @@ func (cb *CircuitBreaker) Unquarantine(ctx context.Context, agentID, actor strin
 	if ok {
 		delete(cb.quarantined, agentID)
 		delete(cb.violations, agentID)
-		cb.quarantinedCount.Store(int32(len(cb.quarantined)))
 	}
 	cb.mu.Unlock()
 	if ok {
