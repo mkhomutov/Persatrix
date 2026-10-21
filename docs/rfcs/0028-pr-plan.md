@@ -146,9 +146,11 @@ in the PR named:
   unslotted), so the checkpoint is defined and not wired. Pre-tool and
   post-outcome are wired in PR 10, where calibration first needs them, in
   both places tools run: the persona's `tool_round.py` and the task agent's
-  executor. For a persona, pre-tool runs inside the model loop, before
-  pre-act sees the final action list — the reverse of §A's order, since its
-  tools run before its actions are parsed.
+  executor. Post-outcome also gets a seat at `ActionExecutor.execute`, so a
+  publish or any other non-tool action records whether it ran. For a
+  persona, pre-tool runs inside the model loop, before pre-act sees the
+  final action list — the reverse of §A's order, since its tools run before
+  its actions are parsed.
 - **E-7 Dashboards.** The repository holds no dashboard files, so Phase 2
   item 4 ships as metrics plus documented queries in `docs/observability.md`.
   PR 10.
@@ -180,24 +182,34 @@ in the PR named:
   many rotated files are kept. Records pass through a real secret redactor
   (PR 3a) before writing. Every candidate's free text — a message, a reply,
   each tool argument's value — is stored as a content hash, beside the
-  candidate's class, ids, tool name and argument names and the acting
-  channel's protection level; never the text. So the log keeps RFC 0037's
-  rule for its audit trail, metadata only, and does not become a
-  confidentiality sink.
+  candidate's class, ids, tool name and argument names, the acting
+  channel's protection level, and the scorer's input features — numbers and
+  labels, no text — so PR 8 can replay a changed policy; never the text. So
+  the log keeps RFC 0037's rule for its audit trail, metadata only, and does
+  not become a confidentiality sink.
 - **E-11 One open approval per action.** The action hash is SHA-256 over the
   canonical JSON of the candidate's class, its tool name or action type, its
   argument values and its target, and nothing that changes with time. A hold
   whose `(actor_id, action_hash)` already has an open approval reuses it, so
-  a retried tool call or a later tick proposing the same publish opens
-  nothing new; the rejection names the open approval and says not to retry.
-  PR 14.
+  a retried tool call opens nothing new; the rejection names the open
+  approval and says not to retry. A held `publish_channel` is matched by
+  actor, class and target channel instead, since the model rewords it each
+  time: while a publish to a channel has an open hold, the agent's further
+  publishes there are deferred onto that hold, and the approval releases the
+  text it was opened with. PR 14.
 - **E-12 A deferred chat reply answers at once, and a release answers
   nothing.** When a gate defers a reply to a waiting REST chat, the agent
   publishes a short notice with `reply_status="deferred"` and the reason,
   plus the approval id when held, which `chat_handler.go` returns as HTTP 200
-  — the ISSUE-0065 pattern for errors — instead of a 504 after 30 s. A
-  released publish carries its approval id, and the chat waiter skips such a
-  message, so a release never answers a later chat request. PRs 5 and 13.
+  — the ISSUE-0065 pattern for errors — instead of a 504 after 30 s. The
+  notice goes out as ISSUE-0065's error replies do
+  (`publish_chat_error_on_channel`), outside the action path, so no gate
+  sees it. A released publish carries its approval id, and the chat waiter
+  skips such a message, so a release never answers a later chat request. The
+  waiter still matches on channel and sender only, so an ordinary reply that
+  lands after the 30 s timeout can answer the next chat, as today;
+  correlating a reply with the inbound message id fixes both, and PR 13
+  records that case on ISSUE-0033, the waiter's open issue. PRs 5 and 13.
 - **E-13 A release resumes its turn's context.** The release is its own event
   type, not `APPROVAL_RESPONSE`, which has no wallet cause and is floored to
   `public`. It is charged under the held turn's wallet cause and acts at the
@@ -328,8 +340,9 @@ in `spans.py`; a new `_metrics_decision.py` (`metrics.py` is at 500 lines).
 (E-10). The log writes one JSON line per record, in one write, as
 `call_log.py` does, redacted first by PR 3a's redactor. Every candidate's
 free text — message, reply, tool argument values — is written as a content
-hash with the acting channel's protection level, never as text. It is the
-source of truth for replay. The span carries the selected class, the
+hash with the acting channel's protection level, never as text, beside the
+candidate's non-text scoring features. It is the source of truth for
+replay. The span carries the selected class, the
 candidate count and the confidence; spans are sampled and not relied on. A
 failing sink counts a metric and never fails the turn. The size cap and the
 number of rotated files kept are config keys.
@@ -344,7 +357,9 @@ unchanged; the span attributes.
 ### PR 4 — `feature/v040-rfc0028-config`
 
 **Scope**: a `decision:` block in `schemas/agent.schema.json` (`mode`, and
-class names for `autonomy.requires_approval_for`); a commented example in
+class names for `autonomy.requires_approval_for`, which accepts `delegate`
+and `publish_channel`; tool calls are held only through the required-HITL
+registry, PR 11); a commented example in
 `config/agents.yaml`; a new `agents/decision/config.py`; the glossary's
 Autonomy Level entry rewritten (E-3); the `requires_approval_for` examples in
 `docs/ai-agents-orchestration-spec.md` and `docs/persatrix-extension-spec.md`
@@ -371,9 +386,12 @@ early return writes a `defer` record with its reason where it returns:
 replay, the response gate, salience silence, an empty TICK, a model-call
 error, no response, MAX_TOKENS, and in `agents/persona_runtime/__init__.py`
 the event and tick timeouts and the missing-model return. The tick cut
-records the actions it drops. A persona run as a workflow step records the
-actions `PersonaAgent.handle` drops as `defer` with `reason=workflow_step`.
-E-12's `deferred` arm in `internal/server/chat_handler.go`.
+records the actions it drops. A persona run as a workflow step never
+reaches the executor, so `PersonaAgent.handle` (`agents/persona.py`) calls
+the same checkpoint on the `COMPLETE_TASK` it returns, which is recorded and
+gated like any action, and records the actions it drops as `defer` with
+`reason=workflow_step`. E-12's `deferred` arm in
+`internal/server/chat_handler.go`.
 **Implementation**: each action that will run is the candidate; manual mode
 selects it, and the log takes the record while recording is on. Later gates
 sit on this seam (PR 9, PR 14, RFC 0012 PR 10), so they see the publish that
@@ -384,8 +402,10 @@ DecisionRecord, and `agent.deliberated` is emitted from it while recording
 is on, as RFC 0051's amendment asks. Phase 1 item 2, persona half.
 **Tests**: a scripted turn writes one record per final action with its class;
 a plain-text reply is recorded as the publish it becomes; a gated silence, a
-timeout and the tick cut write their records; a fake deferral of a chat
-reply returns HTTP 200 with `reply_status="deferred"`, not a 504; with no
+timeout and the tick cut write their records; a workflow-step persona's
+`COMPLETE_TASK` writes its record; a fake deferral of a chat reply returns
+HTTP 200 with `reply_status="deferred"`, not a 504, also for an agent with
+`publish_channel` on its approval list; with no
 `decision:` block nothing is written, every recorded golden replays
 byte-identically under `make eval-replay`, and the offline demo's transcript
 is unchanged.
@@ -412,8 +432,9 @@ stage calls two existing gates read-only — `PermissionGate`
 (`agents/tools/permissions.py`) and channel membership — and removes what
 they would refuse; the wallet keeps refusing at the lease (E-2). A
 rule-weighted scorer, with its weights in config, gives each survivor a score
-and a confidence in [0, 1]. Below the configured floor the outcome is `defer`
-with `reason=low_confidence`.
+and a confidence in [0, 1]; its input features go into the record (E-10).
+Below the configured floor the outcome is `defer` with
+`reason=low_confidence`.
 **Tests**: deterministic ranking; confidence bounds; a candidate the
 permission gate would refuse is never selected in any mode.
 **Estimate**: ~450 lines.
@@ -436,8 +457,8 @@ sequence.
 **Implementation**: Phase 2 item 2 and OQ 2. A selected candidate in a class
 on the agent's approval list becomes `defer` with `reason=approval_required`,
 recorded, and nothing runs until PR 14 puts these classes on A4's queue. The
-classes are `delegate` and `publish_channel`; no external bridge exists to
-route.
+classes are `delegate` and `publish_channel`, as PR 4's schema allows; tool
+calls are not on the list, and no external bridge exists to route.
 **Tests**: each listed class defers in manual and semi-automated mode; an
 empty list changes nothing.
 **Estimate**: ~250 lines.
@@ -446,14 +467,16 @@ empty list changes nothing.
 
 **Scope**: the pre-tool and post-outcome checkpoints (E-6) in both places
 tools run — `agents/persona_runtime/tool_round.py` and PR 6's task-agent
-executor module; acceptance, rejection and fallback counters in
+executor module — and post-outcome at `ActionExecutor.execute` for the
+persona's other actions; acceptance, rejection and fallback counters in
 `_metrics_decision.py`; a decision section in `docs/observability.md` with
 the queries (E-7).
 **Implementation**: Phase 2 item 4. Post-outcome records whether the selected
 action ran, failed or was refused; a `PermissionError` counts as refused in
 both executors.
-**Tests**: each checkpoint writes its record in each runtime; the counters
-move as each outcome is recorded.
+**Tests**: each checkpoint writes its record in each runtime; a publish
+writes its post-outcome record; the counters move as each outcome is
+recorded.
 **Acceptance**: Phase 2 complete.
 **Estimate**: ~400 lines.
 
@@ -488,9 +511,12 @@ and on no route.
 **Scope**: A4's approve, deny, expiry and withdraw paths mint, refuse, expire
 and withdraw tokens; a spend route that an agent calls, with its
 `auth_policy.go` entry and a place among A4's token-checked agent routes; the
-chat waiter's skip of a released message (E-12); the four `decision.hitl_*`
-audit events (security class), with RFC 0009's unused `hitl.*` constants
-retired; the approval secret, with its Upgrade Notes line.
+chat waiter's skip of a released message (E-12), and the late-reply case
+recorded on ISSUE-0033; the spend route's exemption from the per-agent REST
+rate limiter, so a waiting task agent (PR 14a) cannot trip it; the four
+`decision.hitl_*` audit events (security class), with RFC 0009's unused
+`hitl.*` constants retired; the approval secret, with its Upgrade Notes
+line.
 **Implementation**: approving a pending approval mints its token, bound to the
 held action's hash. A spend is one transaction (E-8): the row must be
 `approved`, unexpired, for the same hash and for the calling agent, and it
@@ -527,8 +553,10 @@ mode.
 **Tests**: the security tests — no mode runs a required-HITL action or tool
 call without a token; an approval-list class reaches the queue and releases;
 a held call retried three times, and re-proposed on the next tick, opens one
-approval and, once approved, runs once; the release is charged to the held
-turn's cause and keeps its protection level and cascade depth; an approval
+approval and, once approved, runs once; a held publish re-proposed in new
+words opens no second approval and, approved, posts once; the release is
+charged to the held turn's cause and keeps its protection level and cascade
+depth; an approval
 survives an orchestrator restart and still releases once; the plan's
 acceptance, "held, released only by a signed, scoped, expiring approval
 token that survives an orchestrator restart, and refused on replay".
@@ -537,16 +565,18 @@ token that survives an orchestrator restart, and refused on replay".
 ### PR 14a — `feature/v040-rfc0028-hitl-task-step`
 
 **Scope**: the task agent side, in PR 6's executor module: a required-HITL
-or approval-list tool call opens or reuses its approval (E-11) and waits
-inside the step (E-9), asking the spend route until it answers, bounded by
-the step's timeout.
+tool call opens or reuses its approval (E-11) and waits inside the step
+(E-9), asking the spend route with backoff — 5 s, doubling to at most 60 s —
+until it answers, bounded by the step's timeout; PR 13 exempts that route
+from the per-agent REST rate limiter.
 **Implementation**: on release the spend runs the call and the step goes on,
 so the workflow resumes as RFC 0009 §F's step 5 promised; on denial, expiry
 or timeout the call returns §F's rejection result, which the model handles
 like any tool error. No task status is added.
 **Tests**: a workflow step with a held call completes after approval; a
 denial returns the rejection and the step goes on; a timeout ends the wait
-and never hangs the workflow; the workflow suites pass unchanged.
+and never hangs the workflow; an hour's wait stays under the rate
+limiter and quarantines nothing; the workflow suites pass unchanged.
 **Acceptance**: Phase 2a complete.
 **Estimate**: ~300 lines.
 
@@ -585,7 +615,9 @@ marked ✂️ or *taken, not cut*.
 |------|-----------|------|
 | `agents/base.py` | 505 | PR 6 moves `_execute_tools` out first |
 | `agents/observability/metrics.py` | 500 | PR 3 adds a `_metrics_decision.py` module |
-| `agents/action_executor.py` | 489 | PR 5 adds one call; the logic lives in `agents/decision/` |
+| `agents/action_executor.py` | 489 | PRs 5 and 10 add one call each; the logic lives in `agents/decision/` |
+| `agents/tick.py` | 472 | PR 5 records the actions its cut drops, through one call |
+| `agents/persona.py` | 335 | PR 5 adds the checkpoint call in `handle` |
 | `agents/persona_runtime/__init__.py` | 486 | PR 5 records its three early returns through one helper |
 | `internal/server/chat_handler.go` | 472 | PR 5 adds one `reply_status` arm |
 | `agents/persona_runtime/action_loop.py` | 426 | PR 5 records its early returns; the logic lives in `agents/decision/` |

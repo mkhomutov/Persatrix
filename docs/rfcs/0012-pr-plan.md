@@ -26,9 +26,10 @@ phases in 14 PRs:
 - **C2, Phase 2** — the authority axis: a channel `authority` level beside
   RFC 0037's `classification`, the two-factor rule, and directives written to
   the commitments tier with their cross-context influence record.
-- **C3, Phase 3** — the accept / adapt / refuse decision at RFC 0028's
-  pre-act checkpoint, conflict ranking and tie escalation, and runtime changes
-  to the organization graph as a required human-in-the-loop class.
+- **C3, Phase 3** — the accept / adapt / refuse decision as RFC 0028's
+  pre-act checkpoint input, worked out when a turn starts; conflict ranking
+  and tie escalation; and runtime changes to the organization graph as a
+  required human-in-the-loop class.
 
 Two items are out, by the RFC's
 [2026-10-20 amendment](0012-protocols-organizations.md#amendment-2026-10-20--the-v040-plans-ruling-b-audit):
@@ -67,7 +68,7 @@ if R2 settles them differently, the PR named here adapts before it opens.
 |-----|--------|---------|
 | A1 | Society tables for organizations, roles, members and `manages` edges (with a `scope` label), and an organization-graph version counter, behind the society-store interface; one transaction that spans a pending approval and those tables, both in `data/channels.db`, so an approved graph change commits with its approval or not at all | C1 PR 3, C3 PR 11 |
 | A2 | On the `commitments` table: a kind that tells a directive from a commitment; `due_at` nullable for a directive; §E's fields (`issuer_id`, `issuing_channel_id`, `channel_authority`, `issuer_authority`, `scope`); the scope columns a fact carries (`session_id`, `principal_id`, `epoch_id`, `protection_level`), read with the facts tier's session, principal and epoch filters; a directive status — pending, accepted, adapted, refused, escalated, superseded, fulfilled — outside the commitment `state` constraint; the structured form PR 8 extracts (polarity, action class, target); the graph version; `conflicts_with`, a mark that the conflict check has run, and a count of its failures; a store call that writes a directive outside the tools. RFC 0021's tools (`list_commitments`, `fulfill_commitment`, `cancel_commitment`), its prompt block and any later janitor act only on `kind = commitment` rows; directive rows change only through PRs 9–10a | C2 PR 8 |
-| A4 | The organization read (C1 PR 4) among the token-checked agent routes; verified sender ids under `auth.mode: enabled`; the pending-approval queue, its release path, a call that withdraws an open approval, and an approve hook that runs inside A1's transaction — C3 uses them for ties and graph changes | C1 PR 4, C3 |
+| A4 | The organization read (C1 PR 4) among the token-checked agent routes; verified sender ids under `auth.mode: enabled`; the pending-approval queue, its release path, a call that withdraws an open approval, and an approve hook that runs inside A1's transaction; a tie group on approval rows, so approving one row withdraws the group's other open rows in the same transaction; and a decision event to the persona whenever one of its approvals is approved, denied, expired or withdrawn — C3 uses them for ties and graph changes | C1 PR 4, C3 |
 | B1, B3 | The pre-act checkpoint, a `DecisionRecord` that names its subject, and approval tokens | C3 |
 
 ---
@@ -82,7 +83,7 @@ confirmed or overturned in the review of the PR named.
 | # | Question | Answer | Settled in |
 |---|----------|--------|-----------|
 | OQ 1 | Role authority: declared or derived from depth? | Declared, the RFC's proposed resolution: each role names its `authority` ceiling, and the schema requires it. | New default; C1 PR 1 |
-| OQ 2 | A stored directive after the graph changes | The graph version goes up only when a load or a runtime change alters the graph. A `pending` directive whose version is older has its issuer authority worked out again before the checkpoint uses it. A record's verdict and provenance never change; an accepted directive can later be superseded (D-6), which writes a new record. | New default; C3 PR 9 |
+| OQ 2 | A stored directive after the graph changes | The graph version goes up only when a load or a runtime change alters the graph. A `pending` directive whose version is older has its issuer authority worked out again before a turn uses it. A record's verdict and provenance never change; an accepted directive can later be superseded (D-6), which writes a new record. | New default; C3 PR 9 |
 | OQ 3 | Ties in a flat organization | No `tiebreak` role in v0.4.0. Every tie, in any topology, goes to a person (D-8). A `tiebreak` role can be added later without a schema break. | New default; C3 PR 10a |
 | OQ 4 | A persona in two organizations | Not in v0.4.0: validation fails it. Membership stays a list per organization, so Phase 5 can lift the rule without a schema change. | New default; C1 PR 1 |
 | OQ 5 | Must authority and classification move together? | No, the RFC's proposed resolution: they stay independent, and neither schema ties them. | New default; C2 PR 5 |
@@ -119,22 +120,26 @@ in the PR named:
   router stamps the version from an in-memory copy that PR 3 sets at load
   and PR 11 raises on apply, so no dispatch reads the store for it. C1 PR 4.
 - **D-6 Conflict is judged by the model and ranked by rule, at the
-  checkpoint.** The close-time extraction never sees other directives, and
-  sibling closes run at once, so it cannot judge conflict. When the
-  checkpoint first meets a new directive, one short model call compares it
-  with every pending and accepted directive the persona holds — scopes go in
-  as context, not as a filter, so two wordings of one matter still meet —
+  start of a turn.** The close-time extraction never sees other directives,
+  and sibling closes run at once, so it cannot judge conflict. When a turn
+  first meets a new directive, before its prompt is built, one short model
+  call compares it with every pending and accepted directive the persona
+  holds — scopes go in as context, not as a filter, so two wordings of one
+  matter still meet —
   and records the ones it contradicts (`conflicts_with`). The call has its
   own purpose, `DIRECTIVE_CONFLICT`, and is charged under the turn's wallet
   cause. It runs apart from the reply: a failure leaves the directive
-  `pending` and unused, and the next checkpoint tries again; after three
-  failures the directive goes to a person as a tie (D-8). §C precedence then
-  picks the winner, whichever arrived first. The loser gets a refuse record
+  `pending` and unused, and the next turn tries again; after three failures
+  the directive goes to a person on D-8's path with
+  `reason=conflict_unjudged`, so `authority_tie` keeps meaning two issuers
+  of equal standing. §C precedence then picks the winner, whichever arrived
+  first. The loser gets a refuse record
   with `reason=outranked`, as §F says; its row reads `refused` if it was
   pending and `superseded` if it had been accepted. Contradicting directives
-  from issuers with no order between them are a tie. A later directive from
-  the same issuer in the same scope supersedes their earlier one, with no
-  tie. C3 PRs 9–10.
+  from issuers with no order between them are a tie. A later directive that
+  the conflict call finds contradicts an earlier one from the same issuer
+  supersedes it, with no tie; unrelated directives from one issuer stand side
+  by side, whatever their scope. C3 PRs 9–10.
 - **D-7 Direct-message authority.** A `dm_default_authority` setting, like
   `dm_default_classification`, defaults to `observed`. So a manager directs a
   report in a direct message only where the operator allows it. It applies
@@ -142,15 +147,18 @@ in the PR named:
   PR 5's operator route. C2 PR 5.
 - **D-8 Ties go to a person.** A tie, in any topology, opens one pending
   approval per tied directive on A4's queue, once, and the tied rows move to
-  `escalated`. Approving one accepts it, refuses the others and withdraws
-  their approvals. Denying an approval, or letting it expire, refuses its
-  directive. Each of these writes a record. A tie re-opens only when a new
-  directive contradicts one of its rows or the graph version goes up, and
+  `escalated`. The approvals form one tie group on A4's queue: approving one
+  withdraws the others in the same transaction, so two contradictory rows
+  can never both be approved. The persona applies each decision event A4
+  sends — the approved row accepted, the others refused; a denied or expired
+  row refused. Each of these writes a record. A tie still `escalated`
+  re-opens only when a new directive contradicts one of its rows or a graph
+  change alters `directs` between the tied issuers and the persona, and
   re-opening first withdraws the tie's open approvals, so a restart with an
-  unchanged file opens nothing. The record names the recipient's manager,
-  whom §F prefers, but v0.4.0 has no persona-to-persona direct-message
-  route, and in a matrix the tied managers are themselves the parties, so
-  the manager route is not built. C3 PR 10a.
+  unchanged file opens nothing. A tie a person decided stays decided. The
+  record names the recipient's manager, whom §F prefers, but v0.4.0 has no
+  persona-to-persona direct-message route, and in a matrix the tied managers
+  are themselves the parties, so the manager route is not built. C3 PR 10a.
 - **D-9 Scope is a label, not free text.** The extraction is given the scope
   labels of the members who direct the persona (the PR 4 read) and picks
   one, or `general`. In a hierarchy `directs` ignores scope. In a matrix a
@@ -162,7 +170,9 @@ in the PR named:
   take this action class on this target — is enforced as a constraint,
   since a step that removes candidates cannot make an action happen. A "do"
   form is listed in the prompt and ends `fulfilled` once RFC 0028's
-  post-outcome record shows its action ran. Everything else stays accepted
+  post-outcome record shows its action ran — for a publish or any other
+  non-tool action, the record RFC 0028 PR 10 writes at
+  `ActionExecutor.execute`. Everything else stays accepted
   until superseded. C3 PR 10.
 - **D-11 Directives pass the injection gate.** The directives prompt block
   is a fifth tier of RFC 0037's `TurnInjectionGate`, beside channel history,
@@ -174,6 +184,12 @@ in the PR named:
   audience check applies as for the other tiers, so a cross-room directive
   into a wider room binds by its constraint only, and the live arc gives its
   instructions in rooms whose audience covers the acting room's (PR 12).
+- **D-12 A directive binds within one principal.** A directive is stamped
+  with the principal of the interaction record it came from, as a fact from
+  that record is, and the read keeps the facts tier's strict principal
+  equality. So a directive binds only turns served for the same principal;
+  in v0.4.0 organizational directives do not cross principals, and the
+  guide says so. C2 PR 8.
 
 ---
 
@@ -444,24 +460,29 @@ partial conflict), or *refuse* (`no_authority`, `outranked`, or
 `permission_denied`, the last from `PermissionGate` in
 `agents/tools/permissions.py`). The loser of a conflict gets a refuse record
 with `reason=outranked`, its row `refused` or, if it had been accepted,
-`superseded` (D-6); the same issuer's later directive in the same scope
-supersedes their earlier one. A tie is a `defer` with `reason=authority_tie`
-(D-8). Each outcome is one `DecisionRecord` whose subject is the directive,
-and the row's status follows it.
+`superseded` (D-6); the same issuer's later directive supersedes their
+earlier one only when the conflict call pairs them. A tie is a `defer`
+with `reason=authority_tie` (D-8). Each outcome is one `DecisionRecord`
+whose subject is the directive, and the row's status follows it.
 **Tests**: the RFC's unit list — the higher manager wins, also when the
 lower directive was accepted first, and the loser's record is a refuse with
 `reason=outranked` either way; equal issuers defer, never pick; a manager's
-revised directive supersedes their first with no tie; a declined request is
+revised directive supersedes their first with no tie, while an unrelated
+second directive from the same manager leaves the first accepted; a
+declined request is
 refused with its reason; a record's verdict never changes.
 **Migration**: none.
 **Estimate**: ~400 lines.
 
 ### PR 10 — `feature/v040-rfc0012-directive-checkpoint`
 
-**Scope**: the PR 9 input at the persona's pre-act checkpoint; D-6's conflict
-call, with its `LLMCallPurpose` member and wallet cause; each accepted "do
-not" form as a constraint input that removes a violating candidate before
-selection, and the post-outcome hook that marks a "do" form `fulfilled`
+**Scope**: the PR 9 evaluation as the pre-act checkpoint's directive input,
+computed at the start of the persona's turn, before prompt assembly, so a
+directive accepted then is in that turn's prompt;
+D-6's conflict call there, with its `LLMCallPurpose` member and wallet
+cause; each accepted "do not" form as a constraint input at RFC 0028's
+pre-act checkpoint, a backstop that removes a violating candidate before it
+runs, and the post-outcome hook that marks a "do" form `fulfilled`
 (D-10); a "directives you have accepted" prompt block, for members only,
 passed through `TurnInjectionGate` as its fifth tier (D-11), budgeted,
 wrapped in RFC 0021's delimiters for text from other sources and filled
@@ -480,9 +501,10 @@ selected; a "do" form ends `fulfilled` after its action runs. Security: a
 directive planted in a low-authority channel cannot bind the persona
 elsewhere; a directive given in a `restricted` DM is withheld from an
 `internal` group's prompt, still enforced by its constraint, and listed in
-the gate's decision record; a failed conflict call leaves the reply
-unchanged and is retried, and three failures send the directive to a
-person.
+the gate's decision record; a directive accepted at a turn's start is in
+that turn's prompt; a failed conflict call leaves the reply unchanged and is
+retried, and three failures send the directive to a person with
+`reason=conflict_unjudged`.
 **Migration**: none.
 **Estimate**: ~480 lines, of which the two moves are ~80; if over, the gated
 prompt block splits into its own PR.
@@ -491,16 +513,20 @@ prompt block splits into its own PR.
 
 **Scope**: D-8 and OQ 3 — ties to a person, on A4's queue.
 **Implementation**: a tie opens one pending approval per tied directive,
-once, and the rows move to `escalated`. Approving one accepts it, refuses
-the others and withdraws their approvals through A4's withdraw call;
-denying an approval or its expiry refuses its directive. Every closing
-writes a record. A tie re-opens only on a new contradicting directive or a
-higher graph version, after withdrawing its open approvals.
+once, as one tie group, and the rows move to `escalated`. Approving one
+withdraws the others in A4's transaction; the persona applies A4's decision
+events — the approved row accepted and the others refused, a denied or
+expired row refused. Every closing writes a record. An `escalated` tie
+re-opens only on a new contradicting directive or a graph change that alters
+`directs` between its issuers and the persona, after withdrawing its open
+approvals; a decided tie never re-opens.
 **Tests**: a tie opens one approval per tied directive across many
 checkpoints; approving one withdraws the others, so neither can be approved
-later; a denied or expired approval refuses its directive with a record; a
-restart with an unchanged file opens nothing; a graph change re-opens the tie
-once.
+later, and two approvals sent at once accept only one; a denied or expired
+approval refuses its directive with a record; a restart with an unchanged
+file opens nothing; a graph change that alters `directs` between the tied
+issuers re-opens an escalated tie once, and an unrelated change or a
+decided tie re-opens nothing.
 **Migration**: none.
 **Estimate**: ~300 lines.
 
@@ -547,12 +573,15 @@ a room other than the one where the persona acts, chosen so that each
 issuing room's audience covers the acting room's (D-11); and a manufactured
 tie. The manager and the peer are scripted stand-ins that the driver
 registers with the enrollment secret, so their instructions are verbatim and
-their sender ids are verified. Plus the plan's two legs: a held action — a
-`publish_channel` on the persona's approval list, released by its token
-(RFC 0028 PR 14), its replayed token refused — and a forged agent id
-refused. The driver checks each `DecisionRecord`'s reason and issuing room,
-not the reply text, as acceptance item 1 asks. The live run belongs to the
-release gate.
+their sender ids are verified. Every leg runs under one principal (D-12):
+the stand-ins act for the driver's operator account, which also drives the
+acting room, and the driver checks that the directive rows and the acting
+turn carry the same principal before it scores leg 1. Plus the plan's two
+legs: a held action — a `publish_channel` on the persona's approval list,
+released by its token (RFC 0028 PR 14), its replayed token refused — and a
+forged agent id refused. The driver checks each `DecisionRecord`'s reason
+and issuing room, not the reply text, as acceptance item 1 asks. The live
+run belongs to the release gate.
 **Tests**: the driver against recorded records — the pass rules fail on a
 reply that complies without a record, and on a record whose issuing room is
 the acting room.
@@ -576,7 +605,7 @@ amendment's two items; Phases 4–5 for v0.5.0); this plan's statuses closed.
 | `agents/persona_runtime/memory_context.py` | 500 | PR 10 splits at a real seam first, before the fifth gated tier |
 | `internal/channels/config.go` | 499 | PR 5 splits at a real seam first |
 | `cmd/orchestrator/main.go` | 499 | PR 3 adds one call; the logic lives in its own file |
-| `agents/persona_runtime/fact_extractor.py` | 483 | PR 8 adds one call |
+| `agents/persona_runtime/summarize_close.py` | 471 | PR 8 adds the fragment wiring and the membership plumbing; it splits at a real seam first if that would cross 500 |
 
 ## Risks
 
