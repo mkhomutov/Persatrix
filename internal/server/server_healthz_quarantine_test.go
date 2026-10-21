@@ -24,13 +24,15 @@ import (
 // sharing the anonymous budget could still be 429'd by a flood.
 //
 // These tests pin the bypass: `/healthz` must always return 200, even
-// with an active quarantine, while `/api/v1/*` stays behind the breaker.
+// with the anonymous budget spent and a quarantine open, while `/api/v1/*`
+// stays behind the limiter and breaker.
 
 // TestHealthzAllowedDuringQuarantine asserts the H-03 fix: probes pass
 // through untouched even when an agent is quarantined.
 func TestHealthzAllowedDuringQuarantine(t *testing.T) {
 	cb := breakerWithThreshold(t)
 	srv := testServerWithBreaker(t, cb)
+	spendAnonymousBudget(t, srv, cb)
 
 	// Seed quarantine state, which once made the middleware deny
 	// anonymous traffic via the H-01 protection.

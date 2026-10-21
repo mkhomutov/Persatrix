@@ -24,17 +24,18 @@ import (
 // operator most needs it. (Until ISSUE-0152's fix, a quarantine of any agent
 // also refused every anonymous call outright.)
 //
-// These tests pin the bypass: the console surface stays reachable during an
-// active quarantine, while genuine /api/v1/* agent endpoints stay behind the
-// limiter and breaker.
+// These tests pin the bypass: with the anonymous budget spent and a
+// quarantine open, the console surface stays reachable, while genuine
+// /api/v1/* agent endpoints stay behind the limiter and breaker.
 
 // uiTestServerWithBreaker builds a console-wired Server (WithUI) behind a
-// circuit breaker, mirroring testServerWithBreaker's post-construction
-// WithRateLimiter application.
+// circuit breaker and a limiter whose anonymous budget is already spent
+// (spendAnonymousBudget), so a console route that went behind the limiter
+// would get 429.
 func uiTestServerWithBreaker(t *testing.T, cb *security.CircuitBreaker, opts ...ServerOption) *Server {
 	t.Helper()
 	srv := uiTestServer(t, append([]ServerOption{WithUI(uiAssetFS())}, opts...)...)
-	WithRateLimiter(nil, cb)(srv)
+	spendAnonymousBudget(t, srv, cb)
 	return srv
 }
 

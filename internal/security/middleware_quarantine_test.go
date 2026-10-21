@@ -100,8 +100,10 @@ func TestRateLimitHooks_QuarantineRefusesOnlyTheQuarantinedID(t *testing.T) {
 
 // TestRateLimitHooks_NoIDKeepsItsSharedBudgetDuringQuarantine pins what
 // still caps a caller that drops its header: the shared anonymous budget.
-// Its refusals are rate-limit refusals, and they quarantine nothing, because
-// the breaker counts violations only against a named ID.
+// Its refusals are rate-limit refusals, not quarantine refusals. They also
+// quarantine nothing; that last check holds through both the middleware's
+// guard and RecordViolation's own skip of an empty ID, so it cannot tell
+// which of the two is doing the work.
 func TestRateLimitHooks_NoIDKeepsItsSharedBudgetDuringQuarantine(t *testing.T) {
 	const calls = 10 // twice the breaker's rate-limit threshold of 5
 	transports := []struct {

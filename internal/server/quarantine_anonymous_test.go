@@ -15,9 +15,9 @@ import (
 // ISSUE-0152 steps 1–2, end to end through Server.Handler(): an outsider
 // invents an agent ID and floods a route the agents use until the real rate
 // limiter and circuit breaker quarantine it. In either auth mode, that must
-// not shut out the callers that send no agent ID — today every REST call the
-// Python agents make and every CLI command — and the operator must be able
-// to release the ID without inventing one.
+// not shut out the callers that send no agent ID — the CLI, scripts, and
+// the agents' REST calls until they sent their own ID — and the operator
+// must be able to release the ID without inventing one.
 
 // inventedAgentID is the shape the v0.3.0 release checks used to trip a
 // quarantine with a curl loop.
@@ -29,7 +29,7 @@ const inventedAgentID = "probe-1778578135"
 func productionShapedLimiter(t *testing.T, auditor security.AuditLogger) (*security.RateLimiter, *security.CircuitBreaker) {
 	t.Helper()
 	rl, err := security.NewRateLimiter(security.RateLimitConfig{
-		CallsPerWindow: 20,
+		CallsPerWindow: 30,
 		WindowSeconds:  60,
 		Enabled:        true,
 		Logger:         zap.NewNop(),
@@ -57,9 +57,44 @@ func floodUntilQuarantined(t *testing.T, h http.Handler, cb *security.CircuitBre
 	require.True(t, cb.IsQuarantined(id), "precondition: the flood must quarantine %s", id)
 }
 
+// spendAnonymousBudget wires a limiter whose shared anonymous budget is one
+// call, and spends it, so any later anonymous call that reaches the limiter
+// gets 429. /healthz, the console and login sit outside the limiter
+// (Server.Handler) so that a flood of anonymous calls cannot lock them out;
+// the tests that call this assert they still answer.
+func spendAnonymousBudget(t *testing.T, srv *Server, cb *security.CircuitBreaker) {
+	t.Helper()
+	rl, err := security.NewRateLimiter(security.RateLimitConfig{
+		CallsPerWindow: 1,
+		WindowSeconds:  60,
+		Enabled:        true,
+		Logger:         zap.NewNop(),
+	})
+	require.NoError(t, err)
+	WithRateLimiter(rl, cb)(srv)
+	h := srv.Handler()
+	require.Equal(t, http.StatusOK, doRequest(h, http.MethodGet, "/api/v1/agents", nil).Code,
+		"the one anonymous call is admitted")
+	require.Equal(t, http.StatusTooManyRequests, doRequest(h, http.MethodGet, "/api/v1/agents", nil).Code,
+		"precondition: the anonymous budget is spent")
+}
+
+// TestLoginSkipsTheAnonymousBudget pins the login half of the bypass
+// (auth_handlers.go): with the anonymous budget spent, login still answers.
+func TestLoginSkipsTheAnonymousBudget(t *testing.T) {
+	srv, _ := newAuthServer(t, DefaultAuthConfig()) // `disabled`: login still works
+	spendAnonymousBudget(t, srv, breakerWithThreshold(t))
+
+	rec := postLogin(t, srv.Handler(), `{"username":"alice","password":"s3cret"}`, nil)
+	assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+}
+
 func TestInventedIDQuarantineSparesCallersWithNoID(t *testing.T) {
-	// The routes the agents call with no agent ID, all open to callers
-	// with no account under `enabled` too (auth_policy.go's carve-out).
+	// The routes the agents call. Under `enabled` all but the last two are
+	// open to callers with no account (auth_policy.go's carve-out); the
+	// agent directory and recall answer 401 there before the limiter.
+	// Convene answers its own 403 (config_edit_enabled is off here), so
+	// only the body check can catch a quarantine refusal on it.
 	agentRoutes := []struct{ method, path string }{
 		{http.MethodPost, "/api/v1/agents/register"},
 		{http.MethodDelete, "/api/v1/agents/some-agent"},
@@ -68,6 +103,8 @@ func TestInventedIDQuarantineSparesCallersWithNoID(t *testing.T) {
 		{http.MethodGet, "/api/v1/channels/group:x/messages"},
 		{http.MethodPost, "/api/v1/channels/group:x/messages"},
 		{http.MethodPost, "/api/v1/channels/group:x/convene"},
+		{http.MethodGet, "/api/v1/agents"},
+		{http.MethodPost, "/api/v1/personas/ember-owl/recall"},
 	}
 	modes := []struct {
 		name string
