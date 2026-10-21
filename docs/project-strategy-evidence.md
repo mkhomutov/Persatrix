@@ -131,7 +131,7 @@ at 2026-10-20.
 | Trust reaches the model as one prompt line | `agents/persona_runtime/relationship_section.py:224-226` (now :281-284) injects the score only when it differs from 0.5; `EVAL-MEMORY-001.yaml:58-62` settles for `> 0.0` and notes the increase form "needs live" |
 | The audience gate was shadow-only | [RFC 0037 audience amendment](rfcs/0037-amendment-audience-egress.md) status 🔄 Shadow; flip is verdict-gated (v0.3.16 PR A3). Live since A3 ([#950](https://github.com/mkhomutov/Persatrix/pull/950)) |
 | Live arcs cost cents | v0.3.11 autonomous arc $0.17, 99 s, about 47 000 tokens; v0.3.15 ten-leg arc $0.13 ([execution reports](manual-tests/)) |
-| Extraction RFCs are parked | RFC 0046 and 0047: 📋 Proposed, target v0.4.0+, gated on RFC 0045 and the MIT↛BUSL CI gate |
+| Extraction RFCs are parked | RFC 0046: not standalone, rides the governance-core extraction if a strategy review orders one; the first ordered none, and [ruling (t)](v0.4.x-sequencing-2026-10-21.md#rulings) passes it to the next. RFC 0047: 📋 Proposed, target v0.4.0+, gated on RFC 0045 and the MIT↛BUSL CI gate |
 | Licence grant | Non-commercial use only, deployments under 10 users ([LICENSE](../LICENSE) Additional Use Grant) |
 | Interop drafts waiting | [#754](https://github.com/mkhomutov/Persatrix/pull/754) and [#755](https://github.com/mkhomutov/Persatrix/pull/755) (RFC 0041 Phase 1) open since 2026-07-18; still drafts at 2026-10-20, now v0.4.0's cuttable D4 |
 
@@ -150,10 +150,11 @@ From [v0.3.x sequencing](v0.3.x-sequencing.md); each row is one amendment.
 | 2026-09-12 | **measure first** | close v0.3.16 small; EXP-001 before any train opens |
 | 2026-10-18 | **the goal** | a society that pursues long goals; EXP-001 a measurement; v0.4.0 opens |
 | 2026-10-18 | substrate | v0.4.0's shape, in [v0.4.x sequencing](v0.4.x-sequencing.md): the phases' own prerequisites board, nothing else |
+| 2026-10-21 | **the reading** | the first review acted on, in [a file of its own](v0.4.x-sequencing-2026-10-21.md): the goal replaces the product reading; rule 6 stays, read for the goal; the README may be rewritten after the strategy rewrite; Apache-2.0 outside the reserved seams by a licence PR |
 
 No amendment after 2026-06-28 cites anything from outside the repository.
 Since 2026-09-12 every amendment carries an External evidence section, and
-all three are empty of positives.
+all four are empty of positives.
 Nothing records the v0.3.11 demo being shown to anyone.
 
 ## 8. Market claims — perishable
@@ -197,11 +198,11 @@ the first review.
 | #895 R1 | Unblock RFC 0046 now, breaking the version train | Rejected — #896's market finding; the lease travels with the governance core (§2) |
 | #895 R2 | Implement MCP in both directions | Changed — one interop slice, chosen by the experiment (§6.7) |
 | #895 R3 | Stop the tenancy work after the shadow gate | Changed — stop after v0.3.16, but keep the gate as the confidentiality story (§2) |
-| #895 R4 | Choose one wedge; rewrite the README | Changed — wedge stated as a hypothesis; README changes on the result (§5) |
+| #895 R4 | Choose one wedge; rewrite the README | Changed — wedge stated as a hypothesis; README changes on the result (§5); since [ruling (v)](v0.4.x-sequencing-2026-10-21.md#rulings), after the strategy rewrite |
 | #895 R5 | Cut the cycle to plan → implement → tag | Adopted as §7.3 |
 | #895 R6 | Raise the file cap to ~800 or retire it | Adopted as §7.4 (warning at 500, gate at 800) |
-| #895 R7 | Retire the Rust CLI | Changed — freeze now, delete on the wedge decision (§2) |
-| #895 R8 | Reconsider BUSL | Deferred — default Apache-2.0 at the first review (§4); applied there on 2026-10-20, for the amendment that acts on it |
+| #895 R7 | Retire the Rust CLI | Changed — freeze now, delete on the wedge decision (§2); with no wedge decision to come, [ruling (t)](v0.4.x-sequencing-2026-10-21.md#rulings) passes whether and when to the next strategy review |
+| #895 R8 | Reconsider BUSL | Deferred — default Apache-2.0 at the first review (§4); applied there on 2026-10-20, for the [Amendment 2026-10-21](v0.4.x-sequencing-2026-10-21.md#rulings) (ruling w) |
 | #896 S1 | External-evidence input to Before Phase 0 | Adopted as §7.1 |
 | #896 S2 | Ship MCP, memory side first | Changed — the MCP server is one of the two interop slices (§6.7) |
 | #896 S3 | Reposition on the memory boundary | Changed — one of two candidate wedges; the experiment decides (§4) |
@@ -213,15 +214,15 @@ the first review.
 | #897 S1 | Run the ablation before repositioning | Adopted; widened to the five-arm experiment (§4) |
 | #897 S2 | Make `MEMORY_BUDGET_TOKENS` configurable first | Adopted as §6.2 |
 | #897 S3 | Reposition on the gate, not on memory | Changed — the gate is the fallback wedge if C does not beat A (§4) |
-| #897 S4 | Decide the fate of the other 86 % | Changed — decided per component at the first review, not by an amendment now (§8); at the first review (2026-10-20) no extraction was ordered |
+| #897 S4 | Decide the fate of the other 86 % | Changed — decided per component at the first review, not by an amendment now (§8); at the first review (2026-10-20) no extraction was ordered; passed to the next strategy review ([ruling t](v0.4.x-sequencing-2026-10-21.md#rulings)) |
 | #897 S5 | Retire the trust score or evidence it | Adopted as §8 last row |
 | #897 S6 | Adopt #896's external-evidence gate | Adopted as §7.1 |
 | #898 R1 | Pause v0.4.0; finish v0.3.16 small | Adopted as §6.1 |
 | #898 R2 | One published experiment, four setups | Adopted; a fifth arm added for the allocator (§4) |
-| #898 R3 | Name one first user and job in the README | Changed — named as a hypothesis (§5); README after the result |
+| #898 R3 | Name one first user and job in the README | Changed — named as a hypothesis (§5); README after the result; since [ruling (v)](v0.4.x-sequencing-2026-10-21.md#rulings), after the strategy rewrite instead, without waiting for EXP-001 |
 | #898 R4 | First contact in five minutes: images, binaries, demo, transcript | Adopted as §6.5 |
 | #898 R5 | MCP client and an A2A endpoint | Changed — one slice, RFC 0043 preferred (§3.4, §6.7) |
-| #898 R6 | Release the governance core and budget lease permissively now | Changed — lease not alone; the core's extraction is decided at the first review (§8), which (2026-10-20) ordered none |
+| #898 R6 | Release the governance core and budget lease permissively now | Changed — lease not alone; the core's extraction is decided at the first review (§8), which (2026-10-20) ordered none; passed to the next strategy review ([ruling t](v0.4.x-sequencing-2026-10-21.md#rulings)) |
 | #898 R7 | Process diet; cap as a warning | Adopted as §7.3–§7.4 |
 | #898 R8 | Review on 2026-11-30 against outcomes | Adopted as the first review date (§10) |
 

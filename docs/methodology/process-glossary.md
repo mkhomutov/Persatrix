@@ -1,6 +1,6 @@
 # Process Glossary
 
-> **Last updated**: 2026-09-17
+> **Last updated**: 2026-10-21
 > Terms used to run the project. Product and architecture terms live in the
 > [AI glossary](../ai-glossary.md); this file covers the process vocabulary
 > that appears in plans, PR bodies, and reports. Same authoring rules: use the
@@ -9,8 +9,11 @@
 ### Sequencing amendment
 A dated section appended to the current line's sequencing document,
 [v0.4.x-sequencing.md](../v0.4.x-sequencing.md) (the v0.3.x line's,
-[v0.3.x-sequencing.md](../v0.3.x-sequencing.md), is frozen), that assigns issues and RFC phases to concrete versions and names the next
-version. The citation for "why is this in scope". Never edited; superseded by
+[v0.3.x-sequencing.md](../v0.3.x-sequencing.md), is frozen), or a dated file
+of its own beside it once that document nears its cap
+([ruling s](../v0.4.x-sequencing.md#rulings)), that assigns issues and RFC
+phases to concrete versions and names the next version, or ratifies what a
+strategy review decided. The citation for "why is this in scope". Never edited; superseded by
 a later amendment. See [decisions.md](decisions.md#sequencing-amendments).
 
 ### External evidence section
@@ -21,6 +24,13 @@ When every row is "none", the amendment may not scope a version on internal
 correctness alone. See [decisions.md](decisions.md#sequencing-amendments)
 rule 6; `scripts/checks/amendment_evidence.py` fails when a row is missing,
 given twice, blank or "TBD", or when an amendment heading is in another form.
+
+### Goal audit
+A check of each item against the project's goal, proposing what the goal
+needs and a version lacks; only an amendment adds what it proposes. It sits
+in a version plan, as v0.4.0's does, or in the amendment itself. It is the
+first condition of the route past rule 6 that
+[ruling (u)](../v0.4.x-sequencing-2026-10-21.md#rulings) sets.
 
 ### Pre-registered experiment
 An experiment whose materials, arms, scoring and decision rules are merged
