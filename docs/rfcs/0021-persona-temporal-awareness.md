@@ -3,7 +3,7 @@ id: RFC-0021
 title: Persona Temporal Awareness
 summary: Gives personas a now-anchor in the system prompt and temporal-prefix rendering on recall — Phase 1 in v0.3.0; Phase 2 (commitments) in v0.4.0; Phases 3–4 (REMINDER, duration calibration) unslotted.
 type: architecture
-status: partially_implemented
+status: implementing
 author: Maksim Khomutov
 created: 2026-04-25
 target: v0.3.0 (Phase 1) + v0.4.0 (Phase 2) + unslotted (Phases 3–4)
@@ -16,7 +16,7 @@ depends_on:
 # RFC 0021 — Persona Temporal Awareness
 
 **Type**: architecture
-**Status**: ⚠️ Partially Implemented (Phase 1)
+**Status**: 🚧 Implementing (Phase 1 shipped; Phase 2 in v0.4.0 — [PR plan](0021-phase2-pr-plan.md))
 **Author**: Maksim Khomutov
 **Date**: 2026-04-25
 **Target**: v0.3.0 (Phase 1) + v0.4.0 (Phase 2) + unslotted (Phases 3–4)
@@ -577,7 +577,7 @@ This RFC formalizes the temporal substrate that has been implicitly missing acro
 
 **Required before Phases 2–4 implementation begins**:
 
-1. Resolve Open Questions 3, 4, 5, 6, 7 in a v0.4.0 PR-plan document.
+1. Resolve Open Questions 3, 4, 5, 6, 7 in a v0.4.0 PR-plan document. *(2026-10-21: done in the [Phase 2 PR plan](0021-phase2-pr-plan.md#phase-0--open-questions-and-design-points); 6 and 7 wait with Phase 4.)*
 2. Confirm that RFC 0008 §D's context-packaging pipeline composes with the new commitments and duration-prior budget lines. Expected to be a no-op for RFC 0008 — the new lines are additional inputs to the same allocator.
 3. Coordinate with RFC 0009 Phase 1 (input sanitization) so commitment descriptions and reminder text route through the sanitization pass before storage.
 

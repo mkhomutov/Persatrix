@@ -238,7 +238,7 @@ The throughline: **draw the personal/society storage boundary now, on paper, bef
 
 ## Open questions
 
-1. **At what scale does SQLite actually break for channels?** Worth benchmarking before committing to Postgres for v0.4.0. Specifically: 10 agents writing to one channel at 1 msg/sec each — does WAL mode hold? If yes, SA-1 narrows to "design the split, defer the migration."
+1. **At what scale does SQLite actually break for channels?** Worth benchmarking before committing to Postgres for v0.4.0. Specifically: 10 agents writing to one channel at 1 msg/sec each — does WAL mode hold? If yes, SA-1 narrows to "design the split, defer the migration." *(2026-10-21: [benchmarked](storage-architecture-benchmark.md) — it holds once the channels store gets back its channel-time index.)*
 2. **Per-tier file split (SA-5) vs one-file-per-agent with separate tables.** Both work; the choice is locking-granularity gains vs connection-management cost. Decide inside SA-1's RFC.
 3. **Action log: JSONL (cheap, replayable, slow to query) or SQLite append-only table (queryable, harder to tail)?** [RFC 0009](rfcs/0009-security-sandboxing.md) has likely thought about this; resolve as part of SA-1 / SA-7 prep. Governs the per-agent stream only; the society `audit_chain` table is fixed at Postgres.
 4. **Does "identity" deserve a separate tier, or is it a `subject="self"` view over `facts.db` with a write ACL?** Lean toward view-with-ACL; the question is whether the ACL is enforceable inside SQLite or needs Python-layer mediation. Resolve in SA-2.

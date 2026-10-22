@@ -340,7 +340,7 @@ Phase 3 is v0.4.0, as society tables in the SQLite channels store ([RFC 0029's 2
 - **Phase 5 — Society-tier consumers.** RFC 0028 `decision_records` and RFC 0013 `audit_chain` schemas land directly in the society Postgres.
 - **Phase 6 — Conditional per-tier SQLite file split (SA-5).** Gated on a Phase 3 contention benchmark; default outcome is "not needed".
 
-The v0.4.0 PR plan for Phase 3 is the [v0.4.0 plan](../v0.4.0-plan.md)'s row R2, after its benchmark; the [RFC 0029 PR plan](0029-pr-plan.md) is extended there, not replaced.
+The v0.4.0 PR plan for Phase 3 is [0029-phase3-pr-plan.md](0029-phase3-pr-plan.md), written for the [v0.4.0 plan](../v0.4.0-plan.md)'s row R2 after its benchmark, beside this one rather than inside it.
 
 ---
 
