@@ -248,7 +248,10 @@ tagged.
 > anonymous budget, and its refusals quarantine nothing. The operator
 > releases an ID with no `X-Agent-ID` of their own: under `disabled` with no
 > header (the `SECURITY_UNQUARANTINE_TOKEN` check stays), under `enabled`
-> with an operator session. `internal/server/quarantine_anonymous_test.go`
+> with an operator session. Under `enabled` a signed-in caller that sends no
+> ID is counted under its session (`security.WithCallerKey`), so an
+> outsider who keeps the anonymous budget spent cannot refuse that release.
+> `internal/server/quarantine_anonymous_test.go`
 > trips a real quarantine under an invented ID in both auth modes and checks
 > that each of the nine routes the agents call answers a caller with no ID
 > as it did before. `CircuitBreaker.HasAnyQuarantined` served only the removed rule
@@ -256,9 +259,10 @@ tagged.
 > (`agents/orchestrator_session.py`), which closes the REST half of
 > [ISSUE-0111](ISSUE-0111-anonymous-wallet-rpcs-share-rate-limit-bucket.md)'s
 > residuals. That has a cost, filed as
-> [ISSUE-0187](ISSUE-0187-agent-rest-bursts-count-toward-its-own-quarantine.md):
-> an agent's refused REST calls now count toward its own quarantine, and a
-> persona's start-up catch-up in a deployment with many channels can trip it.
+> [ISSUE-0187](ISSUE-0187-agent-rest-bursts-count-toward-its-own-quarantine.md),
+> high: an agent's REST calls now share its wallet calls' budget and count
+> toward its quarantine, which someone posting into a channel can trip; the
+> start-up catch-up now stops at its first refusal.
 > Still open, so the status is `in_progress`: step 5, which closes this issue
 > with RFC 0009 Phase 4 (row A4) — until then anyone who can reach the REST
 > port can get a named agent quarantined by sending its ID, and an invented

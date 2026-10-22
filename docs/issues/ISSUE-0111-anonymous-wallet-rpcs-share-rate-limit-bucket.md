@@ -142,4 +142,6 @@ Landed with the v0.3.11 release-prep MT-execution PR (TDD,
 > covers only one-request, one-reply gRPC calls. Still open: the close-summary
 > path does not wait out `retry-after-seconds`. New with the fix, and filed
 > as [ISSUE-0187](ISSUE-0187-agent-rest-bursts-count-toward-its-own-quarantine.md):
-> an agent's refused REST calls now count toward its own quarantine.
+> an agent's REST calls now share its wallet calls' budget, so a burst of
+> them can refuse its leases, this issue's failure one agent at a time; and
+> its refused REST calls count toward its own quarantine.

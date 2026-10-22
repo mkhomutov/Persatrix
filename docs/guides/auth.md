@@ -263,7 +263,9 @@ orchestrator WARNs about the residual at startup):
   the agent fleet.
 - **Anonymous channel writes remain possible** on the same paths (they are
   the production persona transport). The defence is the RFC 0009 per-agent
-  rate limiter + quarantine, unchanged.
+  rate limiter + quarantine, unchanged, and it can be turned on the
+  personas: a few dozen posts in a minute quarantine every persona in the
+  channel ([ISSUE-0187](../issues/ISSUE-0187-agent-rest-bursts-count-toward-its-own-quarantine.md)).
 
 A fleet-less deployment (no persona agents calling back over REST) has no
 reason to keep this surface reachable at all — that is exactly ISSUE-0117.

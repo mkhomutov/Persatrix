@@ -1,8 +1,8 @@
 ---
 id: ISSUE-0187
-summary: "Since the agents' REST calls carry the hosted agent's ID (ISSUE-0152 step 3), a refused REST call counts toward that agent's own quarantine. A persona's start-up catch-up reads every channel in the deployment one after another, with no pause on a 429, so in a deployment where that comes to more than about 60 reads in a minute the persona is refused five times and quarantined; a busy channel can do the same, since every open-floor message costs each member persona three calls even when it stays silent. It then cannot call its model or publish until an operator releases it. Before, its REST refusals fell into the shared anonymous budget, which quarantines nothing."
+summary: "Since the agents' REST calls carry the hosted agent's ID (ISSUE-0152 step 3), they spend the same budget as its wallet calls, and a refused REST call counts toward its quarantine. Every open-floor message costs each member persona three calls even when it stays silent, so someone with no account, in either auth mode, can post about 22 messages in a minute into a channel and quarantine every persona in it until an operator releases each one; raising the budget does not stop that. Short of a quarantine, a burst of an agent's own REST calls leaves its wallet calls nothing, so its bids and turns fail closed. The start-up catch-up, which read every channel back to back past a 429, now stops at the first one."
 status: open
-severity: medium
+severity: high
 area: security
 created: 2026-10-21
 refs:
@@ -14,6 +14,8 @@ refs:
   - agents/channel_history_fetcher.py
   - agents/persona_runtime/salience_gate.py
   - agents/server_reregister.py
+  - agents/wallet_client.py
+  - docs/guides/auth.md
   - internal/security/middleware.go
   - cmd/orchestrator/ratelimit.go
 ---
@@ -25,9 +27,11 @@ refs:
 Each agent now has its own rate-limit budget on REST, which was the point of
 ISSUE-0152's step 3. The same change means a REST call refused for going over
 that budget is a violation against the agent, and five violations in ten
-minutes quarantine it. The start-up catch-up makes a long run of REST calls
-with nothing to slow it down, so a persona in a deployment with many channels
-can quarantine itself as it starts; a busy channel can do it more slowly.
+minutes quarantine it. A busy channel can do that, and anyone who can post
+to it can make it busy; before a quarantine, a burst of REST calls already
+leaves the agent's wallet calls nothing. The start-up catch-up made a long
+run of REST calls with nothing to slow it down; it now stops at its first
+refusal.
 
 ## Context
 
@@ -48,15 +52,19 @@ Read at the PR that made the change (ISSUE-0152's steps 1–3):
   then for every channel in the list reads it to check membership
   (`agents/channel_catchup_discovery.py`), and for each channel the persona
   belongs to reads its history (`agents/channel_history_fetcher.py`). The
-  calls run one after another with no pause, and a refused call is logged and
-  skipped, so the loop carries on into further refusals.
+  calls run one after another with no pause. As filed, a refused call was
+  logged and skipped, so the loop carried on into further refusals.
+- **Anyone can post to a channel.** Channel publishes stay open to callers
+  with no account in both auth modes (`docs/guides/auth.md`), the publish
+  body's `sender_id` is taken on trust, and the channel list names each
+  channel's members.
 
 So a persona's start-up costs about 2 + C + M calls: registration, the list,
 one read per channel in the deployment (C) and one per channel it belongs to
-(M). Once that passes the budget, every further read is refused and counts.
-With the defaults, 40 channels with the persona in 30 of them comes to 72
-calls, about 12 refusals, and a quarantine. Direct messages are channels, so
-C grows with every person and persona pair that has talked.
+(M). With the defaults, 40 channels with the persona in 30 of them comes to
+72 calls; as filed, that was about 12 refusals and a quarantine. Direct
+messages are channels, so C grows with every person and persona pair that
+has talked.
 
 ## Impact
 
@@ -64,9 +72,26 @@ C grows with every person and persona pair that has talked.
   wallet calls are refused, so it cannot call its model, and its publishes
   are refused. A quarantine has no end of its own (RFC 0009 §H); the operator
   releases the ID through `POST /api/v1/agents/{id}/unquarantine`.
-- **It is new with ISSUE-0152's fix.** Before, the catch-up's reads were
-  anonymous: once the shared budget ran out they were refused too, and the
-  catch-up silently lost the channels left, but nothing was quarantined.
+- **An outsider can do it on purpose.** Someone with no account posts about
+  22 open-floor messages in a minute into a salience-gated channel, as one of
+  its members, inside the anonymous budget. Each member persona spends three
+  calls on each (below), is refused five times, and is quarantined: the
+  lockout ISSUE-0152 describes, one channel at a time. Wallet calls alone
+  allowed it before, at about 33 messages; the agents' REST ID brings that
+  down to about 22. A bigger `SECURITY_RATE_LIMIT_CALLS` only raises the
+  count, and the poster's budget grows with it.
+- **Before any quarantine, REST bursts starve the agent's wallet calls.** A
+  start-up catch-up that comes to 60 calls (30 channels, a member of 28)
+  spends the whole budget, so for the rest of that minute a bid's lease is
+  refused and the bid fails closed to silence, a turn's model call fails
+  closed (RFC 0023 §F), a close-summary lease becomes the
+  `[interaction summary unavailable]` placeholder, and a refused
+  `SettleLease` is reaped at its granted estimate: ISSUE-0111's failure, one
+  agent at a time.
+- **The catch-up half is new with ISSUE-0152's fix.** Before, the catch-up's
+  reads were anonymous: once the shared budget ran out they were refused
+  too, and the catch-up silently lost the channels left, but nothing was
+  quarantined and the agent's wallet budget was untouched.
 - **Busy live traffic can do the same.** Every open-floor message in a
   salience-gated channel costs each member persona a history read and a
   leased bid, which is two wallet calls, even when it stays silent
@@ -80,25 +105,32 @@ C grows with every person and persona pair that has talked.
   as the quarantine threshold. After an orchestrator restart the budget is
   fresh, but if the channel only blipped while the budget was spent, five
   refused tries quarantine the agent.
-- **Medium severity.** It needs a large deployment or a burst, and the
-  release endpoint recovers it; but the agent is out until then.
+- **High severity.** Someone with no account, in either auth mode, can
+  quarantine every persona in a channel with a few dozen messages, and it
+  lasts until an operator releases each one: ISSUE-0152's own grounds for
+  High. The organic paths, a large deployment or a busy channel, are slower
+  to reach.
 
 ## Proposed fix / investigation path
 
-1. **Stop the catch-up at the first 429** (or wait out its `Retry-After`)
-   instead of skipping to the next channel, so a pass adds at most one
-   violation. Test first: a catch-up over more channels than the budget stops
-   after one refusal.
+1. **Stop the catch-up at the first 429** instead of skipping to the next
+   channel, so a pass adds at most one violation. Fixed: see Notes.
 2. **Cut the per-channel membership read.** `GET /api/v1/channels` already
    returns each channel's members with their respond policy
    (`handleListChannels`), so the catch-up needs 2 + M calls, not 2 + C + M.
 3. **Size the budget**, or document raising `SECURITY_RATE_LIMIT_CALLS` for
    deployments with many channels. The CHANGELOG's upgrade note for the fix
-   says so for now.
-4. ISSUE-0152's step 4, an end to a quarantine, would bound the outage but
+   says so for now. It does nothing against an outsider.
+4. **Keep wallet calls out of REST bursts**: count an agent's REST and
+   wallet calls against separate budgets, so a burst of reads cannot refuse
+   its leases.
+5. **Verify the sender.** Only a publish the orchestrator can tie to its
+   sender closes the outsider path: RFC 0009 Phase 4's agent tokens on the
+   REST routes (row A4), and ISSUE-0117's `auth.agent_ingress` close knob.
+6. ISSUE-0152's step 4, an end to a quarantine, would bound the outage but
    changes RFC 0009 §H, and stays the owner's call.
 
-**Slot: the owner's call.** Step 1 is a small Python change.
+**Slot: the owner's call.** Step 1 is fixed; step 5 is row A4.
 
 ## Notes
 
@@ -110,3 +142,14 @@ C grows with every person and persona pair that has talked.
 > its 14 messages drew no `rate_limit.violated` and no `agent.quarantined`
 > event; the orchestrator logged no 429. No catch-up over many channels was
 > run.
+
+> 2026-10-22 — the review of
+> [#1050](https://github.com/mkhomutov/Persatrix/pull/1050) found the
+> outsider path and the wallet starvation, added above, and raised the
+> severity from medium to high. Step 1 is fixed in the same PR: a 429 on a
+> membership or history read stops the pass (`OrchestratorRateLimitedError`,
+> `agents/channel_history_fetcher.py`), so a pass adds at most one
+> violation; `tests/unit/python/test_channel_catchup_gaps.py` runs a
+> catch-up over more channels than the budget and sees one refusal. The
+> re-registration path, the live traffic, the wallet starvation and the
+> outsider path stay open.

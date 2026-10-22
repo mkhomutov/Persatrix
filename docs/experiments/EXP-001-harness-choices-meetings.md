@@ -1,7 +1,7 @@
 # EXP-001 — The harness's frozen choices: holding the meetings
 
 > **Status**: 🚧 **In Progress** — PR 5a's, PR 5b's and PR 5c's rows froze when they merged; the review of PR 5c changed its rows before any meeting was scored, and PR 5e changed one row of PR 5b's when it merged ([#1032](https://github.com/mkhomutov/Persatrix/pull/1032)).
-> **Last updated**: 2026-10-07
+> **Last updated**: 2026-10-22
 > **Part of**: the [EXP-001 harness](EXP-001-harness.md); the [first part](EXP-001-harness-choices.md) holds the choices of PRs 1 to 4 and the arm order, the [third part](EXP-001-harness-choices-d-prime.md) those of PRs 5d and 5e, the [fourth part](EXP-001-harness-choices-judge.md) PR 6a's, the [fifth part](EXP-001-harness-choices-practice.md) PR 6b's, and the [sixth part](EXP-001-harness-choices-scored.md) PR 6c's
 
 These are the frozen choices of the harness PRs that hold the meetings: how
@@ -37,6 +37,17 @@ harness PR that says what changed and why, and from then on nothing changes.
 | Between meetings | Before each start the harness clears each adviser's saved persona state, its mood, stress, energy and goal progress, so the runtime starts it from its defaults, as a new adviser. Every memory tier, and the interaction counter the runtime keeps though nothing reads it now, stay as they were, since an adviser left running would keep both through a quiet week | 5c |
 | A restart leaves memory as it was | An adviser replays recent channel messages into memory as it starts, but only those from after its clock anchor, and every try sets a new anchor. So once every adviser has logged the end of its catch-up pass, within 90 seconds of the start, the pass must have replayed no message, and each adviser's store that existed before the start must hold exactly the rows it held then, in every table but `agent_state`, the saved state. A pass the runtime's 60-second budget cut off has ended too, with the count it had reached. Otherwise the meeting fails before the operator speaks, and the run stops on a harness fault (check 2). A process that exits, or a pass that aborts, before every pass has ended is a deployment that does not start (PR 5b), since what an aborted pass replayed is not known | 5c |
 | Holding a D meeting again | Before a meeting's first try, with every process stopped, the harness copies the deployment's stores, each adviser's memory file and the orchestrator's databases but not its logs, into `stores-before` beside the meeting's tries. Before any later try it removes the stores and puts the copy back, so the try starts from the memory the first try began with, in a channel without the failed try's messages. This narrows PR 5b's "Holding a meeting again" row for D: a try held again leaves its call log and its processes' logs, but not its stores. PR 5b's rows on failures the system causes and on harness faults hold for D as for B and C. A close summary cut off at its 30-second limit is one of the provider errors that call for this, since D's summaries count. A call that fails while the processes stop is read once they have stopped, so no adviser is killed while it still writes. A summary that fails once the series' last meeting is over changes nothing any meeting shows, so it counts no more than a summary in B or C does | 5c |
+
+## Notes
+
+> 2026-10-22 — the rate-limiter row gives its reason as the code stood when
+> it froze. Since [#1050](https://github.com/mkhomutov/Persatrix/pull/1050)
+> each adviser's REST calls carry its own ID, so the advisers no longer
+> share one anonymous bucket: each has a budget of its own, which a burst
+> of its own calls can spend, leaving its wallet calls nothing, or turn
+> into a quarantine
+> ([ISSUE-0187](../issues/ISSUE-0187-agent-rest-bursts-count-toward-its-own-quarantine.md)).
+> The choice, the limiter off, is unchanged; this note changes no row.
 
 ## Related documentation
 
