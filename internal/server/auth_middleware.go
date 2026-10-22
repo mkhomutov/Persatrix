@@ -68,6 +68,18 @@ func identityFrom(ctx context.Context) authIdentity {
 	return anonymousIdentity
 }
 
+// sessionRateLimitKey names a signed-in caller's own rate-limit budget
+// ([security.WithCallerKey]) for a call that sends no X-Agent-ID, so the
+// anonymous budget an outsider can keep spent never refuses a signed-in
+// operator; "" for everyone else. Only `enabled` resolves sessions. The
+// colon keeps it apart from every X-Agent-ID.
+func sessionRateLimitKey(r *http.Request) string {
+	if ident := identityFrom(r.Context()); ident.Authenticated {
+		return "participant:" + ident.ParticipantID
+	}
+	return ""
+}
+
 // authRuntime bundles what the auth surface needs at request time. One
 // Server field instead of five keeps server.go inside its size cap.
 type authRuntime struct {

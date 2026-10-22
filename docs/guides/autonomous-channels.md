@@ -311,10 +311,14 @@ deterministic — it demonstrates the *shape* of a human-free brainstorm, not a
 live model's reasoning. The mock answers each participant's open-floor bid, so
 all three personas take part; before v0.3.16 it could not, and only the
 convener spoke ([ISSUE-0160](../issues/ISSUE-0160-offline-roundtable-only-the-convener-speaks.md)).
-Give a re-run a minute: the agents' REST calls share one rate-limit bucket
+Each persona's REST calls count against its own rate-limit budget. Until
+v0.4.0 the fleet shared one
 ([ISSUE-0111](../issues/ISSUE-0111-anonymous-wallet-rpcs-share-rate-limit-bucket.md)),
-and a convene inside the minute a discussion just used can see its opener
-refused, so nothing starts. Swap `provider: mock` for a keyed vendor (`make
+so a re-run inside the minute a discussion had just used could see its
+opener refused, and nothing started. A persona refused again and again for
+going over its own budget is quarantined
+([ISSUE-0187](../issues/ISSUE-0187-agent-rest-bursts-count-toward-its-own-quarantine.md)).
+Swap `provider: mock` for a keyed vendor (`make
 demo-anthropic`, `demo-openai`, `demo-gemini` or `demo-watsonx`; the four-vendor
 roster in
 [`blueprints/autonomous-multivendor`](../../blueprints/autonomous-multivendor/blueprint.yaml)

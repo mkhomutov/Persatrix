@@ -49,11 +49,11 @@ func WithUIConfig(cfg *UIConfig) ServerOption {
 // than on s.mux behind RESTRateLimitMiddleware: the console is operator/tester
 // traffic, not agent API traffic, so it must NOT be governed by the agent
 // rate-limiter / circuit-breaker. The browser calls the boot endpoints
-// anonymously (no X-Agent-ID), and the PR #244 H-01 anonymous-deny fires
-// whenever *any* agent is quarantined — routing the console through that layer
-// would 403 it and make the console unbootable exactly when an operator needs
-// it to investigate or clear the quarantine. See [Server.Handler]. (Pinned by
-// ui_quarantine_test.go; the H-01 deny stays in force for genuine /api/v1/*.)
+// anonymously (no X-Agent-ID), so routing the console through that layer
+// would put it in the anonymous budget every caller with no ID shares, and a
+// flood could make the console unbootable exactly when an operator needs it
+// to investigate or clear a quarantine. See [Server.Handler]. (Pinned by
+// ui_quarantine_test.go; genuine /api/v1/* stays behind the breaker.)
 //
 // http.FileServer (over hash-mode routing, RFC 0048 PR plan D1) is correct
 // because every real-file request maps to an embedded asset and client routes

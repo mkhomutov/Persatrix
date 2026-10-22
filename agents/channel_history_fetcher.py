@@ -18,8 +18,9 @@ Contract: :meth:`fetch` returns the channel's message list on success,
 field is absent / not a list, and ``None`` on any HTTP 4xx/5xx or
 transport error (logged WARN). ``None`` means "best-effort failure
 already logged" — callers branch on it rather than catching an
-exception, so the catch-up call site's ``if messages is None: continue``
-guard is unchanged.
+exception. The one exception is a 429 for a fetcher built with
+``raise_on_rate_limit=True``, as the catch-up's is: it raises
+:class:`OrchestratorRateLimitedError` so the pass stops (ISSUE-0187).
 
 This module imports nothing from :mod:`agents.channel_catchup` or
 :mod:`agents.persona_runtime`, so either side can depend on it without
@@ -38,6 +39,7 @@ __all__ = [
     "DEFAULT_REQUEST_TIMEOUT_SECONDS",
     "ChannelHistoryFetcher",
     "HttpChannelHistoryFetcher",
+    "OrchestratorRateLimitedError",
 ]
 
 logger = logging.getLogger(__name__)
@@ -51,6 +53,15 @@ logger = logging.getLogger(__name__)
 # independent — this default applies only to callers that omit
 # ``timeout`` (e.g. the RFC 0034 conversation window).
 DEFAULT_REQUEST_TIMEOUT_SECONDS: float = 10.0
+
+
+class OrchestratorRateLimitedError(Exception):
+    """The orchestrator refused a read for going over this agent's budget.
+
+    Raised only where a caller opts in (the start-up catch-up), so that it
+    can stop rather than collect one refusal per remaining channel: each
+    refusal counts toward the agent's quarantine (ISSUE-0187).
+    """
 
 
 class ChannelHistoryFetcher(Protocol):
@@ -103,8 +114,11 @@ class HttpChannelHistoryFetcher:
         session: aiohttp.ClientSession,
         orchestrator_url: str,
         timeout: aiohttp.ClientTimeout | None = None,
+        raise_on_rate_limit: bool = False,
     ) -> None:
         self._session = session
+        # A 429 raises OrchestratorRateLimitedError instead of returning None.
+        self._raise_on_rate_limit = raise_on_rate_limit
         self._base = orchestrator_url.rstrip("/")
         self._timeout = timeout or aiohttp.ClientTimeout(
             total=DEFAULT_REQUEST_TIMEOUT_SECONDS,
@@ -137,6 +151,8 @@ class HttpChannelHistoryFetcher:
                         "channels: history fetch %s returned HTTP %d: %s",
                         channel_id, resp.status, body[:256],
                     )
+                    if resp.status == 429 and self._raise_on_rate_limit:
+                        raise OrchestratorRateLimitedError(channel_id)
                     return None
                 data = await resp.json()
             # Shape guard inside the request ``try``: a 2xx response whose
@@ -146,6 +162,8 @@ class HttpChannelHistoryFetcher:
             # ``data.get`` and escape the "never raises across the seam"
             # contract the conversation-window caller depends on.
             messages = data.get("messages") if isinstance(data, dict) else None
+        except OrchestratorRateLimitedError:
+            raise
         except Exception as exc:
             logger.warning(
                 "channels: history fetch %s failed: %s",

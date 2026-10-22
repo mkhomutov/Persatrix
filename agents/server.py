@@ -27,6 +27,7 @@ from .observability.log_shipper import (
     queue_capacity_from_env,
     set_active_shipper,
 )
+from .orchestrator_session import new_orchestrator_session
 from .persona_runtime import _LLMPersonaAgent
 from .prefix_keepalive import start_prefix_keepalive
 from .server_persona import (
@@ -186,11 +187,15 @@ class AgentServer:
                     "Failed to init memory for task agent %s", agent_id,
                 )
 
-        # Deep-review D4: shared aiohttp session for self-registration and
-        # http_request tool (via builtin.http_session). RFC 0011 PR 4a-ii-β-1
-        # wires the REST channel publisher onto it (chat-reply path keeps
-        # using the in-process cascade until PR 4a-ii-β-2).
-        self._session = aiohttp.ClientSession()
+        # The hosted agent's ID, named on REST and wallet calls alike so both
+        # count against one rate-limit budget; with no agent hosted, neither
+        # sends one. v0.1 hosts a single agent per process.
+        hosted_agent_id = next(iter(self.agents), "")
+        # Deep-review D4: one shared aiohttp session for every REST call to
+        # the orchestrator, sending the hosted agent's ID so each agent gets
+        # its own rate-limit budget (ISSUE-0152). RFC 0011 PR 4a-ii-β-1
+        # wires the REST channel publisher onto it.
+        self._session = new_orchestrator_session(hosted_agent_id)
         self._dispatcher.set_channel_publisher(HTTPChannelPublisher(
             orchestrator_url=self.orchestrator_url, session=self._session,
         ))
@@ -211,17 +216,16 @@ class AgentServer:
         # is configured (configure_logging runs in main()) so the tail
         # processor's first record (typically "Agent server listening")
         # already has somewhere to enqueue.  The agent_id used for the
-        # batch-level field is the first registered agent (v0.1 hosts a
-        # single agent per process); a future multi-agent process would
-        # set per-entry agent_id on the structlog contextvars.
-        first_agent_id = next(iter(self.agents.keys()), "unknown")
+        # batch-level field is the hosted agent ("unknown" with none); a
+        # future multi-agent process would set per-entry agent_id on the
+        # structlog contextvars.
         # RFC 0023 — open one outbound channel to the orchestrator and
         # share it between the LogService log stream and the WalletService
         # lease RPCs (HTTP/2 multiplexes both stubs over one connection).
         self._orchestrator_channel = grpc.aio.insecure_channel(self.orchestrator_grpc)
         self._log_shipper = Shipper(
             self.orchestrator_grpc,
-            first_agent_id,
+            hosted_agent_id or "unknown",
             max_queue=queue_capacity_from_env(),
             channel=self._orchestrator_channel,
         )
@@ -237,7 +241,7 @@ class AgentServer:
         # (x-agent-id metadata) so the RFC 0009 rate limiter meters this
         # agent's own budget instead of the shared anonymous bucket.
         self._wallet_client = WalletClient.from_channel(
-            self._orchestrator_channel, agent_id=first_agent_id,
+            self._orchestrator_channel, agent_id=hosted_agent_id,
         )
         wire_wallet_client(self.agents, self._wallet_client)
 

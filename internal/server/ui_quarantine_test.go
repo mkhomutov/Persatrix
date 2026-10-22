@@ -19,21 +19,23 @@ import (
 // Without the bypass, the console's boot endpoints (/api/v1/ui/config,
 // /api/v1/ui/context) and static tree sit under /api/v1/ behind
 // RESTRateLimitMiddleware. The browser calls them anonymously (no X-Agent-ID),
-// so the PR #244 H-01 anonymous-deny — which fires whenever *any* agent is
-// quarantined — would 403 them and make the console unbootable precisely when
-// an operator most needs it to investigate or clear the quarantine.
+// so they would share the anonymous budget with every other caller that sends
+// no ID, and a flood of such calls would 429 the console precisely when an
+// operator most needs it. (Until ISSUE-0152's fix, a quarantine of any agent
+// also refused every anonymous call outright.)
 //
-// These tests pin the bypass: the console surface stays reachable during an
-// active quarantine, while genuine /api/v1/* agent endpoints remain denied (the
-// H-01 protection must not regress).
+// These tests pin the bypass: with the anonymous budget spent and a
+// quarantine open, the console surface stays reachable, while genuine
+// /api/v1/* agent endpoints stay behind the limiter and breaker.
 
 // uiTestServerWithBreaker builds a console-wired Server (WithUI) behind a
-// circuit breaker, mirroring testServerWithBreaker's post-construction
-// WithRateLimiter application.
+// circuit breaker and a limiter whose anonymous budget is already spent
+// (spendAnonymousBudget), so a console route that went behind the limiter
+// would get 429.
 func uiTestServerWithBreaker(t *testing.T, cb *security.CircuitBreaker, opts ...ServerOption) *Server {
 	t.Helper()
 	srv := uiTestServer(t, append([]ServerOption{WithUI(uiAssetFS())}, opts...)...)
-	WithRateLimiter(nil, cb)(srv)
+	spendAnonymousBudget(t, srv, cb)
 	return srv
 }
 
@@ -84,9 +86,9 @@ func TestUIStatic_AllowedDuringQuarantine(t *testing.T) {
 }
 
 // TestQuarantineStillBlocksAgentAPIWithConsole guards against over-correction:
-// wiring the console must not regress the H-01 anonymous-deny for genuine
-// /api/v1/* agent endpoints. With the same server and an active quarantine, an
-// anonymous agent-API call must still be denied.
+// wiring the console must not take genuine /api/v1/* agent endpoints out from
+// behind the breaker. With the same server and an active quarantine, the
+// quarantined agent's own agent-API call must still be refused.
 func TestQuarantineStillBlocksAgentAPIWithConsole(t *testing.T) {
 	cb := breakerWithThreshold(t)
 	srv := uiTestServerWithBreaker(t, cb)
@@ -94,8 +96,9 @@ func TestQuarantineStillBlocksAgentAPIWithConsole(t *testing.T) {
 	cb.RecordViolation(context.Background(), "agent-bad", security.ViolationCapability)
 	require.True(t, cb.IsQuarantined("agent-bad"))
 
-	rec := doRequest(srv.Handler(), http.MethodGet, "/api/v1/agents", nil)
+	rec := doRequestWithHeaders(srv.Handler(), http.MethodGet, "/api/v1/agents", nil,
+		map[string]string{security.AgentIDHeader: "agent-bad"})
 	assert.Equal(t, http.StatusForbidden, rec.Code,
-		"the console bypass must be scoped to /ui — agent API endpoints keep the H-01 deny")
-	assert.Contains(t, rec.Body.String(), "QUARANTINE_ACTIVE")
+		"the console bypass must be scoped to /ui — agent API endpoints keep the breaker")
+	assert.Contains(t, rec.Body.String(), `"QUARANTINED"`)
 }

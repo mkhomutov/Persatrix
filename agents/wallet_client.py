@@ -63,6 +63,12 @@ from .generated import wallet_pb2_grpc as wallet_grpc
 
 logger = logging.getLogger(__name__)
 
+# The metadata key the orchestrator's rate limiter reads the caller's agent
+# ID from (``AgentIDMetadataKey``). Defined here, in an MIT leaf, so the
+# agents' REST session can share it without this module importing
+# orchestrator-coupled code (RFC 0045).
+AGENT_ID_METADATA_KEY = "x-agent-id"
+
 __all__ = ["BudgetExceededError", "Lease", "WalletClient"]
 
 # gRPC statuses that mean "the wallet could not be reached / could not
@@ -184,7 +190,7 @@ class WalletClient:
         # starves late callers into the placeholder summary. Empty id →
         # no metadata (the pre-fix wire shape).
         self._metadata: tuple[tuple[str, str], ...] | None = (
-            (("x-agent-id", agent_id),) if agent_id else None
+            ((AGENT_ID_METADATA_KEY, agent_id),) if agent_id else None
         )
         self._acquire_max_attempts = max(1, acquire_max_attempts)
         self._settle_max_attempts = max(1, settle_max_attempts)

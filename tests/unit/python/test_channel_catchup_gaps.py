@@ -111,3 +111,61 @@ class TestARaisingRowGapsOneSpeakerNotTheRoom:
         # loop reads — so this pins the wire-side fallback instead.
         assert outcome.speaker_gaps == {("group:planning", "alice")}
         assert outcome.completed == {"group:planning"}
+
+
+class TestAPassStopsAtTheFirstRateLimit:
+    """ISSUE-0187 step 1.
+
+    The agents' REST calls carry the hosted agent's ID, so a call the
+    orchestrator refuses for going over that agent's budget counts toward
+    its quarantine, and five in ten minutes quarantine it. A pass that
+    carried on past a 429 would collect one refusal per remaining channel;
+    it stops instead, so a pass adds at most one.
+    """
+
+    async def test_one_refusal_then_the_pass_stops(self, orchestrator):
+        base_url, state = orchestrator
+        member = [{"id": "ember-owl", "respond": "when_mentioned",
+                   "joined_at": "2026-05-01T00:00:00+00:00"}]
+        for i in range(10):
+            cid = f"group:room-{i}"
+            state["channels"].append(_channel(channel_id=cid))
+            state["members"][cid] = member
+            state["history"][cid] = [
+                _msg(msg_id=f"m-{i}", channel_id=cid,
+                     sender_id="alice", content="hello"),
+            ]
+        # The list, then room-0's membership and history, then room-1's
+        # membership; room-1's history is the first call refused.
+        state["budget"] = 4
+
+        agent = _SpyAgent("ember-owl")
+        outcome = ReplayPassOutcome()
+        async with aiohttp.ClientSession() as session:
+            await replay_channel_history(
+                agent=agent, orchestrator_url=base_url,
+                session=session, outcome=outcome,
+            )
+
+        assert state["limited"] == 1, "the pass stops at the first 429"
+        assert len(state["log"]) == 5
+        assert outcome.completed == {"group:room-0"}, (
+            "room-1's window never arrived, so it is not complete"
+        )
+        assert [e.channel_id for e in agent.events] == ["group:room-0"]
+
+    async def test_a_refused_membership_read_stops_the_pass_too(
+        self, orchestrator,
+    ):
+        base_url, state = orchestrator
+        for i in range(10):
+            state["channels"].append(_channel(channel_id=f"group:room-{i}"))
+        state["budget"] = 1  # the list only
+
+        async with aiohttp.ClientSession() as session:
+            await replay_channel_history(
+                agent=_SpyAgent("ember-owl"), orchestrator_url=base_url,
+                session=session,
+            )
+
+        assert state["limited"] == 1

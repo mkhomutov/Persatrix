@@ -132,3 +132,16 @@ Landed with the v0.3.11 release-prep MT-execution PR (TDD,
 > boards v0.4.0, and by its plan-opening default its step 3 agent half rides
 > with its early PR. Each agent then gets its own REST budget, which closes
 > the REST half of the residuals above.
+
+> 2026-10-21 — **the REST half of the residuals is fixed** by
+> [#1050](https://github.com/mkhomutov/Persatrix/pull/1050) (ISSUE-0152's
+> step 3, agent half): the agents' shared REST session now sends the hosted
+> agent's `X-Agent-ID`, so registration, channel reads and publishes,
+> convene callbacks and recall each count against that agent's own budget,
+> as its wallet calls do. The log stream needs nothing: the rate-limit hook
+> covers only one-request, one-reply gRPC calls. Still open: the close-summary
+> path does not wait out `retry-after-seconds`. New with the fix, and filed
+> as [ISSUE-0187](ISSUE-0187-agent-rest-bursts-count-toward-its-own-quarantine.md):
+> an agent's REST calls now share its wallet calls' budget, so a burst of
+> them can refuse its leases, this issue's failure one agent at a time; and
+> its refused REST calls count toward its own quarantine.
