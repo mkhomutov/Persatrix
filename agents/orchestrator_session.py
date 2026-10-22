@@ -16,10 +16,12 @@ from __future__ import annotations
 
 import aiohttp
 
-AGENT_ID_HEADER = "X-Agent-ID"
-# The same name as gRPC metadata, which takes lowercase keys
-# (``AgentIDMetadataKey``); the wallet client sends it.
-AGENT_ID_METADATA_KEY = AGENT_ID_HEADER.lower()
+from .wallet_client import AGENT_ID_METADATA_KEY
+
+# One name for both transports: HTTP header names ignore case, so the REST
+# session sends the wallet's gRPC metadata key as it is, and the
+# orchestrator reads it as X-Agent-ID.
+AGENT_ID_HEADER = AGENT_ID_METADATA_KEY
 
 
 def new_orchestrator_session(agent_id: str | None) -> aiohttp.ClientSession:

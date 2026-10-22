@@ -60,9 +60,14 @@ import grpc.aio
 
 from .generated import wallet_pb2 as walletpb
 from .generated import wallet_pb2_grpc as wallet_grpc
-from .orchestrator_session import AGENT_ID_METADATA_KEY
 
 logger = logging.getLogger(__name__)
+
+# The metadata key the orchestrator's rate limiter reads the caller's agent
+# ID from (``AgentIDMetadataKey``). Defined here, in an MIT leaf, so the
+# agents' REST session can share it without this module importing
+# orchestrator-coupled code (RFC 0045).
+AGENT_ID_METADATA_KEY = "x-agent-id"
 
 __all__ = ["BudgetExceededError", "Lease", "WalletClient"]
 
