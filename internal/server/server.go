@@ -395,7 +395,7 @@ func (s *Server) Handler() http.Handler {
 	// shadowed here but kept so direct-s.mux test/integration code still works.
 	var apiH http.Handler = s.mux
 	if s.rateLimiter != nil || s.circuitBreaker != nil {
-		apiH = security.RESTRateLimitMiddleware(s.rateLimiter, s.circuitBreaker)(apiH)
+		apiH = security.RESTRateLimitMiddleware(s.rateLimiter, s.circuitBreaker, security.WithCallerKey(sessionRateLimitKey))(apiH)
 	}
 	root := http.NewServeMux()
 	root.HandleFunc("GET /healthz", s.handleHealthz)

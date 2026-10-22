@@ -67,7 +67,11 @@ type CircuitBreakerConfig struct {
 type CircuitBreaker struct {
 	cfg CircuitBreakerConfig
 
-	mu          sync.Mutex
+	// mu is a read-write lock because IsQuarantined runs on every call
+	// that sends an agent ID, the agents' own REST calls among them since
+	// ISSUE-0152: concurrent checks share it, and only RecordViolation and
+	// Unquarantine take it exclusively.
+	mu          sync.RWMutex
 	violations  map[string]map[ViolationType][]time.Time
 	quarantined map[string]quarantineEntry
 
@@ -207,8 +211,8 @@ func (cb *CircuitBreaker) RecordViolation(ctx context.Context, agentID string, v
 
 // IsQuarantined reports whether agentID is currently quarantined.
 func (cb *CircuitBreaker) IsQuarantined(agentID string) bool {
-	cb.mu.Lock()
-	defer cb.mu.Unlock()
+	cb.mu.RLock()
+	defer cb.mu.RUnlock()
 	_, ok := cb.quarantined[agentID]
 	return ok
 }
@@ -248,8 +252,8 @@ func (cb *CircuitBreaker) Unquarantine(ctx context.Context, agentID, actor strin
 // QuarantinedAgents returns the current set of quarantined IDs. Useful
 // for the unquarantine REST handler and debugging.
 func (cb *CircuitBreaker) QuarantinedAgents() []string {
-	cb.mu.Lock()
-	defer cb.mu.Unlock()
+	cb.mu.RLock()
+	defer cb.mu.RUnlock()
 	ids := make([]string, 0, len(cb.quarantined))
 	for id := range cb.quarantined {
 		ids = append(ids, id)

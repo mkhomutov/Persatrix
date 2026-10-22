@@ -24,10 +24,12 @@
 // invent one to get a fresh budget, or send a real agent's ID to get that
 // agent quarantined (ISSUE-0152). Callers that send no agent ID share one
 // bucket: today the CLI and any other client that sends none, since the
-// agents send theirs on REST and wallet calls. The stream that carries
-// agents' logs to the orchestrator skips both checks. And a quarantine
-// does not stop the orchestrator sending the agent tasks, though RFC 0009
-// says it should.
+// agents send theirs on REST and wallet calls; under `auth.mode: enabled`
+// a signed-in caller gets a budget of its own ([WithCallerKey]). An
+// agent's own REST bursts count toward its quarantine (ISSUE-0187). The
+// stream that carries agents' logs to the orchestrator skips both checks.
+// And a quarantine does not stop the orchestrator sending the agent tasks,
+// though RFC 0009 says it should.
 //
 // Built but not called by the orchestrator yet:
 //

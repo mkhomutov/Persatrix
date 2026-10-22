@@ -100,7 +100,11 @@ func validAgentID(id string) bool {
 // The middleware is intentionally additive: `nil` limiter or breaker
 // is a passthrough. Callers wiring this from cmd/orchestrator must
 // construct both in main.go before mounting.
-func RESTRateLimitMiddleware(limiter *RateLimiter, breaker *CircuitBreaker) func(http.Handler) http.Handler {
+func RESTRateLimitMiddleware(limiter *RateLimiter, breaker *CircuitBreaker, opts ...RESTOption) func(http.Handler) http.Handler {
+	var o restOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
 	return func(next http.Handler) http.Handler {
 		if limiter == nil && breaker == nil {
 			return next
@@ -119,7 +123,13 @@ func RESTRateLimitMiddleware(limiter *RateLimiter, breaker *CircuitBreaker) func
 				writeJSONError(w, http.StatusForbidden, "QUARANTINED", "agent is quarantined")
 				return
 			}
-			if limiter != nil && !limiter.Allow(r.Context(), agentID) {
+			key := agentID
+			if key == "" && o.callerKey != nil {
+				key = o.callerKey(r)
+			}
+			if limiter != nil && !limiter.Allow(r.Context(), key) {
+				// Only a self-reported ID feeds the breaker: a caller keyed
+				// by WithCallerKey is never quarantined.
 				if breaker != nil && agentID != "" {
 					breaker.RecordViolation(r.Context(), agentID, ViolationRateLimit)
 				}
@@ -130,6 +140,25 @@ func RESTRateLimitMiddleware(limiter *RateLimiter, breaker *CircuitBreaker) func
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// RESTOption configures [RESTRateLimitMiddleware].
+type RESTOption func(*restOptions)
+
+type restOptions struct {
+	callerKey func(*http.Request) string
+}
+
+// WithCallerKey gives a caller that sends no X-Agent-ID but that the
+// server has verified, such as a signed-in session, a budget of its own:
+// key returns that budget's name, or "" to leave the call in the shared
+// anonymous budget. Without it an outsider who keeps the anonymous budget
+// spent, which costs nothing because its refusals quarantine nothing,
+// also refuses every signed-in operator (ISSUE-0152). The name must not
+// match the agent-ID pattern, so it cannot collide with an X-Agent-ID.
+// Such a caller is rate-limited but never quarantined.
+func WithCallerKey(key func(*http.Request) string) RESTOption {
+	return func(o *restOptions) { o.callerKey = key }
 }
 
 // GRPCRateLimitInterceptor mirrors [RESTRateLimitMiddleware] for the

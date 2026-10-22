@@ -60,6 +60,7 @@ import grpc.aio
 
 from .generated import wallet_pb2 as walletpb
 from .generated import wallet_pb2_grpc as wallet_grpc
+from .orchestrator_session import AGENT_ID_METADATA_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -184,7 +185,7 @@ class WalletClient:
         # starves late callers into the placeholder summary. Empty id →
         # no metadata (the pre-fix wire shape).
         self._metadata: tuple[tuple[str, str], ...] | None = (
-            (("x-agent-id", agent_id),) if agent_id else None
+            ((AGENT_ID_METADATA_KEY, agent_id),) if agent_id else None
         )
         self._acquire_max_attempts = max(1, acquire_max_attempts)
         self._settle_max_attempts = max(1, settle_max_attempts)

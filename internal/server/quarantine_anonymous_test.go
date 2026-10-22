@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"testing"
 	"time"
@@ -166,4 +167,48 @@ func TestInventedIDQuarantineSparesCallersWithNoID(t *testing.T) {
 			assert.Equal(t, []any{m.wantActor}, actors)
 		})
 	}
+}
+
+// TestSignedInCallerHasItsOwnBudget: under `enabled`, a signed-in caller
+// that sends no X-Agent-ID is counted under its session, not in the
+// anonymous budget, which an outsider can keep spent for free because
+// refusals of callers with no ID never escalate. So the operator's release
+// still answers during such a flood, and a signed-in caller over its own
+// budget is refused but never quarantined: a session is not a
+// self-reported ID.
+func TestSignedInCallerHasItsOwnBudget(t *testing.T) {
+	harness := newEnforcedServer(t, nil) // `enabled`
+	rl, err := security.NewRateLimiter(security.RateLimitConfig{
+		CallsPerWindow: 2,
+		WindowSeconds:  60,
+		Enabled:        true,
+		Logger:         zap.NewNop(),
+	})
+	require.NoError(t, err)
+	_, cb := productionShapedLimiter(t, &recordingAuditor{})
+	WithRateLimiter(rl, cb)(harness.srv)
+	h := harness.srv.Handler()
+
+	// An outsider spends the anonymous budget on a route open to callers
+	// with no account.
+	for i := 0; i < 2; i++ {
+		request(h, http.MethodGet, "/api/v1/channels", "")
+	}
+	require.Equal(t, http.StatusTooManyRequests, request(h, http.MethodGet, "/api/v1/channels", "").Code,
+		"precondition: the anonymous budget is spent")
+	for i := 0; i < 5; i++ {
+		cb.RecordViolation(context.Background(), inventedAgentID, security.ViolationRateLimit)
+	}
+	require.True(t, cb.IsQuarantined(inventedAgentID))
+
+	op := bearerFor(t, h, "alice")
+	rec := request(h, http.MethodPost, "/api/v1/agents/"+inventedAgentID+"/unquarantine", op)
+	assert.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+
+	for i := 0; i < 8; i++ {
+		request(h, http.MethodGet, "/api/v1/channels", op)
+	}
+	assert.Equal(t, http.StatusTooManyRequests, request(h, http.MethodGet, "/api/v1/channels", op).Code,
+		"over its own budget a signed-in caller is refused like anyone")
+	assert.Empty(t, cb.QuarantinedAgents(), "and nothing is quarantined")
 }

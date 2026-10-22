@@ -12,7 +12,8 @@ completeness bookkeeping; the history rows themselves already come from
 
 Every function here is best-effort by contract: ``None`` means "failed,
 already logged at WARN", and the caller skips that channel rather than
-aborting the pass.
+aborting the pass. The one exception is a 429 on a membership read, which
+raises :class:`OrchestratorRateLimitedError` so the pass stops (ISSUE-0187).
 """
 
 from __future__ import annotations
@@ -21,6 +22,8 @@ import logging
 from urllib.parse import quote
 
 import aiohttp
+
+from .channel_history_fetcher import OrchestratorRateLimitedError
 
 __all__ = [
     "fetch_channel_list",
@@ -80,7 +83,10 @@ async def fetch_channel_membership(
     channel_id: str,
     timeout: aiohttp.ClientTimeout,
 ) -> list[dict] | None:
-    """``GET /api/v1/channels/{id}`` → member list, or ``None`` on error."""
+    """``GET /api/v1/channels/{id}`` → member list, or ``None`` on error.
+
+    Raises :class:`OrchestratorRateLimitedError` on a 429.
+    """
     url = f"{base}/api/v1/channels/{quote(channel_id, safe='')}"
     try:
         async with session.get(url, timeout=timeout) as resp:
@@ -90,8 +96,12 @@ async def fetch_channel_membership(
                     "channels: catch-up get-channel %s returned HTTP %d: %s",
                     channel_id, resp.status, body[:256],
                 )
+                if resp.status == 429:
+                    raise OrchestratorRateLimitedError(channel_id)
                 return None
             data = await resp.json()
+    except OrchestratorRateLimitedError:
+        raise
     except Exception as exc:
         logger.warning(
             "channels: catch-up get-channel %s failed: %s",

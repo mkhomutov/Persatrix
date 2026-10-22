@@ -17,14 +17,17 @@ from __future__ import annotations
 import aiohttp
 
 AGENT_ID_HEADER = "X-Agent-ID"
+# The same name as gRPC metadata, which takes lowercase keys
+# (``AgentIDMetadataKey``); the wallet client sends it.
+AGENT_ID_METADATA_KEY = AGENT_ID_HEADER.lower()
 
 
 def new_orchestrator_session(agent_id: str | None) -> aiohttp.ClientSession:
     """Open the shared session, sending ``agent_id`` on every call.
 
     A process hosts one agent today, so the server passes that agent's ID, as
-    it does for the wallet. With no agent hosted it passes ``None`` and the
-    session sends no header.
+    it does for the wallet. With no agent hosted it passes an empty ID and
+    the session sends no header.
     """
     headers = {AGENT_ID_HEADER: agent_id} if agent_id else None
     return aiohttp.ClientSession(headers=headers)
