@@ -62,6 +62,7 @@ dependencies.
 | `make eval-record` / `eval-record-offline TARGET=` / `eval-drift` | Record a golden live / against the mock; report live drift (never gates) | on demand |
 | `python tests/perf/personal_tier_latency.py [--capture-baseline PATH]` | Recall latency vs baseline | `Python` (informational) |
 | `scripts/perf/wallet_p99.py` | Wallet acquire+settle p99 harness (RFC 0023) | on demand |
+| `TestSocietyStoreBenchmark` (`internal/channels/society_bench*_test.go`) | The channels store and society tables under a society's load; skipped unless `-society-bench` is passed ([storage-architecture-benchmark.md](../storage-architecture-benchmark.md)) | on demand; when a society table is added |
 
 ## Lint and static checks
 

@@ -624,6 +624,31 @@ amendment's two items; Phases 4–5 for v0.5.0); this plan's statuses closed.
 > 2026-10-20 — Plan written for row R1, proposed with RFC 0012's move to
 > Accepted. The first implementation PR moves it to 🚧 Implementing.
 
+> 2026-10-21 — Row R2's plans answer the table above
+> ([RFC 0029](0029-phase3-pr-plan.md), [RFC 0021](0021-phase2-pr-plan.md),
+> [RFC 0009](0009-phases-3-4-pr-plan.md)); where they settle it differently,
+> the PR named adapts before it opens:
+> - PR 1: membership is keyed by organization and agent, so the
+>   one-organization rule (OQ 4) stays in validation; an unscoped `manages`
+>   edge stores an empty label, and the schema reserves `general` so no
+>   matrix dimension takes D-9's label.
+> - PR 4: whichever of it and RFC 0009 PR 9 merges second puts the
+>   organization read on A4's agent-route helper.
+> - PR 9: A2's `update_directive` stores the issuer authority OQ 2 works out
+>   again.
+> - PR 10: `commitments` is the injection gate's fifth tier (A2 PR 4), so the
+>   directives tier is the sixth, and A2 PR 4 splits `memory_context.py`
+>   first.
+> - PR 10a: tie rows are A4's `tie` kind, opened as one group in one call;
+>   approving one withdraws the pending rows and is refused once a sibling
+>   is approved; the persona confirms each decision event against the queue
+>   before applying it.
+> - PR 11: a graph change is A4's `graph_change` kind, its actor the
+>   proposing operator; the approve hook re-checks and writes through the
+>   transaction's own handle and makes no channel-store or network call.
+> - PR 12: A4 binds every publish to its caller, a signed-in account
+>   included, so the forged-id leg may use either.
+
 ## Related documentation
 
 - [RFC 0028 PR plan](0028-pr-plan.md) — the checkpoint, records and tokens C3 uses

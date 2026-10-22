@@ -641,6 +641,24 @@ marked ✂️ or *taken, not cut*.
 > Accepted, and Phase 2a step 2 corrected as open question 9 recorded. The
 > first implementation PR moves it to 🚧 Implementing.
 
+> 2026-10-21 — Row R2's plans answer the table above
+> ([RFC 0029](0029-phase3-pr-plan.md), [RFC 0009](0009-phases-3-4-pr-plan.md));
+> where they settle it differently, the PR named adapts before it opens:
+> - PR 10: RFC 0009 PR 3's argument check runs before the pre-tool seat, so
+>   a held call's hash covers checked arguments; PR 10 tests that order.
+> - PR 11: `hitl.enabled` is in `config/security.yaml`, default `false`.
+> - PR 12: inside an approve transaction the key is read through the
+>   transaction's own handle (RFC 0029 plan S-6).
+> - PR 13: A4's queue writes no audit event of its own, so the
+>   `decision.hitl_*` events are the one family on its transitions, and they
+>   need a `withdrawn` event too; they carry ids, kind and class, never the
+>   held text. A4's expiry also ends approved rows never spent. Only rows of
+>   A4's `action` kind are spent with a token.
+> - PR 14: a held publish's hash covers its class and target channel only,
+>   as E-11 matches it, so A1's unique index keeps one open hold per target;
+>   the persona confirms each decision event against the queue before
+>   releasing.
+
 ## Related documentation
 
 - [RFC 0012 PR plan](0012-pr-plan.md) — the directive input and the graph-change class that use this engine

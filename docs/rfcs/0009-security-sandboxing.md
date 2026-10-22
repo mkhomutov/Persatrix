@@ -3,7 +3,7 @@ id: RFC-0009
 title: Agent Identity, Security & Sandboxing
 summary: Agent identity, deny-by-default permission model, rate limiting, input sanitization, and sandboxing — Phases 1–2 in v0.3.0, Phases 3–4 deferred to v0.4.0.
 type: architecture
-status: partially_implemented
+status: implementing
 author: Maksim Khomutov
 created: 2026-04-15
 target: v0.3.0 (Phases 1–2) + v0.4.0 (Phases 3–4)
@@ -15,7 +15,7 @@ depends_on:
 # RFC 0009 — Agent Identity, Security & Sandboxing
 
 **Type**: architecture  
-**Status**: ⚠️ Partially Implemented (Phases 1–2 — v0.3.0; Phases 3–4 deferred to v0.4.0)  
+**Status**: 🚧 Implementing (Phases 1–2 shipped in v0.3.0; Phases 3–4 in v0.4.0 — [PR plan](0009-phases-3-4-pr-plan.md))  
 **Author**: Maksim Khomutov  
 **Date**: 2026-04-15  
 **Target**: v0.3.0 (Phases 1–2) + v0.4.0 (Phases 3–4)  
@@ -544,6 +544,45 @@ Deliverables:
 
 Dependencies: Phases 1 and 3.
 
+#### Amendment 2026-10-21 — v0.4.0's Phases 3–4
+
+Made with the [Phases 3–4 PR plan](0009-phases-3-4-pr-plan.md), as the
+[v0.4.0 plan](../v0.4.0-plan.md#scope-locks)'s agent-identity lock asks. It
+records open questions 9 and 10 as locked and changes these deliverables:
+
+- **Phase 4 needs Phase 3's argument check**, so Phase 3 is not cut under
+  ruling (n)'s clause. RFC 0028's hold is keyed by a hash over a call's
+  argument values; unchecked, `"30"` and `30` are two calls.
+- **Tokens are checked on every REST route an agent calls and on the
+  wallet's gRPC calls** (question 9), in an `X-Agent-Token` header, not
+  `Authorization`. Registration takes a fleet enrollment secret and returns
+  the token (question 1). Revocation is per process (question 4). A token
+  names its agent and carries no capability claims (deliverable 1): nothing
+  in v0.4.0 reads them.
+- **Every publish is bound to its caller**: the token's agent, or a
+  signed-in account's own participant.
+- **Pending approvals are rows in the society tables** (question 10), on
+  `/api/v1/approvals` and each agent's `/api/v1/agents/{id}/holds`, never
+  under `/workflows`. RFC 0028's hold opens them (§F's dated note).
+- **`hitl_enabled` is `hitl.enabled` in `config/security.yaml`**, one switch
+  per deployment, default `false`.
+- **Phase 3 checks arguments against the schema `@tool` already builds**, with
+  `jsonschema`, not Pydantic models, and refuses only what fails today. Its
+  limits default to today's behaviour; §D's numbers become the guide's
+  recommendation. §D's 60 tool calls a minute is not built: tool calls never
+  reach the orchestrator.
+- **Python audit events stay structured log lines.** `tool.arg_invalid` and
+  `tool.resource_limited` reach the orchestrator's log stream, not its
+  checksummed chain; there is no Python-to-Go audit call.
+
+| What | Before | After (v0.4.0) |
+|------|--------|----------------|
+| Token checks | Every inbound gRPC call | Every agent REST route and the wallet's gRPC calls |
+| Pending approvals | `internal/state/state.go`, in memory | Society tables in `data/channels.db`, through `internal/approvals/` |
+| The pause | Agent runtime, before an irreversible tool | RFC 0028 Phase 2a's hold; Phase 4 builds the queue only |
+| Argument schemas | Pydantic models per tool | The decorator's JSON schema, narrowed per parameter |
+| Limit defaults | 10 s of CPU, 64 KB of output | Today's caps; §D's numbers recommended |
+
 ---
 
 ## Files Touched (Estimated)
@@ -601,9 +640,9 @@ Dependencies: Phases 1 and 3.
 
 <!-- A list break keeps each open question's own number when rendered. -->
 
-9. **Which agent calls carry the token (2026-10-18).** Phase 4 validates tokens on every inbound gRPC call, the wallet's lease calls among them, but agents make their other calls to the orchestrator over REST: registration and deregistration, the channel list and channel lookups, history, publish, convene, the agent directory (`GET /api/v1/agents`) and persona recall. [v0.4.0's shape](../v0.4.x-sequencing.md#amendment-2026-10-18--v040s-shape-its-prerequisites-its-cuts-and-the-end-of-the-v03x-line) (ruling n) checks the tokens on every one of them. Its agent-identity scope lock rules only the route: check them on REST as the calls stand, or first move publish, history and registration to gRPC with RFC 0040 Phases 2–3 and still check the calls left on REST, REST publish included. **Plan-opening default:** the REST route, with a token-validation middleware on each of those routes, added to this phase when its PR plan opens. RFC 0040 Phases 2–3 then stay unslotted. Registration cannot present a token, because it is the call that issues one. It presents a **fleet enrollment secret** instead: a shared secret the operator sets on the orchestrator and gives the fleet, the way `SECURITY_UNQUARANTINE_TOKEN` is set for unquarantine. Under `auth.mode: enabled` a registration without it is refused, so an anonymous peer cannot register and collect a token. The token comes back in the REST registration response (item 1). The signing key changes on every restart, so after an orchestrator restart the fleet's re-registration ([ISSUE-0125](../issues/ISSUE-0125-agents-never-reregister-after-orchestrator-restart.md)) presents the secret again and gets a fresh token. A call refused for a stale token re-registers the same way. What a token admits on each route is recorded as the defaults in [ISSUE-0117](../issues/ISSUE-0117-agent-ingress-close-knob.md) and [ISSUE-0140](../issues/ISSUE-0140-agent-fleet-401-on-roster-fetch-under-auth.md).
+9. **Which agent calls carry the token (2026-10-18).** Phase 4 validates tokens on every inbound gRPC call, the wallet's lease calls among them, but agents make their other calls to the orchestrator over REST: registration and deregistration, the channel list and channel lookups, history, publish, convene, the agent directory (`GET /api/v1/agents`) and persona recall. [v0.4.0's shape](../v0.4.x-sequencing.md#amendment-2026-10-18--v040s-shape-its-prerequisites-its-cuts-and-the-end-of-the-v03x-line) (ruling n) checks the tokens on every one of them. Its agent-identity scope lock rules only the route: check them on REST as the calls stand, or first move publish, history and registration to gRPC with RFC 0040 Phases 2–3 and still check the calls left on REST, REST publish included. **Plan-opening default:** the REST route, with a token-validation middleware on each of those routes, added to this phase when its PR plan opens. RFC 0040 Phases 2–3 then stay unslotted. Registration cannot present a token, because it is the call that issues one. It presents a **fleet enrollment secret** instead: a shared secret the operator sets on the orchestrator and gives the fleet, the way `SECURITY_UNQUARANTINE_TOKEN` is set for unquarantine. Under `auth.mode: enabled` a registration without it is refused, so an anonymous peer cannot register and collect a token. The token comes back in the REST registration response (item 1). The signing key changes on every restart, so after an orchestrator restart the fleet's re-registration ([ISSUE-0125](../issues/ISSUE-0125-agents-never-reregister-after-orchestrator-restart.md)) presents the secret again and gets a fresh token. A call refused for a stale token re-registers the same way. What a token admits on each route is recorded as the defaults in [ISSUE-0117](../issues/ISSUE-0117-agent-ingress-close-knob.md) and [ISSUE-0140](../issues/ISSUE-0140-agent-fleet-401-on-roster-fetch-under-auth.md). *(2026-10-21: locked at the v0.4.0 plan opening; the [amendment under Phase 4](#amendment-2026-10-21--v040s-phases-34) records it.)*
 
-10. **Where pending approvals are kept (2026-10-18).** §F holds a pending action in a `PendingApproval` entry in the state store, and Phase 4 lists `internal/state/state.go` for it. That store keeps runs in memory only, so a restart would drop every pending approval. **Plan-opening default:** pending approvals are rows in the society tables in `data/channels.db`, the society backend's default form ([RFC 0029 Open Question 2](0029-personal-society-storage-split.md#open-questions)). RFC 0028's approval-signing key and used-nonce record are kept beside them ([RFC 0028 Open Question 9](0028-agent-decision-policy-engine.md#open-questions)). Deliverable 4 and the Files Touched row change when this phase's PR plan opens.
+10. **Where pending approvals are kept (2026-10-18).** §F holds a pending action in a `PendingApproval` entry in the state store, and Phase 4 lists `internal/state/state.go` for it. That store keeps runs in memory only, so a restart would drop every pending approval. **Plan-opening default:** pending approvals are rows in the society tables in `data/channels.db`, the society backend's default form ([RFC 0029 Open Question 2](0029-personal-society-storage-split.md#open-questions)). RFC 0028's approval-signing key and used-nonce record are kept beside them ([RFC 0028 Open Question 9](0028-agent-decision-policy-engine.md#open-questions)). Deliverable 4 and the Files Touched row change when this phase's PR plan opens. *(2026-10-21: locked; the [amendment under Phase 4](#amendment-2026-10-21--v040s-phases-34) records it.)*
 
 ### New questions surfaced by current realities (2026-04-29)
 
