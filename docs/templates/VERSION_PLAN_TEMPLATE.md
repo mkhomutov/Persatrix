@@ -11,7 +11,7 @@
 **Goal**: <Two to four sentences. What holds today, what does not, and what
 this release makes true. Name the issues and RFC phases by ID; link each.>
 
-Scope was ratified by `docs/v<line>.x-sequencing.md` (the current line's sequencing doc) §Amendment YYYY-MM-DD,
+Scope was ratified by `docs/v<line>.x-sequencing.md` (the current line's sequencing doc, or its dated companion) §Amendment YYYY-MM-DD,
 whose next-steps item <n> this executes.
 
 > Guidance: this file is the release's one document — plan, scope locks and
@@ -135,5 +135,5 @@ takes the tag. The next plan's first section checks both.
 ## Related documentation
 
 - `docs/methodology/release-cycle.md` — the cycle this plan follows
-- `docs/v<line>.x-sequencing.md` (the current line's sequencing doc) §Amendment YYYY-MM-DD — the ratifying decision
+- `docs/v<line>.x-sequencing.md` (the current line's sequencing doc, or its dated companion) §Amendment YYYY-MM-DD — the ratifying decision
 - <RFCs, issues, `docs/vX.Y.(Z-1)-plan.md`>

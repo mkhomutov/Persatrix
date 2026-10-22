@@ -2,6 +2,9 @@
 
 > **Status**: 📋 Proposed — an opinion synthesis. It ratifies nothing; acting
 > on §6–§8 goes through a [sequencing amendment](methodology/decisions.md#sequencing-amendments).
+> **Read under the goal**: since the [Amendment 2026-10-21](v0.4.x-sequencing-2026-10-21.md#amendment-2026-10-21--the-goal-replaces-the-product-reading-and-the-licence-default-applies),
+> the project's goal decides, not §4's product reading. Until this document
+> is rewritten around the goal, that amendment holds wherever the two disagree.
 > **Last reviewed**: 2026-10-20 at `04bc24d0` — the first review, held at the
 > [v0.4.0 plan](v0.4.0-plan.md) opening.
 > **Next review**: the first after EXP-001's result is published, or
@@ -211,7 +214,10 @@ This is a standing document. It is reviewed:
 A review re-runs the evidence companion's commands, updates the verification
 column in the four-reviews companion's
 [§1](project-strategy-four-reviews.md#1-what-the-four-reviews-established),
-records any decision rule that fired, and appends a row below. A review that
+records any decision rule that fired, lists every addition boarded by
+[ruling (u)](v0.4.x-sequencing-2026-10-21.md#rulings), beside its experiment's result once published,
+takes up what an amendment passed to it (ruling (t) passes three items),
+and appends a row below. A review that
 changes a decision is ratified by the sequencing amendment that acts on it,
 not by this file.
 
@@ -220,7 +226,7 @@ not by this file.
 | 2026-09-11 | `cbeea7bc` | Written from PRs #895–#898, all closed unmerged. | None; the experiment has not run. |
 | 2026-09-12 | `604fab72` | The maintainer chose the product reading. [Amendment 2026-09-12](v0.3.x-sequencing.md#amendment-2026-09-12--close-v0316-small-then-measure-before-any-train-opens) ratifies §6 items 1–4, §7 items 1–4 as rulings, and §8's RFC 0046 row; K1 rides v0.3.16 as a cuttable fold-in. | None; the experiment has not run. |
 | 2026-10-18 | `c6ef01d5` | The maintainer named the project's goal: a society of AI agents that pursues long, hard goals. [Amendment 2026-10-18](v0.3.x-sequencing.md#amendment-2026-10-18--a-society-that-pursues-long-goals-exp-001-measures-v040-opens) ratifies it, turns EXP-001 from the gate into a measurement and opens v0.4.0 as already defined. By the route EXP-001's pre-registration §5 sets, this review also changes two things the pre-registration's part 2 says: what a fired rule decides, alike for all four rules, and that the first review after the result receives it. Only the outside-use figures were measured again. | None; the scored run has not started. |
-| 2026-10-20 | `04bc24d0` | **The first review**, held at the [v0.4.0 plan](v0.4.0-plan.md) opening (ruling (r) of [v0.4.0's shape](v0.4.x-sequencing.md#rulings)). The evidence was re-run and the four reviews' findings re-verified: F5 half holds, since the file cap became a warning (ruling (e)) but files still cluster just under 500, and the rest stand. Two rulings and one default, for the sequencing amendment that acts on this review to ratify. The maintainer's goal replaces the product reading (ruling (g)), and the strategy is rewritten around it in a later PR. §4's licence default applies, since no commercial conversation is in progress, so everything outside the reserved seams moves to Apache-2.0. §4's other default, sent with them: the workflow engine is frozen, since EXP-001 does not use it, and leaves the README when ruling (j) next allows a rewrite. Until that amendment, the External evidence rule and the README rule keep binding. No governance-core extraction is ordered, so RFC 0046 stays where ruling (c) left it (§8). The trust score (§8) waits for EXP-001's result. §6 items 1, 2 and 4 are done; item 3's harness is built and its scored run not started; items 5–7 have not started. | None; the scored run has not started. |
+| 2026-10-20 | `04bc24d0` | **The first review**, held at the [v0.4.0 plan](v0.4.0-plan.md) opening (ruling (r) of [v0.4.0's shape](v0.4.x-sequencing.md#rulings)). The evidence was re-run and the four reviews' findings re-verified: F5 half holds, since the file cap became a warning (ruling (e)) but files still cluster just under 500, and the rest stand. Two rulings and one default, for the [sequencing Amendment 2026-10-21](v0.4.x-sequencing-2026-10-21.md#amendment-2026-10-21--the-goal-replaces-the-product-reading-and-the-licence-default-applies) to ratify. The maintainer's goal replaces the product reading (ruling (g)), and the strategy is rewritten around it in a later PR. §4's licence default applies, since no commercial conversation is in progress, so everything outside the reserved seams moves to Apache-2.0. §4's other default, sent with them: the workflow engine is frozen, since EXP-001 does not use it, and leaves the README when ruling (j) next allows a rewrite. Until that amendment, the External evidence rule and the README rule keep binding. No governance-core extraction is ordered, so RFC 0046 stays where ruling (c) left it (§8). The trust score (§8) waits for EXP-001's result. §6 items 1, 2 and 4 are done; item 3's harness is built and its scored run not started; items 5–7 have not started. | None; the scored run has not started. |
 
 ## Related documentation
 

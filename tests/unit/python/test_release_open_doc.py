@@ -85,13 +85,15 @@ def test_fill_handles_the_branch_prefix_next_patch_and_sequencing_placeholders()
     text = (
         "**Branch prefix**: `feature/vXYZ-`\n"
         "- **The vX.Y.(Z+1) bundle** and X.Y.(Z+1)\n"
-        "ratified by `docs/v<line>.x-sequencing.md` (the current line's sequencing doc)"
-        " §Amendment YYYY-MM-DD\n"
+        "ratified by `docs/v<line>.x-sequencing.md` (the current line's sequencing doc,"
+        " or its dated companion) §Amendment YYYY-MM-DD\n"
     )
     out = fill(text, version="0.3.16", codename="c", previous="0.3.15", today="2026-09-20")
     assert "`feature/v0316-`" in out
     assert "The v0.3.17 bundle** and 0.3.17" in out
-    assert "`docs/v0.3.x-sequencing.md` §Amendment YYYY-MM-DD" in out  # amendment date stays
+    # The amendment may sit in a dated file beside the line's document (ruling s of the
+    # v0.4.x sequencing), so the hint survives; the amendment date stays for the author.
+    assert "`docs/v0.3.x-sequencing.md` (or its dated companion) §Amendment YYYY-MM-DD" in out
 
 
 def test_fill_rejects_a_version_that_is_not_x_y_z() -> None:

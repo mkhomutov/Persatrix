@@ -88,8 +88,9 @@ def fill(text: str, *, version: str, codename: str, previous: str, today: str) -
     # Branch-prefix digits: v0.3.16 → v0316 (the cycle convention, e.g. feature/v0316-).
     out = out.replace("vXYZ", f"v{major}{minor}{patch}")
     out = out.replace(
-        "`docs/v<line>.x-sequencing.md` (the current line's sequencing doc)",
-        f"`docs/v{major}.{minor}.x-sequencing.md`",
+        "`docs/v<line>.x-sequencing.md` (the current line's sequencing doc,"
+        " or its dated companion)",
+        f"`docs/v{major}.{minor}.x-sequencing.md` (or its dated companion)",
     )
     out = out.replace("<Codename>", codename)
     out = out.replace("**Created**: YYYY-MM-DD", f"**Created**: {today}")

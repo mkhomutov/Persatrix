@@ -38,7 +38,8 @@ each phase's PR breakdown in its RFC's PR plan
 
 The version's scope is ratified in a dated amendment to the sequencing
 document of the current line ([v0.4.x-sequencing.md](../v0.4.x-sequencing.md);
-the v0.3.x line's is [v0.3.x-sequencing.md](../v0.3.x-sequencing.md), frozen), never by editing
+the v0.3.x line's is [v0.3.x-sequencing.md](../v0.3.x-sequencing.md), frozen), or in a dated file
+beside it ([ruling s](../v0.4.x-sequencing.md#rulings)), never by editing
 an earlier decision. The amendment names the version, its codename, its
 one-line story, the issues and RFC phases it carries, which of them are
 **cuttable**, and the next version after it. It is the citation every later

@@ -6,7 +6,7 @@ type: architecture
 status: proposed
 author: Maksim Khomutov
 created: 2026-05-25
-target: not standalone — rides the governance-core extraction, if a strategy review orders one; the first (2026-10-20) ordered none (Amendment 2026-09-12)
+target: not standalone — rides the governance-core extraction, if a strategy review orders one; the first (2026-10-20) ordered none, and v0.4.x sequencing ruling (t) passes it to the next
 depends_on:
   - RFC-0045
   - RFC-0023
@@ -19,7 +19,7 @@ depends_on:
 **Status**: 📋 Proposed  
 **Author**: Maksim Khomutov  
 **Date**: 2026-05-25  
-**Target**: not standalone — rides the governance-core extraction, if a strategy review orders one; the [first](../project-strategy.md#10-review-cadence-and-log) (2026-10-20) ordered none ([sequencing Amendment 2026-09-12](../v0.3.x-sequencing.md#amendment-2026-09-12--close-v0316-small-then-measure-before-any-train-opens) ruling c, 2026-09-12; was v0.4.0+ gated on RFC-0045 acceptance + the MIT↛BUSL boundary CI gate)  
+**Target**: not standalone — rides the governance-core extraction, if a strategy review orders one; the [first](../project-strategy.md#10-review-cadence-and-log) (2026-10-20) ordered none, and [ruling (t)](../v0.4.x-sequencing-2026-10-21.md#rulings) passes it to the next ([sequencing Amendment 2026-09-12](../v0.3.x-sequencing.md#amendment-2026-09-12--close-v0316-small-then-measure-before-any-train-opens) ruling c, 2026-09-12; was v0.4.0+ gated on RFC-0045 acceptance + the MIT↛BUSL boundary CI gate)  
 **Depends on**: RFC 0045 (Open-Core Library Extraction Policy — the governing policy this RFC inherits and, in §H/§B, refines), RFC 0023 (LLM Call Leasing — the subsystem being extracted), RFC 0024 (Event-Driven Agent Scheduling — the idle-loop whose placement RFC 0045 deferred here)
 
 ---
