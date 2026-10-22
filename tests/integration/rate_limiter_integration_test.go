@@ -122,15 +122,11 @@ func TestRateLimit_UnquarantineEndpoint(t *testing.T) {
 	require.NoError(t, resp.Body.Close())
 	require.Equal(t, http.StatusForbidden, resp.StatusCode)
 
-	// Operator releases via the unquarantine endpoint.
+	// Operator releases via the unquarantine endpoint, sending no
+	// X-Agent-ID: a quarantine refuses only the ID it names
+	// (ISSUE-0152), so the release needs no invented ID.
 	req2, _ := http.NewRequest(http.MethodPost,
 		ts.URL+"/api/v1/agents/quarantined-agent/unquarantine", nil)
-	// PR #244 review H-01: operators must identify themselves via
-	// X-Agent-ID. The middleware denies anonymous (empty-header) calls
-	// while a quarantine is active, so operators presenting
-	// "X-Agent-ID: operator" pass the H-01 check and the same value
-	// lands in the unquarantine audit event as `actor` for forensics.
-	req2.Header.Set(security.AgentIDHeader, "operator")
 	resp2, err := ts.Client().Do(req2)
 	require.NoError(t, err)
 	require.NoError(t, resp2.Body.Close())

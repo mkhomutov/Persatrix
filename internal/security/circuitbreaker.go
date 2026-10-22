@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -68,28 +67,17 @@ type CircuitBreakerConfig struct {
 type CircuitBreaker struct {
 	cfg CircuitBreakerConfig
 
-	mu          sync.Mutex
+	// mu is a read-write lock because IsQuarantined runs on every call
+	// that sends an agent ID, the agents' own REST calls among them since
+	// ISSUE-0152: concurrent checks share it, and only RecordViolation and
+	// Unquarantine take it exclusively.
+	mu          sync.RWMutex
 	violations  map[string]map[ViolationType][]time.Time
 	quarantined map[string]quarantineEntry
 
 	// exempt is the immutable set built from [CircuitBreakerConfig.ExemptAgentIDs]
 	// at construction. Read-only after NewCircuitBreaker, so it needs no lock.
 	exempt map[string]struct{}
-
-	// quarantinedCount mirrors len(quarantined) for lock-free reads on
-	// the request hot path (PR #244 round-2 review L-05). Without this,
-	// every anonymous REST/gRPC request acquires `cb.mu` purely to
-	// answer HasAnyQuarantined(), which serialises an otherwise
-	// independent flow of traffic — a noticeable contention source
-	// under the exact DoS conditions the breaker is meant to handle.
-	//
-	// Invariant: quarantinedCount.Load() == int32(len(quarantined)) at
-	// every point where `cb.mu` is not held by another goroutine.
-	// Both write sites (open in RecordViolation, decrement in
-	// Unquarantine) bracket the map mutation under `cb.mu`, so a
-	// concurrent reader can observe at most a one-event lag — which is
-	// the same TOCTOU window the existing mutex-guarded reader had.
-	quarantinedCount atomic.Int32
 }
 
 type quarantineEntry struct {
@@ -193,7 +181,6 @@ func (cb *CircuitBreaker) RecordViolation(ctx context.Context, agentID string, v
 	shouldOpen := len(kept) >= rule.Count
 	if shouldOpen {
 		cb.quarantined[agentID] = quarantineEntry{since: now, reason: vt}
-		cb.quarantinedCount.Store(int32(len(cb.quarantined)))
 		// PR #244 review M-03 (partial): clear the per-agent violation
 		// history when the breaker opens so the entry does not linger
 		// after a future Unquarantine restores the agent. A full LRU/TTL
@@ -224,27 +211,10 @@ func (cb *CircuitBreaker) RecordViolation(ctx context.Context, agentID string, v
 
 // IsQuarantined reports whether agentID is currently quarantined.
 func (cb *CircuitBreaker) IsQuarantined(agentID string) bool {
-	cb.mu.Lock()
-	defer cb.mu.Unlock()
+	cb.mu.RLock()
+	defer cb.mu.RUnlock()
 	_, ok := cb.quarantined[agentID]
 	return ok
-}
-
-// HasAnyQuarantined reports whether at least one agent is currently
-// quarantined. Used by the REST/gRPC middleware to close the
-// header-omission bypass (PR #244 review H-01): when a quarantine is
-// active, anonymous (empty-X-Agent-ID) calls must be denied so a
-// quarantined caller cannot drop their header to slip past
-// IsQuarantined and re-enter via the anonymous bucket.
-//
-// Lock-free atomic load (PR #244 round-2 review L-05). The
-// `quarantinedCount` field mirrors len(quarantined) and is updated
-// under `cb.mu` at both write sites — see the field's invariant
-// comment. Suitable for the request hot path because the steady-state
-// answer (no quarantine) is the overwhelmingly common case and must
-// not contend on the breaker mutex.
-func (cb *CircuitBreaker) HasAnyQuarantined() bool {
-	return cb.quarantinedCount.Load() > 0
 }
 
 // Unquarantine releases agentID and clears its violation history.
@@ -261,7 +231,6 @@ func (cb *CircuitBreaker) Unquarantine(ctx context.Context, agentID, actor strin
 	if ok {
 		delete(cb.quarantined, agentID)
 		delete(cb.violations, agentID)
-		cb.quarantinedCount.Store(int32(len(cb.quarantined)))
 	}
 	cb.mu.Unlock()
 	if ok {
@@ -283,8 +252,8 @@ func (cb *CircuitBreaker) Unquarantine(ctx context.Context, agentID, actor strin
 // QuarantinedAgents returns the current set of quarantined IDs. Useful
 // for the unquarantine REST handler and debugging.
 func (cb *CircuitBreaker) QuarantinedAgents() []string {
-	cb.mu.Lock()
-	defer cb.mu.Unlock()
+	cb.mu.RLock()
+	defer cb.mu.RUnlock()
 	ids := make([]string, 0, len(cb.quarantined))
 	for id := range cb.quarantined {
 		ids = append(ids, id)

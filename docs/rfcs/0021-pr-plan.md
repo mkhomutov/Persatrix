@@ -11,7 +11,7 @@
 
 ## Overview
 
-RFC 0021 spans four phases. **Only Phase 1 lands in v0.3.0**: now-anchor in the system prompt, recency rendering on episode and relationship recall, `Clock` abstraction. Phases 2–4 (commitments, REMINDER event, duration calibration) were deferred to v0.4.0, where only Phase 2 stays; Phases 3–4 are unslotted ([v0.4.x sequencing ruling (m)](../v0.4.x-sequencing.md#rulings)). See the [RFC's Phased Implementation Plan](0021-persona-temporal-awareness.md#phased-implementation-plan).
+RFC 0021 spans four phases. **Only Phase 1 lands in v0.3.0**: now-anchor in the system prompt, recency rendering on episode and relationship recall, `Clock` abstraction. Phases 2–4 (commitments, REMINDER event, duration calibration) were deferred to v0.4.0, where only Phase 2 stays; Phases 3–4 are unslotted ([v0.4.x sequencing ruling (m)](../v0.4.x-sequencing.md#rulings)). See the [RFC's Phased Implementation Plan](0021-persona-temporal-awareness.md#phased-implementation-plan). Phase 2's plan is [0021-phase2-pr-plan.md](0021-phase2-pr-plan.md).
 
 This plan splits Phase 1 into **3 PRs**. Each stays well under the [BRANCHING.md](../BRANCHING.md) 500-line soft cap.
 

@@ -198,16 +198,11 @@ func TestGRPCInterceptor_RetryAfterHeaderOnRateLimit(t *testing.T) {
 }
 
 // TestRESTMiddleware_AnonymousAllowedWhenNoQuarantine guards the
-// baseline behaviour the H-01 fix must preserve: when no agent is
-// quarantined, anonymous calls (empty X-Agent-ID) still flow through
-// the limiter via the anonymous bucket. This protects infrastructure
-// probes such as Kubernetes liveness checks against /healthz that do
-// not (and should not) carry an agent identity.
-//
-// Pairs with TestRESTMiddleware_QuarantineActiveBlocksAnonymous below
-// to lock in the precise trade-off: anonymous traffic is admitted in
-// the steady state but cut off the moment the breaker opens, closing
-// the header-omission bypass without breaking the no-quarantine case.
+// baseline: anonymous calls (empty X-Agent-ID) flow through the limiter
+// via the anonymous bucket. This protects callers that do not (and
+// should not) carry an agent identity, such as infrastructure probes.
+// TestRateLimitHooks_QuarantineRefusesOnlyTheQuarantinedID pins that a
+// quarantine changes nothing for them (ISSUE-0152).
 func TestRESTMiddleware_AnonymousAllowedWhenNoQuarantine(t *testing.T) {
 	clk := newFakeClock(time.Unix(0, 0))
 	rl := newTestRateLimiter(t, clk)
@@ -221,54 +216,6 @@ func TestRESTMiddleware_AnonymousAllowedWhenNoQuarantine(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 	assert.Equal(t, http.StatusOK, rec.Code,
 		"anonymous calls must succeed when no agent is quarantined")
-}
-
-// TestRESTMiddleware_QuarantineActiveBlocksAnonymous guards PR #244
-// review H-01: a quarantined agent must not be able to bypass the
-// quarantine simply by omitting the X-Agent-ID header (which would
-// otherwise re-bucket them as "anonymous" and skip IsQuarantined). The
-// fix denies all empty-ID calls with 403 whenever ANY agent is
-// currently quarantined.
-//
-// This is the minimum-impact mitigation: under the much more common
-// "nothing quarantined" steady state (TestRESTMiddleware_AnonymousAllowedWhenNoQuarantine),
-// anonymous traffic still passes. The mode flips only when an active
-// quarantine makes the bypass exploitable — the operator releasing the
-// quarantine restores anonymous access.
-//
-// Stronger fixes (auth, signed identity headers) belong in RFC 0009
-// Phase 4; this is the v0.3 stop-gap.
-func TestRESTMiddleware_QuarantineActiveBlocksAnonymous(t *testing.T) {
-	clk := newFakeClock(time.Unix(0, 0))
-	rl := newTestRateLimiter(t, clk)
-	cb, _ := newTestBreaker(t, clk)
-	for i := 0; i < 3; i++ {
-		cb.RecordViolation(context.Background(), "agent-bad", ViolationCapability)
-	}
-	require.True(t, cb.IsQuarantined("agent-bad"),
-		"precondition: agent-bad must be quarantined")
-
-	mw := RESTRateLimitMiddleware(rl, cb)
-	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-
-	// Caller omits X-Agent-ID entirely.
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/work", nil)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	assert.Equal(t, http.StatusForbidden, rec.Code,
-		"empty X-Agent-ID must be denied while a quarantine is active")
-	assert.Contains(t, rec.Body.String(), "QUARANTINE_ACTIVE",
-		"response body should carry the QUARANTINE_ACTIVE error code")
-
-	// Releasing the quarantine restores anonymous access (no lingering
-	// global-deny state).
-	require.True(t, cb.Unquarantine(context.Background(), "agent-bad", "operator-test"))
-	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/work", nil))
-	assert.Equal(t, http.StatusOK, rec.Code,
-		"anonymous traffic must resume once quarantine is cleared")
 }
 
 // TestRESTMiddleware_ExemptConsoleStaysRateLimitedNeverQuarantined pins the
@@ -314,30 +261,6 @@ func TestRESTMiddleware_ExemptConsoleStaysRateLimitedNeverQuarantined(t *testing
 	assert.Equal(t, http.StatusOK, codes[0], "first call within the window passes")
 	assert.Equal(t, http.StatusTooManyRequests, codes[len(codes)-1],
 		"over-limit console calls stay 429 even past the quarantine threshold")
-}
-
-// TestGRPCInterceptor_QuarantineActiveBlocksAnonymous mirrors
-// TestRESTMiddleware_QuarantineActiveBlocksAnonymous on the gRPC side.
-// Maps to canonical gRPC code `PermissionDenied` (parity with the
-// existing quarantine path, which also returns PermissionDenied).
-func TestGRPCInterceptor_QuarantineActiveBlocksAnonymous(t *testing.T) {
-	clk := newFakeClock(time.Unix(0, 0))
-	rl := newTestRateLimiter(t, clk)
-	cb, _ := newTestBreaker(t, clk)
-	for i := 0; i < 3; i++ {
-		cb.RecordViolation(context.Background(), "agent-bad", ViolationCapability)
-	}
-	require.True(t, cb.IsQuarantined("agent-bad"))
-
-	interceptor := GRPCRateLimitInterceptor(rl, cb)
-	handler := func(ctx context.Context, req any) (any, error) { return "ok", nil }
-
-	// No metadata at all -> empty agent ID.
-	_, err := interceptor(context.Background(), nil, &grpc.UnaryServerInfo{}, handler)
-	require.Error(t, err)
-	st, _ := status.FromError(err)
-	assert.Equal(t, codes.PermissionDenied, st.Code(),
-		"empty x-agent-id metadata must be denied while quarantine is active")
 }
 
 // PR #244 round-2 review M-07 — bound + validate X-Agent-ID at the

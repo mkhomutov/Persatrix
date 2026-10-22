@@ -110,16 +110,30 @@ async def orchestrator():
         "history": {},              # channel_id -> [message JSON]
         "log": [],                  # request paths
         "fail_paths": set(),        # paths that return 500
+        # Calls admitted before every later one gets 429, like a spent
+        # per-agent rate-limit budget (ISSUE-0187); None = no limit.
+        "budget": None,
+        "limited": 0,               # 429s returned
     }
+
+    def over_budget() -> bool:
+        if state["budget"] is not None and len(state["log"]) > state["budget"]:
+            state["limited"] += 1
+            return True
+        return False
 
     async def list_channels(request: web.Request) -> web.Response:
         state["log"].append(request.path_qs)
+        if over_budget():
+            return web.json_response({"code": "RATE_LIMITED"}, status=429)
         if request.path in state["fail_paths"]:
             return web.json_response({"error": "boom"}, status=500)
         return web.json_response({"channels": state["channels"]})
 
     async def get_channel(request: web.Request) -> web.Response:
         state["log"].append(request.path)
+        if over_budget():
+            return web.json_response({"code": "RATE_LIMITED"}, status=429)
         if request.path in state["fail_paths"]:
             return web.json_response({"error": "boom"}, status=500)
         cid = request.match_info["id"]
@@ -132,6 +146,8 @@ async def orchestrator():
 
     async def history(request: web.Request) -> web.Response:
         state["log"].append(request.path_qs)
+        if over_budget():
+            return web.json_response({"code": "RATE_LIMITED"}, status=429)
         if request.path in state["fail_paths"]:
             return web.json_response({"error": "boom"}, status=500)
         cid = request.match_info["id"]

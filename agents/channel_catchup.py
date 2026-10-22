@@ -70,7 +70,10 @@ from .channel_catchup_discovery import (
     fetch_channel_membership,
     resolve_respond_policy,
 )
-from .channel_history_fetcher import HttpChannelHistoryFetcher
+from .channel_history_fetcher import (
+    HttpChannelHistoryFetcher,
+    OrchestratorRateLimitedError,
+)
 from .channel_replay_event import build_replay_event
 from .channel_replay_outcome import ReplayPassOutcome
 from .channel_validation import validate_channel_message_dict
@@ -244,12 +247,43 @@ async def _replay_channel_history_inner(
     timeout = aiohttp.ClientTimeout(total=_REQUEST_TIMEOUT_SECONDS)
     history_fetcher = HttpChannelHistoryFetcher(
         session=session, orchestrator_url=orchestrator_url, timeout=timeout,
+        raise_on_rate_limit=True,
     )
 
     channels = await fetch_channel_list(session, base, timeout)
     if channels is None:
         return
 
+    try:
+        await _replay_channels(
+            agent=agent, channels=channels, session=session, base=base,
+            timeout=timeout, history_fetcher=history_fetcher, limit=limit,
+            counts=counts, outcome=outcome,
+        )
+    except OrchestratorRateLimitedError as exc:
+        # ISSUE-0187: each refusal counts toward this agent's quarantine,
+        # so stop at the first one. The channels left are skipped, as on
+        # a budget overrun; the ones already finished stay complete.
+        logger.warning(
+            "channels: catch-up stopped at the first rate-limit refusal "
+            "agent=%s channel=%s; partial channels=%d (remaining skipped)",
+            agent.agent_id, exc, counts["channels"],
+        )
+
+
+async def _replay_channels(
+    *,
+    agent: _AgentLike,
+    channels: list[dict],
+    session: aiohttp.ClientSession,
+    base: str,
+    timeout: aiohttp.ClientTimeout,
+    history_fetcher: HttpChannelHistoryFetcher,
+    limit: int,
+    counts: dict[str, int],
+    outcome: ReplayPassOutcome,
+) -> None:
+    """The per-channel loop of :func:`_replay_channel_history_inner`."""
     for ch in channels:
         channel_id = ch.get("id")
         if not isinstance(channel_id, str) or not channel_id:

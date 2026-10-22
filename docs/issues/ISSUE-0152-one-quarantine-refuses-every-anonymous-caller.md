@@ -1,7 +1,7 @@
 ---
 id: ISSUE-0152
-summary: "Agent IDs are self-reported and unchecked, and while ANY agent ID is quarantined the orchestrator refuses every call that sends none — today every REST call from the Python agents and every CLI command — so about 65 quick requests under an invented ID, with no account in either auth mode, stop all persona channel replies and the CLI until an operator releases the ID, through an unquarantine endpoint that refuses anonymous callers too"
-status: open
+summary: "Agent IDs are self-reported and unchecked. While ANY agent ID was quarantined, the orchestrator refused every call that sent none — every REST call from the Python agents and every CLI command — so about 65 quick requests under an invented ID, with no account in either auth mode, stopped all persona channel replies and the CLI until an operator released the ID, through an unquarantine endpoint that refused anonymous callers too. Steps 1–2 and step 3's agent half end that in v0.4.0. Open until RFC 0009 Phase 4's agent tokens: anyone who can reach the REST port can still get a named agent quarantined by sending its ID"
+status: in_progress
 severity: high
 area: security
 created: 2026-09-11
@@ -21,7 +21,9 @@ refs:
   - internal/server/auth_policy.go
   - internal/server/agent_handlers.go
   - internal/server/server_unquarantine_test.go
+  - internal/server/quarantine_anonymous_test.go
   - agents/server.py
+  - agents/orchestrator_session.py
   - agents/channel_publisher.py
   - cli/src/main.rs
 ---
@@ -43,6 +45,9 @@ Nothing recovers on its own, and the release endpoint refuses callers without
 an agent ID too.
 
 ## Context
+
+Context and Impact describe the code as filed; the 2026-10-21 note records
+what has changed since.
 
 **Callers name themselves.** A REST caller puts its
 [agent ID](../ai-glossary.md#agent-id) in the `X-Agent-ID` header, a gRPC
@@ -234,3 +239,33 @@ tagged.
 > questions](../rfcs/0009-security-sandboxing.md#genuinely-open-deferred-to-phase-4--v040))
 > checks RFC 0009's tokens on the agents' REST calls rather than moving those
 > calls to gRPC first.
+
+> 2026-10-21 — **steps 1 and 2, and step 3's agent half, fixed** by
+> [#1050](https://github.com/mkhomutov/Persatrix/pull/1050), the early Go
+> PR the [v0.4.0 plan](../v0.4.0-plan.md#implementation-prs) schedules under
+> A3, A4, with its Python half in the same PR. A quarantine now refuses only
+> the ID it names, on REST and gRPC: a caller with no ID stays in the shared
+> anonymous budget, and its refusals quarantine nothing. The operator
+> releases an ID with no `X-Agent-ID` of their own: under `disabled` with no
+> header (the `SECURITY_UNQUARANTINE_TOKEN` check stays), under `enabled`
+> with an operator session. Under `enabled` a signed-in caller that sends no
+> ID is counted under its session (`security.WithCallerKey`), so an
+> outsider who keeps the anonymous budget spent cannot refuse that release.
+> `internal/server/quarantine_anonymous_test.go`
+> trips a real quarantine under an invented ID in both auth modes and checks
+> that each of the nine routes the agents call answers a caller with no ID
+> as it did before. `CircuitBreaker.HasAnyQuarantined` served only the removed rule
+> and is gone. The agents' REST session sends the hosted agent's ID
+> (`agents/orchestrator_session.py`), which closes the REST half of
+> [ISSUE-0111](ISSUE-0111-anonymous-wallet-rpcs-share-rate-limit-bucket.md)'s
+> residuals. That has a cost, filed as
+> [ISSUE-0187](ISSUE-0187-agent-rest-bursts-count-toward-its-own-quarantine.md),
+> high: an agent's REST calls now share its wallet calls' budget and count
+> toward its quarantine, which someone posting into a channel can trip; the
+> start-up catch-up now stops at its first refusal.
+> Still open, so the status is `in_progress`: step 5, which closes this issue
+> with RFC 0009 Phase 4 (row A4) — until then anyone who can reach the REST
+> port can get a named agent quarantined by sending its ID, and an invented
+> ID still gets a fresh budget; step 3's CLI half, under the Rust CLI
+> freeze, so the CLI still shares the anonymous budget; step 4, the owner's
+> call.
