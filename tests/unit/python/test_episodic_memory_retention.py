@@ -162,44 +162,44 @@ class TestDeleteOldEpisodes:
 
 
 class TestFutureMigration:
-    async def test_hypothetical_v20_migration_applied(self):
-        """Patch MIGRATIONS with a hypothetical v20 entry, verify v1–v20 applied.
+    async def test_hypothetical_v21_migration_applied(self):
+        """Patch MIGRATIONS with a hypothetical v21 entry, verify v1–v21 applied.
 
         Forward-compat probe — always one past the highest real
-        migration.  Bumped v19 → v20 when migration v19 (ISSUE-0130 (b):
-        the ``episodes(agent_id, interaction_id)`` index) landed, as it
-        was bumped v18 → v19 before that; the rename + table-name bump
+        migration.  Bumped v20 → v21 when migration v20 (RFC 0021
+        Phase 2: the ``commitments`` table) landed, as it was bumped
+        v19 → v20 and v18 → v19 before that; the rename + table-name bump
         preserves the "one-past-the-tail collision" contract that
         previously caught ``UNIQUE constraint failed:
         schema_version.version`` regressions.
         """
         from agents.memory.migrations import MIGRATIONS
 
-        v20 = (
-            20,
+        v21 = (
+            21,
             "Hypothetical test-only table",
-            "CREATE TABLE IF NOT EXISTS _test_v20 (id TEXT PRIMARY KEY);",
+            "CREATE TABLE IF NOT EXISTS _test_v21 (id TEXT PRIMARY KEY);",
         )
         original = list(MIGRATIONS)
         try:
-            MIGRATIONS.append(v20)
+            MIGRATIONS.append(v21)
             mem = EpisodicMemory(agent_id="test-agent", db_path=":memory:")
             await mem.initialize()
             db = mem._ensure_db()
 
-            # All twenty versions should be recorded
+            # All twenty-one versions should be recorded
             async with db.execute(
                 "SELECT version FROM schema_version ORDER BY version"
             ) as cursor:
                 versions = [r[0] for r in await cursor.fetchall()]
             assert versions == [
                 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17,
-                18, 19, 20,
+                18, 19, 20, 21,
             ]
 
-            # v20 table should exist
+            # v21 table should exist
             async with db.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='_test_v20'"
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='_test_v21'"
             ) as cursor:
                 assert await cursor.fetchone() is not None
 

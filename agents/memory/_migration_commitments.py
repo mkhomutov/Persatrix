@@ -5,7 +5,7 @@ the sentence today.  This table is where that promise will be kept — and,
 in the same rows, the instructions other members of an organization give
 the persona (RFC 0012 §E's directives).  Nothing reads it yet: the
 ``CommitmentStore`` of the Phase 2 plan's PR 2 is its first reader, and
-RFC 0012's directive calls (PR 3) its second.
+the same plan's PR 3, the directive calls RFC 0012 uses, its second.
 
 **One table, two kinds** (the plan's H-2).  ``kind`` tells them apart:
 
@@ -17,12 +17,15 @@ RFC 0012's directive calls (PR 3) its second.
   ``state`` vocabulary) and an issuer, no ``state``, and its ``due_at``
   is optional.
 
-The ``commitments_kind_shape`` check keeps those columns apart, so a
-reader that filters on ``kind`` never meets a row of the other shape.
-The other RFC 0012 columns (channel and issuer authority, scope, the
-structured form, the graph version, the conflict fields) carry no check:
-their vocabularies are RFC 0012's and RFC 0028's, checked by PR 3's store
-calls, and a SQLite check can only change by rebuilding the table.
+The ``commitments_kind_shape`` check keeps those four columns apart: a
+reader that filters on ``kind`` never meets a commitment without a due
+time and a state, or a directive without a status and an issuer.  The
+other RFC 0012 columns (channel and issuer authority, scope, the
+structured form, the graph version, the conflict fields) are not kept
+off a commitment row and carry no vocabulary check, beyond
+``conflict_failures`` never going below zero: their vocabularies are
+RFC 0012's and RFC 0028's, checked by PR 3's store calls, and a SQLite
+check can only change by rebuilding the table.
 
 **Scoped like a fact** (H-3).  ``session_id``, ``principal_id``,
 ``epoch_id`` and ``protection_level`` are declared exactly as the facts
@@ -39,8 +42,11 @@ time — nearest due first), RFC 0012's read (kind, directive status), and
 
 **Guards.**  The ``sqlite_master`` guard every sibling handler has: a
 partial restore that already holds a ``commitments`` table keeps it, and
-an index is created only when its columns are present.  ``CREATE INDEX
-IF NOT EXISTS`` makes a replay after a crash safe.  One commit.
+an index is created only when its columns are present.  SQLite commits
+each ``CREATE`` on its own, so a crash after the table and before its
+indexes leaves an unindexed table; the replay's ``CREATE INDEX IF NOT
+EXISTS`` loop runs whether or not this call made the table, which
+repairs it.  The tail commit matches the siblings'.
 """
 
 from __future__ import annotations
@@ -84,7 +90,8 @@ def _in(values: tuple[str, ...]) -> str:
 # Every interpolated value is a module constant above, never input.
 _CREATE_TABLE = f"""
 CREATE TABLE commitments (
-    id                    TEXT PRIMARY KEY,
+    -- SQLite lets a TEXT primary key hold NULL unless it says NOT NULL.
+    id                    TEXT PRIMARY KEY NOT NULL,
     agent_id              TEXT NOT NULL,
     kind                  TEXT NOT NULL
         CONSTRAINT commitments_kind

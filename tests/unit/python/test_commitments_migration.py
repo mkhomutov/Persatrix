@@ -9,12 +9,11 @@ own promise (``kind = 'commitment'``) and an instruction someone gave it
   indexes, and records v20
 * the scope columns default exactly as the facts tier's do, so a row
   written without them is scoped as a fact written without them is
-* each check constraint refuses a row of the wrong shape — and each
-  refused row differs in one column from a row the table accepts, so the
-  refusal can only come from the constraint named
 * an in-place upgrade from a populated v19 store adds the table and
   leaves every earlier row and schema object as it was
 * the handler is idempotent and leaves a pre-existing table alone
+
+The check constraints are tested in ``test_commitments_constraints.py``.
 
 Nothing reads the table yet: PR 2's ``CommitmentStore`` is its first
 reader.
@@ -22,18 +21,13 @@ reader.
 
 from __future__ import annotations
 
-import sqlite3
 from typing import Any
 
 import aiosqlite
 import pytest
 
 from agents.epoch_id import DEFAULT_EPOCH_ID
-from agents.memory._migration_commitments import (
-    COMMITMENT_STATES,
-    DIRECTIVE_STATUSES,
-    _apply_migration_20,
-)
+from agents.memory._migration_commitments import _apply_migration_20
 from agents.memory.episodic import EpisodicMemory
 from agents.memory.migrations import (
     MIGRATIONS,
@@ -43,47 +37,50 @@ from agents.memory.migrations import (
 from agents.principal_id import DEFAULT_PRINCIPAL_ID
 from agents.session_id import LEGACY_SESSION_ID
 
-# A row of each kind the table accepts.  Every refusal case below starts
-# from one of these and changes one column.
-_COMMITMENT: dict[str, Any] = {
-    "id": "c-1",
-    "agent_id": "ember-owl",
-    "kind": "commitment",
-    "description": "send Bob the design notes",
-    "due_at": 2_000.0,
-    "target_party": "bob",
-    "created_at": 1_000.0,
-    "state": "open",
-}
-_DIRECTIVE: dict[str, Any] = {
-    "id": "d-1",
-    "agent_id": "ember-owl",
-    "kind": "directive",
-    "description": "do not post the launch date in #general",
-    "created_at": 1_000.0,
-    "issuer_id": "alice",
-    "issuing_channel_id": "ops",
-    "channel_authority": "operational",
-    "issuer_authority": "directive",
-    "scope": "general",
-    "directive_status": "pending",
-    "polarity": "do_not",
-    "action_class": "publish_channel",
-    "target": "general",
-    "graph_version": 3,
-}
-_BASES = {"commitment": _COMMITMENT, "directive": _DIRECTIVE}
+from ._commitments_migration_helpers import COMMITMENT, DIRECTIVE, insert
 
 _SCOPE_COLUMNS = ("session_id", "principal_id", "epoch_id", "protection_level")
 
+# ``(type, notnull, default)`` of every other column, as ``PRAGMA
+# table_info`` reports it.  The scope columns are pinned against the facts
+# tier instead (``TestScopeColumns``).
+_DECLARED: dict[str, tuple[str, int, str | None]] = {
+    # RFC 0021 §F
+    "id": ("TEXT", 1, None),
+    "agent_id": ("TEXT", 1, None),
+    "kind": ("TEXT", 1, None),
+    "description": ("TEXT", 1, None),
+    "due_at": ("REAL", 0, None),
+    "target_party": ("TEXT", 0, None),
+    "created_at": ("REAL", 1, None),
+    "state": ("TEXT", 0, None),
+    "fulfilled_at": ("REAL", 0, None),
+    "source_interaction_id": ("TEXT", 0, None),
+    "tags_json": ("TEXT", 1, "'[]'"),
+    # RFC 0012 §E, and the RFC 0012 plan's asks of row A2
+    "issuer_id": ("TEXT", 0, None),
+    "issuing_channel_id": ("TEXT", 0, None),
+    "channel_authority": ("TEXT", 0, None),
+    "issuer_authority": ("TEXT", 0, None),
+    "scope": ("TEXT", 0, None),
+    "directive_status": ("TEXT", 0, None),
+    "polarity": ("TEXT", 0, None),
+    "action_class": ("TEXT", 0, None),
+    "target": ("TEXT", 0, None),
+    "graph_version": ("INTEGER", 0, None),
+    "conflicts_with_json": ("TEXT", 1, "'[]'"),
+    "conflict_checked_at": ("REAL", 0, None),
+    "conflict_failures": ("INTEGER", 1, "0"),
+}
 
-async def _insert(db: aiosqlite.Connection, row: dict[str, Any]) -> None:
-    cols = ", ".join(row)
-    marks = ", ".join("?" for _ in row)
-    await db.execute(
-        f"INSERT INTO commitments ({cols}) VALUES ({marks})",  # noqa: S608 — test-owned keys
-        tuple(row.values()),
-    )
+_INDEX_COLUMNS: dict[str, list[str]] = {
+    # the open-commitments block: open rows, nearest due first
+    "idx_commitments_due": ["agent_id", "kind", "state", "due_at"],
+    # RFC 0012's reads, by directive status
+    "idx_commitments_directive": ["agent_id", "kind", "directive_status"],
+    # ``list_commitments_to(target_party)``
+    "idx_commitments_target": ["agent_id", "target_party", "state"],
+}
 
 
 async def _column_info(
@@ -141,42 +138,16 @@ class TestFreshStore:
         assert 20 in versions
 
     async def test_columns(self, memory: EpisodicMemory):
-        cols = set(await _column_info(memory._ensure_db(), "commitments"))
-        expected = {
-            # RFC 0021 §F
-            "id", "agent_id", "kind", "description", "due_at",
-            "target_party", "created_at", "state", "fulfilled_at",
-            "source_interaction_id", "tags_json",
-            # RFC 0012 §E, and the RFC 0012 plan's asks of row A2
-            "issuer_id", "issuing_channel_id", "channel_authority",
-            "issuer_authority", "scope", "directive_status",
-            "polarity", "action_class", "target", "graph_version",
-            "conflicts_with_json", "conflict_checked_at",
-            "conflict_failures",
-            # the scope a fact carries
-            *_SCOPE_COLUMNS,
-        }
-        assert cols == expected, (
-            f"missing: {expected - cols}; unexpected: {cols - expected}"
+        """Every column, with its type, NOT NULL and default — so a
+        dropped NOT NULL fails here, not in PR 2's first write."""
+        info = await _column_info(memory._ensure_db(), "commitments")
+        assert set(info) == {*_DECLARED, *_SCOPE_COLUMNS}, (
+            f"missing: {set(_DECLARED) - set(info)}; "
+            f"unexpected: {set(info) - set(_DECLARED) - set(_SCOPE_COLUMNS)}"
         )
+        assert {name: info[name] for name in _DECLARED} == _DECLARED
 
-    @pytest.mark.parametrize(
-        "index, columns",
-        [
-            # the open-commitments block: open rows, nearest due first
-            ("idx_commitments_due", ["agent_id", "kind", "state", "due_at"]),
-            # RFC 0012's reads, by directive status
-            (
-                "idx_commitments_directive",
-                ["agent_id", "kind", "directive_status"],
-            ),
-            # ``list_commitments_to(target_party)``
-            (
-                "idx_commitments_target",
-                ["agent_id", "target_party", "state"],
-            ),
-        ],
-    )
+    @pytest.mark.parametrize("index, columns", list(_INDEX_COLUMNS.items()))
     async def test_indexes(
         self, memory: EpisodicMemory, index: str, columns: list[str],
     ):
@@ -198,7 +169,7 @@ class TestFreshStore:
             ),
             (
                 "SELECT id FROM commitments WHERE agent_id = 'a' "
-                "AND target_party = 'bob'",
+                "AND kind = 'commitment' AND target_party = 'bob'",
                 "idx_commitments_target",
             ),
         ],
@@ -239,7 +210,7 @@ class TestScopeColumns:
 
     async def test_row_written_without_them(self, memory: EpisodicMemory):
         db = memory._ensure_db()
-        await _insert(db, _COMMITMENT)
+        await insert(db, COMMITMENT)
         async with db.execute(
             "SELECT session_id, principal_id, epoch_id, protection_level "
             "FROM commitments WHERE id = 'c-1'",
@@ -255,7 +226,7 @@ class TestScopeColumns:
 
     async def test_list_and_count_defaults(self, memory: EpisodicMemory):
         db = memory._ensure_db()
-        await _insert(db, _DIRECTIVE)
+        await insert(db, DIRECTIVE)
         async with db.execute(
             "SELECT tags_json, conflicts_with_json, conflict_failures, "
             "conflict_checked_at FROM commitments WHERE id = 'd-1'",
@@ -263,101 +234,6 @@ class TestScopeColumns:
             row = await cursor.fetchone()
         assert row is not None
         assert tuple(row) == ("[]", "[]", 0, None)
-
-
-# ─── Check constraints ──────────────────────────────────────
-
-
-class TestCheckConstraints:
-    async def test_well_formed_rows_accepted(self, memory: EpisodicMemory):
-        """The positive controls every refusal below is measured from;
-        a directive needs no ``due_at``."""
-        db = memory._ensure_db()
-        await _insert(db, _COMMITMENT)
-        await _insert(db, _DIRECTIVE)
-        await _insert(db, {**_DIRECTIVE, "id": "d-2", "due_at": 3_000.0})
-        async with db.execute("SELECT COUNT(*) FROM commitments") as cursor:
-            row = await cursor.fetchone()
-        assert row is not None
-        assert row[0] == 3
-
-    @pytest.mark.parametrize("state", COMMITMENT_STATES)
-    async def test_every_state_accepted(
-        self, memory: EpisodicMemory, state: str,
-    ):
-        await _insert(memory._ensure_db(), {**_COMMITMENT, "state": state})
-
-    @pytest.mark.parametrize("status", DIRECTIVE_STATUSES)
-    async def test_every_directive_status_accepted(
-        self, memory: EpisodicMemory, status: str,
-    ):
-        await _insert(
-            memory._ensure_db(), {**_DIRECTIVE, "directive_status": status},
-        )
-
-    async def test_vocabularies_are_the_plans(self):
-        assert COMMITMENT_STATES == ("open", "fulfilled", "missed", "cancelled")
-        # The RFC 0012 plan's seven, outside the commitment ``state``
-        # constraint.
-        assert DIRECTIVE_STATUSES == (
-            "pending", "accepted", "adapted", "refused", "escalated",
-            "superseded", "fulfilled",
-        )
-
-    @pytest.mark.parametrize(
-        "kind, change, constraint",
-        [
-            ("commitment", {"due_at": None}, "commitments_kind_shape"),
-            ("commitment", {"state": None}, "commitments_kind_shape"),
-            (
-                "commitment",
-                {"directive_status": "pending"},
-                "commitments_kind_shape",
-            ),
-            ("commitment", {"issuer_id": "alice"}, "commitments_kind_shape"),
-            ("directive", {"state": "open"}, "commitments_kind_shape"),
-            ("directive", {"directive_status": None}, "commitments_kind_shape"),
-            ("directive", {"issuer_id": None}, "commitments_kind_shape"),
-            ("commitment", {"kind": "expectation"}, "commitments_kind"),
-            ("commitment", {"state": "done"}, "commitments_state"),
-            (
-                "directive",
-                {"directive_status": "approved"},
-                "commitments_directive_status",
-            ),
-            (
-                "directive",
-                {"conflict_failures": -1},
-                "commitments_conflict_failures",
-            ),
-        ],
-        ids=[
-            "commitment-without-due_at",
-            "commitment-without-state",
-            "commitment-with-directive_status",
-            "commitment-with-issuer",
-            "directive-with-state",
-            "directive-without-directive_status",
-            "directive-without-issuer",
-            "unknown-kind",
-            "unknown-state",
-            "unknown-directive_status",
-            "negative-conflict_failures",
-        ],
-    )
-    async def test_wrong_shape_refused(
-        self,
-        memory: EpisodicMemory,
-        kind: str,
-        change: dict[str, Any],
-        constraint: str,
-    ):
-        db = memory._ensure_db()
-        with pytest.raises(
-            sqlite3.IntegrityError,
-            match=rf"CHECK constraint failed: {constraint}$",
-        ):
-            await _insert(db, {**_BASES[kind], **change})
 
 
 # ─── Upgrade from a populated v19 store ─────────────────────
@@ -430,23 +306,32 @@ class TestUpgradeFromV19:
 
 
 class TestIdempotency:
-    async def test_handler_replay_keeps_rows(self, memory: EpisodicMemory):
-        """The crash between the DDL and the version record: running the
-        handler again must neither raise nor rebuild the table."""
+    async def test_handler_replay_keeps_rows_and_rebuilds_indexes(
+        self, memory: EpisodicMemory,
+    ):
+        """The crash after the table and before its indexes — SQLite
+        commits each CREATE on its own — then the version record never
+        written: the replay keeps the rows and builds the missing indexes."""
         db = memory._ensure_db()
-        await _insert(db, _COMMITMENT)
+        await insert(db, COMMITMENT)
+        for index in _INDEX_COLUMNS:
+            await db.execute(f"DROP INDEX {index}")
         await db.commit()
+
         await _apply_migration_20(db)
+
         async with db.execute("SELECT id FROM commitments") as cursor:
             rows = [r[0] for r in await cursor.fetchall()]
         assert rows == ["c-1"]
-        assert await _index_columns(db, "idx_commitments_due") == [
-            "agent_id", "kind", "state", "due_at",
-        ]
+        for index, columns in _INDEX_COLUMNS.items():
+            assert await _index_columns(db, index) == columns
 
     async def test_umbrella_rerun_records_v20_once(
         self, memory: EpisodicMemory,
     ):
+        """The version gate: a second ``_apply_migrations`` skips v20
+        rather than recording it twice (the handler's own replay is the
+        test above)."""
         db = memory._ensure_db()
         await _apply_migrations(db)
         async with db.execute(

@@ -249,6 +249,26 @@ columns match the facts tier's.
 **Acceptance**: the table exists and nothing reads it.
 **Estimate**: ~300 lines.
 
+**Review findings** (PR 1):
+
+| Finding | Severity | Description | Disposition |
+|---------|----------|-------------|-------------|
+| F-1 | Medium | The retention suite's forward-compatibility probe added a pretend v20, which collided with the real one; the plan named only the version pin in `test_episodic_memory_core.py` | Fixed in-PR: the probe moves to v21 |
+| F-2 | Info | One log-correlation integration test fails in a local full run, also on `main` in the same environment, and passes alone | Noted: not this change; CI runs it |
+| F-3 | Low | The replay test ran with the indexes already in place, so it could not catch a handler that indexes only a table it creates — the crash SQLite allows, since each `CREATE` commits on its own | Fixed in-PR: the indexes are dropped before the replay |
+| F-4 | Low | Nothing pinned NOT NULL outside the scope columns, and `id` could hold NULL, as a SQLite text primary key may | Fixed in-PR: every column's declaration is pinned, and `id` is NOT NULL; eleven mutants, each a weakened constraint, now fail a test |
+| F-5 | Low | The module docstring said the kinds were kept wholly apart, that no conflict field had a check, and that the handler made one commit | Fixed in-PR: the docstring says which columns are kept apart and how a replay repairs a crash |
+| F-6 | Info | The target-read plan test left out the `kind` filter every reader will send | Fixed in-PR |
+| F-7 | Info | The umbrella re-run test pins the version gate, not the handler's replay | Fixed in-PR: its docstring says so; the replay test covers the handler |
+| F-8 | Info | "RFC 0012's directive calls (PR 3)" read as RFC 0012's PR 3 | Fixed in-PR: "the same plan's PR 3" |
+| F-9 | Info | ~780 changed lines against a ~300 estimate and the 500-line target; the tests are about 70% of it | Noted: the migration stays with its tests |
+| F-10 | Info | The PR 1 row did not link its PR | Fixed in-PR once the PR was open |
+| F-11 | Info | The fixes took the test file past 500 lines | Fixed in-PR: the check-constraint tests split into `test_commitments_constraints.py`, the shared rows into a helper module |
+| F-12 | Info | The glossary has no *commitment* or *directive* | → deferred to PR 6, which adds *commitment* and *commitments tier*; *directive* is RFC 0012's |
+| F-13 | Info | The memory-architecture diagram does not show the table | → deferred to PR 6 |
+| F-14 | Info | The migration modules' docstrings list handlers only to v13 and v12, and `migrations.py` re-exports none after v18 | Noted: older than this change; the new tests import the handler from its module |
+| F-15 | Info | A third index, by target party, beyond the two H-2 names | Noted: RFC 0021 §F's own index, for `list_commitments_to` |
+
 ### PR 2 — `feature/v040-rfc0021-commitment-store`
 
 **Scope**: `agents/memory/commitments.py` (new) — the `Commitment`
@@ -331,6 +351,8 @@ assign to A2 — a commitment never fires a reminder — filed and linked from
 that row.
 **Acceptance**: Phase 2 complete.
 **Estimate**: ~300 lines.
+**From PR 1 review**: F-13 — the commitments table joins the memory store
+in `docs/diagrams/memory-architecture.md`.
 
 ### PR 7 — `feature/v040-rfc0021-closeout`
 
