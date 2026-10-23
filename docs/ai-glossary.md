@@ -1212,13 +1212,13 @@ decision layer task agents and persona agents share. Its types live in
 ### Decision Policy Engine
 - **Aliases:** "the decision engine"
 - **Disallowed:** "decision maker", "action selector"
-- **Definition:** The layer that, at each decision checkpoint, lists what an agent could do next, removes what a constraint forbids, ranks the rest, picks one and writes a DecisionRecord of the choice. It runs in the agent, in manual, semi-automated or automated mode; v0.4.0 starts in manual mode.
+- **Definition:** The layer that, at each decision checkpoint, lists what an agent could do next, removes what a constraint forbids, ranks the rest, picks one and writes a DecisionRecord of the choice. It runs in the agent, in manual, semi-automated or automated mode (`PolicyMode`, which each record names); v0.4.0 starts in manual mode.
 - **Example:** "The Decision Policy Engine records that the persona replied rather than called a tool."
 
 ### Decision Checkpoint
-- **Aliases:** "checkpoint"
+- **Aliases:** "pre-act checkpoint", "pre-tool checkpoint", "pre-delegate checkpoint", "post-outcome checkpoint" — not a bare "checkpoint", which also names a saved state snapshot (`persatrix checkpoint`)
 - **Disallowed:** "decision point", "decision hook"
-- **Definition:** A point in a turn where the agent's choice is made explicit and recorded: pre-act (which class of action comes next), pre-tool, pre-delegate, and post-outcome (how it went). `Checkpoint` in `agents/decision/types.py`.
+- **Definition:** A point in a turn where the agent's choice is made explicit and recorded: pre-act (which class of action comes next), pre-tool, pre-delegate, and post-outcome (how it went). `Checkpoint` in `agents/decision/decision_types.py`.
 - **Example:** "The pre-act checkpoint sees the persona's final action list."
 
 ### Action Class
@@ -1230,7 +1230,7 @@ decision layer task agents and persona agents share. Its types live in
 ### DecisionRecord
 - **Aliases:** "decision record"
 - **Disallowed:** "decision log entry", "decision trace" (when meaning one record; a trace is a series of them)
-- **Definition:** The frozen record one checkpoint writes: its context, the candidates, the outcome (the selected candidate, its confidence, the rejections and a reason) and its subject — the agent's next action, or an RFC 0012 directive with an accept / adapt / refuse verdict. It converts to one JSON line and back unchanged, and holds a hash of any message or argument text, never the text.
+- **Definition:** The frozen record one checkpoint writes: its context, the candidates, the outcome (the selected candidate, its confidence, the rejections and a reason) and its subject — the agent's next action, or an RFC 0012 directive with an accept / adapt / refuse verdict, or with none when a tie defers it. It converts to one JSON line and back unchanged, and holds a hash of any message or argument text, never the text.
 - **Example:** "Refusing a peer's directive writes a DecisionRecord with subject `directive` and verdict `refuse`."
 
 ### Human-in-the-Loop (HITL)

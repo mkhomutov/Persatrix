@@ -19,19 +19,19 @@ runtime keeps the action itself and finds it again by ``candidate_id``.
 from __future__ import annotations
 
 import dataclasses
+import functools
 import hashlib
 import json
 import math
 import re
+import time
 import typing
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 from types import UnionType
 from typing import Any, Protocol, runtime_checkable
-
-from ..clock import agent_now
 
 __all__ = [
     "RECORD_FORMAT_VERSION",
@@ -44,14 +44,20 @@ __all__ = [
     "DecisionRecord",
     "DecisionSubject",
     "DirectiveVerdict",
+    "PolicyMode",
     "Rejection",
+    "hash_arguments",
     "hash_content",
 ]
 
-#: The ``"v"`` of a record's JSON line. A reader refuses any other version.
+#: The ``"v"`` of a record's JSON line. A field added with a default keeps
+#: it, since older lines read with the default. It goes up only for a change
+#: older lines could not be read under, and that change keeps reading them:
+#: a reader takes its own version and every older one, and refuses newer.
 RECORD_FORMAT_VERSION = 1
 
 _SHA256_HEX = re.compile(r"[0-9a-f]{64}")
+_REASON_CODE = re.compile(r"[a-z][a-z0-9_]*")
 
 
 class ActionClass(Enum):
@@ -89,6 +95,14 @@ class DirectiveVerdict(Enum):
     REFUSE = "refuse"
 
 
+class PolicyMode(Enum):
+    """Who chooses among the permitted candidates (§B)."""
+
+    MANUAL = "manual"
+    SEMI_AUTOMATED = "semi_automated"
+    AUTOMATED = "automated"
+
+
 def hash_content(text: str) -> str:
     """The digest a candidate carries in place of its text (E-10).
 
@@ -98,13 +112,28 @@ def hash_content(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
 
 
+def hash_arguments(arguments: Mapping[str, Any]) -> str:
+    """The digest of a tool call's argument values, the same in any key order,
+    so both runtimes give one call one hash."""
+    return hash_content(json.dumps(arguments, sort_keys=True, separators=(",", ":")))
+
+
 def _as_float(value: float, name: str) -> float:
     """A finite number as a float, so the JSON line has one spelling for it."""
     if isinstance(value, bool) or not isinstance(value, int | float):
         raise ValueError(f"{name} must be a number, got {value!r}")
-    if not math.isfinite(value):
+    try:
+        number = float(value)
+    except OverflowError:
+        raise ValueError(f"{name} is too large for a float") from None
+    if not math.isfinite(number):
         raise ValueError(f"{name} must be finite, got {value!r}")
-    return float(value)
+    return number
+
+
+def _check_reason(reason: str | None) -> None:
+    if reason is not None and not _REASON_CODE.fullmatch(reason):
+        raise ValueError("a reason must be a short code such as no_candidate, never text")
 
 
 @dataclass(frozen=True)
@@ -117,6 +146,9 @@ class DecisionContext:
 
     checkpoint: Checkpoint
     agent_id: str
+    #: Tells a manual record from a scored one, and semi-automated from
+    #: automated, so calibration can pick the records it needs.
+    mode: PolicyMode
     agent_type: str | None = None
     #: An ``EventType`` value, or ``"workflow_step"`` for a task.
     event_type: str | None = None
@@ -145,7 +177,8 @@ class DecisionCandidate:
     argument_names: tuple[str, ...] = ()
     #: The channel or agent the action addresses.
     target: str | None = None
-    #: ``hash_content`` of the message, reply or argument values.
+    #: ``hash_content`` of the message or reply, or ``hash_arguments`` of the
+    #: argument values.
     content_hash: str | None = None
 
     def __post_init__(self) -> None:
@@ -158,7 +191,11 @@ class Rejection:
     """A candidate a constraint or gate removed, and which one did it."""
 
     candidate_id: str
+    #: A short code, like the outcome's.
     reason: str
+
+    def __post_init__(self) -> None:
+        _check_reason(self.reason)
 
 
 @dataclass(frozen=True)
@@ -170,7 +207,8 @@ class DecisionOutcome:
     #: directive's own row says which class it governs, when it says one.
     action_class: ActionClass | None
     selected_id: str | None = None
-    #: A short code such as ``no_candidate`` or ``approval_required``.
+    #: A short code such as ``no_candidate`` or ``approval_required``, never
+    #: text from the turn (E-10).
     reason: str | None = None
     #: In [0, 1]; ``None`` in manual mode, which does not score.
     confidence: float | None = None
@@ -180,6 +218,7 @@ class DecisionOutcome:
     verdict: DirectiveVerdict | None = None
 
     def __post_init__(self) -> None:
+        _check_reason(self.reason)
         if self.confidence is not None:
             object.__setattr__(self, "confidence", _as_float(self.confidence, "confidence"))
             if not 0.0 <= self.confidence <= 1.0:
@@ -197,8 +236,9 @@ class DecisionRecord:
     #: The directive's id when ``subject`` is ``DIRECTIVE``.
     subject_id: str | None = None
     record_id: str = field(default_factory=lambda: uuid.uuid4().hex)
-    #: Agent time (``agents.clock``), as the turn's memory is stamped.
-    recorded_at: float = field(default_factory=agent_now)
+    #: Real time: ``agents.clock`` keeps telemetry and whatever reaches the
+    #: orchestrator on it, as the record's span and an approval's expiry are.
+    recorded_at: float = field(default_factory=time.time)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "recorded_at", _as_float(self.recorded_at, "recorded_at"))
@@ -212,10 +252,13 @@ class DecisionRecord:
     @classmethod
     def from_json(cls, line: str) -> DecisionRecord:
         """Read a line ``to_json`` wrote; raise ``ValueError`` on anything else."""
-        data = json.loads(line)
+        try:
+            data = json.loads(line)
+        except RecursionError as exc:
+            raise ValueError("a decision record line is nested too deeply") from exc
         version = data.pop("v", None) if isinstance(data, dict) else None
-        if type(version) is not int or version != RECORD_FORMAT_VERSION:
-            raise ValueError(f"not a version {RECORD_FORMAT_VERSION} decision record")
+        if type(version) is not int or not 1 <= version <= RECORD_FORMAT_VERSION:
+            raise ValueError(f"not a decision record of versions 1 to {RECORD_FORMAT_VERSION}")
         # Their defaults would give the line a new id, or the reader's clock.
         if missing := {"record_id", "recorded_at"} - data.keys():
             raise ValueError(f"a decision record line lacks {sorted(missing)}")
@@ -243,7 +286,8 @@ def _check_record(record: DecisionRecord) -> None:
     if outcome.selected_id is not None:
         if outcome.selected_id in rejected:
             raise ValueError("the selected candidate cannot also be rejected")
-        if classes.get(outcome.selected_id) is not outcome.action_class:
+        if (outcome.selected_id not in classes
+                or classes[outcome.selected_id] is not outcome.action_class):
             raise ValueError("the selection must name a candidate of the outcome's class")
     deferred = outcome.action_class is ActionClass.DEFER and bool(outcome.reason)
     if record.subject is DecisionSubject.ACTION:
@@ -291,8 +335,10 @@ def _decode(hint: Any, raw: Any) -> Any:
     if origin is tuple:
         if not isinstance(raw, list):
             raise ValueError(f"expected a list, got {raw!r}")
-        (item_hint, _) = typing.get_args(hint)
-        return tuple(_decode(item_hint, item) for item in raw)
+        args = typing.get_args(hint)
+        if args[1:] != (Ellipsis,):
+            raise ValueError(f"the decoder reads tuple[X, ...] only, not {hint!r}")
+        return tuple(_decode(args[0], item) for item in raw)
     if isinstance(hint, type) and issubclass(hint, Enum):
         return hint(raw)
     if dataclasses.is_dataclass(hint):
@@ -304,10 +350,16 @@ def _decode(hint: Any, raw: Any) -> Any:
     raise ValueError(f"expected {hint!r}, got {raw!r}")
 
 
+@functools.cache
+def _hints(cls: type) -> dict[str, Any]:
+    """A dataclass's field types, worked out once per class, not per line."""
+    return typing.get_type_hints(cls)
+
+
 def _decode_dataclass(cls: Any, raw: Any) -> Any:
     if not isinstance(raw, dict):
         raise ValueError(f"expected an object for {cls.__name__}, got {raw!r}")
-    hints = typing.get_type_hints(cls)
+    hints = _hints(cls)
     names = {f.name for f in dataclasses.fields(cls)}
     if unknown := raw.keys() - names:
         raise ValueError(f"{cls.__name__} has no field {sorted(unknown)}")

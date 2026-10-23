@@ -12,7 +12,7 @@ from .action_classes import (
     class_of_action,
     class_of_step,
 )
-from .types import (
+from .decision_types import (
     RECORD_FORMAT_VERSION,
     ActionClass,
     Checkpoint,
@@ -23,7 +23,9 @@ from .types import (
     DecisionRecord,
     DecisionSubject,
     DirectiveVerdict,
+    PolicyMode,
     Rejection,
+    hash_arguments,
     hash_content,
 )
 
@@ -40,8 +42,10 @@ __all__ = [
     "DecisionRecord",
     "DecisionSubject",
     "DirectiveVerdict",
+    "PolicyMode",
     "Rejection",
     "class_of_action",
     "class_of_step",
+    "hash_arguments",
     "hash_content",
 ]

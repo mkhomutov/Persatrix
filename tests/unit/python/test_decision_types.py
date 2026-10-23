@@ -1,23 +1,25 @@
-"""The decision contract's types (RFC 0028 §A and §D; PR plan PR 1, E-4 and E-5).
+"""The decision contract's types (RFC 0028 §A and §D; PR plan PR 1, E-5).
 
 These pin the vocabulary every later decision PR builds on: §A's six action
-classes and four checkpoints, a class for every persona action and every
-task-agent step, frozen types, and the one JSON line a record becomes — the
-decision log's line and the replay harness's input, so it must come back
-unchanged.
+classes and four checkpoints, frozen types, and the one JSON line a record
+becomes — the decision log's line and the replay harness's input, so it must
+come back unchanged. Each action's class is in test_decision_action_classes.py.
 """
 
 from __future__ import annotations
 
 import dataclasses
 import json
+import time
+import typing
 from collections.abc import Sequence
+from typing import Any
 
 import pytest
 
+import agents.decision.decision_types as decision_types
+from agents.clock import CLOCK_ANCHOR_ENV, CLOCK_START_ENV, reset_agent_clock
 from agents.decision import (
-    ACTION_TYPE_CLASSES,
-    STOP_REASON_CLASSES,
     ActionClass,
     Checkpoint,
     DecisionCandidate,
@@ -27,12 +29,11 @@ from agents.decision import (
     DecisionRecord,
     DecisionSubject,
     DirectiveVerdict,
+    PolicyMode,
     Rejection,
-    class_of_action,
-    class_of_step,
+    hash_arguments,
     hash_content,
 )
-from agents.llm_types import StopReason
 from agents.persona_types import ActionType
 
 # ─── The closed vocabularies ───────────────────────────────
@@ -63,49 +64,19 @@ def test_a_record_decides_an_action_or_a_directive() -> None:
     assert {v.value for v in DirectiveVerdict} == {"accept", "adapt", "refuse"}
 
 
-# ─── E-4: every action and every step has a class ──────────
-
-EXPECTED_ACTION_CLASSES = {
-    ActionType.SEND_CHANNEL_MESSAGE: ActionClass.PUBLISH_CHANNEL,
-    ActionType.COMPLETE_TASK: ActionClass.RESPOND,
-    ActionType.DELEGATE: ActionClass.DELEGATE,
-    ActionType.SPAWN_SUB_AGENT: ActionClass.DELEGATE,
-    ActionType.USE_TOOL: ActionClass.TOOL_CALL,
-    ActionType.REQUEST_APPROVAL: ActionClass.ASK_CLARIFICATION,
-    ActionType.GRANT_APPROVAL: ActionClass.RESPOND,
-    ActionType.DENY_APPROVAL: ActionClass.RESPOND,
-    ActionType.DO_NOTHING: ActionClass.DEFER,
-    ActionType.END_INTERACTION_VOTE: ActionClass.PUBLISH_CHANNEL,
-}
-
-
-def test_every_action_type_member_has_a_class() -> None:
-    # A new ActionType member fails here until it is given a class.
-    assert set(ACTION_TYPE_CLASSES) == set(ActionType)
-
-
-@pytest.mark.parametrize(("action_type", "expected"), list(EXPECTED_ACTION_CLASSES.items()))
-def test_action_type_class(action_type: ActionType, expected: ActionClass) -> None:
-    assert class_of_action(action_type) is expected
-
-
-def test_every_task_agent_step_has_a_class() -> None:
-    assert set(STOP_REASON_CLASSES) == set(StopReason)
-    assert class_of_step(StopReason.END_TURN) is ActionClass.RESPOND
-    assert class_of_step(StopReason.TOOL_USE) is ActionClass.TOOL_CALL
-    assert class_of_step(StopReason.MAX_TOKENS) is ActionClass.DEFER
-
-
-def test_the_class_tables_are_read_only() -> None:
-    with pytest.raises(TypeError):
-        ACTION_TYPE_CLASSES[ActionType.DO_NOTHING] = ActionClass.RESPOND  # type: ignore[index]
+def test_policy_modes_are_section_b_three() -> None:
+    assert {m.value for m in PolicyMode} == {"manual", "semi_automated", "automated"}
 
 
 # ─── Builders ──────────────────────────────────────────────
 
 
 def _context(**overrides: object) -> DecisionContext:
-    values: dict[str, object] = {"checkpoint": Checkpoint.PRE_ACT, "agent_id": "ember-owl"}
+    values: dict[str, object] = {
+        "checkpoint": Checkpoint.PRE_ACT,
+        "agent_id": "ember-owl",
+        "mode": PolicyMode.MANUAL,
+    }
     values.update(overrides)
     return DecisionContext(**values)  # type: ignore[arg-type]
 
@@ -128,12 +99,13 @@ def _full_record() -> DecisionRecord:
         action=ActionType.USE_TOOL.value,
         tool_name="web_search",
         argument_names=("query", "limit"),
-        content_hash=hash_content('{"query": "x", "limit": 3}'),
+        content_hash=hash_arguments({"query": "x", "limit": 3}),
     )
     return DecisionRecord(
         record_id="r-1",
         recorded_at=1_790_000_000.25,
         context=_context(
+            mode=PolicyMode.SEMI_AUTOMATED,
             agent_type="persona",
             event_type="channel_message",
             event_id="m-42",
@@ -236,14 +208,19 @@ def _mutated(path: Sequence[str | int], value: object) -> str:
     ("path", "value"),
     [
         (["v"], 2),
+        (["v"], 0),
         (["surprise"], 1),
         (["context", "surprise"], 1),
         (["context", "checkpoint"], "pre_lunch"),
         (["candidates", 0, "action_class"], "shout"),
         (["outcome", "confidence"], "high"),
         (["outcome", "confidence"], True),
+        # Too large for a float.
+        pytest.param(["outcome", "confidence"], 10**400, id="confidence-overflows-float"),
+        pytest.param(["recorded_at"], 10**400, id="time-overflows-float"),
         (["candidates", 0, "argument_names"], "query"),
         (["context", "agent_id"], 7),
+        (["outcome", "reason"], "the launch is on Friday"),
     ],
 )
 def test_from_json_refuses_a_malformed_line(path: list[str | int], value: object) -> None:
@@ -251,11 +228,44 @@ def test_from_json_refuses_a_malformed_line(path: list[str | int], value: object
         DecisionRecord.from_json(_mutated(path, value))
 
 
-def test_from_json_refuses_a_missing_required_field() -> None:
+def test_from_json_refuses_a_line_nested_too_deep() -> None:
+    with pytest.raises(ValueError):
+        DecisionRecord.from_json("[" * 100_000 + "]" * 100_000)
+
+
+@pytest.mark.parametrize("key", ["agent_id", "mode"])
+def test_from_json_refuses_a_missing_required_field(key: str) -> None:
     data = json.loads(_full_record().to_json())
-    del data["context"]["agent_id"]
+    del data["context"][key]
     with pytest.raises(ValueError):
         DecisionRecord.from_json(json.dumps(data))
+
+
+def test_a_reader_reads_older_versions(monkeypatch: pytest.MonkeyPatch) -> None:
+    line = _full_record().to_json()
+    monkeypatch.setattr(decision_types, "RECORD_FORMAT_VERSION", 2)
+    assert DecisionRecord.from_json(line) == _full_record()
+
+
+def test_the_decoder_refuses_a_fixed_length_tuple() -> None:
+    # It reads tuple[X, ...] only; a pair would come back as two of its first type.
+    with pytest.raises(ValueError):
+        decision_types._decode(tuple[str, ActionClass], ["x", "respond"])
+
+
+def test_reading_a_line_resolves_each_type_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    line = _full_record().to_json()
+    DecisionRecord.from_json(line)
+    calls: list[object] = []
+    real = typing.get_type_hints
+
+    def counting(cls: Any) -> dict[str, Any]:
+        calls.append(cls)
+        return real(cls)
+
+    monkeypatch.setattr(typing, "get_type_hints", counting)
+    DecisionRecord.from_json(line)
+    assert calls == []
 
 
 @pytest.mark.parametrize("key", ["record_id", "recorded_at"])
@@ -293,7 +303,23 @@ def test_integer_numbers_are_stored_as_floats() -> None:
     assert DecisionRecord.from_json(line).to_json() == line
 
 
-@pytest.mark.parametrize("value", [True, float("inf"), float("nan")])
+def test_a_record_is_stamped_in_real_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Telemetry stays on real time (agents.clock), as the record's span and an
+    # approval's expiry do, even when the agent's clock is shifted.
+    monkeypatch.setenv(CLOCK_START_ENV, "2001-01-01T00:00:00+00:00")
+    monkeypatch.delenv(CLOCK_ANCHOR_ENV, raising=False)
+    reset_agent_clock()
+    try:
+        before = time.time()
+        record = _record(DecisionOutcome(ActionClass.DEFER, reason="x"))
+        assert before <= record.recorded_at <= time.time()
+    finally:
+        reset_agent_clock()
+
+
+@pytest.mark.parametrize(
+    "value", [True, float("inf"), float("nan"), pytest.param(10**400, id="overflows-float")]
+)
 def test_a_time_is_a_finite_number(value: float) -> None:
     with pytest.raises(ValueError):
         DecisionRecord(
@@ -322,6 +348,23 @@ def test_any_python_string_can_be_hashed() -> None:
     # refuses to encode.
     assert hash_content("a\ud83d") != hash_content("a")
     assert len(hash_content("a\ud83d")) == 64
+
+
+def test_argument_values_hash_the_same_in_any_key_order() -> None:
+    assert hash_arguments({"query": "x", "limit": 3}) == hash_arguments({"limit": 3, "query": "x"})
+    assert hash_arguments({"query": "x"}) == hash_content('{"query":"x"}')
+
+
+@pytest.mark.parametrize("reason", ["the launch is on Friday", "Approval_Required", ""])
+@pytest.mark.parametrize(
+    "make",
+    [lambda reason: DecisionOutcome(ActionClass.DEFER, reason=reason),
+     lambda reason: Rejection("c0", reason)],
+    ids=["outcome", "rejection"],
+)
+def test_a_reason_is_a_code_not_text(make: Any, reason: str) -> None:
+    with pytest.raises(ValueError):
+        make(reason)
 
 
 def test_content_hash_must_be_a_sha256_digest() -> None:
@@ -380,6 +423,9 @@ def _record(outcome: DecisionOutcome, candidates: tuple[DecisionCandidate, ...] 
          {"subject": DecisionSubject.DIRECTIVE, "subject_id": "dir-9"}),
         (DecisionOutcome(ActionClass.DEFER), (),
          {"subject": DecisionSubject.DIRECTIVE, "subject_id": "dir-9"}),
+        # A verdict selects no candidate, least of all one that is not there.
+        (DecisionOutcome(None, selected_id="ghost", verdict=DirectiveVerdict.REFUSE),
+         (_publish(),), {"subject": DecisionSubject.DIRECTIVE, "subject_id": "dir-9"}),
         # An action record has an action class and names no directive.
         (DecisionOutcome(None, reason="x"), (), {}),
         (DecisionOutcome(ActionClass.DEFER, reason="x"), (), {"subject_id": "dir-9"}),
@@ -403,7 +449,10 @@ def test_a_tied_directive_defers_with_its_reason() -> None:
     assert record.outcome.verdict is None
 
 
-@pytest.mark.parametrize("confidence", [-0.1, 1.5, float("nan"), float("inf"), True])
+@pytest.mark.parametrize(
+    "confidence",
+    [-0.1, 1.5, float("nan"), float("inf"), True, pytest.param(10**400, id="overflows-float")],
+)
 def test_confidence_is_a_probability(confidence: float) -> None:
     with pytest.raises(ValueError):
         DecisionOutcome(ActionClass.DEFER, reason="x", confidence=confidence)

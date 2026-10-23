@@ -10,7 +10,7 @@ refs:
   - docs/rfcs/0028-pr-plan.md
   - docs/rfcs/0029-personal-society-storage-split.md
   - docs/v0.4.0-plan.md
-  - agents/decision/types.py
+  - agents/decision/decision_types.py
 ---
 
 # ISSUE-0189: Decision records are runtime-local

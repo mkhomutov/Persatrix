@@ -15,7 +15,7 @@ from types import MappingProxyType
 
 from ..llm_types import StopReason
 from ..persona_types import ActionType
-from .types import ActionClass
+from .decision_types import ActionClass
 
 __all__ = [
     "ACTION_TYPE_CLASSES",

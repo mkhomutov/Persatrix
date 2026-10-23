@@ -289,7 +289,7 @@ PR, numbered `F-n`.
 
 ### PR 1 — `feature/v040-rfc0028-types`
 
-**Scope**: a new `agents/decision/` with `types.py`: `ActionClass` (§A's six),
+**Scope**: a new `agents/decision/` with `decision_types.py`: `ActionClass` (§A's six),
 `Checkpoint` (the four), `DecisionContext`, `DecisionCandidate`,
 `DecisionOutcome`, `DecisionRecord`, and a `DecisionPolicy` protocol with
 `select(context, candidates)`. The eight glossary entries the RFC's next steps
@@ -323,6 +323,21 @@ trip is stable; nothing in `agents/decision/` imports a runtime loop.
 | F-13 | Info | The PR 1 row did not link its PR | Fixed in-PR once the PR was open |
 | F-14 | Low | `content_hash` is an unsalted SHA-256, so a short or guessable text — a yes or no, a small number, a known channel name — can be recovered by hashing guesses | → deferred to PR 3 |
 | F-15 | Info | Construction checks no text or tuple field's type: `agent_id=7` is written and refused on read, and a list of candidates makes `to_json` raise | Noted: mypy types every caller, and PR 3's sink counts a write error without failing the turn |
+| F-16 | Medium | A verdict record whose `selected_id` named no candidate passed: the lookup gave `None`, the verdict's own class | Fixed in-PR: a selection must name a candidate of the outcome's class |
+| F-17 | Low | A number too large for a float raised `OverflowError`, and a deeply nested line `RecursionError`, not `ValueError` | Fixed in-PR: both become `ValueError` |
+| F-18 | Low | The import walk dropped imports from the package root (`from .. import X`, `import agents`), whose `__init__` loads both runtimes | Fixed in-PR: such an import walks the root's `__init__` |
+| F-19 | Low | The walk skipped the package `__init__` an import runs first, such as `agents/tools/__init__.py` for `agents.tools.permissions` | Fixed in-PR: every package above an imported module is walked |
+| F-20 | Low | An outcome's or a rejection's `reason` took any text, so E-10 rested on each caller | Fixed in-PR: a reason is a short code (`[a-z][a-z0-9_]*`); `rationale` stays the policy's own words |
+| F-21 | Low | The decoder read a fixed-length tuple as `tuple[X, ...]` without a word | Fixed in-PR: it refuses any other tuple |
+| F-22 | Low | A reader refused every version but its own, so a version bump would orphan every log line | Fixed in-PR: a reader takes its version and older ones; the version goes up only for a change older lines cannot be read under |
+| F-23 | Low | Only `hash_content(text)` existed, so each runtime would write argument values its own way before hashing | Fixed in-PR: `hash_arguments`, over canonical JSON |
+| F-24 | Low | `recorded_at` was agent time, though `agents.clock` keeps telemetry and what reaches the orchestrator on real time, as the span and an approval's expiry are | Fixed in-PR: real time |
+| F-25 | Low | The decoder resolved each dataclass's type hints on every line, about six times slower than once | Fixed in-PR: once per class |
+| F-26 | Info | The hand-rolled import walk duplicates the import-linter gate | Noted: import-linter's graph misses F-19's case, so the walk stays |
+| F-27 | Low | A record did not name its policy mode, so semi-automated and automated records looked alike | Fixed in-PR: `DecisionContext.mode`, a `PolicyMode` |
+| F-28 | Low | The glossary gave every directive record a verdict; a tie has none | Fixed in-PR |
+| F-29 | Info | The glossary aliased Decision Checkpoint as a bare "checkpoint", which also names a saved state snapshot | Fixed in-PR: the four named checkpoints are the aliases |
+| F-30 | Low | `types.py` shadows the standard `types` module when its directory is first on `sys.path`; the repo names these `<area>_types.py` | Fixed in-PR: `decision_types.py`; the action-class tests move to their own file, keeping the types tests under 500 lines |
 
 ### PR 2 — `feature/v040-rfc0028-pipeline`
 
