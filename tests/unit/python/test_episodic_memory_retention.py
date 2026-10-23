@@ -162,44 +162,41 @@ class TestDeleteOldEpisodes:
 
 
 class TestFutureMigration:
-    async def test_hypothetical_v20_migration_applied(self):
-        """Patch MIGRATIONS with a hypothetical v20 entry, verify v1–v20 applied.
+    async def test_hypothetical_next_migration_applied(self):
+        """Patch MIGRATIONS with a hypothetical next entry, verify all applied.
 
         Forward-compat probe — always one past the highest real
-        migration.  Bumped v19 → v20 when migration v19 (ISSUE-0130 (b):
-        the ``episodes(agent_id, interaction_id)`` index) landed, as it
-        was bumped v18 → v19 before that; the rename + table-name bump
-        preserves the "one-past-the-tail collision" contract that
-        previously caught ``UNIQUE constraint failed:
-        schema_version.version`` regressions.
+        migration, worked out from the registry so a new migration never
+        collides with it (it was a literal, bumped by hand at v19, v20 and
+        v21, until the commitments table's review); it preserves the
+        "one-past-the-tail collision" contract that previously caught
+        ``UNIQUE constraint failed: schema_version.version`` regressions.
         """
         from agents.memory.migrations import MIGRATIONS
 
-        v20 = (
-            20,
+        nxt = max(v for v, _, _ in MIGRATIONS) + 1
+        probe = (
+            nxt,
             "Hypothetical test-only table",
-            "CREATE TABLE IF NOT EXISTS _test_v20 (id TEXT PRIMARY KEY);",
+            "CREATE TABLE IF NOT EXISTS _test_next (id TEXT PRIMARY KEY);",
         )
         original = list(MIGRATIONS)
         try:
-            MIGRATIONS.append(v20)
+            MIGRATIONS.append(probe)
             mem = EpisodicMemory(agent_id="test-agent", db_path=":memory:")
             await mem.initialize()
             db = mem._ensure_db()
 
-            # All twenty versions should be recorded
+            # Every version, the probe's included, should be recorded
             async with db.execute(
                 "SELECT version FROM schema_version ORDER BY version"
             ) as cursor:
                 versions = [r[0] for r in await cursor.fetchall()]
-            assert versions == [
-                1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17,
-                18, 19, 20,
-            ]
+            assert versions == list(range(1, nxt + 1))
 
-            # v20 table should exist
+            # The probe's table should exist
             async with db.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='_test_v20'"
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='_test_next'"
             ) as cursor:
                 assert await cursor.fetchone() is not None
 

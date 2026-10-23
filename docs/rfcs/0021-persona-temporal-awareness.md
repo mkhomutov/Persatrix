@@ -263,6 +263,13 @@ CREATE INDEX idx_commitments_due_state ON commitments(state, due_at);
 CREATE INDEX idx_commitments_target ON commitments(target_party, state);
 ```
 
+> 2026-10-23 — Memory-store migration v20 builds the table as the
+> [Phase 2 PR plan](0021-phase2-pr-plan.md#phase-0--open-questions-and-design-points)'s
+> H-2 says, which corrects the SQL above: `agent_id` and a `kind`, since
+> RFC 0012's directives share the table; `due_at` and `state` required of
+> commitments only; and indexes led by `agent_id` and `kind`
+> (`idx_commitments_due`, `idx_commitments_target`).
+
 **Why a separate table, not Notes.** Notes are unstructured topic-content pairs with no due date and no lifecycle. Commitments need indexed queries on `due_at` (for the tick-loop scan), structured `target_party` (so "what did I promise Alice?" returns deterministically), and a state machine. Trying to store commitments as notes would mean parsing free-text descriptions to find due dates — exactly the failure pattern this RFC exists to fix.
 
 **Why per-agent (not centralized in the orchestrator).** Each agent owns its own view. When Agent A promises Agent B, A records "I promised B" in A's store; B may independently record "A promised me" in B's store. A canonical ledger across agents is a v0.4.0+ concern (RFC 0012 organizational layer). Per-agent gives us the right behavior with no new cross-agent contracts.

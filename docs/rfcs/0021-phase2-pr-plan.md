@@ -1,7 +1,7 @@
 # RFC 0021 — Persona Temporal Awareness — PR Implementation Plan (Phase 2)
 
 **RFC**: [0021-persona-temporal-awareness.md](0021-persona-temporal-awareness.md)
-**Status**: ⬜ Not started
+**Status**: 🔄 In progress
 **Created**: 2026-10-21
 **Branch prefix**: `feature/v040-rfc0021-`
 **Target**: `main`
@@ -83,7 +83,7 @@ asks row A2 for the following; nothing is asked of A2 by the RFC 0028 plan.
 | `due_at` nullable for a directive | PR 1: required for a commitment, nullable for a directive, by a check constraint | — |
 | §E's fields: `issuer_id`, `issuing_channel_id`, `channel_authority`, `issuer_authority`, `scope` | PR 1 | — |
 | The scope columns a fact carries, read with the facts tier's filters | PR 1 (`session_id`, `principal_id`, `epoch_id`, `protection_level`); PR 2 reads them with the same helpers | — |
-| A directive status outside the commitment `state` constraint | PR 1: `directive_status`, its seven values, with `state` null on a directive row and `directive_status` null on a commitment row | — |
+| A directive status outside the commitment `state` constraint | PR 1: `directive_status`, with `state` null on a directive row and `directive_status` null on a commitment row; PR 3 checks its seven values | — |
 | The structured form: polarity, action class, target | PR 1: `polarity`, `action_class`, `target` | — |
 | The graph version | PR 1: `graph_version` | — |
 | `conflicts_with`, a mark that the conflict check ran, a count of its failures | PR 1: `conflicts_with_json`, `conflict_checked_at`, `conflict_failures` | — |
@@ -190,7 +190,7 @@ each settled by a new default in the PR named:
 
 | PR | Row | Title | Branch | Status | GitHub PR | Merged |
 |----|-----|-------|--------|--------|-----------|--------|
-| 1 | A2 | The `commitments` table (memory-store migration v20) | `feature/v040-rfc0021-commitments-table` | ⬜ | — | — |
+| 1 | A2 | The `commitments` table (memory-store migration v20) | `feature/v040-rfc0021-commitments-table` | 🔀 | [#1053](https://github.com/mkhomutov/Persatrix/pull/1053) | — |
 | 2 | A2 | `CommitmentStore`: make, list, fulfil, cancel | `feature/v040-rfc0021-commitment-store` | ⬜ | — | — |
 | 3 | A2 | Directive rows: the store calls RFC 0012 uses | `feature/v040-rfc0021-directive-calls` | ⬜ | — | — |
 | 4 | A2 | The open-commitments prompt block | `feature/v040-rfc0021-commitments-block` | ⬜ | — | — |
@@ -243,11 +243,39 @@ moves to 🚧 Implementing in this PR if it has not already.
 exists), `CREATE … IF NOT EXISTS`, one commit.
 **Tests**: the migration on a populated v19 store; each check constraint
 refuses a row of the wrong shape (a commitment with no `due_at`, a directive
-with a `state`, an unknown `directive_status`); the defaults of the scope
+with a `state`, a due time that is not a number); the defaults of the scope
 columns match the facts tier's.
 **Migration**: **memory store**, v19 → v20; read by PR 2.
 **Acceptance**: the table exists and nothing reads it.
 **Estimate**: ~300 lines.
+
+**Review findings** (PR 1):
+
+| Finding | Severity | Description | Disposition |
+|---------|----------|-------------|-------------|
+| F-1 | Medium | The retention suite's forward-compatibility probe added a pretend v20, which collided with the real one; the plan named only the version pin in `test_episodic_memory_core.py` | Fixed in-PR: the probe moves to v21 |
+| F-2 | Info | One log-correlation integration test fails in a local full run, also on `main` in the same environment, and passes alone | Noted: not this change; CI runs it |
+| F-3 | Low | The replay test ran with the indexes already in place, so it could not catch a handler that indexes only a table it creates — the crash SQLite allows when upgrading a v19 store, since each `CREATE` then commits on its own | Fixed in-PR: the indexes are dropped before the replay |
+| F-4 | Low | Nothing pinned NOT NULL outside the scope columns, and `id` could hold NULL, as a SQLite text primary key may | Fixed in-PR: every column's declaration is pinned, and `id` is NOT NULL; eleven mutants of the table and the handler now each fail a test |
+| F-5 | Low | The module docstring said the kinds were kept wholly apart, that no conflict field had a check, and that the handler made one commit | Fixed in-PR: the docstring says which columns are kept apart and how a replay repairs a crash |
+| F-6 | Info | The target-read plan test left out the `kind` filter every reader will send | Fixed in-PR |
+| F-7 | Info | The umbrella re-run test pins the version gate, not the handler's replay | Fixed in-PR: its docstring says so; the replay test covers the handler |
+| F-8 | Info | "RFC 0012's directive calls (PR 3)" read as RFC 0012's PR 3 | Fixed in-PR: "the same plan's PR 3" |
+| F-9 | Info | ~785 changed lines against a ~300 estimate and the 500-line target; the tests are about three quarters of it | Noted: the migration stays with its tests |
+| F-10 | Info | The PR 1 row did not link its PR | Fixed in-PR once the PR was open |
+| F-11 | Info | The fixes took the test file past 500 lines | Fixed in-PR: the check-constraint tests split into `test_commitments_constraints.py`, the shared rows into a helper module |
+| F-12 | Info | The glossary has no *commitment* or *directive* | Fixed in-PR (second review): both added, as the term rule asks of the change that introduces them; PR 6 adds *commitments tier*, and RFC 0012's PR 1 finds *directive* there |
+| F-13 | Info | The memory-architecture diagram does not show the table | → deferred to PR 6 |
+| F-14 | Info | The migration modules' docstrings list handlers only to v13 and v12, and `migrations.py` re-exports none after v18 | Fixed in-PR (second review): `migrations.py` re-exports v19 and v20, and the tests import the handler from it; the docstrings' lists stay as they are |
+| F-15 | Info | A third index, by target party, beyond the two H-2 names | Noted: RFC 0021 §F's own index, for `list_commitments_to` |
+| F-16 | Low | A due time or creation time that is not a number was accepted, and such a due time sorts after every real one and never falls due | Fixed in-PR: both columns are checked to hold numbers |
+| F-17 | Low | The target-party index left out `kind`, so for that read it tied with the other two and won only by the order the indexes were made in | Fixed in-PR: it is `(agent_id, kind, target_party, state)`; a test builds the indexes in reverse order |
+| F-18 | Low | An empty issuer satisfied "a directive has an issuer", and an empty description was accepted | Fixed in-PR: both must be non-empty |
+| F-19 | Low | A `commitments` table of another shape already in the store was kept without a word, and v20 recorded over it | Fixed in-PR: the handler logs a warning naming the missing columns |
+| F-20 | Low | The `directive_status` check froze a vocabulary that has grown once already, against the reason the docstring gives for leaving RFC 0012's other columns unchecked | Fixed in-PR: the check is gone; PR 3's store calls check the seven (H-11), and a test pins that the table accepts another |
+| F-21 | Low | RFC 0021 §F's SQL no longer matched the table | Fixed in-PR: a dated note under §F points at H-2 |
+| F-22 | Info | The forward-compatibility probe still named its version, so the next migration would collide with it as F-1's did | Fixed in-PR: it probes one past the highest registered version |
+| F-23 | Info | The docstring said each `CREATE` commits on its own, which holds only when upgrading a v19 store | Fixed in-PR: the docstring names that path |
 
 ### PR 2 — `feature/v040-rfc0021-commitment-store`
 
@@ -326,11 +354,13 @@ still pass.
 "remind me to call Bob tomorrow at 3pm" stores a commitment that appears in
 its next prompt, and a second principal's prompt shows none of it; a
 commitments section in `docs/guides/persona-agents.md`; the glossary's
-*commitment* and *commitments tier*; the issue the v0.4.0 plan's Known Gaps
+*commitments tier* (*commitment* and *directive* came with PR 1); the issue the v0.4.0 plan's Known Gaps
 assign to A2 — a commitment never fires a reminder — filed and linked from
 that row.
 **Acceptance**: Phase 2 complete.
 **Estimate**: ~300 lines.
+**From PR 1 review**: F-13 — the commitments table joins the memory store
+in `docs/diagrams/memory-architecture.md`.
 
 ### PR 7 — `feature/v040-rfc0021-closeout`
 

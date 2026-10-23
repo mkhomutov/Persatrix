@@ -48,6 +48,8 @@ from ._migration_handlers import (
     _apply_migration_16,
     _apply_migration_17,
     _apply_migration_18,
+    _apply_migration_19,
+    _apply_migration_20,
 )
 from ._migration_protection import PROTECTION_LEVEL_DEFAULT
 from ._migration_registry import MIGRATIONS
@@ -75,6 +77,8 @@ __all__ = [
     "_apply_migration_16",
     "_apply_migration_17",
     "_apply_migration_18",
+    "_apply_migration_19",
+    "_apply_migration_20",
     "_apply_migrations",
     "_fts5_available",
 ]

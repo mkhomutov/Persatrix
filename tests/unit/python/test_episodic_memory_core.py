@@ -85,8 +85,10 @@ class TestMigrations:
         # episodes + facts — the v0.3.15 residuals PR 3 speaker axis).
         # 18 → 19 alongside migration v19 (ISSUE-0130 (b), PR B2 review:
         # index episodes(agent_id, interaction_id) — the close path's
-        # Phase-2 match and the replay re-derivation guard).
-        assert len(rows) == 19
+        # Phase-2 match and the replay re-derivation guard).  19 → 20
+        # alongside migration v20 (RFC 0021 Phase 2 PR 1: the commitments
+        # table).
+        assert len(rows) == 20
         assert rows[0][0] == 1
         assert "Initial schema" in rows[0][1]
         assert rows[1][0] == 2
@@ -157,6 +159,10 @@ class TestMigrations:
         # swap between the two would otherwise round-trip green.
         assert rows[18][0] == 19
         assert "index episodes" in rows[18][1].lower()
+        # v20 adds RFC 0021 Phase 2's table — disambiguated by the
+        # ``commitments`` token (no other migration carries it).
+        assert rows[19][0] == 20
+        assert "commitments" in rows[19][1].lower()
 
     async def test_migrations_are_idempotent(self, memory: EpisodicMemory):
         """Re-running migrations does not error or duplicate rows."""
@@ -175,8 +181,10 @@ class TestMigrations:
         # 17 → 18 alongside migration v18 (ISSUE-0131: speaker_id on
         # episodes + facts).  18 → 19 alongside migration v19
         # (ISSUE-0130 (b): the episodes(agent_id, interaction_id) index).
+        # 19 → 20 alongside migration v20 (RFC 0021 Phase 2 PR 1: the
+        # commitments table).
         # Same row-count discipline as ``test_migration_version_recorded``.
-        assert row[0] == 19
+        assert row[0] == 20
 
     async def test_wal_mode_enabled(self):
         """WAL mode is set on file-based databases (not :memory:)."""
