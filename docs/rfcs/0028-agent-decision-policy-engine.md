@@ -3,7 +3,7 @@ id: RFC-0028
 title: Agent Decision Policy Engine
 summary: Per-agent declarative policy engine governing tool selection, delegation, and channel-publish decisions — Phases 1–3 in v0.4.0, collective extension in v0.5.0+.
 type: architecture
-status: accepted
+status: implementing
 author: Maksim Khomutov
 created: 2026-05-02
 target: v0.4.0 (Phases 1–3); v0.5.0+ (Phase 4 collective extension)
@@ -15,7 +15,7 @@ depends_on:
 # RFC 0028 - Agent Decision Policy Engine
 
 **Type**: architecture
-**Status**: 👍 Accepted — Phases 1, 2 and 2a for v0.4.0, Phase 3 cuttable; Phase 4 for v0.5.0+
+**Status**: 🚧 Implementing — Phases 1, 2 and 2a for v0.4.0, Phase 3 cuttable; Phase 4 for v0.5.0+
 **PR plan**: [0028-pr-plan.md](0028-pr-plan.md) — Phases 1–3, the v0.4.0 plan's rows B1–B3 and D1
 **Accepted**: by the maintainer's review approval of [#1047](https://github.com/mkhomutov/Persatrix/pull/1047), row R1 of the [v0.4.0 plan](../v0.4.0-plan.md#progress)
 **Author**: Maksim Khomutov
