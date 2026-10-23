@@ -11,7 +11,8 @@ own promise (``kind = 'commitment'``) and an instruction someone gave it
   written without them is scoped as a fact written without them is
 * an in-place upgrade from a populated v19 store adds the table and
   leaves every earlier row and schema object as it was
-* the handler is idempotent and leaves a pre-existing table alone
+* the handler is idempotent and leaves a pre-existing table alone,
+  warning when it lacks any column
 
 The check constraints are tested in ``test_commitments_constraints.py``.
 
@@ -21,17 +22,19 @@ reader.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import aiosqlite
 import pytest
 
 from agents.epoch_id import DEFAULT_EPOCH_ID
-from agents.memory._migration_commitments import _apply_migration_20
+from agents.memory import _migration_commitments
 from agents.memory.episodic import EpisodicMemory
 from agents.memory.migrations import (
     MIGRATIONS,
     PROTECTION_LEVEL_DEFAULT,
+    _apply_migration_20,
     _apply_migrations,
 )
 from agents.principal_id import DEFAULT_PRINCIPAL_ID
@@ -40,6 +43,7 @@ from agents.session_id import LEGACY_SESSION_ID
 from ._commitments_migration_helpers import COMMITMENT, DIRECTIVE, insert
 
 _SCOPE_COLUMNS = ("session_id", "principal_id", "epoch_id", "protection_level")
+_LOGGER = "agents.memory._migration_commitments"
 
 # ``(type, notnull, default)`` of every other column, as ``PRAGMA
 # table_info`` reports it.  The scope columns are pinned against the facts
@@ -79,7 +83,7 @@ _INDEX_COLUMNS: dict[str, list[str]] = {
     # RFC 0012's reads, by directive status
     "idx_commitments_directive": ["agent_id", "kind", "directive_status"],
     # ``list_commitments_to(target_party)``
-    "idx_commitments_target": ["agent_id", "target_party", "state"],
+    "idx_commitments_target": ["agent_id", "kind", "target_party", "state"],
 }
 
 
@@ -146,6 +150,8 @@ class TestFreshStore:
             f"unexpected: {set(info) - set(_DECLARED) - set(_SCOPE_COLUMNS)}"
         )
         assert {name: info[name] for name in _DECLARED} == _DECLARED
+        # The handler's missing-column warning reads the same names.
+        assert _migration_commitments._COLUMNS == set(info)
 
     @pytest.mark.parametrize("index, columns", list(_INDEX_COLUMNS.items()))
     async def test_indexes(
@@ -183,6 +189,28 @@ class TestFreshStore:
         plan = " ".join(row[3] for row in await cursor.fetchall())
         assert index in plan, plan
         assert "TEMP B-TREE" not in plan, plan
+
+    async def test_target_read_index_wins_in_any_creation_order(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ):
+        """SQLite breaks a tie between equally matching indexes by the
+        order they were made in; the target index must win on its own."""
+        monkeypatch.setattr(
+            _migration_commitments, "_INDEXES",
+            tuple(reversed(_migration_commitments._INDEXES)),
+        )
+        db = await aiosqlite.connect(":memory:")
+        try:
+            await _apply_migration_20(db)
+            cursor = await db.execute(
+                "EXPLAIN QUERY PLAN SELECT id FROM commitments "
+                "WHERE agent_id = 'a' AND kind = 'commitment' "
+                "AND target_party = 'bob'",
+            )
+            plan = " ".join(row[3] for row in await cursor.fetchall())
+            assert "idx_commitments_target" in plan, plan
+        finally:
+            await db.close()
 
     async def test_records_v20(self, memory: EpisodicMemory):
         async with memory._ensure_db().execute(
@@ -307,24 +335,27 @@ class TestUpgradeFromV19:
 
 class TestIdempotency:
     async def test_handler_replay_keeps_rows_and_rebuilds_indexes(
-        self, memory: EpisodicMemory,
+        self, memory: EpisodicMemory, caplog: pytest.LogCaptureFixture,
     ):
-        """The crash after the table and before its indexes — SQLite
-        commits each CREATE on its own — then the version record never
-        written: the replay keeps the rows and builds the missing indexes."""
+        """The crash after the table and before its indexes — upgrading a
+        v19 store, SQLite commits each CREATE on its own — then the version
+        record never written: the replay keeps the rows, builds the missing
+        indexes, and warns of nothing, since the table is whole."""
         db = memory._ensure_db()
         await insert(db, COMMITMENT)
         for index in _INDEX_COLUMNS:
             await db.execute(f"DROP INDEX {index}")
         await db.commit()
 
-        await _apply_migration_20(db)
+        with caplog.at_level(logging.WARNING, logger=_LOGGER):
+            await _apply_migration_20(db)
 
         async with db.execute("SELECT id FROM commitments") as cursor:
             rows = [r[0] for r in await cursor.fetchall()]
         assert rows == ["c-1"]
         for index, columns in _INDEX_COLUMNS.items():
             assert await _index_columns(db, index) == columns
+        assert not [r for r in caplog.records if r.name == _LOGGER]
 
     async def test_umbrella_rerun_records_v20_once(
         self, memory: EpisodicMemory,
@@ -341,10 +372,13 @@ class TestIdempotency:
         assert row is not None
         assert row[0] == 1
 
-    async def test_stub_table_left_alone(self):
+    async def test_stub_table_left_alone(
+        self, caplog: pytest.LogCaptureFixture,
+    ):
         """A partial restore that already holds a ``commitments`` table of
         another shape: the handler neither drops it nor indexes columns
-        it lacks, and the umbrella still records v20."""
+        it lacks, and the umbrella still records v20 — but it warns,
+        naming what is missing, since no later run looks again."""
         db = await aiosqlite.connect(":memory:")
         try:
             await db.execute(
@@ -359,8 +393,11 @@ class TestIdempotency:
             await db.execute("INSERT INTO commitments VALUES ('kept')")
             await db.commit()
 
-            await _apply_migrations(db)
+            with caplog.at_level(logging.WARNING, logger=_LOGGER):
+                await _apply_migrations(db)
 
+            [record] = [r for r in caplog.records if r.name == _LOGGER]
+            assert "due_at" in record.getMessage()
             assert set(await _column_info(db, "commitments")) == {"id"}
             async with db.execute("SELECT id FROM commitments") as cursor:
                 assert [r[0] for r in await cursor.fetchall()] == ["kept"]

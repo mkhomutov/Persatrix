@@ -58,6 +58,15 @@ class TestCheckConstraints:
             memory._ensure_db(), {**DIRECTIVE, "directive_status": status},
         )
 
+    async def test_directive_status_vocabulary_left_to_the_store(
+        self, memory: EpisodicMemory,
+    ):
+        """RFC 0012's statuses have grown once already; PR 3's store calls
+        check them, so a new one needs no table rebuild."""
+        await insert(
+            memory._ensure_db(), {**DIRECTIVE, "directive_status": "withdrawn"},
+        )
+
     async def test_vocabularies_are_the_plans(self):
         assert COMMITMENT_STATES == ("open", "fulfilled", "missed", "cancelled")
         # The RFC 0012 plan's seven, outside the commitment ``state``
@@ -81,13 +90,15 @@ class TestCheckConstraints:
             ("directive", {"state": "open"}, "commitments_kind_shape"),
             ("directive", {"directive_status": None}, "commitments_kind_shape"),
             ("directive", {"issuer_id": None}, "commitments_kind_shape"),
+            ("directive", {"issuer_id": ""}, "commitments_kind_shape"),
             ("commitment", {"kind": "expectation"}, "commitments_kind"),
+            ("commitment", {"description": ""}, "commitments_description"),
+            # A due time that is not a number would sort after every real
+            # one and never fall due.
+            ("commitment", {"due_at": "tomorrow"}, "commitments_due_at"),
+            ("directive", {"due_at": "tomorrow"}, "commitments_due_at"),
+            ("commitment", {"created_at": "now"}, "commitments_created_at"),
             ("commitment", {"state": "done"}, "commitments_state"),
-            (
-                "directive",
-                {"directive_status": "approved"},
-                "commitments_directive_status",
-            ),
             (
                 "directive",
                 {"conflict_failures": -1},
@@ -102,9 +113,13 @@ class TestCheckConstraints:
             "directive-with-state",
             "directive-without-directive_status",
             "directive-without-issuer",
+            "directive-with-empty-issuer",
             "unknown-kind",
+            "empty-description",
+            "commitment-with-text-due_at",
+            "directive-with-text-due_at",
+            "text-created_at",
             "unknown-state",
-            "unknown-directive_status",
             "negative-conflict_failures",
         ],
     )

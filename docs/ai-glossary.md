@@ -611,6 +611,18 @@ Terms introduced by [docs/storage-architecture-roadmap.md](storage-architecture-
 - **Definition:** A society-shared memory tier holding extracted patterns of *how to do things*, populated by [RFC 0015](rfcs/0015-process-automation-pattern-extraction.md). Distinct from declarative facts and from skills in the Skill Registry; the open question of whether it collapses into RFC 0014's catalogue is tracked in SA-2 ([storage-architecture-roadmap.md OQ #5](storage-architecture-roadmap.md#open-questions)).
 - **Example:** "Procedural memory holds the recipe for `triage-a-bug-report`; skills register the tool capability that runs it."
 
+### Commitment
+- **Aliases:** —
+- **Disallowed:** "reminder" (when meaning the stored promise; a reminder is RFC 0021 Phase 3's event), "todo"
+- **Definition:** A persona's own promise to do something by a due time, kept as a `kind = 'commitment'` row of the `commitments` table in its memory store ([RFC 0021](rfcs/0021-persona-temporal-awareness.md) §F, migration v20), with a state: `open`, then `fulfilled`, `missed` or `cancelled`. Distinct from a note, which has no due time, and from a Directive.
+- **Example:** "'I'll send Bob the notes on Friday' becomes an open commitment due Friday, to `bob`."
+
+### Directive
+- **Aliases:** —
+- **Disallowed:** "command", "order"
+- **Definition:** An instruction another member of an organization gives a persona, kept with its provenance ([RFC 0012](rfcs/0012-protocols-organizations.md) §E's cross-context influence record) as a `kind = 'directive'` row of the same `commitments` table, with a directive status (`pending`, then `accepted`, `adapted`, `refused` and so on) in place of a commitment's state.
+- **Example:** "Alice's 'do not post the launch date in #general' is stored as a pending directive with issuer `alice`."
+
 ## RFC 0008 — Context Budget & Packaging
 
 Terms introduced by [RFC 0008](rfcs/0008-agent-memory-context-optimization.md)
