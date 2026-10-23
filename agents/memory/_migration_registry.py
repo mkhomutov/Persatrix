@@ -385,4 +385,22 @@ MIGRATIONS: list[tuple[int, str, str]] = [
         "close path's Phase-2 match and the replay re-derivation guard",
         "",  # handled by _apply_migration_19()
     ),
+    # Migration 20 (RFC 0021 Phase 2 PR 1, v0.4.0 row A2) creates the
+    # ``commitments`` table: a persona's own promises (``kind =
+    # 'commitment'``, RFC 0021 §F) and, in the same rows, the directives
+    # RFC 0012 §E records (``kind = 'directive'``), as the v0.4.0 plan's
+    # store lock says.  Check constraints keep each kind's columns apart;
+    # the scope columns are declared as the facts tier's are, so the
+    # first reader (PR 2's ``CommitmentStore``) uses that tier's filters.
+    # A new table, but on the callable path for the ``sqlite_master``
+    # guard every sibling has: a partial restore that already holds a
+    # ``commitments`` table keeps it.  Lives in
+    # :mod:`agents.memory._migration_commitments`.  See
+    # docs/rfcs/0021-phase2-pr-plan.md (H-2).
+    (
+        20,
+        "RFC 0021 Phase 2: commitments table (commitments and RFC 0012 "
+        "directives)",
+        "",  # handled by _apply_migration_20()
+    ),
 ]

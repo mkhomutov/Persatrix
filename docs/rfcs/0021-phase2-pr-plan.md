@@ -1,7 +1,7 @@
 # RFC 0021 — Persona Temporal Awareness — PR Implementation Plan (Phase 2)
 
 **RFC**: [0021-persona-temporal-awareness.md](0021-persona-temporal-awareness.md)
-**Status**: ⬜ Not started
+**Status**: 🔄 In progress
 **Created**: 2026-10-21
 **Branch prefix**: `feature/v040-rfc0021-`
 **Target**: `main`
@@ -190,7 +190,7 @@ each settled by a new default in the PR named:
 
 | PR | Row | Title | Branch | Status | GitHub PR | Merged |
 |----|-----|-------|--------|--------|-----------|--------|
-| 1 | A2 | The `commitments` table (memory-store migration v20) | `feature/v040-rfc0021-commitments-table` | ⬜ | — | — |
+| 1 | A2 | The `commitments` table (memory-store migration v20) | `feature/v040-rfc0021-commitments-table` | 🔀 | — | — |
 | 2 | A2 | `CommitmentStore`: make, list, fulfil, cancel | `feature/v040-rfc0021-commitment-store` | ⬜ | — | — |
 | 3 | A2 | Directive rows: the store calls RFC 0012 uses | `feature/v040-rfc0021-directive-calls` | ⬜ | — | — |
 | 4 | A2 | The open-commitments prompt block | `feature/v040-rfc0021-commitments-block` | ⬜ | — | — |

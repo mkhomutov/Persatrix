@@ -37,6 +37,7 @@ from collections.abc import Awaitable, Callable
 
 import aiosqlite
 
+from ._migration_commitments import _apply_migration_20
 from ._migration_episode_interaction_index import _apply_migration_19
 
 # Migration v8 (RFC 0026 PR 1) lives in :mod:`agents.memory._migration_facts`
@@ -486,4 +487,5 @@ _MIGRATION_HANDLERS: dict[int, Callable[[aiosqlite.Connection], Awaitable[None]]
     17: _apply_migration_17,
     18: _apply_migration_18,
     19: _apply_migration_19,
+    20: _apply_migration_20,
 }
