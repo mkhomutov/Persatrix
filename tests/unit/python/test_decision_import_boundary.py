@@ -78,11 +78,12 @@ def _reached(root: Path, start: set[str]) -> set[str]:
 
 
 def _decision_modules(root: Path) -> set[str]:
-    package = root / "agents" / "decision"
-    return {
-        "agents.decision" + ("" if p.stem == "__init__" else f".{p.stem}")
-        for p in package.glob("*.py")
-    }
+    """Every module under ``agents/decision/``, subpackages included."""
+    modules = set()
+    for path in (root / "agents" / "decision").rglob("*.py"):
+        parts = path.relative_to(root).with_suffix("").parts
+        modules.add(".".join(parts[:-1] if parts[-1] == "__init__" else parts))
+    return modules
 
 
 def test_the_decision_package_reaches_no_runtime_loop() -> None:
@@ -95,10 +96,11 @@ def test_the_decision_package_reaches_no_runtime_loop() -> None:
     assert "agents.persona_types" in outside
 
 
-def test_the_walk_catches_a_loop_reached_through_another_module(tmp_path: Path) -> None:
+def test_the_walk_catches_a_loop_reached_from_a_subpackage(tmp_path: Path) -> None:
     files = {
         "agents/decision/__init__.py": "",
-        "agents/decision/bad.py": "from ..helper import thing\n",
+        "agents/decision/sub/__init__.py": "",
+        "agents/decision/sub/bad.py": "from ...helper import thing\n",
         "agents/helper.py": "from .persona_runtime.action_loop import run\n",
         "agents/persona_runtime/__init__.py": "",
         "agents/persona_runtime/action_loop.py": "def run(): ...\n",

@@ -82,7 +82,7 @@ class DecisionSubject(Enum):
 
 
 class DirectiveVerdict(Enum):
-    """RFC 0012 §F's answer to a directive. A tie has none: it defers."""
+    """RFC 0012 §F's answer to a directive. A tie gets none: it defers."""
 
     ACCEPT = "accept"
     ADAPT = "adapt"
@@ -90,8 +90,21 @@ class DirectiveVerdict(Enum):
 
 
 def hash_content(text: str) -> str:
-    """The digest a candidate carries in place of its text (E-10)."""
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+    """The digest a candidate carries in place of its text (E-10).
+
+    ``surrogatepass`` lets a reply cut mid-emoji, which can hold a lone
+    surrogate, be hashed instead of raising.
+    """
+    return hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
+
+
+def _as_float(value: float, name: str) -> float:
+    """A finite number as a float, so the JSON line has one spelling for it."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise ValueError(f"{name} must be a number, got {value!r}")
+    if not math.isfinite(value):
+        raise ValueError(f"{name} must be finite, got {value!r}")
+    return float(value)
 
 
 @dataclass(frozen=True)
@@ -153,8 +166,9 @@ class DecisionOutcome:
     """What a policy chose (§D)."""
 
     #: The selected candidate's class; ``DEFER`` when nothing is selected.
-    #: For a directive record, the one action class the directive governs.
-    action_class: ActionClass
+    #: ``None`` only on a directive record that reached a verdict: the
+    #: directive's own row says which class it governs, when it says one.
+    action_class: ActionClass | None
     selected_id: str | None = None
     #: A short code such as ``no_candidate`` or ``approval_required``.
     reason: str | None = None
@@ -166,8 +180,10 @@ class DecisionOutcome:
     verdict: DirectiveVerdict | None = None
 
     def __post_init__(self) -> None:
-        if self.confidence is not None and not 0.0 <= self.confidence <= 1.0:
-            raise ValueError(f"confidence {self.confidence!r} is outside [0, 1]")
+        if self.confidence is not None:
+            object.__setattr__(self, "confidence", _as_float(self.confidence, "confidence"))
+            if not 0.0 <= self.confidence <= 1.0:
+                raise ValueError(f"confidence {self.confidence!r} is outside [0, 1]")
 
 
 @dataclass(frozen=True)
@@ -185,6 +201,7 @@ class DecisionRecord:
     recorded_at: float = field(default_factory=agent_now)
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "recorded_at", _as_float(self.recorded_at, "recorded_at"))
         _check_record(self)
 
     def to_json(self) -> str:
@@ -199,6 +216,9 @@ class DecisionRecord:
         version = data.pop("v", None) if isinstance(data, dict) else None
         if type(version) is not int or version != RECORD_FORMAT_VERSION:
             raise ValueError(f"not a version {RECORD_FORMAT_VERSION} decision record")
+        # Their defaults would give the line a new id, or the reader's clock.
+        if missing := {"record_id", "recorded_at"} - data.keys():
+            raise ValueError(f"a decision record line lacks {sorted(missing)}")
         record: DecisionRecord = _decode(cls, data)
         return record
 
@@ -227,21 +247,28 @@ def _check_record(record: DecisionRecord) -> None:
             raise ValueError("the selection must name a candidate of the outcome's class")
     deferred = outcome.action_class is ActionClass.DEFER and bool(outcome.reason)
     if record.subject is DecisionSubject.ACTION:
-        if outcome.verdict is not None:
-            raise ValueError("only a directive record carries a verdict")
+        if outcome.action_class is None or outcome.verdict is not None:
+            raise ValueError("an action record has an action class and no verdict")
+        if record.subject_id is not None:
+            raise ValueError("only a directive record names a subject id")
         if outcome.selected_id is None and not deferred:
             raise ValueError("with nothing selected the outcome must defer, with a reason")
     else:
         if not record.subject_id:
             raise ValueError("a directive record must name its directive")
-        if outcome.verdict is None and not deferred:
-            raise ValueError("a directive gets a verdict or defers with a reason")
+        reached = outcome.verdict is not None and outcome.action_class is None
+        if not reached and not (deferred and outcome.verdict is None):
+            raise ValueError(
+                "a directive gets a verdict and no action class, or defers with a reason"
+            )
 
 
 # ─── The JSON line ─────────────────────────────────────────
-# Encoding walks the dataclasses; decoding walks their type hints, so a field
-# added later with a default is read from old lines and written to new ones
-# with no change here.
+# Encoding walks the dataclasses; decoding walks their type hints. A field
+# added later with a default is read from older lines, which lack it. The
+# decoder reads str, float, the enums and dataclasses here, optional values
+# and ``tuple[X, ...]`` of those; a field of any other type (an int, a bool,
+# a mapping, a fixed-length tuple) needs its own branch and test first.
 
 
 def _encode(value: Any) -> Any:
@@ -270,10 +297,8 @@ def _decode(hint: Any, raw: Any) -> Any:
         return hint(raw)
     if dataclasses.is_dataclass(hint):
         return _decode_dataclass(hint, raw)
-    if hint is float and isinstance(raw, int | float) and not isinstance(raw, bool):
-        if not math.isfinite(raw):
-            raise ValueError(f"expected a finite number, got {raw!r}")
-        return float(raw)
+    if hint is float:
+        return _as_float(raw, "a number field")
     if hint is str and isinstance(raw, str):
         return raw
     raise ValueError(f"expected {hint!r}, got {raw!r}")

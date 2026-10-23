@@ -304,6 +304,26 @@ to one JSON line and back unchanged, because that line is the replay format.
 trip is stable; nothing in `agents/decision/` imports a runtime loop.
 **Estimate**: ~300 lines.
 
+**Review findings** (PR 1):
+
+| Finding | Severity | Description | Disposition |
+|---------|----------|-------------|-------------|
+| F-1 | Medium | A number field took an `int` or a `bool`: `confidence=1` was written `1` and re-written `1.0`, so the line changed on a second pass; `confidence=True` was written and then refused on read; an infinite time built a record that could not be written | Fixed in-PR: both number fields are stored as finite floats, and a `bool` is refused |
+| F-2 | Medium | A directive record's `action_class` meant the class the directive governs, but RFC 0012 gives a directive one only where the instruction allows it, a tie had to write `defer` in its place, and a tie could carry a verdict | Fixed in-PR: a verdict record has no action class (the directive's own row holds one, when it has one); a tie defers with no verdict; an action record names no subject id |
+| F-3 | Low | `from_json` filled a missing `record_id` or `recorded_at` from their defaults, so one line read twice gave two ids and the reader's clock | Fixed in-PR: a line without either is refused |
+| F-4 | Low | The decoder's comment said any field added later needs no change, but it reads only str, float, the enums and dataclasses, optionals and `tuple[X, ...]`; no test read an older line | Fixed in-PR: the comment says which types it reads, and a test reads a line without two defaulted fields; other types → deferred to PR 7 |
+| F-5 | Low | `hash_content` raised on a lone surrogate, which a reply cut mid-emoji can hold | Fixed in-PR: `surrogatepass` |
+| F-6 | Low | An end-of-interaction vote is `publish_channel`, so under E-11 a held reply and a vote to the same channel fold onto one hold, and the second is dropped | → deferred to PR 14 |
+| F-7 | Low | The key-order test's `shuffled != line` held because of the separators, whatever the key order | Fixed in-PR: compact separators |
+| F-8 | Low | The import walk started only from the package's top-level modules, so a subpackage reaching a loop went unseen | Fixed in-PR: it walks every module, and its negative control reaches the loop from a subpackage |
+| F-9 | Low | The HITL glossary entry said all four §H classes are held; under OQ 7 two of them follow whether HITL is enabled | Fixed in-PR |
+| F-10 | Info | `GRANT_APPROVAL` and `DENY_APPROVAL` are `respond`, the one class OQ 1 lets an operator automate; harmless while both return `not_implemented` | → deferred to PR 11 |
+| F-11 | Info | ~1 100 changed lines against the ~300 estimate and the 500-line target, about half of them tests; the code is the JSON codec and the record's checks | Noted: the types stay with their tests |
+| F-12 | Info | The RFC 0021 Phase 2 plan's PR 1 row, outside this row, moves to ✅ | Noted: #1053 merged, and `main`'s plan-status check stays red until the row flips |
+| F-13 | Info | The PR 1 row did not link its PR | Fixed in-PR once the PR was open |
+| F-14 | Low | `content_hash` is an unsalted SHA-256, so a short or guessable text — a yes or no, a small number, a known channel name — can be recovered by hashing guesses | → deferred to PR 3 |
+| F-15 | Info | Construction checks no text or tuple field's type: `agent_id=7` is written and refused on read, and a list of candidates makes `to_json` raise | Noted: mypy types every caller, and PR 3's sink counts a write error without failing the turn |
+
 ### PR 2 — `feature/v040-rfc0028-pipeline`
 
 **Scope**: `agents/decision/pipeline.py` and `baseline.py`.
@@ -353,6 +373,9 @@ off nothing is written and no span or metric appears; rotation at the cap
 keeps the configured number of files; a sink error leaves the turn's result
 unchanged; the span attributes.
 **Estimate**: ~350 lines.
+**From PR 1 review**: F-14 — a content hash is unsalted, so a short or
+guessable text can be recovered by hashing guesses. The log either keys the
+hash, with the key kept in the agent, or records that limit.
 
 ### PR 4 — `feature/v040-rfc0028-config`
 
@@ -438,6 +461,10 @@ Below the configured floor the outcome is `defer` with
 **Tests**: deterministic ranking; confidence bounds; a candidate the
 permission gate would refuse is never selected in any mode.
 **Estimate**: ~450 lines.
+**From PR 1 review**: F-4 — the record decoder reads str, float, the enums
+and dataclasses, optionals and `tuple[X, ...]`. A features or scores field of
+another type (a mapping, an int, a fixed-length tuple) brings its decoder
+branch and test with it.
 
 ### PR 8 — `feature/v040-rfc0028-replay`
 
@@ -491,6 +518,9 @@ switched off: validation refuses a config that removes them.
 **Tests**: the schema; each covered action is classified; `hitl_enabled:
 false` lifts only the two switchable classes.
 **Estimate**: ~300 lines.
+**From PR 1 review**: F-10 — `GRANT_APPROVAL` and `DENY_APPROVAL` map to
+`respond`, the class OQ 1 lets an operator automate. If either is ever
+built, the registry treats it as a security-sensitive policy change.
 
 ### PR 12 — `feature/v040-rfc0028-approval-tokens`
 
@@ -561,6 +591,10 @@ survives an orchestrator restart and still releases once; the plan's
 acceptance, "held, released only by a signed, scoped, expiring approval
 token that survives an orchestrator restart, and refused on replay".
 **Estimate**: ~450 lines.
+**From PR 1 review**: F-6 — an end-of-interaction vote is a
+`publish_channel`, so E-11's match by actor, class and channel would fold a
+held reply and a vote onto one hold and drop the second. The match adds the
+action type.
 
 ### PR 14a — `feature/v040-rfc0028-hitl-task-step`
 

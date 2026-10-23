@@ -192,10 +192,7 @@ def test_a_directive_record_round_trips() -> None:
         subject_id="dir-9",
         context=_context(),
         candidates=(),
-        outcome=DecisionOutcome(
-            action_class=ActionClass.PUBLISH_CHANNEL,
-            verdict=DirectiveVerdict.ADAPT,
-        ),
+        outcome=DecisionOutcome(action_class=None, verdict=DirectiveVerdict.ADAPT),
     )
     assert DecisionRecord.from_json(record.to_json()) == record
 
@@ -210,7 +207,7 @@ def _reversed_keys(value: object) -> object:
 
 def test_the_line_does_not_depend_on_key_order() -> None:
     line = _full_record().to_json()
-    shuffled = json.dumps(_reversed_keys(json.loads(line)))
+    shuffled = json.dumps(_reversed_keys(json.loads(line)), separators=(",", ":"))
     assert shuffled != line
     assert DecisionRecord.from_json(shuffled).to_json() == line
 
@@ -261,6 +258,52 @@ def test_from_json_refuses_a_missing_required_field() -> None:
         DecisionRecord.from_json(json.dumps(data))
 
 
+@pytest.mark.parametrize("key", ["record_id", "recorded_at"])
+def test_from_json_does_not_invent_an_id_or_a_time(key: str) -> None:
+    # A default would give the same line a new id, or the reader's clock,
+    # on every read.
+    data = json.loads(_full_record().to_json())
+    del data[key]
+    with pytest.raises(ValueError):
+        DecisionRecord.from_json(json.dumps(data))
+
+
+def test_an_older_line_without_a_defaulted_field_reads_with_the_default() -> None:
+    data = json.loads(_full_record().to_json())
+    del data["outcome"]["rationale"]
+    del data["context"]["mood"]
+    record = DecisionRecord.from_json(json.dumps(data))
+    assert record.outcome.rationale == ""
+    assert record.context.mood is None
+
+
+# ─── Numbers: one spelling, so the line reads back identical ───
+
+
+def test_integer_numbers_are_stored_as_floats() -> None:
+    record = DecisionRecord(
+        recorded_at=1_790_000_000,
+        context=_context(),
+        candidates=(),
+        outcome=DecisionOutcome(ActionClass.DEFER, reason="x", confidence=1),
+    )
+    assert isinstance(record.recorded_at, float)
+    assert isinstance(record.outcome.confidence, float)
+    line = record.to_json()
+    assert DecisionRecord.from_json(line).to_json() == line
+
+
+@pytest.mark.parametrize("value", [True, float("inf"), float("nan")])
+def test_a_time_is_a_finite_number(value: float) -> None:
+    with pytest.raises(ValueError):
+        DecisionRecord(
+            recorded_at=value,
+            context=_context(),
+            candidates=(),
+            outcome=DecisionOutcome(ActionClass.DEFER, reason="x"),
+        )
+
+
 # ─── E-10: text never enters a record ──────────────────────
 
 
@@ -272,6 +315,13 @@ def test_a_candidate_carries_a_hash_not_its_text() -> None:
     )
     assert "launch" not in record.to_json()
     assert record.candidates[0].content_hash == hash_content("the launch is on Friday")
+
+
+def test_any_python_string_can_be_hashed() -> None:
+    # A reply cut mid-emoji can hold a lone surrogate, which strict UTF-8
+    # refuses to encode.
+    assert hash_content("a\ud83d") != hash_content("a")
+    assert len(hash_content("a\ud83d")) == 64
 
 
 def test_content_hash_must_be_a_sha256_digest() -> None:
@@ -317,13 +367,22 @@ def _record(outcome: DecisionOutcome, candidates: tuple[DecisionCandidate, ...] 
         (DecisionOutcome(ActionClass.DEFER, reason="x", verdict=DirectiveVerdict.ACCEPT),
          (), {}),
         # ... names its directive ...
-        (DecisionOutcome(ActionClass.PUBLISH_CHANNEL, verdict=DirectiveVerdict.ACCEPT),
+        (DecisionOutcome(None, verdict=DirectiveVerdict.ACCEPT),
          (), {"subject": DecisionSubject.DIRECTIVE}),
-        # ... and either reaches a verdict or defers with a reason.
-        (DecisionOutcome(ActionClass.PUBLISH_CHANNEL), (),
+        # ... and either reaches a verdict, with no action class of its own,
+        # or defers with a reason and no verdict.
+        (DecisionOutcome(ActionClass.PUBLISH_CHANNEL, verdict=DirectiveVerdict.ACCEPT), (),
+         {"subject": DecisionSubject.DIRECTIVE, "subject_id": "dir-9"}),
+        (DecisionOutcome(ActionClass.DEFER, reason="authority_tie",
+                         verdict=DirectiveVerdict.ACCEPT), (),
+         {"subject": DecisionSubject.DIRECTIVE, "subject_id": "dir-9"}),
+        (DecisionOutcome(None), (),
          {"subject": DecisionSubject.DIRECTIVE, "subject_id": "dir-9"}),
         (DecisionOutcome(ActionClass.DEFER), (),
          {"subject": DecisionSubject.DIRECTIVE, "subject_id": "dir-9"}),
+        # An action record has an action class and names no directive.
+        (DecisionOutcome(None, reason="x"), (), {}),
+        (DecisionOutcome(ActionClass.DEFER, reason="x"), (), {"subject_id": "dir-9"}),
     ],
 )
 def test_an_inconsistent_record_is_refused(
@@ -344,7 +403,7 @@ def test_a_tied_directive_defers_with_its_reason() -> None:
     assert record.outcome.verdict is None
 
 
-@pytest.mark.parametrize("confidence", [-0.1, 1.5, float("nan"), float("inf")])
+@pytest.mark.parametrize("confidence", [-0.1, 1.5, float("nan"), float("inf"), True])
 def test_confidence_is_a_probability(confidence: float) -> None:
     with pytest.raises(ValueError):
         DecisionOutcome(ActionClass.DEFER, reason="x", confidence=confidence)

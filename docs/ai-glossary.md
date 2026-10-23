@@ -1236,7 +1236,7 @@ decision layer task agents and persona agents share. Its types live in
 ### Human-in-the-Loop (HITL)
 - **Aliases:** "HITL"
 - **Disallowed:** "manual override", "human gate"
-- **Definition:** The rule that some actions wait for a person's approval, whatever the policy mode. RFC 0028 §H names four required-HITL classes: external communications, security-sensitive policy changes, irreversible operations and high-impact organizational actions. Such an action is held, and without a valid approval token it defers with `reason=hitl_required`.
+- **Definition:** The rule that some actions wait for a person's approval, whatever the policy mode. RFC 0028 §H names four required-HITL classes. Security-sensitive policy changes and high-impact organizational actions are held in every deployment; irreversible operations and external communications only where HITL is enabled ([PR plan](rfcs/0028-pr-plan.md) OQ 7). A held action without a valid approval token defers with `reason=hitl_required`.
 - **Example:** "A runtime change to the organization graph is HITL: it waits in the pending-approval queue."
 
 ### Approval Token
