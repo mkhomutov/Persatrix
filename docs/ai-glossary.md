@@ -1202,3 +1202,63 @@ verbatim) are defined now (PR #232 review SF-5).
   checksum, making post-hoc redaction observable. Operator-verifiable
   with a 50-line script; not a defence against append-only-after-the-fact
   attackers — see RFC 0009 §G for threat-model bounds.
+
+## RFC 0028 — Decision Policy Engine (PR 1)
+
+Terms from [RFC 0028](rfcs/0028-agent-decision-policy-engine.md), the
+decision layer task agents and persona agents share. Its types live in
+`agents/decision/` ([PR plan](rfcs/0028-pr-plan.md) PR 1).
+
+### Decision Policy Engine
+- **Aliases:** "the decision engine"
+- **Disallowed:** "decision maker", "action selector"
+- **Definition:** The layer that, at each decision checkpoint, lists what an agent could do next, removes what a constraint forbids, ranks the rest, picks one and writes a DecisionRecord of the choice. It runs in the agent, in manual, semi-automated or automated mode; v0.4.0 starts in manual mode.
+- **Example:** "The Decision Policy Engine records that the persona replied rather than called a tool."
+
+### Decision Checkpoint
+- **Aliases:** "checkpoint"
+- **Disallowed:** "decision point", "decision hook"
+- **Definition:** A point in a turn where the agent's choice is made explicit and recorded: pre-act (which class of action comes next), pre-tool, pre-delegate, and post-outcome (how it went). `Checkpoint` in `agents/decision/types.py`.
+- **Example:** "The pre-act checkpoint sees the persona's final action list."
+
+### Action Class
+- **Aliases:** —
+- **Disallowed:** "action kind", "action category"
+- **Definition:** One of the six kinds of next action a pre-act checkpoint chooses among: `respond`, `ask_clarification`, `tool_call`, `delegate`, `publish_channel`, `defer`. Every persona `ActionType` and every task-agent step has one (`agents/decision/action_classes.py`), so an approval list names classes, not actions.
+- **Example:** "`DO_NOTHING` is in the `defer` class; an end-of-interaction vote is a `publish_channel`."
+
+### DecisionRecord
+- **Aliases:** "decision record"
+- **Disallowed:** "decision log entry", "decision trace" (when meaning one record; a trace is a series of them)
+- **Definition:** The frozen record one checkpoint writes: its context, the candidates, the outcome (the selected candidate, its confidence, the rejections and a reason) and its subject — the agent's next action, or an RFC 0012 directive with an accept / adapt / refuse verdict. It converts to one JSON line and back unchanged, and holds a hash of any message or argument text, never the text.
+- **Example:** "Refusing a peer's directive writes a DecisionRecord with subject `directive` and verdict `refuse`."
+
+### Human-in-the-Loop (HITL)
+- **Aliases:** "HITL"
+- **Disallowed:** "manual override", "human gate"
+- **Definition:** The rule that some actions wait for a person's approval, whatever the policy mode. RFC 0028 §H names four required-HITL classes: external communications, security-sensitive policy changes, irreversible operations and high-impact organizational actions. Such an action is held, and without a valid approval token it defers with `reason=hitl_required`.
+- **Example:** "A runtime change to the organization graph is HITL: it waits in the pending-approval queue."
+
+### Approval Token
+- **Aliases:** —
+- **Disallowed:** "approval key", "permission token" (a capability token is RFC 0009's)
+- **Definition:** A signed, expiring token the orchestrator issues when a person approves one held action, bound to the action's hash, the actor, a scope, an expiry and a nonce (RFC 0028 Phase 2a). Spending it releases that one action once: the orchestrator checks it and moves the pending approval from approved to spent in the same transaction.
+- **Example:** "The persona's held publish runs in a later turn, once its approval token is spent."
+
+### Agent Society
+- **Aliases:** "society"
+- **Disallowed:** "swarm", "hive"
+- **Definition:** A group of persona agents that work as one — a team, lab or organization (RFC 0012) — over shared society state. In v0.4.0 its members still decide one at a time (individual scope).
+- **Example:** "An RFC 0012 organization is the agent society v0.4.0 builds."
+
+### Individual Scope
+- **Aliases:** —
+- **Disallowed:** "solo mode"
+- **Definition:** A decision one agent makes for itself: one agent chooses one action (RFC 0028 §G). Every decision in v0.4.0 has individual scope.
+- **Example:** "Each member's reply to the manager is an individual-scope decision."
+
+### Collective Scope
+- **Aliases:** —
+- **Disallowed:** "group vote", "consensus mode"
+- **Definition:** A decision an agent society makes together: eligible agents propose ranked candidates and a collective policy — majority, weighted majority or role-weighted — picks the group's action, recorded as a `CollectiveDecisionRecord` (RFC 0028 §G, Phase 4, v0.5.0+). Not built in v0.4.0.
+- **Example:** "Choosing the lab's next experiment by role-weighted vote is a collective-scope decision."

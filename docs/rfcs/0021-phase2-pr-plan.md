@@ -190,7 +190,7 @@ each settled by a new default in the PR named:
 
 | PR | Row | Title | Branch | Status | GitHub PR | Merged |
 |----|-----|-------|--------|--------|-----------|--------|
-| 1 | A2 | The `commitments` table (memory-store migration v20) | `feature/v040-rfc0021-commitments-table` | 🔀 | [#1053](https://github.com/mkhomutov/Persatrix/pull/1053) | — |
+| 1 | A2 | The `commitments` table (memory-store migration v20) | `feature/v040-rfc0021-commitments-table` | ✅ | [#1053](https://github.com/mkhomutov/Persatrix/pull/1053) | 2026-10-23 |
 | 2 | A2 | `CommitmentStore`: make, list, fulfil, cancel | `feature/v040-rfc0021-commitment-store` | ⬜ | — | — |
 | 3 | A2 | Directive rows: the store calls RFC 0012 uses | `feature/v040-rfc0021-directive-calls` | ⬜ | — | — |
 | 4 | A2 | The open-commitments prompt block | `feature/v040-rfc0021-commitments-block` | ⬜ | — | — |

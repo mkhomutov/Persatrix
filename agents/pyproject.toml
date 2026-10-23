@@ -188,6 +188,7 @@ persatrix_agents = "."
 # or imports will silently fail in editable installs.
 packages = [
     "persatrix_agents",
+    "persatrix_agents.decision",
     "persatrix_agents.generated",
     "persatrix_agents.memory",
     "persatrix_agents.observability",

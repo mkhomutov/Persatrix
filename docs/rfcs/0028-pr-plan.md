@@ -1,7 +1,7 @@
 # RFC 0028 — Agent Decision Policy Engine — PR Implementation Plan (Phases 1, 2, 2a and 3)
 
 **RFC**: [0028-agent-decision-policy-engine.md](0028-agent-decision-policy-engine.md)
-**Status**: ⬜ Not started
+**Status**: 🔄 In progress
 **Created**: 2026-10-20
 **Branch prefix**: `feature/v040-rfc0028-`
 **Target**: `main`
@@ -226,7 +226,7 @@ is unslotted with RFC 0049 Phase 3 and is not in this plan.
 
 | PR | Row | Title | Branch | Status | GitHub PR | Merged |
 |----|-----|-------|--------|--------|-----------|--------|
-| 1 | B1 | Decision types, action classes, glossary | `feature/v040-rfc0028-types` | ⬜ | — | — |
+| 1 | B1 | Decision types, action classes, glossary | `feature/v040-rfc0028-types` | 🔀 | — | — |
 | 2 | B1 | Selection pipeline and baseline policy | `feature/v040-rfc0028-pipeline` | ⬜ | — | — |
 | 3a | B1 | Python secret redactor | `feature/v040-rfc0028-redactor` | ⬜ | — | — |
 | 3 | B1 | Decision log and checkpoint spans | `feature/v040-rfc0028-decision-log` | ⬜ | — | — |
