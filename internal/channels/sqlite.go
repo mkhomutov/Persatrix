@@ -217,8 +217,22 @@ func NewSQLiteStore(path string, opts SQLiteOptions) (ChannelStore, error) {
 	return store, nil
 }
 
+// statisticsFloor is how many messages a store must hold before its open
+// gathers planner statistics. Statistics from a smaller store mislead the
+// planner on the publish path: from 70 messages down it plans the cap prune
+// ([pruneOldestSQL]) as a scan of the whole table, where a larger store finds
+// each row it deletes by id, and the store keeps those numbers until an open
+// finds the table grown tenfold. A deployment that restarted early and then
+// ran to the cap would pay ~11 ms a publish at 50 000 messages, against
+// ~1 ms. Below the floor the store runs without statistics, where all three
+// channel-time reads walk their index. The floor sits more than ten times
+// above the turn, measured on SQLite 3.53.4 with one to fifty channels.
+const statisticsFloor = 1000
+
 // gatherPlannerStatistics runs `PRAGMA optimize=0x10002`, the form SQLite
-// advises when a long-lived connection opens: it runs ANALYZE on each table
+// advises when a long-lived connection opens, once the store holds
+// [statisticsFloor] messages; below that it gathers nothing, reading at most
+// the floor's worth of rows to tell. The pragma runs ANALYZE on each table
 // with an index that has no statistics, or whose row count has changed
 // tenfold since its last ANALYZE, and analyzes nothing otherwise. Without
 // statistics the planner guesses each index's selectivity; the guess is what
@@ -244,6 +258,14 @@ func NewSQLiteStore(path string, opts SQLiteOptions) (ChannelStore, error) {
 // also advises for long-lived connections; a table that grows tenfold is
 // re-analyzed at the next open.
 func gatherPlannerStatistics(db *sql.DB) error {
+	var held int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM (SELECT 1 FROM messages LIMIT ?)`,
+		statisticsFloor).Scan(&held); err != nil {
+		return err
+	}
+	if held < statisticsFloor {
+		return nil
+	}
 	_, err := db.Exec(`PRAGMA optimize=0x10002`)
 	return err
 }

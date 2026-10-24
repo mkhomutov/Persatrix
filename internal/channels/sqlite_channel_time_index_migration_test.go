@@ -123,7 +123,26 @@ type planStore struct {
 // one room, the channel matches every row too, so only the order the index
 // gives tells the two apart. Statistics come from ANALYZE, which the store's
 // open-time `PRAGMA optimize` runs.
+//
+// The two reopened stores are what a restart leaves: whatever statistics the
+// store's own open gathers from the messages it finds. Statistics from twenty
+// messages would plan the cap prune as a scan of the whole table, so the open
+// must gather none; [statisticsFloor] messages give the youngest statistics it
+// records.
 func planStores() []planStore {
+	reopened := func(messages int) func(t *testing.T) *sql.DB {
+		return func(t *testing.T) *sql.DB {
+			path := filepath.Join(t.TempDir(), "channels.db")
+			seeded, err := NewSQLiteStore(path, SQLiteOptions{})
+			require.NoError(t, err)
+			seedChannelHistory(t, seeded.(*sqliteStore).db, 1, messages)
+			require.NoError(t, seeded.Close())
+			store, err := NewSQLiteStore(path, SQLiteOptions{})
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = store.Close() })
+			return store.(*sqliteStore).db
+		}
+	}
 	analyzed := func(channels int) func(t *testing.T) *sql.DB {
 		return func(t *testing.T) *sql.DB {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "channels.db"), SQLiteOptions{})
@@ -148,15 +167,30 @@ func planStores() []planStore {
 		}},
 		{"with statistics", analyzed(4)},
 		{"with statistics, one channel", analyzed(1)},
+		{"reopened young, with twenty messages", reopened(20)},
+		{"reopened at the statistics floor", func(t *testing.T) *sql.DB {
+			db := reopened(statisticsFloor)(t)
+			require.NotZero(t, messageStatRows(t, db), "precondition: the open gathered statistics")
+			return db
+		}},
 	}
 }
 
 // assertWalksChannelTimeIndex fails when the plan sorts the channel or scans
-// by epoch — ISSUE-0188's two symptoms — or reads through another index.
+// by epoch — ISSUE-0188's two symptoms — when any step reads every message,
+// as the cap prune's outer DELETE does under statistics from a tiny store, or
+// when the read goes through another index.
 func assertWalksChannelTimeIndex(t *testing.T, plan string) {
 	t.Helper()
 	assert.NotContains(t, plan, "USE TEMP B-TREE", "the read sorts the channel; plan=%s", plan)
 	assert.NotContains(t, plan, "idx_messages_epoch", "the read scans the store by epoch; plan=%s", plan)
+	for _, step := range strings.Split(plan, " | ") {
+		// `SCAN messages`, `SCAN m` or `SCAN m USING …`; `SCAN mi` is the
+		// membership table, whose plan is the RFC 0029 Phase 3 plan's F-3.
+		scanned, _, _ := strings.Cut(strings.TrimPrefix(step, "SCAN "), " ")
+		assert.False(t, strings.HasPrefix(step, "SCAN ") && (scanned == "messages" || scanned == "m"),
+			"the read scans every message (%s); plan=%s", step, plan)
+	}
 	assert.Contains(t, plan, "idx_messages_channel_time", "the read must walk the channel-time index; plan=%s", plan)
 }
 
@@ -304,27 +338,37 @@ func TestSQLiteStore_SchemaV14_Migration_Idempotent(t *testing.T) {
 }
 
 // TestSQLiteStore_Open_GathersPlannerStatistics pins the open-time
-// `PRAGMA optimize`: a store reopened with history has statistics for its
-// message indexes, so the planner weighs them by what they hold.
+// `PRAGMA optimize` and its floor: a store one message short of
+// [statisticsFloor] reopens with no statistics, and once it holds the floor
+// the next open records them for its message indexes, so the planner weighs
+// them by what they hold.
 func TestSQLiteStore_Open_GathersPlannerStatistics(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "channels.db")
 	store1, err := NewSQLiteStore(path, SQLiteOptions{})
 	require.NoError(t, err)
-	seedChannelHistory(t, store1.(*sqliteStore).db, 2, 200)
-	require.NoError(t, store1.Close())
-	withDB(t, path, func(db *sql.DB) {
-		require.Zero(t, messageStatRows(t, db), "precondition: nothing has analyzed the history yet")
-	})
-
-	store2, err := NewSQLiteStore(path, SQLiteOptions{})
+	seedChannelHistory(t, store1.(*sqliteStore).db, 2, statisticsFloor/2)
+	_, err = store1.(*sqliteStore).db.Exec(`DELETE FROM messages WHERE id = 'group:room-1-msg-0000'`)
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = store2.Close() })
+	require.NoError(t, store1.Close())
+
+	short, err := NewSQLiteStore(path, SQLiteOptions{})
+	require.NoError(t, err)
+	db := short.(*sqliteStore).db
+	assert.Zero(t, messageStatRows(t, db), "one message short of the floor, the open gathers no statistics")
+	_, err = db.Exec(`INSERT INTO messages (id, channel_id, sender_id, content, timestamp) VALUES (?, ?, ?, ?, ?)`,
+		"group:room-1-msg-0000", "group:room-1", historyReader, "back again", historyStart)
+	require.NoError(t, err)
+	require.NoError(t, short.Close())
+
+	store3, err := NewSQLiteStore(path, SQLiteOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store3.Close() })
 
 	var stat string
-	require.NoError(t, store2.(*sqliteStore).db.QueryRow(
+	require.NoError(t, store3.(*sqliteStore).db.QueryRow(
 		`SELECT stat FROM sqlite_stat1 WHERE tbl = 'messages' AND idx = 'idx_messages_epoch'`).Scan(&stat),
-		"the open must record statistics for the message indexes")
-	assert.Equal(t, "400 400", stat,
+		"at the floor, the open must record statistics for the message indexes")
+	assert.Equal(t, fmt.Sprintf("%[1]d %[1]d", statisticsFloor), stat,
 		"every row shares the one epoch, which is what the statistics tell the planner")
 }
 
@@ -332,7 +376,9 @@ func TestSQLiteStore_Open_GathersPlannerStatistics(t *testing.T) {
 // of the open-time mask. Statistics taken while a store was young would
 // otherwise stay until something queried the table on the opening
 // connection, which at open nothing has: plain `PRAGMA optimize`, or 0x02
-// alone, leaves the young numbers in place.
+// alone, leaves the young numbers in place. The store's own open takes none
+// below [statisticsFloor], so the young ones here come from an ANALYZE run by
+// hand, as an operator's might.
 func TestSQLiteStore_Open_ReanalyzesATableThatGrewTenfold(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "channels.db")
 	epochStat := func(store ChannelStore) string {
@@ -342,29 +388,28 @@ func TestSQLiteStore_Open_ReanalyzesATableThatGrewTenfold(t *testing.T) {
 		return stat
 	}
 
-	young, err := NewSQLiteStore(path, SQLiteOptions{})
+	young := statisticsFloor / 20
+	store, err := NewSQLiteStore(path, SQLiteOptions{})
 	require.NoError(t, err)
-	seedChannelHistory(t, young.(*sqliteStore).db, 1, 20)
-	require.NoError(t, young.Close())
-
-	analyzed, err := NewSQLiteStore(path, SQLiteOptions{})
+	db := store.(*sqliteStore).db
+	seedChannelHistory(t, db, 1, young)
+	_, err = db.Exec(`ANALYZE`)
 	require.NoError(t, err)
-	require.Equal(t, "20 20", epochStat(analyzed), "precondition: the young store's statistics")
-	grown := analyzed.(*sqliteStore).db
-	tx, err := grown.Begin()
+	require.Equal(t, fmt.Sprintf("%[1]d %[1]d", young), epochStat(store), "precondition: the young store's statistics")
+	tx, err := db.Begin()
 	require.NoError(t, err)
-	for i := 20; i < 400; i++ {
+	for i := young; i < statisticsFloor; i++ {
 		_, err := tx.Exec(`INSERT INTO messages (id, channel_id, sender_id, content, timestamp) VALUES (?, ?, ?, ?, ?)`,
 			fmt.Sprintf("late-%04d", i), "group:room-0", historyReader, "later", historyStart.Add(time.Duration(i)*time.Second))
 		require.NoError(t, err)
 	}
 	require.NoError(t, tx.Commit())
-	require.NoError(t, analyzed.Close())
+	require.NoError(t, store.Close())
 
 	reopened, err := NewSQLiteStore(path, SQLiteOptions{})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = reopened.Close() })
-	assert.Equal(t, "400 400", epochStat(reopened),
+	assert.Equal(t, fmt.Sprintf("%[1]d %[1]d", statisticsFloor), epochStat(reopened),
 		"a table twenty times the size it was analyzed at is analyzed again when the store opens")
 }
 
@@ -376,7 +421,7 @@ func TestSQLiteStore_Open_SurvivesAFailedOptimize(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "channels.db")
 	store1, err := NewSQLiteStore(path, SQLiteOptions{})
 	require.NoError(t, err)
-	seedChannelHistory(t, store1.(*sqliteStore).db, 1, 50)
+	seedChannelHistory(t, store1.(*sqliteStore).db, 1, statisticsFloor)
 	require.NoError(t, store1.Close())
 
 	holder, err := sql.Open("sqlite", buildDSN(path))

@@ -219,8 +219,11 @@ func (s *sqliteStore) PublishMessage(ctx context.Context, msg ChannelMessage) er
 
 // pruneOldestSQL deletes a channel's oldest rows: arguments channel id, then
 // how many. The subquery walks `idx_messages_channel_time` (channels-store
-// v14) from its oldest end, so it reads only the rows it deletes; a constant
-// so the query-plan tests explain this statement, not a copy of it.
+// v14) from its oldest end and the DELETE finds each row by id, so it reads
+// only the rows it deletes. Statistics from a store of 70 messages or fewer
+// would make that DELETE scan the table, which is why the store gathers none
+// below [statisticsFloor]. A constant so the query-plan tests explain this
+// statement, not a copy of it.
 const pruneOldestSQL = `DELETE FROM messages
 		   WHERE id IN (
 		     SELECT id FROM messages

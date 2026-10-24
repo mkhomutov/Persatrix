@@ -243,6 +243,8 @@ in the PR body; ISSUE-0188 closed.
 | F-8 | Info | The shipped schema runs with planner statistics; the benchmark's 2026-10-21 indexed variant had the index without them | Noted in the benchmark's re-run section |
 | F-9 | Info | The gate re-run shared the machine with unrelated load (load average ~8.6 on 8 cores), and its room step overlapped a disk-wide scan for two minutes | Noted: both shared steps passed; the record says so |
 | F-10 | Info | ~880 changed lines against the ~250 estimate and the 500-line target, ~570 of them in test files | Noted: the migration stays with its tests |
+| F-11 | Medium | Statistics an open took from a store of 70 messages or fewer turn the cap prune's DELETE into a scan of the whole table, kept until an open finds it grown tenfold: a store that restarted early and then ran to the cap paid ~11 ms a publish at 50 000 messages, against ~1 ms | Fixed in-PR: the open gathers statistics only once the store holds 1 000 messages |
+| F-12 | Medium | The plan tests passed that scan: their check rejected only a sort and the epoch index, and their statistics came from 300 messages a channel | Fixed in-PR: the check rejects any step that reads every message, on stores reopened young and at the floor |
 
 ### PR 2 — `feature/v040-rfc0029-society-tables`
 
@@ -343,7 +345,9 @@ plan the store has outgrown.
 > so the plan tests explain the statements the store runs; the v3 test's copy
 > of the history query had already drifted from it. And the open-time pragma
 > is `PRAGMA optimize=0x10002`, the form SQLite advises when a long-lived
-> connection opens, with no analysis limit, so the statistics are exact.
+> connection opens, with no analysis limit, so the statistics are exact. It
+> runs only once the store holds 1 000 messages, since statistics from a
+> smaller store mislead the cap prune (F-11).
 
 ## Related documentation
 
