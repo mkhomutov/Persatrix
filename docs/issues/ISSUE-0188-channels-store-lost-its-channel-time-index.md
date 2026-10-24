@@ -6,6 +6,9 @@ severity: medium
 area: channels
 created: 2026-10-21
 refs:
+  - internal/channels/sqlite_channel_time_index_migration.go
+  - internal/channels/sqlite_channel_time_index_migration_test.go
+  - internal/channels/sqlite.go
   - internal/channels/sqlite_migrations.go
   - internal/channels/sqlite_messages.go
   - internal/channels/sqlite_messages_read.go
@@ -90,3 +93,13 @@ with this index, so the phase that boards states it as its dependency
 
 > 2026-10-21 — filed from the v0.4.0 row R2 storage benchmark, run on
 > `b1a7932f`. Docs only: no code changes.
+
+> 2026-10-24 — fixed by channels-store v14, the first PR of RFC 0029's
+> Phase 3 plan. `migrateV13ToV14` creates `idx_messages_channel_time`, and
+> the store runs `PRAGMA optimize=0x10002` when it opens. A query-plan test
+> for each of the three reads fails if it sorts or walks the epoch index, on
+> stores with and without statistics. The benchmark's gate, re-run on the
+> shipped schema, passes with the society tables on the store's own
+> connection ([results](../storage-architecture-benchmark.md#the-gate-on-channels-store-v14)).
+> Statistics are gathered only at open; refreshing them while the store
+> stays open is that plan's PR 5.

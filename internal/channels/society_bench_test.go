@@ -37,8 +37,6 @@ var (
 		"directory for the store files (default: a test temp dir)")
 	societyBenchForms = flag.String("society-bench-forms", "shared,separate",
 		"society connection forms to run, comma-separated")
-	societyBenchSchemas = flag.String("society-bench-schemas", "as-is,indexed",
-		"channel-store schemas to run, comma-separated")
 	societyBenchDuration = flag.Duration("society-bench-duration", 0,
 		"override each step's duration")
 )
@@ -124,7 +122,6 @@ func nearestRank(sorted []time.Duration, p float64) time.Duration {
 
 type benchStep struct {
 	Layout   string        `json:"layout"`
-	Schema   string        `json:"schema"`
 	Form     string        `json:"form"`
 	Rate     float64       `json:"rate_msgs_per_s"`
 	Duration time.Duration `json:"-"`
@@ -186,17 +183,15 @@ func (r *benchResult) judge() {
 	r.Pass = len(r.Failures) == 0
 }
 
-func benchPlan(plan string, schemas, forms []string, override time.Duration) []benchStep {
+func benchPlan(plan string, forms []string, override time.Duration) []benchStep {
 	var steps []benchStep
 	add := func(rate float64, d time.Duration) {
 		if override > 0 {
 			d = override
 		}
 		for _, layout := range []string{"room", "society"} {
-			for _, schema := range schemas {
-				for _, form := range forms {
-					steps = append(steps, benchStep{Layout: layout, Schema: schema, Form: form, Rate: rate, Duration: d})
-				}
+			for _, form := range forms {
+				steps = append(steps, benchStep{Layout: layout, Form: form, Rate: rate, Duration: d})
 			}
 		}
 	}
@@ -222,11 +217,7 @@ func TestSocietyStoreBenchmark(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	schemas, err := benchList("-society-bench-schemas", *societyBenchSchemas, "as-is", "indexed")
-	if err != nil {
-		t.Fatal(err)
-	}
-	steps := benchPlan(*societyBench, schemas, forms, *societyBenchDuration)
+	steps := benchPlan(*societyBench, forms, *societyBenchDuration)
 	if len(steps) == 0 {
 		t.Fatalf("unknown -society-bench plan %q", *societyBench)
 	}
@@ -236,8 +227,8 @@ func TestSocietyStoreBenchmark(t *testing.T) {
 			t.Fatal(err)
 		}
 		// Named for what ran, so a narrowed run does not overwrite a wider one.
-		outPath = filepath.Join(*societyBenchOut, fmt.Sprintf("society-bench-%s-%s-%s-%s-%s.json",
-			*societyBench, strings.Join(schemas, "+"), strings.Join(forms, "+"), runtime.GOOS, runtime.GOARCH))
+		outPath = filepath.Join(*societyBenchOut, fmt.Sprintf("society-bench-%s-%s-%s-%s.json",
+			*societyBench, strings.Join(forms, "+"), runtime.GOOS, runtime.GOARCH))
 	}
 	dir := *societyBenchDir
 	if dir == "" {
@@ -256,46 +247,35 @@ func TestSocietyStoreBenchmark(t *testing.T) {
 			t.Fatalf("seed %s: %v", name, err)
 		}
 		t.Logf("seeded %s in %s", name, time.Since(begin).Round(time.Second))
-		templates[name+"/as-is"] = path
-		if !slices.Contains(schemas, "indexed") {
-			continue
-		}
-		indexed := filepath.Join(dir, "template-"+name, "indexed.db")
-		if err := indexTemplate(ctx, path, indexed); err != nil {
-			t.Fatalf("index %s: %v", name, err)
-		}
-		templates[name+"/indexed"] = indexed
+		templates[name] = path
 	}
 	service := map[string]map[string]float64{}
-	for key, path := range templates {
-		if !slices.Contains(schemas, strings.Split(key, "/")[1]) {
-			continue
-		}
-		st, err := serviceTimes(ctx, path, filepath.Join(dir, "service.db"), layouts[strings.Split(key, "/")[0]])
+	for name, path := range templates {
+		st, err := serviceTimes(ctx, path, filepath.Join(dir, "service.db"), layouts[name])
 		if err != nil {
-			t.Fatalf("service times %s: %v", key, err)
+			t.Fatalf("service times %s: %v", name, err)
 		}
-		service[key] = st
-		t.Logf("service times %s: %v", key, st)
+		service[name] = st
+		t.Logf("service times %s: %v", name, st)
 	}
 
-	env := benchEnvironment(t, templates["room/as-is"])
+	env := benchEnvironment(t, templates["room"])
 	failedRamp := map[string]bool{}
 	var results []benchResult
 	for i, step := range steps {
-		key := step.Layout + "/" + step.Schema + "/" + step.Form
+		key := step.Layout + "/" + step.Form
 		if *societyBench == "ramp" && failedRamp[key] {
 			continue
 		}
-		res := runBenchStep(ctx, t, templates[step.Layout+"/"+step.Schema],
+		res := runBenchStep(ctx, t, templates[step.Layout],
 			filepath.Join(dir, fmt.Sprintf("step-%02d", i)), layouts[step.Layout], step)
 		results = append(results, res)
 		if !res.Pass {
 			failedRamp[key] = true
 		}
 		s := res.Stats
-		t.Logf("%-7s %-7s %-8s %5.0f/s pass=%-5v offered=%d published=%d e2e p99=%.1fms max=%.1fms history p99=%.1fms society-w p99=%.1fms wal=%.1fMB %v",
-			step.Layout, step.Schema, step.Form, step.Rate, res.Pass, res.Offered, res.Published,
+		t.Logf("%-7s %-8s %5.0f/s pass=%-5v offered=%d published=%d e2e p99=%.1fms max=%.1fms history p99=%.1fms society-w p99=%.1fms wal=%.1fMB %v",
+			step.Layout, step.Form, step.Rate, res.Pass, res.Offered, res.Published,
 			s[classPublishE2E].P99ms, s[classPublishE2E].MaxMs, s[classHistory].P99ms,
 			s[classSocietyWrite].P99ms, res.WALPeakMB, res.Failures)
 	}

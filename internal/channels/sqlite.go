@@ -191,6 +191,13 @@ func NewSQLiteStore(path string, opts SQLiteOptions) (ChannelStore, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if err := gatherPlannerStatistics(db); err != nil {
+		// Statistics are advice to the planner, not schema: every read still
+		// answers correctly without them, so a store that could not gather
+		// them still opens.
+		logger.Warn("channels: gather planner statistics failed; the next open retries",
+			zap.Error(err))
+	}
 
 	store := &sqliteStore{
 		db:                    db,
@@ -208,6 +215,37 @@ func NewSQLiteStore(path string, opts SQLiteOptions) (ChannelStore, error) {
 	// call against the single pinned connection. See [sqliteStore.probeMessagesFTS].
 	store.ftsAvailable = store.probeMessagesFTS()
 	return store, nil
+}
+
+// gatherPlannerStatistics runs `PRAGMA optimize=0x10002`, the form SQLite
+// advises when a long-lived connection opens: it runs ANALYZE on each table
+// with an index that has no statistics, or whose row count has changed
+// tenfold since its last ANALYZE, and analyzes nothing otherwise. Without
+// statistics the planner guesses each index's selectivity; the guess is what
+// sent the scoped window read to `idx_messages_epoch`, whose one value
+// matches every message (ISSUE-0188). With them it sees that, so no
+// epoch-filtered read walks the whole store. Running after [applySchema] also
+// gives a newly built index its statistics, as SQLite advises after a CREATE
+// INDEX.
+//
+// 0x02 alone would analyze only tables with an unanalyzed index; 0x10000 adds
+// the tenfold check, which SQLite otherwise makes only for tables this
+// connection has queried — at open, none. The mask leaves out 0x10's analysis
+// limit, so the statistics are exact: a limited ANALYZE samples ~2 000 index
+// entries and would record the epoch index as about as selective as a
+// channel. A full one took ~0.2 s per 200 000 messages on the development
+// Mac, and runs only on the opens that need one.
+//
+// Every form of the pragma takes the write lock, even when it analyzes
+// nothing, so an open waits under busy_timeout for any other writer to the
+// file. Only the orchestrator opens it.
+//
+// The statistics are not refreshed while the store stays open, as SQLite
+// also advises for long-lived connections; a table that grows tenfold is
+// re-analyzed at the next open.
+func gatherPlannerStatistics(db *sql.DB) error {
+	_, err := db.Exec(`PRAGMA optimize=0x10002`)
+	return err
 }
 
 // buildDSN attaches the PRAGMA flags every channel-store connection needs:

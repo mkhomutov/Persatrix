@@ -22,9 +22,10 @@ import (
 //	v3 — RFC 0031 Phase 1 PR 2: introduces the `sessions` table and adds
 //	    `session_id TEXT NOT NULL DEFAULT 'legacy'` to `channels` and
 //	    `messages`. Replaces the chronological-scan index with the
-//	    covering `(channel_id, session_id, timestamp DESC)` shape that
-//	    keeps the today's `channel_id`-only history scan cheap AND lets
-//	    Phase 2's per-session filter use the same index. Adds
+//	    covering `(channel_id, session_id, timestamp DESC)` shape, meant to
+//	    keep the `channel_id`-only history scan cheap AND let Phase 2's
+//	    per-session filter use the same index; it did not keep the scan
+//	    cheap (see v14). Adds
 //	    `idx_channels_session` for per-session channel lookups. The
 //	    `legacy` session is a synthetic carve-out (no row in `sessions`)
 //	    — Phase 3 CLI's `persatrix session new --label legacy` is
@@ -143,7 +144,16 @@ import (
 //	    `'local'` on affected stores and `''` on correct ones) and repaired
 //	    by rewriting those rows to `''`. A no-op on every store that never
 //	    saw the original spelling. See migrateV12ToV13.
-const channelStoreSchemaVersion = 13
+//	  - v14 (ISSUE-0188, v0.4.0 RFC 0029 Phase 3 PR 1) adds
+//	    `idx_messages_channel_time(channel_id, timestamp DESC)`. v3's
+//	    covering index puts `session_id` between the two, so it never served
+//	    the time-ordered reads v3 expected it to: since v3 a channel's history
+//	    and the cap prune have sorted the whole channel, and the scoped window
+//	    read, added after v6, has walked the store through v6's epoch index.
+//	    A pure addition, under a new name so the v3 tests that pin
+//	    `idx_messages_channel_ts` staying dropped keep their meaning. See
+//	    migrateV13ToV14.
+const channelStoreSchemaVersion = 14
 
 // schemaV1SQL is the original schema shipped in PR #231. Applied verbatim
 // when opening a fresh database; the v1→v2 migration below uses

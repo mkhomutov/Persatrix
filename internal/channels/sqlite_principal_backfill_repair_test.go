@@ -57,9 +57,9 @@ func seedStampedMessage(t *testing.T, db *sql.DB, msgID, content, principal stri
 	require.NoError(t, err)
 }
 
-// TestSQLiteStore_SchemaV13_Migration_Idempotent pins the literal latest
-// version (the newest migration's test owns the literal pin, per the v5/v6
-// test-header convention) and that a reopen is a no-op.
+// TestSQLiteStore_SchemaV13_Migration_Idempotent pins that a reopen is a
+// no-op. The literal latest-version pin moved to the v14 test, which owns it
+// as the newest migration's (the v5/v6 test-header convention).
 func TestSQLiteStore_SchemaV13_Migration_Idempotent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "channels.db")
 
@@ -74,10 +74,8 @@ func TestSQLiteStore_SchemaV13_Migration_Idempotent(t *testing.T) {
 	withDB(t, path, func(db *sql.DB) {
 		var version int
 		require.NoError(t, db.QueryRow(`PRAGMA user_version`).Scan(&version))
-		assert.Equal(t, 13, version,
-			"channelStoreSchemaVersion is v13 as of the ISSUE-0130 (b) backfill repair")
 		assert.Equal(t, channelStoreSchemaVersion, version,
-			"the literal pin and the const must agree")
+			"reopen is a no-op: the store settles at the const")
 	})
 }
 

@@ -1,6 +1,6 @@
 # Storage Architecture Benchmark — does SQLite hold a society?
 
-**Status**: ✅ Run 2026-10-21
+**Status**: ✅ Run 2026-10-21; gate re-run 2026-10-24 on channels-store v14 ([below](#the-gate-on-channels-store-v14))
 **Question**: [storage roadmap open question 1](storage-architecture-roadmap.md#open-questions)
 — at what scale does SQLite break for channels, ten agents writing to one
 channel at one message a second each?
@@ -92,7 +92,7 @@ version and 2 000 settled approvals.
 | Axis | Values |
 |------|--------|
 | Layout | **room**: ten agents in one channel, the roadmap's case. **society**: fifty agents in ten channels of ten, each agent in two and posting in them in turn |
-| Schema | **as-is**: the channels store as shipped. **indexed**: plus one index, messages by channel in time order (see [the first finding](#1-the-channels-store-lacks-its-channel-time-index)) |
+| Schema | **as-is**: the channels store as shipped then (v13). **indexed**: plus one index, messages by channel in time order (see [the first finding](#1-the-channels-store-lacks-its-channel-time-index)). Channels-store v14 ships that index, so the harness now runs the shipped schema alone |
 | Society connection | **shared**: the society calls use the channels store's own single connection. **separate**: they open a second connection to the same file |
 | Rate | the gate: 10 messages a second for five minutes. The ramp: 20, 50, 100, 200 and 400 a second for a minute each, indexed only, stopping a series at its first failure |
 | Platform | macOS on the development Mac (APFS); Linux in Docker on the same Mac (arm64, ext4 inside the Docker VM) |
@@ -165,6 +165,25 @@ and the write-ahead log never passed 4.4 MB.
 Each cell is the wait p99. The separate-connection series failed at their
 first step, 20 a second, on both platforms, with 1 to 26 failed publishes.
 Linux at 200 a second lost no post; it failed on latency alone.
+
+### The gate on channels-store v14
+
+Re-run on macOS on 2026-10-24 for RFC 0029's Phase 3 PR 1, on the shipped
+schema: the index, and planner statistics the store now gathers when it
+opens, which the indexed variant above did not have.
+
+| Layout | Society connection | Result |
+|--------|--------------------|--------|
+| Room | shared | ✅ 3 000 of 3 000; wait p99 37.5 ms, max 421 ms |
+| Room | separate | ❌ 1 failed publish |
+| Society | shared | ✅ 3 000 of 3 000; wait p99 11.5 ms, max 71 ms |
+| Society | separate | ❌ 2 failed publishes |
+
+In both shared steps every kind of call answered within 18 ms at the 99th
+percentile, and no race was lost. Unrelated work kept the machine busy
+throughout, at a load average of about 8.6 on its 8 cores, and a disk-wide
+scan overlapped two minutes of the room step: its one stall, 421 ms, shows
+in every kind of call at once.
 
 ---
 
@@ -271,17 +290,16 @@ go test ./internal/channels -run '^TestSocietyStoreBenchmark$' -count=1 -timeout
 ```
 
 ```bash
-go test ./internal/channels -run '^TestSocietyStoreBenchmark$' -count=1 -timeout 0 -v -args -society-bench=ramp -society-bench-schemas=indexed -society-bench-out=/tmp
+go test ./internal/channels -run '^TestSocietyStoreBenchmark$' -count=1 -timeout 0 -v -args -society-bench=ramp -society-bench-out=/tmp
 ```
 
 `-society-bench=smoke` runs every combination for ten seconds.
-`-society-bench-schemas` and `-society-bench-forms` narrow the runs; the
-`indexed` schema stops existing as a variant once A1 restores the index, as
-the shipped schema then has it. An unknown value fails before seeding. The
-JSON written to `-society-bench-out`, a file named for the plan, schemas,
-forms and platform, holds each call's median time with nothing else running,
+`-society-bench-forms` narrows the runs; an unknown value fails before
+seeding. The `-society-bench-schemas` flag went with the `indexed` variant
+when v14 shipped the index. The JSON written to `-society-bench-out`, a file
+named for the plan, forms and platform, holds each call's median time with nothing else running,
 and for every step the counts, the percentiles, the errors and the verdict.
-Seeding takes about two minutes; the gate about 45.
+Seeding takes two to thirteen minutes, with the machine's load; the gate about 35.
 
 ## Related documentation
 

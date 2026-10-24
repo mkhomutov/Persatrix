@@ -41,34 +41,36 @@ func (s *sqliteStore) GetHistory(ctx context.Context, channelID string, limit in
 	if limit <= 0 {
 		limit = 50
 	}
-	// Branch on `before.IsZero()` rather than substituting a future-dated
-	// sentinel: a synthetic "now+1h" upper bound would skew if the system
-	// clock jumped backwards mid-pagination and is harder to read at the
-	// SQL site. Two query strings keep the predicate honest.
-	var (
-		rows *sql.Rows
-		qErr error
-	)
-	if before.IsZero() {
-		rows, qErr = s.db.QueryContext(ctx,
-			`SELECT `+messageColumns+`
-			   FROM messages
-			  WHERE channel_id = ?
-			  ORDER BY timestamp DESC
-			  LIMIT ?`, channelID, limit)
-	} else {
-		rows, qErr = s.db.QueryContext(ctx,
-			`SELECT `+messageColumns+`
-			   FROM messages
-			  WHERE channel_id = ? AND timestamp < ?
-			  ORDER BY timestamp DESC
-			  LIMIT ?`, channelID, before, limit)
-	}
-	if qErr != nil {
-		return nil, fmt.Errorf("channels: history query: %w", qErr)
+	q, args := historyQuery(channelID, limit, before)
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("channels: history query: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	return scanMessageRows(rows)
+}
+
+// historyQuery is [sqliteStore.GetHistory]'s SQL and arguments. It is its own
+// function so the query-plan tests explain the statement the store runs, not
+// a copy of it.
+//
+// Branch on `before.IsZero()` rather than substituting a future-dated
+// sentinel: a synthetic "now+1h" upper bound would skew if the system
+// clock jumped backwards mid-pagination and is harder to read at the
+// SQL site. Two query strings keep the predicate honest.
+func historyQuery(channelID string, limit int, before time.Time) (string, []any) {
+	if before.IsZero() {
+		return `SELECT ` + messageColumns + `
+			   FROM messages
+			  WHERE channel_id = ?
+			  ORDER BY timestamp DESC
+			  LIMIT ?`, []any{channelID, limit}
+	}
+	return `SELECT ` + messageColumns + `
+			   FROM messages
+			  WHERE channel_id = ? AND timestamp < ?
+			  ORDER BY timestamp DESC
+			  LIMIT ?`, []any{channelID, before, limit}
 }
 
 // GetHistoryScoped implements [ChannelStore.GetHistoryScoped] — the §G membership
@@ -98,6 +100,18 @@ func (s *sqliteStore) GetHistoryScoped(ctx context.Context, channelID, participa
 	if limit <= 0 {
 		limit = 50
 	}
+	q, args := scopedHistoryQuery(channelID, participantID, limit, before)
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("channels: scoped history query: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	return scanMessageRows(rows)
+}
+
+// scopedHistoryQuery is [sqliteStore.GetHistoryScoped]'s SQL and arguments,
+// its own function for the same reason as [historyQuery].
+func scopedHistoryQuery(channelID, participantID string, limit int, before time.Time) (string, []any) {
 	scope, scopeArgs := membershipEpochScope(participantID, DefaultEpochID)
 
 	q := `SELECT ` + recallMessageColumns + `
@@ -115,13 +129,7 @@ func (s *sqliteStore) GetHistoryScoped(ctx context.Context, channelID, participa
 	}
 	q += ` ORDER BY m.timestamp DESC LIMIT ?`
 	args = append(args, limit)
-
-	rows, err := s.db.QueryContext(ctx, q, args...)
-	if err != nil {
-		return nil, fmt.Errorf("channels: scoped history query: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	return scanMessageRows(rows)
+	return q, args
 }
 
 // GetThread implements [ChannelStore.GetThread].
