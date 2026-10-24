@@ -239,7 +239,7 @@ in the PR body; ISSUE-0188 closed.
 | F-4 | Low | The edited v3 test's comment did not say what its body checks, and it still explained a hand-copied query | Fixed in-PR: it explains `historyQuery` |
 | F-5 | Low | The plan's dated note cited P-1 with no finding behind it, and left out the mask | Fixed in-PR |
 | F-6 | Low | Two comments still said v3's index kept the history scan cheap, and one dated the scoped read's epoch scan to v6, before the read existed | Fixed in-PR |
-| F-7 | Low | The RFC 0028 plan's PR 1 row dated #1054 in UTC; `merged-prs.md` uses the author date, 2026-10-24 | Fixed in-PR |
+| F-7 | Low | This PR's flip of the RFC 0028 plan's PR 1 row dated #1054 in UTC; `merged-prs.md` uses the author date, 2026-10-24 | Moved out: #1058 flipped that row on main, dated 2026-10-24, so this PR leaves it alone |
 | F-8 | Info | The shipped schema runs with planner statistics; the benchmark's 2026-10-21 indexed variant had the index without them | Noted in the benchmark's re-run section |
 | F-9 | Info | The gate re-run shared the machine with unrelated load (load average ~8.6 on 8 cores), and its room step overlapped a disk-wide scan for two minutes | Noted: both shared steps passed; the record says so |
 | F-10 | Info | ~880 changed lines against the ~250 estimate and the 500-line target, ~570 of them in test files | Noted: the migration stays with its tests |
