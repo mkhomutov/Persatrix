@@ -610,6 +610,13 @@ token that survives an orchestrator restart, and refused on replay".
 `publish_channel`, so E-11's match by actor, class and channel would fold a
 held reply and a vote onto one hold and drop the second. The match adds the
 action type.
+**From RFC 0029 Phase 3 PR 2 review**: F-6 — an approval row keeps the held
+turn in three nullable columns, protection level, cascade depth and origin,
+all three or none. E-13's release also needs the held turn's wallet cause,
+and RFC 0037's tripwire more of the dispatch origin than a channel id, so
+this PR defines what `origin` holds, as JSON when it needs more than one
+field, the cause included. A release refuses a persona hold that has no
+held turn.
 
 ### PR 14a — `feature/v040-rfc0028-hitl-task-step`
 

@@ -171,7 +171,7 @@ confirmed or overturned in its review:
 | PR | Row | Title | Branch | Status | GitHub PR | Merged |
 |----|-----|-------|--------|--------|-----------|--------|
 | 1 | A1 | Restore the channel-time index (channels-store v14; ISSUE-0188) | `feature/v040-rfc0029-channel-time-index` | ✅ | [#1057](https://github.com/mkhomutov/Persatrix/pull/1057) | 2026-10-24 |
-| 2 | A1 | The society tables (channels-store v15) | `feature/v040-rfc0029-society-tables` | ⬜ | — | — |
+| 2 | A1 | The society tables (channels-store v15) | `feature/v040-rfc0029-society-tables` | 🔀 | — | — |
 | 3 | A1 | `internal/society`: the store on the channels connection | `feature/v040-rfc0029-society-store` | ⬜ | — | — |
 | 4 | A1 | Startup wiring; the single-node Known Gap issue | `feature/v040-rfc0029-society-wiring` | ⬜ | — | — |
 | 5 | — | Review follow-ups and closeout | `feature/v040-rfc0029-closeout` | ⬜ | — | — |
@@ -250,7 +250,7 @@ in the PR body; ISSUE-0188 closed.
 
 **Scope**: `internal/channels/sqlite_society_migration.go` (new), its
 `case` arm and `channelStoreSchemaVersion`; its test file.
-**Implementation**: S-2, S-3 and S-4. Every society table in one migration,
+**Implementation**: S-2, S-3, S-4 and S-5's table. Every society table in one migration,
 named `society_*`, with their constraints and indexes. No store reads them
 yet.
 **Tests**: the migration on a populated v14 store; each constraint refuses
@@ -261,6 +261,31 @@ v15 store opened by a v14 binary is refused.
 **Migration**: **channels store**, v14 → v15; read by PR 3.
 **Acceptance**: the tables exist and nothing reads them.
 **Estimate**: ~300 lines.
+
+**Review findings** (PR 2):
+
+| Finding | Severity | Description | Disposition |
+|---------|----------|-------------|-------------|
+| F-1 | Medium | The held-turn check made every `action` row carry a protection level, cascade depth and origin, but a task agent's hold (RFC 0028 PR 14a) waits inside its step and has no held turn, so it would have had to write made-up values | Fixed in-PR: all three or none; RFC 0028 PR 14's release refuses a persona hold without them |
+| F-2 | Medium | No plan says how an approved `tie` or `graph_change` row ends: no token spends it, and RFC 0009 PR 13's sweep expires every unspent approved row, so an accepted tie would later read as expired and its directive be refused | → deferred to RFC 0009 PR 13, which picks how such a row ends; the six states hold either way, so no migration follows |
+| F-3 | Low | Deleting a role silently deleted its members and their edges | Fixed in-PR: a role a member holds cannot be deleted |
+| F-4 | Low | A one-column TEXT primary key admitted NULL, and NULLs never collide, so two starts could each store a key with no purpose | Fixed in-PR: the three are NOT NULL |
+| F-5 | Low | Times were DATETIME, which the driver writes as text in the writer's own time zone, so an expiry compared as text could be hours off | Fixed in-PR: unix seconds, as the accounts store keeps its expiry, and a check refuses anything else |
+| F-6 | Low | `origin` is one text column, but E-13's release also needs the held turn's wallet cause, and RFC 0037's tripwire more of the dispatch origin than a channel id | → deferred to RFC 0028 PR 14, which defines what `origin` holds, the cause included |
+| F-7 | Low | A `tie` row outside any tie group was admitted | Fixed in-PR: a check |
+| F-8 | Low | The held-turn test emptied all three columns at once, so a check on one of them passed | Fixed in-PR: one case per column |
+| F-9 | Low | No test pinned the five non-unique indexes | Fixed in-PR: the upgrade test pins each table's indexes |
+| F-10 | Low | No test pinned that a step that cannot finish leaves the store at v14 | Fixed in-PR |
+| F-11 | Low | A comment said the store keeps no decided action's text; an approved row keeps it until it is spent or expires | Fixed in-PR: no settled row's text |
+| F-12 | Low | The dated note listed only some of the indexes beyond S-3, and not the role rule | Fixed in-PR |
+| F-13 | Low | This section's Implementation line left out S-5, whose table it creates | Fixed in-PR |
+| F-14 | Low | The schema history's v15 line read as though the amendment named that file | Fixed in-PR |
+| F-15 | Info | Rows still admitted: a member managing themself, a payload that is not JSON, a deleted graph-version row, a tie and an action sharing a hash, and the 32-byte floor applies to every key purpose | Noted: validation refuses the first as a cycle; only PR 3's store calls write the rest |
+| F-16 | Info | The open-row index serves a query only when it repeats `state IN ('pending', 'approved')`, and replacing a member with `INSERT OR REPLACE` drops their edges | → deferred to PR 3 |
+| F-17 | Info | One `delivered_at` serves G-10's decision event only if each transition clears it and an acknowledgement names the state it was sent for | → deferred to RFC 0009 PR 14 |
+| F-18 | Info | The file-size table gave `sqlite_migrations.go` as 476 lines | Fixed in-PR |
+| F-19 | Info | The schema is a package-level slice, where v9 builds its statements inside the function | Noted: kept, as v14 keeps its index statement at package level |
+| F-20 | Info | ~880 changed lines against the ~300 estimate and the 500-line target, ~600 of them in test files | Noted: the tables stay with their tests, split into a migration file and a constraints file |
 
 ### PR 3 — `feature/v040-rfc0029-society-store`
 
@@ -283,6 +308,12 @@ error (the benchmark's second finding as a unit test).
 **Acceptance**: the benchmark's gate passes with the real society store,
 recorded in the PR body.
 **Estimate**: ~450 lines.
+**From PR 2 review**: F-16 — a query that should use the open-row index
+repeats its condition, `state IN ('pending', 'approved')`, as written; a
+member's role changes by update, never `INSERT OR REPLACE`, which deletes
+the row and with it their edges; a graph-version update checks that it
+changed one row. The comments that say nothing reads the society tables
+go with this PR.
 
 ### PR 4 — `feature/v040-rfc0029-society-wiring`
 
@@ -320,7 +351,7 @@ plan the store has outgrown.
 |------|-----------|------|
 | `cmd/orchestrator/main.go` | 499 | PR 4 wires through its own file |
 | `cmd/orchestrator/channels.go` | 491 | PR 4 adds one call; the logic lives in the new file |
-| `internal/channels/sqlite_migrations.go` | 476 | PRs 1 and 2 add one `case` arm each; the bodies live in their own files, as since v9 |
+| `internal/channels/sqlite_migrations.go` | 484 | PRs 1 and 2 add one `case` arm each; the bodies live in their own files, as since v9 |
 
 ## Risks
 
@@ -348,6 +379,37 @@ plan the store has outgrown.
 > connection opens, with no analysis limit, so the statistics are exact. It
 > runs only once the store holds 1 000 messages, since statistics from a
 > smaller store mislead the cap prune (F-11).
+
+> 2026-10-24 — PR 2 settles what S-3 to S-5 leave open, each a new default
+> for its review to confirm or overturn; the review's findings shaped six:
+> - A persona's hold keeps the turn its release resumes (RFC 0028 E-13): its
+>   protection level, cascade depth and origin. A task agent's hold waits
+>   inside its step, a `graph_change` row's actor is an operator, and a
+>   `tie` row releases nothing, so the three columns are nullable, all three
+>   or none (F-1). Every `tie` row belongs to a tie group (F-7).
+> - The table itself keeps G-11: a row leaves `pending` and `approved` only
+>   when the same write clears its payload.
+> - The nonce is made when a row opens, so every row has one, and the token
+>   an approval mints carries it.
+> - Times are unix seconds, as the accounts store keeps its expiry, so an
+>   expiry is compared as a number in Go, never as text (F-5).
+> - The key table refuses a key shorter than 32 bytes, or one stored as
+>   text, and no one-column key may be NULL (F-4).
+> - Topology and role authority have no check: the graph is written only
+>   after the loader validates it, and the loader owns both vocabularies, as
+>   `classification.go` owns v11's.
+> - Beyond S-3's unique index, approvals are indexed by state and expiry for
+>   the queue and the sweep, by actor for an agent's holds route, and by tie
+>   group; members by agent, and edges by report for the walk up a chain
+>   (F-12).
+> - Deleting an organization deletes its graph, and removing a member
+>   removes the edges to and from them; a role a member holds cannot be
+>   deleted (F-3). The migration seeds the graph-version row at 0, meaning
+>   no graph is loaded.
+>
+> One test reads its section differently: no test runs a v14 binary, so
+> "a v15 store opened by a v14 binary is refused" is pinned as this binary
+> refusing a store one version newer than it knows, the same rule.
 
 ## Related documentation
 

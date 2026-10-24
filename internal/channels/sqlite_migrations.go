@@ -9,9 +9,10 @@ package channels
 // v9→v10 in sqlite_messages_fts_migration.go, v10→v11 in
 // sqlite_classification_migration.go, v11→v12 in
 // sqlite_principal_migration.go, v12→v13 in
-// sqlite_principal_backfill_repair.go and v13→v14 in
-// sqlite_channel_time_index_migration.go), a `case N:` arm in applyMigration,
-// and bumps channelStoreSchemaVersion.
+// sqlite_principal_backfill_repair.go, v13→v14 in
+// sqlite_channel_time_index_migration.go and v14→v15 in
+// sqlite_society_migration.go), a `case N:` arm in applyMigration, and bumps
+// channelStoreSchemaVersion.
 
 import (
 	"database/sql"
@@ -64,6 +65,8 @@ func applyMigration(db *sql.DB, target int) error {
 		return migrateV12ToV13(db)
 	case 14:
 		return migrateV13ToV14(db)
+	case 15:
+		return migrateV14ToV15(db)
 	default:
 		return fmt.Errorf("no migration registered for v%d", target)
 	}
