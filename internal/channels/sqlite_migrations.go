@@ -8,9 +8,10 @@ package channels
 // sibling file: v8→v9 lives in sqlite_membership_intervals_migration.go,
 // v9→v10 in sqlite_messages_fts_migration.go, v10→v11 in
 // sqlite_classification_migration.go, v11→v12 in
-// sqlite_principal_migration.go and v12→v13 in
-// sqlite_principal_backfill_repair.go), a `case N:` arm in applyMigration, and
-// bumps channelStoreSchemaVersion.
+// sqlite_principal_migration.go, v12→v13 in
+// sqlite_principal_backfill_repair.go and v13→v14 in
+// sqlite_channel_time_index_migration.go), a `case N:` arm in applyMigration,
+// and bumps channelStoreSchemaVersion.
 
 import (
 	"database/sql"
@@ -61,6 +62,8 @@ func applyMigration(db *sql.DB, target int) error {
 		return migrateV11ToV12(db)
 	case 13:
 		return migrateV12ToV13(db)
+	case 14:
+		return migrateV13ToV14(db)
 	default:
 		return fmt.Errorf("no migration registered for v%d", target)
 	}
@@ -320,10 +323,12 @@ func migrateV3ToV4(db *sql.DB) error {
 //     so every pre-v3 row picks up `session_id = 'legacy'` in one statement.
 //   - Index replacement: drop `idx_messages_channel_ts` (v2 chronological
 //     scan), create `idx_messages_channel_session(channel_id, session_id,
-//     timestamp DESC)`. The leading `channel_id` keeps today's
+//     timestamp DESC)`. The leading `channel_id` was meant to keep today's
 //     `WHERE channel_id = ? ORDER BY timestamp DESC` scan cheap, and the
 //     trailing `session_id` lets Phase 2's per-session filter use the same
-//     index without a second one.
+//     index without a second one. It did not keep the scan cheap: with
+//     `session_id` in the middle the read sorts the whole channel, which v14
+//     (migrateV13ToV14) fixes with an index of its own.
 //   - `idx_channels_session` supports fast per-session channel listings
 //     (Phase 3 CLI `persatrix session list`).
 //

@@ -217,6 +217,21 @@ func (s *sqliteStore) PublishMessage(ctx context.Context, msg ChannelMessage) er
 	return nil
 }
 
+// pruneOldestSQL deletes a channel's oldest rows: arguments channel id, then
+// how many. The subquery walks `idx_messages_channel_time` (channels-store
+// v14) from its oldest end and the DELETE finds each row by id, so it reads
+// only the rows it deletes. Statistics from a store of 70 messages or fewer
+// would make that DELETE scan the table, which is why the store gathers none
+// below [statisticsFloor]. A constant so the query-plan tests explain this
+// statement, not a copy of it.
+const pruneOldestSQL = `DELETE FROM messages
+		   WHERE id IN (
+		     SELECT id FROM messages
+		      WHERE channel_id = ?
+		      ORDER BY timestamp ASC
+		      LIMIT ?
+		   )`
+
 // pruneExcess deletes the oldest rows from `channelID` until the row count
 // is at or under the configured cap. The `thread_id` self-cascade prunes
 // reply chains rooted in any deleted message during the same statement.
@@ -236,16 +251,7 @@ func (s *sqliteStore) pruneExcess(ctx context.Context, tx *sql.Tx, channelID str
 		return nil
 	}
 	// Delete the `excess` oldest messages; cascade handles thread replies.
-	// Using a subquery against the `(channel_id, timestamp DESC)` index lets
-	// SQLite walk the tail in order.
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM messages
-		   WHERE id IN (
-		     SELECT id FROM messages
-		      WHERE channel_id = ?
-		      ORDER BY timestamp ASC
-		      LIMIT ?
-		   )`, channelID, excess); err != nil {
+	if _, err := tx.ExecContext(ctx, pruneOldestSQL, channelID, excess); err != nil {
 		return fmt.Errorf("channels: prune oldest %d: %w", excess, err)
 	}
 	// PR #231 review Should-Fix #4: cap-pruning was previously silent.

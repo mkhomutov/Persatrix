@@ -1,7 +1,7 @@
 # RFC 0029 — Personal/Society Storage Split — PR Implementation Plan (Phase 3, v0.4.0 form)
 
 **RFC**: [0029-personal-society-storage-split.md](0029-personal-society-storage-split.md)
-**Status**: ⬜ Not started
+**Status**: 🔄 In progress
 **Created**: 2026-10-21
 **Branch prefix**: `feature/v040-rfc0029-`
 **Target**: `main`
@@ -170,7 +170,7 @@ confirmed or overturned in its review:
 
 | PR | Row | Title | Branch | Status | GitHub PR | Merged |
 |----|-----|-------|--------|--------|-----------|--------|
-| 1 | A1 | Restore the channel-time index (channels-store v14; ISSUE-0188) | `feature/v040-rfc0029-channel-time-index` | ⬜ | — | — |
+| 1 | A1 | Restore the channel-time index (channels-store v14; ISSUE-0188) | `feature/v040-rfc0029-channel-time-index` | 🔀 | [#1057](https://github.com/mkhomutov/Persatrix/pull/1057) | — |
 | 2 | A1 | The society tables (channels-store v15) | `feature/v040-rfc0029-society-tables` | ⬜ | — | — |
 | 3 | A1 | `internal/society`: the store on the channels connection | `feature/v040-rfc0029-society-store` | ⬜ | — | — |
 | 4 | A1 | Startup wiring; the single-node Known Gap issue | `feature/v040-rfc0029-society-wiring` | ⬜ | — | — |
@@ -227,6 +227,24 @@ unchanged.
 **Acceptance**: the benchmark's gate passes on the shipped schema, recorded
 in the PR body; ISSUE-0188 closed.
 **Estimate**: ~250 lines.
+
+**Review findings** (PR 1):
+
+| Finding | Severity | Description | Disposition |
+|---------|----------|-------------|-------------|
+| P-1 | Low | This section said the session migration's tests pass unchanged; one pinned v3's covering index as the index `GetHistory` walks, and the planner now takes the new one | Fixed in-PR: that assertion moves to the new index |
+| F-1 | Low | The comment on the open-time `PRAGMA optimize` said its 0x10000 bit is what makes an open analyze, and that it is otherwise a no-op. 0x02 alone analyzes a table with an unanalyzed index; 0x10000 adds the tenfold-growth check; every form takes the write lock, so an open waits out `busy_timeout` behind another writer | Fixed in-PR (comment) |
+| F-2 | Low | No test pinned the mask: the statistics test passed with plain `PRAGMA optimize` | Fixed in-PR: a store grown twentyfold is re-analyzed at open, a test that fails with 0x02 |
+| F-3 | Low | Statistics are gathered only at open. Taken while `membership_intervals` holds one row, they turn the scoped read's membership check into a scan of that table, until the next open after it grows tenfold | → deferred to PR 5 |
+| F-4 | Low | The edited v3 test's comment did not say what its body checks, and it still explained a hand-copied query | Fixed in-PR: it explains `historyQuery` |
+| F-5 | Low | The plan's dated note cited P-1 with no finding behind it, and left out the mask | Fixed in-PR |
+| F-6 | Low | Two comments still said v3's index kept the history scan cheap, and one dated the scoped read's epoch scan to v6, before the read existed | Fixed in-PR |
+| F-7 | Low | This PR's flip of the RFC 0028 plan's PR 1 row dated #1054 in UTC; `merged-prs.md` uses the author date, 2026-10-24 | Moved out: #1058 flipped that row on main, dated 2026-10-24, so this PR leaves it alone |
+| F-8 | Info | The shipped schema runs with planner statistics; the benchmark's 2026-10-21 indexed variant had the index without them | Noted in the benchmark's re-run section |
+| F-9 | Info | The gate re-run shared the machine with unrelated load (load average ~8.6 on 8 cores), and its room step overlapped a disk-wide scan for two minutes | Noted: both shared steps passed; the record says so |
+| F-10 | Info | ~880 changed lines against the ~250 estimate and the 500-line target, ~570 of them in test files | Noted: the migration stays with its tests |
+| F-11 | Medium | Statistics an open took from a store of 70 messages or fewer turn the cap prune's DELETE into a scan of the whole table, kept until an open finds it grown tenfold: a store that restarted early and then ran to the cap paid ~11 ms a publish at 50 000 messages, against ~1 ms | Fixed in-PR: the open gathers statistics only once the store holds 1 000 messages |
+| F-12 | Medium | The plan tests passed that scan: their check rejected only a sort and the epoch index, and their statistics came from 300 messages a channel | Fixed in-PR: the check rejects any step that reads every message, on stores reopened young and at the floor |
 
 ### PR 2 — `feature/v040-rfc0029-society-tables`
 
@@ -289,6 +307,10 @@ component; RFC and ROADMAP status to ⚠️ Partially Implemented (Phases 1 and 
 shipped, Phase 3 in the SQLite form; Phases 2 and 4–6 unslotted); the storage
 roadmap's SA-1 row updated; this plan's statuses closed. RFC 0029, near its
 8 000-word cap, splits at a real seam first if the closeout would cross it.
+**From PR 1 review**: F-3 — refresh the planner statistics while the store
+stays open, with a periodic `PRAGMA optimize` as SQLite advises for
+long-lived connections, so statistics taken on a young store do not keep a
+plan the store has outgrown.
 
 ---
 
@@ -314,6 +336,18 @@ roadmap's SA-1 row updated; this plan's statuses closed. RFC 0029, near its
 > 2026-10-21 — Plan written for row R2 after the benchmark. RFC 0029 moves to
 > 🚧 Implementing with it, and its amendment gains a dated note with the
 > benchmark's result and its two conditions.
+
+> 2026-10-24 — PR 1 departs from its section three times. One
+> session-migration test could not pass unchanged: it pinned v3's covering
+> index as the one `GetHistory` walks, and the planner now takes the new
+> index, so that assertion moves to it (P-1). The three reads' SQL moved,
+> unchanged, into `historyQuery`, `pruneOldestSQL` and `scopedHistoryQuery`,
+> so the plan tests explain the statements the store runs; the v3 test's copy
+> of the history query had already drifted from it. And the open-time pragma
+> is `PRAGMA optimize=0x10002`, the form SQLite advises when a long-lived
+> connection opens, with no analysis limit, so the statistics are exact. It
+> runs only once the store holds 1 000 messages, since statistics from a
+> smaller store mislead the cap prune (F-11).
 
 ## Related documentation
 

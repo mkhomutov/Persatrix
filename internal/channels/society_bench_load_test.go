@@ -369,30 +369,6 @@ func (w *benchWorld) drive(ctx context.Context, cancel context.CancelFunc, step 
 	return walPeak.Load()
 }
 
-// indexTemplate copies a seeded store and adds the one index the channel
-// queries lack: messages by channel in time order. Since the RFC 0031 session
-// migration replaced idx_messages_channel_ts with (channel_id, session_id,
-// timestamp), a channel's newest-first read, the cap prune's oldest-first
-// read and the scoped window read each sort or scan the whole channel or
-// table. This variant measures the store with that fixed.
-func indexTemplate(ctx context.Context, from, to string) error {
-	if err := copyBenchFile(from, to); err != nil {
-		return err
-	}
-	cs, err := NewSQLiteStore(to, SQLiteOptions{MaxChannels: 100})
-	if err != nil {
-		return err
-	}
-	defer func() { _ = cs.Close() }()
-	db := cs.(*sqliteStore).db
-	if _, err := db.ExecContext(ctx,
-		`CREATE INDEX idx_bench_messages_channel_ts ON messages(channel_id, timestamp DESC)`); err != nil {
-		return err
-	}
-	_, err = db.ExecContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`)
-	return err
-}
-
 // serviceTimes is each call's median time with nothing else running.
 func serviceTimes(ctx context.Context, template, scratch string, l benchLayout) (map[string]float64, error) {
 	if err := copyBenchFile(template, scratch); err != nil {

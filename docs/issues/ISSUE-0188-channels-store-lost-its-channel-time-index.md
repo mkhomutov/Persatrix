@@ -1,11 +1,16 @@
 ---
 id: ISSUE-0188
 summary: "The channels store has had no index on messages by channel in time order since channels-store v3 (RFC 0031 PR 2, #335) replaced `idx_messages_channel_ts` with `(channel_id, session_id, timestamp DESC)`. Every newest-first channel read and the cap's oldest-first prune now sort the whole channel, and the scoped window read (`GetHistoryScoped`) scans the whole table through the epoch index. On a channel at its 10 000-message cap a window read takes ~47 ms and a publish ~12 ms, against 0.2 ms and 1.2 ms with the index, so ten agents posting a message a second each saturate the store's one connection. Found by the v0.4.0 storage benchmark; the fix, one index in its own migration, is the first PR of RFC 0029's Phase 3 plan."
-status: open
+status: resolved
 severity: medium
 area: channels
 created: 2026-10-21
+closed: 2026-10-24
+closed_pr: 1057
 refs:
+  - internal/channels/sqlite_channel_time_index_migration.go
+  - internal/channels/sqlite_channel_time_index_migration_test.go
+  - internal/channels/sqlite.go
   - internal/channels/sqlite_migrations.go
   - internal/channels/sqlite_messages.go
   - internal/channels/sqlite_messages_read.go
@@ -90,3 +95,15 @@ with this index, so the phase that boards states it as its dependency
 
 > 2026-10-21 — filed from the v0.4.0 row R2 storage benchmark, run on
 > `b1a7932f`. Docs only: no code changes.
+
+> 2026-10-24 — fixed by channels-store v14, the first PR of RFC 0029's
+> Phase 3 plan. `migrateV13ToV14` creates `idx_messages_channel_time`, and
+> the store runs `PRAGMA optimize=0x10002` when it opens holding at least
+> 1 000 messages: statistics from 70 or fewer would make every cap prune
+> scan the whole table. A query-plan test for each of the three reads fails
+> if it sorts, walks the epoch index or scans every message, on stores with
+> and without statistics and on stores reopened young and at that floor.
+> The benchmark's gate, re-run on the shipped schema, passes with the
+> society tables on the store's own connection ([results](../storage-architecture-benchmark.md#the-gate-on-channels-store-v14)).
+> Statistics are gathered only at open; refreshing them while the store
+> stays open is that plan's PR 5.
