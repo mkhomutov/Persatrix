@@ -17,9 +17,9 @@
    for a completed execution (REST round-trip).
 2. `persatrix logs --follow <execution_id>` streams live entries over SSE for a long-running
    execution and prints a single `[reconnected]` info line on transient stream loss.
-3. Entries survive an orchestrator restart (warm-load from `data/logs/<execution_id>/<seq>.jsonl`).
-   **Currently Accepted-with-known-gap** — see Step 4 for details; the warm-load code path is
-   exercised by unit tests until seal-on-completion is wired in (RFC 0018 PR 7 follow-up).
+3. A finished execution's entries survive an orchestrator restart (the scheduler writes them to
+   `data/logs/<execution_id>/<seq>.jsonl` when the run ends; warm-load reads them back). See
+   Step 4 for what is still not written to disk.
 4. `PERSATRIX_LOG_FORMAT=pretty` selects the developer console encoder for the orchestrator process
    without disturbing the schema-conformant JSON output of the `LogService` shipper.
 
@@ -329,32 +329,34 @@ $beforeRestart = (./bin/persatrix.exe logs $runId2 | Measure-Object -Line).Lines
 
 $afterRestart = (./bin/persatrix.exe logs $runId2 | Measure-Object -Line).Lines
 "before=$beforeRestart after=$afterRestart"
-Test-Path "data/logs/$runId2"   # expect: False (see Known gap below)
+Test-Path "data/logs/$runId2"   # expect: True
 ```
 
-**Expected**: Pre-restart entries are still queryable after the orchestrator process restart
-— **but only when those entries have actually been flushed to disk.**
+**Expected**: Pre-restart entries are still queryable after the orchestrator process restart,
+and `data/logs/<runId2>/` holds one `<sequence>.jsonl` file.
 
-> **Known gap (RFC 0018 PR 7 follow-up)**: Production code never invokes `Buffer.Seal()`,
-> `Buffer.Close()` does not flush in-memory rings on shutdown, and `Buffer.evictLocked`
-> drops un-sealed rings without flushing them. The on-disk `data/logs/<id>/` tree is
-> therefore populated **only** by the `Buffer.Seal(executionID)` code path, which today
-> is exercised exclusively from unit tests. A small completed run reports `after=0` after
-> a clean restart — `data/logs/<runId2>` will not even exist on disk — and forcing LRU
-> eviction (e.g. `PERSATRIX_LOGBUFFER_MAX_EXEC=1` plus a second run) does **not** change
-> that, because the evicted ring is dropped rather than sealed.
+> **How the run reaches disk**: when a run ends (completed or failed) the scheduler seals
+> its ring two seconds later (`logbuffer.SealGraceDefault`), which writes it to
+> `data/logs/<id>/`. The wait lets agent entries still in the shipper's 0.5 s batch arrive
+> first; a sealed ring ignores later entries. Stopping the orchestrator inside those two
+> seconds seals the run at once, so a clean stop never loses a finished run.
 >
-> Until seal-on-completion is wired into the scheduler's terminal-state path (RFC 0018
-> PR 7 follow-up — "wire `Buffer.Seal` into the workflow lifecycle", captured in
-> [docs/rfcs/0018-pr-plan.md](../rfcs/0018-pr-plan.md)), Step 4 is **Accepted-with-known-gap**:
-> mark it skipped and record `after=0` as the documented current behaviour. The warm-load
-> code path itself is covered by `TestWarmLoadAfterReopen` in
-> [`internal/observability/logbuffer/buffer_test.go`](../../internal/observability/logbuffer/buffer_test.go),
-> which seeds disk via `b.Seal()` directly.
+> **Still not written to disk**: a run that is still going when the orchestrator stops, and a
+> ring that LRU eviction drops before its run ends (e.g. `PERSATRIX_LOGBUFFER_MAX_EXEC=1`
+> plus a second, overlapping run). Both are lost on restart.
+>
+> The sealing path is covered by `TestTerminalRun_SealsRunLogs` in
+> [`internal/scheduler/scheduler_log_seal_test.go`](../../internal/scheduler/scheduler_log_seal_test.go)
+> and the `TestSealAfterGrace_*` tests in
+> [`internal/observability/logbuffer/seal_test.go`](../../internal/observability/logbuffer/seal_test.go);
+> warm-load by `TestWarmLoad_ResumesFromDisk` in
+> [`internal/observability/logbuffer/buffer_test.go`](../../internal/observability/logbuffer/buffer_test.go);
+> both together by `test_finished_run_logs_survive_orchestrator_restart` in
+> [`tests/integration/test_logs_e2e.py`](../../tests/integration/test_logs_e2e.py).
 
 **Verification**:
-- [ ] `before=$beforeRestart` recorded; `after=0` is the documented current behaviour
-- [ ] Step result reported as `Skipped (Accepted-with-known-gap)` until PR 7 lands
+- [ ] `after` equals `before`
+- [ ] `data/logs/<runId2>` exists
 
 ---
 
@@ -411,12 +413,8 @@ PR 3). Representative Scenario B run produced 9 entries spanning the `planner` a
 
 ## Pass / Fail Criteria
 
-- **Pass**: Steps 1–3, 5, and 6 each meet their Verification checkboxes; Step 4 is reported as
-  `Skipped (Accepted-with-known-gap)` per its inline note.
+- **Pass**: Steps 1–6 each meet their Verification checkboxes.
 - **Accepted-with-known-gap**:
-  - Step 4 (restart durability) until `Buffer.Seal` is wired into the workflow lifecycle
-    (RFC 0018 PR 7 follow-up). Verified live: `data/logs/<runId>` is **not** created even
-    after a clean shutdown of a completed full-agent run.
   - `--trace` server-side filtering is currently client-side; entries are still shipped over
     the wire. Tracked in [#179](https://github.com/mkhomutov/Persatrix/issues/179)
     ("CLI logs polish residuals" → "add a server-side `trace` query parameter"). Operator
@@ -425,4 +423,4 @@ PR 3). Representative Scenario B run produced 9 entries spanning the `planner` a
   - Step 1's agent-side check and Step 6 are reported as `N/A (Skipped)` when run under
     **Scenario A** (no agents registered), because no agent-side entry then exists.
 - **Fail**: Any non-skipped step's Verification fails, or the warm-load code path itself
-  regresses (covered by `TestWarmLoadAfterReopen`).
+  regresses (covered by `TestWarmLoad_ResumesFromDisk`).

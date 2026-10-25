@@ -596,7 +596,7 @@ persatrix logs exec-7f2a1 --follow --level INFO
 persatrix logs _ --trace abc123 --verbose
 ```
 
-Across an orchestrator restart, `--follow` prints `[reconnected]` and resumes from the warm-loaded ring; entries flushed to disk before the restart remain queryable via the snapshot path.
+Across an orchestrator restart, `--follow` prints `[reconnected]` and resumes from the warm-loaded ring; entries flushed to disk before the restart remain queryable via the snapshot path. A run's entries are flushed two seconds after it ends (completed or failed), which gives agent entries still in the shipper's 0.5 s batch time to arrive; stopping the orchestrator inside that window flushes the run at once. A run still going when the orchestrator stops is not flushed.
 
 ### 12.4 End-to-end coverage
 

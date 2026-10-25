@@ -98,6 +98,7 @@ def _spawn_orchestrator(
     http_port: int,
     grpc_port: int,
     log_dir: Path,
+    workflows_dir: Path = REPO_ROOT / "workflows",
 ) -> subprocess.Popen[bytes]:
     if not SERVER_BIN.exists():
         pytest.skip(
@@ -121,7 +122,7 @@ def _spawn_orchestrator(
         "--http-bind=127.0.0.1",
         "--grpc-bind=127.0.0.1",
         f"--config={REPO_ROOT / 'config'}",
-        f"--workflows-dir={REPO_ROOT / 'workflows'}",
+        f"--workflows-dir={workflows_dir}",
     ]
     # Redirect stdout/stderr to files in the per-test log dir.  Using
     # subprocess.PIPE here is unsafe on Windows: the OS pipe buffer is
@@ -368,13 +369,13 @@ def test_logs_survive_orchestrator_restart(tmp_path: Path) -> None:
     """Sealed entries on disk are surfaced after a (re)start.
 
     Exercises the disk store's warm-load path
-    (``internal/observability/logbuffer/disk.go``).  The orchestrator
-    only flushes a ring to disk when the workflow lifecycle calls
-    ``Buffer.Seal``; PR 6 does not wire that path, so the test seeds
-    the on-disk JSONL file directly using the documented layout
+    (``internal/observability/logbuffer/disk.go``) on its own: the test
+    seeds the on-disk JSONL file directly using the documented layout
     (``<dir>/<execution_id>/<sequence>.jsonl``, one Entry per line)
     and then starts the orchestrator and asserts that the warm-load
-    surfaces the entries via ``persatrix logs``.
+    surfaces the entries via ``persatrix logs``.  The path that writes
+    those files when a run ends is covered by
+    ``test_finished_run_logs_survive_orchestrator_restart``.
     """
     http_port = _free_port()
     grpc_port = _free_port()
@@ -423,6 +424,91 @@ def test_logs_survive_orchestrator_restart(tmp_path: Path) -> None:
     assert result.returncode == 0, f"stderr={result.stderr}"
     assert "pre-restart-1" in result.stdout, f"stdout={result.stdout!r}"
     assert "pre-restart-2" in result.stdout, f"stdout={result.stdout!r}"
+
+
+def _post_json(url: str, body: dict[str, object]) -> dict[str, object]:
+    import urllib.request
+
+    req = urllib.request.Request(  # noqa: S310 — loopback
+        url,
+        data=json.dumps(body).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=5.0) as resp:  # noqa: S310 — loopback
+        return json.loads(resp.read())
+
+
+def _get_json(url: str) -> dict[str, object]:
+    import urllib.request
+
+    with urllib.request.urlopen(url, timeout=5.0) as resp:  # noqa: S310 — loopback
+        return json.loads(resp.read())
+
+
+def test_finished_run_logs_survive_orchestrator_restart(tmp_path: Path) -> None:
+    """A finished run's logs are written to disk and served after a restart.
+
+    The run's only step names an agent that is not registered, so the run
+    fails at once.  The scheduler then seals the run's ring after a short
+    grace (``logbuffer.SealGraceDefault``, 2 s), which writes it to disk.
+    Before the scheduler sealed finished runs, nothing reached disk and
+    ``persatrix logs`` came back empty after any restart.
+    """
+    log_dir = tmp_path / "logbuffer"
+    log_dir.mkdir()
+    workflows_dir = tmp_path / "workflows"
+    workflows_dir.mkdir()
+    (workflows_dir / "seal-e2e.yaml").write_text(
+        'schema_version: "0.1"\n'
+        "workflow:\n"
+        "  id: seal-e2e\n"
+        "  name: Seal E2E\n"
+        "  steps:\n"
+        "    - id: only-step\n"
+        "      agent: no-such-agent\n"
+        '      input: "hello"\n',
+        encoding="utf-8",
+    )
+    http_port = _free_port()
+    grpc_port = _free_port()
+    server = f"http://127.0.0.1:{http_port}"
+
+    proc = _spawn_orchestrator(
+        http_port=http_port, grpc_port=grpc_port, log_dir=log_dir, workflows_dir=workflows_dir
+    )
+    try:
+        run = _post_json(
+            f"{server}/api/v1/workflows/run", {"workflow_id": "seal-e2e", "inputs": {}}
+        )
+        exec_id = str(run["run_id"])
+        deadline = time.monotonic() + 15.0
+        status = ""
+        while time.monotonic() < deadline:
+            status = str(_get_json(f"{server}/api/v1/workflows/{exec_id}/status")["status"])
+            if status in ("completed", "failed", "cancelled"):
+                break
+            time.sleep(SERVER_READY_POLL_S)
+        assert status == "failed", f"run did not fail as set up; status={status!r}"
+
+        # Seal grace (2 s) plus headroom for the disk write.
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline and not list((log_dir / exec_id).glob("*.jsonl")):
+            time.sleep(SERVER_READY_POLL_S)
+    finally:
+        _stop(proc)
+    assert list((log_dir / exec_id).glob("*.jsonl")), "finished run was never written to disk"
+
+    proc = _spawn_orchestrator(
+        http_port=http_port, grpc_port=grpc_port, log_dir=log_dir, workflows_dir=workflows_dir
+    )
+    try:
+        result = _run_cli(["logs", exec_id], server=server)
+    finally:
+        _stop(proc)
+
+    assert result.returncode == 0, f"stderr={result.stderr}"
+    assert "run created" in result.stdout, f"stdout={result.stdout!r}"
 
 
 def test_logs_invalid_level_rejected_at_parse_time() -> None:

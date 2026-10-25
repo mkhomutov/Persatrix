@@ -165,6 +165,9 @@ type Config struct {
 	// Subscribe returns ErrSubscriberCapExceeded.  Default:
 	// MaxSubscribersDefault (PERSATRIX_LOGBUFFER_SUBSCRIBERS).
 	MaxSubscribers int
+	// SealGrace is how long SealAfterGrace waits before sealing a
+	// finished execution. Default: SealGraceDefault.
+	SealGrace time.Duration
 }
 
 // Defaults returns a Config with all RFC-pinned defaults.
@@ -177,6 +180,7 @@ func Defaults() Config {
 		DropLevel:      "DEBUG",
 		RatePerExec:    1000,
 		MaxSubscribers: MaxSubscribersDefault,
+		SealGrace:      SealGraceDefault,
 	}
 }
 
@@ -216,6 +220,9 @@ type Buffer struct {
 	// broadcast on the Append admit path.
 	subMu sync.RWMutex
 	subs  map[*subscriber]struct{}
+
+	// Finished executions waiting out SealGrace (see seal.go).
+	seals sealQueue
 }
 
 // New constructs a Buffer, applying defaults for any zero-valued Config
@@ -239,6 +246,7 @@ func New(cfg Config, logger *zap.Logger) (*Buffer, error) {
 		disk:       disk,
 		rateWarned: make(map[string]struct{}),
 		subs:       make(map[*subscriber]struct{}),
+		seals:      sealQueue{pending: make(map[string]*time.Timer)},
 	}
 	if err := b.warmLoad(); err != nil {
 		return nil, err
@@ -268,6 +276,9 @@ func applyDefaults(cfg Config) Config {
 	}
 	if cfg.MaxSubscribers <= 0 {
 		cfg.MaxSubscribers = d.MaxSubscribers
+	}
+	if cfg.SealGrace <= 0 {
+		cfg.SealGrace = d.SealGrace
 	}
 	return cfg
 }
@@ -320,37 +331,6 @@ func (b *Buffer) Append(entry Entry) DropReason {
 	return DropNone
 }
 
-// Seal marks the named execution's ring as sealed (no further admit
-// after seal is allowed only for entries of the same execution; in
-// practice executors stop emitting once the workflow terminates) and
-// flushes the ring's contents to disk in a single batch.
-//
-// Sealed rings remain queryable via Snapshot until LRU-evicted.
-//
-// Invalid execution IDs are rejected here as well: the value would
-// otherwise reach disk.flush as a path component (see validExecutionID).
-func (b *Buffer) Seal(executionID string) error {
-	if !validExecutionID(executionID) {
-		return errInvalidExecutionID
-	}
-	b.mu.RLock()
-	ring, ok := b.rings[executionID]
-	b.mu.RUnlock()
-	if !ok {
-		return nil
-	}
-	entries := ring.seal()
-	if len(entries) == 0 {
-		ring.markFlushed()
-		return nil
-	}
-	if err := b.disk.flush(executionID, entries); err != nil {
-		return err
-	}
-	ring.markFlushed()
-	return nil
-}
-
 // Snapshot returns a copy of the named execution's currently-buffered
 // entries (oldest first). Returns nil for unknown or invalid execution
 // IDs (the latter cannot exist in b.rings or on disk because they are
@@ -372,8 +352,9 @@ func (b *Buffer) Snapshot(executionID string) []Entry {
 
 // Close is an idempotent shutdown gate that prevents further Append
 // calls. Rings that were sealed via Seal() prior to Close remain
-// durable on disk and queryable via Snapshot; un-sealed (active)
-// rings are intentionally NOT flushed here — the orchestrator's
+// durable on disk and queryable via Snapshot. Finished executions still
+// waiting out their SealAfterGrace delay are sealed now. Other un-sealed
+// (active) rings are intentionally NOT flushed here — the scheduler's
 // terminal hooks own per-execution sealing in the normal path, and
 // flushing partial in-flight rings would complicate restart semantics
 // (the agent shipper may still be delivering tail entries).
@@ -381,7 +362,7 @@ func (b *Buffer) Close() error {
 	if !b.closed.CompareAndSwap(false, true) {
 		return nil
 	}
-	return nil
+	return b.drainSeals()
 }
 
 // Stats returns a snapshot of the buffer's internal counters. Intended

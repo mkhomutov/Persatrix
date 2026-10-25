@@ -326,6 +326,7 @@ func TestApplyDefaults_FillsZeroFields(t *testing.T) {
 	assert.Equal(t, int64(512*1024*1024), c.DiskCapBytes)
 	assert.Equal(t, "DEBUG", c.DropLevel)
 	assert.Equal(t, 1000, c.RatePerExec)
+	assert.Equal(t, 2*time.Second, c.SealGrace)
 }
 
 // PR #173 review Should-Fix #2: SSE fan-out drops are now aggregated in
