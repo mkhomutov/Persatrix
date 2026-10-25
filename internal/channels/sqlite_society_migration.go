@@ -14,12 +14,14 @@ import (
 // A one-column TEXT primary key is NOT NULL, since SQLite otherwise lets it
 // hold NULLs that never collide.
 var societySchemaV15 = []string{
-	// The organization graph's version, in a single row. A graph write raises
-	// it in the same transaction (RFC 0012 OQ 2); 0 means no graph is loaded.
+	// The organization graph's version, a whole number in a single row. A
+	// graph write raises it in the same transaction (RFC 0012 OQ 2); 0 means
+	// no graph is loaded.
 	`CREATE TABLE society_meta (
         id            INTEGER PRIMARY KEY CONSTRAINT society_meta_one_row CHECK (id = 1),
         graph_version INTEGER NOT NULL DEFAULT 0
-                      CONSTRAINT society_meta_graph_version CHECK (graph_version >= 0)
+                      CONSTRAINT society_meta_graph_version
+                      CHECK (typeof(graph_version) = 'integer' AND graph_version >= 0)
     )`,
 	`INSERT INTO society_meta (id, graph_version) VALUES (1, 0)`,
 
@@ -53,6 +55,9 @@ var societySchemaV15 = []string{
     )`,
 	// A persona's organization and role, read by agent (RFC 0012 C1 PR 4).
 	`CREATE INDEX idx_society_members_agent ON society_members(agent_id)`,
+	// A role's holders, which each role delete looks up to check that no
+	// member still holds it.
+	`CREATE INDEX idx_society_members_role ON society_members(organization_id, role_id)`,
 	`CREATE TABLE society_manages (
         organization_id TEXT NOT NULL,
         manager_id      TEXT NOT NULL,
@@ -72,12 +77,14 @@ var societySchemaV15 = []string{
 	// row from `approved` to `spent`. The nonce is made when the row opens,
 	// and the token an approval mints carries it. A persona's hold keeps the
 	// turn its release resumes (E-13): its protection level, cascade depth
-	// and origin, all three or none. A task agent's hold waits inside its
-	// step, a `graph_change` row's actor is an operator, and a `tie` row
-	// releases nothing, so they keep none. Every `tie` row belongs to a tie
+	// and origin, all three or none, the depth a whole number. A task agent's
+	// hold waits inside its step, a `graph_change` row's actor is an operator,
+	// and a `tie` row releases nothing, so they keep none, and only an
+	// `action` row may keep one. A `tie` row, and no other, belongs to a tie
 	// group. The held action's payload is JSON, and a row leaves `pending` and
 	// `approved` only with it cleared (G-11), so the store keeps no settled
-	// row's text. Times are unix seconds, as the accounts store keeps its
+	// row's text. A decided row records who decided and when, both or
+	// neither. Times are unix seconds, as the accounts store keeps its
 	// expiry, so expiry is compared as a number in Go, never as text.
 	`CREATE TABLE society_approvals (
         id               TEXT NOT NULL PRIMARY KEY,
@@ -100,8 +107,12 @@ var societySchemaV15 = []string{
         delivered_at     INTEGER,
         created_at       INTEGER NOT NULL,
         CONSTRAINT society_approvals_held_turn CHECK
-            ((protection_level IS NULL) = (cascade_depth IS NULL) AND (cascade_depth IS NULL) = (origin IS NULL)),
-        CONSTRAINT society_approvals_tie_in_group CHECK (kind <> 'tie' OR tie_group IS NOT NULL),
+            ((protection_level IS NULL) = (cascade_depth IS NULL) AND (cascade_depth IS NULL) = (origin IS NULL)
+             AND (kind = 'action' OR protection_level IS NULL)),
+        CONSTRAINT society_approvals_cascade_depth CHECK
+            (cascade_depth IS NULL OR (typeof(cascade_depth) = 'integer' AND cascade_depth >= 0)),
+        CONSTRAINT society_approvals_tie_in_group CHECK ((kind = 'tie') = (tie_group IS NOT NULL)),
+        CONSTRAINT society_approvals_decision CHECK ((decided_by IS NULL) = (decided_at IS NULL)),
         CONSTRAINT society_approvals_unix_times CHECK
             (typeof(expires_at) = 'integer' AND typeof(created_at) = 'integer'
              AND typeof(decided_at) IN ('integer', 'null') AND typeof(delivered_at) IN ('integer', 'null')),
@@ -122,12 +133,14 @@ var societySchemaV15 = []string{
 
 	// One key per purpose, made once by the store's first call for it (S-5).
 	// The approval-signing key is an HMAC-SHA256 key, so nothing shorter than
-	// 32 bytes, nor stored as text, is a key.
+	// 32 bytes, nor stored as text, is a key. Its time is unix seconds, as an
+	// approval row's are.
 	`CREATE TABLE society_keys (
         purpose    TEXT NOT NULL PRIMARY KEY,
         key        BLOB NOT NULL
                    CONSTRAINT society_keys_length CHECK (typeof(key) = 'blob' AND length(key) >= 32),
         created_at INTEGER NOT NULL
+                   CONSTRAINT society_keys_unix_time CHECK (typeof(created_at) = 'integer')
     )`,
 }
 

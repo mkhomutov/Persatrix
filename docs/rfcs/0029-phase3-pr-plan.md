@@ -285,7 +285,17 @@ v15 store opened by a v14 binary is refused.
 | F-17 | Info | One `delivered_at` serves G-10's decision event only if each transition clears it and an acknowledgement names the state it was sent for | → deferred to RFC 0009 PR 14 |
 | F-18 | Info | The file-size table gave `sqlite_migrations.go` as 476 lines | Fixed in-PR |
 | F-19 | Info | The schema is a package-level slice, where v9 builds its statements inside the function | Noted: kept, as v14 keeps its index statement at package level |
-| F-20 | Info | ~880 changed lines against the ~300 estimate and the 500-line target, ~600 of them in test files | Noted: the tables stay with their tests, split into a migration file and a constraints file |
+| F-20 | Info | ~1 020 changed lines against the ~300 estimate and the 500-line target, ~710 of them in test files | Noted: the tables stay with their tests, split into a migration file and a constraints file |
+| F-21 | Low | Only a `tie` row with no group was refused, so an `action` or `graph_change` row could carry a tie group and be withdrawn with that group's siblings | Fixed in-PR: a `tie` row, and no other, has a tie group |
+| F-22 | Low | A `graph_change` or `tie` row could keep a held turn, which a release would read as a persona hold to resume | Fixed in-PR: only an `action` row keeps one |
+| F-23 | Low | The cascade depth and the graph version took text, which passes `>= 0`, and the depth could be negative | Fixed in-PR: both are whole numbers, never below zero |
+| F-24 | Low | The key's `created_at` took a `time.Time`, stored as text, F-5's hazard | Fixed in-PR: unix seconds, checked |
+| F-25 | Low | A row could record who decided with no time, or a time with no decider | Fixed in-PR: both or neither |
+| F-26 | Low | The upgrade test pinned the literal 15 after a full open, so v16 would break it as v15 broke v14's | Fixed in-PR: it expects `channelStoreSchemaVersion`; the idempotence test keeps the literal |
+| F-27 | Low | The index pin checked names only, so an index rebuilt on other columns passed | Fixed in-PR: each index's columns and partial condition are pinned |
+| F-28 | Low | The statistics floor counts messages only, so the society tables are analyzed while they hold a few rows, and the expiry sweep plans as a scan until they grow tenfold | → deferred to PR 5, with PR 1's F-3 |
+| F-29 | Info | No index served the member's role foreign key, so each role delete scanned the organization's members | Fixed in-PR: members are indexed by role |
+| F-30 | Info | The schema history's v15 line broke mid-sentence | Fixed in-PR |
 
 ### PR 3 — `feature/v040-rfc0029-society-store`
 
@@ -342,6 +352,9 @@ roadmap's SA-1 row updated; this plan's statuses closed. RFC 0029, near its
 stays open, with a periodic `PRAGMA optimize` as SQLite advises for
 long-lived connections, so statistics taken on a young store do not keep a
 plan the store has outgrown.
+**From PR 2 review**: F-28 — the open gathers statistics once the store holds
+1 000 messages, however few rows the society tables hold, so the refresh
+covers them too.
 
 ---
 
@@ -386,22 +399,26 @@ plan the store has outgrown.
 >   protection level, cascade depth and origin. A task agent's hold waits
 >   inside its step, a `graph_change` row's actor is an operator, and a
 >   `tie` row releases nothing, so the three columns are nullable, all three
->   or none (F-1). Every `tie` row belongs to a tie group (F-7).
+>   or none (F-1), and only an `action` row keeps them (F-22). A `tie` row,
+>   and no other, belongs to a tie group (F-7, F-21).
 > - The table itself keeps G-11: a row leaves `pending` and `approved` only
->   when the same write clears its payload.
+>   when the same write clears its payload. A decided row records who
+>   decided and when, both or neither (F-25).
 > - The nonce is made when a row opens, so every row has one, and the token
 >   an approval mints carries it.
 > - Times are unix seconds, as the accounts store keeps its expiry, so an
->   expiry is compared as a number in Go, never as text (F-5).
+>   expiry is compared as a number in Go, never as text (F-5). The cascade
+>   depth and the graph version are whole numbers too (F-23).
 > - The key table refuses a key shorter than 32 bytes, or one stored as
->   text, and no one-column key may be NULL (F-4).
+>   text, and a time that is not unix seconds (F-24); no one-column key may
+>   be NULL (F-4).
 > - Topology and role authority have no check: the graph is written only
 >   after the loader validates it, and the loader owns both vocabularies, as
 >   `classification.go` owns v11's.
 > - Beyond S-3's unique index, approvals are indexed by state and expiry for
 >   the queue and the sweep, by actor for an agent's holds route, and by tie
->   group; members by agent, and edges by report for the walk up a chain
->   (F-12).
+>   group; members by agent, and by role for its foreign key (F-29); and
+>   edges by report for the walk up a chain (F-12).
 > - Deleting an organization deletes its graph, and removing a member
 >   removes the edges to and from them; a role a member holds cannot be
 >   deleted (F-3). The migration seeds the graph-version row at 0, meaning

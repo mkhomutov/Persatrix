@@ -70,6 +70,8 @@ func assertRefusal(t *testing.T, err error, want string) {
 func TestSocietyApprovals_Constraints(t *testing.T) {
 	const oneOpen = "UNIQUE constraint failed: society_approvals.actor_id, society_approvals.action_hash"
 	const heldTurn = "CHECK constraint failed: society_approvals_held_turn"
+	const cascadeDepth = "CHECK constraint failed: society_approvals_cascade_depth"
+	const tieInGroup = "CHECK constraint failed: society_approvals_tie_in_group"
 	with := func(a approval, edit func(*approval)) approval { edit(&a); return a }
 	sameHold := func(a *approval) { a.Hash = "hash-1" }
 
@@ -108,15 +110,29 @@ func TestSocietyApprovals_Constraints(t *testing.T) {
 			nil, with(pendingAction(1), func(a *approval) { a.Turn[1] = nil }), heldTurn},
 		{"a held turn with no origin",
 			nil, with(pendingAction(1), func(a *approval) { a.Turn[2] = nil }), heldTurn},
+		{"a cascade depth stored as text",
+			nil, with(pendingAction(1), func(a *approval) { a.Turn[1] = "one" }), cascadeDepth},
+		{"a negative cascade depth",
+			nil, with(pendingAction(1), func(a *approval) { a.Turn[1] = -1 }), cascadeDepth},
 		{"a graph change has no held turn",
 			nil, with(pendingAction(1), func(a *approval) {
 				a.Kind, a.Actor, a.Turn = "graph_change", "operator-1", nil
 			}), ""},
+		{"a graph change with a held turn",
+			nil, with(pendingAction(1), func(a *approval) { a.Kind, a.Actor = "graph_change", "operator-1" }),
+			heldTurn},
 		{"a tie row in its group",
 			nil, with(pendingAction(1), func(a *approval) { a.Kind, a.Turn, a.TieGroup = "tie", nil, "tie-1" }), ""},
+		{"a tie row with a held turn",
+			nil, with(pendingAction(1), func(a *approval) { a.Kind, a.TieGroup = "tie", "tie-1" }), heldTurn},
 		{"a tie row outside any group",
-			nil, with(pendingAction(1), func(a *approval) { a.Kind, a.Turn = "tie", nil }),
-			"CHECK constraint failed: society_approvals_tie_in_group"},
+			nil, with(pendingAction(1), func(a *approval) { a.Kind, a.Turn = "tie", nil }), tieInGroup},
+		{"an action row in a tie group",
+			nil, with(pendingAction(1), func(a *approval) { a.TieGroup = "tie-1" }), tieInGroup},
+		{"a graph change in a tie group",
+			nil, with(pendingAction(1), func(a *approval) {
+				a.Kind, a.Actor, a.Turn, a.TieGroup = "graph_change", "operator-1", nil, "tie-1"
+			}), tieInGroup},
 		{"a settled row that keeps its payload",
 			nil, with(pendingAction(1), func(a *approval) { a.State = "spent" }),
 			"CHECK constraint failed: society_approvals_payload_settled"},
@@ -162,13 +178,38 @@ func TestSocietyApprovals_TimesAreUnixSeconds(t *testing.T) {
 		t.Run(column, func(t *testing.T) {
 			db := newSocietyDB(t)
 			require.NoError(t, insertApproval(db, pendingAction(1)))
-			update := `UPDATE society_approvals SET ` + column + ` = ? WHERE id = 'approval-1'`
+			set := column + ` = ?`
+			if column == "decided_at" {
+				set += `, decided_by = 'operator-1'` // who decided goes with when
+			}
+			update := `UPDATE society_approvals SET ` + set + ` WHERE id = 'approval-1'`
 			now := time.Now()
 
 			_, err := db.Exec(update, now)
 			assertRefusal(t, err, "CHECK constraint failed: society_approvals_unix_times")
 			_, err = db.Exec(update, now.Unix())
 			assertRefusal(t, err, "")
+		})
+	}
+}
+
+// TestSocietyApprovals_DecisionNamesWhoAndWhen: a decided row records who
+// decided and when, both or neither (RFC 0009 PR 12), so no decision is kept
+// without its time or without its decider.
+func TestSocietyApprovals_DecisionNamesWhoAndWhen(t *testing.T) {
+	const decide = `UPDATE society_approvals SET state = 'denied', payload = NULL, %s WHERE id = 'approval-1'`
+	const decision = "CHECK constraint failed: society_approvals_decision"
+	cases := []struct{ name, set, want string }{
+		{"a decider with no time", `decided_by = 'operator-1'`, decision},
+		{"a time with no decider", `decided_at = 86400`, decision},
+		{"both", `decided_by = 'operator-1', decided_at = 86400`, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db := newSocietyDB(t)
+			require.NoError(t, insertApproval(db, pendingAction(1)))
+			_, err := db.Exec(fmt.Sprintf(decide, tc.set))
+			assertRefusal(t, err, tc.want)
 		})
 	}
 }
@@ -320,7 +361,7 @@ func TestSocietyOrganizations_DeletingAMemberTakesItsEdges(t *testing.T) {
 }
 
 // TestSocietyMeta_Constraints: the graph version lives in exactly one row,
-// and never goes below zero.
+// and is a whole number that never goes below zero.
 func TestSocietyMeta_Constraints(t *testing.T) {
 	cases := []struct {
 		name, stmt, want string
@@ -328,6 +369,8 @@ func TestSocietyMeta_Constraints(t *testing.T) {
 		{"a second row", `INSERT INTO society_meta (id, graph_version) VALUES (2, 0)`,
 			"CHECK constraint failed: society_meta_one_row"},
 		{"a negative version", `UPDATE society_meta SET graph_version = -1 WHERE id = 1`,
+			"CHECK constraint failed: society_meta_graph_version"},
+		{"a version stored as text", `UPDATE society_meta SET graph_version = 'one' WHERE id = 1`,
 			"CHECK constraint failed: society_meta_graph_version"},
 		{"the version goes up", `UPDATE society_meta SET graph_version = graph_version + 1 WHERE id = 1`, ""},
 	}
@@ -339,8 +382,9 @@ func TestSocietyMeta_Constraints(t *testing.T) {
 	}
 }
 
-// TestSocietyKeys_Constraints: one key per purpose (S-5), and none shorter
-// than the 32 bytes an HMAC-SHA256 key needs.
+// TestSocietyKeys_Constraints: one key per purpose (S-5), none shorter than
+// the 32 bytes an HMAC-SHA256 key needs, and its time in unix seconds, as an
+// approval row keeps its times.
 func TestSocietyKeys_Constraints(t *testing.T) {
 	const insert = `INSERT INTO society_keys (purpose, key, created_at) VALUES (?, ?, ?)`
 	key := []byte(strings.Repeat("k", 32))
@@ -349,12 +393,14 @@ func TestSocietyKeys_Constraints(t *testing.T) {
 		name  string
 		first bool
 		key   any
+		at    any // nil writes the time in unix seconds
 		want  string
 	}{
-		{"a 32-byte key", false, key, ""},
-		{"a second key for one purpose", true, key, "UNIQUE constraint failed: society_keys.purpose"},
-		{"a 16-byte key", false, key[:16], "CHECK constraint failed: society_keys_length"},
-		{"a key stored as text", false, string(key), "CHECK constraint failed: society_keys_length"},
+		{"a 32-byte key", false, key, nil, ""},
+		{"a second key for one purpose", true, key, nil, "UNIQUE constraint failed: society_keys.purpose"},
+		{"a 16-byte key", false, key[:16], nil, "CHECK constraint failed: society_keys_length"},
+		{"a key stored as text", false, string(key), nil, "CHECK constraint failed: society_keys_length"},
+		{"a time stored as text", false, key, time.Now(), "CHECK constraint failed: society_keys_unix_time"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -364,7 +410,11 @@ func TestSocietyKeys_Constraints(t *testing.T) {
 				_, err := db.Exec(insert, "approval_signing", key, now)
 				require.NoError(t, err)
 			}
-			_, err := db.Exec(insert, "approval_signing", tc.key, now)
+			at := tc.at
+			if at == nil {
+				at = now
+			}
+			_, err := db.Exec(insert, "approval_signing", tc.key, at)
 			assertRefusal(t, err, tc.want)
 		})
 	}

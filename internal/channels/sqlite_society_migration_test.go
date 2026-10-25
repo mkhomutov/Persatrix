@@ -13,6 +13,7 @@ import (
 	"database/sql"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -25,12 +26,20 @@ var societyTables = []string{
 	"society_meta", "society_organizations", "society_roles",
 }
 
-// societyIndexes is every index v15 adds, by table.
-var societyIndexes = map[string][]string{
-	"society_approvals": {"idx_society_approvals_actor", "idx_society_approvals_state_expiry",
-		"idx_society_approvals_tie_group", "ux_society_approvals_open"},
-	"society_manages": {"idx_society_manages_report"},
-	"society_members": {"idx_society_members_agent"},
+// societyIndexes is every index v15 adds, by table, each with its shape as
+// [indexShapes] reads it: its columns in order, and a partial index's WHERE.
+var societyIndexes = map[string]map[string]string{
+	"society_approvals": {
+		"idx_society_approvals_actor":        "actor_id, created_at",
+		"idx_society_approvals_state_expiry": "state, expires_at",
+		"idx_society_approvals_tie_group":    "tie_group WHERE tie_group IS NOT NULL",
+		"ux_society_approvals_open":          "actor_id, action_hash WHERE state IN ('pending', 'approved')",
+	},
+	"society_manages": {"idx_society_manages_report": "organization_id, report_id"},
+	"society_members": {
+		"idx_society_members_agent": "agent_id",
+		"idx_society_members_role":  "organization_id, role_id",
+	},
 }
 
 // migrateThroughV14 hand-builds a v14 store at `path`, as PR 1 left it, so the
@@ -89,6 +98,48 @@ func societyTableNames(t *testing.T, db *sql.DB) []string {
 	return names
 }
 
+// indexShapes maps each index on `table` (SQLite's own left out) to its
+// columns in order, each marked DESC when it sorts that way, followed by its
+// WHERE when it is partial; nil when the table has none. So an index rebuilt
+// on other columns, or with another condition, fails the pin, not only one
+// that is dropped or renamed.
+func indexShapes(t *testing.T, db *sql.DB, table string) map[string]string {
+	t.Helper()
+	var shapes map[string]string
+	for _, name := range tableIndexes(t, db, table) {
+		columns := func() []string {
+			rows, err := db.Query(
+				`SELECT name, "desc" FROM pragma_index_xinfo(?) WHERE key = 1 ORDER BY seqno`, name)
+			require.NoError(t, err)
+			defer func() { _ = rows.Close() }()
+			var columns []string
+			for rows.Next() {
+				var column string
+				var desc int
+				require.NoError(t, rows.Scan(&column, &desc))
+				if desc == 1 {
+					column += " DESC"
+				}
+				columns = append(columns, column)
+			}
+			require.NoError(t, rows.Err())
+			return columns
+		}()
+		var ddl string
+		require.NoError(t, db.QueryRow(
+			`SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?`, name).Scan(&ddl))
+		shape := strings.Join(columns, ", ")
+		if _, where, partial := strings.Cut(strings.Join(strings.Fields(ddl), " "), " WHERE "); partial {
+			shape += " WHERE " + where
+		}
+		if shapes == nil {
+			shapes = map[string]string{}
+		}
+		shapes[name] = shape
+	}
+	return shapes
+}
+
 // TestSQLiteStore_Migration_V14ToV15_AddsTheSocietyTablesToAPopulatedStore is
 // the upgrade an operator runs: a v14 store with history opens at v15 with
 // the society tables beside the channel tables, and nothing the store held
@@ -106,11 +157,11 @@ func TestSQLiteStore_Migration_V14ToV15_AddsTheSocietyTablesToAPopulatedStore(t 
 	t.Cleanup(func() { _ = store.Close() })
 	sdb := store.(*sqliteStore).db
 
-	assert.Equal(t, 15, readUserVersion(t, sdb))
+	assert.Equal(t, channelStoreSchemaVersion, readUserVersion(t, sdb), "the open runs v15 and every later step")
 	assert.Equal(t, societyTables, societyTableNames(t, sdb))
 	assert.Equal(t, before, schemaObjects(t, sdb), "v15 adds tables and changes nothing else")
 	for _, table := range societyTables {
-		assert.ElementsMatch(t, societyIndexes[table], tableIndexes(t, sdb, table), "%s's indexes", table)
+		assert.Equal(t, societyIndexes[table], indexShapes(t, sdb, table), "%s's indexes", table)
 	}
 
 	for _, table := range societyTables {
