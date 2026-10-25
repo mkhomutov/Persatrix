@@ -535,6 +535,14 @@ one; a sibling approved earlier is never withdrawn; an approved row past
 its deadline expires and its hash can open again; a failing hook leaves the
 row pending and its change unwritten.
 **Estimate**: ~450 lines.
+**From RFC 0029 Phase 3 PR 2 review**: F-2 — no token spends an approved
+`tie` or `graph_change` row, so a sweep that expires every unspent approved
+row would later report an accepted tie as expired, and RFC 0012 PR 10a would
+refuse its directive. This PR settles how such a row ends: the approve
+transaction moves it to `spent`, as RFC 0012 PR 11 calls the approve route
+the spender, or the sweep leaves approved rows of those kinds alone. The
+table's six states hold either way. A test pins that an approved tie never
+expires.
 
 ### PR 14 — `feature/v040-rfc0009-approval-event`
 
@@ -552,6 +560,10 @@ repeat is ignored; a decision the queue does not confirm is ignored; a row
 another agent opened is never sent to this one; a `graph_change` row is
 never sent and never left waiting as undelivered.
 **Estimate**: ~450 lines.
+**From RFC 0029 Phase 3 PR 2 review**: F-17 — a row has one `delivered_at`,
+so it serves a row that leaves `pending` and later `approved` only if each
+transition clears it and an acknowledgement names the state it was sent
+for; otherwise an approved row's later expiry is never sent.
 
 ### PR 15 — `feature/v040-rfc0009-irreversible`
 

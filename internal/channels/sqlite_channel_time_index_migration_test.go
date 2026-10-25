@@ -252,7 +252,7 @@ func TestSQLiteStore_Migration_V13ToV14_IndexesAPopulatedStore(t *testing.T) {
 
 	var version int
 	require.NoError(t, sdb.QueryRow(`PRAGMA user_version`).Scan(&version))
-	assert.Equal(t, 14, version)
+	assert.Equal(t, channelStoreSchemaVersion, version, "the open runs v14 and every later step")
 
 	// The index's columns, in order, and which way each sorts.
 	rows, err := sdb.Query(
@@ -311,9 +311,9 @@ func TestMigrateV13ToV14_StampsUserVersionInTransaction(t *testing.T) {
 	assert.Contains(t, tableIndexes(t, db, "messages"), "idx_messages_channel_time")
 }
 
-// TestSQLiteStore_SchemaV14_Migration_Idempotent pins the literal latest
-// version (the newest migration's test owns the literal pin) and that a
-// reopen is a no-op.
+// TestSQLiteStore_SchemaV14_Migration_Idempotent pins that a reopen is a
+// no-op and keeps the index. The literal latest-version pin moved to the v15
+// test, which owns it as the newest migration's.
 func TestSQLiteStore_SchemaV14_Migration_Idempotent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "channels.db")
 
@@ -328,10 +328,8 @@ func TestSQLiteStore_SchemaV14_Migration_Idempotent(t *testing.T) {
 	withDB(t, path, func(db *sql.DB) {
 		var version int
 		require.NoError(t, db.QueryRow(`PRAGMA user_version`).Scan(&version))
-		assert.Equal(t, 14, version,
-			"channelStoreSchemaVersion is v14 as of the channel-time index (ISSUE-0188)")
 		assert.Equal(t, channelStoreSchemaVersion, version,
-			"the literal pin and the const must agree")
+			"reopen is a no-op: the store settles at the const")
 		assert.Contains(t, tableIndexes(t, db, "messages"), "idx_messages_channel_time",
 			"the index survives the reopen")
 	})

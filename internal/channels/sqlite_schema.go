@@ -153,7 +153,13 @@ import (
 //	    A pure addition, under a new name so the v3 tests that pin
 //	    `idx_messages_channel_ts` staying dropped keep their meaning. See
 //	    migrateV13ToV14.
-const channelStoreSchemaVersion = 14
+//	  - v15 (v0.4.0 RFC 0029 Phase 3 PR 2) adds the society tables, named
+//	    `society_*`: the organization graph and its version, the
+//	    pending-approval queue, and the approval-signing key, all of which
+//	    RFC 0029's 2026-10-20 amendment puts in `data/channels.db`. A pure
+//	    addition with no reader yet; the society store reads them on this
+//	    store's connection from PR 3. See migrateV14ToV15.
+const channelStoreSchemaVersion = 15
 
 // schemaV1SQL is the original schema shipped in PR #231. Applied verbatim
 // when opening a fresh database; the v1→v2 migration below uses
