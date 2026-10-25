@@ -146,7 +146,7 @@ func (b *Buffer) warmLoad() error {
 		}
 		ring.mu.Lock()
 		ring.sealed = true
-		ring.flushed = true
+		ring.unflushed = 0
 		ring.mu.Unlock()
 		// Stamp lastTouch in disk-list order (oldest→newest) so
 		// evictLocked picks the oldest warm-loaded ring first if the

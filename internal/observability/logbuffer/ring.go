@@ -3,7 +3,9 @@ package logbuffer
 import "sync"
 
 // executionRing is a fixed-capacity FIFO ring of Entry values for one
-// execution. Sealed rings are immutable (further append is a no-op).
+// execution. A sealed ring belongs to a finished execution: it still
+// admits late entries, and each Seal writes only the entries not yet on
+// disk.
 type executionRing struct {
 	executionID string
 	cap         int
@@ -15,12 +17,16 @@ type executionRing struct {
 	// admission on another execution.
 	lastTouch uint64
 
-	mu      sync.Mutex
-	entries []Entry
-	head    int  // index of oldest entry when len(entries) == cap
-	full    bool // true once we have wrapped at least once
-	sealed  bool
-	flushed bool // sealed ring has been written to disk
+	mu        sync.Mutex
+	entries   []Entry
+	head      int  // index of oldest entry when len(entries) == cap
+	full      bool // true once we have wrapped at least once
+	sealed    bool
+	unflushed int // entries appended since the last write to disk
+
+	// flushMu serialises Seal on this ring so two seals never write
+	// the same entries.
+	flushMu sync.Mutex
 
 	limiter *tokenBucket
 }
@@ -44,21 +50,23 @@ func (r *executionRing) allow(level string) bool {
 	return r.limiter.allow()
 }
 
-func (r *executionRing) append(e Entry) {
+// append adds e and reports whether the ring is sealed, i.e. whether e
+// arrived after its execution finished and needs another seal to reach
+// disk.
+func (r *executionRing) append(e Entry) (sealed bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.sealed {
-		return
-	}
+	r.unflushed++
 	if !r.full {
 		r.entries = append(r.entries, e)
 		if len(r.entries) == r.cap {
 			r.full = true
 		}
-		return
+		return r.sealed
 	}
 	r.entries[r.head] = e
 	r.head = (r.head + 1) % r.cap
+	return r.sealed
 }
 
 func (r *executionRing) snapshot() []Entry {
@@ -79,31 +87,40 @@ func (r *executionRing) snapshotLocked() []Entry {
 	return out
 }
 
-// seal marks the ring immutable and returns its current contents in
-// chronological order. Subsequent calls return the same snapshot
-// without re-allocating.
-func (r *executionRing) seal() []Entry {
+// seal marks the ring sealed and returns, oldest first, the entries not
+// yet written to disk, plus the count to pass to markFlushed once they
+// are. Entries the ring has already overwritten are gone.
+func (r *executionRing) seal() ([]Entry, int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.sealed = true
-	return r.snapshotLocked()
+	all := r.snapshotLocked()
+	return all[len(all)-min(r.unflushed, len(all)):], r.unflushed
 }
 
-// hasUnflushed returns true if the ring has been sealed and its
-// contents have not yet been flushed to disk. Tracked alongside the
-// ring rather than inside diskStore so the LRU path can skip eviction
-// without touching the disk lock.
+// markSealed marks the ring as belonging to a finished execution, which
+// keeps LRU eviction off it while it holds entries not yet on disk.
+func (r *executionRing) markSealed() {
+	r.mu.Lock()
+	r.sealed = true
+	r.mu.Unlock()
+}
+
+// hasUnflushed returns true if the ring has been sealed and holds
+// entries not yet flushed to disk. Tracked alongside the ring rather
+// than inside diskStore so the LRU path can skip eviction without
+// touching the disk lock.
 func (r *executionRing) hasUnflushed() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.sealed && !r.flushed
+	return r.sealed && r.unflushed > 0
 }
 
-// markFlushed transitions a sealed ring into the disk-backed state so
-// LRU eviction can free it.
-func (r *executionRing) markFlushed() {
+// markFlushed records that n entries, the count seal returned, are now
+// on disk; entries appended since that seal still count as unflushed.
+func (r *executionRing) markFlushed(n int) {
 	r.mu.Lock()
-	r.flushed = true
+	r.unflushed -= n
 	r.mu.Unlock()
 }
 

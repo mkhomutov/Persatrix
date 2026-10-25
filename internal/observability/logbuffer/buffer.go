@@ -168,6 +168,9 @@ type Config struct {
 	// SealGrace is how long SealAfterGrace waits before sealing a
 	// finished execution. Default: SealGraceDefault.
 	SealGrace time.Duration
+	// CloseTimeout is how long Close waits for finished executions to
+	// reach disk. Default: CloseTimeoutDefault.
+	CloseTimeout time.Duration
 }
 
 // Defaults returns a Config with all RFC-pinned defaults.
@@ -181,6 +184,7 @@ func Defaults() Config {
 		RatePerExec:    1000,
 		MaxSubscribers: MaxSubscribersDefault,
 		SealGrace:      SealGraceDefault,
+		CloseTimeout:   CloseTimeoutDefault,
 	}
 }
 
@@ -280,6 +284,9 @@ func applyDefaults(cfg Config) Config {
 	if cfg.SealGrace <= 0 {
 		cfg.SealGrace = d.SealGrace
 	}
+	if cfg.CloseTimeout <= 0 {
+		cfg.CloseTimeout = d.CloseTimeout
+	}
 	return cfg
 }
 
@@ -322,7 +329,10 @@ func (b *Buffer) Append(entry Entry) DropReason {
 		b.warnRateOnce(entry.ExecutionID)
 		return DropRateLimit
 	}
-	ring.append(entry)
+	if ring.append(entry) {
+		// A late entry for a finished execution: write it to disk too.
+		b.scheduleSeal(entry.ExecutionID)
+	}
 	// Fan out to live-tail subscribers AFTER successful admit so the
 	// SSE stream order matches the on-disk order.  Non-blocking; a
 	// slow subscriber drops entries rather than back-pressuring Append
@@ -353,7 +363,8 @@ func (b *Buffer) Snapshot(executionID string) []Entry {
 // Close is an idempotent shutdown gate that prevents further Append
 // calls. Rings that were sealed via Seal() prior to Close remain
 // durable on disk and queryable via Snapshot. Finished executions still
-// waiting out their SealAfterGrace delay are sealed now. Other un-sealed
+// waiting out their SealAfterGrace delay are sealed now, waiting at most
+// Config.CloseTimeout for the disk. Other un-sealed
 // (active) rings are intentionally NOT flushed here — the scheduler's
 // terminal hooks own per-execution sealing in the normal path, and
 // flushing partial in-flight rings would complicate restart semantics

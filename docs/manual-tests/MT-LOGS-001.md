@@ -19,7 +19,7 @@
    execution and prints a single `[reconnected]` info line on transient stream loss.
 3. A finished execution's entries survive an orchestrator restart (the scheduler writes them to
    `data/logs/<execution_id>/<seq>.jsonl` when the run ends; warm-load reads them back). See
-   Step 4 for what is still not written to disk.
+   Step 4 for what may still be lost.
 4. `PERSATRIX_LOG_FORMAT=pretty` selects the developer console encoder for the orchestrator process
    without disturbing the schema-conformant JSON output of the `LogService` shipper.
 
@@ -321,6 +321,7 @@ do {
     Start-Sleep -Seconds 3
     $status = (./bin/persatrix.exe status $runId2) -join "`n"
 } while ($status -match 'Status:\s*(pending|running)')
+Start-Sleep -Seconds 3   # let the 2 s seal grace pass, so late agent entries are counted
 $beforeRestart = (./bin/persatrix.exe logs $runId2 | Measure-Object -Line).Lines
 
 # Stop the orchestrator (Ctrl-C in the make run terminal). Do NOT delete
@@ -333,17 +334,19 @@ Test-Path "data/logs/$runId2"   # expect: True
 ```
 
 **Expected**: Pre-restart entries are still queryable after the orchestrator process restart,
-and `data/logs/<runId2>/` holds one `<sequence>.jsonl` file.
+and `data/logs/<runId2>/` holds at least one `<sequence>.jsonl` file.
 
 > **How the run reaches disk**: when a run ends (completed or failed) the scheduler seals
-> its ring two seconds later (`logbuffer.SealGraceDefault`), which writes it to
-> `data/logs/<id>/`. The wait lets agent entries still in the shipper's 0.5 s batch arrive
-> first; a sealed ring ignores later entries. Stopping the orchestrator inside those two
-> seconds seals the run at once, so a clean stop never loses a finished run.
+> its ring, and two seconds later (`logbuffer.SealGraceDefault`) writes it to
+> `data/logs/<id>/`. The wait lets agent entries still in the shipper's 0.5 s batch land in
+> the same file; entries that arrive later are still kept and written to a further
+> `<sequence>.jsonl`. Stopping the orchestrator inside those two seconds writes the run at
+> once (giving up after 5 s on a stalled disk), so a clean stop does not lose a finished run.
 >
-> **Still not written to disk**: a run that is still going when the orchestrator stops, and a
-> ring that LRU eviction drops before its run ends (e.g. `PERSATRIX_LOGBUFFER_MAX_EXEC=1`
-> plus a second, overlapping run). Both are lost on restart.
+> **May be lost on restart**: a run that is still going when the orchestrator stops (the
+> stop fails it, and its entries reach disk only if the scheduler records that failure
+> before the process exits), and a ring that LRU eviction drops before its run ends (e.g.
+> `PERSATRIX_LOGBUFFER_MAX_EXEC=1` plus a second, overlapping run).
 >
 > The sealing path is covered by `TestTerminalRun_SealsRunLogs` in
 > [`internal/scheduler/scheduler_log_seal_test.go`](../../internal/scheduler/scheduler_log_seal_test.go)

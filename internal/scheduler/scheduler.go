@@ -117,16 +117,16 @@ func WithMetrics(inst *obsmetrics.Instruments) Option {
 }
 
 // LogSealer seals a finished run's log ring so its entries are written to
-// disk and survive an orchestrator restart (RFC 0018 § E). The seal waits a
-// short grace so agent entries still on their way are kept.
-// *logbuffer.Buffer implements it.
+// disk and survive an orchestrator restart (RFC 0018 § E). The write waits a
+// short grace so agent entries still on their way land in the same file.
+// *logbuffer.Buffer implements it, and a nil *logbuffer.Buffer does nothing.
 type LogSealer interface {
 	SealAfterGrace(executionID string)
 }
 
 // WithLogSealer has the scheduler seal each run's logs once the run reaches
-// a terminal state. When nil, runs are never sealed and their logs stay in
-// memory only.
+// a terminal state. When nil (or a nil *logbuffer.Buffer), runs are never
+// sealed and their logs stay in memory only.
 func WithLogSealer(ls LogSealer) Option {
 	return func(s *WorkflowScheduler) {
 		s.logSealer = ls
