@@ -316,11 +316,12 @@ func main() {
 		schedOpts = append(schedOpts, scheduler.WithMetrics(orchMetrics))
 	}
 
-	// RFC 0018 PR 5 — wire the log buffer into the HTTP server so the
-	// REST + SSE retrieval surface reads the same ring the BufferCore
-	// tee + LogServiceServer.StreamLogs feed (buffer built earlier).
+	// RFC 0018 PR 5 — REST + SSE read the ring the BufferCore tee and
+	// LogServiceServer.StreamLogs feed (buffer built earlier); the
+	// scheduler seals each finished run's ring so it reaches disk.
 	if logBuf != nil {
 		srvOpts = append(srvOpts, server.WithLogBuffer(logBuf))
+		schedOpts = append(schedOpts, scheduler.WithLogSealer(logBuf))
 	}
 
 	// RFC 0009 PR 1b — audit emit from the agent registration handler.

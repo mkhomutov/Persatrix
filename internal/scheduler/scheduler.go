@@ -57,6 +57,10 @@ type WorkflowScheduler struct {
 	// Metrics instruments (optional — nil-safe).  Wired in RFC 0019 PR 3.
 	metrics *obsmetrics.Instruments
 
+	// logSealer is told when a run ends so its log ring is written to disk
+	// (optional — nil-safe).
+	logSealer LogSealer
+
 	// packager assembles per-step context packages when the workflow opts in
 	// via context_budget_total > 0 (RFC 0008 Phase 1). Always non-nil — a
 	// scheduler constructed without an explicit packager uses the default
@@ -109,6 +113,23 @@ func WithCostComponents(counter *cost.TokenCounter, enforcer *cost.BudgetEnforce
 func WithMetrics(inst *obsmetrics.Instruments) Option {
 	return func(s *WorkflowScheduler) {
 		s.metrics = inst
+	}
+}
+
+// LogSealer seals a finished run's log ring so its entries are written to
+// disk and survive an orchestrator restart (RFC 0018 § E). The write waits a
+// short grace so agent entries still on their way land in the same file.
+// *logbuffer.Buffer implements it, and a nil *logbuffer.Buffer does nothing.
+type LogSealer interface {
+	SealAfterGrace(executionID string)
+}
+
+// WithLogSealer has the scheduler seal each run's logs once the run reaches
+// a terminal state. When nil (or a nil *logbuffer.Buffer), runs are never
+// sealed and their logs stay in memory only.
+func WithLogSealer(ls LogSealer) Option {
+	return func(s *WorkflowScheduler) {
+		s.logSealer = ls
 	}
 }
 
@@ -392,6 +413,8 @@ func (s *WorkflowScheduler) executeRun(ctx context.Context, runID string) {
 	}
 
 	s.logger.Info("run completed", zap.String("execution_id", runID))
+	// After the "run completed" line so that line lands in the sealed ring.
+	s.sealRunLogs(runID)
 	span.SetAttributes(attribute.String("persatrix.status", state.RunCompleted.String()))
 	span.SetStatus(codes.Ok, "completed")
 
@@ -433,6 +456,14 @@ func (s *WorkflowScheduler) failRun(ctx context.Context, runID string, errMsg st
 	}
 	if err := s.store.UpdateRunStatus(cleanupCtx, runID, state.RunFailed); err != nil {
 		s.logger.Error("failed to set run status to failed", zap.String("execution_id", runID), zap.Error(err))
+	}
+	s.sealRunLogs(runID)
+}
+
+// sealRunLogs hands a finished run's log ring to the sealer, if one is set.
+func (s *WorkflowScheduler) sealRunLogs(runID string) {
+	if s.logSealer != nil {
+		s.logSealer.SealAfterGrace(runID)
 	}
 }
 

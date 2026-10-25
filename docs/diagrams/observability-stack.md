@@ -45,9 +45,9 @@ graph LR
     SHIP -->|"gRPC LogService.Publish"| LS
     ORCH -->|"direct Append<br/>(local zap core)"| RING
     LS --> RING
-    RING -->|"flush on eviction/seal"| DISK
+    RING -->|"flush on seal<br/>(2 s after the run ends)"| DISK
     RING --> REST
-    DISK -. "warm-load<br/>(no-op today — RFC 0018 PR 7 wires Seal)" .-> RING
+    DISK -. "warm-load on restart" .-> RING
     REST --> CLI
     CLI -->|"--follow → SSE reconnect"| REST
     REST -. rendered .-> PLOGS
