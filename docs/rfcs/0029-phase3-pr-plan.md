@@ -457,6 +457,15 @@ covers them too.
 >   open-row index (F-16).
 > - A key formats, logs and marshals as `[redacted]`, so it reaches no log
 >   or route by accident (S-5).
+> - The benchmark's gate passes with the real society store
+>   ([re-run](../storage-architecture-benchmark-reruns.md#the-gate-on-the-society-store)),
+>   and so does S-2's second connection with both connections' write
+>   transactions begun as `IMMEDIATE`; on a second connection as
+>   transactions begin today, society writes fail as well as publishes. The
+>   store keeps the shared connection: the immediate form passed one run on
+>   one platform, and moving to it changes how every channel-store
+>   transaction begins. Its review may give the store its own connection,
+>   which would drop S-6's no-other-call rule.
 
 ## Related documentation
 
