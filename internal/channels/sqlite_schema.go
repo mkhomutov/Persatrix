@@ -157,8 +157,8 @@ import (
 //	    `society_*`: the organization graph and its version, the
 //	    pending-approval queue, and the approval-signing key, all of which
 //	    RFC 0029's 2026-10-20 amendment puts in `data/channels.db`. A pure
-//	    addition with no reader yet; the society store reads them on this
-//	    store's connection from PR 3. See migrateV14ToV15.
+//	    addition; the society store (internal/society) reads and writes them
+//	    on this store's connection. See migrateV14ToV15.
 const channelStoreSchemaVersion = 15
 
 // schemaV1SQL is the original schema shipped in PR #231. Applied verbatim

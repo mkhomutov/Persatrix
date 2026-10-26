@@ -25,6 +25,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/mkhomutov/persatrix/internal/society"
 )
 
 const (
@@ -162,7 +164,11 @@ func seedTemplate(ctx context.Context, path string, l benchLayout) error {
 			}
 		}
 	}
-	if err := seedSociety(ctx, s.db, l.Agents, benchSettledApprovals); err != nil {
+	st, err := society.NewSQLiteStore(s)
+	if err != nil {
+		return err
+	}
+	if err := seedSociety(ctx, st, l.Agents, benchSettledApprovals); err != nil {
 		return err
 	}
 	// The seeded rows are what a run reads: check them before trusting a run.
@@ -179,7 +185,7 @@ func seedTemplate(ctx context.Context, path string, l benchLayout) error {
 type benchWorld struct {
 	layout  benchLayout
 	store   ChannelStore
-	society *sql.DB
+	society society.Store
 	rec     *benchRecorder
 	runID   string
 	stop    chan struct{}
@@ -264,7 +270,7 @@ func (w *benchWorld) approvalLifecycle(ctx context.Context, agent string, seq in
 		})
 	} else {
 		w.timed(classSocietyWrite, func() error {
-			return societyOpenApproval(ctx, w.society, id, agent, "", benchApprovalTTL)
+			return societyOpenApproval(ctx, w.society, id, agent, benchApprovalTTL)
 		})
 	}
 	if !w.wait(time.Second + time.Duration(rng.IntN(9_000))*time.Millisecond) {
@@ -325,7 +331,7 @@ func (w *benchWorld) drive(ctx context.Context, cancel context.CancelFunc, step 
 	w.every(benchGraphChangeEvery, func() {
 		id := fmt.Sprintf("%s-graph-%d", w.runID, graphChanges.Add(1))
 		w.timed(classSocietyWrite, func() error {
-			return societyOpenApproval(ctx, w.society, id, "operator", "", benchApprovalTTL)
+			return societyOpenGraphChange(ctx, w.society, id, benchApprovalTTL)
 		})
 		w.timed(classSocietyWrite, func() error { return societyDecide(ctx, w.society, id, true, true) })
 	})
@@ -380,7 +386,10 @@ func serviceTimes(ctx context.Context, template, scratch string, l benchLayout) 
 		return nil, err
 	}
 	defer func() { _ = cs.Close() }()
-	db := cs.(*sqliteStore).db
+	st, err := society.NewSQLiteStore(cs.(*sqliteStore))
+	if err != nil {
+		return nil, err
+	}
 	ch := l.Channels[0]
 	member := func(i int) string { return l.Members[ch][i%len(l.Members[ch])] }
 	rng := rand.New(rand.NewPCG(5, 6))
@@ -403,9 +412,9 @@ func serviceTimes(ctx context.Context, template, scratch string, l benchLayout) 
 			return cs.PublishMessage(ctx, ChannelMessage{ID: fmt.Sprintf("svc-%d", i), ChannelID: ch,
 				SenderID: member(i), Content: benchContent(rng)})
 		}},
-		{"society_read org read", func(i int) error { return societyOrgRead(ctx, db, member(i)) }},
+		{"society_read org read", func(i int) error { return societyOrgRead(ctx, st, member(i)) }},
 		{"society_write hold", func(i int) error {
-			return societyOpenApproval(ctx, db, fmt.Sprintf("svc-%d", i), member(i), "", benchApprovalTTL)
+			return societyOpenApproval(ctx, st, fmt.Sprintf("svc-%d", i), member(i), benchApprovalTTL)
 		}},
 	}
 	out := map[string]float64{}
@@ -424,19 +433,42 @@ func serviceTimes(ctx context.Context, template, scratch string, l benchLayout) 
 	return out, nil
 }
 
-// openSociety returns the handle the society calls use: the channel store's
-// own single connection, or a second connection to the same file.
-func openSociety(cs ChannelStore, path, form string) (db *sql.DB, closeFn func() error, err error) {
+// benchStorePath is the path a step opens its channel store at. The
+// immediate form begins every write transaction on both connections as
+// IMMEDIATE, under which busy_timeout applies to the write lock (plan S-2).
+func benchStorePath(path, form string) string {
+	if form == "immediate" {
+		return path + "?_txlock=immediate"
+	}
+	return path
+}
+
+// benchConn hands the society store a connection the channel store did not
+// make, for the forms that measure a second connection.
+type benchConn struct{ db *sql.DB }
+
+func (c benchConn) SocietyConn() *sql.DB { return c.db }
+
+// openSociety returns the society store the society calls use: on the
+// channel store's own single connection, or on a second connection to the
+// same file, its transactions begun as the channel store's are.
+func openSociety(cs ChannelStore, path, form string) (st society.Store, closeFn func() error, err error) {
 	switch form {
 	case "shared":
-		return cs.(*sqliteStore).db, func() error { return nil }, nil
-	case "separate":
-		db, err := sql.Open("sqlite", buildDSN(path))
+		st, err := society.NewSQLiteStore(cs.(*sqliteStore))
+		return st, func() error { return nil }, err
+	case "separate", "immediate":
+		db, err := sql.Open("sqlite", buildDSN(benchStorePath(path, form)))
 		if err != nil {
 			return nil, nil, err
 		}
 		db.SetMaxOpenConns(1)
-		return db, db.Close, nil
+		st, err := society.NewSQLiteStore(benchConn{db})
+		if err != nil {
+			_ = db.Close()
+			return nil, nil, err
+		}
+		return st, db.Close, nil
 	}
 	return nil, nil, errors.New("unknown society form " + form)
 }

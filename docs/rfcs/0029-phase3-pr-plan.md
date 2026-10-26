@@ -172,7 +172,7 @@ confirmed or overturned in its review:
 |----|-----|-------|--------|--------|-----------|--------|
 | 1 | A1 | Restore the channel-time index (channels-store v14; ISSUE-0188) | `feature/v040-rfc0029-channel-time-index` | ✅ | [#1057](https://github.com/mkhomutov/Persatrix/pull/1057) | 2026-10-24 |
 | 2 | A1 | The society tables (channels-store v15) | `feature/v040-rfc0029-society-tables` | ✅ | [#1060](https://github.com/mkhomutov/Persatrix/pull/1060) | 2026-10-25 |
-| 3 | A1 | `internal/society`: the store on the channels connection | `feature/v040-rfc0029-society-store` | ⬜ | — | — |
+| 3 | A1 | `internal/society`: the store on the channels connection | `feature/v040-rfc0029-society-store` | 🔀 | — (this PR) | — |
 | 4 | A1 | Startup wiring; the single-node Known Gap issue | `feature/v040-rfc0029-society-wiring` | ⬜ | — | — |
 | 5 | — | Review follow-ups and closeout | `feature/v040-rfc0029-closeout` | ⬜ | — | — |
 
@@ -427,6 +427,36 @@ covers them too.
 > One test reads its section differently: no test runs a v14 binary, so
 > "a v15 store opened by a v14 binary is refused" is pinned as this binary
 > refusing a store one version newer than it knows, the same rule.
+
+> 2026-10-26 — PR 3 settles what S-5 and S-6 leave open, each a new default
+> for its review to confirm or overturn:
+> - The constructor takes a `ConnSource`, which the SQLite channel store
+>   satisfies with `SocietyConn()`, the one exported call in
+>   `internal/channels`. The interface lives in `internal/society`, so the
+>   benchmark, a test in `internal/channels`, runs the real store with no
+>   import cycle. The constructor fails on a connection without the society
+>   tables.
+> - The graph is replaced whole: deleting the organizations takes their
+>   roles, members and edges (v15's cascade), and the new graph is inserted,
+>   under a savepoint, so a graph the tables refuse leaves the old one even
+>   inside a caller's transaction that goes on to commit. No row is replaced
+>   in place (F-16). The version write must change the one meta row and
+>   raise the version, so of two writers that read one version only one
+>   wins (`ErrGraphVersion`). The graph reads back sorted by its keys, the
+>   canonical form RFC 0012 PR 3 compares.
+> - The store makes each row's nonce (16 random bytes) and creation time,
+>   and refuses a payload that is not JSON (PR 2 F-15).
+> - A move names the state it expects and follows the queue's lifecycle:
+>   pending to approved, denied, expired or withdrawn; approved to spent,
+>   expired or withdrawn. The four settled states are final. A move to one
+>   clears the payload, and every move clears `delivered_at`, so each new
+>   state is owed its own decision event: half of PR 2's F-17, whose
+>   acknowledgement stays RFC 0009 PR 14's.
+> - The open-row lookup is a list query that selects open rows, stated as
+>   the index's own condition; a query-plan test pins that it takes the
+>   open-row index (F-16).
+> - A key formats, logs and marshals as `[redacted]`, so it reaches no log
+>   or route by accident (S-5).
 
 ## Related documentation
 

@@ -339,3 +339,10 @@ func (s *sqliteStore) recordSessionWrite(ctx context.Context, sessionID string) 
 
 // Close implements [ChannelStore.Close].
 func (s *sqliteStore) Close() error { return s.db.Close() }
+
+// SocietyConn hands the store's one connection to the society store
+// (internal/society), whose tables live in this file and which shares this
+// connection rather than open a second one to it: on a second connection a
+// society write can fail a publish at once with SQLITE_BUSY (RFC 0029
+// Phase 3 plan S-2). Nothing else takes it.
+func (s *sqliteStore) SocietyConn() *sql.DB { return s.db }

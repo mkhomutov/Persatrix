@@ -149,14 +149,13 @@ var societySchemaV15 = []string{
 // organization graph and its version, the approvals waiting for a person,
 // and the key that signs them. RFC 0029's 2026-10-20 amendment puts them in
 // `data/channels.db`, in this store's one migration chain, since SQLite keeps
-// one `user_version` per file (plan S-2); a later society store reads them on
-// this store's own connection (PR 3).
+// one `user_version` per file (plan S-2); the society store (internal/society)
+// reads and writes them on this store's own connection (PR 3).
 //
-// A pure addition: no existing table, row or index is touched, and nothing
-// reads the new tables yet. Plain CREATE TABLE, as v9 does, so a store that
-// already holds a table of one of these names fails the step, and its
-// transaction leaves the store at v14. One transaction stamps the version
-// with the tables (PR #335 review L3).
+// A pure addition: no existing table, row or index is touched. Plain CREATE
+// TABLE, as v9 does, so a store that already holds a table of one of these
+// names fails the step, and its transaction leaves the store at v14. One
+// transaction stamps the version with the tables (PR #335 review L3).
 func migrateV14ToV15(db *sql.DB) error {
 	tx, err := db.Begin()
 	if err != nil {
