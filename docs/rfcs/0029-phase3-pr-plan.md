@@ -387,6 +387,7 @@ covers them too.
 |------|-----------|------|
 | `cmd/orchestrator/main.go` | 499 | PR 4 wires through its own file |
 | `cmd/orchestrator/channels.go` | 491 | PR 4 adds one call; the logic lives in the new file |
+| `internal/server/server.go` | 500 | PR 4 moves its options, unchanged, to `options.go`, a seam of their own, so the server can hold the society store |
 | `internal/channels/sqlite_migrations.go` | 484 | PRs 1 and 2 add one `case` arm each; the bodies live in their own files, as since v9 |
 
 ## Risks

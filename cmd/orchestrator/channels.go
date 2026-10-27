@@ -52,10 +52,12 @@ const channelFanoutDrainTimeout = 10 * time.Second
 //
 // Returns:
 //
-//   - opts: zero or one `server.WithChannels(...)` options to append to
-//     the orchestrator's option slice. Empty when channels.yaml is
-//     absent or the store cannot open (channel REST endpoints then
-//     return 503; the orchestrator's other surfaces are unaffected).
+//   - opts: the options to append to the orchestrator's option slice:
+//     the channels pair, then [initSociety]'s for the society store on the
+//     channels store's connection. When channels.yaml is absent or the
+//     store cannot open, only [initSociety]'s, which are none: channel REST
+//     endpoints return 503, society features are off, and the
+//     orchestrator's other surfaces are unaffected.
 //   - cleanup: always non-nil; a no-op on the disabled path so callers
 //     can `defer cleanup()` unconditionally.
 //   - err: non-nil only on a hard reconcile failure (operator action
@@ -85,7 +87,7 @@ func initChannels(
 				zap.String("path", channelsCfgPath),
 				zap.Error(cfgErr))
 		}
-		return nil, noop, nil
+		return initSociety(nil, logger), noop, nil
 	}
 
 	maxCh := chanCfg.MaxChannels
@@ -104,7 +106,7 @@ func initChannels(
 		if mkErr := os.MkdirAll(filepath.Dir(dbPath), 0o755); mkErr != nil {
 			logger.Warn("channels: cannot create db directory; channel endpoints will return 503",
 				zap.String("path", dbPath), zap.Error(mkErr))
-			return nil, noop, nil
+			return initSociety(nil, logger), noop, nil
 		}
 	}
 	var sessionMetrics *channels.SessionMetrics
@@ -122,7 +124,7 @@ func initChannels(
 	if sErr != nil {
 		logger.Warn("channels: store open failed; channel endpoints will return 503",
 			zap.String("path", dbPath), zap.Error(sErr))
-		return nil, noop, nil
+		return initSociety(nil, logger), noop, nil
 	}
 	// The store is closed by the cleanup assigned once the router exists
 	// (below). No path between here and there returns early, so an interim
@@ -433,10 +435,10 @@ func initChannels(
 		zap.String("rfc", "0011"),
 		zap.String("scope", "PublishAndAwait"),
 	)
-	return []server.ServerOption{
+	return append([]server.ServerOption{
 		server.WithChannels(chanStore, router),
 		server.WithChannelSessionID(sessionID),
-	}, cleanup, nil
+	}, initSociety(chanStore, logger)...), cleanup, nil
 }
 
 // selectChannelDispatcher picks the per-recipient [channels.MessageDispatcher]
