@@ -17,7 +17,16 @@ func (t *sqliteTx) Graph(ctx context.Context) (Graph, error) {
 		return Graph{}, fmt.Errorf("society: read graph version: %w", err)
 	}
 	at := map[string]int{} // organization id → its index in g.Organizations
-	org := func(id string) *Organization { return &g.Organizations[at[id]] }
+	// org finds a row's organization. A row of one the store does not hold
+	// fails the read rather than join another; only a connection without
+	// foreign keys, which the constructor refuses, could leave one.
+	org := func(id string) (*Organization, error) {
+		i, ok := at[id]
+		if !ok {
+			return nil, fmt.Errorf("a row of unknown organization %q", id)
+		}
+		return &g.Organizations[i], nil
+	}
 
 	if err := t.each(ctx, `SELECT id, name, topology FROM society_organizations ORDER BY id`,
 		func(rows *sql.Rows) error {
@@ -38,8 +47,11 @@ func (t *sqliteTx) Graph(ctx context.Context) (Graph, error) {
 		if err := rows.Scan(&id, &r.ID, &r.Authority); err != nil {
 			return err
 		}
-		org(id).Roles = append(org(id).Roles, r)
-		return nil
+		o, err := org(id)
+		if err == nil {
+			o.Roles = append(o.Roles, r)
+		}
+		return err
 	}); err != nil {
 		return Graph{}, err
 	}
@@ -50,8 +62,11 @@ func (t *sqliteTx) Graph(ctx context.Context) (Graph, error) {
 		if err := rows.Scan(&id, &m.AgentID, &m.RoleID); err != nil {
 			return err
 		}
-		org(id).Members = append(org(id).Members, m)
-		return nil
+		o, err := org(id)
+		if err == nil {
+			o.Members = append(o.Members, m)
+		}
+		return err
 	}); err != nil {
 		return Graph{}, err
 	}
@@ -62,8 +77,11 @@ func (t *sqliteTx) Graph(ctx context.Context) (Graph, error) {
 		if err := rows.Scan(&id, &e.ManagerID, &e.ReportID, &e.Scope); err != nil {
 			return err
 		}
-		org(id).Manages = append(org(id).Manages, e)
-		return nil
+		o, err := org(id)
+		if err == nil {
+			o.Manages = append(o.Manages, e)
+		}
+		return err
 	}); err != nil {
 		return Graph{}, err
 	}

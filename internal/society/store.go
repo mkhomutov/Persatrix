@@ -12,6 +12,7 @@
 package society
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -48,20 +49,33 @@ type Ops interface {
 	// Approval reads one row by id, or fails with [ErrNotFound].
 	Approval(ctx context.Context, id string) (Approval, error)
 
-	// ListApprovals returns the rows q selects, oldest first.
+	// ListApprovals returns the rows q selects, in the order they were
+	// opened.
 	ListApprovals(ctx context.Context, q ApprovalQuery) ([]Approval, error)
 
 	// MoveApproval moves a row from m.From to m.To and returns it as
 	// stored. A row no longer in m.From fails with a [*WrongStateError],
 	// so a lost race is reported, never overwritten; an unknown id fails
 	// with [ErrNotFound]; a move off the queue's lifecycle fails with
-	// [ErrInvalid]. A move to a settled state clears the payload (RFC 0009
-	// G-11), and every move clears the delivery time, since each new state
-	// is owed its own decision event (G-10).
+	// [ErrInvalid]. A decision or a spend on a row at or past its expiry
+	// fails with [ErrExpired], even before the sweep has reached the row,
+	// so an expired approval is never granted or redeemed. A move to a
+	// settled state clears the payload (RFC 0009 G-11), and every move
+	// clears the delivery time, since each new state is owed its own
+	// decision event (G-10).
 	MoveApproval(ctx context.Context, id string, m Move) (Approval, error)
 
+	// MoveApprovals moves every open row q selects to `to` in one
+	// statement and returns them as stored, in no set order. It makes the
+	// two moves the queue makes in bulk, which need no decision: to expired,
+	// as the expiry sweep does, and to withdrawn, as approving one row of a
+	// tie group does to the rest. Any other `to`, a settled q.State, or a
+	// q.Limit fails with [ErrInvalid].
+	MoveApprovals(ctx context.Context, q ApprovalQuery, to State) ([]Approval, error)
+
 	// Key reads the key kept for purpose, making it on the first call. Two
-	// first calls get the same key (S-5).
+	// first calls get the same key, each in a transaction of its own even
+	// on two connections (S-5).
 	Key(ctx context.Context, purpose string) (Key, error)
 }
 
@@ -86,7 +100,11 @@ type Store interface {
 	// makes no call on the Store itself, nor on the channels store, nor any
 	// network call: each would wait for the connection forever, or hold it
 	// across the wait. Events and audit lines go out after InTx returns.
-	InTx(ctx context.Context, fn func(Tx) error) error
+	// fn is handed a context that marks it as inside the transaction, so a
+	// Store call made with it fails at once with [ErrInvalid] rather than
+	// wait; the channels store cannot see that mark, so the rule stays a
+	// rule for its calls.
+	InTx(ctx context.Context, fn func(context.Context, Tx) error) error
 }
 
 // ConnSource hands the society store the connection it runs on. The SQLite
@@ -203,8 +221,9 @@ type Approval struct {
 
 // Move is one change of an approval row's state. From is the state the
 // caller read the row in. DecidedBy and DecidedAt, both or neither, record a
-// person's decision; a move without them keeps the row's earlier one, so a
-// spend keeps who approved.
+// person's decision, and a move to approved or denied must carry them; any
+// other move may leave them out and keeps the row's earlier one, so a spend
+// keeps who approved.
 type Move struct {
 	From      State
 	To        State
@@ -238,12 +257,23 @@ const KeyApprovalSigning = "approval_signing"
 // KeySize is the length of every key the store makes: an HMAC-SHA256 key.
 const KeySize = 32
 
-// Key is a secret the store keeps. It formats, logs and marshals as
-// "[redacted]", so it reaches no log and no route by accident (S-5); only
-// its bytes sign.
-type Key []byte
+// Key is a secret the store keeps, which reaches no log and no route by
+// accident (S-5). It formats, logs and marshals as "[redacted]". Its bytes
+// sit behind a pointer, so even a Key held in another value's unexported
+// field, where fmt cannot call the Key's methods, prints as an address; and
+// a Key is no []byte that zap.Binary or an encoder would take as data. Only
+// [Key.Bytes] hands the bytes over, to sign with.
+type Key struct{ secret *[]byte }
 
 const redacted = "[redacted]"
+
+// Bytes returns a copy of the key's bytes.
+func (k Key) Bytes() []byte {
+	if k.secret == nil {
+		return nil
+	}
+	return bytes.Clone(*k.secret)
+}
 
 // String serves loggers that take a [fmt.Stringer], as zap.Any does.
 func (Key) String() string { return redacted }
@@ -268,6 +298,9 @@ var (
 	// ErrInvalid is returned for a call the store refuses before touching
 	// a table.
 	ErrInvalid = errors.New("society: invalid")
+	// ErrExpired is returned for a decision or a spend on a row at or past
+	// its expiry.
+	ErrExpired = errors.New("society: approval has expired")
 )
 
 // WrongStateError reports a move that lost a race: the row is in Got, not in

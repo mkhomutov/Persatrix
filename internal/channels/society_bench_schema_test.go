@@ -6,10 +6,11 @@ package channels
 // Since RFC 0029 Phase 3 PR 3 they run on the real society store over the
 // v15 society tables, where R2 ran them on a stand-in schema. Each call is
 // what the queue and the organization read will do on the store: the
-// approvals package reads a row, checks its expiry and moves it from the
-// state it read, so a move that finds the row elsewhere is a lost race; the
-// authority read loads the graph and finds the agent's role and managers in
-// Go, as RFC 0012 D-5 computes `directs`.
+// approvals package moves a row from the state it read, and the store
+// refuses the move if the row has left that state or, for a decide or a
+// spend, passed its expiry, so either refusal is a lost race; the authority
+// read loads the graph and finds the agent's role and managers in Go, as
+// RFC 0012 D-5 computes `directs`.
 
 import (
 	"context"
@@ -54,24 +55,30 @@ func seedSociety(ctx context.Context, st society.Store, agents []string, history
 		return err
 	}
 	settled := []society.State{society.StateSpent, society.StateDenied, society.StateExpired, society.StateWithdrawn}
-	past := time.Now().UTC().Add(-24 * time.Hour)
-	return st.InTx(ctx, func(tx society.Tx) error {
+	// The store stamps each row's creation as it opens, so each settles then
+	// too, as a real row would after it: a decision or a spend before its
+	// expiry, and an expiry once the row is due.
+	return st.InTx(ctx, func(ctx context.Context, tx society.Tx) error {
 		for i := 0; i < history; i++ {
-			a := benchHold(fmt.Sprintf("hist-%d", i), agents[i%len(agents)], past.Add(15*time.Minute))
+			to := settled[i%len(settled)]
+			expires := time.Now().Add(15 * time.Minute)
+			if to == society.StateExpired {
+				expires = time.Now()
+			}
+			a := benchHold(fmt.Sprintf("hist-%d", i), agents[i%len(agents)], expires)
 			if _, err := tx.OpenApproval(ctx, a); err != nil {
 				return err
 			}
-			to := settled[i%len(settled)]
 			from := society.StatePending
 			if to == society.StateSpent {
-				if _, err := tx.MoveApproval(ctx, a.ID, benchDecision(from, society.StateApproved, past)); err != nil {
+				if _, err := tx.MoveApproval(ctx, a.ID, benchDecision(from, society.StateApproved, time.Now())); err != nil {
 					return err
 				}
 				from = society.StateApproved
 			}
 			m := society.Move{From: from, To: to}
 			if to == society.StateDenied {
-				m = benchDecision(from, to, past)
+				m = benchDecision(from, to, time.Now())
 			}
 			if _, err := tx.MoveApproval(ctx, a.ID, m); err != nil {
 				return err
@@ -148,7 +155,7 @@ func societyOpenGraphChange(ctx context.Context, st society.Store, id string, tt
 // as A4 does, so nothing joins the group later.
 func societyOpenTieGroup(ctx context.Context, st society.Store, ids []string, actor, tieGroup string, ttl time.Duration) error {
 	expires := time.Now().Add(ttl)
-	return st.InTx(ctx, func(tx society.Tx) error {
+	return st.InTx(ctx, func(ctx context.Context, tx society.Tx) error {
 		for _, id := range ids {
 			if _, err := tx.OpenApproval(ctx, society.Approval{ID: id, Kind: society.KindTie, ActorID: actor,
 				ActionHash: "directive-" + id, TieGroup: tieGroup, ExpiresAt: expires}); err != nil {
@@ -159,26 +166,15 @@ func societyOpenTieGroup(ctx context.Context, st society.Store, ids []string, ac
 	})
 }
 
-// errBenchNoRow marks a move that found its row elsewhere — a lost race the
-// lifecycle expects (the sweeper expired the row first), not a failure.
+// errBenchNoRow marks a move that found its row elsewhere or past its
+// expiry — a lost race the lifecycle expects (the sweeper expired the row
+// first), not a failure.
 var errBenchNoRow = errors.New("no row in the expected state")
 
-// liveRow reads a row for a move from `from`: a row past its expiry, or
-// already elsewhere, is a lost race.
-func liveRow(ctx context.Context, tx society.Tx, id string, from society.State) error {
-	a, err := tx.Approval(ctx, id)
-	if err != nil {
-		return err
-	}
-	if a.State != from || !a.ExpiresAt.After(time.Now()) {
-		return errBenchNoRow
-	}
-	return nil
-}
-
-// lostRace maps a move the store refused for its state to errBenchNoRow.
+// lostRace maps a move the store refused for the row's state or its expiry
+// to errBenchNoRow.
 func lostRace(err error) error {
-	if errors.Is(err, society.ErrWrongState) {
+	if errors.Is(err, society.ErrWrongState) || errors.Is(err, society.ErrExpired) {
 		return errBenchNoRow
 	}
 	return err
@@ -189,10 +185,7 @@ func lostRace(err error) error {
 // adds an edge to the organization graph and raises its version, so the
 // approval and the change commit together or not at all.
 func societyDecide(ctx context.Context, st society.Store, id string, approve, graphChange bool) error {
-	return lostRace(st.InTx(ctx, func(tx society.Tx) error {
-		if err := liveRow(ctx, tx, id, society.StatePending); err != nil {
-			return err
-		}
+	return lostRace(st.InTx(ctx, func(ctx context.Context, tx society.Tx) error {
 		to := society.StateDenied
 		if approve {
 			to = society.StateApproved
@@ -202,14 +195,9 @@ func societyDecide(ctx context.Context, st society.Store, id string, approve, gr
 			return err
 		}
 		if row.TieGroup != "" {
-			siblings, err := tx.ListApprovals(ctx, society.ApprovalQuery{State: society.StatePending, TieGroup: row.TieGroup})
-			if err != nil {
+			if _, err := tx.MoveApprovals(ctx, society.ApprovalQuery{State: society.StatePending, TieGroup: row.TieGroup},
+				society.StateWithdrawn); err != nil {
 				return err
-			}
-			for _, s := range siblings {
-				if _, err := tx.MoveApproval(ctx, s.ID, society.Move{From: society.StatePending, To: society.StateWithdrawn}); err != nil {
-					return err
-				}
 			}
 		}
 		if !graphChange {
@@ -230,28 +218,13 @@ func societyDecide(ctx context.Context, st society.Store, id string, approve, gr
 // societySpend redeems an approval's token: the row is spent once, and only
 // while the approval is live.
 func societySpend(ctx context.Context, st society.Store, id string) error {
-	return lostRace(st.InTx(ctx, func(tx society.Tx) error {
-		if err := liveRow(ctx, tx, id, society.StateApproved); err != nil {
-			return err
-		}
-		_, err := tx.MoveApproval(ctx, id, society.Move{From: society.StateApproved, To: society.StateSpent})
-		return err
-	}))
+	_, err := st.MoveApproval(ctx, id, society.Move{From: society.StateApproved, To: society.StateSpent})
+	return lostRace(err)
 }
 
 // societyExpireSweep expires every pending or approved row past its
 // deadline, as A4's sweep does, so an approval never spent ends too.
 func societyExpireSweep(ctx context.Context, st society.Store) error {
-	return st.InTx(ctx, func(tx society.Tx) error {
-		due, err := tx.ListApprovals(ctx, society.ApprovalQuery{Open: true, ExpiredBy: time.Now()})
-		if err != nil {
-			return err
-		}
-		for _, a := range due {
-			if _, err := tx.MoveApproval(ctx, a.ID, society.Move{From: a.State, To: society.StateExpired}); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
+	_, err := st.MoveApprovals(ctx, society.ApprovalQuery{Open: true, ExpiredBy: time.Now()}, society.StateExpired)
+	return err
 }

@@ -325,6 +325,25 @@ the row and with it their edges; a graph-version update checks that it
 changed one row. The comments that say nothing reads the society tables
 go with this PR.
 
+**Review findings** (PR 3):
+
+| Finding | Severity | Description | Disposition |
+|---------|----------|-------------|-------------|
+| F-1 | Medium | A move never checked the expiry, so a row past it but not yet swept could be approved or spent; only the benchmark's own read guarded it | Fixed in-PR: a decision or a spend on a row at or past its expiry fails with `ErrExpired`, in the move's own statement |
+| F-2 | Medium | The constructor took a connection without foreign keys, where replacing the graph leaves the old roles, members and edges behind, and the graph read then panicked or filed them under another organization | Fixed in-PR: such a connection is refused, and a row of an unknown organization fails the read |
+| F-3 | Low | Every read began as a write transaction, so under `_txlock=immediate` each authority check and queue read waited for the write lock; the benchmark's immediate form measured that, not the form its doc described | Fixed in-PR: reads begin read-only; the gate re-ran on the fix |
+| F-4 | Low | The key's comment promised one key across first calls on two connections, but a second call that read first failed its insert with `SQLITE_BUSY_SNAPSHOT` | Fixed in-PR: the insert comes first, so a call of its own takes the write lock before it reads; a two-connection test pins it |
+| F-5 | Medium | A key in another value's unexported field printed its bytes, since fmt cannot call its methods there, and as a `[]byte` it passed to `zap.Binary` | Fixed in-PR: its bytes sit behind a pointer, which prints as an address, and only `Bytes()` hands them over |
+| F-6 | Low | A move to approved or denied could record no one deciding | Fixed in-PR: a decision names who and when |
+| F-7 | Low | A Store call inside the transaction call waited forever for the connection its own transaction held | Fixed in-PR: the function gets a marked context, and a Store call made with it fails at once with `ErrInvalid`; the channels store cannot see the mark, so its rule stays a rule |
+| F-8 | Low | The expiry sweep and a tie group's withdrawal ran a list and then two statements a row, holding the shared connection | Fixed in-PR: `MoveApprovals` moves them in one statement |
+| F-9 | Low | Shapes only the table's checks refused (a held turn off an action row, a tie group on the wrong kind, a negative depth) came back as driver errors, not `ErrInvalid` | Fixed in-PR: checked before the insert |
+| F-10 | Low | The list ordered rows opened in one second by their ids as text, so `hold-10` came before `hold-9` | Fixed in-PR: by creation time, then rowid |
+| F-11 | Low | The open-row conflict was told by the driver's message text | Fixed in-PR: the typed code, confirmed by a lookup of the open row; `internal/channels`' helper is not shared, since importing it here would make a cycle with its benchmark |
+| F-12 | Low | Opening and moving a row each read it back with a second statement | Fixed in-PR: `RETURNING` |
+| F-13 | Low | The benchmark's seed recorded each settled row's decision a day before the row was opened | Fixed in-PR: each row settles after it opens, a decision or a spend before its expiry |
+| F-14 | Info | The ROADMAP's latest-changes note grew to a paragraph | Fixed in-PR: shortened |
+
 ### PR 4 — `feature/v040-rfc0029-society-wiring`
 
 **Scope**: `cmd/orchestrator/channels.go` (491) builds the society store from

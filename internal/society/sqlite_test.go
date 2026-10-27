@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -83,6 +84,47 @@ func TestNewSQLiteStore_RefusesAConnectionWithoutTheSocietyTables(t *testing.T) 
 	assert.Contains(t, err.Error(), "society_meta")
 }
 
+func TestNewSQLiteStore_RefusesAConnectionWithoutForeignKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "channels.db")
+	require.NoError(t, openChannels(t, path).Close())
+	// The society tables, on a connection left at SQLite's default: foreign
+	// keys off, so deleting an organization would leave its rows behind.
+	db := openRawDB(t, path)
+	_, err := NewSQLiteStore(connOf{db})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "foreign keys")
+}
+
+// Under the driver's `_txlock=immediate` every transaction it begins takes
+// the write lock first, unless it is asked for a read-only one; a society
+// read must never wait behind a writer for a lock it does not need.
+func TestReads_NeverTakeTheWriteLock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "channels.db")
+	cs := openChannels(t, path+"?_txlock=immediate")
+	t.Cleanup(func() { _ = cs.Close() })
+	s := storeOn(t, cs)
+	ctx := context.Background()
+	require.NoError(t, s.ReplaceGraph(ctx, lab()))
+	_, err := s.OpenApproval(ctx, action("hold-1", "moss-fox"))
+	require.NoError(t, err)
+
+	writer, err := openRawDB(t, path).Conn(ctx)
+	require.NoError(t, err)
+	defer func() { _ = writer.Close() }()
+	_, err = writer.ExecContext(ctx, `BEGIN IMMEDIATE`)
+	require.NoError(t, err)
+	defer func() { _, _ = writer.ExecContext(ctx, `ROLLBACK`) }()
+
+	read, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	_, err = s.Graph(read)
+	assert.NoError(t, err, "the graph read")
+	_, err = s.Approval(read, "hold-1")
+	assert.NoError(t, err, "one row's read")
+	_, err = s.ListApprovals(read, ApprovalQuery{Open: true})
+	assert.NoError(t, err, "the queue's read")
+}
+
 func TestKey_IsMadeOnceAcrossConcurrentFirstCalls(t *testing.T) {
 	s, _ := newTestStore(t)
 	ctx := context.Background()
@@ -100,12 +142,47 @@ func TestKey_IsMadeOnceAcrossConcurrentFirstCalls(t *testing.T) {
 	wg.Wait()
 	for i := range callers {
 		require.NoError(t, errs[i])
-		assert.Len(t, keys[i], KeySize)
+		assert.Len(t, keys[i].Bytes(), KeySize)
 		assert.Equal(t, keys[0], keys[i], "every first call must get the one key")
 	}
 	var rows int
 	require.NoError(t, s.db.QueryRow(`SELECT COUNT(*) FROM society_keys`).Scan(&rows))
 	assert.Equal(t, 1, rows)
+}
+
+// Two first calls on two connections: the second has begun its transaction
+// when the first makes and commits the key, and must return that key rather
+// than fail its own write against a snapshot older than the key.
+func TestKey_IsMadeOnceAcrossFirstCallsOnTwoConnections(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "channels.db")
+	ctx := context.Background()
+	cs := openChannels(t, path)
+	t.Cleanup(func() { _ = cs.Close() })
+	first := storeOn(t, cs)
+
+	db := openRawDB(t, path+"?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)")
+	db.SetMaxOpenConns(1)
+	st, err := NewSQLiteStore(connOf{db})
+	require.NoError(t, err)
+	second := st.(*sqliteStore)
+
+	// The clock is the seam: the second call reads it as it stores its key,
+	// and the first call makes and commits its key right then.
+	var firstKey Key
+	var firstErr error
+	made := false
+	second.now = func() time.Time {
+		if !made {
+			made = true
+			firstKey, firstErr = first.Key(ctx, KeyApprovalSigning)
+		}
+		return testClock
+	}
+	got, err := second.Key(ctx, KeyApprovalSigning)
+	require.NoError(t, firstErr)
+	require.NoError(t, err)
+	require.True(t, made)
+	assert.Equal(t, firstKey.Bytes(), got.Bytes(), "both calls return the one key stored")
 }
 
 func TestKey_SurvivesAReopen(t *testing.T) {
@@ -139,7 +216,9 @@ func TestKey_NeverFormatsItsBytes(t *testing.T) {
 	s, _ := newTestStore(t)
 	key, err := s.Key(context.Background(), KeyApprovalSigning)
 	require.NoError(t, err)
-	hexKey := fmt.Sprintf("%x", []byte(key))
+	raw := key.Bytes()
+	hexKey := fmt.Sprintf("%x", raw)
+	decimalKey := strings.Trim(fmt.Sprintf("%d", raw), "[]")
 
 	core, logs := observer.New(zap.DebugLevel)
 	zap.New(core).Info("key", zap.Any("key", key), zap.Stringer("stringer", key))
@@ -150,9 +229,31 @@ func TestKey_NeverFormatsItsBytes(t *testing.T) {
 		string(encoded), fmt.Sprint(logs.All()[0].ContextMap()),
 	} {
 		assert.NotContains(t, out, hexKey)
-		assert.NotContains(t, out, string(key))
+		assert.NotContains(t, out, string(raw))
 		assert.Contains(t, out, "redacted")
 	}
+
+	// A Key kept in another value's unexported field, where fmt cannot call
+	// the Key's own methods and prints what it finds by reflection.
+	type signer struct{ key Key }
+	held := signer{key}
+	out := fmt.Sprintf("%v %+v %#v", held, held, held)
+	assert.NotContains(t, out, hexKey)
+	assert.NotContains(t, out, decimalKey)
+}
+
+func TestInTx_RefusesAStoreCallMadeInsideIt(t *testing.T) {
+	s, _ := newTestStore(t)
+	// The deadline only bounds the test: a nested call that waits for the
+	// connection its own transaction holds would otherwise wait forever.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var nested error
+	require.NoError(t, s.InTx(ctx, func(ctx context.Context, _ Tx) error {
+		_, nested = s.Key(ctx, KeyApprovalSigning)
+		return nil
+	}))
+	assert.ErrorIs(t, nested, ErrInvalid, "a Store call inside InTx fails at once")
 }
 
 func TestInTx_CommitsAGraphChangeWithItsApproval(t *testing.T) {
@@ -162,7 +263,7 @@ func TestInTx_CommitsAGraphChangeWithItsApproval(t *testing.T) {
 	a, err := s.OpenApproval(ctx, graphChange("change-1"))
 	require.NoError(t, err)
 
-	require.NoError(t, s.InTx(ctx, func(tx Tx) error {
+	require.NoError(t, s.InTx(ctx, func(ctx context.Context, tx Tx) error {
 		g, err := tx.Graph(ctx)
 		if err != nil {
 			return err
@@ -195,7 +296,7 @@ func TestInTx_AnErrorLeavesTheGraphAndTheApprovalUnchanged(t *testing.T) {
 	require.NoError(t, err)
 	refused := errors.New("the change makes a cycle")
 
-	err = s.InTx(ctx, func(tx Tx) error {
+	err = s.InTx(ctx, func(ctx context.Context, tx Tx) error {
 		g := lab()
 		g.Version = 2
 		g.Organizations[0].Manages = nil
@@ -247,7 +348,7 @@ func TestSharedConnection_PublishesAndSocietyWritesRunTogether(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for i := range rounds {
-				errs <- s.InTx(ctx, func(tx Tx) error {
+				errs <- s.InTx(ctx, func(ctx context.Context, tx Tx) error {
 					a, err := tx.OpenApproval(ctx, action(fmt.Sprintf("a-%d-%d", w, i), "moss-fox"))
 					if err != nil {
 						return err

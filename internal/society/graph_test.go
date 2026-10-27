@@ -37,6 +37,21 @@ func TestGraph_AnEmptyStoreHasNoGraphAtVersionZero(t *testing.T) {
 	assert.Equal(t, Graph{}, g)
 }
 
+func TestGraph_RefusesARowOfAnOrganizationItDoesNotHold(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+	require.NoError(t, s.ReplaceGraph(ctx, lab()))
+	// Only a connection with foreign keys off can leave such a row, and the
+	// constructor refuses one, so the test turns them off on the store's own.
+	_, err := s.db.Exec(`PRAGMA foreign_keys = OFF`)
+	require.NoError(t, err)
+	_, err = s.db.Exec(`INSERT INTO society_roles (organization_id, id, authority) VALUES ('gone', 'lead', 'directive')`)
+	require.NoError(t, err)
+
+	_, err = s.Graph(ctx)
+	assert.ErrorContains(t, err, `"gone"`, "a row of no organization fails the read, never joins another")
+}
+
 func TestReplaceGraph_ReadsBackInCanonicalOrder(t *testing.T) {
 	s, _ := newTestStore(t)
 	ctx := context.Background()
@@ -140,7 +155,7 @@ func TestReplaceGraph_AFailureInsideACommittedTransactionLeavesTheOldGraph(t *te
 	ctx := context.Background()
 	require.NoError(t, s.ReplaceGraph(ctx, lab()))
 
-	require.NoError(t, s.InTx(ctx, func(tx Tx) error {
+	require.NoError(t, s.InTx(ctx, func(ctx context.Context, tx Tx) error {
 		g := lab()
 		g.Version = 2
 		g.Organizations[0].Members = append(g.Organizations[0].Members, Member{AgentID: "sage-lynx", RoleID: "chair"})

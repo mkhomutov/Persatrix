@@ -76,24 +76,25 @@ func TestOpenApproval_RefusesARowTheQueueCannotHold(t *testing.T) {
 	s, _ := newTestStore(t)
 	ctx := context.Background()
 	for name, bad := range map[string]func(*Approval){
-		"no id":             func(a *Approval) { a.ID = "" },
-		"no actor":          func(a *Approval) { a.ActorID = "" },
-		"no action hash":    func(a *Approval) { a.ActionHash = "" },
-		"no expiry":         func(a *Approval) { a.ExpiresAt = time.Time{} },
-		"unknown kind":      func(a *Approval) { a.Kind = "vote" },
-		"payload not JSON":  func(a *Approval) { a.Payload = json.RawMessage(`{"class":`) },
-		"caller's nonce":    func(a *Approval) { a.Nonce = "chosen" },
-		"caller's state":    func(a *Approval) { a.State = StateApproved },
-		"decided already":   func(a *Approval) { a.DecidedBy, a.DecidedAt = "operator-1", testClock },
-		"tie with no group": func(a *Approval) { a.Kind, a.Held = KindTie, nil },
-		"held graph change": func(a *Approval) { a.Kind = KindGraphChange },
-		"negative depth":    func(a *Approval) { a.Held.CascadeDepth = -1 },
+		"no id":              func(a *Approval) { a.ID = "" },
+		"no actor":           func(a *Approval) { a.ActorID = "" },
+		"no action hash":     func(a *Approval) { a.ActionHash = "" },
+		"no expiry":          func(a *Approval) { a.ExpiresAt = time.Time{} },
+		"unknown kind":       func(a *Approval) { a.Kind = "vote" },
+		"payload not JSON":   func(a *Approval) { a.Payload = json.RawMessage(`{"class":`) },
+		"caller's nonce":     func(a *Approval) { a.Nonce = "chosen" },
+		"caller's state":     func(a *Approval) { a.State = StateApproved },
+		"decided already":    func(a *Approval) { a.DecidedBy, a.DecidedAt = "operator-1", testClock },
+		"tie with no group":  func(a *Approval) { a.Kind, a.Held = KindTie, nil },
+		"group on an action": func(a *Approval) { a.TieGroup = "tie-7" },
+		"held graph change":  func(a *Approval) { a.Kind = KindGraphChange },
+		"negative depth":     func(a *Approval) { a.Held.CascadeDepth = -1 },
 	} {
 		t.Run(name, func(t *testing.T) {
 			a := action("hold-"+strings.ReplaceAll(name, " ", "-"), "moss-fox")
 			bad(&a)
 			_, err := s.OpenApproval(ctx, a)
-			require.Error(t, err)
+			require.ErrorIs(t, err, ErrInvalid, "refused before the table sees it")
 			_, err = s.Approval(ctx, a.ID)
 			assert.ErrorIs(t, err, ErrNotFound, "a refused row must not be stored")
 		})
@@ -138,8 +139,45 @@ func TestMoveApproval_ReportsALostRace(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, StateExpired, got.State, "the lost race must not overwrite the winner")
 
-	_, err = s.MoveApproval(ctx, "no-such-row", Move{From: StatePending, To: StateDenied})
+	_, err = s.MoveApproval(ctx, "no-such-row", Move{From: StatePending, To: StateDenied,
+		DecidedBy: "operator-1", DecidedAt: testClock})
 	assert.ErrorIs(t, err, ErrNotFound)
+}
+
+func TestMoveApproval_RefusesADecisionOrASpendPastTheExpiry(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+	for _, id := range []string{"hold-1", "hold-2"} {
+		a := action(id, "moss-fox")
+		a.ExpiresAt = testClock.Add(time.Hour)
+		_, err := s.OpenApproval(ctx, a)
+		require.NoError(t, err)
+	}
+	_, err := s.MoveApproval(ctx, "hold-2", Move{From: StatePending, To: StateApproved,
+		DecidedBy: "operator-1", DecidedAt: testClock})
+	require.NoError(t, err)
+
+	// At the expiry, before the sweep has reached either row.
+	s.now = func() time.Time { return testClock.Add(time.Hour) }
+	for _, c := range []struct {
+		id string
+		m  Move
+	}{
+		{"hold-1", Move{From: StatePending, To: StateApproved, DecidedBy: "operator-1", DecidedAt: testClock}},
+		{"hold-1", Move{From: StatePending, To: StateDenied, DecidedBy: "operator-1", DecidedAt: testClock}},
+		{"hold-2", Move{From: StateApproved, To: StateSpent}},
+	} {
+		_, err := s.MoveApproval(ctx, c.id, c.m)
+		assert.ErrorIs(t, err, ErrExpired, "%s → %s", c.m.From, c.m.To)
+	}
+	got, err := s.Approval(ctx, "hold-2")
+	require.NoError(t, err)
+	assert.Equal(t, StateApproved, got.State, "an expired approval is never spent")
+
+	_, err = s.MoveApproval(ctx, "hold-1", Move{From: StatePending, To: StateExpired})
+	assert.NoError(t, err, "the sweep still ends the row")
+	_, err = s.MoveApproval(ctx, "hold-2", Move{From: StateApproved, To: StateWithdrawn})
+	assert.NoError(t, err)
 }
 
 func TestMoveApproval_RefusesAMoveOffTheLifecycle(t *testing.T) {
@@ -155,6 +193,9 @@ func TestMoveApproval_RefusesAMoveOffTheLifecycle(t *testing.T) {
 		{From: StatePending, To: "lost"},
 		{From: StatePending, To: StateApproved, DecidedBy: "operator-1"},
 		{From: StatePending, To: StateApproved, DecidedAt: testClock},
+		// A person's decision names who made it.
+		{From: StatePending, To: StateApproved},
+		{From: StatePending, To: StateDenied},
 	} {
 		_, err := s.OpenApproval(ctx, action("hold-1", "moss-fox"))
 		require.NoError(t, err)
@@ -224,6 +265,116 @@ func TestListApprovals_SelectsByEachField(t *testing.T) {
 
 	_, err = s.ListApprovals(ctx, ApprovalQuery{State: StatePending, Open: true})
 	assert.ErrorIs(t, err, ErrInvalid, "a state and the open pair cannot both be asked for")
+}
+
+func TestListApprovals_KeepsTheOrderRowsOpenedInWithinOneSecond(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+	for _, id := range []string{"hold-9", "hold-10", "hold-11"} {
+		_, err := s.OpenApproval(ctx, action(id, "moss-fox"))
+		require.NoError(t, err)
+	}
+	rows, err := s.ListApprovals(ctx, ApprovalQuery{ActorID: "moss-fox"})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"hold-9", "hold-10", "hold-11"}, idsOf(rows), "opened in one second, listed as opened")
+}
+
+// idsOf lists the ids of rows, in their order.
+func idsOf(rows []Approval) []string {
+	out := []string{}
+	for _, r := range rows {
+		out = append(out, r.ID)
+	}
+	return out
+}
+
+func TestMoveApprovals_ExpiresEveryOpenRowPastItsExpiry(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+	open := func(id, actor string, expires time.Time) {
+		t.Helper()
+		a := action(id, actor)
+		a.ExpiresAt = expires
+		_, err := s.OpenApproval(ctx, a)
+		require.NoError(t, err)
+	}
+	due := testClock.Add(time.Minute)
+	open("due-pending", "moss-fox", due)
+	open("due-approved", "moss-fox", due)
+	open("due-denied", "tide-wren", due)
+	open("live", "moss-fox", testClock.Add(time.Hour))
+	decide := Move{From: StatePending, DecidedBy: "operator-1", DecidedAt: testClock}
+	decide.To = StateApproved
+	_, err := s.MoveApproval(ctx, "due-approved", decide)
+	require.NoError(t, err)
+	decide.To = StateDenied
+	_, err = s.MoveApproval(ctx, "due-denied", decide)
+	require.NoError(t, err)
+	_, err = s.db.Exec(`UPDATE society_approvals SET delivered_at = ?`, testClock.Unix())
+	require.NoError(t, err)
+
+	swept, err := s.MoveApprovals(ctx, ApprovalQuery{Open: true, ExpiredBy: due}, StateExpired)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"due-pending", "due-approved"}, idsOf(swept))
+	for _, a := range swept {
+		assert.Equal(t, StateExpired, a.State)
+		assert.Nil(t, a.Payload, "a settled row keeps no text (G-11)")
+		assert.True(t, a.DeliveredAt.IsZero(), "each new state is owed its own decision event")
+	}
+	for id, want := range map[string]State{"due-denied": StateDenied, "live": StatePending} {
+		got, err := s.Approval(ctx, id)
+		require.NoError(t, err)
+		assert.Equal(t, want, got.State, id)
+	}
+	got, err := s.Approval(ctx, "due-approved")
+	require.NoError(t, err)
+	assert.Equal(t, "operator-1", got.DecidedBy, "expiry keeps who approved")
+}
+
+func TestMoveApprovals_WithdrawsTheRestOfATieGroup(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+	for id, group := range map[string]string{"tie-a": "tie-7", "tie-b": "tie-7", "tie-c": "tie-7", "tie-x": "tie-8"} {
+		_, err := s.OpenApproval(ctx, Approval{ID: id, Kind: KindTie, ActorID: "tide-wren",
+			ActionHash: "directive-" + id, TieGroup: group, ExpiresAt: testClock.Add(time.Hour)})
+		require.NoError(t, err)
+	}
+	_, err := s.MoveApproval(ctx, "tie-a", Move{From: StatePending, To: StateApproved,
+		DecidedBy: "operator-1", DecidedAt: testClock})
+	require.NoError(t, err)
+
+	withdrawn, err := s.MoveApprovals(ctx, ApprovalQuery{State: StatePending, TieGroup: "tie-7"}, StateWithdrawn)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"tie-b", "tie-c"}, idsOf(withdrawn))
+	for id, want := range map[string]State{"tie-a": StateApproved, "tie-x": StatePending} {
+		got, err := s.Approval(ctx, id)
+		require.NoError(t, err)
+		assert.Equal(t, want, got.State, id)
+	}
+}
+
+func TestMoveApprovals_RefusesAMoveTheQueueNeverMakesInBulk(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+	_, err := s.OpenApproval(ctx, action("hold-1", "moss-fox"))
+	require.NoError(t, err)
+	for _, c := range []struct {
+		q  ApprovalQuery
+		to State
+	}{
+		{ApprovalQuery{Open: true}, StateApproved},
+		{ApprovalQuery{Open: true}, StateDenied},
+		{ApprovalQuery{Open: true}, StateSpent},
+		{ApprovalQuery{Open: true}, StatePending},
+		{ApprovalQuery{State: StateDenied}, StateExpired},
+		{ApprovalQuery{Open: true, Limit: 1}, StateExpired},
+	} {
+		_, err := s.MoveApprovals(ctx, c.q, c.to)
+		assert.ErrorIs(t, err, ErrInvalid, "%+v → %s", c.q, c.to)
+	}
+	got, err := s.Approval(ctx, "hold-1")
+	require.NoError(t, err)
+	assert.Equal(t, StatePending, got.State)
 }
 
 // The open-row lookup a retried hold makes must use the open-row index, which

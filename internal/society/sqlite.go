@@ -30,7 +30,9 @@ type sqliteTx struct {
 
 // NewSQLiteStore builds the society store on src's connection, which it
 // shares and never closes: the channels store owns it. It fails if the
-// connection does not hold the society tables (channels-store v15).
+// connection does not hold the society tables (channels-store v15), or does
+// not enforce foreign keys: replacing the graph relies on deleting an
+// organization deleting its roles, members and edges.
 func NewSQLiteStore(src ConnSource) (Store, error) {
 	db := src.SocietyConn()
 	if db == nil {
@@ -40,18 +42,41 @@ func NewSQLiteStore(src ConnSource) (Store, error) {
 	if err := db.QueryRow(`SELECT graph_version FROM society_meta WHERE id = 1`).Scan(&version); err != nil {
 		return nil, fmt.Errorf("society: read society_meta: %w", err)
 	}
+	var foreignKeys bool
+	if err := db.QueryRow(`PRAGMA foreign_keys`).Scan(&foreignKeys); err != nil {
+		return nil, fmt.Errorf("society: read foreign_keys: %w", err)
+	}
+	if !foreignKeys {
+		return nil, errors.New("society: the connection does not enforce foreign keys")
+	}
 	return &sqliteStore{db: db, now: time.Now}, nil
 }
 
+// readOnly begins a transaction that only reads. Under the driver's
+// `_txlock=immediate` every other transaction takes the write lock as it
+// begins, so a read that did not say so would queue behind every writer.
+var readOnly = &sql.TxOptions{ReadOnly: true}
+
+// inTxMark keys the mark InTx puts on its function's context: the
+// connection that function's transaction holds.
+type inTxMark struct{}
+
 // InTx implements [Store].
-func (s *sqliteStore) InTx(ctx context.Context, fn func(Tx) error) error {
-	return s.run(ctx, func(tx *sqliteTx) error { return fn(tx) })
+func (s *sqliteStore) InTx(ctx context.Context, fn func(context.Context, Tx) error) error {
+	return s.run(ctx, nil, func(tx *sqliteTx) error {
+		return fn(context.WithValue(ctx, inTxMark{}, s.db), tx)
+	})
 }
 
-// run is InTx on the concrete handle. The deferred rollback also ends the
-// transaction when fn panics; after a commit it does nothing.
-func (s *sqliteStore) run(ctx context.Context, fn func(*sqliteTx) error) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+// run is InTx on the concrete handle, in a transaction begun with opts. A
+// context InTx marked for this connection is refused before it waits for
+// the connection its own transaction holds. The deferred rollback also ends
+// the transaction when fn panics; after a commit it does nothing.
+func (s *sqliteStore) run(ctx context.Context, opts *sql.TxOptions, fn func(*sqliteTx) error) error {
+	if ctx.Value(inTxMark{}) == s.db {
+		return fmt.Errorf("%w: a call inside InTx goes through its Tx, not the Store", ErrInvalid)
+	}
+	tx, err := s.db.BeginTx(ctx, opts)
 	if err != nil {
 		return fmt.Errorf("society: begin: %w", err)
 	}
@@ -65,10 +90,11 @@ func (s *sqliteStore) run(ctx context.Context, fn func(*sqliteTx) error) error {
 	return nil
 }
 
-// inTx runs one call in a transaction of its own and returns its result.
-func inTx[T any](ctx context.Context, s *sqliteStore, call func(*sqliteTx) (T, error)) (T, error) {
+// inTx runs one call in a transaction of its own, begun with opts, and
+// returns its result.
+func inTx[T any](ctx context.Context, s *sqliteStore, opts *sql.TxOptions, call func(*sqliteTx) (T, error)) (T, error) {
 	var out T
-	err := s.run(ctx, func(tx *sqliteTx) error {
+	err := s.run(ctx, opts, func(tx *sqliteTx) error {
 		var err error
 		out, err = call(tx)
 		return err
@@ -81,65 +107,63 @@ func inTx[T any](ctx context.Context, s *sqliteStore, call func(*sqliteTx) (T, e
 }
 
 func (s *sqliteStore) Graph(ctx context.Context) (Graph, error) {
-	return inTx(ctx, s, func(tx *sqliteTx) (Graph, error) { return tx.Graph(ctx) })
+	return inTx(ctx, s, readOnly, func(tx *sqliteTx) (Graph, error) { return tx.Graph(ctx) })
 }
 
 func (s *sqliteStore) ReplaceGraph(ctx context.Context, g Graph) error {
-	return s.run(ctx, func(tx *sqliteTx) error { return tx.ReplaceGraph(ctx, g) })
+	return s.run(ctx, nil, func(tx *sqliteTx) error { return tx.ReplaceGraph(ctx, g) })
 }
 
 func (s *sqliteStore) OpenApproval(ctx context.Context, a Approval) (Approval, error) {
-	return inTx(ctx, s, func(tx *sqliteTx) (Approval, error) { return tx.OpenApproval(ctx, a) })
+	return inTx(ctx, s, nil, func(tx *sqliteTx) (Approval, error) { return tx.OpenApproval(ctx, a) })
 }
 
 func (s *sqliteStore) Approval(ctx context.Context, id string) (Approval, error) {
-	return inTx(ctx, s, func(tx *sqliteTx) (Approval, error) { return tx.Approval(ctx, id) })
+	return inTx(ctx, s, readOnly, func(tx *sqliteTx) (Approval, error) { return tx.Approval(ctx, id) })
 }
 
 func (s *sqliteStore) ListApprovals(ctx context.Context, q ApprovalQuery) ([]Approval, error) {
-	return inTx(ctx, s, func(tx *sqliteTx) ([]Approval, error) { return tx.ListApprovals(ctx, q) })
+	return inTx(ctx, s, readOnly, func(tx *sqliteTx) ([]Approval, error) { return tx.ListApprovals(ctx, q) })
 }
 
 func (s *sqliteStore) MoveApproval(ctx context.Context, id string, m Move) (Approval, error) {
-	return inTx(ctx, s, func(tx *sqliteTx) (Approval, error) { return tx.MoveApproval(ctx, id, m) })
+	return inTx(ctx, s, nil, func(tx *sqliteTx) (Approval, error) { return tx.MoveApproval(ctx, id, m) })
+}
+
+func (s *sqliteStore) MoveApprovals(ctx context.Context, q ApprovalQuery, to State) ([]Approval, error) {
+	return inTx(ctx, s, nil, func(tx *sqliteTx) ([]Approval, error) { return tx.MoveApprovals(ctx, q, to) })
 }
 
 func (s *sqliteStore) Key(ctx context.Context, purpose string) (Key, error) {
-	return inTx(ctx, s, func(tx *sqliteTx) (Key, error) { return tx.Key(ctx, purpose) })
+	return inTx(ctx, s, nil, func(tx *sqliteTx) (Key, error) { return tx.Key(ctx, purpose) })
 }
 
-// Key implements [Ops]. The insert names its conflict, so even two first
-// calls on two connections keep one key; the one stored is the one returned.
+// Key implements [Ops]. It stores a fresh key unless one is kept, then
+// reads the one kept. The insert comes first, so in a transaction of its own
+// the call takes the write lock before it reads anything, and two first
+// calls, even on two connections, store one key and both return it. Inside
+// a caller's transaction that has already read, on a second connection, the
+// insert can fail with SQLITE_BUSY as any write after a read can; on the
+// channels store's own connection it cannot (S-2).
 func (t *sqliteTx) Key(ctx context.Context, purpose string) (Key, error) {
 	if purpose == "" {
-		return nil, fmt.Errorf("%w: a key needs a purpose", ErrInvalid)
-	}
-	key, err := t.readKey(ctx, purpose)
-	if err == nil || !errors.Is(err, sql.ErrNoRows) {
-		return key, err
+		return Key{}, fmt.Errorf("%w: a key needs a purpose", ErrInvalid)
 	}
 	fresh := make([]byte, KeySize)
 	if _, err := rand.Read(fresh); err != nil {
-		return nil, fmt.Errorf("society: make key: %w", err)
+		return Key{}, fmt.Errorf("society: make key: %w", err)
 	}
 	if _, err := t.tx.ExecContext(ctx,
 		`INSERT INTO society_keys (purpose, key, created_at) VALUES (?, ?, ?)
 		 ON CONFLICT (purpose) DO NOTHING`, purpose, fresh, t.now().Unix()); err != nil {
-		return nil, fmt.Errorf("society: store key: %w", err)
+		return Key{}, fmt.Errorf("society: store key: %w", err)
 	}
-	return t.readKey(ctx, purpose)
-}
-
-func (t *sqliteTx) readKey(ctx context.Context, purpose string) (Key, error) {
-	var key []byte
-	err := t.tx.QueryRowContext(ctx, `SELECT key FROM society_keys WHERE purpose = ?`, purpose).Scan(&key)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, err
-		}
-		return nil, fmt.Errorf("society: read key: %w", err)
+	var kept []byte
+	if err := t.tx.QueryRowContext(ctx,
+		`SELECT key FROM society_keys WHERE purpose = ?`, purpose).Scan(&kept); err != nil {
+		return Key{}, fmt.Errorf("society: read key: %w", err)
 	}
-	return Key(key), nil
+	return Key{secret: &kept}, nil
 }
 
 // unixOrNull stores a time as unix seconds, and a zero time as NULL.
