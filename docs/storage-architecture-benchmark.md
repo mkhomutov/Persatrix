@@ -170,8 +170,9 @@ Linux at 200 a second lost no post; it failed on latency alone.
 ### The re-runs
 
 RFC 0029's Phase 3 plan re-runs the gate on shipped code: on
-channels-store v14 (2026-10-24) and on the real society store, with a third
-connection form (2026-10-26). Both are in
+channels-store v14 (2026-10-24), on the real society store with a third
+connection form (2026-10-26), and on that store again after its review
+(2026-10-27). All three are in
 [the re-runs](storage-architecture-benchmark-reruns.md).
 
 ---
@@ -220,8 +221,11 @@ setting, which leaves read-only transactions as they are), a publish takes
 the write lock before its membership read and waits under `busy_timeout`
 like any other writer. That could let a second connection work, without the
 shared connection's rule that a society transaction must make no other
-store call. [Measured on the society store](storage-architecture-benchmark-reruns.md#the-gate-on-the-society-store),
-it passed: nothing failed in either layout.
+store call. [Measured on the reviewed society store](storage-architecture-benchmark-reruns.md#the-gate-after-the-society-stores-review),
+it passed: nothing failed in either layout. The
+[first measurement](storage-architecture-benchmark-reruns.md#the-gate-on-the-society-store)
+passed too, but its society reads took the write lock as well, a stricter
+form than this one.
 
 ### 3. With both conditions, the one connection is the limit
 

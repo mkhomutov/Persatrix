@@ -172,7 +172,7 @@ confirmed or overturned in its review:
 |----|-----|-------|--------|--------|-----------|--------|
 | 1 | A1 | Restore the channel-time index (channels-store v14; ISSUE-0188) | `feature/v040-rfc0029-channel-time-index` | ✅ | [#1057](https://github.com/mkhomutov/Persatrix/pull/1057) | 2026-10-24 |
 | 2 | A1 | The society tables (channels-store v15) | `feature/v040-rfc0029-society-tables` | ✅ | [#1060](https://github.com/mkhomutov/Persatrix/pull/1060) | 2026-10-25 |
-| 3 | A1 | `internal/society`: the store on the channels connection | `feature/v040-rfc0029-society-store` | ✅ | [#1063](https://github.com/mkhomutov/Persatrix/pull/1063) | 2026-10-27 |
+| 3 | A1 | `internal/society`: the store on the channels connection | `feature/v040-rfc0029-society-store` (head branch `ccr-b7e6b467-72zd06`, assigned by the session that opened it) | ✅ | [#1063](https://github.com/mkhomutov/Persatrix/pull/1063) | 2026-10-27 |
 | 4 | A1 | Startup wiring; the single-node Known Gap issue | `feature/v040-rfc0029-society-wiring` | ⬜ | — | — |
 | 5 | — | Review follow-ups and closeout | `feature/v040-rfc0029-closeout` | ⬜ | — | — |
 
@@ -487,16 +487,20 @@ covers them too.
 >   which would drop S-6's no-other-call rule.
 
 > 2026-10-27 — PR 3's review kept those defaults and the shared connection,
-> and added to them (its findings table): a decision or a spend on a row past
-> its expiry fails, even before the sweep; a decision names who made it; the
-> sweep and a tie group's withdrawal move their rows in one statement; reads
-> begin read-only; the constructor also refuses a connection without foreign
-> keys; a key is written before it is read, and its bytes sit behind a
-> pointer; and a Store call made inside the transaction call fails at once.
+> and added to them ([its findings table](#pr-3--featurev040-rfc0029-society-store)):
+> a decision or a spend on a row at or past its expiry fails, even before the
+> sweep; a decision names who made it; the sweep and a tie group's withdrawal
+> move their rows in one statement; the store's own reads begin read-only,
+> though under `_txlock=immediate` a transaction call that only reads still
+> takes the write lock; the constructor also refuses a connection without
+> foreign keys; a key is written before it is read, and its bytes sit behind
+> a pointer; and a Store call made with the context the transaction call
+> hands its function fails at once, though one made with any other context
+> still waits forever.
 > The gate [re-ran on the fixed store](../storage-architecture-benchmark-reruns.md#the-gate-after-the-society-stores-review)
 > and passed on the shared and immediate forms. On the separate one, society
 > writes, which now begin with their write, no longer fail; publishes still
-> do.
+> do, and more of them than before (7 and 8, against 2).
 
 ## Related documentation
 
