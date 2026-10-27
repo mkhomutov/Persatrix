@@ -178,6 +178,10 @@ confirmed or overturned in its review:
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ✂️ Cut
 
+> A PR's own row still says 🔀 when it merges, so `main`'s plan-status
+> check fails until a later PR flips it. PRs 1 to 3 each needed that
+> follow-up: see [ISSUE-0190](../issues/ISSUE-0190-merged-pr-plan-row-reddens-main.md).
+
 ## Dependency graph
 
 ```
