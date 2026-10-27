@@ -41,9 +41,14 @@ jobs:
         working-directory: cli
         run: cargo install cargo-deny --locked --version 0.19.0
 
+      # `-D advisory-not-detected` fails the audit on an ignore in deny.toml
+      # that no longer matches any crate, so a stale exception is caught the
+      # week it goes stale. Without it that is only a warning: the RUSTSEC-2026-0173
+      # ignore matched nothing from 2026-09-25 through three green runs, and
+      # was noticed only when other advisories failed the run (#1043).
       - name: Run comprehensive dependency audit
         working-directory: cli
-        run: cargo deny check advisories bans sources licenses
+        run: cargo deny check -D advisory-not-detected advisories bans sources licenses
 
       - name: Create issue on failure
         if: failure()
@@ -63,7 +68,7 @@ jobs:
             1. Review the workflow logs above
             2. Check for new security advisories, license issues, or dependency problems
             3. Update dependencies or add justified exceptions to \`deny.toml\`
-            4. Re-run the audit locally: \`cd cli && cargo deny check advisories bans sources licenses\`
+            4. Re-run the audit locally: \`cd cli && cargo deny check -D advisory-not-detected advisories bans sources licenses\`
             `;
             
             // Check if an open issue already exists with this title
