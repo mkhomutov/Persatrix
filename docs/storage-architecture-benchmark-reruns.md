@@ -1,6 +1,6 @@
 # Storage Architecture Benchmark — the re-runs
 
-**Status**: ✅ Gate re-run 2026-10-24 on channels-store v14; 2026-10-26 on the society store
+**Status**: ✅ Gate re-run 2026-10-24 on channels-store v14; 2026-10-26 on the society store, and 2026-10-27 after its review
 **Parent**: [storage-architecture-benchmark.md](storage-architecture-benchmark.md) — the
 2026-10-21 run, its method, its pass criteria and its findings
 **Why**: RFC 0029's Phase 3 plan re-runs the benchmark's gate whenever a
@@ -78,17 +78,77 @@ changing how every channel-store transaction begins, a channels-store
 change outside this PR. RFC 0029's Phase 3 plan records the choice for
 review (S-2).
 
+The review found that in this run no society read was marked as read-only.
+Under the immediate form a transaction not so marked begins as a write, so
+each read took the write lock: the immediate step measured a stricter form
+than the one described above. The shared and separate steps were not
+affected, since there every transaction begins as a reader, marked or not.
+The next section re-runs the gate on the fixed store.
+
+## The gate after the society store's review
+
+Re-run on Linux on 2026-10-27, on the same kind of container (4 cores,
+SQLite 3.53.4, Go 1.26), after PR 3's review changed what the society calls
+do. The store's own reads, of the graph and of the approval rows, begin
+read-only, so under the immediate form they never take the write lock. A
+transaction run through `InTx` still takes it as it begins, even one that
+only reads. A decide or a spend no longer reads its row first: one statement
+moves the row, only if it is still in the state the caller names and still
+live, and returns it. The expiry sweep and a tie group's withdrawal move all
+their rows in one statement each, where they ran two statements a row.
+
+| Layout | Society connection | Result |
+|--------|--------------------|--------|
+| Room | shared | ✅ 3 000 of 3 000; wait p99 18.8 ms, max 71 ms |
+| Room | immediate | ✅ 3 000 of 3 000; wait p99 20.1 ms, max 147 ms |
+| Room | separate | ❌ 7 failed publishes |
+| Society | shared | ✅ 3 000 of 3 000; wait p99 21.4 ms, max 218 ms |
+| Society | immediate | ✅ 3 000 of 3 000; wait p99 17.0 ms, max 129 ms |
+| Society | separate | ❌ 8 failed publishes |
+
+In the four passing steps no call failed and no race was lost; at the 99th
+percentile every kind of call answered within 16 ms and the publish wait
+within 22 ms, and the write-ahead log never passed 5 MB. Alone, a held action
+opened in 0.5–0.6 ms and the authority read took 0.09 ms (room) and 0.21 ms
+(society).
+
+Most of these figures are higher than on 2026-10-26. The publish wait's p99
+rose by 60 to 100 % in three of the four passing steps, while the room's
+shared step held at about 18 ms, and the authority read alone took 50 to
+60 % longer. The benchmark does not record how busy the machine was, so this
+run cannot tell a slower store from a busier container. Every step still
+stayed well inside the pass criteria (100 ms at the 99th percentile, and no
+post waiting a second). A later re-run should note the machine's load, as
+the v14 re-run did.
+
+On the separate connection the society store's own writes no longer fail:
+each now begins with its write, and a transaction that has read nothing yet
+waits for the write lock under `busy_timeout`. Publishes still fail, as in
+every earlier run, since a publish reads its membership before it writes,
+and more of them failed than on 2026-10-26: 7 and 8, against 2 in each
+layout. This run does not show why. One likely reason is that a society
+write that used to fail at once now waits and commits, so more commits land
+between a publish's read and its write. On this evidence the fix did not
+help publishes on a second connection, and may have made them worse.
+
+The choice above stands, though one of its two reasons has changed: the
+immediate form has now passed two runs, both on Linux, where the shared one
+has passed every run on both platforms. The other is unchanged: moving to
+the immediate form means changing how every channel-store transaction
+begins. So the store keeps the shared connection, with the immediate form as
+the measured way to a second connection.
+
 ## Reproduce
 
 The commands are the parent's
-([Reproduce](storage-architecture-benchmark.md#reproduce)). The society-store
-re-run named all three forms:
+([Reproduce](storage-architecture-benchmark.md#reproduce)). Both society-store
+re-runs named all three forms:
 
 ```bash
 go test ./internal/channels -run '^TestSocietyStoreBenchmark$' -count=1 -timeout 0 -v -args -society-bench=gate -society-bench-forms=shared,immediate,separate -society-bench-out=/tmp
 ```
 
-It took 31 minutes, seeding included.
+Each took 31–32 minutes, seeding included.
 
 ## Related documentation
 
