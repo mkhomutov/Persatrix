@@ -1,6 +1,6 @@
 ---
 id: ISSUE-0192
-summary: "In v0.4.0 the society store (RFC 0029 Phase 3) — the organization graph, the pending approvals and the key that signs them — is a set of tables in the orchestrator's own SQLite file, data/channels.db, run on the channels store's one connection. One orchestrator process serves it: a second node cannot share it, so a deployment that needs one needs RFC 0029's Postgres form first, by amendment. A Known Gap of the v0.4.0 plan."
+summary: "In v0.4.0 the society store (RFC 0029 Phase 3) — the organization graph, the pending approvals and the key that signs them — is a set of tables in the orchestrator's channels database (the --channels-db file, data/channels.db by default), run on the channels store's one connection. One orchestrator process serves it: a second node cannot share it, so a deployment that needs one needs RFC 0029's Postgres form first, by amendment. A Known Gap of the v0.4.0 plan."
 status: open
 severity: low
 area: society
@@ -40,7 +40,7 @@ owned by row A1.
 
 ## Impact
 
-- **One orchestrator.** Two orchestrators on one `data/channels.db` would
+- **One orchestrator.** Two orchestrators on one channels database would
   each hold a connection to it: the form S-2 rules out, where a society
   write can fail a publish at once with `SQLITE_BUSY`. SQLite's file
   locking is also not to be trusted on a network file system. The
@@ -49,8 +49,10 @@ owned by row A1.
 - **One connection.** Every society call queues behind channel calls on the
   channels store's connection. The benchmark's ramp measured the headroom;
   a society past it slows its channels too.
-- **One file.** The society state is backed up, and lost, with
-  `data/channels.db`, as channel history already is.
+- **One file.** The society state is backed up, and lost, with the
+  channels database, as channel history already is: the `--channels-db`
+  file, `data/channels.db` by default and `/var/lib/persatrix/channels.db`
+  under Docker Compose.
 
 None of this weakens a check: the limit is on scale and availability, not
 on what the store refuses.

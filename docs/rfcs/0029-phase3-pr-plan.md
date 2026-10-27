@@ -364,6 +364,19 @@ connection; with channels disabled, startup logs that society features are
 off.
 **Estimate**: ~250 lines.
 
+**Review findings** (PR 4):
+
+| Finding | Severity | Description | Disposition |
+|---------|----------|-------------|-------------|
+| F-1 | Low | One of the three returns that start without channels, a database directory that cannot be made, had no test; the cases that had one checked only the society line, which all three log, so none could tell which path it took | Fixed in-PR: a case for that return, and each case checks its channels line too; a copy of the code without that return's society call fails it |
+| F-2 | Low | ISSUE-0192 named the society's file as `data/channels.db`, only the default: Docker Compose runs `/var/lib/persatrix/channels.db`, so its backup line sent a Compose operator to the wrong file | Fixed in-PR: it names the `--channels-db` file and both paths |
+| F-3 | Low | RFC 0029's two notes left out `internal/server/` and the startup tests | Fixed in-PR |
+| F-4 | Info | The server's field and `WithSociety`'s comment said the store is missing only when channels are off, not when channels are on and the store could not be built | Fixed in-PR |
+| F-5 | Info | `society.go`'s header and the PR body said every return of `initChannels` brings the store up or says it is off; a reconcile failure does neither, since startup then stops | Fixed in-PR: the header names the exception |
+| F-6 | Info | `options.go`'s header read as the whole set of options, but four live beside their routes | Fixed in-PR: it names them |
+| F-7 | Info | Size statements went stale: this plan's table said `channels.go` gains one call, the v0.4.0 plan's risk row still listed `server.go`, and the RFC 0009 and RFC 0012 plans give `server.go` at 500 and `main.go` at 499, now 384 and 500 | Fixed in-PR for this plan and the v0.4.0 row, which lists `main.go` instead; the other plans' "Lines now" columns are dated, and their plan, routes registered from their own files, still holds |
+| F-8 | Info | The startup test cannot see which connection the store it built runs on; S-2 is pinned one level down, on `openSociety` | Noted: the success return passes the one channels store in scope, and the Risks row's guard, a constructor that takes the channels store rather than a path, holds; a check at startup needs the server to read the store back, which nothing does yet |
+
 ### PR 5 — `feature/v040-rfc0029-closeout`
 
 **Purpose**: the review findings deferred from PRs 1–4, paraphrased by
@@ -386,7 +399,7 @@ covers them too.
 | File | Lines now | Plan |
 |------|-----------|------|
 | `cmd/orchestrator/main.go` | 499 | PR 4 wires through its own file |
-| `cmd/orchestrator/channels.go` | 491 | PR 4 adds one call; the logic lives in the new file |
+| `cmd/orchestrator/channels.go` | 491 | PR 4 adds one call to each return that does not stop startup; the logic lives in the new file |
 | `internal/server/server.go` | 500 | PR 4 moves its options, unchanged, to `options.go`, a seam of their own, so the server can hold the society store |
 | `internal/channels/sqlite_migrations.go` | 484 | PRs 1 and 2 add one `case` arm each; the bodies live in their own files, as since v9 |
 

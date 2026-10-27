@@ -1,8 +1,11 @@
 package server
 
-// The options New takes: each hands the server one optional dependency.
-// Split out of server.go, at its 500-line cap, when the society store's
-// option joined them (RFC 0029 Phase 3 plan PR 4).
+// Most of the options New takes, each handing the server an optional
+// dependency. The rest live beside the routes they serve: WithAuth in
+// auth_middleware.go, WithInteractionReader in interactions_handler.go, and
+// WithUI and WithUIConfig in ui.go. Split out of server.go, at its 500-line
+// cap, when the society store's option joined them (RFC 0029 Phase 3 plan
+// PR 4).
 
 import (
 	"net/http"
@@ -140,8 +143,9 @@ func WithChannelSessionID(sessionID string) ServerOption {
 
 // WithSociety hands the server the society store, which startup builds on
 // the channels store's connection (RFC 0029 Phase 3). Nothing on the server
-// reads it yet: RFC 0009's approval-queue routes are its first reader. With
-// channels off there is no store and the option is not passed.
+// reads it yet: RFC 0009's approval-queue routes will be its first reader.
+// With channels off, or a store that could not be built, the option is not
+// passed.
 func WithSociety(st society.Store) ServerOption {
 	return func(s *Server) {
 		s.societyStore = st

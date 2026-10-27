@@ -100,8 +100,9 @@ type Server struct {
 
 	// societyStore is the society store (RFC 0029 Phase 3): the organization
 	// graph, the pending approvals and the key that signs them, on the
-	// channels store's connection. Nil when channels are off, and then so is
-	// every society feature. Wired via WithSociety.
+	// channels store's connection. Nil when channels are off or the store
+	// could not be built, and then so is every society feature. Wired via
+	// WithSociety.
 	societyStore society.Store
 
 	// uiFS is the embedded web-console asset tree (RFC 0048 Phase 1 PR 1 —

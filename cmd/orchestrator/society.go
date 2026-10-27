@@ -6,7 +6,7 @@ package main
 // the channels store's file, on that store's one connection (plan S-2). So it
 // comes up with the channels store or not at all: [initChannels] calls
 // [initSociety] once the channels store has opened, and on each path where it
-// has not.
+// has not. A reconcile failure is the one exception, since it stops startup.
 
 import (
 	"fmt"

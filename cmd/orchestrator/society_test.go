@@ -99,40 +99,58 @@ func TestInitSociety_SaysWhenSocietyFeaturesAreOff(t *testing.T) {
 // TestInitChannels_BringsTheSocietyStoreUpWithTheChannelsStore pins where
 // the society store comes from at startup: initChannels builds it whenever
 // the channels store opens, and says society features are off on each path
-// where none opens.
+// where none opens. Each case also checks the channels line, so it fails if
+// it took a different path from the one it names.
 func TestInitChannels_BringsTheSocietyStoreUpWithTheChannelsStore(t *testing.T) {
 	withConfig := func(t *testing.T) string {
 		dir := t.TempDir()
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "channels.yaml"), []byte("max_channels: 50\n"), 0o644))
 		return dir
 	}
+	const societyOff = "society: channels are off, so there is no society store; society features are off"
 	tests := []struct {
-		name     string
-		cfgDir   func(t *testing.T) string
-		dbPath   func(t *testing.T) string
-		wantOpts int
-		wantMsg  string
+		name         string
+		cfgDir       func(t *testing.T) string
+		dbPath       func(t *testing.T) string
+		wantOpts     int
+		wantChannels string
+		wantMsg      string
 	}{
 		{
 			name:   "channels on",
 			cfgDir: withConfig,
 			dbPath: func(t *testing.T) string { return filepath.Join(t.TempDir(), "channels.db") },
 			// The channels pair, then the society store's.
-			wantOpts: 3,
-			wantMsg:  "society: store ready on the channels store's connection",
+			wantOpts:     3,
+			wantChannels: "channels: subsystem ready",
+			wantMsg:      "society: store ready on the channels store's connection",
 		},
 		{
-			name:    "channels.yaml absent",
-			cfgDir:  func(t *testing.T) string { return t.TempDir() },
-			dbPath:  func(t *testing.T) string { return filepath.Join(t.TempDir(), "channels.db") },
-			wantMsg: "society: channels are off, so there is no society store; society features are off",
+			name:         "channels.yaml absent",
+			cfgDir:       func(t *testing.T) string { return t.TempDir() },
+			dbPath:       func(t *testing.T) string { return filepath.Join(t.TempDir(), "channels.db") },
+			wantChannels: "channels: channels.yaml not present; channel endpoints will return 503",
+			wantMsg:      societyOff,
+		},
+		{
+			name:   "the database's directory cannot be made",
+			cfgDir: withConfig,
+			// A plain file where a parent directory should be.
+			dbPath: func(t *testing.T) string {
+				blocker := filepath.Join(t.TempDir(), "blocker")
+				require.NoError(t, os.WriteFile(blocker, nil, 0o644))
+				return filepath.Join(blocker, "data", "channels.db")
+			},
+			wantChannels: "channels: cannot create db directory; channel endpoints will return 503",
+			wantMsg:      societyOff,
 		},
 		{
 			name:   "the channels store cannot open",
 			cfgDir: withConfig,
 			// A directory where the database file should be.
-			dbPath:  func(t *testing.T) string { return t.TempDir() },
-			wantMsg: "society: channels are off, so there is no society store; society features are off",
+			dbPath:       func(t *testing.T) string { return t.TempDir() },
+			wantChannels: "channels: store open failed; channel endpoints will return 503",
+			wantMsg:      societyOff,
 		},
 	}
 	for _, tt := range tests {
@@ -142,6 +160,8 @@ func TestInitChannels_BringsTheSocietyStoreUpWithTheChannelsStore(t *testing.T) 
 			t.Cleanup(cleanup)
 			require.NoError(t, err)
 			assert.Len(t, opts, tt.wantOpts)
+			assert.Equal(t, 1, logs.FilterMessage(tt.wantChannels).Len(),
+				"startup must take the path the case names")
 			lines := societyLines(logs)
 			require.Len(t, lines, 1)
 			assert.Equal(t, tt.wantMsg, lines[0].Message)
