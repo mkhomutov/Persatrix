@@ -12,6 +12,7 @@ refs:
   - cli/src/commands/channel_config_autonomous.rs
   - https://rustsec.org/advisories/RUSTSEC-2024-0449
   - https://github.com/mkhomutov/Persatrix/issues/1043
+  - https://github.com/mkhomutov/Persatrix/pull/1066
 ---
 
 # ISSUE-0191: The CLI's YAML parser is unmaintained
@@ -46,25 +47,31 @@ call `serde_yaml_ng` directly too.
 
 ## Impact
 
-Low. The parser reads only a file the operator names on the command line,
-never YAML from the network. The risk is that a parser bug will never be
-fixed, not an attack anyone can mount today.
+Low. The parser reads only local files: the one `import` is given, and the
+one `diff` compares against, which is `config/channels.yaml` in the current
+directory unless `--file` names another. It never reads YAML from the
+network. No advisory reports a flaw in the parser today; the risk is that
+one found later will never be fixed.
 
 ## Proposed fix / investigation path
 
 Move to a YAML crate written in safe Rust. The advisory suggests
 `serde-saphyr` (serde-based) or `noyalib`. The move has to keep:
 
-- how an unquoted scalar is typed: a knob that expects a string rejects a
-  value the parser read as a boolean
-  (`yaml_to_knob_json_rejects_wrong_type_naming_the_knob`), so an unquoted
-  `true` must still read as a boolean;
+- how an unquoted scalar is typed: `true` must still read as a boolean and
+  `5` as an integer, or every boolean and integer knob stops importing.
+  `parse_channel_block_lifts_name_revision_and_knobs` parses such text and
+  would catch that. `yaml_to_knob_json_rejects_wrong_type_naming_the_knob`
+  would not, because it builds its values in code. No test yet parses an
+  unquoted `true` into a string knob, which must stay an error; add one
+  before the move;
 - the shape `export` writes, so an exported block imports unchanged.
 
 Then delete the `RUSTSEC-2024-0449` entry from `deny.toml` and run
-`cd cli && cargo deny check advisories bans sources licenses`.
+`cd cli && cargo deny check -D advisory-not-detected advisories bans sources licenses`.
+The audit fails while the entry stays, because it then matches no crate.
 
 ## Notes
 
 > 2026-10-27 — filed while fixing the weekly audit for GitHub issue #1043;
-> that PR adds the `deny.toml` ignore.
+> PR #1066 adds the `deny.toml` ignore.

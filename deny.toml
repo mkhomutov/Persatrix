@@ -11,7 +11,7 @@
 # - [sources]     Non-crates.io sources FAIL CI (strict source control)
 #
 # Run locally:
-#   cd cli && cargo deny check advisories bans sources licenses
+#   cd cli && cargo deny check -D advisory-not-detected advisories bans sources licenses
 # The cargo-deny that `make check-licenses-rust` installs (0.19.0) needs rustc
 # 1.88 or newer, newer than the 1.86 the CLI itself needs.
 #
@@ -19,6 +19,8 @@
 # - Only add exceptions with clear justification and TODO follow-up
 # - Prefer fixing root cause (upgrade deps) over adding exceptions
 # - Document why exception is needed and when it can be removed
+# - The audit fails on an exception that no longer matches any crate
+#   (`-D advisory-not-detected`); delete it then
 
 [advisories]
 version = 2
@@ -28,12 +30,14 @@ ignore = [
     # RUSTSEC-2024-0449 — unsafe-libyaml is unmaintained (an "unmaintained"
     # notice, not a vulnerability). It is the YAML parser inside serde_yaml_ng
     # 0.10, the latest release, so no upgrade removes it. The CLI parses YAML
-    # only in `channel config import` and `diff`, which read a file the
-    # operator names on the command line, and `export`, which writes one; no
-    # YAML arrives from the network. Leaving it means replacing serde_yaml_ng
-    # with a parser written in safe Rust, tracked in ISSUE-0191
+    # only from local files: the one `channel config import` is given, and the
+    # one `channel config diff` compares against, which is
+    # config/channels.yaml in the current directory unless `--file` names
+    # another. `export` writes YAML. No YAML arrives from the network. Getting
+    # rid of unsafe-libyaml means replacing serde_yaml_ng with a parser written
+    # in safe Rust, tracked in ISSUE-0191
     # (docs/issues/ISSUE-0191-cli-yaml-parser-unmaintained.md). Drop this entry
-    # in the PR that does.
+    # in the PR that does; the audit fails once it matches nothing.
     "RUSTSEC-2024-0449",
 ]
 
@@ -76,12 +80,10 @@ confidence-threshold = 0.8
 multiple-versions = "warn"
 wildcards = "allow"
 highlight = "all"
-# testing_table 0.3.x is a production (non-dev) transitive dep pulled in by
-# tabled 0.21 (introduced in PR #162 — RUSTSEC-2024-0370 fix — under tabled
-# 0.20, and still present after the 0.21 upgrade). Its runtime
-# impact is zero (compile-time only; it pulls only unicode-width). This is an
-# upstream design decision in tabled_derive and is not an error in our tree.
-# Revisit when tabled is next upgraded or replaced.
+# testing_table 0.3 is a normal (non-dev) dependency of tabled itself, in
+# the tree since tabled 0.20 (PR #162, the RUSTSEC-2024-0370 fix) and still
+# there in tabled 0.22. It pulls in only unicode-width, and only one version
+# of it is in the tree, so `skip` has nothing to list for it.
 skip = []
 
 [sources]
