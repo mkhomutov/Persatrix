@@ -1,6 +1,6 @@
 # Storage Architecture Benchmark — does SQLite hold a society?
 
-**Status**: ✅ Run 2026-10-21; gate re-run 2026-10-24 on channels-store v14 ([below](#the-gate-on-channels-store-v14))
+**Status**: ✅ Run 2026-10-21; gate re-runs on channels-store v14 and on the society store in [the re-runs](storage-architecture-benchmark-reruns.md)
 **Question**: [storage roadmap open question 1](storage-architecture-roadmap.md#open-questions)
 — at what scale does SQLite break for channels, ten agents writing to one
 channel at one message a second each?
@@ -45,8 +45,9 @@ and the society store shares the channels store's connection.
 
 The benchmark drives the real channels store, `NewSQLiteStore` with its
 shipped schema, migrations, full-text index and 10 000-message cap, at the
-load a society puts on it. It adds a stand-in for the society tables in the
-same file. The roadmap asked about writes alone. A write is the cheap part, so
+load a society puts on it. This run made its society calls on a stand-in for
+the society tables in the same file; the re-runs since RFC 0029's Phase 3
+PR 3 make them on the real society store. The roadmap asked about writes alone. A write is the cheap part, so
 the benchmark also makes every read a message causes.
 
 ### The load one message makes
@@ -93,7 +94,7 @@ version and 2 000 settled approvals.
 |------|--------|
 | Layout | **room**: ten agents in one channel, the roadmap's case. **society**: fifty agents in ten channels of ten, each agent in two and posting in them in turn |
 | Schema | **as-is**: the channels store as shipped then (v13). **indexed**: plus one index, messages by channel in time order (see [the first finding](#1-the-channels-store-lacks-its-channel-time-index)). Channels-store v14 ships that index, so the harness now runs the shipped schema alone |
-| Society connection | **shared**: the society calls use the channels store's own single connection. **separate**: they open a second connection to the same file |
+| Society connection | **shared**: the society calls use the channels store's own single connection. **separate**: they open a second connection to the same file. The [re-runs](storage-architecture-benchmark-reruns.md#the-gate-on-the-society-store) add **immediate**: a second connection, both connections beginning their write transactions as `IMMEDIATE` |
 | Rate | the gate: 10 messages a second for five minutes. The ramp: 20, 50, 100, 200 and 400 a second for a minute each, indexed only, stopping a series at its first failure |
 | Platform | macOS on the development Mac (APFS); Linux in Docker on the same Mac (arm64, ext4 inside the Docker VM) |
 
@@ -166,24 +167,12 @@ Each cell is the wait p99. The separate-connection series failed at their
 first step, 20 a second, on both platforms, with 1 to 26 failed publishes.
 Linux at 200 a second lost no post; it failed on latency alone.
 
-### The gate on channels-store v14
+### The re-runs
 
-Re-run on macOS on 2026-10-24 for RFC 0029's Phase 3 PR 1, on the shipped
-schema: the index, and planner statistics the store now gathers when it
-opens, which the indexed variant above did not have.
-
-| Layout | Society connection | Result |
-|--------|--------------------|--------|
-| Room | shared | ✅ 3 000 of 3 000; wait p99 37.5 ms, max 421 ms |
-| Room | separate | ❌ 1 failed publish |
-| Society | shared | ✅ 3 000 of 3 000; wait p99 11.5 ms, max 71 ms |
-| Society | separate | ❌ 2 failed publishes |
-
-In both shared steps every kind of call answered within 18 ms at the 99th
-percentile, and no race was lost. Unrelated work kept the machine busy
-throughout, at a load average of about 8.6 on its 8 cores, and a disk-wide
-scan overlapped two minutes of the room step: its one stall, 421 ms, shows
-in every kind of call at once.
+RFC 0029's Phase 3 plan re-runs the gate on shipped code: on
+channels-store v14 (2026-10-24) and on the real society store, with a third
+connection form (2026-10-26). Both are in
+[the re-runs](storage-architecture-benchmark-reruns.md).
 
 ---
 
@@ -231,8 +220,8 @@ setting, which leaves read-only transactions as they are), a publish takes
 the write lock before its membership read and waits under `busy_timeout`
 like any other writer. That could let a second connection work, without the
 shared connection's rule that a society transaction must make no other
-store call. RFC 0029's Phase 3 plan measures it before the society store
-settles its connection.
+store call. [Measured on the society store](storage-architecture-benchmark-reruns.md#the-gate-on-the-society-store),
+it passed: nothing failed in either layout.
 
 ### 3. With both conditions, the one connection is the limit
 
@@ -279,9 +268,10 @@ A1's re-runs of the gate (RFC 0029 plan S-7) measure them.
   `synchronous=FULL`. On macOS SQLite's `fsync` does not force the drive's
   cache to the platter (`fullfsync` is off), so commits there are cheaper than
   on Linux; that is why both platforms ran.
-- **The candidate tables.** The society tables are a stand-in with the rows
-  and indexes the RFC 0012 and RFC 0028 PR plans ask of A1. A1 writes the real
-  ones and re-runs the gate on them.
+- **The candidate tables.** This run's society tables were a stand-in with
+  the rows and indexes the RFC 0012 and RFC 0028 PR plans ask of A1. The
+  [re-runs](storage-architecture-benchmark-reruns.md) use A1's real tables
+  and, since its PR 3, the real society store.
 
 ## Reproduce
 
@@ -294,7 +284,8 @@ go test ./internal/channels -run '^TestSocietyStoreBenchmark$' -count=1 -timeout
 ```
 
 `-society-bench=smoke` runs every combination for ten seconds.
-`-society-bench-forms` narrows the runs; an unknown value fails before
+`-society-bench-forms` picks the connection forms (`shared`, `separate`,
+`immediate`; the first two by default); an unknown value fails before
 seeding. The `-society-bench-schemas` flag went with the `indexed` variant
 when v14 shipped the index. The JSON written to `-society-bench-out`, a file
 named for the plan, forms and platform, holds each call's median time with nothing else running,

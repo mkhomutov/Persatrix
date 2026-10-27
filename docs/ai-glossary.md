@@ -585,6 +585,12 @@ Terms introduced by [docs/storage-architecture-roadmap.md](storage-architecture-
 - **Definition:** Cross-agent persistent state that no single agent owns: channels, org topology, decision audit, HITL approvals, shared facts, procedural patterns, the audit chain. Backed by Postgres in the SA-1 target picture. Distinct from a single agent's personal memory.
 - **Example:** "The organization graph is society state; in v0.4.0 it lives in the society tables, not in a persona's memory."
 
+### Society Store
+- **Aliases:** —
+- **Disallowed:** "society database", "shared store"
+- **Definition:** The orchestrator component that reads and writes v0.4.0's *society state*: the organization graph and its version, the pending approvals, and the key that signs them. It keeps them in the society tables of the SQLite channels store and runs on that store's own connection, never one of its own (`internal/society`, [RFC 0029 Phase 3](rfcs/0029-phase3-pr-plan.md)). A change that spans several of those tables, such as an approval and the organization change it releases, runs in its one transaction call, so both commit or neither does.
+- **Example:** "RFC 0012's graph change commits with its approval through the society store's transaction call."
+
 ### Vectors-as-Accelerator-Only
 - **Aliases:** —
 - **Disallowed:** "vectors as primary store", "vector-first recall"

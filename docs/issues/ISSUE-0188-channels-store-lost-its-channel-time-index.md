@@ -104,6 +104,6 @@ with this index, so the phase that boards states it as its dependency
 > if it sorts, walks the epoch index or scans every message, on stores with
 > and without statistics and on stores reopened young and at that floor.
 > The benchmark's gate, re-run on the shipped schema, passes with the
-> society tables on the store's own connection ([results](../storage-architecture-benchmark.md#the-gate-on-channels-store-v14)).
+> society tables on the store's own connection ([results](../storage-architecture-benchmark-reruns.md#the-gate-on-channels-store-v14)).
 > Statistics are gathered only at open; refreshing them while the store
 > stays open is that plan's PR 5.

@@ -36,7 +36,7 @@ var (
 	societyBenchDir = flag.String("society-bench-dir", "",
 		"directory for the store files (default: a test temp dir)")
 	societyBenchForms = flag.String("society-bench-forms", "shared,separate",
-		"society connection forms to run, comma-separated")
+		"society connection forms to run, comma-separated: shared, separate, immediate")
 	societyBenchDuration = flag.Duration("society-bench-duration", 0,
 		"override each step's duration")
 )
@@ -213,7 +213,7 @@ func TestSocietyStoreBenchmark(t *testing.T) {
 		t.Skip("society-store benchmark: pass -society-bench=smoke|gate|ramp to run it")
 	}
 	// Checked before the minutes of seeding, so a typo fails at once.
-	forms, err := benchList("-society-bench-forms", *societyBenchForms, "shared", "separate")
+	forms, err := benchList("-society-bench-forms", *societyBenchForms, "shared", "separate", "immediate")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,7 +315,7 @@ func runBenchStep(ctx context.Context, t *testing.T, template, dir string, l ben
 	if err := copyBenchFile(template, path); err != nil {
 		t.Fatal(err)
 	}
-	cs, err := NewSQLiteStore(path, SQLiteOptions{MaxChannels: 100})
+	cs, err := NewSQLiteStore(benchStorePath(path, step.Form), SQLiteOptions{MaxChannels: 100})
 	if err != nil {
 		t.Fatal(err)
 	}

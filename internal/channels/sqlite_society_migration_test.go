@@ -6,8 +6,8 @@ package channels
 // index, empty but for the graph-version row, and nothing else in the store
 // changed; a step that cannot finish leaves the store at v14; and a store
 // newer than its binary is refused. The tables' constraints are pinned in
-// sqlite_society_constraints_test.go. No store call reads these tables yet
-// (PR 3).
+// sqlite_society_constraints_test.go; the society store's calls on them in
+// internal/society.
 
 import (
 	"database/sql"

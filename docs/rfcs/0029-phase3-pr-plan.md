@@ -172,7 +172,7 @@ confirmed or overturned in its review:
 |----|-----|-------|--------|--------|-----------|--------|
 | 1 | A1 | Restore the channel-time index (channels-store v14; ISSUE-0188) | `feature/v040-rfc0029-channel-time-index` | ✅ | [#1057](https://github.com/mkhomutov/Persatrix/pull/1057) | 2026-10-24 |
 | 2 | A1 | The society tables (channels-store v15) | `feature/v040-rfc0029-society-tables` | ✅ | [#1060](https://github.com/mkhomutov/Persatrix/pull/1060) | 2026-10-25 |
-| 3 | A1 | `internal/society`: the store on the channels connection | `feature/v040-rfc0029-society-store` | ⬜ | — | — |
+| 3 | A1 | `internal/society`: the store on the channels connection | `feature/v040-rfc0029-society-store` | 🔀 | [#1063](https://github.com/mkhomutov/Persatrix/pull/1063) | — |
 | 4 | A1 | Startup wiring; the single-node Known Gap issue | `feature/v040-rfc0029-society-wiring` | ⬜ | — | — |
 | 5 | — | Review follow-ups and closeout | `feature/v040-rfc0029-closeout` | ⬜ | — | — |
 
@@ -325,6 +325,25 @@ the row and with it their edges; a graph-version update checks that it
 changed one row. The comments that say nothing reads the society tables
 go with this PR.
 
+**Review findings** (PR 3):
+
+| Finding | Severity | Description | Disposition |
+|---------|----------|-------------|-------------|
+| F-1 | Medium | A move never checked the expiry, so a row past it but not yet swept could be approved or spent; only the benchmark's own read guarded it | Fixed in-PR: a decision or a spend on a row at or past its expiry fails with `ErrExpired`, in the move's own statement |
+| F-2 | Medium | The constructor took a connection without foreign keys, where replacing the graph leaves the old roles, members and edges behind, and the graph read then panicked or filed them under another organization | Fixed in-PR: such a connection is refused, and a row of an unknown organization fails the read |
+| F-3 | Low | Every read began as a write transaction, so under `_txlock=immediate` each authority check and queue read waited for the write lock; the benchmark's immediate form measured that, not the form its doc described | Fixed in-PR: reads begin read-only; the gate re-ran on the fix |
+| F-4 | Low | The key's comment promised one key across first calls on two connections, but a second call that read first failed its insert with `SQLITE_BUSY_SNAPSHOT` | Fixed in-PR: the insert comes first, so a call of its own takes the write lock before it reads; a two-connection test pins it |
+| F-5 | Medium | A key in another value's unexported field printed its bytes, since fmt cannot call its methods there, and as a `[]byte` it passed to `zap.Binary` | Fixed in-PR: its bytes sit behind a pointer, which prints as an address, and only `Bytes()` hands them over |
+| F-6 | Low | A move to approved or denied could record no one deciding | Fixed in-PR: a decision names who and when |
+| F-7 | Low | A Store call inside the transaction call waited forever for the connection its own transaction held | Fixed in-PR: the function gets a marked context, and a Store call made with it fails at once with `ErrInvalid`; the channels store cannot see the mark, so its rule stays a rule |
+| F-8 | Low | The expiry sweep and a tie group's withdrawal ran a list and then two statements a row, holding the shared connection | Fixed in-PR: `MoveApprovals` moves them in one statement |
+| F-9 | Low | Shapes only the table's checks refused (a held turn off an action row, a tie group on the wrong kind, a negative depth) came back as driver errors, not `ErrInvalid` | Fixed in-PR: checked before the insert |
+| F-10 | Low | The list ordered rows opened in one second by their ids as text, so `hold-10` came before `hold-9` | Fixed in-PR: by creation time, then rowid |
+| F-11 | Low | The open-row conflict was told by the driver's message text | Fixed in-PR: the typed code, confirmed by a lookup of the open row; `internal/channels`' helper is not shared, since importing it here would make a cycle with its benchmark |
+| F-12 | Low | Opening and moving a row each read it back with a second statement | Fixed in-PR: `RETURNING` |
+| F-13 | Low | The benchmark's seed recorded each settled row's decision a day before the row was opened | Fixed in-PR: each row settles after it opens, a decision or a spend before its expiry |
+| F-14 | Info | The ROADMAP's latest-changes note grew to a paragraph | Fixed in-PR: shortened |
+
 ### PR 4 — `feature/v040-rfc0029-society-wiring`
 
 **Scope**: `cmd/orchestrator/channels.go` (491) builds the society store from
@@ -427,6 +446,45 @@ covers them too.
 > One test reads its section differently: no test runs a v14 binary, so
 > "a v15 store opened by a v14 binary is refused" is pinned as this binary
 > refusing a store one version newer than it knows, the same rule.
+
+> 2026-10-26 — PR 3 settles what S-5 and S-6 leave open, each a new default
+> for its review to confirm or overturn:
+> - The constructor takes a `ConnSource`, which the SQLite channel store
+>   satisfies with `SocietyConn()`, the one exported call in
+>   `internal/channels`. The interface lives in `internal/society`, so the
+>   benchmark, a test in `internal/channels`, runs the real store with no
+>   import cycle. The constructor fails on a connection without the society
+>   tables.
+> - The graph is replaced whole: deleting the organizations takes their
+>   roles, members and edges (v15's cascade), and the new graph is inserted,
+>   under a savepoint, so a graph the tables refuse leaves the old one even
+>   inside a caller's transaction that goes on to commit. No row is replaced
+>   in place (F-16). The version write must change the one meta row and
+>   raise the version, so of two writers that read one version only one
+>   wins (`ErrGraphVersion`). The graph reads back sorted by its keys, the
+>   canonical form RFC 0012 PR 3 compares.
+> - The store makes each row's nonce (16 random bytes) and creation time,
+>   and refuses a payload that is not JSON (PR 2 F-15).
+> - A move names the state it expects and follows the queue's lifecycle:
+>   pending to approved, denied, expired or withdrawn; approved to spent,
+>   expired or withdrawn. The four settled states are final. A move to one
+>   clears the payload, and every move clears `delivered_at`, so each new
+>   state is owed its own decision event: half of PR 2's F-17, whose
+>   acknowledgement stays RFC 0009 PR 14's.
+> - The open-row lookup is a list query that selects open rows, stated as
+>   the index's own condition; a query-plan test pins that it takes the
+>   open-row index (F-16).
+> - A key formats, logs and marshals as `[redacted]`, so it reaches no log
+>   or route by accident (S-5).
+> - The benchmark's gate passes with the real society store
+>   ([re-run](../storage-architecture-benchmark-reruns.md#the-gate-on-the-society-store)),
+>   and so does S-2's second connection with both connections' write
+>   transactions begun as `IMMEDIATE`; on a second connection as
+>   transactions begin today, society writes fail as well as publishes. The
+>   store keeps the shared connection: the immediate form passed one run on
+>   one platform, and moving to it changes how every channel-store
+>   transaction begins. Its review may give the store its own connection,
+>   which would drop S-6's no-other-call rule.
 
 ## Related documentation
 
