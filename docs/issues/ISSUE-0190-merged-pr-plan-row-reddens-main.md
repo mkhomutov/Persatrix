@@ -12,6 +12,7 @@ refs:
   - docs/methodology/release-cycle.md
   - docs/development-workflow.md
   - docs/rfcs/0029-phase3-pr-plan.md
+  - https://github.com/mkhomutov/Persatrix/pull/1065
 ---
 
 # ISSUE-0190: A merged PR's own plan row turns main red until another PR flips it
