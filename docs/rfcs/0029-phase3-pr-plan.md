@@ -179,7 +179,7 @@ confirmed or overturned in its review:
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ✂️ Cut
 
 > A PR's own row still says 🔀 when it merges, so `main`'s plan-status
-> check fails until a later PR flips it. PRs 1 to 3 each needed that
+> check fails until a later PR flips it. PRs 1 to 4 each needed that
 > follow-up: see [ISSUE-0190](../issues/ISSUE-0190-merged-pr-plan-row-reddens-main.md).
 
 ## Dependency graph
@@ -382,7 +382,10 @@ off.
 **Purpose**: the review findings deferred from PRs 1–4, paraphrased by
 component; RFC and ROADMAP status to ⚠️ Partially Implemented (Phases 1 and 3
 shipped, Phase 3 in the SQLite form; Phases 2 and 4–6 unslotted); the storage
-roadmap's SA-1 row updated; this plan's statuses closed. RFC 0029, near its
+roadmap's SA-1 row updated; this plan's statuses closed, its own row
+included: its last commit flips that row to ✅ with the expected merge date,
+the first fix ISSUE-0190 lists, so its merge leaves `main` green and needs no
+flip PR. RFC 0029, near its
 8 000-word cap, splits at a real seam first if the closeout would cross it.
 **From PR 1 review**: F-3 — refresh the planner statistics while the store
 stays open, with a periodic `PRAGMA optimize` as SQLite advises for
