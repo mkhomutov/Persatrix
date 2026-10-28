@@ -1,6 +1,6 @@
 ---
 id: ISSUE-0190
-summary: "A PR that a plan tracks still has its own progress row at 🔀 PR open when it squash-merges, since it cannot say merged before it has. The plan-status check then fails Docs hygiene, a required check, on main and on every open PR until another PR flips the row. That happened after each of v0.4.0's five implementation merges so far, and two of the flips were written twice by sessions racing for the same row. The merged-PR history check tolerates the same lag and its hook catches the file up; the plan-status check has neither."
+summary: "A PR that a plan tracks still has its own progress row at 🔀 PR open when it squash-merges, since it cannot say merged before it has. The plan-status check then fails Docs hygiene, a required check, on main and on every open PR until another PR flips the row. That happened after each of v0.4.0's six implementation merges so far, and two of the flips were written twice by sessions racing for the same row. The merged-PR history check tolerates the same lag and its hook catches the file up; the plan-status check has neither."
 status: open
 severity: medium
 area: scripts/checks
@@ -57,7 +57,8 @@ green before #1053. Times are the squash merges' local times (+1100).
 | 2026-10-23 21:23 | #1053 (RFC 0021 Ph 2 PR 1) | 2026-10-24 17:10 | #1054 carried #1053's flip but left its own row at 🔀; #1058 flipped that. #1056 wrote the same flip and, merged 19 minutes later, landed only its merged-PR history row |
 | 2026-10-24 20:50 | #1057 (RFC 0029 Ph 3 PR 1) | 21:37 | #1059 |
 | 2026-10-25 20:12 | #1060 (RFC 0029 Ph 3 PR 2) | 22:14 | #1061 carried the flip so its own Docs hygiene would pass; #1062, a flip PR of its own, was closed |
-| 2026-10-27 17:16 | #1063 (RFC 0029 Ph 3 PR 3) | not yet | #1065, open |
+| 2026-10-27 17:16 | #1063 (RFC 0029 Ph 3 PR 3) | 20:23 | #1065 |
+| 2026-10-28 07:02 | #1067 (RFC 0029 Ph 3 PR 4) | when #1068 merges | #1068 |
 
 Each red run failed the same step, "Check no plan row announces an
 already-merged PR as open", on the merged PR's own row.

@@ -173,13 +173,13 @@ confirmed or overturned in its review:
 | 1 | A1 | Restore the channel-time index (channels-store v14; ISSUE-0188) | `feature/v040-rfc0029-channel-time-index` | ✅ | [#1057](https://github.com/mkhomutov/Persatrix/pull/1057) | 2026-10-24 |
 | 2 | A1 | The society tables (channels-store v15) | `feature/v040-rfc0029-society-tables` | ✅ | [#1060](https://github.com/mkhomutov/Persatrix/pull/1060) | 2026-10-25 |
 | 3 | A1 | `internal/society`: the store on the channels connection | `feature/v040-rfc0029-society-store` (head branch `ccr-b7e6b467-72zd06`, assigned by the session that opened it) | ✅ | [#1063](https://github.com/mkhomutov/Persatrix/pull/1063) | 2026-10-27 |
-| 4 | A1 | Startup wiring; the single-node Known Gap issue | `feature/v040-rfc0029-society-wiring` | 🔀 | [#1067](https://github.com/mkhomutov/Persatrix/pull/1067) | — |
+| 4 | A1 | Startup wiring; the single-node Known Gap issue | `feature/v040-rfc0029-society-wiring` | ✅ | [#1067](https://github.com/mkhomutov/Persatrix/pull/1067) | 2026-10-28 |
 | 5 | — | Review follow-ups and closeout | `feature/v040-rfc0029-closeout` | ⬜ | — | — |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ✂️ Cut
 
 > A PR's own row still says 🔀 when it merges, so `main`'s plan-status
-> check fails until a later PR flips it. PRs 1 to 3 each needed that
+> check fails until a later PR flips it. PRs 1 to 4 each needed that
 > follow-up: see [ISSUE-0190](../issues/ISSUE-0190-merged-pr-plan-row-reddens-main.md).
 
 ## Dependency graph
@@ -382,7 +382,10 @@ off.
 **Purpose**: the review findings deferred from PRs 1–4, paraphrased by
 component; RFC and ROADMAP status to ⚠️ Partially Implemented (Phases 1 and 3
 shipped, Phase 3 in the SQLite form; Phases 2 and 4–6 unslotted); the storage
-roadmap's SA-1 row updated; this plan's statuses closed. RFC 0029, near its
+roadmap's SA-1 row updated; this plan's statuses closed, its own row
+included: its last commit flips that row to ✅ with the expected merge date,
+the first fix ISSUE-0190 lists, so its merge leaves `main` green and needs no
+flip PR. RFC 0029, near its
 8 000-word cap, splits at a real seam first if the closeout would cross it.
 **From PR 1 review**: F-3 — refresh the planner statistics while the store
 stays open, with a periodic `PRAGMA optimize` as SQLite advises for
