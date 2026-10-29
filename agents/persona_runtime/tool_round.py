@@ -66,7 +66,7 @@ class _ToolRoundMixin:
         Registry lookups are restricted to tools in ``config["tools"]``
         (F-5a-2: defense-in-depth against LLM hallucinating tool names
         that exist in the global registry but weren't offered to this agent),
-        and a call runs only on arguments that pass the check (RFC 0009 PR 3).
+        and a call runs only on arguments that pass the check (RFC 0009 Phase 3).
         """
         # Offered registry tools, then memory tools (always allowed) shadowing
         # any of the same name, exactly as _build_tool_definitions() offers them.

@@ -1,4 +1,4 @@
-"""The argument check on the built-in tools (RFC 0009 PR 3).
+"""The argument check on the built-in tools (RFC 0009 Phase 3).
 
 The check enforces a parameter's declared type only where the tool asks for
 it with a ``type`` narrowing, and a built-in asks only where every off-type

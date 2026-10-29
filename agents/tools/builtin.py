@@ -88,8 +88,8 @@ def _truncate(text: str) -> str:
     ),
     permissions=["filesystem:read"],
     tier="builtin",
-    # RFC 0009 PR 3: each STRING_ONLY parameter fails inside the tool today on
-    # a value of any other type, so the argument check refuses it first.
+    # RFC 0009 Phase 3: each STRING_ONLY parameter fails inside the tool today
+    # on a value of any other type, so the argument check refuses it first.
     narrow={"path": STRING_ONLY},
 )
 async def file_read(path: str) -> ToolResult:
@@ -187,6 +187,8 @@ def _shell_timeout(requested: int, limit: int | None) -> int:
     ),
     permissions=["shell:exec"],
     tier="builtin",
+    # One exception to "fails today": on Python 3.11 shlex.split(None) reads
+    # the agent's standard input, so a null command is refused on purpose.
     narrow={"command": STRING_ONLY},
 )
 async def shell_exec(command: str, timeout: int = 30) -> ToolResult:

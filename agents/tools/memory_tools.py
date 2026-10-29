@@ -103,7 +103,7 @@ def create_memory_tools(
         ),
         permissions=["memory:write"],
         tier="builtin",
-        # RFC 0009 PR 3: each STRING_ONLY parameter fails inside the tool
+        # RFC 0009 Phase 3: each STRING_ONLY parameter fails inside the tool
         # today on a value of any other type, so the argument check refuses it.
         narrow={"topic": STRING_ONLY, "content": STRING_ONLY},
     )

@@ -18,8 +18,8 @@ tool is one they offer, and its arguments pass the check in
 :mod:`agents.tools.arg_check` (RFC 0009 Phase 3). A call whose arguments are
 refused gets a structured ``tool_argument_validation_error`` and a
 ``tool.arg_invalid`` audit line instead. What the tool receives is the
-checked arguments, so RFC 0028's pre-tool seat, which sits between the
-admission and the run, sees them too.
+checked arguments, so RFC 0028 PR 10's pre-tool seat, which will sit between
+the admission and the run, will see them too.
 """
 
 from __future__ import annotations
@@ -119,8 +119,8 @@ def admit_call(
     name, so the check reads the tool that will actually run. A call to any
     other tool is answered by :func:`refuse_call`. A call whose arguments fail
     the check, or that the check itself fails on, does not run: running it on
-    arguments nobody checked would hand the pre-tool seat a value the check
-    never saw.
+    arguments nobody checked would hand the coming pre-tool seat a value the
+    check never saw.
     """
     tool_def = tools.get(call.name)
     if tool_def is None or tool_def.func is None:

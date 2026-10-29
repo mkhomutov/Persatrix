@@ -1,4 +1,4 @@
-"""Both places a tool runs check its arguments first (RFC 0009 PR 3).
+"""Both places a tool runs check its arguments first (RFC 0009 Phase 3).
 
 A tool runs in two places: a task agent's ``_execute_tools``
 (``agents/base.py``) and a persona's (``agents/persona_runtime/tool_round.py``).
@@ -19,6 +19,8 @@ from unittest.mock import patch
 import pytest
 
 from agents.llm_client import LLMToolResult, ToolCall
+from agents.observability import logging as obs_logging
+from agents.observability.redact import NoopRedactor
 from agents.persona import create_persona_agent
 from agents.task_agent import TaskAgent
 from agents.tools.registry import ToolDefinition, ToolResult, clear_registry, get_tool, tool
@@ -27,12 +29,20 @@ from ._persona_test_helpers import _PERSONA_CONFIG, _make_client
 
 Run = Callable[[list[ToolCall]], Awaitable[list[LLMToolResult]]]
 
+_STANDARD_RECORD_KEYS = frozenset(logging.LogRecord("", 0, "", 0, "", (), None).__dict__)
+
 
 @pytest.fixture(autouse=True)
 def _clean_registry():
     clear_registry()
     yield
     clear_registry()
+    obs_logging.set_redactor(NoopRedactor())
+
+
+def _audit_record(caplog: pytest.LogCaptureFixture) -> logging.LogRecord:
+    [record] = [r for r in caplog.records if r.name == "agents.tools.audit"]
+    return record
 
 
 def _register(seen: list[dict[str, Any]]) -> None:
@@ -131,7 +141,7 @@ class TestOrderAndAudit:
         with caplog.at_level(logging.INFO):
             await run([ToolCall(id="c7", name="probe", input={"cmd": "SECRET-123"})])
 
-        [record] = [r for r in caplog.records if r.name == "agents.tools.audit"]
+        record = _audit_record(caplog)
         assert record.levelno == logging.INFO
         assert record.getMessage() == "tool.arg_invalid"
         fields = record.__dict__
@@ -143,14 +153,51 @@ class TestOrderAndAudit:
         assert fields["unknown_arguments"] == ["cmd"]
         assert fields["unknown_argument_count"] == 1
         assert fields["invalid_arguments"] == []
-        assert "SECRET-123" not in json.dumps(
-            {k: v for k, v in fields.items() if k.endswith(("arguments", "_type", "count"))},
-        )
+        extra = {k: v for k, v in fields.items() if k not in _STANDARD_RECORD_KEYS}
+        assert "SECRET-123" not in json.dumps(extra, default=str)
         assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []
 
-    async def test_a_check_that_fails_refuses_the_call(self, run: Run) -> None:
-        # Running the tool on unchecked arguments would hand RFC 0028's
-        # pre-tool seat a value the check never saw, so the call is refused.
+    async def test_the_redactor_runs_over_the_audit_line(
+        self, run: Run, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # The model chose the unknown names, so the operator's redactor sees them.
+        class _Mask:
+            def redact(self, record: dict[str, Any]) -> dict[str, Any]:
+                return {**record, "unknown_arguments": ["[REDACTED]"]}
+
+        _register([])
+        obs_logging.set_redactor(_Mask())
+
+        with caplog.at_level(logging.INFO, logger="agents.tools.audit"):
+            await run([ToolCall(id="c1", name="probe", input={"sk-live-1": 1})])
+
+        assert _audit_record(caplog).__dict__["unknown_arguments"] == ["[REDACTED]"]
+
+    async def test_a_redactor_that_raises_still_refuses_the_call(
+        self, run: Run, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        class _Boom:
+            def redact(self, record: dict[str, Any]) -> dict[str, Any]:
+                raise RuntimeError("boom")
+
+        seen: list[dict[str, Any]] = []
+        _register(seen)
+        obs_logging.set_redactor(_Boom())
+
+        with caplog.at_level(logging.INFO, logger="agents.tools.audit"):
+            [result] = await run([ToolCall(id="c1", name="probe", input={"cmd": "ls"})])
+
+        assert _body(result)["unknown"] == ["cmd"]
+        assert seen == []
+        levels = [r.levelno for r in caplog.records if r.name == "agents.tools.audit"]
+        assert levels == [logging.WARNING, logging.INFO]
+
+    async def test_a_check_that_fails_refuses_the_call(
+        self, run: Run, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # Running the tool on unchecked arguments would hand RFC 0028's coming
+        # pre-tool seat a value the check never saw, so the call is refused,
+        # and the operator's log line is the one record of why.
         seen: list[dict[str, Any]] = []
         _register(seen)
 
@@ -159,6 +206,9 @@ class TestOrderAndAudit:
 
         assert (result.content, result.is_error) == ("Internal tool error", True)
         assert seen == []
+        [record] = [r for r in caplog.records if r.name == "agents.tools.tool_list"]
+        assert record.levelno == logging.ERROR and record.exc_info is not None
+        assert "'probe'" in record.getMessage()
 
 
 async def test_a_persona_checks_the_memory_tool_that_shadows_a_registry_tool() -> None:

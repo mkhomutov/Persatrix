@@ -91,7 +91,9 @@ class ToolDefinition:
     tier: str = "custom"  # "builtin" | "custom" | "mcp"
     func: Callable | None = None
     # What the tool's signature accepts, for the argument check
-    # (agents.tools.arg_check); None for a definition @tool did not build.
+    # (agents.tools.arg_check). None for a definition @tool did not build, or
+    # for a tool with a positional-only parameter: either is checked for
+    # shape alone.
     argument_spec: ArgumentSpec | None = None
 
 
@@ -116,14 +118,16 @@ def tool(
               in ``builtin.py`` pass ``tier="builtin"``.
         narrow: Per parameter, JSON Schema keywords that limit its value, such
               as ``{"limit": {"minimum": 1}}``; the keywords allowed are
-              :data:`agents.tools.arg_check.NARROWING_KEYWORDS`. A narrowing is
-              added to the schema the model is offered and checked before
-              the tool runs. ``{"type": ...}`` restating the parameter's own
-              type makes the check refuse a value of any other type, which is
-              otherwise passed to the tool as sent. Any keyword but such a
-              ``type`` changes the offered schema, so on a tool a golden
-              offers it means re-recording the goldens, and the keyword must
-              be one every provider's schema subset accepts.
+              :data:`agents.tools.arg_check.NARROWING_KEYWORDS`, which every
+              provider accepts. A narrowing is added to the schema the model
+              is offered, and before the tool runs a narrowed parameter is
+              checked against that whole schema, its declared type included,
+              so ``{"limit": {"minimum": 1}}`` refuses ``false`` as well as
+              ``0``. An un-narrowed parameter's value of another type is passed
+              to the tool as sent. :data:`agents.tools.arg_check.STRING_ONLY`
+              restates a text parameter's type and leaves the offered schema
+              as it was; any other keyword changes it, so on a tool a golden
+              offers it means re-recording the goldens.
 
     Usage:
         @tool(name="query_database", description="Run a read-only SQL query")

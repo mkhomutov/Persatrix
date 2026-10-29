@@ -14,10 +14,12 @@ It refuses only what fails today (the RFC 0009 Phases 3–4 plan's G-2):
   each a ``TypeError`` today;
 - arguments that are not a JSON object;
 - a value that breaks a *narrowing* the tool declared for that parameter
-  with ``@tool(narrow=...)``. The narrowing is part of the schema the model
-  is offered, so what the model is told is what is checked. A built-in tool
-  narrows a parameter's type only where every value of another type already
-  fails inside the tool.
+  with ``@tool(narrow=...)``. The narrowing is added to the schema the model
+  is offered, and a narrowed parameter is checked against that whole schema,
+  its declared type included, so what the model is told is what is checked.
+  A built-in tool narrows a parameter only where every value of another type
+  already fails inside the tool, with one exception: on Python 3.11 a null
+  ``shell_exec`` command read the agent's standard input, and is refused.
 
 It converts a value sent in a lossless other form, so the tool and RFC
 0028's later hold see one form: an integer parameter given ``"30"`` or
@@ -33,6 +35,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import math
 import re
 import types
 import typing
@@ -51,11 +54,13 @@ __all__ = [
     "validate_arguments",
 ]
 
-#: The JSON Schema keywords a narrowing may use; each limits one value.
-NARROWING_KEYWORDS = frozenset({
-    "type", "enum", "const", "minimum", "maximum", "exclusiveMinimum",
-    "exclusiveMaximum", "multipleOf", "minLength", "maxLength", "pattern",
-})
+#: The JSON Schema keywords a narrowing may use; each limits one value. Every
+#: provider's tool schema takes them, Gemini's being the narrowest: it refuses
+#: the whole request over ``const``, ``exclusiveMinimum``, ``multipleOf`` or an
+#: ``enum`` of anything but strings. ``pattern`` is left out: jsonschema
+#: matches it with Python's ``re.search``, where ``$`` also matches before a
+#: final newline, so it would admit what the model is told it refuses.
+NARROWING_KEYWORDS = frozenset({"type", "enum", "minimum", "maximum", "minLength", "maxLength"})
 
 #: The narrowing of a string parameter that refuses a value of any other type.
 STRING_ONLY: Mapping[str, Any] = types.MappingProxyType({"type": "string"})
@@ -71,15 +76,19 @@ _INTEGER_TEXT = re.compile(r"0|-?[1-9][0-9]*", re.ASCII)
 
 _BY_NAME = (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
 
-_RULE_TEXT = {
-    "minimum": "must be >= {}",
-    "maximum": "must be <= {}",
-    "exclusiveMinimum": "must be > {}",
-    "exclusiveMaximum": "must be < {}",
-    "minLength": "must be at least {} characters",
-    "maxLength": "must be at most {} characters",
-    "enum": "must be one of {}",
-}
+_RULE_TEXT = {"minimum": "must be >= {}", "maximum": "must be <= {}", "enum": "must be one of {}"}
+
+# JSON's numbers are finite, but Python's json module reads NaN and Infinity,
+# and NaN compares false with every bound. So a narrowed number must be
+# finite, or a NaN would pass a minimum and a maximum alike.
+_Validator = jsonschema.validators.extend(
+    jsonschema.Draft7Validator,
+    type_checker=jsonschema.Draft7Validator.TYPE_CHECKER.redefine(
+        "number",
+        lambda checker, value: jsonschema.Draft7Validator.TYPE_CHECKER.is_type(value, "number")
+        and (not isinstance(value, float) or math.isfinite(value)),
+    ),
+)
 
 
 @dataclass(frozen=True)
@@ -178,6 +187,10 @@ def argument_spec(
             raise ValueError(f"{where} with {sorted(set(rule) - NARROWING_KEYWORDS)}")
         if rule.get("type", properties[name]["type"]) != properties[name]["type"]:
             raise ValueError(f"{where} to another type than its own")
+        if "enum" in rule and (properties[name]["type"] != "string" or not all(
+            isinstance(choice, str) for choice in rule["enum"]
+        )):
+            raise ValueError(f"{where} with an enum: only text parameters take one")
         try:
             jsonschema.Draft7Validator.check_schema(dict(rule))
         except jsonschema.SchemaError as exc:
@@ -186,7 +199,8 @@ def argument_spec(
     if positional_only:
         return None
     by_name = [p for p in params.values() if p.kind in _BY_NAME]
-    narrowed = {name: dict(rule) for name, rule in (narrow or {}).items()}
+    # Each narrowed parameter is checked against its whole offered schema.
+    narrowed = {name: dict(properties[name]) for name in (narrow or {})}
     return ArgumentSpec(
         names=tuple(p.name for p in by_name),
         required=tuple(p.name for p in by_name if p.default is inspect.Parameter.empty),
@@ -198,7 +212,7 @@ def argument_spec(
         ),
         open=any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()),
         narrowed=frozenset(narrowed),
-        validator=jsonschema.Draft7Validator({"type": "object", "properties": narrowed}),
+        validator=_Validator({"type": "object", "properties": narrowed}),
     )
 
 
@@ -262,8 +276,15 @@ def _takes_none(annotation: Any) -> bool:
         return True
     if isinstance(annotation, str):
         return True
-    if typing.get_origin(annotation) in (typing.Union, types.UnionType):
-        return type(None) in typing.get_args(annotation)
+    if type(annotation).__name__ == "TypeAliasType":  # ``type X = ...``
+        return _takes_none(annotation.__value__)
+    origin = typing.get_origin(annotation)
+    if origin is typing.Literal:
+        return None in typing.get_args(annotation)
+    if origin is typing.Annotated:
+        return _takes_none(typing.get_args(annotation)[0])
+    if origin in (typing.Union, types.UnionType):
+        return any(_takes_none(member) for member in typing.get_args(annotation))
     return False
 
 
@@ -276,7 +297,7 @@ def _json_type(value: Any) -> str:
     if isinstance(value, int):
         return "integer"
     if isinstance(value, float):
-        return "number"
+        return "number" if math.isfinite(value) else "non-finite number"
     if isinstance(value, str):
         return "string"
     if isinstance(value, Mapping):
@@ -287,14 +308,23 @@ def _json_type(value: Any) -> str:
 
 
 def _shown(name: object) -> str:
-    """An unknown argument's name as a refusal shows it: escaped, cut short."""
-    return str(name).encode("utf-8", "backslashreplace").decode("utf-8")[:_MAX_NAME]
+    """An unknown argument's name as a refusal shows it, cut short.
+
+    The model chose it, so every character that does not print (a control
+    character, a lone surrogate, a right-to-left mark) is escaped: the name
+    goes into a log line and a terminal as well as the model's reply.
+    """
+    text = str(name)[:_MAX_NAME]
+    return "".join(c if c.isprintable() else ascii(c)[1:-1] for c in text)[:_MAX_NAME]
 
 
 def _broken(rule: str, got: str, limit: Any) -> str:
     """How an argument broke the narrowing keyword *rule*, without its value."""
     if rule == "type":
         return f"must be of type {limit}, not {got}"
+    if rule in ("minLength", "maxLength"):
+        bound = "least" if rule == "minLength" else "most"
+        return f"must be at {bound} {limit} character{'' if limit == 1 else 's'}"
     template = _RULE_TEXT.get(rule)
     if template is None:
         return f"does not meet its {rule} rule"

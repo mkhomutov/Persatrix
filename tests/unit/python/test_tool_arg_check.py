@@ -1,4 +1,4 @@
-"""A tool call's arguments are checked before the tool runs (RFC 0009 PR 3).
+"""A tool call's arguments are checked before the tool runs (RFC 0009 Phase 3).
 
 The model writes a call's arguments as JSON, and they used to go straight
 into the tool as keyword arguments, so a missing or misspelt argument
@@ -17,10 +17,16 @@ import inspect
 import itertools
 import json
 import math
+import sys
+from typing import TYPE_CHECKING, Literal, Optional, Union
 
 import pytest
 
-from agents.tools.arg_check import ArgumentRefusal, validate_arguments
+from agents.observability.log_shipper import record_to_proto
+from agents.tools.arg_check import NARROWING_KEYWORDS, ArgumentRefusal, validate_arguments
+
+if TYPE_CHECKING:
+    from fractions import Fraction  # only for an annotation that cannot be resolved
 from agents.tools.registry import ToolDefinition, ToolResult, clear_registry, get_tool, tool
 
 
@@ -82,6 +88,8 @@ class TestMissingAndUnknown:
                     binds = False
                 checked = validate_arguments(td.argument_spec, arguments)
                 assert isinstance(checked, dict) is binds, (name, subset)
+                if binds:  # nothing to convert, so every argument arrives as sent
+                    assert checked == arguments, (name, subset)
 
     def test_missing_and_unknown_are_named_together(self) -> None:
         @tool(name="shell")
@@ -152,7 +160,7 @@ class TestConversion:
 
     @pytest.mark.parametrize(
         "given",
-        [" 30 ", "+30", "3_0", "030", "-0", "٣٠", "30.0", "9" * 5000,
+        [" 30 ", "+30", "3_0", "030", "-0", "٣٠", "30.0",
          5.5, True, False, math.nan, math.inf, [30], {"n": 30}, None],
         ids=lambda v: repr(v)[:20],
     )
@@ -169,6 +177,22 @@ class TestConversion:
         assert isinstance(checked, dict)
         assert checked["b"] is given
 
+    def test_integer_text_longer_than_python_reads_passes_unchanged(self) -> None:
+        # int() refuses text over sys.get_int_max_str_digits() digits; the
+        # check then leaves the text as sent rather than fail.
+        @tool(name="needs_int")
+        async def needs_int(b: int) -> ToolResult:
+            return ToolResult(success=True)
+
+        limit = sys.get_int_max_str_digits()
+        sys.set_int_max_str_digits(4300)
+        try:
+            checked = _check("needs_int", {"b": "9" * 5000})
+        finally:
+            sys.set_int_max_str_digits(limit)
+
+        assert checked == {"b": "9" * 5000}
+
     def test_a_string_parameter_given_a_number_passes_unchanged(self) -> None:
         _register_shapes()
         checked = _check("plain", {"a": 30})
@@ -177,14 +201,40 @@ class TestConversion:
 
     def test_null_for_an_optional_argument_means_its_default(self) -> None:
         @tool(name="nulls")
-        async def nulls(a: str, b: int = 1, c: int | None = 5, d=None) -> ToolResult:
+        async def nulls(
+            a: str, b: int = 1, c: int | None = 5, d=None,
+            e: Optional[int] = 5,  # noqa: UP045 — typing.Union is a branch of its own
+            f: Union[int, str, None] = 5,  # noqa: UP007
+            g: Literal["x", None] = "x",
+            h: Optional[Literal["x"]] = "x",  # noqa: UP045
+        ) -> ToolResult:
             return ToolResult(success=True)
 
-        checked = _check("nulls", {"a": None, "b": None, "c": None, "d": None})
+        checked = _check("nulls", dict.fromkeys("abcdefgh"))
 
-        # b's annotation does not admit None, so null is its default; c and d
+        # b's annotation does not take None, so null is its default; the others
         # take None as a value of their own, and a required argument keeps it.
-        assert checked == {"a": None, "c": None, "d": None}
+        assert checked == dict.fromkeys("acdefgh")
+
+    def test_null_stays_null_for_an_alias_that_takes_none(self) -> None:
+        typing_extensions = pytest.importorskip("typing_extensions")
+
+        async def aliased(x: int = 5) -> ToolResult:
+            return ToolResult(success=True)
+
+        aliased.__annotations__["x"] = typing_extensions.TypeAliasType("MaybeInt", int | None)
+        tool(name="aliased")(aliased)
+
+        assert _check("aliased", {"x": None}) == {"x": None}
+
+    def test_null_stays_null_when_the_annotations_cannot_be_resolved(self) -> None:
+        # Fraction is imported only for type checkers, so get_type_hints
+        # fails and nothing says x refuses None.
+        @tool(name="unresolved")
+        async def unresolved(x: Fraction = 0) -> ToolResult:  # type: ignore[assignment]
+            return ToolResult(success=True)
+
+        assert _check("unresolved", {"x": None}) == {"x": None}
 
     def test_the_call_input_is_never_changed(self) -> None:
         _register_shapes()
@@ -212,6 +262,72 @@ class TestNarrowing:
         assert body["invalid"] == [{"argument": "limit", "rule": "minimum", "got": "integer"}]
         assert "argument limit must be >= 1" in body["tool_argument_validation_error"]
 
+    @pytest.mark.parametrize("given", [False, True, "0.0", [5], 2.5])
+    def test_a_narrowed_parameter_is_checked_against_its_whole_offered_schema(
+        self, given: object,
+    ) -> None:
+        # The model is offered {"type": "integer", "minimum": 1}, so that is
+        # what is checked: false, which Python reads as 0, does not get past.
+        @tool(name="limited", narrow={"limit": {"minimum": 1}})
+        async def limited(limit: int = 10) -> ToolResult:
+            return ToolResult(success=True)
+
+        refusal = _check("limited", {"limit": given})
+
+        assert isinstance(refusal, ArgumentRefusal)
+        assert refusal.invalid[0][:2] == ("limit", "type")
+
+    @pytest.mark.parametrize("given", [math.nan, math.inf, -math.inf])
+    def test_a_narrowed_number_must_be_finite(self, given: float) -> None:
+        # Python's json module reads NaN, and NaN compares false with any bound.
+        @tool(name="ratio", narrow={"r": {"minimum": 0, "maximum": 1}})
+        async def ratio(r: float = 0.5) -> ToolResult:
+            return ToolResult(success=True)
+
+        refusal = _check("ratio", {"r": given})
+
+        assert isinstance(refusal, ArgumentRefusal)
+        assert "argument r must be of type number, not non-finite number" in refusal.detail
+
+    @pytest.mark.parametrize(
+        ("narrow", "given", "text"),
+        [({"minLength": 1}, "", "must be at least 1 character."),
+         ({"maxLength": 2}, "abc", "must be at most 2 characters."),
+         ({"enum": ["a", "b"]}, "c", 'must be one of ["a", "b"].')],
+    )
+    def test_each_refusal_reads_as_a_sentence(self, narrow: dict, given: str, text: str) -> None:
+        @tool(name="worded", narrow={"s": narrow})
+        async def worded(s: str) -> ToolResult:
+            return ToolResult(success=True)
+
+        refusal = _check("worded", {"s": given})
+
+        assert isinstance(refusal, ArgumentRefusal)
+        assert f"argument s {text}" in refusal.detail
+
+    def test_the_keywords_are_the_ones_every_provider_takes(self) -> None:
+        # Gemini refuses the whole request over const, exclusiveMinimum,
+        # multipleOf or an enum of anything but text; pattern is matched
+        # Python's way, so "$" passes a final newline.
+        assert frozenset(
+            {"type", "enum", "minimum", "maximum", "minLength", "maxLength"},
+        ) == NARROWING_KEYWORDS
+
+    def test_every_keyword_passes_gemini_schema_validation(self) -> None:
+        types = pytest.importorskip("google.genai.types")
+
+        @tool(name="every", narrow={
+            "n": {"minimum": 1, "maximum": 9},
+            "s": {"minLength": 1, "maxLength": 9, "enum": ["a", "b"]},
+        })
+        async def every(n: int, s: str) -> ToolResult:
+            return ToolResult(success=True)
+
+        declaration = {"name": "every", "description": "", "parameters": _def("every").parameters}
+        types.GenerateContentConfig.model_validate(
+            {"tools": [{"function_declarations": [declaration]}]},
+        )
+
     def test_a_type_narrowing_enforces_the_declared_type(self) -> None:
         @tool(name="strict", narrow={"path": {"type": "string"}})
         async def strict(path: str) -> ToolResult:
@@ -225,13 +341,16 @@ class TestNarrowing:
     @pytest.mark.parametrize(
         "narrow",
         [{"nope": {"type": "string"}}, {"path": {"default": "x"}},
-         {"path": {"type": "integer"}}, {"path": {"maxLength": "x"}}],
-        ids=["unknown-parameter", "keyword-not-allowed", "type-differs", "bad-schema"],
+         {"path": {"type": "integer"}}, {"path": {"maxLength": "x"}},
+         {"path": {"pattern": "^a$"}}, {"count": {"multipleOf": 2}},
+         {"count": {"enum": [1, 2]}}, {"path": {"enum": ["a", 1]}}],
+        ids=["unknown-parameter", "keyword-not-allowed", "type-differs", "bad-schema",
+             "pattern", "multipleOf", "enum-on-a-number", "enum-of-mixed-types"],
     )
     def test_a_bad_narrowing_fails_when_the_tool_is_defined(self, narrow: dict) -> None:
         with pytest.raises(ValueError):
             @tool(name="bad", narrow=narrow)
-            async def bad(path: str) -> ToolResult:
+            async def bad(path: str, count: int = 1) -> ToolResult:
                 return ToolResult(success=True)
 
 
@@ -250,9 +369,14 @@ class TestRefusalCarriesNoValue:
             {"argument": "path", "rule": "type", "got": "array"},
         ]
 
-    def test_content_is_ascii_even_for_a_lone_surrogate_name(self) -> None:
+    def test_a_name_that_does_not_print_is_escaped_everywhere(self) -> None:
+        # The model chose the name; it reaches a log line, the log shipper and
+        # a terminal as well as the model's reply.
         _register_shapes()
-        refusal = _check("plain", {"a": "x", "\ud800": 1})
+        refusal = _check("plain", {"a": "x", "x\x1b[31m\n\u202e\ud800": 1})
 
         assert isinstance(refusal, ArgumentRefusal)
-        refusal.content().encode("ascii")
+        [shown] = refusal.audit_fields()["unknown_arguments"]
+        assert shown == "x\\x1b[31m\\n\\u202e\\ud800"
+        assert json.loads(refusal.content())["unknown"] == [shown]
+        record_to_proto({"message": "tool.arg_invalid", **refusal.audit_fields()})

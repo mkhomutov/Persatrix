@@ -151,7 +151,9 @@ in the PR named:
   `shell_exec` clamps its timeout, it still clamps. No Pydantic models: no
   second source of truth and no new dependency. The check runs before
   RFC 0028's pre-tool seat, so a held call's hash covers checked arguments.
-  PR 3.
+  PR 3. *Revision (PR 3):* how the check reads arguments, and its one
+  exception to "refuses only what fails today", are in
+  [PR 3's implementation note](#pr-3--featurev040-rfc0009-arg-schemas).
 - **G-3 Limits default to today's behaviour.** The 100 KB output cap stays
   on the three tools that have it; any other tool takes a cap only when
   `resource_limits.tool_output_bytes` sets one. Shell wall time keeps
@@ -379,25 +381,59 @@ default this PR's review confirms or overturns.
   signature, not the generated schema, which admits unknown keys and
   offers `**kwargs` as a required string; a tool with `**kwargs` takes any
   name. `jsonschema` checks each parameter's narrowing.
-- **Type.** A declared type is enforced only where the tool narrows it
-  (`@tool(narrow=...)`), since an off-type value runs today on five of the
-  nine built-ins: a `shell_exec` timeout of 5.5, a falsy `tags`, a
-  `recall_notes` limit of `true`. The built-ins narrow eleven string
+- **Type.** A declared type is enforced only on a parameter the tool
+  narrows (`@tool(narrow=...)`), since an off-type value runs today on five
+  of the nine built-ins: a `shell_exec` timeout of 5.5, a falsy `tags`, a
+  `recall_notes` limit of `true`. A narrowing is added to the offered
+  schema, and a narrowed parameter is checked against that whole schema, its
+  declared type included, so the model is told what is checked; a narrowed
+  number must also be finite. The keywords are the ones every provider takes,
+  Gemini's subset being the narrowest. The built-ins narrow eleven string
   parameters where every off-type value fails today, which a test pins by
-  running each tool without the check. A narrowing is part of the offered
-  schema, so the model is told what is checked; these restate the type, so
-  no offered schema or golden changes.
+  running each tool without the check; these restate the type, so no offered
+  schema or golden changes.
 - **One form.** An integer parameter given canonical integer text (`"30"`,
   never `" 30"` or `"030"`) or a whole float gets the int; a bool, a
   fraction, NaN and infinity pass unchanged, so RFC 0028 PR 10's hash must
   handle those itself. A null for an optional parameter means its default,
-  unless the annotation takes `None`.
+  unless the annotation takes `None`. Defaults are not filled in, and text
+  passes exactly as sent (`http_request` upper-cases its own method), so
+  PR 10's hash binds defaults itself, and PR 15's rule for a writing method
+  compares as the tool does.
 - **One exception to "fails today".** On Python 3.11 a null `shell_exec`
   command read the agent's standard input; its narrowing refuses it.
 - **Refusal and audit.** The model gets JSON with
   `tool_argument_validation_error` and lists of the missing, unknown and
   invalid arguments; the audit line is INFO on `agents.tools.audit`. Neither
-  carries a value. A refused call writes no tool span or metric.
+  carries a value, and a model-chosen name is escaped where it does not
+  print. A refused call writes no tool span or metric.
+
+**Review findings** (PR 3):
+
+| Finding | Severity | Description | Disposition |
+|---------|----------|-------------|-------------|
+| F-1 | Low | A narrowing was checked on its own, while the model was offered it merged with the declared type, so `{"minimum": 1}` admitted `false`, which a tool reads as 0 | Fixed in-PR: a narrowed parameter is checked against its whole offered schema |
+| F-2 | Low | A numeric bound let NaN through, since NaN compares false with every bound, and Python's `json` reads NaN in a model's arguments | Fixed in-PR: a narrowed number must be finite |
+| F-3 | Low | Four allowed keywords (`const`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`) and an enum of numbers make Gemini refuse every request that offers the tool; a fractional `multipleOf` made the check raise on NaN, infinity or a huge integer; `pattern` runs as Python's `re.search`, where `$` matches before a final newline | Fixed in-PR: the keywords are `type`, `enum` (text only), `minimum`, `maximum`, `minLength` and `maxLength`; a test pins the set, and another checks them against Gemini's SDK where it is installed |
+| F-4 | Low | A null was replaced by the default for an annotation that takes `None` but is a `Literal` or a type alias | Fixed in-PR |
+| F-5 | Low | No test covered `Optional`, `Union`, a `Literal`, an alias or annotations that cannot be resolved | Fixed in-PR: one case each |
+| F-6 | Low | An unknown name was escaped only for lone surrogates, so control and right-to-left characters reached the audit line raw, and the one test of it could not fail | Fixed in-PR: every character that does not print is escaped, and the test runs the audit fields through the log shipper's encoder |
+| F-7 | Low | The audit line's leak check read only some of its fields | Fixed in-PR: every field the record carries |
+| F-8 | Low | No test covered the audit line's redactor or its fallback, though a redactor that raised past it would end the agent's turn | Fixed in-PR: two tests |
+| F-9 | Low | The binding test checked only refused or admitted, so a `**kwargs` tool could lose its extra arguments unseen | Fixed in-PR: an admitted call keeps every argument |
+| F-10 | Info | A 5 000-digit case passed only under the interpreter's default digit limit | Fixed in-PR: its own test sets the limit |
+| F-11 | Info | The fail-closed test did not check the operator's log line, the only record of why the call did not run | Fixed in-PR |
+| F-12 | Info | A refusal read "at least 1 characters" | Fixed in-PR |
+| F-13 | Info | The CHANGELOG said arguments that are not an object failed inside the tool (they failed before it, as an internal error), that every argument is named (16 unknown names are), stated the null rule without its exception, and read as a full list of the narrowed arguments | Fixed in-PR |
+| F-14 | Low | New comments said "RFC 0009 PR 3", which already names the Phases 1–2 plan's input sanitizer | Fixed in-PR: "RFC 0009 Phase 3" |
+| F-15 | Low | The comments stating the rule "narrow only what fails today" left out its one exception, the null `shell_exec` command | Fixed in-PR |
+| F-16 | Info | The `argument_spec` comment left out the positional-only case | Fixed in-PR |
+| F-17 | Info | `tool_list.py` described the pre-tool seat as already there | Fixed in-PR |
+| F-18 | Info | The glossary's *Narrowing* did not set itself apart from the recall tool's narrowing parameters | Fixed in-PR |
+| F-19 | Info | The Go audit registry gave no pointer that the Python runtime now writes `tool.arg_invalid` | Fixed in-PR: a comment, as `agent.deliberated` has |
+| F-20 | Low | RFC 0009 had no dated note on how PR 3 meets its amendment, and G-2 no pointer to the exception | Fixed in-PR |
+| F-21 | Info | The note to RFC 0028 did not say defaults are not filled in, nor that text passes as sent | Fixed in-PR |
+| F-22 | Info | The pin test sends no falsy value of another type | Noted: verification found each fails through the same branch as one the test sends |
 
 ### PR 4 — `feature/v040-rfc0009-resource-limits`
 

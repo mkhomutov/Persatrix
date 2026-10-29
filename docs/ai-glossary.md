@@ -116,9 +116,11 @@ Process vocabulary (scope lock, cuttable, live arc, finding, …) lives in the
 - **Aliases:** "argument narrowing"
 - **Disallowed:** —
 - **Definition:** JSON Schema keywords a tool declares for one parameter with
-  `@tool(narrow=...)`, added to the schema the model is offered and checked by
-  the **Argument Check**. `{"type": "string"}` makes the check refuse a value of
-  any other type; otherwise one is passed to the tool as sent.
+  `@tool(narrow=...)`, added to the schema the model is offered. The
+  **Argument Check** checks a narrowed parameter against that whole schema,
+  its declared type included; a value of another type for an un-narrowed
+  parameter is passed to the tool as sent. Not the recall tool's "narrowing
+  parameters" (`channel_id`, `sender`), which filter its results.
 - **Example:** "`file_read` narrows `path` to strings, since any other value
   already failed inside the tool."
 
