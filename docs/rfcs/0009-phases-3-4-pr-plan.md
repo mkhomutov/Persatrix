@@ -136,7 +136,7 @@ the points it implements.
 | 2 | A4 | ISSUE-0152 step 3, agent half: agents send their id on REST | (in PR 1) | ✅ | [#1050](https://github.com/mkhomutov/Persatrix/pull/1050) | 2026-10-22 |
 | 3 | A3 | Tool arguments checked against the tool's schema | `feature/v040-rfc0009-arg-schemas` (head branch `claude/affectionate-faraday-sewbto`, assigned by the session that opened it) | ✅ | [#1069](https://github.com/mkhomutov/Persatrix/pull/1069) | 2026-10-29 |
 | 4 | A3 | Shell CPU limit, output caps, `resource_limits:` | `feature/v040-rfc0009-resource-limits` | ⬜ | — | — |
-| 5 | A4 | Agent tokens: issue, check, revoke (Go) | `feature/v040-rfc0009-agent-token` | ⬜ | — | — |
+| 5 | A4 | Agent tokens: issue, check, revoke (Go) | `feature/v040-rfc0009-agent-token` (head branch `claude/admiring-cori-ibird5`, assigned by the session that opened it) | 🔄 | — | — |
 | 6 | A4 | Registration returns a token and accepts the enrollment secret | `feature/v040-rfc0009-enrollment` | ⬜ | — | — |
 | 7 | A4 | Agents send the secret, keep their token and refresh it | `feature/v040-rfc0009-agent-token-client` | ⬜ | — | — |
 | 8 | A4 | Token check on REST; every publish bound to its caller | `feature/v040-rfc0009-token-middleware` | ⬜ | — | — |
@@ -358,6 +358,44 @@ appears in no log line.
 **Migration**: none.
 **Estimate**: ~350 lines.
 
+**Implementation note (2026-10-29)**: how G-5 and OQ 4 are met, each point a
+new default this PR's review confirms or overturns.
+
+- **What.** `AgentTokenIssuer` in `internal/security/agent_token.go`, with
+  `Issue`, `Check` and `Revoke`, and its key from `crypto/rand` when it is
+  made. Nothing calls it yet: PR 6 makes one at startup. The glossary's
+  *agent token* moves here from PR 6, since this PR puts the term in code;
+  *fleet enrollment secret* stays with PR 6.
+- **Format.** `agt1.<fields>.<signature>`, both parts base64url without
+  padding. The fields are the issue time and the expiry in Unix
+  nanoseconds, a 16-byte nonce and the agent ID; the signature is
+  HMAC-SHA256 over the text before it, prefix included. The prefix names the
+  format and makes a leaked token easy to find, so a redaction pattern can
+  key on it later. A token is at most 433 characters, and `Check` refuses a
+  longer one before any work.
+- **Check order.** The signature is compared first, in constant time,
+  against the text exactly as sent, so no other spelling of a token checks:
+  the last character of a base64 part has spare bits. Only then are the
+  fields read, then the expiry, then revocation. The three refusals stay
+  apart — invalid (garbled, changed, or another process's key), expired,
+  revoked — for PR 6's audit line and PR 7's retry rule; what a caller is
+  told is PR 8's choice.
+- **Revocation (OQ 4).** `Revoke` records a moment for the agent, and its
+  tokens issued before it are refused; one issued after works, so a
+  deregistered agent can register again. Issue and Revoke never record one
+  moment twice, and each is later than the last even if the clock stands
+  still or steps back, so a registration in the same instant as its
+  deregistration is not caught. After a step back, new tokens are dated
+  ahead of the clock and work that much longer. A revocation is dropped once
+  every token it covers has expired, so the list holds one day's
+  revocations; an ID no agent can have is ignored.
+- **ID.** `Issue` refuses an ID the REST and gRPC hooks refuse as an
+  `X-Agent-ID`: one off the agent ID pattern, or over 256 bytes.
+- **Key.** It sits behind a pointer that no method returns, so printing or
+  encoding the issuer, or a value holding it, shows no key byte. The test
+  looks for the key in five encodings in a JSON log line, `fmt`'s output,
+  JSON, the errors and a token.
+
 ### PR 6 — `feature/v040-rfc0009-enrollment`
 
 **Scope**: `handleRegisterAgent` and `handleDeleteAgent`; the
@@ -375,6 +413,9 @@ audited (G-14).
 refused and audited; a deregistered agent's token is refused; a
 re-registration from a new address writes its audit line.
 **Estimate**: ~350 lines.
+**From PR 5**: registration's ID pattern (`planner.ResourceIDRegex`) has no
+length limit, and `Issue` refuses an ID over 256 bytes, so this PR refuses
+such a registration with 400 before it registers anything.
 
 ### PR 7 — `feature/v040-rfc0009-agent-token-client`
 

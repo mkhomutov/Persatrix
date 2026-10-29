@@ -47,10 +47,14 @@
 //   - [VerifyChain], which checks an audit log's checksum chain and reports
 //     the first break. Only tests call it: neither the orchestrator nor the
 //     CLI checks the chain.
+//   - [AgentTokenIssuer], made by [NewAgentTokenIssuer]: issues each agent a
+//     signed token that names it, checks a token and revokes an agent's
+//     tokens (RFC 0009 Phase 4). Registration does not hand tokens out yet,
+//     and no call is checked against one.
 //
-// Planned: agent identity tokens, so the orchestrator can check which agent
-// is calling (RFC 0009 Phase 4). Until then, the agent ID a caller sends is
-// taken on trust. ROADMAP.md has the target release.
+// Planned: checking agent tokens on the agents' calls, so the orchestrator
+// knows which agent is calling (RFC 0009 Phase 4). Until then, the agent ID
+// a caller sends is taken on trust. ROADMAP.md has the target release.
 //
 // Tool permissions are checked in the Python agents: PermissionGate in
 // agents/tools/permissions.py (deny-by-default) and PathValidator in

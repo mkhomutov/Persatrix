@@ -472,6 +472,20 @@ Process vocabulary (scope lock, cuttable, live arc, finding, …) lives in the
   unique across `config/agents.yaml`.
 - **Example:** "Use the agent ID `ember-owl`, not the display name `Ember Owl`."
 
+### Agent Token
+- **Aliases:** —
+- **Disallowed:** "capability token" (RFC 0009 §B's first design, which also
+  listed what the agent may do), "bearer token" (`Authorization: Bearer`
+  carries account sessions)
+- **Definition:** A signed token the orchestrator issues to one agent, naming
+  its **Agent ID**, which the agent shows on its calls to the orchestrator so
+  the orchestrator knows which agent is calling (RFC 0009 Phase 4,
+  `internal/security/agent_token.go`). It lives 24 hours and can be revoked,
+  and an orchestrator restart makes every earlier one invalid. Not an
+  **Approval Token**, which releases one held action.
+- **Example:** "After the orchestrator restarted, the persona's agent token was
+  refused, so the persona registered again and got a new one."
+
 ### Participant ID
 - **Aliases:** —
 - **Disallowed:** "user id" (when meaning a channel participant), "member id"
