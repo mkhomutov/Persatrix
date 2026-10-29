@@ -60,7 +60,7 @@ green before #1053. Times are the squash merges' local times (+1100).
 | 2026-10-25 20:12 | #1060 (RFC 0029 Ph 3 PR 2) | 22:14 | #1061 carried the flip so its own Docs hygiene would pass; #1062, a flip PR of its own, was closed |
 | 2026-10-27 17:16 | #1063 (RFC 0029 Ph 3 PR 3) | 20:23 | #1065 |
 | 2026-10-28 07:02 | #1067 (RFC 0029 Ph 3 PR 4) | 21:47 | #1068 |
-| 2026-10-29 21:30 | #1069 (RFC 0009 Ph 3 PR 3) | when its flip PR merges | a flip PR |
+| 2026-10-29 21:30 | #1069 (RFC 0009 Ph 3 PR 3) | when #1070 merges | #1070 |
 
 Each red run failed the same step, "Check no plan row announces an
 already-merged PR as open", on the merged PR's own row.
