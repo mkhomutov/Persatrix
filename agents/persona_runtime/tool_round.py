@@ -16,7 +16,7 @@ from typing import Any
 from ..llm_client import LLMToolResult, ToolCall
 from ..security import maybe_wrap_tool_content
 from ..tools.registry import ToolDefinition
-from ..tools.tool_list import offered_tools, refuse_call
+from ..tools.tool_list import admit_call, offered_tools
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +65,8 @@ class _ToolRoundMixin:
 
         Registry lookups are restricted to tools in ``config["tools"]``
         (F-5a-2: defense-in-depth against LLM hallucinating tool names
-        that exist in the global registry but weren't offered to this agent).
+        that exist in the global registry but weren't offered to this agent),
+        and a call runs only on arguments that pass the check (RFC 0009 PR 3).
         """
         # Offered registry tools, then memory tools (always allowed) shadowing
         # any of the same name, exactly as _build_tool_definitions() offers them.
@@ -74,13 +75,13 @@ class _ToolRoundMixin:
         results: list[LLMToolResult] = []
 
         for call in tool_calls:
-            tool_def = tool_map.get(call.name)
-            if tool_def is None or tool_def.func is None:
-                results.append(refuse_call(self.agent_id, call))
+            admitted = admit_call(self.agent_id, tool_map, call)
+            if isinstance(admitted, LLMToolResult):
+                results.append(admitted)
                 continue
 
             try:
-                result = await tool_def.func(**call.input)
+                result = await admitted.run(**admitted.arguments)
                 if result.success:
                     content = (
                         json.dumps(result.data)

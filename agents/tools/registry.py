@@ -14,7 +14,7 @@ import inspect
 import logging
 import time
 import warnings
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, get_type_hints
 
@@ -33,6 +33,7 @@ from ..observability.spans import (
     get_redactor,
     tool_payload_capture_mode,
 )
+from .arg_check import ArgumentSpec, argument_spec
 
 logger = logging.getLogger(__name__)
 _tracer = trace.get_tracer(__name__)
@@ -89,6 +90,9 @@ class ToolDefinition:
     permissions: list[str] = field(default_factory=list)
     tier: str = "custom"  # "builtin" | "custom" | "mcp"
     func: Callable | None = None
+    # What the tool's signature accepts, for the argument check
+    # (agents.tools.arg_check); None for a definition @tool did not build.
+    argument_spec: ArgumentSpec | None = None
 
 
 # ─── Global Tool Registry ──────────────────────────────────
@@ -101,6 +105,7 @@ def tool(
     description: str = "",
     permissions: list[str] | None = None,
     tier: str = "custom",
+    narrow: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> Callable:
     """
     Decorator to register a function as an agent tool.
@@ -109,6 +114,16 @@ def tool(
         tier: One of ``"builtin"``, ``"custom"``, ``"mcp"``. Defaults to
               ``"custom"`` for user-defined tools; framework-bundled tools
               in ``builtin.py`` pass ``tier="builtin"``.
+        narrow: Per parameter, JSON Schema keywords that limit its value, such
+              as ``{"limit": {"minimum": 1}}``; the keywords allowed are
+              :data:`agents.tools.arg_check.NARROWING_KEYWORDS`. A narrowing is
+              added to the schema the model is offered and checked before
+              the tool runs. ``{"type": ...}`` restating the parameter's own
+              type makes the check refuse a value of any other type, which is
+              otherwise passed to the tool as sent. Any keyword but such a
+              ``type`` changes the offered schema, so on a tool a golden
+              offers it means re-recording the goldens, and the keyword must
+              be one every provider's schema subset accepts.
 
     Usage:
         @tool(name="query_database", description="Run a read-only SQL query")
@@ -163,6 +178,7 @@ def tool(
             if param.default is inspect.Parameter.empty:
                 required.append(param_name)
 
+        spec = argument_spec(tool_name, sig, resolved_hints, properties, narrow)
         params: dict[str, Any] = {
             "type": "object",
             "properties": properties,
@@ -177,6 +193,7 @@ def tool(
             permissions=permissions or [],
             tier=tier,
             func=func,  # replaced with wrapper below
+            argument_spec=spec,
         )
         _tool_registry[tool_name] = tool_def
 

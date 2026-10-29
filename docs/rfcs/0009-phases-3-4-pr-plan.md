@@ -1,7 +1,7 @@
 # RFC 0009 — Agent Identity, Security & Sandboxing — PR Implementation Plan (Phases 3–4)
 
 **RFC**: [0009-security-sandboxing.md](0009-security-sandboxing.md)
-**Status**: ⬜ Not started
+**Status**: 🔄 In progress
 **Created**: 2026-10-21
 **Branch prefix**: `feature/v040-rfc0009-`
 **Target**: `main`
@@ -279,7 +279,7 @@ in the PR named:
 |----|-----|-------|--------|--------|-----------|--------|
 | 1 | A4 | ISSUE-0152 steps 1–2: one quarantine no longer refuses every anonymous caller | `fix/quarantine-spares-anonymous-callers` | ✅ | [#1050](https://github.com/mkhomutov/Persatrix/pull/1050) | 2026-10-22 |
 | 2 | A4 | ISSUE-0152 step 3, agent half: agents send their id on REST | (in PR 1) | ✅ | [#1050](https://github.com/mkhomutov/Persatrix/pull/1050) | 2026-10-22 |
-| 3 | A3 | Tool arguments checked against the tool's schema | `feature/v040-rfc0009-arg-schemas` | ⬜ | — | — |
+| 3 | A3 | Tool arguments checked against the tool's schema | `feature/v040-rfc0009-arg-schemas` (head branch `claude/affectionate-faraday-sewbto`, assigned by the session that opened it) | 🔄 | — | — |
 | 4 | A3 | Shell CPU limit, output caps, `resource_limits:` | `feature/v040-rfc0009-resource-limits` | ⬜ | — | — |
 | 5 | A4 | Agent tokens: issue, check, revoke (Go) | `feature/v040-rfc0009-agent-token` | ⬜ | — | — |
 | 6 | A4 | Registration returns a token and accepts the enrollment secret | `feature/v040-rfc0009-enrollment` | ⬜ | — | — |
@@ -363,6 +363,41 @@ string still reaches `PathValidator`, whose job it stays; every golden
 replays unchanged.
 **Acceptance**: Phase 3 items 1, 2 and 6 for arguments.
 **Estimate**: ~400 lines.
+
+**Implementation note (2026-10-29)**: how G-2 is met, each point a new
+default this PR's review confirms or overturns.
+
+- **Where.** The check is `agents/tools/arg_check.py`, not `registry.py`,
+  which keeps room for PR 4's output cap and PR 15's tag; `registry.py`
+  reads each tool's signature once into an `ArgumentSpec`.
+  `tool_list.admit_call` replaces the lookup at both call sites, so
+  `base.py` stays at 505 lines, and RFC 0028 PR 10's seat goes between
+  the admission and the run, on the checked arguments. A check that itself
+  fails refuses the call: running it unchecked would give the seat a value
+  nobody checked.
+- **Against what.** Missing and unknown arguments are read off the
+  signature, not the generated schema, which admits unknown keys and
+  offers `**kwargs` as a required string; a tool with `**kwargs` takes any
+  name. `jsonschema` checks each parameter's narrowing.
+- **Type.** A declared type is enforced only where the tool narrows it
+  (`@tool(narrow=...)`), since an off-type value runs today on five of the
+  nine built-ins: a `shell_exec` timeout of 5.5, a falsy `tags`, a
+  `recall_notes` limit of `true`. The built-ins narrow eleven string
+  parameters where every off-type value fails today, which a test pins by
+  running each tool without the check. A narrowing is part of the offered
+  schema, so the model is told what is checked; these restate the type, so
+  no offered schema or golden changes.
+- **One form.** An integer parameter given canonical integer text (`"30"`,
+  never `" 30"` or `"030"`) or a whole float gets the int; a bool, a
+  fraction, NaN and infinity pass unchanged, so RFC 0028 PR 10's hash must
+  handle those itself. A null for an optional parameter means its default,
+  unless the annotation takes `None`.
+- **One exception to "fails today".** On Python 3.11 a null `shell_exec`
+  command read the agent's standard input; its narrowing refuses it.
+- **Refusal and audit.** The model gets JSON with
+  `tool_argument_validation_error` and lists of the missing, unknown and
+  invalid arguments; the audit line is INFO on `agents.tools.audit`. Neither
+  carries a value. A refused call writes no tool span or metric.
 
 ### PR 4 — `feature/v040-rfc0009-resource-limits`
 

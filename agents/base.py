@@ -36,7 +36,7 @@ from .task_types import (
     TaskOutput,
     TaskStatus,
 )
-from .tools.tool_list import offered_tools, refuse_call
+from .tools.tool_list import admit_call, offered_tools
 
 logger = logging.getLogger(__name__)
 
@@ -209,19 +209,19 @@ class BaseAgent(ABC):
     async def _execute_tools(self, tool_calls: list[ToolCall]) -> list[LLMToolResult]:
         """Execute tool calls sequentially, returning LLM-facing results.
 
-        ISSUE-0151: a tool the agent was not offered (one its ``tools`` list
-        leaves out) gets the same ``Unknown tool`` error as a tool that does
-        not exist and never runs, as personas already do.
+        ISSUE-0151: a tool the agent was not offered gets the same ``Unknown
+        tool`` error as one that does not exist, as personas do; neither runs,
+        nor does a call whose arguments fail ``admit_call``'s check (RFC 0009).
         """
         results: list[LLMToolResult] = []
         offered = {td.name: td for td in offered_tools(self.agent_id, self.config)}
         for call in tool_calls:
-            tool_def = offered.get(call.name)
-            if tool_def is None or tool_def.func is None:
-                results.append(refuse_call(self.agent_id, call))
+            admitted = admit_call(self.agent_id, offered, call)
+            if isinstance(admitted, LLMToolResult):
+                results.append(admitted)
                 continue
             try:
-                result = await tool_def.func(**call.input)
+                result = await admitted.run(**admitted.arguments)
                 if result.success:
                     # SF4: JSON for dict/list so the LLM sees {"k": true} not Python repr.
                     content = (

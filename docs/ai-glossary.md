@@ -100,6 +100,28 @@ Process vocabulary (scope lock, cuttable, live arc, finding, …) lives in the
   `@tool(name=..., permissions=[...])` decorator in `agents/tools/`.
 - **Example:** "The `file_read` tool requires the `fs.read` permission."
 
+### Argument Check
+- **Aliases:** "argument validation"
+- **Disallowed:** "schema enforcement" (it enforces a declared type only where a
+  **Narrowing** asks for it)
+- **Definition:** The step that reads a tool call's arguments before the tool
+  runs (`agents/tools/arg_check.py`, RFC 0009 Phase 3). It refuses a call
+  missing a required argument, naming one the tool does not take, or breaking a
+  narrowing, and converts a lossless other form, such as `"30"` for an integer,
+  to the declared one.
+- **Example:** "The argument check refused `shell_exec` with `cmd` instead of
+  `command`, so the tool never ran."
+
+### Narrowing
+- **Aliases:** "argument narrowing"
+- **Disallowed:** —
+- **Definition:** JSON Schema keywords a tool declares for one parameter with
+  `@tool(narrow=...)`, added to the schema the model is offered and checked by
+  the **Argument Check**. `{"type": "string"}` makes the check refuse a value of
+  any other type; otherwise one is passed to the tool as sent.
+- **Example:** "`file_read` narrows `path` to strings, since any other value
+  already failed inside the tool."
+
 ### Skill
 - **Aliases:** —
 - **Disallowed:** "tool" (when meaning a skill); "capability" (when meaning a
