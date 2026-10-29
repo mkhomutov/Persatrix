@@ -380,21 +380,44 @@ new default this PR's review confirms or overturns.
   apart — invalid (garbled, changed, or another process's key), expired,
   revoked — for PR 6's audit line and PR 7's retry rule; what a caller is
   told is PR 8's choice.
-- **Revocation (OQ 4).** `Revoke` records a moment for the agent, and its
-  tokens issued before it are refused; one issued after works, so a
-  deregistered agent can register again. Issue and Revoke never record one
-  moment twice, and each is later than the last even if the clock stands
-  still or steps back, so a registration in the same instant as its
-  deregistration is not caught. After a step back, new tokens are dated
-  ahead of the clock and work that much longer. A revocation is dropped once
-  every token it covers has expired, so the list holds one day's
-  revocations; an ID no agent can have is ignored.
-- **ID.** `Issue` refuses an ID the REST and gRPC hooks refuse as an
-  `X-Agent-ID`: one off the agent ID pattern, or over 256 bytes.
+- **Time.** The issuer keeps its own: the time of day when it was made,
+  plus the time passed since on the monotonic clock, which a time sync does
+  not move. So a token works for 24 hours of the orchestrator's running
+  time however the computer's clock is stepped; time a suspended machine
+  sleeps may not count. `Check` reads its time and the agent's revocation
+  together, under the issuer's lock, and never takes its time as earlier
+  than a moment already recorded (F-1). A token's dates count from the
+  issuer's start, so an agent acts on a refusal, as G-5 says, not on its own
+  clock against the expiry.
+- **Revocation (OQ 4).** For each agent holding a token that still works,
+  the issuer keeps its latest token's expiry and its latest revocation's
+  moment. `Revoke` refuses the agent's tokens issued before that moment; one
+  issued after works, so a deregistered agent can register again. Issue and
+  Revoke never record one moment twice, so a registration in the same
+  instant as its deregistration is not caught. Revoking an agent with no
+  working token keeps nothing. `Issue` forgets the agents whose tokens have
+  all expired once the map has doubled, so it stays within about twice the
+  agents with a working token (F-3). An unexpired token for an agent the
+  issuer does not know is refused as invalid.
+- **ID.** `Issue` refuses an empty ID and any ID the REST and gRPC hooks
+  refuse as an `X-Agent-ID`: one off the agent ID pattern, or over 256
+  bytes.
 - **Key.** It sits behind a pointer that no method returns, so printing or
   encoding the issuer, or a value holding it, shows no key byte. The test
-  looks for the key in five encodings in a JSON log line, `fmt`'s output,
-  JSON, the errors and a token.
+  looks for the key in six forms in a JSON log line, `fmt`'s output, JSON,
+  the errors and a token.
+
+**Review findings** (PR 5):
+
+| Finding | Severity | Description | Disposition |
+|---------|----------|-------------|-------------|
+| F-1 | Medium | Expiry and forgetting read the wall clock. Once a revocation was forgotten, a clock stepped back could bring the revoked token back; a forward jump and its correction dated every later token ahead and stretched its life without bound; and `Check` read the clock outside its lock, so forgetting could fall between the clock and the lookup | Fixed in-PR: the issuer counts time on the monotonic clock from the time of day it was made, never takes its time as earlier than a recorded moment, and reads it with the revocation under its lock; tests for the step back and the lock (no unit test can step the monotonic clock) |
+| F-2 | Low | The over-length case could not fail: its padded token was refused by its signature anyway, so nothing showed the length is checked first | Fixed in-PR: a lengthened real token is refused with no allocation |
+| F-3 | Low | `Revoke` kept an entry for any ID, even one never issued a token, and every call added one, so the list grew with revocations, not agents | Fixed in-PR: one entry per agent with a working token, holding its revocation; revoking an agent with none keeps nothing; `Issue` forgets expired agents once the map has doubled |
+| F-4 | Low | The glossary's *Approval Token* still called a capability token RFC 0009's, which the new *Agent Token* entry disallows; the ID rule left out that `Issue` also refuses an empty ID, which the hooks admit as anonymous | Fixed in-PR |
+| F-5 | Info | `AgentToken` named what a token says, not the token the glossary defines | Fixed in-PR: renamed `AgentTokenClaims` before PRs 6–10 use it |
+| F-6 | Info | A registration and a deregistration of one agent that race can leave it registered with a revoked token, which PR 7's retry rule, for invalid and expired tokens, would leave refused until it expires | → deferred to PR 6 (noted there) |
+| F-7 | Info | The PR is over the ~350-line estimate and the 500-line target, most of it tests | Noted: 328 lines of code; the tests that prove it are not split from it |
 
 ### PR 6 — `feature/v040-rfc0009-enrollment`
 
@@ -415,7 +438,12 @@ re-registration from a new address writes its audit line.
 **Estimate**: ~350 lines.
 **From PR 5**: registration's ID pattern (`planner.ResourceIDRegex`) has no
 length limit, and `Issue` refuses an ID over 256 bytes, so this PR refuses
-such a registration with 400 before it registers anything.
+such a registration with 400 before it registers anything. `Revoke` keeps
+nothing for an agent with no working token, so deregistration may call it
+for any ID it removes.
+**From PR 5 review**: F-6 — this PR serializes one agent's registration and
+deregistration, so a racing pair cannot leave the agent registered with a
+token already revoked.
 
 ### PR 7 — `feature/v040-rfc0009-agent-token-client`
 

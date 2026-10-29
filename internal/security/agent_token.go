@@ -34,6 +34,10 @@ const (
 	agentTokenFixedSize = 8 + 8 + agentTokenNonceSize
 )
 
+// agentTokenSweepFloor is how many agents the issuer holds before Issue
+// first forgets the ones whose tokens have all expired.
+const agentTokenSweepFloor = 64
+
 // maxAgentTokenLen is the longest token Issue makes, the one for an ID of
 // [MaxAgentIDLen]. Check refuses anything longer before doing any work.
 var maxAgentTokenLen = len(agentTokenPrefix) +
@@ -51,14 +55,14 @@ var (
 	// ErrAgentTokenRevoked: the agent's tokens were revoked after this one
 	// was issued, as when the agent deregistered.
 	ErrAgentTokenRevoked = errors.New("security: agent token has been revoked")
-	// ErrAgentTokenAgentID: Issue was asked for an ID no agent can have, one
-	// the REST and gRPC hooks would refuse as an X-Agent-ID.
+	// ErrAgentTokenAgentID: Issue was asked for an ID no agent can have:
+	// empty, off the agent ID pattern, or over 256 bytes.
 	ErrAgentTokenAgentID = errors.New("security: an agent token's agent ID must match ^[a-z0-9][a-z0-9-]*[a-z0-9]$ and be at most 256 bytes")
 )
 
-// AgentToken is what a token says: which agent it was issued to, and when it
-// was issued and expires.
-type AgentToken struct {
+// AgentTokenClaims is what a token says: which agent it was issued to, and
+// when it was issued and expires.
+type AgentTokenClaims struct {
 	AgentID   string
 	IssuedAt  time.Time
 	ExpiresAt time.Time
@@ -89,6 +93,11 @@ type AgentTokenConfig struct {
 // A token lists nothing the agent may do: nothing in v0.4.0 would read such
 // a list.
 //
+// The issuer keeps its own time: the time of day when it was made, plus the
+// time that has passed since (see [AgentTokenIssuer.clock]). So a token
+// works for 24 hours however a time sync moves the computer's clock, and its
+// IssuedAt and ExpiresAt are dates counted from when the issuer was made.
+//
 // Revocations are kept in this process only, since v0.4.0 runs one
 // orchestrator: [AgentTokenIssuer.Revoke] stops every token one agent holds,
 // and a restart stops all of them by making a new key.
@@ -96,23 +105,25 @@ type AgentTokenIssuer struct {
 	// key signs every token. It sits behind a pointer, so printing the
 	// issuer, or a value that holds one, shows an address rather than the
 	// key; no method returns it.
-	key *[agentTokenKeySize]byte
-	now func() time.Time
+	key   *[agentTokenKeySize]byte
+	now   func() time.Time
+	start time.Time
 
 	mu sync.RWMutex
 	// last is the latest moment Issue or Revoke recorded, in Unix
 	// nanoseconds (see [AgentTokenIssuer.moment]).
 	last int64
-	// revoked maps each agent whose tokens were revoked to the moment of
-	// its latest revocation. order holds the same revocations, oldest first,
-	// so the ones that no longer guard anything can be dropped.
-	revoked map[string]int64
-	order   []agentTokenRevocation
+	// agents holds what the issuer knows of each agent while a token issued
+	// to it may still work. Issue forgets the others once the map has
+	// reached sweepAt.
+	agents  map[string]agentTokenState
+	sweepAt int
 }
 
-type agentTokenRevocation struct {
-	agentID string
-	at      int64
+// agentTokenState is what the issuer keeps about one agent.
+type agentTokenState struct {
+	lastExpiry int64 // when its latest token expires, in Unix nanoseconds
+	revokedAt  int64 // the moment of its latest revocation; math.MinInt64 if none
 }
 
 // NewAgentTokenIssuer makes an issuer with a new key from crypto/rand.
@@ -128,109 +139,143 @@ func NewAgentTokenIssuer(cfg AgentTokenConfig) *AgentTokenIssuer {
 	return &AgentTokenIssuer{
 		key:     key,
 		now:     now,
+		start:   now(),
 		last:    math.MinInt64,
-		revoked: make(map[string]int64),
+		agents:  make(map[string]agentTokenState),
+		sweepAt: agentTokenSweepFloor,
 	}
 }
 
 // Issue makes a token for agentID that works for [AgentTokenTTL], and says
 // what the token holds. An ID no agent can have gets [ErrAgentTokenAgentID].
-func (t *AgentTokenIssuer) Issue(agentID string) (string, AgentToken, error) {
+func (t *AgentTokenIssuer) Issue(agentID string) (string, AgentTokenClaims, error) {
 	if agentID == "" || !validAgentID(agentID) {
-		return "", AgentToken{}, ErrAgentTokenAgentID
+		return "", AgentTokenClaims{}, ErrAgentTokenAgentID
 	}
 	p := agentTokenPayload{agentID: agentID}
 	_, _ = rand.Read(p.nonce[:]) // never fails; see NewAgentTokenIssuer
+
 	t.mu.Lock()
 	p.issued = t.moment()
-	t.mu.Unlock()
 	p.expires = p.issued + int64(AgentTokenTTL)
+	if len(t.agents) >= t.sweepAt {
+		t.forgetExpired(p.issued)
+	}
+	state, known := t.agents[agentID]
+	if !known {
+		state.revokedAt = math.MinInt64
+	}
+	state.lastExpiry = p.expires
+	t.agents[agentID] = state
+	t.mu.Unlock()
 
 	signed := agentTokenPrefix + base64.RawURLEncoding.EncodeToString(p.marshal())
-	return signed + "." + t.sign(signed), p.agentToken(), nil
+	return signed + "." + t.sign(signed), p.claims(), nil
 }
 
 // Check says which agent a token was issued to, or why the token is refused:
 // [ErrAgentTokenInvalid], [ErrAgentTokenExpired] or [ErrAgentTokenRevoked].
 // The signature is checked first, against the token's text exactly as sent,
 // and nothing else in the token is read unless it matches.
-func (t *AgentTokenIssuer) Check(token string) (AgentToken, error) {
+func (t *AgentTokenIssuer) Check(token string) (AgentTokenClaims, error) {
 	if len(token) > maxAgentTokenLen {
-		return AgentToken{}, ErrAgentTokenInvalid
+		return AgentTokenClaims{}, ErrAgentTokenInvalid
 	}
 	dot := strings.LastIndexByte(token, '.')
 	if dot < len(agentTokenPrefix) || !strings.HasPrefix(token, agentTokenPrefix) {
-		return AgentToken{}, ErrAgentTokenInvalid
+		return AgentTokenClaims{}, ErrAgentTokenInvalid
 	}
 	signed, signature := token[:dot], token[dot+1:]
 	// hmac.Equal takes the same time wherever two signatures differ, so the
 	// time a refusal takes cannot help anyone guess a signature.
 	if !hmac.Equal([]byte(signature), []byte(t.sign(signed))) {
-		return AgentToken{}, ErrAgentTokenInvalid
+		return AgentTokenClaims{}, ErrAgentTokenInvalid
 	}
 	raw, err := base64.RawURLEncoding.Strict().DecodeString(signed[len(agentTokenPrefix):])
 	if err != nil {
-		return AgentToken{}, ErrAgentTokenInvalid
+		return AgentTokenClaims{}, ErrAgentTokenInvalid
 	}
 	p, ok := unmarshalAgentTokenPayload(raw)
 	if !ok {
-		return AgentToken{}, ErrAgentTokenInvalid
+		return AgentTokenClaims{}, ErrAgentTokenInvalid
 	}
 
-	if t.now().UnixNano() >= p.expires {
-		return AgentToken{}, ErrAgentTokenExpired
-	}
+	// The time and the agent's state are read together, so nothing can
+	// forget a revocation between the two.
 	t.mu.RLock()
-	revokedAt, found := t.revoked[p.agentID]
+	now := t.current()
+	state, known := t.agents[p.agentID]
 	t.mu.RUnlock()
-	if found && p.issued <= revokedAt {
-		return AgentToken{}, ErrAgentTokenRevoked
+	switch {
+	case now >= p.expires:
+		return AgentTokenClaims{}, ErrAgentTokenExpired
+	case !known:
+		// The issuer forgets an agent only once all its tokens have
+		// expired, so an unexpired token for an agent it does not know
+		// was not issued here.
+		return AgentTokenClaims{}, ErrAgentTokenInvalid
+	case p.issued <= state.revokedAt:
+		return AgentTokenClaims{}, ErrAgentTokenRevoked
 	}
-	return p.agentToken(), nil
+	return p.claims(), nil
 }
 
 // Revoke stops every token issued to agentID so far, as deregistering the
 // agent needs. A token issued to it afterwards works, so the agent can
-// register again. An ID no agent can have holds no token, so it is ignored.
+// register again. An agent holding no token that still works has nothing to
+// revoke, so then the call changes nothing and keeps nothing.
 func (t *AgentTokenIssuer) Revoke(agentID string) {
-	if agentID == "" || !validAgentID(agentID) {
-		return
-	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.forget(t.now().UnixNano())
-	at := t.moment()
-	t.revoked[agentID] = at
-	t.order = append(t.order, agentTokenRevocation{agentID: agentID, at: at})
+	state, known := t.agents[agentID]
+	if !known {
+		return
+	}
+	state.revokedAt = t.moment()
+	t.agents[agentID] = state
 }
 
-// moment returns the clock's reading in Unix nanoseconds, or a nanosecond
-// past the last moment it returned if the clock has not moved past that one.
-// So each moment is later than the one before, even when the clock stands
-// still or a time sync steps it back, and a token issued after a revocation
-// always has a later moment than the revocation, which therefore never
-// catches it. After a step back, a new token's issue time is ahead of the
-// clock, and the token works for that much longer. The caller holds t.mu.
+// clock returns the issuer's time in Unix nanoseconds: the time of day when
+// it was made, plus the time passed since. The time passed comes from the
+// clock's monotonic reading, which a time sync does not move, so no step of
+// the computer's clock can bring back a revoked token or stretch a token's
+// life; time a suspended machine spends asleep may not count. time.Now gives
+// that reading; a test clock has none, so its readings count as they are.
+func (t *AgentTokenIssuer) clock() int64 {
+	return t.start.UnixNano() + int64(t.now().Sub(t.start))
+}
+
+// current is the issuer's time for a decision: the clock, but never earlier
+// than a moment already recorded. forgetExpired runs at a recorded moment,
+// so even a clock that went back cannot make a token it forgot about look
+// unexpired. The caller holds t.mu.
+func (t *AgentTokenIssuer) current() int64 {
+	return max(t.clock(), t.last)
+}
+
+// moment returns the issuer's time, or a nanosecond past the last moment it
+// returned if the time has not moved past that one. So each moment is later
+// than the one before, even when the clock stands still, and a token issued
+// after a revocation always has a later moment than the revocation, which
+// therefore never catches it. The caller holds t.mu for writing.
 func (t *AgentTokenIssuer) moment() int64 {
-	t.last = max(t.now().UnixNano(), t.last+1)
+	t.last = max(t.clock(), t.last+1)
 	return t.last
 }
 
-// forget drops each revocation that no longer guards anything. A revocation
-// at moment m catches only tokens issued before m, and each of those has
-// expired by m + AgentTokenTTL, so from then on Check refuses them as expired
-// anyway. Revocations are recorded in the order of their moments, so the
-// ones to drop are at the front. This keeps the list to the revocations of
-// the last [AgentTokenTTL]. The caller holds t.mu.
-func (t *AgentTokenIssuer) forget(now int64) {
-	for len(t.order) > 0 && now >= t.order[0].at+int64(AgentTokenTTL) {
-		r := t.order[0]
-		if t.revoked[r.agentID] == r.at {
-			delete(t.revoked, r.agentID)
+// forgetExpired drops each agent whose tokens have all expired by now: none
+// can pass Check, so its revocation guards nothing. Issue calls it only once
+// the map has doubled since the last time, so its cost, spread over the
+// Issues that grew the map, stays the same however many agents there are,
+// and the map stays within about twice the agents whose tokens still work.
+// The caller holds t.mu for writing, and now is a moment it recorded.
+func (t *AgentTokenIssuer) forgetExpired(now int64) {
+	for id, state := range t.agents {
+		if now >= state.lastExpiry {
+			delete(t.agents, id)
 		}
-		t.order[0] = agentTokenRevocation{} // lets the ID be freed
-		t.order = t.order[1:]
 	}
+	t.sweepAt = max(agentTokenSweepFloor, 2*len(t.agents))
 }
 
 // sign returns the signature for signed, the token's text before its last
@@ -274,8 +319,8 @@ func unmarshalAgentTokenPayload(b []byte) (agentTokenPayload, bool) {
 	return p, true
 }
 
-func (p agentTokenPayload) agentToken() AgentToken {
-	return AgentToken{
+func (p agentTokenPayload) claims() AgentTokenClaims {
+	return AgentTokenClaims{
 		AgentID:   p.agentID,
 		IssuedAt:  time.Unix(0, p.issued).UTC(),
 		ExpiresAt: time.Unix(0, p.expires).UTC(),

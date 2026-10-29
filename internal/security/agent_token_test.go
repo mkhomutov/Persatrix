@@ -57,7 +57,7 @@ func TestAgentTokenIssuer_IssuesATokenThatChecks(t *testing.T) {
 	token, issued, err := issuer.Issue("ember-owl")
 	require.NoError(t, err)
 	assert.Equal(t, 24*time.Hour, AgentTokenTTL, "a token lives 24 hours (G-5)")
-	assert.Equal(t, AgentToken{
+	assert.Equal(t, AgentTokenClaims{
 		AgentID:   "ember-owl",
 		IssuedAt:  tokenClockStart,
 		ExpiresAt: tokenClockStart.Add(AgentTokenTTL),
@@ -195,7 +195,8 @@ func TestAgentTokenIssuer_ATokenIssuedAfterARevocationWorks(t *testing.T) {
 	_, err := issuer.Check(sameMoment)
 	assert.NoError(t, err, "a token issued after a revocation is not caught by it")
 
-	// The clock steps back an hour, as a time sync can.
+	// The clock the issuer is given steps back an hour. time.Now's
+	// monotonic reading never does, but the issuer does not rely on that.
 	clk.Advance(-time.Hour)
 	issuer.Revoke("ember-owl")
 	_, err = issuer.Check(sameMoment)
@@ -227,19 +228,47 @@ func TestAgentTokenIssuer_RefusesWhatIsNotAToken(t *testing.T) {
 	lastDot := strings.LastIndexByte(token, '.')
 
 	for name, bad := range map[string]string{
-		"empty":                   "",
-		"prefix only":             agentTokenPrefix,
-		"no signature":            token[:lastDot],
-		"an empty signature":      token[:lastDot+1],
-		"an extra part":           token + ".AAAA",
-		"a space before it":       " " + token,
-		"a bearer header":         "Bearer " + token,
-		"over the longest length": token + strings.Repeat("A", maxAgentTokenLen),
-		"an account session":      base64.RawURLEncoding.EncodeToString(make([]byte, 32)),
+		"empty":                 "",
+		"prefix only":           agentTokenPrefix,
+		"no signature":          token[:lastDot],
+		"an empty signature":    token[:lastDot+1],
+		"an extra part":         token + ".AAAA",
+		"a space before it":     " " + token,
+		"a bearer header":       "Bearer " + token,
+		"longer than any token": token + strings.Repeat("A", maxAgentTokenLen),
+		"an account session":    base64.RawURLEncoding.EncodeToString(make([]byte, 32)),
 	} {
 		_, err := issuer.Check(bad)
 		assert.ErrorIs(t, err, ErrAgentTokenInvalid, name)
 	}
+}
+
+// The length is checked before anything else, so a long string costs
+// nothing to refuse (PR 5 review F-2).
+func TestAgentTokenIssuer_RefusesAnOverlongTokenBeforeAnyWork(t *testing.T) {
+	issuer := newTestIssuer(newFakeClock(tokenClockStart))
+	// A real token, lengthened, so only the length stops it before the
+	// signature is worked out.
+	overlong := issueToken(t, issuer, "ember-owl") + strings.Repeat("A", maxAgentTokenLen)
+	var err error
+	allocs := testing.AllocsPerRun(10, func() { _, err = issuer.Check(overlong) })
+	assert.ErrorIs(t, err, ErrAgentTokenInvalid)
+	assert.Zero(t, allocs, "an overlong token was read before it was refused")
+}
+
+// A token signed with the issuer's key for an agent it holds nothing about
+// cannot be one it issued, since it forgets an agent only once all the
+// agent's tokens have expired. Such a token is refused, not trusted.
+func TestAgentTokenIssuer_RefusesASignedTokenForAnAgentItNeverIssuedTo(t *testing.T) {
+	issuer := newTestIssuer(newFakeClock(tokenClockStart))
+	p := agentTokenPayload{
+		agentID: "tide-wren",
+		issued:  tokenClockStart.UnixNano(),
+		expires: tokenClockStart.Add(AgentTokenTTL).UnixNano(),
+	}
+	signed := agentTokenPrefix + base64.RawURLEncoding.EncodeToString(p.marshal())
+	_, err := issuer.Check(signed + "." + issuer.sign(signed))
+	assert.ErrorIs(t, err, ErrAgentTokenInvalid)
 }
 
 func TestAgentTokenIssuer_IssuesOnlyForAnIDAnAgentCanHave(t *testing.T) {
@@ -266,38 +295,70 @@ func TestAgentTokenIssuer_IssuesOnlyForAnIDAnAgentCanHave(t *testing.T) {
 	assert.Equal(t, longest, got.AgentID)
 }
 
-func TestAgentTokenIssuer_ForgetsARevocationOnceItsTokensHaveExpired(t *testing.T) {
+// issueUntilForgetting issues tokens to new agents, named from prefix, until
+// the next Issue forgets the agents whose tokens have all expired, and then
+// makes that Issue.
+func issueUntilForgetting(t *testing.T, issuer *AgentTokenIssuer, prefix string) {
+	t.Helper()
+	for i := 0; len(issuer.agents) < issuer.sweepAt; i++ {
+		issueToken(t, issuer, fmt.Sprintf("%s-%d", prefix, i))
+	}
+	issueToken(t, issuer, prefix+"-last")
+}
+
+func TestAgentTokenIssuer_ForgetsAnAgentOnceAllItsTokensHaveExpired(t *testing.T) {
 	clk := newFakeClock(tokenClockStart)
 	issuer := newTestIssuer(clk)
 	old := issueToken(t, issuer, "ember-owl")
-	issuer.Revoke("ember-owl")
-	for i := range 100 {
-		issuer.Revoke(fmt.Sprintf("agent-%d", i))
+	for range 3 {
+		issuer.Revoke("ember-owl")
 	}
-	issuer.Revoke("ember-owl")
+	issuer.Revoke("never-issued")
 	issuer.Revoke("Not An Agent")
-	assert.Len(t, issuer.revoked, 101, "one entry per agent, and none for an ID no agent can have")
+	assert.Len(t, issuer.agents, 1, "one entry per agent holding a token; revoking again, or revoking an agent with none, keeps nothing more")
 
-	clk.Advance(AgentTokenTTL + time.Second)
-	issuer.Revoke("tide-wren")
-	assert.Len(t, issuer.revoked, 1, "a revocation older than a token's lifetime guards nothing, so it is dropped")
-	assert.Len(t, issuer.order, 1)
+	clk.Advance(AgentTokenTTL)
+	issueUntilForgetting(t, issuer, "later")
+	assert.NotContains(t, issuer.agents, "ember-owl", "an agent whose tokens have all expired is forgotten")
+	assert.LessOrEqual(t, len(issuer.agents), 2*agentTokenSweepFloor)
 	_, err := issuer.Check(old)
-	assert.ErrorIs(t, err, ErrAgentTokenExpired, "a token whose revocation was dropped is still refused")
+	assert.ErrorIs(t, err, ErrAgentTokenExpired, "a forgotten agent's token is still refused")
 }
 
-func TestAgentTokenIssuer_DroppingARevocationKeepsALaterOneForTheSameAgent(t *testing.T) {
+// The issuer forgets in batches that grow with the map, so Issue does not
+// walk every agent each time once there are many.
+func TestAgentTokenIssuer_ForgetsOnlyOnceTheMapHasGrown(t *testing.T) {
+	issuer := newTestIssuer(newFakeClock(tokenClockStart))
+	for i := range 3 * agentTokenSweepFloor {
+		issueToken(t, issuer, fmt.Sprintf("agent-%d", i))
+	}
+	assert.Greater(t, issuer.sweepAt, len(issuer.agents), "with every token still working, the next pass waits for the map to grow")
+}
+
+// A machine without a clock battery can read 1970 until it syncs; a token
+// issued at that first instant still works.
+func TestAgentTokenIssuer_WorksFromTheFirstInstantOfAClockAt1970(t *testing.T) {
+	issuer := newTestIssuer(newFakeClock(time.Unix(0, 0)))
+	token, issued, err := issuer.Issue("ember-owl")
+	require.NoError(t, err)
+	require.Zero(t, issued.IssuedAt.UnixNano())
+	_, err = issuer.Check(token)
+	assert.NoError(t, err)
+}
+
+func TestAgentTokenIssuer_KeepsARevocationWhileAnyOfTheAgentsTokensWorks(t *testing.T) {
 	clk := newFakeClock(tokenClockStart)
 	issuer := newTestIssuer(clk)
+	issueToken(t, issuer, "ember-owl")
 	issuer.Revoke("ember-owl")
 	clk.Advance(23 * time.Hour)
-	token := issueToken(t, issuer, "ember-owl")
+	later := issueToken(t, issuer, "ember-owl")
 	issuer.Revoke("ember-owl")
 
-	clk.Advance(2 * time.Hour) // past the first revocation's 24 hours, not the token's
-	issuer.Revoke("tide-wren")
-	_, err := issuer.Check(token)
-	assert.ErrorIs(t, err, ErrAgentTokenRevoked, "the later revocation still stands once the earlier one is dropped")
+	clk.Advance(2 * time.Hour) // past the first token's 24 hours, not the later one's
+	issueUntilForgetting(t, issuer, "filler")
+	_, err := issuer.Check(later)
+	assert.ErrorIs(t, err, ErrAgentTokenRevoked, "the agent, and its revocation, are kept while one of its tokens still works")
 }
 
 func TestAgentTokenIssuer_IsSafeForConcurrentUse(t *testing.T) {
@@ -307,8 +368,10 @@ func TestAgentTokenIssuer_IsSafeForConcurrentUse(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			id := fmt.Sprintf("agent-%d", i)
-			for range 50 {
+			for j := range 50 {
+				// A new agent each time, so the map grows and Issue
+				// forgets what has expired while the others run.
+				id := fmt.Sprintf("agent-%d-%d", i, j)
 				token, _, err := issuer.Issue(id)
 				if err != nil {
 					t.Error(err)
@@ -374,4 +437,47 @@ func TestAgentTokenIssuer_KeyReachesNoLogLineTokenOrError(t *testing.T) {
 			assert.NotContains(t, out, secret, "the %s carries the key as %s", name, form)
 		}
 	}
+}
+
+// A revoked token stays refused even when the issuer's clock goes back after
+// the issuer forgot the agent (PR 5 review F-1).
+func TestAgentTokenIssuer_ARevokedTokenStaysRefusedWhenItsClockGoesBack(t *testing.T) {
+	clk := newFakeClock(tokenClockStart)
+	issuer := newTestIssuer(clk)
+	token := issueToken(t, issuer, "ember-owl")
+	clk.Advance(time.Minute)
+	issuer.Revoke("ember-owl")
+
+	clk.Advance(AgentTokenTTL + time.Second)
+	issueUntilForgetting(t, issuer, "filler")
+	require.NotContains(t, issuer.agents, "ember-owl", "the issuer has forgotten the agent and its revocation")
+
+	// The clock the issuer is given goes back two minutes, to before the
+	// token expired. time.Now's monotonic reading never does, but the
+	// issuer does not rely on that.
+	clk.Advance(-2 * time.Minute)
+	_, err := issuer.Check(token)
+	assert.ErrorIs(t, err, ErrAgentTokenExpired, "a revoked token came back when the clock went back")
+}
+
+// Check reads its time and the agent's revocation together, under its lock,
+// so nothing can drop the revocation between the two (PR 5 review F-1).
+func TestAgentTokenIssuer_CheckReadsItsTimeUnderItsLock(t *testing.T) {
+	clk := newFakeClock(tokenClockStart)
+	var issuer *AgentTokenIssuer
+	checking, unlockedReads := false, 0
+	issuer = NewAgentTokenIssuer(AgentTokenConfig{Now: func() time.Time {
+		if checking && issuer.mu.TryLock() {
+			issuer.mu.Unlock()
+			unlockedReads++
+		}
+		return clk.Now()
+	}})
+	token := issueToken(t, issuer, "ember-owl")
+
+	checking = true
+	_, err := issuer.Check(token)
+	checking = false
+	require.NoError(t, err)
+	assert.Zero(t, unlockedReads, "Check read the clock while a revocation could be dropped")
 }
