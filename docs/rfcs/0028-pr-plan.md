@@ -228,7 +228,7 @@ is unslotted with RFC 0049 Phase 3 and is not in this plan.
 | PR | Row | Title | Branch | Status | GitHub PR | Merged |
 |----|-----|-------|--------|--------|-----------|--------|
 | 1 | B1 | Decision types, action classes, glossary | `feature/v040-rfc0028-types` | ✅ | [#1054](https://github.com/mkhomutov/Persatrix/pull/1054) | 2026-10-24 |
-| 2 | B1 | Selection pipeline and baseline policy | `feature/v040-rfc0028-pipeline` | ⬜ | — | — |
+| 2 | B1 | Selection pipeline and baseline policy | `feature/v040-rfc0028-pipeline` (head branch `claude/great-bell-gyjk5g`, assigned by the session that opened it) | 🔄 | — | — |
 | 3a | B1 | Python secret redactor | `feature/v040-rfc0028-redactor` | ⬜ | — | — |
 | 3 | B1 | Decision log and checkpoint spans | `feature/v040-rfc0028-decision-log` | ⬜ | — | — |
 | 4 | B1 | `decision:` configuration and schema | `feature/v040-rfc0028-config` | ⬜ | — | — |
@@ -349,6 +349,13 @@ select. If nothing survives, the outcome is `defer` with its reason. The
 baseline policy (manual mode) ranks the runtime's own proposal first. E-2:
 the runtime gets the pipeline with no enforcing inputs; those arrive with
 PR 7, PR 9, B3 and RFC 0012 C3.
+*As built*: the policy picks among the candidates the constraint inputs
+leave, and an approval gate holds that pick rather than swapping in the
+next, so PR 9's held class defers. Nothing proposed defers `no_candidate`;
+everything removed, `no_permitted_candidate`. A step that raises, or answers
+with anything but a reason code or a valid pick, fails closed
+(`constraint_error`, `policy_error`, `approval_gate_error`); its log line
+names the agent and the candidate's id, never the answer.
 **Tests**: constraint filtering with fake inputs; the empty-survivor `defer`;
 deterministic ranking; manual mode never selects a candidate that a
 constraint removed.

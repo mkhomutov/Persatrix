@@ -268,7 +268,8 @@ class DecisionRecord:
 
 @runtime_checkable
 class DecisionPolicy(Protocol):
-    """A strategy that picks among candidates (§D). Manual mode's is PR 2's."""
+    """A strategy that picks among candidates (§D). Manual mode's is
+    ``BaselinePolicy``; the selection pipeline (``decide``) runs it."""
 
     def select(
         self, context: DecisionContext, candidates: Sequence[DecisionCandidate]
