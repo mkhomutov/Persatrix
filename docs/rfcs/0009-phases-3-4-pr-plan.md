@@ -281,7 +281,7 @@ in the PR named:
 |----|-----|-------|--------|--------|-----------|--------|
 | 1 | A4 | ISSUE-0152 steps 1–2: one quarantine no longer refuses every anonymous caller | `fix/quarantine-spares-anonymous-callers` | ✅ | [#1050](https://github.com/mkhomutov/Persatrix/pull/1050) | 2026-10-22 |
 | 2 | A4 | ISSUE-0152 step 3, agent half: agents send their id on REST | (in PR 1) | ✅ | [#1050](https://github.com/mkhomutov/Persatrix/pull/1050) | 2026-10-22 |
-| 3 | A3 | Tool arguments checked against the tool's schema | `feature/v040-rfc0009-arg-schemas` (head branch `claude/affectionate-faraday-sewbto`, assigned by the session that opened it) | 🔄 | — | — |
+| 3 | A3 | Tool arguments checked against the tool's schema | `feature/v040-rfc0009-arg-schemas` (head branch `claude/affectionate-faraday-sewbto`, assigned by the session that opened it) | 🔀 | [#1069](https://github.com/mkhomutov/Persatrix/pull/1069) | — |
 | 4 | A3 | Shell CPU limit, output caps, `resource_limits:` | `feature/v040-rfc0009-resource-limits` | ⬜ | — | — |
 | 5 | A4 | Agent tokens: issue, check, revoke (Go) | `feature/v040-rfc0009-agent-token` | ⬜ | — | — |
 | 6 | A4 | Registration returns a token and accepts the enrollment secret | `feature/v040-rfc0009-enrollment` | ⬜ | — | — |
