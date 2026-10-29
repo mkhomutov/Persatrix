@@ -38,6 +38,7 @@ from typing import TYPE_CHECKING
 from ..acting_classification import current_acting_classification
 from ..prompt_loader import load_snippet
 from ..session_id import current_session_id, resolve_session_id_silent
+from .arg_check import STRING_ONLY
 from .identity_write_through import maybe_write_through_identity
 from .registry import ToolDefinition, ToolResult, get_tool, tool
 
@@ -102,6 +103,9 @@ def create_memory_tools(
         ),
         permissions=["memory:write"],
         tier="builtin",
+        # RFC 0009 Phase 3: each STRING_ONLY parameter fails inside the tool
+        # today on a value of any other type, so the argument check refuses it.
+        narrow={"topic": STRING_ONLY, "content": STRING_ONLY},
     )
     async def store_note(topic: str, content: str, tags: str = "") -> ToolResult:
         """Store a note with a topic and content. Tags is a comma-separated string."""
@@ -186,6 +190,7 @@ def create_memory_tools(
         ),
         permissions=["memory:write"],
         tier="builtin",
+        narrow={"note_id": STRING_ONLY, "content": STRING_ONLY},
     )
     async def update_note(note_id: str, content: str) -> ToolResult:
         """Update a note's content. Topic and tags are preserved."""
@@ -229,6 +234,7 @@ def create_memory_tools(
         ),
         permissions=["memory:write"],
         tier="builtin",
+        narrow={"note_id": STRING_ONLY},
     )
     async def delete_note(note_id: str) -> ToolResult:
         """Delete a note by ID."""

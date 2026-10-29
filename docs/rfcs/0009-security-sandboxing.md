@@ -583,6 +583,8 @@ records open questions 9 and 10 as locked and changes these deliverables:
 | Argument schemas | Pydantic models per tool | The decorator's JSON schema, narrowed per parameter |
 | Limit defaults | 10 s of CPU, 64 KB of output | Today's caps; §D's numbers recommended |
 
+> 2026-10-29 — PR 3 reads missing and unknown arguments off the tool's signature, since the generated schema admits unknown keys, and enforces a declared type only on a parameter the tool narrows. A path-traversal string still reaches `PathValidator`, whose job it stays, so §E's example is not the check's. One call that ran before is refused: a null `shell_exec` command, which on Python 3.11 read the agent's standard input. The [plan's PR 3 note](0009-phases-3-4-pr-plan.md#pr-3--featurev040-rfc0009-arg-schemas) has the rest.
+
 ---
 
 ## Files Touched (Estimated)

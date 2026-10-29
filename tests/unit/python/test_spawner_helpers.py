@@ -107,6 +107,26 @@ def test_bounded_strips_mixed_control_chars() -> None:
     assert out == f"a{_CTRL_REPLACEMENT}b{_CTRL_REPLACEMENT}c{_CTRL_REPLACEMENT}d"
 
 
+@pytest.mark.parametrize(
+    "unprintable",
+    [
+        "\x85",    # NEL — a C1 control some terminals read as a line break
+        "\x9b",    # CSI — the C1 form of an ANSI escape
+        "\u2028",  # LINE SEPARATOR — a forged line in a Unicode-aware viewer
+        "\u202e",  # RIGHT-TO-LEFT OVERRIDE — text that reads backwards
+        "\u200f",  # RIGHT-TO-LEFT MARK
+        "\ud800",  # a lone surrogate — no UTF-8 encoder accepts it
+    ],
+)
+def test_bounded_strips_every_character_that_does_not_print(unprintable: str) -> None:
+    """The model chooses tool-argument names as freely as a sub-agent its
+    output, and a log viewer is misled by more than C0: every character
+    Python does not print is replaced, so the escape cannot be rebuilt."""
+    out = _bounded(f"a{unprintable}b")
+    assert out == f"a{_CTRL_REPLACEMENT}b"
+    out.encode("utf-8")
+
+
 def test_bounded_preserves_non_control_unicode() -> None:
     """Non-control Unicode (emoji, accented letters, the U+2424 glyph
     itself) must pass through untouched.  This guards against an

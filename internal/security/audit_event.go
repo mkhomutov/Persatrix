@@ -26,8 +26,14 @@ const (
 	AuditCapabilityViolation AuditEventType = "capability.violation"
 
 	// Tool dispatch
-	AuditToolInvoked     AuditEventType = "tool.invoked"
-	AuditToolDenied      AuditEventType = "tool.denied"
+	AuditToolInvoked AuditEventType = "tool.invoked"
+	AuditToolDenied  AuditEventType = "tool.denied"
+	// A tool call whose arguments failed the Python runtime's argument check
+	// (RFC 0009 Phase 3): the runtime refuses the call and writes this record
+	// as a structured log line on its own egress (logger agents.tools.audit;
+	// there is no Python→Go audit RPC), so the constant is RESERVED here and
+	// never reaches the checksummed chain. It names the tool's missing and
+	// invalid arguments and counts the unknown ones; it never carries a value.
 	AuditToolArgInvalid  AuditEventType = "tool.arg_invalid"
 	AuditToolRateLimited AuditEventType = "tool.rate_limited"
 

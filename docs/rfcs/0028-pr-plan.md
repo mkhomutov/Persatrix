@@ -64,8 +64,9 @@ RFC's next step 3 asks for. PRs 5 and 6 prove both byte for byte.
   a 504 after 30 s, unless the reply carries a `reply_status`, as
   ISSUE-0065's error replies do.
 - `agents/base.py` `_run_llm_loop` — the task agent's step; tool dispatch is
-  the point where a choice exists. Personas never run its `_execute_tools`:
-  the persona's own copy in `tool_round.py` wins.
+  the point where a choice exists. Personas never run the task agent's
+  `_execute_tools` (`agents/task_tool_round.py`, moved out of `base.py` by
+  RFC 0009 Phases 3–4 PR 3): the persona's own copy in `tool_round.py` wins.
 - `agents/call_log.py` — the one-JSON-line-per-call file the decision log
   copies. `agents/observability/spans.py` and the `_metrics_*.py` modules —
   the span-name and metrics pattern.
@@ -451,15 +452,18 @@ is unchanged.
 
 ### PR 6 — `feature/v040-rfc0028-task-preact`
 
-**Scope**: `agents/base.py` (505 lines) — first a pure-move commit taking
-`_execute_tools` into its own module, a real seam; then the checkpoint in
-`_run_llm_loop` where a tool call or a final reply is chosen. Personas do not
-run this copy; PR 10 wires both executors.
+**Scope**: `agents/base.py` — the checkpoint in `_run_llm_loop` where a
+tool call or a final reply is chosen. Personas do not run this copy; PR 10
+wires both executors. *Revision:* the pure move this PR was to open with,
+`_execute_tools` into its own module, landed in RFC 0009 Phases 3–4 PR 3
+([#1069](https://github.com/mkhomutov/Persatrix/pull/1069)), which edited
+`base.py` at 505 lines: the task agent's tool round is
+`agents/task_tool_round.py`.
 **Tests**: a task-agent step writes its record; the workflow suites pass
 unchanged.
 **Acceptance**: Phase 1 complete; baseline records collected from here on by
 every agent with recording on.
-**Estimate**: ~350 lines, of which the move is ~80.
+**Estimate**: ~270 lines (the ~80-line move landed earlier).
 
 ### PR 7 — `feature/v040-rfc0028-scoring`
 
@@ -508,8 +512,8 @@ empty list changes nothing.
 ### PR 10 — `feature/v040-rfc0028-outcome-metrics`
 
 **Scope**: the pre-tool and post-outcome checkpoints (E-6) in both places
-tools run — `agents/persona_runtime/tool_round.py` and PR 6's task-agent
-executor module — and post-outcome at `ActionExecutor.execute` for the
+tools run — `agents/persona_runtime/tool_round.py` and the task agent's
+`agents/task_tool_round.py` — and post-outcome at `ActionExecutor.execute` for the
 persona's other actions; acceptance, rejection and fallback counters in
 `_metrics_decision.py`; a decision section in `docs/observability.md` with
 the queries (E-7).
@@ -620,7 +624,7 @@ held turn.
 
 ### PR 14a — `feature/v040-rfc0028-hitl-task-step`
 
-**Scope**: the task agent side, in PR 6's executor module: a required-HITL
+**Scope**: the task agent side, in `agents/task_tool_round.py`: a required-HITL
 tool call opens or reuses its approval (E-11) and waits inside the step
 (E-9), asking the spend route with backoff — 5 s, doubling to at most 60 s —
 until it answers, bounded by the step's timeout; PR 13 exempts that route
@@ -669,7 +673,7 @@ marked ✂️ or *taken, not cut*.
 
 | File | Lines now | Plan |
 |------|-----------|------|
-| `agents/base.py` | 505 | PR 6 moves `_execute_tools` out first |
+| `agents/base.py` | 412 | RFC 0009 Phases 3–4 PR 3 moved `_execute_tools` to `agents/task_tool_round.py`; PR 6 adds the checkpoint |
 | `agents/observability/metrics.py` | 500 | PR 3 adds a `_metrics_decision.py` module |
 | `agents/action_executor.py` | 489 | PRs 5 and 10 add one call each; the logic lives in `agents/decision/` |
 | `agents/tick.py` | 472 | PR 5 records the actions its cut drops, through one call |

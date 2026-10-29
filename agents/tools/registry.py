@@ -14,7 +14,7 @@ import inspect
 import logging
 import time
 import warnings
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, get_type_hints
 
@@ -33,6 +33,7 @@ from ..observability.spans import (
     get_redactor,
     tool_payload_capture_mode,
 )
+from .arg_check import ArgumentSpec, argument_spec
 
 logger = logging.getLogger(__name__)
 _tracer = trace.get_tracer(__name__)
@@ -66,6 +67,21 @@ def _record_tool_metrics(
     inst.tool_duration.record(duration_ms, attributes=attrs)
 
 
+def record_refused_call(*, agent_id: str, tool_name: str, reason: str) -> None:
+    """Record a call refused before its tool ran as a failed tool call.
+
+    The call never reaches the ``@tool`` wrapper, which records the span and
+    metrics of every call it runs, so this records them in its place: a
+    failure rate read off ``agent.tool.invocations`` still counts a call the
+    argument check refused (RFC 0009 Phase 3). *reason* is the span status.
+    """
+    with _tracer.start_as_current_span(
+        TOOL_EXECUTE_SPAN, attributes={"tool.name": tool_name, "tool.success": False},
+    ) as span:
+        span.set_status(Status(StatusCode.ERROR, reason))
+    _record_tool_metrics(agent_id=agent_id, tool_name=tool_name, success=False, duration_ms=0.0)
+
+
 @dataclass
 class ToolResult:
     """Result from a tool invocation."""
@@ -89,6 +105,11 @@ class ToolDefinition:
     permissions: list[str] = field(default_factory=list)
     tier: str = "custom"  # "builtin" | "custom" | "mcp"
     func: Callable | None = None
+    # What the tool's signature accepts, for the argument check
+    # (agents.tools.arg_check). None for a definition @tool did not build, or
+    # for a tool with a positional-only parameter: either is checked for
+    # shape alone.
+    argument_spec: ArgumentSpec | None = None
 
 
 # ─── Global Tool Registry ──────────────────────────────────
@@ -101,6 +122,7 @@ def tool(
     description: str = "",
     permissions: list[str] | None = None,
     tier: str = "custom",
+    narrow: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> Callable:
     """
     Decorator to register a function as an agent tool.
@@ -109,6 +131,21 @@ def tool(
         tier: One of ``"builtin"``, ``"custom"``, ``"mcp"``. Defaults to
               ``"custom"`` for user-defined tools; framework-bundled tools
               in ``builtin.py`` pass ``tier="builtin"``.
+        narrow: Per parameter, JSON Schema keywords that limit its value, such
+              as ``{"limit": {"minimum": 1}}``; the keywords allowed are
+              :data:`agents.tools.arg_check.NARROWING_KEYWORDS`, which every
+              provider accepts. A narrowing is added to the schema the model
+              is offered, and before the tool runs a narrowed parameter is
+              checked against that whole schema, its declared type included,
+              so ``{"limit": {"minimum": 1}}`` refuses ``false`` as well as
+              ``0``. An un-narrowed parameter's value of another type is passed
+              to the tool as sent. A narrowing that cannot work (a keyword
+              the parameter's type ignores, an empty enum, a bound that is
+              not finite, a minimum over its maximum) raises ``ValueError``
+              when the tool is defined. :data:`agents.tools.arg_check.STRING_ONLY`
+              restates a text parameter's type and leaves the offered schema
+              as it was; any other keyword changes it, so on a tool a golden
+              offers it means re-recording the goldens.
 
     Usage:
         @tool(name="query_database", description="Run a read-only SQL query")
@@ -141,6 +178,10 @@ def tool(
         properties: dict[str, Any] = {}
         required: list[str] = []
         for param_name, param in sig.parameters.items():
+            # A call binds by name alone, so *args is never filled and **kwargs
+            # takes any other name: neither is a property the model can send.
+            if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+                continue
             annotation = resolved_hints.get(param_name, param.annotation)
             if annotation in known_types:
                 param_type = known_types[annotation]
@@ -163,6 +204,7 @@ def tool(
             if param.default is inspect.Parameter.empty:
                 required.append(param_name)
 
+        spec = argument_spec(tool_name, sig, resolved_hints, properties, narrow)
         params: dict[str, Any] = {
             "type": "object",
             "properties": properties,
@@ -177,6 +219,7 @@ def tool(
             permissions=permissions or [],
             tier=tier,
             func=func,  # replaced with wrapper below
+            argument_spec=spec,
         )
         _tool_registry[tool_name] = tool_def
 

@@ -20,6 +20,7 @@ import aiohttp
 # :mod:`agents.tools.memory_tools` (RFC 0037 PR 4 — the §C/§D notes-leg
 # wiring pushed this module past the 500-line cap).  Every existing
 # ``from agents.tools.builtin import create_memory_tools`` keeps working.
+from .arg_check import STRING_ONLY
 from .memory_tools import check_auto_reflect, create_memory_tools  # noqa: F401
 from .permissions import PermissionGate
 from .registry import ToolResult, tool
@@ -87,6 +88,9 @@ def _truncate(text: str) -> str:
     ),
     permissions=["filesystem:read"],
     tier="builtin",
+    # RFC 0009 Phase 3: each STRING_ONLY parameter fails inside the tool today
+    # on a value of any other type, so the argument check refuses it first.
+    narrow={"path": STRING_ONLY},
 )
 async def file_read(path: str) -> ToolResult:
     """Read a file from the sandboxed workspace."""
@@ -127,6 +131,7 @@ async def file_read(path: str) -> ToolResult:
     ),
     permissions=["filesystem:write"],
     tier="builtin",
+    narrow={"path": STRING_ONLY, "content": STRING_ONLY},
 )
 async def file_write(path: str, content: str) -> ToolResult:
     """Write content to a file in the sandboxed workspace."""
@@ -182,6 +187,9 @@ def _shell_timeout(requested: int, limit: int | None) -> int:
     ),
     permissions=["shell:exec"],
     tier="builtin",
+    # One exception to "fails today": on Python 3.11 shlex.split(None) reads
+    # the agent's standard input, so a null command is refused on purpose.
+    narrow={"command": STRING_ONLY},
 )
 async def shell_exec(command: str, timeout: int = 30) -> ToolResult:
     """Execute an allowlisted shell command."""
@@ -282,6 +290,7 @@ ALLOWED_HTTP_METHODS = frozenset({"GET", "POST", "PUT", "PATCH"})
     ),
     permissions=["network:http"],
     tier="builtin",
+    narrow={"url": STRING_ONLY, "method": STRING_ONLY},
 )
 async def http_request(url: str, method: str = "GET", body: str = "") -> ToolResult:
     """Make an HTTP request to an allowlisted domain."""

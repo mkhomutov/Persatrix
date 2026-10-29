@@ -129,7 +129,7 @@ confirmed or overturned in its review:
 - **S-3 What an approval row holds.** RFC 0028's columns, plus what the
   RFC 0009 and RFC 0012 plans need to run the queue: a `kind` — `action`,
   `graph_change` or `tie`, with what `actor_id` and `action_hash` mean for
-  each as [RFC 0009 plan G-9](0009-phases-3-4-pr-plan.md#phase-0--open-questions-and-design-points)
+  each as [RFC 0009 plan G-9](0009-phases-3-4-design-pr-plan.md#phase-0--open-questions-and-design-points)
   sets out; a nullable `tie_group`; the held action's payload as JSON,
   cleared when the row settles (G-11); `decided_by` and `decided_at`;
   `delivered_at` for the decision event (G-10); and `created_at`. A partial

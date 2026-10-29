@@ -33,9 +33,9 @@ class Redactor(Protocol):
         Implementations must return a new dict (or the input unchanged) and
         must not raise on well-formed input.  Errors surface as the unredacted
         record being emitted; the structlog chain logs a warning out-of-band,
-        and :func:`agents.memory._facts_audit.emit_audit` mirrors that
-        out-of-band warning for the pre-``configure_logging`` window
-        (PR #340 review S2).
+        and :func:`agents.observability.audit_record.emit_audit_record`
+        mirrors that out-of-band warning for the pre-``configure_logging``
+        window (PR #340 review S2).
 
         Idempotence (PR #340 review N1)
         -------------------------------

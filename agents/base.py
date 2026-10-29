@@ -17,15 +17,13 @@ from .llm_client import (
     BudgetExceededError,
     LLMClient,
     LLMResponse,
-    LLMToolResult,
     StopReason,
-    ToolCall,
 )
 from .llm_types import LLMCallPurpose
 from .memory import MemoryStore, SharedPoolRegistry, budget_to_limit
 from .memory.facade_procedural import procedural_kwargs_from_config
 from .prompt_loader import load_snippet
-from .security import maybe_wrap_tool_content
+from .task_tool_round import _TaskToolRoundMixin
 
 # Task dataclasses live in the leaf module agents.task_types; re-exported
 # here to preserve the historical `from agents.base import TaskInput` paths.
@@ -36,7 +34,6 @@ from .task_types import (
     TaskOutput,
     TaskStatus,
 )
-from .tools.tool_list import offered_tools, refuse_call
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +43,7 @@ __all__ = [
 ]
 
 
-class BaseAgent(ABC):
+class BaseAgent(_TaskToolRoundMixin, ABC):
     """
     Base class for all Persatrix agents.
 
@@ -189,96 +186,6 @@ class BaseAgent(ABC):
             self._memory = None
 
     # ─── Shared LLM Loop ────────────────────────────────────
-
-    def _build_tool_definitions(self) -> list[dict[str, Any]]:
-        """Build normalized tool definitions from the tool registry.
-
-        S-12: filters to only tools in the agent's ``tools`` config; an empty
-        list exposes no tools (e.g. planner agent). The rule lives in
-        :mod:`agents.tools.tool_list`, which ``_execute_tools`` shares.
-        """
-        return [
-            {
-                "name": td.name,
-                "description": td.description,
-                "parameters": td.parameters,
-            }
-            for td in offered_tools(self.agent_id, self.config)
-        ]
-
-    async def _execute_tools(self, tool_calls: list[ToolCall]) -> list[LLMToolResult]:
-        """Execute tool calls sequentially, returning LLM-facing results.
-
-        ISSUE-0151: a tool the agent was not offered (one its ``tools`` list
-        leaves out) gets the same ``Unknown tool`` error as a tool that does
-        not exist and never runs, as personas already do.
-        """
-        results: list[LLMToolResult] = []
-        offered = {td.name: td for td in offered_tools(self.agent_id, self.config)}
-        for call in tool_calls:
-            tool_def = offered.get(call.name)
-            if tool_def is None or tool_def.func is None:
-                results.append(refuse_call(self.agent_id, call))
-                continue
-            try:
-                result = await tool_def.func(**call.input)
-                if result.success:
-                    # SF4: JSON for dict/list so the LLM sees {"k": true} not Python repr.
-                    content = (
-                        json.dumps(result.data)
-                        if isinstance(result.data, (dict, list))
-                        else str(result.data)
-                    )
-                    content = maybe_wrap_tool_content(call.name, content)
-                else:
-                    error_msg = result.error or "Tool failed"
-                    # Include error_type when the @tool wrapper captured an
-                    # exception (e.g. PermissionError, ValueError) so the LLM
-                    # receives structured context about the failure category.
-                    if result.error_type:
-                        content = f"Tool error ({result.error_type}): {error_msg}"
-                    else:
-                        content = error_msg
-                    # A failure can still carry output — shell_exec's stdout
-                    # and stderr on a non-zero exit — and the model needs it
-                    # to see what went wrong.
-                    if result.data:
-                        output = (
-                            json.dumps(result.data)
-                            if isinstance(result.data, (dict, list))
-                            else str(result.data)
-                        )
-                        content += "\n" + maybe_wrap_tool_content(call.name, output)
-                results.append(
-                    LLMToolResult(
-                        tool_call_id=call.id,
-                        content=content,
-                        is_error=not result.success,
-                    )
-                )
-            except PermissionError as exc:
-                # Defense-in-depth: normally unreachable (the @tool wrapper catches
-                # all exceptions), retained for MCP/custom tools that bypass the
-                # decorator. SF-06: log full details, return a generic LLM message.
-                logger.warning("Permission denied in tool %s: %s", call.name, exc)
-                results.append(
-                    LLMToolResult(
-                        tool_call_id=call.id,
-                        content="Permission denied",
-                        is_error=True,
-                    )
-                )
-            except Exception as exc:
-                # Defense-in-depth: same rationale as PermissionError above.
-                logger.warning("Unexpected error in tool %s: %s", call.name, exc)
-                results.append(
-                    LLMToolResult(
-                        tool_call_id=call.id,
-                        content="Internal tool error",
-                        is_error=True,
-                    )
-                )
-        return results
 
     async def _inject_memories(
         self,
