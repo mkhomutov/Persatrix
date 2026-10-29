@@ -225,31 +225,46 @@ default this PR's review confirms or overturns.
 - **Where.** The check is `agents/tools/arg_check.py`, not `registry.py`,
   which keeps room for PR 4's output cap and PR 15's tag; `registry.py`
   reads each tool's signature once into an `ArgumentSpec`.
-  `tool_list.admit_call` replaces the lookup at both call sites, so
-  `base.py` stays at 505 lines, and RFC 0028 PR 10's seat goes between
-  the admission and the run, on the checked arguments. A check that itself
-  fails refuses the call: running it unchecked would give the seat a value
-  nobody checked.
+  `tool_list.admit_call` replaces the lookup at both call sites, and
+  RFC 0028 PR 10's seat goes between the admission and the run, on the
+  checked arguments. Since the PR edits `base.py` at 505 lines, it first
+  moves the task agent's tool round (`_build_tool_definitions`,
+  `_execute_tools`) unchanged into `agents/task_tool_round.py`, the seam
+  RFC 0028 PR 6 named, as personas have `tool_round.py`. A check that
+  itself fails refuses the call: running it unchecked would give the seat a
+  value nobody checked.
 - **Against what.** Missing and unknown arguments are read off the
-  signature, not the generated schema, which admits unknown keys and
-  offers `**kwargs` as a required string; a tool with `**kwargs` takes any
-  name. `jsonschema` checks each parameter's narrowing.
+  signature, not the generated schema, which admits unknown keys; a tool
+  with `**kwargs` takes any name. The schema no longer offers `*args` or
+  `**kwargs` as a required string: a call binds by name alone, so the model
+  was told to send what the check refuses. No built-in has either, so no
+  golden changes. `jsonschema` checks each parameter's narrowing, and only
+  on a tool that narrows one.
 - **Type.** A declared type is enforced only on a parameter the tool
   narrows (`@tool(narrow=...)`), since an off-type value runs today on five
   of the nine built-ins: a `shell_exec` timeout of 5.5, a falsy `tags`, a
   `recall_notes` limit of `true`. A narrowing is added to the offered
   schema, and a narrowed parameter is checked against that whole schema, its
   declared type included, so the model is told what is checked; a narrowed
-  number must also be finite. The keywords are the ones every provider takes,
-  Gemini's subset being the narrowest. The built-ins narrow eleven string
+  number must also be finite. A narrowed parameter's null is checked rather
+  than replaced by its default, so a null that failed inside the tool is
+  refused, unless the annotation takes `None`, when it runs as before. The
+  keywords are the ones every provider takes, Gemini's subset being the
+  narrowest; a narrowing that cannot work fails when the tool is defined: a
+  keyword on a type it does not limit, an empty enum, a bound that is not
+  finite, a minimum over its maximum. The built-ins narrow eleven string
   parameters where every off-type value fails today, which a test pins by
   running each tool without the check; these restate the type, so no offered
   schema or golden changes.
 - **One form.** An integer parameter given canonical integer text (`"30"`,
   never `" 30"` or `"030"`) or a whole float gets the int; a bool, a
   fraction, NaN and infinity pass unchanged, so RFC 0028 PR 10's hash must
-  handle those itself. A null for an optional parameter means its default,
-  unless the annotation takes `None`. Defaults are not filled in, and text
+  handle those itself. A number parameter given an int or integer text the
+  float holds exactly, or decimal text that reads back the same (`"0.5"`,
+  never `"0.50"` or `"1e5"`), gets the float, so Anthropic's `1` and
+  Gemini's `1.0` are one call; a bool passes unchanged. A null for an
+  optional parameter means its default, unless the annotation takes `None`
+  or the tool narrows the parameter. Defaults are not filled in, and text
   passes exactly as sent (`http_request` upper-cases its own method), so
   PR 10's hash binds defaults itself, and PR 15's rule for a writing method
   compares as the tool does.
@@ -257,9 +272,15 @@ default this PR's review confirms or overturns.
   command read the agent's standard input; its narrowing refuses it.
 - **Refusal and audit.** The model gets JSON with
   `tool_argument_validation_error` and lists of the missing, unknown and
-  invalid arguments; the audit line is INFO on `agents.tools.audit`. Neither
-  carries a value, and a model-chosen name is escaped where it does not
-  print. A refused call writes no tool span or metric.
+  invalid arguments; the audit line is INFO on `agents.tools.audit`,
+  written through the helper the fact tier's audit uses
+  (`agents/observability/audit_record.py`). Neither carries a value, and the
+  audit line counts the unknown names instead of listing them, since the
+  model chooses a name as freely as a value; the reply passes each through
+  `bounded`, the one log-injection defence. A refused call is recorded as a
+  failed tool call, an `agent.tool.execute` span with an error status and
+  `agent.tool.invocations` with `tool.success=false`, as the wrapper
+  recorded the `TypeError` it replaces.
 
 **Review findings** (PR 3):
 
@@ -287,6 +308,20 @@ default this PR's review confirms or overturns.
 | F-20 | Low | RFC 0009 had no dated note on how PR 3 meets its amendment, and G-2 no pointer to the exception | Fixed in-PR |
 | F-21 | Info | The note to RFC 0028 did not say defaults are not filled in, nor that text passes as sent | Fixed in-PR |
 | F-22 | Info | The pin test sends no falsy value of another type | Noted: verification found each fails through the same branch as one the test sends |
+| F-23 | Medium | A null for an optional narrowed parameter was replaced by its default before the narrowing ran, so `http_request` with a null method, which failed inside the tool, sent a live GET; the pin test ran the tools without the check only | Fixed in-PR: a narrowed parameter's null is checked, and a test runs the check on every off-type value of every narrowed built-in |
+| F-24 | Low | A narrowed parameter annotated to take `None` refused a null the tool ran on before | Fixed in-PR: such a null passes the narrowing unchecked |
+| F-25 | Low | The generated schema still offered `*args` and `**kwargs` as required strings, so the model was told to send what the check refuses | Fixed in-PR: neither is offered; no built-in has either, so no golden changes |
+| F-26 | Low | A narrowing that cannot work passed the definition-time check: a NaN or infinite bound (which also breaks the request's JSON), an enum that is not a list (a `TypeError`) or is empty, a length on a number, a bound on text | Fixed in-PR: each raises `ValueError`, and so does a minimum over its maximum |
+| F-27 | Low | Only integer parameters had one form: a number parameter kept `1` and `1.0`, and `"0.5"` and `0.5`, apart, so RFC 0028's hash would see two calls | Fixed in-PR: a number parameter gets the float where the conversion is lossless |
+| F-28 | Low | A refused call recorded no tool span or metric, though the `TypeError` it replaces did, so a tool failure rate stopped counting it | Fixed in-PR: a failed `agent.tool.execute` span and `agent.tool.invocations{tool.success=false}`, also for a call refused because the check itself failed |
+| F-29 | Low | Unknown argument names, which the model chooses, went verbatim into the audit line, so a name could carry a secret into the log stream | Fixed in-PR: the audit line counts them; the model's reply, which repeats what the model sent, still names them |
+| F-30 | Low | The tool audit helper copied the fact tier's redact-then-log body without its re-entry guard | Fixed in-PR: one helper, `agents/observability/audit_record.py`, guard included, writes both |
+| F-31 | Info | Unknown names had an escaper of their own beside `agents/sub_agents/_log_safety.bounded`, the single log-injection defence | Fixed in-PR: `bounded` replaces every character that does not print, and the check calls it |
+| F-32 | Info | The narrowing pass ran on every call, even for a tool with no narrowing, and `ArgumentSpec.narrowed` was read only by tests | Fixed in-PR: the pass runs only over narrowed parameters |
+| F-33 | Info | The wording for a broken keyword was split between a table and inline branches, with a fallback that could not run | Fixed in-PR: one table for all six keywords, their types included |
+| F-34 | Low | The PR edited `agents/base.py` at 505 lines without splitting it, against the size rule | Fixed in-PR: the task agent's tool round moved unchanged to `agents/task_tool_round.py`, RFC 0028 PR 6's seam; `base.py` is 412 lines |
+| F-35 | Info | The PR description ended with an assistant attribution line, which the repository's rules forbid in PRs and commits | Fixed in-PR: removed from the description |
+| F-36 | Info | The head branch is not the planned `feature/v040-rfc0009-arg-schemas` | Noted: the session that opened the PR assigned its head branch, which a PR cannot change; the row records the planned name, as for #941 and #1063, and the squash commit carries no branch name |
 
 ### PR 4 — `feature/v040-rfc0009-resource-limits`
 
@@ -524,7 +559,7 @@ the closeout would take it past its cap.
 
 | File | Lines now | Plan |
 |------|-----------|------|
-| `agents/base.py` | 505 | PR 3 adds one call; RFC 0028 PR 6 moves `_execute_tools` out first, and whichever merges second rebases |
+| `agents/base.py` | 412 | PR 3 moved the task agent's tool round, unchanged, to `agents/task_tool_round.py` (121 lines) |
 | `internal/server/server.go` | 500 | PR 12 registers its routes from their own file |
 | `agents/server_servicers.py` | 502 | PR 14 splits at a real seam first |
 | `cmd/orchestrator/main.go` | 499 | PR 6 reads its setting beside `cmd/orchestrator/ratelimit.go`, not here |

@@ -67,6 +67,21 @@ def _record_tool_metrics(
     inst.tool_duration.record(duration_ms, attributes=attrs)
 
 
+def record_refused_call(*, agent_id: str, tool_name: str, reason: str) -> None:
+    """Record a call refused before its tool ran as a failed tool call.
+
+    The call never reaches the ``@tool`` wrapper, which records the span and
+    metrics of every call it runs, so this records them in its place: a
+    failure rate read off ``agent.tool.invocations`` still counts a call the
+    argument check refused (RFC 0009 Phase 3). *reason* is the span status.
+    """
+    with _tracer.start_as_current_span(
+        TOOL_EXECUTE_SPAN, attributes={"tool.name": tool_name, "tool.success": False},
+    ) as span:
+        span.set_status(Status(StatusCode.ERROR, reason))
+    _record_tool_metrics(agent_id=agent_id, tool_name=tool_name, success=False, duration_ms=0.0)
+
+
 @dataclass
 class ToolResult:
     """Result from a tool invocation."""
@@ -124,7 +139,10 @@ def tool(
               checked against that whole schema, its declared type included,
               so ``{"limit": {"minimum": 1}}`` refuses ``false`` as well as
               ``0``. An un-narrowed parameter's value of another type is passed
-              to the tool as sent. :data:`agents.tools.arg_check.STRING_ONLY`
+              to the tool as sent. A narrowing that cannot work (a keyword
+              the parameter's type ignores, an empty enum, a bound that is
+              not finite, a minimum over its maximum) raises ``ValueError``
+              when the tool is defined. :data:`agents.tools.arg_check.STRING_ONLY`
               restates a text parameter's type and leaves the offered schema
               as it was; any other keyword changes it, so on a tool a golden
               offers it means re-recording the goldens.
@@ -160,6 +178,10 @@ def tool(
         properties: dict[str, Any] = {}
         required: list[str] = []
         for param_name, param in sig.parameters.items():
+            # A call binds by name alone, so *args is never filled and **kwargs
+            # takes any other name: neither is a property the model can send.
+            if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+                continue
             annotation = resolved_hints.get(param_name, param.annotation)
             if annotation in known_types:
                 param_type = known_types[annotation]

@@ -140,7 +140,8 @@ class TestMissingAndUnknown:
 
         assert isinstance(refusal, ArgumentRefusal)
         unknown = json.loads(refusal.content())["unknown"]
-        assert len(unknown) == 16 and all(len(n) == 64 for n in unknown)
+        assert len(unknown) == 16
+        assert all(n == n[:64] + "… (truncated)" and len(n) == 77 for n in unknown)
         assert refusal.audit_fields()["unknown_argument_count"] == 100
         assert "... and 84 more" in refusal.detail
 
@@ -369,14 +370,13 @@ class TestRefusalCarriesNoValue:
             {"argument": "path", "rule": "type", "got": "array"},
         ]
 
-    def test_a_name_that_does_not_print_is_escaped_everywhere(self) -> None:
-        # The model chose the name; it reaches a log line, the log shipper and
-        # a terminal as well as the model's reply.
+    def test_a_name_that_does_not_print_is_replaced(self) -> None:
+        # The model chose the name, which its reply repeats; it goes through
+        # the one log-injection defence, agents.sub_agents._log_safety.bounded.
         _register_shapes()
         refusal = _check("plain", {"a": "x", "x\x1b[31m\n\u202e\ud800": 1})
 
         assert isinstance(refusal, ArgumentRefusal)
-        [shown] = refusal.audit_fields()["unknown_arguments"]
-        assert shown == "x\\x1b[31m\\n\\u202e\\ud800"
-        assert json.loads(refusal.content())["unknown"] == [shown]
+        assert json.loads(refusal.content())["unknown"] == ["x\u2424[31m\u2424\u2424\u2424"]
+        assert "unknown_arguments" not in refusal.audit_fields()
         record_to_proto({"message": "tool.arg_invalid", **refusal.audit_fields()})

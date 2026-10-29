@@ -1,29 +1,38 @@
 """Both places a tool runs check its arguments first (RFC 0009 Phase 3).
 
 A tool runs in two places: a task agent's ``_execute_tools``
-(``agents/base.py``) and a persona's (``agents/persona_runtime/tool_round.py``).
-Both now ask :func:`agents.tools.tool_list.admit_call`, so a call the check
-refuses never runs on either path, the model gets a structured
-``tool_argument_validation_error``, and one ``tool.arg_invalid`` audit line
-is written. The model is mocked at the ``LLMClient`` boundary; no network.
+(``agents/task_tool_round.py``) and a persona's
+(``agents/persona_runtime/tool_round.py``). Both now ask
+:func:`agents.tools.tool_list.admit_call`, so a call the check refuses never
+runs on either path, the model gets a structured
+``tool_argument_validation_error``, the call counts as a failed tool call,
+and one ``tool.arg_invalid`` audit line is written. The model is mocked at
+the ``LLMClient`` boundary; no network.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
 from typing import Any
 from unittest.mock import patch
 
 import pytest
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from opentelemetry.trace import StatusCode
 
 from agents.llm_client import LLMToolResult, ToolCall
 from agents.observability import logging as obs_logging
 from agents.observability.redact import NoopRedactor
+from agents.observability.spans import TOOL_EXECUTE_SPAN
 from agents.persona import create_persona_agent
 from agents.task_agent import TaskAgent
 from agents.tools.registry import ToolDefinition, ToolResult, clear_registry, get_tool, tool
+from agents.tools.tool_list import admit_call
 
 from ._persona_test_helpers import _PERSONA_CONFIG, _make_client
 
@@ -38,6 +47,26 @@ def _clean_registry():
     yield
     clear_registry()
     obs_logging.set_redactor(NoopRedactor())
+
+
+@pytest.fixture
+def exporter() -> Iterator[InMemorySpanExporter]:
+    """An in-memory span exporter on the active tracer provider."""
+    provider = trace.get_tracer_provider()
+    if not isinstance(provider, TracerProvider):
+        provider = TracerProvider()
+        trace.set_tracer_provider(provider)
+    exp = InMemorySpanExporter()
+    processor = SimpleSpanProcessor(exp)
+    provider.add_span_processor(processor)
+    yield exp
+    processor.shutdown()
+
+
+def _probe() -> ToolDefinition:
+    td = get_tool("probe")
+    assert td is not None
+    return td
 
 
 def _audit_record(caplog: pytest.LogCaptureFixture) -> logging.LogRecord:
@@ -150,7 +179,6 @@ class TestOrderAndAudit:
         assert fields["agent_id"] in ("code-reviewer", "ember-owl")
         assert fields["input_type"] == "object"
         assert fields["missing_arguments"] == ["command"]
-        assert fields["unknown_arguments"] == ["cmd"]
         assert fields["unknown_argument_count"] == 1
         assert fields["invalid_arguments"] == []
         extra = {k: v for k, v in fields.items() if k not in _STANDARD_RECORD_KEYS}
@@ -160,18 +188,92 @@ class TestOrderAndAudit:
     async def test_the_redactor_runs_over_the_audit_line(
         self, run: Run, caplog: pytest.LogCaptureFixture,
     ) -> None:
-        # The model chose the unknown names, so the operator's redactor sees them.
         class _Mask:
             def redact(self, record: dict[str, Any]) -> dict[str, Any]:
-                return {**record, "unknown_arguments": ["[REDACTED]"]}
+                return {**record, "tool_call_id": "[REDACTED]"}
 
         _register([])
         obs_logging.set_redactor(_Mask())
 
         with caplog.at_level(logging.INFO, logger="agents.tools.audit"):
-            await run([ToolCall(id="c1", name="probe", input={"sk-live-1": 1})])
+            await run([ToolCall(id="c1", name="probe", input={"cmd": 1})])
 
-        assert _audit_record(caplog).__dict__["unknown_arguments"] == ["[REDACTED]"]
+        assert _audit_record(caplog).__dict__["tool_call_id"] == "[REDACTED]"
+
+    async def test_an_unknown_name_stays_out_of_the_audit_line(
+        self, run: Run, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # The model chooses a name as freely as a value, so a name can carry
+        # what a value would; the audit line counts the names and the model,
+        # which sent them, is the one told which they were.
+        _register([])
+
+        with caplog.at_level(logging.INFO, logger="agents.tools.audit"):
+            [result] = await run([ToolCall(
+                id="c1", name="probe", input={"command": "ls", "sk-live-abc123": 1},
+            )])
+
+        fields = _audit_record(caplog).__dict__
+        extra = {k: v for k, v in fields.items() if k not in _STANDARD_RECORD_KEYS}
+        assert "sk-live" not in json.dumps(extra, default=str)
+        assert fields["unknown_argument_count"] == 1
+        assert _body(result)["unknown"] == ["sk-live-abc123"]
+
+    async def test_a_redactor_fallback_that_logs_an_audit_line_does_not_recurse(
+        self, run: Run, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # A handler that audits its own records re-enters the audit helper
+        # from the fallback WARNING; the redactor must not run again there.
+        calls: list[int] = []
+
+        class _Boom:
+            def redact(self, record: dict[str, Any]) -> dict[str, Any]:
+                calls.append(1)
+                raise RuntimeError("boom")
+
+        class _Reenter(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                if record.levelno == logging.WARNING:
+                    admit_call("ember-owl", {"probe": _probe()}, ToolCall(
+                        id="c2", name="probe", input={"cmd": "ls"},
+                    ))
+
+        _register([])
+        obs_logging.set_redactor(_Boom())
+        handler = _Reenter()
+        audit_logger = logging.getLogger("agents.tools.audit")
+        audit_logger.addHandler(handler)
+        try:
+            with caplog.at_level(logging.INFO, logger="agents.tools.audit"):
+                await run([ToolCall(id="c1", name="probe", input={"cmd": "ls"})])
+        finally:
+            audit_logger.removeHandler(handler)
+
+        assert calls == [1]
+        infos = [r for r in caplog.records
+                 if r.name == "agents.tools.audit" and r.levelno == logging.INFO]
+        assert len(infos) == 2
+
+    async def test_a_refusal_records_a_failed_tool_span_and_metric(
+        self, run: Run, exporter: InMemorySpanExporter,
+    ) -> None:
+        # A misspelt argument used to fail inside the tool's wrapper, which
+        # recorded the failure; the tool failure rate a dashboard reads must
+        # still count the call now that it is refused before the tool runs.
+        seen: list[dict[str, Any]] = []
+        _register(seen)
+
+        with patch("agents.tools.registry._record_tool_metrics") as metrics:
+            await run([ToolCall(id="c1", name="probe", input={"cmd": "ls"})])
+
+        assert seen == []
+        [span] = [s for s in exporter.get_finished_spans() if s.name == TOOL_EXECUTE_SPAN]
+        assert span.attributes is not None
+        assert (span.attributes["tool.name"], span.attributes["tool.success"]) == ("probe", False)
+        assert span.status.status_code is StatusCode.ERROR
+        metrics.assert_called_once()
+        assert metrics.call_args.kwargs["tool_name"] == "probe"
+        assert metrics.call_args.kwargs["success"] is False
 
     async def test_a_redactor_that_raises_still_refuses_the_call(
         self, run: Run, caplog: pytest.LogCaptureFixture,
@@ -201,11 +303,15 @@ class TestOrderAndAudit:
         seen: list[dict[str, Any]] = []
         _register(seen)
 
-        with patch("agents.tools.tool_list.validate_arguments", side_effect=RuntimeError):
+        with (
+            patch("agents.tools.tool_list.validate_arguments", side_effect=RuntimeError),
+            patch("agents.tools.registry._record_tool_metrics") as metrics,
+        ):
             [result] = await run([ToolCall(id="c1", name="probe", input={"command": "ls"})])
 
         assert (result.content, result.is_error) == ("Internal tool error", True)
         assert seen == []
+        assert metrics.call_args.kwargs["success"] is False
         [record] = [r for r in caplog.records if r.name == "agents.tools.tool_list"]
         assert record.levelno == logging.ERROR and record.exc_info is not None
         assert "'probe'" in record.getMessage()

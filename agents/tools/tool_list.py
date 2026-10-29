@@ -16,10 +16,13 @@ would otherwise record that the model reached for a tool it was not given.
 Both kinds of agent run a call only once :func:`admit_call` admits it: the
 tool is one they offer, and its arguments pass the check in
 :mod:`agents.tools.arg_check` (RFC 0009 Phase 3). A call whose arguments are
-refused gets a structured ``tool_argument_validation_error`` and a
-``tool.arg_invalid`` audit line instead. What the tool receives is the
-checked arguments, so RFC 0028 PR 10's pre-tool seat, which will sit between
-the admission and the run, will see them too.
+refused gets a structured ``tool_argument_validation_error`` instead, and is
+recorded as a failed tool call (span and metrics) and in a
+``tool.arg_invalid`` audit line. As the RFC 0009 Phases 3–4 plan's G-4 says,
+that line is a structured log record on ``agents.tools.audit``: it reaches
+the orchestrator's log stream but not its checksummed audit chain. What the
+tool receives is the checked arguments, so RFC 0028 PR 10's pre-tool seat,
+which will sit between the admission and the run, will see them too.
 """
 
 from __future__ import annotations
@@ -29,13 +32,14 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, NamedTuple
 
 from ..llm_types import LLMToolResult, ToolCall
-from ._tool_audit import emit_tool_audit
+from ..observability.audit_record import emit_audit_record
 from .arg_check import ArgumentRefusal, validate_arguments
-from .registry import ToolDefinition, ToolResult, list_tools
+from .registry import ToolDefinition, ToolResult, list_tools, record_refused_call
 
 __all__ = ["AdmittedCall", "admit_call", "offered_tools", "refuse_call"]
 
 logger = logging.getLogger(__name__)
+_audit_logger = logging.getLogger("agents.tools.audit")
 
 
 def _listed_names(agent_id: str, config: Mapping[str, Any]) -> frozenset[str]:
@@ -132,10 +136,14 @@ def admit_call(
             "Agent %r could not check the arguments of a call to tool %r, "
             "so the call did not run", agent_id, call.name,
         )
+        record_refused_call(agent_id=agent_id, tool_name=call.name, reason="argument_check_error")
         return LLMToolResult(tool_call_id=call.id, content="Internal tool error", is_error=True)
     if isinstance(checked, ArgumentRefusal):
-        emit_tool_audit(
-            "tool.arg_invalid", agent_id=agent_id, tool_name=call.name,
+        record_refused_call(
+            agent_id=agent_id, tool_name=call.name, reason="tool_argument_validation_error",
+        )
+        emit_audit_record(
+            _audit_logger, "tool.arg_invalid", agent_id=agent_id, tool_name=call.name,
             tool_call_id=call.id, **checked.audit_fields(),
         )
         return LLMToolResult(tool_call_id=call.id, content=checked.content(), is_error=True)

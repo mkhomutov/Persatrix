@@ -13,6 +13,7 @@ golden replays unchanged.
 from __future__ import annotations
 
 import importlib
+import json
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -29,6 +30,22 @@ from agents.tools.sandbox import PathValidator
 from agents.tools.tool_list import AdmittedCall, admit_call
 
 _OFF_TYPE: list[Any] = [30, 30.0, True, ["x"], {"k": "v"}, None]
+
+# Each narrowed built-in parameter, with arguments the tool runs on; a note id
+# of None is replaced by a stored note's id before the tool runs.
+_NARROWED = [
+    ("file_read", "path", {"path": "{ws}/a.txt"}),
+    ("file_write", "path", {"path": "{ws}/b.txt", "content": "x"}),
+    ("file_write", "content", {"path": "{ws}/b.txt", "content": "x"}),
+    ("shell_exec", "command", {"command": "echo hi"}),
+    ("http_request", "url", {"url": "https://api.example.com/x"}),
+    ("http_request", "method", {"url": "https://api.example.com/x", "method": "GET"}),
+    ("store_note", "topic", {"topic": "t", "content": "c"}),
+    ("store_note", "content", {"topic": "t", "content": "c"}),
+    ("update_note", "note_id", {"note_id": None, "content": "c"}),
+    ("update_note", "content", {"note_id": None, "content": "c"}),
+    ("delete_note", "note_id", {"note_id": None}),
+]
 
 
 @pytest.fixture(autouse=True)
@@ -83,22 +100,7 @@ async def _a_note_id() -> str:
 
 
 class TestNarrowedValuesFailToday:
-    @pytest.mark.parametrize(
-        ("name", "parameter", "valid"),
-        [
-            ("file_read", "path", {"path": "{ws}/a.txt"}),
-            ("file_write", "path", {"path": "{ws}/b.txt", "content": "x"}),
-            ("file_write", "content", {"path": "{ws}/b.txt", "content": "x"}),
-            ("shell_exec", "command", {"command": "echo hi"}),
-            ("http_request", "url", {"url": "https://api.example.com/x"}),
-            ("http_request", "method", {"url": "https://api.example.com/x", "method": "GET"}),
-            ("store_note", "topic", {"topic": "t", "content": "c"}),
-            ("store_note", "content", {"topic": "t", "content": "c"}),
-            ("update_note", "note_id", {"note_id": None, "content": "c"}),
-            ("update_note", "content", {"note_id": None, "content": "c"}),
-            ("delete_note", "note_id", {"note_id": None}),
-        ],
-    )
+    @pytest.mark.parametrize(("name", "parameter", "valid"), _NARROWED)
     async def test_every_off_type_value_fails_without_the_check(
         self, tmp_path: Path, name: str, parameter: str, valid: dict[str, Any],
     ) -> None:
@@ -119,6 +121,22 @@ class TestNarrowedValuesFailToday:
                     valid = {**valid, "note_id": await _a_note_id()}
                 result = await td.func(**{**valid, parameter: value})  # type: ignore[misc]
                 assert result.success is False, (name, parameter, value)
+
+
+    @pytest.mark.parametrize(("name", "parameter", "valid"), _NARROWED)
+    def test_the_check_refuses_every_off_type_value(
+        self, name: str, parameter: str, valid: dict[str, Any],
+    ) -> None:
+        # The other half of the pin: each value that fails inside the tool is
+        # refused by the check, a null for an optional parameter included.
+        td = _def(name)
+        valid = {key: "n1" if value is None else value for key, value in valid.items()}
+        for value in _OFF_TYPE:
+            call = ToolCall(id="c1", name=name, input={**valid, parameter: value})
+            refused = admit_call("t", {name: td}, call)
+            assert isinstance(refused, LLMToolResult), (name, parameter, value)
+            invalid = json.loads(refused.content)["invalid"]
+            assert [i["argument"] for i in invalid] == [parameter], (name, parameter, value)
 
 
 class TestToolRulesStayInPlace:

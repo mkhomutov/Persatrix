@@ -55,6 +55,13 @@ from __future__ import annotations
 #
 # TAB (0x09) is included in the strip set because tab-separated log
 # formats would otherwise allow column injection.
+#
+# RFC 0009 Phase 3 (the tool argument check, whose unknown argument names
+# the model chooses) widened the strip past C0 and DEL to every character
+# ``str.isprintable`` rejects: C1 controls (``\x85`` NEL, ``\x9b`` CSI),
+# line and paragraph separators, bidi marks and overrides that make a log
+# line read backwards, and lone surrogates no UTF-8 encoder accepts. Each is
+# replaced one for one, so the length cap below counts the same characters.
 _CTRL_REPLACEMENT = "\u2424"
 _CTRL_TRANSLATION = str.maketrans(
     {c: _CTRL_REPLACEMENT for c in list(range(0x20)) + [0x7F]}
@@ -80,10 +87,12 @@ def bounded(text: object, *, cap: int = _DELEGATION_FAILURE_MESSAGE_CAP) -> str:
     orchestrator logs (LLM01 / OWASP A09 / CWE-117):
 
     1. **Control-character strip** — every C0 control character
-       (0x00-0x1F) plus DEL (0x7F) is replaced with
+       (0x00-0x1F) plus DEL (0x7F), and every other character
+       ``str.isprintable`` rejects, is replaced with
        :data:`_CTRL_REPLACEMENT`.  This neutralises forged-line
-       injection (`\\n`, `\\r`), ANSI escape sequences (`\\x1b[...`),
-       NUL bytes, and tab-column injection in TSV-style log pipelines.
+       injection (`\\n`, `\\r`, U+2028), ANSI escape sequences
+       (`\\x1b[...`, C1 CSI), NUL bytes, tab-column injection in TSV-style
+       log pipelines, bidi overrides and lone surrogates.
     2. **Length cap** — strings longer than *cap* are truncated to the
        first *cap* characters followed by the canonical marker
        ``"… (truncated)"``.
@@ -97,10 +106,13 @@ def bounded(text: object, *, cap: int = _DELEGATION_FAILURE_MESSAGE_CAP) -> str:
     step after round-2's volume cap left the injection vector open.
     """
     s = text if isinstance(text, str) else str(text)
-    s = s.translate(_CTRL_TRANSLATION)
+    # Cut first: the strip is one character for one, and the text may be long.
+    head = s[:cap].translate(_CTRL_TRANSLATION)
+    if not head.isprintable():
+        head = "".join(c if c.isprintable() else _CTRL_REPLACEMENT for c in head)
     if len(s) <= cap:
-        return s
-    return s[:cap] + "… (truncated)"
+        return head
+    return head + "… (truncated)"
 
 
 # Backwards-compat private alias retained for the duration of the v0.3.x
