@@ -11,6 +11,11 @@ import (
 	"go.uber.org/zap"
 )
 
+// DefaultUnauthenticatedID is the rate limiter's bucket for callers that
+// name no agent, unless [RateLimitConfig] sets another. No agent token is
+// issued for it.
+const DefaultUnauthenticatedID = "anonymous"
+
 // RateLimitConfig configures a [RateLimiter].
 //
 // CallsPerWindow is the maximum number of admitted calls per agent within
@@ -24,7 +29,7 @@ import (
 //
 // Auditor is optional; when nil the limiter still enforces but does not
 // emit audit events. UnauthenticatedID is the bucket key used for empty
-// agent IDs; defaults to `anonymous`.
+// agent IDs; defaults to [DefaultUnauthenticatedID].
 type RateLimitConfig struct {
 	CallsPerWindow    int
 	WindowSeconds     int
@@ -90,7 +95,7 @@ func NewRateLimiter(cfg RateLimitConfig) (*RateLimiter, error) {
 		cfg.Logger = zap.NewNop()
 	}
 	if cfg.UnauthenticatedID == "" {
-		cfg.UnauthenticatedID = "anonymous"
+		cfg.UnauthenticatedID = DefaultUnauthenticatedID
 	}
 	return &RateLimiter{
 		cfg:      cfg,

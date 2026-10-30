@@ -11,7 +11,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
-	"math"
+	"hash"
 	"strings"
 	"sync"
 	"time"
@@ -26,23 +26,31 @@ const (
 	// apart, and makes a token easy to spot in text such as a pasted log.
 	agentTokenPrefix = "agt1."
 
-	agentTokenKeySize   = 32 // an HMAC-SHA256 key
-	agentTokenNonceSize = 16
+	agentTokenKeySize = 32 // an HMAC-SHA256 key
 
-	// agentTokenFixedSize is the fields before the agent ID: the issue time
-	// and the expiry, each 8 bytes of Unix nanoseconds, then the nonce.
-	agentTokenFixedSize = 8 + 8 + agentTokenNonceSize
+	// agentTokenFixedSize is the fields before the agent ID, 8 bytes each:
+	// the issue time and the expiry by the time of day, the expiry by the
+	// issuer's running clock, and the serial number.
+	agentTokenFixedSize = 4 * 8
 )
 
 // agentTokenSweepFloor is how many agents the issuer holds before Issue
 // first forgets the ones whose tokens have all expired.
 const agentTokenSweepFloor = 64
 
-// maxAgentTokenLen is the longest token Issue makes, the one for an ID of
-// [MaxAgentIDLen]. Check refuses anything longer before doing any work.
-var maxAgentTokenLen = len(agentTokenPrefix) +
-	base64.RawURLEncoding.EncodedLen(agentTokenFixedSize+MaxAgentIDLen) + 1 +
-	base64.RawURLEncoding.EncodedLen(sha256.Size)
+// agentTokenEncoding writes both parts of a token. Strict decoding refuses
+// a last character with spare bits set, so only one spelling of a signature
+// decodes.
+var agentTokenEncoding = base64.RawURLEncoding.Strict()
+
+var (
+	// agentTokenSignatureLen is the length of a token's signature part.
+	agentTokenSignatureLen = agentTokenEncoding.EncodedLen(sha256.Size)
+	// maxAgentTokenLen is the longest token Issue makes, the one for an ID
+	// of [MaxAgentIDLen]. Check refuses anything longer before any work.
+	maxAgentTokenLen = len(agentTokenPrefix) +
+		agentTokenEncoding.EncodedLen(agentTokenFixedSize+MaxAgentIDLen) + 1 + agentTokenSignatureLen
+)
 
 // Why a token is refused. They stay apart for the audit line; what a caller
 // is told is the server's choice.
@@ -53,25 +61,22 @@ var (
 	// ErrAgentTokenExpired: the token is past its [AgentTokenTTL].
 	ErrAgentTokenExpired = errors.New("security: agent token has expired")
 	// ErrAgentTokenRevoked: the agent's tokens were revoked after this one
-	// was issued, as when the agent deregistered.
+	// was issued, as when the agent deregistered, or it was issued a newer
+	// one.
 	ErrAgentTokenRevoked = errors.New("security: agent token has been revoked")
 	// ErrAgentTokenAgentID: Issue was asked for an ID no agent can have:
-	// empty, off the agent ID pattern, or over 256 bytes.
-	ErrAgentTokenAgentID = errors.New("security: an agent token's agent ID must match ^[a-z0-9][a-z0-9-]*[a-z0-9]$ and be at most 256 bytes")
+	// empty, one the REST and gRPC hooks refuse as an [AgentIDHeader] (see
+	// validAgentID), or one the security layer gives callers that are not
+	// agents ([ConsoleAgentID], [DefaultUnauthenticatedID]).
+	ErrAgentTokenAgentID = errors.New("security: no agent token can be issued for this agent ID")
 )
 
 // AgentTokenClaims is what a token says: which agent it was issued to, and
-// when it was issued and expires.
+// when it was issued and expires by the orchestrator's clock.
 type AgentTokenClaims struct {
 	AgentID   string
 	IssuedAt  time.Time
 	ExpiresAt time.Time
-}
-
-// AgentTokenConfig configures [NewAgentTokenIssuer].
-type AgentTokenConfig struct {
-	// Now is the clock; nil means [time.Now]. Tests set their own.
-	Now func() time.Time
 }
 
 // AgentTokenIssuer issues agent tokens, checks them and revokes them. An
@@ -84,8 +89,8 @@ type AgentTokenConfig struct {
 //
 //	agt1.<fields>.<signature>
 //
-// The fields are the agent's ID, when the token was issued, when it expires
-// and a random nonce. The signature is HMAC-SHA256 over everything before it,
+// The fields are the agent's ID, when the token was issued and expires, and
+// its serial number. The signature is HMAC-SHA256 over everything before it,
 // under a key the issuer makes from crypto/rand and never stores or hands
 // out. So nobody without the key can make a token or change one, and a
 // restart stops every earlier token from working. Both parts are base64url
@@ -93,28 +98,33 @@ type AgentTokenConfig struct {
 // A token lists nothing the agent may do: nothing in v0.4.0 would read such
 // a list.
 //
-// The issuer keeps its own time: the time of day when it was made, plus the
-// time that has passed since (see [AgentTokenIssuer.clock]). So a token
-// works for 24 hours however a time sync moves the computer's clock, and its
-// IssuedAt and ExpiresAt are dates counted from when the issuer was made.
+// A token stops working when 24 hours have passed on either of two clocks
+// (see [agentTokenClock]): the time of day, which a time sync can step but
+// which counts the hours a machine sleeps, and the time the issuer has been
+// running, which no time sync moves. So stepping the clock back cannot make
+// a token last longer than 24 hours, and a machine's sleep cannot either.
+// Its IssuedAt and ExpiresAt are times of day, as an audit line's are.
 //
-// Revocations are kept in this process only, since v0.4.0 runs one
-// orchestrator: [AgentTokenIssuer.Revoke] stops every token one agent holds,
-// and a restart stops all of them by making a new key.
+// Revocation goes by serial number, not by time: an agent's tokens up to a
+// number are refused. Issuing a token refuses every earlier one the agent
+// holds, and [AgentTokenIssuer.Revoke] refuses the latest too. Revocations
+// are kept in this process only, since v0.4.0 runs one orchestrator, and a
+// restart stops every token by making a new key.
 type AgentTokenIssuer struct {
-	// key signs every token. It sits behind a pointer, so printing the
-	// issuer, or a value that holds one, shows an address rather than the
-	// key; no method returns it.
-	key   *[agentTokenKeySize]byte
-	now   func() time.Time
-	start time.Time
+	// macs hands out HMACs under the key, kept for reuse. The key lives only
+	// in the pool's New function and the HMACs it makes, so printing or
+	// encoding the issuer, even by following pointers as go-spew does,
+	// shows no key byte: a function prints as an address at most, and the
+	// pool keeps what it holds behind unsafe pointers. No method returns it.
+	macs  sync.Pool
+	clock agentTokenClock
 
 	mu sync.RWMutex
-	// last is the latest moment Issue or Revoke recorded, in Unix
-	// nanoseconds (see [AgentTokenIssuer.moment]).
-	last int64
-	// agents holds what the issuer knows of each agent while a token issued
-	// to it may still work. Issue forgets the others once the map has
+	// serial is the serial number of the latest token issued; the first
+	// is 1.
+	serial uint64
+	// agents holds what the issuer knows of each agent while its latest
+	// token may still work. Issue forgets the others once the map has
 	// reached sweepAt.
 	agents  map[string]agentTokenState
 	sweepAt int
@@ -122,80 +132,98 @@ type AgentTokenIssuer struct {
 
 // agentTokenState is what the issuer keeps about one agent.
 type agentTokenState struct {
-	lastExpiry int64 // when its latest token expires, in Unix nanoseconds
-	revokedAt  int64 // the moment of its latest revocation; math.MinInt64 if none
+	// revokedThrough is the highest serial number of its tokens that are
+	// refused: every one before its latest, and the latest too once revoked.
+	revokedThrough uint64
+	// expires is when its latest token expires on the running clock.
+	expires time.Duration
+}
+
+// agentTokenClock reads the two clocks an issuer keeps time by: the time of
+// day, in Unix nanoseconds, and how long the issuer has been running.
+type agentTokenClock func() (wall int64, running time.Duration)
+
+// systemAgentTokenClock reads the computer's clocks. The running time comes
+// from time.Now's monotonic reading: no time sync moves it, but on Linux and
+// macOS it stops while the machine sleeps. Only this package can give an
+// issuer another clock, so no caller can hand it a time.Now with that reading
+// stripped, as time.Now().UTC() does.
+func systemAgentTokenClock() agentTokenClock {
+	start := time.Now()
+	return func() (int64, time.Duration) {
+		now := time.Now()
+		return now.UnixNano(), now.Sub(start)
+	}
 }
 
 // NewAgentTokenIssuer makes an issuer with a new key from crypto/rand.
-func NewAgentTokenIssuer(cfg AgentTokenConfig) *AgentTokenIssuer {
-	now := cfg.Now
-	if now == nil {
-		now = time.Now
-	}
-	key := new([agentTokenKeySize]byte)
+func NewAgentTokenIssuer() *AgentTokenIssuer {
+	key := make([]byte, agentTokenKeySize)
 	// rand.Read never returns an error: if the system's random source
 	// fails, it stops the program instead.
-	_, _ = rand.Read(key[:])
-	return &AgentTokenIssuer{
-		key:     key,
-		now:     now,
-		start:   now(),
-		last:    math.MinInt64,
+	_, _ = rand.Read(key)
+	return newAgentTokenIssuer(key, systemAgentTokenClock())
+}
+
+func newAgentTokenIssuer(key []byte, clock agentTokenClock) *AgentTokenIssuer {
+	t := &AgentTokenIssuer{
+		clock:   clock,
 		agents:  make(map[string]agentTokenState),
 		sweepAt: agentTokenSweepFloor,
 	}
+	t.macs.New = func() any {
+		return &agentTokenMAC{
+			Hash:   hmac.New(sha256.New, key),
+			text:   make([]byte, 0, maxAgentTokenLen),
+			fields: make([]byte, 0, agentTokenFixedSize+MaxAgentIDLen),
+		}
+	}
+	return t
 }
 
 // Issue makes a token for agentID that works for [AgentTokenTTL], and says
-// what the token holds. An ID no agent can have gets [ErrAgentTokenAgentID].
+// what the token holds. The agent's earlier tokens stop working, so
+// registering again shuts out a copy of an old one. An ID no agent can have
+// gets [ErrAgentTokenAgentID].
 func (t *AgentTokenIssuer) Issue(agentID string) (string, AgentTokenClaims, error) {
-	if agentID == "" || !validAgentID(agentID) {
+	if !issuableAgentID(agentID) {
 		return "", AgentTokenClaims{}, ErrAgentTokenAgentID
 	}
 	p := agentTokenPayload{agentID: agentID}
-	_, _ = rand.Read(p.nonce[:]) // never fails; see NewAgentTokenIssuer
 
 	t.mu.Lock()
-	p.issued = t.moment()
-	p.expires = p.issued + int64(AgentTokenTTL)
+	wall, running := t.clock()
+	t.serial++
+	p.serial = t.serial
+	p.issued, p.expires = wall, wall+int64(AgentTokenTTL)
+	p.runningExpires = running + AgentTokenTTL
 	if len(t.agents) >= t.sweepAt {
-		t.forgetExpired(p.issued)
+		t.forgetExpired(running)
 	}
-	state, known := t.agents[agentID]
-	if !known {
-		state.revokedAt = math.MinInt64
-	}
-	state.lastExpiry = p.expires
-	t.agents[agentID] = state
+	t.agents[agentID] = agentTokenState{revokedThrough: p.serial - 1, expires: p.runningExpires}
 	t.mu.Unlock()
 
-	signed := agentTokenPrefix + base64.RawURLEncoding.EncodeToString(p.marshal())
-	return signed + "." + t.sign(signed), p.claims(), nil
+	m := t.macs.Get().(*agentTokenMAC)
+	defer t.macs.Put(m)
+	return m.sign(p), p.claims(), nil
 }
 
 // Check says which agent a token was issued to, or why the token is refused:
-// [ErrAgentTokenInvalid], [ErrAgentTokenExpired] or [ErrAgentTokenRevoked].
+// [ErrAgentTokenInvalid], [ErrAgentTokenRevoked] or [ErrAgentTokenExpired].
 // The signature is checked first, against the token's text exactly as sent,
-// and nothing else in the token is read unless it matches.
+// and nothing else in the token is read unless it matches. A revoked token
+// reads as revoked, not expired, for as long as the issuer holds its agent.
 func (t *AgentTokenIssuer) Check(token string) (AgentTokenClaims, error) {
-	if len(token) > maxAgentTokenLen {
+	if len(token) > maxAgentTokenLen || !strings.HasPrefix(token, agentTokenPrefix) {
 		return AgentTokenClaims{}, ErrAgentTokenInvalid
 	}
 	dot := strings.LastIndexByte(token, '.')
-	if dot < len(agentTokenPrefix) || !strings.HasPrefix(token, agentTokenPrefix) {
+	if dot < len(agentTokenPrefix) || len(token)-dot-1 != agentTokenSignatureLen {
 		return AgentTokenClaims{}, ErrAgentTokenInvalid
 	}
-	signed, signature := token[:dot], token[dot+1:]
-	// hmac.Equal takes the same time wherever two signatures differ, so the
-	// time a refusal takes cannot help anyone guess a signature.
-	if !hmac.Equal([]byte(signature), []byte(t.sign(signed))) {
-		return AgentTokenClaims{}, ErrAgentTokenInvalid
-	}
-	raw, err := base64.RawURLEncoding.Strict().DecodeString(signed[len(agentTokenPrefix):])
-	if err != nil {
-		return AgentTokenClaims{}, ErrAgentTokenInvalid
-	}
-	p, ok := unmarshalAgentTokenPayload(raw)
+	m := t.macs.Get().(*agentTokenMAC)
+	p, ok := m.verify(token, dot)
+	t.macs.Put(m)
 	if !ok {
 		return AgentTokenClaims{}, ErrAgentTokenInvalid
 	}
@@ -203,19 +231,20 @@ func (t *AgentTokenIssuer) Check(token string) (AgentTokenClaims, error) {
 	// The time and the agent's state are read together, so nothing can
 	// forget a revocation between the two.
 	t.mu.RLock()
-	now := t.current()
+	wall, running := t.clock()
 	state, known := t.agents[p.agentID]
 	t.mu.RUnlock()
 	switch {
-	case now >= p.expires:
+	case known && p.serial <= state.revokedThrough:
+		return AgentTokenClaims{}, ErrAgentTokenRevoked
+	case wall >= p.expires || running >= p.runningExpires:
 		return AgentTokenClaims{}, ErrAgentTokenExpired
 	case !known:
-		// The issuer forgets an agent only once all its tokens have
-		// expired, so an unexpired token for an agent it does not know
-		// was not issued here.
+		// The issuer forgets an agent only once its tokens have all
+		// expired on the running clock, which never goes back, so an
+		// unexpired token for an agent it does not know was not issued
+		// here.
 		return AgentTokenClaims{}, ErrAgentTokenInvalid
-	case p.issued <= state.revokedAt:
-		return AgentTokenClaims{}, ErrAgentTokenRevoked
 	}
 	return p.claims(), nil
 }
@@ -227,80 +256,99 @@ func (t *AgentTokenIssuer) Check(token string) (AgentTokenClaims, error) {
 func (t *AgentTokenIssuer) Revoke(agentID string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	state, known := t.agents[agentID]
-	if !known {
-		return
+	if state, known := t.agents[agentID]; known {
+		state.revokedThrough = t.serial
+		t.agents[agentID] = state
 	}
-	state.revokedAt = t.moment()
-	t.agents[agentID] = state
 }
 
-// clock returns the issuer's time in Unix nanoseconds: the time of day when
-// it was made, plus the time passed since. The time passed comes from the
-// clock's monotonic reading, which a time sync does not move, so no step of
-// the computer's clock can bring back a revoked token or stretch a token's
-// life; time a suspended machine spends asleep may not count. time.Now gives
-// that reading; a test clock has none, so its readings count as they are.
-func (t *AgentTokenIssuer) clock() int64 {
-	return t.start.UnixNano() + int64(t.now().Sub(t.start))
-}
-
-// current is the issuer's time for a decision: the clock, but never earlier
-// than a moment already recorded. forgetExpired runs at a recorded moment,
-// so even a clock that went back cannot make a token it forgot about look
-// unexpired. The caller holds t.mu.
-func (t *AgentTokenIssuer) current() int64 {
-	return max(t.clock(), t.last)
-}
-
-// moment returns the issuer's time, or a nanosecond past the last moment it
-// returned if the time has not moved past that one. So each moment is later
-// than the one before, even when the clock stands still, and a token issued
-// after a revocation always has a later moment than the revocation, which
-// therefore never catches it. The caller holds t.mu for writing.
-func (t *AgentTokenIssuer) moment() int64 {
-	t.last = max(t.clock(), t.last+1)
-	return t.last
-}
-
-// forgetExpired drops each agent whose tokens have all expired by now: none
-// can pass Check, so its revocation guards nothing. Issue calls it only once
-// the map has doubled since the last time, so its cost, spread over the
-// Issues that grew the map, stays the same however many agents there are,
-// and the map stays within about twice the agents whose tokens still work.
-// The caller holds t.mu for writing, and now is a moment it recorded.
-func (t *AgentTokenIssuer) forgetExpired(now int64) {
+// forgetExpired drops each agent whose latest token has expired on the
+// running clock by now: its earlier ones expired before it, so none can pass
+// Check, and its revocation guards nothing. Issue calls it only once the map
+// has doubled since the last time, so its cost, spread over the Issues that
+// grew the map, stays the same however many agents there are, and the map
+// stays within about twice the agents whose latest token still works. The
+// caller holds t.mu for writing.
+func (t *AgentTokenIssuer) forgetExpired(running time.Duration) {
 	for id, state := range t.agents {
-		if now >= state.lastExpiry {
+		if running >= state.expires {
 			delete(t.agents, id)
 		}
 	}
 	t.sweepAt = max(agentTokenSweepFloor, 2*len(t.agents))
 }
 
-// sign returns the signature for signed, the token's text before its last
-// dot: HMAC-SHA256 under the issuer's key, in base64url.
-func (t *AgentTokenIssuer) sign(signed string) string {
-	mac := hmac.New(sha256.New, t.key[:])
-	mac.Write([]byte(signed))
-	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+// issuableAgentID reports whether an agent can have id: the REST and gRPC
+// hooks accept it as an [AgentIDHeader], and it is none the security layer
+// keeps for callers that are not agents. A token for [ConsoleAgentID] would
+// pass for the web console, which the circuit breaker never quarantines, and
+// one for [DefaultUnauthenticatedID] would share the rate limiter's bucket
+// for every caller that names no agent.
+func issuableAgentID(id string) bool {
+	return id != "" && validAgentID(id) && id != ConsoleAgentID && id != DefaultUnauthenticatedID
+}
+
+// agentTokenMAC is an HMAC under the issuer's key, with room to make or
+// check a token without allocating.
+type agentTokenMAC struct {
+	hash.Hash
+	text     []byte // the token's text
+	fields   []byte // its fields, decoded
+	sum, sig [sha256.Size]byte
+}
+
+// sign returns the token for p.
+func (m *agentTokenMAC) sign(p agentTokenPayload) string {
+	m.fields = p.marshal(m.fields[:0])
+	m.text = agentTokenEncoding.AppendEncode(append(m.text[:0], agentTokenPrefix...), m.fields)
+	m.Reset()
+	m.Write(m.text)
+	m.text = agentTokenEncoding.AppendEncode(append(m.text, '.'), m.Sum(m.sum[:0]))
+	return string(m.text)
+}
+
+// verify reports whether the signature after the token's last dot, at dot,
+// is the one for the text before it, and if so reads the token's fields. A
+// base64 decoder skips line breaks, so a signature part holding one decodes
+// short of a full signature, and is refused for its length.
+func (m *agentTokenMAC) verify(token string, dot int) (agentTokenPayload, bool) {
+	m.text = append(m.text[:0], token...)
+	signed := m.text[:dot]
+	n, err := agentTokenEncoding.Decode(m.sig[:], m.text[dot+1:])
+	if err != nil {
+		return agentTokenPayload{}, false
+	}
+	m.Reset()
+	m.Write(signed)
+	// hmac.Equal takes the same time wherever two signatures of one length
+	// differ, so the time a refusal takes cannot help anyone guess one.
+	if !hmac.Equal(m.Sum(m.sum[:0]), m.sig[:n]) {
+		return agentTokenPayload{}, false
+	}
+	n, err = agentTokenEncoding.Decode(m.fields[:cap(m.fields)], signed[len(agentTokenPrefix):])
+	if err != nil {
+		return agentTokenPayload{}, false
+	}
+	return unmarshalAgentTokenPayload(m.fields[:n])
 }
 
 // agentTokenPayload is a token's fields, which its signature covers.
 type agentTokenPayload struct {
-	agentID string
-	issued  int64 // Unix nanoseconds
-	expires int64 // Unix nanoseconds
-	nonce   [agentTokenNonceSize]byte
+	agentID        string
+	issued         int64         // Unix nanoseconds
+	expires        int64         // Unix nanoseconds
+	runningExpires time.Duration // on the issuer's running clock
+	serial         uint64
 }
 
-// marshal lays the fields out as a token carries them: the issue time and
-// the expiry as 8-byte big-endian integers, the nonce, then the agent ID.
-func (p agentTokenPayload) marshal() []byte {
-	b := make([]byte, 0, agentTokenFixedSize+len(p.agentID))
+// marshal appends the fields to b as a token carries them: the issue time,
+// the expiry, the running expiry and the serial number as 8-byte big-endian
+// integers, then the agent ID.
+func (p agentTokenPayload) marshal(b []byte) []byte {
 	b = binary.BigEndian.AppendUint64(b, uint64(p.issued))
 	b = binary.BigEndian.AppendUint64(b, uint64(p.expires))
-	b = append(b, p.nonce[:]...)
+	b = binary.BigEndian.AppendUint64(b, uint64(p.runningExpires))
+	b = binary.BigEndian.AppendUint64(b, p.serial)
 	return append(b, p.agentID...)
 }
 
@@ -310,13 +358,13 @@ func unmarshalAgentTokenPayload(b []byte) (agentTokenPayload, bool) {
 	if len(b) <= agentTokenFixedSize {
 		return agentTokenPayload{}, false
 	}
-	p := agentTokenPayload{
-		agentID: string(b[agentTokenFixedSize:]),
-		issued:  int64(binary.BigEndian.Uint64(b[0:8])),
-		expires: int64(binary.BigEndian.Uint64(b[8:16])),
-	}
-	copy(p.nonce[:], b[16:agentTokenFixedSize])
-	return p, true
+	return agentTokenPayload{
+		agentID:        string(b[agentTokenFixedSize:]),
+		issued:         int64(binary.BigEndian.Uint64(b[0:8])),
+		expires:        int64(binary.BigEndian.Uint64(b[8:16])),
+		runningExpires: time.Duration(binary.BigEndian.Uint64(b[16:24])),
+		serial:         binary.BigEndian.Uint64(b[24:32]),
+	}, true
 }
 
 func (p agentTokenPayload) claims() AgentTokenClaims {

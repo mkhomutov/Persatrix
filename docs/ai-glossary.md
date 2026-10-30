@@ -480,9 +480,10 @@ Process vocabulary (scope lock, cuttable, live arc, finding, …) lives in the
 - **Definition:** A signed token the orchestrator issues to one agent, naming
   its **Agent ID**, which the agent shows on its calls to the orchestrator so
   the orchestrator knows which agent is calling (RFC 0009 Phase 4,
-  `internal/security/agent_token.go`). It lives 24 hours and can be revoked,
-  and an orchestrator restart makes every earlier one invalid. Not an
-  **Approval Token**, which releases one held action.
+  `internal/security/agent_token.go`). It lives 24 hours, registering again
+  replaces it, and it can be revoked; an orchestrator restart makes every
+  earlier one invalid. Not an **Approval Token**, which releases one held
+  action.
 - **Example:** "After the orchestrator restarted, the persona's agent token was
   refused, so the persona registered again and got a new one."
 
