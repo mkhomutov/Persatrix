@@ -353,7 +353,7 @@ PR):
 | F-20 | Info | Revocation was ordered by timestamps, with a nanosecond tie-break and a floor, which tied its correctness to the clock | Fixed in-PR: a serial number in each token orders it against revocations, and time is used only for expiry |
 | F-21 | Info | The ID error and its comment restated the agent ID pattern and the 256-byte limit, which would go stale if `MaxAgentIDLen` changed | Fixed in-PR: the message names neither, and the comment links them |
 | F-22 | Low | RFC 0009's open question 4 still called the `(AgentID, IssuedAt)` set the right shape, though PR 5 keeps one mark per agent | Fixed in-PR: its dated note says what was built and that no single token can be revoked alone |
-| F-23 | Info | F-8's head branch breaks the repository's branch naming rule, and was noted rather than fixed | Noted: a PR cannot change its head branch, so a fix means reopening the PR from the planned branch, which the maintainer decides |
+| F-23 | Info | F-8's head branch breaks the repository's branch naming rule, and was noted rather than fixed | Noted: a PR cannot change its head branch, so a fix means reopening the PR from the planned branch; the maintainer chose to keep this PR |
 | F-24 | Info | The PR lengthened the ROADMAP header's latest-changes note, already about 170 words | Fixed in-PR: the note says which rows are under way and links the v0.4.0 plan's progress table |
 
 ### PR 6 — `feature/v040-rfc0009-enrollment`
