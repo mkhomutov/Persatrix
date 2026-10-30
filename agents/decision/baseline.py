@@ -34,9 +34,9 @@ class BaselinePolicy:
             # from an unscored one; this policy scores nothing.
             raise ValueError(f"the baseline policy is manual mode's, not {context.mode.value}")
         if not candidates:
-            return DecisionOutcome(
-                ActionClass.DEFER, reason="no_candidate", rationale="nothing was proposed"
-            )
+            # The pipeline's own outcome when nothing was proposed, so asking
+            # the policy directly gives the same record.
+            return DecisionOutcome(ActionClass.DEFER, reason="no_candidate")
         # When a constraint removed the proposal, the first candidate left is
         # the runtime's next choice, in its own order.
         first = candidates[0]

@@ -154,6 +154,8 @@ def test_the_baseline_defers_when_given_nothing() -> None:
     outcome = BaselinePolicy().select(_context(), [])
     assert (outcome.action_class, outcome.selected_id) == (ActionClass.DEFER, None)
     assert outcome.reason == "no_candidate"
+    # The same record whether the runtime asks the policy or the pipeline.
+    assert outcome == decide(_context(), [], BaselinePolicy()).outcome
 
 
 def test_the_baseline_rationale_carries_nothing_from_the_candidate() -> None:
@@ -298,7 +300,7 @@ def test_rejections_keep_the_order_they_were_made_in() -> None:
 
 
 def _raises(context: DecisionContext, candidate: DecisionCandidate) -> str | None:
-    raise RuntimeError("the check is down")
+    raise RuntimeError("the check is down: the launch is on Friday")
 
 
 def _says_text(context: DecisionContext, candidate: DecisionCandidate) -> str | None:
@@ -314,17 +316,30 @@ def test_a_constraint_input_that_breaks_removes_its_candidate(
                         constraints=[_forbid("tool"), constraint])
     assert record.outcome.rejected == (Rejection("publish", "constraint_error"),
                                        Rejection("tool", "directive_forbids"))
-    assert record.outcome.reason == "no_permitted_candidate"
-    # E-10: a reason that is text reaches neither the record nor the log.
+    # Nothing is left, and a check broke: not the same as nothing permitted.
+    assert record.outcome.reason == "constraint_error"
+    # E-10: text a check returns or raises reaches neither the record nor the log.
     assert "launch" not in record.to_json()
     assert "launch" not in caplog.text
     assert "ember-owl" in caplog.text
+    # The error's type is logged, so an operator can tell what broke.
+    assert ("RuntimeError" if constraint is _raises else "ValueError") in caplog.text
+
+
+def test_a_constraint_input_that_breaks_on_one_candidate_leaves_the_rest() -> None:
+    def breaks_on_publish(context: DecisionContext, candidate: DecisionCandidate) -> str | None:
+        return _raises(context, candidate) if candidate.candidate_id == "publish" else None
+
+    record = decide(_context(), [PUBLISH, TOOL], BaselinePolicy(),
+                    constraints=[breaks_on_publish])
+    assert record.outcome.selected_id == "tool"
+    assert record.outcome.rejected == (Rejection("publish", "constraint_error"),)
 
 
 class _Raises:
     def select(self, context: DecisionContext,
                candidates: Sequence[DecisionCandidate]) -> DecisionOutcome:
-        raise RuntimeError("the policy is down")
+        raise RuntimeError("the policy is down: the launch is on Friday")
 
 
 @pytest.mark.parametrize(
@@ -341,9 +356,12 @@ class _Raises:
         _Picks(DecisionOutcome(ActionClass.PUBLISH_CHANNEL, selected_id="publish",
                                rejected=(Rejection("tool", "low_score"),))),
         _Picks(None),  # type: ignore[arg-type]
+        # A score, which manual mode's records never carry.
+        _Picks(DecisionOutcome(ActionClass.PUBLISH_CHANNEL, selected_id="publish",
+                               confidence=0.8)),
     ],
     ids=["raises", "removed", "unknown", "wrong-class", "no-selection", "foreign-rejection",
-         "no-outcome"],
+         "no-outcome", "scored-in-manual"],
 )
 def test_a_policy_that_breaks_defers_and_no_gate_is_asked(
     policy: DecisionPolicy, caplog: pytest.LogCaptureFixture,
@@ -357,7 +375,14 @@ def test_a_policy_that_breaks_defers_and_no_gate_is_asked(
         rejected=(Rejection("tool", "directive_forbids"),),
     )
     assert asked == []
+    assert "launch" not in caplog.text
     assert "ember-owl" in caplog.text
+
+
+def test_a_scored_pick_stands_outside_manual_mode() -> None:
+    scored = DecisionOutcome(ActionClass.PUBLISH_CHANNEL, selected_id="publish", confidence=0.8)
+    record = decide(_context(PolicyMode.SEMI_AUTOMATED), [PUBLISH], _Picks(scored))
+    assert record.outcome == scored
 
 
 @pytest.mark.parametrize("gate", [_raises, _says_text], ids=["raises", "text-reason"])

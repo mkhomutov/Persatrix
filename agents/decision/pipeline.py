@@ -27,9 +27,11 @@ The outcome's own reason codes:
 - ``constraint_error``, ``policy_error``, ``approval_gate_error`` — that step
   broke: it raised, or answered with something other than a reason code or
   a valid pick. The step fails closed, so whatever it could not clear does
-  not run. Its log line says which step broke, for which agent and on which
-  candidate id, and never repeats the step's answer, which may be text
-  (E-10).
+  not run. A constraint input that broke on a candidate names the outcome
+  only when nothing is left, since then it may have removed the one that was
+  permitted. Its log line says which step broke, for which agent and on
+  which candidate id, and the error's type; never the step's answer or the
+  error's message, either of which may be text (E-10).
 """
 
 from __future__ import annotations
@@ -45,6 +47,7 @@ from .decision_types import (
     DecisionOutcome,
     DecisionPolicy,
     DecisionRecord,
+    PolicyMode,
     Rejection,
 )
 
@@ -88,7 +91,10 @@ def decide(
     if not built:
         outcome = DecisionOutcome(ActionClass.DEFER, reason="no_candidate")
     elif not survivors:
-        outcome = DecisionOutcome(ActionClass.DEFER, reason="no_permitted_candidate")
+        broke = any(r.reason == "constraint_error" for r in removed)
+        outcome = DecisionOutcome(
+            ActionClass.DEFER, reason="constraint_error" if broke else "no_permitted_candidate"
+        )
     else:
         # 3. Score, and 4. gate.
         outcome = _gate(context, survivors, _pick(context, survivors, policy), approval_gates)
@@ -129,19 +135,23 @@ def _pick(
 
     The outcome must make a valid record over the candidates the policy was
     given: a pick among them under its own class, or a deferral with a
-    reason. Anything else — a candidate a constraint removed, one never
-    proposed — and a policy that raises, leaves nothing selected.
+    reason, unscored in manual mode. Anything else — a candidate a
+    constraint removed, one never proposed, a score manual mode's records
+    never carry — and a policy that raises, leaves nothing selected.
     """
     try:
         outcome = policy.select(context, survivors)
         if not isinstance(outcome, DecisionOutcome):
             raise TypeError(f"a policy returns a DecisionOutcome, not {type(outcome).__name__}")
+        if context.mode is PolicyMode.MANUAL and outcome.confidence is not None:
+            raise ValueError("manual mode scores nothing, so its outcome has no confidence")
         DecisionRecord(context=context, candidates=survivors, outcome=outcome)
-    except Exception:
-        logger.exception(
-            "The decision policy of agent %r failed at its %s checkpoint, "
+    except Exception as exc:
+        # The error's type only: its message may quote the turn (E-10).
+        logger.error(
+            "The decision policy of agent %r failed at its %s checkpoint (%s), "
             "so nothing was selected",
-            context.agent_id, context.checkpoint.value,
+            context.agent_id, context.checkpoint.value, type(exc).__name__,
         )
         return DecisionOutcome(ActionClass.DEFER, reason="policy_error")
     return outcome
@@ -187,11 +197,13 @@ def _first_refusal(
             reason = check(context, candidate)
             if reason is not None:
                 return Rejection(candidate.candidate_id, reason)
-        except Exception:
-            logger.exception(
-                "Agent %r could not run a %s on candidate %r at its %s checkpoint, "
+        except Exception as exc:
+            # The error's type only: its message may quote the turn (E-10).
+            logger.error(
+                "Agent %r could not run a %s on candidate %r at its %s checkpoint (%s), "
                 "so the candidate does not run",
                 context.agent_id, what, candidate.candidate_id, context.checkpoint.value,
+                type(exc).__name__,
             )
             return Rejection(candidate.candidate_id, error_reason)
     return None
