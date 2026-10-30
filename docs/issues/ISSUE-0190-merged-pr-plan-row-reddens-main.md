@@ -1,6 +1,6 @@
 ---
 id: ISSUE-0190
-summary: "A PR that a plan tracks still has its own progress row at 🔀 PR open when it squash-merges, since it cannot say merged before it has. The plan-status check then fails Docs hygiene, a required check, on main and on every open PR until another PR flips the row. That happened after each of v0.4.0's seven implementation merges so far, and two of the flips were written twice by sessions racing for the same row. The merged-PR history check tolerates the same lag and its hook catches the file up; the plan-status check has neither."
+summary: "A PR that a plan tracks still has its own progress row at 🔀 PR open when it squash-merges, since it cannot say merged before it has. The plan-status check then fails Docs hygiene, a required check, on main and on every open PR until another PR flips the row. That happened after each of v0.4.0's eight implementation merges so far, and two of the flips were written twice by sessions racing for the same row. The merged-PR history check tolerates the same lag and its hook catches the file up; the plan-status check has neither."
 status: open
 severity: medium
 area: scripts/checks
@@ -60,7 +60,8 @@ green before #1053. Times are the squash merges' local times (+1100).
 | 2026-10-25 20:12 | #1060 (RFC 0029 Ph 3 PR 2) | 22:14 | #1061 carried the flip so its own Docs hygiene would pass; #1062, a flip PR of its own, was closed |
 | 2026-10-27 17:16 | #1063 (RFC 0029 Ph 3 PR 3) | 20:23 | #1065 |
 | 2026-10-28 07:02 | #1067 (RFC 0029 Ph 3 PR 4) | 21:47 | #1068 |
-| 2026-10-29 21:30 | #1069 (RFC 0009 Ph 3 PR 3) | when #1070 merges | #1070 |
+| 2026-10-29 21:30 | #1069 (RFC 0009 Ph 3 PR 3) | 21:59 | #1070 |
+| 2026-10-30 20:38 | #1071 (RFC 0009 Ph 4 PR 5) | when #1073 merges | #1073 |
 
 Each red run failed the same step, "Check no plan row announces an
 already-merged PR as open", on the merged PR's own row.

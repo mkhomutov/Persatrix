@@ -136,7 +136,7 @@ the points it implements.
 | 2 | A4 | ISSUE-0152 step 3, agent half: agents send their id on REST | (in PR 1) | ✅ | [#1050](https://github.com/mkhomutov/Persatrix/pull/1050) | 2026-10-22 |
 | 3 | A3 | Tool arguments checked against the tool's schema | `feature/v040-rfc0009-arg-schemas` (head branch `claude/affectionate-faraday-sewbto`, assigned by the session that opened it) | ✅ | [#1069](https://github.com/mkhomutov/Persatrix/pull/1069) | 2026-10-29 |
 | 4 | A3 | Shell CPU limit, output caps, `resource_limits:` | `feature/v040-rfc0009-resource-limits` | ⬜ | — | — |
-| 5 | A4 | Agent tokens: issue, check, revoke (Go) | `feature/v040-rfc0009-agent-token` (head branch `claude/admiring-cori-ibird5`, assigned by the session that opened it) | 🔀 | [#1071](https://github.com/mkhomutov/Persatrix/pull/1071) | — |
+| 5 | A4 | Agent tokens: issue, check, revoke (Go) | `feature/v040-rfc0009-agent-token` (head branch `claude/admiring-cori-ibird5`, assigned by the session that opened it) | ✅ | [#1071](https://github.com/mkhomutov/Persatrix/pull/1071) | 2026-10-30 |
 | 6 | A4 | Registration returns a token and accepts the enrollment secret | `feature/v040-rfc0009-enrollment` | ⬜ | — | — |
 | 7 | A4 | Agents send the secret, keep their token and refresh it | `feature/v040-rfc0009-agent-token-client` | ⬜ | — | — |
 | 8 | A4 | Token check on REST; every publish bound to its caller | `feature/v040-rfc0009-token-middleware` | ⬜ | — | — |
@@ -153,7 +153,7 @@ the points it implements.
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ✂️ Cut
 
 > A PR's own row still says 🔀 when it merges, so `main`'s plan-status
-> check fails until a later PR flips it. PR 3 needed that follow-up: see
+> check fails until a later PR flips it. PRs 3 and 5 needed that follow-up: see
 > [ISSUE-0190](../issues/ISSUE-0190-merged-pr-plan-row-reddens-main.md).
 
 ## Dependency graph
