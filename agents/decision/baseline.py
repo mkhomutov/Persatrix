@@ -13,18 +13,19 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from .decision_types import (
-    ActionClass,
     DecisionCandidate,
     DecisionContext,
     DecisionOutcome,
     PolicyMode,
 )
+from .pipeline import NO_CANDIDATE, RUNTIME_PROPOSAL
 
 __all__ = ["BaselinePolicy"]
 
 
 class BaselinePolicy:
-    """Selects the runtime's own proposal: the first candidate, unscored."""
+    """Selects the first candidate it is given, the runtime's own proposal,
+    unscored."""
 
     def select(
         self, context: DecisionContext, candidates: Sequence[DecisionCandidate]
@@ -36,13 +37,14 @@ class BaselinePolicy:
         if not candidates:
             # The pipeline's own outcome when nothing was proposed, so asking
             # the policy directly gives the same record.
-            return DecisionOutcome(ActionClass.DEFER, reason="no_candidate")
-        # When a constraint removed the proposal, the first candidate left is
-        # the runtime's next choice, in its own order.
+            return NO_CANDIDATE
+        # The pipeline gives only the candidates the constraint inputs left.
+        # When they removed the proposal, the first left is the runtime's next
+        # choice in its own order, and the pipeline makes the reason say so.
         first = candidates[0]
         return DecisionOutcome(
             first.action_class,
             selected_id=first.candidate_id,
-            reason="runtime_proposal",
-            rationale="manual mode takes the runtime's own proposal",
+            reason=RUNTIME_PROPOSAL,
+            rationale="manual mode takes the first candidate left in the runtime's own order",
         )

@@ -1322,7 +1322,7 @@ and `agents/decision/baseline.py` ([PR plan](rfcs/0028-pr-plan.md) PR 2).
 ### Baseline Policy
 - **Aliases:** "manual mode's policy"
 - **Disallowed:** "default policy", "fallback policy"
-- **Definition:** Manual mode's decision policy, `BaselinePolicy`: it selects the first candidate it is given, which the runtime lists first, with reason `runtime_proposal`, and scores nothing. Its records are what semi-automated mode is calibrated against.
+- **Definition:** Manual mode's decision policy, `BaselinePolicy`: it selects the first candidate it is given, which the runtime lists first, with reason `runtime_proposal`, and scores nothing. When a constraint input removed the runtime's own proposal, the selection pipeline makes that reason `proposal_removed`. Its records are what semi-automated mode is calibrated against.
 - **Example:** "Under the baseline policy a persona does what it did in v0.3.16, and the record says so."
 
 ### Constraint Input
@@ -1334,5 +1334,5 @@ and `agents/decision/baseline.py` ([PR plan](rfcs/0028-pr-plan.md) PR 2).
 ### Approval Gate
 - **Aliases:** —
 - **Disallowed:** "approval filter", "hold check"
-- **Definition:** A check the selection pipeline runs on the policy's pick: when the pick needs a person's approval, the outcome defers with the gate's reason, such as `approval_required` or `hitl_required`, and lists the pick as rejected rather than swapping in another candidate. RFC 0028 PR 9 adds the approval list, B3 the required-HITL classes.
+- **Definition:** A check the selection pipeline runs on the policy's pick: when the pick needs a person's approval, the outcome defers with the gate's reason, such as `approval_required` or `hitl_required`, and lists the pick as rejected rather than swapping in another candidate; the policy's score and rationale go with the pick. RFC 0028 PR 9 adds the approval list, B3 the required-HITL classes.
 - **Example:** "With `publish_channel` on its approval list, the approval gate holds the persona's reply."

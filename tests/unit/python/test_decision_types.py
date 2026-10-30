@@ -293,7 +293,7 @@ def test_an_older_line_without_a_defaulted_field_reads_with_the_default() -> Non
 def test_integer_numbers_are_stored_as_floats() -> None:
     record = DecisionRecord(
         recorded_at=1_790_000_000,
-        context=_context(),
+        context=_context(mode=PolicyMode.SEMI_AUTOMATED),
         candidates=(),
         outcome=DecisionOutcome(ActionClass.DEFER, reason="x", confidence=1),
     )
@@ -400,6 +400,8 @@ def _record(outcome: DecisionOutcome, candidates: tuple[DecisionCandidate, ...] 
         (DecisionOutcome(ActionClass.DEFER, reason="x",
                          rejected=(Rejection("c0", "a"), Rejection("c0", "b"))),
          (_publish(),), {}),
+        # Manual mode scores nothing, however the record is built (PR 2).
+        (DecisionOutcome(ActionClass.DEFER, reason="x", confidence=0.5), (), {}),
         # Candidate ids are unique.
         (DecisionOutcome(ActionClass.PUBLISH_CHANNEL, selected_id="c0"),
          (_publish(), _publish()), {}),

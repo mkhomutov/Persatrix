@@ -9,9 +9,13 @@ PR 7, PR 9, B3 and RFC 0012 C3, so these tests drive both steps with fakes.
 
 from __future__ import annotations
 
+import dataclasses
 import itertools
 import logging
+import traceback
+import warnings
 from collections.abc import Sequence
+from typing import Any
 
 import pytest
 
@@ -113,22 +117,9 @@ def test_with_no_inputs_manual_mode_selects_the_runtimes_proposal(
     action_type: ActionType,
 ) -> None:
     proposal = _candidate("c0", action_type)
-    record = decide(_context(), [proposal], BaselinePolicy())
-    outcome = record.outcome
-    assert (outcome.action_class, outcome.selected_id) == (proposal.action_class, "c0")
-    assert outcome.reason == "runtime_proposal"
-    assert outcome.confidence is None  # manual mode does not score
-    assert outcome.rejected == ()
-    assert record.candidates == (proposal,)
-    assert record.context == _context()
-
-
-def test_the_baseline_ranks_by_the_runtimes_order_alone() -> None:
-    # Not by id, class or content: the runtime lists its own proposal first.
-    assert decide(_context(), [NOTHING, PUBLISH, TOOL], BaselinePolicy()).outcome.selected_id \
-        == "nothing"
-    assert decide(_context(), [TOOL, NOTHING, PUBLISH], BaselinePolicy()).outcome.selected_id \
-        == "tool"
+    # The baseline's own pick, unchanged: its proposal, unscored, nothing rejected.
+    assert decide(_context(), [proposal], BaselinePolicy()).outcome \
+        == BaselinePolicy().select(_context(), [proposal])
 
 
 def test_deciding_again_gives_the_same_outcome() -> None:
@@ -142,38 +133,41 @@ def test_deciding_again_gives_the_same_outcome() -> None:
     assert len({r.record_id for r in records}) == 3
 
 
-@pytest.mark.parametrize("mode", [PolicyMode.SEMI_AUTOMATED, PolicyMode.AUTOMATED])
-def test_the_baseline_is_manual_modes_policy_only(mode: PolicyMode) -> None:
-    # A record names its mode so calibration can tell a scored record from
-    # an unscored one; the baseline under another mode would mislabel it.
-    with pytest.raises(ValueError):
-        BaselinePolicy().select(_context(mode), [PUBLISH])
-
-
-def test_the_baseline_defers_when_given_nothing() -> None:
-    outcome = BaselinePolicy().select(_context(), [])
-    assert (outcome.action_class, outcome.selected_id) == (ActionClass.DEFER, None)
-    assert outcome.reason == "no_candidate"
-    # The same record whether the runtime asks the policy or the pipeline.
-    assert outcome == decide(_context(), [], BaselinePolicy()).outcome
-
-
-def test_the_baseline_rationale_carries_nothing_from_the_candidate() -> None:
-    rationales = {decide(_context(), [c], BaselinePolicy()).outcome.rationale for c in _ALL}
-    assert len(rationales) == 1
-    assert rationales != {""}
-
-
 # ─── Step 2: constraint inputs remove candidates ───────────
 
 
 def test_a_constraint_input_removes_the_candidates_it_refuses() -> None:
     record = decide(_context(), [PUBLISH, TOOL], BaselinePolicy(),
                     constraints=[_forbid("publish")])
-    assert record.outcome.selected_id == "tool"
-    assert record.outcome.rejected == (Rejection("publish", "directive_forbids"),)
-    # The record keeps every candidate, the removed one included.
-    assert record.candidates == (PUBLISH, TOOL)
+    assert (record.outcome.selected_id, record.outcome.rejected) \
+        == ("tool", (Rejection("publish", "directive_forbids"),))
+
+
+def test_the_record_keeps_every_candidate_the_removed_ones_included() -> None:
+    record = decide(_context(), _ALL, BaselinePolicy(), constraints=[_forbid("tool")])
+    assert (record.context, record.candidates) == (_context(), _ALL)
+
+
+def test_constraint_inputs_given_as_an_iterator_check_every_candidate() -> None:
+    # Each candidate is checked by every input, so the inputs are read once
+    # up front; an iterator read per candidate would be empty after the first.
+    record = decide(_context(), [PUBLISH, TOOL], BaselinePolicy(),
+                    constraints=iter([_forbid("tool"), _forbid("publish")]))
+    assert record.outcome.reason == "no_permitted_candidate"
+
+
+@pytest.mark.parametrize(
+    ("removed", "selected", "reason"),
+    [("tool", "publish", "runtime_proposal"), ("publish", "tool", "proposal_removed")],
+)
+def test_manual_modes_pick_says_whether_it_is_the_runtimes_proposal(
+    removed: str, selected: str, reason: str,
+) -> None:
+    # The baseline sees only the survivors, so it cannot tell its first
+    # candidate from the runtime's proposal; the pipeline can.
+    record = decide(_context(), [PUBLISH, TOOL], BaselinePolicy(),
+                    constraints=[_forbid(removed)])
+    assert (record.outcome.selected_id, record.outcome.reason) == (selected, reason)
 
 
 def test_the_first_constraint_input_to_refuse_names_the_reason() -> None:
@@ -244,22 +238,33 @@ def test_every_candidate_removed_defers_without_asking_the_policy_or_a_gate() ->
 # ─── Step 4: the approval gate holds a selection ───────────
 
 
-def test_an_approval_gate_holds_the_selection_and_the_outcome_defers() -> None:
-    record = decide(_context(), [PUBLISH, NOTHING], BaselinePolicy(),
+_SCORED = _Picks(DecisionOutcome(ActionClass.PUBLISH_CHANNEL, selected_id="publish",
+                                  confidence=0.75, rationale="highest score"))
+
+
+@pytest.mark.parametrize(
+    ("mode", "policy"),
+    [(PolicyMode.MANUAL, BaselinePolicy()), (PolicyMode.SEMI_AUTOMATED, _SCORED)],
+    ids=["manual", "scored"],
+)
+def test_an_approval_gate_holds_the_selection_and_the_outcome_defers(
+    mode: PolicyMode, policy: DecisionPolicy,
+) -> None:
+    record = decide(_context(mode), [PUBLISH, NOTHING], policy,
                     approval_gates=[_hold(ActionClass.PUBLISH_CHANNEL)])
-    # The held candidate is not swapped for the next one: nothing runs.
-    assert record.outcome.action_class is ActionClass.DEFER
-    assert record.outcome.selected_id is None
-    assert record.outcome.reason == "approval_required"
-    assert record.outcome.rejected == (Rejection("publish", "approval_required"),)
+    # The held candidate is not swapped for the next one, and the policy's
+    # score and rationale go with its pick: nothing was taken.
+    assert record.outcome == DecisionOutcome(
+        ActionClass.DEFER, reason="approval_required",
+        rejected=(Rejection("publish", "approval_required"),),
+    )
 
 
 def test_an_approval_gate_sees_only_the_selection() -> None:
     asked: list[str] = []
     record = decide(_context(), [TOOL, PUBLISH], BaselinePolicy(),
                     approval_gates=[_noting_gate(asked)])
-    assert asked == ["tool"]
-    assert record.outcome.selected_id == "tool"
+    assert (asked, record.outcome.selected_id) == (["tool"], "tool")
 
 
 def test_the_first_approval_gate_to_hold_names_the_reason() -> None:
@@ -267,16 +272,8 @@ def test_the_first_approval_gate_to_hold_names_the_reason() -> None:
                     approval_gates=[_hold(ActionClass.DELEGATE),
                                     _hold(ActionClass.PUBLISH_CHANNEL, "hitl_required"),
                                     _hold(ActionClass.PUBLISH_CHANNEL)])
-    assert record.outcome.reason == "hitl_required"
-    assert record.outcome.rejected == (Rejection("publish", "hitl_required"),)
-
-
-def test_a_held_selection_keeps_the_policys_confidence_and_rationale() -> None:
-    scored = _Picks(DecisionOutcome(ActionClass.PUBLISH_CHANNEL, selected_id="publish",
-                                    confidence=0.75, rationale="highest score"))
-    record = decide(_context(PolicyMode.SEMI_AUTOMATED), [PUBLISH], scored,
-                    approval_gates=[_hold(ActionClass.PUBLISH_CHANNEL)])
-    assert (record.outcome.confidence, record.outcome.rationale) == (0.75, "highest score")
+    assert (record.outcome.reason, record.outcome.rejected) \
+        == ("hitl_required", (Rejection("publish", "hitl_required"),))
 
 
 def test_rejections_keep_the_order_they_were_made_in() -> None:
@@ -307,23 +304,85 @@ def _says_text(context: DecisionContext, candidate: DecisionCandidate) -> str | 
     return "the launch is on Friday"
 
 
-@pytest.mark.parametrize("constraint", [_raises, _says_text], ids=["raises", "text-reason"])
+async def _is_async(context: DecisionContext, candidate: DecisionCandidate) -> str | None:
+    return None
+
+
+_BROKEN = [_raises, _says_text, _is_async]
+_BROKEN_IDS = ["raises", "text-reason", "async"]
+
+
+@pytest.mark.parametrize("constraint", _BROKEN, ids=_BROKEN_IDS)
 def test_a_constraint_input_that_breaks_removes_its_candidate(
-    constraint: ConstraintInput, caplog: pytest.LogCaptureFixture,
+    constraint: ConstraintInput,
+) -> None:
+    record = decide(_context(), [PUBLISH, TOOL], BaselinePolicy(),
+                    constraints=[_forbid("tool"), constraint])
+    # Nothing is left, and a check broke: not the same as nothing permitted.
+    assert record.outcome == DecisionOutcome(
+        ActionClass.DEFER, reason="constraint_error",
+        rejected=(Rejection("publish", "constraint_error"),
+                  Rejection("tool", "directive_forbids")),
+    )
+
+
+@pytest.mark.parametrize("refusing_first", [False, True], ids=["broken-first", "refusing-first"])
+def test_a_refusal_stands_whichever_side_of_a_broken_input_it_runs(
+    refusing_first: bool,
+) -> None:
+    # The candidate would have been refused anyway, so no permitted one was lost.
+    constraints = [_raises, _forbid("publish")]
+    record = decide(_context(), [PUBLISH], BaselinePolicy(),
+                    constraints=constraints[::-1] if refusing_first else constraints)
+    assert record.outcome == DecisionOutcome(
+        ActionClass.DEFER, reason="no_permitted_candidate",
+        rejected=(Rejection("publish", "directive_forbids"),),
+    )
+
+
+def test_an_input_refusing_with_the_error_code_has_not_broken() -> None:
+    record = decide(_context(), [PUBLISH], BaselinePolicy(),
+                    constraints=[_forbid("publish", reason="constraint_error")])
+    assert record.outcome.reason == "no_permitted_candidate"
+
+
+@pytest.mark.parametrize("async_policy", [False, True], ids=["constraint", "policy"])
+def test_an_async_step_is_closed_unrun(async_policy: bool) -> None:
+    # Its coroutine never runs, and is not left to warn that it was never awaited.
+    # mypy refuses either at a typed call site; this is the call it misses.
+    policy: Any = _IsAsync() if async_policy else BaselinePolicy()
+    constraints: Any = [] if async_policy else [_is_async]
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        decide(_context(), [PUBLISH], policy, constraints=constraints)
+    assert [str(w.message) for w in caught if issubclass(w.category, RuntimeWarning)] == []
+
+
+def _name(check: object) -> str:
+    return f"{__name__}.{getattr(check, '__qualname__', type(check).__qualname__)}"
+
+
+@pytest.mark.parametrize(
+    ("step", "slot"),
+    [("constraints", "constraints[1]"), ("approval_gates", "approval_gates[1]")],
+)
+@pytest.mark.parametrize(
+    ("check", "why"),
+    [(_raises, "it raised RuntimeError"),
+     (_says_text, "its answer is not a reason code"),
+     (_is_async, "it is async, and a check answers at once")],
+    ids=_BROKEN_IDS,
+)
+def test_a_broken_checks_log_line_says_which_check_broke_and_how(
+    step: str, slot: str, check: ConstraintInput, why: str, caplog: pytest.LogCaptureFixture,
 ) -> None:
     with caplog.at_level(logging.ERROR, logger="agents.decision.pipeline"):
-        record = decide(_context(), [PUBLISH, TOOL], BaselinePolicy(),
-                        constraints=[_forbid("tool"), constraint])
-    assert record.outcome.rejected == (Rejection("publish", "constraint_error"),
-                                       Rejection("tool", "directive_forbids"))
-    # Nothing is left, and a check broke: not the same as nothing permitted.
-    assert record.outcome.reason == "constraint_error"
-    # E-10: text a check returns or raises reaches neither the record nor the log.
-    assert "launch" not in record.to_json()
-    assert "launch" not in caplog.text
-    assert "ember-owl" in caplog.text
-    # The error's type is logged, so an operator can tell what broke.
-    assert ("RuntimeError" if constraint is _raises else "ValueError") in caplog.text
+        decide(_context(), [PUBLISH], BaselinePolicy(), **{step: [_forbid("tool"), check]})
+    # Pinned whole, so nothing the check returned or raised reaches it (E-10).
+    assert caplog.messages == [
+        f"Agent 'ember-owl' could not run {slot} ({_name(check)}) on candidate 'publish' "
+        f"at its pre_act checkpoint: {why}, so the candidate does not run"
+    ]
 
 
 def test_a_constraint_input_that_breaks_on_one_candidate_leaves_the_rest() -> None:
@@ -332,8 +391,8 @@ def test_a_constraint_input_that_breaks_on_one_candidate_leaves_the_rest() -> No
 
     record = decide(_context(), [PUBLISH, TOOL], BaselinePolicy(),
                     constraints=[breaks_on_publish])
-    assert record.outcome.selected_id == "tool"
-    assert record.outcome.rejected == (Rejection("publish", "constraint_error"),)
+    assert (record.outcome.selected_id, record.outcome.rejected) \
+        == ("tool", (Rejection("publish", "constraint_error"),))
 
 
 class _Raises:
@@ -342,10 +401,17 @@ class _Raises:
         raise RuntimeError("the policy is down: the launch is on Friday")
 
 
+class _IsAsync:
+    async def select(self, context: DecisionContext,
+                     candidates: Sequence[DecisionCandidate]) -> DecisionOutcome:
+        return BaselinePolicy().select(context, candidates)
+
+
 @pytest.mark.parametrize(
     "policy",
     [
         _Raises(),
+        _IsAsync(),
         # The candidate a constraint removed; one never proposed; a survivor
         # under another class; nothing selected and no deferral.
         _Picks(DecisionOutcome(ActionClass.TOOL_CALL, selected_id="tool")),
@@ -360,23 +426,30 @@ class _Raises:
         _Picks(DecisionOutcome(ActionClass.PUBLISH_CHANNEL, selected_id="publish",
                                confidence=0.8)),
     ],
-    ids=["raises", "removed", "unknown", "wrong-class", "no-selection", "foreign-rejection",
-         "no-outcome", "scored-in-manual"],
+    ids=["raises", "async", "removed", "unknown", "wrong-class", "no-selection",
+         "foreign-rejection", "no-outcome", "scored-in-manual"],
 )
-def test_a_policy_that_breaks_defers_and_no_gate_is_asked(
-    policy: DecisionPolicy, caplog: pytest.LogCaptureFixture,
-) -> None:
+def test_a_policy_that_breaks_defers_and_no_gate_is_asked(policy: DecisionPolicy) -> None:
     asked: list[str] = []
-    with caplog.at_level(logging.ERROR, logger="agents.decision.pipeline"):
-        record = decide(_context(), [PUBLISH, TOOL], policy,
-                        constraints=[_forbid("tool")], approval_gates=[_noting_gate(asked)])
-    assert record.outcome == DecisionOutcome(
-        ActionClass.DEFER, reason="policy_error",
-        rejected=(Rejection("tool", "directive_forbids"),),
+    record = decide(_context(), [PUBLISH, TOOL], policy,
+                    constraints=[_forbid("tool")], approval_gates=[_noting_gate(asked)])
+    assert (record.outcome, asked) == (
+        DecisionOutcome(ActionClass.DEFER, reason="policy_error",
+                        rejected=(Rejection("tool", "directive_forbids"),)),
+        [],
     )
-    assert asked == []
-    assert "launch" not in caplog.text
-    assert "ember-owl" in caplog.text
+
+
+def test_a_broken_policys_log_line_says_which_policy_broke_and_how(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Pinned whole: the error's type only, never its message (E-10).
+    with caplog.at_level(logging.ERROR, logger="agents.decision.pipeline"):
+        decide(_context(), [PUBLISH], _Raises())
+    assert caplog.messages == [
+        f"The decision policy ({_name(_Raises)}) of agent 'ember-owl' broke at its pre_act "
+        "checkpoint: it raised RuntimeError, so nothing was selected"
+    ]
 
 
 def test_a_scored_pick_stands_outside_manual_mode() -> None:
@@ -385,24 +458,16 @@ def test_a_scored_pick_stands_outside_manual_mode() -> None:
     assert record.outcome == scored
 
 
-@pytest.mark.parametrize("gate", [_raises, _says_text], ids=["raises", "text-reason"])
-def test_an_approval_gate_that_breaks_holds_the_selection(
-    gate: ApprovalGate, caplog: pytest.LogCaptureFixture,
-) -> None:
-    with caplog.at_level(logging.ERROR, logger="agents.decision.pipeline"):
-        record = decide(_context(), [PUBLISH, NOTHING], BaselinePolicy(),
-                        approval_gates=[gate, _hold(ActionClass.PUBLISH_CHANNEL)])
-    assert record.outcome.action_class is ActionClass.DEFER
-    assert record.outcome.reason == "approval_gate_error"
-    assert record.outcome.rejected == (Rejection("publish", "approval_gate_error"),)
-    assert "launch" not in record.to_json()
-    assert "launch" not in caplog.text
-    assert "ember-owl" in caplog.text
-
-
-def test_the_baseline_under_another_mode_defers_through_the_pipeline() -> None:
-    record = decide(_context(PolicyMode.SEMI_AUTOMATED), [PUBLISH], BaselinePolicy())
-    assert record.outcome == DecisionOutcome(ActionClass.DEFER, reason="policy_error")
+@pytest.mark.parametrize("gate", _BROKEN, ids=_BROKEN_IDS)
+def test_an_approval_gate_that_breaks_holds_the_selection(gate: ApprovalGate) -> None:
+    # A gate that cannot say whether a person must approve holds the pick,
+    # even when a later gate would have held it for approval.
+    record = decide(_context(), [PUBLISH, NOTHING], BaselinePolicy(),
+                    approval_gates=[gate, _hold(ActionClass.PUBLISH_CHANNEL)])
+    assert record.outcome == DecisionOutcome(
+        ActionClass.DEFER, reason="approval_gate_error",
+        rejected=(Rejection("publish", "approval_gate_error"),),
+    )
 
 
 # ─── The record ────────────────────────────────────────────
@@ -421,3 +486,15 @@ def test_duplicate_candidate_ids_are_the_runtimes_error() -> None:
     # Nothing could tell which of the two a rejection or a selection meant.
     with pytest.raises(ValueError):
         decide(_context(), [PUBLISH, PUBLISH], BaselinePolicy())
+
+
+@pytest.mark.parametrize("field", ["checkpoint", "mode"])
+def test_a_context_naming_its_checkpoint_or_mode_by_text_is_the_runtimes_error(
+    field: str,
+) -> None:
+    # Raised before any step runs: a broken step's log line, which names the
+    # checkpoint, must not itself raise with the step's error chained to it.
+    context = dataclasses.replace(_context(), **{field: getattr(_context(), field).value})
+    with pytest.raises(TypeError) as caught:
+        decide(context, [PUBLISH], BaselinePolicy(), constraints=[_raises])
+    assert "launch" not in "".join(traceback.format_exception(caught.value))

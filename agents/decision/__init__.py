@@ -28,14 +28,26 @@ from .decision_types import (
     DirectiveVerdict,
     PolicyMode,
     Rejection,
+    check_candidates,
+    check_outcome,
     hash_arguments,
     hash_content,
 )
-from .pipeline import ApprovalGate, ConstraintInput, decide
+from .pipeline import (
+    NO_CANDIDATE,
+    PROPOSAL_REMOVED,
+    RUNTIME_PROPOSAL,
+    ApprovalGate,
+    ConstraintInput,
+    decide,
+)
 
 __all__ = [
     "ACTION_TYPE_CLASSES",
+    "NO_CANDIDATE",
+    "PROPOSAL_REMOVED",
     "RECORD_FORMAT_VERSION",
+    "RUNTIME_PROPOSAL",
     "STOP_REASON_CLASSES",
     "ActionClass",
     "ApprovalGate",
@@ -51,6 +63,8 @@ __all__ = [
     "DirectiveVerdict",
     "PolicyMode",
     "Rejection",
+    "check_candidates",
+    "check_outcome",
     "class_of_action",
     "class_of_step",
     "decide",
