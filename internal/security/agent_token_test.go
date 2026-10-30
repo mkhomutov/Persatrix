@@ -16,6 +16,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"testing"
@@ -27,9 +28,22 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-// raceDetector reports whether the race detector is built in, which
-// agent_token_race_test.go sets.
-var raceDetector bool
+// raceDetector reports whether the race detector is built in. It reads the
+// test binary's build settings rather than a file behind `//go:build race`:
+// the repository's runner check counts a file behind a build line as one
+// `go test ./...` never runs.
+var raceDetector = func() bool {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return false
+	}
+	for _, s := range info.Settings {
+		if s.Key == "-race" {
+			return s.Value == "true"
+		}
+	}
+	return false
+}()
 
 // tokenClockStart is a real date, so issue times read as one.
 var tokenClockStart = time.Date(2026, 10, 29, 12, 0, 0, 0, time.UTC)
