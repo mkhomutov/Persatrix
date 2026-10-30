@@ -472,6 +472,21 @@ Process vocabulary (scope lock, cuttable, live arc, finding, …) lives in the
   unique across `config/agents.yaml`.
 - **Example:** "Use the agent ID `ember-owl`, not the display name `Ember Owl`."
 
+### Agent Token
+- **Aliases:** —
+- **Disallowed:** "capability token" (RFC 0009 §B's first design, which also
+  listed what the agent may do), "bearer token" (`Authorization: Bearer`
+  carries account sessions)
+- **Definition:** A signed token the orchestrator issues to one agent, naming
+  its **Agent ID**, which the agent shows on its calls to the orchestrator so
+  the orchestrator knows which agent is calling (RFC 0009 Phase 4,
+  `internal/security/agent_token.go`). It lives 24 hours, registering again
+  replaces it, and it can be revoked; an orchestrator restart makes every
+  earlier one invalid. Not an **Approval Token**, which releases one held
+  action.
+- **Example:** "After the orchestrator restarted, the persona's agent token was
+  refused, so the persona registered again and got a new one."
+
 ### Participant ID
 - **Aliases:** —
 - **Disallowed:** "user id" (when meaning a channel participant), "member id"
@@ -1271,7 +1286,7 @@ decision layer task agents and persona agents share. Its types live in
 
 ### Approval Token
 - **Aliases:** —
-- **Disallowed:** "approval key", "permission token" (a capability token is RFC 0009's)
+- **Disallowed:** "approval key", "permission token" (RFC 0009's token is the **Agent Token**)
 - **Definition:** A signed, expiring token the orchestrator issues when a person approves one held action, bound to the action's hash, the actor, a scope, an expiry and a nonce (RFC 0028 Phase 2a). Spending it releases that one action once: the orchestrator checks it and moves the pending approval from approved to spent in the same transaction.
 - **Example:** "The persona's held publish runs in a later turn, once its approval token is spent."
 
