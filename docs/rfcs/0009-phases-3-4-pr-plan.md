@@ -419,6 +419,7 @@ new default this PR's review confirms or overturns.
 | F-6 | Info | A registration and a deregistration of one agent that race can leave it registered with a revoked token, which PR 7's retry rule, for invalid and expired tokens, would leave refused until it expires | → deferred to PR 6 (noted there) |
 | F-7 | Info | The PR is over the ~350-line estimate and the 500-line target, most of it tests | Noted: 328 lines of code; the tests that prove it are not split from it |
 | F-8 | Info | The head branch is not the planned `feature/v040-rfc0009-agent-token` | Noted: the session that opened the PR assigned it; the row records the planned name, as for PR 3 |
+| F-9 | Info | The PR description ended with an assistant attribution line, added when the PR was opened, which the repository's rules forbid in PRs and commits | Fixed in-PR: removed from the description |
 
 ### PR 6 — `feature/v040-rfc0009-enrollment`
 
