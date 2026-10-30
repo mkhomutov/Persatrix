@@ -136,7 +136,7 @@ the points it implements.
 | 2 | A4 | ISSUE-0152 step 3, agent half: agents send their id on REST | (in PR 1) | ✅ | [#1050](https://github.com/mkhomutov/Persatrix/pull/1050) | 2026-10-22 |
 | 3 | A3 | Tool arguments checked against the tool's schema | `feature/v040-rfc0009-arg-schemas` (head branch `claude/affectionate-faraday-sewbto`, assigned by the session that opened it) | ✅ | [#1069](https://github.com/mkhomutov/Persatrix/pull/1069) | 2026-10-29 |
 | 4 | A3 | Shell CPU limit, output caps, `resource_limits:` | `feature/v040-rfc0009-resource-limits` | ⬜ | — | — |
-| 5 | A4 | Agent tokens: issue, check, revoke (Go) | `feature/v040-rfc0009-agent-token` (head branch `claude/admiring-cori-ibird5`, assigned by the session that opened it) | 🔄 | — | — |
+| 5 | A4 | Agent tokens: issue, check, revoke (Go) | `feature/v040-rfc0009-agent-token` (head branch `claude/admiring-cori-ibird5`, assigned by the session that opened it) | 🔀 | [#1071](https://github.com/mkhomutov/Persatrix/pull/1071) | — |
 | 6 | A4 | Registration returns a token and accepts the enrollment secret | `feature/v040-rfc0009-enrollment` | ⬜ | — | — |
 | 7 | A4 | Agents send the secret, keep their token and refresh it | `feature/v040-rfc0009-agent-token-client` | ⬜ | — | — |
 | 8 | A4 | Token check on REST; every publish bound to its caller | `feature/v040-rfc0009-token-middleware` | ⬜ | — | — |
@@ -418,6 +418,7 @@ new default this PR's review confirms or overturns.
 | F-5 | Info | `AgentToken` named what a token says, not the token the glossary defines | Fixed in-PR: renamed `AgentTokenClaims` before PRs 6–10 use it |
 | F-6 | Info | A registration and a deregistration of one agent that race can leave it registered with a revoked token, which PR 7's retry rule, for invalid and expired tokens, would leave refused until it expires | → deferred to PR 6 (noted there) |
 | F-7 | Info | The PR is over the ~350-line estimate and the 500-line target, most of it tests | Noted: 328 lines of code; the tests that prove it are not split from it |
+| F-8 | Info | The head branch is not the planned `feature/v040-rfc0009-agent-token` | Noted: the session that opened the PR assigned it; the row records the planned name, as for PR 3 |
 
 ### PR 6 — `feature/v040-rfc0009-enrollment`
 
