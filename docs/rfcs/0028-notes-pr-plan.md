@@ -47,3 +47,37 @@ Merged as [#1054](https://github.com/mkhomutov/Persatrix/pull/1054) on
 | F-28 | Low | The glossary gave every directive record a verdict; a tie has none | Fixed in-PR |
 | F-29 | Info | The glossary aliased Decision Checkpoint as a bare "checkpoint", which also names a saved state snapshot | Fixed in-PR: the four named checkpoints are the aliases |
 | F-30 | Low | `types.py` shadows the standard `types` module when its directory is first on `sys.path`; the repo names these `<area>_types.py` | Fixed in-PR: `decision_types.py`; the action-class tests move to their own file, keeping the types tests under 500 lines |
+
+## PR 2 — `feature/v040-rfc0028-pipeline`
+
+Merged as [#1072](https://github.com/mkhomutov/Persatrix/pull/1072) on
+2026-10-31.
+
+**Review findings** (PR 2):
+
+| Finding | Severity | Description | Disposition |
+|---------|----------|-------------|-------------|
+| F-1 | Low | A step that raised was logged with its traceback, so the error's message, which may quote the turn, reached the agent log; the raising fakes carried no probe word, so the tests' log assertion could not fail on them | Fixed in-PR: the log line names the error's type only, and every raising fake carries the probe |
+| F-2 | Low | When broken constraint inputs removed every candidate, the outcome said `no_permitted_candidate`, as for a real refusal, though the module docstring listed `constraint_error` as an outcome reason | Fixed in-PR: with nothing left, a constraint input that broke on a candidate makes the outcome `constraint_error` |
+| F-3 | Low | A policy could return a scored outcome under manual mode, the mislabelled record PR 1's F-27 guards against | Fixed in-PR: a confidence under manual mode is `policy_error` |
+| F-4 | Low | The baseline's own outcome for no candidates carried a rationale the pipeline's did not, so one case gave two records | Fixed in-PR: the baseline returns the pipeline's outcome |
+| F-5 | Low | After the rebase took `main`'s ROADMAP header, the feature commit still said the header names the pipeline | Fixed in-PR: the commit message is reworded |
+| F-6 | Info | Constraint inputs and approval gates are sync callables, while the persona's roster and audience reads are async | Noted for PRs 5 and 7: fetch before calling `decide`; mypy refuses an `async def` at a typed call site |
+| F-7 | Info | The baseline under another mode fails at every checkpoint, one ERROR each, rather than once at startup | Noted for PRs 4 and 5: choose the policy from the configured mode when wiring it |
+| F-8 | Info | `ConstraintInput` and `ApprovalGate` are one type, so a gate passed as a constraint type-checks | Noted: both parameters are keyword-only |
+| F-9 | Info | ~760 changed lines against the ~350 estimate and the 500-line target, over half of them tests | Noted: the pipeline stays with its tests |
+| F-10 | Info | The head branch is not the planned `feature/v040-rfc0028-pipeline` | Noted: the session that opened the PR assigned it, as for #1069; the row records the planned name |
+| F-11 | Low | When a constraint input removed the runtime's proposal, the baseline's pick of the next candidate still said `runtime_proposal`, so OQ 3's calibration would count a forced pick as the runtime's own | Fixed in-PR: the pipeline, which alone knows the proposal, makes it `proposal_removed` |
+| F-12 | Low | The constraint inputs were read again for each candidate, so an iterator ran out after the first, and later candidates went unchecked: fail open | Fixed in-PR: both kinds of input are read once, up front |
+| F-13 | Low | Whether a constraint input broke was read from the rejection's code, and the first error stopped the checks, so the outcome depended on the inputs' order, and a refusal with the code `constraint_error` read as a breakage | Fixed in-PR: a broken input is passed over and flagged; a later refusal still names the rejection |
+| F-14 | Low | A held pick kept the policy's rationale and confidence on a deferral that selected nothing, which PR 7's `low_confidence` deferrals would be confused with | Fixed in-PR: the held outcome carries neither |
+| F-15 | Low | A context whose checkpoint was text made the fail-closed handler's log line raise, with the step's error, and its message, chained to it | Fixed in-PR: such a context raises `TypeError` before any step runs |
+| F-16 | Low | Only the pipeline refused a score in manual mode, so a record built directly or read from a line could carry one | Fixed in-PR: the record's own check refuses it |
+| F-17 | Info | The broken-check log line read "could not run a approval gate" | Fixed in-PR: it names the check's slot, such as `approval_gates[0]` |
+| F-18 | Low | The log line named neither which check broke nor where it is defined, so with several inputs an operator could not find it | Fixed in-PR: its slot and `module.qualname`, and the policy's class |
+| F-19 | Info | The policy's outcome was checked by building a throwaway record, and candidate-id uniqueness was checked three times, once in a copied check | Fixed in-PR: `check_candidates` and `check_outcome`, shared with the record's own check |
+| F-20 | Info | The `no_candidate` outcome was written out in both modules, as before F-4 | Fixed in-PR: one `NO_CANDIDATE` |
+| F-21 | Low | An `async def` check or policy returned an unawaited coroutine: every candidate broke, and Python warned it was never awaited | Fixed in-PR: the coroutine is closed unrun, and the log line says the step is async |
+| F-22 | Info | The baseline's tests sat in the pipeline's test file, against the one-test-file-per-module rule | Fixed in-PR: `test_decision_baseline.py` |
+| F-23 | Info | Several tests checked unrelated cases in one block of asserts | Fixed in-PR: split, or one assert on the whole outcome or log line |
+| F-24 | Info | F-9 and F-10 break the plan header's 500-line rule and the branch-naming rule, recorded only as noted | Noted: renaming the head branch would close the PR, and the size rule is guidance the checks do not enforce; the fixes above add to the overrun |
