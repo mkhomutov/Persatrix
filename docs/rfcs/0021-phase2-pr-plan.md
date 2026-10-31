@@ -200,6 +200,10 @@ each settled by a new default in the PR named:
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ✂️ Cut
 
+> A PR's own row still says 🔀 when it merges, so `main`'s plan-status
+> check fails until a later PR flips it: see
+> [ISSUE-0190](../issues/ISSUE-0190-merged-pr-plan-row-reddens-main.md).
+
 ## Dependency graph
 
 ```

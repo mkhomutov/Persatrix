@@ -1,6 +1,6 @@
 ---
 id: ISSUE-0190
-summary: "A PR that a plan tracks still has its own progress row at 🔀 PR open when it squash-merges, since it cannot say merged before it has. The plan-status check then fails Docs hygiene, a required check, on main and on every open PR until another PR flips the row. That happened after each of v0.4.0's eight implementation merges so far, and two of the flips were written twice by sessions racing for the same row. The merged-PR history check tolerates the same lag and its hook catches the file up; the plan-status check has neither."
+summary: "A PR that a plan tracks still has its own progress row at 🔀 PR open when it squash-merges, since it cannot say merged before it has. The plan-status check then fails Docs hygiene, a required check, on main and on every open PR until another PR flips the row. That has happened after every v0.4.0 implementation merge since #1053, and two of the flips were written twice by sessions racing for the same row. The merged-PR history check tolerates the same lag and its hook catches the file up; the plan-status check has neither."
 status: open
 severity: medium
 area: scripts/checks
@@ -13,6 +13,8 @@ refs:
   - docs/development-workflow.md
   - docs/rfcs/0029-phase3-pr-plan.md
   - docs/rfcs/0009-phases-3-4-pr-plan.md
+  - docs/rfcs/0028-pr-plan.md
+  - docs/rfcs/0021-phase2-pr-plan.md
   - https://github.com/mkhomutov/Persatrix/pull/1065
 ---
 
@@ -50,8 +52,9 @@ pre-commit hook catches the file up on the next commit anywhere. The
 plan-status check has neither half: no tolerance, and no step that writes
 the flip.
 
-What it cost in v0.4.0, after every implementation PR so far. `main` was
-green before #1053. Times are the squash merges' local times (+1100).
+What it cost in v0.4.0, after each implementation PR from #1053 to #1072.
+`main` was green before #1053. Times are the squash merges' local times
+(+1100).
 
 | Red from | Merged | Green again | What flipped it |
 |----------|--------|-------------|-----------------|
@@ -61,10 +64,13 @@ green before #1053. Times are the squash merges' local times (+1100).
 | 2026-10-27 17:16 | #1063 (RFC 0029 Ph 3 PR 3) | 20:23 | #1065 |
 | 2026-10-28 07:02 | #1067 (RFC 0029 Ph 3 PR 4) | 21:47 | #1068 |
 | 2026-10-29 21:30 | #1069 (RFC 0009 Ph 3 PR 3) | 21:59 | #1070 |
-| 2026-10-30 20:38 | #1071 (RFC 0009 Ph 4 PR 5) | when #1073 merges | #1073 |
+| 2026-10-30 20:38 | #1071 (RFC 0009 Ph 4 PR 5) | 21:29 | #1073 |
+| 2026-10-31 20:16 | #1072 (RFC 0028 PR 2) | #1074's merge | #1074 |
 
 Each red run failed the same step, "Check no plan row announces an
-already-merged PR as open", on the merged PR's own row.
+already-merged PR as open", on the merged PR's own row. The table stops at
+#1072: later merges repeat the pattern until a fix lands, so a flip PR
+changes only its plan row and adds nothing here.
 
 ## Impact
 
