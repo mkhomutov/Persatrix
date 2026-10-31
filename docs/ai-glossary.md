@@ -1307,3 +1307,32 @@ decision layer task agents and persona agents share. Its types live in
 - **Disallowed:** "group vote", "consensus mode"
 - **Definition:** A decision an agent society makes together: eligible agents propose ranked candidates and a collective policy — majority, weighted majority or role-weighted — picks the group's action, recorded as a `CollectiveDecisionRecord` (RFC 0028 §G, Phase 4, v0.5.0+). Not built in v0.4.0.
 - **Example:** "Choosing the lab's next experiment by role-weighted vote is a collective-scope decision."
+
+## RFC 0028 — Selection Pipeline (PR 2)
+
+How a decision checkpoint settles which candidate runs: `agents/decision/pipeline.py`
+and `agents/decision/baseline.py` ([PR plan](rfcs/0028-pr-plan.md) PR 2).
+
+### Selection Pipeline
+- **Aliases:** —
+- **Disallowed:** "decision flow", "guardrail chain"
+- **Definition:** RFC 0028 §C's five steps at a decision checkpoint: build the candidates from what the runtime proposes, remove what a constraint input forbids, let the policy pick among the rest, pass the pick through each approval gate, and record the selection as one DecisionRecord. It defers with a reason when nothing is left, and a step that breaks fails closed (`decide`).
+- **Example:** "With no inputs, the selection pipeline selects the runtime's own proposal."
+
+### Baseline Policy
+- **Aliases:** "manual mode's policy"
+- **Disallowed:** "default policy", "fallback policy"
+- **Definition:** Manual mode's decision policy, `BaselinePolicy`: it selects the first candidate it is given, which the runtime lists first, with reason `runtime_proposal`, and scores nothing. When a constraint input removed the runtime's own proposal, the selection pipeline makes that reason `proposal_removed`. Its records are what semi-automated mode is calibrated against.
+- **Example:** "Under the baseline policy a persona does what it did in v0.3.16, and the record says so."
+
+### Constraint Input
+- **Aliases:** "hard constraint" (RFC 0028 §C)
+- **Disallowed:** "candidate filter", "guard"
+- **Definition:** A check the selection pipeline runs on every candidate before the policy picks; it removes a candidate it forbids, and the rejection keeps its reason code. None is wired in Phase 1: RFC 0028 PR 7 adds the permission and channel-membership checks, read-only, and RFC 0012 C3 accepted "do not" directives.
+- **Example:** "A manager's accepted 'do not post in #launch' is a constraint input that removes that publish."
+
+### Approval Gate
+- **Aliases:** —
+- **Disallowed:** "approval filter", "hold check"
+- **Definition:** A check the selection pipeline runs on the policy's pick: when the pick needs a person's approval, the outcome defers with the gate's reason, such as `approval_required` or `hitl_required`, and lists the pick as rejected rather than swapping in another candidate; the policy's score and rationale go with the pick. RFC 0028 PR 9 adds the approval list, B3 the required-HITL classes.
+- **Example:** "With `publish_channel` on its approval list, the approval gate holds the persona's reply."

@@ -46,6 +46,8 @@ __all__ = [
     "DirectiveVerdict",
     "PolicyMode",
     "Rejection",
+    "check_candidates",
+    "check_outcome",
     "hash_arguments",
     "hash_content",
 ]
@@ -268,7 +270,8 @@ class DecisionRecord:
 
 @runtime_checkable
 class DecisionPolicy(Protocol):
-    """A strategy that picks among candidates (§D). Manual mode's is PR 2's."""
+    """A strategy that picks among candidates (§D). Manual mode's is
+    ``BaselinePolicy``; the selection pipeline (``decide``) runs it."""
 
     def select(
         self, context: DecisionContext, candidates: Sequence[DecisionCandidate]
@@ -276,10 +279,32 @@ class DecisionPolicy(Protocol):
 
 
 def _check_record(record: DecisionRecord) -> None:
-    outcome = record.outcome
-    classes = {c.candidate_id: c.action_class for c in record.candidates}
-    if len(classes) != len(record.candidates):
+    check_candidates(record.candidates)
+    check_outcome(record.context, record.candidates, record.outcome,
+                  subject=record.subject, subject_id=record.subject_id)
+
+
+def check_candidates(candidates: Sequence[DecisionCandidate]) -> None:
+    """Raise ``ValueError`` unless every candidate's id is its own."""
+    if len({c.candidate_id for c in candidates}) != len(candidates):
         raise ValueError("candidate ids must be unique")
+
+
+def check_outcome(
+    context: DecisionContext,
+    candidates: Sequence[DecisionCandidate],
+    outcome: DecisionOutcome,
+    *,
+    subject: DecisionSubject = DecisionSubject.ACTION,
+    subject_id: str | None = None,
+) -> None:
+    """Raise ``ValueError`` unless *outcome* makes a valid record over
+    *candidates*, whose ids ``check_candidates`` has found unique. The
+    selection pipeline checks a policy's outcome with it, without building a
+    record; a record checks itself with both."""
+    if context.mode is PolicyMode.MANUAL and outcome.confidence is not None:
+        raise ValueError("manual mode scores nothing, so its outcome has no confidence")
+    classes = {c.candidate_id: c.action_class for c in candidates}
     rejected = [r.candidate_id for r in outcome.rejected]
     if len(set(rejected)) != len(rejected) or not set(rejected) <= classes.keys():
         raise ValueError("each rejection must name a different candidate")
@@ -290,15 +315,15 @@ def _check_record(record: DecisionRecord) -> None:
                 or classes[outcome.selected_id] is not outcome.action_class):
             raise ValueError("the selection must name a candidate of the outcome's class")
     deferred = outcome.action_class is ActionClass.DEFER and bool(outcome.reason)
-    if record.subject is DecisionSubject.ACTION:
+    if subject is DecisionSubject.ACTION:
         if outcome.action_class is None or outcome.verdict is not None:
             raise ValueError("an action record has an action class and no verdict")
-        if record.subject_id is not None:
+        if subject_id is not None:
             raise ValueError("only a directive record names a subject id")
         if outcome.selected_id is None and not deferred:
             raise ValueError("with nothing selected the outcome must defer, with a reason")
     else:
-        if not record.subject_id:
+        if not subject_id:
             raise ValueError("a directive record must name its directive")
         reached = outcome.verdict is not None and outcome.action_class is None
         if not reached and not (deferred and outcome.verdict is None):
