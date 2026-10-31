@@ -63,7 +63,7 @@ green before #1053. Times are the squash merges' local times (+1100).
 | 2026-10-28 07:02 | #1067 (RFC 0029 Ph 3 PR 4) | 21:47 | #1068 |
 | 2026-10-29 21:30 | #1069 (RFC 0009 Ph 3 PR 3) | 21:59 | #1070 |
 | 2026-10-30 20:38 | #1071 (RFC 0009 Ph 4 PR 5) | 21:29 | #1073 |
-| 2026-10-31 20:16 | #1072 (RFC 0028 PR 2) | when this flip merges | the RFC 0028 PR 2 flip |
+| 2026-10-31 20:16 | #1072 (RFC 0028 PR 2) | when #1074 merges | #1074 |
 
 Each red run failed the same step, "Check no plan row announces an
 already-merged PR as open", on the merged PR's own row.
