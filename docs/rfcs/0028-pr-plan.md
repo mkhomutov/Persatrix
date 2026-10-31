@@ -228,7 +228,7 @@ is unslotted with RFC 0049 Phase 3 and is not in this plan.
 | PR | Row | Title | Branch | Status | GitHub PR | Merged |
 |----|-----|-------|--------|--------|-----------|--------|
 | 1 | B1 | Decision types, action classes, glossary | `feature/v040-rfc0028-types` | ✅ | [#1054](https://github.com/mkhomutov/Persatrix/pull/1054) | 2026-10-24 |
-| 2 | B1 | Selection pipeline and baseline policy | `feature/v040-rfc0028-pipeline` (head branch `claude/great-bell-gyjk5g`, assigned by the session that opened it) | 🔀 | [#1072](https://github.com/mkhomutov/Persatrix/pull/1072) | — |
+| 2 | B1 | Selection pipeline and baseline policy | `feature/v040-rfc0028-pipeline` (head branch `claude/great-bell-gyjk5g`, assigned by the session that opened it) | ✅ | [#1072](https://github.com/mkhomutov/Persatrix/pull/1072) | 2026-10-31 |
 | 3a | B1 | Python secret redactor | `feature/v040-rfc0028-redactor` | ⬜ | — | — |
 | 3 | B1 | Decision log and checkpoint spans | `feature/v040-rfc0028-decision-log` | ⬜ | — | — |
 | 4 | B1 | `decision:` configuration and schema | `feature/v040-rfc0028-config` | ⬜ | — | — |
@@ -248,6 +248,10 @@ is unslotted with RFC 0049 Phase 3 and is not in this plan.
 | 17 | — | Review follow-ups and closeout | `feature/v040-rfc0028-closeout` | ⬜ | — | — |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ✂️ Cut
+
+> A PR's own row still says 🔀 when it merges, so `main`'s plan-status
+> check fails until a later PR flips it. PRs 1 and 2 needed that follow-up: see
+> [ISSUE-0190](../issues/ISSUE-0190-merged-pr-plan-row-reddens-main.md).
 
 ## Dependency graph
 
