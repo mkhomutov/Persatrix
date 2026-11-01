@@ -681,6 +681,9 @@ merged-prs-check: ## Fail if docs/merged-prs.md does not match git log, or (exit
 plan-status-check: ## Fail if a plan's progress table says "PR open" for a PR that has merged, or (exit 3) a shallow clone cannot tell (CI)
 	$(PYTHON) scripts/checks/plan_status.py
 
+plan-status-fix: merged-prs ## Flip stale plan rows to merged, with the PR's link and its docs/merged-prs.md date (the hook does this on every commit)
+	$(PYTHON) scripts/checks/plan_status.py --fix
+
 rfcs-check: ## Fail if docs/rfcs/INDEX.md is stale, front-matter is invalid, or an RFC's **Status** header line disagrees with it (CI)
 	$(PYTHON) scripts/rfcs.py --check
 

@@ -337,12 +337,12 @@ Status is tracked across multiple documents. **Before and after every task**, ve
 |----------|---------------|
 | RFC file | `Status:` field matches actual state. Use [lifecycle markers](rfcs/README.md#rfc-lifecycle). |
 | PR plan | Checklist items (`- [x]` / `- [ ]`) reflect completed work. Review findings recorded. |
-| [ROADMAP.md](../ROADMAP.md) | RFC Tracker (merged count, status), Component Status tables. The Merged PR History is generated (`docs/merged-prs.md`) and checked by `make plan-status-check` / CI for rows that still say "PR open" after the PR merged. `make roadmap-status-check` / CI flags a Component Status row that says less than the RFC it names. |
+| [ROADMAP.md](../ROADMAP.md) | RFC Tracker (merged count, status), Component Status tables. The Merged PR History is generated (`docs/merged-prs.md`), and `make plan-status-check` / CI fails a row that still says "PR open" once that history records its PR. `make roadmap-status-check` / CI flags a Component Status row that says less than the RFC it names. |
 
 Rules:
 
 1. Starting implementation of an RFC → status to `🚧 Implementing` in both RFC file and ROADMAP.
-2. PR merged → update PR plan checklist and RFC merged count immediately; the merged-PR history regenerates itself, and `plan-status-check` flags any row left saying "PR open".
+2. PR merged → update PR plan checklist and RFC merged count immediately; the next commit anywhere regenerates the merged-PR history and flips the PR's plan row, and `plan-status-check` flags any row left saying "PR open" after that.
 3. All PRs merged → status to `✅ Implemented` in RFC file and ROADMAP.
 4. RFC closes part-way (the rest moved to a later version) → status to `⚠️ Partially Implemented` in RFC file and ROADMAP, Component Status rows included; `roadmap-status-check` flags a row left saying "🚧 In progress".
 5. Component moves from stub to working → update Component Status table in ROADMAP.

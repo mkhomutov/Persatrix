@@ -144,9 +144,11 @@ title changes too — the title becomes the commit message on `main`.
 ## Merging
 
 Squash merge, once every required check is green and every finding has a
-disposition. After merge: pull `main`, flip the plan row, and check the
-ROADMAP's affected rows before starting the next PR
-([ROADMAP §How to Update](../../ROADMAP.md#how-to-update-this-file)).
+disposition. After merge: pull `main` and check the ROADMAP's affected rows
+before starting the next PR
+([ROADMAP §How to Update](../../ROADMAP.md#how-to-update-this-file)). The next
+commit anywhere flips the plan row
+([release cycle](release-cycle.md#phase-1--implementation-prs)).
 
 ## Related documentation
 

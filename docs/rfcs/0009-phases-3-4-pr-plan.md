@@ -152,8 +152,8 @@ the points it implements.
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ✂️ Cut
 
-> A PR's own row still says 🔀 when it merges, so `main`'s plan-status
-> check fails until a later PR flips it: see
+> A PR's own row still says 🔀 when it merges. The next commit anywhere
+> flips it; PRs 3, 5 and 6 needed a follow-up PR before that: see
 > [ISSUE-0190](../issues/ISSUE-0190-merged-pr-plan-row-reddens-main.md).
 
 ## Dependency graph

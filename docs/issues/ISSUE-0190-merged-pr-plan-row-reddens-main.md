@@ -1,13 +1,16 @@
 ---
 id: ISSUE-0190
 summary: "A PR that a plan tracks still has its own progress row at 🔀 PR open when it squash-merges, since it cannot say merged before it has. The plan-status check then fails Docs hygiene, a required check, on main and on every open PR until another PR flips the row. That has happened after every v0.4.0 implementation merge since #1053, and two of the flips were written twice by sessions racing for the same row. The merged-PR history check tolerates the same lag and its hook catches the file up; the plan-status check has neither."
-status: open
+status: resolved
 severity: medium
 area: scripts/checks
 created: 2026-10-27
+closed: 2026-11-01
+closed_pr: 1078
 refs:
   - scripts/checks/plan_status.py
   - scripts/merged_prs.py
+  - scripts/pre_commit.py
   - .github/workflows/ci.yml
   - docs/methodology/release-cycle.md
   - docs/development-workflow.md
@@ -101,6 +104,35 @@ Three ways, which can be combined; the choice is for whoever slots this.
    next commit anywhere carries the flip. A workflow on push to `main` that
    opens the flip PR is the other writer, but it would need write access,
    which the CI workflow does not grant.
+
+## Resolution
+
+Options 2 and 3 together, as `docs/merged-prs.md` already works.
+
+- **The lag.** A 🔀 row passes while the history has no row for its PR. That
+  is wider than sparing the newest merge alone, which is what option 2 first
+  proposed. Of the 30 merges up to #1076, six carried no commit the hook ran
+  on since the merge before them: three from Dependabot, which never runs it,
+  and three branches whose last commit was older than that merge. #1055 and
+  #1056 did so back to back. Any of those would push a tracked PR off the top
+  of the log with its row still open, so `main` would still go red, one merge
+  later. The history trails by exactly the merges no hook has seen, so the
+  row can trail by the same.
+- **The writer.** `plan_status.py --fix` flips what the check would fail, with
+  the PR's link and the date the history gives. The hook runs it straight
+  after `merged_prs.py`, so the commit that adds a PR's history row carries
+  its flip, and a row still open after that fails.
+- **What it leaves.** A row it would lose words from stays for a person, and
+  the check still fails it. A plan with unstaged edits keeps the flip unstaged
+  beside them, since `git add` would sweep them into the commit; until that
+  plan is committed, CI fails the row. `git commit <path>` leaves the old row
+  staged, so the commit after it can undo the flip, and CI then names the row.
+  Nothing is written while a conflict is unresolved or in a shallow clone.
+
+Replaying the ten tracked merges from #1053 to #1076 under the new scripts,
+the check passes at each, where the old one failed. The writer's row matches
+the hand-written flip byte for byte at nine of them. At #1063 only the Branch
+cell differs: the hand flip also added a note there.
 
 ## Notes
 

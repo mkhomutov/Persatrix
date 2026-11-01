@@ -718,7 +718,7 @@ This file must be reviewed and updated **during every task**, not just at comple
 
 ### When a PR is merged
 
-1. The **Merged PR History** ([docs/merged-prs.md](docs/merged-prs.md)) regenerates itself on the next commit (`make merged-prs` by hand); nothing to type.
+1. The **Merged PR History** ([docs/merged-prs.md](docs/merged-prs.md)) regenerates itself on the next commit (`make merged-prs` by hand), and the PR's plan row flips in the same commit (`make plan-status-fix`); nothing to type.
 2. Increment the merged count in the relevant **RFC Scope** table.
 3. If all PRs for an RFC are now merged, change its status to `✅ Implemented` here **and** in the RFC file.
 4. If an RFC closes part-way — some phases shipped, the rest moved to a later version — change its status to `⚠️ Partially Implemented` here **and** in the RFC file.

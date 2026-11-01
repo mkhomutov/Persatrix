@@ -20,6 +20,22 @@ PRs ("PR 0 merged (#854), PR 1 open (#855)"). Released versions' plans are
 frozen evidence and are skipped; which versions are released is read from
 ``CHANGELOG.md`` the same way the size checker does.
 
+A PR cannot write ✅ and a merge date before it has merged, so its own row
+still says 🔀 when it lands (ISSUE-0190). ``docs/merged-prs.md`` can never hold
+the merge that lands it either, so the row follows that file: a 🔀 row passes
+while the history has no row for its PR, which is exactly the lag
+``merged_prs.py --check`` allows. Nothing narrower will do. One merge in five
+carries no commit the hook ran on since the merge before it (Dependabot, or a
+branch only rebased), so a rule that spared the newest merge alone would fail
+the row one merge later.
+
+``--fix`` is the other half: it flips what the check would fail, with the PR's
+link and the date the history gives, which is the squash commit's local date
+and not ``mergedAt`` in UTC. The hook runs ``merged_prs.py`` and then this, so
+the commit that adds a merge's history row also carries its flip. A row the
+writer cannot flip without losing something is left for a person, and the check
+still fails it.
+
 A shallow clone's log stops at its oldest commit (cloud sessions clone with
 ``--depth 50``), so a PR merged before it looks open and its stale row would
 pass. There no row is judged: a notice names ``git fetch --unshallow`` and the
@@ -37,11 +53,13 @@ and a minor release (``X.Y.0``) is not judged.
 Usage::
 
     python scripts/checks/plan_status.py [--verbose]
+    python scripts/checks/plan_status.py --fix    # flip stale rows in place
 
 Exit code: 0 clean, 1 if any stale row, if a plan opens a code fence or HTML
 comment that never closes — every row after it is off the page, so none of
 them would be judged — or if a patch release has a second document; 3 in a
-shallow clone that has none of those failures.
+shallow clone that has none of those failures. ``--fix`` exits 0, or 3 without
+writing in a shallow clone or while a merge conflict is unresolved.
 """
 
 from __future__ import annotations
@@ -49,7 +67,7 @@ from __future__ import annotations
 import argparse
 import re
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from functools import partial
 from pathlib import Path
 from typing import NamedTuple
@@ -61,6 +79,7 @@ if str(REPO_ROOT) not in sys.path:
 from scripts._git import git_output, is_shallow  # noqa: E402
 from scripts.checks import SKIPPED, ensure_utf8_stdout, markdown_page  # noqa: E402
 from scripts.checks.released import is_released_version_doc, released_versions  # noqa: E402
+from scripts.merged_prs import merge_dates, pr_link  # noqa: E402
 
 #: A version-cycle file: groups 1-3 are the version's numbers, group 4 its kind.
 _VERSION_DOC_NAME_RE = re.compile(r"^docs/v(\d+)\.(\d+)\.(\d+)-(.+)\.md$")
@@ -78,6 +97,16 @@ _PR_LINK_RE = re.compile(r"\[#(\d+)\]\(")
 _LINK_ONLY_CELL_RE = re.compile(r"^\[#(\d+)\]\([^)]+\)$")
 _SUBJECT_RE = re.compile(r"\(#(\d+)\)$")
 _STALE_LEADERS = ("🔀", "⬜")
+_LINK_RE = re.compile(r"\[#\d+\]\([^)]+\)")
+#: What a status cell may say, its links aside, for the writer to replace it:
+#: nothing a flip would lose.
+_PLAIN_STATUSES = frozenset({"🔀", "⬜", "🔀 PR open", "⬜ Not started"})
+_WORDLESS_STATUSES = frozenset({"🔀", "⬜"})
+#: A PR or Merged cell with nothing in it yet.
+_PLACEHOLDER_RE = re.compile(r"^(—|-)?\s*(\(this PR\))?$")
+_PR_COLUMN = "GitHub PR"
+_MERGED_COLUMN = "Merged"
+_STATUS_COLUMN = "Status"
 
 
 class StaleRow(NamedTuple):
@@ -165,6 +194,138 @@ def find_stale_rows(
     return stale
 
 
+def recorded_merges(repo_root: Path) -> dict[int, str]:
+    """PR number → date, for each PR with a row in the committed ``docs/merged-prs.md``."""
+    path = repo_root / "docs" / "merged-prs.md"
+    return merge_dates(path.read_text(encoding="utf-8")) if path.exists() else {}
+
+
+def trails_the_history(row: StaleRow, recorded: Mapping[int, str]) -> bool:
+    """Whether *row* is a 🔀 row whose PR merged after ``docs/merged-prs.md`` was written.
+
+    A ⬜ row gets no lag: a merge leaves its row at 🔀. Nor does anything when
+    the history has no rows: every merge would look newer than it, so a lost
+    or reformatted file would pass every row.
+    """
+    return bool(recorded) and row.cell.startswith("🔀") and not recorded.keys() >= set(row.merged)
+
+
+def _header_of(shown: Sequence[str], index: int) -> list[str]:
+    """The header row of the table that holds line *index* of the rendered page."""
+    while index > 0 and markdown_page.cells(shown[index - 1]) is not None:
+        index -= 1
+    return markdown_page.cells(shown[index]) or []
+
+
+def flipped_row(
+    line: str, header: Sequence[str], row: StaleRow, dates: Mapping[int, str],
+) -> str | None:
+    """*line* with its PR marked merged, or ``None`` if that could lose or invent something.
+
+    The link and the date go in their own columns, or in the status cell of a
+    table without them. ``None`` for a status that says more than its marker,
+    a link outside the PR's own cell (it may only cite a PR), or a cell that
+    already holds something else: those need a person.
+    """
+    cells = markdown_page.cells(line)
+    if cells is None or len(cells) != len(header):
+        return None
+    status_at = next(i for i, cell in enumerate(cells) if cell.startswith(_STALE_LEADERS))
+    bare = _LINK_RE.sub("", cells[status_at]).strip()
+    if header[status_at] != _STATUS_COLUMN or bare not in _PLAIN_STATUSES:
+        return None
+    pr_at = header.index(_PR_COLUMN) if _PR_COLUMN in header else status_at
+    date_at = header.index(_MERGED_COLUMN) if _MERGED_COLUMN in header else status_at
+    if row.unlinked:
+        placed = pr_at == status_at or _PLACEHOLDER_RE.match(cells[pr_at]) is not None
+    else:
+        placed = {int(n) for n in _PR_LINK_RE.findall(cells[pr_at])} == set(row.merged)
+    if not placed or (date_at != status_at and not _PLACEHOLDER_RE.match(cells[date_at])):
+        return None
+
+    links = ", ".join(pr_link(str(n)) for n in row.merged)
+    date = max(dates[n] for n in row.merged)
+    status = ["✅" if bare in _WORDLESS_STATUSES else "✅ Merged"]
+    new: dict[int, str] = {}
+    if pr_at == status_at:
+        status.append(links)
+    elif row.unlinked:
+        new[pr_at] = links
+    if date_at == status_at:
+        status.append(date)
+    else:
+        new[date_at] = date
+    new[status_at] = " ".join(status)
+    return markdown_page.with_cells(line, new)
+
+
+def flip_rows(
+    text: str, stale: Sequence[StaleRow], dates: Mapping[int, str],
+) -> tuple[str, list[StaleRow]]:
+    """*text* with each row of *stale* flipped, and the rows left for a person."""
+    lines = text.split("\n")
+    shown = markdown_page.rendered(lines)
+    left: list[StaleRow] = []
+    for row in stale:
+        at = row.line - 1
+        flipped = None
+        if dates.keys() >= set(row.merged):
+            flipped = flipped_row(lines[at], _header_of(shown, at), row, dates)
+        if flipped is None:
+            left.append(row)
+        else:
+            lines[at] = flipped
+    return "\n".join(lines), left
+
+
+def _stale_rows_in(repo_root: Path, rel: str, text: str, merged: frozenset[int]) -> list[StaleRow]:
+    written_by = partial(pr_that_wrote, repo_root, rel)
+    return [s._replace(file=rel) for s in find_stale_rows(text, merged, written_by)]
+
+
+def fix_stale_rows(repo_root: Path) -> int:
+    """Flip every row the check would fail, in place, and report the ones it left.
+
+    A row the history has no date for yet is one the check passes, so run
+    ``merged_prs.py`` first, as the hook does. Nothing is written in a shallow
+    clone, whose log cannot be trusted, or while a conflict is unresolved: a
+    conflicted plan holds both sides, and staging it would mark it resolved,
+    markers and all. ``git commit`` refuses before the hook in that state, so
+    this guards a hand run of this script or of ``pre_commit.py``.
+    """
+    if is_shallow(repo_root):
+        print("[WARN] shallow clone — no plan row flipped; run `git fetch --unshallow`"
+              " to check plan rows against every merged PR")
+        return SKIPPED
+    unmerged = git_output(repo_root, "ls-files", "--unmerged")
+    if unmerged is None or unmerged:
+        print("[WARN] a merge conflict is unresolved — no plan row flipped;"
+              " resolve it, and the next commit carries the flip")
+        return SKIPPED
+    merged = merged_pr_numbers(repo_root)
+    recorded = recorded_merges(repo_root)
+    for p in target_docs(repo_root):
+        rel = p.relative_to(repo_root).as_posix()
+        # surrogateescape, and bytes both ways: every byte but the row's stays as it was.
+        text = p.read_bytes().decode("utf-8", "surrogateescape")
+        stale = [
+            s for s in _stale_rows_in(repo_root, rel, text, merged)
+            if not trails_the_history(s, recorded)
+        ]
+        if not stale:
+            continue
+        fixed, left = flip_rows(text, stale, recorded)
+        if fixed != text:
+            p.write_bytes(fixed.encode("utf-8", "surrogateescape"))
+        for s in stale:
+            if s not in left:
+                prs = ", ".join(f"#{n}" for n in s.merged)
+                print(f"flipped {s.file}:{s.line} to ✅ ({prs})")
+        for s in left:
+            print(f"[WARN] {s.file}:{s.line}: {s.cell!r} left as it is — flip it by hand")
+    return 0
+
+
 def target_docs(repo_root: Path) -> list[Path]:
     """Open-cycle plans + every RFC / issue PR plan."""
     released = released_versions(repo_root)
@@ -230,13 +391,19 @@ def check_plan_status(repo_root: Path, verbose: bool = False) -> int:
         if opened is not None:
             hidden.append(f"{rel}:{opened + 1}")
         if not shallow:
-            written_by = partial(pr_that_wrote, repo_root, rel)
-            stale += [s._replace(file=rel) for s in find_stale_rows(text, merged, written_by)]
+            stale += _stale_rows_in(repo_root, rel, text, merged)
         if verbose:
             print(f"  scanned {rel}")
     if not shallow:
         print(f"[SCAN] Checked progress tables in {len(docs)} plan(s) against {len(merged)}"
               " merged PRs")
+    recorded = recorded_merges(repo_root)
+    trailing = [s for s in stale if trails_the_history(s, recorded)]
+    stale = [s for s in stale if s not in trailing]
+    for s in trailing:
+        prs = ", ".join(f"#{n}" for n in s.merged)
+        print(f"[NOTE] {s.file}:{s.line}: {prs} merged after docs/merged-prs.md was written"
+              " — the next commit flips the row")
     if hidden:
         print(f"\n[FAIL] {len(hidden)} plan(s) hide every row after a code fence or HTML comment"
               " that never closes:")
@@ -266,7 +433,13 @@ def main(argv: list[str] | None = None) -> int:
         description="Flag stale 'PR open' rows in plan tables and a second release document.",
     )
     parser.add_argument("--verbose", action="store_true")
+    parser.add_argument(
+        "--fix", action="store_true",
+        help="Flip stale rows to ✅ with the PR's link and its docs/merged-prs.md date.",
+    )
     args = parser.parse_args(argv)
+    if args.fix:
+        return fix_stale_rows(REPO_ROOT)
     return check_plan_status(REPO_ROOT, verbose=args.verbose)
 
 

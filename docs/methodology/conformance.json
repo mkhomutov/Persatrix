@@ -69,6 +69,7 @@
     "merged-prs",
     "merged-prs-check",
     "plan-status-check",
+    "plan-status-fix",
     "release-sweep",
     "release-doc",
     "branch-protection-show",

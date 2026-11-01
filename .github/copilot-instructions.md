@@ -112,7 +112,7 @@ How releases are planned, reviewed, and shipped: [docs/methodology/README.md](..
 
 Follow [Status Hygiene rules](../docs/development-workflow.md#status-hygiene). In brief:
 - Verify consistency across RFC files, PR plans, and [ROADMAP.md](../ROADMAP.md) before and after every task.
-- PR merged → update PR plan checklist + RFC count immediately; `docs/merged-prs.md` regenerates itself and `make plan-status-check` flags a row still saying "PR open".
+- PR merged → update PR plan checklist + RFC count immediately; the next commit regenerates `docs/merged-prs.md` and flips the PR's plan row, and `make plan-status-check` flags a row still saying "PR open" after that.
 - All PRs for an RFC merged → RFC and ROADMAP status → `✅ Implemented`.
 - New RFC → add to ROADMAP RFC Tracker.
 - **Local-only files MUST NEVER be referenced** in any committed file (docs, code, comments, tests, commit messages, PR descriptions, or issue refs). "Local-only" means any path ignored by `.gitignore` — notably `docs/pr-reviews/` (PR review reports) and any other gitignored artifact. If a finding from a local review needs to be recorded, paraphrase the finding inline; do not link the source file by path or filename.
