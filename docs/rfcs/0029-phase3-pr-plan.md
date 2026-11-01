@@ -1,7 +1,7 @@
 # RFC 0029 — Personal/Society Storage Split — PR Implementation Plan (Phase 3, v0.4.0 form)
 
 **RFC**: [0029-personal-society-storage-split.md](0029-personal-society-storage-split.md)
-**Status**: 🔄 In progress
+**Status**: ✅ Complete
 **Created**: 2026-10-21
 **Branch prefix**: `feature/v040-rfc0029-`
 **Target**: `main`
@@ -174,7 +174,7 @@ confirmed or overturned in its review:
 | 2 | A1 | The society tables (channels-store v15) | `feature/v040-rfc0029-society-tables` | ✅ | [#1060](https://github.com/mkhomutov/Persatrix/pull/1060) | 2026-10-25 |
 | 3 | A1 | `internal/society`: the store on the channels connection | `feature/v040-rfc0029-society-store` (head branch `ccr-b7e6b467-72zd06`, assigned by the session that opened it) | ✅ | [#1063](https://github.com/mkhomutov/Persatrix/pull/1063) | 2026-10-27 |
 | 4 | A1 | Startup wiring; the single-node Known Gap issue | `feature/v040-rfc0029-society-wiring` | ✅ | [#1067](https://github.com/mkhomutov/Persatrix/pull/1067) | 2026-10-28 |
-| 5 | — | Review follow-ups and closeout | `feature/v040-rfc0029-closeout` (head branch `claude/dazzling-newton-dar2a4`, assigned by the session that opened it) | 🔀 | — (this PR) | — |
+| 5 | — | Review follow-ups and closeout | `feature/v040-rfc0029-closeout` (head branch `claude/dazzling-newton-dar2a4`, assigned by the session that opened it) | ✅ | [#1075](https://github.com/mkhomutov/Persatrix/pull/1075) | 2026-11-01 |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ✂️ Cut
 
