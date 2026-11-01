@@ -303,7 +303,13 @@ def test_fix_flips_the_v0316_form_of_a_status_with_its_link_inside(tmp_path: Pat
 @pytest.mark.parametrize(
     "plan",
     [
-        pytest.param(HEADER + f"| 2 | next | 🔀 | [#2]({URL}/2) | — |\n", id="a-cell-short"),
+        pytest.param(HEADER + f"| 2 | next | 🔀 | [#2]({URL}/2) | — |\n", id="cells-missing"),
+        pytest.param(
+            HEADER + f"| 2 | A1 | next | `x` | 🔀 | [#2]({URL}/2) |\n", id="no-merged-cell",
+        ),
+        pytest.param(
+            HEADER + f"| 2 | A1 | next | `x` | 🔀 | [#2]({URL}/2) | — | more |\n", id="a-cell-over",
+        ),
         pytest.param(
             "| PR | Note | GitHub PR | Merged |\n|---|---|---|---|\n"
             f"| 2 | 🔀 | [#2]({URL}/2) | — |\n",
@@ -323,18 +329,67 @@ def test_fix_leaves_a_row_it_cannot_read_for_certain(tmp_path: Path, plan: str) 
     assert path.read_text(encoding="utf-8") == plan
 
 
-def test_fix_keeps_a_byte_that_is_not_utf8_in_both_copies(tmp_path: Path) -> None:
+@pytest.mark.parametrize("unstaged", [b"", b"work in progress\n"], ids=["same", "apart"])
+def test_fix_keeps_a_byte_that_is_not_utf8_in_both_copies(tmp_path: Path, unstaged: bytes) -> None:
     """A plan is never rewritten through a decode that would turn a bad byte into U+FFFD."""
     path = _repo(tmp_path, PLAN, "feat: next (#2)", recorded=(2, 1))
     data = b"\xff not utf-8\n" + PLAN.encode("utf-8")
     path.write_bytes(data)
     _git(tmp_path, "add", REL)
+    path.write_bytes(data + unstaged)
 
     assert fix_stale_rows(tmp_path) == 0
 
     assert path.read_bytes().startswith(b"\xff not utf-8\n")
     assert _staged_blob(tmp_path).startswith(b"\xff not utf-8\n")
     assert FLIPPED.encode("utf-8") in _staged_blob(tmp_path)
+
+
+def test_fix_credits_a_staged_row_by_the_staged_copys_own_lines(tmp_path: Path) -> None:
+    """Unstaged work moves the row, so blaming the working copy would ask about another line."""
+    path = _repo(tmp_path, HEADER + DONE, "docs: the plan (#1)", recorded=(2, 1))
+    own_row = "| 2 | A1 | next | `feature/x-next` | 🔀 | — | — |\n"
+    path.write_bytes((HEADER + DONE + own_row).encode("utf-8"))
+    _git(tmp_path, "commit", "-q", "-am", "feat: next (#2)")
+    path.write_bytes(("work in progress\n" + HEADER + DONE + own_row).encode("utf-8"))
+
+    assert fix_stale_rows(tmp_path) == 0
+
+    assert _staged_blob(tmp_path).decode("utf-8") == HEADER + DONE + FLIPPED
+
+
+def test_fix_keeps_the_mode_of_the_staged_copy(tmp_path: Path) -> None:
+    path = _repo(tmp_path, PLAN, "feat: next (#2)", recorded=(2, 1))
+    path.chmod(0o755)
+    _git(tmp_path, "add", REL)
+
+    assert fix_stale_rows(tmp_path) == 0
+
+    assert _git(tmp_path, "ls-files", "--stage", REL).startswith("100755")
+
+
+def test_fix_flips_a_plan_git_does_not_track_and_leaves_it_untracked(tmp_path: Path) -> None:
+    _repo(tmp_path, PLAN, "feat: next (#2)", recorded=(2, 1))
+    other = tmp_path / OTHER
+    other.write_bytes(PLAN.encode("utf-8"))
+
+    assert fix_stale_rows(tmp_path) == 0
+
+    assert other.read_text(encoding="utf-8") == HEADER + DONE + FLIPPED
+    assert OTHER not in _git(tmp_path, "ls-files")
+
+
+def test_fix_has_no_date_for_a_not_started_row_the_history_has_not_reached(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A ⬜ row gets no lag, so unlike a 🔀 row it reaches the writer with nothing to write."""
+    plan = HEADER + DONE + f"| 2 | A1 | next | `x` | ⬜ | [#2]({URL}/2) | — |\n"
+    path = _repo(tmp_path, plan, "feat: next (#2)")
+
+    assert fix_stale_rows(tmp_path) == 0
+
+    assert path.read_text(encoding="utf-8") == plan
+    assert "[WARN]" in capsys.readouterr().out
 
 
 def test_a_shallow_clone_flips_what_its_history_records(tmp_path: Path) -> None:
@@ -377,7 +432,8 @@ def test_a_branch_commit_quoting_an_open_pr_does_not_flip_its_row(
     assert fix_stale_rows(tmp_path) == 0
 
     assert later in path.read_text(encoding="utf-8")
-    assert "#3" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "#3" in out and "proves no merge" in out
     assert check_plan_status(tmp_path) == 1
 
 
