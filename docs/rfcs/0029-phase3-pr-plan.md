@@ -174,7 +174,7 @@ confirmed or overturned in its review:
 | 2 | A1 | The society tables (channels-store v15) | `feature/v040-rfc0029-society-tables` | ✅ | [#1060](https://github.com/mkhomutov/Persatrix/pull/1060) | 2026-10-25 |
 | 3 | A1 | `internal/society`: the store on the channels connection | `feature/v040-rfc0029-society-store` (head branch `ccr-b7e6b467-72zd06`, assigned by the session that opened it) | ✅ | [#1063](https://github.com/mkhomutov/Persatrix/pull/1063) | 2026-10-27 |
 | 4 | A1 | Startup wiring; the single-node Known Gap issue | `feature/v040-rfc0029-society-wiring` | ✅ | [#1067](https://github.com/mkhomutov/Persatrix/pull/1067) | 2026-10-28 |
-| 5 | — | Review follow-ups and closeout | `feature/v040-rfc0029-closeout` | ⬜ | — | — |
+| 5 | — | Review follow-ups and closeout | `feature/v040-rfc0029-closeout` (head branch `claude/dazzling-newton-dar2a4`, assigned by the session that opened it) | 🔀 | — (this PR) | — |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ✂️ Cut
 
@@ -522,6 +522,28 @@ covers them too.
 > and passed on the shared and immediate forms. On the separate one, society
 > writes, which now begin with their write, no longer fail; publishes still
 > do, and more of them than before (7 and 8, against 2).
+
+> 2026-11-01 — PR 5 settles what PR 1's F-3 and PR 2's F-28 leave open,
+> each a new default for its review to confirm or overturn:
+> - The store refreshes its planner statistics every hour while it stays
+>   open, as SQLite advises for a long-lived connection, with the open's own
+>   call: the same mask, `0x10002`, so a table grown or shrunk tenfold is
+>   analyzed again and the statistics stay exact; and the same floor, so a
+>   store under 1 000 messages still gathers none (PR 1 F-11). Plain
+>   `PRAGMA optimize` would add the analysis limit, which records the epoch
+>   index as about as selective as a channel.
+> - The floor still counts messages alone. A table analyzed at a handful of
+>   rows, membership intervals or society approvals, is analyzed again within
+>   the hour after it grows tenfold, so its numbers stay within a factor of
+>   ten of its size.
+> - The refresh is a loop the store starts and `Close` stops, waiting for it
+>   before the connection closes. It queues on the one connection like any
+>   other call, so it never runs inside a channel or society transaction
+>   (S-6). A full ANALYZE holds the connection while it runs, ~0.2 s per
+>   200 000 messages, and runs only when a table has changed tenfold. A
+>   failed refresh is logged and the next one retries.
+> - The statistics code moves, unchanged but for its comments, from
+>   `sqlite.go` to `sqlite_statistics.go`, beside the loop.
 
 ## Related documentation
 

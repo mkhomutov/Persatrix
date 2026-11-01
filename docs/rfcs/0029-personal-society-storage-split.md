@@ -1,9 +1,9 @@
 ---
 id: RFC-0029
 title: Personal/Society Storage Split
-summary: Splits persona-personal memory from cross-agent society memory behind a facade — Phase 1 (facade + tier rename) in v0.3.x; Phase 3 (society store) in v0.4.0 as society tables in the SQLite channels store; Phases 2 and 4–6 unslotted.
+summary: Splits persona-personal memory from cross-agent society memory behind a facade — Phase 1 (facade + tier rename) shipped in v0.3.2; Phase 3 (society store) implemented for v0.4.0 as society tables in the SQLite channels store; Phases 2 and 4–6 unslotted.
 type: architecture
-status: implementing
+status: partially_implemented
 author: Maksim Khomutov
 created: 2026-05-10
 target: Phase 1 v0.3.2 (facade + tier rename); Phase 3 v0.4.0 (society tables in the SQLite channels store, per v0.4.0's scope lock); Phases 2, 4–6 unslotted — see docs/v0.3.2-plan.md and docs/rfcs/0029-pr-plan.md
@@ -18,7 +18,7 @@ depends_on:
 > **Numbering note (2026-05-10).** This RFC was originally filed as RFC 0025 (PR #309). The 0025 slot is reserved as `superseded by RFC 0027` (per [docs/rfcs/README.md §Reserved RFC Numbers](README.md#reserved-rfc-numbers) and [ROADMAP.md RFC Master Index](../../ROADMAP.md#rfc-master-index) — RFC 0027 explicitly says "supersedes the user's draft RFC 0025"). Reusing slot 0025 for an unrelated topic would invalidate that supersession edge and the README's "slot retained for historical record" semantic, so this RFC was renumbered to the next free slot. Slots 0023 (narrowed) and 0024 (deferred) had no superseding RFC pointing at them and so were not renumbered when their files landed under different topics — only 0025 had an active supersession breadcrumb that this rename preserves. (The reasoning was first recorded in the PR #309 deep-review process; review reports themselves live under `docs/pr-reviews/`, which is `.gitignore`'d per repo convention, so this note is the canonical record.)
 
 **Type**: architecture
-**Status**: 🚧 Implementing (Phase 1 shipped in v0.3.2; Phase 3 in v0.4.0 — [PR plan](0029-phase3-pr-plan.md))
+**Status**: ⚠️ Partially Implemented (Phase 1 shipped in v0.3.2; Phase 3 implemented for v0.4.0, in the SQLite form — [PR plan](0029-phase3-pr-plan.md); Phases 2 and 4–6 unslotted)
 **Author**: Maksim Khomutov
 **Date**: 2026-05-10
 **Target**: Phase 1 v0.3.2 (facade + tier rename) — see [v0.3.2 plan](../v0.3.2-plan.md) and [PR plan](0029-pr-plan.md); Phase 3 v0.4.0 (the society backend as society tables in the SQLite channels store, per v0.4.0's scope lock and [the amendment under §D](#amendment-2026-10-20--v040s-society-backend)); Phases 2, 4–6 unslotted
@@ -566,7 +566,7 @@ The migration is reversible during the deprecation window: `persatrix memory rol
 
 ## Decision / Next Steps
 
-**Status**: 🚧 Implementing — Phase 1 shipped in v0.3.2 (RFC 0029 Phase 1 PRs 1–5). Phase 3 is v0.4.0, as society tables in the SQLite channels store ([amendment under §D](#amendment-2026-10-20--v040s-society-backend), [PR plan](0029-phase3-pr-plan.md)); Phases 2 and 4–6 are unslotted.
+**Status**: ⚠️ Partially Implemented — Phase 1 shipped in v0.3.2 (RFC 0029 Phase 1 PRs 1–5). Phase 3 is implemented for v0.4.0, as society tables in the SQLite channels store ([amendment under §D](#amendment-2026-10-20--v040s-society-backend), [PR plan](0029-phase3-pr-plan.md)): the channel-time index back, the society tables, `internal/society` on the channels store's connection, its startup wiring, and planner statistics refreshed hourly. Phases 2 and 4–6 are unslotted.
 
 **Phase 1 implemented (v0.3.2).** The `MemoryStore` facade promotion landed across RFC 0029 Phase 1 PRs 1–5 ([PR plan](0029-pr-plan.md)): the typed facade in `agents/memory/store.py`, the `MemoryFacade` one-minor-version alias shim, the RFC 0011 channel-history caller migration, the lint rule + `DeprecationWarning` guarding the personal/society boundary, the `persona_runtime/` + `sub_agents/` + RFC 0026 facts-tier call-site sweep, and the `tests/perf/personal_tier_latency.py` personal-tier recall-latency regression gate. No Postgres dependency was added — society-tier methods raise the `SocietyBackendUnavailable` hierarchy. The step-1 ordering prerequisite below ("before RFC 0028 implementation begins") is now satisfied; Phases 2–6 (capability tokens, Postgres society backend, migration tooling, society-tier consumers, conditional file split) were then reserved for v0.4.0; since 2026-10-20 only Phase 3 is, as society tables ([amendment under §D](#amendment-2026-10-20--v040s-society-backend)).
 

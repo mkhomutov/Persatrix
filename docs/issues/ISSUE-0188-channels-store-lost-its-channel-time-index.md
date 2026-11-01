@@ -107,3 +107,8 @@ with this index, so the phase that boards states it as its dependency
 > society tables on the store's own connection ([results](../storage-architecture-benchmark-reruns.md#the-gate-on-channels-store-v14)).
 > Statistics are gathered only at open; refreshing them while the store
 > stays open is that plan's PR 5.
+
+> 2026-11-01 — that plan's PR 5 refreshes the statistics every hour while
+> the store stays open, with the open's own mask and floor, so a table that
+> grows tenfold after the open is analyzed again without a restart. The
+> statistics code now lives in `internal/channels/sqlite_statistics.go`.
