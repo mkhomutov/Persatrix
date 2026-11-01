@@ -6,9 +6,10 @@ package channels
 // messages, whatever the other tables hold then: a room's membership
 // intervals or the society's approvals may number a handful, and numbers that
 // young turn the scoped read's membership check, or the expiry sweep, into a
-// scan of the table. The hourly refresh re-analyzes a table once it has grown
-// tenfold, so the planner's numbers stay within a factor of ten of the
-// table's size without waiting for a restart.
+// scan of the table. While the store holds the floor, the hourly refresh
+// re-analyzes a table once it has grown tenfold, so the planner's numbers
+// stay within a factor of ten of the table's size without waiting for a
+// restart.
 
 import (
 	"database/sql"
@@ -189,8 +190,8 @@ func TestSQLiteStore_StatisticsRefresh_SurvivesAFailure(t *testing.T) {
 }
 
 // TestSQLiteStore_Close_StopsTheStatisticsRefresh pins that Close ends the
-// refresh loop before it closes the connection, so no refresh runs on a
-// closed store, and that a second Close is harmless.
+// refresh loop before it returns, so no refresh runs on a closed store, and
+// that a second Close is harmless.
 func TestSQLiteStore_Close_StopsTheStatisticsRefresh(t *testing.T) {
 	probe := newRefreshProbe()
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "channels.db"), probe.options(nil))
@@ -199,7 +200,7 @@ func TestSQLiteStore_Close_StopsTheStatisticsRefresh(t *testing.T) {
 
 	select {
 	case <-store.(*sqliteStore).refreshDone:
-	case <-time.After(10 * time.Second):
+	default:
 		t.Fatal("Close returned with the refresh loop still running")
 	}
 	select {
@@ -208,6 +209,64 @@ func TestSQLiteStore_Close_StopsTheStatisticsRefresh(t *testing.T) {
 	default:
 	}
 	assert.NoError(t, store.Close(), "a second Close")
+}
+
+// TestSQLiteStore_Close_InterruptsARefreshWaitingForTheConnection pins that
+// Close never waits on whoever holds the store's one connection: the
+// orchestrator's shutdown closes the store under stragglers to stay within
+// its deadline (PR 5 review F-2). A refresh that is waiting for the
+// connection is cancelled, the loop returns before Close does, and nothing
+// is logged, since a refresh Close stopped did not fail.
+func TestSQLiteStore_Close_InterruptsARefreshWaitingForTheConnection(t *testing.T) {
+	core, logs := observer.New(zap.WarnLevel)
+	probe := newRefreshProbe()
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "channels.db"), probe.options(zap.New(core)))
+	require.NoError(t, err)
+	holder, err := store.(*sqliteStore).db.Begin()
+	require.NoError(t, err, "hold the store's one connection")
+	t.Cleanup(func() { _ = holder.Rollback() })
+
+	select {
+	case probe.tick <- time.Now(): // the refresh now waits for the connection
+	case <-time.After(10 * time.Second):
+		t.Fatal("the statistics refresh loop is not listening")
+	}
+	closed := make(chan error, 1)
+	go func() { closed <- store.Close() }()
+	select {
+	case err := <-closed:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close waited for the connection's holder")
+	}
+	select {
+	case <-store.(*sqliteStore).refreshDone:
+	default:
+		t.Fatal("Close returned with the refresh loop still running")
+	}
+	assert.Zero(t, logs.Len(), "a refresh Close stopped is not logged as a failure")
+}
+
+// TestSQLiteStore_StatisticsRefresh_RunsOnItsTicker pins the ticker itself,
+// which every other refresh test replaces with a hand-driven channel (PR 5
+// review F-4): with only the interval shortened, refreshes arrive on their
+// own.
+func TestSQLiteStore_StatisticsRefresh_RunsOnItsTicker(t *testing.T) {
+	refreshed := make(chan error, 1)
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "channels.db"), SQLiteOptions{
+		statisticsSeam: &statisticsSeam{interval: 10 * time.Millisecond, refreshed: refreshed},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+
+	for range 2 {
+		select {
+		case err := <-refreshed:
+			require.NoError(t, err)
+		case <-time.After(10 * time.Second):
+			t.Fatal("the ticker ran no refresh")
+		}
+	}
 }
 
 // TestSQLiteStore_StatisticsRefreshInterval pins the cadence: hourly, as

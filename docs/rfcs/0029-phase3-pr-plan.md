@@ -395,6 +395,18 @@ plan the store has outgrown.
 1 000 messages, however few rows the society tables hold, so the refresh
 covers them too.
 
+**Review findings** (PR 5):
+
+| Finding | Severity | Description | Disposition |
+|---------|----------|-------------|-------------|
+| F-1 | Low | The floor gates every table, so a store that falls back below 1 000 messages refreshes nothing, and its membership or approval statistics stay as they were however much those tables grow; the comments said young numbers never outlive the next hour | Fixed in-PR (comments): the code, the test header and this plan's note state the limit. The floor stays whole: analyzing the other tables while `messages` has no statistics is a state no plan test covers |
+| F-2 | Low | Close waited for a refresh in progress, and a refresh waiting for the one connection waited on whoever held it, so the orchestrator's shutdown, which closes the store under stragglers to keep its deadline, could block behind a slow or leaked transaction | Fixed in-PR: the refresh runs under a context Close cancels, which ends its wait or interrupts its statement; a test holds the connection and pins that Close returns |
+| F-3 | Low | The Close test waited up to ten seconds for the loop to end, so it passed with Close not waiting for the loop at all | Fixed in-PR: it checks that the loop has ended when Close returns; a copy of the code without the wait fails it |
+| F-4 | Info | No test ran the real ticker, so a loop that never ticked in production passed every test | Fixed in-PR: the seam can shorten the interval instead of replacing the ticker, and a test waits for two refreshes from it |
+| F-5 | Info | Comments went stale with the refresh: the floor's reason described a penalty lasting until a restart, which the refresh now bounds, and "only when a table has changed tenfold" left out an index with no statistics yet, so a refresh can take young numbers too | Fixed in-PR |
+| F-6 | Info | The floor's count and the pragma took the connection separately, so a channel delete between them could let the pragma analyze `messages` below the floor | Fixed in-PR: both run on one connection |
+| F-7 | Low | This PR's own row said 🔀 with no link while the ROADMAP and RFC 0029 called the closeout merged; squash-merged so, `main`'s plan-status check would fail (ISSUE-0190) | Fixed in-PR: a later commit flips the row to ✅ with #1075 and its expected merge date |
+
 ---
 
 ## File-size constraints
@@ -532,16 +544,19 @@ covers them too.
 >   store under 1 000 messages still gathers none (PR 1 F-11). Plain
 >   `PRAGMA optimize` would add the analysis limit, which records the epoch
 >   index as about as selective as a channel.
-> - The floor still counts messages alone. A table analyzed at a handful of
->   rows, membership intervals or society approvals, is analyzed again within
->   the hour after it grows tenfold, so its numbers stay within a factor of
->   ten of its size.
+> - The floor still counts messages alone. While the store holds it, a table
+>   analyzed at a handful of rows, membership intervals or society approvals,
+>   is analyzed again within the hour after it grows tenfold, so its numbers
+>   stay within a factor of ten of its size. A store back below the floor
+>   refreshes nothing (F-1).
 > - The refresh is a loop the store starts and `Close` stops, waiting for it
 >   before the connection closes. It queues on the one connection like any
 >   other call, so it never runs inside a channel or society transaction
 >   (S-6). A full ANALYZE holds the connection while it runs, ~0.2 s per
->   200 000 messages, and runs only when a table has changed tenfold. A
->   failed refresh is logged and the next one retries.
+>   200 000 messages, and runs only when an index has no statistics yet or a
+>   table has changed tenfold. Close cancels a refresh in progress, so it
+>   never waits on another holder of the connection (F-2). A failed refresh
+>   is logged and the next one retries.
 > - The statistics code moves, unchanged but for its comments, from
 >   `sqlite.go` to `sqlite_statistics.go`, beside the loop.
 

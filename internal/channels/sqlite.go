@@ -196,7 +196,7 @@ func NewSQLiteStore(path string, opts SQLiteOptions) (ChannelStore, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	if err := gatherPlannerStatistics(db); err != nil {
+	if err := gatherPlannerStatistics(context.Background(), db); err != nil {
 		// Statistics are advice to the planner, not schema: every read still
 		// answers correctly without them, so a store that could not gather
 		// them still opens.
@@ -279,12 +279,11 @@ type sqliteStore struct {
 
 	dmMu sync.Mutex
 
-	// refreshStop ends the hourly planner-statistics refresh and refreshDone
-	// closes when it has returned ([sqliteStore.startRefreshLoop]); Close
-	// waits for it before closing the connection.
-	refreshStop     chan struct{}
-	refreshDone     chan struct{}
-	refreshStopOnce sync.Once
+	// refreshCancel stops the hourly planner-statistics refresh and
+	// refreshDone closes when it has returned ([sqliteStore.startRefreshLoop]);
+	// Close waits for it before closing the connection.
+	refreshCancel context.CancelFunc
+	refreshDone   chan struct{}
 }
 
 // recordSessionWrite increments the `sessions.writes` counter with the
