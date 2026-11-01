@@ -72,6 +72,18 @@ type Server struct {
 	// → callers present `Authorization: Bearer <token>` (crypto/subtle compare).
 	unquarantineToken string
 
+	// Agent identity (RFC 0009 Phase 4; agent_enrollment.go). enrollment
+	// registers and deregisters agents with their tokens, one at a time, so
+	// the registry and the issuer never disagree about an agent; New makes
+	// one over the server's registry when WithAgentEnrollment gives none.
+	// agentTokens is its issuer. enrollmentSecret is the fleet enrollment
+	// secret, "" when none is set. registerPerSource counts registrations by
+	// the caller's address.
+	enrollment        *security.AgentEnrollment
+	agentTokens       *security.AgentTokenIssuer
+	enrollmentSecret  string
+	registerPerSource *security.RateLimiter
+
 	// Channel components (RFC 0011 PR 2 — optional, nil-safe).
 	// channelStore is the persistence boundary; channelRouter wraps it
 	// with publish-side fanout + channel_type cross-validation. When
@@ -162,6 +174,9 @@ func New(addr, workflowsDir string, store state.Store, reg registry.Registry, pl
 	}
 	for _, opt := range opts {
 		opt(s)
+	}
+	if err := s.initAgentEnrollment(); err != nil {
+		return nil, err
 	}
 
 	// RFC 0031 Phase 3 PR 4: the boot-default session id (PERSATRIX_SESSION_ID)

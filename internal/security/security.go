@@ -49,8 +49,11 @@
 //     CLI checks the chain.
 //   - [AgentTokenIssuer], made by [NewAgentTokenIssuer]: issues each agent a
 //     signed token that names it, checks a token and revokes an agent's
-//     tokens (RFC 0009 Phase 4). Registration does not hand tokens out yet,
-//     and no call is checked against one.
+//     tokens (RFC 0009 Phase 4). Registration hands tokens out, but no call
+//     is checked against one yet.
+//   - [AgentEnrollment], made by [NewAgentEnrollment]: registers an agent
+//     and issues its token as one step, and deregisters it and revokes its
+//     tokens as one step, for every server that registers agents.
 //
 // Planned: checking agent tokens on the agents' calls, so the orchestrator
 // knows which agent is calling (RFC 0009 Phase 4). Until then, the agent ID

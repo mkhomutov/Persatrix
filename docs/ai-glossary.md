@@ -487,6 +487,20 @@ Process vocabulary (scope lock, cuttable, live arc, finding, …) lives in the
 - **Example:** "After the orchestrator restarted, the persona's agent token was
   refused, so the persona registered again and got a new one."
 
+### Fleet Enrollment Secret
+- **Aliases:** "enrollment secret"
+- **Disallowed:** "registration token", "agent password", "API key"
+- **Definition:** The shared secret an operator sets on the orchestrator
+  (`SECURITY_ENROLLMENT_SECRET`) and gives every agent, which an agent shows
+  in the `X-Enrollment-Secret` header when it registers, the one call that
+  cannot show an **Agent Token** because it is the call that issues one (RFC
+  0009 Phase 4, `internal/server/agent_enrollment.go`). A wrong one is
+  refused. One secret serves the whole fleet, so whoever holds it can
+  register under any **Agent ID**; registering again from another address is
+  audited.
+- **Example:** "Set the fleet enrollment secret on the orchestrator and on
+  every agent before you turn auth on."
+
 ### Participant ID
 - **Aliases:** —
 - **Disallowed:** "user id" (when meaning a channel participant), "member id"

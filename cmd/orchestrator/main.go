@@ -28,6 +28,7 @@ import (
 	"github.com/mkhomutov/persatrix/internal/planner"
 	"github.com/mkhomutov/persatrix/internal/registry"
 	"github.com/mkhomutov/persatrix/internal/scheduler"
+	"github.com/mkhomutov/persatrix/internal/security"
 	"github.com/mkhomutov/persatrix/internal/server"
 	"github.com/mkhomutov/persatrix/internal/state"
 	"github.com/mkhomutov/persatrix/internal/wallet"
@@ -332,12 +333,10 @@ func main() {
 	// quarantine. Nil-safe when SECURITY_RATE_LIMIT_ENABLED=false.
 	srvOpts = append(srvOpts, server.WithRateLimiter(rateLimiter, circuitBreaker))
 
-	// PR #244 H-02 — optional shared-secret stop-gap. When unset,
-	// unquarantineToken emits a startup WARN + `unquarantine.endpoint.open`
-	// audit event so the open posture is recorded (M-05); nil auditor safe.
-	if tok := unquarantineToken(logger, auditor); tok != "" {
-		srvOpts = append(srvOpts, server.WithUnquarantineToken(tok))
-	}
+	// RFC 0009 Phase 4 — agent tokens and the fleet enrollment secret, with
+	// PR #244 H-02's unquarantine secret (enrollment.go).
+	agentEnrollment := security.NewAgentEnrollment(reg, security.NewAgentTokenIssuer())
+	srvOpts = append(srvOpts, agentIdentityOptions(logger, auditor, agentEnrollment)...)
 
 	sessionID := resolveSessionID(logger)
 	// ISSUE-0085 PR 4: resolve the per-process run/test-isolation epoch once

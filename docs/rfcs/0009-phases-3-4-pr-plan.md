@@ -137,7 +137,7 @@ the points it implements.
 | 3 | A3 | Tool arguments checked against the tool's schema | `feature/v040-rfc0009-arg-schemas` (head branch `claude/affectionate-faraday-sewbto`, assigned by the session that opened it) | ✅ | [#1069](https://github.com/mkhomutov/Persatrix/pull/1069) | 2026-10-29 |
 | 4 | A3 | Shell CPU limit, output caps, `resource_limits:` | `feature/v040-rfc0009-resource-limits` | ⬜ | — | — |
 | 5 | A4 | Agent tokens: issue, check, revoke (Go) | `feature/v040-rfc0009-agent-token` (head branch `claude/admiring-cori-ibird5`, assigned by the session that opened it) | ✅ | [#1071](https://github.com/mkhomutov/Persatrix/pull/1071) | 2026-10-30 |
-| 6 | A4 | Registration returns a token and accepts the enrollment secret | `feature/v040-rfc0009-enrollment` | ⬜ | — | — |
+| 6 | A4 | Registration returns a token and accepts the enrollment secret | `feature/v040-rfc0009-enrollment` (head branch `claude/magical-gates-p9ku7g`, assigned by the session that opened it) | 🔀 | [#1076](https://github.com/mkhomutov/Persatrix/pull/1076) | — |
 | 7 | A4 | Agents send the secret, keep their token and refresh it | `feature/v040-rfc0009-agent-token-client` | ⬜ | — | — |
 | 8 | A4 | Token check on REST; every publish bound to its caller | `feature/v040-rfc0009-token-middleware` | ⬜ | — | — |
 | 9 | A4 | The agent routes' policies under `enabled` | `feature/v040-rfc0009-agent-route-policy` | ⬜ | — | — |
@@ -386,6 +386,64 @@ refuses them with 400 too. F-12 — a registration retires the agent's
 earlier tokens, so the audit line for a re-registration from a new address
 (G-14) can say the old address's token stopped working.
 
+**Implementation note (2026-11-01)**: how this PR meets the scope above.
+Each point not settled above is a new default this PR's review confirms or
+overturns.
+
+- **Where.** `security.AgentEnrollment` (`internal/security/agent_enrollment.go`)
+  holds the registry and token steps; `internal/server/agent_enrollment.go`
+  holds the secret check, the registration limit and the audit lines; the
+  handlers in `agent_handlers.go` call them. `cmd/orchestrator/enrollment.go`
+  reads `SECURITY_ENROLLMENT_SECRET` and hands the server its agent-identity
+  options; the unquarantine secret's wiring moved there from `main.go`
+  (499 lines), which now makes the one `AgentEnrollment`, over the registry
+  and one `AgentTokenIssuer`, and passes it in, so every server that
+  registers agents, and PR 10's gRPC check, can share it. A server given
+  none makes its own.
+- **The secret (new default).** It travels in an `X-Enrollment-Secret`
+  header, never `Authorization`, which carries account sessions, and is
+  compared in constant time through the same SHA-256 helper the unquarantine
+  bearer uses. Its surrounding whitespace is trimmed, as a header's is. A shown secret that differs from the one set gets 401 and an
+  `agent.token_invalid` line with `reason: enrollment_secret` and the
+  caller's address, read past trusted proxies; neither secret is ever
+  written. No secret shown is admitted, as the scope says; with none set, a
+  shown one is ignored, so a fleet given the secret before its orchestrator
+  keeps registering. The check runs after the ID checks and before the
+  capability checks, so a caller with a wrong secret cannot make
+  registration write its capability audit lines.
+- **The response (new default).** The `201` body adds `agent_token` and
+  `agent_token_expires_at` to the agent's fields, with
+  `Cache-Control: no-store`. The list and get routes carry no token.
+- **IDs.** `security.IssuableAgentID`, exported from PR 5's unexported
+  check, refuses `web-console`, `anonymous` and an ID over
+  `MaxAgentIDLen` with 400 before anything registers.
+- **One step at a time (F-6).** One lock in `AgentEnrollment` covers a
+  registration's registry upsert and token issue, and a deregistration's
+  removal and revocation, so a racing pair leaves the agent either
+  registered with a working token or gone with a revoked one; a test puts
+  the deregistration between the two steps, and fails without the lock.
+  Registration is rare, so one lock costs nothing a per-agent one would
+  save. Revocation follows a successful removal only, and a registration
+  whose token cannot be issued is undone.
+- **The limit (new default).** One address may register 120 times a
+  minute, counted by the caller's address, not its `X-Agent-ID`; over it,
+  `429` with `Retry-After`. It bounds secret guessing and the audit
+  flushes each registration forces, and fits a host's whole fleet.
+- **Audit.** Every registration writes `agent.token_issued` with the
+  address, the caller's source and the expiry, never the token, and, with
+  a secret set, `enrollment_secret: shown` or `absent`. An agent already
+  registered adds `previous_token: revoked` (F-12), and `previous_address`
+  or `previous_source` when the address it gives or the source it comes
+  from differs (G-14). A deregistration writes `agent.deregistered` with
+  the caller's source. All three are security-class, as `audit_event.go`
+  has classed the token events since Phase 1.
+
+**For PR 7**: the agent sends `X-Enrollment-Secret` on registration and
+reads `agent_token` and `agent_token_expires_at` from the `201` body.
+Reading the secret from the same `SECURITY_ENROLLMENT_SECRET` the
+orchestrator reads keeps one name per deployment; PR 4's scrub of a tool's
+environment removes it.
+
 ### PR 7 — `feature/v040-rfc0009-agent-token-client`
 
 **Scope**: `agents/server.py` (490) and `server_reregister.py`; the
@@ -582,7 +640,7 @@ the closeout would take it past its cap.
 | `agents/base.py` | 412 | PR 3 moved the task agent's tool round, unchanged, to `agents/task_tool_round.py` (121 lines) |
 | `internal/server/server.go` | 500 | PR 12 registers its routes from their own file |
 | `agents/server_servicers.py` | 502 | PR 14 splits at a real seam first |
-| `cmd/orchestrator/main.go` | 499 | PR 6 reads its setting beside `cmd/orchestrator/ratelimit.go`, not here |
+| `cmd/orchestrator/main.go` | 499 | PR 6 read its setting in `cmd/orchestrator/enrollment.go`, which took the unquarantine wiring with it; still 499 after |
 | `agents/wallet_client.py` | 503 | PR 7 splits it at a real seam first, then adds one metadata entry |
 | `internal/server/auth_middleware.go` | 330 | PR 8 adds the agent principal |
 | `agents/server.py` | 490 | PR 7 sends the token through `orchestrator_session.py`; the refresh lives in `server_reregister.py` |
