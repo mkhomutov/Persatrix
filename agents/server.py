@@ -27,7 +27,7 @@ from .observability.log_shipper import (
     queue_capacity_from_env,
     set_active_shipper,
 )
-from .orchestrator_session import new_orchestrator_session
+from .orchestrator_session import enrollment_headers, new_orchestrator_session
 from .persona_runtime import _LLMPersonaAgent
 from .prefix_keepalive import start_prefix_keepalive
 from .server_persona import (
@@ -38,7 +38,7 @@ from .server_persona import (
     wire_wallet_client,
 )
 from .server_persona_timers import wire_convene_clients
-from .server_reregister import ReregistrationWatcher
+from .server_reregister import AgentTokenKeeper, ReregistrationWatcher
 from .server_servicers import (  # noqa: F401
     AgentServiceServicer,
     _extract_chat_reply,
@@ -100,6 +100,8 @@ class AgentServer:
         # ISSUE-0125 — re-registers this agent when the orchestrator comes back
         # from a restart. Armed at the end of start(), stopped first in stop().
         self._reregister_watcher: ReregistrationWatcher | None = None
+        # RFC 0009 Phases 3–4 plan PR 7 — the hosted agent's token.
+        self._tokens = AgentTokenKeeper(lambda: self._self_register())
         # EXP-001 arm D′ — keeps a cached prompt prefix alive through a quiet
         # spell when the process's setting asks; cancelled early in stop().
         self._prefix_keepalive: asyncio.Task[None] | None = None
@@ -195,7 +197,9 @@ class AgentServer:
         # the orchestrator, sending the hosted agent's ID so each agent gets
         # its own rate-limit budget (ISSUE-0152). RFC 0011 PR 4a-ii-β-1
         # wires the REST channel publisher onto it.
-        self._session = new_orchestrator_session(hosted_agent_id)
+        self._session = new_orchestrator_session(
+            hosted_agent_id, self.orchestrator_url, self._tokens,
+        )
         self._dispatcher.set_channel_publisher(HTTPChannelPublisher(
             orchestrator_url=self.orchestrator_url, session=self._session,
         ))
@@ -242,6 +246,7 @@ class AgentServer:
         # agent's own budget instead of the shared anonymous bucket.
         self._wallet_client = WalletClient.from_channel(
             self._orchestrator_channel, agent_id=hosted_agent_id,
+            agent_token=lambda: self._tokens.token,
         )
         wire_wallet_client(self.agents, self._wallet_client)
 
@@ -278,7 +283,7 @@ class AgentServer:
         if self._orchestrator_channel is None:
             return
         self._reregister_watcher = ReregistrationWatcher(
-            self._orchestrator_channel, self._self_register,
+            self._orchestrator_channel, self._tokens.register,
         )
         self._reregister_watcher.start()
 
@@ -320,10 +325,14 @@ class AgentServer:
             }
             url = f"{self.orchestrator_url}/api/v1/agents/register"
             try:
+                # Shows the secret, never a token: a stale one must not block its own renewal.
                 async with self._session.post(
-                    url, json=payload, timeout=aiohttp.ClientTimeout(total=10)
+                    url, json=payload, timeout=aiohttp.ClientTimeout(total=10),
+                    headers=enrollment_headers(), middlewares=(), allow_redirects=False,
                 ) as resp:
                     if resp.status in (200, 201):
+                        if agent_id == next(iter(self.agents)):  # the one the session names
+                            await self._tokens.keep_from(resp)
                         logger.info(
                             "Registered agent %s with orchestrator at %s",
                             agent_id,
@@ -403,6 +412,7 @@ class AgentServer:
             except Exception:
                 logger.exception("Error stopping the re-registration watcher")
             self._reregister_watcher = None
+        await self._tokens.close()  # a refused call must not re-register it either
         # A keep-alive has nothing to keep once the agent is going.
         if self._prefix_keepalive is not None:
             self._prefix_keepalive.cancel()

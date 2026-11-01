@@ -113,3 +113,64 @@ async def test_from_channel_forwards_agent_id() -> None:
     client = WalletClient.from_channel(channel, agent_id="nova-sparrow")
     assert client._metadata is not None
     assert ("x-agent-id", "nova-sparrow") in tuple(client._metadata)
+
+
+async def test_every_rpc_carries_the_current_agent_token() -> None:
+    """RFC 0009 Phases 3–4 plan, PR 7: registering again replaces the token,
+    so each call reads it rather than the client fixing one at the start."""
+    stub = _stub()
+    current = ["agt1.first"]
+    client = WalletClient(
+        stub, agent_id="ember-owl", agent_token=lambda: current[0], backoff_base=0.0,
+    )
+
+    async with client.lease(
+        agent_id="ember-owl",
+        model="m",
+        estimated_input_tokens=1,
+        estimated_max_output_tokens=1,
+        cause=walletpb.CAUSE_CHANNEL_MESSAGE,
+    ) as lease:
+        lease.mark_call_started()
+        assert _metadata_kwarg(stub.AcquireLease) == (
+            ("x-agent-id", "ember-owl"), ("x-agent-token", "agt1.first"),
+        )
+        current[0] = "agt1.second"
+        await lease.settle(input_tokens=1, output_tokens=1)
+    assert _metadata_kwarg(stub.SettleLease) == (
+        ("x-agent-id", "ember-owl"), ("x-agent-token", "agt1.second"),
+    )
+
+    with pytest.raises(RuntimeError, match="boom"):
+        async with client.lease(
+            agent_id="ember-owl",
+            model="m",
+            estimated_input_tokens=1,
+            estimated_max_output_tokens=1,
+            cause=walletpb.CAUSE_CHANNEL_MESSAGE,
+        ):
+            raise RuntimeError("boom")  # pre-call abort → ReleaseLease
+    assert ("x-agent-token", "agt1.second") in _metadata_kwarg(stub.ReleaseLease)
+
+
+async def test_no_token_yet_sends_no_token_metadata() -> None:
+    stub = _stub()
+    client = WalletClient(
+        stub, agent_id="ember-owl", agent_token=lambda: "", backoff_base=0.0,
+    )
+
+    async with client.lease(
+        agent_id="ember-owl",
+        model="m",
+        estimated_input_tokens=1,
+        estimated_max_output_tokens=1,
+        cause=walletpb.CAUSE_CHANNEL_MESSAGE,
+    ):
+        pass
+
+    assert _metadata_kwarg(stub.AcquireLease) == (("x-agent-id", "ember-owl"),)
+
+
+async def test_from_channel_forwards_the_token_source() -> None:
+    client = WalletClient.from_channel(AsyncMock(), agent_token=lambda: "agt1.fake")
+    assert client._metadata == (("x-agent-token", "agt1.fake"),)

@@ -52,7 +52,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 
 import grpc
@@ -69,6 +69,9 @@ logger = logging.getLogger(__name__)
 # agents' REST session can share it without this module importing
 # orchestrator-coupled code (RFC 0045).
 AGENT_ID_METADATA_KEY = "x-agent-id"
+# The metadata key of the agent's token, which proves that ID (RFC 0009
+# Phases 3–4 plan, G-5). The REST session shares it the same way.
+AGENT_TOKEN_METADATA_KEY = "x-agent-token"
 
 __all__ = ["BudgetExceededError", "Lease", "WalletClient"]
 
@@ -93,6 +96,7 @@ class WalletClient:
         stub: wallet_grpc.WalletServiceStub,
         *,
         agent_id: str = "",
+        agent_token: Callable[[], str] | None = None,
         acquire_max_attempts: int = 3,
         settle_max_attempts: int = 3,
         backoff_base: float = 0.1,
@@ -103,9 +107,9 @@ class WalletClient:
         # shares one anonymous bucket and the RFC 0052 close-summary fan
         # starves late callers into the placeholder summary. Empty id →
         # no metadata (the pre-fix wire shape).
-        self._metadata: tuple[tuple[str, str], ...] | None = (
-            ((AGENT_ID_METADATA_KEY, agent_id),) if agent_id else None
-        )
+        self._agent_id = agent_id
+        # Registering again replaces the token, so it is read on each call.
+        self._agent_token = agent_token
         self._acquire_max_attempts = max(1, acquire_max_attempts)
         self._settle_max_attempts = max(1, settle_max_attempts)
         self._backoff_base = max(0.0, backoff_base)
@@ -116,6 +120,7 @@ class WalletClient:
         channel: grpc.aio.Channel,
         *,
         agent_id: str = "",
+        agent_token: Callable[[], str] | None = None,
         acquire_max_attempts: int = 3,
         settle_max_attempts: int = 3,
         backoff_base: float = 0.1,
@@ -129,10 +134,18 @@ class WalletClient:
         return cls(
             wallet_grpc.WalletServiceStub(channel),
             agent_id=agent_id,
+            agent_token=agent_token,
             acquire_max_attempts=acquire_max_attempts,
             settle_max_attempts=settle_max_attempts,
             backoff_base=backoff_base,
         )
+
+    @property
+    def _metadata(self) -> tuple[tuple[str, str], ...] | None:
+        """What this call shows: the agent's ID and its current token."""
+        token = self._agent_token() if self._agent_token is not None else ""
+        entries = ((AGENT_ID_METADATA_KEY, self._agent_id), (AGENT_TOKEN_METADATA_KEY, token))
+        return tuple((key, value) for key, value in entries if value) or None
 
     def _backoff(self, attempt: int) -> float:
         """Backoff delay for retry *attempt* (1-indexed), with full jitter.
