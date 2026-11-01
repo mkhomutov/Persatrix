@@ -140,9 +140,10 @@ type SQLiteOptions struct {
 	// option behaves exactly as before this knob existed.
 	DMDefaultClassification Classification
 
-	// statisticsSeam is test-only: it replaces the hourly planner-statistics
-	// refresh's ticker ([statisticsSeam]). Unexported, so production builds
-	// cannot set it.
+	// statisticsSeam is test-only: it drives the hourly planner-statistics
+	// refresh by hand, or keeps the real ticker on a shorter interval, and
+	// reports each refresh's error on a channel the test must drain
+	// ([statisticsSeam]). Unexported, so production builds cannot set it.
 	statisticsSeam *statisticsSeam
 }
 
@@ -196,7 +197,7 @@ func NewSQLiteStore(path string, opts SQLiteOptions) (ChannelStore, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	if err := gatherPlannerStatistics(context.Background(), db); err != nil {
+	if err := gatherPlannerStatistics(context.Background(), db, false); err != nil {
 		// Statistics are advice to the planner, not schema: every read still
 		// answers correctly without them, so a store that could not gather
 		// them still opens.

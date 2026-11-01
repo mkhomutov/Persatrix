@@ -9,6 +9,8 @@ package channels
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"time"
 
 	"go.uber.org/zap"
@@ -30,7 +32,8 @@ const statisticsFloor = 1000
 // statisticsRefreshInterval is how often an open store refreshes its planner
 // statistics. A refresh that finds nothing to analyze costs one bounded row
 // count and a brief write lock, so hourly is cheap, and it keeps a table's numbers no
-// more than an hour behind its tenfold growth.
+// more than an hour behind its tenfold growth. A refresh does not wait for a
+// lock another writer holds: it fails, and the next one retries.
 const statisticsRefreshInterval = time.Hour
 
 // gatherPlannerStatistics runs `PRAGMA optimize=0x10002`, the form SQLite
@@ -59,8 +62,12 @@ const statisticsRefreshInterval = time.Hour
 // or a table grown or shrunk tenfold.
 //
 // Every form of the pragma takes the write lock, even when it analyzes
-// nothing, so a call waits under busy_timeout for any other writer to the
-// file. Only the orchestrator opens it.
+// nothing, so the open waits under busy_timeout for any other writer to the
+// file. Only the orchestrator opens it. A refresh (refresh true) runs the
+// pragma with busy_timeout 0 instead, then puts the connection's wait back:
+// waiting would hold the store's one connection from every other call, and
+// keep Close waiting too, since cancelling a statement does not end SQLite's
+// wait for a lock.
 //
 // The floor counts messages alone, and gates every table. Once it is met,
 // the other tables are analyzed at whatever size they have, so a handful of
@@ -71,7 +78,7 @@ const statisticsRefreshInterval = time.Hour
 // tenfold, so those numbers are out by less than ten times for at most an
 // hour. A store that falls back below the floor refreshes nothing, and keeps
 // whatever statistics it had until it holds the floor again.
-func gatherPlannerStatistics(ctx context.Context, db *sql.DB) error {
+func gatherPlannerStatistics(ctx context.Context, db *sql.DB, refresh bool) (err error) {
 	conn, err := db.Conn(ctx)
 	if err != nil {
 		return err
@@ -85,8 +92,34 @@ func gatherPlannerStatistics(ctx context.Context, db *sql.DB) error {
 	if held < statisticsFloor {
 		return nil
 	}
+	if refresh {
+		restore, dropErr := dropBusyTimeout(ctx, conn)
+		if dropErr != nil {
+			return dropErr
+		}
+		defer func() { err = errors.Join(err, restore()) }()
+	}
 	_, err = conn.ExecContext(ctx, `PRAGMA optimize=0x10002`)
 	return err
+}
+
+// dropBusyTimeout sets conn's busy_timeout to 0, so its next statement fails
+// at once rather than wait for another writer's lock, and returns the call
+// that puts the old value back. That call does not use ctx: Close may have
+// cancelled it, and the connection goes back to the pool for every other
+// call, which needs its wait.
+func dropBusyTimeout(ctx context.Context, conn *sql.Conn) (restore func() error, err error) {
+	var wait int
+	if err := conn.QueryRowContext(ctx, `PRAGMA busy_timeout`).Scan(&wait); err != nil {
+		return nil, err
+	}
+	if _, err := conn.ExecContext(ctx, `PRAGMA busy_timeout = 0`); err != nil {
+		return nil, err
+	}
+	return func() error {
+		_, err := conn.ExecContext(context.Background(), fmt.Sprintf(`PRAGMA busy_timeout = %d`, wait))
+		return err
+	}, nil
 }
 
 // statisticsSeam stands in for the refresh loop's ticker in tests: each value
@@ -112,7 +145,9 @@ func (s *sqliteStore) startRefreshLoop(seam *statisticsSeam) {
 // so it never runs inside a channel or society transaction; one that needs a
 // full ANALYZE holds the connection for it. Close cancels the refresh's
 // context, which stops it waiting for the connection or interrupts its
-// statement, so Close never waits on another holder of the connection. A
+// ANALYZE, and the refresh's pragma never waits for another writer's lock
+// ([gatherPlannerStatistics]), so Close never waits on another holder of the
+// connection or of the file's write lock. A
 // failed refresh is logged and the next tick tries again: statistics are
 // advice, and every read answers without them. One that Close stopped is not
 // logged.
@@ -143,7 +178,7 @@ func (s *sqliteStore) refreshLoop(ctx context.Context, seam *statisticsSeam) {
 			return
 		case <-tick:
 		}
-		err := gatherPlannerStatistics(ctx, s.db)
+		err := gatherPlannerStatistics(ctx, s.db, true)
 		if err != nil && ctx.Err() == nil {
 			s.logger.Warn("channels: refresh planner statistics failed; the next refresh retries",
 				zap.Error(err))
@@ -159,12 +194,8 @@ func (s *sqliteStore) refreshLoop(ctx context.Context, seam *statisticsSeam) {
 }
 
 // stopRefreshLoop cancels the refresh loop and waits for it to return, so no
-// refresh runs on a closed connection. Safe to call more than once, and a
-// no-op on a store whose loop never started.
+// refresh runs on a closed connection. Safe to call more than once.
 func (s *sqliteStore) stopRefreshLoop() {
-	if s.refreshCancel == nil {
-		return
-	}
 	s.refreshCancel()
 	<-s.refreshDone
 }

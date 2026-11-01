@@ -158,20 +158,11 @@ func TestSQLiteStore_StatisticsRefresh_KeepsTheFloor(t *testing.T) {
 	assert.Zero(t, messageStatRows(t, db), "one message short of the floor, the refresh gathers no statistics")
 }
 
-// TestSQLiteStore_StatisticsRefresh_SurvivesAFailure pins that a refresh that
-// cannot take the write lock logs a warning and leaves the loop running, so
-// the next refresh gathers what this one could not.
-func TestSQLiteStore_StatisticsRefresh_SurvivesAFailure(t *testing.T) {
-	t.Parallel() // waits out the store's five-second busy_timeout
-	path := filepath.Join(t.TempDir(), "channels.db")
-	core, logs := observer.New(zap.WarnLevel)
-	probe := newRefreshProbe()
-	store, err := NewSQLiteStore(path, probe.options(zap.New(core)))
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = store.Close() })
-	db := store.(*sqliteStore).db
-	seedChannelHistory(t, db, 1, statisticsFloor)
-
+// holdWriteLock takes the write lock on the file at path from a second
+// connection, as another process would, and returns the call that releases
+// it.
+func holdWriteLock(t *testing.T, path string) (release func()) {
+	t.Helper()
 	holder, err := sql.Open("sqlite", buildDSN(path))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = holder.Close() })
@@ -180,13 +171,67 @@ func TestSQLiteStore_StatisticsRefresh_SurvivesAFailure(t *testing.T) {
 	require.NoError(t, err)
 	_, err = lock.Exec(`UPDATE messages SET content = content WHERE id = 'group:room-0-msg-0000'`)
 	require.NoError(t, err, "take the write lock and hold it")
+	return func() { require.NoError(t, lock.Rollback()) }
+}
 
+// busyTimeout is the busy_timeout, in milliseconds, of db's connection.
+func busyTimeout(t *testing.T, db *sql.DB) int {
+	t.Helper()
+	var ms int
+	require.NoError(t, db.QueryRow(`PRAGMA busy_timeout`).Scan(&ms))
+	return ms
+}
+
+// TestSQLiteStore_StatisticsRefresh_SurvivesAFailure pins that a refresh that
+// cannot take the write lock fails at once, rather than hold the store's one
+// connection for the five-second busy_timeout, logs a warning and leaves the
+// loop running, so the next refresh gathers what this one could not. The
+// connection keeps its busy_timeout for every other call.
+func TestSQLiteStore_StatisticsRefresh_SurvivesAFailure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "channels.db")
+	core, logs := observer.New(zap.WarnLevel)
+	probe := newRefreshProbe()
+	store, err := NewSQLiteStore(path, probe.options(zap.New(core)))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	db := store.(*sqliteStore).db
+	seedChannelHistory(t, db, 1, statisticsFloor)
+	release := holdWriteLock(t, path)
+
+	start := time.Now()
 	assert.Error(t, probe.refresh(t), "the refresh cannot take the write lock")
+	assert.Less(t, time.Since(start), time.Second, "the refresh does not wait for another writer's lock")
 	assert.Equal(t, 1, logs.FilterMessageSnippet("planner statistics").Len(), "the failure is logged")
-	require.NoError(t, lock.Rollback())
+	assert.Equal(t, 5000, busyTimeout(t, db), "the connection gets its busy_timeout back")
+	release()
 
 	require.NoError(t, probe.refresh(t), "the loop is still running")
 	assert.NotZero(t, messageStatRows(t, db), "the next refresh gathers the statistics")
+}
+
+// TestSQLiteStore_Close_DoesNotWaitForAnotherWritersLock pins that Close
+// never waits out busy_timeout behind another process's write lock: a refresh
+// whose pragma meets that lock fails at once, since cancelling a statement
+// does not end SQLite's wait for a lock. The pause lets the refresh reach its
+// pragma before Close.
+func TestSQLiteStore_Close_DoesNotWaitForAnotherWritersLock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "channels.db")
+	probe := newRefreshProbe()
+	store, err := NewSQLiteStore(path, probe.options(nil))
+	require.NoError(t, err)
+	seedChannelHistory(t, store.(*sqliteStore).db, 1, statisticsFloor)
+	release := holdWriteLock(t, path)
+	defer release()
+
+	select {
+	case probe.tick <- time.Now():
+	case <-time.After(10 * time.Second):
+		t.Fatal("the statistics refresh loop is not listening")
+	}
+	time.Sleep(200 * time.Millisecond)
+	start := time.Now()
+	require.NoError(t, store.Close())
+	assert.Less(t, time.Since(start), time.Second, "Close does not wait for another writer's lock")
 }
 
 // TestSQLiteStore_Close_StopsTheStatisticsRefresh pins that Close ends the
