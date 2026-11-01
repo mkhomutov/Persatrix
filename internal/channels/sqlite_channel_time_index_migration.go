@@ -32,7 +32,8 @@ const channelTimeIndexDDL = `CREATE INDEX IF NOT EXISTS idx_messages_channel_tim
 //
 // No query changes: with this index the planner walks it for all three
 // reads, both without statistics and with the ones the store gathers. The
-// store's open-time `PRAGMA optimize` ([gatherPlannerStatistics]) gives it
+// store's `PRAGMA optimize` ([gatherPlannerStatistics]), at open and at each
+// hourly refresh while it stays open, gives it
 // statistics that show `idx_messages_epoch` matching everything, so no
 // epoch-filtered read falls back to walking the store, but only once it
 // holds [statisticsFloor] messages: statistics from a smaller store would

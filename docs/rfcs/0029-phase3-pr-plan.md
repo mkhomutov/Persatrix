@@ -1,7 +1,7 @@
 # RFC 0029 — Personal/Society Storage Split — PR Implementation Plan (Phase 3, v0.4.0 form)
 
 **RFC**: [0029-personal-society-storage-split.md](0029-personal-society-storage-split.md)
-**Status**: 🔄 In progress
+**Status**: ✅ Complete
 **Created**: 2026-10-21
 **Branch prefix**: `feature/v040-rfc0029-`
 **Target**: `main`
@@ -174,7 +174,7 @@ confirmed or overturned in its review:
 | 2 | A1 | The society tables (channels-store v15) | `feature/v040-rfc0029-society-tables` | ✅ | [#1060](https://github.com/mkhomutov/Persatrix/pull/1060) | 2026-10-25 |
 | 3 | A1 | `internal/society`: the store on the channels connection | `feature/v040-rfc0029-society-store` (head branch `ccr-b7e6b467-72zd06`, assigned by the session that opened it) | ✅ | [#1063](https://github.com/mkhomutov/Persatrix/pull/1063) | 2026-10-27 |
 | 4 | A1 | Startup wiring; the single-node Known Gap issue | `feature/v040-rfc0029-society-wiring` | ✅ | [#1067](https://github.com/mkhomutov/Persatrix/pull/1067) | 2026-10-28 |
-| 5 | — | Review follow-ups and closeout | `feature/v040-rfc0029-closeout` | ⬜ | — | — |
+| 5 | — | Review follow-ups and closeout | `feature/v040-rfc0029-closeout` (head branch `claude/dazzling-newton-dar2a4`, assigned by the session that opened it) | ✅ | [#1075](https://github.com/mkhomutov/Persatrix/pull/1075) | 2026-11-01 |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ✂️ Cut
 
@@ -395,6 +395,27 @@ plan the store has outgrown.
 1 000 messages, however few rows the society tables hold, so the refresh
 covers them too.
 
+**Review findings** (PR 5; F-8 to F-16 from a second review):
+
+| Finding | Severity | Description | Disposition |
+|---------|----------|-------------|-------------|
+| F-1 | Low | The floor gates every table, so a store that falls back below 1 000 messages refreshes nothing, and its membership or approval statistics stay as they were however much those tables grow; the comments said young numbers never outlive the next hour | Fixed in-PR (comments): the code, the test header and this plan's note state the limit. The floor stays whole: analyzing the other tables while `messages` has no statistics is a state no plan test covers |
+| F-2 | Low | Close waited for a refresh in progress, and a refresh waiting for the one connection waited on whoever held it, so the orchestrator's shutdown, which closes the store under stragglers to keep its deadline, could block behind a slow or leaked transaction | Fixed in-PR: the refresh runs under a context Close cancels, which ends its wait or interrupts its statement; a test holds the connection and pins that Close returns |
+| F-3 | Low | The Close test waited up to ten seconds for the loop to end, so it passed with Close not waiting for the loop at all | Fixed in-PR: it checks that the loop has ended when Close returns; a copy of the code without the wait fails it |
+| F-4 | Info | No test ran the real ticker, so a loop that never ticked in production passed every test | Fixed in-PR: the seam can shorten the interval instead of replacing the ticker, and a test waits for two refreshes from it |
+| F-5 | Info | Comments went stale with the refresh: the floor's reason described a penalty lasting until a restart, which the refresh now bounds, and "only when a table has changed tenfold" left out an index with no statistics yet, so a refresh can take young numbers too | Fixed in-PR |
+| F-6 | Info | The floor's count and the pragma took the connection separately, so a channel delete between them could let the pragma analyze `messages` below the floor | Fixed in-PR: both run on one connection |
+| F-7 | Low | This PR's own row said 🔀 with no link while the ROADMAP and RFC 0029 called the closeout merged; squash-merged so, `main`'s plan-status check would fail (ISSUE-0190) | Fixed in-PR: a later commit flips the row to ✅ with #1075 and its expected merge date |
+| F-8 | Low | A refresh whose pragma met another process's write lock kept Close waiting out the five-second busy_timeout: cancelling a statement does not end SQLite's wait for a lock | Fixed in-PR: the refresh's pragma runs with busy_timeout 0, restored after |
+| F-9 | Low | That wait also held the store's one connection, stalling every channel and society call for up to five seconds an hour | Fixed in-PR, by F-8's fix |
+| F-10 | Low | No test closed the store while a refresh was inside its statement | Fixed in-PR: a test holds the write lock from a second connection and times Close |
+| F-11 | Info | F-1 again: a floor per table would refresh the other tables while `messages` is below 1 000 | Noted, as F-1: the floor stays whole |
+| F-12 | Info | The v0.4.0 plan passes 2 900 words | Noted: an open release's plan is not split, and it stays under 3 000 |
+| F-13 | Info | The failure test waited out busy_timeout on every run | Fixed in-PR, by F-8's fix |
+| F-14 | Info | The v14 migration's comment credited only the open's pragma | Fixed in-PR |
+| F-15 | Info | The seam option's doc left out its interval and its `refreshed` channel | Fixed in-PR |
+| F-16 | Info | `stopRefreshLoop` guarded a state no store reaches | Fixed in-PR: the guard is gone |
+
 ---
 
 ## File-size constraints
@@ -522,6 +543,33 @@ covers them too.
 > and passed on the shared and immediate forms. On the separate one, society
 > writes, which now begin with their write, no longer fail; publishes still
 > do, and more of them than before (7 and 8, against 2).
+
+> 2026-11-01 — PR 5 settles what PR 1's F-3 and PR 2's F-28 leave open,
+> each a new default for its review to confirm or overturn:
+> - The store refreshes its planner statistics every hour while it stays
+>   open, as SQLite advises for a long-lived connection, with the open's own
+>   call: the same mask, `0x10002`, so a table grown or shrunk tenfold is
+>   analyzed again and the statistics stay exact; and the same floor, so a
+>   store under 1 000 messages still gathers none (PR 1 F-11). Plain
+>   `PRAGMA optimize` would add the analysis limit, which records the epoch
+>   index as about as selective as a channel.
+> - The floor still counts messages alone. While the store holds it, a table
+>   analyzed at a handful of rows, membership intervals or society approvals,
+>   is analyzed again within the hour after it grows tenfold, so its numbers
+>   stay within a factor of ten of its size. A store back below the floor
+>   refreshes nothing (F-1).
+> - The refresh is a loop the store starts and `Close` stops, waiting for it
+>   before the connection closes. It queues on the one connection like any
+>   other call, so it never runs inside a channel or society transaction
+>   (S-6). A full ANALYZE holds the connection while it runs, ~0.2 s per
+>   200 000 messages, and runs only when an index has no statistics yet or a
+>   table has changed tenfold. Close cancels a refresh in progress, so it
+>   never waits on another holder of the connection (F-2), and a refresh
+>   never waits for another writer's lock (F-8). A failed refresh
+>   is logged and the next one retries.
+> - The statistics code moves, unchanged but for its comments and the
+>   refresh's lock wait, from `sqlite.go` to `sqlite_statistics.go`, beside
+>   the loop.
 
 ## Related documentation
 
