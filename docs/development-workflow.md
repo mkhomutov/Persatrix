@@ -342,7 +342,7 @@ Status is tracked across multiple documents. **Before and after every task**, ve
 Rules:
 
 1. Starting implementation of an RFC → status to `🚧 Implementing` in both RFC file and ROADMAP.
-2. PR merged → update PR plan checklist and RFC merged count immediately; the next commit anywhere regenerates the merged-PR history and flips the PR's plan row, and `plan-status-check` flags any row left saying "PR open" after that.
+2. PR merged → update PR plan checklist and RFC merged count immediately; the next commit made through the pre-commit hook regenerates the merged-PR history and flips the PR's plan row (with none coming, flip it by hand), and `plan-status-check` flags any row left saying "PR open" after that.
 3. All PRs merged → status to `✅ Implemented` in RFC file and ROADMAP.
 4. RFC closes part-way (the rest moved to a later version) → status to `⚠️ Partially Implemented` in RFC file and ROADMAP, Component Status rows included; `roadmap-status-check` flags a row left saying "🚧 In progress".
 5. Component moves from stub to working → update Component Status table in ROADMAP.

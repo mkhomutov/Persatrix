@@ -54,12 +54,14 @@ Usage::
 
     python scripts/checks/plan_status.py [--verbose]
     python scripts/checks/plan_status.py --fix    # flip stale rows in place
+    python scripts/checks/plan_status.py --staged # judge what the commit holds (the hook)
 
 Exit code: 0 clean, 1 if any stale row, if a plan opens a code fence or HTML
 comment that never closes — every row after it is off the page, so none of
 them would be judged — or if a patch release has a second document; 3 in a
-shallow clone that has none of those failures. ``--fix`` exits 0, or 3 without
-writing while a merge conflict is unresolved.
+shallow clone that has none of those failures. ``--fix`` exits 0; 3 without
+writing while a merge conflict is unresolved or ``git diff`` fails; 1 when git
+would not stage a flip.
 """
 
 from __future__ import annotations
@@ -71,7 +73,7 @@ import tempfile
 from collections.abc import Callable, Mapping
 from functools import partial
 from pathlib import Path
-from typing import NamedTuple
+from typing import NamedTuple, TypeVar
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(REPO_ROOT) not in sys.path:
@@ -83,6 +85,7 @@ from scripts.checks.plan_row_flip import (  # noqa: E402
     PR_LINK_RE,
     STALE_LEADERS,
     StaleRow,
+    can_flip,
     flip_rows,
     stage,
     staged_bytes,
@@ -104,6 +107,10 @@ _ONE_DOCUMENT_KINDS = frozenset({"plan", "test-findings-pr-plan"})
 _LAST_RELEASE_BEFORE_THE_RULING = (0, 3, 16)
 _LINK_ONLY_CELL_RE = re.compile(r"^\[#(\d+)\]\([^)]+\)$")
 _SUBJECT_RE = re.compile(r"\(#(\d+)\)$")
+#: The committer of every squash merge made on GitHub, the web page and the API alike.
+_GITHUB_COMMITTER = "noreply@github.com"
+_HISTORY = "docs/merged-prs.md"
+_T = TypeVar("_T")
 
 
 def _subject_numbers(log: str | None) -> frozenset[int]:
@@ -127,10 +134,17 @@ def prs_named_by_this_branch(repo_root: Path) -> frozenset[int]:
     ``fix: review follow-up (#3)`` reads like a squash merge to the log walks
     here and in ``merged_prs.py``. The check's mistake is loud, since it fails
     the row. A flip written on that word would be quiet: nothing checks a ✅.
-    Empty without ``origin/main``, where the two cannot be told apart.
+    A commit GitHub made is a squash merge wherever it sits: ``origin/main`` can
+    lag the ``main`` a branch was rebased on (a fork pulls from ``upstream``),
+    and the merges in between are not this branch's. Empty without
+    ``origin/main``, where the two cannot be told apart.
     """
+    log = git_output(
+        repo_root, "log", "--first-parent", "--format=%ce%x00%s", "origin/main..HEAD"
+    )
+    commits = (line.partition("\0") for line in (log or "").splitlines())
     return _subject_numbers(
-        git_output(repo_root, "log", "--first-parent", "--format=%s", "origin/main..HEAD")
+        "\n".join(subject for email, _, subject in commits if email != _GITHUB_COMMITTER)
     )
 
 
@@ -201,9 +215,11 @@ def find_stale_rows(
     return stale
 
 
-def recorded_merges(repo_root: Path) -> dict[int, str]:
-    """PR number → date, for each PR with a row in the committed ``docs/merged-prs.md``."""
-    path = repo_root / "docs" / "merged-prs.md"
+def recorded_merges(repo_root: Path, staged: bool = False) -> dict[int, str]:
+    """PR number → date, for each PR with a row in ``docs/merged-prs.md``, or its staged copy."""
+    if staged:
+        return merge_dates(staged_bytes(repo_root, _HISTORY).decode("utf-8", "replace"))
+    path = repo_root / _HISTORY
     return merge_dates(path.read_text(encoding="utf-8")) if path.exists() else {}
 
 
@@ -222,6 +238,14 @@ def _stale_rows_in(
 ) -> list[StaleRow]:
     written_by = partial(pr_that_wrote, repo_root, rel, contents=contents)
     return [s._replace(file=rel) for s in find_stale_rows(text, merged, written_by)]
+
+
+def _judged(
+    repo_root: Path, rel: str, merged: frozenset[int] | None, text: str,
+    contents: Path | None = None,
+) -> tuple[str, list[StaleRow]]:
+    """*text*, and its stale rows; none when *merged* is ``None`` (a shallow clone)."""
+    return text, [] if merged is None else _stale_rows_in(repo_root, rel, text, merged, contents)
 
 
 class _Facts(NamedTuple):
@@ -254,6 +278,15 @@ def _flip_copy(
     return _Flip(text, after, flipped, left + [s for s in stale if s not in flippable])
 
 
+def _with_staged_copy(repo_root: Path, rel: str, use: Callable[[str, Path], _T]) -> _T:
+    """*use* called with the staged copy of *rel*: its text, and a file git blame can read."""
+    blob = staged_bytes(repo_root, rel)
+    with tempfile.TemporaryDirectory() as scratch:
+        copy = Path(scratch) / "staged"
+        copy.write_bytes(blob)
+        return use(blob.decode("utf-8", "surrogateescape"), copy)
+
+
 def _flip_staged_copy(repo_root: Path, rel: str, facts: _Facts) -> _Flip:
     """The staged copy of a plan whose working copy differs, flipped on its own terms.
 
@@ -261,11 +294,9 @@ def _flip_staged_copy(repo_root: Path, rel: str, facts: _Facts) -> _Flip:
     already flipped: ``git commit <path>`` leaves the old row in the real index,
     where the next commit would undo the flip.
     """
-    blob = staged_bytes(repo_root, rel)
-    with tempfile.TemporaryDirectory() as scratch:
-        copy = Path(scratch) / "staged"
-        copy.write_bytes(blob)
-        return _flip_copy(repo_root, rel, blob.decode("utf-8", "surrogateescape"), facts, copy)
+    return _with_staged_copy(
+        repo_root, rel, lambda text, copy: _flip_copy(repo_root, rel, text, facts, copy)
+    )
 
 
 def _report(copy: _Flip, named_by_branch: frozenset[int], where: str = "") -> None:
@@ -290,18 +321,27 @@ def fix_stale_rows(repo_root: Path) -> int:
     records, and those have merged however short the log is. Nothing is written
     while a conflict is unresolved: a conflicted plan holds both sides. ``git
     commit`` refuses before the hook in that state, so this guards a hand run.
+    Nor when ``git diff`` fails: which plans hold unstaged edits is unknown, and
+    staging the working copy would sweep them into the commit. 1 when git would
+    not stage a flip.
     """
     unmerged = git_output(repo_root, "ls-files", "--unmerged")
     if unmerged is None or unmerged:
         print("[WARN] a merge conflict is unresolved — no plan row flipped;"
               " resolve it, and the next commit carries the flip")
         return SKIPPED
+    diff = git_output(repo_root, "diff", "--name-only")
+    if diff is None:
+        print("[WARN] git cannot say which plans have unstaged edits — no plan row flipped;"
+              " the next commit carries the flip")
+        return SKIPPED
     recorded = recorded_merges(repo_root)
     facts = _Facts(
         recorded, merged_pr_numbers(repo_root) | recorded.keys(),
         prs_named_by_this_branch(repo_root),
     )
-    differ = set((git_output(repo_root, "diff", "--name-only") or "").splitlines())
+    differ = set(diff.splitlines())
+    result = 0
     for p in target_docs(repo_root):
         rel = p.relative_to(repo_root).as_posix()
         # surrogateescape, and bytes both ways: every byte but the row's stays as it was.
@@ -314,9 +354,11 @@ def fix_stale_rows(repo_root: Path) -> int:
         if rel in differ:
             staged = _flip_staged_copy(repo_root, rel, facts)
             _report(staged, facts.named_by_branch, " (staged copy)")
-        if staged.after != staged.before:
-            stage(repo_root, rel, staged.after)
-    return 0
+        if staged.after != staged.before and not stage(repo_root, rel, staged.after):
+            print(f"[FAIL] {rel}: git would not stage the flip, so the commit would carry"
+                  " the history row with the row still open — run `make plan-status-fix`")
+            result = 1
+    return result
 
 
 def target_docs(repo_root: Path) -> list[Path]:
@@ -354,7 +396,8 @@ def second_release_documents(repo_root: Path) -> list[str]:
     return sorted(found)
 
 
-def check_plan_status(repo_root: Path, verbose: bool = False) -> int:
+def check_plan_status(repo_root: Path, verbose: bool = False, staged: bool = False) -> int:
+    """*staged* judges each plan's staged copy, which is what a commit holds (the hook)."""
     extra = second_release_documents(repo_root)
     if extra:
         print(f"[FAIL] {len(extra)} release document(s) beside a patch release's plan"
@@ -376,26 +419,35 @@ def check_plan_status(repo_root: Path, verbose: bool = False) -> int:
     stale: list[StaleRow] = []
     docs = target_docs(repo_root)
     hidden: list[str] = []
+    texts: dict[str, str] = {}
     for p in docs:
         rel = p.relative_to(repo_root).as_posix()
-        # Not read_text(): it turns a lone "\r" into a line end git blame does not count.
-        text = p.read_bytes().decode("utf-8", errors="replace")
+        judge = partial(_judged, repo_root, rel, None if shallow else merged)
+        if staged:
+            text, rows = _with_staged_copy(repo_root, rel, judge)
+        else:
+            # Not read_text(): it turns a lone "\r" into a line end git blame does not count.
+            text, rows = judge(p.read_bytes().decode("utf-8", errors="replace"))
+        texts[rel] = text
+        stale += rows
         opened = markdown_page.unclosed(text.split("\n"))
         if opened is not None:
             hidden.append(f"{rel}:{opened + 1}")
-        if not shallow:
-            stale += _stale_rows_in(repo_root, rel, text, merged)
         if verbose:
             print(f"  scanned {rel}")
     if not shallow:
         print(f"[SCAN] Checked progress tables in {len(docs)} plan(s) against {len(merged)}"
               " merged PRs")
-    recorded = recorded_merges(repo_root)
+    recorded = recorded_merges(repo_root, staged)
     trailing = [s for s in stale if trails_the_history(s, recorded)]
     stale = [s for s in stale if s not in trailing]
     for s in trailing:
+        then = (
+            "the next commit flips the row" if can_flip(texts[s.file], s)
+            else "the writer cannot flip this row, so flip it by hand"
+        )
         print(f"[NOTE] {s.file}:{s.line}: {s.prs} merged after docs/merged-prs.md was written"
-              " — the next commit flips the row")
+              f" — {then}")
     if hidden:
         print(f"\n[FAIL] {len(hidden)} plan(s) hide every row after a code fence or HTML comment"
               " that never closes:")
@@ -429,10 +481,14 @@ def main(argv: list[str] | None = None) -> int:
         help="Flip stale rows to ✅ with the PR's link and its docs/merged-prs.md date,"
              " in the working copy and the staged copy.",
     )
+    parser.add_argument(
+        "--staged", action="store_true",
+        help="Judge each plan's staged copy, as the commit will hold it (the hook does).",
+    )
     args = parser.parse_args(argv)
     if args.fix:
         return fix_stale_rows(REPO_ROOT)
-    return check_plan_status(REPO_ROOT, verbose=args.verbose)
+    return check_plan_status(REPO_ROOT, verbose=args.verbose, staged=args.staged)
 
 
 if __name__ == "__main__":

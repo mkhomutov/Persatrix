@@ -179,7 +179,7 @@ confirmed or overturned in its review:
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ✂️ Cut
 
 > PRs 1 to 4 each needed a follow-up PR to flip their rows, before the
-> next commit anywhere did it: see
+> next commit made through the pre-commit hook did it: see
 > [ISSUE-0190](../issues/ISSUE-0190-merged-pr-plan-row-reddens-main.md).
 
 ## Dependency graph

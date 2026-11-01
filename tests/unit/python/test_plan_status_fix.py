@@ -101,6 +101,18 @@ def test_a_trailing_row_is_named_so_the_lag_is_visible(
     assert check_plan_status(tmp_path) == 0
     out = capsys.readouterr().out
     assert f"{REL}:4" in out and "#2" in out and "[FAIL]" not in out
+    assert "the next commit flips the row" in out
+
+
+def test_a_trailing_row_the_writer_cannot_flip_is_left_to_a_person(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _repo(tmp_path, PLAN.replace("| 🔀 |", "| 🔀 PR open, rebased |"), "feat: next (#2)")
+    capsys.readouterr()
+
+    assert check_plan_status(tmp_path) == 0
+    out = capsys.readouterr().out
+    assert "flip it by hand" in out and "the next commit flips" not in out
 
 
 # --- The writer ------------------------------------------------------------
@@ -272,6 +284,10 @@ def test_fix_keeps_every_other_byte_of_the_plan(tmp_path: Path) -> None:
             "🔀 PR open (this PR)", "—", f"✅ Merged | [#2]({URL}/2)", id="own-row-worded",
         ),
         pytest.param("🔀", "_this PR_", f"✅ | [#2]({URL}/2)", id="own-row-italic-placeholder"),
+        pytest.param(
+            f"🔀 PR open ([#2]({URL}/2))", f"[#2]({URL}/2)", f"✅ Merged | [#2]({URL}/2)",
+            id="status-citing-its-link",
+        ),
     ],
 )
 def test_fix_flips_the_other_ways_a_plan_writes_its_own_row(

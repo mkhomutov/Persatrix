@@ -96,6 +96,19 @@ def test_the_hook_does_not_sweep_someone_elses_edit_into_the_commit(
     assert "work in progress\n" in text and f"| ✅ | [#2]({URL}/2) | 2026-11-01 |" in text
 
 
+def test_the_hook_judges_the_plan_the_commit_holds(tmp_path: Path, tooling: Path) -> None:
+    """The working copy's row flips; the staged copy's is one the writer leaves for a person."""
+    plan = _hooked_repo(tmp_path, tooling)
+    plan.write_bytes(PLAN.replace("| 🔀 |", "| 🔀 PR open, rebased |").encode("utf-8"))
+    _git(tmp_path, "add", REL)
+    plan.write_bytes(PLAN.encode("utf-8"))
+
+    proc = _run(tmp_path, sys.executable, "scripts/pre_commit.py", "--skip-fmt")
+
+    assert f"| ✅ | [#2]({URL}/2) | 2026-11-01 |" in plan.read_text(encoding="utf-8")
+    assert "✗ plan status" in proc.stdout
+
+
 def _install_hook(repo: Path) -> None:
     """Run the real hook on ``git commit``; the checks a fixture cannot pass don't refuse it."""
     hook = repo / ".git" / "hooks" / "pre-commit"

@@ -156,9 +156,10 @@ Rules that hold for every PR:
 - **The plan row flips at PR open by hand, and at merge by itself**, and
   Progress is reconciled at every PR open. A PR cannot write its own merge
   date, so its row still says 🔀 when it lands. The hook flips it in the next
-  commit anywhere, the one that adds the PR to `docs/merged-prs.md`. Merged
-  PRs leaving their own rows stale is the most common hygiene defect in the
-  history, so `make plan-status-check` fails a row left open after that commit.
+  commit it runs on that has the merge, the one that adds the PR to
+  `docs/merged-prs.md`; without it, flip by hand. Merged PRs leaving their
+  own rows stale is the most common hygiene defect in the history, so
+  `make plan-status-check` fails a row left open after that commit.
 - **Large residual work gets its own PR plan** owned by the issue
   (`docs/issues/ISSUE-NNNN-…-pr-plan.md`); the plan links it rather than
   duplicating its PR table.
