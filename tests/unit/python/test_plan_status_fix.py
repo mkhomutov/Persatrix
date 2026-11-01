@@ -9,10 +9,12 @@ history has no row for its PR, and the commit that adds that row flips it.
 from __future__ import annotations
 
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+from _git_fixture_helpers import GIT_ENV
 from _git_fixture_helpers import git as _git
 from _git_fixture_helpers import run as _run
 
@@ -74,7 +76,7 @@ def test_the_newest_merge_may_leave_its_own_unlinked_row_open(tmp_path: Path) ->
 def test_a_merge_that_carried_no_flip_does_not_fail_the_row_before_it(tmp_path: Path) -> None:
     """A Dependabot PR, or a branch only rebased, lands with no commit the hook ran on.
 
-    One merge in five does, so the row may not fail just because it is no
+    About one merge in four does, so the row may not fail just because it is no
     longer the newest. The history trails by the same merges.
     """
     _repo(tmp_path, PLAN, "feat: next (#2)", "chore(deps): bump (#3)", "chore(deps): bump (#4)")
@@ -287,18 +289,149 @@ def test_fix_keeps_every_other_byte_of_the_plan(tmp_path: Path) -> None:
     assert path.read_bytes() == want.encode("utf-8")
 
 
-def test_a_shallow_clone_writes_nothing_and_says_why(
+@pytest.mark.parametrize(
+    ("status", "pr_cell", "flipped"),
+    [
+        pytest.param(
+            "🔀 PR open (this PR)", "—", f"✅ Merged | [#2]({URL}/2)", id="own-row-worded",
+        ),
+        pytest.param("🔀", "_this PR_", f"✅ | [#2]({URL}/2)", id="own-row-italic-placeholder"),
+    ],
+)
+def test_fix_flips_the_other_ways_a_plan_writes_its_own_row(
+    tmp_path: Path, status: str, pr_cell: str, flipped: str
+) -> None:
+    row = f"| 2 | A1 | next | `feature/x-next` | {status} | {pr_cell} | — |\n"
+    path = _repo(tmp_path, HEADER + row, "feat: next (#2)", recorded=(2, 1))
+
+    assert fix_stale_rows(tmp_path) == 0
+
+    assert f"| {flipped} | {RECORDED} |\n" in path.read_text(encoding="utf-8")
+
+
+def test_fix_flips_the_v0316_form_of_a_status_with_its_link_inside(tmp_path: Path) -> None:
+    plan = (
+        "| # | RFC phase | Status |\n"
+        "|---|-----------|--------|\n"
+        f"| A1 | society tables | 🔀 [#2]({URL}/2) open |\n"
+    )
+    path = _repo(tmp_path, plan, "feat: next (#2)", recorded=(2, 1))
+
+    assert fix_stale_rows(tmp_path) == 0
+
+    assert f"| A1 | society tables | ✅ [#2]({URL}/2) {RECORDED} |\n" in (
+        path.read_text(encoding="utf-8")
+    )
+
+
+@pytest.mark.parametrize(
+    "plan",
+    [
+        pytest.param(HEADER + f"| 2 | next | 🔀 | [#2]({URL}/2) | — |\n", id="a-cell-short"),
+        pytest.param(
+            "| PR | Note | GitHub PR | Merged |\n|---|---|---|---|\n"
+            f"| 2 | 🔀 | [#2]({URL}/2) | — |\n",
+            id="marker-outside-the-status-column",
+        ),
+        pytest.param(
+            HEADER + "| 2 | A1 | next | `feature/x-next` | 🔀 | see the notes | — |\n",
+            id="unlinked-row-with-words-in-its-pr-cell",
+        ),
+    ],
+)
+def test_fix_leaves_a_row_it_cannot_read_for_certain(tmp_path: Path, plan: str) -> None:
+    path = _repo(tmp_path, plan, "feat: next (#2)", recorded=(2, 1))
+
+    assert fix_stale_rows(tmp_path) == 0
+
+    assert path.read_text(encoding="utf-8") == plan
+
+
+def test_fix_keeps_a_byte_that_is_not_utf8_in_both_copies(tmp_path: Path) -> None:
+    """A plan is never rewritten through a decode that would turn a bad byte into U+FFFD."""
+    path = _repo(tmp_path, PLAN, "feat: next (#2)", recorded=(2, 1))
+    data = b"\xff not utf-8\n" + PLAN.encode("utf-8")
+    path.write_bytes(data)
+    _git(tmp_path, "add", REL)
+
+    assert fix_stale_rows(tmp_path) == 0
+
+    assert path.read_bytes().startswith(b"\xff not utf-8\n")
+    assert _staged_blob(tmp_path).startswith(b"\xff not utf-8\n")
+    assert FLIPPED.encode("utf-8") in _staged_blob(tmp_path)
+
+
+def _staged_blob(repo: Path) -> bytes:
+    """The plan as the next commit would hold it, byte for byte."""
+    proc = subprocess.run(
+        ["git", "show", f":{REL}"], cwd=repo, capture_output=True, check=True, env=GIT_ENV
+    )
+    return proc.stdout
+
+
+def test_a_shallow_clone_flips_what_its_history_records(tmp_path: Path) -> None:
+    """A PR with a history row has merged, however short the log is.
+
+    The hook has just added that row, so skipping here would commit a history
+    that says the PR merged beside a row that says it is open, and CI fails that.
+    """
+    origin = tmp_path / "origin"
+    _repo(origin, PLAN, "feat: next (#2)", "fix: other (#3)", recorded=(2, 1))
+    _git(tmp_path, "clone", "-q", "--depth", "1", origin.as_uri(), "shallow")
+
+    assert fix_stale_rows(tmp_path / "shallow") == 0
+
+    assert (tmp_path / "shallow" / REL).read_text(encoding="utf-8") == HEADER + DONE + FLIPPED
+
+
+def _branch_off_main(repo: Path) -> None:
+    """Put *repo* on a branch, with ``origin/main`` where a fetched ``main`` would be."""
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _git(repo, "switch", "-q", "-c", "topic")
+
+
+def test_a_branch_commit_quoting_an_open_pr_does_not_flip_its_row(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    origin = tmp_path / "origin"
-    _repo(origin, PLAN, "feat: next (#2)", recorded=(2, 1))
-    _git(tmp_path, "clone", "-q", "--depth", "1", origin.as_uri(), "shallow")
+    """A subject ending ``(#3)`` proves nothing on a branch: #3 may be this very PR, still open.
+
+    The history generator is fooled by that subject, so the row must not be
+    flipped on its word: nothing would ever check a ✅ on an open PR.
+    """
+    later = f"| 3 | A1 | later | `feature/x-later` | 🔀 | [#3]({URL}/3) | — |\n"
+    path = _repo(tmp_path, PLAN + later, "feat: next (#2)", recorded=(2, 1))
+    _branch_off_main(tmp_path)
+    _git(tmp_path, "commit", "-q", "--allow-empty", "-m", "fix: review findings (#3)")
+    rows = [MergedPR(n, RECORDED, f"change {n}") for n in (3, 2, 1)]
+    (tmp_path / HISTORY).write_text(render(rows), encoding="utf-8")
     capsys.readouterr()
 
-    assert fix_stale_rows(tmp_path / "shallow") == SKIPPED
+    assert fix_stale_rows(tmp_path) == 0
 
-    assert (tmp_path / "shallow" / REL).read_text(encoding="utf-8") == PLAN
-    assert "`git fetch --unshallow`" in capsys.readouterr().out
+    assert later in path.read_text(encoding="utf-8")
+    assert "#3" in capsys.readouterr().out
+    assert check_plan_status(tmp_path) == 1
+
+
+def test_a_branch_commit_quoting_a_merged_pr_does_not_date_its_row(tmp_path: Path) -> None:
+    """The history takes the newest commit naming a PR, so its date would be the branch's."""
+    path = _repo(tmp_path, PLAN, "feat: next (#2)", recorded=(2, 1))
+    _branch_off_main(tmp_path)
+    _git(tmp_path, "commit", "-q", "--allow-empty", "-m", "fix: review follow-up (#2)")
+
+    assert fix_stale_rows(tmp_path) == 0
+
+    assert path.read_text(encoding="utf-8") == PLAN
+
+
+def test_a_real_merge_still_flips_on_a_branch_that_quotes_nothing(tmp_path: Path) -> None:
+    path = _repo(tmp_path, PLAN, "feat: next (#2)", recorded=(2, 1))
+    _branch_off_main(tmp_path)
+    _git(tmp_path, "commit", "-q", "--allow-empty", "-m", "fix: an ordinary commit")
+
+    assert fix_stale_rows(tmp_path) == 0
+
+    assert path.read_text(encoding="utf-8") == HEADER + DONE + FLIPPED
 
 
 OTHER = "docs/rfcs/0098-pr-plan.md"
@@ -393,16 +526,96 @@ def test_the_next_commit_carries_the_flip_dated_as_the_history_dates_it(
 def test_the_hook_does_not_sweep_someone_elses_edit_into_the_commit(
     tmp_path: Path, tooling: Path
 ) -> None:
-    """A plan carrying unstaged work keeps it unstaged, and the flip stays beside it."""
+    """A plan carrying unstaged work keeps it unstaged; only the flip is staged."""
     plan = _hooked_repo(tmp_path, tooling)
     plan.write_text(plan.read_text(encoding="utf-8") + "work in progress\n", encoding="utf-8")
 
     proc = _run(tmp_path, sys.executable, "scripts/pre_commit.py", "--skip-fmt")
 
     assert "✗ plan status" not in proc.stdout
-    assert REL not in _staged(tmp_path)
+    staged = _staged_blob(tmp_path).decode("utf-8")
+    assert f"| ✅ | [#2]({URL}/2) | 2026-11-01 |" in staged
+    assert "work in progress" not in staged
     text = plan.read_text(encoding="utf-8")
     assert "work in progress\n" in text and f"| ✅ | [#2]({URL}/2) | 2026-11-01 |" in text
+
+
+def _install_hook(repo: Path) -> None:
+    """Run the real hook on ``git commit``; the checks a fixture cannot pass don't refuse it."""
+    hook = repo / ".git" / "hooks" / "pre-commit"
+    hook.parent.mkdir(exist_ok=True)
+    hook.write_text(
+        f'#!/bin/sh\n"{sys.executable}" scripts/pre_commit.py --skip-fmt\nexit 0\n',
+        encoding="utf-8",
+    )
+    hook.chmod(0o755)
+
+
+def _row_at_head(repo: Path) -> str:
+    return next(ln for ln in _git(repo, "show", f"HEAD:{REL}").splitlines() if "[#2]" in ln)
+
+
+@pytest.mark.parametrize("flags", [(), ("-a",)], ids=["plain", "commit-all"])
+def test_a_plain_commit_carries_the_flip(
+    tmp_path: Path, tooling: Path, flags: tuple[str, ...]
+) -> None:
+    """``-a`` hands the hook a different index file, so it is a commit of its own kind."""
+    _hooked_repo(tmp_path, tooling)
+    _install_hook(tmp_path)
+
+    _git(tmp_path, "commit", "-q", "--allow-empty", *flags, "-m", "fix: something else")
+
+    assert "| ✅ |" in _row_at_head(tmp_path)
+
+
+def test_a_commit_of_other_files_carries_the_flip_past_an_unstaged_plan(
+    tmp_path: Path, tooling: Path
+) -> None:
+    """The commit adds the history row, so it must add the flip too, or CI fails it."""
+    plan = _hooked_repo(tmp_path, tooling)
+    _install_hook(tmp_path)
+    plan.write_text(plan.read_text(encoding="utf-8") + "work in progress\n", encoding="utf-8")
+
+    _git(tmp_path, "commit", "-q", "--allow-empty", "-m", "fix: something else")
+
+    assert "| ✅ |" in _row_at_head(tmp_path)
+    assert "work in progress" not in _git(tmp_path, "show", f"HEAD:{REL}")
+    assert "work in progress\n" in plan.read_text(encoding="utf-8")
+
+
+def test_a_partial_commit_carries_the_flip_and_the_next_commit_keeps_it(
+    tmp_path: Path, tooling: Path
+) -> None:
+    """``git commit <path>`` leaves the old row in the real index, ready to undo the flip."""
+    _hooked_repo(tmp_path, tooling)
+    _install_hook(tmp_path)
+    note = tmp_path / "docs" / "note.md"
+    note.write_text("one\n", encoding="utf-8")
+    _git(tmp_path, "add", "docs/note.md")
+    _git(tmp_path, "commit", "-q", "--no-verify", "-m", "docs: a note")
+    note.write_text("two\n", encoding="utf-8")
+
+    _git(tmp_path, "commit", "-q", "-m", "docs: only the note", "docs/note.md")
+    assert "| ✅ |" in _row_at_head(tmp_path)
+
+    _git(tmp_path, "commit", "-q", "--allow-empty", "-m", "fix: something else")
+    assert "| ✅ |" in _row_at_head(tmp_path)
+
+
+def test_a_shallow_clones_commit_carries_the_history_row_and_the_flip_together(
+    tmp_path: Path, tooling: Path
+) -> None:
+    origin = tmp_path / "origin"
+    origin.mkdir()
+    _hooked_repo(origin, tooling)
+    _git(tmp_path, "clone", "-q", "--depth", "2", origin.as_uri(), "shallow")
+    shallow = tmp_path / "shallow"
+    _install_hook(shallow)
+
+    _git(shallow, "commit", "-q", "--allow-empty", "-m", "fix: something else")
+
+    assert "[#2](" in _git(shallow, "show", f"HEAD:{HISTORY}")
+    assert "| ✅ |" in _row_at_head(shallow)
 
 
 def test_the_hook_stages_nothing_when_no_row_flips(tmp_path: Path, tooling: Path) -> None:

@@ -9,6 +9,7 @@ closed: 2026-11-01
 closed_pr: 1078
 refs:
   - scripts/checks/plan_status.py
+  - scripts/checks/plan_row_flip.py
   - scripts/merged_prs.py
   - scripts/pre_commit.py
   - .github/workflows/ci.yml
@@ -111,23 +112,27 @@ Options 2 and 3 together, as `docs/merged-prs.md` already works.
 
 - **The lag.** A 🔀 row passes while the history has no row for its PR. That
   is wider than sparing the newest merge alone, which is what option 2 first
-  proposed. Of the 30 merges up to #1076, six carried no commit the hook ran
-  on since the merge before them: three from Dependabot, which never runs it,
-  and three branches whose last commit was older than that merge. #1055 and
-  #1056 did so back to back. Any of those would push a tracked PR off the top
-  of the log with its row still open, so `main` would still go red, one merge
-  later. The history trails by exactly the merges no hook has seen, so the
-  row can trail by the same.
+  proposed. Of the 30 merges up to #1076, eight landed with no row for the
+  merge before them: three from Dependabot, which never runs the hook, and
+  five branches (#1050, #1056, #1058, #1064, #1076) with no commit the hook ran
+  on since that merge. #1058, #1055 and #1056 did so three in a row. Any of
+  those would push a tracked PR off the top of the log with its row still open,
+  so `main` would still go red, one merge later. The history trails by exactly
+  the merges no hook has seen, so the row can trail by the same.
 - **The writer.** `plan_status.py --fix` flips what the check would fail, with
-  the PR's link and the date the history gives. The hook runs it straight
-  after `merged_prs.py`, so the commit that adds a PR's history row carries
-  its flip, and a row still open after that fails.
-- **What it leaves.** A row it would lose words from stays for a person, and
-  the check still fails it. A plan with unstaged edits keeps the flip unstaged
-  beside them, since `git add` would sweep them into the commit; until that
-  plan is committed, CI fails the row. `git commit <path>` leaves the old row
-  staged, so the commit after it can undo the flip, and CI then names the row.
-  Nothing is written while a conflict is unresolved or in a shallow clone.
+  the PR's link and the date the history gives. It writes the working copy and
+  the staged copy separately, and the hook runs it straight after
+  `merged_prs.py`. So the commit that adds a PR's history row always carries
+  its flip, whatever else is unstaged, and unstaged edits to a plan stay
+  unstaged. The old row `git commit <path>` leaves in the index heals on the
+  next commit. A shallow clone flips what its history records, since a PR with
+  a history row has merged however short the log is.
+- **What it leaves.** Two kinds of row stay for a person, and the check still
+  fails both: a row it would lose words from, and a row whose PR is named by a
+  commit on the branch, since a subject ending in `(#3)` proves no merge.
+  Nothing is written while a conflict is unresolved. An unlinked row goes to
+  the last PR that touched its line, which is
+  [ISSUE-0193](ISSUE-0193-unlinked-plan-row-credited-to-last-editor.md).
 
 Replaying the ten tracked merges from #1053 to #1076 under the new scripts,
 the check passes at each, where the old one failed. The writer's row matches

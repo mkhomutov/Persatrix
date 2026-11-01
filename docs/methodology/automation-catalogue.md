@@ -97,7 +97,7 @@ directory `git rev-parse --git-path hooks` names (so linked worktrees and
 installer. Fourteen steps, target under 10 s:
 
 0. regenerate `FILEMAP.md` and `docs/merged-prs.md`, flip merged PRs' plan
-rows, and `git add` them ·
+rows, and stage them ·
 1. `gofmt -l` on staged Go blobs (CRLF-safe) · 2. `ruff check agents/` ·
 3. `cargo fmt --check` · 4. doc links · 5. leaked markup · 6. status markers ·
 7. RFC index freshness · 8. ROADMAP status rows · 9. file sizes (`--strict`) ·

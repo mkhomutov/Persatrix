@@ -23,10 +23,10 @@ Checks executed:
 
 A step that exits ``SKIPPED`` (3) could not run in this checkout and changed
 nothing — in a shallow clone, whose log is cut short, docs/merged-prs.md when
-the log stops short of its rows, and the plan-status stale-row check and its
-writer; the writer also while a merge conflict is unresolved. It is reported as
-skipped rather than failed, its file is not staged, and the reason it printed
-last is repeated after the results.
+the log stops short of its rows, and the plan-status stale-row check; and the
+plan-row writer while a merge conflict is unresolved. It is reported as skipped
+rather than failed, its file is not staged, and the reason it printed last is
+repeated after the results.
 
 Usage::
 
@@ -138,8 +138,9 @@ def _resolve_argv(argv: list[str]) -> list[str]:
 _GENERATED: tuple[tuple[str, list[str], str | None], ...] = (
     # (label, generator command, output path to stage) — regenerated before the
     # checks so the commit carries the current file map and merged-PR history.
-    # No output path means the generator changes hand-edited files, so only the
-    # ones it changed are staged. Plan rows run after the history they read.
+    # No output path means the generator stages its own change: plans are
+    # hand-edited, so ``git add`` could sweep in work that is not this commit's.
+    # Plan rows run after the history they read.
     ("filemap", ["scripts/generate_filemap.py"], "FILEMAP.md"),
     ("merged prs", ["scripts/merged_prs.py"], "docs/merged-prs.md"),
     ("plan rows", ["scripts/checks/plan_status.py", "--fix"], None),
@@ -162,21 +163,8 @@ def _skip_note(label: str, output: str) -> str:
     return f"{label}: {lines[-1] if lines else 'no reason given'}"
 
 
-def _unstaged_paths() -> set[str]:
-    """Tracked files whose working copy differs from what is staged."""
-    proc = subprocess.run(
-        ["git", "diff", "--name-only"], cwd=REPO_ROOT, capture_output=True,
-        encoding="utf-8", errors="replace", check=True,
-    )
-    return set(proc.stdout.splitlines())
-
-
 def _regenerate(label: str, command: list[str], output: str | None) -> tuple[bool, str | None]:
-    """Run one generator and stage its output.
-
-    With no *output*, stage the files the generator changed, but not one that
-    already had unstaged edits: ``git add`` would sweep them into the commit.
-    Such a file keeps the change beside them, for the commit that stages it.
+    """Run one generator and stage its *output*, if it names one.
 
     Returns ``(passed, None)``, or ``(True, note)`` when the generator exited
     ``SKIPPED``: it left its file alone, so the file is not staged.
@@ -184,7 +172,6 @@ def _regenerate(label: str, command: list[str], output: str | None) -> tuple[boo
     print(f"\n▶ {label}")
     t0 = time.monotonic()
     try:
-        edited = _unstaged_paths() if output is None else set()
         proc = _run_step([sys.executable, *command])
         if proc.returncode == SKIPPED:
             print(f"  – SKIP  ({time.monotonic() - t0:.1f}s)")
@@ -194,9 +181,8 @@ def _regenerate(label: str, command: list[str], output: str | None) -> tuple[boo
             print(f"  ✗ FAIL  ({elapsed:.1f}s)")
             return False, None
         # Stage the updated file so it's included in the commit.
-        changed = [output] if output else sorted(_unstaged_paths() - edited)
-        if changed:
-            subprocess.run(["git", "add", *changed], cwd=REPO_ROOT, check=True)
+        if output:
+            subprocess.run(["git", "add", output], cwd=REPO_ROOT, check=True)
         elapsed = time.monotonic() - t0
         print(f"  ✓ PASS  ({elapsed:.1f}s)")
         return True, None
