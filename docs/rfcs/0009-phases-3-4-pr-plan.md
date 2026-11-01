@@ -293,12 +293,6 @@ earlier tokens, so the audit line for a re-registration from a new address
 PR 6's implementation note and its review findings are in
 [the plan's notes on merged PRs](0009-phases-3-4-notes-pr-plan.md#pr-6--featurev040-rfc0009-enrollment).
 
-**For PR 7**: the agent sends `X-Enrollment-Secret` on registration and
-reads `agent_token` and `agent_token_expires_at` from the `201` body.
-Reading the secret from the same `SECURITY_ENROLLMENT_SECRET` the
-orchestrator reads keeps one name per deployment; PR 4's scrub of a tool's
-environment removes it.
-
 ### PR 7 — `feature/v040-rfc0009-agent-token-client`
 
 **Scope**: `agents/server.py` (490) and `server_reregister.py`; the
@@ -315,6 +309,11 @@ and never on an `http_request` tool call; an orchestrator restart, seen as a
 refused token, re-registers once and the retried call succeeds; a second
 refusal is not retried in a loop.
 **Estimate**: ~350 lines.
+**From PR 6**: the agent sends `X-Enrollment-Secret` on registration and
+reads `agent_token` and `agent_token_expires_at` from the `201` body.
+Reading the secret from the same `SECURITY_ENROLLMENT_SECRET` the
+orchestrator reads keeps one name per deployment; PR 4's scrub of a tool's
+environment removes it.
 **From PR 5 review**: F-12 — a new token retires the agent's earlier
 ones, so the client registers again once for all the calls in flight, and
 a call refused as revoked while the client already holds a newer token
@@ -371,7 +370,8 @@ test.
 **Estimate**: ~450 lines.
 **From PR 6 review**: F-10 — no compose file sets `env_file` or any
 `SECURITY_*` variable, so `SECURITY_ENROLLMENT_SECRET` in `.env` reaches
-neither the orchestrator nor the agents. This PR passes it through in every
+neither the orchestrator nor the agents, and `.env.example` does not list
+it. This PR lists it there and passes it through in every
 `docker-compose*.yaml`; otherwise, once it requires the secret, a composed
 stack under `enabled` refuses every registration.
 

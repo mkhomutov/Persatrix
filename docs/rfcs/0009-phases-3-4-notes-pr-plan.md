@@ -227,8 +227,9 @@ PR):
 Merged as [#1076](https://github.com/mkhomutov/Persatrix/pull/1076) on
 2026-11-01.
 
-**Implementation note (2026-11-01)**: how this PR meets the scope above.
-Each point not settled above is a new default this PR's review confirms or
+**Implementation note (2026-11-01)**: how this PR meets
+[the plan's scope](0009-phases-3-4-pr-plan.md#pr-6--featurev040-rfc0009-enrollment).
+Each point not settled there is a new default this PR's review confirms or
 overturns.
 
 - **Where.** `security.AgentEnrollment` (`internal/security/agent_enrollment.go`)
@@ -258,7 +259,7 @@ overturns.
 - **IDs.** `security.IssuableAgentID`, exported from PR 5's unexported
   check, refuses `web-console`, `anonymous` and an ID over
   `MaxAgentIDLen` with 400 before anything registers.
-- **One step at a time (F-6).** One lock in `AgentEnrollment` covers a
+- **One step at a time (PR 5's F-6).** One lock in `AgentEnrollment` covers a
   registration's registry upsert and token issue, and a deregistration's
   removal and revocation, so a racing pair leaves the agent either
   registered with a working token or gone with a revoked one; a test puts
@@ -273,7 +274,7 @@ overturns.
 - **Audit.** Every registration writes `agent.token_issued` with the
   address, the caller's source and the expiry, never the token, and, with
   a secret set, `enrollment_secret: shown` or `absent`. An agent already
-  registered adds `previous_token: revoked` (F-12), and `previous_address`
+  registered adds `previous_token: revoked` (PR 5's F-12), and `previous_address`
   or `previous_source` when the address it gives or the source it comes
   from differs (G-14). A deregistration writes `agent.deregistered` with
   the caller's source. All three are security-class, as `audit_event.go`
@@ -282,7 +283,11 @@ overturns.
 **Review findings** (PR 6): F-1 to F-8 are the code review's, whose fixes
 went into the PR's last commit, in that commit's order. That review kept no
 numbers or severities, so these were added after the merge. F-9 and F-10 are
-a security review's notes on the fixed PR, which found no vulnerability.
+a security review's notes on the fixed PR, which found no vulnerability;
+their severities, added after the merge too, rate what each would do if its
+named PR left it out. No review recorded a ruling on the note's new defaults.
+The fix commit shows this much: the secret's and the response's stood, with
+the secret trimmed (F-7), and the limit's came from F-3.
 
 | Finding | Severity | Description | Disposition |
 |---------|----------|-------------|-------------|
@@ -294,8 +299,8 @@ a security review's notes on the fixed PR, which found no vulnerability.
 | F-6 | Medium | The race test passed without the lock, so it could not catch what it claimed | Fixed in-PR: it stalls the registration between its two steps until the deregistration has run, and fails without the lock |
 | F-7 | Low | A secret ending in a line break never matched a header's value | Fixed in-PR: the secret is trimmed, as a header is |
 | F-8 | Low | The security package comment, the token events' reserved notes and the ROADMAP row still said registration hands out no tokens | Fixed in-PR |
-| F-9 | Info | Registration admits the ID `local`, which is `channels.DefaultPrincipalID`, so an agent can hold a token naming it. Nothing reads the token yet | → deferred to PR 8 (noted there) |
-| F-10 | Info | No compose file sets `env_file` or any `SECURITY_*` variable, so `SECURITY_ENROLLMENT_SECRET` in `.env` reaches no container. Nothing requires the secret yet | → deferred to PR 9 (noted there) |
-| F-11 | Info | The PR merged with its description saying "Not yet reviewed", and with no findings table here | Fixed after the merge: this table. The description is unchanged |
-| F-12 | Info | The PR description ends with an assistant attribution line, which the repository's rules forbid in PRs and commits | Noted: the PR has merged, so the line stays unless the maintainer removes it |
-| F-13 | Info | The head branch is not the planned `feature/v040-rfc0009-enrollment`, and the PR is over the ~350-line estimate and the 500-line target: 21 files, +1 167, of which 634 are tests | Noted: the row records the planned name, as for PRs 3 and 5 |
+| F-9 | Medium | Registration admits the ID `local`, which is `channels.DefaultPrincipalID`, so an agent can hold a token naming it. Nothing reads the token yet | → deferred to PR 8 (noted there) |
+| F-10 | Medium | No compose file sets `env_file` or any `SECURITY_*` variable, so `SECURITY_ENROLLMENT_SECRET` in `.env` reaches no container. Nothing requires the secret yet | → deferred to PR 9 (noted there) |
+| F-11 | Info | The PR merged with its description saying "Not yet reviewed", and with no findings table here | Noted: this table is the review's record. The description was not edited, so it still says that |
+| F-12 | Info | The PR description ends with an assistant attribution line, which the repository's rules forbid in PRs and commits | Noted: a merged PR's description can still be edited, so the line stays only until the maintainer removes it |
+| F-13 | Info | The head branch is not the planned `feature/v040-rfc0009-enrollment`, and the PR is over the ~350-line estimate and the 500-line target: 21 files, +1 167, of which 634 are tests | Noted: the row records the planned name, as for PRs 3 and 5. The PR missed the plan's 500-line limit and merged at that size: 442 lines of code, 91 of docs, and the tests that prove the code, not split from it |
