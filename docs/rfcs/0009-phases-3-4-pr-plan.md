@@ -137,7 +137,7 @@ the points it implements.
 | 3 | A3 | Tool arguments checked against the tool's schema | `feature/v040-rfc0009-arg-schemas` (head branch `claude/affectionate-faraday-sewbto`, assigned by the session that opened it) | ✅ | [#1069](https://github.com/mkhomutov/Persatrix/pull/1069) | 2026-10-29 |
 | 4 | A3 | Shell CPU limit, output caps, `resource_limits:` | `feature/v040-rfc0009-resource-limits` | ⬜ | — | — |
 | 5 | A4 | Agent tokens: issue, check, revoke (Go) | `feature/v040-rfc0009-agent-token` (head branch `claude/admiring-cori-ibird5`, assigned by the session that opened it) | ✅ | [#1071](https://github.com/mkhomutov/Persatrix/pull/1071) | 2026-10-30 |
-| 6 | A4 | Registration returns a token and accepts the enrollment secret | `feature/v040-rfc0009-enrollment` (head branch `claude/magical-gates-p9ku7g`, assigned by the session that opened it) | 🔀 | [#1076](https://github.com/mkhomutov/Persatrix/pull/1076) | — |
+| 6 | A4 | Registration returns a token and accepts the enrollment secret | `feature/v040-rfc0009-enrollment` (head branch `claude/magical-gates-p9ku7g`, assigned by the session that opened it) | ✅ | [#1076](https://github.com/mkhomutov/Persatrix/pull/1076) | 2026-11-01 |
 | 7 | A4 | Agents send the secret, keep their token and refresh it | `feature/v040-rfc0009-agent-token-client` | ⬜ | — | — |
 | 8 | A4 | Token check on REST; every publish bound to its caller | `feature/v040-rfc0009-token-middleware` | ⬜ | — | — |
 | 9 | A4 | The agent routes' policies under `enabled` | `feature/v040-rfc0009-agent-route-policy` | ⬜ | — | — |
@@ -153,7 +153,7 @@ the points it implements.
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ✂️ Cut
 
 > A PR's own row still says 🔀 when it merges, so `main`'s plan-status
-> check fails until a later PR flips it. PRs 3 and 5 needed that follow-up: see
+> check fails until a later PR flips it: see
 > [ISSUE-0190](../issues/ISSUE-0190-merged-pr-plan-row-reddens-main.md).
 
 ## Dependency graph
@@ -257,104 +257,8 @@ appears in no log line.
 **Migration**: none.
 **Estimate**: ~350 lines.
 
-**Implementation note (2026-10-29, revised 2026-10-30 after the second
-review)**: how G-5 and OQ 4 are met, each point a new default this PR's
-review confirms or overturns.
-
-- **What.** `AgentTokenIssuer` in `internal/security/agent_token.go`, with
-  `Issue`, `Check` and `Revoke`, and its key from `crypto/rand` when
-  `NewAgentTokenIssuer()` makes it. Nothing calls it yet: PR 6 makes one at
-  startup. The constructor takes no clock, so no caller can hand it one
-  without time.Now's monotonic reading (F-10); a later PR that must fake
-  the time from another package adds a constructor taking both clocks'
-  readings, never a single `Now`. The glossary's *agent token* moves here
-  from PR 6, since this PR puts the term in code; *fleet enrollment secret*
-  stays with PR 6.
-- **Format.** `agt1.<fields>.<signature>`, both parts base64url without
-  padding. The fields are four 8-byte numbers — the issue time and the
-  expiry by the time of day, the expiry by the issuer's running clock, and
-  the serial number — then the agent ID; the signature is HMAC-SHA256 over
-  the text before it, prefix included. G-5's nonce is the serial number: a
-  number used once in a process, which also orders a token against
-  revocations (F-20). The prefix names the format and makes a leaked token
-  easy to find, so a redaction pattern can key on it later. A token is at
-  most 433 characters, and `Check` refuses a longer one before any work.
-- **Check order.** The signature part is decoded strictly and compared, in
-  constant time, with the signature of the text exactly as sent, so no
-  other spelling of a token checks: the last character of a base64 part has
-  spare bits, and a decoder skips line breaks, so a signature part holding
-  one decodes short. Only then are the fields read, then revocation, then
-  expiry, so a revoked token reads as revoked while the issuer holds its
-  agent (F-13). The three refusals stay apart — invalid (garbled, changed,
-  or another process's key), revoked, expired — for PR 6's audit line and
-  PR 7's retry rule; what a caller is told is PR 8's choice. A check that
-  passes makes one allocation, the agent ID it returns (F-19).
-- **Time.** Two clocks: the time of day, and the time the issuer has been
-  running, from time.Now's monotonic reading. A token stops when 24 hours
-  have passed on either: at its `ExpiresAt`, by the time of day, which
-  counts the hours a machine sleeps (F-14), or 24 running hours after it
-  was issued, which no time sync moves (F-10). So no step of the clock and
-  no sleep makes a token last longer. A step forward ends tokens early, and
-  their agents register again; stepped back again, the clock can let such
-  a token work until its 24 running hours end. `IssuedAt` and `ExpiresAt`
-  are times of day at issue, as an audit line's are, so an orchestrator
-  started before its first time sync dates only the tokens issued before
-  the sync wrongly, and the sync's step forward ends them (F-15). `Check`
-  reads both clocks with the agent's revocation, under the issuer's lock
-  (F-1).
-- **Revocation (OQ 4).** By serial number, not time (F-20). For each agent
-  whose latest token may still work, the issuer keeps the serial number up
-  to which its tokens are refused, and that token's expiry by the running
-  clock. `Issue` refuses every earlier token the agent holds, so registering
-  again shuts out a copied one (F-12), and `Revoke` refuses the latest too;
-  a token issued after either works, so a deregistered agent can register
-  again. This is one mark per agent, not RFC 0009's set keyed by
-  `(AgentID, IssuedAt)`: no single token can be revoked alone (F-22).
-  Revoking an agent with no working token keeps nothing. Once the map has
-  doubled, `Issue` forgets each agent whose latest token has expired by the
-  running clock, so the map stays within about twice the agents with a
-  working token (F-3). That clock never goes back, so an unexpired token
-  for an agent the issuer does not know was not issued here: it is refused
-  as invalid.
-- **ID.** `Issue` refuses an empty ID, any ID the REST and gRPC hooks
-  refuse as an `X-Agent-ID`, and the two the security layer gives callers
-  that are not agents: `web-console` and `anonymous` (F-11).
-- **Key.** It lives only in the function that makes the issuer's HMACs and
-  in the HMACs, kept in a pool, and no method returns it, so printing or
-  encoding the issuer, or a value holding it, shows no key byte, even to a
-  printer that follows pointers. The test looks for the key in seven forms
-  in a JSON log line, `fmt`'s output, JSON, a testify diff (F-16), the
-  errors and a token.
-
-**Review findings** (PR 5; F-10 to F-24 from a second review of the fixed
-PR):
-
-| Finding | Severity | Description | Disposition |
-|---------|----------|-------------|-------------|
-| F-1 | Medium | Expiry and forgetting read the wall clock. Once a revocation was forgotten, a clock stepped back could bring the revoked token back; a forward jump and its correction dated every later token ahead and stretched its life without bound; and `Check` read the clock outside its lock, so forgetting could fall between the clock and the lookup | Fixed in-PR, and reworked by F-10 and F-20: a token stops at 24 hours on the running clock, which never goes back, revocation goes by serial number, and `Check` reads both clocks with the revocation under its lock; tests for the step back and the lock |
-| F-2 | Low | The over-length case could not fail: its padded token was refused by its signature anyway, so nothing showed the length is checked first | Fixed in-PR: a lengthened real token is refused with no allocation |
-| F-3 | Low | `Revoke` kept an entry for any ID, even one never issued a token, and every call added one, so the list grew with revocations, not agents | Fixed in-PR: one entry per agent with a working token, holding its revocation; revoking an agent with none keeps nothing; `Issue` forgets expired agents once the map has doubled |
-| F-4 | Low | The glossary's *Approval Token* still called a capability token RFC 0009's, which the new *Agent Token* entry disallows; the ID rule left out that `Issue` also refuses an empty ID, which the hooks admit as anonymous | Fixed in-PR |
-| F-5 | Info | `AgentToken` named what a token says, not the token the glossary defines | Fixed in-PR: renamed `AgentTokenClaims` before PRs 6–10 use it |
-| F-6 | Info | A registration and a deregistration of one agent that race can leave it registered with a revoked token, which PR 7's retry rule, for invalid and expired tokens, would leave refused until it expires | → deferred to PR 6 (noted there) |
-| F-7 | Info | The PR is over the ~350-line estimate and the 500-line target, most of it tests | Noted: 376 lines of code after the second review; the tests that prove it are not split from it |
-| F-8 | Info | The head branch is not the planned `feature/v040-rfc0009-agent-token` | Noted: the session that opened the PR assigned it; the row records the planned name, as for PR 3 |
-| F-9 | Info | The PR description ended with an assistant attribution line, added when the PR was opened, which the repository's rules forbid in PRs and commits | Fixed in-PR: removed from the description |
-| F-10 | Medium | The F-1 fix worked only if the injected `Now` kept time.Now's monotonic reading, which nothing said or checked; `time.Now().UTC()`, common in this repository, strips it, so a token issued after a corrected forward jump still passed long after its 24 hours, and an expired one passed again after a step back | Fixed in-PR: no caller can give the issuer a clock, and a token stops at 24 hours on the running clock whatever the time of day says; tests for a step back, a corrected jump, and an expired token after a step back |
-| F-11 | Medium | `Issue` signed tokens for `web-console`, which the circuit breaker never quarantines, and `anonymous`, the rate limiter's bucket for callers that name no agent | Fixed in-PR: both refused, the second named by a new `DefaultUnauthenticatedID` |
-| F-12 | Low | A new token for an agent left its earlier ones working, so registering again never shut out a leaked or stolen copy | Fixed in-PR: `Issue` refuses the agent's earlier tokens as revoked; PR 7's client re-registers once for all its calls in flight (noted there) |
-| F-13 | Low | `Check` tested expiry before revocation, so a revoked token read as expired once its 24 hours passed, and PR 7's client, which registers again on an expired token, would undo the operator's deregistration | Fixed in-PR as far as the issuer can: revocation is checked first, so a revoked token reads as revoked while the issuer holds its agent; it forgets the agent some time after the token expires, so not registering again after a revocation → deferred to PR 7 (noted there) |
-| F-14 | Low | The monotonic clock stops while the machine sleeps, so a token lived 24 hours plus every hour the orchestrator's host slept | Fixed in-PR: a token also stops at its `ExpiresAt` by the time of day |
-| F-15 | Low | A token's dates were the time of day at the issuer's start plus the time passed, so an orchestrator started before its first time sync, or after the host slept, dated every token wrongly for its whole life | Fixed in-PR: the dates are the time of day at issue |
-| F-16 | Low | go-spew, which prints testify's failure diffs, followed the key's pointer and printed its bytes; the key test tried only zap, JSON and `fmt` | Fixed in-PR: the key lives only in the HMACs' pool and the function that makes them, and the test reads a testify diff |
-| F-17 | Low | The test named for forgetting only once the map has grown could not fail: it would pass if `Issue` forgot on every call | Fixed in-PR: it expires every token and checks the next `Issue` forgets none until the map has doubled; the helper that grows the map fails instead of looping forever |
-| F-18 | Low | The concurrency test ran on the real clock and ended in milliseconds, so nothing expired and no sweep deleted while other goroutines checked | Fixed in-PR: its clock moves on at every read, and the test checks agents were forgotten while the others ran |
-| F-19 | Info | `Check` made 11 allocations, a fresh HMAC included, on what PRs 8–10 make every agent call | Fixed in-PR: pooled HMACs and buffers, one allocation for a token that checks; a test pins it, skipped under the race detector, which drops pooled values |
-| F-20 | Info | Revocation was ordered by timestamps, with a nanosecond tie-break and a floor, which tied its correctness to the clock | Fixed in-PR: a serial number in each token orders it against revocations, and time is used only for expiry |
-| F-21 | Info | The ID error and its comment restated the agent ID pattern and the 256-byte limit, which would go stale if `MaxAgentIDLen` changed | Fixed in-PR: the message names neither, and the comment links them |
-| F-22 | Low | RFC 0009's open question 4 still called the `(AgentID, IssuedAt)` set the right shape, though PR 5 keeps one mark per agent | Fixed in-PR: its dated note says what was built and that no single token can be revoked alone |
-| F-23 | Info | F-8's head branch breaks the repository's branch naming rule, and was noted rather than fixed | Noted: a PR cannot change its head branch, so a fix means reopening the PR from the planned branch; the maintainer chose to keep this PR |
-| F-24 | Info | The PR lengthened the ROADMAP header's latest-changes note, already about 170 words | Fixed in-PR: the note says which rows are under way and links the v0.4.0 plan's progress table |
+PR 5's implementation note and its review findings are in
+[the plan's notes on merged PRs](0009-phases-3-4-notes-pr-plan.md#pr-5--featurev040-rfc0009-agent-token).
 
 ### PR 6 — `feature/v040-rfc0009-enrollment`
 
@@ -386,57 +290,8 @@ refuses them with 400 too. F-12 — a registration retires the agent's
 earlier tokens, so the audit line for a re-registration from a new address
 (G-14) can say the old address's token stopped working.
 
-**Implementation note (2026-11-01)**: how this PR meets the scope above.
-Each point not settled above is a new default this PR's review confirms or
-overturns.
-
-- **Where.** `security.AgentEnrollment` (`internal/security/agent_enrollment.go`)
-  holds the registry and token steps; `internal/server/agent_enrollment.go`
-  holds the secret check, the registration limit and the audit lines; the
-  handlers in `agent_handlers.go` call them. `cmd/orchestrator/enrollment.go`
-  reads `SECURITY_ENROLLMENT_SECRET` and hands the server its agent-identity
-  options; the unquarantine secret's wiring moved there from `main.go`
-  (499 lines), which now makes the one `AgentEnrollment`, over the registry
-  and one `AgentTokenIssuer`, and passes it in, so every server that
-  registers agents, and PR 10's gRPC check, can share it. A server given
-  none makes its own.
-- **The secret (new default).** It travels in an `X-Enrollment-Secret`
-  header, never `Authorization`, which carries account sessions, and is
-  compared in constant time through the same SHA-256 helper the unquarantine
-  bearer uses. Its surrounding whitespace is trimmed, as a header's is. A shown secret that differs from the one set gets 401 and an
-  `agent.token_invalid` line with `reason: enrollment_secret` and the
-  caller's address, read past trusted proxies; neither secret is ever
-  written. No secret shown is admitted, as the scope says; with none set, a
-  shown one is ignored, so a fleet given the secret before its orchestrator
-  keeps registering. The check runs after the ID checks and before the
-  capability checks, so a caller with a wrong secret cannot make
-  registration write its capability audit lines.
-- **The response (new default).** The `201` body adds `agent_token` and
-  `agent_token_expires_at` to the agent's fields, with
-  `Cache-Control: no-store`. The list and get routes carry no token.
-- **IDs.** `security.IssuableAgentID`, exported from PR 5's unexported
-  check, refuses `web-console`, `anonymous` and an ID over
-  `MaxAgentIDLen` with 400 before anything registers.
-- **One step at a time (F-6).** One lock in `AgentEnrollment` covers a
-  registration's registry upsert and token issue, and a deregistration's
-  removal and revocation, so a racing pair leaves the agent either
-  registered with a working token or gone with a revoked one; a test puts
-  the deregistration between the two steps, and fails without the lock.
-  Registration is rare, so one lock costs nothing a per-agent one would
-  save. Revocation follows a successful removal only, and a registration
-  whose token cannot be issued is undone.
-- **The limit (new default).** One address may register 120 times a
-  minute, counted by the caller's address, not its `X-Agent-ID`; over it,
-  `429` with `Retry-After`. It bounds secret guessing and the audit
-  flushes each registration forces, and fits a host's whole fleet.
-- **Audit.** Every registration writes `agent.token_issued` with the
-  address, the caller's source and the expiry, never the token, and, with
-  a secret set, `enrollment_secret: shown` or `absent`. An agent already
-  registered adds `previous_token: revoked` (F-12), and `previous_address`
-  or `previous_source` when the address it gives or the source it comes
-  from differs (G-14). A deregistration writes `agent.deregistered` with
-  the caller's source. All three are security-class, as `audit_event.go`
-  has classed the token events since Phase 1.
+PR 6's implementation note and its review findings are in
+[the plan's notes on merged PRs](0009-phases-3-4-notes-pr-plan.md#pr-6--featurev040-rfc0009-enrollment).
 
 **For PR 7**: the agent sends `X-Enrollment-Secret` on registration and
 reads `agent_token` and `agent_token_expires_at` from the `201` body.
@@ -488,6 +343,11 @@ admitted and quarantines nothing, in both modes; under `disabled` nothing
 else changes.
 **Acceptance**: ISSUE-0187 closed, with its regression test.
 **Estimate**: ~450 lines.
+**From PR 6 review**: F-9 — registration admits the ID `local`, which is
+`channels.DefaultPrincipalID`, so an agent can hold a token naming it. This
+PR either refuses that ID, as `IssuableAgentID` refuses `web-console` and
+`anonymous`, or shows by a test that such a token gets none of the default
+principal's standing.
 
 ### PR 9 — `feature/v040-rfc0009-agent-route-policy`
 
@@ -509,6 +369,11 @@ not another's.
 **Acceptance**: ISSUE-0140 and ISSUE-0117 closed, each with its regression
 test.
 **Estimate**: ~450 lines.
+**From PR 6 review**: F-10 — no compose file sets `env_file` or any
+`SECURITY_*` variable, so `SECURITY_ENROLLMENT_SECRET` in `.env` reaches
+neither the orchestrator nor the agents. This PR passes it through in every
+`docker-compose*.yaml`; otherwise, once it requires the secret, a composed
+stack under `enabled` refuses every registration.
 
 ### PR 10 — `feature/v040-rfc0009-grpc-token`
 
