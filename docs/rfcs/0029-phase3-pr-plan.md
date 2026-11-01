@@ -395,7 +395,7 @@ plan the store has outgrown.
 1 000 messages, however few rows the society tables hold, so the refresh
 covers them too.
 
-**Review findings** (PR 5):
+**Review findings** (PR 5; F-8 to F-16 from a second review):
 
 | Finding | Severity | Description | Disposition |
 |---------|----------|-------------|-------------|
@@ -406,6 +406,15 @@ covers them too.
 | F-5 | Info | Comments went stale with the refresh: the floor's reason described a penalty lasting until a restart, which the refresh now bounds, and "only when a table has changed tenfold" left out an index with no statistics yet, so a refresh can take young numbers too | Fixed in-PR |
 | F-6 | Info | The floor's count and the pragma took the connection separately, so a channel delete between them could let the pragma analyze `messages` below the floor | Fixed in-PR: both run on one connection |
 | F-7 | Low | This PR's own row said 🔀 with no link while the ROADMAP and RFC 0029 called the closeout merged; squash-merged so, `main`'s plan-status check would fail (ISSUE-0190) | Fixed in-PR: a later commit flips the row to ✅ with #1075 and its expected merge date |
+| F-8 | Low | A refresh whose pragma met another process's write lock kept Close waiting out the five-second busy_timeout: cancelling a statement does not end SQLite's wait for a lock | Fixed in-PR: the refresh's pragma runs with busy_timeout 0, restored after |
+| F-9 | Low | That wait also held the store's one connection, stalling every channel and society call for up to five seconds an hour | Fixed in-PR, by F-8's fix |
+| F-10 | Low | No test closed the store while a refresh was inside its statement | Fixed in-PR: a test holds the write lock from a second connection and times Close |
+| F-11 | Info | F-1 again: a floor per table would refresh the other tables while `messages` is below 1 000 | Noted, as F-1: the floor stays whole |
+| F-12 | Info | The v0.4.0 plan passes 2 900 words | Noted: an open release's plan is not split, and it stays under 3 000 |
+| F-13 | Info | The failure test waited out busy_timeout on every run | Fixed in-PR, by F-8's fix |
+| F-14 | Info | The v14 migration's comment credited only the open's pragma | Fixed in-PR |
+| F-15 | Info | The seam option's doc left out its interval and its `refreshed` channel | Fixed in-PR |
+| F-16 | Info | `stopRefreshLoop` guarded a state no store reaches | Fixed in-PR: the guard is gone |
 
 ---
 
@@ -555,10 +564,12 @@ covers them too.
 >   (S-6). A full ANALYZE holds the connection while it runs, ~0.2 s per
 >   200 000 messages, and runs only when an index has no statistics yet or a
 >   table has changed tenfold. Close cancels a refresh in progress, so it
->   never waits on another holder of the connection (F-2). A failed refresh
+>   never waits on another holder of the connection (F-2), and a refresh
+>   never waits for another writer's lock (F-8). A failed refresh
 >   is logged and the next one retries.
-> - The statistics code moves, unchanged but for its comments, from
->   `sqlite.go` to `sqlite_statistics.go`, beside the loop.
+> - The statistics code moves, unchanged but for its comments and the
+>   refresh's lock wait, from `sqlite.go` to `sqlite_statistics.go`, beside
+>   the loop.
 
 ## Related documentation
 
