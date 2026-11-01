@@ -8,6 +8,7 @@ package main
 
 import (
 	"os"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -21,12 +22,13 @@ import (
 const enrollmentSecretEnvVar = "SECURITY_ENROLLMENT_SECRET"
 
 // agentIdentityOptions returns the REST server's options for agent
-// identity: tokens, the issuer that signs the tokens registration answers
-// with, always; the unquarantine and enrollment secrets when each is set.
+// identity: enrollment, which registers agents with the tokens registration
+// answers with, always; the unquarantine and enrollment secrets when each
+// is set.
 func agentIdentityOptions(logger *zap.Logger, auditor security.AuditLogger,
-	tokens *security.AgentTokenIssuer,
+	enrollment *security.AgentEnrollment,
 ) []server.ServerOption {
-	opts := []server.ServerOption{server.WithAgentTokenIssuer(tokens)}
+	opts := []server.ServerOption{server.WithAgentEnrollment(enrollment)}
 	// PR #244 H-02 — when unset, unquarantineToken writes a startup WARN and
 	// an `unquarantine.endpoint.open` audit event (M-05); nil auditor safe.
 	if tok := unquarantineToken(logger, auditor); tok != "" {
@@ -42,8 +44,11 @@ func agentIdentityOptions(logger *zap.Logger, auditor security.AuditLogger,
 // "" when it is unset, and logs which, never the secret. Unset, registration
 // admits any caller, as before: PR 9 of the Phases 3–4 plan refuses every
 // registration under auth.mode: enabled until it is set, and warns then.
+// Surrounding whitespace is trimmed, as an HTTP header's is on arrival, so a
+// value ending in a line break, as a mounted secret file's often does, still
+// matches what the agents send.
 func enrollmentSecret(logger *zap.Logger) string {
-	secret := os.Getenv(enrollmentSecretEnvVar)
+	secret := strings.TrimSpace(os.Getenv(enrollmentSecretEnvVar))
 	if secret == "" {
 		logger.Info("agent enrollment secret not set",
 			zap.String("source", enrollmentSecretEnvVar),
@@ -52,6 +57,6 @@ func enrollmentSecret(logger *zap.Logger) string {
 	}
 	logger.Info("agent enrollment secret set",
 		zap.String("source", enrollmentSecretEnvVar),
-		zap.String("posture", "registration refuses a wrong secret"))
+		zap.String("posture", "registration refuses a wrong secret and still admits one that shows none"))
 	return secret
 }

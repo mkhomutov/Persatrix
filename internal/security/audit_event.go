@@ -21,8 +21,9 @@ type AuditEventType string
 const (
 	// Lifecycle
 	AuditAgentRegistered     AuditEventType = "agent.registered"
-	AuditAgentTokenIssued    AuditEventType = "agent.token_issued"  // reserved (Phase 4 — agent identity tokens)
-	AuditAgentTokenInvalid   AuditEventType = "agent.token_invalid" // reserved (Phase 4)
+	AuditAgentTokenIssued    AuditEventType = "agent.token_issued"  // registration issued an agent token (RFC 0009 Phase 4)
+	AuditAgentTokenInvalid   AuditEventType = "agent.token_invalid" // a registration showed a wrong enrollment secret (Phase 4)
+	AuditAgentDeregistered   AuditEventType = "agent.deregistered"  // an agent was removed and its tokens revoked (Phase 4)
 	AuditCapabilityViolation AuditEventType = "capability.violation"
 
 	// Tool dispatch
@@ -133,6 +134,7 @@ func AllAuditEventTypes() []AuditEventType {
 		AuditAgentRegistered,
 		AuditAgentTokenIssued,
 		AuditAgentTokenInvalid,
+		AuditAgentDeregistered,
 		AuditCapabilityViolation,
 		AuditToolInvoked,
 		AuditToolDenied,
@@ -187,6 +189,7 @@ var securityEvents = map[AuditEventType]struct{}{
 	AuditChannelConfidentialityTripwire: {},
 	AuditAgentTokenIssued:               {},
 	AuditAgentTokenInvalid:              {},
+	AuditAgentDeregistered:              {},
 	AuditToolDenied:                     {},
 	AuditToolRateLimited:                {},
 	AuditMemoryDenied:                   {},

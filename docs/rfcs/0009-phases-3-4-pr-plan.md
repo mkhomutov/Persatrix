@@ -390,17 +390,20 @@ earlier tokens, so the audit line for a re-registration from a new address
 Each point not settled above is a new default this PR's review confirms or
 overturns.
 
-- **Where.** `internal/server/agent_enrollment.go` holds the secret check,
-  the enrollment and deregistration steps and the token audit line; the
+- **Where.** `security.AgentEnrollment` (`internal/security/agent_enrollment.go`)
+  holds the registry and token steps; `internal/server/agent_enrollment.go`
+  holds the secret check, the registration limit and the audit lines; the
   handlers in `agent_handlers.go` call them. `cmd/orchestrator/enrollment.go`
   reads `SECURITY_ENROLLMENT_SECRET` and hands the server its agent-identity
   options; the unquarantine secret's wiring moved there from `main.go`
-  (499 lines), which now makes the one `AgentTokenIssuer` and passes it in,
-  so PR 10's gRPC check can share it. A server given no issuer makes its own.
+  (499 lines), which now makes the one `AgentEnrollment`, over the registry
+  and one `AgentTokenIssuer`, and passes it in, so every server that
+  registers agents, and PR 10's gRPC check, can share it. A server given
+  none makes its own.
 - **The secret (new default).** It travels in an `X-Enrollment-Secret`
   header, never `Authorization`, which carries account sessions, and is
   compared in constant time through the same SHA-256 helper the unquarantine
-  bearer uses. A shown secret that differs from the one set gets 401 and an
+  bearer uses. Its surrounding whitespace is trimmed, as a header's is. A shown secret that differs from the one set gets 401 and an
   `agent.token_invalid` line with `reason: enrollment_secret` and the
   caller's address, read past trusted proxies; neither secret is ever
   written. No secret shown is admitted, as the scope says; with none set, a
@@ -414,17 +417,26 @@ overturns.
 - **IDs.** `security.IssuableAgentID`, exported from PR 5's unexported
   check, refuses `web-console`, `anonymous` and an ID over
   `MaxAgentIDLen` with 400 before anything registers.
-- **One step at a time (F-6).** One server-wide lock covers a
+- **One step at a time (F-6).** One lock in `AgentEnrollment` covers a
   registration's registry upsert and token issue, and a deregistration's
   removal and revocation, so a racing pair leaves the agent either
-  registered with a working token or gone with a revoked one; a test races
-  the two 200 times. Registration is rare, so one lock costs nothing a
-  per-agent one would save. Revocation follows a successful removal only.
+  registered with a working token or gone with a revoked one; a test puts
+  the deregistration between the two steps, and fails without the lock.
+  Registration is rare, so one lock costs nothing a per-agent one would
+  save. Revocation follows a successful removal only, and a registration
+  whose token cannot be issued is undone.
+- **The limit (new default).** One address may register 120 times a
+  minute, counted by the caller's address, not its `X-Agent-ID`; over it,
+  `429` with `Retry-After`. It bounds secret guessing and the audit
+  flushes each registration forces, and fits a host's whole fleet.
 - **Audit.** Every registration writes `agent.token_issued` with the
-  address and expiry, never the token. An agent already registered adds
-  `previous_token: revoked` (F-12), and `previous_address` when it came
-  from another address (G-14). Both token events are security-class, as
-  `audit_event.go` has classed them since Phase 1.
+  address, the caller's source and the expiry, never the token, and, with
+  a secret set, `enrollment_secret: shown` or `absent`. An agent already
+  registered adds `previous_token: revoked` (F-12), and `previous_address`
+  or `previous_source` when the address it gives or the source it comes
+  from differs (G-14). A deregistration writes `agent.deregistered` with
+  the caller's source. All three are security-class, as `audit_event.go`
+  has classed the token events since Phase 1.
 
 **For PR 7**: the agent sends `X-Enrollment-Secret` on registration and
 reads `agent_token` and `agent_token_expires_at` from the `201` body.

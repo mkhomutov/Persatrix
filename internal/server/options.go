@@ -108,12 +108,23 @@ func WithUnquarantineToken(token string) ServerOption {
 }
 
 // WithAgentTokenIssuer gives the server the issuer that signs the agent
-// tokens registration answers with (RFC 0009 Phase 4). The orchestrator
-// makes one at startup, so its gRPC server can check the same tokens; a
-// server given none makes its own.
+// tokens registration answers with (RFC 0009 Phase 4), when no
+// WithAgentEnrollment gives it an enrollment, whose issuer wins. A server
+// given neither makes its own.
 func WithAgentTokenIssuer(t *security.AgentTokenIssuer) ServerOption {
 	return func(s *Server) {
 		s.agentTokens = t
+	}
+}
+
+// WithAgentEnrollment gives the server the enrollment that registers and
+// deregisters agents with their tokens (RFC 0009 Phase 4). The orchestrator
+// makes one at startup, over the registry it passes New, and hands it to
+// every server that registers agents, so they all keep the registry and the
+// tokens agreeing under one lock; its issuer signs the tokens.
+func WithAgentEnrollment(e *security.AgentEnrollment) ServerOption {
+	return func(s *Server) {
+		s.enrollment = e
 	}
 }
 

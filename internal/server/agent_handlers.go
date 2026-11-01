@@ -59,12 +59,14 @@ func (s *Server) handleRegisterAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	// RFC 0009 PR 6: refuse an ID no agent token can be issued for (too long,
 	// or kept for callers that are not agents) before anything registers,
-	// then a wrong fleet enrollment secret (agent_enrollment.go).
+	// then a source over its registrations for the window, then a wrong
+	// fleet enrollment secret (agent_enrollment.go).
 	if !security.IssuableAgentID(req.ID) {
 		writeError(w, "BAD_REQUEST", "id is reserved or too long for an agent", http.StatusBadRequest)
 		return
 	}
-	if s.enrollmentRefused(w, r, req.ID) {
+	source := s.requestSource(r)
+	if s.registrationThrottled(w, r, source) || s.enrollmentRefused(w, r, req.ID, source) {
 		return
 	}
 	// (PR #71 review §2.3): cap display name length to prevent registry pollution
@@ -159,7 +161,7 @@ func (s *Server) handleRegisterAgent(w http.ResponseWriter, r *http.Request) {
 	// re-registration — "registration accepted" — so no client has to branch on
 	// insert-vs-update (RFC 0002 §Agents amended 2026-08-23). RFC 0009 PR 6:
 	// either way the agent gets a new token, which retires its earlier ones.
-	token, claims, previous, err := s.enrollAgent(r.Context(), info)
+	enrolled, err := s.enrollment.Enroll(r.Context(), info, source)
 	if err != nil {
 		s.logger.Error("failed to register agent", zap.Error(err), zap.String("agent_id", req.ID))
 		writeError(w, "INTERNAL", "failed to register agent", http.StatusInternalServerError)
@@ -183,14 +185,14 @@ func (s *Server) handleRegisterAgent(w http.ResponseWriter, r *http.Request) {
 			"name":         req.Name,
 		},
 	})
-	s.auditTokenIssued(r.Context(), info, claims, previous)
+	s.auditTokenIssued(r, info, source, enrolled)
 
 	// The body carries a credential, so nothing on the way may keep a copy.
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, registerAgentResponse{
 		agentResponse:       agentToResponse(&info),
-		AgentToken:          token,
-		AgentTokenExpiresAt: claims.ExpiresAt,
+		AgentToken:          enrolled.Token,
+		AgentTokenExpiresAt: enrolled.Claims.ExpiresAt,
 	}, http.StatusCreated)
 }
 
@@ -299,8 +301,9 @@ func (s *Server) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 	// TODO(v0.3): consider checking for active workflow runs referencing this agent
 	// before deletion, analogous to the "cannot delete running workflow" guard in
 	// handleDeleteWorkflow. Currently dormant — no execution in v0.1. (Review finding F-09)
-	// RFC 0009 PR 6: deregistering also revokes the agent's tokens.
-	if err := s.deregisterAgent(r.Context(), id); err != nil {
+	// RFC 0009 PR 6: deregistering also revokes the agent's tokens, and is
+	// audited, since anyone may call it.
+	if err := s.enrollment.Deregister(r.Context(), id); err != nil {
 		if errors.Is(err, registry.ErrAgentNotFound) {
 			writeError(w, "NOT_FOUND", "agent not found", http.StatusNotFound)
 			return
@@ -309,6 +312,7 @@ func (s *Server) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "INTERNAL", "failed to delete agent", http.StatusInternalServerError)
 		return
 	}
+	s.auditDeregistered(r.Context(), id, s.requestSource(r))
 
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -335,8 +335,8 @@ func main() {
 
 	// RFC 0009 Phase 4 — agent tokens and the fleet enrollment secret, with
 	// PR #244 H-02's unquarantine secret (enrollment.go).
-	agentTokens := security.NewAgentTokenIssuer()
-	srvOpts = append(srvOpts, agentIdentityOptions(logger, auditor, agentTokens)...)
+	agentEnrollment := security.NewAgentEnrollment(reg, security.NewAgentTokenIssuer())
+	srvOpts = append(srvOpts, agentIdentityOptions(logger, auditor, agentEnrollment)...)
 
 	sessionID := resolveSessionID(logger)
 	// ISSUE-0085 PR 4: resolve the per-process run/test-isolation epoch once
