@@ -309,6 +309,7 @@ name = "MIT-candidate primitives must not import orchestrator-coupled (BUSL) mod
 type = "forbidden"
 source_modules = [
     "persatrix_agents.wallet_client",
+    "persatrix_agents.wallet_lease",
     "persatrix_agents.prompt_loader",
     "persatrix_agents.prompt_safety",
     "persatrix_agents.llm_types",
@@ -325,4 +326,5 @@ ignore_imports = [
     "persatrix_agents.llm_offline -> persatrix_agents.llm_types",
     "persatrix_agents.wallet_client -> persatrix_agents.generated.wallet_pb2",
     "persatrix_agents.wallet_client -> persatrix_agents.generated.wallet_pb2_grpc",
+    "persatrix_agents.wallet_client -> persatrix_agents.wallet_lease",
 ]
