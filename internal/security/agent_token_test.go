@@ -325,6 +325,7 @@ func TestAgentTokenIssuer_IssuesOnlyForAnIDAnAgentCanHave(t *testing.T) {
 		"the web console":       ConsoleAgentID,
 		"the anonymous callers": DefaultUnauthenticatedID,
 	} {
+		assert.False(t, IssuableAgentID(id), name)
 		token, issued, err := issuer.Issue(id)
 		assert.ErrorIs(t, err, ErrAgentTokenAgentID, name)
 		assert.Empty(t, token, name)
@@ -333,6 +334,7 @@ func TestAgentTokenIssuer_IssuesOnlyForAnIDAnAgentCanHave(t *testing.T) {
 	assert.Empty(t, issuer.agents, "a refused ID leaves nothing behind")
 
 	longest := strings.Repeat("e", MaxAgentIDLen)
+	assert.True(t, IssuableAgentID(longest), "registration asks this before it registers anything")
 	token := issueToken(t, issuer, longest)
 	assert.Equal(t, maxAgentTokenLen, len(token), "the longest ID's token is the longest Check reads")
 	got, err := issuer.Check(token)

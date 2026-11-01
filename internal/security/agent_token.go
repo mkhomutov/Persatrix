@@ -186,7 +186,7 @@ func newAgentTokenIssuer(key []byte, clock agentTokenClock) *AgentTokenIssuer {
 // registering again shuts out a copy of an old one. An ID no agent can have
 // gets [ErrAgentTokenAgentID].
 func (t *AgentTokenIssuer) Issue(agentID string) (string, AgentTokenClaims, error) {
-	if !issuableAgentID(agentID) {
+	if !IssuableAgentID(agentID) {
 		return "", AgentTokenClaims{}, ErrAgentTokenAgentID
 	}
 	p := agentTokenPayload{agentID: agentID}
@@ -278,13 +278,15 @@ func (t *AgentTokenIssuer) forgetExpired(running time.Duration) {
 	t.sweepAt = max(agentTokenSweepFloor, 2*len(t.agents))
 }
 
-// issuableAgentID reports whether an agent can have id: the REST and gRPC
+// IssuableAgentID reports whether an agent can have id, so that
+// [AgentTokenIssuer.Issue] would sign a token for it: the REST and gRPC
 // hooks accept it as an [AgentIDHeader], and it is none the security layer
-// keeps for callers that are not agents. A token for [ConsoleAgentID] would
-// pass for the web console, which the circuit breaker never quarantines, and
-// one for [DefaultUnauthenticatedID] would share the rate limiter's bucket
-// for every caller that names no agent.
-func issuableAgentID(id string) bool {
+// keeps for callers that are not agents. Registration asks before it
+// registers anything. A token for [ConsoleAgentID] would pass for the web
+// console, which the circuit breaker never quarantines, and one for
+// [DefaultUnauthenticatedID] would share the rate limiter's bucket for every
+// caller that names no agent.
+func IssuableAgentID(id string) bool {
 	return id != "" && validAgentID(id) && id != ConsoleAgentID && id != DefaultUnauthenticatedID
 }
 

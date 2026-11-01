@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -71,6 +72,16 @@ type Server struct {
 	// (pre-PR-244 "front with an authenticating reverse proxy" posture); set
 	// → callers present `Authorization: Bearer <token>` (crypto/subtle compare).
 	unquarantineToken string
+
+	// Agent identity (RFC 0009 Phase 4; agent_enrollment.go). agentTokens
+	// issues the token registration answers with; New makes one when no
+	// WithAgentTokenIssuer gives it, so every server can. enrollmentSecret
+	// is the fleet enrollment secret, "" when none is set. enrollMu keeps
+	// one registration or deregistration at a time, so the registry and the
+	// issuer never disagree about an agent.
+	agentTokens      *security.AgentTokenIssuer
+	enrollmentSecret string
+	enrollMu         sync.Mutex
 
 	// Channel components (RFC 0011 PR 2 — optional, nil-safe).
 	// channelStore is the persistence boundary; channelRouter wraps it
@@ -162,6 +173,9 @@ func New(addr, workflowsDir string, store state.Store, reg registry.Registry, pl
 	}
 	for _, opt := range opts {
 		opt(s)
+	}
+	if s.agentTokens == nil {
+		s.agentTokens = security.NewAgentTokenIssuer()
 	}
 
 	// RFC 0031 Phase 3 PR 4: the boot-default session id (PERSATRIX_SESSION_ID)

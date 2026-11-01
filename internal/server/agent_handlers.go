@@ -57,6 +57,16 @@ func (s *Server) handleRegisterAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "BAD_REQUEST", "id must match ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", http.StatusBadRequest)
 		return
 	}
+	// RFC 0009 PR 6: refuse an ID no agent token can be issued for (too long,
+	// or kept for callers that are not agents) before anything registers,
+	// then a wrong fleet enrollment secret (agent_enrollment.go).
+	if !security.IssuableAgentID(req.ID) {
+		writeError(w, "BAD_REQUEST", "id is reserved or too long for an agent", http.StatusBadRequest)
+		return
+	}
+	if s.enrollmentRefused(w, r, req.ID) {
+		return
+	}
 	// (PR #71 review §2.3): cap display name length to prevent registry pollution
 	// and log bloat. 100 chars is generous for a human-readable label. The name
 	// is display-only — no routing or security decisions depend on it.
@@ -147,8 +157,10 @@ func (s *Server) handleRegisterAgent(w http.ResponseWriter, r *http.Request) {
 	// the reason a returning agent could never correct a stale advertised
 	// address. The status code stays 201 for both the first registration and a
 	// re-registration — "registration accepted" — so no client has to branch on
-	// insert-vs-update (RFC 0002 §Agents amended 2026-08-23).
-	if err := s.registry.Register(r.Context(), info); err != nil {
+	// insert-vs-update (RFC 0002 §Agents amended 2026-08-23). RFC 0009 PR 6:
+	// either way the agent gets a new token, which retires its earlier ones.
+	token, claims, previous, err := s.enrollAgent(r.Context(), info)
+	if err != nil {
 		s.logger.Error("failed to register agent", zap.Error(err), zap.String("agent_id", req.ID))
 		writeError(w, "INTERNAL", "failed to register agent", http.StatusInternalServerError)
 		return
@@ -171,8 +183,15 @@ func (s *Server) handleRegisterAgent(w http.ResponseWriter, r *http.Request) {
 			"name":         req.Name,
 		},
 	})
+	s.auditTokenIssued(r.Context(), info, claims, previous)
 
-	writeJSON(w, agentToResponse(&info), http.StatusCreated)
+	// The body carries a credential, so nothing on the way may keep a copy.
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, registerAgentResponse{
+		agentResponse:       agentToResponse(&info),
+		AgentToken:          token,
+		AgentTokenExpiresAt: claims.ExpiresAt,
+	}, http.StatusCreated)
 }
 
 // maxCapabilityEchoLen bounds the verbatim echo of a rejected capability
@@ -280,7 +299,8 @@ func (s *Server) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 	// TODO(v0.3): consider checking for active workflow runs referencing this agent
 	// before deletion, analogous to the "cannot delete running workflow" guard in
 	// handleDeleteWorkflow. Currently dormant — no execution in v0.1. (Review finding F-09)
-	if err := s.registry.Unregister(r.Context(), id); err != nil {
+	// RFC 0009 PR 6: deregistering also revokes the agent's tokens.
+	if err := s.deregisterAgent(r.Context(), id); err != nil {
 		if errors.Is(err, registry.ErrAgentNotFound) {
 			writeError(w, "NOT_FOUND", "agent not found", http.StatusNotFound)
 			return
@@ -384,7 +404,13 @@ func validBearerToken(header, expected string) bool {
 	if !strings.HasPrefix(header, prefix) {
 		return false
 	}
-	supplied := header[len(prefix):]
+	return secretsEqual(header[len(prefix):], expected)
+}
+
+// secretsEqual compares a shown secret with the one set, in constant time
+// over both length and content (ISSUE-0004, above): both are hashed to
+// SHA-256 digests first. The fleet enrollment secret shares it.
+func secretsEqual(supplied, expected string) bool {
 	supSum := sha256.Sum256([]byte(supplied))
 	expSum := sha256.Sum256([]byte(expected))
 	return subtle.ConstantTimeCompare(supSum[:], expSum[:]) == 1

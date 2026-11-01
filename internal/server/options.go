@@ -107,6 +107,26 @@ func WithUnquarantineToken(token string) ServerOption {
 	}
 }
 
+// WithAgentTokenIssuer gives the server the issuer that signs the agent
+// tokens registration answers with (RFC 0009 Phase 4). The orchestrator
+// makes one at startup, so its gRPC server can check the same tokens; a
+// server given none makes its own.
+func WithAgentTokenIssuer(t *security.AgentTokenIssuer) ServerOption {
+	return func(s *Server) {
+		s.agentTokens = t
+	}
+}
+
+// WithEnrollmentSecret sets the fleet enrollment secret: the shared secret
+// an agent shows in the [EnrollmentSecretHeader] when it registers, so a
+// stranger cannot register and collect a token. The orchestrator reads it
+// from SECURITY_ENROLLMENT_SECRET. Empty means none is set.
+func WithEnrollmentSecret(secret string) ServerOption {
+	return func(s *Server) {
+		s.enrollmentSecret = secret
+	}
+}
+
 // WithChannels injects the channel store and (optionally) the channel
 // router used by the RFC 0011 §C REST endpoints. Pass nil for the
 // router when the caller only wants direct-store reads (history/list)
