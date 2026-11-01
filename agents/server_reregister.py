@@ -144,17 +144,23 @@ class AgentTokenKeeper:
         self._closed = False
 
     async def keep_from(self, answer: aiohttp.ClientResponse) -> None:
-        """Keep the token a registration answered with.
+        """Take what a registration's answer says about the token.
 
         An orchestrator older than RFC 0009's Phases 3–4 plan PR 6 sends none,
-        which leaves nothing to show.
+        which leaves nothing to show. A refusal issued none, so the token held
+        stands. A 5xx proves neither: a gateway may answer one for a
+        registration that landed, so it stays an unanswered registration.
         """
-        body = await answer.json()
-        token = body.get("agent_token") if isinstance(body, dict) else None
-        self.token = token if isinstance(token, str) else ""
-        self._answered = True
-        if self.token:
-            logger.info("Agent token kept; it expires at %s", body.get("agent_token_expires_at"))
+        if answer.status in (200, 201):
+            body = await answer.json()
+            token = body.get("agent_token") if isinstance(body, dict) else None
+            self.token = token if isinstance(token, str) else ""
+            if self.token:
+                logger.info(
+                    "Agent token kept; it expires at %s", body.get("agent_token_expires_at"),
+                )
+        if answer.status < 500:
+            self._answered = True
 
     async def register(self) -> bool:
         """Register now, or wait for the registration already under way.

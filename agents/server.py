@@ -330,9 +330,9 @@ class AgentServer:
                     url, json=payload, timeout=aiohttp.ClientTimeout(total=10),
                     headers=enrollment_headers(), middlewares=(), allow_redirects=False,
                 ) as resp:
+                    if agent_id == next(iter(self.agents)):  # the one the session names
+                        await self._tokens.keep_from(resp)
                     if resp.status in (200, 201):
-                        if agent_id == next(iter(self.agents)):  # the one the session names
-                            await self._tokens.keep_from(resp)
                         logger.info(
                             "Registered agent %s with orchestrator at %s",
                             agent_id,

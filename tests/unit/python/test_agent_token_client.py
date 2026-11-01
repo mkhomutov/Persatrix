@@ -11,11 +11,21 @@ from __future__ import annotations
 
 import logging
 from collections.abc import AsyncIterator
+from types import SimpleNamespace
+from typing import Any
+from unittest.mock import MagicMock
 
+import aiohttp
 import pytest
+from yarl import URL
 
-from agents.orchestrator_session import ENROLLMENT_SECRET_ENV
+from agents.orchestrator_session import (
+    AGENT_TOKEN_HEADER,
+    ENROLLMENT_SECRET_ENV,
+    token_middleware,
+)
 from agents.server import AgentServer
+from agents.server_reregister import AgentTokenKeeper
 from agents.tools import builtin
 from agents.tools.permissions import PermissionGate
 
@@ -156,7 +166,7 @@ async def test_registration_never_carries_a_token(
     assert [c.token for c in orchestrator.to(REGISTER)] == [None, None]
 
 
-async def test_a_redirect_to_another_host_carries_no_token(
+async def test_a_redirect_to_another_port_carries_no_token(
     server: AgentServer, orchestrator: FakeOrchestrator,
 ) -> None:
     """G-5: the token goes only on calls to the orchestrator."""
@@ -171,6 +181,88 @@ async def test_a_redirect_to_another_host_carries_no_token(
 
     assert [c.token for c in orchestrator.to(PUBLISH)] == [orchestrator.issued[0]]
     assert [c.token for c in elsewhere.calls] == [None]
+
+
+async def test_a_redirect_to_another_name_on_the_same_port_carries_no_token(
+    server: AgentServer, orchestrator: FakeOrchestrator,
+) -> None:
+    orchestrator.redirect_to = f"http://localhost:{URL(orchestrator.url).port}/somewhere"
+    try:
+        await publish(server, orchestrator)
+    finally:
+        orchestrator.redirect_to = ""
+
+    assert [c.token for c in orchestrator.to("/somewhere")] == [None]
+
+
+@pytest.mark.parametrize(
+    ("orchestrator_url", "called", "shown"),
+    [
+        pytest.param("http://orch.example:8080", "http://orch.example:8080/api", True,
+                     id="the orchestrator"),
+        pytest.param("http://orch.example:8080", "http://evil.example:8080/api", False,
+                     id="another host"),
+        pytest.param("http://orch.example:8080", "http://orch.example:9090/api", False,
+                     id="another port"),
+        pytest.param("http://orch.example:8080", "https://orch.example:8080/api", False,
+                     id="another scheme"),
+        pytest.param("https://orch.example", "http://orch.example/api", False,
+                     id="https dropped"),
+        pytest.param("https://orch.example", "https://orch.example:443/api", True,
+                     id="https's default port spelled out"),
+        pytest.param("http://orch.example:80", "http://orch.example/api", True,
+                     id="http's default port spelled out"),
+        pytest.param("http://ORCH.example:8080", "http://orch.example:8080/api", True,
+                     id="a host in capitals"),
+        pytest.param("http://[0:0:0:0:0:0:0:1]:8080", "http://[::1]:8080/api", True,
+                     id="an IPv6 address spelled out"),
+    ],
+)
+async def test_the_token_goes_to_the_orchestrators_origin_alone(
+    orchestrator_url: str, called: str, shown: bool,
+) -> None:
+    tokens = AgentTokenKeeper(MagicMock())
+    tokens.token = "agt1.fake"
+    request: Any = SimpleNamespace(url=URL(called), headers={})
+    answer = MagicMock(status=200)
+    sent: dict[str, str] = {}
+
+    async def handler(sending: Any) -> Any:
+        sent.update(sending.headers)
+        return answer
+
+    assert await token_middleware(orchestrator_url, tokens)(request, handler) is answer
+    assert (AGENT_TOKEN_HEADER in sent) is shown
+
+
+async def test_a_failed_calls_error_does_not_show_the_token(
+    server: AgentServer, orchestrator: FakeOrchestrator,
+) -> None:
+    """``repr`` of aiohttp's response error prints the request's headers, and
+    the event loop logs a failed wake with ``%r``."""
+    orchestrator.publish_answer = b'{"error": "no"}'
+    orchestrator.publish_status = 403
+    assert server._session is not None
+
+    with pytest.raises(aiohttp.ClientResponseError) as failed:
+        async with server._session.post(f"{orchestrator.url}{PUBLISH}", json={}) as resp:
+            resp.raise_for_status()
+
+    token = orchestrator.issued[0]
+    assert [c.token for c in orchestrator.to(PUBLISH)] == [token]
+    assert AGENT in repr(failed.value)  # it does print the headers
+    assert token not in repr(failed.value)
+
+
+async def test_the_wallet_shows_the_current_token(
+    server: AgentServer, orchestrator: FakeOrchestrator,
+) -> None:
+    assert server._wallet_client is not None
+    assert dict(server._wallet_client._metadata or ())[AGENT_TOKEN_HEADER] == orchestrator.issued[0]
+
+    await server._self_register()
+
+    assert dict(server._wallet_client._metadata or ())[AGENT_TOKEN_HEADER] == orchestrator.issued[1]
 
 
 async def test_http_request_tool_carries_neither_credential(

@@ -8,7 +8,7 @@ names the refusal.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any
@@ -63,6 +63,7 @@ class FakeOrchestrator:
         self.answer_with_token = True
         self.redirect_to = ""
         self.publish_answer: bytes | None = None
+        self.publish_status = 401
 
     def to(self, path: str, method: str = "POST") -> list[Call]:
         return [c for c in self.calls if c.path == path and c.method == method]
@@ -86,12 +87,12 @@ class FakeOrchestrator:
             request.headers.get(ENROLLMENT_SECRET_HEADER),
             await request.read(),
         ))
-        if self.redirect_to:
+        if self.redirect_to and str(request.url) != self.redirect_to:
             raise web.HTTPTemporaryRedirect(self.redirect_to)
         if request.path == REGISTER:
             return await self._register(request)
         if self.publish_answer is not None:
-            return web.Response(body=self.publish_answer, status=401)
+            return web.Response(body=self.publish_answer, status=self.publish_status)
         code = self.refusals.get(request.headers.get(AGENT_TOKEN_HEADER, ""))
         if code:
             return web.json_response({"error": "refused", "code": code}, status=401)
@@ -155,7 +156,17 @@ async def started_server(orchestrator: FakeOrchestrator) -> AsyncIterator[AgentS
     try:
         yield started
     finally:
+        # A test that failed may have left a registration held, which stop() waits for.
+        if orchestrator.registration_gate is not None:
+            orchestrator.registration_gate.set()
         await started.stop()
+
+
+async def until(condition: Callable[[], bool]) -> None:
+    """Let the event loop run until ``condition`` holds, failing rather than hanging."""
+    async with asyncio.timeout(5):
+        while not condition():
+            await asyncio.sleep(0)
 
 
 async def publish(server: AgentServer, orchestrator: FakeOrchestrator) -> int:

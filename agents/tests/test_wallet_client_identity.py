@@ -15,7 +15,7 @@ network, per the TDD rule in ``.github/copilot-instructions.md``.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -172,5 +172,5 @@ async def test_no_token_yet_sends_no_token_metadata() -> None:
 
 
 async def test_from_channel_forwards_the_token_source() -> None:
-    client = WalletClient.from_channel(AsyncMock(), agent_token=lambda: "agt1.fake")
+    client = WalletClient.from_channel(MagicMock(), agent_token=lambda: "agt1.fake")
     assert client._metadata == (("x-agent-token", "agt1.fake"),)

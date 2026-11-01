@@ -28,6 +28,7 @@ from ._agent_token_helpers import (
     publish,
     running_orchestrator,
     started_server,
+    until,
 )
 
 
@@ -98,6 +99,8 @@ async def test_a_second_refusal_is_not_retried(
         pytest.param(b'{"error": "x", "code": "UNAUTHORIZED"}', id="an account refusal"),
         pytest.param(b"not json", id="no JSON"),
         pytest.param(b'["a list"]', id="no object"),
+        pytest.param(b'{"code": ["AGENT_TOKEN_INVALID"]}', id="a list for a code"),
+        pytest.param(b'{"code": {"a": 1}}', id="an object for a code"),
     ],
 )
 async def test_a_401_that_names_no_token_is_left_alone(
@@ -112,6 +115,17 @@ async def test_a_401_that_names_no_token_is_left_alone(
 
     assert orchestrator.registrations == 1
     assert len(orchestrator.to(PUBLISH)) == 1
+
+
+async def test_only_a_401_refuses_a_token(
+    server: AgentServer, orchestrator: FakeOrchestrator,
+) -> None:
+    orchestrator.publish_answer = b'{"error": "x", "code": "AGENT_TOKEN_INVALID"}'
+    orchestrator.publish_status = 403
+
+    assert await publish(server, orchestrator) == 403
+
+    assert orchestrator.registrations == 1
 
 
 async def test_a_call_that_showed_no_token_is_left_alone(
@@ -134,10 +148,8 @@ async def test_calls_in_flight_share_one_registration(
     orchestrator.registration_gate = asyncio.Event()
 
     calls = [asyncio.create_task(publish(server, orchestrator)) for _ in range(8)]
-    while orchestrator.registrations < 2:
-        await asyncio.sleep(0)
-    while len(orchestrator.to(PUBLISH)) < 8:
-        await asyncio.sleep(0)
+    await until(lambda: orchestrator.registrations == 2)
+    await until(lambda: len(orchestrator.to(PUBLISH)) == 8)
     await asyncio.sleep(0.05)
     orchestrator.registration_gate.set()
 
@@ -155,8 +167,7 @@ async def test_calls_in_flight_share_one_failed_registration(
     orchestrator.registration_gate = asyncio.Event()
 
     calls = [asyncio.create_task(publish(server, orchestrator)) for _ in range(4)]
-    while len(orchestrator.to(PUBLISH)) < 4:
-        await asyncio.sleep(0)
+    await until(lambda: len(orchestrator.to(PUBLISH)) == 4)
     await asyncio.sleep(0.05)
     orchestrator.registration_gate.set()
 
@@ -200,8 +211,7 @@ async def test_a_call_refused_as_revoked_waits_for_the_registration_that_retired
     old = orchestrator.issued[0]
     orchestrator.registration_gate = asyncio.Event()
     registering = asyncio.create_task(server._tokens.register())
-    while orchestrator.registrations < 2:
-        await asyncio.sleep(0)
+    await until(lambda: orchestrator.registrations == 2)
 
     refused = asyncio.create_task(server._tokens.after_refusal(old, revoked=True))
     await asyncio.sleep(0)
@@ -309,7 +319,7 @@ async def test_a_revocation_is_believed_again_once_a_registration_is_answered(
 async def test_a_refusal_as_a_registration_starts_is_not_read_as_a_revocation() -> None:
     """The registration is under way before its first step has run, and it may
     be what retired the token."""
-    answer = MagicMock()
+    answer = MagicMock(status=201)
     answer.json = AsyncMock(return_value={"agent_token": "new"})
 
     async def register() -> bool:
@@ -338,6 +348,46 @@ async def test_a_lost_answer_is_not_read_as_a_revocation(
     assert await publish(server, orchestrator) == 201
 
     assert orchestrator.registrations == 3
+
+
+@pytest.mark.parametrize("status", [401, 429])
+async def test_a_refused_registration_leaves_a_revocation_believed(
+    server: AgentServer, orchestrator: FakeOrchestrator, status: int,
+) -> None:
+    """A refusal issued no token, so no token went astray to retire this one."""
+    orchestrator.registration_status = status
+    assert await server._tokens.register() is False
+    orchestrator.registration_status = 201
+    orchestrator.refuse_current(TOKEN_REVOKED)
+
+    assert await publish(server, orchestrator) == 401
+
+    assert orchestrator.registrations == 2
+
+
+async def test_a_5xx_is_not_read_as_a_refused_registration(
+    server: AgentServer, orchestrator: FakeOrchestrator,
+) -> None:
+    """A gateway may answer 504 for a registration that landed, which is the
+    lost answer again."""
+    orchestrator.registration_status = 504
+    assert await server._tokens.register() is False
+    orchestrator.registration_status = 201
+    orchestrator.refuse_current(TOKEN_REVOKED)
+
+    assert await publish(server, orchestrator) == 201
+
+    assert orchestrator.registrations == 3
+
+
+async def test_a_refused_registration_keeps_the_token_held(
+    server: AgentServer, orchestrator: FakeOrchestrator,
+) -> None:
+    orchestrator.registration_status = 401
+
+    assert await server._tokens.register() is False
+
+    assert server._tokens.token == orchestrator.issued[0]
 
 
 # ─── Shutting down ───────────────────────────────────────────────────────────
@@ -405,8 +455,7 @@ async def test_closing_waits_for_a_registration_under_way(
     first and leave the agent registered after it left."""
     orchestrator.registration_gate = asyncio.Event()
     registering = asyncio.create_task(server._tokens.register())
-    while orchestrator.registrations < 2:
-        await asyncio.sleep(0)
+    await until(lambda: orchestrator.registrations == 2)
 
     closing = asyncio.create_task(server._tokens.close())
     await asyncio.sleep(0.01)
@@ -437,11 +486,9 @@ async def test_a_reconnect_and_a_refused_call_share_one_registration(
     orchestrator.registration_gate = asyncio.Event()
 
     reconnect = asyncio.create_task(server._tokens.register())
-    while orchestrator.registrations < 2:
-        await asyncio.sleep(0)
+    await until(lambda: orchestrator.registrations == 2)
     call = asyncio.create_task(publish(server, orchestrator))
-    while not orchestrator.to(PUBLISH):
-        await asyncio.sleep(0)
+    await until(lambda: bool(orchestrator.to(PUBLISH)))
     await asyncio.sleep(0.05)
     orchestrator.registration_gate.set()
 
@@ -464,7 +511,7 @@ async def test_the_watcher_replaces_the_token(
 
 async def test_an_answer_that_is_no_object_leaves_no_token() -> None:
     keeper = AgentTokenKeeper(AsyncMock(return_value=True))
-    response = MagicMock()
+    response = MagicMock(status=201)
     response.json = AsyncMock(return_value=["not", "an", "object"])
 
     await keeper.keep_from(response)

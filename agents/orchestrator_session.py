@@ -9,7 +9,9 @@ callbacks and verbatim recall (ISSUE-0152 step 3). The wallet's gRPC calls
 send the same ID as metadata (ISSUE-0111).
 
 Every call on this session goes to the orchestrator. The ``http_request`` tool
-opens a session of its own, so the ID never reaches an outside host.
+opens a session of its own, so the ID never reaches a host a model chose. A
+redirect the orchestrator answers with is followed, and it keeps the ID, which
+proves nothing on its own, but not the token.
 
 The session also shows the agent's token (RFC 0009 Phases 3–4 plan, PR 7),
 which proves the ID. A token changes each time the agent registers, so
@@ -23,9 +25,9 @@ from __future__ import annotations
 
 import json
 import os
-from urllib.parse import urlsplit
 
 import aiohttp
+from yarl import URL
 
 from .server_reregister import AgentTokenKeeper
 from .wallet_client import AGENT_ID_METADATA_KEY, AGENT_TOKEN_METADATA_KEY
@@ -47,8 +49,6 @@ TOKEN_INVALID = "AGENT_TOKEN_INVALID"
 TOKEN_EXPIRED = "AGENT_TOKEN_EXPIRED"
 TOKEN_REVOKED = "AGENT_TOKEN_REVOKED"
 _TOKEN_REFUSALS = frozenset({TOKEN_INVALID, TOKEN_EXPIRED, TOKEN_REVOKED})
-
-_DEFAULT_PORTS = {"http": 80, "https": 443}
 
 
 def enrollment_headers() -> dict[str, str]:
@@ -75,7 +75,22 @@ async def _refused_token_code(response: aiohttp.ClientResponse) -> str | None:
     except ValueError:
         return None
     code = body.get("code") if isinstance(body, dict) else None
-    return code if code in _TOKEN_REFUSALS else None
+    return code if isinstance(code, str) and code in _TOKEN_REFUSALS else None
+
+
+async def _send_showing(
+    token: str, request: aiohttp.ClientRequest, handler: aiohttp.ClientHandlerType,
+) -> aiohttp.ClientResponse:
+    """Send ``request`` with ``token``, which comes off it once the answer is back.
+
+    aiohttp's response errors read these same headers and their ``repr`` prints
+    them, and ``agents/event_loop.py`` logs a failed wake with ``%r``.
+    """
+    request.headers[AGENT_TOKEN_HEADER] = token
+    try:
+        return await handler(request)
+    finally:
+        del request.headers[AGENT_TOKEN_HEADER]
 
 
 def token_middleware(
@@ -91,10 +106,8 @@ def token_middleware(
     aiohttp runs this for every hop of a redirect, so the origin check is what
     keeps the token off a host a redirect names (the plan's G-5).
     """
-    target = urlsplit(orchestrator_url)
-    orchestrator = (
-        target.scheme, target.hostname, target.port or _DEFAULT_PORTS.get(target.scheme),
-    )
+    target = URL(orchestrator_url)
+    orchestrator = (target.scheme, target.host, target.port)
 
     async def middleware(
         request: aiohttp.ClientRequest, handler: aiohttp.ClientHandlerType,
@@ -102,16 +115,14 @@ def token_middleware(
         used = tokens.token
         if not used or (request.url.scheme, request.url.host, request.url.port) != orchestrator:
             return await handler(request)
-        request.headers[AGENT_TOKEN_HEADER] = used
-        response = await handler(request)
+        response = await _send_showing(used, request, handler)
         code = await _refused_token_code(response)
         if code is None:
             return response
         newer = await tokens.after_refusal(used, revoked=code == TOKEN_REVOKED)
         if not newer:
             return response
-        request.headers[AGENT_TOKEN_HEADER] = newer
-        return await handler(request)
+        return await _send_showing(newer, request, handler)
 
     return middleware
 
