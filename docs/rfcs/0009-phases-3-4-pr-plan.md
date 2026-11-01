@@ -138,7 +138,7 @@ the points it implements.
 | 4 | A3 | Shell CPU limit, output caps, `resource_limits:` | `feature/v040-rfc0009-resource-limits` | ⬜ | — | — |
 | 5 | A4 | Agent tokens: issue, check, revoke (Go) | `feature/v040-rfc0009-agent-token` (head branch `claude/admiring-cori-ibird5`, assigned by the session that opened it) | ✅ | [#1071](https://github.com/mkhomutov/Persatrix/pull/1071) | 2026-10-30 |
 | 6 | A4 | Registration returns a token and accepts the enrollment secret | `feature/v040-rfc0009-enrollment` (head branch `claude/magical-gates-p9ku7g`, assigned by the session that opened it) | ✅ | [#1076](https://github.com/mkhomutov/Persatrix/pull/1076) | 2026-11-01 |
-| 7 | A4 | Agents send the secret, keep their token and refresh it | `feature/v040-rfc0009-agent-token-client` | ⬜ | — | — |
+| 7 | A4 | Agents send the secret, keep their token and refresh it | `feature/v040-rfc0009-agent-token-client` | 🔀 | [#1079](https://github.com/mkhomutov/Persatrix/pull/1079) | — |
 | 8 | A4 | Token check on REST; every publish bound to its caller | `feature/v040-rfc0009-token-middleware` | ⬜ | — | — |
 | 9 | A4 | The agent routes' policies under `enabled` | `feature/v040-rfc0009-agent-route-policy` | ⬜ | — | — |
 | 10 | A4 | Token check on the wallet's gRPC calls | `feature/v040-rfc0009-grpc-token` | ⬜ | — | — |
