@@ -96,7 +96,9 @@ review findings that outgrow the original scope.
 recorded in the PR body and the plan; local review reports are never linked.
 
 **Merge**: squash, once every required check is green and every finding has
-a disposition. Pull `main`, flip the plan row, check ROADMAP.
+a disposition. Pull `main` and check ROADMAP. The next commit made through
+the pre-commit hook, on a branch that has the merge, flips the plan row; with
+no such commit coming, flip it by hand.
 
 ## Tags and releases
 

@@ -51,7 +51,7 @@ for _p in (str(REPO_ROOT), str(_SCRIPTS_DIR)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from _doc_index import REPO_URL, run_index_cli  # noqa: E402  (same style as rfcs.py / issues.py)
+from _doc_index import pr_link, run_index_cli  # noqa: E402  (same style as rfcs.py / issues.py)
 
 from scripts._git import git_output, is_shallow  # noqa: E402
 from scripts.checks import SKIPPED  # noqa: E402
@@ -141,6 +141,15 @@ def _number(row: str) -> str:
     return row[len("| [#"):].split("]", 1)[0]
 
 
+def merge_dates(content: str) -> dict[int, str]:
+    """Each PR's date, from the table in *content*.
+
+    The last cell: a title's own pipes are escaped, and it would not matter if
+    they were not.
+    """
+    return {int(_number(row)): row.rstrip(" |").rsplit("|", 1)[1].strip() for row in _rows(content)}
+
+
 def overlay(committed: str, recent: str) -> str | None:
     """The whole table, from a shallow clone's *recent* one and the *committed* file.
 
@@ -205,7 +214,7 @@ def _cell(text: str) -> str:
 
 def render(prs: list[MergedPR]) -> str:
     return _render_rows([
-        f"| [#{p.number}]({REPO_URL}/pull/{p.number}) | {_cell(p.title)} | "
+        f"| {pr_link(str(p.number))} | {_cell(p.title)} | "
         f"{_cell(classify(p.title))} | {p.date} |"
         for p in prs
     ])

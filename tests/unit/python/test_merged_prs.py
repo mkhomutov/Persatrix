@@ -33,6 +33,7 @@ from scripts.merged_prs import (
     behind_by,
     classify,
     compare,
+    merge_dates,
     overlay,
     parse_log,
     render,
@@ -136,6 +137,20 @@ def test_check_fails_on_a_hand_edit_or_a_lost_row() -> None:
     assert behind_by(_table(4, 3, 2, 1, 0), _table(4, 3, 2, 1)) is None  # extra row
     edited = _table(3, 2, 1).replace("feat: pr 2", "feat: pr two")
     assert compare(edited, _table(3, 2, 1)) is not None
+
+
+def test_merge_dates_reads_each_prs_date_from_the_table() -> None:
+    assert merge_dates(render(parse_log(LOG)))[860] == "2026-09-06"
+    assert merge_dates(render(parse_log(LOG)))[853] == "2026-08-01"
+
+
+def test_merge_dates_finds_the_date_past_a_pipe_in_the_title() -> None:
+    table = render([MergedPR(number=7, date="2026-11-01", title="fix: a | b | c")])
+    assert merge_dates(table) == {7: "2026-11-01"}
+
+
+def test_merge_dates_is_empty_for_a_file_with_no_rows() -> None:
+    assert merge_dates("# reformatted\n") == {}
 
 
 def test_overlay_rebuilds_the_whole_table_from_a_shallow_log_and_the_committed_rows() -> None:

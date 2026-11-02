@@ -198,3 +198,32 @@ def test_cells_split_a_table_row(line: str, expected: list[str] | None) -> None:
 )
 def test_is_divider_knows_the_line_under_a_header_row(cells: list[str], expected: bool) -> None:
     assert markdown_page.is_divider(cells) is expected
+
+
+# --------------------------------------------------------------------------
+# with_cells — changing a row without retyping the rest of it
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    ("line", "new", "expected"),
+    [
+        pytest.param("| a | b | c |", {1: "B"}, "| a | B | c |", id="one-cell"),
+        pytest.param("| a | b | c |", {0: "A", 2: "C"}, "| A | b | C |", id="two-cells"),
+        pytest.param("|  a  |b|   c   |", {1: "B"}, "|  a  | B |   c   |", id="unpadded-cell"),
+        pytest.param("|  a  |  b  |", {0: "A"}, "|  A  |  b  |", id="padding-kept"),
+        pytest.param("a | b |", {1: "B"}, "a | B |", id="no-opening-pipe"),
+        pytest.param("| a | b", {1: "B"}, "| a | B", id="no-closing-pipe"),
+        pytest.param(r"| a\|b | c |", {1: "C"}, r"| a\|b | C |", id="escaped-pipe"),
+        pytest.param("  | a | b |  ", {0: "A"}, "  | A | b |  ", id="indent-kept"),
+    ],
+)
+def test_with_cells_changes_those_cells_and_no_other_byte(
+    line: str, new: dict[int, str], expected: str
+) -> None:
+    assert markdown_page.with_cells(line, new) == expected
+
+
+def test_with_cells_counts_cells_as_cells_does() -> None:
+    line = r"| a\|b | c | d |"
+    index = (markdown_page.cells(line) or []).index("c")
+    assert markdown_page.cells(markdown_page.with_cells(line, {index: "C"})) == [r"a|b", "C", "d"]
