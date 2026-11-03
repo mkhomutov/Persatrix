@@ -33,13 +33,12 @@ const (
 	// shares the per-agent rate limiter — it gets its own bucket, distinct
 	// from the shared anonymous one, so it does not use up the budget the
 	// CLI and other callers with no ID share — but unlike a real agent it
-	// must never be quarantined: a console that trips its own 429
-	// ≥5×/10min under normal load would otherwise feed the breaker
-	// (denials for non-empty ids are recorded)
-	// and 403 the operator's own surface, with no automatic recovery (only
-	// the operator-token-gated Unquarantine, which has no console UI). The
-	// exemption removes no real protection pre-Phase-4: the id is self-
-	// reported and trivially spoofable, so quarantine never gated a
+	// must never be quarantined: a quarantine would 403 the operator's own
+	// surface, with no automatic recovery (only the operator-token-gated
+	// Unquarantine, which has no console UI). Since ISSUE-0187 a REST call
+	// refused for its budget feeds no breaker at all, so the exemption is
+	// the second of two guards. It removes no real protection: the id is
+	// self-reported and trivially spoofable, so quarantine never gated a
 	// determined caller (they rotate ids), and the rate limit + anonymous
 	// bucket remain the backstop. Must satisfy [agentIDRegex].
 	ConsoleAgentID = "web-console"
@@ -86,6 +85,15 @@ func validAgentID(id string) bool {
 // by omitting the header) and emit `rate_limit.unauthenticated_caller`
 // security-class audit events via the limiter.
 //
+// An agent's REST calls spend a budget of their own, apart from its wallet
+// calls through [GRPCRateLimitInterceptor] on the same limiter, and a REST
+// call refused for that budget counts nothing toward a quarantine
+// (ISSUE-0187). Anyone who can post to a channel makes every member persona
+// read it, so a burst of posts would otherwise leave the persona's wallet
+// calls nothing and, past five refusals, quarantine it. The two budgets are
+// the same size, and the REST one is kept under the agent's ID with a "rest:"
+// prefix, which no agent ID can start with.
+//
 // A quarantine refuses only the ID it names (ISSUE-0152). A quarantined
 // agent that drops its header lands in the shared anonymous bucket, which
 // still caps it, and could as easily send a fresh invented ID. Refusing
@@ -119,20 +127,21 @@ func RESTRateLimitMiddleware(limiter *RateLimiter, breaker *CircuitBreaker, opts
 					"X-Agent-ID must be ≤1-256 chars matching ^[a-z0-9][a-z0-9-]*[a-z0-9]$")
 				return
 			}
-			if breaker != nil && agentID != "" && breaker.IsQuarantined(agentID) {
+			caller := agentID
+			if o.agentID != nil {
+				caller = o.agentID(r)
+			}
+			if breaker != nil && (quarantined(breaker, agentID) || quarantined(breaker, caller)) {
 				writeJSONError(w, http.StatusForbidden, "QUARANTINED", "agent is quarantined")
 				return
 			}
-			key := agentID
-			if key == "" && o.callerKey != nil {
+			key := ""
+			if caller != "" {
+				key = restBudgetPrefix + caller
+			} else if o.callerKey != nil {
 				key = o.callerKey(r)
 			}
 			if limiter != nil && !limiter.Allow(r.Context(), key) {
-				// Only a self-reported ID feeds the breaker: a caller keyed
-				// by WithCallerKey is never quarantined.
-				if breaker != nil && agentID != "" {
-					breaker.RecordViolation(r.Context(), agentID, ViolationRateLimit)
-				}
 				w.Header().Set("Retry-After", strconv.Itoa(limiter.cfg.WindowSeconds))
 				writeJSONError(w, http.StatusTooManyRequests, "RATE_LIMITED", "rate limit exceeded")
 				return
@@ -147,6 +156,16 @@ type RESTOption func(*restOptions)
 
 type restOptions struct {
 	callerKey func(*http.Request) string
+	agentID   func(*http.Request) string
+}
+
+// restBudgetPrefix starts the key an agent's REST budget is kept under, so it
+// is apart from the budget its wallet calls spend under its bare ID.
+const restBudgetPrefix = "rest:"
+
+// quarantined reports whether id names a quarantined agent; "" names none.
+func quarantined(breaker *CircuitBreaker, id string) bool {
+	return id != "" && breaker.IsQuarantined(id)
 }
 
 // WithCallerKey gives a caller that sends no X-Agent-ID but that the
@@ -159,6 +178,19 @@ type restOptions struct {
 // Such a caller is rate-limited but never quarantined.
 func WithCallerKey(key func(*http.Request) string) RESTOption {
 	return func(o *restOptions) { o.callerKey = key }
+}
+
+// WithAgentID tells the middleware which agent a request is from when the
+// server can tell better than the X-Agent-ID header, which anyone can set:
+// id returns the agent the server verified, or "" for none. The call then
+// spends that agent's budget, or, for "", the one a caller with no ID gets.
+// Under auth.mode: enabled the server passes the agent an X-Agent-Token
+// proves (RFC 0009 Phases 3–4 plan, G-7), so naming an agent without its
+// token spends nothing of that agent's budget. A header that names a
+// quarantined agent is still refused: dropping the header gets the caller
+// no less.
+func WithAgentID(id func(*http.Request) string) RESTOption {
+	return func(o *restOptions) { o.agentID = id }
 }
 
 // GRPCRateLimitInterceptor mirrors [RESTRateLimitMiddleware] for the

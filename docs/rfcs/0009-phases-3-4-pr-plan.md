@@ -138,7 +138,7 @@ the points it implements.
 | 4 | A3 | Shell CPU limit, output caps, `resource_limits:` | `feature/v040-rfc0009-resource-limits` | ⬜ | — | — |
 | 5 | A4 | Agent tokens: issue, check, revoke (Go) | `feature/v040-rfc0009-agent-token` (head branch `claude/admiring-cori-ibird5`, assigned by the session that opened it) | ✅ | [#1071](https://github.com/mkhomutov/Persatrix/pull/1071) | 2026-10-30 |
 | 6 | A4 | Registration returns a token and accepts the enrollment secret | `feature/v040-rfc0009-enrollment` (head branch `claude/magical-gates-p9ku7g`, assigned by the session that opened it) | ✅ | [#1076](https://github.com/mkhomutov/Persatrix/pull/1076) | 2026-11-01 |
-| 7 | A4 | Agents send the secret, keep their token and refresh it | `feature/v040-rfc0009-agent-token-client` | 🔀 | [#1079](https://github.com/mkhomutov/Persatrix/pull/1079) | — |
+| 7 | A4 | Agents send the secret, keep their token and refresh it | `feature/v040-rfc0009-agent-token-client` | ✅ | [#1079](https://github.com/mkhomutov/Persatrix/pull/1079) | 2026-11-03 |
 | 8 | A4 | Token check on REST; every publish bound to its caller | `feature/v040-rfc0009-token-middleware` | ⬜ | — | — |
 | 9 | A4 | The agent routes' policies under `enabled` | `feature/v040-rfc0009-agent-route-policy` | ⬜ | — | — |
 | 10 | A4 | Token check on the wallet's gRPC calls | `feature/v040-rfc0009-grpc-token` | ⬜ | — | — |
@@ -460,6 +460,51 @@ so the client has to guess, and a late registration can stop a healthy agent
 until it restarts. This PR weighs giving a replaced token a code of its own,
 which ends the guess, against two processes on one ID then fighting over it
 until the limiter stops them.
+**Implementation note (2026-11-03)**: how this PR meets the scope above.
+Each point not settled above is a new default this PR's review confirms or
+overturns.
+
+- **Where.** `internal/server/agent_token_check.go` reads the token in the
+  auth middleware before the route's policy, so a refused token gets its own
+  code on any route; `internal/server/publish_sender.go` holds the sender
+  check; `security.WithAgentID` hands the limiter the verified agent.
+- **Refusals.** A token `Check` refuses gets a 401 with its code; a good one
+  beside an `X-Agent-ID` naming another agent gets `AGENT_TOKEN_INVALID`; a
+  token beside an account credential, bearer or cookie, gets a 400, which no
+  agent reads as a token refusal. Each writes `agent.token_invalid` with a
+  reason, the source, and the claimed ID if an agent could hold it, never the
+  token. A Python drift test pins the codes to the agents' constants.
+- **Refusals per source (new default).** A refused call never reaches the
+  rate limiter, and each line is flushed at once, so one address is refused
+  at most 120 times a minute, sized as registrations are; past that, 429 and
+  no line.
+- **The sender.** A refused publish gets 403 and `authz.denied` with reason
+  `sender_not_caller`. A caller with no credential is refused too, so the
+  anonymous channel write the auth guide records as a residual closes under
+  `enabled`; anonymous reads stay until PR 9. The CLI's `channel send` sends
+  the OS username unless given `--as`, so a person whose participant ID
+  differs passes `--as`; PR 11's guide says so.
+- **Budgets.** One limiter still: an agent's REST budget is kept under
+  `rest:<id>`, the same size as its wallet budget, and a REST refusal records
+  no violation in either mode. Under `enabled` both go by the token's agent;
+  a call naming an agent without its token spends the anonymous budget (new
+  default), and a header naming a quarantined agent is still refused.
+  Wallet calls still feed the breaker, so a member posting about 33 messages
+  a minute into a channel can still quarantine its personas through their
+  leased bids; ISSUE-0152 step 4 stays the owner's call.
+- **F-9.** `IssuableAgentID` refuses `local`; a server test pins it to
+  `channels.DefaultPrincipalID`.
+- **F-15.** `AgentServer.stop` deregisters after the gRPC grace, the order
+  RFC 0004's shutdown sequence gives, so an RPC finishing inside the grace
+  still publishes. A persona's channel turn runs on its event loop, which
+  the grace does not wait for: one still running after it loses its publish
+  under `enabled`, as it would if the process were killed. `close_memory`'s
+  wallet calls stay PR 10's.
+- **F-4.** No code of its own for a replaced token: an agent told "replaced"
+  would register again, so a rolling restart's old process would take the
+  ID back from the new one, each retiring the other's token. The race F-4
+  found stays: it needs a stalled registration overtaken by a later one, and
+  the stopped agent logs why.
 
 ### PR 9 — `feature/v040-rfc0009-agent-route-policy`
 

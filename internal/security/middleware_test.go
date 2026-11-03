@@ -105,7 +105,10 @@ func TestGRPCInterceptor_QuarantinedReturnsPermissionDenied(t *testing.T) {
 	assert.Equal(t, codes.PermissionDenied, st.Code())
 }
 
-func TestMiddleware_DenyRecordsBreakerViolation(t *testing.T) {
+// TestGRPCInterceptor_DenyRecordsBreakerViolation: a wallet call refused for
+// the agent's budget is a violation. A REST one is not
+// (TestRESTMiddleware_RefusalRecordsNoViolation).
+func TestGRPCInterceptor_DenyRecordsBreakerViolation(t *testing.T) {
 	clk := newFakeClock(time.Unix(0, 0))
 	rl := newTestRateLimiter(t, clk, func(c *RateLimitConfig) { c.CallsPerWindow = 1 })
 	cb, _ := newTestBreaker(t, clk, func(c *CircuitBreakerConfig) {
@@ -113,15 +116,9 @@ func TestMiddleware_DenyRecordsBreakerViolation(t *testing.T) {
 			ViolationRateLimit: {Count: 2, Window: time.Hour},
 		}
 	})
-	mw := RESTRateLimitMiddleware(rl, cb)
-	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
+	interceptor := GRPCRateLimitInterceptor(rl, cb)
 	for i := 0; i < 3; i++ {
-		req := httptest.NewRequest(http.MethodPost, "/x", nil)
-		req.Header.Set("X-Agent-ID", "agent-a")
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
+		callGRPC(interceptor, "agent-a")
 	}
 	assert.True(t, cb.IsQuarantined("agent-a"),
 		"two rate-limit denials should open the breaker")

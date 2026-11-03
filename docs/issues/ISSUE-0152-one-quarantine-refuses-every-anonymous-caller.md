@@ -269,3 +269,10 @@ tagged.
 > ID still gets a fresh budget; step 3's CLI half, under the Rust CLI
 > freeze, so the CLI still shares the anonymous budget; step 4, the owner's
 > call.
+
+> 2026-11-03 — RFC 0009 Phases 3–4 plan PR 8 closes the REST half of the
+> remaining path: a REST call refused for its budget no longer counts toward
+> a quarantine, and under `auth.mode: enabled` the budget and the quarantine
+> check go by the agent a token proves. The gRPC half stays until PR 10 checks
+> tokens on the wallet's calls: anyone who can reach the gRPC port can still
+> get a named agent quarantined by sending its ID.

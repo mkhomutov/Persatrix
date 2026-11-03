@@ -46,6 +46,11 @@ type authIdentity struct {
 	// the §A2 same-origin assertion applies to cookie-resolved writes
 	// only.
 	Transport string
+	// AgentID is the agent an X-Agent-Token proves under `enabled` (RFC
+	// 0009 Phase 4, agent_token_check.go), "" for any other caller. An
+	// agent holds no account, so its identity is otherwise the anonymous
+	// one: no route's policy reads it yet.
+	AgentID string
 }
 
 // anonymousIdentity is the RFC 0039 §H anonymous `local` identity every
@@ -148,6 +153,13 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ident := anonymousIdentity
 		if s.authEnforced() {
+			// An agent token is read first, so a refused one is answered
+			// with its own code even on a route the policy would refuse.
+			agentID, ok := s.checkAgentToken(w, r)
+			if !ok {
+				return
+			}
+			ident.AgentID = agentID
 			if resolved, ok := s.auth.resolveRequest(r); ok {
 				if resolved.Transport == transportCookie && !isReadMethod(r.Method) && !sameOriginAllowed(r) {
 					writeError(w, "FORBIDDEN", "cross-origin cookie-authenticated request rejected", http.StatusForbidden)

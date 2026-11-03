@@ -60,7 +60,7 @@ func TestPrincipalColumn_AuthenticatedPublishSurfacesPrincipal(t *testing.T) {
 	operator := bearerFor(t, h.handler, "alice")
 	h.seedChannel(t, operator)
 
-	rec := h.publishAs(t, operator, "human", "the quarterly plan")
+	rec := h.publishAs(t, operator, "alice-participant", "the quarterly plan")
 	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
 	assert.Equal(t, "alice-participant", decodeMessage(t, rec).PrincipalID,
 		"the publish response carries the tenant the row was stamped with")
@@ -72,7 +72,8 @@ func TestPrincipalColumn_AuthenticatedPublishSurfacesPrincipal(t *testing.T) {
 }
 
 // TestPrincipalColumn_UnauthenticatedPublishSurfacesLocal — an agent-origin
-// publish (the persona fleet holds no accounts) persists and surfaces `local`.
+// publish (the persona fleet holds no accounts; its token proves the agent,
+// not a tenant) persists and surfaces `local`.
 // That is the *finding* ISSUE-0130 records, not a defect of this PR: with no
 // verified tenant there is nothing to attribute. B2 uses this value to decide
 // a span is genuinely unattributable and skip its derivation, rather than
@@ -82,7 +83,7 @@ func TestPrincipalColumn_UnauthenticatedPublishSurfacesLocal(t *testing.T) {
 	operator := bearerFor(t, h.handler, "alice")
 	h.seedChannel(t, operator)
 
-	rec := h.publishAs(t, "", "agent-alice", "a persona reply")
+	rec := h.publishAsAgent(t, "agent-alice", "a persona reply")
 	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
 	assert.Equal(t, "local", decodeMessage(t, rec).PrincipalID)
 }
@@ -161,16 +162,19 @@ func TestPrincipalColumn_DegradedEchoStillCarriesATenant(t *testing.T) {
 	h.seedChannel(t, operator)
 
 	for _, tc := range []struct {
-		name   string
-		token  string
-		sender string
-		want   string
+		name    string
+		publish func(t *testing.T) *httptest.ResponseRecorder
+		want    string
 	}{
-		{"authenticated echoes the verified participant", operator, "human", "alice-participant"},
-		{"unauthenticated echoes the shared tenant", "", "agent-alice", "local"},
+		{"authenticated echoes the verified participant", func(t *testing.T) *httptest.ResponseRecorder {
+			return h.publishAs(t, operator, "alice-participant", "the quarterly plan")
+		}, "alice-participant"},
+		{"an agent echoes the shared tenant", func(t *testing.T) *httptest.ResponseRecorder {
+			return h.publishAsAgent(t, "agent-alice", "the quarterly plan")
+		}, "local"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			rec := h.publishAs(t, tc.token, tc.sender, "the quarterly plan")
+			rec := tc.publish(t)
 			require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
 
 			got := decodeMessage(t, rec)

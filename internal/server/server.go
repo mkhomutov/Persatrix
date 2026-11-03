@@ -83,6 +83,9 @@ type Server struct {
 	agentTokens       *security.AgentTokenIssuer
 	enrollmentSecret  string
 	registerPerSource *security.RateLimiter
+	// tokenRefusalsPerSource counts refused agent tokens by the caller's
+	// address (agent_token_check.go).
+	tokenRefusalsPerSource *security.RateLimiter
 
 	// Channel components (RFC 0011 PR 2 — optional, nil-safe).
 	// channelStore is the persistence boundary; channelRouter wraps it
@@ -176,6 +179,9 @@ func New(addr, workflowsDir string, store state.Store, reg registry.Registry, pl
 		opt(s)
 	}
 	if err := s.initAgentEnrollment(); err != nil {
+		return nil, err
+	}
+	if err := s.initTokenRefusalLimiter(); err != nil {
 		return nil, err
 	}
 
@@ -295,7 +301,8 @@ func (s *Server) Handler() http.Handler {
 	// shadowed here but kept so direct-s.mux test/integration code still works.
 	var apiH http.Handler = s.mux
 	if s.rateLimiter != nil || s.circuitBreaker != nil {
-		apiH = security.RESTRateLimitMiddleware(s.rateLimiter, s.circuitBreaker, security.WithCallerKey(sessionRateLimitKey))(apiH)
+		apiH = security.RESTRateLimitMiddleware(s.rateLimiter, s.circuitBreaker,
+			security.WithCallerKey(sessionRateLimitKey), security.WithAgentID(s.restAgentID))(apiH)
 	}
 	root := http.NewServeMux()
 	root.HandleFunc("GET /healthz", s.handleHealthz)

@@ -153,3 +153,19 @@ has talked.
 > catch-up over more channels than the budget and sees one refusal. The
 > re-registration path, the live traffic, the wallet starvation and the
 > outsider path stay open.
+
+> 2026-11-03 — steps 4 and 5 are fixed by RFC 0009 Phases 3–4 plan PR 8
+> (design point G-7). In both auth modes an agent's REST calls spend a budget
+> of their own, apart from its wallet calls, and a REST call refused for it
+> counts toward no quarantine (`internal/security/middleware.go`), so the
+> catch-up, a re-registration loop and busy live traffic can neither
+> quarantine an agent nor leave its wallet calls nothing. Under
+> `auth.mode: enabled` a publish must name its caller, so someone with no
+> account can no longer post into a channel. Regression tests:
+> `TestRESTBurst_LeavesTheWalletAndQuarantinesNothing` and
+> `TestPublishSender_NoCredentialIsRefusedUnderEnabled`
+> (`internal/server/publish_sender_test.go`). What stays: a persona's leased
+> bid is two wallet calls, so about 33 open-floor posts a minute, by a member
+> under `enabled` or by anyone under `disabled`, still spend its wallet budget
+> and quarantine it, as before ISSUE-0152's fix; an end to a quarantine is
+> ISSUE-0152's step 4, the owner's call. Steps 2 and 3 are not taken.

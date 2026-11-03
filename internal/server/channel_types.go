@@ -94,11 +94,11 @@ func resolveMemberRequests(reqs []channelMemberRequest) ([]channels.Member, erro
 
 // publishMessageRequest is the JSON body for POST /api/v1/channels/{id}/messages.
 //
-// `SenderID` is REQUIRED. The orchestrator does not infer sender identity
-// in v0.3.0 — auth tokens land in RFC 0009 Phase 4. When the publish
-// crosses agent → orchestrator, the agent-side `ActionExecutor` populates
-// `sender_id` from its registered ID; human clients (CLI, curl) must
-// supply it explicitly.
+// `SenderID` is REQUIRED. The orchestrator does not fill it in: an agent's
+// `ActionExecutor` sends its registered ID, and human clients (CLI, curl)
+// must supply it. Under auth.mode: enabled it must be the caller, the agent
+// its X-Agent-Token proves or the signed-in account's own participant, or
+// the publish is refused (publish_sender.go, RFC 0009 Phase 4).
 type publishMessageRequest struct {
 	SenderID    string         `json:"sender_id"`
 	Content     string         `json:"content"`

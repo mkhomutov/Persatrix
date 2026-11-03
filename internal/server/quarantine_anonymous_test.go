@@ -13,12 +13,14 @@ import (
 	"github.com/mkhomutov/persatrix/internal/security"
 )
 
-// ISSUE-0152 steps 1–2, end to end through Server.Handler(): an outsider
-// invents an agent ID and floods a route the agents use until the real rate
-// limiter and circuit breaker quarantine it. In either auth mode, that must
-// not shut out the callers that send no agent ID — the CLI, scripts, and
-// the agents' REST calls until they sent their own ID — and the operator
-// must be able to release the ID without inventing one.
+// ISSUE-0152 steps 1–2, end to end through Server.Handler(): an invented
+// agent ID is quarantined. In either auth mode, that must not shut out the
+// callers that send no agent ID — the CLI, scripts, and the agents' REST
+// calls until they sent their own ID — and the operator must be able to
+// release the ID without inventing one. The quarantine used to be tripped by
+// flooding a REST route the agents use; since ISSUE-0187 a REST refusal is
+// no violation, so only wallet calls can trip one, and these tests record
+// the violations themselves.
 
 // inventedAgentID is the shape the v0.3.0 release checks used to trip a
 // quarantine with a curl loop.
@@ -48,14 +50,14 @@ func productionShapedLimiter(t *testing.T, auditor security.AuditLogger) (*secur
 	return rl, cb
 }
 
-// floodUntilQuarantined sends requests as id until the breaker opens on it.
-func floodUntilQuarantined(t *testing.T, h http.Handler, cb *security.CircuitBreaker, id string) {
+// quarantine records rate-limit violations against id until the breaker
+// opens on it, as refused wallet calls would.
+func quarantine(t *testing.T, cb *security.CircuitBreaker, id string) {
 	t.Helper()
-	for i := 0; i < 100 && !cb.IsQuarantined(id); i++ {
-		doRequestWithHeaders(h, http.MethodGet, "/api/v1/channels", nil,
-			map[string]string{security.AgentIDHeader: id})
+	for i := 0; i < 5; i++ {
+		cb.RecordViolation(context.Background(), id, security.ViolationRateLimit)
 	}
-	require.True(t, cb.IsQuarantined(id), "precondition: the flood must quarantine %s", id)
+	require.True(t, cb.IsQuarantined(id), "precondition: %s must be quarantined", id)
 }
 
 // spendAnonymousBudget wires a limiter whose shared anonymous budget is one
@@ -137,7 +139,7 @@ func TestInventedIDQuarantineSparesCallersWithNoID(t *testing.T) {
 				before[i] = request(h, rt.method, rt.path, "").Code
 			}
 
-			floodUntilQuarantined(t, h, cb, inventedAgentID)
+			quarantine(t, cb, inventedAgentID)
 
 			for i, rt := range agentRoutes {
 				rec := request(h, rt.method, rt.path, "")

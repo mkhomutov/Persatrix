@@ -324,6 +324,11 @@ func TestAgentTokenIssuer_IssuesOnlyForAnIDAnAgentCanHave(t *testing.T) {
 		// that names no agent (PR 5 review F-11).
 		"the web console":       ConsoleAgentID,
 		"the anonymous callers": DefaultUnauthenticatedID,
+		// The principal of every request no account signed in for: a
+		// token naming it would let an agent publish as that shared
+		// tenant (PR 6 review F-9). The server's test pins the spelling
+		// to channels.DefaultPrincipalID.
+		"the default principal": "local",
 	} {
 		assert.False(t, IssuableAgentID(id), name)
 		token, issued, err := issuer.Issue(id)

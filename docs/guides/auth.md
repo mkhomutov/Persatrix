@@ -246,8 +246,8 @@ gating these routes would break every deployed persona fleet:
   fleet publishes and catches up through),
 - `POST /api/v1/channels/{id}/convene` (the standing-schedule callback).
 
-Two consequences to take seriously on a non-loopback `enabled` bind (the
-orchestrator WARNs about the residual at startup):
+What that means on a non-loopback `enabled` bind (the orchestrator WARNs
+about the residual at startup):
 
 - **Anonymous channel reads remain possible.** Channel lists and message
   histories are readable without a login — including channels classified
@@ -261,11 +261,15 @@ orchestrator WARNs about the residual at startup):
   channel content should keep the orchestrator loopback-bound or
   network-restrict the `/api/v1/channels` paths (proxy rule / firewall) to
   the agent fleet.
-- **Anonymous channel writes remain possible** on the same paths (they are
-  the production persona transport). The defence is the RFC 0009 per-agent
-  rate limiter + quarantine, unchanged, and it can be turned on the
-  personas: a few dozen posts in a minute quarantine every persona in the
-  channel ([ISSUE-0187](../issues/ISSUE-0187-agent-rest-bursts-count-toward-its-own-quarantine.md)).
+- **A channel write names its caller.** A publish's `sender_id` must be the
+  agent its `X-Agent-Token` proves, or the signed-in account's own
+  participant, or it is refused with `403`
+  ([RFC 0009](../rfcs/0009-security-sandboxing.md) Phase 4). So nobody without
+  an account or an agent token can post, and `persatrix channel send` needs
+  `--as <your participant id>` when your OS username is not it. An agent's
+  REST calls spend a rate-limit budget apart from its wallet calls, and a
+  REST refusal quarantines nothing
+  ([ISSUE-0187](../issues/ISSUE-0187-agent-rest-bursts-count-toward-its-own-quarantine.md)).
 
 A fleet-less deployment (no persona agents calling back over REST) has no
 reason to keep this surface reachable at all — that is exactly ISSUE-0117.

@@ -95,10 +95,12 @@ func newPrincipalHarness(
 
 // seedChannel creates a channel with exactly one respond-always member
 // (`agent-bot`), so every publish produces exactly one dispatch and the
-// recorded slice reads one entry per turn. `human` and `agent-alice` are
-// members only so both a console publish and a persona reply clear the
-// sender-must-be-a-member gate; both are RespondNever so neither is ever a
-// recipient. Created through the operator session — channel creation is
+// recorded slice reads one entry per turn. The others are members only so
+// each publish clears the sender-must-be-a-member gate, and are RespondNever
+// so none is ever a recipient: `agent-alice` for a persona reply, the two
+// accounts' participants for a console publish under `enabled`, where a
+// publish names its caller (RFC 0009 Phase 4 G-7), and `human` for one under
+// `disabled`. Created through the operator session — channel creation is
 // policyOperator.
 func (h principalHarness) seedChannel(t *testing.T, operatorToken string) {
 	t.Helper()
@@ -106,6 +108,8 @@ func (h principalHarness) seedChannel(t *testing.T, operatorToken string) {
 		Name: "planning",
 		Members: []channelMemberRequest{
 			{ID: "human", Respond: "never"},
+			{ID: "alice-participant", Respond: "never"},
+			{ID: "bob-participant", Respond: "never"},
 			{ID: "agent-alice", Respond: "never"},
 			{ID: "agent-bot", Respond: "always"},
 		},
@@ -119,19 +123,32 @@ func (h principalHarness) seedChannel(t *testing.T, operatorToken string) {
 	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
 }
 
-// publishAs posts a channel message, optionally bearing token.
+// publishAs posts a channel message, optionally bearing an account's session
+// token.
 func (h principalHarness) publishAs(t *testing.T, token, sender, content string) *httptest.ResponseRecorder {
+	t.Helper()
+	headers := map[string]string{}
+	if token != "" {
+		headers["Authorization"] = "Bearer " + token
+	}
+	return h.publishWith(t, headers, sender, content)
+}
+
+// publishAsAgent registers agentID and posts a channel message as that agent,
+// showing the token it was issued, as the persona fleet does.
+func (h principalHarness) publishAsAgent(t *testing.T, agentID, content string) *httptest.ResponseRecorder {
+	t.Helper()
+	rec := doRequest(h.handler, http.MethodPost, "/api/v1/agents/register", registerBody(agentID, "localhost:50051"))
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	return h.publishWith(t, asAgent(agentID, decodeRegistered(t, rec.Body.String()).AgentToken), agentID, content)
+}
+
+func (h principalHarness) publishWith(t *testing.T, headers map[string]string, sender, content string,
+) *httptest.ResponseRecorder {
 	t.Helper()
 	body, err := json.Marshal(map[string]any{"sender_id": sender, "content": content})
 	require.NoError(t, err)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/channels/group:planning/messages", strings.NewReader(string(body)))
-	req.Header.Set("Content-Type", "application/json")
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	rec := httptest.NewRecorder()
-	h.handler.ServeHTTP(rec, req)
-	return rec
+	return doRequestWithHeaders(h.handler, http.MethodPost, "/api/v1/channels/group:planning/messages", body, headers)
 }
 
 // TestPrincipalProducer_AuthenticatedPublishReachesDispatch is the headline
@@ -145,7 +162,7 @@ func TestPrincipalProducer_AuthenticatedPublishReachesDispatch(t *testing.T) {
 	operator := bearerFor(t, h.handler, "alice")
 	h.seedChannel(t, operator)
 
-	require.Equal(t, http.StatusCreated, h.publishAs(t, operator, "human", "the quarterly plan").Code)
+	require.Equal(t, http.StatusCreated, h.publishAs(t, operator, "alice-participant", "the quarterly plan").Code)
 	h.router.WaitForPendingFanout()
 
 	assert.Equal(t, []string{"alice-participant"}, h.dispatcher.snapshot(),
@@ -162,10 +179,10 @@ func TestPrincipalProducer_TwoAccountsPartitionOneAgent(t *testing.T) {
 	operator := bearerFor(t, h.handler, "alice")
 	h.seedChannel(t, operator)
 
-	require.Equal(t, http.StatusCreated, h.publishAs(t, operator, "human", "alice speaks").Code)
+	require.Equal(t, http.StatusCreated, h.publishAs(t, operator, "alice-participant", "alice speaks").Code)
 	h.router.WaitForPendingFanout()
 	user := bearerFor(t, h.handler, "bob")
-	require.Equal(t, http.StatusCreated, h.publishAs(t, user, "human", "bob speaks").Code)
+	require.Equal(t, http.StatusCreated, h.publishAs(t, user, "bob-participant", "bob speaks").Code)
 	h.router.WaitForPendingFanout()
 
 	assert.Equal(t, []string{"alice-participant", "bob-participant"}, h.dispatcher.snapshot(),
@@ -179,13 +196,14 @@ func TestPrincipalProducer_TwoAccountsPartitionOneAgent(t *testing.T) {
 // human and agent traffic. A persona reply must stay on the `'local'`
 // default — stamping the anonymous identity's literal "local" participant as
 // an explicit principal would put a header on the wire where there is none
-// today, for no change in resolved value.
+// today, for no change in resolved value. The reply shows its agent token,
+// which proves the agent but no account, so no principal either.
 func TestPrincipalProducer_UnauthenticatedPublishEmitsNothing(t *testing.T) {
 	h := newPrincipalHarness(t, nil)
 	operator := bearerFor(t, h.handler, "alice")
 	h.seedChannel(t, operator)
 
-	require.Equal(t, http.StatusCreated, h.publishAs(t, "", "agent-alice", "a persona reply").Code)
+	require.Equal(t, http.StatusCreated, h.publishAsAgent(t, "agent-alice", "a persona reply").Code)
 	h.router.WaitForPendingFanout()
 
 	assert.Equal(t, []string{""}, h.dispatcher.snapshot(),
