@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0187
 summary: "Since the agents' REST calls carry the hosted agent's ID (ISSUE-0152 step 3), they spend the same budget as its wallet calls, and a refused REST call counts toward its quarantine. Every open-floor message costs each member persona three calls even when it stays silent, so someone with no account, in either auth mode, can post about 22 messages in a minute into a channel and quarantine every persona in it until an operator releases each one; raising the budget does not stop that. Short of a quarantine, a burst of an agent's own REST calls leaves its wallet calls nothing, so its bids and turns fail closed. The start-up catch-up, which read every channel back to back past a 429, now stops at the first one."
-status: open
+status: resolved
 severity: high
 area: security
 created: 2026-10-21
+closed: 2026-11-03
+closed_pr: 1085
 refs:
   - docs/issues/ISSUE-0152-one-quarantine-refuses-every-anonymous-caller.md
   - docs/issues/ISSUE-0111-anonymous-wallet-rpcs-share-rate-limit-bucket.md
@@ -130,7 +132,7 @@ has talked.
 6. ISSUE-0152's step 4, an end to a quarantine, would bound the outage but
    changes RFC 0009 §H, and stays the owner's call.
 
-**Slot: the owner's call.** Step 1 is fixed; step 5 is row A4.
+**Slot: the owner's call.** Steps 1, 4 and 5 are fixed; step 5 was row A4.
 
 ## Notes
 
@@ -155,7 +157,7 @@ has talked.
 > outsider path stay open.
 
 > 2026-11-03 — steps 4 and 5 are fixed by RFC 0009 Phases 3–4 plan PR 8
-> (design point G-7). In both auth modes an agent's REST calls spend a budget
+> ([#1085](https://github.com/mkhomutov/Persatrix/pull/1085), design point G-7). In both auth modes an agent's REST calls spend a budget
 > of their own, apart from its wallet calls, and a REST call refused for it
 > counts toward no quarantine (`internal/security/middleware.go`), so the
 > catch-up, a re-registration loop and busy live traffic can neither
