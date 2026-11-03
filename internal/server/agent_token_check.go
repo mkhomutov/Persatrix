@@ -11,6 +11,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"unicode/utf8"
 
 	"github.com/mkhomutov/persatrix/internal/security"
 )
@@ -49,6 +50,15 @@ const (
 	tokenRefusalsPerSourceWindowSeconds = 60
 	tokenRefusalsPerSourceMaxTracked    = 1000
 )
+
+// auditFieldMax bounds a request's path and method on an audit line that a
+// caller with no credential can cause: the per-source limits count lines,
+// not bytes (PR 8 review F-3).
+const auditFieldMax = 256
+
+// registerBudgetPrefix keys a registration's REST budget under
+// auth.mode: enabled by the address it came from ([Server.restCallerKey]).
+const registerBudgetPrefix = "register:"
 
 // errAgentTokenNamesAnother: a good token, shown beside an X-Agent-ID that
 // names another agent. The agents read it as invalid.
@@ -121,9 +131,9 @@ func (s *Server) refuseAgentToken(w http.ResponseWriter, r *http.Request, named,
 	ev := security.AuditEvent{
 		EventType: security.AuditAgentTokenInvalid,
 		Action:    "authenticate",
-		Resource:  r.URL.Path,
+		Resource:  auditBounded(r.URL.Path),
 		Outcome:   "refused",
-		Detail:    map[string]any{"reason": reason, "method": r.Method, "source": source},
+		Detail:    map[string]any{"reason": reason, "method": auditBounded(r.Method), "source": source},
 	}
 	// Only an ID an agent could hold reaches the line: the header is the
 	// caller's to fill, and the audit log is flushed line by line.
@@ -146,6 +156,33 @@ func (s *Server) restAgentID(r *http.Request) string {
 		return identityFrom(r.Context()).AgentID
 	}
 	return r.Header.Get(security.AgentIDHeader)
+}
+
+// restCallerKey is the REST budget of a call that proves no agent
+// ([security.WithCallerKey]): a signed-in caller's own, and under
+// auth.mode: enabled a registration's address. A registration shows no
+// token, so it proves no agent; counted with every caller that has no
+// account, anyone spending that budget would keep every agent from
+// registering (PR 8 review F-2). Its address is what the registration
+// limiter counts too (agent_enrollment.go).
+func (s *Server) restCallerKey(r *http.Request) string {
+	if s.authEnforced() && r.Method == http.MethodPost && r.URL.Path == registerPath {
+		return registerBudgetPrefix + s.requestSource(r)
+	}
+	return sessionRateLimitKey(r)
+}
+
+// auditBounded cuts s to [auditFieldMax] bytes, on a character boundary,
+// and marks the cut.
+func auditBounded(s string) string {
+	if len(s) <= auditFieldMax {
+		return s
+	}
+	cut := auditFieldMax
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "…"
 }
 
 // initTokenRefusalLimiter builds the limiter on refused tokens per source.

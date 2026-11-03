@@ -50,7 +50,7 @@ func (s *Server) publishSenderRefused(w http.ResponseWriter, r *http.Request, se
 		EventType: security.AuditAuthzDenied,
 		AgentID:   ident.AgentID,
 		Action:    "publish",
-		Resource:  r.URL.Path,
+		Resource:  auditBounded(r.URL.Path),
 		Outcome:   "refused",
 		Detail:    detail,
 	})

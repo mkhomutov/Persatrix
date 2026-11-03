@@ -27,8 +27,11 @@ const (
 	rateLimitCallsEnvVar = "SECURITY_RATE_LIMIT_CALLS"
 	// rateLimitWindowEnvVar overrides the rolling-window length in seconds.
 	rateLimitWindowEnvVar = "SECURITY_RATE_LIMIT_WINDOW_SECONDS"
-	// rateLimitMaxAgentsEnvVar bounds the per-agent ring map (DoS mitigation
+	// rateLimitMaxAgentsEnvVar bounds the limiter's ring map (DoS mitigation
 	// against self-reported X-Agent-ID flooding; see RFC 0009 §B + PR plan).
+	// Each agent holds two rings, its REST budget and its wallet budget, so
+	// the default covers about 500 agents before the least recently used
+	// ring is dropped and starts afresh.
 	rateLimitMaxAgentsEnvVar = "SECURITY_RATE_LIMIT_MAX_AGENTS"
 
 	defaultRateLimitCalls            = 60

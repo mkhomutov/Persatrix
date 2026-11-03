@@ -304,3 +304,98 @@ the secret trimmed (F-7), and the limit's came from F-3.
 | F-11 | Info | The PR merged with its description saying "Not yet reviewed", and with no findings table here | Noted: this table is the review's record. The description was not edited, so it still says that |
 | F-12 | Info | The PR description ends with an assistant attribution line, which the repository's rules forbid in PRs and commits | Noted: a merged PR's description can still be edited, so the line stays only until the maintainer removes it |
 | F-13 | Info | The head branch is not the planned `feature/v040-rfc0009-enrollment`, and the PR is over the ~350-line estimate and the 500-line target: 21 files, +1 167, of which 634 are tests | Noted: the row records the planned name, as for PRs 3 and 5. The PR missed the plan's 500-line limit and merged at that size: 442 lines of code, 91 of docs, and the tests that prove the code, not split from it |
+
+## PR 7 — `feature/v040-rfc0009-agent-token-client`
+
+Merged as [#1079](https://github.com/mkhomutov/Persatrix/pull/1079) on
+2026-11-03.
+
+**Implementation note (2026-11-01)**: how this PR meets
+[the plan's scope](0009-phases-3-4-pr-plan.md#pr-7--featurev040-rfc0009-agent-token-client).
+Each point not settled there is a new default this PR's review confirms or
+overturns.
+
+- **Where.** `AgentTokenKeeper` in `agents/server_reregister.py` holds the
+  token and runs the registrations that replace it. `token_middleware` in
+  `agents/orchestrator_session.py` shows the token on each call and acts on
+  a refusal, through aiohttp's client middleware, which needs aiohttp 3.12,
+  so `agents/pyproject.toml` raises its floor from 3.9, and names `yarl`, whose
+  URLs it compares with the orchestrator's address. The token comes off the
+  request once the answer is back, because a response error's `repr` prints
+  the request's headers. `wallet_client.py`
+  reads the token on each call through a function it is given, and first
+  gave `Lease` and `BudgetExceededError` to a new `wallet_lease.py`, an MIT
+  leaf listed beside it in the import contract.
+- **What a refusal looks like (new default; PR 8 builds it).** A 401 with
+  the orchestrator's usual error body, whose `code` is `AGENT_TOKEN_INVALID`,
+  `AGENT_TOKEN_EXPIRED` or `AGENT_TOKEN_REVOKED`. Any other 401 is about
+  something else and is left alone.
+- **One registration (F-12).** `AgentTokenKeeper.register` starts a
+  registration or joins the one under way, so a reconnect and every call
+  refused meanwhile share it, and one failed registration fails them all
+  rather than one more try for each. It runs as a task of its own, so a
+  caller whose time runs out leaves it finishing for the others. A refused
+  call whose token is still the current one joins a registration under way,
+  which may be what retired it, and any newer token than the one it showed
+  retries it. The retried call's answer stands, whatever it is, so nothing
+  can loop.
+- **Revoked (F-13).** A refusal of the current token that says revoked
+  stops the client registering, by either road, until its process restarts,
+  and it remembers, so a later "expired" for the same token changes nothing.
+  A client never told cannot know: an agent deregistered while idle comes
+  back at its next channel reconnect, which has nothing to check, or at its
+  next call after the issuer forgot it, which reads as expired. An agent whose
+  orchestrator restarted reads as invalid and registers too. The stop is not
+  always an operator's: a second process registering the same ID retires the
+  first one's token, and the first then stops and says so in its log.
+- **A lost answer (new default).** The orchestrator issues a token and the
+  connection drops before the answer arrives. That retires the token the
+  client still holds, so its next call reads as revoked, though nobody
+  revoked anything. While no registration has been answered, the client takes
+  "revoked" for one more registration rather than stopping for good, which
+  would mute the agent over one dropped connection. A 5xx counts as no
+  answer, since a gateway may send one for a registration that landed; any
+  other answer counts. The cost is narrow: an operator's deregistration in
+  the same window is undone, and audited.
+- **No timer (new default).** A token is replaced only when a call is
+  refused or the channel reconnects, never ahead of its expiry, though the
+  answer gives the time and the log records it. A timer needs no refusal to
+  fire, so it would bring back an idle agent an operator had deregistered.
+- **Registration.** It shows the secret and no token, since a stale token
+  must not block its own replacement, and follows no redirect, so the secret
+  reaches no other host. `AgentServer.stop` closes the keeper before it
+  deregisters: a refused call cannot bring a leaving agent back, and the
+  deregistration waits for a registration under way, so the two cannot pass
+  each other on the wire (the client's half of PR 5's F-6). A redirect
+  to another host carries no token either, since aiohttp runs the middleware
+  on every hop.
+- **One token per process.** The session names the first hosted agent, so
+  only that agent's token is kept; a second agent's beside that ID is what
+  PR 8 refuses.
+
+**Review findings** (PR 7): F-1 to F-12 are an independent review's, proved by
+running them, and F-13 to F-21 the author's.
+
+| Finding | Severity | Description | Disposition |
+|---------|----------|-------------|-------------|
+| F-1 | Medium | The one test of the origin check redirected to another port on the same host, so dropping the host or the scheme from the check left every test green | Fixed in-PR: a table of origins, and a redirect to `localhost` on the same port; each part of the check now has a test that fails without it |
+| F-2 | Low | Nothing read a token on a started server's wallet, so deleting that wiring left every test green | Fixed in-PR: `test_the_wallet_shows_the_current_token` |
+| F-3 | Low | A registration answered with a refusal still counted as unanswered, though a refusal issues no token, so a later "revoked" was doubted and an operator's deregistration undone | Fixed in-PR: an answer below 500 counts, and a 5xx stays in doubt, since a gateway may send one for a registration that landed |
+| F-4 | Low | A registration that timed out here can still land after a later one was answered, which retires the later token; the client reads that as revoked and stops until it restarts, with no operator involved. It takes a 10-second stall and one registration overtaking another, and was reproduced against the test orchestrator only | → deferred to PR 8 (noted there) |
+| F-5 | Low | With no timer and the keeper closed first, an agent idle past 24 hours deregisters on an expired token and nothing can replace it. Harmless until the route checks a token | → deferred to PR 9 (noted there) |
+| F-6 | Low | A 401 whose `code` was a list or an object raised `TypeError` out of the call. Only a proxy in front could send one | Fixed in-PR |
+| F-7 | Info | `urlsplit` tidies an address less than aiohttp's own URLs do, so an orchestrator at a spelled-out IPv6 address silently never got a token | Fixed in-PR: compared through `yarl` |
+| F-8 | Info | `orchestrator_session.py`'s docstring said the ID never reaches an outside host, but a redirect carries it | Fixed in-PR: reworded |
+| F-9 | Info | The note on revocation left out that a reconnect also brings back a deregistered idle agent | Fixed in-PR |
+| F-10 | Info | Nothing ordered PR 4 before PR 9, though PR 9 makes agents hold the secret and `shell_exec` inherits it until PR 4 | Fixed in-PR: edge added to the graph |
+| F-11 | Info | Seven unbounded waits in the tests hung on a broken client, and no pytest timeout is set: PR 5's F-17 again | Fixed in-PR: a bounded `until`, and teardown releases a held registration |
+| F-12 | Info | +1,436 lines at review, 970 of them tests, past the ~350 estimate and the 500-line target | Noted: the refusal paths needed a loopback orchestrator |
+| F-13 | Low | `repr` of aiohttp's response error prints the request's headers, token included, and `event_loop.py` logs a failed wake with `%r`. Every publish path catches the error first today, so no log line carried it | Fixed in-PR: the token comes off the request once the answer is back |
+| F-14 | Info | The wallet shows the token but does not act on a refusal | → deferred to PR 10 (noted there) |
+| F-15 | Low | An agent deregisters, which revokes its token, before its gRPC grace and its last wallet calls, so once tokens are checked that work is refused | → deferred to PR 8 and PR 10 (noted there) |
+| F-16 | Info | `shell_exec` inherits the secret until PR 4, and `/proc/<agent pid>/environ` outlives a scrub | → deferred to PR 4 (noted there) |
+| F-17 | Info | Anyone holding the fleet secret can stop a live agent by registering its ID, until it restarts. Until PR 9 refuses a retired token's deregistration, a rolling restart's old process can do the same to the new one | Noted: the secret is the fleet's, and the stopped agent logs why |
+| F-18 | Low | A call that shows no token is not retried, so an agent whose first registration was refused has no token until a reconnect or a restart | → deferred to PR 9 (noted there) |
+| F-19 | Info | `start()` after `stop()` on one server object stays closed | Noted: nothing restarts one |
+| F-20 | Info | The client sets no floor on re-registering: if each new token is refused too, each refused call registers once | Noted: the orchestrator's limit of 120 a minute per address bounds it |
+| F-21 | Info | `agents/server.py` stands at exactly 500 lines, so the next line added warns | Noted |

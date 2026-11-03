@@ -12,11 +12,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 
 	"github.com/mkhomutov/persatrix/internal/channels"
 	"github.com/mkhomutov/persatrix/internal/security"
@@ -219,6 +221,9 @@ func TestAgentToken_BesideAnAccountCredentialIsRefused(t *testing.T) {
 	for name, credential := range map[string]map[string]string{
 		"a bearer session": {"Authorization": "Bearer " + session},
 		"a session cookie": {"Cookie": sessionCookieName + "=" + session},
+		// Any Authorization header, not only a session (PR 8 review F-9):
+		// a request has one caller.
+		"basic credentials": {"Authorization": "Basic YWdlbnQ6c2VjcmV0"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			headers := asAgent("agent-alice", token)
@@ -231,7 +236,7 @@ func TestAgentToken_BesideAnAccountCredentialIsRefused(t *testing.T) {
 	}
 	assert.Zero(t, th.messages(t))
 	refusals := auditsOf(th.auditor, security.AuditAgentTokenInvalid)
-	require.Len(t, refusals, 2)
+	require.Len(t, refusals, 3)
 	for _, ev := range refusals {
 		assert.Equal(t, "account_credential", ev.Detail["reason"])
 	}
@@ -279,4 +284,65 @@ func TestRegisterAgent_RefusesTheDefaultPrincipal(t *testing.T) {
 	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/agents/register",
 		registerBody(channels.DefaultPrincipalID, "localhost:50051"))
 	assert.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+}
+
+func TestAgentToken_RefusalLineNamesOnlyAnIDAnAgentCouldHold(t *testing.T) {
+	// The claimed ID is the caller's to fill (PR 8 review F-9).
+	th := newTokenHarness(t, AuthModeEnabled)
+	for _, claimed := range []string{strings.Repeat("a", 300), "Agent Alice", "web-console"} {
+		rec := doRequestWithHeaders(th.h, http.MethodGet, "/api/v1/channels", nil, asAgent(claimed, "agt1.junk"))
+		require.Equal(t, http.StatusUnauthorized, rec.Code, claimed)
+	}
+	refusals := auditsOf(th.auditor, security.AuditAgentTokenInvalid)
+	require.Len(t, refusals, 3)
+	for _, ev := range refusals {
+		assert.Empty(t, ev.AgentID)
+	}
+}
+
+func TestAgentToken_RefusalLineBoundsThePathAndMethod(t *testing.T) {
+	// Anyone can cause the line, and the per-source limit counts lines, not
+	// bytes (PR 8 review F-3).
+	th := newTokenHarness(t, AuthModeEnabled)
+	path := "/api/v1/" + strings.Repeat("a", 64*1024)
+	rec := doRequestWithHeaders(th.h, strings.Repeat("M", 4096), path, nil, asAgent("agent-alice", "agt1.junk"))
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
+
+	refusals := auditsOf(th.auditor, security.AuditAgentTokenInvalid)
+	require.Len(t, refusals, 1)
+	assert.True(t, strings.HasPrefix(path, strings.TrimSuffix(refusals[0].Resource, "…")),
+		"the line keeps the start of the path")
+	assert.LessOrEqual(t, len(refusals[0].Resource), auditFieldMax+len("…"))
+	assert.LessOrEqual(t, len(fmt.Sprint(refusals[0].Detail["method"])), auditFieldMax+len("…"))
+}
+
+func TestRegistration_UnderEnabledSpendsItsAddressesBudget(t *testing.T) {
+	// A registration shows no token, so under enabled it proves no agent.
+	// Counted with every caller that has no account, anyone spending that
+	// budget kept every agent from registering (PR 8 review F-2); it is
+	// counted by its address, as the registration limiter counts it.
+	limiterAudit := &recordingAuditor{}
+	rl, err := security.NewRateLimiter(security.RateLimitConfig{
+		CallsPerWindow: 5, WindowSeconds: 60, Enabled: true, Logger: zap.NewNop(), Auditor: limiterAudit,
+	})
+	require.NoError(t, err)
+	_, cb := productionShapedLimiter(t, &recordingAuditor{})
+	th := newTokenHarness(t, AuthModeEnabled, WithRateLimiter(rl, cb))
+	for i := 0; i < 10; i++ { // callers with no account spend their budget
+		doRequestWithHeaders(th.h, http.MethodGet, "/api/v1/channels", nil, nil)
+	}
+	register := func(id, remote string) int {
+		return requestFrom(th.h, http.MethodPost, "/api/v1/agents/register",
+			registerBody(id, "localhost:50051"), remote, asAgent(id, "")).Code
+	}
+
+	anonymous := len(auditsOf(limiterAudit, security.AuditRateLimitUnauthenticatedCall))
+	for i := 0; i < 5; i++ {
+		require.Equal(t, http.StatusCreated, register(fmt.Sprintf("agent-%d", i), "198.51.100.9:5000"), i)
+	}
+	assert.Len(t, auditsOf(limiterAudit, security.AuditRateLimitUnauthenticatedCall), anonymous,
+		"a registration is not counted as a caller with no account")
+	assert.Equal(t, http.StatusTooManyRequests, register("agent-5", "198.51.100.9:5001"),
+		"one address shares one budget")
+	assert.Equal(t, http.StatusCreated, register("agent-5", "198.51.100.10:5000"))
 }

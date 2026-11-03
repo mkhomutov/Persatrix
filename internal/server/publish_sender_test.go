@@ -10,6 +10,7 @@ package server
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -170,4 +171,18 @@ func TestAgentToken_AnUnprovenIDSpendsNoneOfTheAgentsBudget(t *testing.T) {
 		rec := doRequestWithHeaders(th.h, http.MethodGet, "/api/v1/channels", nil, asAgent("agent-alice", token))
 		assert.Equal(t, http.StatusOK, rec.Code, "call %d: the agent's own budget is whole", i)
 	}
+}
+
+func TestPublishSender_RefusalLineBoundsThePath(t *testing.T) {
+	// A caller with no credential can cause the line (PR 8 review F-3).
+	th := newTokenHarness(t, AuthModeEnabled)
+	path := "/api/v1/channels/" + strings.Repeat("a", 64*1024) + "/messages"
+	rec := doRequestWithHeaders(th.h, http.MethodPost, path,
+		[]byte(`{"sender_id":"agent-alice","content":"the quarterly plan"}`), nil)
+	require.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
+
+	refusals := senderRefusals(th.auditor)
+	require.Len(t, refusals, 1)
+	assert.True(t, strings.HasPrefix(path, strings.TrimSuffix(refusals[0].Resource, "…")))
+	assert.LessOrEqual(t, len(refusals[0].Resource), auditFieldMax+len("…"))
 }

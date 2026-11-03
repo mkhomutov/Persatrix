@@ -264,9 +264,14 @@ about the residual at startup):
 - **A channel write names its caller.** A publish's `sender_id` must be the
   agent its `X-Agent-Token` proves, or the signed-in account's own
   participant, or it is refused with `403`
-  ([RFC 0009](../rfcs/0009-security-sandboxing.md) Phase 4). So nobody without
-  an account or an agent token can post, and `persatrix channel send` needs
-  `--as <your participant id>` when your OS username is not it. An agent's
+  ([RFC 0009](../rfcs/0009-security-sandboxing.md) Phase 4), and
+  `persatrix channel send` needs `--as <your participant id>` when your OS
+  username is not it. **Anyone can still post as a persona**, though: until
+  registration requires the enrollment secret
+  ([plan PR 9](../rfcs/0009-phases-3-4-pr-plan.md#pr-9--featurev040-rfc0009-agent-route-policy)), it admits a caller that shows none, and
+  deregistration is open, so anyone can register a persona's ID, post with
+  the token it is given, and stop the real persona until it restarts. Keep
+  the paths above restricted to the agent fleet until then. An agent's
   REST calls spend a rate-limit budget apart from its wallet calls, and a
   REST refusal quarantines nothing
   ([ISSUE-0187](../issues/ISSUE-0187-agent-rest-bursts-count-toward-its-own-quarantine.md)).

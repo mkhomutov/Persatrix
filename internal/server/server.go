@@ -302,7 +302,7 @@ func (s *Server) Handler() http.Handler {
 	var apiH http.Handler = s.mux
 	if s.rateLimiter != nil || s.circuitBreaker != nil {
 		apiH = security.RESTRateLimitMiddleware(s.rateLimiter, s.circuitBreaker,
-			security.WithCallerKey(sessionRateLimitKey), security.WithAgentID(s.restAgentID))(apiH)
+			security.WithCallerKey(s.restCallerKey), security.WithAgentID(s.restAgentID))(apiH)
 	}
 	root := http.NewServeMux()
 	root.HandleFunc("GET /healthz", s.handleHealthz)
