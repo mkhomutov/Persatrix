@@ -45,6 +45,25 @@ def git_output(repo_root: Path, *args: str) -> str | None:
         return None
 
 
+def git_bytes(repo_root: Path, *args: str, stdin: bytes | None = None) -> bytes | None:
+    """Like :func:`git_output`, but bytes both ways, with *stdin* fed to git.
+
+    For a file's own bytes, which a decode would change. The same timeout, so a
+    wedged git cannot hang a commit.
+    """
+    try:
+        return subprocess.run(
+            ["git", *args],
+            cwd=repo_root,
+            input=stdin,
+            capture_output=True,
+            check=True,
+            timeout=_TIMEOUT_S,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
 def is_shallow(repo_root: Path) -> bool:
     """Whether *repo_root* is a shallow clone, whose log stops at its oldest fetched commit.
 

@@ -5,7 +5,8 @@ Runs a fast subset of checks (target: <10 s) sequentially and prints a
 summary at the end.  Exits 0 if all pass, 1 if any fail.
 
 Checks executed:
-  0. Regenerate FILEMAP.md and docs/merged-prs.md and ``git add`` them
+  0. Regenerate FILEMAP.md and docs/merged-prs.md, flip the plan rows of the
+     PRs that history now records, and ``git add`` them
   1. ``go fmt`` check (Go orchestrator)
   2. ``ruff check`` (Python agents)
   3. ``cargo fmt --check`` (Rust CLI)
@@ -22,9 +23,10 @@ Checks executed:
 
 A step that exits ``SKIPPED`` (3) could not run in this checkout and changed
 nothing — in a shallow clone, whose log is cut short, docs/merged-prs.md when
-the log stops short of its rows, and the plan-status stale-row check. It is
-reported as skipped rather than failed, its file is not staged, and the reason
-it printed last is repeated after the results.
+the log stops short of its rows, and the plan-status stale-row check; and the
+plan-row writer while a merge conflict is unresolved. It is reported as skipped
+rather than failed, its file is not staged, and the reason it printed last is
+repeated after the results.
 
 Usage::
 
@@ -123,7 +125,8 @@ _CHECKS: list[tuple[str, list[str]]] = [
     ("rfcs index", ["{python}", "scripts/rfcs.py", "--check"]),
     ("roadmap status", ["{python}", "scripts/checks/roadmap_status.py"]),
     ("file size", ["{python}", "scripts/checks/file_size.py", "--strict"]),
-    ("plan status", ["{python}", "scripts/checks/plan_status.py"]),
+    # The staged copies: the commit takes the index, which may differ from the working copy.
+    ("plan status", ["{python}", "scripts/checks/plan_status.py", "--staged"]),
     ("amendment evidence", ["{python}", "scripts/checks/amendment_evidence.py"]),
     ("conformance", ["{python}", "scripts/checks/methodology_conformance.py"]),
 ]
@@ -133,11 +136,15 @@ def _resolve_argv(argv: list[str]) -> list[str]:
     return [sys.executable if tok == "{python}" else tok for tok in argv]
 
 
-_GENERATED = (
-    # (label, generator script, output path to stage) — regenerated before the
+_GENERATED: tuple[tuple[str, list[str], str | None], ...] = (
+    # (label, generator command, output path to stage) — regenerated before the
     # checks so the commit carries the current file map and merged-PR history.
-    ("filemap", "scripts/generate_filemap.py", "FILEMAP.md"),
-    ("merged prs", "scripts/merged_prs.py", "docs/merged-prs.md"),
+    # No output path means the generator stages its own change: plans are
+    # hand-edited, so ``git add`` could sweep in work that is not this commit's.
+    # Plan rows run after the history they read.
+    ("filemap", ["scripts/generate_filemap.py"], "FILEMAP.md"),
+    ("merged prs", ["scripts/merged_prs.py"], "docs/merged-prs.md"),
+    ("plan rows", ["scripts/checks/plan_status.py", "--fix"], None),
 )
 
 
@@ -157,8 +164,8 @@ def _skip_note(label: str, output: str) -> str:
     return f"{label}: {lines[-1] if lines else 'no reason given'}"
 
 
-def _regenerate(label: str, script: str, output: str) -> tuple[bool, str | None]:
-    """Run one generator and stage its output.
+def _regenerate(label: str, command: list[str], output: str | None) -> tuple[bool, str | None]:
+    """Run one generator and stage its *output*, if it names one.
 
     Returns ``(passed, None)``, or ``(True, note)`` when the generator exited
     ``SKIPPED``: it left its file alone, so the file is not staged.
@@ -166,7 +173,7 @@ def _regenerate(label: str, script: str, output: str) -> tuple[bool, str | None]
     print(f"\n▶ {label}")
     t0 = time.monotonic()
     try:
-        proc = _run_step([sys.executable, script])
+        proc = _run_step([sys.executable, *command])
         if proc.returncode == SKIPPED:
             print(f"  – SKIP  ({time.monotonic() - t0:.1f}s)")
             return True, _skip_note(label, proc.stdout)
@@ -175,7 +182,8 @@ def _regenerate(label: str, script: str, output: str) -> tuple[bool, str | None]
             print(f"  ✗ FAIL  ({elapsed:.1f}s)")
             return False, None
         # Stage the updated file so it's included in the commit.
-        subprocess.run(["git", "add", output], cwd=REPO_ROOT, check=True)
+        if output:
+            subprocess.run(["git", "add", output], cwd=REPO_ROOT, check=True)
         elapsed = time.monotonic() - t0
         print(f"  ✓ PASS  ({elapsed:.1f}s)")
         return True, None
@@ -232,9 +240,9 @@ def main(argv: list[str] | None = None) -> int:
     # Track results in the summary so failures and skips are visible.
     results: list[tuple[str, bool, float]] = []
     skipped: list[str] = []
-    for label, script, output in _GENERATED:
+    for label, command, output in _GENERATED:
         t0 = time.monotonic()
-        ok, note = _regenerate(label, script, output)
+        ok, note = _regenerate(label, command, output)
         if note is not None:
             skipped.append(note)
             continue

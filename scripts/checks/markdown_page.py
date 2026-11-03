@@ -34,7 +34,7 @@ CommonMark rules these checks need:
 from __future__ import annotations
 
 import re
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 
 _FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
 _HEADING_RE = re.compile(r"^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$")
@@ -132,6 +132,23 @@ def cells(line: str) -> list[str] | None:
         return None
     inner = inner[1 if opens else 0 : -1 if closes else None]
     return [c.strip().replace("\\|", "|") for c in _PIPE_RE.split(inner)]
+
+
+def with_cells(line: str, new: Mapping[int, str]) -> str:
+    """*line* with the cells numbered in *new* replaced, as :func:`cells` numbers them.
+
+    Every other byte stays: the rest of the row is not retyped.
+    """
+    parts = _PIPE_RE.split(line)
+    offset = 1 if line.strip().startswith("|") else 0
+    for index, text in new.items():
+        at = index + offset
+        part = parts[at]
+        lead = part[: len(part) - len(part.lstrip())] or " "
+        closed = at + 1 < len(parts)
+        trail = part[len(part.rstrip()) :] or (" " if closed else "")
+        parts[at] = f"{lead}{text}{trail}"
+    return "|".join(parts)
 
 
 def is_divider(row: Sequence[str]) -> bool:
