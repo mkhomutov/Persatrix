@@ -68,6 +68,7 @@ PYPROJECT = AGENTS_DIR / "pyproject.toml"
 # silently-dropped candidate fails loudly here.
 EXPECTED_MIT_CANDIDATES = {
     "persatrix_agents.wallet_client",
+    "persatrix_agents.wallet_lease",
     "persatrix_agents.prompt_loader",
     "persatrix_agents.prompt_safety",
     "persatrix_agents.llm_types",

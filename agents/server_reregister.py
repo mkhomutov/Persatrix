@@ -36,6 +36,12 @@ history on every reconnect. Catch-up has no watermark (RFC 0011 open question 8)
 so that is unbounded re-derivation, the exact growth curve ISSUE-0130 closed.
 This watcher therefore takes one callback and calls one callback.
 
+**A reconnect is also how a token is replaced.** A registration answers with an
+agent token (RFC 0009 Phases 3–4 plan, PR 7), and an orchestrator restart makes
+every earlier token invalid. :class:`AgentTokenKeeper` holds the token and runs
+the one registration that a reconnect and every call refused for its token
+share, so this module holds both ways of finding out the orchestrator forgot us.
+
 It is event-driven rather than a periodic re-register on purpose: a fleet-wide
 timer is the polling shape RFC 0024 removed, and it would cost every idle agent a
 wake-up forever to catch an event that happens once a month.
@@ -62,11 +68,12 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Protocol
 
+import aiohttp
 import grpc
 
 logger = logging.getLogger("Persatrix.agent.server_reregister")
 
-__all__ = ["ConnectivitySource", "ReregistrationWatcher"]
+__all__ = ["AgentTokenKeeper", "ConnectivitySource", "ReregistrationWatcher"]
 
 
 class ConnectivitySource(Protocol):
@@ -107,6 +114,124 @@ WATCH_RETRY_INITIAL_SEC = 1.0
 WATCH_RETRY_CAP_SEC = 30.0
 
 
+class AgentTokenKeeper:
+    """Holds the hosted agent's token and settles what a refused call does next.
+
+    Each registration replaces the token and retires the one before it, so two
+    at once would leave a call holding a token the second just retired. Every
+    registration after startup therefore goes through :meth:`register`, one at
+    a time, shared by every call refused meanwhile and by a reconnect.
+
+    A token is replaced only when a call is refused or the channel reconnects,
+    never on a timer ahead of its expiry. A timer would need no refusal to
+    fire, so it would bring back an idle agent an operator had deregistered.
+
+    Args:
+        register: awaited for each registration. This is ``_self_register``,
+            which hands the answer back through :meth:`keep_from`.
+    """
+
+    def __init__(self, register: Callable[[], Awaitable[bool]]) -> None:
+        self._register = register
+        # The token a call shows; empty until a registration answers with one.
+        self.token = ""
+        self._registering: asyncio.Task[bool] | None = None
+        # False while a registration has gone out with no answer back. The
+        # orchestrator may have issued a token nobody read, which retires the
+        # one held here, so a refusal of that one proves no revocation.
+        self._answered = True
+        self._revoked = False
+        self._closed = False
+
+    async def keep_from(self, answer: aiohttp.ClientResponse) -> None:
+        """Take what a registration's answer says about the token.
+
+        An orchestrator older than RFC 0009's Phases 3–4 plan PR 6 sends none,
+        which leaves nothing to show. A refusal issued none, so the token held
+        stands. A 5xx proves neither: a gateway may answer one for a
+        registration that landed, so it stays an unanswered registration.
+        """
+        if answer.status in (200, 201):
+            body = await answer.json()
+            token = body.get("agent_token") if isinstance(body, dict) else None
+            self.token = token if isinstance(token, str) else ""
+            if self.token:
+                logger.info(
+                    "Agent token kept; it expires at %s", body.get("agent_token_expires_at"),
+                )
+        if answer.status < 500:
+            self._answered = True
+
+    async def register(self) -> bool:
+        """Register now, or wait for the registration already under way.
+
+        Returns what ``_self_register`` returns. An agent that was told it is
+        revoked, or is shutting down, owes no registration, so that reads as
+        True: a retry has nothing to do.
+
+        The registration runs as a task of its own, so a caller whose time
+        runs out leaves it finishing for the others. Cut short, it could have
+        been issued a token nobody reads.
+        """
+        if self._closed or self._revoked:
+            return True
+        if self._registering is None:
+            self._answered = False
+            self._registering = asyncio.create_task(
+                self._register_once(), name="agent-token-register",
+            )
+        return await asyncio.shield(self._registering)
+
+    async def _register_once(self) -> bool:
+        try:
+            return await self._register()
+        finally:
+            self._registering = None
+
+    async def after_refusal(self, used: str, *, revoked: bool) -> str:
+        """Settle a call refused for showing ``used``.
+
+        Returns the token to send the call again with, or ``""`` when the
+        refusal stands.
+
+        A newer token held here answers a refusal of any kind, revoked
+        included (the plan's F-12). A refusal of the current token registers
+        once, or joins the registration under way, which may be what retired
+        it, and a failed one leaves the call refused. The exception is one
+        that says revoked: that is an operator's deregistration, which
+        registering again would undo. The client remembers it, because the
+        issuer forgets the agent and the same token later reads as expired
+        (F-13). ``revoked`` is believed only while every registration has
+        been answered: see ``_answered``.
+        """
+        if self.token == used:
+            if revoked and self._answered:
+                self._stop_registering()
+            await self.register()
+        return self.token if self.token != used else ""
+
+    def _stop_registering(self) -> None:
+        if self._closed or self._revoked:
+            return
+        self._revoked = True
+        logger.error(
+            "This agent's token was revoked: it was deregistered, or its ID was "
+            "registered from elsewhere. It will not register again until its "
+            "process restarts",
+        )
+
+    async def close(self) -> None:
+        """Register no more, and let a registration under way end first.
+
+        Called before de-registration, for the reason the watcher is stopped
+        first, and so the deregistration cannot pass a registration on the wire
+        and leave the agent registered after it left.
+        """
+        self._closed = True
+        if self._registering is not None:
+            await asyncio.wait({self._registering})
+
+
 class ReregistrationWatcher:
     """Calls ``reregister`` whenever the watched channel reconnects.
 
@@ -116,8 +241,9 @@ class ReregistrationWatcher:
             is the *gRPC* endpoint while registration itself is a REST POST to a
             different address — the channel is the restart **signal**, not the
             transport the re-registration travels on.
-        reregister: awaited on each reconnect. This is ``_self_register`` and
-            must stay that: see the module docstring on catch-up replay. It
+        reregister: awaited on each reconnect. This is
+            :meth:`AgentTokenKeeper.register`, which runs ``_self_register`` and
+            must run only that: see the module docstring on catch-up replay. It
             returns True when every hosted agent is registered; False means the
             attempt did not land and is worth retrying.
     """

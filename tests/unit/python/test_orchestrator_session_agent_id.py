@@ -23,7 +23,11 @@ from aiohttp import web
 
 import agents.server as agents_server
 from agents.convene_client import HTTPConveneClient
-from agents.orchestrator_session import AGENT_ID_HEADER, new_orchestrator_session
+from agents.orchestrator_session import (
+    AGENT_ID_HEADER,
+    AGENT_TOKEN_HEADER,
+    new_orchestrator_session,
+)
 from agents.persona import create_persona_agent
 from agents.persona_runtime import _LLMPersonaAgent
 from agents.server import AgentServer
@@ -32,18 +36,22 @@ from agents.tools.recall import HttpRecallClient
 from ._persona_test_helpers import _PERSONA_CONFIG, _make_client
 
 Seen = list[tuple[str, str | None]]
+Recording = tuple[str, Seen, list[str | None]]
 
 
 @pytest.fixture
-async def recording_orchestrator() -> AsyncIterator[tuple[str, Seen]]:
-    """Answer every route and record (method and path, X-Agent-ID)."""
+async def recording_orchestrator() -> AsyncIterator[Recording]:
+    """Answer every route and record (method and path, X-Agent-ID), and each
+    call's X-Agent-Token."""
     seen: Seen = []
+    tokens: list[str | None] = []
 
     async def record(request: web.Request) -> web.Response:
         seen.append((f"{request.method} {request.path}", request.headers.get(AGENT_ID_HEADER)))
+        tokens.append(request.headers.get(AGENT_TOKEN_HEADER))
         if request.method == "GET" and request.path == "/api/v1/channels":
             return web.json_response({"channels": []})
-        return web.json_response({}, status=201)
+        return web.json_response({"agent_token": "agt1.fake"}, status=201)
 
     app = web.Application()
     app.router.add_route("*", "/{tail:.*}", record)
@@ -53,15 +61,15 @@ async def recording_orchestrator() -> AsyncIterator[tuple[str, Seen]]:
     await site.start()
     port = site._server.sockets[0].getsockname()[1]  # type: ignore[union-attr]
     try:
-        yield f"http://127.0.0.1:{port}", seen
+        yield f"http://127.0.0.1:{port}", seen, tokens
     finally:
         await runner.cleanup()
 
 
 async def test_every_rest_call_carries_the_hosted_agent_id(
-    recording_orchestrator: tuple[str, Seen],
+    recording_orchestrator: Recording,
 ) -> None:
-    url, seen = recording_orchestrator
+    url, seen, _ = recording_orchestrator
     server = AgentServer(host="127.0.0.1", port=0, shutdown_grace=1, orchestrator_url=url)
     server.register_agent(
         create_persona_agent(
@@ -83,7 +91,7 @@ async def test_every_rest_call_carries_the_hosted_agent_id(
 
 
 async def test_the_per_message_paths_carry_the_hosted_agent_id(
-    recording_orchestrator: tuple[str, Seen], monkeypatch: pytest.MonkeyPatch,
+    recording_orchestrator: Recording, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Publish, history, roster, convene and recall: the calls that spend an
     agent's budget message by message (ISSUE-0187). Each must ride the
@@ -91,7 +99,7 @@ async def test_the_per_message_paths_carry_the_hosted_agent_id(
     are called through the objects start() wired; convene and recall, which
     need a timer or a permission to fire, through the session start() hands
     their wiring."""
-    url, seen = recording_orchestrator
+    url, seen, tokens = recording_orchestrator
     handed: dict[str, aiohttp.ClientSession] = {}
 
     def spy(name: str, real: Callable[..., None]) -> Callable[..., None]:
@@ -115,6 +123,7 @@ async def test_the_per_message_paths_carry_the_hosted_agent_id(
     await server.start()
     try:
         seen.clear()
+        tokens.clear()
         agent = server.agents["ember-owl"]
         assert isinstance(agent, _LLMPersonaAgent)
         publisher = server._dispatcher.executor.channel_publisher
@@ -132,6 +141,9 @@ async def test_the_per_message_paths_carry_the_hosted_agent_id(
         )
         calls = [call for call, _ in seen]
         assert seen and [agent_id for _, agent_id in seen] == ["ember-owl"] * len(seen)
+        # The same paths show the token registration answered with (RFC 0009
+        # Phases 3–4 plan, PR 7).
+        assert tokens == ["agt1.fake"] * len(seen)
     finally:
         await server.stop()
 
@@ -158,12 +170,12 @@ async def test_session_header(agent_id: str | None, want: dict[str, str]) -> Non
 
 
 async def test_no_agent_hosted_sends_no_id_on_either_transport(
-    recording_orchestrator: tuple[str, Seen],
+    recording_orchestrator: Recording,
 ) -> None:
     """REST and wallet calls name the same identity: with no agent hosted,
     neither sends an ID (the wallet once sent ``unknown``, a real bucket
     that could be quarantined)."""
-    url, _ = recording_orchestrator
+    url, _, _ = recording_orchestrator
     server = AgentServer(host="127.0.0.1", port=0, shutdown_grace=1, orchestrator_url=url)
     await server.start()
     try:

@@ -256,4 +256,6 @@ wrapt==2.5.1
     #   opentelemetry-instrumentation
     #   opentelemetry-instrumentation-grpc
 yarl==1.25.1
-    # via aiohttp
+    # via
+    #   persatrix-agents (agents/pyproject.toml)
+    #   aiohttp
