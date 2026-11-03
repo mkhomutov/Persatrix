@@ -315,8 +315,9 @@ Each persona's REST calls count against its own rate-limit budget. Until
 v0.4.0 the fleet shared one
 ([ISSUE-0111](../issues/ISSUE-0111-anonymous-wallet-rpcs-share-rate-limit-bucket.md)),
 so a re-run inside the minute a discussion had just used could see its
-opener refused, and nothing started. A persona refused again and again for
-going over its own budget is quarantined
+opener refused, and nothing started. A REST call refused for going over
+that budget counts toward no quarantine, and leaves the persona's wallet
+calls their own budget
 ([ISSUE-0187](../issues/ISSUE-0187-agent-rest-bursts-count-toward-its-own-quarantine.md)).
 Swap `provider: mock` for a keyed vendor (`make
 demo-anthropic`, `demo-openai`, `demo-gemini` or `demo-watsonx`; the four-vendor

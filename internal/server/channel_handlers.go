@@ -282,6 +282,9 @@ func (s *Server) handlePublishMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "BAD_REQUEST", fmt.Sprintf("participant_type %q must be one of [agent, user]", claimed), http.StatusBadRequest)
 		return
 	}
+	if s.publishSenderRefused(w, r, req.SenderID, req.Metadata) { // G-7: the sender is the caller
+		return
+	}
 
 	// RFC 0031 Phase 3 PR 4: apply the optional `session_id` override (the
 	// CLI's `--session`) — see [Server.resolveSessionOverride].

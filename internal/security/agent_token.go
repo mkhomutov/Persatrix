@@ -34,6 +34,13 @@ const (
 	agentTokenFixedSize = 4 * 8
 )
 
+// defaultPrincipalID is the principal of every request no account signed in
+// for, which the channels store stamps on such a request's messages
+// (channels.DefaultPrincipalID; this package does not import channels, and the
+// server's tests pin the two spellings together). A token naming it would let
+// an agent publish under that shared tenant's ID (PR 6 review F-9).
+const defaultPrincipalID = "local"
+
 // agentTokenSweepFloor is how many agents the issuer holds before Issue
 // first forgets the ones whose tokens have all expired.
 const agentTokenSweepFloor = 64
@@ -66,8 +73,8 @@ var (
 	ErrAgentTokenRevoked = errors.New("security: agent token has been revoked")
 	// ErrAgentTokenAgentID: Issue was asked for an ID no agent can have:
 	// empty, one the REST and gRPC hooks refuse as an [AgentIDHeader] (see
-	// validAgentID), or one the security layer gives callers that are not
-	// agents ([ConsoleAgentID], [DefaultUnauthenticatedID]).
+	// validAgentID), or one kept for callers that are not agents
+	// ([ConsoleAgentID], [DefaultUnauthenticatedID], defaultPrincipalID).
 	ErrAgentTokenAgentID = errors.New("security: no agent token can be issued for this agent ID")
 )
 
@@ -283,11 +290,13 @@ func (t *AgentTokenIssuer) forgetExpired(running time.Duration) {
 // hooks accept it as an [AgentIDHeader], and it is none the security layer
 // keeps for callers that are not agents. Registration asks before it
 // registers anything. A token for [ConsoleAgentID] would pass for the web
-// console, which the circuit breaker never quarantines, and one for
+// console, which the circuit breaker never quarantines, one for
 // [DefaultUnauthenticatedID] would share the rate limiter's bucket for every
-// caller that names no agent.
+// caller that names no agent, and one for defaultPrincipalID would name the
+// tenant of every caller no account signed in for.
 func IssuableAgentID(id string) bool {
-	return id != "" && validAgentID(id) && id != ConsoleAgentID && id != DefaultUnauthenticatedID
+	return id != "" && validAgentID(id) &&
+		id != ConsoleAgentID && id != DefaultUnauthenticatedID && id != defaultPrincipalID
 }
 
 // agentTokenMAC is an HMAC under the issuer's key, with room to make or

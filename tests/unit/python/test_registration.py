@@ -295,8 +295,15 @@ class TestSessionLifecycle:
                 assert server._session is None
                 assert session.closed
 
-    async def test_stop_calls_deregister_before_grpc_stop(self):
-        """stop() de-registers agents before stopping gRPC server."""
+    async def test_stop_calls_deregister_after_grpc_stop(self):
+        """stop() de-registers agents once the gRPC server's grace is over.
+
+        De-registering revokes the agent's token, and the orchestrator refuses
+        a publish with a revoked one under ``auth.mode: enabled``, so work
+        finishing inside the grace still publishes (RFC 0009 Phases 3–4 plan
+        PR 7 review F-15, settled in PR 8). RFC 0004's shutdown sequence
+        orders them the same way.
+        """
         server = _make_server()
         call_order: list[str] = []
 
@@ -317,4 +324,4 @@ class TestSessionLifecycle:
 
         await server.stop()
 
-        assert call_order == ["deregister", "grpc_stop"]
+        assert call_order == ["grpc_stop", "deregister"]

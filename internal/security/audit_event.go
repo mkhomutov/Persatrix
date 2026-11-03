@@ -22,7 +22,7 @@ const (
 	// Lifecycle
 	AuditAgentRegistered     AuditEventType = "agent.registered"
 	AuditAgentTokenIssued    AuditEventType = "agent.token_issued"  // registration issued an agent token (RFC 0009 Phase 4)
-	AuditAgentTokenInvalid   AuditEventType = "agent.token_invalid" // a registration showed a wrong enrollment secret (Phase 4)
+	AuditAgentTokenInvalid   AuditEventType = "agent.token_invalid" // a wrong enrollment secret, or a refused agent token on a call (Phase 4)
 	AuditAgentDeregistered   AuditEventType = "agent.deregistered"  // an agent was removed and its tokens revoked (Phase 4)
 	AuditCapabilityViolation AuditEventType = "capability.violation"
 
@@ -116,7 +116,11 @@ const (
 	// AuditAuthzDenied is the §E role-gate refusal (RFC 0039 Phase 2):
 	// an AUTHENTICATED caller below the route's required policy. 401s
 	// emit nothing — anonymous pokes are unbounded noise; this records
-	// a known account probing above its privilege.
+	// a known account probing above its privilege. It also records a
+	// publish under auth.mode: enabled that names a sender other than its
+	// caller (RFC 0009 Phase 4, design point G-7); a caller with no
+	// credential can make those too, so the anonymous REST budget bounds
+	// them.
 	AuditAuthzDenied AuditEventType = "authz.denied"
 
 	// Audit-log lifecycle (chain-recovery — PR #232 review SF-3)

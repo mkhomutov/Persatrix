@@ -437,10 +437,10 @@ class AgentServer:
                     "Error closing scheduled_wakes cache for %s", agent_id,
                 )
         self._scheduled_wakes_caches.clear()
-        # De-register from orchestrator before stopping gRPC server.
-        await self._self_deregister()
         if self._server:
             await self._server.stop(grace=self.shutdown_grace)
+        # De-register after the grace: it revokes the token work inside it publishes with.
+        await self._self_deregister()
         # F-02: isolate per-agent shutdown errors so one agent's failure
         # doesn't prevent cleanup of remaining agents.
         for agent_id, agent in self.agents.items():
