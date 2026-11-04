@@ -1,0 +1,9 @@
+# A role declares `clearance`, which v0.4.0 refuses until RFC 0012 §G's
+# check returns (the PR plan's D-3).
+organizations:
+  - id: acme
+    name: Acme
+    topology: flat
+    roles: [{id: member, authority: peer, clearance: secret}]
+    members:
+      - {agent_id: ember-owl, role: member}

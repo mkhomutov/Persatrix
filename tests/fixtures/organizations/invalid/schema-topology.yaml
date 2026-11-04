@@ -1,0 +1,8 @@
+# A topology that is not hierarchy, flat or matrix.
+organizations:
+  - id: acme
+    name: Acme
+    topology: tree
+    roles: [{id: member, authority: peer}]
+    members:
+      - {agent_id: ember-owl, role: member}

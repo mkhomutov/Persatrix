@@ -1,0 +1,16 @@
+# iron-fox is a member of two organizations (RFC 0012 open question 4).
+organizations:
+  - id: alpha
+    name: Alpha
+    topology: flat
+    roles: [{id: member, authority: peer}]
+    members:
+      - {agent_id: ember-owl, role: member}
+      - {agent_id: iron-fox, role: member}
+  - id: beta
+    name: Beta
+    topology: flat
+    roles: [{id: member, authority: peer}]
+    members:
+      - {agent_id: nova-sparrow, role: member}
+      - {agent_id: iron-fox, role: member}

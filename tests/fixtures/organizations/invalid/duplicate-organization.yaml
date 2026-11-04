@@ -1,0 +1,14 @@
+# Two organizations with one id.
+organizations:
+  - id: acme
+    name: Acme
+    topology: flat
+    roles: [{id: member, authority: peer}]
+    members:
+      - {agent_id: ember-owl, role: member}
+  - id: acme
+    name: Acme Again
+    topology: flat
+    roles: [{id: member, authority: peer}]
+    members:
+      - {agent_id: iron-fox, role: member}

@@ -1350,3 +1350,39 @@ and `agents/decision/baseline.py` ([PR plan](rfcs/0028-pr-plan.md) PR 2).
 - **Disallowed:** "approval filter", "hold check"
 - **Definition:** A check the selection pipeline runs on the policy's pick: when the pick needs a person's approval, the outcome defers with the gate's reason, such as `approval_required` or `hitl_required`, and lists the pick as rejected rather than swapping in another candidate; the policy's score and rationale go with the pick. RFC 0028 PR 9 adds the approval list, B3 the required-HITL classes.
 - **Example:** "With `publish_channel` on its approval list, the approval gate holds the persona's reply."
+
+## RFC 0012 — Organizations (PR 1)
+
+What an operator declares in `config/organizations.yaml`, and the authority it
+gives ([PR plan](rfcs/0012-pr-plan.md) PR 1). *Directive* is defined with the
+storage terms above.
+
+### Organization
+- **Aliases:** "org" (in identifiers such as `org_validate`)
+- **Disallowed:** "org chart", "company config"
+- **Definition:** A named graph of personas an operator declares in `config/organizations.yaml` ([RFC 0012](rfcs/0012-protocols-organizations.md) §B): a topology, roles that each carry an authority ceiling, and members — personas from `config/agents.yaml`, one role each — with the `manages` edges between them. In v0.4.0 a persona belongs to at most one organization. `make validate` checks the graph (`agents/org_validate.py`).
+- **Example:** "In the `acme-engineering` organization, `ember-owl` holds the `vp-engineering` role and manages `iron-fox`."
+
+### Topology
+- **Aliases:** —
+- **Disallowed:** "org structure", "org shape"
+- **Definition:** How an organization's `manages` edges may run, one of three (RFC 0012 §B, §C): `hierarchy`, a tree where a member has at most one manager, who directs them on any matter; `flat`, peers with no `manages` edges, so no member directs another; `matrix`, where a member may have several managers, each edge labelled with a dimension (its *scope*, such as `project`), and a manager directs only within it. No topology allows a loop.
+- **Example:** "In the `matrix` studio, `jade-heron` directs `iron-fox` on `project` work only."
+
+### Authority Axis
+- **Aliases:** "the integrity axis"
+- **Disallowed:** "trust level" (a relationship score, not this), "permission level"
+- **Definition:** RFC 0012's measure of how much an instruction binds the persona it reaches — the counterpart of RFC 0037's confidentiality axis, which governs what may be said where. An instruction binds only when its issuer directs the recipient through the organization graph and its channel's authority level (`observed`, `peer`, `operational`, `directive`) is `operational` or higher; the issuer's role authority caps the level that counts. An unknown level reads as `observed`, so an unlabelled channel binds no one.
+- **Example:** "On the authority axis, a manager's instruction in a `peer` channel is a request, not a directive."
+
+### Cross-Context Influence Record
+- **Aliases:** "influence record"
+- **Disallowed:** "directive metadata", "provenance blob"
+- **Definition:** The provenance a directive is kept with, so the persona can weigh it later in another channel (RFC 0012 §E): the issuer, the issuing channel and its authority level, the issuer's standing over the persona then (directive, request or observation), the scope label and the directive's status. The extraction pass writes it at the close of the interaction the instruction came in, on the directive's row of the persona's `commitments` table.
+- **Example:** "The influence record shows the directive came from `ember-owl` in an `operational` channel."
+
+### Clearance
+- **Aliases:** —
+- **Disallowed:** "access level", "security level" (when meaning a role's ceiling)
+- **Definition:** A role's confidentiality ceiling in RFC 0012 §G: the highest RFC 0037 classification its holders may see, checked against each channel a persona joins. Unslotted in v0.4.0 by RFC 0012's 2026-10-20 amendment, so the schema refuses a role's `clearance` key ([ISSUE-0195](issues/ISSUE-0195-role-clearance-unchecked-egress-logged-not-held.md)). Distinct from a role's authority ceiling, which v0.4.0 keeps.
+- **Example:** "`make validate` refuses a role that declares `clearance: secret`."

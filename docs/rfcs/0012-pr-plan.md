@@ -1,7 +1,7 @@
 # RFC 0012 — Protocols & Organizations — PR Implementation Plan (Phases 1–3)
 
 **RFC**: [0012-protocols-organizations.md](0012-protocols-organizations.md)
-**Status**: ⬜ Not started
+**Status**: 🔄 In progress
 **Created**: 2026-10-20
 **Branch prefix**: `feature/v040-rfc0012-`
 **Target**: `main`
@@ -648,6 +648,14 @@ amendment's two items; Phases 4–5 for v0.5.0); this plan's statuses closed.
 >   transaction's own handle and makes no channel-store or network call.
 > - PR 12: A4 binds every publish to its caller, a signed-in account
 >   included, so the forged-id leg may use either.
+
+> 2026-11-04 — PR 1 checks more than its list, and PR 2's loader applies
+> the same rules: organization, role and member ids and `manages` edges are
+> unique, as A1's keys require; every role and `manages` target is declared
+> in the organization; a member is a persona, not a task agent; a hierarchy
+> edge takes no scope; and a loop across matrix dimensions is still a
+> cycle. Each rule's message starts with its name, and each has a fixture
+> named after it under `tests/fixtures/organizations/`.
 
 ## Related documentation
 

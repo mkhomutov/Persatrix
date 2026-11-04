@@ -1,0 +1,9 @@
+# ghost-moth is not in agents.yaml.
+organizations:
+  - id: acme
+    name: Acme
+    topology: flat
+    roles: [{id: member, authority: peer}]
+    members:
+      - {agent_id: ember-owl, role: member}
+      - {agent_id: ghost-moth, role: member}
