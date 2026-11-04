@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://persatrix.dev/schemas/organization.schema.json",
   "title": "Persatrix Organization Configuration (v0.4.0+)",
-  "description": "Internal-only schema until v1.0; `$id` may break across v0.x bumps without notice. RFC 0012 §B: an organization is a named graph of personas — its topology, its roles with their authority ceilings, and its members with the `manages` edges between them. This schema checks the shape. `agents/org_validate.py` checks the graph rules, each with a message that names it: no loop in `manages`, one manager per member in a hierarchy, a scope on every matrix edge and none on a hierarchy edge, no `manages` in a flat organization, every member a persona in agents.yaml, and each persona in one organization. `make validate` runs both, and the Go loader (RFC 0012 PR 2) applies the same rules.",
+  "description": "Internal-only schema until v1.0; `$id` may break across v0.x bumps without notice. RFC 0012 §B: an organization is a named graph of personas — its topology, its roles with their authority ceilings, and its members with the `manages` edges between them. This schema checks the shape. `agents/org_validate.py` checks the graph rules, each with a message that names it: no loop in `manages`, one manager per member in a hierarchy, a scope on every matrix edge and none on a hierarchy edge, no `manages` in a flat organization, every member a persona in agents.yaml, and each persona in one organization. `make validate` runs both. RFC 0012 PR 2's Go loader is to apply the same rules, tested on the same fixtures (`tests/fixtures/organizations/`).",
   "type": "object",
   "additionalProperties": false,
   "required": ["organizations"],
@@ -17,7 +17,8 @@
     "id": {
       "type": "string",
       "pattern": "^[a-z0-9][a-z0-9-]*[a-z0-9]$",
-      "description": "Lowercase letters, digits and hyphens, as an agent id."
+      "not": { "type": "string", "pattern": "\\n" },
+      "description": "Lowercase letters, digits and hyphens, as an agent id. The `not` refuses a final line break, which Python's `$` lets through and Go's does not."
     },
     "organization": {
       "type": "object",
@@ -47,9 +48,13 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "authority"],
-      "description": "A role and its ceiling. A `clearance` key is refused until RFC 0012 §G's membership check returns, since a ceiling that nothing enforces would read as a control (the PR plan's D-3).",
+      "description": "A role and its ceiling. A `clearance` key is refused until RFC 0012 §G's membership check returns, since a ceiling that nothing enforces would read as a control (the PR plan's D-3). An `x-refusal` names the rule a refusal enforces; `agents/validate.py` prints it in place of the JSON Schema message.",
       "properties": {
         "id": { "$ref": "#/definitions/id" },
+        "clearance": {
+          "not": {},
+          "x-refusal": "clearance: a role cannot declare a clearance until RFC 0012 §G's membership check returns, since nothing would enforce it (the PR plan's D-3)"
+        },
         "authority": {
           "type": "string",
           "enum": ["observed", "peer", "operational", "directive"],
@@ -75,19 +80,26 @@
       }
     },
     "edge": {
-      "type": ["string", "object"],
-      "pattern": "^[a-z0-9][a-z0-9-]*[a-z0-9]$",
-      "additionalProperties": false,
-      "required": ["agent_id"],
-      "properties": {
-        "agent_id": { "$ref": "#/definitions/id" },
-        "scope": { "$ref": "#/definitions/scope" }
+      "if": { "type": "string" },
+      "then": { "$ref": "#/definitions/id" },
+      "else": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["agent_id"],
+        "properties": {
+          "agent_id": { "$ref": "#/definitions/id" },
+          "scope": { "$ref": "#/definitions/scope" }
+        }
       }
     },
     "scope": {
-      "type": "string",
-      "pattern": "^[a-z0-9][a-z0-9-]*[a-z0-9]$",
-      "not": { "const": "general" },
+      "allOf": [
+        { "$ref": "#/definitions/id" },
+        {
+          "not": { "const": "general" },
+          "x-refusal": "reserved-scope: `general` is kept for a directive that names no matrix dimension (the PR plan's D-9)"
+        }
+      ],
       "description": "A matrix dimension, such as `project` or `function`. `general` is kept for a directive that names no dimension (the PR plan's D-9)."
     }
   }

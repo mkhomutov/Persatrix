@@ -1,6 +1,7 @@
 # ember-owl manages iron-fox, nova-sparrow and jade-heron on the `function`
 # dimension. jade-heron and slate-wren both manage iron-fox on `project`:
-# two managers in one scope, which RFC 0012 §C ranks as a tie.
+# two managers in one scope are allowed, and RFC 0012's PR plan has PR 2
+# rank their directives as a tie.
 organizations:
   - id: product-studio
     name: Product Studio

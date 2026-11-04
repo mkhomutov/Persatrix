@@ -9,13 +9,13 @@ members against ``agents.yaml``. It runs only on a file the schema accepted.
 
 Each message starts with the name of the rule it breaks, such as
 ``second-manager:``. The fixtures in ``tests/fixtures/organizations/`` hold
-one file per rule, and the Go loader (RFC 0012 PR 2) is tested on the same
-files, so the two checkers keep the same rules.
+one file per rule; RFC 0012 PR 2's Go loader is to be tested on the same
+files, so the two checkers are held to the same rules.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Hashable, Iterator, Mapping
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -29,27 +29,65 @@ class GraphError(NamedTuple):
     message: str
 
 
+class _RepeatedKeyError(Exception):
+    def __init__(self, key: object, line: int) -> None:
+        super().__init__(key, line)
+        self.key = key
+        self.line = line
+
+
+class _UniqueKeyLoader(yaml.SafeLoader):
+    """A loader that refuses a key given twice in one mapping. PyYAML keeps
+    the last value, so the schema pass may have checked a graph the file
+    does not plainly say; Go's YAML parser refuses such a file."""
+
+    def construct_mapping(self, node: yaml.MappingNode, deep: bool = False) -> dict[Hashable, Any]:
+        seen: set[object] = set()
+        for key_node, _ in node.value:
+            key = self.construct_object(key_node, deep=deep)
+            if key in seen:
+                raise _RepeatedKeyError(key, key_node.start_mark.line + 1)
+            seen.add(key)
+        return super().construct_mapping(node, deep=deep)
+
+
 def check_file(organizations_path: Path, agents_path: Path) -> list[GraphError]:
     """Check an organizations file the schema has accepted."""
-    doc = yaml.safe_load(organizations_path.read_text(encoding="utf-8"))
+    text = organizations_path.read_text(encoding="utf-8")
+    try:
+        doc = yaml.load(text, Loader=_UniqueKeyLoader)
+    except _RepeatedKeyError as repeated:
+        return [
+            GraphError(
+                "",
+                f"duplicate-key: {repeated.key!r} is given twice in one mapping "
+                f"(line {repeated.line}); YAML would keep only the last",
+            )
+        ]
     if not doc:
         return []
-    return check_organizations(doc, agent_types(agents_path))
+    agents = agent_types(agents_path)
+    if agents is None:
+        return [
+            GraphError(
+                "",
+                f"unknown-agent: {agents_path.name} is missing or unreadable, "
+                "so no member can be checked",
+            )
+        ]
+    return check_organizations(doc, agents)
 
 
-def agent_types(agents_path: Path) -> dict[str, str]:
-    """Each agent id in ``agents.yaml`` with its type, ``task`` by default.
-
-    A missing or unreadable file gives no agents, so every member fails
-    ``unknown-agent``: the check fails closed.
-    """
+def agent_types(agents_path: Path) -> dict[str, str] | None:
+    """Each agent id in ``agents.yaml`` with its type, ``task`` by default;
+    None when the file is missing, unreadable or lists no agents."""
     try:
         content = yaml.safe_load(agents_path.read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError):
-        return {}
+        return None
     agents = content.get("agents") if isinstance(content, dict) else None
     if not isinstance(agents, list):
-        return {}
+        return None
     return {
         agent["id"]: agent.get("type", "task")
         for agent in agents

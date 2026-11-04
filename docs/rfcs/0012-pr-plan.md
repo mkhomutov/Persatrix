@@ -653,9 +653,16 @@ amendment's two items; Phases 4–5 for v0.5.0); this plan's statuses closed.
 > the same rules: organization, role and member ids and `manages` edges are
 > unique, as A1's keys require; every role and `manages` target is declared
 > in the organization; a member is a persona, not a task agent; a hierarchy
-> edge takes no scope; and a loop across matrix dimensions is still a
-> cycle. Each rule's message starts with its name, and each has a fixture
-> named after it under `tests/fixtures/organizations/`.
+> edge takes no scope; a loop across matrix dimensions is still a cycle; a
+> key given twice in one mapping is refused, as Go's YAML parser refuses
+> it; and an id cannot end in a line break, which Python's `$` lets
+> through. Two managers of one member on one matrix dimension are allowed;
+> PR 2 ranks their directives as a tie. Each rule's message starts with its
+> name, and each has a fixture named after it under
+> `tests/fixtures/organizations/`. For PR 2 (from PR 1's review): PyYAML
+> reads an unquoted `on`, `off`, `yes` or `no` as a boolean, so validation
+> refuses `scope: on` where Go's parser reads the text `on`; PR 2's loader
+> refuses it too, and adds the fixture.
 
 ## Related documentation
 

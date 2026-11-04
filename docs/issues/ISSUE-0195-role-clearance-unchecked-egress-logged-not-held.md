@@ -23,6 +23,8 @@ clearance, so nothing stops a persona from being a member of a channel
 classified above what its role should see. When a persona's message
 repeats memory classified above the channel it posts in, the message is
 sent and an audit event is written; nothing holds it for a person.
+RFC 0037 reads such a hit as a bug, since its injection gate keeps that
+memory out of the channel's prompt.
 
 ## Context
 
@@ -52,17 +54,19 @@ plan lists this as a Known Gap owned by row C1, whose PR 1 files it.
 - **Membership.** A persona can be added to any channel, whatever its
   classification and the persona's role. This is v0.3.16's behaviour; an
   organization adds no check to it.
-- **Egress.** A persona that restates protected memory in a less
-  classified channel is not stopped. The tripwire writes a
+- **Egress.** A publish that copies a span of memory classified above
+  its channel is sent. The tripwire writes a
   `channel.confidentiality_tripwire` audit event naming the persona, the
   channel and the entry's protection level, so an operator can find it
-  afterwards. The tripwire is lexical: it matches verbatim spans, not
-  paraphrase.
+  afterwards; §H would have held it instead. The tripwire matches verbatim
+  spans only, so a paraphrase is neither logged now nor held by §H, which
+  keeps the same detection.
 
-Neither weakens a v0.3.16 control. RFC 0037's injection gate (§D) still
-keeps memory classified above a channel out of that channel's prompt, so
-the verbatim paths stay closed; what is left is the residual path RFC 0037
-§G names, a persona restating in its own words what it was given.
+Neither weakens a v0.3.16 control. RFC 0037's injection gate (§D) keeps
+memory classified above a channel out of that channel's prompt, so RFC 0037
+§G reads a true verbatim hit as a bug — an entry stamped at the wrong
+level, a projection that copied its source, or a missed injection path —
+not a path the design leaves open. What goes unheld is that bug class.
 Severity is low for that reason.
 
 ## Proposed fix / investigation path

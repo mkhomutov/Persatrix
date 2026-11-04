@@ -94,7 +94,10 @@ def _validate_yaml_against_schema(
     validator = jsonschema.Draft7Validator(schema)
     for error in sorted(validator.iter_errors(content), key=lambda e: list(e.absolute_path)):
         json_path = ".".join(str(p) for p in error.absolute_path)
-        errors.append(ValidationError(str(yaml_path), error.message, json_path))
+        # A subschema may name the rule it enforces (`x-refusal`), so the
+        # message says why the value is refused, not which keyword caught it.
+        refusal = error.schema.get("x-refusal") if isinstance(error.schema, dict) else None
+        errors.append(ValidationError(str(yaml_path), refusal or error.message, json_path))
 
     return errors
 

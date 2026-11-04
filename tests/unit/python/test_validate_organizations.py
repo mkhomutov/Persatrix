@@ -54,10 +54,12 @@ def test_invalid_fixture_fails_for_its_rule_only(tmp_path: Path, fixture: Path) 
     assert errors, "a refused file must say why"
     rendered = [str(e) for e in errors]
     if rule.startswith("schema-"):
-        # The shape is wrong, so the graph checks never ran: every error is
-        # the schema's, and one names the key at fault.
+        # The shape is wrong, so the graph checks never ran. One error is at
+        # the key at fault, or names it.
         key = rule.removeprefix("schema-")
-        assert any(key in line for line in rendered), rendered
+        assert any(e.path.split(".")[-1] == key or f"'{key}'" in e.message for e in errors), (
+            rendered
+        )
     else:
         # Every error starts with this rule's name: the fixture breaks one
         # rule, and no other rule misfires on it.
@@ -70,8 +72,9 @@ def test_fixtures_cover_each_topology_and_rule() -> None:
     rules = {p.stem.split("--")[0] for p in _fixtures("invalid")}
     # The PR plan's list: a cycle, a second manager in a hierarchy, a matrix
     # edge without scope, `manages` in a flat organization, an agent missing
-    # from agents.yaml, a persona in two organizations; and D-3's
-    # `clearance`, OQ 1's required `authority`.
+    # from agents.yaml, a persona in two organizations; D-3's `clearance`,
+    # OQ 1's required `authority` and D-9's reserved `general`; and a key
+    # given twice, which Go's parser refuses and PyYAML would hide.
     assert {
         "cycle",
         "second-manager",
@@ -79,16 +82,18 @@ def test_fixtures_cover_each_topology_and_rule() -> None:
         "flat-manages",
         "unknown-agent",
         "second-organization",
-        "schema-clearance",
+        "clearance",
         "schema-authority",
+        "reserved-scope",
+        "duplicate-key",
     } <= rules
 
 
-def test_member_fails_when_agents_yaml_is_missing(tmp_path: Path) -> None:
+def test_missing_agents_yaml_is_one_error_that_says_so(tmp_path: Path) -> None:
     ok, errors = _validate(tmp_path, _FIXTURES / "valid" / "flat.yaml", agents=None)
     assert not ok
-    assert errors
-    assert all(e.message.startswith("unknown-agent: ") for e in errors)
+    (error,) = errors
+    assert error.message.startswith("unknown-agent: agents.yaml ")
 
 
 def test_second_manager_names_both_managers(tmp_path: Path) -> None:
