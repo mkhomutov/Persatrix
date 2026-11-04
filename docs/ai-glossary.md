@@ -124,6 +124,17 @@ Process vocabulary (scope lock, cuttable, live arc, finding, …) lives in the
 - **Example:** "`file_read` narrows `path` to strings, since any other value
   already failed inside the tool."
 
+### Resource Limits
+- **Aliases:** "tool limits"
+- **Disallowed:** —
+- **Definition:** An agent's `resource_limits` block (RFC 0009 Phase 3): a CPU
+  limit on each `shell_exec` command (`shell_cpu_seconds`), which the kernel
+  holds the command to, and an output cap on what one tool call hands the
+  model (`tool_output_bytes`), for every tool. Each is off until set. The
+  wall-time limit on a command is `permissions.shell.max_execution_seconds`.
+- **Example:** "The resource limits stopped the spinning command at 10 s of
+  CPU, long before its 30-second wall time."
+
 ### Skill
 - **Aliases:** —
 - **Disallowed:** "tool" (when meaning a skill); "capability" (when meaning a

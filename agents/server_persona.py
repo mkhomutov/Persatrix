@@ -30,8 +30,6 @@ from .server_persona_timers import init_persona_timers, summarize_autonomy_caden
 from .task_agent import TaskAgent
 from .tick import TickScheduler
 from .tools import builtin
-from .tools.permissions import PermissionGate
-from .tools.sandbox import PathValidator
 from .wallet_client import WalletClient
 
 if TYPE_CHECKING:
@@ -183,6 +181,14 @@ def load_agent(
             f"Agent {agent_id!r} missing required 'model' field in config"
         )
 
+    # Wire built-in tool dependencies; a bad resource_limits value stops here.
+    try:
+        builtin.configure(
+            agent_config.get("permissions", {}), workspace, agent_config.get("resource_limits"),
+        )
+    except ValueError as exc:
+        raise SystemExit(f"Agent {agent_id!r}: {exc}") from None
+
     # Resolve instructions_file (if present) into the inline instructions
     # field before constructing the agent.  This keeps TaskAgent runtime
     # purely data-driven — it never touches the filesystem.
@@ -245,17 +251,6 @@ def load_agent(
             config=agent_config,
             llm_client=llm_client,
         )
-
-    # Wire built-in tool dependencies
-    permissions = agent_config.get("permissions", {})
-    builtin.permission_gate = PermissionGate(permissions)
-    fs = permissions.get("filesystem", {})
-    builtin.path_validator = PathValidator(
-        allow_read=fs.get("read", []),
-        allow_write=fs.get("write", []),
-        deny=fs.get("deny", []),
-    )
-    builtin.workspace_root = Path(workspace).resolve()
 
     return agent
 
