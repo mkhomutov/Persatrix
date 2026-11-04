@@ -43,8 +43,8 @@ LLM_CALL_SPAN = "agent.llm.call"
 TOOL_EXECUTE_SPAN = "agent.tool.execute"
 SUBAGENT_SPAWN_SPAN = "agent.subagent.spawn"
 
-# RFC 0028 §D — one span per decision a checkpoint records, only while
-# recording is on. Sampled, for watching live; the decision log is the
+# RFC 0028 §D — one span per decision a decision checkpoint records, only
+# while recording is on. Sampled, for watching live; the decision log is the
 # record replay reads, and the span's `decision.record_id` finds its line.
 DECISION_CHECKPOINT_SPAN = "agent.decision.checkpoint"
 

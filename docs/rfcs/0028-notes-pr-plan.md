@@ -113,3 +113,28 @@ reviews; the severities are this record's own:
 | F-18 | Low | The freshness test called any generator failure a stale file, so a pattern the rewrite refuses told the developer to regenerate, which fails the same way | Fixed in-PR: a failure that names no stale file says the generator failed; a negative control for each case |
 | F-19 | Info | About 1 440 changed lines against the ~350 estimate and the plan header's 500-line rule, recorded nowhere | Noted: about 220 lines are generated and about 400 are tests; the translator is what keeps the copy from leaking, so it stays with the redactor |
 | F-20 | Low | F-9's fix covered only `{,`. Go also reads a repeat count with a leading zero as text, where Python reads `x{01}` as one x and refuses `x{10,01}`. No pattern has that shape. Found by Copilot on [#1088](https://github.com/mkhomutov/Persatrix/pull/1088), whose diff still carried this PR's files | Fixed in [#1092](https://github.com/mkhomutov/Persatrix/pull/1092): every `{` Go reads as text is written `\{`, and a test checks each short brace shape against Go's own parser. A scratch run over 3 889 shapes found no match that differs from Go, against 116 before |
+
+## PR 3 — `feature/v040-rfc0028-decision-log`
+
+Opened as [#1090](https://github.com/mkhomutov/Persatrix/pull/1090), stacked
+on PR 3a's [#1086](https://github.com/mkhomutov/Persatrix/pull/1086) until
+that merged.
+
+**Review findings** (PR 3), from one independent review:
+
+| Finding | Severity | Description | Disposition |
+|---------|----------|-------------|-------------|
+| F-1 | Medium | A short write passed as success, so a record was lost and the next one joined to its half, a line replay cannot read | Fixed in-PR: a line is written whole or not at all; a short write is carried on, and one that fails part-way is cut back off and counted |
+| F-2 | Low | Owner-only held only for a file or folder the log made; an existing one open to others stayed open, though F-14's ruling rests on it | Fixed in-PR for the file, which is made owner-only; an existing folder keeps its mode, as the docs now say |
+| F-3 | Low | The log followed a link at its path and appended to the link's target | Fixed in-PR: a link, or a file that is not this user's own plain file, is refused and counted |
+| F-4 | Low | The lock belonged to each log object, so two recorders for one agent lost records to overlapping rotations | Fixed in-PR: one lock per file in a process; a second process is still not guarded, as the docs say |
+| F-5 | Low | `keep` had no bound, and rotation checked every slot under the lock: `keep: 2000000` stalled one write for 9 s | Fixed in-PR: `keep` is 0 to 100, and rotation lists the folder once |
+| F-6 | Low | The rotation test kept 2 files, so the order of the shift was never tested | Fixed in-PR: 3 files, each one's records checked in order |
+| F-7 | Low | No test could fail on dropping a line longer than the cap, rotating an empty file, a folder made open to others, or a sink error while recording is off | Fixed in-PR: a test for each; each of those changes now fails one |
+| F-8 | Low | A `log` block with keys of mixed types raised `TypeError`, not `ValueError` | Fixed in-PR: a key that is not a name is refused |
+| F-9 | Info | "No text from the turn" rests on the callers: ids, a target, argument names and a rationale are written as given | Noted for PRs 5 to 7 in the plan; the docs say so |
+| F-10 | Info | The test that no message or argument value reaches the file cannot fail on this PR's code | Fixed in-PR: the test says it guards PR 1's types |
+| F-11 | Info | Rotated files above a lowered `keep` were never removed | Fixed in-PR: rotation drops them |
+| F-12 | Info | An agent id near 250 characters made rotated file names too long for the file system | Fixed in-PR: an id over 200 characters is refused |
+| F-13 | Info | The span's confidence was said to be absent only in manual mode, the metrics table did not give `none` for a verdict, three places said a bare "checkpoint", and the glossary did not say what turns recording on | Fixed in-PR |
+| F-14 | Info | About 1 260 changed lines in this PR's own commits against the ~350 estimate and the 500-line target, 440 of them tests | Noted: the log stays with its tests |
