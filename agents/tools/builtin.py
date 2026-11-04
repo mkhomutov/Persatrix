@@ -233,7 +233,8 @@ async def shell_exec(command: str, timeout: int = 30) -> ToolResult:
     if not gate.check("shell:exec"):
         return ToolResult(success=False, error="Permission denied: shell:exec")
 
-    timeout = _shell_timeout(timeout, gate.shell_time_limit())
+    time_limit = gate.shell_time_limit()
+    timeout = _shell_timeout(timeout, time_limit)
 
     try:
         args = shlex.split(command)
@@ -290,7 +291,10 @@ async def shell_exec(command: str, timeout: int = 30) -> ToolResult:
         except TimeoutError:
             proc.kill()
             await proc.wait()
-        emit_resource_limited("shell_exec", "shell_wall_seconds", wall_seconds=timeout)
+        # RFC 0009 G-4: audited only when the agent's own time limit stopped
+        # it; a shorter timeout is the model's choice, not an operator's.
+        if time_limit is not None and timeout == min(time_limit, MAX_TIMEOUT_SECONDS):
+            emit_resource_limited("shell_exec", "max_execution_seconds", wall_seconds=timeout)
         return ToolResult(
             success=False,
             error=f"Command timed out after {timeout}s",

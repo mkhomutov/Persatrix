@@ -103,9 +103,13 @@ class TestOutputSizeLimiter:
         data = {"stdout": "ok", "stderr": "", "exit_code": 0}
         assert OutputSizeLimiter(1024).limit(data) == (data, None)
 
-    def test_text_over_the_cap_is_cut_with_the_notice(self):
+    def test_text_over_the_cap_is_cut_with_the_notice_inside_the_cap(self):
+        """Review F-5: the notice counts toward the cap, so the model gets at
+        most the cap."""
         data, size = OutputSizeLimiter(1024).limit("A" * 5000)
-        assert data == "A" * 1024 + "\n... [truncated at 1 KB]"
+        notice = "\n... [truncated at 1 KB]"
+        assert data == "A" * (1024 - len(notice)) + notice
+        assert _size(data) == 1024
         assert size == 5000
 
     def test_a_structured_output_fits_and_keeps_its_other_fields(self):
@@ -140,16 +144,29 @@ class TestOutputSizeLimiter:
         assert isinstance(data, str)
         assert data.startswith("[0, 1, 2")
         assert data.endswith("\n... [truncated at 1 KB]")
+        assert _size(data) <= 1024
         assert size == _size(json.dumps(rows))
+
+    def test_short_texts_beside_a_long_one_do_not_cost_the_shape(self):
+        """Review F-4: cutting every text to nothing turns each short one into
+        a longer notice, so a cut that leaves short texts whole can fit where
+        that one does not."""
+        original = {"ids": [f"{i % 100:02d}" for i in range(1000)], "content": "x" * 100_000}
+        data, _ = OutputSizeLimiter(16_384).limit(original)
+        assert isinstance(data, dict)
+        assert data["ids"] == original["ids"]
+        assert data["content"].endswith("\n... [truncated at 16 KB]")
+        assert _size(render_output(data)) <= 16_384
 
     def test_output_the_model_cannot_be_shown_is_left_to_the_tool_round(self):
         """An output json.dumps refuses fails in the tool round today; the cap
         does not change that."""
         data = {"when": object()}
-        assert OutputSizeLimiter(10).limit(data) == (data, None)
+        assert OutputSizeLimiter(1024).limit(data) == (data, None)
 
-    @pytest.mark.parametrize("max_bytes", [0, -1])
-    def test_a_cap_under_one_byte_is_refused(self, max_bytes):
+    @pytest.mark.parametrize("max_bytes", [1023, 0, -1])
+    def test_a_cap_under_one_kilobyte_is_refused(self, max_bytes):
+        """A cap too small to hold the notice could not keep its own promise."""
         with pytest.raises(ValueError):
             OutputSizeLimiter(max_bytes)
 
@@ -177,7 +194,8 @@ class TestToolOutputCap:
         with caplog.at_level(logging.INFO, logger="agents.tools.audit"):
             result = await big()
         assert result.success is True
-        assert result.data == "A" * 1024 + "\n... [truncated at 1 KB]"
+        assert result.data.endswith("\n... [truncated at 1 KB]")
+        assert _size(result.data) == 1024
         [record] = _audit_records(caplog)
         assert record.getMessage() == "tool.resource_limited"
         assert record.tool_name == "big"  # type: ignore[attr-defined]
@@ -207,7 +225,8 @@ class TestToolOutputCap:
 
         registry.output_limiter = OutputSizeLimiter(1024)
         result = await plain()
-        assert result.data == "A" * 1024 + "\n... [truncated at 1 KB]"
+        assert result.data.endswith("\n... [truncated at 1 KB]")
+        assert _size(result.data) == 1024
 
     async def test_output_within_the_cap_writes_no_audit_line(
         self, caplog: pytest.LogCaptureFixture,
@@ -239,11 +258,34 @@ class TestReadResourceLimits:
         assert limits.output.max_bytes == 65_536
 
     @pytest.mark.parametrize(
-        "block", [{}, {"shell_cpu_seconds": 300, "tool_output_bytes": 102_400}],
+        "block",
+        [
+            {},
+            {"shell_cpu_seconds": 300, "tool_output_bytes": 102_400},
+            {"shell_cpu_seconds": 1, "tool_output_bytes": 1024},
+            # Review F-6: what YAML gives for a block with only its header
+            # uncommented, and for a key left empty, both set no limit.
+            None,
+            {"shell_cpu_seconds": None, "tool_output_bytes": None},
+        ],
     )
     def test_the_schema_and_the_runtime_accept_the_same_block(self, block):
         _LIMITS_VALIDATOR.validate(block)
         read_resource_limits(block)
+
+    def test_a_whole_number_written_with_a_decimal_point_is_that_number(self):
+        """Review F-6: JSON Schema's integer takes 10.0, so the runtime does too."""
+        _LIMITS_VALIDATOR.validate({"shell_cpu_seconds": 10.0})
+        limits = read_resource_limits({"shell_cpu_seconds": 10.0, "tool_output_bytes": 2048.0})
+        assert limits.shell.cpu_seconds == 10
+        assert isinstance(limits.shell.cpu_seconds, int)
+        assert limits.output is not None
+        assert limits.output.max_bytes == 2048
+
+    def test_keys_of_mixed_types_are_refused_cleanly(self):
+        """Review F-9: a YAML block can hold a number as a key beside a name."""
+        with pytest.raises(ValueError, match="resource_limits does not take"):
+            read_resource_limits({1: 2, "a": 3})
 
     @pytest.mark.parametrize(
         "block",
@@ -256,6 +298,7 @@ class TestReadResourceLimits:
             {"shell_cpu_seconds": True},
             {"shell_cpu_seconds": 1.5},
             {"tool_output_bytes": 0},
+            {"tool_output_bytes": 1023},  # too small to hold the notice
             {"tool_output_bytes": 102_401},  # over the built-in tools' own cap
             {"cpu_seconds": 10},  # a key the block does not take
             ["shell_cpu_seconds"],
@@ -314,7 +357,7 @@ class TestLoadAgentWiresTheLimits:
         assert registry.output_limiter.max_bytes == 65_536
 
     def test_an_agent_with_no_block_leaves_no_earlier_limit_behind(self, _create):
-        registry.output_limiter = OutputSizeLimiter(10)
+        registry.output_limiter = OutputSizeLimiter(1024)
         with tempfile.TemporaryDirectory() as tmp:
             load_agent("code-writer", _write_agent(Path(tmp), {}), tmp)
         assert registry.output_limiter is None

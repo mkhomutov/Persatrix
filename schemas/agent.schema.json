@@ -174,21 +174,21 @@
       ]
     },
     "resource_limits": {
-      "type": "object",
+      "type": ["object", "null"],
       "additionalProperties": false,
-      "description": "RFC 0009 Phase 3: limits on what this agent's tools may spend and return. Each is off until set, so a tool behaves as it did before. A value outside its range stops the agent at startup. The wall-time limit on a shell command is permissions.shell.max_execution_seconds.",
+      "description": "RFC 0009 Phase 3: limits on what this agent's tools may spend and return. Each is off until set, so a tool behaves as it did before; an empty block or key sets none. A value outside its range stops the agent at startup. The wall-time limit on a shell command is permissions.shell.max_execution_seconds.",
       "properties": {
         "shell_cpu_seconds": {
-          "type": "integer",
+          "type": ["integer", "null"],
           "minimum": 1,
           "maximum": 300,
-          "description": "The most CPU seconds one shell_exec command may spend; the kernel stops it there (SIGXCPU). Set in the command's own process before it starts. Not applied on Windows, which has no such limit. 10 is the recommended value for production."
+          "description": "The most CPU seconds each process of a shell_exec command may spend; the kernel stops it there (SIGXCPU). Set in the command's own process before it starts, so each process it starts gets the same limit on its own, and a command that starts others can spend more in all, up to its wall time. Only the command's own process stopping is reported. Not applied on Windows, which has no such limit. 10 is the recommended value for production."
         },
         "tool_output_bytes": {
-          "type": "integer",
-          "minimum": 1,
+          "type": ["integer", "null"],
+          "minimum": 1024,
           "maximum": 102400,
-          "description": "The most bytes one tool call may hand the model, for every tool, measured as the model is shown the output. A longer output is cut with a '[truncated at …]' notice; a structured one keeps its fields and has its long texts cut. file_read, shell_exec and http_request cut at 102400 (100 KB) either way, which this can lower and never raise. 65536 (64 KB) is the recommended value for production."
+          "description": "The most bytes one tool call may hand the model, for every tool, measured as the model is shown the output, a '[truncated at …]' notice included. A longer output is cut with that notice; a structured one keeps its fields and has its long texts cut. At least 1024, to leave room for the notice. file_read, shell_exec and http_request cut at 102400 (100 KB) either way, which this can lower and never raise. 65536 (64 KB) is the recommended value for production."
         }
       }
     },

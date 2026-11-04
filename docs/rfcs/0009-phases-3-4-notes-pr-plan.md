@@ -6,6 +6,7 @@
 review took the plan toward its 8 000-word cap. Each merged PR's
 implementation note and review findings move here; its scope, tests and
 estimate stay in the plan.
+**Part 2**: [from PR 8 on](0009-phases-3-4-notes-2-pr-plan.md).
 
 ---
 

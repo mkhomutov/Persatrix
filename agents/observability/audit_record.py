@@ -1,11 +1,13 @@
 """One audit record, redacted, written as a structured log line.
 
-Two parts of the runtime write audit lines that reach the orchestrator's log
-stream but not its checksummed audit chain, since there is no Python-to-Go
-audit call: the fact tier (:mod:`agents.memory._facts_audit`, RFC 0026 §G)
-and a tool call the argument check refuses (:mod:`agents.tools.tool_list`,
-RFC 0009 Phase 3). Both write through :func:`emit_audit_record`, so the
-redaction and its fallback are one policy.
+Three parts of the runtime write audit lines that reach the orchestrator's
+log stream but not its checksummed audit chain, since there is no
+Python-to-Go audit call: the fact tier (:mod:`agents.memory._facts_audit`,
+RFC 0026 §G), a tool call the argument check refuses
+(:mod:`agents.tools.tool_list`, RFC 0009 Phase 3), and a tool limit that
+stops a command or cuts an output (:mod:`agents.tools.sandbox`, the same
+phase). All three write through :func:`emit_audit_record`, so the redaction
+and its fallback are one policy.
 
 The registered redactor runs over the fields before the line is written,
 even when :func:`~agents.observability.logging.configure_logging` has not
