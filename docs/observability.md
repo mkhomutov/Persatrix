@@ -123,8 +123,12 @@ make run
 ## 7. Redaction hook
 
 Both runtimes route every record through a `Redactor` interface before
-serialisation. The default implementation is a no-op pass-through; a real
-PII / secret scrubber is the responsibility of a future security RFC under the
+serialisation. The default implementation is a no-op pass-through. The
+Python side also has `SecretRedactor`, which masks API keys, tokens and
+passwords with the Go `SecretRedactor`'s own patterns (RFC 0028 PR 3a), for
+the decision log RFC 0028 PR 3 adds. Logs and spans keep the pass-through
+until a redactor is installed through each one's own `set_redactor()`. A PII
+scrubber is still the responsibility of a future security RFC under the
 RFC 0009 umbrella.
 
 The same `Redactor` interface shape is used by RFC 0019 Phase 2 for opt-in
@@ -235,12 +239,13 @@ backends by default. The env var has three modes:
 |------|-----------|-----------------------|
 | `none` (default) | No payload data captured. | (none) |
 | `metadata` | Argument names and types only, no values. | `tool.arguments.<arg>.type` |
-| `full` | Argument values captured, **passed through the RFC 0018 redactor** (single secrets-policy code path for both logs and spans). | `tool.arguments.<arg>` |
+| `full` | Argument values captured, **passed through the RFC 0018 redactor** installed for spans (its own hook, below). | `tool.arguments.<arg>` |
 
-The redactor today is the no-op `NoopRedactor` shipped in RFC 0018 PR 1.
-A real redactor lands with the future security RFC under the RFC 0009
-umbrella; both signals will pick it up automatically because they share
-the same `agents.observability.spans.set_redactor()` hook.
+The redactor installed by default is the no-op `NoopRedactor` shipped in
+RFC 0018 PR 1. Tool-payload span attributes take the redactor installed
+through `agents.observability.spans.set_redactor()`, and log records the one
+installed through `agents.observability.logging.set_redactor()`: two hooks,
+so a redactor installed on one does not reach the other.
 
 > **Operator warning — `full` + `NoopRedactor`.** Setting
 > `PERSATRIX_TRACE_TOOL_PAYLOADS=full` with the default `NoopRedactor`

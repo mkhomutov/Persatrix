@@ -12,6 +12,8 @@ refs:
   - internal/security/security.go
   - internal/a2a/a2a.go
   - cmd/genpatterns/main.go
+  - cmd/genpatterns/redact.go
+  - agents/observability/redact.py
   - agents/security_patterns.py
   - agents/security.py
   - agents/base.py
@@ -316,3 +318,16 @@ it waits for the v0.3.16 tag unless a dated amendment takes it in.
 > shape](../v0.4.x-sequencing.md#amendment-2026-10-18--v040s-shape-its-prerequisites-its-cuts-and-the-end-of-the-v03x-line)
 > does not take it in: its [ruling (q)](../v0.4.x-sequencing.md#rulings)
 > boards an issue only when a phase in the release is its fix.
+
+> 2026-11-04 — RFC 0028 PR 3a copies Go's secret-redactor patterns into the
+> agents with the same generator, and shows the split can leak: copied
+> verbatim, a non-ASCII space after `Bearer` let that pattern take the start
+> of a private key that followed, so the key's body was left in the text. So
+> `cmd/genpatterns` rewrites each redactor pattern to Go's meaning (Go's
+> ASCII spaces for `\s`, `\Z` for `$`, Python's ASCII mode, and the two
+> non-ASCII letters Go's `(?i)` folds with s and k), and fails on a pattern
+> using anything else the engines read differently. The redactor's copy also
+> has the behavioural test step 1 asks for: the generator runs Go's redactor
+> over samples, non-ASCII ones among them, and the Python test compares its
+> own output with Go's. This issue still covers only the sanitizer, whose
+> patterns use `\b`, which the rewrite does not cover.

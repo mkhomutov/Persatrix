@@ -302,8 +302,8 @@ Three directories under `internal/` hold real code but have no box on purpose:
   says which packages it guards.
 
 Outside `internal/`, three more have no box: `cmd/genpatterns`, a build-time
-tool that writes the Python copies of the orchestrator's security patterns and
-enums, and the Python packages `agents/observability/` (including the log
+tool that writes the Python copies of the orchestrator's security patterns,
+enums and secret-redactor patterns, and the Python packages `agents/observability/` (including the log
 shipper — see [observability-stack.md](observability-stack.md)) and
 `agents/temporal/` (time-awareness helpers, RFC 0021). The Python group shows
 selected modules, not every file.

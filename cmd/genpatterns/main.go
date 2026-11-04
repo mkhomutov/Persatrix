@@ -1,37 +1,43 @@
 // Command genpatterns generates the Python mirrors of the Go-side
 // security surface that needs Go↔Python parity.
 //
-// Two outputs:
+// Four outputs:
 //
 //   - The InputSanitizer pattern table — sourced from
 //     [security.DefaultPatterns] — written to `agents/security_patterns.py`.
 //   - The closed-set enums (ContextSource, SanitizerAction) — sourced from
 //     [security.AllContextSources] and [security.AllSanitizerActions] —
 //     written to `agents/security_enums.py`.
+//   - The secret redactor's patterns — sourced from
+//     [security.DefaultRedactPatterns] — written to
+//     `agents/observability/redact_patterns.py` (RFC 0028 PR 3a).
+//   - The redactor parity samples: each of redactSamples beside what
+//     [security.NewSecretRedactor] returns for it, written to
+//     `tests/unit/python/_redact_parity_samples.py`.
 //
-// The Go side is the authority for both. This tool serialises them into
-// Python modules so the Python sanitizer has byte-identical regex strings,
-// pattern names, and enum constants without re-deriving them from prose.
+// The Go side is the authority for all of them. This tool serialises them into
+// Python modules so the Python sanitizer and redactor have byte-identical regex
+// strings, pattern names, and enum constants without re-deriving them from prose.
 //
 // Usage:
 //
-//	go run ./cmd/genpatterns \
-//	    -out agents/security_patterns.py \
-//	    -enums-out agents/security_enums.py
+//	go run ./cmd/genpatterns            # write the four files
+//	go run ./cmd/genpatterns -check     # exit 1 naming each stale file
 //
-// or via the Makefile target:
+// or via the Makefile targets:
 //
 //	make generate-sanitizer-patterns
+//	make generate-sanitizer-patterns-check
 //
-// The pattern-parity test in tests/unit/python/test_pattern_parity.py loads
-// both sides and asserts they agree. If you edit [security.DefaultPatterns]
-// or the enum closed sets, re-run this generator and commit the resulting
-// diff in the same PR — CI fails otherwise.
+// The `-check` mode is the parity gate CI runs. If you edit
+// [security.DefaultPatterns], the redactor's patterns or the enum closed
+// sets, re-run this generator and commit the resulting diff in the same PR.
 package main
 
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -41,24 +47,87 @@ import (
 func main() {
 	out := flag.String("out", "agents/security_patterns.py", "Output Python module path for the pattern table")
 	enumsOut := flag.String("enums-out", "agents/security_enums.py", "Output Python module path for ContextSource + SanitizerAction enums")
+	redactOut := flag.String("redact-out", "agents/observability/redact_patterns.py", "Output Python module path for the secret redactor's patterns")
+	samplesOut := flag.String("redact-samples-out", "tests/unit/python/_redact_parity_samples.py", "Output Python module path for the redactor parity samples")
+	check := flag.Bool("check", false, "Compare each output with the file at its path instead of writing; exit 1 if any differs")
 	flag.Parse()
 
-	patternsSrc := renderPatterns(security.DefaultPatterns)
-	if err := os.WriteFile(*out, []byte(patternsSrc), 0o644); err != nil {
-		fmt.Fprintf(os.Stderr, "write %s: %v\n", *out, err)
+	outs, err := buildOutputs(outputPaths{
+		patterns:      *out,
+		enums:         *enumsOut,
+		redact:        *redactOut,
+		redactSamples: *samplesOut,
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	fmt.Printf("wrote %d bytes to %s (%d patterns)\n", len(patternsSrc), *out, len(security.DefaultPatterns))
+	if *check {
+		if !checkOutputs(outs, os.Stdout) {
+			os.Exit(1)
+		}
+		return
+	}
+	if err := writeOutputs(outs, os.Stdout); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
 
-	enumsSrc := renderEnums(security.AllContextSources(), security.AllSanitizerActions())
-	if err := os.WriteFile(*enumsOut, []byte(enumsSrc), 0o644); err != nil {
-		fmt.Fprintf(os.Stderr, "write %s: %v\n", *enumsOut, err)
-		os.Exit(1)
+type outputPaths struct {
+	patterns, enums, redact, redactSamples string
+}
+
+// output is one generated file: where it goes, its bytes, and what a write
+// reports about it.
+type output struct {
+	path    string
+	body    string
+	summary string
+}
+
+func buildOutputs(p outputPaths) ([]output, error) {
+	sources, actions := security.AllContextSources(), security.AllSanitizerActions()
+	redact := security.DefaultRedactPatterns()
+	redactBody, err := renderRedactPatterns(redact)
+	if err != nil {
+		return nil, err
 	}
-	fmt.Printf("wrote %d bytes to %s (%d sources, %d actions)\n",
-		len(enumsSrc), *enumsOut,
-		len(security.AllContextSources()), len(security.AllSanitizerActions()),
-	)
+	return []output{
+		{p.patterns, renderPatterns(security.DefaultPatterns),
+			fmt.Sprintf("%d patterns", len(security.DefaultPatterns))},
+		{p.enums, renderEnums(sources, actions),
+			fmt.Sprintf("%d sources, %d actions", len(sources), len(actions))},
+		{p.redact, redactBody,
+			fmt.Sprintf("%d redact patterns", len(redact))},
+		{p.redactSamples, renderRedactSamples(security.NewSecretRedactor(), redactSamples),
+			fmt.Sprintf("%d redact samples", len(redactSamples))},
+	}, nil
+}
+
+func writeOutputs(outs []output, w io.Writer) error {
+	for _, o := range outs {
+		if err := os.WriteFile(o.path, []byte(o.body), 0o644); err != nil {
+			return fmt.Errorf("write %s: %w", o.path, err)
+		}
+		fmt.Fprintf(w, "wrote %d bytes to %s (%s)\n", len(o.body), o.path, o.summary)
+	}
+	return nil
+}
+
+// checkOutputs names each output whose file is missing or differs from what
+// this generator renders, and returns true when none does: a hand edit of a
+// generated file, or a Go change not regenerated, fails it.
+func checkOutputs(outs []output, w io.Writer) bool {
+	fresh := true
+	for _, o := range outs {
+		got, err := os.ReadFile(o.path)
+		if err != nil || string(got) != o.body {
+			fmt.Fprintf(w, "✗ %s is stale; run: make generate-sanitizer-patterns\n", o.path)
+			fresh = false
+		}
+	}
+	return fresh
 }
 
 // renderPatterns serialises patterns to a Python module body. The output is
@@ -93,7 +162,7 @@ func renderPatterns(patterns []security.Pattern) string {
 	b.WriteString("DEFAULT_PATTERNS: list[_Pattern] = [\n")
 	for _, p := range patterns {
 		fmt.Fprintf(&b, "    _Pattern(\n")
-		fmt.Fprintf(&b, "        name=%s,\n", pyRepr(p.Name))
+		fmt.Fprintf(&b, "        name=%s,\n", pyStr(p.Name))
 		// We pin the Go-source string verbatim so a pattern edited on one
 		// side only surfaces in the parity test. Both engines accept every
 		// string in the table, but they do not match the same text: Go
@@ -101,8 +170,8 @@ func renderPatterns(patterns []security.Pattern) string {
 		// the two fold case differently, so the sides flag different
 		// non-ASCII input. See
 		// docs/issues/ISSUE-0154-go-and-python-sanitizers-flag-different-text.md.
-		fmt.Fprintf(&b, "        regex=%s,\n", pyRepr(p.Regex.String()))
-		fmt.Fprintf(&b, "        description=%s,\n", pyRepr(p.Description))
+		fmt.Fprintf(&b, "        regex=%s,\n", pyStr(p.Regex.String()))
+		fmt.Fprintf(&b, "        description=%s,\n", pyStr(p.Description))
 		fmt.Fprintf(&b, "    ),\n")
 	}
 	b.WriteString("]\n")
@@ -150,7 +219,7 @@ func renderEnums(sources []security.ContextSource, actions []security.SanitizerA
 	b.WriteString("# both sides, so renaming silently breaks operator alerts.\n")
 	b.WriteString("\n")
 	for _, s := range sources {
-		fmt.Fprintf(&b, "%s: Final[str] = %s\n", contextSourceConstName(string(s)), pyRepr(string(s)))
+		fmt.Fprintf(&b, "%s: Final[str] = %s\n", contextSourceConstName(string(s)), pyStr(string(s)))
 	}
 	b.WriteString("\n")
 	b.WriteString("KNOWN_CONTEXT_SOURCES: Final[frozenset[str]] = frozenset({\n")
@@ -166,7 +235,7 @@ func renderEnums(sources []security.ContextSource, actions []security.SanitizerA
 	b.WriteString("# passthrough; operators may opt into quarantine via deployment config.\n")
 	b.WriteString("\n")
 	for _, a := range actions {
-		fmt.Fprintf(&b, "%s: Final[str] = %s\n", sanitizerActionConstName(a.String()), pyRepr(a.String()))
+		fmt.Fprintf(&b, "%s: Final[str] = %s\n", sanitizerActionConstName(a.String()), pyStr(a.String()))
 	}
 	b.WriteString("\n")
 	b.WriteString("KNOWN_SANITIZER_ACTIONS: Final[frozenset[str]] = frozenset({\n")
@@ -183,33 +252,4 @@ func contextSourceConstName(value string) string {
 
 func sanitizerActionConstName(value string) string {
 	return "SANITIZER_ACTION_" + strings.ToUpper(value)
-}
-
-// pyRepr renders s as a Python double-quoted string literal. We avoid
-// raw-string forms because Go's regex strings already escape backslashes
-// once; doubling that with Python raw-strings would diverge from the Go
-// source. The escape table covers the characters that appear in the
-// pattern table — extending it for new escapes is cheaper than pulling in
-// a JSON encoder for what is conceptually a trivial mapping.
-func pyRepr(s string) string {
-	var b strings.Builder
-	b.WriteByte('"')
-	for _, r := range s {
-		switch r {
-		case '\\':
-			b.WriteString(`\\`)
-		case '"':
-			b.WriteString(`\"`)
-		case '\n':
-			b.WriteString(`\n`)
-		case '\r':
-			b.WriteString(`\r`)
-		case '\t':
-			b.WriteString(`\t`)
-		default:
-			b.WriteRune(r)
-		}
-	}
-	b.WriteByte('"')
-	return b.String()
 }
