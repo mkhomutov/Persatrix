@@ -43,6 +43,11 @@ LLM_CALL_SPAN = "agent.llm.call"
 TOOL_EXECUTE_SPAN = "agent.tool.execute"
 SUBAGENT_SPAWN_SPAN = "agent.subagent.spawn"
 
+# RFC 0028 §D — one span per decision a checkpoint records, only while
+# recording is on. Sampled, for watching live; the decision log is the
+# record replay reads, and the span's `decision.record_id` finds its line.
+DECISION_CHECKPOINT_SPAN = "agent.decision.checkpoint"
+
 # RFC 0033 §G — the logical alias (`quality` / `fast` / `summarizer`) a request
 # resolved via, added to the LLM-call span *alongside* (never replacing) the
 # physical `gen_ai.request.model`. RFC 0019 §Attribute Schema mandates the
@@ -178,6 +183,7 @@ def gen_ai_attributes(
 
 
 __all__ = [
+    "DECISION_CHECKPOINT_SPAN",
     "EPISODIC_RECALL_SPAN",
     "EPISODIC_REMEMBER_SPAN",
     "LLM_CALL_SPAN",

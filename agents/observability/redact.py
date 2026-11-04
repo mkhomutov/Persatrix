@@ -2,9 +2,10 @@
 
 The default :class:`NoopRedactor` is a pass-through, and logs and spans still
 install it.  :class:`SecretRedactor` masks the secrets Go's ``SecretRedactor``
-masks, with Go's own patterns (RFC 0028 PR 3a), for the decision log RFC 0028
-PR 3 adds.  A PII scrubber is still the responsibility of a future security
-RFC under the RFC 0009 umbrella.
+masks, with Go's own patterns (RFC 0028 PR 3a); the decision log
+(:mod:`agents.observability.decision_log`, RFC 0028 PR 3) is its first caller.
+A PII scrubber is still the responsibility of a future security RFC under the
+RFC 0009 umbrella.
 
 The :class:`Redactor` Protocol is the **single** redaction contract shared
 across both observability signals:

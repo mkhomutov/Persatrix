@@ -1,9 +1,9 @@
 """The Python secret redactor matches Go's (RFC 0028 PR plan, PR 3a).
 
-The decision log RFC 0028 PR 3 adds is to mask secrets before it writes a
-line. The patterns come from Go's ``SecretRedactor``: ``cmd/genpatterns``
-copies them into ``agents/observability/redact_patterns.py`` and runs Go's
-redactor over a set of samples, writing what Go returned into
+The decision log (RFC 0028 PR 3) masks secrets before it writes a line. The
+patterns come from Go's ``SecretRedactor``: ``cmd/genpatterns`` copies them
+into ``agents/observability/redact_patterns.py`` and runs Go's redactor over a
+set of samples, writing what Go returned into
 ``_redact_parity_samples.py``. These tests check that Python returns the same
 for each sample, so the two sides are compared by what they mask, not only by
 their pattern strings. That the generated files are fresh is checked by
