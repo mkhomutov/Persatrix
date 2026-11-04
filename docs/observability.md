@@ -125,11 +125,11 @@ make run
 Both runtimes route every record through a `Redactor` interface before
 serialisation. The default implementation is a no-op pass-through. The
 Python side also has `SecretRedactor`, which masks API keys, tokens and
-passwords with the Go `SecretRedactor`'s own patterns (RFC 0028 PR 3a), for
-the decision log RFC 0028 PR 3 adds. Logs and spans keep the pass-through
-until a redactor is installed through each one's own `set_redactor()`. A PII
-scrubber is still the responsibility of a future security RFC under the
-RFC 0009 umbrella.
+passwords with the Go `SecretRedactor`'s own patterns (RFC 0028 PR 3a); the
+decision log ([§14](#14-decision-log-rfc-0028-pr-3)) uses it. Logs and spans
+keep the pass-through until a redactor is installed through each one's own
+`set_redactor()`. A PII scrubber is still the responsibility of a future
+security RFC under the RFC 0009 umbrella.
 
 The same `Redactor` interface shape is used by RFC 0019 Phase 2 for opt-in
 tool-payload capture as span attributes — one redaction contract across both
@@ -173,6 +173,7 @@ never overwrite a section owned by another PR.
 | Persisted log layout (`data/logs/<execution_id>/...`) + env knobs | RFC 0018 PR 4 |
 | `LogService` gRPC + REST + SSE endpoint shapes | RFC 0018 PR 5 |
 | `persatrix logs` CLI flags + colour scheme | RFC 0018 PR 6 |
+| Decision log, checkpoint span, decision metrics | RFC 0028 PR 3 (✅ § 14 below); PR 10 adds the outcome metrics |
 
 ---
 
@@ -210,6 +211,7 @@ querying for a specific channel id pivots from either span via the shared
 | `agent.llm.call` | `LLMClient.create_message()` | OTEL **Gen-AI semantic conventions**: `gen_ai.system`, `gen_ai.request.model`, `gen_ai.operation.name`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.response.finish_reasons`. Plus `persatrix.lease_id` when the call acquired an RFC 0023 wallet lease, and `persatrix.llm.model_alias` when the model came in via a model alias (both § 10.5). |
 | `agent.tool.execute` | `@tool` decorator wrapper in `tools/registry.py` | `tool.name`, `tool.success` (+ optional payload — see § 10.4) |
 | `agent.subagent.spawn` | `ActionExecutor` SPAWN_SUB_AGENT case (stub for RFC 0009) | `agent.id`, `subagent.role`, `subagent.status`. The sub-agent's root span will emit `Link(link.kind="spawn")` back here when the spawner ships in RFC 0009. |
+| `agent.decision.checkpoint` | `DecisionRecorder.record()` (RFC 0028 PR 3; only while recording is on, § 14) | `agent.id`, `decision.checkpoint`, `decision.action_class` (absent on a directive's verdict), `decision.candidate_count`, `decision.confidence` (absent in manual mode), `decision.record_id` — the record's id, which finds its line in the decision log |
 | `channel.publish` | `HTTPChannelPublisher.publish()` (Python REST publisher; ISSUE-0032) | `channel.id`, `channel.sender_id`, `channel.mentions_count`, `channel.message_id` (set from the orchestrator's 201 response). Joins the Go-side `channel.dispatch` span by `channel.message_id` for end-to-end publish-path traces. Status `UNSET` on the sticky `ChannelsDisabledError` (HTTP 503) branch — deployment signal, not an internal failure; mirrors the Go-side `channel.dispatch` discipline of leaving best-effort no-ops `Unset` so error-rate dashboards stay honest on channels-off runs. |
 | `channel.dispatch` | `GRPCMessageDispatcher.Dispatch()` (Go orchestrator fan-out; ISSUE-0032) | `channel.id`, `channel.message_id`, `recipient.agent_id` (set at span start); `recipient.address` (added only after the registry resolves a real address, so a lookup miss never pollutes address-cardinality dashboards). Plus `session.id` — the resolved per-`(agent, channel)` session (RFC 0031), set from the `--session` override or the auto-binding — and `epoch.id` — the resolved run/test-isolation epoch (ISSUE-0085), set from the `--epoch` override or the boot `PERSATRIX_EPOCH`. Both are **low-cardinality-on-span, never a metric label** (RFC 0031 OQ #7), so a trace can be pivoted to the conversation / logical run it served. Each is omitted when unresolved (channels-off / pre-wiring path → persona falls back to its `legacy` / `live` construction snapshot). Status discipline: the best-effort unknown-participant drop stays `Unset` (no `RecordError` — a `channels.yaml` typo must not redden error-rate dashboards, RFC 0011 §C); registry / readiness / dial failures `RecordError` + set `Error`. |
 
@@ -664,3 +666,37 @@ OTEL surface in
   annotations:
     summary: Audit metrics series absent for 1 hour — metrics init failure or sink down
 ```
+
+---
+
+## 14. Decision log (RFC 0028 PR 3)
+
+Each decision an agent's checkpoint records — what it could do, what it
+chose, and why, as a `DecisionRecord` — goes to two sinks, both only while
+recording is on (an agent with a `decision:` block, or in an organization):
+the agent's decision log and an `agent.decision.checkpoint` span (§ 10.2).
+With recording off neither runs, and no metric moves.
+
+The log is one file per agent, `data/decisions/<agent id>.jsonl`, created
+readable by its owner only. Each line is one record's JSON line, the format
+the replay harness reads, with every string masked first by
+`SecretRedactor` (§ 7). It holds no text from the turn: a message, a reply
+or a tool argument's values appear only as a SHA-256 hash, beside the
+candidate's class, ids, tool name and argument names, and the acting
+channel's protection level. The hash is not keyed, so a short or guessable
+text can be found by hashing guesses; the file's owner-only mode is the
+guard.
+
+| `decision.log` key | Default | Meaning |
+|--------------------|---------|---------|
+| `dir` | `data/decisions` | Where the agent's file goes |
+| `max_bytes` | 10 MiB | When the next line would pass it, the file is renamed `.1` and a new one begun |
+| `keep` | 5 | Rotated files kept (`.1` newest); 0 keeps none |
+
+A sink that fails never fails the turn: it is logged by the error's type and
+counted.
+
+| Metric | Attributes | Counts |
+|--------|------------|--------|
+| `agent.decision.records` | `agent.id`, `checkpoint`, `action_class` | Decisions recorded |
+| `agent.decision.sink_errors` | `agent.id`, `sink` (`log` or `span`) | A sink that failed to take one |

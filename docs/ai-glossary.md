@@ -1265,7 +1265,8 @@ verbatim) are defined now (PR #232 review SF-5).
   `Action` / `Resource` sees it scrubbed before the canonical-JSON encode.
   The agents' Python `SecretRedactor` (`agents/observability/redact.py`,
   RFC 0028 PR 3a) applies the same patterns, generated from this table by
-  `cmd/genpatterns`, for the decision log RFC 0028 PR 3 adds.
+  `cmd/genpatterns`, before the [decision log](#decision-log) writes a
+  record.
 
 ### Tamper evidence
 - **Aliases:** "audit chain integrity"; **Disallowed:** "audit signing"
@@ -1306,6 +1307,12 @@ decision layer task agents and persona agents share. Its types live in
 - **Disallowed:** "decision log entry", "decision trace" (when meaning one record; a trace is a series of them)
 - **Definition:** The frozen record one checkpoint writes: its context, the candidates, the outcome (the selected candidate, its confidence, the rejections and a reason) and its subject — the agent's next action, or an RFC 0012 directive with an accept / adapt / refuse verdict, or with none when a tie defers it. It converts to one JSON line and back unchanged, and holds a hash of any message or argument text, never the text.
 - **Example:** "Refusing a peer's directive writes a DecisionRecord with subject `directive` and verdict `refuse`."
+
+### Decision Log
+- **Aliases:** —
+- **Disallowed:** "decision audit log" (the security audit log is RFC 0009's), "decision trace file"
+- **Definition:** The file one agent writes its DecisionRecords to, one JSON line each, while recording is on: `data/decisions/<agent id>.jsonl`, masked by `SecretRedactor`, rotated at a size cap (`agents/observability/decision_log.py`, RFC 0028 PR 3). It is the source of truth the replay harness reads; the `agent.decision.checkpoint` span beside it is sampled.
+- **Example:** "The span's `decision.record_id` finds the record's line in the decision log."
 
 ### Human-in-the-Loop (HITL)
 - **Aliases:** "HITL"

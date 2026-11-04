@@ -381,6 +381,15 @@ replay. The span carries the selected class, the
 candidate count and the confidence; spans are sampled and not relied on. A
 failing sink counts a metric and never fails the turn. The size cap and the
 number of rotated files kept are config keys.
+*As built*: `DecisionRecorder.for_agent(agent_id, config, recording=…)`
+gives PR 5 one `record(record)` call; with recording off it makes nothing.
+The agent's `decision.log` keys are `dir` (`data/decisions`), `max_bytes`
+(10 MiB) and `keep` (5). A line is the record's `to_json` line, masked; the
+file is owner-only (0600). F-14 is recorded, not keyed: a key would stop
+replay and the eval harness matching a hash to a known text. The span's
+`decision.record_id` finds its line. Metrics: `agent.decision.records` and
+`agent.decision.sink_errors`. The four shared-pool counters moved to
+`_metrics_shared_pool.py` to make room in `metrics.py`.
 **Tests**: one line per record; a secret in a candidate is redacted by the
 real redactor; neither message text nor a tool argument's value reaches the
 file, and each record carries the acting protection level; with recording
@@ -412,6 +421,8 @@ defaults; an agent with no block and no list reads manual, recording off and
 nothing to approve; `decision: {mode: manual}` turns recording on; one with
 `requires_approval_for` and no block keeps its list.
 **Estimate**: ~300 lines.
+**From PR 3**: the schema's `decision:` block takes the `log` keys
+`dir`, `max_bytes` and `keep`, which `DecisionLogConfig` reads and checks.
 **From PR 2 review**: F-7 — the baseline policy under any mode but manual
 fails at every checkpoint, one ERROR each, rather than once at startup. The
 runtime chooses its policy from the configured mode when it wires it.
@@ -684,7 +695,7 @@ marked ✂️ or *taken, not cut*.
 | File | Lines now | Plan |
 |------|-----------|------|
 | `agents/base.py` | 412 | RFC 0009 Phases 3–4 PR 3 moved `_execute_tools` to `agents/task_tool_round.py`; PR 6 adds the checkpoint |
-| `agents/observability/metrics.py` | 500 | PR 3 adds a `_metrics_decision.py` module |
+| `agents/observability/metrics.py` | 469 | PR 3 added `_metrics_decision.py`, and moved the shared-pool counters out to make room |
 | `agents/action_executor.py` | 489 | PRs 5 and 10 add one call each; the logic lives in `agents/decision/` |
 | `agents/tick.py` | 472 | PR 5 records the actions its cut drops, through one call |
 | `agents/persona.py` | 335 | PR 5 adds the checkpoint call in `handle` |
