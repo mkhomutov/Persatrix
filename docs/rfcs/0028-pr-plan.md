@@ -384,8 +384,9 @@ number of rotated files kept are config keys.
 *As built*: `DecisionRecorder.for_agent(agent_id, config, recording=…)`
 gives PR 5 one `record(record)` call; with recording off it makes nothing.
 The agent's `decision.log` keys are `dir` (`data/decisions`), `max_bytes`
-(10 MiB) and `keep` (5). A line is the record's `to_json` line, masked; the
-file is owner-only (0600). F-14 is recorded, not keyed: a key would stop
+(10 MiB) and `keep` (5, at most 100). A line is the record's `to_json` line,
+masked, written whole or not at all; the file is owner-only (0600), and a
+link at its path is refused. F-14 is recorded, not keyed: a key would stop
 replay and the eval harness matching a hash to a known text. The span's
 `decision.record_id` finds its line. Metrics: `agent.decision.records` and
 `agent.decision.sink_errors`. The four shared-pool counters moved to
@@ -422,7 +423,8 @@ nothing to approve; `decision: {mode: manual}` turns recording on; one with
 `requires_approval_for` and no block keeps its list.
 **Estimate**: ~300 lines.
 **From PR 3**: the schema's `decision:` block takes the `log` keys
-`dir`, `max_bytes` and `keep`, which `DecisionLogConfig` reads and checks.
+`dir`, `max_bytes` and `keep` (0 to 100), which `DecisionLogConfig` reads and
+checks.
 **From PR 2 review**: F-7 — the baseline policy under any mode but manual
 fails at every checkpoint, one ERROR each, rather than once at startup. The
 runtime chooses its policy from the configured mode when it wires it.
@@ -467,6 +469,10 @@ is unchanged.
 the persona fetches them before calling `decide`; mypy refuses an
 `async def` at a typed call site. F-7 — the policy is chosen from the
 configured mode, as PR 4 notes.
+**From PR 3 review**: F-9 — a record's own strings (ids, a target, argument
+names, a rationale) reach the decision log as the checkpoint fills them,
+masked for secrets only, so the persona and task agent (PR 6), and the
+scored policy's rationale (PR 7), keep the turn's text out of them.
 
 ### PR 6 — `feature/v040-rfc0028-task-preact`
 

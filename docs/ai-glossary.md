@@ -1299,7 +1299,7 @@ decision layer task agents and persona agents share. Its types live in
 ### Decision Log
 - **Aliases:** —
 - **Disallowed:** "decision audit log" (the security audit log is RFC 0009's), "decision trace file"
-- **Definition:** The file one agent writes its DecisionRecords to, one JSON line each, while recording is on: `data/decisions/<agent id>.jsonl`, masked by `SecretRedactor`, rotated at a size cap (`agents/observability/decision_log.py`, RFC 0028 PR 3). It is the source of truth the replay harness reads; the `agent.decision.checkpoint` span beside it is sampled.
+- **Definition:** The file one agent writes its DecisionRecords to, one JSON line each, while recording is on (the agent has a `decision:` block or is in an organization, RFC 0028 PR 4): `data/decisions/<agent id>.jsonl`, masked by `SecretRedactor`, rotated at a size cap (`agents/observability/decision_log.py`, RFC 0028 PR 3). It is the source of truth the replay harness reads; the `agent.decision.checkpoint` span beside it is sampled.
 - **Example:** "The span's `decision.record_id` finds the record's line in the decision log."
 
 ### Human-in-the-Loop (HITL)

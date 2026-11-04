@@ -17,23 +17,33 @@ organization (PR 4) — :class:`DecisionRecorder` sends it to two sinks:
 With recording off neither runs, no file or directory is made, and no
 metric moves.
 
-**What a line holds.** No text from the turn: a candidate's message, reply
-or tool-argument values appear only as its SHA-256 ``content_hash`` (PR 1),
-beside its class, ids, tool name and argument names, and the context's
-acting channel and protection level. The hash is not keyed, so a short or
-guessable text — a yes or no, a number, a channel name — can be found by
-hashing guesses (PR 1 review F-14). That limit is recorded rather than
-keyed: the file is readable by its owner only, the same owner whose memory
-store holds the texts themselves, and a key would stop replay and the eval
-harness matching a hash to a known text.
+**What a line holds.** The record has no field for text from the turn: a
+candidate's message, reply or tool-argument values appear only as its
+SHA-256 ``content_hash`` (PR 1), beside its class, ids, tool name and
+argument names, and the context's acting channel and protection level. Its
+other strings (ids, a target, argument names, an outcome's rationale) are
+written as the checkpoint fills them, masked for secrets only, so the
+checkpoints (PRs 5 to 7) must keep the turn's text out of them. The hash is
+not keyed, so a short or guessable text — a yes or no, a number, a channel
+name — can be found by hashing guesses (PR 1 review F-14). That limit is
+recorded rather than keyed: the file is readable by its owner only, the same
+owner whose memory store holds the texts themselves, and a key would stop
+replay and the eval harness matching a hash to a known text.
 
 **Size.** When the next line would take the file past ``max_bytes``, the
 file becomes ``.1`` (``.1`` becomes ``.2``, and so on up to ``keep``; the
-oldest is dropped), and ``keep: 0`` drops the full file. A line longer than
-the cap is still written, alone in a new file. The settings are the agent's
-``decision.log`` keys: ``dir`` (default ``data/decisions``), ``max_bytes``
-(10 MiB) and ``keep`` (5). One process writes an agent's file, so rotation
-does not guard against a second.
+oldest, and any file above a lowered ``keep``, is dropped), and ``keep: 0``
+drops the full file. A line longer than the cap is still written, alone in a
+new file. The settings are the agent's ``decision.log`` keys: ``dir``
+(default ``data/decisions``), ``max_bytes`` (10 MiB) and ``keep`` (5, at most
+100). Every log on one file in a process shares one lock; a second process
+writing the same file is not guarded against.
+
+**The file.** The folder is created owner-only (0700); one that exists keeps
+its mode. The file is created owner-only (0600), and one found open to
+others is made owner-only. A link at the file's path, or a file of another
+user, is refused. A line is written whole or not at all: a short write is
+carried on, and a write that fails part-way is cut back off.
 
 **Failure.** A sink that fails — the disk, the redactor, the tracer — is
 counted (``agent.decision.sink_errors``) and logged by the error's type,
@@ -47,6 +57,7 @@ import json
 import logging
 import os
 import re
+import stat
 import threading
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -63,9 +74,20 @@ from .spans import DECISION_CHECKPOINT_SPAN
 logger = logging.getLogger(__name__)
 _tracer = trace.get_tracer(__name__)
 
-#: The canonical agent id, which is also a safe file name.
-_AGENT_ID = re.compile(r"[a-z0-9][a-z0-9-]*[a-z0-9]")
+#: The canonical agent id, which is also a safe file name. At 200
+#: characters, the last rotated file's name stays well under the 255 bytes
+#: most file systems allow.
+_AGENT_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,198}[a-z0-9]")
 _LOG_KEYS = frozenset({"dir", "max_bytes", "keep"})
+#: Rotation renames each kept file, under the lock, on the turn's thread.
+_MAX_KEEP = 100
+#: A rotated file's number.
+_ROTATED = re.compile(r"[1-9][0-9]*")
+
+#: One lock per log file, shared by every DecisionLog on it in this process:
+#: two recorders for one agent rotate the same files.
+_locks: dict[str, threading.Lock] = {}
+_locks_guard = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -82,8 +104,8 @@ class DecisionLogConfig:
             raise ValueError("decision.log.dir must be a path")
         if not _is_whole(self.max_bytes) or self.max_bytes < 1:
             raise ValueError("decision.log.max_bytes must be a whole number of bytes, 1 or more")
-        if not _is_whole(self.keep) or self.keep < 0:
-            raise ValueError("decision.log.keep must be a whole number, 0 or more")
+        if not _is_whole(self.keep) or not 0 <= self.keep <= _MAX_KEEP:
+            raise ValueError(f"decision.log.keep must be a whole number from 0 to {_MAX_KEEP}")
 
     @classmethod
     def from_agent_config(cls, config: Mapping[str, Any] | None) -> DecisionLogConfig:
@@ -91,6 +113,8 @@ class DecisionLogConfig:
         where it, or the ``decision`` block, is absent."""
         log = _mapping(_mapping((config or {}).get("decision"), "decision").get("log"),
                        "decision.log")
+        if not all(isinstance(key, str) for key in log):
+            raise ValueError("decision.log's keys must be names")
         if unknown := log.keys() - _LOG_KEYS:
             raise ValueError(f"decision.log has no key {sorted(unknown)}")
         return cls(**log)
@@ -124,7 +148,8 @@ class DecisionLog:
         self._max_bytes = max_bytes
         self._keep = keep
         self._redactor = redactor if redactor is not None else SecretRedactor()
-        self._lock = threading.Lock()
+        with _locks_guard:
+            self._lock = _locks.setdefault(os.path.abspath(self._path), threading.Lock())
 
     def write(self, record: DecisionRecord) -> None:
         """Append *record* as one line, masked first. Raises on failure:
@@ -135,9 +160,11 @@ class DecisionLog:
         with self._lock:
             self._path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
             self._rotate_for(len(data))
-            fd = os.open(self._path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+            flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW
+            fd = os.open(self._path, flags, 0o600)
             try:
-                os.write(fd, data)
+                _own_file(fd)
+                _append_whole(fd, data)
             finally:
                 os.close(fd)
 
@@ -148,16 +175,55 @@ class DecisionLog:
             return
         if size == 0 or size + incoming <= self._max_bytes:
             return
+        # Oldest first, from one listing of the folder, so a file above a
+        # lowered keep goes too.
+        for n in sorted(self._rotated_numbers(), reverse=True):
+            if n >= self._keep:
+                self._rotated(n).unlink()
+            else:
+                self._rotated(n).replace(self._rotated(n + 1))
         if self._keep == 0:
             self._path.unlink()
-            return
-        for n in range(self._keep - 1, 0, -1):
-            if (older := self._rotated(n)).exists():
-                older.replace(self._rotated(n + 1))
-        self._path.replace(self._rotated(1))
+        else:
+            self._path.replace(self._rotated(1))
+
+    def _rotated_numbers(self) -> list[int]:
+        prefix = f"{self._path.name}."
+        return [int(path.name[len(prefix):]) for path in self._path.parent.iterdir()
+                if path.name.startswith(prefix) and _ROTATED.fullmatch(path.name[len(prefix):])]
 
     def _rotated(self, n: int) -> Path:
         return self._path.with_name(f"{self._path.name}.{n}")
+
+
+def _own_file(fd: int) -> None:
+    """Refuse an open log that is not a plain file of this user's, and make
+    one open to others owner-only."""
+    status = os.fstat(fd)
+    if not stat.S_ISREG(status.st_mode) or status.st_uid != os.geteuid():
+        raise PermissionError("the decision log is not this user's own file")
+    if status.st_mode & 0o077:
+        os.fchmod(fd, 0o600)
+
+
+def _append_whole(fd: int, data: bytes) -> None:
+    """Write all of *data*, carrying on after a short write. A write that
+    fails part-way is cut back off, so the file always ends on a whole line,
+    and the error is raised."""
+    start = os.fstat(fd).st_size
+    view = memoryview(data)
+    written = 0
+    try:
+        while written < len(data):
+            n = os.write(fd, view[written:])
+            if n <= 0:
+                raise OSError("the decision log took no bytes")
+            written += n
+    except BaseException:
+        if written:
+            with contextlib.suppress(OSError):
+                os.ftruncate(fd, start)
+        raise
 
 
 class DecisionRecorder:
