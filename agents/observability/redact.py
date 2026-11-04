@@ -74,10 +74,14 @@ class NoopRedactor:
 
 
 #: How deep :meth:`SecretRedactor.redact` walks, and what it puts past that
-#: depth: the cap and marker of Go's ``RedactStruct``.  A value past the cap,
-#: a cycle included, is replaced, never kept.
+#: depth: the number and marker of Go's ``RedactStruct``.  This walk counts
+#: one step per level, so it keeps values down to 32 levels; Go counts two per
+#: level of a JSON-shaped ``map[string]any`` (the map, then the value inside
+#: it) and stops at 16.  A value past the cap, a cycle included, is replaced,
+#: never kept.
 _MAX_DEPTH = 32
 _DEPTH_MARKER = "[REDACTED:max-depth-exceeded]"
+_CONTAINERS = (dict, list, tuple)
 
 
 class SecretRedactor:
@@ -99,22 +103,26 @@ class SecretRedactor:
     """
 
     def __init__(self) -> None:
+        # Each marker's backslashes are doubled, so `sub` reads it as plain
+        # text, never as a reference to a matched group.
         self._patterns = tuple(
-            (re.compile(expr), f"[REDACTED:{name}]") for name, expr in REDACT_PATTERNS
+            (re.compile(expr), f"[REDACTED:{name}]".replace("\\", "\\\\"))
+            for name, expr in REDACT_PATTERNS
         )
 
     def redact_text(self, text: str) -> str:
         """Return *text* with every match of every pattern masked."""
         for pattern, marker in self._patterns:
-            # A function, so the marker is never read as a replacement template.
-            text = pattern.sub(lambda _match: marker, text)
+            text = pattern.sub(marker, text)
         return text
 
     def redact(self, record: dict[str, Any]) -> dict[str, Any]:
         """Return a copy of *record* with every string in it masked.
 
         Dicts, lists and tuples are walked; keys are kept as they are, as Go
-        keeps map keys; other values are returned unchanged.
+        keeps map keys; other values are returned unchanged.  A container the
+        record holds in two places at the same depth is copied once and held
+        in both, as :func:`copy.deepcopy` keeps it.
         """
         # One result per container and depth: a container reached down many
         # paths, or a cycle with two ways back, is walked once per depth
@@ -127,7 +135,7 @@ class SecretRedactor:
             return _DEPTH_MARKER
         if isinstance(value, str):
             return self.redact_text(value)
-        if not isinstance(value, dict | list | tuple):
+        if not isinstance(value, _CONTAINERS):
             return value
         key = (id(value), depth)
         if key not in seen:

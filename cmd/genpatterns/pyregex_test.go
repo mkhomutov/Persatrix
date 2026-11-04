@@ -22,6 +22,13 @@ func TestPythonRegex_WritesGosReading(t *testing.T) {
 		{`(?i)[^s]`, "(?ai)[^s\u017f]"},
 		{`[a-z]{20,}`, `(?a)[a-z]{20,}`},
 		{`[ _-]?key["']?[:=\s]+`, `(?a)[ _-]?key["']?[:=\t\n\f\r ]+`},
+		// Go's spaces end in a literal space, so a '-' after them is
+		// escaped: Python would read ` -a` as a range from space to a.
+		{`[\s-a]`, `(?a)[\t\n\f\r \-a]`},
+		{`[\s--/]`, `(?a)[\t\n\f\r \--/]`},
+		// Go reads `{,n}` as text; Python would read it as 0..n repeats.
+		{`x{,5}`, `(?a)x\{,5}`},
+		{`x{,}`, `(?a)x\{,}`},
 	}
 	for _, tc := range cases {
 		got, err := pythonRegex(tc.in)

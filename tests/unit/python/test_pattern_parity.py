@@ -83,7 +83,9 @@ class TestParityFreshness:
     )
     def test_generator_output_matches_checked_in_files(self) -> None:
         # `-check` renders every generated file and compares it with the
-        # checked-in one, writing nothing; it names each stale file.
+        # checked-in one, writing nothing; it names each stale file on
+        # stdout, and a generator error (a pattern it cannot rewrite, a
+        # build failure) goes to stderr with nothing named.
         try:
             result = subprocess.run(
                 ["go", "run", "./cmd/genpatterns", "-check"],
@@ -94,6 +96,11 @@ class TestParityFreshness:
             )
         except FileNotFoundError:
             pytest.skip("`go` toolchain not on PATH; freshness checked in CI.")
+        if result.returncode != 0 and "is stale" not in result.stdout:
+            pytest.fail(
+                f"Generator failed (rc={result.returncode}); regenerating fails the "
+                f"same way. stderr:\n{result.stderr}"
+            )
         if result.returncode != 0:
             pytest.fail(
                 "A generated security mirror is stale relative to the Go source. "

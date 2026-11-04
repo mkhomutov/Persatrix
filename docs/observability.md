@@ -239,7 +239,7 @@ backends by default. The env var has three modes:
 |------|-----------|-----------------------|
 | `none` (default) | No payload data captured. | (none) |
 | `metadata` | Argument names and types only, no values. | `tool.arguments.<arg>.type` |
-| `full` | Argument values captured, **passed through the RFC 0018 redactor** (single secrets-policy code path for both logs and spans). | `tool.arguments.<arg>` |
+| `full` | Argument values captured, **passed through the RFC 0018 redactor** installed for spans (its own hook, below). | `tool.arguments.<arg>` |
 
 The redactor installed by default is the no-op `NoopRedactor` shipped in
 RFC 0018 PR 1. Tool-payload span attributes take the redactor installed

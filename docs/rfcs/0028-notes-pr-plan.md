@@ -86,8 +86,8 @@ Merged as [#1072](https://github.com/mkhomutov/Persatrix/pull/1072) on
 
 Opened as [#1086](https://github.com/mkhomutov/Persatrix/pull/1086).
 
-**Review findings** (PR 3a), from one independent review; the severities are
-this record's own:
+**Review findings** (PR 3a; F-8 to F-19 from a second review of the fixed
+branch), from two independent reviews; the severities are this record's own:
 
 | Finding | Severity | Description | Disposition |
 |---------|----------|-------------|-------------|
@@ -98,3 +98,15 @@ this record's own:
 | F-5 | Low | The observability guide said logs and spans share one `set_redactor()` hook (each has its own), its operator warning named `SecretRedactor`, which masks secrets and no other personal data, as the redactor to install, and the guide, the glossary and two docstrings spoke of PR 3's decision log as already calling it | Fixed in-PR |
 | F-6 | Low | `redact` masks values only: keys are kept, as Go keeps map keys, and an object other than a dict, list or tuple is returned unchanged | Noted: its one caller, PR 3's decision log, passes a record decoded from JSON, whose keys are the record's field names and whose values are JSON types |
 | F-7 | Info | Row 3a still read ⬜ | Fixed in-PR: 🔀 with the PR link |
+| F-8 | Medium | The rewrite wrote `\s` in a class as Go's spaces, which end in a literal space, so a `-` after them made a Python range: Go's `[\s-a]` became a class that also took digits, capitals and punctuation, with no error. No pattern has that shape yet | Fixed in-PR: a `-` after the spaces is escaped, with a test case for a lone `-` and for a range |
+| F-9 | Medium | `{,n}` passed through unchanged: Go reads it as text, Python as 0 to n repeats, so a pattern ending in one would match empty text in Python and mask between every character | Fixed in-PR: `{,` is written `\{,`, with a test case |
+| F-10 | Low | The depth cap was called Go's, but Go counts two steps per level of a JSON-shaped record and stops at 16 levels, where the Python walk stops at 32 | Fixed in-PR: the comment says how each counts |
+| F-11 | Info | A container the record holds in two places at the same depth is one object in the result | Noted: `copy.deepcopy` keeps sharing the same way, and a copy per path would make the result itself double at each level, which F-3 removed; the docstring says so |
+| F-12 | Low | The guide's `full` row still said logs and spans share one redactor, against the paragraph below it | Fixed in-PR: the row names the spans' own hook |
+| F-13 | Low | F-8 and F-9 passed both the translator's tests and every sample, and F-1's fuzz is not committed | Fixed in-PR: a test case for each. No seeded differential test is added: inputs built from token prefixes could put whole token shapes in a committed file |
+| F-14 | Info | A Python binding of RE2 would read Go's patterns as Go does, without a hand-written rewrite | Noted: it adds a native dependency and a license entry, a choice for a version plan rather than this PR |
+| F-15 | Info | The generator had two Python string escapers, `pyStr` and the sanitizer's `pyRepr` | Fixed in-PR: one, `pyStr`; the sanitizer's two files are unchanged byte for byte |
+| F-16 | Info | The Makefile spelled out the four output paths that are the generator's defaults, which the Python freshness test relies on | Fixed in-PR: both targets use the defaults |
+| F-17 | Info | `redact_text` built a function for each pattern on every string, and the walk built its type check on every call | Fixed in-PR: the markers are plain-text templates made once, and the type check is a constant |
+| F-18 | Low | The freshness test called any generator failure a stale file, so a pattern the rewrite refuses told the developer to regenerate, which fails the same way | Fixed in-PR: a failure that names no stale file says the generator failed; a negative control for each case |
+| F-19 | Info | About 1 440 changed lines against the ~350 estimate and the plan header's 500-line rule, recorded nowhere | Noted: about 220 lines are generated and about 400 are tests; the translator is what keeps the copy from leaking, so it stays with the redactor |

@@ -162,7 +162,7 @@ func renderPatterns(patterns []security.Pattern) string {
 	b.WriteString("DEFAULT_PATTERNS: list[_Pattern] = [\n")
 	for _, p := range patterns {
 		fmt.Fprintf(&b, "    _Pattern(\n")
-		fmt.Fprintf(&b, "        name=%s,\n", pyRepr(p.Name))
+		fmt.Fprintf(&b, "        name=%s,\n", pyStr(p.Name))
 		// We pin the Go-source string verbatim so a pattern edited on one
 		// side only surfaces in the parity test. Both engines accept every
 		// string in the table, but they do not match the same text: Go
@@ -170,8 +170,8 @@ func renderPatterns(patterns []security.Pattern) string {
 		// the two fold case differently, so the sides flag different
 		// non-ASCII input. See
 		// docs/issues/ISSUE-0154-go-and-python-sanitizers-flag-different-text.md.
-		fmt.Fprintf(&b, "        regex=%s,\n", pyRepr(p.Regex.String()))
-		fmt.Fprintf(&b, "        description=%s,\n", pyRepr(p.Description))
+		fmt.Fprintf(&b, "        regex=%s,\n", pyStr(p.Regex.String()))
+		fmt.Fprintf(&b, "        description=%s,\n", pyStr(p.Description))
 		fmt.Fprintf(&b, "    ),\n")
 	}
 	b.WriteString("]\n")
@@ -219,7 +219,7 @@ func renderEnums(sources []security.ContextSource, actions []security.SanitizerA
 	b.WriteString("# both sides, so renaming silently breaks operator alerts.\n")
 	b.WriteString("\n")
 	for _, s := range sources {
-		fmt.Fprintf(&b, "%s: Final[str] = %s\n", contextSourceConstName(string(s)), pyRepr(string(s)))
+		fmt.Fprintf(&b, "%s: Final[str] = %s\n", contextSourceConstName(string(s)), pyStr(string(s)))
 	}
 	b.WriteString("\n")
 	b.WriteString("KNOWN_CONTEXT_SOURCES: Final[frozenset[str]] = frozenset({\n")
@@ -235,7 +235,7 @@ func renderEnums(sources []security.ContextSource, actions []security.SanitizerA
 	b.WriteString("# passthrough; operators may opt into quarantine via deployment config.\n")
 	b.WriteString("\n")
 	for _, a := range actions {
-		fmt.Fprintf(&b, "%s: Final[str] = %s\n", sanitizerActionConstName(a.String()), pyRepr(a.String()))
+		fmt.Fprintf(&b, "%s: Final[str] = %s\n", sanitizerActionConstName(a.String()), pyStr(a.String()))
 	}
 	b.WriteString("\n")
 	b.WriteString("KNOWN_SANITIZER_ACTIONS: Final[frozenset[str]] = frozenset({\n")
@@ -252,33 +252,4 @@ func contextSourceConstName(value string) string {
 
 func sanitizerActionConstName(value string) string {
 	return "SANITIZER_ACTION_" + strings.ToUpper(value)
-}
-
-// pyRepr renders s as a Python double-quoted string literal. We avoid
-// raw-string forms because Go's regex strings already escape backslashes
-// once; doubling that with Python raw-strings would diverge from the Go
-// source. The escape table covers the characters that appear in the
-// pattern table — extending it for new escapes is cheaper than pulling in
-// a JSON encoder for what is conceptually a trivial mapping.
-func pyRepr(s string) string {
-	var b strings.Builder
-	b.WriteByte('"')
-	for _, r := range s {
-		switch r {
-		case '\\':
-			b.WriteString(`\\`)
-		case '"':
-			b.WriteString(`\"`)
-		case '\n':
-			b.WriteString(`\n`)
-		case '\r':
-			b.WriteString(`\r`)
-		case '\t':
-			b.WriteString(`\t`)
-		default:
-			b.WriteRune(r)
-		}
-	}
-	b.WriteByte('"')
-	return b.String()
 }

@@ -18,6 +18,10 @@ import (
 //     letters. Go also folds the long s (U+017F) with s and the Kelvin sign
 //     (U+212A) with k, so under `(?i)` those two are added wherever s or k
 //     can match.
+//   - `{,` becomes `\{,`. Go reads `{,n}` as text; Python reads it as 0 to n
+//     repeats, which can match nothing at all.
+//   - Inside a class, a `-` right after Go's spaces is escaped: they end in
+//     a literal space, and Python would read ` -x` as a range from space to x.
 //
 // Anything else the two engines may read differently is an error (`\b`,
 // `\w`, `\d`, any other escaped letter, flags past a leading `(?i)`, a `[`
@@ -74,6 +78,9 @@ func pythonRegex(expr string) (string, error) {
 		case c == '$':
 			b.WriteString(`\Z`)
 			i++
+		case strings.HasPrefix(body[i:], "{,"):
+			b.WriteString(`\{`)
+			i++
 		default:
 			if extra, ok := foldExtra(c, fold); ok {
 				b.WriteString("[" + string(c) + string(extra) + "]")
@@ -125,6 +132,10 @@ func pythonClass(s string, fold bool) (string, int, error) {
 		if text == `\s` {
 			items = append(items, goSpaces)
 		} else {
+			if len(items) > 0 && items[len(items)-1] == goSpaces && text[0] == '-' {
+				// The spaces end in a literal space; ` -` would start a range.
+				text = `\` + text
+			}
 			items = append(items, text)
 			spans = append(spans, [2]byte{lo, hi})
 		}
@@ -193,7 +204,9 @@ func isASCIIAlnum(c byte) bool {
 
 // pyStr writes s as a Python string literal in printable ASCII: a control
 // character or a non-ASCII letter in a pattern or a sample is written as an
-// escape, so a reviewer sees it.
+// escape, so a reviewer sees it. It is never a raw string: a backslash is
+// written doubled, so Python reads back Go's text unchanged. Every generated
+// file uses it.
 func pyStr(s string) string {
 	var b strings.Builder
 	b.WriteByte('"')
