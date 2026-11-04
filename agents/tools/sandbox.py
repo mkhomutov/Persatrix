@@ -10,8 +10,11 @@ so a tool behaves as it did before (design point G-3):
 
 - ``ResourceLimiter`` caps the CPU time of a ``shell_exec`` command
   (``shell_cpu_seconds``). The limit is set in the child process before the
-  command starts, so the kernel stops a command that spins. Windows has no
-  such limit, and there only the wall time applies. The wall time stays
+  command starts, so the kernel stops a command that spins. It holds for
+  each process the command starts, not for all of them together: a command
+  that starts others can spend more in all, up to its wall time and the
+  container's own limits. Windows has no such limit, and there only the
+  wall time applies. The wall time stays
   ``permissions.shell.max_execution_seconds``, which ``shell_exec`` already
   reads; it is adopted here rather than set twice.
 - ``OutputSizeLimiter`` caps what one tool call hands the model
@@ -19,7 +22,7 @@ so a tool behaves as it did before (design point G-3):
   ``file_read``, ``shell_exec`` and ``http_request`` keep their own
   100 KB cut (``MAX_OUTPUT_BYTES`` in ``builtin.py``) either way.
 
-A limit that stops a command, or the output cap, writes a
+A limit an operator set that stops a command, or the output cap, writes a
 ``tool.resource_limited`` audit line. Like ``tool.arg_invalid``, it is a
 structured log record on ``agents.tools.audit``: it reaches the
 orchestrator's log stream but not its checksummed audit chain (G-4).
@@ -158,19 +161,27 @@ def tool_process_env(environ: Mapping[str, str] | None = None) -> dict[str, str]
 def cpu_rlimit(seconds: int, current_hard: int) -> tuple[int, int]:
     """The ``RLIMIT_CPU`` pair a child sets for a limit of *seconds*.
 
-    The kernel sends SIGXCPU at the soft limit, and SIGKILL at the hard one
-    to a command that ignores it, a second later. A process may not raise
-    its hard limit, so a lower one already set (by the container, say)
-    stands, and the soft limit never passes it.
+    The kernel sends SIGXCPU at the soft limit. Linux sends SIGKILL at the
+    hard one, a second later, to a command that ignores SIGXCPU; macOS does
+    not, and such a command runs on to its wall time. A process may not
+    raise its hard limit, so a lower one already set (by the container, say)
+    stands, and the soft limit sits a second under it: Linux checks the hard
+    limit first, so equal limits would kill the command with SIGKILL, which
+    does not read as the limit. Under a one-second hard limit there is no
+    room, and the two are equal.
     """
     hard = seconds + 1
     if current_hard != resource.RLIM_INFINITY:
         hard = min(hard, current_hard)
-    return min(seconds, hard), hard
+    return min(seconds, max(1, hard - 1)), hard
 
 
 class ResourceLimiter:
     """The CPU limit on one ``shell_exec`` command, or none.
+
+    The limit holds for each process the command starts, each on its own;
+    only the command's own process stopping at it is reported. A process it
+    starts that is stopped shows only in the command's output and exit code.
 
     The wall-time limit is not here: it stays the agent's
     ``permissions.shell.max_execution_seconds``, as before.
@@ -185,8 +196,8 @@ class ResourceLimiter:
         """What the child runs before the command starts, or None for nothing.
 
         None with no limit set, so a command starts exactly as before, and on
-        Windows, which has no CPU limit. The function makes one system call
-        each way, which is safe in a child forked from a threaded process.
+        Windows, which has no CPU limit. The function only reads and sets
+        limits, which is safe in a child forked from a threaded process.
         """
         seconds = self.cpu_seconds
         if seconds is None or sys.platform == "win32":
@@ -195,15 +206,20 @@ class ResourceLimiter:
         def set_cpu_limit() -> None:
             _, current_hard = resource.getrlimit(resource.RLIMIT_CPU)
             resource.setrlimit(resource.RLIMIT_CPU, cpu_rlimit(seconds, current_hard))
+            # SIGXCPU writes a core file by default, and the command runs in
+            # the agent's workspace.
+            _, core_hard = resource.getrlimit(resource.RLIMIT_CORE)
+            resource.setrlimit(resource.RLIMIT_CORE, (0, core_hard))
 
         return set_cpu_limit
 
     def stopped_by_cpu_limit(self, returncode: int | None) -> bool:
         """Whether a command that ended with *returncode* was stopped by the limit.
 
-        Only SIGXCPU counts. A command that ignores it is killed a second later
-        with SIGKILL, which reads as any other kill: its exit code is reported
-        as it is, and no audit line is written.
+        Only SIGXCPU counts. A command that ignores it, and on Linux one under
+        a one-second hard limit, is killed with SIGKILL, which reads as any
+        other kill: its exit code is reported as it is, and no audit line is
+        written.
         """
         if self.cpu_seconds is None or returncode is None or sys.platform == "win32":
             return False
@@ -219,17 +235,25 @@ def _size_label(max_bytes: int) -> str:
     return f"{max_bytes} bytes"
 
 
+def _notice(max_bytes: int) -> str:
+    return f"\n... [truncated at {_size_label(max_bytes)}]"
+
+
+def _cut(text: str, keep_bytes: int, notice: str) -> str:
+    """The first *keep_bytes* of *text*'s UTF-8, then *notice*; never splits a character."""
+    kept = text.encode("utf-8", errors="replace")[:keep_bytes].decode("utf-8", errors="ignore")
+    return kept + notice
+
+
 def truncate_text(text: str, max_bytes: int) -> str:
     """*text* cut to *max_bytes* of UTF-8 with a notice, or as it is if it fits.
 
-    The notice names the limit, as ``\\n... [truncated at 100 KB]``. A cut
-    never splits a character.
+    The notice names the limit, as ``\\n... [truncated at 100 KB]``, and comes
+    after the *max_bytes* kept.
     """
-    encoded = text.encode("utf-8", errors="replace")
-    if len(encoded) <= max_bytes:
+    if _byte_size(text) <= max_bytes:
         return text
-    kept = encoded[:max_bytes].decode("utf-8", errors="ignore")
-    return f"{kept}\n... [truncated at {_size_label(max_bytes)}]"
+    return _cut(text, max_bytes, _notice(max_bytes))
 
 
 def render_output(data: Any) -> str:
@@ -258,18 +282,25 @@ def _longest_text(data: Any) -> int:
 class OutputSizeLimiter:
     """Caps what one tool call hands the model at *max_bytes*.
 
-    The size is that of the output as the model is shown it. A text over the
-    cap is cut with :func:`truncate_text`'s notice. A dict or a list keeps its
-    shape: every text in it longer than one common length is cut to that
-    length, the longest length that makes the whole fit, so a long stdout
-    does not cost the model ``shell_exec``'s stderr and exit code. One with
-    too many fields for any such cut to fit is cut as its shown text.
+    The size is that of the output as the model is shown it, the notice
+    included. A text over the cap is cut with :func:`truncate_text`'s notice.
+    A dict or a list keeps its shape: every text in it is cut to one common
+    length, the longest that makes the whole fit, so a long stdout does not
+    cost the model ``shell_exec``'s stderr and exit code. A text no longer
+    than that length and the notice together is kept whole, since cutting it
+    would lengthen it. One with too many fields for any such cut to fit is
+    cut as its shown text.
     """
 
+    #: The smallest cap, which leaves room for the notice and some text.
+    MIN_BYTES = 1024
+
     def __init__(self, max_bytes: int) -> None:
-        if max_bytes < 1:
-            raise ValueError("an output cap is at least one byte")
+        if max_bytes < self.MIN_BYTES:
+            raise ValueError(f"an output cap is at least {self.MIN_BYTES} bytes")
         self.max_bytes = max_bytes
+        self._notice = _notice(max_bytes)
+        self._notice_bytes = _byte_size(self._notice)
 
     def limit(self, data: Any) -> tuple[Any, int | None]:
         """*data* cut to fit, and its size before the cut; None if it fit.
@@ -288,14 +319,13 @@ class OutputSizeLimiter:
             fitted = self._fit_texts(data)
             if fitted is not None:
                 return fitted, size
-        return truncate_text(shown, self.max_bytes), size
+        return _cut(shown, self.max_bytes - self._notice_bytes, self._notice), size
 
     def _cut_texts(self, data: Any, length: int) -> Any:
         if isinstance(data, str):
-            if _byte_size(data) <= length:
+            if _byte_size(data) <= length + self._notice_bytes:
                 return data
-            kept = data.encode("utf-8", errors="replace")[:length].decode("utf-8", errors="ignore")
-            return f"{kept}\n... [truncated at {_size_label(self.max_bytes)}]"
+            return _cut(data, length, self._notice)
         if isinstance(data, dict):
             return {k: self._cut_texts(v, length) for k, v in data.items()}
         if isinstance(data, list):
@@ -312,9 +342,9 @@ class OutputSizeLimiter:
         low, high = 0, min(_longest_text(data), self.max_bytes)
         if not self._fits(self._cut_texts(data, low)):
             return None
-        # The texts uncut never fit, nor do any cut at the cap. Cutting one
-        # more byte can lengthen a text by its notice, so this finds a length
-        # that fits, not always the longest.
+        # The texts uncut never fit, nor do any cut at the cap. A text is
+        # only cut where that shortens it, so the whole grows with the
+        # length, and this finds the longest length that fits.
         while high - low > 1:
             middle = (low + high) // 2
             if self._fits(self._cut_texts(data, middle)):
@@ -331,7 +361,7 @@ class OutputSizeLimiter:
 #: the built-in tools' own cut, which it can lower and never raise.
 _LIMIT_RANGES: dict[str, tuple[int, int]] = {
     "shell_cpu_seconds": (1, 300),
-    "tool_output_bytes": (1, 102_400),
+    "tool_output_bytes": (OutputSizeLimiter.MIN_BYTES, 102_400),
 }
 
 
@@ -346,20 +376,24 @@ class ResourceLimits:
 def read_resource_limits(block: object) -> ResourceLimits:
     """Read an agent's ``resource_limits`` block; None or absent sets no limit.
 
-    Raises ``ValueError`` naming the key for a value
-    ``schemas/agent.schema.json`` refuses: a limit an operator set must not
-    be dropped quietly, so a bad one stops the agent at startup.
+    A key set to None sets no limit either, and a whole number written as
+    ``10.0`` is that number, as ``schemas/agent.schema.json`` reads them.
+    Raises ``ValueError`` naming the key for a value the schema refuses: a
+    limit an operator set must not be dropped quietly, so a bad one stops
+    the agent at startup.
     """
     if block is None:
         block = {}
     if not isinstance(block, dict):
         raise ValueError("resource_limits must be a mapping")
-    unknown = sorted(set(block) - set(_LIMIT_RANGES))
+    unknown = sorted(map(str, set(block) - set(_LIMIT_RANGES)))
     if unknown:
-        raise ValueError(f"resource_limits does not take {', '.join(map(str, unknown))}")
+        raise ValueError(f"resource_limits does not take {', '.join(unknown)}")
     values: dict[str, int | None] = {}
     for key, (low, high) in _LIMIT_RANGES.items():
         value = block.get(key)
+        if isinstance(value, float) and value.is_integer():
+            value = int(value)
         if value is not None and (
             isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high
         ):
