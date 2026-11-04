@@ -4,6 +4,9 @@
 # security.DefaultRedactPatterns). Regenerate via:
 # make generate-sanitizer-patterns
 #
+# Each expression is Go's, rewritten by cmd/genpatterns/pyregex.go so that
+# Python's re matches what Go's RE2 matches: Go's ASCII spaces for \s, \Z
+# for $, ASCII mode, and the two non-ASCII letters Go's (?i) folds.
 # tests/unit/python/test_secret_redactor.py runs the Python redactor over
 # samples and compares the result with what Go's redactor returned for them.
 
@@ -12,15 +15,15 @@ from __future__ import annotations
 #: (marker name, regular expression), in the order Go's SecretRedactor
 #: applies them. A match becomes ``[REDACTED:<marker name>]``.
 REDACT_PATTERNS: tuple[tuple[str, str], ...] = (
-    ("anthropic-api-key", "sk-ant-[A-Za-z0-9\\-_]{20,}"),
-    ("stripe-key", "[sp]k_live_[A-Za-z0-9]{20,}"),
-    ("openai-api-key", "sk-[A-Za-z0-9_\\-]{20,}"),
-    ("github-token", "gh[opusr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{60,}"),
-    ("slack-token", "xox[baprs]-[A-Za-z0-9\\-]{10,}"),
-    ("bearer-token", "(?i)bearer\\s+[A-Za-z0-9\\-_.~+/]+=*"),
-    ("aws-access-key", "AKIA[0-9A-Z]{16}"),
-    ("gcp-private-key", "-----BEGIN PRIVATE KEY-----[\\s\\S]*?(-----END PRIVATE KEY-----|$)"),
-    ("google-api-key", "AIza[A-Za-z0-9_\\-]{35}"),
-    ("watsonx-api-key", "(?i)watsonx[ _-]?api[ _-]?key[\"']?[:=\\s]+[\"']?[A-Za-z0-9_\\-]{20,}"),
-    ("generic-secret", "(?i)[\"']?(password|secret|token|api[_-]?key)[\"']?\\s*[:=]\\s*[\"']?[^\\s,;&\"'}\\]\\[]+[\"']?"),  # noqa: E501
+    ("anthropic-api-key", "(?a)sk-ant-[A-Za-z0-9\\-_]{20,}"),
+    ("stripe-key", "(?a)[sp]k_live_[A-Za-z0-9]{20,}"),
+    ("openai-api-key", "(?a)sk-[A-Za-z0-9_\\-]{20,}"),
+    ("github-token", "(?a)gh[opusr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{60,}"),
+    ("slack-token", "(?a)xox[baprs]-[A-Za-z0-9\\-]{10,}"),
+    ("bearer-token", "(?ai)bearer[\\t\\n\\f\\r ]+[A-Za-z0-9\\-_.~+/\u017f\u212a]+=*"),
+    ("aws-access-key", "(?a)AKIA[0-9A-Z]{16}"),
+    ("gcp-private-key", "(?a)-----BEGIN PRIVATE KEY-----[\\s\\S]*?(-----END PRIVATE KEY-----|\\Z)"),
+    ("google-api-key", "(?a)AIza[A-Za-z0-9_\\-]{35}"),
+    ("watsonx-api-key", "(?ai)wat[s\u017f]onx[ _-]?api[ _-]?[k\u212a]ey[\"']?[:=\\t\\n\\f\\r ]+[\"']?[A-Za-z0-9_\\-\u017f\u212a]{20,}"),  # noqa: E501
+    ("generic-secret", "(?ai)[\"']?(pa[s\u017f][s\u017f]word|[s\u017f]ecret|to[k\u212a]en|api[_-]?[k\u212a]ey)[\"']?[\\t\\n\\f\\r ]*[:=][\\t\\n\\f\\r ]*[\"']?[^\\t\\n\\f\\r ,;&\"'}\\]\\[]+[\"']?"),  # noqa: E501
 )

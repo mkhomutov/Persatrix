@@ -37,13 +37,21 @@ func TestRedactSamples_CoverEveryPattern(t *testing.T) {
 	}
 }
 
-// TestRenderRedactPatterns_CopiesGoStringsVerbatim pins that each name and
-// expression reaches the Python module unchanged and in order.
-func TestRenderRedactPatterns_CopiesGoStringsVerbatim(t *testing.T) {
-	src := renderRedactPatterns(security.DefaultRedactPatterns())
+// TestRenderRedactPatterns_WritesEachPatternRewritten pins that each name
+// reaches the Python module in order, beside its expression as pythonRegex
+// rewrote it.
+func TestRenderRedactPatterns_WritesEachPatternRewritten(t *testing.T) {
+	src, err := renderRedactPatterns(security.DefaultRedactPatterns())
+	if err != nil {
+		t.Fatal(err)
+	}
 	at := 0
 	for _, p := range security.DefaultRedactPatterns() {
-		i := strings.Index(src[at:], pyRepr(p.Name)+", "+pyRepr(p.Expr))
+		expr, err := pythonRegex(p.Expr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		i := strings.Index(src[at:], pyStr(p.Name)+", "+pyStr(expr))
 		if i < 0 {
 			t.Fatalf("%s is missing, changed or out of order in:\n%s", p.Name, src)
 		}
@@ -56,19 +64,24 @@ func TestRenderRedactPatterns_CopiesGoStringsVerbatim(t *testing.T) {
 	}
 }
 
-// TestRenderRedactSamples_KeepsGoOutputAndSplitsInput pins that the samples
-// module carries what Go returned for each input, and never an input whole:
-// GitHub's push-time secret scanner flags a full token shape even as test data.
-func TestRenderRedactSamples_KeepsGoOutputAndSplitsInput(t *testing.T) {
+// TestRenderRedactPatterns_NamesAPatternItCannotRewrite pins that a Go
+// pattern the rewrite does not cover stops the generator, naming it.
+func TestRenderRedactPatterns_NamesAPatternItCannotRewrite(t *testing.T) {
+	_, err := renderRedactPatterns([]security.RedactPattern{{Name: "word-key", Expr: `\bkey\w+`}})
+	if err == nil || !strings.Contains(err.Error(), "word-key") {
+		t.Fatalf("err = %v; want one naming word-key", err)
+	}
+}
+
+// TestRenderRedactSamples_KeepsGoOutput pins that the samples module carries
+// what Go returned for each input.
+func TestRenderRedactSamples_KeepsGoOutput(t *testing.T) {
 	r := security.NewSecretRedactor()
 	src := renderRedactSamples(r, redactSamples)
 	for _, s := range redactSamples {
 		in := strings.Join(s.parts, "")
-		if !strings.Contains(src, pyRepr(r.Redact(in))) {
+		if !strings.Contains(src, pyStr(r.Redact(in))) {
 			t.Errorf("Go's output for %q is missing", in)
-		}
-		if s.pattern != "" && strings.Contains(src, pyRepr(in)) {
-			t.Errorf("sample for %s is written whole: %q", s.pattern, in)
 		}
 	}
 }
@@ -77,12 +90,15 @@ func TestRenderRedactSamples_KeepsGoOutputAndSplitsInput(t *testing.T) {
 // hand edit or a missing file fails and names the file.
 func TestCheck_FailsOnHandEdit(t *testing.T) {
 	dir := t.TempDir()
-	outs := buildOutputs(outputPaths{
+	outs, err := buildOutputs(outputPaths{
 		patterns:      filepath.Join(dir, "security_patterns.py"),
 		enums:         filepath.Join(dir, "security_enums.py"),
 		redact:        filepath.Join(dir, "redact_patterns.py"),
 		redactSamples: filepath.Join(dir, "_redact_parity_samples.py"),
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := writeOutputs(outs, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}

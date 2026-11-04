@@ -320,11 +320,14 @@ it waits for the v0.3.16 tag unless a dated amendment takes it in.
 > boards an issue only when a phase in the release is its fix.
 
 > 2026-11-04 — RFC 0028 PR 3a copies Go's secret-redactor patterns into the
-> agents the same way, verbatim and compiled with no flags, so the redactor
-> inherits this split; this issue still covers only the sanitizer. The
-> redactor's copy has the behavioural test step 1 asks for, on ASCII input
-> only: `cmd/genpatterns` runs Go's redactor over samples and the Python
-> test compares its own output with Go's. Run on non-ASCII input, the Python
-> redactor masks more where a label is followed by a Unicode space, and less
-> in two cases, which the `SecretRedactor` docstring lists: a value ends at a
-> non-ASCII space, and a private key with no end line keeps its last newline.
+> agents with the same generator, and shows the split can leak: copied
+> verbatim, a non-ASCII space after `Bearer` let that pattern take the start
+> of a private key that followed, so the key's body was left in the text. So
+> `cmd/genpatterns` rewrites each redactor pattern to Go's meaning (Go's
+> ASCII spaces for `\s`, `\Z` for `$`, Python's ASCII mode, and the two
+> non-ASCII letters Go's `(?i)` folds with s and k), and fails on a pattern
+> using anything else the engines read differently. The redactor's copy also
+> has the behavioural test step 1 asks for: the generator runs Go's redactor
+> over samples, non-ASCII ones among them, and the Python test compares its
+> own output with Go's. This issue still covers only the sanitizer, whose
+> patterns use `\b`, which the rewrite does not cover.

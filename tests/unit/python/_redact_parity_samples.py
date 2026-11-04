@@ -127,4 +127,64 @@ SAMPLES: tuple[tuple[str, str, str], ...] = (
         "sk-short and a token without a value",
         "sk-short and a token without a value",
     ),
+    (
+        "gcp-private-key",
+        "Authorization: Bearer\xa0-----BEGIN PRIVATE" + " KEY-----\nMIIEvQI\n-----END PRIVATE KEY-----",  # noqa: E501
+        "Authorization: Bearer\xa0[REDACTED:gcp-private-key]",
+    ),
+    (
+        "gcp-private-key",
+        "Authorization: Bearer\x0b-----BEGIN PRIVATE" + " KEY-----\nMIIEvQI\n-----END PRIVATE KEY-----",  # noqa: E501
+        "Authorization: Bearer\x0b[REDACTED:gcp-private-key]",
+    ),
+    (
+        "gcp-private-key",
+        "Authorization: Bearer abc\u0131def-----BEGIN PRIVATE" + " KEY-----\nMIIEvQI\n-----END PRIVATE KEY-----",  # noqa: E501
+        "Authorization: [REDACTED:bearer-token]\u0131def[REDACTED:gcp-private-key]",
+    ),
+    (
+        "gcp-private-key",
+        "-----BEGIN PRIVATE" + " KEY-----MIIEvQI\n",
+        "[REDACTED:gcp-private-key]",
+    ),
+    (
+        "generic-secret",
+        "password=" + "hunter\x0b2tail",
+        "[REDACTED:generic-secret]",
+    ),
+    (
+        "generic-secret",
+        "WATSONX_API_" + "KEY:\x1dabcdefghij0123456789ABCDEFGHIJ",
+        "WATSONX_[REDACTED:generic-secret]",
+    ),
+    (
+        "generic-secret",
+        "\u017fecret=" + "hunter2",
+        "[REDACTED:generic-secret]",
+    ),
+    (
+        "generic-secret",
+        "api_\u212aey=" + "abc123",
+        "[REDACTED:generic-secret]",
+    ),
+    (
+        "bearer-token",
+        "Authorization: Bearer " + "abc\u212adef\u017fgh",
+        "Authorization: [REDACTED:bearer-token]",
+    ),
+    (
+        "",
+        "ap\u0131_key=hunter2",
+        "ap\u0131_key=hunter2",
+    ),
+    (
+        "",
+        "password\xa0= hunter2",
+        "password\xa0= hunter2",
+    ),
+    (
+        "",
+        "Authorization: Bearer\u2003abc.def",
+        "Authorization: Bearer\u2003abc.def",
+    ),
 )

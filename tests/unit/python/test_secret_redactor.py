@@ -83,3 +83,32 @@ def test_a_cycle_ends_at_the_depth_cap() -> None:
     record: dict[str, Any] = {"name": "x"}
     record["self"] = record
     assert "[REDACTED:max-depth-exceeded]" in repr(SecretRedactor().redact(record))
+
+
+def test_a_cycle_through_two_keys_ends_at_the_depth_cap() -> None:
+    # Each object is walked once per depth, so two ways back into the same
+    # dict do not double the work at every level.
+    text, masked = _secret_sample()
+    record: dict[str, Any] = {"s": text}
+    record["a"] = record
+    record["b"] = record
+    marker = "[REDACTED:max-depth-exceeded]"
+    node: Any = SecretRedactor().redact(record)
+    steps = 0
+    while isinstance(node, dict):
+        # The dict at depth 32 holds values past the cap, its "s" included.
+        assert node["s"] == (masked if steps < 32 else marker)
+        node, steps = node["b"], steps + 1
+    assert (node, steps) == (marker, 33)
+
+
+def test_a_value_shared_down_many_paths_is_masked_on_each() -> None:
+    text, masked = _secret_sample()
+    shared: Any = {"leaf": text}
+    for _ in range(28):
+        shared = [shared, shared]
+    out = SecretRedactor().redact({"root": shared})
+    left = right = out["root"]
+    for _ in range(28):
+        left, right = left[0], right[1]
+    assert left == right == {"leaf": masked}

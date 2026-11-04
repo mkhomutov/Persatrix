@@ -52,12 +52,16 @@ func main() {
 	check := flag.Bool("check", false, "Compare each output with the file at its path instead of writing; exit 1 if any differs")
 	flag.Parse()
 
-	outs := buildOutputs(outputPaths{
+	outs, err := buildOutputs(outputPaths{
 		patterns:      *out,
 		enums:         *enumsOut,
 		redact:        *redactOut,
 		redactSamples: *samplesOut,
 	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	if *check {
 		if !checkOutputs(outs, os.Stdout) {
 			os.Exit(1)
@@ -82,19 +86,23 @@ type output struct {
 	summary string
 }
 
-func buildOutputs(p outputPaths) []output {
+func buildOutputs(p outputPaths) ([]output, error) {
 	sources, actions := security.AllContextSources(), security.AllSanitizerActions()
 	redact := security.DefaultRedactPatterns()
+	redactBody, err := renderRedactPatterns(redact)
+	if err != nil {
+		return nil, err
+	}
 	return []output{
 		{p.patterns, renderPatterns(security.DefaultPatterns),
 			fmt.Sprintf("%d patterns", len(security.DefaultPatterns))},
 		{p.enums, renderEnums(sources, actions),
 			fmt.Sprintf("%d sources, %d actions", len(sources), len(actions))},
-		{p.redact, renderRedactPatterns(redact),
+		{p.redact, redactBody,
 			fmt.Sprintf("%d redact patterns", len(redact))},
 		{p.redactSamples, renderRedactSamples(security.NewSecretRedactor(), redactSamples),
 			fmt.Sprintf("%d redact samples", len(redactSamples))},
-	}
+	}, nil
 }
 
 func writeOutputs(outs []output, w io.Writer) error {

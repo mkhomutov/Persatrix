@@ -88,14 +88,14 @@ class SecretRedactor:
     a match becomes ``[REDACTED:<pattern name>]``.  A parity test runs Go's
     output for a set of samples against this class.
 
-    Python's ``re`` counts more characters as a space than Go's RE2 (``\\s``
-    is Unicode here, ASCII there), the split ISSUE-0154 records for the
-    sanitizer.  So this side mostly masks more: ``password\\u00a0= x`` is
-    masked here and not in Go.  It masks less in two cases: a ``password=``
-    value ends at a non-ASCII space, so the rest of it stays, and a
-    private-key block with no end line keeps its final newline, since
-    Python's ``$`` also matches before one.  The parity samples are ASCII and
-    match Go exactly.
+    Python's ``re`` reads ``\\s``, ``$`` and ``(?i)`` differently from Go's
+    RE2 outside ASCII (the split ISSUE-0154 records for the sanitizer), and a
+    pattern that took more text here could swallow the start of a secret a
+    later pattern masks.  So the generator rewrites each expression to Go's
+    meaning: Go's five ASCII spaces for ``\\s``, ``\\Z`` for ``$``, ASCII
+    mode, and the two non-ASCII letters Go's ``(?i)`` folds with s and k.  The
+    parity samples include text the two engines would otherwise read
+    differently.
     """
 
     def __init__(self) -> None:
@@ -116,20 +116,28 @@ class SecretRedactor:
         Dicts, lists and tuples are walked; keys are kept as they are, as Go
         keeps map keys; other values are returned unchanged.
         """
-        return {key: self._walk(value, 1) for key, value in record.items()}
+        # One result per container and depth: a container reached down many
+        # paths, or a cycle with two ways back, is walked once per depth
+        # rather than once per path, which would double at every level.
+        seen: dict[tuple[int, int], Any] = {}
+        return {key: self._walk(value, 1, seen) for key, value in record.items()}
 
-    def _walk(self, value: Any, depth: int) -> Any:
+    def _walk(self, value: Any, depth: int, seen: dict[tuple[int, int], Any]) -> Any:
         if depth > _MAX_DEPTH:
             return _DEPTH_MARKER
         if isinstance(value, str):
             return self.redact_text(value)
-        if isinstance(value, dict):
-            return {key: self._walk(item, depth + 1) for key, item in value.items()}
-        if isinstance(value, list):
-            return [self._walk(item, depth + 1) for item in value]
-        if isinstance(value, tuple):
-            return tuple(self._walk(item, depth + 1) for item in value)
-        return value
+        if not isinstance(value, dict | list | tuple):
+            return value
+        key = (id(value), depth)
+        if key not in seen:
+            if isinstance(value, dict):
+                seen[key] = {k: self._walk(item, depth + 1, seen) for k, item in value.items()}
+            elif isinstance(value, list):
+                seen[key] = [self._walk(item, depth + 1, seen) for item in value]
+            else:
+                seen[key] = tuple(self._walk(item, depth + 1, seen) for item in value)
+        return seen[key]
 
 
 __all__ = ["NoopRedactor", "Redactor", "SecretRedactor"]

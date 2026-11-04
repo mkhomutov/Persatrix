@@ -81,3 +81,20 @@ Merged as [#1072](https://github.com/mkhomutov/Persatrix/pull/1072) on
 | F-22 | Info | The baseline's tests sat in the pipeline's test file, against the one-test-file-per-module rule | Fixed in-PR: `test_decision_baseline.py` |
 | F-23 | Info | Several tests checked unrelated cases in one block of asserts | Fixed in-PR: split, or one assert on the whole outcome or log line |
 | F-24 | Info | F-9 and F-10 break the plan header's 500-line rule and the branch-naming rule, recorded only as noted | Noted: renaming the head branch would close the PR, and the size rule is guidance the checks do not enforce; the fixes above add to the overrun |
+
+## PR 3a — `feature/v040-rfc0028-redactor`
+
+Opened as [#1086](https://github.com/mkhomutov/Persatrix/pull/1086).
+
+**Review findings** (PR 3a), from one independent review; the severities are
+this record's own:
+
+| Finding | Severity | Description | Disposition |
+|---------|----------|-------------|-------------|
+| F-1 | High | The patterns were copied verbatim, and Python's `re` reads `\s`, `$` and `(?i)` differently from Go's RE2 outside ASCII. A pattern that took more text in Python swallowed the start of a secret a later pattern masks: after `Bearer` and a non-ASCII space, a `\v` or a dotless i, the bearer pattern took the start of a private key, and the key's body stayed in the text. Python's `$` also kept a key's final newline, and a `\v` ended a `password=` value early | Fixed in-PR: `cmd/genpatterns` rewrites each pattern to Go's meaning and fails on a construct it does not cover, with a sample for each case. A scratch fuzz over about 551 000 inputs found no difference from Go; run with the verbatim patterns, it found 3 419 |
+| F-2 | Medium | The class docstring, the plan's as-built note and the ISSUE-0154 note said the copy masks more, and less only in two listed non-ASCII cases, missing F-1's leak | Fixed in-PR: reworded for the rewrite |
+| F-3 | Medium | The walk visited a container once per path, so a dict with two keys back to itself, or a list shared down many levels, took time that doubled at each of the 32 levels | Fixed in-PR: one result per container and depth, with a test for each shape |
+| F-4 | Low | The samples test checked that no sample was written whole, which could not fail, since each is written as its parts joined by `+` | Fixed in-PR: no part may be matched on its own by its sample's pattern |
+| F-5 | Low | The observability guide said logs and spans share one `set_redactor()` hook (each has its own), its operator warning named `SecretRedactor`, which masks secrets and no other personal data, as the redactor to install, and the guide and glossary spoke of PR 3's decision log as already calling it | Fixed in-PR |
+| F-6 | Low | `redact` masks values only: keys are kept, as Go keeps map keys, and an object other than a dict, list or tuple is returned unchanged | Noted: its one caller, PR 3's decision log, passes a record decoded from JSON, whose keys are the record's field names and whose values are JSON types |
+| F-7 | Info | Row 3a still read ⬜ | Fixed in-PR: 🔀 with the PR link |

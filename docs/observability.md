@@ -125,10 +125,11 @@ make run
 Both runtimes route every record through a `Redactor` interface before
 serialisation. The default implementation is a no-op pass-through. The
 Python side also has `SecretRedactor`, which masks API keys, tokens and
-passwords with the Go `SecretRedactor`'s own patterns (RFC 0028 PR 3a); the
-decision log uses it, and logs and spans keep the pass-through until one is
-installed. A PII scrubber is still the responsibility of a future security
-RFC under the RFC 0009 umbrella.
+passwords with the Go `SecretRedactor`'s own patterns (RFC 0028 PR 3a), for
+the decision log RFC 0028 PR 3 adds. Logs and spans keep the pass-through
+until a redactor is installed through each one's own `set_redactor()`. A PII
+scrubber is still the responsibility of a future security RFC under the
+RFC 0009 umbrella.
 
 The same `Redactor` interface shape is used by RFC 0019 Phase 2 for opt-in
 tool-payload capture as span attributes — one redaction contract across both
@@ -241,14 +242,15 @@ backends by default. The env var has three modes:
 | `full` | Argument values captured, **passed through the RFC 0018 redactor** (single secrets-policy code path for both logs and spans). | `tool.arguments.<arg>` |
 
 The redactor installed by default is the no-op `NoopRedactor` shipped in
-RFC 0018 PR 1. `agents.observability.redact.SecretRedactor` masks secrets;
-installed through the shared `agents.observability.spans.set_redactor()`
-hook, both signals use it.
+RFC 0018 PR 1. Tool-payload span attributes take the redactor installed
+through `agents.observability.spans.set_redactor()`, and log records the one
+installed through `agents.observability.logging.set_redactor()`: two hooks,
+so a redactor installed on one does not reach the other.
 
 > **Operator warning — `full` + `NoopRedactor`.** Setting
 > `PERSATRIX_TRACE_TOOL_PAYLOADS=full` with the default `NoopRedactor`
 > writes raw tool arguments to spans; the runtime logs a one-time
-> `WARNING` on first use. Install `SecretRedactor` via
+> `WARNING` on first use. Install a real redactor via
 > `set_redactor()` before enabling `full` in production.
 
 ### 10.5 Persatrix-specific attribute namespace

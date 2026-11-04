@@ -1253,7 +1253,7 @@ verbatim) are defined now (PR #232 review SF-5).
   `Action` / `Resource` sees it scrubbed before the canonical-JSON encode.
   The agents' Python `SecretRedactor` (`agents/observability/redact.py`,
   RFC 0028 PR 3a) applies the same patterns, generated from this table by
-  `cmd/genpatterns`, before the decision log writes a record.
+  `cmd/genpatterns`, for the decision log RFC 0028 PR 3 adds.
 
 ### Tamper evidence
 - **Aliases:** "audit chain integrity"; **Disallowed:** "audit signing"
