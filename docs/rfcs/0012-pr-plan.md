@@ -197,7 +197,7 @@ in the PR named:
 
 | PR | Row | Title | Branch | Status | GitHub PR | Merged |
 |----|-----|-------|--------|--------|-----------|--------|
-| 1 | C1 | Organization schema, validation, glossary | `feature/v040-rfc0012-org-schema` | ⬜ | — | — |
+| 1 | C1 | Organization schema, validation, glossary | `feature/v040-rfc0012-org-schema` | 🔀 | [#1088](https://github.com/mkhomutov/Persatrix/pull/1088) | — |
 | 2 | C1 | `internal/protocols/`: graph, topology checks, `directs` | `feature/v040-rfc0012-protocols-graph` | ⬜ | — | — |
 | 3 | C1 | Graph loaded into the society tables at startup | `feature/v040-rfc0012-org-load` | ⬜ | — | — |
 | 4 | C1 | Organization read; a persona's organization and role; the guide | `feature/v040-rfc0012-persona-role` | ⬜ | — | — |
@@ -280,6 +280,21 @@ the two checkers cannot drift.
 **Acceptance**: a hierarchy, a flat and a matrix organization validate; each
 bad shape is refused with its reason.
 **Estimate**: ~400 lines.
+
+**Review findings** (PR 1): F-1 to F-7 are an independent review's, which
+found nothing High or Medium; F-8 and F-9 are the author's.
+
+| Finding | Severity | Description | Disposition |
+|---------|----------|-------------|-------------|
+| F-1 | Low | The Python and Go YAML parsers and regex engines can disagree, so validation could pass a file Go refuses: a key given twice keeps its last value, which can hide a loop, and an id ending in a line break passes Python's `$`, even past the `general` reservation. Python also refuses `scope: on`, a YAML 1.1 boolean, where Go reads text. The docs said the two checkers cannot drift | Fixed in-PR for the first two: a loader that refuses repeated keys (`duplicate-key`), a schema guard against a final line break, a fixture each, softer wording. The boolean case → deferred to PR 2 (the 2026-11-04 note) |
+| F-2 | Low | A missing or unreadable `agents.yaml` gave one `unknown-agent` per member and never said the file was missing | Fixed in-PR: one error naming the file |
+| F-3 | Low | The D-3 and D-9 refusals printed JSON Schema's wording (`'clearance' was unexpected`), not the reason | Fixed in-PR: the schema names each rule (`x-refusal`), which `validate.py` prints; fixtures `clearance`, `reserved-scope` |
+| F-4 | Low | ISSUE-0195 said the unheld egress was paraphrase; the tripwire matches verbatim spans only, and RFC 0037 §G reads a verbatim hit as a bug | Fixed in-PR (issue text) |
+| F-5 | Info | The valid matrix fixture allows two managers of one member on one dimension, a decision PR 2 inherits, and credited §C for it | Fixed in-PR: recorded in the 2026-11-04 note; fixture comment corrected |
+| F-6 | Info | Docs said in the present tense that PR 2's Go loader is tested on the fixtures | Fixed in-PR (wording) |
+| F-7 | Info | This plan's row 1 still read ⬜ | Fixed in-PR: 🔀 with the PR link |
+| F-8 | Info | About 1 100 lines against the 500-line guidance and this estimate; 384 are fixture data PR 2 shares, and the checker split from them would be untested | Noted |
+| F-9 | Info | mypy does not check the signature of the `importlib`-loaded `check_file` call, which script mode needs; the fixture tests and the script-run test cover it | Noted |
 
 ### PR 2 — `feature/v040-rfc0012-protocols-graph`
 
