@@ -1,27 +1,58 @@
 """
-Sandbox rules for tool execution. Only path restriction is built so far.
+Sandbox rules for tool execution.
 
 ``PathValidator`` keeps ``file_read`` and ``file_write`` to the paths an
 agent's permissions allow.
 
-Planned, not built (RFC 0009 Phase 3): ``ResourceLimiter``, to cap the
-processor time and total running time of a ``shell_exec`` command, and
-``OutputSizeLimiter``, to cap the size of every tool's output (one limit,
-set per agent). They are the TODOs at the end of this file.
+The rest is RFC 0009 Phase 3's limits (the Phases 3–4 plan's PR 4), each
+set by the agent's ``resource_limits`` block and each off until it is set,
+so a tool behaves as it did before (design point G-3):
 
-Until they land, ``builtin.py`` applies fixed limits of its own, and only to
-some tools: ``MAX_TIMEOUT_SECONDS`` limits how long ``shell_exec`` may run,
-and ``MAX_OUTPUT_BYTES`` limits what ``file_read``, ``shell_exec`` (stdout
-and stderr separately) and ``http_request`` return. The other built-in
-tools, such as ``recall_notes`` and ``recall_channel_messages``, have no
-output limit yet.
+- ``ResourceLimiter`` caps the CPU time of a ``shell_exec`` command
+  (``shell_cpu_seconds``). The limit is set in the child process before the
+  command starts, so the kernel stops a command that spins. It holds for
+  each process the command starts, not for all of them together: a command
+  that starts others can spend more in all, up to its wall time and the
+  container's own limits. Windows has no such limit, and there only the
+  wall time applies. The wall time stays
+  ``permissions.shell.max_execution_seconds``, which ``shell_exec`` already
+  reads; it is adopted here rather than set twice.
+- ``OutputSizeLimiter`` caps what one tool call hands the model
+  (``tool_output_bytes``), for every tool, in the ``@tool`` wrapper.
+  ``file_read``, ``shell_exec`` and ``http_request`` keep their own
+  100 KB cut (``MAX_OUTPUT_BYTES`` in ``builtin.py``) either way.
+
+A limit an operator set that stops a command, or the output cap, writes a
+``tool.resource_limited`` audit line. Like ``tool.arg_invalid``, it is a
+structured log record on ``agents.tools.audit``: it reaches the
+orchestrator's log stream but not its checksummed audit chain (G-4).
+
+``tool_process_env`` is the environment a process a tool starts gets: the
+agent's own, less every ``SECURITY_*`` variable, so a prompt-injected
+command cannot read the fleet enrollment secret (G-14).
 """
 
+from __future__ import annotations
+
 import fnmatch
+import json
 import logging
+import os
+import signal
+import sys
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
+
+from ..observability.audit_record import emit_audit_record
+from ..observability.metrics import current_agent_id
+
+if sys.platform != "win32":
+    import resource
 
 logger = logging.getLogger(__name__)
+_audit_logger = logging.getLogger("agents.tools.audit")
 
 # Use fnmatchcase for deterministic cross-platform behavior.
 # fnmatch.fnmatch is case-insensitive on Windows but case-sensitive on
@@ -102,5 +133,282 @@ class PathValidator:
         )
 
 
-# TODO: Implement ResourceLimiter
-# TODO: Implement OutputSizeLimiter
+# ─── The environment of a tool's process (G-14) ───────────────
+
+#: Every variable whose name starts with this, in any letter case, is taken
+#: out of a tool process's environment. The orchestrator's security settings
+#: use it, the fleet enrollment secret (``SECURITY_ENROLLMENT_SECRET``) among
+#: them; no tool needs any of them.
+SCRUBBED_ENV_PREFIX = "SECURITY_"
+
+
+def tool_process_env(environ: Mapping[str, str] | None = None) -> dict[str, str]:
+    """The environment for a process a tool starts: *environ*, less its secrets.
+
+    *environ* defaults to the agent's own. The agent token is held in memory
+    only, so it is never in an environment to take out.
+    """
+    source = os.environ if environ is None else environ
+    return {
+        name: value for name, value in source.items()
+        if not name.upper().startswith(SCRUBBED_ENV_PREFIX)
+    }
+
+
+# ─── The CPU limit on a shell command ─────────────────────────
+
+
+def cpu_rlimit(seconds: int, current_hard: int) -> tuple[int, int]:
+    """The ``RLIMIT_CPU`` pair a child sets for a limit of *seconds*.
+
+    The kernel sends SIGXCPU at the soft limit. Linux sends SIGKILL at the
+    hard one, a second later, to a command that ignores SIGXCPU; macOS does
+    not, and such a command runs on to its wall time. A process may not
+    raise its hard limit, so a lower one already set (by the container, say)
+    stands, and the soft limit sits a second under it: Linux checks the hard
+    limit first, so equal limits would kill the command with SIGKILL, which
+    does not read as the limit. Under a one-second hard limit there is no
+    room, and the two are equal.
+    """
+    hard = seconds + 1
+    if current_hard != resource.RLIM_INFINITY:
+        hard = min(hard, current_hard)
+    return min(seconds, max(1, hard - 1)), hard
+
+
+class ResourceLimiter:
+    """The CPU limit on one ``shell_exec`` command, or none.
+
+    The limit holds for each process the command starts, each on its own;
+    only the command's own process stopping at it is reported. A process it
+    starts that is stopped shows only in the command's output and exit code.
+
+    The wall-time limit is not here: it stays the agent's
+    ``permissions.shell.max_execution_seconds``, as before.
+    """
+
+    def __init__(self, cpu_seconds: int | None = None) -> None:
+        if cpu_seconds is not None and cpu_seconds < 1:
+            raise ValueError("a CPU limit is at least one second")
+        self.cpu_seconds = cpu_seconds
+
+    def child_setup(self) -> Callable[[], None] | None:
+        """What the child runs before the command starts, or None for nothing.
+
+        None with no limit set, so a command starts exactly as before, and on
+        Windows, which has no CPU limit. The function only reads and sets
+        limits, which is safe in a child forked from a threaded process.
+        """
+        seconds = self.cpu_seconds
+        if seconds is None or sys.platform == "win32":
+            return None
+
+        def set_cpu_limit() -> None:
+            _, current_hard = resource.getrlimit(resource.RLIMIT_CPU)
+            resource.setrlimit(resource.RLIMIT_CPU, cpu_rlimit(seconds, current_hard))
+            # SIGXCPU writes a core file by default, and the command runs in
+            # the agent's workspace.
+            _, core_hard = resource.getrlimit(resource.RLIMIT_CORE)
+            resource.setrlimit(resource.RLIMIT_CORE, (0, core_hard))
+
+        return set_cpu_limit
+
+    def stopped_by_cpu_limit(self, returncode: int | None) -> bool:
+        """Whether a command that ended with *returncode* was stopped by the limit.
+
+        Only SIGXCPU counts. A command that ignores it, and on Linux one under
+        a one-second hard limit, is killed with SIGKILL, which reads as any
+        other kill: its exit code is reported as it is, and no audit line is
+        written.
+        """
+        if self.cpu_seconds is None or returncode is None or sys.platform == "win32":
+            return False
+        return returncode == -signal.SIGXCPU
+
+
+# ─── The cap on what a tool returns ───────────────────────────
+
+
+def _size_label(max_bytes: int) -> str:
+    if max_bytes % 1024 == 0:
+        return f"{max_bytes // 1024} KB"
+    return f"{max_bytes} bytes"
+
+
+def _notice(max_bytes: int) -> str:
+    return f"\n... [truncated at {_size_label(max_bytes)}]"
+
+
+def _cut(text: str, keep_bytes: int, notice: str) -> str:
+    """The first *keep_bytes* of *text*'s UTF-8, then *notice*; never splits a character."""
+    kept = text.encode("utf-8", errors="replace")[:keep_bytes].decode("utf-8", errors="ignore")
+    return kept + notice
+
+
+def truncate_text(text: str, max_bytes: int) -> str:
+    """*text* cut to *max_bytes* of UTF-8 with a notice, or as it is if it fits.
+
+    The notice names the limit, as ``\\n... [truncated at 100 KB]``, and comes
+    after the *max_bytes* kept.
+    """
+    if _byte_size(text) <= max_bytes:
+        return text
+    return _cut(text, max_bytes, _notice(max_bytes))
+
+
+def render_output(data: Any) -> str:
+    """A tool's output as the model is shown it: JSON for a dict or a list.
+
+    The same rule as the two tool rounds (``agents/task_tool_round.py`` and
+    ``agents/persona_runtime/tool_round.py``) use.
+    """
+    return json.dumps(data) if isinstance(data, (dict, list)) else str(data)
+
+
+def _byte_size(text: str) -> int:
+    return len(text.encode("utf-8", errors="replace"))
+
+
+def _longest_text(data: Any) -> int:
+    if isinstance(data, str):
+        return _byte_size(data)
+    if isinstance(data, dict):
+        return max((_longest_text(v) for v in data.values()), default=0)
+    if isinstance(data, list):
+        return max((_longest_text(v) for v in data), default=0)
+    return 0
+
+
+class OutputSizeLimiter:
+    """Caps what one tool call hands the model at *max_bytes*.
+
+    The size is that of the output as the model is shown it, the notice
+    included. A text over the cap is cut with :func:`truncate_text`'s notice.
+    A dict or a list keeps its shape: every text in it is cut to one common
+    length, the longest that makes the whole fit, so a long stdout does not
+    cost the model ``shell_exec``'s stderr and exit code. A text no longer
+    than that length and the notice together is kept whole, since cutting it
+    would lengthen it. One with too many fields for any such cut to fit is
+    cut as its shown text.
+    """
+
+    #: The smallest cap, which leaves room for the notice and some text.
+    MIN_BYTES = 1024
+
+    def __init__(self, max_bytes: int) -> None:
+        if max_bytes < self.MIN_BYTES:
+            raise ValueError(f"an output cap is at least {self.MIN_BYTES} bytes")
+        self.max_bytes = max_bytes
+        self._notice = _notice(max_bytes)
+        self._notice_bytes = _byte_size(self._notice)
+
+    def limit(self, data: Any) -> tuple[Any, int | None]:
+        """*data* cut to fit, and its size before the cut; None if it fit.
+
+        An output ``json.dumps`` refuses is returned as it is, to fail in the
+        tool round as it did before.
+        """
+        try:
+            shown = render_output(data)
+        except (TypeError, ValueError):
+            return data, None
+        size = _byte_size(shown)
+        if size <= self.max_bytes:
+            return data, None
+        if isinstance(data, (dict, list)):
+            fitted = self._fit_texts(data)
+            if fitted is not None:
+                return fitted, size
+        return _cut(shown, self.max_bytes - self._notice_bytes, self._notice), size
+
+    def _cut_texts(self, data: Any, length: int) -> Any:
+        if isinstance(data, str):
+            if _byte_size(data) <= length + self._notice_bytes:
+                return data
+            return _cut(data, length, self._notice)
+        if isinstance(data, dict):
+            return {k: self._cut_texts(v, length) for k, v in data.items()}
+        if isinstance(data, list):
+            return [self._cut_texts(v, length) for v in data]
+        return data
+
+    def _fits(self, data: Any) -> bool:
+        return _byte_size(render_output(data)) <= self.max_bytes
+
+    def _fit_texts(self, data: dict[str, Any] | list[Any]) -> Any:
+        # No text cut longer than the cap fits, so cut there once first and
+        # search the rest on that smaller copy.
+        data = self._cut_texts(data, self.max_bytes)
+        low, high = 0, min(_longest_text(data), self.max_bytes)
+        if not self._fits(self._cut_texts(data, low)):
+            return None
+        # The texts uncut never fit, nor do any cut at the cap. A text is
+        # only cut where that shortens it, so the whole grows with the
+        # length, and this finds the longest length that fits.
+        while high - low > 1:
+            middle = (low + high) // 2
+            if self._fits(self._cut_texts(data, middle)):
+                low = middle
+            else:
+                high = middle
+        return self._cut_texts(data, low)
+
+
+# ─── The resource_limits block and its audit line ─────────────
+
+#: ``shell_cpu_seconds`` is at most the wall-time ceiling: a one-thread
+#: command can spend no more CPU than that. ``tool_output_bytes`` is at most
+#: the built-in tools' own cut, which it can lower and never raise.
+_LIMIT_RANGES: dict[str, tuple[int, int]] = {
+    "shell_cpu_seconds": (1, 300),
+    "tool_output_bytes": (OutputSizeLimiter.MIN_BYTES, 102_400),
+}
+
+
+@dataclass(frozen=True)
+class ResourceLimits:
+    """One agent's limits, read from its ``resource_limits`` block."""
+
+    shell: ResourceLimiter
+    output: OutputSizeLimiter | None
+
+
+def read_resource_limits(block: object) -> ResourceLimits:
+    """Read an agent's ``resource_limits`` block; None or absent sets no limit.
+
+    A key set to None sets no limit either, and a whole number written as
+    ``10.0`` is that number, as ``schemas/agent.schema.json`` reads them.
+    Raises ``ValueError`` naming the key for a value the schema refuses: a
+    limit an operator set must not be dropped quietly, so a bad one stops
+    the agent at startup.
+    """
+    if block is None:
+        block = {}
+    if not isinstance(block, dict):
+        raise ValueError("resource_limits must be a mapping")
+    unknown = sorted(map(str, set(block) - set(_LIMIT_RANGES)))
+    if unknown:
+        raise ValueError(f"resource_limits does not take {', '.join(unknown)}")
+    values: dict[str, int | None] = {}
+    for key, (low, high) in _LIMIT_RANGES.items():
+        value = block.get(key)
+        if isinstance(value, float) and value.is_integer():
+            value = int(value)
+        if value is not None and (
+            isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high
+        ):
+            raise ValueError(f"resource_limits.{key} must be a whole number from {low} to {high}")
+        values[key] = value
+    output_bytes = values["tool_output_bytes"]
+    return ResourceLimits(
+        shell=ResourceLimiter(values["shell_cpu_seconds"]),
+        output=None if output_bytes is None else OutputSizeLimiter(output_bytes),
+    )
+
+
+def emit_resource_limited(tool_name: str, limit: str, **fields: Any) -> None:
+    """Write the ``tool.resource_limited`` audit line for *limit* hit by *tool_name*."""
+    emit_audit_record(
+        _audit_logger, "tool.resource_limited",
+        agent_id=current_agent_id(), tool_name=tool_name, limit=limit, **fields,
+    )

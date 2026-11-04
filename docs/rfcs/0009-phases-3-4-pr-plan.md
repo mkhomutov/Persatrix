@@ -135,11 +135,11 @@ the points it implements.
 | 1 | A4 | ISSUE-0152 steps 1–2: one quarantine no longer refuses every anonymous caller | `fix/quarantine-spares-anonymous-callers` | ✅ | [#1050](https://github.com/mkhomutov/Persatrix/pull/1050) | 2026-10-22 |
 | 2 | A4 | ISSUE-0152 step 3, agent half: agents send their id on REST | (in PR 1) | ✅ | [#1050](https://github.com/mkhomutov/Persatrix/pull/1050) | 2026-10-22 |
 | 3 | A3 | Tool arguments checked against the tool's schema | `feature/v040-rfc0009-arg-schemas` (head branch `claude/affectionate-faraday-sewbto`, assigned by the session that opened it) | ✅ | [#1069](https://github.com/mkhomutov/Persatrix/pull/1069) | 2026-10-29 |
-| 4 | A3 | Shell CPU limit, output caps, `resource_limits:` | `feature/v040-rfc0009-resource-limits` | ⬜ | — | — |
+| 4 | A3 | Shell CPU limit, output caps, `resource_limits:` | `feature/v040-rfc0009-resource-limits` | 🔀 | [#1089](https://github.com/mkhomutov/Persatrix/pull/1089) | — |
 | 5 | A4 | Agent tokens: issue, check, revoke (Go) | `feature/v040-rfc0009-agent-token` (head branch `claude/admiring-cori-ibird5`, assigned by the session that opened it) | ✅ | [#1071](https://github.com/mkhomutov/Persatrix/pull/1071) | 2026-10-30 |
 | 6 | A4 | Registration returns a token and accepts the enrollment secret | `feature/v040-rfc0009-enrollment` (head branch `claude/magical-gates-p9ku7g`, assigned by the session that opened it) | ✅ | [#1076](https://github.com/mkhomutov/Persatrix/pull/1076) | 2026-11-01 |
 | 7 | A4 | Agents send the secret, keep their token and refresh it | `feature/v040-rfc0009-agent-token-client` | ✅ | [#1079](https://github.com/mkhomutov/Persatrix/pull/1079) | 2026-11-03 |
-| 8 | A4 | Token check on REST; every publish bound to its caller | `feature/v040-rfc0009-token-middleware` | 🔀 | [#1085](https://github.com/mkhomutov/Persatrix/pull/1085) | — |
+| 8 | A4 | Token check on REST; every publish bound to its caller | `feature/v040-rfc0009-token-middleware` | ✅ | [#1085](https://github.com/mkhomutov/Persatrix/pull/1085) | 2026-11-04 |
 | 9 | A4 | The agent routes' policies under `enabled` | `feature/v040-rfc0009-agent-route-policy` | ⬜ | — | — |
 | 10 | A4 | Token check on the wallet's gRPC calls | `feature/v040-rfc0009-grpc-token` | ⬜ | — | — |
 | 11 | A4 | MT-AUTH-001 v1.1; the auth guide's agent section | `feature/v040-rfc0009-auth-mt` | ⬜ | — | — |
@@ -251,6 +251,76 @@ merges, so this PR comes before PR 9 makes the secret required. The token is hel
 scrub stops short of G-14's words on Linux: a tool running as the agent's
 user can read the secret from `/proc/<agent pid>/environ`, which keeps the
 environment the agent started with. This PR or PR 11's guide says so.
+**Implementation note (2026-11-04)**: how this PR meets the scope above.
+Each point not settled above is a new default this PR's review confirms or
+overturns.
+
+- **The block.** `resource_limits` sits beside `permissions` in an agent's
+  entry, with `shell_cpu_seconds` (1 to 300, the wall-time ceiling) and
+  `tool_output_bytes` (1 024, room for the notice, to 102 400, the built-in
+  tools' own cut, which it can lower and never raise). An empty block or key
+  sets no limit, and `10.0` reads as 10, as the schema reads them.
+  `builtin.configure` reads it with the
+  permissions, before the agent is built, and a value the schema refuses
+  stops the agent at startup rather than being dropped (new default). That
+  wiring moved out of `server_persona.py`, which keeps it under 500 lines.
+  `config/agents.yaml` shows the block commented out with §D's numbers, so
+  the shipped agents behave as before; a test keeps the example valid.
+- **The CPU limit.** `RLIMIT_CPU`, set in the child before `exec` through
+  `preexec_fn`, and only when a limit is set, so a command with none starts
+  exactly as before. The soft limit is the setting and the hard one a second
+  more, never above a lower hard limit already in force, such as a
+  container's, with the soft limit then a second under it, since Linux
+  checks the hard limit first. SIGXCPU comes at the limit; on Linux SIGKILL
+  follows a second later to a command that ignores it, while macOS sends
+  none and such a command runs to its wall time. The child also sets its
+  core-file limit to 0, since SIGXCPU writes one by default. The limit holds
+  for each process the command starts, on its own, so a command that starts
+  others can spend more in all, up to its wall time. Only SIGXCPU to the
+  command's own process reads as the limit: the call fails with
+  `ResourceLimitError` and keeps the command's output (new default).
+- **The output cap.** Applied in the `@tool` wrapper to every tool's
+  result, a failed one's too, measured as the model is shown it (JSON for a
+  dict or a list), the notice included. A text is cut with `_truncate`'s
+  notice, naming the cap; `_truncate` builds the same notice, so the 100 KB
+  notice and every golden stay as they were. A dict or a list keeps its
+  shape: each of its texts is cut to one common length, the longest that
+  fits, so a long stdout keeps `shell_exec`'s stderr and exit code (new
+  default); a text no longer than that length and the notice stays whole.
+  One with too many fields for that is cut as text.
+- **The audit line.** `tool.resource_limited`, on `agents.tools.audit` as
+  G-4 says, names the agent, the tool, the limit (`shell_cpu_seconds`,
+  `max_execution_seconds` or `tool_output_bytes`) and its value, and for the
+  cap the size before the cut. A command stopped at the agent's own
+  wall-time limit writes one too. A shorter timeout the model chose, and the
+  built-in tools' own 100 KB cut, write none: each is the tool's behaviour,
+  not a limit an operator set.
+- **G-14.** `shell_exec` starts its command with `tool_process_env()`, the
+  agent's environment less every variable whose name starts with
+  `SECURITY_`, in any letter case; a test ties that prefix to the secret's
+  name. The token is held in memory only, and a test shows it does not
+  reach a command. Two things still do, and PR 11's guide says so: on Linux
+  a command running as the agent's user can read the secret from
+  `/proc/<agent pid>/environ` (PR 7's F-16), and every other variable,
+  provider API keys included, still reaches it, since an allowlisted command
+  may need one. PR 16 files both.
+
+**Review findings** (PR 4): F-1 to F-8 are an independent review's, each
+proved by a run or by reading the code, and F-9 to F-11 the author's.
+
+| Finding | Severity | Description | Disposition |
+|---------|----------|-------------|-------------|
+| F-1 | Medium | `RLIMIT_CPU` holds each process on its own, so `shell_cpu_seconds` did not cap a command's CPU time in all, as the schema, CHANGELOG and glossary said: a command that starts children gives each a fresh limit, and a child stopped at it is reported nowhere | Docs fixed in-PR: each now says the limit holds per process, the total is bounded by wall time and the container, and only the command's own process is reported |
+| F-2 | Low | Under an inherited hard limit at or below the setting, soft and hard were equal, and Linux checks the hard limit first, so the command died with SIGKILL and no audit line. macOS never sends SIGKILL, so a command that ignores SIGXCPU runs to its wall time | Fixed in-PR: the soft limit sits a second under a lower hard limit, with a test for each case. The ignored-SIGXCPU kill stays an ordinary exit; the docstrings and this note say so |
+| F-3 | Low | SIGXCPU dumps core by default, so with an unlimited core limit each stop wrote a core file into the agent's workspace | Fixed in-PR: the child sets its core-file limit to 0; the test raises the agent's own first |
+| F-4 | Low | A structured output fell back to cut text when cutting every text to nothing did not fit, though cutting a short text lengthens it by the notice, so a longer common length could still fit | Fixed in-PR: a text is cut only where that shortens it, so the search finds the longest length that fits; a test with many short texts beside a long one |
+| F-5 | Low | The text and fallback cuts added the notice after cutting to the cap, so the model got up to 30 bytes more than the cap | Fixed in-PR: the notice counts toward the cap, and the smallest cap is 1 024 bytes, in the schema and the code |
+| F-6 | Low | The schema and the runtime read two blocks differently: `10.0` passed the schema and stopped the agent, and a null block or key, what YAML gives for a header uncommented alone, failed the schema and ran | Fixed in-PR: both take a null block or key as no limit, and `10.0` as 10; parity tests for each |
+| F-7 | Info | A command stopped at the timeout the model chose wrote the wall-time audit line, even with no limit set, as if an operator had set it | Fixed in-PR: only the agent's own `max_execution_seconds` stopping a command writes one, under that name |
+| F-8 | Low | Three places left stale: ROADMAP's sandbox row called both limiters unbuilt, the audit-record module named two writers, and `shell_exec` and `http_request` still tell the model their cut is 100 KB when a lower cap applies | The first two fixed in-PR. The tool descriptions → Noted: changing them re-records every golden, and the cut's notice names the cap |
+| F-9 | Low | A block with a number key beside a name raised `TypeError` sorting the unknown keys, not the `ValueError` naming them | Fixed in-PR, with a test |
+| F-10 | Info | +1 051 lines at review, 556 of them tests, past the ~400 estimate | Noted |
+| F-11 | Info | The fixes took this plan to 7 973 of its 8 000 words, and RFC 0009 stood at 7 686 before this PR | Fixed in-PR for the plan: PR 8's merged note moved, unchanged, to a second notes file. The RFC → Noted: this PR's own note is short, and the next note splits the RFC |
 
 ### PR 5 — `feature/v040-rfc0009-agent-token`
 
@@ -374,70 +444,9 @@ so the client has to guess, and a late registration can stop a healthy agent
 until it restarts. This PR weighs giving a replaced token a code of its own,
 which ends the guess, against two processes on one ID then fighting over it
 until the limiter stops them.
-**Implementation note (2026-11-03)**: how this PR meets the scope above.
-Each point not settled above is a new default this PR's review confirms or
-overturns.
 
-- **Where.** `internal/server/agent_token_check.go` reads the token in the
-  auth middleware before the route's policy, so a refused token gets its own
-  code on any route; `internal/server/publish_sender.go` holds the sender
-  check; `security.WithAgentID` hands the limiter the verified agent.
-- **Refusals.** A token `Check` refuses gets a 401 with its code; a good one
-  beside an `X-Agent-ID` naming another agent gets `AGENT_TOKEN_INVALID`; a
-  token beside an account credential, bearer or cookie, gets a 400, which no
-  agent reads as a token refusal. Each writes `agent.token_invalid` with a
-  reason, the source, and the claimed ID if an agent could hold it, never the
-  token. A Python drift test pins the codes to the agents' constants.
-- **Refusals per source (new default).** A refused call never reaches the
-  rate limiter, and each line is flushed at once, so one address is refused
-  at most 120 times a minute, sized as registrations are; past that, 429 and
-  no line.
-- **The sender.** A refused publish gets 403 and `authz.denied` with reason
-  `sender_not_caller`. A caller with no credential is refused too, but until
-  PR 9 requires the enrollment secret anyone can register an agent's ID and
-  post as it (review F-1), and anonymous reads stay. The CLI's `channel send` sends
-  the OS username unless given `--as`, so a person whose participant ID
-  differs passes `--as`; PR 11's guide says so.
-- **Budgets.** One limiter still: an agent's REST budget is kept under
-  `rest:<id>`, the same size as its wallet budget, and a REST refusal records
-  no violation in either mode. Under `enabled` both go by the token's agent;
-  a call naming an agent without its token spends the anonymous budget (new
-  default), a registration its address's (review F-2), and a header naming
-  a quarantined agent is still refused. Wallet calls still feed the
-  breaker, so about 33 posts a minute into a channel can still quarantine
-  its personas through their leased bids: ISSUE-0194.
-- **F-9.** `IssuableAgentID` refuses `local`; a server test pins it to
-  `channels.DefaultPrincipalID`.
-- **F-15.** `AgentServer.stop` deregisters after the gRPC grace, the order
-  RFC 0004's shutdown sequence gives, so an RPC finishing inside the grace
-  still publishes. A persona's channel turn runs on its event loop, which
-  the grace does not wait for: one still running after it loses its publish
-  under `enabled`, as it would if the process were killed. `close_memory`'s
-  wallet calls stay PR 10's.
-- **F-4.** No code of its own for a replaced token: an agent told "replaced"
-  would register again, so a rolling restart's old process would take the
-  ID back from the new one, each retiring the other's token. The race F-4
-  found stays: it needs a stalled registration overtaken by a later one, and
-  the stopped agent logs why.
-
-**Review findings** (PR 8): F-1 to F-12 are an independent review's, each
-Medium one proved by running it, and F-13 the author's.
-
-| Finding | Severity | Description | Disposition |
-|---------|----------|-------------|-------------|
-| F-1 | Medium | Registration admits a caller that shows no secret and deregistration is open, so anyone can register a live agent's ID, publish with the token, and stop the real agent, whose token now reads revoked, until it restarts. The auth guide, the CHANGELOG and ISSUE-0187's note said nobody without a credential could post | Docs fixed in-PR: the residual is back in each. The code → deferred to PR 9 (noted there) |
-| F-2 | Medium | Under `enabled` a registration shows no token, so it spent the budget every caller with no account shares: anyone spending that kept every agent from registering, and an agent that missed its registration had every publish refused | Fixed in-PR: under `enabled` a registration spends its address's budget, `register:<address>`; `TestRegistration_UnderEnabledSpendsItsAddressesBudget` |
-| F-3 | Medium | The two new audit lines anyone can cause copied the request's path and method whole, so one refused call wrote a line of about 900 KB | Fixed in-PR: both cut to 256 bytes, with a test for each line |
-| F-4 | Medium | ISSUE-0187 was resolved while its high outcome still happens through the personas' wallet bids, about 33 posts a minute, and no issue tracked that; its note also called step 5 fixed | Filed as [ISSUE-0194](../issues/ISSUE-0194-channel-posts-quarantine-personas-through-their-bids.md) (high), for PR 16's Known Gaps; ISSUE-0187's note corrected |
-| F-5 | Low | PR 7's F-18 starts doing harm here: under `enabled` an agent with no token has every publish refused with 403, which its client never takes as a cue to register | → deferred to PR 9 (noted there) |
-| F-6 | Low | An agent can register under a signed-in account's participant ID and publish as that person | → deferred to PR 9 (noted there) |
-| F-7 | Low | The autonomous-channels guide still said a persona refused over its REST budget is quarantined | Fixed in-PR |
-| F-8 | Low | No upgrade note said that an agent from before PR 7 shows no token, so under `enabled` its publishes are refused | Fixed in-PR: added to the upgrade note on publishes |
-| F-9 | Info | Two mutants survived: dropping the audit line's filter on the claimed ID, and dropping the refusal of a bare `Authorization` header beside a token | Fixed in-PR: a test for each; both mutants are now caught |
-| F-10 | Info | With deregistration after the grace, the orchestrator may still send work to a closing agent for up to the grace, 30 s by default. RFC 0004 gives that order | Noted |
-| F-11 | Info | `channel_session_override.go` and `channels/principal_restamp.go` still call the sender unchecked, and say agent tokens have not shipped; partly true until PR 9 | → deferred to PR 9 (noted there) |
-| F-12 | Info | +1,125 lines at review, 688 of them tests, past the ~450 estimate and the 500-line target | Noted |
-| F-13 | Low | One limiter now holds two budgets per agent, so `SECURITY_RATE_LIMIT_MAX_AGENTS`, 1 000 by default, covers about 500 agents before the least recently used is dropped and starts afresh | Fixed in-PR: the setting's comment and the CHANGELOG say so |
+PR 8's implementation note and its review findings are in
+[the plan's notes on merged PRs, part 2](0009-phases-3-4-notes-2-pr-plan.md#pr-8--featurev040-rfc0009-token-middleware).
 
 ### PR 9 — `feature/v040-rfc0009-agent-route-policy`
 
@@ -512,6 +521,12 @@ the CLI's `channel send` as the signed-in person, and G-14's limit.
 where no id is verified, anyone who reaches the REST port can still get a
 named agent quarantined; the closing note says so.
 **Estimate**: ~250 lines.
+**From PR 4**: G-14's limit is two gaps. On Linux a command `shell_exec`
+runs as the agent's user can read the enrollment secret from
+`/proc/<agent pid>/environ`, which the scrub cannot change; running tools as
+another user, or allowlisting no command that reads files outside the
+workspace, closes it. And only `SECURITY_*` variables are scrubbed, so a
+command still sees the provider API keys.
 
 ### PR 12 — `feature/v040-rfc0009-approval-queue`
 
@@ -606,6 +621,9 @@ lines drafted in `[Unreleased]`.
 **From PR 8 review**: F-4 — ISSUE-0194, posts into a channel quarantining
 its personas through their wallet bids, goes in the Known Gaps unless an
 amendment slots it.
+**From PR 4**: the two G-14 gaps PR 11's guide states, the secret readable
+in `/proc/<agent pid>/environ` and the provider API keys in a tool's
+environment, each filed and named in the Known Gaps.
 
 ### PR 17 — `feature/v040-rfc0009-closeout`
 
@@ -649,7 +667,8 @@ the closeout would take it past its cap.
 ## Related documentation
 
 - [RFC 0009 Phases 1–2 plan](0009-pr-plan.md) — what v0.3.0 shipped
-- [Notes on merged PRs](0009-phases-3-4-notes-pr-plan.md) — this plan's merged PRs' implementation notes and review findings
+- [Notes on merged PRs](0009-phases-3-4-notes-pr-plan.md) — this plan's merged PRs' implementation notes, PRs 3 and 5 to 7, and review findings
+- [Notes on merged PRs, part 2](0009-phases-3-4-notes-2-pr-plan.md) — the same from PR 8 on
 - [RFC 0028 PR plan](0028-pr-plan.md) — the hold, the release and the approval tokens this queue serves
 - [RFC 0012 PR plan](0012-pr-plan.md) — ties and graph changes on the queue
 - [RFC 0029 Phase 3 PR plan](0029-phase3-pr-plan.md) — the society tables the queue lives in

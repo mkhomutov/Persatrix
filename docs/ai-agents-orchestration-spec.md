@@ -485,6 +485,14 @@ resource_limits:
     max_output_size_bytes: 1048576  # 1MB
 ```
 
+> 2026-11-04 — these were MVP targets. What is built is per agent: the
+> per-task call cap is `max_llm_calls`, the wall time of a shell command is
+> `permissions.shell.max_execution_seconds`, and RFC 0009 Phase 3's
+> `resource_limits` block sets a CPU limit on each process of a command
+> (`shell_cpu_seconds`)
+> and a cap on any tool's output (`tool_output_bytes`), each off until set;
+> `schemas/agent.schema.json` has the ranges.
+
 ### 6.4 Secrets Management
 
 - **Never in YAML directly** — secrets use `${ENV_VAR}` references, resolved at runtime
