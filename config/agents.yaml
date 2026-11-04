@@ -83,6 +83,14 @@ agents:
         # Ollama is local (localhost) and needs no entry.
         allow: ["api.anthropic.com", "api.openai.com"]
         deny: ["*"]
+    # RFC 0009 Phase 3: limits on what this agent's tools spend and return.
+    # Each is off until set, so the shipped agents behave as before; these are
+    # the values recommended for production (ranges in
+    # schemas/agent.schema.json). The wall-time limit is
+    # shell.max_execution_seconds above.
+    # resource_limits:
+    #   shell_cpu_seconds: 10    # the kernel stops a command at 10 s of CPU
+    #   tool_output_bytes: 65536 # the most one tool call hands the model (64 KB)
 
   - id: "code-reviewer"
     type: "task"

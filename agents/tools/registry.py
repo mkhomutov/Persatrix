@@ -15,7 +15,7 @@ import logging
 import time
 import warnings
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, get_type_hints
 
 from opentelemetry import trace
@@ -34,9 +34,16 @@ from ..observability.spans import (
     tool_payload_capture_mode,
 )
 from .arg_check import ArgumentSpec, argument_spec
+from .sandbox import OutputSizeLimiter, emit_resource_limited
 
 logger = logging.getLogger(__name__)
 _tracer = trace.get_tracer(__name__)
+
+# The cap on what one tool call hands the model: the agent's
+# ``resource_limits.tool_output_bytes``, set at startup by
+# ``agents.tools.builtin.configure``. None, the default, caps nothing
+# (RFC 0009 Phase 3, the Phases 3–4 plan's G-3).
+output_limiter: OutputSizeLimiter | None = None
 
 # Process-wide latch so the ``full``-mode-with-no-op-redactor warning fires
 # at most once.  Operators who opt in to full payload capture without first
@@ -93,6 +100,24 @@ class ToolResult:
     # (TimeoutError, ConnectionError) from permanent ones (ValueError, PermissionError)
     # for retry and circuit-breaker decisions.
     error_type: str | None = None
+
+
+def _cap_output(tool_name: str, result: ToolResult) -> ToolResult:
+    """*result* with its output cut to the agent's cap, if one is set and hit.
+
+    A failed call's output is capped too: ``shell_exec`` returns its stdout
+    and stderr with a non-zero exit. The error text is left as it is.
+    """
+    limiter = output_limiter
+    if limiter is None or result.data is None:
+        return result
+    data, output_bytes = limiter.limit(result.data)
+    if output_bytes is None:
+        return result
+    emit_resource_limited(
+        tool_name, "tool_output_bytes", max_bytes=limiter.max_bytes, output_bytes=output_bytes,
+    )
+    return replace(result, data=data)
 
 
 @dataclass
@@ -281,6 +306,7 @@ def tool(
                         result = func(*args, **kwargs)
 
                     if isinstance(result, ToolResult):
+                        result = _cap_output(tool_name, result)
                         span.set_attribute("tool.success", result.success)
                         if not result.success:
                             span.set_status(
@@ -300,7 +326,7 @@ def tool(
                         success=True,
                         duration_ms=(time.monotonic() - tool_started) * 1000.0,
                     )
-                    return ToolResult(success=True, data=result)
+                    return _cap_output(tool_name, ToolResult(success=True, data=result))
                 except Exception as e:
                     logger.exception("Tool '%s' failed", tool_name)
                     span.record_exception(e)

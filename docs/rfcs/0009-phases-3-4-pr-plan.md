@@ -251,6 +251,49 @@ merges, so this PR comes before PR 9 makes the secret required. The token is hel
 scrub stops short of G-14's words on Linux: a tool running as the agent's
 user can read the secret from `/proc/<agent pid>/environ`, which keeps the
 environment the agent started with. This PR or PR 11's guide says so.
+**Implementation note (2026-11-04)**: how this PR meets the scope above.
+Each point not settled above is a new default this PR's review confirms or
+overturns.
+
+- **The block.** `resource_limits` sits beside `permissions` in an agent's
+  entry, with `shell_cpu_seconds` (1 to 300, the wall-time ceiling) and
+  `tool_output_bytes` (1 to 102 400, the built-in tools' own cut, which it
+  can lower and never raise). `builtin.configure` reads it with the
+  permissions, before the agent is built, and a value the schema refuses
+  stops the agent at startup rather than being dropped (new default). That
+  wiring moved out of `server_persona.py`, which keeps it under 500 lines.
+  `config/agents.yaml` shows the block commented out with §D's numbers, so
+  the shipped agents behave as before; a test keeps the example valid.
+- **The CPU limit.** `RLIMIT_CPU`, set in the child before `exec` through
+  `preexec_fn`, and only when a limit is set, so a command with none starts
+  exactly as before. The soft limit is the setting and the hard one a second
+  more, never above a lower hard limit already in force, such as a
+  container's: SIGXCPU at the limit, SIGKILL a second later to a command
+  that ignores it. Only SIGXCPU reads as the limit: the call fails with
+  `ResourceLimitError` and keeps the command's output (new default).
+- **The output cap.** Applied in the `@tool` wrapper to every tool's
+  result, a failed one's too, measured as the model is shown it (JSON for a
+  dict or a list). A text is cut with `_truncate`'s notice, naming the cap;
+  `_truncate` now calls that same cut, so the 100 KB notice and every golden
+  stay as they were. A dict or a list keeps its shape: each of its texts is
+  cut to one common length, the longest that fits, so a long stdout keeps
+  `shell_exec`'s stderr and exit code (new default). One with too many
+  fields for that is cut as text.
+- **The audit line.** `tool.resource_limited`, on `agents.tools.audit` as
+  G-4 says, names the agent, the tool, the limit (`shell_cpu_seconds`,
+  `shell_wall_seconds` or `tool_output_bytes`) and its value, and for the
+  cap the size before the cut. A command stopped at its wall time writes
+  one too. The built-in tools' own 100 KB cut writes none: that is the
+  tool's behaviour, not a limit an operator set.
+- **G-14.** `shell_exec` starts its command with `tool_process_env()`, the
+  agent's environment less every variable whose name starts with
+  `SECURITY_`, in any letter case; a test ties that prefix to the secret's
+  name. The token is held in memory only, and a test shows it does not
+  reach a command. Two things still do, and PR 11's guide says so: on Linux
+  a command running as the agent's user can read the secret from
+  `/proc/<agent pid>/environ` (PR 7's F-16), and every other variable,
+  provider API keys included, still reaches it, since an allowlisted command
+  may need one. PR 16 files both.
 
 ### PR 5 — `feature/v040-rfc0009-agent-token`
 
@@ -512,6 +555,12 @@ the CLI's `channel send` as the signed-in person, and G-14's limit.
 where no id is verified, anyone who reaches the REST port can still get a
 named agent quarantined; the closing note says so.
 **Estimate**: ~250 lines.
+**From PR 4**: G-14's limit is two gaps. On Linux a command `shell_exec`
+runs as the agent's user can read the enrollment secret from
+`/proc/<agent pid>/environ`, which the scrub cannot change; running tools as
+another user, or allowlisting no command that reads files outside the
+workspace, closes it. And only `SECURITY_*` variables are scrubbed, so a
+command still sees the provider API keys.
 
 ### PR 12 — `feature/v040-rfc0009-approval-queue`
 
@@ -606,6 +655,9 @@ lines drafted in `[Unreleased]`.
 **From PR 8 review**: F-4 — ISSUE-0194, posts into a channel quarantining
 its personas through their wallet bids, goes in the Known Gaps unless an
 amendment slots it.
+**From PR 4**: the two G-14 gaps PR 11's guide states, the secret readable
+in `/proc/<agent pid>/environ` and the provider API keys in a tool's
+environment, each filed and named in the Known Gaps.
 
 ### PR 17 — `feature/v040-rfc0009-closeout`
 
