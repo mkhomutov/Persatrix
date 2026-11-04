@@ -121,4 +121,4 @@ on PR 3a's [#1086](https://github.com/mkhomutov/Persatrix/pull/1086).
 | F-11 | Info | Rotated files above a lowered `keep` were never removed | Fixed in-PR: rotation drops them |
 | F-12 | Info | An agent id near 250 characters made rotated file names too long for the file system | Fixed in-PR: an id over 200 characters is refused |
 | F-13 | Info | The span's confidence was said to be absent only in manual mode, the metrics table did not give `none` for a verdict, three places said a bare "checkpoint", and the glossary did not say what turns recording on | Fixed in-PR |
-| F-14 | Info | About 1 260 changed lines in this PR's own commits against the ~350 estimate and the 500-line target, 440 of them tests | Noted: the log stays with its tests |
+| F-14 | Info | About 1 050 changed lines in this PR's own commits against the ~350 estimate and the 500-line target, 440 of them tests | Noted: the log stays with its tests |
