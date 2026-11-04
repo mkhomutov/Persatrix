@@ -27,15 +27,14 @@ commitment carries no source channel for the audience check to judge.
 :data:`MAX_DESCRIPTION_CHARS` and passed through the sanitizer as the
 persona's own output before it is stored; a flag is logged, not refused,
 as for channel text.  The target party gets the same checks, since the
-prompt block shows it on the same line.  A person has at most
-:data:`MAX_OPEN_COMMITMENTS` open with the persona in an epoch, counted
-across rooms, so a persona cannot pass the cap by spreading its promises
-out, and one person filling it neither blocks another nor tells them
-anything.  (H-7 said "per persona"; the Phase 2 plan's PR 2 review
-revised it.  With auth disabled every room shares one person, so there the
-cap is per persona.)  The protection level is stored as the caller gives
-it: the persona stamps it, since memory must not import the
-classification rules.
+prompt block shows it on the same line.  A persona has at most
+:data:`MAX_OPEN_COMMITMENTS` open in an epoch, counted across people and
+rooms, so it cannot pass the cap by spreading its promises out (H-7).
+One person's open commitments therefore count against everyone's; the
+maintainer kept that on the Phase 2 plan's PR 2 review (F-1).  Another
+epoch's do not count, since this one can neither read nor close them.
+The protection level is stored as the caller gives it: the persona
+stamps it, since memory must not import the classification rules.
 
 **Time** comes only from the :class:`~agents.clock.Clock` the store is
 given, agent time by default — never the real clock
@@ -87,7 +86,7 @@ logger = logging.getLogger(__name__)
 #: is refused.
 MAX_DESCRIPTION_CHARS = 1_000
 
-#: RFC 0021 §Security's soft cap, per person and epoch (H-7, as revised).
+#: RFC 0021 §Security's soft cap, per persona and epoch (H-7).
 MAX_OPEN_COMMITMENTS = 500
 
 # The most rows one read returns, as the facts and notes tiers bound theirs.
@@ -159,7 +158,7 @@ class CommitmentClosedError(ValueError):
 
 
 class CommitmentCapError(ValueError):
-    """The person already has :data:`MAX_OPEN_COMMITMENTS` open."""
+    """The persona already has :data:`MAX_OPEN_COMMITMENTS` open."""
 
 
 # Making one: what the RFC asks of each field, before anything is stored.
@@ -205,7 +204,7 @@ def _check_tags(tags: Sequence[str]) -> list[str]:
 
 
 # One statement, so two calls at once cannot both pass the count.  The
-# count's person and epoch predicates come from the shared helpers.
+# count's epoch predicate comes from the shared helper.
 _INSERT_UNDER_CAP = """
 INSERT INTO commitments
     (id, agent_id, kind, description, due_at, target_party, created_at,
@@ -214,7 +213,7 @@ INSERT INTO commitments
 SELECT ?, ?, 'commitment', ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?
 WHERE (
     SELECT COUNT(*) FROM commitments
-    WHERE agent_id = ? AND kind = 'commitment' AND state = 'open'{person}{epoch}
+    WHERE agent_id = ? AND kind = 'commitment' AND state = 'open'{epoch}
 ) < ?
 """
 
@@ -307,7 +306,7 @@ class CommitmentStore:
         the tool's (PR 5), and so is refusing a time already past.  A blank
         ``target_party`` is stored as none.  Raises :class:`ValueError` or
         :class:`TypeError` for a field the RFC refuses, and
-        :class:`CommitmentCapError` when the person already has
+        :class:`CommitmentCapError` when the persona already has
         :data:`MAX_OPEN_COMMITMENTS` open — the error says so, and nothing
         is stored.
         """
@@ -327,20 +326,17 @@ class CommitmentStore:
         session_id = normalize_session_id(
             current_session_id() or self._active_session_id,
         )
-        person, person_params = principal_eq_clause(
-            principal_id, column="principal_id",
-        )
         epoch, epoch_params = epoch_eq_clause(epoch_id, column="epoch_id")
         commitment_id = str(uuid.uuid4())
         cursor = await db.execute(
-            _INSERT_UNDER_CAP.format(person=person, epoch=epoch),
+            _INSERT_UNDER_CAP.format(epoch=epoch),
             (
                 commitment_id, self._agent_id, checked["description"].content,
                 due, checked["target_party"].content if target else None,
                 float(self._clock.now()), source_interaction_id,
                 json.dumps(tag_list), session_id, principal_id, epoch_id,
                 protection_level,
-                self._agent_id, *person_params, *epoch_params,
+                self._agent_id, *epoch_params,
                 MAX_OPEN_COMMITMENTS,
             ),
         )

@@ -165,10 +165,10 @@ each settled by a new default in the PR named:
   in v0.4.0 ([ISSUE-0186](../issues/ISSUE-0186-persona-memory-has-no-capacity-bound.md)).
   PR 2.
 
-  > 2026-11-04 — PR 2's review (F-1) counts the cap per person and epoch,
-  > across rooms: a count shared by everyone let one person's commitments
-  > block another's, and the refusal told them the persona held commitments
-  > for someone else.
+  > 2026-11-04 — PR 2's review (F-1) asked whether to count the cap per
+  > person instead; the maintainer kept one count per persona, across
+  > people and rooms. It is per epoch, since an epoch is an isolated run
+  > that can neither read nor close another's commitments.
 - **H-8 Permissions are granted in config.** `PermissionGate` has no
   defaults: every grant is in `config/agents.yaml`. `commitments: {read,
   write}` joins the `permissions` schema, and the three shipped personas get
@@ -308,7 +308,7 @@ every call here.
 
 | Finding | Severity | Description | Disposition |
 |---------|----------|-------------|-------------|
-| F-1 | Low | H-7's "per persona", read as one count for everyone, let one person's open commitments block another's, and the refusal told the second person that the persona held commitments for someone else. The independent review rated the change Medium: counted per person, a persona with N people can hold 500 × N open commitments, so the cap no longer bounds the whole tier or Phase 3's reminder load; with auth disabled every room shares one person, so there it is per persona as before | Fixed in-PR, as a new default to confirm: the cap counts the person's and epoch's open commitments, across rooms; H-7 carries a dated note, and tests pin that another person, epoch, persona or room does not change the count |
+| F-1 | Info | H-7's "per persona", one count for everyone, lets one person's open commitments refuse another's, and the refusal tells the second person that the persona holds commitments for someone else. Counting per person instead (the self-review's first fix) lets a persona with N people hold 500 × N, so the cap no longer bounds the whole tier or Phase 3's reminder load; the independent review rated that change Medium. With auth disabled every room shares one person, so the two agree there | Noted: the maintainer ruled on 2026-11-04 to keep H-7's count per persona, across people and rooms, and per epoch; H-7 carries a dated note, and tests pin that another person's commitments count while another epoch's or persona's do not |
 | F-2 | Info | The plan named a call `list`; a method of that name would hide the built-in `list` from the annotations after it in the class, which mypy then reads as the method | Fixed in-PR: it is `list_commitments`, §G's tool name, and the scope line says so |
 | F-3 | Info | No persona opens the store yet: `build_personal_tiers` builds it, but nothing puts it on the persona's memory namespace or opens and closes it, and its clock is agent time, not the persona's — under the eval driver's frozen clock the two differ | → deferred to PR 4, the first reader |
 | F-4 | Low | Only the description was capped and sanitized (H-6); the independent review stored a 200 000-character target party ending in an instruction override with no flag, and 50 tags of that size. PR 4's block shows the target party on the description's line | Fixed in-PR for the target party: the description's cap and sanitizer, with a flag logged under its field name. Tags, which no prompt shows → deferred to PR 5 |
@@ -316,7 +316,7 @@ every call here.
 | F-6 | Info | §G keeps a cancel reason in the tags; `cancel` takes none | → deferred to PR 5, which settles the tools' arguments (H-9) |
 | F-7 | Info | `create` takes a due time already past | Noted: OQ 3 puts that refusal in PR 5's tool, which reads the model's time |
 | F-8 | Info | A flagged description logs twice: the sanitizer's warning, which names the source, and the store's, which names the commitment | Noted: only the second says which row to look at |
-| F-9 | Info | `commitments.py` is 492 lines, and PR 3 adds the directive dataclass and three calls to it | → deferred to PR 3 |
+| F-9 | Info | `commitments.py` is 488 lines, and PR 3 adds the directive dataclass and three calls to it | → deferred to PR 3 |
 | F-10 | Info | ~1 280 changed lines against a ~450 estimate and the 500-line target; the tests are over half of it | Noted: the store stays with its tests, as PR 1's did (its F-9) |
 | F-11 | Low | The store's flag warning, which says the row was stored, was logged before the insert, so a flagged commitment the cap refused was logged under an id never stored | Fixed in-PR: logged after the insert; a test pins that a refused row logs nothing |
 | F-12 | Low | Nothing tested the persona filter in the cap's count: a count across every persona sharing a memory file passed every test | Fixed in-PR: another persona's 500 open commitments do not block this one |
@@ -324,7 +324,7 @@ every call here.
 | F-14 | Info | The directive-cap test cannot fail through the cap's `kind` filter: the table gives a directive no `state`, so `state = 'open'` already leaves it out | Fixed in-PR: its docstring says both hold it, and it stays as a pin against a later change to either |
 | F-15 | Info | The tie-break test passed with the query's `rowid` tie-break removed, since the index returns equal due times in insertion order anyway | Fixed in-PR: a test reads across states, where the index gives a tie in state order, so only the tie-break passes it |
 | F-16 | Info | `personal_tiers.py`'s docstrings still said the persona runtime opens and closes every tier it builds | Fixed in-PR |
-| F-17 | Info | The cap's count wrote the person and epoch predicates by hand rather than through the shared helpers | Fixed in-PR: it uses them |
+| F-17 | Info | The cap's count wrote the person and epoch predicates by hand rather than through the shared helpers | Fixed in-PR: it uses them (since F-1's ruling, the epoch's only) |
 | F-18 | Info | No read takes a protection-level allowlist, as the notes tier's does; if PR 4's gate filters after a read's limit, withheld rows can push out rows it would admit | → deferred to PR 4 |
 
 ### PR 3 — `feature/v040-rfc0021-directive-calls`
@@ -341,7 +341,7 @@ class or polarity is refused; no commitment call sees a directive and no
 directive call sees a commitment.
 **Migration**: none.
 **Estimate**: ~300 lines.
-**From PR 2 review**: F-9 — `commitments.py` (492) first moves its
+**From PR 2 review**: F-9 — `commitments.py` (488) first moves its
 dataclass, errors and field checks to a `commitment_types.py`, in a
 pure-move commit, as `fact_types.py` sits beside `facts.py`.
 
@@ -426,7 +426,7 @@ rows are never removed.
 | `agents/memory/_migration_handlers.py` | 489 | PR 1 adds one registry line; the handler is its own file |
 | `agents/persona_runtime/facts_section.py` | 500 | Untouched: the block is its own module |
 | `agents/persona_runtime/injection_gate.py` | 449 | PR 4 adds a tier name |
-| `agents/memory/commitments.py` | 492 | PR 3 moves its types out first (PR 2's F-9) |
+| `agents/memory/commitments.py` | 488 | PR 3 moves its types out first (PR 2's F-9) |
 
 ## Risks
 

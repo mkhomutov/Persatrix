@@ -5,8 +5,10 @@ A commitment is scoped like a fact: each row carries the session, person
 the facts tier's filters — strict equality for the person and the epoch,
 the room's session plus the ``legacy`` carve-out for the session.  So a
 promise made to one signed-in person never reaches another's prompt, and
-a fresh epoch starts with none.  The same table holds RFC 0012's
-directive rows; no call here sees one.  Making a commitment and its
+a fresh epoch starts with none.  The cap on open commitments is the
+exception: it counts every person's and every room's, within one epoch.
+The same table holds RFC 0012's directive rows; no call here sees one.
+Making a commitment and its
 lifecycle are in ``test_commitment_store.py``.
 """
 
@@ -109,19 +111,31 @@ class TestStrictAxes:
         assert commitment is not None
         assert commitment.state == "open"
 
-    async def test_the_cap_counts_only_ones_own(
-        self, store: CommitmentStore, scope: Scope,
-    ):
-        """One person filling the cap neither blocks another nor tells
-        them anything about the first one's commitments."""
-        db = store._ensure_db()
-        column = "principal_id" if scope is principal_scope else "epoch_id"
-        for n in range(MAX_OPEN_COMMITMENTS):
-            await insert(db, {**COMMITMENT, "id": f"c-{n}", column: "alice"})
-        with scope("alice"), pytest.raises(CommitmentCapError):
-            await _make(store)
-        with scope("bob"):
-            await _make(store)
+
+# ─── The cap: one count per persona, in each epoch ──────────
+
+
+async def test_the_cap_counts_every_persons_commitments(store: CommitmentStore):
+    """H-7 bounds the persona's open commitments, not each person's, so
+    one person's 500 refuse another's next one (the maintainer's ruling
+    on PR 2's F-1)."""
+    db = store._ensure_db()
+    for n in range(MAX_OPEN_COMMITMENTS):
+        await insert(db, {**COMMITMENT, "id": f"c-{n}", "principal_id": "alice"})
+    with principal_scope("bob"), pytest.raises(CommitmentCapError):
+        await _make(store)
+
+
+async def test_the_cap_counts_only_the_epochs_commitments(store: CommitmentStore):
+    """An epoch is an isolated run: another epoch's rows cannot be read or
+    closed from this one, so they do not count toward its cap."""
+    db = store._ensure_db()
+    for n in range(MAX_OPEN_COMMITMENTS):
+        await insert(db, {**COMMITMENT, "id": f"c-{n}", "epoch_id": "run-1"})
+    with epoch_scope("run-1"), pytest.raises(CommitmentCapError):
+        await _make(store)
+    with epoch_scope("run-2"):
+        await _make(store)
 
 
 # ─── Session: the room plus the legacy carve-out ────────────
@@ -149,8 +163,8 @@ class TestSession:
             await store.fulfill(cid)
 
     async def test_the_cap_spans_rooms(self, store: CommitmentStore):
-        """The cap bounds a person's open commitments, not a room's, so a
-        persona cannot pass it by spreading them over rooms."""
+        """The cap bounds the persona's open commitments, not a room's, so
+        it cannot pass it by spreading them over rooms."""
         db = store._ensure_db()
         for n in range(MAX_OPEN_COMMITMENTS):
             room = "room-a" if n % 2 else "room-b"
