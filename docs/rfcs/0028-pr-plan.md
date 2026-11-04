@@ -352,6 +352,14 @@ pass-through `NoopRedactor`. Its patterns are generated from Go's
 `make generate-sanitizer-patterns-check`.
 **Implementation**: the decision log (PR 3) calls it. Installing it for logs
 and spans is out of scope, so log output does not change.
+*As built*: `SecretRedactor` in `agents/observability/redact.py`, reading
+`redact_patterns.py`. `cmd/genpatterns` also runs Go's redactor over a list
+of samples and writes each beside Go's output, so the Python test compares
+what the two mask, not only their strings; a sample is split at its token
+prefix, since GitHub's push scanner flags whole token shapes. The existing
+gate, `make generate-sanitizer-patterns-check`, covers the new files through
+a new `-check` mode. Python's wider `\s` makes the copy mask more, and in two
+non-ASCII cases less, as the class docstring and an ISSUE-0154 note record.
 **Tests**: each Go pattern masks the same sample in Python; the gate fails on
 a hand edit of the generated file.
 **Estimate**: ~350 lines.

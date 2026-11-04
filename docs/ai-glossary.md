@@ -1245,12 +1245,15 @@ verbatim) are defined now (PR #232 review SF-5).
 - **Aliases:** none; **Disallowed:** "secret scrubber", "PII filter"
   (PII is a separate v0.4.0 concern).
 - **Definition:** `Redactor` implementation in
-  `internal/security/redactor.go` carrying the five default patterns
-  from RFC 0009 §I (`anthropic-api-key`, `openai-api-key`,
-  `bearer-token`, `aws-access-key`, `generic-secret`). Installed by
-  default in `NewFileAuditLogger` (PR #233 review Should-Fix #3) so any
-  caller embedding a secret in `AuditEvent.Detail` / `Action` /
-  `Resource` sees it scrubbed before the canonical-JSON encode.
+  `internal/security/redactor.go` carrying the default patterns: RFC 0009
+  §I's five (`anthropic-api-key`, `openai-api-key`, `bearer-token`,
+  `aws-access-key`, `generic-secret`) and the vendor patterns added
+  since. Installed by default in `NewFileAuditLogger` (PR #233 review
+  Should-Fix #3) so any caller embedding a secret in `AuditEvent.Detail` /
+  `Action` / `Resource` sees it scrubbed before the canonical-JSON encode.
+  The agents' Python `SecretRedactor` (`agents/observability/redact.py`,
+  RFC 0028 PR 3a) applies the same patterns, generated from this table by
+  `cmd/genpatterns`, before the decision log writes a record.
 
 ### Tamper evidence
 - **Aliases:** "audit chain integrity"; **Disallowed:** "audit signing"

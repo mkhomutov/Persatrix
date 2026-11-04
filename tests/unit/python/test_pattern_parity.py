@@ -13,7 +13,9 @@ This test asserts:
   2. Every pattern in the Python mirror compiles cleanly — guards
      against accidental Go-only escape syntax leaking through.
   3. Re-running `make generate-sanitizer-patterns` produces no diff
-     against the checked-in pattern OR enums file (freshness check).
+     against any checked-in generated file (freshness check) — the
+     sanitizer's two and, since RFC 0028 PR 3a, the secret redactor's
+     patterns and parity samples, which test_secret_redactor.py reads.
 
 The third leg is the actual parity gate: it fails the build if a
 maintainer edits the Go pattern table or enum closed sets without
@@ -32,8 +34,6 @@ import pytest
 from agents.security_patterns import COMPILED_PATTERNS, DEFAULT_PATTERNS
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-GENERATED_PATTERNS_FILE = REPO_ROOT / "agents" / "security_patterns.py"
-GENERATED_ENUMS_FILE = REPO_ROOT / "agents" / "security_enums.py"
 
 
 class TestGeneratedShape:
@@ -81,44 +81,24 @@ class TestParityFreshness:
         not (REPO_ROOT / "go.mod").exists(),
         reason="Go module unavailable in this environment; freshness checked in CI.",
     )
-    def test_generator_output_matches_checked_in_files(self, tmp_path: Path) -> None:
-        patterns_out = tmp_path / "security_patterns.py"
-        enums_out = tmp_path / "security_enums.py"
+    def test_generator_output_matches_checked_in_files(self) -> None:
+        # `-check` renders every generated file and compares it with the
+        # checked-in one, writing nothing; it names each stale file.
         try:
             result = subprocess.run(
-                [
-                    "go", "run", "./cmd/genpatterns",
-                    "-out", str(patterns_out),
-                    "-enums-out", str(enums_out),
-                ],
+                ["go", "run", "./cmd/genpatterns", "-check"],
                 cwd=REPO_ROOT,
                 capture_output=True,
                 check=False,
                 text=True,
             )
         except FileNotFoundError:
-            pytest.skip("`go` toolchain not on PATH; freshness check deferred to CI.")
+            pytest.skip("`go` toolchain not on PATH; freshness checked in CI.")
         if result.returncode != 0:
             pytest.fail(
-                f"Generator failed (rc={result.returncode}). stderr:\n{result.stderr}"
-            )
-
-        # Two byte-level diffs, one per generated file. We assert each
-        # separately so a failure message points at the specific stale file
-        # rather than a combined "something drifted" report.
-        if GENERATED_PATTERNS_FILE.read_bytes() != patterns_out.read_bytes():
-            pytest.fail(
-                "agents/security_patterns.py is stale relative to "
-                "internal/security/sanitize_patterns.go. Run:\n"
-                "    make generate-sanitizer-patterns\n"
-                "and commit the resulting diff."
-            )
-        if GENERATED_ENUMS_FILE.read_bytes() != enums_out.read_bytes():
-            pytest.fail(
-                "agents/security_enums.py is stale relative to "
-                "internal/security/context_source.go or sanitize_action.go. Run:\n"
-                "    make generate-sanitizer-patterns\n"
-                "and commit the resulting diff."
+                "A generated security mirror is stale relative to the Go source. "
+                "Run:\n    make generate-sanitizer-patterns\nand commit the "
+                f"resulting diff.\n{result.stdout}{result.stderr}"
             )
 
 

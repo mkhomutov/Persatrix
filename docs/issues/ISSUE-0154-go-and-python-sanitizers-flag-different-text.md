@@ -12,6 +12,8 @@ refs:
   - internal/security/security.go
   - internal/a2a/a2a.go
   - cmd/genpatterns/main.go
+  - cmd/genpatterns/redact.go
+  - agents/observability/redact.py
   - agents/security_patterns.py
   - agents/security.py
   - agents/base.py
@@ -316,3 +318,13 @@ it waits for the v0.3.16 tag unless a dated amendment takes it in.
 > shape](../v0.4.x-sequencing.md#amendment-2026-10-18--v040s-shape-its-prerequisites-its-cuts-and-the-end-of-the-v03x-line)
 > does not take it in: its [ruling (q)](../v0.4.x-sequencing.md#rulings)
 > boards an issue only when a phase in the release is its fix.
+
+> 2026-11-04 — RFC 0028 PR 3a copies Go's secret-redactor patterns into the
+> agents the same way, verbatim and compiled with no flags, so the redactor
+> inherits this split; this issue still covers only the sanitizer. The
+> redactor's copy has the behavioural test step 1 asks for, on ASCII input
+> only: `cmd/genpatterns` runs Go's redactor over samples and the Python
+> test compares its own output with Go's. Run on non-ASCII input, the Python
+> redactor masks more where a label is followed by a Unicode space, and less
+> in two cases, which the `SecretRedactor` docstring lists: a value ends at a
+> non-ASCII space, and a private key with no end line keeps its last newline.

@@ -1,8 +1,10 @@
 """Persatrix log-record redactor surface (RFC 0018 § F).
 
-This module ships the *hook surface only*.  The default :class:`NoopRedactor`
-is a pass-through; a real PII / secret scrubber is the responsibility of a
-future security RFC under the RFC 0009 umbrella.
+The default :class:`NoopRedactor` is a pass-through, and logs and spans still
+install it.  :class:`SecretRedactor` masks the secrets Go's ``SecretRedactor``
+masks, with Go's own patterns (RFC 0028 PR 3a); the decision log is its first
+caller.  A PII scrubber is still the responsibility of a future security RFC
+under the RFC 0009 umbrella.
 
 The :class:`Redactor` Protocol is the **single** redaction contract shared
 across both observability signals:
@@ -20,7 +22,10 @@ redactor decides to no-op.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Protocol, runtime_checkable
+
+from .redact_patterns import REDACT_PATTERNS
 
 
 @runtime_checkable
@@ -68,4 +73,63 @@ class NoopRedactor:
         return record
 
 
-__all__ = ["NoopRedactor", "Redactor"]
+#: How deep :meth:`SecretRedactor.redact` walks, and what it puts past that
+#: depth: the cap and marker of Go's ``RedactStruct``.  A value past the cap,
+#: a cycle included, is replaced, never kept.
+_MAX_DEPTH = 32
+_DEPTH_MARKER = "[REDACTED:max-depth-exceeded]"
+
+
+class SecretRedactor:
+    """Masks API keys, tokens and passwords as Go's ``SecretRedactor`` does.
+
+    The patterns are Go's, copied by ``cmd/genpatterns`` into
+    :mod:`agents.observability.redact_patterns`, and applied in Go's order;
+    a match becomes ``[REDACTED:<pattern name>]``.  A parity test runs Go's
+    output for a set of samples against this class.
+
+    Python's ``re`` counts more characters as a space than Go's RE2 (``\\s``
+    is Unicode here, ASCII there), the split ISSUE-0154 records for the
+    sanitizer.  So this side mostly masks more: ``password\\u00a0= x`` is
+    masked here and not in Go.  It masks less in two cases: a ``password=``
+    value ends at a non-ASCII space, so the rest of it stays, and a
+    private-key block with no end line keeps its final newline, since
+    Python's ``$`` also matches before one.  The parity samples are ASCII and
+    match Go exactly.
+    """
+
+    def __init__(self) -> None:
+        self._patterns = tuple(
+            (re.compile(expr), f"[REDACTED:{name}]") for name, expr in REDACT_PATTERNS
+        )
+
+    def redact_text(self, text: str) -> str:
+        """Return *text* with every match of every pattern masked."""
+        for pattern, marker in self._patterns:
+            # A function, so the marker is never read as a replacement template.
+            text = pattern.sub(lambda _match: marker, text)
+        return text
+
+    def redact(self, record: dict[str, Any]) -> dict[str, Any]:
+        """Return a copy of *record* with every string in it masked.
+
+        Dicts, lists and tuples are walked; keys are kept as they are, as Go
+        keeps map keys; other values are returned unchanged.
+        """
+        return {key: self._walk(value, 1) for key, value in record.items()}
+
+    def _walk(self, value: Any, depth: int) -> Any:
+        if depth > _MAX_DEPTH:
+            return _DEPTH_MARKER
+        if isinstance(value, str):
+            return self.redact_text(value)
+        if isinstance(value, dict):
+            return {key: self._walk(item, depth + 1) for key, item in value.items()}
+        if isinstance(value, list):
+            return [self._walk(item, depth + 1) for item in value]
+        if isinstance(value, tuple):
+            return tuple(self._walk(item, depth + 1) for item in value)
+        return value
+
+
+__all__ = ["NoopRedactor", "Redactor", "SecretRedactor"]

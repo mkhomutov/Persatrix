@@ -5,6 +5,8 @@
 tests/fixtures/**           -text eol=lf
 agents/security_patterns.py -text eol=lf
 agents/security_enums.py    -text eol=lf
+agents/observability/redact_patterns.py      -text eol=lf
+tests/unit/python/_redact_parity_samples.py  -text eol=lf
 
 # Protobuf-generated stubs are emitted with LF by protoc / grpc_tools. The
 # `make proto-check` byte-level diff fails on Windows checkouts with
