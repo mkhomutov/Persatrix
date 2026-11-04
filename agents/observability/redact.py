@@ -1,8 +1,11 @@
 """Persatrix log-record redactor surface (RFC 0018 § F).
 
-This module ships the *hook surface only*.  The default :class:`NoopRedactor`
-is a pass-through; a real PII / secret scrubber is the responsibility of a
-future security RFC under the RFC 0009 umbrella.
+The default :class:`NoopRedactor` is a pass-through, and logs and spans still
+install it.  :class:`SecretRedactor` masks the secrets Go's ``SecretRedactor``
+masks, with Go's own patterns (RFC 0028 PR 3a); the decision log
+(:mod:`agents.observability.decision_log`, RFC 0028 PR 3) is its first caller.
+A PII scrubber is still the responsibility of a future security RFC under the
+RFC 0009 umbrella.
 
 The :class:`Redactor` Protocol is the **single** redaction contract shared
 across both observability signals:
@@ -20,7 +23,10 @@ redactor decides to no-op.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Protocol, runtime_checkable
+
+from .redact_patterns import REDACT_PATTERNS
 
 
 @runtime_checkable
@@ -68,4 +74,71 @@ class NoopRedactor:
         return record
 
 
-__all__ = ["NoopRedactor", "Redactor"]
+#: How deep :meth:`SecretRedactor.redact` walks, and what it puts past that
+#: depth: the cap and marker of Go's ``RedactStruct``.  A value past the cap,
+#: a cycle included, is replaced, never kept.
+_MAX_DEPTH = 32
+_DEPTH_MARKER = "[REDACTED:max-depth-exceeded]"
+
+
+class SecretRedactor:
+    """Masks API keys, tokens and passwords as Go's ``SecretRedactor`` does.
+
+    The patterns are Go's, copied by ``cmd/genpatterns`` into
+    :mod:`agents.observability.redact_patterns`, and applied in Go's order;
+    a match becomes ``[REDACTED:<pattern name>]``.  A parity test runs Go's
+    output for a set of samples against this class.
+
+    Python's ``re`` reads ``\\s``, ``$`` and ``(?i)`` differently from Go's
+    RE2 outside ASCII (the split ISSUE-0154 records for the sanitizer), and a
+    pattern that took more text here could swallow the start of a secret a
+    later pattern masks.  So the generator rewrites each expression to Go's
+    meaning: Go's five ASCII spaces for ``\\s``, ``\\Z`` for ``$``, ASCII
+    mode, and the two non-ASCII letters Go's ``(?i)`` folds with s and k.  The
+    parity samples include text the two engines would otherwise read
+    differently.
+    """
+
+    def __init__(self) -> None:
+        self._patterns = tuple(
+            (re.compile(expr), f"[REDACTED:{name}]") for name, expr in REDACT_PATTERNS
+        )
+
+    def redact_text(self, text: str) -> str:
+        """Return *text* with every match of every pattern masked."""
+        for pattern, marker in self._patterns:
+            # A function, so the marker is never read as a replacement template.
+            text = pattern.sub(lambda _match: marker, text)
+        return text
+
+    def redact(self, record: dict[str, Any]) -> dict[str, Any]:
+        """Return a copy of *record* with every string in it masked.
+
+        Dicts, lists and tuples are walked; keys are kept as they are, as Go
+        keeps map keys; other values are returned unchanged.
+        """
+        # One result per container and depth: a container reached down many
+        # paths, or a cycle with two ways back, is walked once per depth
+        # rather than once per path, which would double at every level.
+        seen: dict[tuple[int, int], Any] = {}
+        return {key: self._walk(value, 1, seen) for key, value in record.items()}
+
+    def _walk(self, value: Any, depth: int, seen: dict[tuple[int, int], Any]) -> Any:
+        if depth > _MAX_DEPTH:
+            return _DEPTH_MARKER
+        if isinstance(value, str):
+            return self.redact_text(value)
+        if not isinstance(value, dict | list | tuple):
+            return value
+        key = (id(value), depth)
+        if key not in seen:
+            if isinstance(value, dict):
+                seen[key] = {k: self._walk(item, depth + 1, seen) for k, item in value.items()}
+            elif isinstance(value, list):
+                seen[key] = [self._walk(item, depth + 1, seen) for item in value]
+            else:
+                seen[key] = tuple(self._walk(item, depth + 1, seen) for item in value)
+        return seen[key]
+
+
+__all__ = ["NoopRedactor", "Redactor", "SecretRedactor"]

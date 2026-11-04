@@ -81,3 +81,44 @@ Merged as [#1072](https://github.com/mkhomutov/Persatrix/pull/1072) on
 | F-22 | Info | The baseline's tests sat in the pipeline's test file, against the one-test-file-per-module rule | Fixed in-PR: `test_decision_baseline.py` |
 | F-23 | Info | Several tests checked unrelated cases in one block of asserts | Fixed in-PR: split, or one assert on the whole outcome or log line |
 | F-24 | Info | F-9 and F-10 break the plan header's 500-line rule and the branch-naming rule, recorded only as noted | Noted: renaming the head branch would close the PR, and the size rule is guidance the checks do not enforce; the fixes above add to the overrun |
+
+## PR 3a — `feature/v040-rfc0028-redactor`
+
+Opened as [#1086](https://github.com/mkhomutov/Persatrix/pull/1086).
+
+**Review findings** (PR 3a), from one independent review; the severities are
+this record's own:
+
+| Finding | Severity | Description | Disposition |
+|---------|----------|-------------|-------------|
+| F-1 | High | The patterns were copied verbatim, and Python's `re` reads `\s`, `$` and `(?i)` differently from Go's RE2 outside ASCII. A pattern that took more text in Python swallowed the start of a secret a later pattern masks: after `Bearer` and a non-ASCII space, a `\v` or a dotless i, the bearer pattern took the start of a private key, and the key's body stayed in the text. Python's `$` also kept a key's final newline, and a `\v` ended a `password=` value early | Fixed in-PR: `cmd/genpatterns` rewrites each pattern to Go's meaning and fails on a construct it does not cover, with a sample for each case. A scratch fuzz over about 551 000 inputs found no difference from Go; run with the verbatim patterns, it found 3 419 |
+| F-2 | Medium | The class docstring, the plan's as-built note and the ISSUE-0154 note said the copy masks more, and less only in two listed non-ASCII cases, missing F-1's leak | Fixed in-PR: reworded for the rewrite |
+| F-3 | Medium | The walk visited a container once per path, so a dict with two keys back to itself, or a list shared down many levels, took time that doubled at each of the 32 levels | Fixed in-PR: one result per container and depth, with a test for each shape |
+| F-4 | Low | The samples test checked that no sample was written whole, which could not fail, since each is written as its parts joined by `+` | Fixed in-PR: no part may be matched on its own by its sample's pattern |
+| F-5 | Low | The observability guide said logs and spans share one `set_redactor()` hook (each has its own), its operator warning named `SecretRedactor`, which masks secrets and no other personal data, as the redactor to install, and the guide, the glossary and two docstrings spoke of PR 3's decision log as already calling it | Fixed in-PR |
+| F-6 | Low | `redact` masks values only: keys are kept, as Go keeps map keys, and an object other than a dict, list or tuple is returned unchanged | Noted: its one caller, PR 3's decision log, passes a record decoded from JSON, whose keys are the record's field names and whose values are JSON types |
+| F-7 | Info | Row 3a still read ⬜ | Fixed in-PR: 🔀 with the PR link |
+
+## PR 3 — `feature/v040-rfc0028-decision-log`
+
+Opened as [#1090](https://github.com/mkhomutov/Persatrix/pull/1090), stacked
+on PR 3a's [#1086](https://github.com/mkhomutov/Persatrix/pull/1086).
+
+**Review findings** (PR 3), from one independent review:
+
+| Finding | Severity | Description | Disposition |
+|---------|----------|-------------|-------------|
+| F-1 | Medium | A short write passed as success, so a record was lost and the next one joined to its half, a line replay cannot read | Fixed in-PR: a line is written whole or not at all; a short write is carried on, and one that fails part-way is cut back off and counted |
+| F-2 | Low | Owner-only held only for a file or folder the log made; an existing one open to others stayed open, though F-14's ruling rests on it | Fixed in-PR for the file, which is made owner-only; an existing folder keeps its mode, as the docs now say |
+| F-3 | Low | The log followed a link at its path and appended to the link's target | Fixed in-PR: a link, or a file that is not this user's own plain file, is refused and counted |
+| F-4 | Low | The lock belonged to each log object, so two recorders for one agent lost records to overlapping rotations | Fixed in-PR: one lock per file in a process; a second process is still not guarded, as the docs say |
+| F-5 | Low | `keep` had no bound, and rotation checked every slot under the lock: `keep: 2000000` stalled one write for 9 s | Fixed in-PR: `keep` is 0 to 100, and rotation lists the folder once |
+| F-6 | Low | The rotation test kept 2 files, so the order of the shift was never tested | Fixed in-PR: 3 files, each one's records checked in order |
+| F-7 | Low | No test could fail on dropping a line longer than the cap, rotating an empty file, a folder made open to others, or a sink error while recording is off | Fixed in-PR: a test for each; each of those changes now fails one |
+| F-8 | Low | A `log` block with keys of mixed types raised `TypeError`, not `ValueError` | Fixed in-PR: a key that is not a name is refused |
+| F-9 | Info | "No text from the turn" rests on the callers: ids, a target, argument names and a rationale are written as given | Noted for PRs 5 to 7 in the plan; the docs say so |
+| F-10 | Info | The test that no message or argument value reaches the file cannot fail on this PR's code | Fixed in-PR: the test says it guards PR 1's types |
+| F-11 | Info | Rotated files above a lowered `keep` were never removed | Fixed in-PR: rotation drops them |
+| F-12 | Info | An agent id near 250 characters made rotated file names too long for the file system | Fixed in-PR: an id over 200 characters is refused |
+| F-13 | Info | The span's confidence was said to be absent only in manual mode, the metrics table did not give `none` for a verdict, three places said a bare "checkpoint", and the glossary did not say what turns recording on | Fixed in-PR |
+| F-14 | Info | About 1 050 changed lines in this PR's own commits against the ~350 estimate and the 500-line target, 440 of them tests | Noted: the log stays with its tests |

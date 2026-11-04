@@ -127,6 +127,11 @@ class _Instruments:
     temporal_recency_rendered: Counter
     channel_messages_salience_skipped: Counter  # RFC 0030 Tier B — _metrics_salience
     deliberation_parse_failures: Counter  # RFC 0051 Phase 1a — _metrics_salience
+    # RFC 0008 PR plan PR 4 — registered by :mod:`._metrics_shared_pool`.
+    shared_pool_reads: Counter
+    shared_pool_writes: Counter
+    shared_pool_denied: Counter
+    shared_pool_evictions: Counter
 
     def __init__(self, meter: Meter) -> None:
         # ─── Counters ────────────────────────────────────────────────
@@ -199,52 +204,16 @@ class _Instruments:
 
         from . import _metrics_confidentiality as _mc
         from . import _metrics_conversation_window as _mcw
+        from . import _metrics_decision as _md
         from . import _metrics_facts as _mf
         from . import _metrics_interactions as _mi
         from . import _metrics_persona_tick as _mp
         from . import _metrics_salience as _msal
+        from . import _metrics_shared_pool as _msp
         from . import _metrics_temporal as _mt
         from . import _metrics_wakes as _mw
-        for mod in (_mi, _mf, _mp, _mw, _mt, _msal, _mcw, _mc):  # size-cap splits
+        for mod in (_mi, _mf, _mp, _mw, _mt, _msal, _mcw, _mc, _msp, _md):  # size-cap splits
             mod.register(self, meter)
-
-        # ─── Shared memory pools (RFC 0008 PR plan PR 4) ─────────────
-        # Recorded by ``agents.memory.shared_pool`` ACL gates.  ``denied``
-        # carries an ``operation`` attribute (read|write|publish) so
-        # operators can distinguish trust-boundary breaches from misrouted
-        # writers without joining traces.
-        self.shared_pool_reads: Counter = meter.create_counter(
-            name="agent.shared_pool.reads",
-            unit="{call}",
-            description=(
-                "Reads served by a SharedMemoryPool (post-ACL).  Attributes: "
-                "pool, agent.id, result.count."
-            ),
-        )
-        self.shared_pool_writes: Counter = meter.create_counter(
-            name="agent.shared_pool.writes",
-            unit="{entry}",
-            description=(
-                "Entries written to a SharedMemoryPool (post-ACL + provenance "
-                "injection).  Attributes: pool, agent.id."
-            ),
-        )
-        self.shared_pool_denied: Counter = meter.create_counter(
-            name="agent.shared_pool.denied",
-            unit="{call}",
-            description=(
-                "ACL or sensitivity denials raised by SharedMemoryPool.  "
-                "Attributes: pool, agent.id, operation."
-            ),
-        )
-        self.shared_pool_evictions: Counter = meter.create_counter(
-            name="agent.shared_pool.evictions",
-            unit="{entry}",
-            description=(
-                "Entries evicted by the FIFO ``max_entries`` cap on a "
-                "SharedMemoryPool.  Attributes: pool."
-            ),
-        )
 
         # Python mirror of channel_instruments.go:53 ``sessions.writes``
         # (RFC 0031 Phase 1); one tick per store_episode / record_interaction.
