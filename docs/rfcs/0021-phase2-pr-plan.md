@@ -174,7 +174,10 @@ each settled by a new default in the PR named:
   > due time no longer counts, as a `missed` one does not. Nothing marks
   > one `missed` before Phase 3, and a turn can close only its own
   > person's and room's, so 500 forgotten promises would otherwise refuse
-  > every later one with nothing able to release them.
+  > every later one with nothing able to release them. The maintainer kept
+  > this the same day, at a known cost: until PR 5's tool refuses a due
+  > time already past (OQ 3), the store does not cap a commitment made
+  > with one.
 - **H-8 Permissions are granted in config.** `PermissionGate` has no
   defaults: every grant is in `config/agents.yaml`. `commitments: {read,
   write}` joins the `permissions` schema, and the three shipped personas get
@@ -332,7 +335,7 @@ every call here.
 | F-16 | Info | `personal_tiers.py`'s docstrings still said the persona runtime opens and closes every tier it builds | Fixed in-PR |
 | F-17 | Info | The cap's count wrote the person and epoch predicates by hand rather than through the shared helpers | Fixed in-PR: it uses them (since F-1's ruling, the epoch's only) |
 | F-18 | Info | No read takes a protection-level allowlist, as the notes tier's does; if PR 4's gate filters after a read's limit, withheld rows can push out rows it would admit | → deferred to PR 4 |
-| F-19 | Medium | Overdue open commitments counted toward the cap for good: nothing marks one `missed` before Phase 3, the count spans every person and room, and a turn can close only its own, so 500 forgotten promises refused every later one in the epoch with nothing able to release them | Fixed in-PR: a commitment past its due time leaves the count, as a `missed` one will; H-7 carries a dated note, and a test pins that one falling due makes room |
+| F-19 | Medium | Overdue open commitments counted toward the cap for good: nothing marks one `missed` before Phase 3, the count spans every person and room, and a turn can close only its own, so 500 forgotten promises refused every later one in the epoch with nothing able to release them | Fixed in-PR: a commitment past its due time leaves the count, as a `missed` one will; the maintainer kept that on 2026-11-05. H-7 carries a dated note, and a test pins that one falling due makes room |
 | F-20 | Low | The cap's error told the caller to fulfil or cancel one, though the rows it counts are mostly ones the turn cannot see | Fixed in-PR: it says the count spans every person and room, and that one falling due, or closed where it was made, makes room |
 | F-21 | Low | Nothing tested the cap under racing creates: a count and an insert split into two statements passed every test | Fixed in-PR: 80 creates over four connections, from 490 open, land exactly 10; that split fails it |
 | F-22 | Low | Making or closing a commitment sent neither the per-session write counter nor a memory write event, as every other persona-memory tier's write does | Fixed in-PR: both, as surface `commitment` and tier `commitments`, scored 0 like the other tiers' writes |
