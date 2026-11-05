@@ -36,6 +36,7 @@ from agents.memory._events import (
     set_memory_write_bus,
 )
 from agents.memory._salience import (
+    COMMITMENTS_APPEND_SALIENCE,
     EPISODIC_APPEND_SALIENCE,
     FACTS_APPEND_SALIENCE,
     NOTES_APPEND_SALIENCE,
@@ -185,7 +186,8 @@ class TestDefaultOffInvariant:
         metric_reader: InMemoryMetricReader,
     ) -> None:
         """A stream of stock-PR3a-scored writes records only ``below_threshold``."""
-        # All five PR 3a per-tier constants (per ``agents.memory._salience``).
+        # All five PR 3a per-tier constants (per ``agents.memory._salience``),
+        # and the commitments tier's (RFC 0021 Phase 2 PR 2).
         # Reflection-contradiction (0.6) is the highest PR 3a writes today.
         constants = [
             ("episodic", EPISODIC_APPEND_SALIENCE),
@@ -193,6 +195,7 @@ class TestDefaultOffInvariant:
             ("facts", FACTS_APPEND_SALIENCE),
             ("relationship", RELATIONSHIP_APPEND_SALIENCE),
             ("reflection", REFLECTION_CONTRADICTION_SALIENCE),
+            ("commitments", COMMITMENTS_APPEND_SALIENCE),
         ]
         for tier, sal in constants:
             for _ in range(5):
@@ -205,7 +208,7 @@ class TestDefaultOffInvariant:
                         written_at=time.time(),
                     ),
                 )
-        # Total writes: 25.  All must suppress; none must enqueue.
+        # Total writes: 30.  All must suppress; none must enqueue.
         await asyncio.sleep(0.05)
         reasons = _collect_salience_total(metric_reader)
         assert reasons.get("none", 0) == 0, (
@@ -214,4 +217,4 @@ class TestDefaultOffInvariant:
             "Re-verify that EventLoop.DEFAULT_SALIENCE_THRESHOLD > "
             "REFLECTION_CONTRADICTION_SALIENCE."
         )
-        assert reasons.get("below_threshold", 0) == 25
+        assert reasons.get("below_threshold", 0) == 30

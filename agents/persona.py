@@ -288,7 +288,8 @@ def create_persona_agent(
     db_path = memory_config.get("db_path", "data/memory.db")
 
     # RFC 0029 Phase 1 PR 3 — build the personal tiers (episodic /
-    # relationship / declarative-fact) through the ``agents.memory``
+    # relationship / declarative-fact; and commitments, which no persona
+    # opens until RFC 0021 Phase 2 PR 4) through the ``agents.memory``
     # facade so the per-tier classes are constructed inside
     # ``agents/memory/``.  The RFC 0029 PR 2 ``DeprecationWarning`` on
     # direct external tier construction stays silent on this production

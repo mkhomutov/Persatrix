@@ -32,8 +32,10 @@ prompt block shows it on the same line.  A persona has at most
 rooms, so it cannot pass the cap by spreading its promises out (H-7).
 One person's open commitments therefore count against everyone's; the
 maintainer kept that on the Phase 2 plan's PR 2 review (F-1).  Another
-epoch's do not count, since this one can neither read nor close them.
-The protection level is stored as the caller gives it: the persona
+epoch's do not count, since this one can neither read nor close them,
+and nor does one past its due time (F-19): Phase 3's janitor will mark
+it ``missed``, which does not count, and until then a turn that cannot
+see it could never release it.  The protection level is stored as the caller gives it: the persona
 stamps it, since memory must not import the classification rules.
 
 **Time** comes only from the :class:`~agents.clock.Clock` the store is
@@ -57,16 +59,21 @@ from ..clock import AgentClock, Clock
 from ..epoch_id import resolve_epoch_id_silent
 from ..principal_id import resolve_principal_id_silent
 from ..security import CONTEXT_SOURCE_AGENT_OUTPUT, sanitize
-from ..session_id import (
-    current_session_id,
-    normalize_session_id,
-    resolve_session_id_silent,
-)
+from ..session_id import normalize_session_id, resolve_session_id_silent
 from ._epoch_filter import epoch_eq_clause, resolve_active_epoch
 from ._migration_commitments import COMMITMENT_STATES
 from ._migration_protection import PROTECTION_LEVEL_DEFAULT
 from ._principal_filter import principal_eq_clause, resolve_active_principal
-from ._session_filter import _resolve_session_list, session_in_clause
+from ._salience import (
+    COMMITMENTS_APPEND_SALIENCE,
+    emit_for_tier,
+    emit_session_write,
+)
+from ._session_filter import (
+    _resolve_session_list,
+    resolve_active_session,
+    session_in_clause,
+)
 from .migrations import _apply_migrations
 
 __all__ = [
@@ -86,7 +93,8 @@ logger = logging.getLogger(__name__)
 #: is refused.
 MAX_DESCRIPTION_CHARS = 1_000
 
-#: RFC 0021 §Security's soft cap, per persona and epoch (H-7).
+#: RFC 0021 §Security's soft cap, per persona and epoch (H-7), on open
+#: commitments not yet due.
 MAX_OPEN_COMMITMENTS = 500
 
 # The most rows one read returns, as the facts and notes tiers bound theirs.
@@ -150,11 +158,16 @@ class CommitmentClosedError(ValueError):
     """The commitment is no longer open, so it cannot change."""
 
     def __init__(self, commitment_id: str, state: str) -> None:
-        super().__init__(
-            f"commitment {commitment_id} is already {state}; "
-            "a closed commitment cannot change",
-        )
+        # Both arguments go to ``args``, so the error copies and pickles.
+        super().__init__(commitment_id, state)
+        self.commitment_id = commitment_id
         self.state = state
+
+    def __str__(self) -> str:
+        return (
+            f"commitment {self.commitment_id} is already {self.state}; "
+            "a closed commitment cannot change"
+        )
 
 
 class CommitmentCapError(ValueError):
@@ -166,6 +179,8 @@ class CommitmentCapError(ValueError):
 
 def _check_text(value: str, field: str) -> str:
     """Strip ``value`` and refuse it over :data:`MAX_DESCRIPTION_CHARS`."""
+    if not isinstance(value, str):
+        raise TypeError(f"{field} must be text; got {type(value).__name__}")
     text = value.strip()
     if len(text) > MAX_DESCRIPTION_CHARS:
         raise ValueError(
@@ -188,10 +203,14 @@ def _check_due_at(due_at: float) -> float:
             f"due_at must be epoch seconds; got {type(due_at).__name__}",
         )
     # SQLite stores NaN as NULL, and infinity sorts after every real time
-    # and never falls due.
-    if not math.isfinite(due_at):
-        raise ValueError(f"due_at must be a finite time; got {due_at!r}")
-    return float(due_at)
+    # and never falls due.  An int past a float's range is as infinite.
+    try:
+        value = float(due_at)
+    except OverflowError:
+        value = math.inf
+    if not math.isfinite(value):
+        raise ValueError(f"due_at must be a finite time; got {value!r}")
+    return value
 
 
 def _check_tags(tags: Sequence[str]) -> list[str]:
@@ -204,7 +223,8 @@ def _check_tags(tags: Sequence[str]) -> list[str]:
 
 
 # One statement, so two calls at once cannot both pass the count.  The
-# count's epoch predicate comes from the shared helper.
+# count's epoch predicate comes from the shared helper; a row past its due
+# time is left out of it, as a ``missed`` one will be.
 _INSERT_UNDER_CAP = """
 INSERT INTO commitments
     (id, agent_id, kind, description, due_at, target_party, created_at,
@@ -213,7 +233,8 @@ INSERT INTO commitments
 SELECT ?, ?, 'commitment', ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?
 WHERE (
     SELECT COUNT(*) FROM commitments
-    WHERE agent_id = ? AND kind = 'commitment' AND state = 'open'{epoch}
+    WHERE agent_id = ? AND kind = 'commitment' AND state = 'open'
+        AND due_at >= ?{epoch}
 ) < ?
 """
 
@@ -307,52 +328,72 @@ class CommitmentStore:
         ``target_party`` is stored as none.  Raises :class:`ValueError` or
         :class:`TypeError` for a field the RFC refuses, and
         :class:`CommitmentCapError` when the persona already has
-        :data:`MAX_OPEN_COMMITMENTS` open — the error says so, and nothing
-        is stored.
+        :data:`MAX_OPEN_COMMITMENTS` open and not yet due — the error says
+        so, and nothing is stored.
         """
         db = self._ensure_db()
         text = _check_description(description)
         due = _check_due_at(due_at)
         tag_list = _check_tags(tags)
-        target = _check_text(target_party, "target_party") if target_party else ""
+        target = (
+            _check_text(target_party, "target_party")
+            if target_party is not None else ""
+        )
 
-        checked = {
-            field: sanitize(value, source=CONTEXT_SOURCE_AGENT_OUTPUT)
-            for field, value in (("description", text), ("target_party", target))
-            if value
-        }
+        description_scan = sanitize(text, source=CONTEXT_SOURCE_AGENT_OUTPUT)
+        target_scan = (
+            sanitize(target, source=CONTEXT_SOURCE_AGENT_OUTPUT) if target else None
+        )
         principal_id = resolve_active_principal(self._active_principal_id)
         epoch_id = resolve_active_epoch(self._active_epoch_id)
         session_id = normalize_session_id(
-            current_session_id() or self._active_session_id,
+            resolve_active_session(self._active_session_id),
         )
         epoch, epoch_params = epoch_eq_clause(epoch_id, column="epoch_id")
         commitment_id = str(uuid.uuid4())
+        now = float(self._clock.now())
         cursor = await db.execute(
             _INSERT_UNDER_CAP.format(epoch=epoch),
             (
-                commitment_id, self._agent_id, checked["description"].content,
-                due, checked["target_party"].content if target else None,
-                float(self._clock.now()), source_interaction_id,
+                commitment_id, self._agent_id, description_scan.content,
+                due, target_scan.content if target_scan else None,
+                now, source_interaction_id,
                 json.dumps(tag_list), session_id, principal_id, epoch_id,
                 protection_level,
-                self._agent_id, *epoch_params,
+                self._agent_id, now, *epoch_params,
                 MAX_OPEN_COMMITMENTS,
             ),
         )
         await db.commit()
         if cursor.rowcount != 1:
+            # The rows it counts are mostly ones this turn cannot see.
             raise CommitmentCapError(
-                f"already {MAX_OPEN_COMMITMENTS} open commitments; fulfil or "
-                "cancel one before making another",
+                f"already {MAX_OPEN_COMMITMENTS} open commitments not yet "
+                "due, counted across every person and room; another can be "
+                "made once one falls due, or is fulfilled or cancelled where "
+                "it was made",
             )
-        for field, result in checked.items():
-            if result.flagged:
+        for field, scan in (
+            ("description", description_scan), ("target_party", target_scan),
+        ):
+            if scan is not None and scan.flagged:
                 logger.warning(
                     "commitment %s of %s stored with sanitizer flags %s in its %s",
-                    commitment_id, self._agent_id, ",".join(result.flags), field,
+                    commitment_id, self._agent_id, ",".join(scan.flags), field,
                 )
+        self._count_write(session_id)
         return commitment_id
+
+    def _count_write(self, session_id: str) -> None:
+        """The write counter and bus event every persona-memory tier sends."""
+        emit_session_write(
+            agent_id=self._agent_id, session_id=session_id, surface="commitment",
+        )
+        emit_for_tier(
+            agent_id=self._agent_id,
+            tier="commitments",
+            salience=COMMITMENTS_APPEND_SALIENCE,
+        )
 
     # ─── Reading ───────────────────────────────────────────
 
@@ -404,8 +445,9 @@ class CommitmentStore:
     ) -> list[Commitment]:
         """RFC 0021 §F's "what did I promise Alice?": commitments to
         ``target_party`` in ``state`` (``None``: every state), nearest
-        due first."""
-        target = target_party.strip()
+        due first.  The name matches whatever the case of its ASCII
+        letters (SQLite's ``NOCASE``), since the model writes it freely."""
+        target = _check_text(target_party, "target_party")
         if not target:
             raise ValueError("target_party must be non-empty")
         return await self._select(
@@ -431,7 +473,7 @@ class CommitmentStore:
             where += " AND state = ?"
             params.append(state)
         if target is not None:
-            where += " AND target_party = ?"
+            where += " AND target_party = ? COLLATE NOCASE"
             params.append(target)
         if within_seconds is not None:
             if not within_seconds >= 0:  # also refuses NaN
@@ -485,4 +527,5 @@ class CommitmentStore:
             raise CommitmentNotFoundError(f"no commitment {commitment_id!r}")
         if cursor.rowcount != 1:
             raise CommitmentClosedError(commitment_id, commitment.state)
+        self._count_write(commitment.session_id)
         return commitment

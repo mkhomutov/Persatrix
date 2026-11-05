@@ -4,8 +4,9 @@ PR 3 routes the persona-runtime / sub-agent memory call sites — and the
 ``create_persona_agent`` factory — through the ``agents.memory``
 ``MemoryStore`` facade, off the legacy ``MemoryFacade`` shim:
 
-- ``build_personal_tiers`` constructs the three per-agent personal tiers
-  (``EpisodicMemory`` / ``RelationshipMemory`` / ``FactStore``) *inside*
+- ``build_personal_tiers`` constructs the per-agent personal tiers
+  (``EpisodicMemory`` / ``RelationshipMemory`` / ``FactStore``, and since
+  RFC 0021 Phase 2 PR 2 ``CommitmentStore``) *inside*
   ``agents/memory/`` so the RFC 0029 PR 2 ``DeprecationWarning`` on direct
   external construction stays silent on the production path.
 - ``create_persona_agent`` is the sole production site outside
@@ -48,7 +49,7 @@ def test_build_personal_tiers_is_exported_from_memory_package() -> None:
     assert build_personal_tiers is canonical_builder
 
 
-def test_build_personal_tiers_returns_the_three_personal_tiers() -> None:
+def test_build_personal_tiers_returns_the_personal_tiers() -> None:
     from agents.memory import build_personal_tiers
 
     tiers = build_personal_tiers("alice", db_path=":memory:")

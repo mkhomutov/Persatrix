@@ -12,15 +12,19 @@ person (principal) and epoch filters, and directive rows — is in
 
 from __future__ import annotations
 
+import asyncio
+import copy
 import logging
 import math
+import pickle
 from pathlib import Path
-from typing import get_args
+from typing import Any, get_args
 
 import pytest
 
 from agents.clock import CLOCK_START_ENV, FrozenClock, reset_agent_clock
 from agents.memory import build_personal_tiers
+from agents.memory import commitments as commitments_module
 from agents.memory._migration_commitments import COMMITMENT_STATES
 from agents.memory.commitments import (
     MAX_DESCRIPTION_CHARS,
@@ -37,6 +41,8 @@ from ._commitments_migration_helpers import COMMITMENT, insert
 
 _T0 = 2_000_000_000.0  # a fixed instant in 2033
 _HOUR = 3_600.0
+# An open row not yet due at ``_T0``, so the cap counts it.
+_OPEN = {**COMMITMENT, "due_at": _T0 + _HOUR}
 
 
 @pytest.fixture
@@ -143,7 +149,7 @@ class TestCreateRefuses:
             await _make(store, target_party="b" * (MAX_DESCRIPTION_CHARS + 1))
         assert len(await store.list_commitments(state=None)) == 1
 
-    @pytest.mark.parametrize("due_at", [math.nan, math.inf, -math.inf])
+    @pytest.mark.parametrize("due_at", [math.nan, math.inf, -math.inf, 10**400])
     async def test_due_time_not_finite(self, store: CommitmentStore, due_at: float):
         with pytest.raises(ValueError, match="due_at"):
             await _make(store, due_at=due_at)
@@ -161,6 +167,13 @@ class TestCreateRefuses:
     async def test_tag_not_a_string(self, store: CommitmentStore):
         with pytest.raises(TypeError, match="tags"):
             await _make(store, tags=["design", 3])
+
+    @pytest.mark.parametrize("target_party", [42, 0, ["bob"]])
+    async def test_target_party_not_text(self, store: CommitmentStore, target_party: Any):
+        """Even a falsy one: ``0`` is not "no target"."""
+        with pytest.raises(TypeError, match="target_party"):
+            await _make(store, target_party=target_party)
+        assert await store.list_commitments(state=None) == []
 
 
 class TestSanitize:
@@ -183,9 +196,9 @@ class TestSanitize:
     async def test_clean_description_logs_nothing(
         self, store: CommitmentStore, caplog: pytest.LogCaptureFixture,
     ):
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.WARNING, logger="agents.memory.commitments"):
             await _make(store)
-        assert caplog.records == []
+        assert [r for r in caplog.records if r.name == "agents.memory.commitments"] == []
 
     async def test_a_flagged_target_party_is_logged_too(
         self, store: CommitmentStore, caplog: pytest.LogCaptureFixture,
@@ -210,7 +223,7 @@ class TestSanitize:
         is not logged."""
         db = store._ensure_db()
         for n in range(MAX_OPEN_COMMITMENTS):
-            await insert(db, {**COMMITMENT, "id": f"c-{n}"})
+            await insert(db, {**_OPEN, "id": f"c-{n}"})
         with (
             caplog.at_level(logging.WARNING, logger="agents.memory.commitments"),
             pytest.raises(CommitmentCapError),
@@ -274,6 +287,33 @@ class TestLifecycle:
     async def test_unknown_id(self, store: CommitmentStore, call: str):
         with pytest.raises(CommitmentNotFoundError, match="no-such-id"):
             await getattr(store, call)("no-such-id")
+
+    def test_the_closed_error_copies_and_pickles(self):
+        err = CommitmentClosedError("c-1", "fulfilled")
+        for again in (copy.copy(err), pickle.loads(pickle.dumps(err))):
+            assert again.state == "fulfilled"
+            assert str(again) == str(err)
+            assert "c-1 is already fulfilled" in str(again)
+
+    async def test_each_write_is_counted_and_published(
+        self, store: CommitmentStore, monkeypatch: pytest.MonkeyPatch,
+    ):
+        """As every persona-memory tier's write is; a refused close is not."""
+        sent: list[tuple[str, str]] = []
+        monkeypatch.setattr(
+            commitments_module, "emit_session_write",
+            lambda **kw: sent.append((kw["surface"], kw["session_id"])),
+        )
+        monkeypatch.setattr(
+            commitments_module, "emit_for_tier",
+            lambda **kw: sent.append((kw["tier"], kw["agent_id"])),
+        )
+        cid = await _make(store)
+        await store.fulfill(cid)
+        with pytest.raises(CommitmentClosedError):
+            await store.cancel(cid)
+        made_or_closed = [("commitment", "legacy"), ("commitments", "ember-owl")]
+        assert sent == made_or_closed * 2
 
 
 # ─── Listing ────────────────────────────────────────────────
@@ -382,9 +422,18 @@ class TestListTo:
         cid = await _make(store, target_party=" alice ")
         assert [c.id for c in await store.list_commitments_to("alice ")] == [cid]
 
+    async def test_target_matches_whatever_its_case(self, store: CommitmentStore):
+        """The model writes the name freely, so its case drifts."""
+        cid = await _make(store, target_party="alice")
+        assert [c.id for c in await store.list_commitments_to("Alice")] == [cid]
+
     async def test_empty_target_refused(self, store: CommitmentStore):
         with pytest.raises(ValueError, match="target_party"):
             await store.list_commitments_to("  ")
+
+    async def test_target_not_text_refused(self, store: CommitmentStore):
+        with pytest.raises(TypeError, match="target_party"):
+            await store.list_commitments_to(42)  # type: ignore[arg-type]
 
 
 # ─── The cap on open commitments ────────────────────────────
@@ -407,7 +456,7 @@ class TestOpenCap:
     async def test_closing_one_makes_room(self, store: CommitmentStore):
         db = store._ensure_db()
         for n in range(MAX_OPEN_COMMITMENTS):
-            await insert(db, {**COMMITMENT, "id": f"c-{n}"})
+            await insert(db, {**_OPEN, "id": f"c-{n}"})
         with pytest.raises(CommitmentCapError):
             await _make(store)
         await store.cancel("c-0")
@@ -417,8 +466,51 @@ class TestOpenCap:
         db = store._ensure_db()
         for n in range(MAX_OPEN_COMMITMENTS):
             state = "fulfilled" if n % 2 else "cancelled"
-            await insert(db, {**COMMITMENT, "id": f"c-{n}", "state": state})
+            await insert(db, {**_OPEN, "id": f"c-{n}", "state": state})
         await _make(store)
+
+    async def test_one_falling_due_makes_room(
+        self, store: CommitmentStore, clock: FrozenClock,
+    ):
+        """Nothing marks a row ``missed`` before Phase 3, and a turn may not
+        see the rows it counts, so falling due is what releases one."""
+        db = store._ensure_db()
+        for n in range(MAX_OPEN_COMMITMENTS):
+            await insert(db, {**_OPEN, "id": f"c-{n}", "due_at": _T0 + _HOUR + n})
+        with pytest.raises(CommitmentCapError):
+            await _make(store)
+        clock.advance(_HOUR)  # c-0 is due now: still counted
+        with pytest.raises(CommitmentCapError):
+            await _make(store, due_at=_T0 + 2 * _HOUR)
+        clock.advance(1)  # c-0 is past due
+        await _make(store, due_at=_T0 + 2 * _HOUR)
+
+    async def test_racing_creates_never_pass_the_cap(
+        self, tmp_path: Path, clock: FrozenClock,
+    ):
+        """The count and the insert are one statement, so creates racing on
+        separate connections cannot both pass it."""
+        path = str(tmp_path / "m.db")
+        stores = [
+            CommitmentStore(agent_id="ember-owl", db_path=path, clock=clock)
+            for _ in range(4)
+        ]
+        for s in stores:
+            await s.initialize()
+        try:
+            db = stores[0]._ensure_db()
+            for n in range(MAX_OPEN_COMMITMENTS - 10):
+                await insert(db, {**_OPEN, "id": f"c-{n}"})
+            await db.commit()
+            results = await asyncio.gather(
+                *(_make(stores[n % 4], f"task {n}") for n in range(80)),
+                return_exceptions=True,
+            )
+        finally:
+            for s in stores:
+                await s.close()
+        assert sum(isinstance(r, str) for r in results) == 10
+        assert sum(isinstance(r, CommitmentCapError) for r in results) == 70
 
 
 # ─── The clock and the tiers ────────────────────────────────

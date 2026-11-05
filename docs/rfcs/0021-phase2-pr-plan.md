@@ -169,6 +169,12 @@ each settled by a new default in the PR named:
   > person instead; the maintainer kept one count per persona, across
   > people and rooms. It is per epoch, since an epoch is an isolated run
   > that can neither read nor close another's commitments.
+  >
+  > 2026-11-05 — PR 2's second review (F-19): an open commitment past its
+  > due time no longer counts, as a `missed` one does not. Nothing marks
+  > one `missed` before Phase 3, and a turn can close only its own
+  > person's and room's, so 500 forgotten promises would otherwise refuse
+  > every later one with nothing able to release them.
 - **H-8 Permissions are granted in config.** `PermissionGate` has no
   defaults: every grant is in `config/agents.yaml`. `commitments: {read,
   write}` joins the `permissions` schema, and the three shipped personas get
@@ -290,7 +296,7 @@ columns match the facts tier's.
 
 **Scope**: `agents/memory/commitments.py` (new) — the `Commitment`
 dataclass, `create`, `get`, `list_open_commitments`, `list_commitments_to`,
-`list_commitments`, `fulfill`, `cancel`; its opening in `build_personal_tiers()`
+`list_commitments`, `fulfill`, `cancel`; its construction in `build_personal_tiers()`
 (`personal_tiers.py`, 79) and its place on `PersonalTiers`.
 **Implementation**: H-1, H-3, H-6 and H-7 and OQ 5. The lifecycle is §F's:
 `open` to `fulfilled` or `cancelled`; a closed row is read-only; nothing
@@ -326,6 +332,21 @@ every call here.
 | F-16 | Info | `personal_tiers.py`'s docstrings still said the persona runtime opens and closes every tier it builds | Fixed in-PR |
 | F-17 | Info | The cap's count wrote the person and epoch predicates by hand rather than through the shared helpers | Fixed in-PR: it uses them (since F-1's ruling, the epoch's only) |
 | F-18 | Info | No read takes a protection-level allowlist, as the notes tier's does; if PR 4's gate filters after a read's limit, withheld rows can push out rows it would admit | → deferred to PR 4 |
+| F-19 | Medium | Overdue open commitments counted toward the cap for good: nothing marks one `missed` before Phase 3, the count spans every person and room, and a turn can close only its own, so 500 forgotten promises refused every later one in the epoch with nothing able to release them | Fixed in-PR: a commitment past its due time leaves the count, as a `missed` one will; H-7 carries a dated note, and a test pins that one falling due makes room |
+| F-20 | Low | The cap's error told the caller to fulfil or cancel one, though the rows it counts are mostly ones the turn cannot see | Fixed in-PR: it says the count spans every person and room, and that one falling due, or closed where it was made, makes room |
+| F-21 | Low | Nothing tested the cap under racing creates: a count and an insert split into two statements passed every test | Fixed in-PR: 80 creates over four connections, from 490 open, land exactly 10; that split fails it |
+| F-22 | Low | Making or closing a commitment sent neither the per-session write counter nor a memory write event, as every other persona-memory tier's write does | Fixed in-PR: both, as surface `commitment` and tier `commitments`, scored 0 like the other tiers' writes |
+| F-23 | Low | A target party that was not text crashed with an `AttributeError`, and `0` was stored as no target; `list_commitments_to` had the same gap | Fixed in-PR: a `TypeError` in both |
+| F-24 | Low | A due time given as a whole number past a float's range raised `OverflowError`, not the `ValueError` promised | Fixed in-PR: refused as not finite |
+| F-25 | Low | `CommitmentClosedError` could not be copied or pickled, since its two arguments never reached `args` | Fixed in-PR: they do, and a test round-trips it |
+| F-26 | Low | `list_commitments_to` matched the name's case exactly, so "Alice" missed a promise to "alice" | Fixed in-PR: it matches whatever the case of its ASCII letters (SQLite's `NOCASE`). A form such as "@alice" stays free text (OQ 10) |
+| F-27 | Info | The write spelled out the session's call-time precedence by hand, where the person and epoch go through a resolver | Fixed in-PR: `resolve_active_session` in `_session_filter.py`, used by the write and by `_resolve_session_list`; the snapshot scan knows it |
+| F-28 | Info | Other places still said three personal tiers — a test's name and docstring and a comment in `persona.py` — and this plan's PR 2 scope said the store is opened in `build_personal_tiers()` | Fixed in-PR |
+| F-29 | Info | `agents.memory` exported neither the store, its dataclass nor its errors | Fixed in-PR |
+| F-30 | Info | After the rebase the PR body still named #1085 and RFC 0009's plan row, and its gates had run on the tree before the rebase | Fixed in-PR: the body names #1086's row, and its gates are run on the final tree |
+| F-31 | Info | The sanitizer's results sat in a filtered dictionary read back by key, which hid that each field is stored as the sanitizer returns it | Fixed in-PR: one named result per field |
+| F-32 | Low | The `legacy` test did not check that the row closed from another room ended fulfilled, and the other-room test tried only fulfil | Fixed in-PR: both checked |
+| F-33 | Info | A test asserted no warning at all on the root logger, so any unrelated warning would fail it | Fixed in-PR: it watches the store's own logger |
 
 ### PR 3 — `feature/v040-rfc0021-directive-calls`
 
@@ -341,7 +362,7 @@ class or polarity is refused; no commitment call sees a directive and no
 directive call sees a commitment.
 **Migration**: none.
 **Estimate**: ~300 lines.
-**From PR 2 review**: F-9 — `commitments.py` (488) first moves its
+**From PR 2 review**: F-9 — `commitments.py` (531) first moves its
 dataclass, errors and field checks to a `commitment_types.py`, in a
 pure-move commit, as `fact_types.py` sits beside `facts.py`.
 
@@ -426,7 +447,7 @@ rows are never removed.
 | `agents/memory/_migration_handlers.py` | 489 | PR 1 adds one registry line; the handler is its own file |
 | `agents/persona_runtime/facts_section.py` | 500 | Untouched: the block is its own module |
 | `agents/persona_runtime/injection_gate.py` | 449 | PR 4 adds a tier name |
-| `agents/memory/commitments.py` | 488 | PR 3 moves its types out first (PR 2's F-9) |
+| `agents/memory/commitments.py` | 531 | PR 3 moves its types out first (PR 2's F-9) |
 
 ## Risks
 

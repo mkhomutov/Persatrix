@@ -6,7 +6,8 @@ the facts tier's filters — strict equality for the person and the epoch,
 the room's session plus the ``legacy`` carve-out for the session.  So a
 promise made to one signed-in person never reaches another's prompt, and
 a fresh epoch starts with none.  The cap on open commitments is the
-exception: it counts every person's and every room's, within one epoch.
+exception: it counts every person's and every room's open commitments not
+yet due, within one epoch.
 The same table holds RFC 0012's directive rows; no call here sees one.
 Making a commitment and its
 lifecycle are in ``test_commitment_store.py``.
@@ -35,6 +36,8 @@ from ._commitments_migration_helpers import COMMITMENT, DIRECTIVE, insert
 
 _T0 = 2_000_000_000.0
 _DUE = _T0 + 3_600.0
+# An open row not yet due at ``_T0``, so the cap counts it.
+_OPEN = {**COMMITMENT, "due_at": _DUE}
 
 Scope = Callable[[str], AbstractContextManager[str]]
 
@@ -121,7 +124,7 @@ async def test_the_cap_counts_every_persons_commitments(store: CommitmentStore):
     on PR 2's F-1)."""
     db = store._ensure_db()
     for n in range(MAX_OPEN_COMMITMENTS):
-        await insert(db, {**COMMITMENT, "id": f"c-{n}", "principal_id": "alice"})
+        await insert(db, {**_OPEN, "id": f"c-{n}", "principal_id": "alice"})
     with principal_scope("bob"), pytest.raises(CommitmentCapError):
         await _make(store)
 
@@ -131,7 +134,7 @@ async def test_the_cap_counts_only_the_epochs_commitments(store: CommitmentStore
     closed from this one, so they do not count toward its cap."""
     db = store._ensure_db()
     for n in range(MAX_OPEN_COMMITMENTS):
-        await insert(db, {**COMMITMENT, "id": f"c-{n}", "epoch_id": "run-1"})
+        await insert(db, {**_OPEN, "id": f"c-{n}", "epoch_id": "run-1"})
     with epoch_scope("run-1"), pytest.raises(CommitmentCapError):
         await _make(store)
     with epoch_scope("run-2"):
@@ -147,8 +150,9 @@ class TestSession:
             cid = await _make(store)
         with session_scope("room-b"):
             assert await _visible(store, cid) == _HIDDEN
-            with pytest.raises(CommitmentNotFoundError):
-                await store.fulfill(cid)
+            for call in ("fulfill", "cancel"):
+                with pytest.raises(CommitmentNotFoundError):
+                    await getattr(store, call)(cid)
         with session_scope("room-a"):
             assert await _visible(store, cid) == _shown(cid)
 
@@ -160,7 +164,10 @@ class TestSession:
             with session_scope(room):
                 assert await _visible(store, cid) == _shown(cid)
         with session_scope("room-b"):
-            await store.fulfill(cid)
+            assert (await store.fulfill(cid)).state == "fulfilled"
+        commitment = await store.get(cid)
+        assert commitment is not None
+        assert commitment.state == "fulfilled"
 
     async def test_the_cap_spans_rooms(self, store: CommitmentStore):
         """The cap bounds the persona's open commitments, not a room's, so
@@ -168,7 +175,7 @@ class TestSession:
         db = store._ensure_db()
         for n in range(MAX_OPEN_COMMITMENTS):
             room = "room-a" if n % 2 else "room-b"
-            await insert(db, {**COMMITMENT, "id": f"c-{n}", "session_id": room})
+            await insert(db, {**_OPEN, "id": f"c-{n}", "session_id": room})
         with session_scope("room-c"), pytest.raises(CommitmentCapError):
             await _make(store)
 
@@ -233,5 +240,5 @@ class TestOtherRows:
         """Personas may share one memory file (``data/memory.db``)."""
         db = store._ensure_db()
         for n in range(MAX_OPEN_COMMITMENTS):
-            await insert(db, {**COMMITMENT, "id": f"c-{n}", "agent_id": "quiet-heron"})
+            await insert(db, {**_OPEN, "id": f"c-{n}", "agent_id": "quiet-heron"})
         await _make(store)
