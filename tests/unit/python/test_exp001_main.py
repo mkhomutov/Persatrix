@@ -1,12 +1,13 @@
-"""EXP-001 harness — the practice run and the scored run from the command
-line (PRs 6b and 6c).
+"""EXP-001 harness — the practice run, the scored run and scoring from the
+command line (PRs 6b and 6c, and the scoring PR).
 
 ``python -m evaluators.exp001 practice ROOT --provider anthropic`` makes real
 model calls, so the provider is never a default: ``offline`` holds the
 meetings on the mock provider at no cost and judges nothing. ``scored``
-holds the scored run the same way. The runs themselves are in
-``test_exp001_practice.py`` and ``test_exp001_scored.py``; these tests hold
-the command to what it passes each run.
+holds the scored run the same way, and ``score`` scores either. The runs
+themselves are in ``test_exp001_practice.py``, ``test_exp001_scored.py`` and
+``test_exp001_scoring_run.py``; these tests hold the command to what it
+passes each.
 """
 
 from __future__ import annotations
@@ -19,12 +20,20 @@ import pytest
 from agents.llm_offline import MockProvider
 from agents.llm_providers import AnthropicProvider
 from evaluators.exp001 import __main__ as command
-from evaluators.exp001 import practice, practice_report, scored, scored_report
+from evaluators.exp001 import (
+    practice,
+    practice_report,
+    result_report,
+    scored,
+    scored_report,
+    scoring_run,
+)
 from evaluators.exp001.attempts import HarnessFault
 from evaluators.exp001.costs import ARMS
 from evaluators.exp001.deployment import ARMS_ALIAS
-from evaluators.exp001.judge import JudgePrompts
+from evaluators.exp001.judge import JudgeFault, JudgePrompts
 from evaluators.exp001.materials import PRACTICE_SERIES, SCORED_SERIES
+from evaluators.exp001.sheets import SheetError
 
 
 @pytest.fixture
@@ -255,3 +264,73 @@ class TestTheScoredRun:
         assert "RateLimitError: overloaded" in captured.err
         assert "start the run again to resume it" in captured.err
         assert "SCORED SUMMARY of {'the': 'stopped report'}" in captured.out
+
+
+def _progress(*, left: int) -> scoring_run.Progress:
+    return scoring_run.Progress(
+        packets=3, left={"person-1": ("p1",) * left, "person-2": (), "judge": ()},
+        written=(), sheets={}, judge_cap_reached=False, due=None,
+    )
+
+
+class TestScoring:
+    """``score ROOT`` says how far scoring has got; ``--open`` opens the seal
+    once every score is in. Neither makes a model call, so it takes no provider."""
+
+    @pytest.fixture
+    def asked(self, monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+        calls: list[dict[str, Any]] = []
+        monkeypatch.setattr(result_report, "summary", lambda result: f"RESULT {result}\n")
+        monkeypatch.setattr(result_report, "progress_words",
+                            lambda progress: f"PROGRESS {len(progress.left['person-1'])}\n")
+        self.answer: Any = _progress(left=1)
+
+        def score(root: Path, **kwargs: Any) -> Any:
+            calls.append({"root": root, **kwargs})
+            if isinstance(self.answer, Exception):
+                raise self.answer
+            return self.answer
+
+        monkeypatch.setattr(scoring_run, "score", score)
+        return calls
+
+    def test_it_reports_progress_with_the_judges_prompts_and_opens_nothing(
+        self, asked: list[dict[str, Any]], tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        assert command.main(["score", str(tmp_path)]) == 0
+        (call,) = asked
+        assert (call["root"], call["open_seal"]) == (tmp_path, False)
+        assert isinstance(call["prompts"], JudgePrompts)
+        assert [s.id for s in call["materials"].series] == list(SCORED_SERIES)
+        assert capsys.readouterr().out == "PROGRESS 1\n"
+
+    def test_asked_to_open_before_every_score_is_in_it_fails(
+        self, asked: list[dict[str, Any]], tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        assert command.main(["score", str(tmp_path), "--open"]) == 2
+        assert asked[0]["open_seal"] is True
+        captured = capsys.readouterr()
+        assert captured.out == "PROGRESS 1\n"
+        assert "the seal stays shut" in captured.err
+
+    def test_once_open_it_gives_the_result(
+        self, asked: list[dict[str, Any]], tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        self.answer = {"the": "result"}
+        assert command.main(["score", str(tmp_path), "--open"]) == 0
+        out = capsys.readouterr().out
+        assert "RESULT {'the': 'result'}" in out
+        assert str(tmp_path / scoring_run.RESULT) in out
+
+    @pytest.mark.parametrize("error", [
+        scoring_run.ScoringRefused("the scored run is incomplete"),
+        SheetError("person-2-scores.csv: p1: C1 is '3', not 0, 1 or 2"),
+        JudgeFault("packet p1: the judge's answer is unreadable"),
+    ])
+    def test_what_cannot_be_scored_says_why(
+        self, asked: list[dict[str, Any]], tmp_path: Path, capsys: pytest.CaptureFixture[str],
+        error: Exception,
+    ) -> None:
+        self.answer = error
+        assert command.main(["score", str(tmp_path)]) == 2
+        assert str(error) in capsys.readouterr().err

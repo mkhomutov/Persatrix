@@ -1,5 +1,6 @@
 """EXP-001 from the command line: ``python -m evaluators.exp001 practice ROOT``,
-then ``python -m evaluators.exp001 scored ROOT``.
+then ``python -m evaluators.exp001 scored ROOT``, then
+``python -m evaluators.exp001 score ROOT``.
 
 ``practice`` holds the practice series for each arm named, in the order
 named, then judges the practice memos and writes the report
@@ -20,6 +21,12 @@ the meetings on the offline mock provider instead, at no cost, and judges
 nothing. The provider is never a default.
 
 The channel arms run the orchestrator binary: ``make build-orchestrator``.
+
+``score`` scores a scored run, or a practice run, once its packets are
+drawn and judged (:mod:`evaluators.exp001.scoring_run`). It writes each
+person a blank score sheet the first time and says how many packets each
+rater has left; with ``--open``, once every score is in, it opens the seal
+and writes the result. It makes no model call.
 """
 
 from __future__ import annotations
@@ -35,7 +42,14 @@ from pathlib import Path
 from agents.llm_client import LLMClient
 from agents.llm_offline import MockProvider
 from agents.llm_providers import AnthropicProvider
-from evaluators.exp001 import practice, practice_report, scored, scored_report
+from evaluators.exp001 import (
+    practice,
+    practice_report,
+    result_report,
+    scored,
+    scored_report,
+    scoring_run,
+)
 from evaluators.exp001.attempts import HarnessFault
 from evaluators.exp001.costs import ARMS
 from evaluators.exp001.deployment import ARMS_ALIAS, REPO, Alias
@@ -43,6 +57,7 @@ from evaluators.exp001.judge import JudgePrompts, load_prompts
 from evaluators.exp001.materials import load_materials
 from evaluators.exp001.packets import load_adviser_names
 from evaluators.exp001.panel import load_panel
+from evaluators.exp001.sheets import SheetError
 
 MATERIALS = REPO / "evaluators" / "experiments" / "EXP-001"
 BINARY = REPO / "bin" / "persatrix-server"
@@ -55,6 +70,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "scored":
         return _scored(args)
+    if args.command == "score":
+        return _score(args)
     arms = tuple(args.arms)
     if len(set(arms)) != len(arms):
         parser.error("name each arm once")
@@ -122,6 +139,27 @@ def _scored(args: argparse.Namespace) -> int:
     return 0
 
 
+def _score(args: argparse.Namespace) -> int:
+    """How far scoring has got, or, the seal open, the result."""
+    try:
+        scores = scoring_run.score(
+            args.root, materials=load_materials(MATERIALS),
+            prompts=load_prompts(MATERIALS / "rubric.yaml"), open_seal=args.open_seal,
+        )
+    except (scoring_run.ScoringRefused, SheetError, HarnessFault) as refused:
+        print(refused, file=sys.stderr)
+        return 2
+    if isinstance(scores, scoring_run.Progress):
+        print(result_report.progress_words(scores), end="")
+        if args.open_seal:
+            print("the seal stays shut: every score is not in yet", file=sys.stderr)
+            return 2
+        return 0
+    print(result_report.summary(scores), end="")
+    print(f"The result: {args.root / scoring_run.RESULT}")
+    return 0
+
+
 def _provider(name: str) -> tuple[LLMClient, Alias, JudgePrompts | None]:
     """The client, model alias and judge's prompts either run is held with on
     the provider *name*: offline, the mock provider's alias, and no judging."""
@@ -160,6 +198,14 @@ def _parser() -> argparse.ArgumentParser:
     held.add_argument(
         "--fixed-by", metavar="PR",
         help="after a harness fault, the reviewed PR that fixed it: starts the next window",
+    )
+    scoring = commands.add_parser(
+        "score", help="score a run's packets: open the seal once every score is in",
+    )
+    scoring.add_argument("root", type=Path, help="the scored or practice run's directory")
+    scoring.add_argument(
+        "--open", dest="open_seal", action="store_true",
+        help="once every score is in, open the seal and write the result",
     )
     return parser
 

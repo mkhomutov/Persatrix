@@ -224,6 +224,57 @@ async def _judge_batch(
     return Judged(memo_scores, recall_marks, spend, cap_reached=bool(left), left=tuple(left))
 
 
+def read_batch(
+    packets: Sequence[Packet],
+    prompts: JudgePrompts,
+    directory: Path,
+    *,
+    batch: str,
+    cap: float = JUDGING_CAP,
+) -> Judged | None:
+    """The batch's scores as :func:`judge_batch` gave them, asking nothing;
+    None while the judge has not answered every packet and its cap has not
+    stopped it. *packets* are in the judge's order, which it answered in.
+    An answer that breaks one pass, or one the harness cannot read, is a
+    :class:`JudgeFault`, as when the batch was judged."""
+    kept = directory / REPLIES
+    answers = _read_answers(kept)
+    ids = {p.id for p in packets}
+    stray = sorted(set(answers) - ids)
+    if stray:
+        raise JudgeFault(f"{kept}: answers for packets not in this batch: {', '.join(stray)}")
+    calls, spend = _batch_log(directory / CALL_LOG, batch, ids)
+    lost = sorted({r.meeting for r in calls.records} - set(answers))
+    if lost:
+        raise JudgeFault(f"{directory / CALL_LOG}: answered with no answer kept: {', '.join(lost)}")
+    memo_scores: dict[str, MemoScores] = {}
+    recall_marks: dict[str, dict[str, bool]] = {}
+    left: list[str] = []
+    for packet in packets:
+        answer = answers.get(packet.id)
+        if answer is None:
+            if not left and spend < cap:
+                return None  # the judge would ask this one next
+            left.append(packet.id)
+            continue
+        if answer["asked"] != _asked(packet, prompts):
+            raise JudgeFault(f"packet {packet.id}: its kept answer was asked with another prompt")
+        try:
+            if isinstance(packet, MemoPacket):
+                memo_scores[packet.id] = read_memo_reply(_text(answer), packet.key)
+            else:
+                recall_marks[packet.id] = read_recall_reply(_text(answer), packet.key)
+        except UnreadableReplyError as exc:
+            unreadable = f"packet {packet.id}: the judge's answer is unreadable"
+            raise JudgeFault(f"{unreadable}: {exc}") from exc
+    return Judged(memo_scores, recall_marks, spend, cap_reached=bool(left), left=tuple(left))
+
+
+def answered(directory: Path) -> frozenset[str]:
+    """The packets the batch in *directory* has kept an answer for."""
+    return frozenset(_read_answers(directory / REPLIES))
+
+
 @contextmanager
 def sole_run(directory: Path, busy: Exception) -> Iterator[None]:
     """Hold *directory* for one run, or raise *busy* while another holds it,
