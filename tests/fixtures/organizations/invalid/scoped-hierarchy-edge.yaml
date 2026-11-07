@@ -1,0 +1,10 @@
+# A hierarchy edge with a scope: a hierarchy manager directs on every matter,
+# so the scope would read as a limit that nothing applies.
+organizations:
+  - id: acme
+    name: Acme
+    topology: hierarchy
+    roles: [{id: member, authority: operational}]
+    members:
+      - {agent_id: ember-owl, role: member, manages: [{agent_id: iron-fox, scope: project}]}
+      - {agent_id: iron-fox, role: member}

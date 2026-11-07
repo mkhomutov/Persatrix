@@ -1,0 +1,9 @@
+# iron-fox holds a role the organization does not declare.
+organizations:
+  - id: acme
+    name: Acme
+    topology: flat
+    roles: [{id: member, authority: peer}]
+    members:
+      - {agent_id: ember-owl, role: member}
+      - {agent_id: iron-fox, role: chief}

@@ -1,0 +1,9 @@
+# A matrix edge written out in full, but with no scope.
+organizations:
+  - id: acme
+    name: Acme
+    topology: matrix
+    roles: [{id: member, authority: operational}]
+    members:
+      - {agent_id: ember-owl, role: member, manages: [{agent_id: iron-fox}]}
+      - {agent_id: iron-fox, role: member}

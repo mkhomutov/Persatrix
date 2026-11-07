@@ -1,0 +1,26 @@
+# RFC 0012 §B's example, one level deeper: ember-owl manages iron-fox and
+# nova-sparrow, and iron-fox manages jade-heron.
+organizations:
+  - id: acme-engineering
+    name: "Acme Corp — Engineering"
+    topology: hierarchy
+    roles:
+      - id: vp-engineering
+        authority: directive
+      - id: staff-engineer
+        authority: operational
+      - id: product-manager
+        authority: operational
+      - id: engineer
+        authority: peer
+    members:
+      - agent_id: ember-owl
+        role: vp-engineering
+        manages: [iron-fox, nova-sparrow]
+      - agent_id: iron-fox
+        role: staff-engineer
+        manages: [jade-heron]
+      - agent_id: nova-sparrow
+        role: product-manager
+      - agent_id: jade-heron
+        role: engineer

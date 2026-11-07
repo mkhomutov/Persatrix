@@ -3,7 +3,7 @@ id: RFC-0012
 title: Protocols & Organizations
 summary: Define the organization model — a named graph of personas with roles and a hierarchy / flat / matrix topology — and, on top of it, the authority axis: a persona reasoning about whether a directive issued in one context should influence its behaviour in another, and accepting, adapting, or refusing it. The integrity counterpart to RFC 0037's confidentiality axis. Phases 1–3 (organizations & authority) target v0.4.0; Phases 4–5 (meeting / negotiation protocols, inter-org federation) target v0.5.0.
 type: architecture
-status: accepted
+status: implementing
 author: Maksim Khomutov
 created: 2026-05-16
 target: v0.4.0 (Phases 1–3 — organizations & authority, less §G's clearance check and §H, unslotted by the 2026-10-20 amendment); v0.5.0 (Phases 4–5 — meeting/negotiation protocols, inter-org federation)
@@ -17,7 +17,7 @@ depends_on:
 # RFC 0012 — Protocols & Organizations
 
 **Type**: architecture
-**Status**: 👍 Accepted — Phases 1–3 for v0.4.0, less the two items the [2026-10-20 amendment](#amendment-2026-10-20--the-v040-plans-ruling-b-audit) unslots; Phases 4–5 stay a sketch until v0.5.0 is planned
+**Status**: 🚧 Implementing — Phases 1–3 for v0.4.0 ([PR plan](0012-pr-plan.md)), less the two items the [2026-10-20 amendment](#amendment-2026-10-20--the-v040-plans-ruling-b-audit) unslots; Phases 4–5 stay a sketch until v0.5.0 is planned
 **PR plan**: [0012-pr-plan.md](0012-pr-plan.md) — Phases 1–3, the v0.4.0 plan's rows C1–C3
 **Accepted**: by the maintainer's review approval of [#1047](https://github.com/mkhomutov/Persatrix/pull/1047), row R1 of the [v0.4.0 plan](../v0.4.0-plan.md#progress)
 **Author**: Maksim Khomutov

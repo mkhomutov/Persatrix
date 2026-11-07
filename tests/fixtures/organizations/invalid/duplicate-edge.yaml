@@ -1,0 +1,9 @@
+# ember-owl lists iron-fox twice under `manages`.
+organizations:
+  - id: acme
+    name: Acme
+    topology: hierarchy
+    roles: [{id: member, authority: operational}]
+    members:
+      - {agent_id: ember-owl, role: member, manages: [iron-fox, iron-fox]}
+      - {agent_id: iron-fox, role: member}

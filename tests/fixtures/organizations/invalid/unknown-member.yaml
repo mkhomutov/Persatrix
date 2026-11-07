@@ -1,0 +1,9 @@
+# ember-owl manages nova-sparrow, who is not a member of this organization.
+organizations:
+  - id: acme
+    name: Acme
+    topology: hierarchy
+    roles: [{id: member, authority: operational}]
+    members:
+      - {agent_id: ember-owl, role: member, manages: [nova-sparrow]}
+      - {agent_id: iron-fox, role: member}

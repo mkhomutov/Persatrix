@@ -1,7 +1,7 @@
 # RFC 0012 — Protocols & Organizations — PR Implementation Plan (Phases 1–3)
 
 **RFC**: [0012-protocols-organizations.md](0012-protocols-organizations.md)
-**Status**: ⬜ Not started
+**Status**: 🔄 In progress
 **Created**: 2026-10-20
 **Branch prefix**: `feature/v040-rfc0012-`
 **Target**: `main`
@@ -197,7 +197,7 @@ in the PR named:
 
 | PR | Row | Title | Branch | Status | GitHub PR | Merged |
 |----|-----|-------|--------|--------|-----------|--------|
-| 1 | C1 | Organization schema, validation, glossary | `feature/v040-rfc0012-org-schema` | ⬜ | — | — |
+| 1 | C1 | Organization schema, validation, glossary | `feature/v040-rfc0012-org-schema` | 🔀 | [#1088](https://github.com/mkhomutov/Persatrix/pull/1088) | — |
 | 2 | C1 | `internal/protocols/`: graph, topology checks, `directs` | `feature/v040-rfc0012-protocols-graph` | ⬜ | — | — |
 | 3 | C1 | Graph loaded into the society tables at startup | `feature/v040-rfc0012-org-load` | ⬜ | — | — |
 | 4 | C1 | Organization read; a persona's organization and role; the guide | `feature/v040-rfc0012-persona-role` | ⬜ | — | — |
@@ -280,6 +280,21 @@ the two checkers cannot drift.
 **Acceptance**: a hierarchy, a flat and a matrix organization validate; each
 bad shape is refused with its reason.
 **Estimate**: ~400 lines.
+
+**Review findings** (PR 1): F-1 to F-7 are an independent review's, which
+found nothing High or Medium; F-8 and F-9 are the author's.
+
+| Finding | Severity | Description | Disposition |
+|---------|----------|-------------|-------------|
+| F-1 | Low | The Python and Go YAML parsers and regex engines can disagree, so validation could pass a file Go refuses: a key given twice keeps its last value, which can hide a loop, and an id ending in a line break passes Python's `$`, even past the `general` reservation. Python also refuses `scope: on`, a YAML 1.1 boolean, where Go reads text. The docs said the two checkers cannot drift | Fixed in-PR for the first two: a loader that refuses repeated keys (`duplicate-key`), a schema guard against a final line break, a fixture each, softer wording. The boolean case → deferred to PR 2 (the 2026-11-04 note) |
+| F-2 | Low | A missing or unreadable `agents.yaml` gave one `unknown-agent` per member and never said the file was missing | Fixed in-PR: one error naming the file |
+| F-3 | Low | The D-3 and D-9 refusals printed JSON Schema's wording (`'clearance' was unexpected`), not the reason | Fixed in-PR: the schema names each rule (`x-refusal`), which `validate.py` prints; fixtures `clearance`, `reserved-scope` |
+| F-4 | Low | ISSUE-0195 said the unheld egress was paraphrase; the tripwire matches verbatim spans only, and RFC 0037 §G reads a verbatim hit as a bug | Fixed in-PR (issue text) |
+| F-5 | Info | The valid matrix fixture allows two managers of one member on one dimension, a decision PR 2 inherits, and credited §C for it | Fixed in-PR: recorded in the 2026-11-04 note; fixture comment corrected |
+| F-6 | Info | Docs said in the present tense that PR 2's Go loader is tested on the fixtures | Fixed in-PR (wording) |
+| F-7 | Info | This plan's row 1 still read ⬜ | Fixed in-PR: 🔀 with the PR link |
+| F-8 | Info | About 1 100 lines against the 500-line guidance and this estimate; 384 are fixture data PR 2 shares, and the checker split from them would be untested | Noted |
+| F-9 | Info | mypy does not check the signature of the `importlib`-loaded `check_file` call, which script mode needs; the fixture tests and the script-run test cover it | Noted |
 
 ### PR 2 — `feature/v040-rfc0012-protocols-graph`
 
@@ -648,6 +663,21 @@ amendment's two items; Phases 4–5 for v0.5.0); this plan's statuses closed.
 >   transaction's own handle and makes no channel-store or network call.
 > - PR 12: A4 binds every publish to its caller, a signed-in account
 >   included, so the forged-id leg may use either.
+
+> 2026-11-04 — PR 1 checks more than its list, and PR 2's loader applies
+> the same rules: organization, role and member ids and `manages` edges are
+> unique, as A1's keys require; every role and `manages` target is declared
+> in the organization; a member is a persona, not a task agent; a hierarchy
+> edge takes no scope; a loop across matrix dimensions is still a cycle; a
+> key given twice in one mapping is refused, as Go's YAML parser refuses
+> it; and an id cannot end in a line break, which Python's `$` lets
+> through. Two managers of one member on one matrix dimension are allowed;
+> PR 2 ranks their directives as a tie. Each rule's message starts with its
+> name, and each has a fixture named after it under
+> `tests/fixtures/organizations/`. For PR 2 (from PR 1's review): PyYAML
+> reads an unquoted `on`, `off`, `yes` or `no` as a boolean, so validation
+> refuses `scope: on` where Go's parser reads the text `on`; PR 2's loader
+> refuses it too, and adds the fixture.
 
 ## Related documentation
 
