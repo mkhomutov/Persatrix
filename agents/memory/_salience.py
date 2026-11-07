@@ -46,11 +46,13 @@ def emit_for_tier(
     agent_id: str,
     tier: MemoryTier,
     salience: float,
+    written_at: float | None = None,
 ) -> None:
     """Publish a :class:`MemoryWriteEvent` for ``tier`` after a successful write.
 
     Captures the active OTEL span id at call time as ``source_span_id`` (PR 3b's
-    loop-back guard input).
+    loop-back guard input).  ``written_at`` is the write's time by the tier's
+    own clock, for a tier given one; without it the event takes agent time.
 
     The ``contextlib.suppress`` is defence-in-depth against *non-subscriber*
     failure modes — subscriber exceptions are already swallowed inside
@@ -68,6 +70,7 @@ def emit_for_tier(
             tier=tier,
             salience=salience,
             source_span_id=current_llm_span_id(),
+            written_at=written_at,
         )
 
 

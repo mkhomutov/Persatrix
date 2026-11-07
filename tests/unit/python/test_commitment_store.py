@@ -25,6 +25,12 @@ import pytest
 from agents.clock import CLOCK_START_ENV, FrozenClock, reset_agent_clock
 from agents.memory import build_personal_tiers
 from agents.memory import commitments as commitments_module
+from agents.memory._events import (
+    MemoryWriteBus,
+    MemoryWriteEvent,
+    get_memory_write_bus,
+    set_memory_write_bus,
+)
 from agents.memory._migration_commitments import COMMITMENT_STATES
 from agents.memory.commitments import (
     MAX_DESCRIPTION_CHARS,
@@ -314,6 +320,25 @@ class TestLifecycle:
             await store.cancel(cid)
         made_or_closed = [("commitment", "legacy"), ("commitments", "ember-owl")]
         assert sent == made_or_closed * 2
+
+    async def test_each_write_event_carries_the_stores_time(
+        self, store: CommitmentStore, clock: FrozenClock,
+    ):
+        """The event says when the row was written by the store's clock,
+        not by agent time, which a frozen clock stands apart from."""
+        bus, original = MemoryWriteBus(), get_memory_write_bus()
+        events: list[MemoryWriteEvent] = []
+        bus.subscribe(events.append)
+        set_memory_write_bus(bus)
+        try:
+            kept, dropped = await _make(store), await _make(store)
+            clock.advance(600)
+            await store.fulfill(kept)
+            clock.advance(600)
+            await store.cancel(dropped)
+        finally:
+            set_memory_write_bus(original)
+        assert [e.written_at for e in events] == [_T0, _T0, _T0 + 600, _T0 + 1200]
 
 
 # ─── Listing ────────────────────────────────────────────────

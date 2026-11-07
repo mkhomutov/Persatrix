@@ -381,11 +381,12 @@ class CommitmentStore:
                     "commitment %s of %s stored with sanitizer flags %s in its %s",
                     commitment_id, self._agent_id, ",".join(scan.flags), field,
                 )
-        self._count_write(session_id)
+        self._count_write(session_id, now)
         return commitment_id
 
-    def _count_write(self, session_id: str) -> None:
-        """The write counter and bus event every persona-memory tier sends."""
+    def _count_write(self, session_id: str, written_at: float) -> None:
+        """The write counter and bus event every persona-memory tier sends,
+        the event stamped by the store's clock."""
         emit_session_write(
             agent_id=self._agent_id, session_id=session_id, surface="commitment",
         )
@@ -393,6 +394,7 @@ class CommitmentStore:
             agent_id=self._agent_id,
             tier="commitments",
             salience=COMMITMENTS_APPEND_SALIENCE,
+            written_at=written_at,
         )
 
     # ─── Reading ───────────────────────────────────────────
@@ -513,7 +515,8 @@ class CommitmentStore:
     ) -> Commitment:
         db = self._ensure_db()
         where, params = self._scope()
-        fulfilled_at = self._clock.now() if state == "fulfilled" else None
+        now = float(self._clock.now())
+        fulfilled_at = now if state == "fulfilled" else None
         # The update decides; the read after it only says why it did not.
         # Nothing reopens a row, so the read cannot disagree with it.
         cursor = await db.execute(
@@ -527,5 +530,5 @@ class CommitmentStore:
             raise CommitmentNotFoundError(f"no commitment {commitment_id!r}")
         if cursor.rowcount != 1:
             raise CommitmentClosedError(commitment_id, commitment.state)
-        self._count_write(commitment.session_id)
+        self._count_write(commitment.session_id, now)
         return commitment

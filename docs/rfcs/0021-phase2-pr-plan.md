@@ -350,6 +350,7 @@ every call here.
 | F-31 | Info | The sanitizer's results sat in a filtered dictionary read back by key, which hid that each field is stored as the sanitizer returns it | Fixed in-PR: one named result per field |
 | F-32 | Low | The `legacy` test did not check that the row closed from another room ended fulfilled, and the other-room test tried only fulfil | Fixed in-PR: both checked |
 | F-33 | Info | A test asserted no warning at all on the root logger, so any unrelated warning would fail it | Fixed in-PR: it watches the store's own logger |
+| F-34 | Low | A write's memory event took agent time, not the store's clock, so under a frozen clock the row and its event disagreed — against the module's rule that its time comes only from the clock it is given | Fixed in-PR: the write-event helper passes on a time, the store gives its own on making and closing, and a test pins each event's time under a frozen clock |
 
 ### PR 3 — `feature/v040-rfc0021-directive-calls`
 
