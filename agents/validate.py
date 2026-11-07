@@ -39,6 +39,12 @@ _SCHEMA_MAP: dict[str, str] = {
     "ui.yaml": "ui.schema.json",
 }
 
+# Config files that may not be empty, blank, comment-only or null. Every
+# other file may be: it then sets nothing. An empty organizations.yaml
+# would pass without the `organizations` list its schema requires; a file
+# declares no organization with `organizations: []` (RFC 0012 §B).
+_MUST_DECLARE = frozenset({"organizations.yaml"})
+
 # Workflow files live in a separate directory and share one schema.
 _WORKFLOW_SCHEMA = "workflow.schema.json"
 
@@ -196,8 +202,12 @@ def _validate_yaml_against_schema(
         return None, errors
 
     if content is None:
-        # Empty file is valid (no data to validate)
-        return content, errors
+        if yaml_path.name not in _MUST_DECLARE:
+            # An empty file is valid: there is nothing in it to check.
+            return content, errors
+        # Read as a file with no keys, as Go's typed decode reads it, so the
+        # schema names the key the file must have.
+        content = {}
 
     validator = _Validator(schema)
     for error in sorted(validator.iter_errors(content), key=lambda e: list(e.absolute_path)):

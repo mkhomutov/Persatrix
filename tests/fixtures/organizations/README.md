@@ -16,4 +16,6 @@ where the YAML parsers or regex engines differ, add a fixture here.
   Schema checks with its own message, which is at `<key>` or names it.
   A Go decode into typed fields drops an unknown key and reads a null or
   empty value as absent; the `schema-` files for those cases need the Go
-  loader to refuse them too.
+  loader to refuse them too. It also reads a comment-only or null file as
+  one with no keys, which `schema-organizations--comment-only` and
+  `--null-document` refuse: `organizations: []` declares no organization.

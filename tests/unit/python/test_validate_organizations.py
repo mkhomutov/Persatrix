@@ -15,11 +15,13 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
+from agents.org_validate import _find_loop
 from agents.validate import validate_config_dir
 
 _ROOT = Path(__file__).resolve().parents[3]
@@ -150,6 +152,53 @@ def test_no_organization_needs_no_agents_yaml(tmp_path: Path) -> None:
     without agents.yaml, as v0.3.16's placeholder did."""
     ok, errors = _validate(tmp_path, _FIXTURES / "valid" / "empty.yaml", agents=None)
     assert ok, [str(e) for e in errors]
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["", "# Every line commented out.\n", "null\n", "~\n", "---\n"],
+    ids=["empty", "comment-only", "null", "tilde", "bare-document"],
+)
+def test_file_with_nothing_in_it_is_refused(tmp_path: Path, text: str) -> None:
+    """A file with nothing in it has no `organizations` list, which the
+    schema requires: `organizations: []` is how a file declares no
+    organization. Go's typed decode reads each of these as a file with no
+    keys, so PR 2's loader must refuse them too."""
+    organizations = tmp_path / "organizations.yaml"
+    organizations.write_text(text, encoding="utf-8")
+    ok, errors = _validate(tmp_path, organizations, agents=None)
+    assert not ok
+    (error,) = errors
+    assert error.message == "'organizations' is a required property", error.message
+
+
+def test_other_config_files_may_still_be_empty(tmp_path: Path) -> None:
+    """Only organizations.yaml must say what it declares. An empty or
+    comment-only file of another kind still passes, as before."""
+    config = tmp_path / "config"
+    config.mkdir()
+    (config / "agents.yaml").write_text("", encoding="utf-8")
+    (config / "ui.yaml").write_text("# Nothing set yet.\n", encoding="utf-8")
+    ok, errors, checked = validate_config_dir(
+        str(config), str(_SCHEMAS), workflow_dir=str(tmp_path / "no-workflows")
+    )
+    assert ok, [str(e) for e in errors]
+    assert checked == 2
+
+
+def test_cycle_search_stays_fast_on_a_long_chain() -> None:
+    """The schema sets no limit on how many members an organization has.
+    A chain of 100 000 managers that loops back to its start is found and
+    named in a fraction of a second. A search that rescans the path at
+    every step slows with the square of the chain, over 30 s here, so the
+    5 s bound catches it."""
+    n = 100_000
+    reports = {f"m{i}": [f"m{(i + 1) % n}"] for i in range(n)}
+    start = time.perf_counter()
+    loop = _find_loop(reports)
+    elapsed = time.perf_counter() - start
+    assert loop == [*reports, "m0"]
+    assert elapsed < 5, f"{elapsed:.1f} s"
 
 
 def test_agent_with_an_empty_type_is_read_as_a_task_agent(tmp_path: Path) -> None:

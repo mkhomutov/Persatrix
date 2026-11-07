@@ -218,22 +218,28 @@ def _find_loop(reports: Mapping[str, list[str]]) -> list[str]:
     """The first loop in ``manages``, whatever the edges' scopes, as a path
     that ends where it starts; empty when there is none.
 
-    Iterative, so a long management chain cannot exhaust the stack.
+    Iterative, so a long management chain cannot exhaust the stack, and
+    each member's place on the path is kept in a map, so the search takes
+    time in step with the members and edges, however long the chain.
     """
     done: set[str] = set()
     for root in reports:
         if root in done:
             continue
         path = [root]
+        place = {root: 0}  # where each member on the path stands in it
         branches = [iter(reports[root])]
         while branches:
             nxt = next(branches[-1], None)
             if nxt is None:
                 branches.pop()
-                done.add(path.pop())
-            elif nxt in path:
-                return [*path[path.index(nxt) :], nxt]
+                finished = path.pop()
+                del place[finished]
+                done.add(finished)
+            elif nxt in place:
+                return [*path[place[nxt] :], nxt]
             elif nxt not in done:
+                place[nxt] = len(path)
                 path.append(nxt)
                 branches.append(iter(reports.get(nxt, ())))
     return []

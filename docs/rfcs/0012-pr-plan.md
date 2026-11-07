@@ -283,7 +283,9 @@ bad shape is refused with its reason.
 
 **Review findings** (PR 1): F-1 to F-7 are an independent review's, which
 found nothing High or Medium; F-8 and F-9 are the author's. F-10 to F-24
-are a second independent review's, which found nothing High.
+are a second independent review's, which found nothing High. F-25 and F-26
+are Copilot's, which rated both Medium; Low here, since each effect is
+bounded.
 
 | Finding | Severity | Description | Disposition |
 |---------|----------|-------------|-------------|
@@ -311,6 +313,8 @@ are a second independent review's, which found nothing High.
 | F-22 | Low | This plan still said the checkers cannot drift, and F-1's deferral had no From PR 1 review entry in PR 2's section | Fixed in-PR: reworded; the entry added |
 | F-23 | Low | The fixture tests pinned 10 rule names, and a `schema-` fixture passed if any one error matched, so deleting or muddying a fixture stayed green | Fixed in-PR: the expected rules are read from the checkers' messages and the schema's `x-refusal`s; every error must match |
 | F-24 | Low | The extension spec's §E4.1 still showed the old `organization:` shape, which the schema refuses | Fixed in-PR: a pointer to §B and an example in the new shape |
+| F-25 | Low | An empty, comment-only or null `organizations.yaml` passed unchecked, though the schema requires the `organizations` list and refuses `organizations: null` | Fixed in-PR: such a file is read as one with no keys, as Go's typed decode reads it, and refused; other config files may still be empty; two fixtures for PR 2 |
+| F-26 | Low | The loop check scanned the whole path at each step, so its time grew with the square of a management chain, which the schema does not limit: 37 s for 100 000 members | Fixed in-PR: a map keeps each member's place on the path, 0.12 s; a timing test |
 
 ### PR 2 — `feature/v040-rfc0012-protocols-graph`
 
@@ -334,6 +338,9 @@ accepts as a boolean (`on`, `off`, `yes`, `no`, `true`, `false`), an integer
 (`2024`, `007`, `0x1f`, `0b1`) or a date (`2026-11-04`), so `make validate`
 refuses `scope: on` or a role id `007`, where a decode into a Go string keeps
 the text. The loader refuses each of these too, with a fixture for each type.
+F-25 — the loader refuses an empty, comment-only or null file, as the
+`schema-organizations--` fixtures pin. F-26 — its loop check finds a
+member on the path through a map, not a scan.
 
 ### PR 3 — `feature/v040-rfc0012-org-load`
 
