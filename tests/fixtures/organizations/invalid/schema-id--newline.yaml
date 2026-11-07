@@ -1,5 +1,5 @@
 # An id that ends in a line break. Python's `$` matches before a final
-# newline, so the id pattern alone would let it through.
+# newline; `agents/validate.py` reads it as the end of the text, as Go does.
 organizations:
   - id: "acme\n"
     name: Acme

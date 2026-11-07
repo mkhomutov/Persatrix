@@ -274,8 +274,8 @@ organization, an `agent_id` absent from `config/agents.yaml`, and a persona in
 two organizations — the plan's acceptance: "a cycle or a second manager fails
 validation".
 **Tests**: each invalid fixture fails `make validate` with a message naming
-the rule; the valid fixtures pass. The same fixtures feed PR 2's Go tests, so
-the two checkers cannot drift.
+the rule; the valid fixtures pass. The same fixtures feed PR 2's Go tests,
+which hold the two checkers to the same verdict on each case a fixture pins.
 **Migration**: none.
 **Acceptance**: a hierarchy, a flat and a matrix organization validate; each
 bad shape is refused with its reason.
@@ -286,7 +286,7 @@ found nothing High or Medium; F-8 and F-9 are the author's.
 
 | Finding | Severity | Description | Disposition |
 |---------|----------|-------------|-------------|
-| F-1 | Low | The Python and Go YAML parsers and regex engines can disagree, so validation could pass a file Go refuses: a key given twice keeps its last value, which can hide a loop, and an id ending in a line break passes Python's `$`, even past the `general` reservation. Python also refuses `scope: on`, a YAML 1.1 boolean, where Go reads text. The docs said the two checkers cannot drift | Fixed in-PR for the first two: a loader that refuses repeated keys (`duplicate-key`), a schema guard against a final line break, a fixture each, softer wording. The boolean case → deferred to PR 2 (the 2026-11-04 note) |
+| F-1 | Low | The Python and Go YAML parsers and regex engines can disagree, so validation could pass a file Go refuses: a key given twice keeps its last value, which can hide a loop, and an id ending in a line break passes Python's `$`, even past the `general` reservation. Python also refuses `scope: on`, a YAML 1.1 boolean, where Go reads text. The docs said the two checkers cannot drift | Fixed in-PR for the first two: a loader that refuses repeated keys (`duplicate-key`), a schema guard against a final line break, a fixture each, softer wording. The YAML 1.1 typing case (booleans, numbers, dates) → deferred to PR 2 (its From PR 1 review entry) |
 | F-2 | Low | A missing or unreadable `agents.yaml` gave one `unknown-agent` per member and never said the file was missing | Fixed in-PR: one error naming the file |
 | F-3 | Low | The D-3 and D-9 refusals printed JSON Schema's wording (`'clearance' was unexpected`), not the reason | Fixed in-PR: the schema names each rule (`x-refusal`), which `validate.py` prints; fixtures `clearance`, `reserved-scope` |
 | F-4 | Low | ISSUE-0195 said the unheld egress was paraphrase; the tripwire matches verbatim spans only, and RFC 0037 §G reads a verbatim hit as a bug | Fixed in-PR (issue text) |
@@ -313,6 +313,11 @@ scope.
 **Migration**: none.
 **Acceptance**: `go test ./internal/protocols` covers every §C rule.
 **Estimate**: ~450 lines.
+**From PR 1 review**: F-1 — PyYAML types an unquoted value the id pattern
+accepts as a boolean (`on`, `off`, `yes`, `no`, `true`, `false`), an integer
+(`2024`, `007`, `0x1f`, `0b1`) or a date (`2026-11-04`), so `make validate`
+refuses `scope: on` or a role id `007`, where a decode into a Go string keeps
+the text. The loader refuses each of these too, with a fixture for each type.
 
 ### PR 3 — `feature/v040-rfc0012-org-load`
 
@@ -674,10 +679,9 @@ amendment's two items; Phases 4–5 for v0.5.0); this plan's statuses closed.
 > through. Two managers of one member on one matrix dimension are allowed;
 > PR 2 ranks their directives as a tie. Each rule's message starts with its
 > name, and each has a fixture named after it under
-> `tests/fixtures/organizations/`. For PR 2 (from PR 1's review): PyYAML
-> reads an unquoted `on`, `off`, `yes` or `no` as a boolean, so validation
-> refuses `scope: on` where Go's parser reads the text `on`; PR 2's loader
-> refuses it too, and adds the fixture.
+> `tests/fixtures/organizations/`. PR 2's loader also refuses the YAML 1.1
+> typed values validation refuses, such as `scope: on` (its From PR 1
+> review entry).
 
 ## Related documentation
 

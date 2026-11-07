@@ -1,0 +1,5 @@
+# A YAML 1.2 directive. PyYAML reads the file all the same; Go's YAML parser
+# refuses every version but 1.1.
+%YAML 1.2
+---
+organizations: []

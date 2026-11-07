@@ -17,8 +17,7 @@
     "id": {
       "type": "string",
       "pattern": "^[a-z0-9][a-z0-9-]*[a-z0-9]$",
-      "not": { "type": "string", "pattern": "\\n" },
-      "description": "Lowercase letters, digits and hyphens, as an agent id. The `not` refuses a final line break, which Python's `$` lets through and Go's does not."
+      "description": "Lowercase letters, digits and hyphens, as an agent id. `agents/validate.py` reads `$` as the end of the text, as Go does, so a final line break is refused; Python's own `$` would let it through."
     },
     "organization": {
       "type": "object",

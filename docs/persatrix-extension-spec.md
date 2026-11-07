@@ -522,66 +522,56 @@ whom, which channels they share, and what authority they have.
 
 ### E4.1 Topology Types
 
-```yaml
-organization:
-  id: "acme-engineering"
-  name: "Acme Corp Engineering Department"
-  topology: "hierarchy"               # hierarchy | flat | matrix | network | custom
-
-  # ─── Hierarchy topology ──────────────────
-  structure:
-    - agent_id: "ember-owl"
-      role: "VP of Engineering"
-      reports_to: null                # top of this org
-      manages:
-        - agent_id: "iron-fox"
-          role: "Senior Backend Engineer"
-        - agent_id: "cobalt-lark"
-          role: "Junior Developer"
-        - agent_id: "nova-sparrow"
-          role: "QA Lead"
-          manages:
-            - agent_id: "grid-hawk"
-              role: "QA Engineer"
-```
+`config/organizations.yaml` declares organizations in
+[RFC 0012](rfcs/0012-protocols-organizations.md#b-the-organization-model)
+§B's shape, which `schemas/organization.schema.json` and `make validate`
+check. A persona belongs to one organization; the earlier sketch's
+`structure:` tree, departments, cross-functional teams and privileges are
+not part of it.
 
 ```yaml
-organization:
-  id: "debate-society"
-  name: "Policy Debate Simulation"
-  topology: "flat"
+organizations:
+  - id: acme-engineering
+    name: "Acme Corp Engineering Department"
+    topology: hierarchy               # hierarchy | flat | matrix
+    roles:
+      - {id: vp-engineering, authority: directive}
+      - {id: qa-lead, authority: operational}
+      - {id: engineer, authority: peer}
+    members:
+      - agent_id: ember-owl
+        role: vp-engineering
+        manages: [iron-fox, cobalt-lark, nova-sparrow]   # one manager each
+      - {agent_id: iron-fox, role: engineer}
+      - {agent_id: cobalt-lark, role: engineer}
+      - {agent_id: nova-sparrow, role: qa-lead, manages: [grid-hawk]}
+      - {agent_id: grid-hawk, role: engineer}
 
-  members:
-    - agent_id: "participant-1"
-      role: "debater"
-    - agent_id: "participant-2"
-      role: "debater"
-    - agent_id: "moderator"
-      role: "moderator"
-      privileges: ["mute", "set_topic", "end_discussion"]
-```
+  - id: debate-society
+    name: "Policy Debate Simulation"
+    topology: flat                    # peers: no member manages another
+    roles:
+      - {id: moderator, authority: operational}
+      - {id: debater, authority: peer}
+    members:
+      - {agent_id: moss-heron, role: moderator}
+      - {agent_id: tide-otter, role: debater}
+      - {agent_id: plum-finch, role: debater}
 
-```yaml
-organization:
-  id: "startup-sim"
-  name: "Startup Simulation"
-  topology: "matrix"
-
-  departments:
-    - id: "engineering"
-      lead: "cto"
-      members: ["dev-1", "dev-2", "devops-1"]
-    - id: "product"
-      lead: "cpo"
-      members: ["pm-1", "designer-1"]
-    - id: "sales"
-      lead: "vp-sales"
-      members: ["ae-1", "ae-2", "sdr-1"]
-
-  cross_functional:
-    - id: "launch-team"
-      members: ["pm-1", "dev-1", "designer-1", "ae-1"]
-      purpose: "Coordinate v2.0 launch"
+  - id: startup-sim
+    name: "Startup Simulation"
+    topology: matrix                  # each edge names its dimension
+    roles:
+      - {id: lead, authority: directive}
+      - {id: member, authority: peer}
+    members:
+      - agent_id: sage-kite           # leads engineering
+        role: lead
+        manages: [{agent_id: dune-wren, scope: engineering}]
+      - agent_id: rust-magpie         # leads the launch team
+        role: lead
+        manages: [{agent_id: dune-wren, scope: launch}]
+      - {agent_id: dune-wren, role: member}
 ```
 
 ### E4.2 Authority & Escalation Rules

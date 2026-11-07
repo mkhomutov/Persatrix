@@ -9,9 +9,13 @@ PR 2); their README says how a file name names the rule it breaks.
 
 from __future__ import annotations
 
+import json
+import os
+import re
 import shutil
 import subprocess
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -57,7 +61,7 @@ def test_invalid_fixture_fails_for_its_rule_only(tmp_path: Path, fixture: Path) 
         # The shape is wrong, so the graph checks never ran. One error is at
         # the key at fault, or names it.
         key = rule.removeprefix("schema-")
-        assert any(e.path.split(".")[-1] == key or f"'{key}'" in e.message for e in errors), (
+        assert all(e.path.split(".")[-1] == key or f"'{key}'" in e.message for e in errors), (
             rendered
         )
     else:
@@ -87,6 +91,33 @@ def test_fixtures_cover_each_topology_and_rule() -> None:
         "reserved-scope",
         "duplicate-key",
     } <= rules
+    # And every rule a message can name has a fixture, so PR 2 loses none.
+    assert _rule_names() <= rules, sorted(_rule_names() - rules)
+
+
+def _rule_names() -> set[str]:
+    """Every rule a refusal can name: those `validate.py` and
+    `org_validate.py` write at the start of a message, and the schema's
+    `x-refusal` names."""
+    names: set[str] = set()
+    for module in ("validate.py", "org_validate.py"):
+        source = (_ROOT / "agents" / module).read_text(encoding="utf-8")
+        names.update(re.findall(r'"([a-z]+(?:-[a-z]+)*): ', source))
+    schema = json.loads((_SCHEMAS / "organization.schema.json").read_text(encoding="utf-8"))
+    names.update(refusal.split(":")[0] for refusal in _refusals(schema))
+    return names
+
+
+def _refusals(node: object) -> Iterator[str]:
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == "x-refusal":
+                yield value
+            else:
+                yield from _refusals(value)
+    elif isinstance(node, list):
+        for value in node:
+            yield from _refusals(value)
 
 
 def test_missing_agents_yaml_is_one_error_that_says_so(tmp_path: Path) -> None:
@@ -94,6 +125,49 @@ def test_missing_agents_yaml_is_one_error_that_says_so(tmp_path: Path) -> None:
     assert not ok
     (error,) = errors
     assert error.message.startswith("unknown-agent: agents.yaml ")
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["", "# No agents yet.\n", 'schema_version: "0.2"\n', 'schema_version: "0.2"\nagents: []\n'],
+    ids=["empty", "comment-only", "no-agents-key", "no-agents"],
+)
+def test_agents_yaml_that_lists_no_agents_is_one_error_that_says_so(
+    tmp_path: Path, text: str
+) -> None:
+    agents = tmp_path / "agents.yaml"
+    agents.write_text(text, encoding="utf-8")
+    ok, errors = _validate(tmp_path, _FIXTURES / "valid" / "flat.yaml", agents=agents)
+    assert not ok
+    (error,) = [e for e in errors if e.file.endswith("organizations.yaml")]
+    assert error.message.startswith(
+        "unknown-agent: agents.yaml is missing, unreadable or lists no agents"
+    ), error.message
+
+
+def test_no_organization_needs_no_agents_yaml(tmp_path: Path) -> None:
+    """The shipped `organizations: []` names no member, so it validates
+    without agents.yaml, as v0.3.16's placeholder did."""
+    ok, errors = _validate(tmp_path, _FIXTURES / "valid" / "empty.yaml", agents=None)
+    assert ok, [str(e) for e in errors]
+
+
+def test_agent_with_an_empty_type_is_read_as_a_task_agent(tmp_path: Path) -> None:
+    """agents.yaml refuses a `type:` with no value. The graph check reads it
+    as the default, `task`, as Go reads an empty value, so the member is not
+    a persona; it is not missing from agents.yaml."""
+    text = (_FIXTURES / "agents.yaml").read_text(encoding="utf-8")
+    agents = tmp_path / "agents.yaml"
+    agents.write_text(
+        text.replace("  - id: iron-fox\n    type: persona\n", "  - id: iron-fox\n    type:\n"),
+        encoding="utf-8",
+    )
+    ok, errors = _validate(tmp_path, _FIXTURES / "valid" / "flat.yaml", agents=agents)
+    assert not ok
+    graph = [e.message for e in errors if e.file.endswith("organizations.yaml")]
+    assert graph == [
+        "not-a-persona: 'iron-fox' is a task agent; only a persona joins an organization"
+    ], graph
 
 
 def test_second_manager_names_both_managers(tmp_path: Path) -> None:
@@ -117,15 +191,18 @@ def test_cycle_names_the_loop(tmp_path: Path) -> None:
     assert "ember-owl → iron-fox → nova-sparrow → ember-owl" in error.message
 
 
-def test_script_run_checks_the_graph(tmp_path: Path) -> None:
+@pytest.mark.parametrize("flags", [[], ["-I"]], ids=["plain", "isolated"])
+def test_script_run_checks_the_graph(tmp_path: Path, flags: list[str]) -> None:
     """`make validate`, CI and `persatrix validate` run validate.py as a
-    script, which loads the graph checks another way than the import above."""
+    script, which loads the graph checks another way than the import above.
+    Under `-I` (as under `-P` or PYTHONSAFEPATH) the script's own folder is
+    not on the import path."""
     config = tmp_path / "config"
     config.mkdir()
     shutil.copy(_FIXTURES / "invalid" / "second-manager.yaml", config / "organizations.yaml")
     shutil.copy(_FIXTURES / "agents.yaml", config / "agents.yaml")
     result = subprocess.run(
-        [sys.executable, str(_ROOT / "agents" / "validate.py"), str(config)],
+        [sys.executable, *flags, str(_ROOT / "agents" / "validate.py"), str(config)],
         cwd=_ROOT,
         capture_output=True,
         text=True,
@@ -133,6 +210,25 @@ def test_script_run_checks_the_graph(tmp_path: Path) -> None:
     )
     assert result.returncode == 1, result.stdout + result.stderr
     assert "second-manager: " in result.stdout
+
+
+def test_script_prints_a_cycle_through_a_cp1252_pipe(tmp_path: Path) -> None:
+    """On Windows a piped stdout uses the ANSI code page, which has no `→`;
+    `persatrix validate` reads the script's output as UTF-8."""
+    config = tmp_path / "config"
+    config.mkdir()
+    shutil.copy(_FIXTURES / "invalid" / "cycle.yaml", config / "organizations.yaml")
+    shutil.copy(_FIXTURES / "agents.yaml", config / "agents.yaml")
+    result = subprocess.run(
+        [sys.executable, str(_ROOT / "agents" / "validate.py"), str(config)],
+        cwd=_ROOT,
+        capture_output=True,
+        check=False,
+        env={**os.environ, "PYTHONIOENCODING": "cp1252"},
+    )
+    stdout = result.stdout.decode("utf-8", errors="replace")
+    assert result.returncode == 1, stdout + result.stderr.decode("utf-8", errors="replace")
+    assert "cycle: ember-owl → iron-fox → nova-sparrow → ember-owl" in stdout, stdout
 
 
 def test_shipped_file_declares_no_organization(tmp_path: Path) -> None:

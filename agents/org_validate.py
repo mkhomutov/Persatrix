@@ -15,7 +15,7 @@ files, so the two checkers are held to the same rules.
 
 from __future__ import annotations
 
-from collections.abc import Hashable, Iterator, Mapping
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -29,67 +29,36 @@ class GraphError(NamedTuple):
     message: str
 
 
-class _RepeatedKeyError(Exception):
-    def __init__(self, key: object, line: int) -> None:
-        super().__init__(key, line)
-        self.key = key
-        self.line = line
-
-
-class _UniqueKeyLoader(yaml.SafeLoader):
-    """A loader that refuses a key given twice in one mapping. PyYAML keeps
-    the last value, so the schema pass may have checked a graph the file
-    does not plainly say; Go's YAML parser refuses such a file."""
-
-    def construct_mapping(self, node: yaml.MappingNode, deep: bool = False) -> dict[Hashable, Any]:
-        seen: set[object] = set()
-        for key_node, _ in node.value:
-            key = self.construct_object(key_node, deep=deep)
-            if key in seen:
-                raise _RepeatedKeyError(key, key_node.start_mark.line + 1)
-            seen.add(key)
-        return super().construct_mapping(node, deep=deep)
-
-
-def check_file(organizations_path: Path, agents_path: Path) -> list[GraphError]:
-    """Check an organizations file the schema has accepted."""
-    text = organizations_path.read_text(encoding="utf-8")
-    try:
-        doc = yaml.load(text, Loader=_UniqueKeyLoader)
-    except _RepeatedKeyError as repeated:
-        return [
-            GraphError(
-                "",
-                f"duplicate-key: {repeated.key!r} is given twice in one mapping "
-                f"(line {repeated.line}); YAML would keep only the last",
-            )
-        ]
-    if not doc:
+def check_document(doc: Mapping[str, Any], agents_path: Path) -> list[GraphError]:
+    """Check an organizations document the schema has accepted. With no
+    organization there is no member to look up, so agents.yaml is not read."""
+    if not doc["organizations"]:
         return []
     agents = agent_types(agents_path)
     if agents is None:
         return [
             GraphError(
                 "",
-                f"unknown-agent: {agents_path.name} is missing or unreadable, "
-                "so no member can be checked",
+                f"unknown-agent: {agents_path.name} is missing, unreadable or lists "
+                "no agents, so no member can be checked",
             )
         ]
     return check_organizations(doc, agents)
 
 
 def agent_types(agents_path: Path) -> dict[str, str] | None:
-    """Each agent id in ``agents.yaml`` with its type, ``task`` by default;
-    None when the file is missing, unreadable or lists no agents."""
+    """Each agent id in ``agents.yaml`` with its type, ``task`` when it gives
+    none or an empty one, as Go reads an empty value; None when the file is
+    missing, unreadable or lists no agents."""
     try:
         content = yaml.safe_load(agents_path.read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError):
         return None
     agents = content.get("agents") if isinstance(content, dict) else None
-    if not isinstance(agents, list):
+    if not isinstance(agents, list) or not agents:
         return None
     return {
-        agent["id"]: agent.get("type", "task")
+        agent["id"]: agent.get("type") or "task"
         for agent in agents
         if isinstance(agent, dict) and isinstance(agent.get("id"), str)
     }

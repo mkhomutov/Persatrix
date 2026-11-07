@@ -1,6 +1,6 @@
 ---
 id: ISSUE-0195
-summary: "In v0.4.0 an organization role has no clearance and nothing checks one, so a persona can be a member of a channel of any classification (RFC 0012 §G's membership-time clearance check is unslotted). A persona's publish that repeats memory classified above the target channel is logged by RFC 0037's leak tripwire, not held for a person (RFC 0012 §H is unslotted). RFC 0012's 2026-10-20 amendment took both out of v0.4.0; they return only by an amendment that records an outside ask. A Known Gap of the v0.4.0 plan."
+summary: "In v0.4.0 an organization role has no clearance and nothing checks one, so a persona can be a member of a channel of any classification (RFC 0012 §G's membership-time clearance check is unslotted). A persona's publish that repeats memory classified above the target channel is logged by RFC 0037's leak tripwire, not held for a person (RFC 0012 §H is unslotted); one from a turn with no classified acting channel, such as a tick, is not even logged. RFC 0012's 2026-10-20 amendment took both out of v0.4.0; they return only by an amendment that records an outside ask. A Known Gap of the v0.4.0 plan."
 status: open
 severity: low
 area: security
@@ -22,9 +22,12 @@ v0.4.0's organizations give each role an authority ceiling but no
 clearance, so nothing stops a persona from being a member of a channel
 classified above what its role should see. When a persona's message
 repeats memory classified above the channel it posts in, the message is
-sent and an audit event is written; nothing holds it for a person.
-RFC 0037 reads such a hit as a bug, since its injection gate keeps that
-memory out of the channel's prompt.
+sent and an audit event is written; nothing holds it for a person. The
+tripwire skips a turn with no classified acting channel, such as a tick
+or a task assignment, so that turn's message is not logged either.
+RFC 0037 reads any such hit as a bug, since its injection gate keeps that
+memory out of the channel's prompt, and gives a turn of the second kind
+only `public` memory.
 
 ## Context
 
@@ -58,7 +61,11 @@ plan lists this as a Known Gap owned by row C1, whose PR 1 files it.
   its channel is sent. The tripwire writes a
   `channel.confidentiality_tripwire` audit event naming the persona, the
   channel and the entry's protection level, so an operator can find it
-  afterwards; §H would have held it instead. The tripwire matches verbatim
+  afterwards; §H would have held it instead. A publish from a turn with no
+  classified acting channel, such as a tick or a task assignment, is
+  outside the tripwire: it is neither logged now nor held by §H. RFC 0037
+  §G calls that case vacuous, since such a turn sees only `public` memory.
+  The tripwire matches verbatim
   spans only, so a paraphrase is neither logged now nor held by §H, which
   keeps the same detection.
 

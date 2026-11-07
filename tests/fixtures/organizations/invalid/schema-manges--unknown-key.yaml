@@ -1,0 +1,11 @@
+# A misspelt `manages`. The schema refuses a key it does not know; a Go
+# decode that ignores unknown keys would load the organization without the
+# edge.
+organizations:
+  - id: acme
+    name: Acme
+    topology: hierarchy
+    roles: [{id: member, authority: operational}]
+    members:
+      - {agent_id: ember-owl, role: member, manges: [iron-fox]}
+      - {agent_id: iron-fox, role: member}

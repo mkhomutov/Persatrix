@@ -1,0 +1,12 @@
+# Members that share fields through a YAML anchor and merge key (`<<`).
+# Both parsers read the merge, and a key a member gives itself overrides the
+# merged one: iron-fox takes ember-owl's role, not its id.
+organizations:
+  - id: acme
+    name: Acme
+    topology: flat
+    roles: [{id: member, authority: peer}]
+    members:
+      - &member {agent_id: ember-owl, role: member}
+      - <<: *member
+        agent_id: iron-fox

@@ -1,0 +1,13 @@
+# Two merge keys (`<<`) in one mapping. Go's YAML parser compares a merge
+# key by its text, so it refuses the second as a key given twice; PyYAML
+# would merge both.
+organizations:
+  - id: acme
+    name: Acme
+    topology: flat
+    roles: [{id: member, authority: peer}]
+    members:
+      - &member {agent_id: ember-owl, role: member}
+      - <<: *member
+        <<: {role: member}
+        agent_id: iron-fox

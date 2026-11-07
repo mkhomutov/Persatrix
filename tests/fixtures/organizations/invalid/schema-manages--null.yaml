@@ -1,0 +1,12 @@
+# A `manages:` with no value, which is null. A Go decode reads null as no
+# edges; the schema refuses a `manages` that is not a list.
+organizations:
+  - id: acme
+    name: Acme
+    topology: flat
+    roles: [{id: member, authority: peer}]
+    members:
+      - agent_id: ember-owl
+        role: member
+        manages:
+      - {agent_id: iron-fox, role: member}

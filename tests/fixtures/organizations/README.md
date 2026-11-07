@@ -14,3 +14,6 @@ where the YAML parsers or regex engines differ, add a fixture here.
   rule: the part before any `--`. The message starts with that name, such
   as `second-manager: …`. A `schema-<key>` file breaks a shape the JSON
   Schema checks with its own message, which is at `<key>` or names it.
+  A Go decode into typed fields drops an unknown key and reads a null or
+  empty value as absent; the `schema-` files for those cases need the Go
+  loader to refuse them too.
