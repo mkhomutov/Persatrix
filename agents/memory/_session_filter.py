@@ -7,8 +7,12 @@ the predicate across tiers — when each tier owned its own predicate
 the F-3 risk was that one tier silently lost the ``legacy`` carve-out
 or the empty-list guard while the others kept it.
 
-Four functions:
+Five functions:
 
+* :func:`resolve_active_session` — the call-time precedence (task-local
+  ``session_scope`` → tier construction snapshot), the session-axis
+  sibling of ``resolve_active_principal``.  A write tags its row with it,
+  and :func:`_resolve_session_list` reads with it.
 * :func:`_resolve_session_list` — validate ``sessions``, extend with
   the always-visible ``legacy`` carve-out, and return either a
   resolved list of session ids or ``None`` for the ``"*"`` "no filter"
@@ -68,6 +72,7 @@ __all__ = [
     "ROOM_BOOST_FACTOR",
     "SESSIONS_ALL",
     "_resolve_session_list",
+    "resolve_active_session",
     "session_boost_expr",
     "session_in_clause",
     "session_in_predicate",
@@ -90,6 +95,12 @@ __all__ = [
 #: <../../docs/rfcs/0031-per-session-namespacing-channels.md#security-considerations>`_)
 #: is still unbuilt (ISSUE-0086).
 SESSIONS_ALL: Final[str] = "*"
+
+
+def resolve_active_session(snapshot: str) -> str:
+    """The active session for this call: a per-request ``session_scope``
+    wins, else the tier's construction-time ``snapshot``."""
+    return current_session_id() or snapshot
 
 
 def _resolve_session_list(
@@ -134,7 +145,7 @@ def _resolve_session_list(
     if sessions == SESSIONS_ALL:
         return None
     if sessions is None:
-        ids: list[str] = [current_session_id() or active_session_id]
+        ids: list[str] = [resolve_active_session(active_session_id)]
     elif isinstance(sessions, list):
         if not sessions:
             raise ValueError(

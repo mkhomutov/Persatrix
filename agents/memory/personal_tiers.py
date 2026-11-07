@@ -22,12 +22,17 @@ each tier's own ``initialize()`` / ``close()`` lifecycle
 It is the construction half of the RFC 0029 §C ``MemoryStore`` facade:
 ``MemoryStore`` owns the *runtime* personal-tier surface, this helper
 owns *building* the tiers the persona runtime then wires up by hand.
+
+The commitments tier (RFC 0021 Phase 2 PR 2) is built here too, as a
+fourth handle, but no persona opens it yet: the runtime wires it in with
+its first reader, the prompt block (that plan's PR 4).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .commitments import CommitmentStore
 from .episodic import EpisodicMemory
 from .facts import FactStore
 from .relationship import RelationshipMemory
@@ -37,16 +42,21 @@ __all__ = ["PersonalTiers", "build_personal_tiers"]
 
 @dataclass(frozen=True, slots=True)
 class PersonalTiers:
-    """The three un-initialised per-agent personal-tier handles.
+    """The four un-initialised per-agent personal-tier handles.
 
     Returned by :func:`build_personal_tiers`.  Frozen so a caller cannot
     silently swap a handle after the persona runtime has wired it into
     its :class:`~agents.persona_runtime.MemoryNamespace`.
+
+    ``commitments`` (RFC 0021 Phase 2 PR 2) is built here beside the
+    facts tier; nothing wires it into the namespace yet (see the module
+    docstring).
     """
 
     episodic: EpisodicMemory
     relationship: RelationshipMemory
     facts: FactStore
+    commitments: CommitmentStore
 
 
 def build_personal_tiers(
@@ -54,7 +64,7 @@ def build_personal_tiers(
     *,
     db_path: str = "data/memory.db",
 ) -> PersonalTiers:
-    """Construct the three personal tiers for *agent_id* (RFC 0029 §C).
+    """Construct the personal tiers for *agent_id* (RFC 0029 §C).
 
     Construction happens here, inside ``agents/memory/``, so the RFC 0029
     PR 2 boundary ``DeprecationWarning`` stays silent — the persona
@@ -62,10 +72,11 @@ def build_personal_tiers(
     ``EpisodicMemory`` / ``RelationshipMemory`` (``FactStore`` carries no
     boundary guard, so it never warned either way).  The returned handles
     are *un-initialised*: the caller (the persona runtime) opens and
-    closes each tier.
+    closes each tier it uses — today every tier but ``commitments``.
 
-    ``FactStore`` is built with ``shared_db=None`` — each tier owns its
-    own ``aiosqlite`` connection, exactly as the pre-PR-3 factory did.
+    ``FactStore`` and ``CommitmentStore`` are built with
+    ``shared_db=None`` — each tier owns its own ``aiosqlite`` connection,
+    exactly as the pre-PR-3 factory did.
     For file-backed databases the connections share the file and the
     umbrella migration runner is idempotent across them; under
     ``:memory:`` each connection is an isolated database, so a
@@ -76,4 +87,7 @@ def build_personal_tiers(
         episodic=EpisodicMemory(agent_id=agent_id, db_path=db_path),
         relationship=RelationshipMemory(agent_id=agent_id, db_path=db_path),
         facts=FactStore(agent_id=agent_id, db_path=db_path, shared_db=None),
+        commitments=CommitmentStore(
+            agent_id=agent_id, db_path=db_path, shared_db=None,
+        ),
     )

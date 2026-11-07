@@ -6,8 +6,9 @@ with, in ``_active_session_id`` / ``_session_id``, ``_active_principal_id``
 only the fallback: a turn binds its own with ``session_scope``,
 ``principal_scope`` and ``epoch_scope``, and every read and write must
 prefer that.  So the snapshot goes to a resolver
-(``_resolve_session_list``, ``resolve_active_principal``,
-``resolve_active_epoch``, ``resolve_write_principal``) or sits behind
+(``_resolve_session_list``, ``resolve_active_session``,
+``resolve_active_principal``, ``resolve_active_epoch``,
+``resolve_write_principal``) or sits behind
 ``current_session_id() or …`` on its own axis.  Putting it straight into a
 query is the `ISSUE-0164
 <../../../docs/issues/ISSUE-0164-persona-cannot-edit-or-delete-its-channel-notes.md>`_
@@ -42,6 +43,7 @@ SNAPSHOTS: dict[str, str] = {
 # Each resolver, and the position and name of its fallback argument.
 RESOLVERS: dict[str, tuple[int, str]] = {
     "_resolve_session_list": (1, "active_session_id"),
+    "resolve_active_session": (0, "snapshot"),
     "resolve_active_principal": (0, "snapshot"),
     "resolve_active_epoch": (0, "snapshot"),
     "resolve_write_principal": (1, "snapshot"),

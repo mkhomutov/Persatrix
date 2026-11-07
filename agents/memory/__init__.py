@@ -2,6 +2,13 @@
 
 from typing import Protocol, runtime_checkable
 
+from .commitments import (
+    Commitment,
+    CommitmentCapError,
+    CommitmentClosedError,
+    CommitmentNotFoundError,
+    CommitmentStore,
+)
 from .episodic import Episode, EpisodicMemory
 from .eviction import EvictionPass, EvictionStats
 from .facade import (
@@ -49,6 +56,11 @@ class MemoryLifecycle(Protocol):
 
 __all__ = [
     "Candidate",
+    "Commitment",
+    "CommitmentCapError",
+    "CommitmentClosedError",
+    "CommitmentNotFoundError",
+    "CommitmentStore",
     "CompressedView",
     "ContextSection",
     "Episode",

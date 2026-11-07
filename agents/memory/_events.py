@@ -55,7 +55,8 @@ logger = logging.getLogger(__name__)
 # ─── Tier vocabulary ────────────────────────────────────────────────────────
 
 
-# The five Persatrix memory tiers (RFC 0024 PR plan §PR 3a).  ``reflection``
+# The Persatrix memory tiers: RFC 0024 PR plan §PR 3a's five, and
+# ``commitments`` (RFC 0021 Phase 2 PR 2).  ``reflection``
 # has no production write site at v0.3.3 — it is reserved for the future
 # RFC 0027 reflection-driven consolidation work — but lives in the literal
 # so PR 3b's subscriber can carry it as the ``tier`` attribute on
@@ -67,6 +68,7 @@ MemoryTier = Literal[
     "reflection",
     "relationship",
     "facts",
+    "commitments",
 ]
 
 

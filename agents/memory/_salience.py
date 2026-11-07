@@ -4,7 +4,8 @@ Single place to flip for the calibration follow-up named in
 [v0.3.x sequencing §Open questions §3](../../docs/v0.3.x-sequencing.md#open-questions).
 Per-tier constants live here so :mod:`agents.memory.episodic` /
 :mod:`agents.memory.notes` / :mod:`agents.memory.facts` /
-:mod:`agents.memory.relationship` can all consult one source of truth.
+:mod:`agents.memory.relationship` / :mod:`agents.memory.commitments` can
+all consult one source of truth.
 
 The default-off invariant PR 3b ships (threshold default ``0.95`` strictly
 above PR 3a's maximum scoring of ``0.6``) is pinned by
@@ -28,6 +29,7 @@ EPISODIC_APPEND_SALIENCE: float = 0.0
 NOTES_APPEND_SALIENCE: float = 0.0
 RELATIONSHIP_APPEND_SALIENCE: float = 0.0
 FACTS_APPEND_SALIENCE: float = 0.0
+COMMITMENTS_APPEND_SALIENCE: float = 0.0
 
 # Reflection-contradiction salience has no production write site at v0.3.3 —
 # it lives here for PR 3b's default-off invariant and for the future RFC 0027
@@ -44,11 +46,13 @@ def emit_for_tier(
     agent_id: str,
     tier: MemoryTier,
     salience: float,
+    written_at: float | None = None,
 ) -> None:
     """Publish a :class:`MemoryWriteEvent` for ``tier`` after a successful write.
 
     Captures the active OTEL span id at call time as ``source_span_id`` (PR 3b's
-    loop-back guard input).
+    loop-back guard input).  ``written_at`` is the write's time by the tier's
+    own clock, for a tier given one; without it the event takes agent time.
 
     The ``contextlib.suppress`` is defence-in-depth against *non-subscriber*
     failure modes — subscriber exceptions are already swallowed inside
@@ -66,6 +70,7 @@ def emit_for_tier(
             tier=tier,
             salience=salience,
             source_span_id=current_llm_span_id(),
+            written_at=written_at,
         )
 
 
