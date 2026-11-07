@@ -1,0 +1,8 @@
+# A role with no `authority` ceiling (RFC 0012 open question 1).
+organizations:
+  - id: acme
+    name: Acme
+    topology: flat
+    roles: [{id: member}]
+    members:
+      - {agent_id: ember-owl, role: member}

@@ -1,0 +1,13 @@
+# iron-fox's `manages` is given twice. PyYAML keeps the last value, which
+# would hide the loop through ember-owl; Go's YAML parser refuses the file.
+organizations:
+  - id: acme
+    name: Acme
+    topology: hierarchy
+    roles: [{id: member, authority: operational}]
+    members:
+      - {agent_id: ember-owl, role: member, manages: [iron-fox]}
+      - agent_id: iron-fox
+        role: member
+        manages: [ember-owl]
+        manages: []

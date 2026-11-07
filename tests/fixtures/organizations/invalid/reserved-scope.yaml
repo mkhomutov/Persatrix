@@ -1,0 +1,10 @@
+# A matrix dimension named `general`, the label kept for a directive with no
+# dimension (the PR plan's D-9).
+organizations:
+  - id: acme
+    name: Acme
+    topology: matrix
+    roles: [{id: member, authority: operational}]
+    members:
+      - {agent_id: ember-owl, role: member, manages: [{agent_id: iron-fox, scope: general}]}
+      - {agent_id: iron-fox, role: member}

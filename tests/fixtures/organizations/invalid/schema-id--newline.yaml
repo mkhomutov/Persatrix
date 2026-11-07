@@ -1,0 +1,9 @@
+# An id that ends in a line break. Python's `$` matches before a final
+# newline, so the id pattern alone would let it through.
+organizations:
+  - id: "acme\n"
+    name: Acme
+    topology: flat
+    roles: [{id: member, authority: peer}]
+    members:
+      - {agent_id: ember-owl, role: member}

@@ -7,9 +7,11 @@ Usage: python -m persatrix_agents.validate config/
 
 from __future__ import annotations
 
+import importlib
 import json
 import sys
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 import jsonschema  # type: ignore[import-untyped]
@@ -21,12 +23,13 @@ import yaml
 # conversation_window block only — the Go orchestrator owns the rest of
 # the optimisation surface, so the schema leaves unknown top-level keys
 # unconstrained.
-# TODO: Add organizations.yaml, bridges.yaml, mcp-servers.yaml when JSON
-#       schemas are created for them.
+# TODO: Add bridges.yaml, mcp-servers.yaml when JSON schemas are created
+#       for them.
 _SCHEMA_MAP: dict[str, str] = {
     "agents.yaml": "agent.schema.json",
     "channels.yaml": "channel.schema.json",
     "optimization.yaml": "optimization.schema.json",
+    "organizations.yaml": "organization.schema.json",
     "security.yaml": "security.schema.json",
     "ui.yaml": "ui.schema.json",
 }
@@ -48,6 +51,19 @@ class ValidationError:
         if self.path:
             loc += f" at $.{self.path}"
         return f"  ERROR: {loc}: {self.message}"
+
+
+def _org_validate() -> ModuleType:
+    """The sibling ``org_validate`` module.
+
+    ``make validate``, CI and ``persatrix validate`` run this file as a
+    script: no package is set, but the script's own folder is first on the
+    import path. An import statement could not serve both ways, since mypy
+    would resolve the module under two names.
+    """
+    if __package__:
+        return importlib.import_module(".org_validate", __package__)
+    return importlib.import_module("org_validate")
 
 
 def _load_schema(schemas_dir: Path, schema_file: str) -> dict[str, Any]:
@@ -78,7 +94,10 @@ def _validate_yaml_against_schema(
     validator = jsonschema.Draft7Validator(schema)
     for error in sorted(validator.iter_errors(content), key=lambda e: list(e.absolute_path)):
         json_path = ".".join(str(p) for p in error.absolute_path)
-        errors.append(ValidationError(str(yaml_path), error.message, json_path))
+        # A subschema may name the rule it enforces (`x-refusal`), so the
+        # message says why the value is refused, not which keyword caught it.
+        refusal = error.schema.get("x-refusal") if isinstance(error.schema, dict) else None
+        errors.append(ValidationError(str(yaml_path), refusal or error.message, json_path))
 
     return errors
 
@@ -122,6 +141,10 @@ def validate_config_dir(
             files_checked += 1
             continue
         errors = _validate_yaml_against_schema(yaml_path, schema)
+        if filename == "organizations.yaml" and not errors:
+            # RFC 0012: the graph rules a JSON Schema cannot express.
+            graph = _org_validate().check_file(yaml_path, config_path / "agents.yaml")
+            errors = [ValidationError(str(yaml_path), e.message, e.path) for e in graph]
         all_errors.extend(errors)
         files_checked += 1
 

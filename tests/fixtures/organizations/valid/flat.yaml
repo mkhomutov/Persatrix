@@ -1,0 +1,18 @@
+# Three peers and no managers. Their roles still differ in authority, which
+# is why a role declares it (RFC 0012 open question 1).
+organizations:
+  - id: research-lab
+    name: Research Lab
+    topology: flat
+    roles:
+      - id: principal
+        authority: operational
+      - id: researcher
+        authority: peer
+    members:
+      - agent_id: ember-owl
+        role: principal
+      - agent_id: iron-fox
+        role: researcher
+      - agent_id: nova-sparrow
+        role: researcher

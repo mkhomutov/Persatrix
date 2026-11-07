@@ -1,0 +1,10 @@
+# A loop across two dimensions is still a loop: ember-owl manages iron-fox
+# on `project`, and iron-fox manages ember-owl on `function`.
+organizations:
+  - id: acme
+    name: Acme
+    topology: matrix
+    roles: [{id: member, authority: operational}]
+    members:
+      - {agent_id: ember-owl, role: member, manages: [{agent_id: iron-fox, scope: project}]}
+      - {agent_id: iron-fox, role: member, manages: [{agent_id: ember-owl, scope: function}]}
