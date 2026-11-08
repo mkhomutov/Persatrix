@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -18,8 +19,10 @@ import (
 //     letters. Go also folds the long s (U+017F) with s and the Kelvin sign
 //     (U+212A) with k, so under `(?i)` those two are added wherever s or k
 //     can match.
-//   - `{,` becomes `\{,`. Go reads `{,n}` as text; Python reads it as 0 to n
-//     repeats, which can match nothing at all.
+//   - A `{` Go reads as text becomes `\{`. Go reads a repeat only as `{n}`,
+//     `{n,}` or `{n,m}`, with no leading zero in a count. Python also reads
+//     `{,n}` as 0 to n repeats, which can match nothing at all, and `{01}`
+//     as one.
 //   - Inside a class, a `-` right after Go's spaces is escaped: they end in
 //     a literal space, and Python would read ` -x` as a range from space to x.
 //
@@ -27,6 +30,10 @@ import (
 // `\w`, `\d`, any other escaped letter, flags past a leading `(?i)`, a `[`
 // inside a class, non-ASCII text), so a new Go pattern that uses one fails the
 // generator instead of reaching Python with another meaning.
+
+// goRepeat is a repeat as Go's parser reads one: each count is 0 or starts
+// with 1 to 9.
+var goRepeat = regexp.MustCompile(`^\{(0|[1-9][0-9]*)(,(0|[1-9][0-9]*)?)?\}`)
 
 // goSpaces is Go's `\s`, as escapes Python reads the same way.
 const goSpaces = `\t\n\f\r `
@@ -78,7 +85,7 @@ func pythonRegex(expr string) (string, error) {
 		case c == '$':
 			b.WriteString(`\Z`)
 			i++
-		case strings.HasPrefix(body[i:], "{,"):
+		case c == '{' && !goRepeat.MatchString(body[i:]):
 			b.WriteString(`\{`)
 			i++
 		default:
