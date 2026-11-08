@@ -29,7 +29,7 @@ import yaml
 
 from agents.server_persona import load_agent
 from agents.tools import builtin, registry
-from agents.tools.registry import ToolResult, clear_registry, tool
+from agents.tools.registry import ToolResult, clear_registry, shown_output, tool
 from agents.tools.sandbox import (
     OutputSizeLimiter,
     read_resource_limits,
@@ -158,6 +158,16 @@ class TestOutputSizeLimiter:
         assert data["content"].endswith("\n... [truncated at 16 KB]")
         assert _size(render_output(data)) <= 16_384
 
+    def test_a_structured_cut_too_deep_to_make_falls_back_to_the_text_cut(self):
+        """Review F-18: the cut's own recursion failing still leaves the cap kept."""
+        limiter = OutputSizeLimiter(1024)
+        with patch.object(OutputSizeLimiter, "_fit_texts", side_effect=RecursionError):
+            data, size = limiter.limit({"stdout": "A" * 5000})
+        assert isinstance(data, str)
+        assert data.endswith("\n... [truncated at 1 KB]")
+        assert _size(data) <= 1024
+        assert size is not None
+
     def test_output_the_model_cannot_be_shown_is_left_to_the_tool_round(self):
         """An output json.dumps refuses fails in the tool round today; the cap
         does not change that."""
@@ -240,6 +250,50 @@ class TestToolOutputCap:
             result = await small()
         assert result.data == "ok"
         assert _audit_records(caplog) == []
+
+    async def test_a_long_error_text_is_capped_too(self):
+        """Review F-17: the error text a failed call hands the model is held to
+        the cap, as an exception that quotes a whole response would not be."""
+        @tool(name="raising")
+        async def raising() -> ToolResult:
+            raise RuntimeError("E" * 5000)
+
+        registry.output_limiter = OutputSizeLimiter(1024)
+        result = await raising()
+        assert result.success is False
+        assert result.error is not None
+        assert result.error.endswith("\n... [truncated at 1 KB]")
+        assert _size(result.error) <= 1024
+
+    async def test_an_output_too_deep_to_measure_leaves_the_call_a_success(self):
+        """Review F-18: a cap that cannot measure an output does not turn a
+        call that ran, side effects and all, into a failure."""
+        deep: list[Any] = []
+        for _ in range(100_000):
+            deep = [deep]
+
+        @tool(name="deep")
+        async def deep_tool() -> ToolResult:
+            return ToolResult(success=True, data=deep)
+
+        registry.output_limiter = OutputSizeLimiter(1024)
+        result = await deep_tool()
+        assert result.success is True, result.error
+        assert result.data is deep
+
+    async def test_the_tool_round_reuses_the_cap_s_rendering(self):
+        """Review F-22: the output the cap measured is not rendered again."""
+        data = {"stdout": "ok", "exit_code": 0}
+
+        @tool(name="small_dict")
+        async def small_dict() -> ToolResult:
+            return ToolResult(success=True, data=data)
+
+        registry.output_limiter = OutputSizeLimiter(1024)
+        result = await small_dict()
+        assert result.shown == json.dumps(data)
+        with patch("agents.tools.registry.render_output", side_effect=AssertionError("again")):
+            assert shown_output(result) == json.dumps(data)
 
 
 # ─── The resource_limits block ────────────────────────────────
@@ -363,6 +417,20 @@ class TestLoadAgentWiresTheLimits:
         assert registry.output_limiter is None
         assert builtin.resource_limiter is not None
         assert builtin.resource_limiter.cpu_seconds is None
+
+    def test_a_load_that_fails_later_leaves_no_limit_behind(self, _create):
+        """Review F-19: the limits are read first, to fail fast, and installed
+        last, so a load that fails after reading them changes nothing."""
+        gate = builtin.permission_gate
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = _write_agent(Path(tmp), {
+                "resource_limits": {"tool_output_bytes": 65_536},
+                "instructions_file": "prompts/no-such-prompt.md",
+            })
+            with pytest.raises(SystemExit):
+                load_agent("code-writer", config_path, tmp, repo_root=tmp)
+        assert registry.output_limiter is None
+        assert builtin.permission_gate is gate
 
     def test_a_block_the_schema_refuses_stops_the_agent_at_startup(self, _create):
         with tempfile.TemporaryDirectory() as tmp:

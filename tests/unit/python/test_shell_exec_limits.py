@@ -2,35 +2,49 @@
 ``shell_exec`` under RFC 0009 Phase 3's limits, and the environment its
 commands get (the Phases 3–4 plan's PR 4: design points G-3 and G-14).
 
-A CPU limit (``resource_limits.shell_cpu_seconds``) is set in the child
-process before the command starts, so the kernel stops a command that spins
-however its wall-time limit is set. It holds for each process the command
-starts, not for all of them together. With none set, a command runs as
-before. A limit an operator set that stops a command, CPU or wall time,
-writes a ``tool.resource_limited`` audit line.
+A CPU limit (``resource_limits.shell_cpu_seconds``) is set in the command's
+own process before the command starts, by a fresh interpreter that then
+becomes the command, so the kernel stops a command that spins however its
+wall-time limit is set. It holds for each process the command starts, not
+for all of them together. With none set, a command runs as before. The
+wall-time limit stops the command's whole process group. A limit an operator
+set that stops a command, CPU or wall time, writes a
+``tool.resource_limited`` audit line.
 
-A command never sees the fleet enrollment secret: every ``SECURITY_*``
-variable is taken out of its environment, so a prompt-injected ``env`` or
-``printenv`` cannot read the secret. The agent token is held in memory only
-(PR 7), and nothing puts it in the environment either.
+A command's environment holds no fleet enrollment secret: the agent moves it
+into memory at startup, and every ``SECURITY_*`` variable is taken out of a
+command's environment, so a prompt-injected ``env`` or ``printenv`` cannot
+read it there. On Linux the agent's starting environment, in
+``/proc/<agent pid>/environ``, still holds it for a command running as the
+agent's user; the plan records that gap. The agent token is held in memory
+only (PR 7), and nothing puts it in the environment either.
 """
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import json
 import logging
+import os
 import shlex
 import signal
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agents.orchestrator_session import ENROLLMENT_SECRET_ENV
+from agents import orchestrator_session
+from agents.orchestrator_session import (
+    ENROLLMENT_SECRET_ENV,
+    ENROLLMENT_SECRET_HEADER,
+    enrollment_headers,
+    hold_enrollment_secret,
+)
 from agents.server_reregister import AgentTokenKeeper
-from agents.tools import builtin
+from agents.tools import builtin, sandbox
 from agents.tools.permissions import PermissionGate
 from agents.tools.registry import clear_registry
 from agents.tools.sandbox import (
@@ -57,6 +71,20 @@ _SLEEP = f'{_PY_CMD} -c "import time; time.sleep(30)"'
 posix_only = pytest.mark.skipif(
     sys.platform == "win32", reason="RLIMIT_CPU is POSIX-only (RFC 0009 Security Considerations 4)",
 )
+
+# Where a child forked from this process records that it ran Python before
+# exec; set only while a test watches. A hook cannot be unregistered, so it
+# does nothing the rest of the time.
+_FORK_MARKER: list[Path] = []
+
+
+def _mark_forked_child() -> None:
+    if _FORK_MARKER:
+        _FORK_MARKER[0].write_text("forked", encoding="utf-8")
+
+
+if sys.platform != "win32":
+    os.register_at_fork(after_in_child=_mark_forked_child)
 
 
 @pytest.fixture(autouse=True)
@@ -156,10 +184,46 @@ class TestCpuLimit:
         assert result.success is False
         assert result.error == "Command not found: no-such-command-persatrix"
 
+    @posix_only
+    async def test_a_cpu_limit_runs_no_python_in_a_child_forked_from_the_agent(
+        self, tmp_path: Path,
+    ):
+        """Review F-12: the agent has threads, so Python run in a child it forks
+        (``preexec_fn``, and the at-fork hooks that come with it) can hang it."""
+        marker = tmp_path / "forked"
+        _setup(tmp_path, cpu_seconds=5)
+        _FORK_MARKER.append(marker)
+        try:
+            result = await builtin.shell_exec(f'{_PY_CMD} -c "print(1)"')
+        finally:
+            _FORK_MARKER.clear()
+        assert result.success is True, result.error
+        assert not marker.exists()
+
+    @posix_only
+    async def test_the_limit_reported_is_the_one_applied(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Review F-16: under a lower hard limit already in force, the command
+        stops sooner than the setting, and the error and the audit say when."""
+        real = sandbox.resource.getrlimit
+
+        def lower_hard_limit(which: int) -> tuple[int, int]:
+            return (2, 2) if which == sandbox.resource.RLIMIT_CPU else real(which)
+
+        monkeypatch.setattr(sandbox.resource, "getrlimit", lower_hard_limit)
+        _setup(tmp_path, cpu_seconds=10)
+        with caplog.at_level(logging.INFO, logger="agents.tools.audit"):
+            result = await builtin.shell_exec(_SPIN, timeout=30)
+        assert result.error == "Command stopped at its CPU limit of 1 s"
+        assert _audit_record(caplog).cpu_seconds == 1  # type: ignore[attr-defined]
+
 
 class TestResourceLimiter:
-    def test_no_limit_needs_nothing_in_the_child(self):
-        assert ResourceLimiter().child_setup() is None
+    def test_no_limit_starts_the_command_as_it_is(self):
+        assert ResourceLimiter().command(["echo", "hi"], cwd="/", path="/bin") == (
+            ["echo", "hi"], None,
+        )
         assert ResourceLimiter(None).cpu_seconds is None
 
     @pytest.mark.parametrize("seconds", [0, -1])
@@ -168,8 +232,21 @@ class TestResourceLimiter:
             ResourceLimiter(seconds)
 
     @posix_only
-    def test_a_limit_sets_something_in_the_child(self):
-        assert callable(ResourceLimiter(10).child_setup())
+    def test_a_limit_starts_the_command_through_a_fresh_interpreter(self):
+        argv, cpu_seconds = ResourceLimiter(10).command(
+            [_PY, "-c", "pass"], cwd="/", path=os.defpath,
+        )
+        assert argv[0] == sys.executable
+        assert argv[-3:] == [_PY, "-c", "pass"]
+        assert cpu_seconds is not None and 1 <= cpu_seconds <= 10
+
+    @posix_only
+    def test_a_missing_command_is_not_found_before_anything_starts(self, tmp_path: Path):
+        with pytest.raises(FileNotFoundError):
+            ResourceLimiter(10).command(["no-such-command-persatrix"], cwd="/", path=os.defpath)
+        # One named by a path is looked for from the workspace, as exec would.
+        with pytest.raises(FileNotFoundError):
+            ResourceLimiter(10).command(["./no-such-script"], cwd=str(tmp_path), path=os.defpath)
 
     @posix_only
     @pytest.mark.parametrize(
@@ -192,6 +269,16 @@ class TestResourceLimiter:
 
         hard = resource.RLIM_INFINITY if current_hard is None else current_hard
         assert cpu_rlimit(seconds, hard) == expected
+
+    @posix_only
+    @pytest.mark.parametrize(
+        ("current_soft", "expected"), [(3, (3, 11)), (10, (10, 11)), (20, (10, 11))],
+    )
+    def test_a_lower_soft_limit_already_set_stands(self, current_soft, expected):
+        """Review F-15: a stricter soft limit the agent runs under is kept."""
+        import resource
+
+        assert cpu_rlimit(10, resource.RLIM_INFINITY, current_soft) == expected
 
     def test_only_sigxcpu_with_a_limit_set_reads_as_the_cpu_limit(self):
         limited = ResourceLimiter(1)
@@ -232,6 +319,22 @@ class TestWallTimeLimit:
         assert result.error_type == "TimeoutError"
         assert [r for r in caplog.records if r.name == "agents.tools.audit"] == []
 
+    @posix_only
+    async def test_the_time_limit_stops_what_the_command_started(self, tmp_path: Path):
+        """Review F-13: the command's whole process group stops at its time
+        limit, not only its own process, so nothing it started runs on."""
+        marker = tmp_path / "outlived"
+        child = f"import time; time.sleep(2); open({str(marker)!r}, 'w').write('x')"
+        parent = (
+            "import subprocess, sys, time; "
+            f"subprocess.Popen([sys.executable, '-c', {child!r}]); time.sleep(30)"
+        )
+        _setup(tmp_path, max_execution_seconds=1)
+        result = await builtin.shell_exec(f"{_PY_CMD} -c {shlex.quote(parent)}", timeout=30)
+        assert result.error_type == "TimeoutError"
+        await asyncio.sleep(2.5)
+        assert not marker.exists()
+
 
 # ─── The environment a command gets ───────────────────────────
 
@@ -264,13 +367,28 @@ class TestToolProcessEnvironment:
         assert env["PERSATRIX_PROBE"] == "kept"
         assert "fleet-secret-value" not in result.data["stdout"]
 
-    async def test_the_agent_token_never_reaches_a_command(self, tmp_path: Path):
+    async def test_keeping_the_agent_token_puts_nothing_in_the_environment(self):
+        """Review F-23: the token reaches no command because it is never in
+        the environment, which is what this checks; the scrub plays no part."""
         keeper = AgentTokenKeeper(AsyncMock(return_value=True))
         answer = MagicMock(status=200)
         answer.json = AsyncMock(return_value={"agent_token": "agent-token-value"})
         await keeper.keep_from(answer)
         assert keeper.token == "agent-token-value"
-        _setup(tmp_path)
-        result = await builtin.shell_exec(_ENV)
-        assert result.success is True, result.error
-        assert "agent-token-value" not in result.data["stdout"]
+        assert "agent-token-value" not in os.environ.values()
+
+    def test_the_held_secret_leaves_the_environment_and_still_enrols(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Review F-21: held in memory from startup, the secret reaches no process
+        the agent starts by any means, and registration still shows it."""
+        monkeypatch.setenv(ENROLLMENT_SECRET_ENV, "fleet-secret-value")
+        monkeypatch.setattr(orchestrator_session, "_held_enrollment_secret", "")
+        hold_enrollment_secret()
+        assert ENROLLMENT_SECRET_ENV not in os.environ
+        assert enrollment_headers() == {ENROLLMENT_SECRET_HEADER: "fleet-secret-value"}
+        printed = subprocess.run(
+            [_PY, "-c", f"import os; print(os.environ.get({ENROLLMENT_SECRET_ENV!r}))"],
+            capture_output=True, text=True, check=True,
+        )
+        assert printed.stdout.strip() == "None"

@@ -260,25 +260,32 @@ overturns.
   `tool_output_bytes` (1 024, room for the notice, to 102 400, the built-in
   tools' own cut, which it can lower and never raise). An empty block or key
   sets no limit, and `10.0` reads as 10, as the schema reads them.
-  `builtin.configure` reads it with the
-  permissions, before the agent is built, and a value the schema refuses
-  stops the agent at startup rather than being dropped (new default). That
-  wiring moved out of `server_persona.py`, which keeps it under 500 lines.
+  `load_agent` reads it before the agent is built, so a value the schema
+  refuses stops the agent at startup rather than being dropped (new
+  default), and `builtin.configure` installs it with the permissions once
+  the agent is built, so a load that fails leaves nothing behind. That
+  wiring moved out of `server_persona.py`, which keeps it at 500 lines.
   `config/agents.yaml` shows the block commented out with §D's numbers, so
   the shipped agents behave as before; a test keeps the example valid.
-- **The CPU limit.** `RLIMIT_CPU`, set in the child before `exec` through
-  `preexec_fn`, and only when a limit is set, so a command with none starts
-  exactly as before. The soft limit is the setting and the hard one a second
+- **The CPU limit.** `RLIMIT_CPU`, set in the command's own process before
+  it starts, and only when a limit is set, so a command with none starts
+  exactly as before. A fresh interpreter (`python -I -S -c`) sets the limits
+  and then becomes the command (`os.execv`): Python run in a child forked
+  from the agent, whose threads make that unsafe, could hang it
+  (`preexec_fn`). The soft limit is the setting and the hard one a second
   more, never above a lower hard limit already in force, such as a
   container's, with the soft limit then a second under it, since Linux
-  checks the hard limit first. SIGXCPU comes at the limit; on Linux SIGKILL
+  checks the hard limit first; a lower soft limit already in force stands.
+  SIGXCPU comes at the limit; on Linux SIGKILL
   follows a second later to a command that ignores it, while macOS sends
-  none and such a command runs to its wall time. The child also sets its
+  none and such a command runs to its wall time. The shim also sets the
   core-file limit to 0, since SIGXCPU writes one by default. The limit holds
   for each process the command starts, on its own, so a command that starts
-  others can spend more in all, up to its wall time. Only SIGXCPU to the
-  command's own process reads as the limit: the call fails with
-  `ResourceLimitError` and keeps the command's output (new default).
+  others can spend more in all, up to its wall time, which stops its whole
+  process group: each command runs in a session of its own. Only SIGXCPU to
+  the command's own process reads as the limit: the call fails with
+  `ResourceLimitError`, naming the soft limit applied, and keeps the
+  command's output (new default).
 - **The output cap.** Applied in the `@tool` wrapper to every tool's
   result, a failed one's too, measured as the model is shown it (JSON for a
   dict or a list), the notice included. A text is cut with `_truncate`'s
@@ -287,7 +294,11 @@ overturns.
   shape: each of its texts is cut to one common length, the longest that
   fits, so a long stdout keeps `shell_exec`'s stderr and exit code (new
   default); a text no longer than that length and the notice stays whole.
-  One with too many fields for that is cut as text.
+  One with too many fields for that is cut as text. A failed call's error
+  text is held to the same cap on its own; the tool round's error label and
+  data envelope come on top. Both tool rounds render through the cap's own
+  helper and reuse the rendering it measured. An output too deep to render
+  is passed on as it is.
 - **The audit line.** `tool.resource_limited`, on `agents.tools.audit` as
   G-4 says, names the agent, the tool, the limit (`shell_cpu_seconds`,
   `max_execution_seconds` or `tool_output_bytes`) and its value, and for the
@@ -298,15 +309,18 @@ overturns.
 - **G-14.** `shell_exec` starts its command with `tool_process_env()`, the
   agent's environment less every variable whose name starts with
   `SECURITY_`, in any letter case; a test ties that prefix to the secret's
-  name. The token is held in memory only, and a test shows it does not
-  reach a command. Two things still do, and PR 11's guide says so: on Linux
+  name. At startup the agent also moves the secret from its environment
+  into memory, so no process it starts by any means inherits it. The token
+  is held in memory only, and a test shows keeping it puts nothing in the
+  environment. Two things still reach a command, and PR 11's guide says so: on Linux
   a command running as the agent's user can read the secret from
   `/proc/<agent pid>/environ` (PR 7's F-16), and every other variable,
   provider API keys included, still reaches it, since an allowlisted command
   may need one. PR 16 files both.
 
 **Review findings** (PR 4): F-1 to F-8 are an independent review's, each
-proved by a run or by reading the code, and F-9 to F-11 the author's.
+proved by a run or by reading the code, F-9 to F-11 the author's, and F-12
+to F-23 a second independent review's, after the rebase.
 
 | Finding | Severity | Description | Disposition |
 |---------|----------|-------------|-------------|
@@ -321,6 +335,18 @@ proved by a run or by reading the code, and F-9 to F-11 the author's.
 | F-9 | Low | A block with a number key beside a name raised `TypeError` sorting the unknown keys, not the `ValueError` naming them | Fixed in-PR, with a test |
 | F-10 | Info | +1 051 lines at review, 556 of them tests, past the ~400 estimate | Noted |
 | F-11 | Info | The fixes took this plan to 7 973 of its 8 000 words, and RFC 0009 stood at 7 686 before this PR | Fixed in-PR for the plan: PR 8's merged note moved, unchanged, to a second notes file. The RFC → Noted: this PR's own note is short, and the next note splits the RFC |
+| F-12 | Medium | The CPU limit was set through `preexec_fn` in the threaded agent, so every at-fork hook ran in the child (OTEL starts threads there), and the event loop waits for that child to start the command, so a child that hung there hung the agent | Fixed in-PR: a fresh interpreter sets the limits and becomes the command; a test shows no Python runs in a forked child |
+| F-13 | Medium | A command out of time was stopped alone: a process it started ran on, so the wall time bounded nothing it started, as the docs said | Fixed in-PR: each command runs in a session of its own, and its whole process group is stopped; a test shows a started process does not outlive the limit |
+| F-14 | Low | Three docstrings said a command cannot read the enrollment secret, against this note's `/proc/<agent pid>/environ` gap | Fixed in-PR: each names the gap |
+| F-15 | Low | The soft limit ignored a lower soft limit already in force and could raise it | Fixed in-PR: a lower one stands, with a test |
+| F-16 | Low | Under a lower hard limit the error and audit line named the setting, not the sooner limit applied | Fixed in-PR: both name the soft limit applied, with a test |
+| F-17 | Low | The cap left a failed call's error text uncut, and the schema left out the tool round's error label and envelope | Fixed in-PR: the error text is held to the cap, with a test; the schema says what comes on top |
+| F-18 | Low | A cap that raised, as on output nested too deep to render, turned a call that ran into a failure, recorded twice | Fixed in-PR: such an output passes as it is, a failed structured cut falls back to the text cut, and the call is recorded once; tests for both |
+| F-19 | Low | The limits were installed before the rest of the load, so a load that failed later left them behind | Fixed in-PR: read first, installed last, with a test |
+| F-20 | Low | The cap copied the tool rounds' rendering rule, so the two could drift | Fixed in-PR: both rounds render through the cap's helper |
+| F-21 | Low | Only `shell_exec` kept the secret from its command; any other process the agent started inherited it | Fixed in-PR: the agent moves the secret into memory at startup, with a test |
+| F-22 | Low | With a cap set, each output was rendered once to measure and again by the tool round | Fixed in-PR: the round reuses the rendering, with a test |
+| F-23 | Info | The agent-token test passed with the scrub removed, so it checked nothing of the scrub | Fixed in-PR: it now checks what it can, that keeping the token puts nothing in the environment |
 
 ### PR 5 — `feature/v040-rfc0009-agent-token`
 

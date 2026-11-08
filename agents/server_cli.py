@@ -31,6 +31,7 @@ from .observability.metrics import (
 from .observability.metrics import shutdown as metrics_shutdown
 from .observability.tracing import init_tracing
 from .observability.tracing import shutdown as tracing_shutdown
+from .orchestrator_session import hold_enrollment_secret
 from .prompt_prefix import prefix_keepalive_seconds, prompt_prefix
 from .server import AgentServer
 from .server_persona import load_agent, setup_shared_pools
@@ -119,6 +120,9 @@ def main() -> None:
         help="Graceful shutdown timeout in seconds",
     )
     args = parser.parse_args()
+
+    # RFC 0009 G-14: before anything can start a process, so none inherits it.
+    hold_enrollment_secret()
 
     # RFC 0018 Phase 1 — structured logging via structlog + ProcessorFormatter
     # bridge.  Replaces the prior ``logging.basicConfig`` call so all records

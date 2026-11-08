@@ -161,7 +161,7 @@ v0.1.0 complete — end-to-end execution working
 | `agents/tools/registry.py` | Tool discovery and registration | ✅ Complete (decorator + registry; each call's arguments checked before the tool runs, in `agents/tools/arg_check.py`, RFC 0009 Phase 3). Not built: the permission, rate-limit and audit steps its tool wrapper marks TODO (built-in tools check their own permissions), and RFC 0009's `irreversible` flag (Phase 4), slotted for v0.4.0 |
 | `agents/tools/builtin.py` | Built-in tools (file_read, file_write, shell_exec, http_request, memory tools) | ✅ Complete (RFC 0004 PR 3, RFC 0005 PR 3b) |
 | `agents/tools/permissions.py` | Deny-by-default permission gate | ✅ Complete (97% coverage) |
-| `agents/tools/sandbox.py` | Filesystem path restriction (PathValidator) | ✅ Complete (98% coverage: the lines missed run in the forked child, and tests check what that child does). `ResourceLimiter` and `OutputSizeLimiter`, RFC 0009 Phase 3's CPU limit and output cap, and the environment scrub (G-14), added in v0.4.0 |
+| `agents/tools/sandbox.py` | Filesystem path restriction (PathValidator) | ✅ Complete (100% coverage; the CPU limit's shim runs in the command's own process, and tests check what it does). `ResourceLimiter` and `OutputSizeLimiter`, RFC 0009 Phase 3's CPU limit and output cap, and the environment scrub (G-14), added in v0.4.0 |
 | `agents/generated/` | Python gRPC generated stubs | ✅ Complete (RFC 0004 PR 5a) |
 
 #### Rust CLI (`cli/`)

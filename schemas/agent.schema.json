@@ -188,7 +188,7 @@
           "type": ["integer", "null"],
           "minimum": 1024,
           "maximum": 102400,
-          "description": "The most bytes one tool call may hand the model, for every tool, measured as the model is shown the output, a '[truncated at …]' notice included. A longer output is cut with that notice; a structured one keeps its fields and has its long texts cut. At least 1024, to leave room for the notice. file_read, shell_exec and http_request cut at 102400 (100 KB) either way, which this can lower and never raise. 65536 (64 KB) is the recommended value for production."
+          "description": "The most bytes of output one tool call may hand the model, for every tool, measured as the model is shown the output, a '[truncated at …]' notice included. A longer output is cut with that notice; a structured one keeps its fields and has its long texts cut. A failed call's error text is held to the same cap on its own; the tool round's error label and data envelope come on top. At least 1024, to leave room for the notice. file_read, shell_exec and http_request cut at 102400 (100 KB) either way, which this can lower and never raise. 65536 (64 KB) is the recommended value for production."
         }
       }
     },

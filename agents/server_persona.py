@@ -30,6 +30,7 @@ from .server_persona_timers import init_persona_timers, summarize_autonomy_caden
 from .task_agent import TaskAgent
 from .tick import TickScheduler
 from .tools import builtin
+from .tools.sandbox import read_resource_limits
 from .wallet_client import WalletClient
 
 if TYPE_CHECKING:
@@ -181,11 +182,9 @@ def load_agent(
             f"Agent {agent_id!r} missing required 'model' field in config"
         )
 
-    # Wire built-in tool dependencies; a bad resource_limits value stops here.
+    # A bad resource_limits value stops here; the limits are installed last.
     try:
-        builtin.configure(
-            agent_config.get("permissions", {}), workspace, agent_config.get("resource_limits"),
-        )
+        read_resource_limits(agent_config.get("resource_limits"))
     except ValueError as exc:
         raise SystemExit(f"Agent {agent_id!r}: {exc}") from None
 
@@ -252,6 +251,9 @@ def load_agent(
             llm_client=llm_client,
         )
 
+    # Wire built-in tool dependencies last, so a load that fails leaves none.
+    limits = agent_config.get("resource_limits")
+    builtin.configure(agent_config.get("permissions", {}), workspace, limits)
     return agent
 
 

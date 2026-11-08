@@ -9,8 +9,12 @@ Also provides agent-initiated memory tools (notes) via closure-based factory.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
+import os
 import shlex
+import signal
+import sys
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -206,6 +210,23 @@ def _shell_timeout(requested: int, limit: int | None) -> int:
     return max(1, min(requested, cap))
 
 
+def _stop_command(proc: asyncio.subprocess.Process, *, force: bool) -> None:
+    """Stop a command that ran out of time, and every process it started.
+
+    The command runs in a session of its own, so its process group holds what
+    it starts, unless one leaves it. Windows has no such group, and there only
+    the command's own process is stopped.
+    """
+    if sys.platform == "win32":
+        if force:
+            proc.kill()
+        else:
+            proc.terminate()
+        return
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        os.killpg(proc.pid, signal.SIGKILL if force else signal.SIGTERM)
+
+
 @tool(
     name="shell_exec",
     description=(
@@ -258,19 +279,24 @@ async def shell_exec(command: str, timeout: int = 30) -> ToolResult:
         )
 
     limiter = resource_limiter or ResourceLimiter()
+    # RFC 0009 G-14: no SECURITY_* variable, the enrollment secret among
+    # them, reaches the command.
+    env = tool_process_env()
     try:
+        # RFC 0009 G-3: the CPU limit, set in the command's own process before
+        # it starts; the command as it is, as before, when no limit is set.
+        argv, cpu_limit = limiter.command(
+            args, cwd=str(ws), path=env.get("PATH", os.defpath),
+        )
         proc = await asyncio.create_subprocess_exec(
-            *args,
+            *argv,
             stdin=asyncio.subprocess.DEVNULL,  # M-02: prevent blocking on interactive prompts
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=str(ws),
-            # RFC 0009 G-14: no SECURITY_* variable, the enrollment secret
-            # among them, reaches the command.
-            env=tool_process_env(),
-            # RFC 0009 G-3: the CPU limit, set in the child before the
-            # command starts; None, as before, when no limit is set.
-            preexec_fn=limiter.child_setup(),
+            env=env,
+            # Its own session, so the time limit stops all it starts too.
+            start_new_session=True,
         )
     except FileNotFoundError:
         return ToolResult(
@@ -285,11 +311,11 @@ async def shell_exec(command: str, timeout: int = 30) -> ToolResult:
         )
     except TimeoutError:
         # Three-phase shutdown: terminate → 5s grace period → kill → reap
-        proc.terminate()
+        _stop_command(proc, force=False)
         try:
             await asyncio.wait_for(proc.communicate(), timeout=5)
         except TimeoutError:
-            proc.kill()
+            _stop_command(proc, force=True)
             await proc.wait()
         # RFC 0009 G-4: audited only when the agent's own time limit stopped
         # it; a shorter timeout is the model's choice, not an operator's.
@@ -306,11 +332,13 @@ async def shell_exec(command: str, timeout: int = 30) -> ToolResult:
     exit_code = proc.returncode
 
     if limiter.stopped_by_cpu_limit(exit_code):
-        emit_resource_limited("shell_exec", "shell_cpu_seconds", cpu_seconds=limiter.cpu_seconds)
+        # The limit applied, which a lower one already in force can make
+        # shorter than the setting.
+        emit_resource_limited("shell_exec", "shell_cpu_seconds", cpu_seconds=cpu_limit)
         return ToolResult(
             success=False,
             data={"stdout": stdout, "stderr": stderr, "exit_code": exit_code},
-            error=f"Command stopped at its CPU limit of {limiter.cpu_seconds} s",
+            error=f"Command stopped at its CPU limit of {cpu_limit} s",
             error_type="ResourceLimitError",
         )
 

@@ -9,12 +9,13 @@ set by the agent's ``resource_limits`` block and each off until it is set,
 so a tool behaves as it did before (design point G-3):
 
 - ``ResourceLimiter`` caps the CPU time of a ``shell_exec`` command
-  (``shell_cpu_seconds``). The limit is set in the child process before the
-  command starts, so the kernel stops a command that spins. It holds for
-  each process the command starts, not for all of them together: a command
-  that starts others can spend more in all, up to its wall time and the
-  container's own limits. Windows has no such limit, and there only the
-  wall time applies. The wall time stays
+  (``shell_cpu_seconds``). The limit is set in the command's own process
+  before the command starts, by a fresh interpreter that then becomes the
+  command, so the kernel stops a command that spins. It holds for each
+  process the command starts, not for all of them together: a command that
+  starts others can spend more in all, up to its wall time, which stops its
+  whole process group, and the container's own limits. Windows has no such
+  limit, and there only the wall time applies. The wall time stays
   ``permissions.shell.max_execution_seconds``, which ``shell_exec`` already
   reads; it is adopted here rather than set twice.
 - ``OutputSizeLimiter`` caps what one tool call hands the model
@@ -28,19 +29,24 @@ structured log record on ``agents.tools.audit``: it reaches the
 orchestrator's log stream but not its checksummed audit chain (G-4).
 
 ``tool_process_env`` is the environment a process a tool starts gets: the
-agent's own, less every ``SECURITY_*`` variable, so a prompt-injected
-command cannot read the fleet enrollment secret (G-14).
+agent's own, less every ``SECURITY_*`` variable, so the fleet enrollment
+secret is not in it (G-14). Two gaps remain: on Linux a command running as
+the agent's user can still read the secret in ``/proc/<agent pid>/environ``,
+the agent's starting environment, and every other variable, provider API
+keys included, reaches the command.
 """
 
 from __future__ import annotations
 
+import errno
 import fnmatch
 import json
 import logging
 import os
+import shutil
 import signal
 import sys
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -143,10 +149,15 @@ SCRUBBED_ENV_PREFIX = "SECURITY_"
 
 
 def tool_process_env(environ: Mapping[str, str] | None = None) -> dict[str, str]:
-    """The environment for a process a tool starts: *environ*, less its secrets.
+    """The environment for a process a tool starts: *environ*, less ``SECURITY_*``.
 
-    *environ* defaults to the agent's own. The agent token is held in memory
-    only, so it is never in an environment to take out.
+    *environ* defaults to the agent's own, which the agent has already taken
+    the enrollment secret out of at startup
+    (:func:`~agents.orchestrator_session.hold_enrollment_secret`); this keeps
+    any other ``SECURITY_*`` variable out too. The agent token is held in
+    memory only, so it is never in an environment to take out. Provider API
+    keys stay, since an allowlisted command may need one, and on Linux the
+    agent's starting environment stays readable in ``/proc/<agent pid>/environ``.
     """
     source = os.environ if environ is None else environ
     return {
@@ -158,8 +169,10 @@ def tool_process_env(environ: Mapping[str, str] | None = None) -> dict[str, str]
 # ─── The CPU limit on a shell command ─────────────────────────
 
 
-def cpu_rlimit(seconds: int, current_hard: int) -> tuple[int, int]:
-    """The ``RLIMIT_CPU`` pair a child sets for a limit of *seconds*.
+def cpu_rlimit(
+    seconds: int, current_hard: int, current_soft: int | None = None,
+) -> tuple[int, int]:
+    """The ``RLIMIT_CPU`` pair a command gets for a limit of *seconds*.
 
     The kernel sends SIGXCPU at the soft limit. Linux sends SIGKILL at the
     hard one, a second later, to a command that ignores SIGXCPU; macOS does
@@ -168,12 +181,44 @@ def cpu_rlimit(seconds: int, current_hard: int) -> tuple[int, int]:
     stands, and the soft limit sits a second under it: Linux checks the hard
     limit first, so equal limits would kill the command with SIGKILL, which
     does not read as the limit. Under a one-second hard limit there is no
-    room, and the two are equal.
+    room, and the two are equal. A lower soft limit already set stands too.
     """
     hard = seconds + 1
     if current_hard != resource.RLIM_INFINITY:
         hard = min(hard, current_hard)
-    return min(seconds, max(1, hard - 1)), hard
+    soft = min(seconds, hard - 1)
+    if current_soft is not None and current_soft != resource.RLIM_INFINITY:
+        soft = min(soft, current_soft)
+    return max(1, soft), hard
+
+
+#: Run by a fresh interpreter in the command's own process: it sets the
+#: limits, then becomes the command (``os.execv``). SIGXCPU writes a core file
+#: by default, and the command runs in the agent's workspace, so the core
+#: limit goes to 0.
+_CPU_LIMIT_SHIM = (
+    "import os, resource, sys\n"
+    "resource.setrlimit(resource.RLIMIT_CPU, (int(sys.argv[1]), int(sys.argv[2])))\n"
+    "resource.setrlimit(resource.RLIMIT_CORE, (0, resource.getrlimit(resource.RLIMIT_CORE)[1]))\n"
+    "try:\n"
+    "    os.execv(sys.argv[3], sys.argv[4:])\n"
+    "except OSError as exc:\n"
+    "    sys.exit(f'{sys.argv[4]}: {exc.strerror}')\n"
+)
+
+
+def _find_executable(name: str, cwd: str, path: str) -> str:
+    """*name* as starting it would find it: from *cwd* with a directory, else on *path*."""
+    found: str | None
+    if os.path.dirname(name):
+        found = os.path.join(cwd, name)  # an absolute name stays as it is
+        if not os.path.exists(found):
+            found = None
+    else:
+        found = shutil.which(name, path=path)
+    if found is None:
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), name)
+    return found
 
 
 class ResourceLimiter:
@@ -192,26 +237,27 @@ class ResourceLimiter:
             raise ValueError("a CPU limit is at least one second")
         self.cpu_seconds = cpu_seconds
 
-    def child_setup(self) -> Callable[[], None] | None:
-        """What the child runs before the command starts, or None for nothing.
+    def command(
+        self, args: Sequence[str], *, cwd: str, path: str,
+    ) -> tuple[list[str], int | None]:
+        """What to start for the command *args*, and the CPU seconds it gets.
 
-        None with no limit set, so a command starts exactly as before, and on
-        Windows, which has no CPU limit. The function only reads and sets
-        limits, which is safe in a child forked from a threaded process.
+        With no limit set, and on Windows, which has none, *args* as they are
+        and None, so a command starts exactly as before. With one, a fresh
+        interpreter sets the limits in the command's own process and then
+        becomes the command, so nothing runs in a child forked from the
+        agent, whose threads make that unsafe (``preexec_fn``). The limits
+        come from the agent's own, which the command inherits, and the soft
+        one returned is the one applied. *args[0]* is looked up as starting
+        it would, so a missing command raises ``FileNotFoundError`` as before.
         """
-        seconds = self.cpu_seconds
-        if seconds is None or sys.platform == "win32":
-            return None
-
-        def set_cpu_limit() -> None:
-            _, current_hard = resource.getrlimit(resource.RLIMIT_CPU)
-            resource.setrlimit(resource.RLIMIT_CPU, cpu_rlimit(seconds, current_hard))
-            # SIGXCPU writes a core file by default, and the command runs in
-            # the agent's workspace.
-            _, core_hard = resource.getrlimit(resource.RLIMIT_CORE)
-            resource.setrlimit(resource.RLIMIT_CORE, (0, core_hard))
-
-        return set_cpu_limit
+        if self.cpu_seconds is None or sys.platform == "win32":
+            return list(args), None
+        current_soft, current_hard = resource.getrlimit(resource.RLIMIT_CPU)
+        soft, hard = cpu_rlimit(self.cpu_seconds, current_hard, current_soft)
+        executable = _find_executable(args[0], cwd, path)
+        shim = [sys.executable, "-I", "-S", "-c", _CPU_LIMIT_SHIM, str(soft), str(hard)]
+        return [*shim, executable, *args], soft
 
     def stopped_by_cpu_limit(self, returncode: int | None) -> bool:
         """Whether a command that ended with *returncode* was stopped by the limit.
@@ -259,8 +305,10 @@ def truncate_text(text: str, max_bytes: int) -> str:
 def render_output(data: Any) -> str:
     """A tool's output as the model is shown it: JSON for a dict or a list.
 
-    The same rule as the two tool rounds (``agents/task_tool_round.py`` and
-    ``agents/persona_runtime/tool_round.py``) use.
+    The two tool rounds (``agents/task_tool_round.py`` and
+    ``agents/persona_runtime/tool_round.py``) render with it too, through
+    :func:`~agents.tools.registry.shown_output`, so the cap measures what
+    the model sees.
     """
     return json.dumps(data) if isinstance(data, (dict, list)) else str(data)
 
@@ -305,21 +353,35 @@ class OutputSizeLimiter:
     def limit(self, data: Any) -> tuple[Any, int | None]:
         """*data* cut to fit, and its size before the cut; None if it fit.
 
-        An output ``json.dumps`` refuses is returned as it is, to fail in the
-        tool round as it did before.
+        An output ``json.dumps`` refuses, or one nested too deep to measure,
+        is returned as it is, to fail in the tool round as it did before.
+        """
+        data, _, size = self.limit_shown(data)
+        return data, size
+
+    def limit_shown(self, data: Any) -> tuple[Any, str | None, int | None]:
+        """:meth:`limit`, with the result as the model is shown it in between.
+
+        That text is the rendering this measured, kept so the tool round does
+        not render the output again; None where none is at hand (a
+        structured cut, or an output that could not be rendered).
         """
         try:
             shown = render_output(data)
-        except (TypeError, ValueError):
-            return data, None
+        except (TypeError, ValueError, RecursionError):
+            return data, None, None
         size = _byte_size(shown)
         if size <= self.max_bytes:
-            return data, None
+            return data, shown, None
         if isinstance(data, (dict, list)):
-            fitted = self._fit_texts(data)
+            try:
+                fitted = self._fit_texts(data)
+            except RecursionError:
+                fitted = None
             if fitted is not None:
-                return fitted, size
-        return _cut(shown, self.max_bytes - self._notice_bytes, self._notice), size
+                return fitted, None, size
+        cut = _cut(shown, self.max_bytes - self._notice_bytes, self._notice)
+        return cut, cut, size
 
     def _cut_texts(self, data: Any, length: int) -> Any:
         if isinstance(data, str):
