@@ -1,7 +1,7 @@
 # RFC 0012 — Protocols & Organizations — PR Implementation Plan (Phases 1–3)
 
 **RFC**: [0012-protocols-organizations.md](0012-protocols-organizations.md)
-**Status**: ⬜ Not started
+**Status**: 🔄 In progress
 **Created**: 2026-10-20
 **Branch prefix**: `feature/v040-rfc0012-`
 **Target**: `main`
@@ -197,7 +197,7 @@ in the PR named:
 
 | PR | Row | Title | Branch | Status | GitHub PR | Merged |
 |----|-----|-------|--------|--------|-----------|--------|
-| 1 | C1 | Organization schema, validation, glossary | `feature/v040-rfc0012-org-schema` | ⬜ | — | — |
+| 1 | C1 | Organization schema, validation, glossary | `feature/v040-rfc0012-org-schema` | 🔀 | [#1088](https://github.com/mkhomutov/Persatrix/pull/1088) | — |
 | 2 | C1 | `internal/protocols/`: graph, topology checks, `directs` | `feature/v040-rfc0012-protocols-graph` | ⬜ | — | — |
 | 3 | C1 | Graph loaded into the society tables at startup | `feature/v040-rfc0012-org-load` | ⬜ | — | — |
 | 4 | C1 | Organization read; a persona's organization and role; the guide | `feature/v040-rfc0012-persona-role` | ⬜ | — | — |
@@ -274,12 +274,47 @@ organization, an `agent_id` absent from `config/agents.yaml`, and a persona in
 two organizations — the plan's acceptance: "a cycle or a second manager fails
 validation".
 **Tests**: each invalid fixture fails `make validate` with a message naming
-the rule; the valid fixtures pass. The same fixtures feed PR 2's Go tests, so
-the two checkers cannot drift.
+the rule; the valid fixtures pass. The same fixtures feed PR 2's Go tests,
+which hold the two checkers to the same verdict on each case a fixture pins.
 **Migration**: none.
 **Acceptance**: a hierarchy, a flat and a matrix organization validate; each
 bad shape is refused with its reason.
 **Estimate**: ~400 lines.
+
+**Review findings** (PR 1): F-1 to F-7 are an independent review's, which
+found nothing High or Medium; F-8 and F-9 are the author's. F-10 to F-24
+are a second independent review's, which found nothing High. F-25 and F-26
+are Copilot's, which rated both Medium; Low here, since each effect is
+bounded.
+
+| Finding | Severity | Description | Disposition |
+|---------|----------|-------------|-------------|
+| F-1 | Low | The Python and Go YAML parsers and regex engines can disagree, so validation could pass a file Go refuses: a key given twice keeps its last value, which can hide a loop, and an id ending in a line break passes Python's `$`, even past the `general` reservation. Python also refuses `scope: on`, a YAML 1.1 boolean, where Go reads text. The docs said the two checkers cannot drift | Fixed in-PR for the first two: a loader that refuses repeated keys (`duplicate-key`), a schema guard against a final line break, a fixture each, softer wording; F-16 and F-18 moved both into `validate.py`. The YAML 1.1 typing case (booleans, numbers, dates) → deferred to PR 2 (its From PR 1 review entry) |
+| F-2 | Low | A missing or unreadable `agents.yaml` gave one `unknown-agent` per member and never said the file was missing | Fixed in-PR: one error naming the file |
+| F-3 | Low | The D-3 and D-9 refusals printed JSON Schema's wording (`'clearance' was unexpected`), not the reason | Fixed in-PR: the schema names each rule (`x-refusal`), which `validate.py` prints; fixtures `clearance`, `reserved-scope` |
+| F-4 | Low | ISSUE-0195 said the unheld egress was paraphrase; the tripwire matches verbatim spans only, and RFC 0037 §G reads a verbatim hit as a bug | Fixed in-PR (issue text) |
+| F-5 | Info | The valid matrix fixture allows two managers of one member on one dimension, a decision PR 2 inherits, and credited §C for it | Fixed in-PR: recorded in the 2026-11-04 note; fixture comment corrected |
+| F-6 | Info | Docs said in the present tense that PR 2's Go loader is tested on the fixtures | Fixed in-PR (wording) |
+| F-7 | Info | This plan's row 1 still read ⬜ | Fixed in-PR: 🔀 with the PR link |
+| F-8 | Info | About 1 100 lines against the 500-line guidance and this estimate; 384 are fixture data PR 2 shares, and the checker split from them would be untested | Noted |
+| F-9 | Info | mypy does not check the signature of the `importlib`-loaded `check_file` call (now `check_document`), which script mode needs; the fixture tests and the script-run test cover it | Noted |
+| F-10 | Medium | The repeated-key loader built each key before PyYAML applied merges, so a `<<: *anchor` merge key crashed validation with a traceback, on a file yaml.v3 accepts | Fixed in-PR: the check walks the raw nodes before merges and compares key text, so two `<<` keys are still refused, as yaml.v3 refuses them; fixtures. `evaluators/exp001/panel.py` keeps its own loader |
+| F-11 | Medium | The shipped `organizations: []` still needed a readable `agents.yaml`, and failed without one | Fixed in-PR: an empty list reads no `agents.yaml`; a test |
+| F-12 | Low | Script mode imported `org_validate` from the script's folder, which `python -I`, `-P` and `PYTHONSAFEPATH` leave off the import path, so validating the shipped config crashed | Fixed in-PR: loaded by file path; the script-run test also runs under `-I` |
+| F-13 | Low | A cycle's `→` cannot be written to a cp1252 pipe, so on Windows `persatrix validate` crashed instead of naming the loop | Fixed in-PR: the script writes UTF-8; a cp1252-pipe test |
+| F-14 | Low | An `agents.yaml` that exists but lists no agents was reported as missing, and an agent with an empty `type:` as unknown | Fixed in-PR: the error names all three cases; an empty type reads as a task agent; tests |
+| F-15 | Low | A `%YAML 1.2` directive passed validation; yaml.v3 reads only YAML 1.1 and refuses it | Fixed in-PR: refused as `yaml-version`; a fixture |
+| F-16 | Low | A key given twice was refused in `organizations.yaml` only; every other config file validated on PyYAML's last value, which Go's loaders refuse (a gap older than this PR) | Fixed in-PR: `validate.py` reads every config file with the loader |
+| F-17 | Low | The shared fixtures pinned few shape rules, so a Go loader that drops an unknown key, or reads an empty or null value as absent, could pass them all | Fixed in-PR: fixtures for each; the fixture README says Go must refuse them too |
+| F-18 | Low | The line-break guard sat in this schema's `id` only, though Python's `$` affects every pattern in every schema; it printed JSON Schema's wording | Fixed in-PR: `validate.py` reads `$` as the end of the text for every schema, and its message names the line break; the guard is gone |
+| F-19 | Low | ISSUE-0195 said such a publish is always logged; the tripwire skips a turn with no classified acting channel, such as a tick | Fixed in-PR (issue text) |
+| F-20 | Low | The PR 2 deferral named only the YAML 1.1 booleans; PyYAML also types numbers, dates and `true`, which yaml.v3 keeps as text | Fixed in-PR: PR 2's From PR 1 review entry names each type |
+| F-21 | Low | A v0.3.16 `organizations.yaml` now fails validation, and nothing told an operator who keeps their own `config/` to replace it | Fixed in-PR: an upgrade note in CHANGELOG [Unreleased] |
+| F-22 | Low | This plan still said the checkers cannot drift, and F-1's deferral had no From PR 1 review entry in PR 2's section | Fixed in-PR: reworded; the entry added |
+| F-23 | Low | The fixture tests pinned 10 rule names, and a `schema-` fixture passed if any one error matched, so deleting or muddying a fixture stayed green | Fixed in-PR: the expected rules are read from the checkers' messages and the schema's `x-refusal`s; every error must match |
+| F-24 | Low | The extension spec's §E4.1 still showed the old `organization:` shape, which the schema refuses | Fixed in-PR: a pointer to §B and an example in the new shape |
+| F-25 | Low | An empty, comment-only or null `organizations.yaml` passed unchecked, though the schema requires the `organizations` list and refuses `organizations: null` | Fixed in-PR: such a file is read as one with no keys, as Go's typed decode reads it, and refused; other config files may still be empty; two fixtures for PR 2 |
+| F-26 | Low | The loop check scanned the whole path at each step, so its time grew with the square of a management chain, which the schema does not limit: 37 s for 100 000 members | Fixed in-PR: a map keeps each member's place on the path, 0.12 s; a timing test |
 
 ### PR 2 — `feature/v040-rfc0012-protocols-graph`
 
@@ -298,6 +333,14 @@ scope.
 **Migration**: none.
 **Acceptance**: `go test ./internal/protocols` covers every §C rule.
 **Estimate**: ~450 lines.
+**From PR 1 review**: F-1 — PyYAML types an unquoted value the id pattern
+accepts as a boolean (`on`, `off`, `yes`, `no`, `true`, `false`), an integer
+(`2024`, `007`, `0x1f`, `0b1`) or a date (`2026-11-04`), so `make validate`
+refuses `scope: on` or a role id `007`, where a decode into a Go string keeps
+the text. The loader refuses each of these too, with a fixture for each type.
+F-25 — the loader refuses an empty, comment-only or null file, as the
+`schema-organizations--` fixtures pin. F-26 — its loop check finds a
+member on the path through a map, not a scan.
 
 ### PR 3 — `feature/v040-rfc0012-org-load`
 
@@ -648,6 +691,20 @@ amendment's two items; Phases 4–5 for v0.5.0); this plan's statuses closed.
 >   transaction's own handle and makes no channel-store or network call.
 > - PR 12: A4 binds every publish to its caller, a signed-in account
 >   included, so the forged-id leg may use either.
+
+> 2026-11-04 — PR 1 checks more than its list, and PR 2's loader applies
+> the same rules: organization, role and member ids and `manages` edges are
+> unique, as A1's keys require; every role and `manages` target is declared
+> in the organization; a member is a persona, not a task agent; a hierarchy
+> edge takes no scope; a loop across matrix dimensions is still a cycle; a
+> key given twice in one mapping is refused, as Go's YAML parser refuses
+> it; and an id cannot end in a line break, which Python's `$` lets
+> through. Two managers of one member on one matrix dimension are allowed;
+> PR 2 ranks their directives as a tie. Each rule's message starts with its
+> name, and each has a fixture named after it under
+> `tests/fixtures/organizations/`. PR 2's loader also refuses the YAML 1.1
+> typed values validation refuses, such as `scope: on` (its From PR 1
+> review entry).
 
 ## Related documentation
 

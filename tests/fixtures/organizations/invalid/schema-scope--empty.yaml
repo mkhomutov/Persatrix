@@ -1,0 +1,11 @@
+# A hierarchy edge with an empty scope. A Go decode reads `""` as no scope,
+# which a hierarchy edge may have, so its loader must tell an empty value
+# from an absent one.
+organizations:
+  - id: acme
+    name: Acme
+    topology: hierarchy
+    roles: [{id: member, authority: operational}]
+    members:
+      - {agent_id: ember-owl, role: member, manages: [{agent_id: iron-fox, scope: ""}]}
+      - {agent_id: iron-fox, role: member}

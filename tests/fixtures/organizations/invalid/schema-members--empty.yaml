@@ -1,0 +1,8 @@
+# An organization with no members, which the schema refuses. A Go decode
+# reads `[]` as an empty list, which its loader must refuse too.
+organizations:
+  - id: acme
+    name: Acme
+    topology: flat
+    roles: [{id: member, authority: peer}]
+    members: []

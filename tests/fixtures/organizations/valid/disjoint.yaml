@@ -1,0 +1,16 @@
+# Two organizations that share no persona. Role ids are per organization.
+organizations:
+  - id: alpha
+    name: Alpha
+    topology: hierarchy
+    roles: [{id: lead, authority: directive}, {id: member, authority: peer}]
+    members:
+      - {agent_id: ember-owl, role: lead, manages: [iron-fox]}
+      - {agent_id: iron-fox, role: member}
+  - id: beta
+    name: Beta
+    topology: flat
+    roles: [{id: member, authority: peer}]
+    members:
+      - {agent_id: nova-sparrow, role: member}
+      - {agent_id: jade-heron, role: member}

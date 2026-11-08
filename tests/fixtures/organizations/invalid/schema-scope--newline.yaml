@@ -1,0 +1,9 @@
+# `general` with a trailing line break is still the reserved label.
+organizations:
+  - id: acme
+    name: Acme
+    topology: matrix
+    roles: [{id: member, authority: operational}]
+    members:
+      - {agent_id: ember-owl, role: member, manages: [{agent_id: iron-fox, scope: "general\n"}]}
+      - {agent_id: iron-fox, role: member}

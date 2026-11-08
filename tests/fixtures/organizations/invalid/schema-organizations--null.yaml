@@ -1,0 +1,3 @@
+# An `organizations:` with no value, which is null, not the empty list. A Go
+# decode reads null as no organization; the schema refuses it.
+organizations:

@@ -1,0 +1,11 @@
+# A hierarchy edge whose scope is null (`~`). A Go decode reads null as no
+# scope, which a hierarchy edge may have; the schema refuses a scope that is
+# not a label.
+organizations:
+  - id: acme
+    name: Acme
+    topology: hierarchy
+    roles: [{id: member, authority: operational}]
+    members:
+      - {agent_id: ember-owl, role: member, manages: [{agent_id: iron-fox, scope: ~}]}
+      - {agent_id: iron-fox, role: member}

@@ -1,0 +1,5 @@
+# Every line commented out. A file with nothing in it has no
+# `organizations` list, which the schema requires; `organizations: []` is
+# how a file declares no organization. A Go decode reads this file as one
+# with no keys and must refuse it too.
+# organizations: []

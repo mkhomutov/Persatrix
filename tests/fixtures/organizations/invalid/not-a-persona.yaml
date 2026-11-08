@@ -1,0 +1,9 @@
+# code-writer is a task agent, and only personas join an organization.
+organizations:
+  - id: acme
+    name: Acme
+    topology: flat
+    roles: [{id: member, authority: peer}]
+    members:
+      - {agent_id: ember-owl, role: member}
+      - {agent_id: code-writer, role: member}

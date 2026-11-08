@@ -1,0 +1,39 @@
+# The agents the organization fixtures name (see README.md).
+schema_version: "0.2"
+agents:
+  - id: ember-owl
+    type: persona
+    name: Ember Owl
+    role: Lead
+    model: test-model
+    persona: {title: Lead, background: A fixture persona., behavior: {}}
+  - id: iron-fox
+    type: persona
+    name: Iron Fox
+    role: Engineer
+    model: test-model
+    persona: {title: Engineer, background: A fixture persona., behavior: {}}
+  - id: nova-sparrow
+    type: persona
+    name: Nova Sparrow
+    role: Product
+    model: test-model
+    persona: {title: Product, background: A fixture persona., behavior: {}}
+  - id: jade-heron
+    type: persona
+    name: Jade Heron
+    role: Lead
+    model: test-model
+    persona: {title: Lead, background: A fixture persona., behavior: {}}
+  - id: slate-wren
+    type: persona
+    name: Slate Wren
+    role: Lead
+    model: test-model
+    persona: {title: Lead, background: A fixture persona., behavior: {}}
+  - id: code-writer
+    type: task
+    name: Code Writer
+    role: Writes code
+    model: test-model
+    instructions: Write code.

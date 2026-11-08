@@ -1,0 +1,9 @@
+# A flat organization with a manager.
+organizations:
+  - id: acme
+    name: Acme
+    topology: flat
+    roles: [{id: member, authority: operational}]
+    members:
+      - {agent_id: ember-owl, role: member, manages: [iron-fox]}
+      - {agent_id: iron-fox, role: member}

@@ -1,13 +1,37 @@
-# Organization Topology (v0.2+)
-schema_version: "0.2"
+# Organizations (RFC 0012 — Protocols & Organizations, v0.4.0+).
+#
+# Schema: schemas/organization.schema.json. `make validate` checks this
+# file's shape against it, then the graph it declares
+# (agents/org_validate.py): no loop in `manages`, at most one manager per
+# member in a hierarchy, a scope on every matrix edge and none on a
+# hierarchy edge, no `manages` in a flat organization, every member a
+# persona in agents.yaml, and each persona in one organization.
+#
+# Empty, as shipped, means no organization: the deployment behaves as
+# v0.3.16 did.
+organizations: []
 
-# organization:
-#   id: "acme-engineering"
-#   name: "Acme Corp Engineering"
-#   topology: "hierarchy"
-#   structure:
-#     - agent_id: "ember-owl"
-#       role: "VP of Engineering"
-#       manages:
-#         - agent_id: "iron-fox"
-#           role: "Senior Backend Engineer"
+# An example follows. To declare it, put its list in place of the `[]`
+# above. In a matrix organization each `manages` entry names its dimension,
+# as `{agent_id: iron-fox, scope: project}`; the scope `general` is reserved.
+#
+# organizations:
+#   - id: acme-engineering
+#     name: "Acme Corp — Engineering"
+#     topology: hierarchy            # hierarchy | flat | matrix
+#     roles:
+#       - id: vp-engineering
+#         authority: directive       # observed | peer | operational | directive
+#         # clearance: secret        # refused until RFC 0012 §G's check returns
+#       - id: staff-engineer
+#         authority: operational
+#       - id: product-manager
+#         authority: operational
+#     members:
+#       - agent_id: ember-owl
+#         role: vp-engineering
+#         manages: [iron-fox, nova-sparrow]
+#       - agent_id: iron-fox
+#         role: staff-engineer
+#       - agent_id: nova-sparrow
+#         role: product-manager
