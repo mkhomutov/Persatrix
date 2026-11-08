@@ -1,0 +1,58 @@
+# The one protoc install every workflow uses. The committed protobuf stubs
+# were generated with this release, and CI's proto staleness check fails on
+# the output of any other, so the release is pinned exactly.
+#
+# The file comes through GitHub's API (`gh release download`), not the
+# release's github.com link: on 2026-11-08 that link answered every request
+# for the 34.1 files with HTTP 504 while the API still served them. The file
+# is checked against a pinned SHA-256 before it is unpacked.
+#
+# To move to another release, change both values below, the version and the
+# SHA-256 of its protoc-<version>-linux-x86_64.zip (the release API lists it
+# as the file's `digest`), then regenerate the stubs and commit them in the
+# same change. CONTRIBUTING.md states the release too, and
+# tests/unit/python/test_protoc_pin.py checks that it agrees.
+name: Install protoc
+description: >-
+  Install the pinned protoc release, downloaded through GitHub's API and
+  checked against its pinned SHA-256.
+runs:
+  using: composite
+  steps:
+    - name: Download, check and unpack protoc
+      shell: bash
+      env:
+        PROTOC_VERSION: "34.1"
+        PROTOC_SHA256: af27ea66cd26938fe48587804ca7d4817457a08350021a1c6e23a27ccc8c6904
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        if [ "${RUNNER_OS:-}" != "Linux" ] || [ "${RUNNER_ARCH:-}" != "X64" ]; then
+          echo "::error::The pinned file is protoc's Linux x86-64 build; this runner is ${RUNNER_OS:-unknown} ${RUNNER_ARCH:-unknown}"
+          exit 1
+        fi
+        zip="protoc-${PROTOC_VERSION}-linux-x86_64.zip"
+        for try in 1 2 3; do
+          if gh release download "v${PROTOC_VERSION}" --repo protocolbuffers/protobuf \
+              --pattern "$zip" --dir "$RUNNER_TEMP" --clobber; then
+            break
+          fi
+          if [ "$try" = 3 ]; then
+            echo "::error::Could not download $zip after three tries"
+            exit 1
+          fi
+          sleep $((try * 10))
+        done
+        actual=$(sha256sum "$RUNNER_TEMP/$zip" | cut -d ' ' -f 1)
+        if [ "$actual" != "$PROTOC_SHA256" ]; then
+          echo "::error::$zip does not match its pinned SHA-256 (got $actual); not installing it"
+          exit 1
+        fi
+        dir="$RUNNER_TEMP/protoc-${PROTOC_VERSION}"
+        unzip -q -o "$RUNNER_TEMP/$zip" -d "$dir"
+        reported=$("$dir/bin/protoc" --version)
+        if [ "$reported" != "libprotoc ${PROTOC_VERSION}" ]; then
+          echo "::error::The unpacked protoc reports '$reported', not libprotoc ${PROTOC_VERSION}"
+          exit 1
+        fi
+        echo "$dir/bin" >> "$GITHUB_PATH"
+        echo "Installed $reported"

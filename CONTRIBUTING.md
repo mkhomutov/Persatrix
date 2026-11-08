@@ -65,7 +65,7 @@ installed hook has drifted.
 - **Python 3.11+** — Agents. Prefer 3.11–3.13: on 3.14 the pinned grpcio-tools 1.71.2 has no ready-made wheel, so pip compiles it from C++ source, which can fail ([ISSUE-0145](docs/issues/ISSUE-0145-proto-toolchain-pinned-to-protobuf-5x.md))
 - **Rust 1.86+**, through rustup — CLI. `cli/rust-toolchain.toml` pins the release CI uses, and rustup installs it the first time cargo runs in `cli/`
 - **Node.js `^22.22.2 || ^24.15.0 || >=26.0.0`** — only for the web console (`make ui`, `make ui-test`): Node 22 from 22.22.2, Node 24 from 24.15.0, or Node 26 and later. `npm ci` refuses any other version, because `web/.npmrc` enforces the range in `web/package.json`
-- **protoc 34.1**, with the Go plugins **protoc-gen-go v1.36.11** and **protoc-gen-go-grpc v1.6.1** — Protocol buffer compiler (for gRPC codegen). These are the versions CI pins: other versions rewrite the committed stubs, and CI's proto staleness check then fails
+- **protoc 34.1**, with the Go plugins **protoc-gen-go v1.36.11** and **protoc-gen-go-grpc v1.6.1** — Protocol buffer compiler (for gRPC codegen). These are the versions CI pins: other versions rewrite the committed stubs, and CI's proto staleness check then fails. CI installs protoc through `.github/actions/setup-protoc`, which pins the release and its file's SHA-256
 - **Windows only:** `make` — install via [GnuWin32](https://gnuwin32.sourceforge.net/packages/make.htm) or `winget install GnuWin32.Make`, then add `C:\Program Files (x86)\GnuWin32\bin` to your PATH
 
 ### Quick Start
