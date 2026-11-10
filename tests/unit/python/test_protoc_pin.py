@@ -12,8 +12,8 @@ through GitHub's API (`gh release download`), tries three times, and checks
 the file against a pinned SHA-256 before unpacking it. These tests pin the
 parts that make that true: the step names an exact release and its checksum,
 every job that installs protoc uses the step, no workflow installs protoc
-another way or names its version, a file that does not match is refused, and
-the docs state the release the step installs.
+another way, downloads it itself or names its version, a file that does not
+match is refused, and the docs state the release the step installs.
 """
 
 from __future__ import annotations
@@ -42,8 +42,15 @@ PROTOC_JOBS = {
     "ci.yml:cost-regression-gate",
     "python-constraints-refresh.yml:refresh",
 }
-# Other ways a workflow could install protoc, each bypassing the pin.
-OTHER_INSTALLS = ("setup-protoc@", "protobuf-compiler", "brew install protobuf")
+# Other ways a workflow could install protoc, each bypassing the pin: another
+# action, a package manager, or its own download from protoc's repository.
+OTHER_INSTALLS = (
+    "setup-protoc@", "protobuf-compiler", "brew install protobuf",
+    "protocolbuffers/protobuf",
+)
+# A release file's name, protoc-<version>-<platform>.zip, wherever it is
+# downloaded from. The Go plugins, protoc-gen-go and the like, have no digit.
+RELEASE_FILE = re.compile(r"protoc-\d")
 
 
 def _step() -> dict[str, Any]:
@@ -98,17 +105,51 @@ def test_every_job_that_installs_protoc_uses_the_shared_step() -> None:
     assert set(users) == PROTOC_JOBS, f"expected {sorted(PROTOC_JOBS)}, found {sorted(users)}"
 
 
+def _other_install(text: str, version: str) -> str | None:
+    """How this workflow text gets round the shared step, or None."""
+    for other in OTHER_INSTALLS:
+        if other in text:
+            return f"installs protoc with {other!r}"
+    if RELEASE_FILE.search(text):
+        return "downloads a protoc release file itself"
+    if re.search(rf"(?<![\d.]){re.escape(version)}(?![\d.])", text):
+        return f"names protoc's version {version}; only the shared step may"
+    return None
+
+
 def test_no_workflow_installs_protoc_another_way_or_names_its_version() -> None:
     """The version and checksum live in the step alone, so a bump is one
     change, and nothing installs a protoc the checksum does not cover."""
     version, _ = _pins()
     for path in sorted(WORKFLOWS.glob("*.y*ml")):
-        text = path.read_text(encoding="utf-8")
-        for other in OTHER_INSTALLS:
-            assert other not in text, f"{path.name} installs protoc with {other!r}"
-        assert not re.search(rf"(?<![\d.]){re.escape(version)}(?![\d.])", text), (
-            f"{path.name} names protoc's version {version}; only the shared step may"
-        )
+        why = _other_install(path.read_text(encoding="utf-8"), version)
+        assert why is None, f"{path.name} {why}"
+
+
+@pytest.mark.parametrize("line", [
+    "uses: arduino/setup-protoc@v3",
+    "run: sudo apt-get install -y protobuf-compiler",
+    "run: brew install protobuf",
+    "run: gh release download v33.0 --repo protocolbuffers/protobuf",
+    "run: curl -sSLO https://mirror.example/protoc-33.0-linux-x86_64.zip",
+    'version: "{version}"',
+])
+def test_each_other_way_to_install_protoc_is_caught(line: str) -> None:
+    """The check above passes on today's workflows, so it is also run on a
+    line of each kind it must refuse. A workflow's own download of a release
+    file counts: it need not name the pinned version to get round the pin."""
+    version, _ = _pins()
+    assert _other_install(line.format(version=version), version) is not None
+
+
+def test_the_shared_step_and_the_go_plugins_are_not_mistaken_for_an_install() -> None:
+    version, _ = _pins()
+    for line in (
+        f"uses: {ACTION_DIR}",
+        "run: go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11",
+        "run: go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.1",
+    ):
+        assert _other_install(line, version) is None, line
 
 
 def test_the_docs_state_the_release_the_step_installs() -> None:
