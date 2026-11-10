@@ -10,12 +10,12 @@ comes first in a persona's MRO and so replaces this one. Moved out of
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
 from .llm_client import LLMToolResult, ToolCall
 from .security import maybe_wrap_tool_content
+from .tools.registry import shown_output
 from .tools.tool_list import admit_call, offered_tools
 
 logger = logging.getLogger(__name__)
@@ -64,11 +64,7 @@ class _TaskToolRoundMixin:
                 result = await admitted.run(**admitted.arguments)
                 if result.success:
                     # SF4: JSON for dict/list so the LLM sees {"k": true} not Python repr.
-                    content = (
-                        json.dumps(result.data)
-                        if isinstance(result.data, (dict, list))
-                        else str(result.data)
-                    )
+                    content = shown_output(result)
                     content = maybe_wrap_tool_content(call.name, content)
                 else:
                     error_msg = result.error or "Tool failed"
@@ -83,11 +79,7 @@ class _TaskToolRoundMixin:
                     # and stderr on a non-zero exit — and the model needs it
                     # to see what went wrong.
                     if result.data:
-                        output = (
-                            json.dumps(result.data)
-                            if isinstance(result.data, (dict, list))
-                            else str(result.data)
-                        )
+                        output = shown_output(result)
                         content += "\n" + maybe_wrap_tool_content(call.name, output)
                 results.append(
                     LLMToolResult(

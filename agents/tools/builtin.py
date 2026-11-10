@@ -9,12 +9,19 @@ Also provides agent-initiated memory tools (notes) via closure-based factory.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
+import os
 import shlex
+import signal
+import sys
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
 import aiohttp
+
+from . import registry
 
 # Back-compat re-export: the note-tool factory moved to
 # :mod:`agents.tools.memory_tools` (RFC 0037 PR 4 — the §C/§D notes-leg
@@ -24,7 +31,14 @@ from .arg_check import STRING_ONLY
 from .memory_tools import check_auto_reflect, create_memory_tools  # noqa: F401
 from .permissions import PermissionGate
 from .registry import ToolResult, tool
-from .sandbox import PathValidator
+from .sandbox import (
+    PathValidator,
+    ResourceLimiter,
+    emit_resource_limited,
+    read_resource_limits,
+    tool_process_env,
+    truncate_text,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,13 +55,41 @@ _SAFE_RESPONSE_HEADERS = frozenset({
 # Prevents gRPC 4 MB message size blowout and LLM context waste.
 MAX_OUTPUT_BYTES = 102_400  # 100 KB
 
-# Module-level state set by the server at startup via direct assignment
-# (e.g. ``builtin.permission_gate = PermissionGate(...)``).
+# Module-level state set by the server at startup through :func:`configure`
+# (tests assign it directly, e.g. ``builtin.permission_gate = PermissionGate(...)``).
 # TODO(v0.2): refactor to dependency injection for multi-agent hosting
 # where each agent needs its own PermissionGate/PathValidator instance.
 permission_gate: PermissionGate | None = None
 path_validator: PathValidator | None = None
 workspace_root: Path | None = None
+# The CPU limit on a shell_exec command (RFC 0009 Phase 3); None sets none.
+resource_limiter: ResourceLimiter | None = None
+
+
+def configure(
+    permissions: dict[str, Any], workspace: str | Path, resource_limits: object = None,
+) -> None:
+    """Set what every built-in tool reads, from one agent's config.
+
+    *permissions* is the agent's ``permissions`` block and *resource_limits*
+    its ``resource_limits`` block; the output cap it sets applies to every
+    tool, through the ``@tool`` wrapper. Each call replaces all of it, so no
+    limit from an earlier agent is left behind. Raises ``ValueError`` for a
+    ``resource_limits`` value the agent schema refuses, before changing
+    anything.
+    """
+    global permission_gate, path_validator, workspace_root, resource_limiter
+    limits = read_resource_limits(resource_limits)
+    permission_gate = PermissionGate(permissions)
+    fs = permissions.get("filesystem", {})
+    path_validator = PathValidator(
+        allow_read=fs.get("read", []),
+        allow_write=fs.get("write", []),
+        deny=fs.get("deny", []),
+    )
+    workspace_root = Path(workspace).resolve()
+    resource_limiter = limits.shell
+    registry.output_limiter = limits.output
 
 
 def _require_gate() -> PermissionGate:
@@ -70,11 +112,7 @@ def _require_workspace() -> Path:
 
 def _truncate(text: str) -> str:
     """Truncate text to MAX_OUTPUT_BYTES with an indicator."""
-    encoded = text.encode("utf-8", errors="replace")
-    if len(encoded) <= MAX_OUTPUT_BYTES:
-        return text
-    truncated = encoded[:MAX_OUTPUT_BYTES].decode("utf-8", errors="ignore")
-    return truncated + "\n... [truncated at 100 KB]"
+    return truncate_text(text, MAX_OUTPUT_BYTES)
 
 
 @tool(
@@ -172,6 +210,23 @@ def _shell_timeout(requested: int, limit: int | None) -> int:
     return max(1, min(requested, cap))
 
 
+def _stop_command(proc: asyncio.subprocess.Process, *, force: bool) -> None:
+    """Stop a command that ran out of time, and every process it started.
+
+    The command runs in a session of its own, so its process group holds what
+    it starts, unless one leaves it. Windows has no such group, and there only
+    the command's own process is stopped.
+    """
+    if sys.platform == "win32":
+        if force:
+            proc.kill()
+        else:
+            proc.terminate()
+        return
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        os.killpg(proc.pid, signal.SIGKILL if force else signal.SIGTERM)
+
+
 @tool(
     name="shell_exec",
     description=(
@@ -199,7 +254,8 @@ async def shell_exec(command: str, timeout: int = 30) -> ToolResult:
     if not gate.check("shell:exec"):
         return ToolResult(success=False, error="Permission denied: shell:exec")
 
-    timeout = _shell_timeout(timeout, gate.shell_time_limit())
+    time_limit = gate.shell_time_limit()
+    timeout = _shell_timeout(timeout, time_limit)
 
     try:
         args = shlex.split(command)
@@ -222,13 +278,25 @@ async def shell_exec(command: str, timeout: int = 30) -> ToolResult:
             error_type="PermissionError",
         )
 
+    limiter = resource_limiter or ResourceLimiter()
+    # RFC 0009 G-14: no SECURITY_* variable, the enrollment secret among
+    # them, reaches the command.
+    env = tool_process_env()
     try:
+        # RFC 0009 G-3: the CPU limit, set in the command's own process before
+        # it starts; the command as it is, as before, when no limit is set.
+        argv, cpu_limit = limiter.command(
+            args, cwd=str(ws), path=env.get("PATH", os.defpath),
+        )
         proc = await asyncio.create_subprocess_exec(
-            *args,
+            *argv,
             stdin=asyncio.subprocess.DEVNULL,  # M-02: prevent blocking on interactive prompts
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=str(ws),
+            env=env,
+            # Its own session, so the time limit stops all it starts too.
+            start_new_session=True,
         )
     except FileNotFoundError:
         return ToolResult(
@@ -243,12 +311,16 @@ async def shell_exec(command: str, timeout: int = 30) -> ToolResult:
         )
     except TimeoutError:
         # Three-phase shutdown: terminate → 5s grace period → kill → reap
-        proc.terminate()
+        _stop_command(proc, force=False)
         try:
             await asyncio.wait_for(proc.communicate(), timeout=5)
         except TimeoutError:
-            proc.kill()
+            _stop_command(proc, force=True)
             await proc.wait()
+        # RFC 0009 G-4: audited only when the agent's own time limit stopped
+        # it; a shorter timeout is the model's choice, not an operator's.
+        if time_limit is not None and timeout == min(time_limit, MAX_TIMEOUT_SECONDS):
+            emit_resource_limited("shell_exec", "max_execution_seconds", wall_seconds=timeout)
         return ToolResult(
             success=False,
             error=f"Command timed out after {timeout}s",
@@ -258,6 +330,17 @@ async def shell_exec(command: str, timeout: int = 30) -> ToolResult:
     stdout = _truncate(stdout_bytes.decode("utf-8", errors="replace"))
     stderr = _truncate(stderr_bytes.decode("utf-8", errors="replace"))
     exit_code = proc.returncode
+
+    if limiter.stopped_by_cpu_limit(exit_code):
+        # The limit applied, which a lower one already in force can make
+        # shorter than the setting.
+        emit_resource_limited("shell_exec", "shell_cpu_seconds", cpu_seconds=cpu_limit)
+        return ToolResult(
+            success=False,
+            data={"stdout": stdout, "stderr": stderr, "exit_code": exit_code},
+            error=f"Command stopped at its CPU limit of {cpu_limit} s",
+            error_type="ResourceLimitError",
+        )
 
     if exit_code != 0:
         return ToolResult(

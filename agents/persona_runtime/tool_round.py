@@ -9,13 +9,12 @@ turn offers, and running the calls the model makes. Moved out of
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
 from ..llm_client import LLMToolResult, ToolCall
 from ..security import maybe_wrap_tool_content
-from ..tools.registry import ToolDefinition
+from ..tools.registry import ToolDefinition, shown_output
 from ..tools.tool_list import admit_call, offered_tools
 
 logger = logging.getLogger(__name__)
@@ -83,11 +82,7 @@ class _ToolRoundMixin:
             try:
                 result = await admitted.run(**admitted.arguments)
                 if result.success:
-                    content = (
-                        json.dumps(result.data)
-                        if isinstance(result.data, (dict, list))
-                        else str(result.data)
-                    )
+                    content = shown_output(result)
                     # RFC 0009 PR 3: external-data tools wrapped here.
                     content = maybe_wrap_tool_content(call.name, content)
                 else:
@@ -99,11 +94,7 @@ class _ToolRoundMixin:
                     # A failure can still carry output (shell_exec's stdout
                     # and stderr on a non-zero exit); the model needs it.
                     if result.data:
-                        output = (
-                            json.dumps(result.data)
-                            if isinstance(result.data, (dict, list))
-                            else str(result.data)
-                        )
+                        output = shown_output(result)
                         content += "\n" + maybe_wrap_tool_content(call.name, output)
                 results.append(LLMToolResult(
                     tool_call_id=call.id,

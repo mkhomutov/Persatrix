@@ -51,15 +51,34 @@ TOKEN_REVOKED = "AGENT_TOKEN_REVOKED"
 _TOKEN_REFUSALS = frozenset({TOKEN_INVALID, TOKEN_EXPIRED, TOKEN_REVOKED})
 
 
+# The secret once :func:`hold_enrollment_secret` has taken it out of the
+# environment; empty until then.
+_held_enrollment_secret = ""
+
+
+def hold_enrollment_secret() -> None:
+    """Move the enrollment secret out of the environment, into this process's memory.
+
+    Called once at startup, before anything starts a process, so no process
+    the agent starts, by any means, inherits the secret (RFC 0009 G-14).
+    :func:`enrollment_headers` still shows it. On Linux the process's starting
+    environment stays readable in ``/proc/<pid>/environ``; this cannot change it.
+    """
+    global _held_enrollment_secret
+    _held_enrollment_secret = os.environ.pop(ENROLLMENT_SECRET_ENV, "") or _held_enrollment_secret
+
+
 def enrollment_headers() -> dict[str, str]:
     """What a registration shows in place of a token, which it is about to get.
 
-    Empty with no secret set. The value is trimmed as the orchestrator trims
-    its copy: a secret read from a file often ends in a line break, which no
-    header can hold. Registration follows no redirect, so the secret cannot
-    reach a host other than the orchestrator's.
+    Empty with no secret set. The secret is read from the environment, or
+    from memory once :func:`hold_enrollment_secret` has moved it there. The
+    value is trimmed as the orchestrator trims its copy: a secret read from a
+    file often ends in a line break, which no header can hold. Registration
+    follows no redirect, so the secret cannot reach a host other than the
+    orchestrator's.
     """
-    secret = os.environ.get(ENROLLMENT_SECRET_ENV, "").strip()
+    secret = (os.environ.get(ENROLLMENT_SECRET_ENV) or _held_enrollment_secret).strip()
     return {ENROLLMENT_SECRET_HEADER: secret} if secret else {}
 
 

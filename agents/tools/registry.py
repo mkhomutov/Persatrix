@@ -15,7 +15,7 @@ import logging
 import time
 import warnings
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, get_type_hints
 
 from opentelemetry import trace
@@ -34,9 +34,16 @@ from ..observability.spans import (
     tool_payload_capture_mode,
 )
 from .arg_check import ArgumentSpec, argument_spec
+from .sandbox import OutputSizeLimiter, emit_resource_limited, render_output
 
 logger = logging.getLogger(__name__)
 _tracer = trace.get_tracer(__name__)
+
+# The cap on what one tool call hands the model: the agent's
+# ``resource_limits.tool_output_bytes``, set at startup by
+# ``agents.tools.builtin.configure``. None, the default, caps nothing
+# (RFC 0009 Phase 3, the Phases 3–4 plan's G-3).
+output_limiter: OutputSizeLimiter | None = None
 
 # Process-wide latch so the ``full``-mode-with-no-op-redactor warning fires
 # at most once.  Operators who opt in to full payload capture without first
@@ -93,6 +100,44 @@ class ToolResult:
     # (TimeoutError, ConnectionError) from permanent ones (ValueError, PermissionError)
     # for retry and circuit-breaker decisions.
     error_type: str | None = None
+    # *data* as the model is shown it, when the output cap already rendered
+    # it, so the tool round does not render it again (:func:`shown_output`).
+    shown: str | None = field(default=None, repr=False, compare=False)
+
+
+def shown_output(result: ToolResult) -> str:
+    """*result*'s output as the model is shown it (:func:`~.sandbox.render_output`)."""
+    return result.shown if result.shown is not None else render_output(result.data)
+
+
+def _cap_output(tool_name: str, result: ToolResult) -> ToolResult:
+    """*result* held to the agent's cap, if one is set: its output and its error text.
+
+    A failed call's output is capped too: ``shell_exec`` returns its stdout
+    and stderr with a non-zero exit. Its error text is held to the same cap
+    on its own. The tool round's error label and data envelope come on top.
+    """
+    limiter = output_limiter
+    if limiter is None:
+        return result
+    changes: dict[str, Any] = {}
+    if result.data is not None:
+        data, changes["shown"], output_bytes = limiter.limit_shown(result.data)
+        if output_bytes is not None:
+            changes["data"] = data
+            emit_resource_limited(
+                tool_name, "tool_output_bytes",
+                max_bytes=limiter.max_bytes, output_bytes=output_bytes,
+            )
+    if result.error is not None:
+        error, error_bytes = limiter.limit(result.error)
+        if error_bytes is not None:
+            changes["error"] = error
+            emit_resource_limited(
+                tool_name, "tool_output_bytes",
+                max_bytes=limiter.max_bytes, error_bytes=error_bytes,
+            )
+    return replace(result, **changes) if changes else result
 
 
 @dataclass
@@ -281,6 +326,7 @@ def tool(
                         result = func(*args, **kwargs)
 
                     if isinstance(result, ToolResult):
+                        result = _cap_output(tool_name, result)
                         span.set_attribute("tool.success", result.success)
                         if not result.success:
                             span.set_status(
@@ -293,6 +339,8 @@ def tool(
                             duration_ms=(time.monotonic() - tool_started) * 1000.0,
                         )
                         return result
+                    # Capped before the call is recorded, so it is recorded once.
+                    capped = _cap_output(tool_name, ToolResult(success=True, data=result))
                     span.set_attribute("tool.success", True)
                     _record_tool_metrics(
                         agent_id=agent_id,
@@ -300,7 +348,7 @@ def tool(
                         success=True,
                         duration_ms=(time.monotonic() - tool_started) * 1000.0,
                     )
-                    return ToolResult(success=True, data=result)
+                    return capped
                 except Exception as e:
                     logger.exception("Tool '%s' failed", tool_name)
                     span.record_exception(e)
@@ -312,11 +360,11 @@ def tool(
                         success=False,
                         duration_ms=(time.monotonic() - tool_started) * 1000.0,
                     )
-                    return ToolResult(
+                    return _cap_output(tool_name, ToolResult(
                         success=False,
                         error=str(e),
                         error_type=type(e).__name__,
-                    )
+                    ))
 
         # PR-review MF1: Store the wrapper (not the original function) so
         # _execute_tools() goes through the decorator pipeline — permission
