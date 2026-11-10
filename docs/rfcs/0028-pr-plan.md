@@ -230,7 +230,7 @@ is unslotted with RFC 0049 Phase 3 and is not in this plan.
 | 1 | B1 | Decision types, action classes, glossary | `feature/v040-rfc0028-types` | ✅ | [#1054](https://github.com/mkhomutov/Persatrix/pull/1054) | 2026-10-24 |
 | 2 | B1 | Selection pipeline and baseline policy | `feature/v040-rfc0028-pipeline` (head branch `claude/great-bell-gyjk5g`, assigned by the session that opened it) | ✅ | [#1072](https://github.com/mkhomutov/Persatrix/pull/1072) | 2026-10-31 |
 | 3a | B1 | Python secret redactor | `feature/v040-rfc0028-redactor` | ✅ | [#1086](https://github.com/mkhomutov/Persatrix/pull/1086) | 2026-11-04 |
-| 3 | B1 | Decision log and checkpoint spans | `feature/v040-rfc0028-decision-log` | ⬜ | — | — |
+| 3 | B1 | Decision log and checkpoint spans | `feature/v040-rfc0028-decision-log` | 🔀 | [#1090](https://github.com/mkhomutov/Persatrix/pull/1090) | — |
 | 4 | B1 | `decision:` configuration and schema | `feature/v040-rfc0028-config` | ⬜ | — | — |
 | 5 | B1 | Persona pre-act checkpoint | `feature/v040-rfc0028-persona-preact` | ⬜ | — | — |
 | 6 | B1 | Task-agent pre-act checkpoint | `feature/v040-rfc0028-task-preact` | ⬜ | — | — |
@@ -381,6 +381,16 @@ replay. The span carries the selected class, the
 candidate count and the confidence; spans are sampled and not relied on. A
 failing sink counts a metric and never fails the turn. The size cap and the
 number of rotated files kept are config keys.
+*As built*: `DecisionRecorder.for_agent(agent_id, config, recording=…)`
+gives PR 5 one `record(record)` call; with recording off it makes nothing.
+The agent's `decision.log` keys are `dir` (`data/decisions`), `max_bytes`
+(10 MiB) and `keep` (5, at most 100). A line is the record's `to_json` line,
+masked, written whole or not at all; the file is owner-only (0600), and a
+link at its path is refused. F-14 is recorded, not keyed: a key would stop
+replay and the eval harness matching a hash to a known text. The span's
+`decision.record_id` finds its line. Metrics: `agent.decision.records` and
+`agent.decision.sink_errors`. The four shared-pool counters moved to
+`_metrics_shared_pool.py` to make room in `metrics.py`.
 **Tests**: one line per record; a secret in a candidate is redacted by the
 real redactor; neither message text nor a tool argument's value reaches the
 file, and each record carries the acting protection level; with recording
@@ -412,6 +422,9 @@ defaults; an agent with no block and no list reads manual, recording off and
 nothing to approve; `decision: {mode: manual}` turns recording on; one with
 `requires_approval_for` and no block keeps its list.
 **Estimate**: ~300 lines.
+**From PR 3**: the schema's `decision:` block takes the `log` keys
+`dir`, `max_bytes` and `keep` (0 to 100), which `DecisionLogConfig` reads and
+checks.
 **From PR 2 review**: F-7 — the baseline policy under any mode but manual
 fails at every checkpoint, one ERROR each, rather than once at startup. The
 runtime chooses its policy from the configured mode when it wires it.
@@ -456,6 +469,10 @@ is unchanged.
 the persona fetches them before calling `decide`; mypy refuses an
 `async def` at a typed call site. F-7 — the policy is chosen from the
 configured mode, as PR 4 notes.
+**From PR 3 review**: F-9 — a record's own strings (ids, a target, argument
+names, a rationale) reach the decision log as the checkpoint fills them,
+masked for secrets only, so the persona and task agent (PR 6), and the
+scored policy's rationale (PR 7), keep the turn's text out of them.
 
 ### PR 6 — `feature/v040-rfc0028-task-preact`
 
@@ -684,7 +701,7 @@ marked ✂️ or *taken, not cut*.
 | File | Lines now | Plan |
 |------|-----------|------|
 | `agents/base.py` | 412 | RFC 0009 Phases 3–4 PR 3 moved `_execute_tools` to `agents/task_tool_round.py`; PR 6 adds the checkpoint |
-| `agents/observability/metrics.py` | 500 | PR 3 adds a `_metrics_decision.py` module |
+| `agents/observability/metrics.py` | 469 | PR 3 added `_metrics_decision.py`, and moved the shared-pool counters out to make room |
 | `agents/action_executor.py` | 489 | PRs 5 and 10 add one call each; the logic lives in `agents/decision/` |
 | `agents/tick.py` | 472 | PR 5 records the actions its cut drops, through one call |
 | `agents/persona.py` | 335 | PR 5 adds the checkpoint call in `handle` |
