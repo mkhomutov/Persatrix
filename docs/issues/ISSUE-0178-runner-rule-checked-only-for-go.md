@@ -84,3 +84,29 @@ Vitest `include`, in the same PR as its CI step.
 
 **Opt-in tests: open.** The 13 `requires_orchestrator` tests still run in no
 gate.
+
+## Notes
+
+> 2026-11-10 — a whole-repository quality review of `main` at `ee9cfaac`
+> adds three things to the open half.
+>
+> The marker now selects 16 tests, not 13: 6 in `test_logs_e2e.py`, 5 in
+> `test_session_operator_surface.py`, 2 in `test_exp001_arm_d_meetings.py`,
+> and 1 each in `test_exp001_arm_d_prime_meetings.py`,
+> `test_exp001_channel_meeting.py` and `test_exp001_practice_run.py`.
+>
+> The orchestrator's start-up wiring has no test at any level. `main()`,
+> `initRateLimiter`, `initAuditLogger` and `buildLogger` in
+> `cmd/orchestrator` are at 0% coverage, and the package is at 47.8%.
+> [ISSUE-0204](ISSUE-0204-grpc-server-starts-only-if-the-log-buffer-did.md)
+> is a fault in that wiring which these tests would have met.
+>
+> The Rust CLI has no test that completes an HTTP exchange; its only
+> development dependency is `tempfile`. `tests/integration/test_workflow.py`
+> is seven TODO lines and no test.
+>
+> One CI job that builds both binaries and runs
+> `pytest -m requires_orchestrator` would cover all three. The same job could
+> start the installed agent package, which
+> [ISSUE-0210](ISSUE-0210-agent-package-runs-under-two-import-roots.md) and
+> [ISSUE-0219](ISSUE-0219-agent-image-is-not-what-ci-tests.md) ask for.
