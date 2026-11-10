@@ -1,6 +1,6 @@
 # Blueprint Extraction — the plan
 
-> **Last updated**: 2026-09-17
+> **Last updated**: 2026-11-08
 > How the methodology leaves this repository and comes back as a pinned
 > dependency. This is a plan, not a record: the blueprint repository does
 > not exist yet, and creating it is the owner's call.
@@ -24,7 +24,7 @@ The [conformance manifest](conformance.json) is the split, kept as data:
 
 | Section | Travels to the blueprint | Notes |
 |---|---|---|
-| `documents` | yes, with project names replaced by placeholders | The nine methodology docs, the documentation guide, BRANCHING, CONTRIBUTING skeleton, the RFC / issue / manual-test conventions and templates, the five document templates, the PR template, `dependabot.yml`, and the generated files' *shapes* (FILEMAP, merged-prs, the two indexes) |
+| `documents` | yes, with project names replaced by placeholders | The eleven methodology docs, the documentation guide, BRANCHING, CONTRIBUTING skeleton, the RFC / issue / manual-test conventions and templates, the five document templates, the PR template, `dependabot.yml`, and the generated files' *shapes* (FILEMAP, merged-prs, the two indexes) |
 | `tooling` | yes, unchanged | Everything under `scripts/checks/`, the generators, the hook, the release tooling. All stdlib-only and path-relative by design |
 | `make_targets` | yes, as a `Makefile.methodology` include | A consumer's Makefile includes it and keeps its own build targets |
 | `ci_jobs`, `ci_steps_in_docs_hygiene` | yes, as a reusable workflow | `Docs hygiene` and `File size check` become `uses: <blueprint>/.github/workflows/methodology.yml@vN` |
