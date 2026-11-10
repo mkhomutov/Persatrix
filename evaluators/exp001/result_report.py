@@ -78,7 +78,8 @@ def summary(result: Mapping[str, Any]) -> str:
               + _outcome(result["repriced_outcome"], None)]
     alone = result["people_alone"]
     figure = "none" if alone["agreement"] is None else f"{alone['agreement']:.3f}"
-    lines.append(f"  the rule on the two people's scores alone: "
+    # By their sheets: two AI raters fill them in the people's place (the deviation).
+    lines.append(f"  the rule on person-1's and person-2's sheets alone: "
                  f"{_outcome(alone['outcome'], alone['why'])} (their agreement {figure})")
     lines += [_comparison_words(c) for c in result["comparisons"] if not c["deciding"]]
     lines += ["", "Each arm:"]

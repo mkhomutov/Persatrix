@@ -38,6 +38,14 @@ Blinding stays too. The packets carry random IDs and no adviser names, and
 the map from ID to arm stays sealed until every score is in. Part 1, the
 materials and the caps are untouched.
 
+**What the harness gains.** The harness gains the AI raters' commands
+after the first scored meeting, which part 1 §5 would not allow for a
+change. They add steps for the raters and change nothing the harness did
+before them: the run, its packets, the seal and the judge's scores stay as
+they were. The result lists them with this deviation. The plain-words
+result also names the people-alone rule of §7 by the two sheets it reads;
+the harness's own field for it keeps its name, `people_alone`.
+
 ## 2. Why this is a deviation, not a change to part 2
 
 [Part 1 §5](EXP-001-preregistration.md#5-changes) lets part 2 change only
@@ -60,14 +68,17 @@ first.
 - **§7's people-alone rule changes.** "The rule that would fire on the two
   people's scores alone" becomes the rule on the two AI raters' scores
   alone.
-- **Incomplete and inconclusive mean what they meant.** An agreement below
-  0.4, scoring that finishes late, or a judge stopped by its cap still makes
-  the result inconclusive.
-- **The strategy review decides what it is worth.** The first strategy
-  review after the result receives it like any result. It records the rule
-  the AI-scored figures fire, and decides how much weight that rule
-  carries. Any decision it changes is ratified by a sequencing amendment,
-  as usual.
+- **Incomplete and inconclusive mean what they meant, and §6 still binds
+  them.** An agreement below 0.4, scoring that finishes late, or a judge
+  stopped by its cap still makes the result inconclusive. Then part 2 §6
+  applies as written: the first strategy review may only order one repeat
+  of the whole run, under the same documents and this deviation.
+- **What the rule is worth is fixed now, not after.** If a rule fires on
+  the AI-scored figures, the first strategy review after the result treats
+  it as it would the registered rule, with this deviation and its limit
+  (§4) stated beside it. The weight it gives does not depend on which rule
+  fired. Any decision it changes is ratified by a sequencing amendment, as
+  usual.
 - **Who read what, and when.** Part 2 §2 asks the result to say this, and it
   now covers both AI raters' runs and the sessions that brief them (§6).
 
@@ -91,34 +102,51 @@ rater runs it, but the sessions that brief them run two of its commands.
 
 These rules are fixed when this document merges, before the seal opens. The
 harness's [`ai_raters`](../../evaluators/exp001/ai_raters.py) commands hold
-each rater's session to them.
+each rater's session to them, and
+[`ai_rater_runs`](../../evaluators/exp001/ai_rater_runs.py) checks each
+run's record.
 
-1. **The model.** Both raters run on Fable 5.2, the maintainer's choice. It
-   is neither the judge's model nor the arms'. A run is given no model of
-   its own, so it runs on its session's. Each run gives its exact model ID
-   on its answer's first line, and its record must show replies from that
-   model alone. `rater-enter` refuses any other, and the result records the
-   ID.
+1. **The model.** Both raters run on Fable 5.2, `claude-fable-5-2`, the
+   maintainer's choice. It is neither the judge's model nor the arms'. The
+   harness holds that ID, so no session can name another. A run is given
+   no model of its own, so it runs on its session's. Its record must show
+   replies from that model alone, and its answer must name it on its first
+   line. `rater-enter` refuses any other, and the result records the ID.
 2. **One session per rater.** Each rater has its own Claude Code session on
    that model, which briefs that rater and no other:
    - `rater-batches` writes the rater's packets as prompts;
    - the session gives each prompt to a fresh run;
    - `rater-enter` enters each answer in the rater's sheet.
 
-   The session never opens a packet file to read it; the commands do. The
-   session that built the harness briefs neither rater, and never reads a
-   packet from the scored run.
+   Each session runs from an empty folder of its own outside any
+   repository, such as `~/exp001/ai-raters/person-1`, and saves no
+   memory there. Its runs are then given no project instructions, no
+   memory index and no git status; only the maintainer's own instructions
+   file, which says nothing of EXP-001. It runs the harness's commands
+   from a checkout of the commit that merges this document. The session
+   never opens a packet file to read it; the commands do. The session that
+   built the harness briefs neither rater, and never reads a packet from
+   the scored run.
 3. **A run.** A fresh run of the rater's model, a subagent of the rater's
-   session, gets one prompt and nothing else. A prompt holds:
+   session, is given one message, the brief `rater-brief` prints, and
+   nothing else. The brief tells it to read its prompt and do what it says.
+   A prompt holds:
    - the rubric, as the people would have had it;
    - the notes agreed in practice (rule 7);
-   - eight packets in the rater's own order, or fewer in the last batch,
-     each followed by the cells to score.
+   - up to eight packets in the rater's own order, each followed by the
+     cells to score. A prompt holds fewer when eight would make it longer
+     than 50 000 characters or 1 800 lines, so one Read gives it whole.
 
-   The run reads its prompt file, calls no other tool, and hands its answer
+   The run reads its prompt, calls no other tool, and hands its answer
    back. `rater-enter` takes the answer from the run's own record, which
-   Claude Code keeps for every run, and refuses a record that shows any
-   other tool call. That run is discarded and held again whole.
+   Claude Code keeps for every run, and refuses the record when it shows:
+   - any message to the run but its brief, before or during the run;
+   - any instructions file but the maintainer's own, a memory index or a
+     git status;
+   - a tool call other than one Read of the prompt, by its path alone, or
+     a Read that did not give the whole prompt.
+
+   That run is discarded and held again whole.
 4. **Off limits.** Neither a run nor a rater's session reads, from the
    scored run:
    - the seal, `sealed/`;
@@ -128,32 +156,55 @@ each rater's session to them.
    - the run's report;
    - the other rater's packet file or sheet.
 
-   A run reads nothing but its prompt. In practice the raters compare
-   their scores, as rule 7 says, but the scored run's two sheets are never
-   compared before the seal opens.
+   The same holds in the practice run, so its seal and its judge's scores
+   cannot shape the notes. There a session may read its own rater's
+   packets and both raters' sheets, and the differences between them, as
+   rule 7 says. A run reads nothing but its prompt. The scored run's two
+   sheets are never compared before the seal opens.
 5. **Scores as given.** `rater-enter` refuses an answer that does not give
    exactly the cells asked for, with 0, 1 or 2 for a criterion and right or
-   wrong for a recall question. It never changes a cell already scored, and
-   enters nothing once the seal is open. A run that fails is held again
-   whole, from the same prompt: refused, cut off, or calling another tool.
-   The result lists every run held again, and why.
-6. **Everything is kept.** These stay outside the repository until every
-   score is in, then are published with the result:
-   - each run's prompt, record and answer;
-   - each session's log of what it entered, `entered.jsonl`.
+   wrong for a recall question. It refuses one that could be read two
+   ways, too: a cell or packet given twice, a second JSON block, or words
+   after the block. It never changes a cell already scored, and enters
+   nothing once the seal is open. A run that fails is held again whole,
+   from the same prompt: refused, cut off, or calling another tool.
+6. **Everything is kept.** `rater-enter` copies each run's record beside
+   its prompt before checking it, and logs every run in `runs.jsonl`:
+   entered, kept or refused, and why. These stay outside the repository
+   until every score is in, then are published with the result:
+   - each prompt, and each run's answer;
+   - each run's record, without what Claude Code adds around the
+     messages, which names the machine, the account and the maintainer's
+     own instructions and memory;
+   - each session's `runs.jsonl`, which holds the SHA-256 of every full
+     record. The maintainer keeps the full records, unpublished.
+
+   Before the seal opens, each session runs `rater-audit` on its folder of
+   run records. It lists any run the session started on a prompt but never
+   entered, kept or refused, and it must list none. The result lists every
+   run held again, and why.
 7. **Practice first.** As part 2 §2 has the people do, both raters first
-   score the practice run's packets, the same way but with no notes yet.
-   `rater-differences` lists the cells they scored differently. Each
-   rater's session then gives a fresh run its practice prompts, both
-   raters' practice scores and those differences, and asks for short notes
-   on how the anchors apply. The two lists are put side by side, and each
-   session gives a fresh run the combined list to accept or reject note by
-   note. The notes both accept go into every scored prompt and are
-   published with the result. The practice scores are thrown away.
+   score the practice run's packets, the same way but with no notes:
+   `rater-batches` refuses notes there, and requires them on a scored run.
+   `rater-differences` lists the cells they scored differently. Then:
+   - each rater's session writes a notes prompt from practice files only:
+     its practice prompts, both raters' practice sheets and those
+     differences. It asks for short notes on how the anchors apply, with
+     the model line first;
+   - the two lists are put side by side, and each session writes a second
+     prompt that asks to accept or reject the combined list note by note;
+   - each notes prompt goes to a fresh run with its brief, and
+     `rater-keep` checks and keeps that run as `rater-enter` checks a
+     scoring run.
+
+   The notes both accept go into every scored prompt and are published
+   with the result. The practice scores are thrown away.
 8. **Opening the seal.** The session that built the harness runs `score`,
-   which writes the blank sheets and reports progress. Only once every
-   score is in, and after telling the maintainer, does it open the seal
-   with `score --open`, by 2026-11-27 18:12 UTC.
+   which writes the blank sheets and reports progress. Once every score is
+   in, it runs `rater-same-notes` on both raters' folders of prompts. That
+   check passes only when every scored prompt holds the same notes.
+   Then, after telling the maintainer, it opens the seal with
+   `score --open`, by 2026-11-27 18:12 UTC.
 
 ## 6. Who read what, and when, so far
 

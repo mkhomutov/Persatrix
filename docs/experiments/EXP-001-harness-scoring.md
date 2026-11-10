@@ -133,7 +133,8 @@ the run's directory:
   point over which its verdict holds, and the verdict with bids and memory
   summaries repriced at `claude-haiku-4-5` (§5, §7).
 - **Reported, never deciding**: the rule with that repricing, and the rule
-  on the two people's scores alone (§7).
+  on the two people's sheets alone (§7), which two AI raters fill in the
+  people's place.
 - **Each arm**: quality, on plans and on control plans apart; dollars per
   plan, at the fixed table and repriced; quality per dollar; minutes per
   plan and quality per minute; each criterion's average score; and its
@@ -180,19 +181,33 @@ and never reads a packet itself. For rater 1, on the scored run:
 
 ```bash
 python -m evaluators.exp001 rater-batches ~/exp001/scored/window-1 person-1 OUT --notes NOTES
-python -m evaluators.exp001 rater-enter ~/exp001/scored/window-1 person-1 OUT/batch-01.md RECORD --model MODEL
+python -m evaluators.exp001 rater-enter ~/exp001/scored/window-1 person-1 OUT/batch-01.md RECORD
 ```
 
-`rater-batches` splits the rater's packet file into prompts of eight
-packets each, in the rater's order. Each prompt holds the rubric, the notes
-agreed in practice, and the cells to score for each packet, taken from the
-rater's blank sheet. A fresh run answers one prompt. `rater-enter` reads
-the answer from the run's own record and enters it in the sheet exactly as
-given. It refuses a record that shows another model, or a tool call other
-than one Read of the prompt, and an answer that does not give exactly the
-cells asked for. It never scores a cell twice. On a practice run,
-`python -m evaluators.exp001 rater-differences ROOT` lists the cells the two
-raters scored differently, so they can agree on how the anchors apply.
+`rater-batches` splits the rater's packet file into prompts of up to eight
+packets each, in the rater's order, fewer when eight would not fit one
+Read. Each prompt holds the rubric, the notes agreed in practice, and the
+cells to score for each packet, taken from the rater's blank sheet. It
+takes no notes on the practice run and needs them on a scored one.
+`rater-brief OUT/batch-01.md` prints the one message a fresh run of that
+prompt is given. `rater-enter` copies the run's own record beside the
+prompt, reads the answer from it and enters it in the sheet exactly as
+given. It refuses a record that shows another model, any message but the
+brief, project instructions, memory or a git status, or a tool call other
+than one Read of the whole prompt. It refuses an answer that does not give
+exactly the cells asked for, or could be read two ways. It never scores a
+cell twice, and logs every run, entered or refused, in `OUT/runs.jsonl`.
+
+Four more commands check the rest:
+
+- `rater-keep PROMPT RECORD` checks and keeps a run that writes the
+  practice notes, as `rater-enter` checks a scoring run;
+- `rater-audit OUT RECORDS` lists any run in a session's folder of run
+  records that was never entered, kept or refused;
+- `rater-same-notes OUT1 OUT2` checks both raters' scored prompts hold one
+  set of notes;
+- on a practice run, `rater-differences ROOT` lists the cells the two
+  raters scored differently, so they can agree on how the anchors apply.
 
 ## What PR 6d leaves
 
