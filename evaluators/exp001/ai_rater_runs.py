@@ -7,18 +7,23 @@ when its record shows what the rater rules ask
 (``docs/experiments/EXP-001-deviation-ai-raters.md``, rules 1 to 3):
 
 - replies from :data:`MODEL` alone, and an answer that names it first;
+- Claude Code's own :data:`AGENT_TYPE` agent, as the small file Claude Code
+  keeps beside the record names it;
 - the one brief :func:`brief` gives, and no other message to the run;
 - no instructions file but the maintainer's own, so no project instructions,
   no memory index and no git status: a rater's session runs from a folder
   of its own, outside any repository;
+- nothing else but what Claude Code gives every run (:data:`_GIVEN`): a kind
+  of thing this list does not name is refused, whatever it holds;
 - one Read of its prompt by its path alone, which gave the whole prompt, and
   no other tool call but the hand-back of its answer.
 
-:func:`checked` returns the answer such a record holds and refuses any
-other record. :func:`public` is the part of a record that is published:
-the messages and tool calls, without what Claude Code adds around them,
-which holds private data. :func:`brief_of` names the prompt a record was
-briefed with, so a session's runs can be checked off against its log.
+:func:`checked` returns the answer such a record holds, with what the run
+was given, and refuses any other record. :func:`public` is the part of a
+record that is published: the messages and tool calls, without what Claude
+Code adds around them, which holds private data. :func:`brief_of` names
+the prompt a record was briefed with, so a session's runs can be checked
+off against its log.
 """
 
 from __future__ import annotations
@@ -31,6 +36,7 @@ from pathlib import Path
 from typing import Any
 
 MODEL = "claude-fable-5-2"  # the maintainer's choice for both raters, 2026-11-10
+AGENT_TYPE = "general-purpose"  # the agent a run is when its session names no other
 HANDBACK = "SubagentHandback"  # the tool a run hands its answer back with
 _BRIEF = (
     "Read the file {prompt} with the Read tool, once, giving it only that path. "
@@ -41,6 +47,14 @@ _REFUSED = {  # what Claude Code adds to a record when a run is not as briefed
     "queued_command": "a message to the run after its brief",
     "read_truncation_notice": "a prompt cut short",
 }
+# Each kind of thing Claude Code 2.1 gives every run besides its brief, as
+# four real runs' records show. None of them carries a session's own words.
+_GIVEN = frozenset({
+    "agent_listing_delta", "auto_mode", "credential_org", "date", "deferred_tools_delta",
+    "environment", "instructions", "mcp_instructions_delta", "model", "prompt_snapshot",
+    "session_context", "skill_listing",
+})
+_SAID = frozenset({"text", "thinking", "redacted_thinking", "tool_use"})  # a reply's blocks
 _MODEL_LINE = re.compile(r"\A\s*model:\s*(\S+)\s*$", re.M)
 _NUMBERED = re.compile(r"(\d+)\t(.*)", re.S)
 _REMINDER = "<system-reminder>"  # how Claude Code's own notes to a run begin
@@ -53,11 +67,14 @@ class RaterRefused(ValueError):  # noqa: N818 — named for what the operator se
 @dataclass(frozen=True)
 class Run:
     """What a valid run's record shows: its answer, its agent ID in Claude
-    Code, and each instructions file it was given, by path, type and hash."""
+    Code, each instructions file it was given, by path, type and hash, and
+    how it was set up: its agent type, its effort, Claude Code's version,
+    a hash of its system prompt and each kind of thing it was given."""
 
     answer: str
     agent: str
     instructions: tuple[dict[str, str], ...]
+    given: dict[str, Any]
 
 
 def brief(prompt: Path) -> str:
@@ -98,13 +115,53 @@ def checked(record: Path, prompt: Path) -> Run:
                            f"not {MODEL} alone")
     _briefed_only(said, prompt)
     instructions = _given(lines)
+    agent_type = _agent_type(record)
+    other = sorted({str(b.get("type")) for e in replies for b in _blocks(e)} - _SAID)
+    if other:
+        raise RaterRefused(f"the run's record shows a reply holding {', '.join(other)}, which "
+                           "is neither its words nor one of its two tool calls")
     answer = _answer(said, prompt)
     found = _MODEL_LINE.match(answer)
     if found is None:
         raise RaterRefused("the answer does not start with its model line, `model: <id>`")
     if found.group(1) != MODEL:
         raise RaterRefused(f"the run says it ran on {found.group(1)}, not {MODEL}")
-    return Run(answer=answer, agent=agent_of(lines) or record.stem, instructions=instructions)
+    return Run(answer=answer, agent=agent_of(lines) or record.stem, instructions=instructions,
+               given=_setup(lines, agent_type))
+
+
+def _agent_type(record: Path) -> str:
+    """The run's agent type, from the file Claude Code keeps beside its
+    record; refuse any but Claude Code's own :data:`AGENT_TYPE` agent."""
+    beside = record.with_suffix(".meta.json")
+    try:
+        meta = json.loads(beside.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raise RaterRefused(f"{beside.name}: no file beside the record names the run's agent "
+                           "type; a record is entered from where Claude Code wrote it") from None
+    named = meta.get("agentType") if isinstance(meta, dict) else None
+    if named != AGENT_TYPE or meta.get("isBuiltIn") is not True:
+        raise RaterRefused(f"the run was a {named} agent, not Claude Code's own {AGENT_TYPE} "
+                           "agent, which a run is when its session names no other")
+    return AGENT_TYPE
+
+
+def _setup(lines: list[dict[str, Any]], agent_type: str) -> dict[str, Any]:
+    """How the run was set up, so two runs' set-ups can be told apart: its
+    agent type, its effort, Claude Code's version, a hash of its system
+    prompt, and each kind of thing it was given."""
+    replies = [e for e in lines if e.get("type") == "assistant"]
+    given = [e["attachment"] for e in lines
+             if e.get("type") == "attachment" and isinstance(e.get("attachment"), dict)]
+    prompts = {json.dumps(a.get("systemPrompt"), sort_keys=True, ensure_ascii=False)
+               for a in given if a.get("type") == "prompt_snapshot"}
+    return {
+        "agent_type": agent_type,
+        "effort": ", ".join(sorted({str(e.get("effort")) for e in replies})),
+        "version": ", ".join(sorted({str(e.get("version")) for e in replies})),
+        "system_prompt": hashlib.sha256("\n".join(sorted(prompts)).encode()).hexdigest(),
+        "kinds": sorted({str(a.get("type")) for a in given}),
+    }
 
 
 def brief_of(lines: list[dict[str, Any]]) -> str | None:
@@ -172,7 +229,8 @@ def _briefed_only(said: list[dict[str, Any]], prompt: Path) -> None:
 
 def _given(lines: list[dict[str, Any]]) -> tuple[dict[str, str], ...]:
     """Each instructions file the run was given; refuse a record that shows a
-    run given anything that could carry the project into its scores."""
+    run given anything that could carry the project into its scores, or
+    anything of a kind no run is known to be given."""
     files = []
     for e in lines:
         attachment = e.get("attachment") if e.get("type") == "attachment" else None
@@ -181,9 +239,16 @@ def _given(lines: list[dict[str, Any]]) -> tuple[dict[str, str], ...]:
         kind = attachment.get("type")
         if kind in _REFUSED:
             raise RaterRefused(f"the run's record shows {_REFUSED[str(kind)]}")
-        if kind == "session_context" and (attachment.get("context") or {}).get("gitStatus"):
+        if kind not in _GIVEN:
+            raise RaterRefused(f"the run's record shows it was given {kind}, which is not a "
+                               "kind of thing Claude Code is known to give every run")
+        context = attachment.get("context") if kind == "session_context" else None
+        if isinstance(context, dict) and context.get("gitStatus"):
             raise RaterRefused("the run was given a git status: a rater's session runs from "
                                "a folder of its own, outside any repository")
+        if context:
+            raise RaterRefused(f"the run was given session context ({', '.join(context)}); a "
+                               "rater's run is given none")
         if kind != "instructions":
             continue
         for given in attachment.get("files") or []:

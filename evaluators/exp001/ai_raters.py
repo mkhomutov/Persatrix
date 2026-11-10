@@ -21,14 +21,16 @@ rater's own session briefs it with this module, never reading a packet:
   cells its prompt asked for, with 0, 1 or 2, or right or wrong, and could
   be read only one way, is refused and enters nothing, so the run is held
   again whole. A cell already scored is never scored again, and nothing is
-  entered once the seal is open. Every run, entered or refused, is logged
-  in :data:`RUNS` with why, and its record is kept with a published copy.
-- :func:`keep` checks and keeps a run that writes the practice notes.
-- :func:`unentered` lists a session's runs that were never logged, and
-  :func:`same_notes` checks both raters' scored prompts hold one set of
-  notes.
-- :func:`differences` lists the cells two raters scored differently, on a
-  practice run only, so they can agree how the anchors apply.
+  entered once the seal is open. A run set up unlike its folder's first, in
+  its effort or the maintainer's own instructions, is refused too. Every
+  run, entered or refused, is logged in :data:`RUNS` with why, what it was
+  given and the harness's commit, and its record is kept with a published
+  copy. Nothing kept is ever written over.
+- :func:`keep` checks and keeps a run that writes the practice notes, and
+  :func:`briefing` gives a prompt's brief once one Read gives it whole.
+
+The checks that look at all of a rater's runs, or at both raters, are in
+:mod:`evaluators.exp001.ai_rater_checks`.
 """
 
 from __future__ import annotations
@@ -41,6 +43,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import tempfile
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
@@ -53,21 +56,22 @@ from evaluators.exp001 import scored
 from evaluators.exp001.ai_rater_runs import (
     MODEL,
     RaterRefused,
+    Run,
     agent_of,
     brief,
-    brief_of,
     checked,
     entries,
     public,
 )
 from evaluators.exp001.judge import criteria_text
-from evaluators.exp001.rating import PEOPLE, RATER_FILES
+from evaluators.exp001.rating import RATER_FILES
 from evaluators.exp001.scoring_run import OPENED
 from evaluators.exp001.sheets import NOT_SCORED, sheet_path
 
 __all__ = [
-    "BATCH_SIZE", "PROMPT_LIMIT", "RUNS", "RaterRefused", "differences", "enter", "keep",
-    "same_notes", "split", "unentered", "write_batches",
+    "BATCH_SIZE", "LINE_LIMIT", "PROMPT_LIMIT", "RUNS", "RaterRefused", "asked_by", "briefing",
+    "enter", "fits", "is_practice", "keep", "runs_logged", "scores_given", "set_up",
+    "sheet_rows", "split", "write_batches",
 ]
 
 BATCH_SIZE = 8
@@ -119,12 +123,10 @@ Start your reply with one line naming the exact model ID you run on, as
 After the model line, give one short reason for each cell. End your reply
 with one JSON block, fenced as ```json, that maps each packet ID above to
 its cells: a memo's criteria as the numbers 0, 1 or 2, and a recall reply's
-questions as "right" or "wrong". For example:
+questions as "right" or "wrong". Its shape, with every score left out:
 
-```json
-{{"0a1b2c3d": {{"C1": 2, "C2": 0, "C3": 2, "C4": 1, "C5": 2}},
- "4e5f6a7b": {{"R1": "right", "R2": "wrong"}}}}
-```
+    {{"<packet ID>": {{"C1": ..., "C2": ..., "C3": ..., "C4": ..., "C5": ...}},
+     "<packet ID>": {{"R1": "...", "R2": "..."}}}}
 
 Give every packet above, every cell listed for it, and nothing else.
 """
@@ -149,13 +151,13 @@ def write_batches(
     size: int = BATCH_SIZE,
 ) -> list[Path]:
     """Write *person*'s packets in *directory* to *out* as one prompt per batch."""
-    practice = _practice(directory)
+    practice = is_practice(directory)
     if practice and notes is not None:
         raise RaterRefused("the practice is scored with no notes: they come from it")
     if not practice and notes is None:
         raise RaterRefused("a scored run is scored with the notes agreed in practice: "
                            "give --notes")
-    header, rows = _read_sheet(directory, person)
+    header, rows = sheet_rows(directory, person)
     packets = split((directory / RATER_FILES / f"{person}.txt").read_text())
     if [pid for pid, _ in packets] != [row[1] for row in rows]:
         raise RaterRefused(f"{person}'s packets are not the packets their sheet lists, in order")
@@ -180,9 +182,9 @@ def write_batches(
 
     batches: list[list[tuple[str, str]]] = []
     for packet in packets:
-        if not _fits(prompt_of([packet])):
+        if not fits(prompt_of([packet])):
             raise RaterRefused(f"packet {packet[0]} alone makes a prompt too long for one Read")
-        if batches and len(batches[-1]) < size and _fits(prompt_of([*batches[-1], packet])):
+        if batches and len(batches[-1]) < size and fits(prompt_of([*batches[-1], packet])):
             batches[-1].append(packet)
         else:
             batches.append([packet])
@@ -195,7 +197,7 @@ def write_batches(
             handle.write(prompt)
         _write_new(path.with_suffix(".json"), {
             "person": person, "batch": path.stem, "prompt_sha256": _sha256(prompt.encode()),
-            "notes_sha256": None if notes is None else _sha256(notes.read_bytes()),
+            "notes_sha256": None if notes is None else _sha256(notes_text.encode()),
             "packets": [pid for pid, _ in batch], "cells": {pid: cells[pid] for pid, _ in batch},
         })
         written.append(path)
@@ -210,16 +212,21 @@ def enter(
     *person*'s sheet in *directory*, exactly as given; the packets entered.
     The record, its published copy and the answer are kept beside the
     prompt, and the run is logged, entered or refused."""
-    if (directory / OPENED).exists():
-        raise RaterRefused("the seal is open, so no score may be entered")
-    asked = _asked(prompt)
-    if asked["person"] != person or _sha256(prompt.read_bytes()) != asked["prompt_sha256"]:
-        raise RaterRefused(f"{prompt} changed after it was written, or is not {person}'s")
+    asked: dict[str, Any] = {}
+
+    def check() -> dict[str, Any]:
+        if (directory / OPENED).exists():
+            raise RaterRefused("the seal is open, so no score may be entered")
+        asked.update(asked_by(prompt))
+        written = asked.get("prompt_sha256")
+        if asked.get("person") != person or _sha256(_prompt_bytes(prompt)) != written:
+            raise RaterRefused(f"{prompt} changed after it was written, or is not {person}'s")
+        return {"packets": asked.get("packets"), "prompt_sha256": written}
 
     def use(answer: str, _: Path) -> tuple[str, ...]:
-        given = _scores(answer, asked["cells"])
+        given = scores_given(answer, asked.get("cells") or {})
         with _locked(sheet_path(directory, person).parent):
-            header, rows = _read_sheet(directory, person)
+            header, rows = sheet_rows(directory, person)
             by_packet = {row[1]: row for row in rows}
             for pid, cells in given.items():
                 row = by_packet.get(pid)
@@ -234,8 +241,7 @@ def enter(
             _write_sheet(directory, person, header, rows)
         return tuple(given)
 
-    return _run(prompt, record, use, now, outcome="entered",
-                logged={"packets": asked["packets"], "prompt_sha256": asked["prompt_sha256"]})
+    return _run(prompt, record, check, use, now, outcome="entered")
 
 
 def keep(
@@ -244,86 +250,65 @@ def keep(
 ) -> Path:
     """Keep the answer to a notes *prompt* that the run's *record* holds,
     checked as a scoring run is; the kept answer's path."""
-    if prompt.with_suffix(".json").exists():
-        raise RaterRefused(f"{prompt} is a batch: its run is entered with rater-enter")
-    return _run(prompt, record, lambda _, answer: answer, now, outcome="kept",
-                logged={"prompt_sha256": _sha256(prompt.read_bytes())})
+    def check() -> dict[str, Any]:
+        if prompt.with_suffix(".json").exists():
+            raise RaterRefused(f"{prompt} is a batch: its run is entered with rater-enter")
+        return {"prompt_sha256": _sha256(_prompt_bytes(prompt))}
+
+    return _run(prompt, record, check, lambda _, answer: answer, now, outcome="kept")
 
 
-def unentered(out: Path, records: Path) -> list[str]:
-    """Each run in *records*, a session's folder of run records, briefed with
-    a prompt in *out* but never logged as entered, kept or refused."""
-    prompts = {brief(p): p for p in out.glob("*.md") if not p.name.endswith(".answer.md")}
-    logged = {r.get("agent") for r in _log(out)}
-    listed = []
-    for path in sorted(records.glob("*.jsonl")):
-        try:
-            lines = entries(path)
-        except RaterRefused:
-            continue
-        prompt = prompts.get(brief_of(lines) or "")
-        if prompt is not None and (agent_of(lines) or path.stem) not in logged:
-            listed.append(f"{path}: a run of {prompt.stem} never entered, kept or refused")
-    return listed
-
-
-def same_notes(outs: Sequence[Path]) -> str:
-    """The hash of the one set of notes every scored prompt in *outs* holds."""
-    held = {side: json.loads(side.read_text()).get("notes_sha256")
-            for out in outs for side in sorted(out.glob("batch-*.json"))}
-    found = set(held.values())
-    if not held or len(found) != 1 or None in found:
-        raise RaterRefused("the raters' batches were not all written with one set of notes: "
-                           + ", ".join(f"{side} {sha}" for side, sha in held.items()))
-    return str(found.pop())
-
-
-def differences(root: Path) -> list[str]:
-    """Each cell the two raters scored differently on the practice run in *root*."""
-    if "windows" in json.loads((root / scored.RUN).read_text()):
-        raise RaterRefused("differences are listed only for a practice run; a scored run's "
-                           "sheets are compared only by its result")
-    first, second = PEOPLE
-    header, rows = _read_sheet(root, first)
-    other = {row[1]: row for row in _read_sheet(root, second)[1]}
-    listed = []
-    for row in rows:
-        for column, (one, two) in enumerate(zip(row, other[row[1]], strict=True)):
-            if column >= _FIXED and one not in ("", NOT_SCORED) and two != one and two:
-                listed.append(f"{row[1]} {header[column]}: {first} {one}, {second} {two}")
-    return listed
+def briefing(prompt: Path) -> str:
+    """The one message a fresh run of *prompt* is given, once the prompt is
+    there and one Read gives it whole."""
+    if not fits(_prompt_bytes(prompt).decode()):
+        raise RaterRefused(f"{prompt} is too long for one Read: a prompt keeps to "
+                           f"{PROMPT_LIMIT} characters and {LINE_LIMIT} lines")
+    return brief(prompt)
 
 
 def _run(
-    prompt: Path, record: Path, use: Callable[[str, Path], _T], now: Callable[[], dt.datetime],
-    *, outcome: str, logged: dict[str, Any],
+    prompt: Path, record: Path, check: Callable[[], dict[str, Any]],
+    use: Callable[[str, Path], _T], now: Callable[[], dt.datetime], *, outcome: str,
 ) -> _T:
-    """Copy one run's *record* beside its *prompt*, check it, keep its
-    published copy and answer, and *use* the answer and its kept file; log
-    the run either way."""
+    """Copy one run's *record* beside its *prompt* and keep its published
+    copy. Then *check* what was asked, check the record, keep the answer and
+    *use* it and its kept file. The run is logged either way, with what
+    *check* found, and nothing kept before is ever written over."""
     out = prompt.parent
+    if not out.is_dir():
+        raise RaterRefused(f"{prompt}: no such prompt")
     with _locked(out):
-        number = 1 + sum(1 for r in _log(out) if r.get("batch") == prompt.stem)
+        log = runs_logged(out)
+        number = 1 + sum(1 for r in log if r.get("batch") == prompt.stem)
+        while any(out.glob(f"{prompt.stem}.run-{number}.*")):
+            number += 1  # an entry that stopped part-way left files; they stay
         stem = f"{prompt.stem}.run-{number}"
         copy = out / f"{stem}.jsonl"
         entry: dict[str, Any] = {"batch": prompt.stem, "run": number, "record": str(record),
-                                 "at": now().isoformat()}
+                                 "at": now().isoformat(), "harness": _harness()}
         try:
             try:
                 shutil.copyfile(record, copy)
+                if record.with_suffix(".meta.json").is_file():
+                    shutil.copyfile(record.with_suffix(".meta.json"),
+                                    copy.with_suffix(".meta.json"))
             except OSError as error:
                 raise RaterRefused(f"{record}: the run's record cannot be read ({error})") from None
             entry["record_sha256"] = _sha256(copy.read_bytes())
-            entry["agent"] = _agent(copy)
-            ran = checked(copy, prompt)
+            lines = entries(copy)
+            entry["agent"] = agent_of(lines)
             published = out / f"{stem}.public.jsonl"
             published.write_text("".join(json.dumps(line, ensure_ascii=False) + "\n"
-                                         for line in public(entries(copy))))
+                                         for line in public(lines)))
+            entry["public_sha256"] = _sha256(published.read_bytes())
+            entry.update(check())
+            ran = checked(copy, prompt)
+            _as_the_first(log, ran)
             answer = out / f"{stem}.answer.md"
             answer.write_text(ran.answer)
             entry.update(agent=ran.agent, model=MODEL, instructions=list(ran.instructions),
-                         public_sha256=_sha256(published.read_bytes()),
-                         answer_sha256=_sha256(answer.read_bytes()), **logged)
+                         given=ran.given, answer_sha256=_sha256(answer.read_bytes()))
             result = use(ran.answer, answer)
         except RaterRefused as refused:
             _append(out / RUNS, {**entry, "outcome": "refused", "why": str(refused)})
@@ -332,14 +317,46 @@ def _run(
         return result
 
 
-def _agent(record: Path) -> str | None:
+def set_up(run: dict[str, Any]) -> dict[str, str]:
+    """What a logged *run* must share with its folder's first: its effort,
+    and each of the maintainer's own instructions files, by hash."""
+    own = sorted(f"{f.get('path')} {f.get('sha256')}" for f in run.get("instructions") or []
+                 if f.get("type") == "User")
+    return {"effort": str((run.get("given") or {}).get("effort")),
+            "the maintainer's own instructions": "; ".join(own) or "none"}
+
+
+def _as_the_first(log: list[dict[str, Any]], ran: Run) -> None:
+    """Refuse a run set up unlike the first run this folder entered or kept."""
+    first = next((r for r in log if r.get("outcome") in ("entered", "kept")), None)
+    if first is None:
+        return
+    was, now = set_up(first), set_up({"given": ran.given, "instructions": ran.instructions})
+    for what, value in now.items():
+        if was[what] != value:
+            raise RaterRefused(f"the run's {what} ({value}) is not what this folder's first "
+                               f"run had ({was[what]}); every run of a rater is set up alike")
+
+
+def _harness() -> str:
+    """The commit of the checkout these commands run from."""
     try:
-        return agent_of(entries(record))
-    except RaterRefused:
-        return None
+        return subprocess.run(
+            ["git", "-C", str(Path(__file__).parent), "rev-parse", "HEAD"],
+            capture_output=True, text=True, check=True, timeout=10,
+        ).stdout.strip() or "unknown"
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
 
 
-def _practice(directory: Path) -> bool:
+def _prompt_bytes(prompt: Path) -> bytes:
+    try:
+        return prompt.read_bytes()
+    except OSError:
+        raise RaterRefused(f"{prompt}: no such prompt") from None
+
+
+def is_practice(directory: Path) -> bool:
     """Whether *directory* is a practice run; a scored run's window is not."""
     own, root = directory / scored.RUN, directory.parent / scored.RUN
     if own.is_file() and "windows" not in json.loads(own.read_text()):
@@ -349,14 +366,15 @@ def _practice(directory: Path) -> bool:
     raise RaterRefused(f"{directory} is neither a practice run nor a scored run's window")
 
 
-def _asked(prompt: Path) -> dict[str, Any]:
+def asked_by(prompt: Path) -> dict[str, Any]:
+    """What the batch *prompt* asks, as rater-batches wrote it beside the prompt."""
     try:
         return dict(json.loads(prompt.with_suffix(".json").read_text()))
-    except (OSError, ValueError):
+    except (OSError, ValueError, TypeError):
         raise RaterRefused(f"{prompt}: no batch beside it that rater-batches wrote") from None
 
 
-def _scores(text: str, asked: dict[str, list[str]]) -> dict[str, dict[str, int | str]]:
+def scores_given(text: str, asked: dict[str, list[str]]) -> dict[str, dict[str, int | str]]:
     """The answer's one JSON block, checked against the cells *asked*."""
     blocks = list(_JSON.finditer(text))
     if not blocks:
@@ -395,8 +413,9 @@ def _once(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return dict(pairs)
 
 
-def _fits(prompt: str) -> bool:
-    return len(prompt) <= PROMPT_LIMIT and prompt.count("\n") < LINE_LIMIT
+def fits(prompt: str) -> bool:
+    """Whether one Read gives *prompt* whole."""
+    return len(prompt) <= PROMPT_LIMIT and prompt.count("\n") <= LINE_LIMIT
 
 
 @contextmanager
@@ -410,11 +429,15 @@ def _locked(folder: Path) -> Iterator[None]:
         os.close(handle)
 
 
-def _log(out: Path) -> list[dict[str, Any]]:
+def runs_logged(out: Path) -> list[dict[str, Any]]:
+    """Every run logged in *out*, a folder of prompts, in the order logged."""
     path = out / RUNS
     if not path.is_file():
         return []
-    return [json.loads(line) for line in path.read_text().split("\n") if line.strip()]
+    try:
+        return [dict(json.loads(line)) for line in path.read_text().split("\n") if line.strip()]
+    except (ValueError, TypeError):
+        raise RaterRefused(f"{path}: a line of the log cannot be read") from None
 
 
 def _append(path: Path, entry: dict[str, Any]) -> None:
@@ -422,7 +445,7 @@ def _append(path: Path, entry: dict[str, Any]) -> None:
         log.write(json.dumps(entry) + "\n")
 
 
-def _read_sheet(directory: Path, person: str) -> tuple[list[str], list[list[str]]]:
+def sheet_rows(directory: Path, person: str) -> tuple[list[str], list[list[str]]]:
     path = sheet_path(directory, person)
     if not path.is_file():
         raise RaterRefused(f"{path}: no sheet; scoring the run writes it blank first")

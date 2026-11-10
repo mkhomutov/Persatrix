@@ -190,22 +190,37 @@ Read. Each prompt holds the rubric, the notes agreed in practice, and the
 cells to score for each packet, taken from the rater's blank sheet. It
 takes no notes on the practice run and needs them on a scored one.
 `rater-brief OUT/batch-01.md` prints the one message a fresh run of that
-prompt is given. `rater-enter` copies the run's own record beside the
-prompt, reads the answer from it and enters it in the sheet exactly as
-given. It refuses a record that shows another model, any message but the
-brief, project instructions, memory or a git status, or a tool call other
-than one Read of the whole prompt. It refuses an answer that does not give
-exactly the cells asked for, or could be read two ways. It never scores a
-cell twice, and logs every run, entered or refused, in `OUT/runs.jsonl`.
+prompt is given, and refuses a prompt one Read would not give whole.
+`rater-enter` copies the run's own record beside the prompt, reads the
+answer from it and enters it in the sheet exactly as given. It refuses a
+record that shows:
 
-Four more commands check the rest:
+- another model, or an agent other than Claude Code's own general-purpose
+  one;
+- any message but the brief, project instructions, memory or a git status;
+- anything of a kind Claude Code is not known to give every run;
+- a tool call other than one Read of the whole prompt;
+- an effort, or a copy of the maintainer's own instructions file, that is
+  not the first run's in its folder.
+
+It refuses an answer that does not give exactly the cells asked for, or
+could be read two ways. It never scores a cell twice. It logs every run,
+entered or refused, in `OUT/runs.jsonl`, with how the run was set up and
+the harness's commit.
+
+Five more commands check the rest:
 
 - `rater-keep PROMPT RECORD` checks and keeps a run that writes the
   practice notes, as `rater-enter` checks a scoring run;
-- `rater-audit OUT RECORDS` lists any run in a session's folder of run
-  records that was never entered, kept or refused;
+- `rater-audit OUT... RECORDS` takes every folder of prompts a session
+  used and its folder of run records. It lists any record no log names,
+  and any logged record that changed or is gone;
 - `rater-same-notes OUT1 OUT2` checks both raters' scored prompts hold one
-  set of notes;
+  set of notes, before the first scored run;
+- `rater-ready DIRECTORY OUT1 OUT2` says whether the seal may open: the
+  notes are one set, every cell is scored, and each sheet holds exactly
+  what its entered runs gave. It lists what differs between the runs'
+  set-ups, for the result;
 - on a practice run, `rater-differences ROOT` lists the cells the two
   raters scored differently, so they can agree on how the anchors apply.
 

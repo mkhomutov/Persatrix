@@ -2,8 +2,9 @@
 
 Before the seal is opened, :func:`progress_words` says how many packets
 each rater has left. Once it is open, :func:`summary` gives the result as
-:mod:`evaluators.exp001.result` works it out, one section per thing part 2
-of the pre-registration names: the rule that fired, or why none did; the
+:mod:`evaluators.exp001.result` works it out. It first names the deviation
+the scores were given under, then gives one section per thing part 2 of
+the pre-registration names: the rule that fired, or why none did; the
 raters' agreement; each check the decision read; what §7 reports without
 deciding; each arm's figures; and each meeting.
 """
@@ -28,6 +29,9 @@ RULES = {
     "rule 4": "the full stack is justified",
 }
 _SHOWN = 5  # packets named when a rater has more left
+# Two AI raters fill the two people's sheets, by the maintainer's decision of
+# 2026-11-10. This document records that departure from part 2.
+DEVIATION = "docs/experiments/EXP-001-deviation-ai-raters.md"
 
 
 def progress_words(progress: Progress) -> str:
@@ -59,8 +63,13 @@ def progress_words(progress: Progress) -> str:
 def summary(result: Mapping[str, Any]) -> str:
     """The result in plain words."""
     where = f", window {result['window']}" if result["window"] is not None else ""
-    lines = [f"EXP-001 {result['run']} run{where}: the seal was opened at {result['opened_at']}",
-             f"Outcome: {_outcome(result['outcome'], result['why'])}"]
+    lines = [f"EXP-001 {result['run']} run{where}: the seal was opened at {result['opened_at']}"]
+    if result.get("deviation"):
+        lines.append("Two AI raters filled person-1's and person-2's sheets in the two people's "
+                     f"place, a deviation from part 2 of the pre-registration "
+                     f"({result['deviation']}): no rule fires as registered, and the outcome "
+                     "below is what the AI-scored figures show.")
+    lines.append(f"Outcome: {_outcome(result['outcome'], result['why'])}")
     if result["scoring_due"] is not None:
         lines.append(f"Scoring was due by {result['scoring_due']}: "
                      + ("finished on time" if result["on_time"] else "finished LATE"))

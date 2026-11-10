@@ -138,7 +138,8 @@ class TestWritingTheBatches:
         assert "C1: Finds the plan's own problems" in text
         assert "An answer is right when it gives every item" in text
         assert "N1: A problem named only in a heading still counts." in text
-        assert _sidecar(prompt)["notes_sha256"] == hashlib.sha256(notes.read_bytes()).hexdigest()
+        held = hashlib.sha256(notes.read_text().strip().encode()).hexdigest()
+        assert _sidecar(prompt)["notes_sha256"] == held and "```json\n" not in text
         drawn = read_packets(window)
         for pid, cells in _sidecar(prompt)["cells"].items():
             packet = drawn.packets[pid]
@@ -397,7 +398,7 @@ class TestEnteringAnAnswer:
         first, second = _batches(window, notes)
         answers = (_answer(first), _answer(second))
         inside, go = threading.Event(), threading.Event()
-        real = ai_raters._read_sheet
+        real = ai_raters.sheet_rows
 
         def slow(directory: Path, person: str) -> tuple[list[str], list[list[str]]]:
             read = real(directory, person)
@@ -406,7 +407,7 @@ class TestEnteringAnAnswer:
                 go.wait(5)
             return read
 
-        monkeypatch.setattr(ai_raters, "_read_sheet", slow)
+        monkeypatch.setattr(ai_raters, "sheet_rows", slow)
         done: list[tuple[str, ...]] = []
         one = threading.Thread(target=lambda: done.append(
             _enter(window, "person-1", first, answers[0])))
@@ -478,7 +479,8 @@ class TestFromTheCommandLine:
             _batches(window, notes, person)
         assert command.main(["rater-same-notes", *(str(_out(window, p))
                                                    for p in ("person-1", "person-2"))]) == 0
-        assert hashlib.sha256(notes.read_bytes()).hexdigest() in capsys.readouterr().out
+        held = hashlib.sha256(notes.read_text().strip().encode()).hexdigest()
+        assert held in capsys.readouterr().out
 
     def test_practice_differences_are_printed(
         self, run: Path, capsys: pytest.CaptureFixture[str],

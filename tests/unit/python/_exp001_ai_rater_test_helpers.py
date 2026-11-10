@@ -9,9 +9,10 @@ per line. A run's first line is its brief; Claude Code then adds what the
 run is given besides it (its environment, its model, the instructions
 files, the date, the account), one ``attachment`` line each, and the system
 reminder that tells a run to hand its answer back. Then come its replies,
-each tool call on a line of its own, and each tool's result. The shape here
-follows a real record of a Fable 5.2 run that read a batch prompt and
-handed its answer back; every value is made up.
+each tool call on a line of its own, and each tool's result. Beside the
+record Claude Code keeps a small file that names the run's agent type. The
+shape here follows a real record of a Fable 5.2 run that read a batch
+prompt and handed its answer back; every value is made up.
 
 Kept apart from the tests so that every AI-rater test module writes the
 same shape. The pattern mirrors ``_exp001_scores_test_helpers.py``: a
@@ -41,8 +42,8 @@ from ._exp001_scores_test_helpers import build_practice
 
 __all__ = [
     "RUBRIC", "answer", "as_window", "attached", "batches", "enter_answer", "first_memo",
-    "given", "held_practice", "notes_file", "out_of", "record", "runs", "said", "scores",
-    "sidecar",
+    "given", "held_practice", "notes_file", "out_of", "record", "replied", "runs", "said",
+    "scores", "sidecar",
 ]
 
 RUBRIC = EXP / "rubric.yaml"
@@ -72,8 +73,9 @@ def said(content: Any, **fields: Any) -> dict[str, Any]:
     return _line("user", message={"role": "user", "content": content}, **fields)
 
 
-def _replied(block: dict[str, Any], model: str) -> dict[str, Any]:
-    return _line("assistant", requestedModel=model, message={
+def replied(block: dict[str, Any], model: str, effort: str = "high") -> dict[str, Any]:
+    """One block of a run's reply, on a line of its own."""
+    return _line("assistant", requestedModel=model, effort=effort, perTurnEffort=effort, message={
         "model": model, "id": "msg_1", "type": "message", "role": "assistant",
         "content": [block], "stop_reason": "tool_use", "usage": {"output_tokens": 1},
     })
@@ -89,7 +91,8 @@ def record(
     calls: list[tuple[str, dict[str, Any]]] | None = None, handback: bool = True,
     first: str | None = None, instructions: list[dict[str, str]] | None = None,
     context: dict[str, Any] | None = None, extra: Iterable[dict[str, Any]] = (),
-    read: Callable[[str], str] | None = None,
+    read: Callable[[str], str] | None = None, agent_type: str | None = "general-purpose",
+    effort: str = "high",
 ) -> Path:
     """The record of a run briefed to read *prompt* that answered *text*.
 
@@ -97,7 +100,8 @@ def record(
     *model*, reads the whole prompt once and hands *text* back. Each keyword
     changes one thing: the tool *calls* it made, no hand-back, a *first*
     message other than the brief, the *instructions* files or *context* it
-    was given, *extra* lines before its answer, or what the Read gave it.
+    was given, *extra* lines before its answer, what the Read gave it, its
+    *agent_type* (none leaves out the file that names it) or its *effort*.
     """
     whole = prompt.read_text() if prompt.exists() else ""
     lines = [
@@ -112,7 +116,7 @@ def record(
         attached("credential_org", organizationUuid="00000000-0000-4000-8000-000000000000"),
         attached("prompt_snapshot", systemPrompt=["You are an agent for Claude Code."]),
         {"type": "api-request", "params": {"model": model}},
-        _replied({"type": "thinking", "thinking": "", "signature": "c2lnbmVk"}, model),
+        replied({"type": "thinking", "thinking": "", "signature": "c2lnbmVk"}, model, effort),
     ]
     for n, (name, given) in enumerate(
         [("Read", {"file_path": str(prompt)})] if calls is None else calls,
@@ -120,19 +124,19 @@ def record(
         result = _numbered(whole) if given.get("file_path") == str(prompt) else "…"
         if read is not None:
             result = read(result)
-        lines += [_replied({"type": "tool_use", "id": f"t{n}", "name": name, "input": given},
-                           model),
+        lines += [replied({"type": "tool_use", "id": f"t{n}", "name": name, "input": given},
+                           model, effort),
                   said([{"type": "tool_result", "tool_use_id": f"t{n}", "content": result}])]
     lines += list(extra)
     if handback:
         lines += [
-            _replied({"type": "tool_use", "id": "h", "name": "SubagentHandback",
-                      "input": {"message": text}}, model),
+            replied({"type": "tool_use", "id": "h", "name": "SubagentHandback",
+                      "input": {"message": text}}, model, effort),
             said([{"type": "tool_result", "tool_use_id": "h",
                    "content": [{"type": "text", "text": '{"success":true}'}]}]),
         ]
     else:
-        lines.append(_replied({"type": "text", "text": text}, model))
+        lines.append(replied({"type": "text", "text": text}, model, effort))
     folder = prompt.parent.parent / "records"
     folder.mkdir(parents=True, exist_ok=True)
     agent = f"a{len(list(folder.glob('agent-*.jsonl'))) + 1:016x}"
@@ -141,6 +145,11 @@ def record(
             line["agentId"] = agent
     path = folder / f"agent-{agent}.jsonl"
     path.write_text("".join(json.dumps(line, ensure_ascii=False) + "\n" for line in lines))
+    if agent_type is not None:
+        path.with_suffix(".meta.json").write_text(json.dumps({
+            "agentType": agent_type, "isBuiltIn": agent_type == "general-purpose",
+            "launchedWithDefaults": True, "description": "A batch", "spawnDepth": 1,
+        }))
     return path
 
 

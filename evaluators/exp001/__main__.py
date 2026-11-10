@@ -34,10 +34,13 @@ rater's batches as prompts (``rater-batches``), gives each to a fresh run
 with the one brief ``rater-brief`` prints, and enters each run's answer
 into the rater's sheet from the run's own record (``rater-enter``). A run
 that writes the practice notes is checked and kept the same way
-(``rater-keep``). ``rater-audit`` lists any run a session never entered,
-kept or refused; ``rater-same-notes`` checks both raters' scored prompts
-hold one set of notes; on a practice run, ``rater-differences`` lists the
-cells the two raters scored differently.
+(``rater-keep``). The checks before the seal opens are in
+:mod:`evaluators.exp001.ai_rater_checks`: ``rater-audit`` lists any run in
+a session's folder of run records that its logs do not name;
+``rater-same-notes`` checks both raters' scored prompts hold one set of
+notes; ``rater-ready`` checks each sheet holds what its entered runs gave.
+On a practice run, ``rater-differences`` lists the cells the two raters
+scored differently.
 """
 
 from __future__ import annotations
@@ -54,7 +57,7 @@ from agents.llm_client import LLMClient
 from agents.llm_offline import MockProvider
 from agents.llm_providers import AnthropicProvider
 from evaluators.exp001 import (
-    ai_rater_runs,
+    ai_rater_checks,
     ai_raters,
     practice,
     practice_report,
@@ -186,20 +189,25 @@ def _rater(args: argparse.Namespace) -> int:
             ):
                 print(path)
         elif args.command == "rater-brief":
-            print(ai_rater_runs.brief(args.prompt))
+            print(ai_raters.briefing(args.prompt))
         elif args.command == "rater-enter":
             entered = ai_raters.enter(args.directory, args.person, args.prompt, args.record)
             print(f"entered {len(entered)} packets from {args.prompt.stem}")
         elif args.command == "rater-keep":
             print(ai_raters.keep(args.prompt, args.record))
         elif args.command == "rater-audit":
-            listed = ai_raters.unentered(args.out, args.records)
-            print("\n".join(listed) if listed else "every run was entered, kept or refused")
+            listed = ai_rater_checks.unentered(args.outs, args.records)
+            print("\n".join(listed) if listed else "every run was entered, kept or refused, "
+                  "and every logged record is here unchanged")
             return 2 if listed else 0
         elif args.command == "rater-same-notes":
-            print(ai_raters.same_notes(args.outs))
+            print(ai_rater_checks.same_notes(args.outs))
+        elif args.command == "rater-ready":
+            for line in ai_rater_checks.ready(args.directory, args.outs):
+                print(f"the result reports: {line}")
+            print("every score is in, as its run gave it: the seal may be opened")
         else:
-            listed = ai_raters.differences(args.root)
+            listed = ai_rater_checks.differences(args.root)
             print("\n".join(listed) if listed else "the two raters agree on every cell")
     except ai_raters.RaterRefused as refused:
         print(refused, file=sys.stderr)
@@ -283,14 +291,21 @@ def _parser() -> argparse.ArgumentParser:
     keeping.add_argument("prompt", type=Path, help="the notes prompt the run answered")
     keeping.add_argument("record", type=Path, help="the run's own record")
     audit = commands.add_parser(
-        "rater-audit", help="list a session's runs that were never entered, kept or refused",
+        "rater-audit", help="list what a session's run records show that its logs do not",
     )
-    audit.add_argument("out", type=Path, help="where the rater's prompts and log are")
+    audit.add_argument("outs", type=Path, nargs="+",
+                       help="every folder of prompts the session used, each with its log")
     audit.add_argument("records", type=Path, help="the session's folder of run records")
     noted = commands.add_parser(
         "rater-same-notes", help="check both raters' scored prompts hold one set of notes",
     )
     noted.add_argument("outs", type=Path, nargs=2, help="each rater's folder of prompts")
+    opening = commands.add_parser(
+        "rater-ready", help="check each sheet holds what its entered runs gave, before the seal",
+    )
+    opening.add_argument("directory", type=Path,
+                         help="the folder holding the packets and the raters' files")
+    opening.add_argument("outs", type=Path, nargs=2, help="each rater's folder of prompts")
     compared = commands.add_parser(
         "rater-differences", help="list the cells two AI raters scored differently in practice",
     )
