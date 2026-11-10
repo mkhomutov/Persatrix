@@ -227,7 +227,8 @@ PR 6c leaves the scoring to a harness PR of its own: reading the people's
 scores and the judge's, opening the seal once every score is in, and the
 figures part 2 names, quality, agreement, the decision and what its §7
 reports, minutes per plan among them. It is step 4 of
-[pre-registration §6](EXP-001-preregistration.md#6-from-here-to-the-result).
+[pre-registration §6](EXP-001-preregistration.md#6-from-here-to-the-result),
+and PR 6d, in the [third part](EXP-001-harness-scoring.md).
 
 ## The practice run on PR 6c's code
 
@@ -275,6 +276,7 @@ report asks for a harness PR before it.
 
 - [EXP-001 harness](EXP-001-harness.md) — the first part: every harness PR,
   and what PRs 1 to 5d leave the next.
+- [The harness, third part](EXP-001-harness-scoring.md) — PR 6d, scoring.
 - [Frozen choices: arm D′'s transcript prefix](EXP-001-harness-choices-d-prime.md)
   — the choices of PRs 5d and 5e.
 - [Frozen choices: the judge](EXP-001-harness-choices-judge.md) — the choices

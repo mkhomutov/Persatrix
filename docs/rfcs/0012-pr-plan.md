@@ -197,7 +197,7 @@ in the PR named:
 
 | PR | Row | Title | Branch | Status | GitHub PR | Merged |
 |----|-----|-------|--------|--------|-----------|--------|
-| 1 | C1 | Organization schema, validation, glossary | `feature/v040-rfc0012-org-schema` | 🔀 | [#1088](https://github.com/mkhomutov/Persatrix/pull/1088) | — |
+| 1 | C1 | Organization schema, validation, glossary | `feature/v040-rfc0012-org-schema` | ✅ | [#1088](https://github.com/mkhomutov/Persatrix/pull/1088) | 2026-11-08 |
 | 2 | C1 | `internal/protocols/`: graph, topology checks, `directs` | `feature/v040-rfc0012-protocols-graph` | ⬜ | — | — |
 | 3 | C1 | Graph loaded into the society tables at startup | `feature/v040-rfc0012-org-load` | ⬜ | — | — |
 | 4 | C1 | Organization read; a persona's organization and role; the guide | `feature/v040-rfc0012-persona-role` | ⬜ | — | — |
