@@ -2,6 +2,7 @@ package main
 
 import (
 	"regexp"
+	"regexp/syntax"
 	"strings"
 	"testing"
 
@@ -29,11 +30,58 @@ func TestPythonRegex_WritesGosReading(t *testing.T) {
 		// Go reads `{,n}` as text; Python would read it as 0..n repeats.
 		{`x{,5}`, `(?a)x\{,5}`},
 		{`x{,}`, `(?a)x\{,}`},
+		// Go reads a count with a leading zero as text, in either bound;
+		// Python would read `x{01}` as one x.
+		{`x{01}`, `(?a)x\{01}`},
+		{`x{00}`, `(?a)x\{00}`},
+		{`x{1,02}`, `(?a)x\{1,02}`},
+		{`x{01,}`, `(?a)x\{01,}`},
+		// Any other brace Go reads as text is escaped too.
+		{`x{a}`, `(?a)x\{a}`},
+		{`x{}`, `(?a)x\{}`},
+		{`x{1`, `(?a)x\{1`},
+		// A repeat Go reads is kept: a count may be a lone 0.
+		{`x{0}`, `(?a)x{0}`},
+		{`x{10}`, `(?a)x{10}`},
+		{`x{0,1}`, `(?a)x{0,1}`},
+		{`x{1,}`, `(?a)x{1,}`},
+		{`x{2,10}`, `(?a)x{2,10}`},
 	}
 	for _, tc := range cases {
 		got, err := pythonRegex(tc.in)
 		if err != nil || got != tc.want {
 			t.Errorf("pythonRegex(%q) = %q, %v; want %q", tc.in, got, err, tc.want)
+		}
+	}
+}
+
+// TestPythonRegex_EscapesTheBracesGoReadsAsText checks every short brace
+// shape against Go's own parser: the brace is escaped exactly when Go reads
+// it as text, and a repeat Go reads is kept as written.
+func TestPythonRegex_EscapesTheBracesGoReadsAsText(t *testing.T) {
+	tails, level := []string{""}, []string{""}
+	for range 5 {
+		var next []string
+		for _, tail := range level {
+			for _, c := range "01a,}" {
+				next = append(next, tail+string(c))
+			}
+		}
+		tails, level = append(tails, next...), next
+	}
+	for _, tail := range tails {
+		in := "x{" + tail
+		re, err := syntax.Parse(in, syntax.Perl)
+		if err != nil {
+			continue // Go refuses it, so no pattern has this shape
+		}
+		// Go prints a brace it read as text escaped.
+		want := `(?a)x{` + tail
+		if strings.Contains(re.String(), `\{`) {
+			want = `(?a)x\{` + tail
+		}
+		if got, err := pythonRegex(in); err != nil || got != want {
+			t.Errorf("pythonRegex(%q) = %q, %v; want %q (Go reads %s)", in, got, err, want, re)
 		}
 	}
 }

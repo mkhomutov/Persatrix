@@ -84,10 +84,12 @@ Merged as [#1072](https://github.com/mkhomutov/Persatrix/pull/1072) on
 
 ## PR 3a — `feature/v040-rfc0028-redactor`
 
-Opened as [#1086](https://github.com/mkhomutov/Persatrix/pull/1086).
+Merged as [#1086](https://github.com/mkhomutov/Persatrix/pull/1086) on
+2026-11-04.
 
 **Review findings** (PR 3a; F-8 to F-19 from a second review of the fixed
-branch), from two independent reviews; the severities are this record's own:
+branch, F-20 from a review after the merge), from three independent
+reviews; the severities are this record's own:
 
 | Finding | Severity | Description | Disposition |
 |---------|----------|-------------|-------------|
@@ -110,3 +112,4 @@ branch), from two independent reviews; the severities are this record's own:
 | F-17 | Info | `redact_text` built a function for each pattern on every string, and the walk built its type check on every call | Fixed in-PR: the markers are plain-text templates made once, and the type check is a constant |
 | F-18 | Low | The freshness test called any generator failure a stale file, so a pattern the rewrite refuses told the developer to regenerate, which fails the same way | Fixed in-PR: a failure that names no stale file says the generator failed; a negative control for each case |
 | F-19 | Info | About 1 440 changed lines against the ~350 estimate and the plan header's 500-line rule, recorded nowhere | Noted: about 220 lines are generated and about 400 are tests; the translator is what keeps the copy from leaking, so it stays with the redactor |
+| F-20 | Low | F-9's fix covered only `{,`. Go also reads a repeat count with a leading zero as text, where Python reads `x{01}` as one x and refuses `x{10,01}`. No pattern has that shape. Found by Copilot on [#1088](https://github.com/mkhomutov/Persatrix/pull/1088), whose diff still carried this PR's files | Fixed in [#1092](https://github.com/mkhomutov/Persatrix/pull/1092): every `{` Go reads as text is written `\{`, and a test checks each short brace shape against Go's own parser. A scratch run over 3 889 shapes found no match that differs from Go, against 116 before |
