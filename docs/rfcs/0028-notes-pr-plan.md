@@ -116,9 +116,9 @@ reviews; the severities are this record's own:
 
 ## PR 3 — `feature/v040-rfc0028-decision-log`
 
-Opened as [#1090](https://github.com/mkhomutov/Persatrix/pull/1090), stacked
-on PR 3a's [#1086](https://github.com/mkhomutov/Persatrix/pull/1086) until
-that merged.
+Merged as [#1090](https://github.com/mkhomutov/Persatrix/pull/1090) on
+2026-11-10. It was stacked on PR 3a's
+[#1086](https://github.com/mkhomutov/Persatrix/pull/1086) until that merged.
 
 **Review findings** (PR 3), from one independent review:
 
