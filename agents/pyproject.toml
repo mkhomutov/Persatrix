@@ -113,8 +113,8 @@ dev = [
     # because mypy-protobuf output differs across minor versions
     # (3.5 → 3.6 swapped `typing_extensions.final` for `typing.final`
     # and rewrote `Literal` references) — the same reason CI pins
-    # protoc to an exact version (`.github/workflows/ci.yml` →
-    # arduino/setup-protoc, version: "34.1"). Without an exact pin,
+    # protoc to an exact version (`.github/actions/setup-protoc`,
+    # PROTOC_VERSION "34.1"). Without an exact pin,
     # `make proto-python-check` flips red whenever pip resolves a
     # newer 3.x release. The 4.x line is excluded because it requires
     # protobuf>=6 while the runtime closure above caps protobuf<6

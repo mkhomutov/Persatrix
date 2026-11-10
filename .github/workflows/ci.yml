@@ -185,11 +185,8 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          version: "34.1"  # pin to exact version to match committed stubs
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install protoc  # the release and its checksum are pinned in the action
+        uses: ./.github/actions/setup-protoc
 
       - name: Install Go protoc plugins
         run: |
@@ -212,11 +209,8 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          version: "34.1"  # pin to exact version to match committed stubs
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install protoc  # the release and its checksum are pinned in the action
+        uses: ./.github/actions/setup-protoc
 
       # Every job here installs the Python dependencies through `make
       # build-agents`, which pins them to .github/python-constraints.txt. A bare
@@ -409,12 +403,9 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install protoc
+      - name: Install protoc  # the release and its checksum are pinned in the action
         if: steps.changes.outputs.wake_path == 'true'
-        uses: arduino/setup-protoc@v3
-        with:
-          version: "34.1"  # pin to exact version to match committed stubs
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
+        uses: ./.github/actions/setup-protoc
 
       - name: Install dependencies
         if: steps.changes.outputs.wake_path == 'true'

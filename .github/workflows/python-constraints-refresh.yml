@@ -73,10 +73,7 @@ jobs:
       # The required Python job's toolchain, so a check that passes here
       # passes there.
       - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          version: "34.1"
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
+        uses: ./.github/actions/setup-protoc
 
       - name: Install the pinned uv
         run: make uv-install
