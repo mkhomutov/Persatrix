@@ -55,6 +55,14 @@ A model call that scores an experiment's outputs with the same rubric, anchors
 and answer keys as the human raters, without knowing which arm produced each
 output. It is one rater among several, never the only one.
 
+### AI rater
+A model that scores an experiment's outputs in place of a person, with that
+person's packets, rubric and anchors, each batch in a fresh run that sees
+nothing else. Unlike the LLM judge it is not a pre-registered rater: putting
+one in a person's place is a deviation, which the result states first.
+EXP-001's two people were replaced this way
+([the deviation](../experiments/EXP-001-deviation-ai-raters.md)).
+
 ### Version-train gate
 The rule that work slotted for a later version does not merge while the
 current release is uncut, even when requested — the sequencing is flagged

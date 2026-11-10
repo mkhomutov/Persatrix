@@ -170,6 +170,29 @@ minutes per plan ran from 0.3 for arm A's one call to about 15 for D′'s
 discussions, and every meeting showed what closed it: the idle window,
 or the depth cap in three of arm B's.
 
+## AI raters in the people's place
+
+On 2026-11-10 the maintainer decided that two AI raters score the scored
+run in the two people's place. That is a
+[deviation](EXP-001-deviation-ai-raters.md) from part 2, and it sets the
+rules they follow. Each rater's own session briefs it with three commands,
+and never reads a packet itself. For rater 1, on the scored run:
+
+```bash
+python -m evaluators.exp001 rater-batches ~/exp001/scored/window-1 person-1 OUT --notes NOTES
+python -m evaluators.exp001 rater-enter ~/exp001/scored/window-1 person-1 OUT/batch-01.md ANSWER --model MODEL
+```
+
+`rater-batches` splits the rater's packet file into prompts of eight
+packets each, in the rater's order. Each prompt holds the rubric, the notes
+agreed in practice, and the cells to score for each packet, taken from the
+rater's blank sheet. A fresh run answers one prompt. `rater-enter` enters
+that answer in the sheet exactly as given. It refuses an answer from
+another model, or one that does not give exactly the cells asked for, and
+it never scores a cell twice. On a practice run,
+`python -m evaluators.exp001 rater-differences ROOT` lists the cells the two
+raters scored differently, so they can agree on how the anchors apply.
+
 ## What PR 6d leaves
 
 Step 5 of pre-registration §6 writes `docs/experiments/EXP-001-result.md`

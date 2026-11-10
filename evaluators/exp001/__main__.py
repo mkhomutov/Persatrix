@@ -27,6 +27,12 @@ drawn and judged (:mod:`evaluators.exp001.scoring_run`). It writes each
 person a blank score sheet the first time and says how many packets each
 rater has left; with ``--open``, once every score is in, it opens the seal
 and writes the result. It makes no model call.
+
+``rater-batches``, ``rater-enter`` and ``rater-differences`` are for the AI
+raters who score in the two people's place
+(:mod:`evaluators.exp001.ai_raters`): a rater's session writes its rater's
+batches as prompts, enters each run's answer into the rater's sheet, and,
+on a practice run, lists the cells the two raters scored differently.
 """
 
 from __future__ import annotations
@@ -43,6 +49,7 @@ from agents.llm_client import LLMClient
 from agents.llm_offline import MockProvider
 from agents.llm_providers import AnthropicProvider
 from evaluators.exp001 import (
+    ai_raters,
     practice,
     practice_report,
     result_report,
@@ -57,6 +64,7 @@ from evaluators.exp001.judge import JudgePrompts, load_prompts
 from evaluators.exp001.materials import load_materials
 from evaluators.exp001.packets import load_adviser_names
 from evaluators.exp001.panel import load_panel
+from evaluators.exp001.rating import PEOPLE
 from evaluators.exp001.sheets import SheetError
 
 MATERIALS = REPO / "evaluators" / "experiments" / "EXP-001"
@@ -72,6 +80,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _scored(args)
     if args.command == "score":
         return _score(args)
+    if args.command.startswith("rater-"):
+        return _rater(args)
     arms = tuple(args.arms)
     if len(set(arms)) != len(arms):
         parser.error("name each arm once")
@@ -160,6 +170,28 @@ def _score(args: argparse.Namespace) -> int:
     return 0
 
 
+def _rater(args: argparse.Namespace) -> int:
+    """One step of an AI rater's session; what the rater rules refuse fails."""
+    try:
+        if args.command == "rater-batches":
+            for path in ai_raters.write_batches(
+                args.directory, args.person, args.out, rubric=MATERIALS / "rubric.yaml",
+                notes=args.notes,
+            ):
+                print(path)
+        elif args.command == "rater-enter":
+            entered = ai_raters.enter(args.directory, args.person, args.prompt, args.answer,
+                                      model=args.model)
+            print(f"entered {len(entered)} packets from {args.prompt.stem}")
+        else:
+            listed = ai_raters.differences(args.root)
+            print("\n".join(listed) if listed else "the two raters agree on every cell")
+    except ai_raters.RaterRefused as refused:
+        print(refused, file=sys.stderr)
+        return 2
+    return 0
+
+
 def _provider(name: str) -> tuple[LLMClient, Alias, JudgePrompts | None]:
     """The client, model alias and judge's prompts either run is held with on
     the provider *name*: offline, the mock provider's alias, and no judging."""
@@ -207,6 +239,29 @@ def _parser() -> argparse.ArgumentParser:
         "--open", dest="open_seal", action="store_true",
         help="once every score is in, open the seal and write the result",
     )
+    batches = commands.add_parser(
+        "rater-batches", help="write an AI rater's packets as one prompt per batch",
+    )
+    batches.add_argument("directory", type=Path,
+                         help="the folder holding the packets and the raters' files")
+    batches.add_argument("person", choices=PEOPLE, help="whose sheet the rater fills")
+    batches.add_argument("out", type=Path, help="where the prompts go, outside the run")
+    batches.add_argument("--notes", type=Path,
+                         help="the notes agreed in practice; none for the practice itself")
+    entering = commands.add_parser(
+        "rater-enter", help="enter an AI rater's answer into its sheet, exactly as given",
+    )
+    entering.add_argument("directory", type=Path,
+                          help="the folder holding the packets and the raters' files")
+    entering.add_argument("person", choices=PEOPLE, help="whose sheet the rater fills")
+    entering.add_argument("prompt", type=Path, help="the batch's prompt")
+    entering.add_argument("answer", type=Path, help="the run's answer to it")
+    entering.add_argument("--model", required=True,
+                          help="the exact model ID the rater runs on; any other is refused")
+    compared = commands.add_parser(
+        "rater-differences", help="list the cells two AI raters scored differently in practice",
+    )
+    compared.add_argument("root", type=Path, help="the practice run's directory")
     return parser
 
 

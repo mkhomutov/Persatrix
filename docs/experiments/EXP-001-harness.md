@@ -179,6 +179,9 @@ and PR 6d's in its seventh, [scoring](EXP-001-harness-choices-scoring.md).
 - [EXP-001 pre-registration](EXP-001-preregistration.md) — materials, arms
   and the run.
 - [Part 2: scoring and the decision](EXP-001-preregistration-scoring.md).
+- [Deviation: two AI raters](EXP-001-deviation-ai-raters.md) — the
+  maintainer's 2026-11-10 decision that two AI raters score in the two
+  people's place, and the rules they follow.
 - [The harness, second part](EXP-001-harness-run.md) — the judge, the
   practice run, what it showed, PR 5e and the scored run.
 - [The harness, third part](EXP-001-harness-scoring.md) — PR 6d, scoring
