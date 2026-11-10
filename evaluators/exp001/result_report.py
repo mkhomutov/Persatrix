@@ -13,7 +13,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
+from evaluators.exp001.arm_a import ARM as ARM_A
 from evaluators.exp001.costs import REPRICE_MODEL
+from evaluators.exp001.judge import RATER
 
 if TYPE_CHECKING:
     from evaluators.exp001.scoring_run import Progress
@@ -38,12 +40,19 @@ def progress_words(progress: Progress) -> str:
         lines.append(f"  wrote {person}'s blank score sheet: {progress.sheets[person]}")
     for rater, left in progress.left.items():
         named = ", ".join(left[:_SHOWN]) + (", ..." if len(left) > _SHOWN else "")
-        lines.append(f"  {rater}: " + (f"{len(left)} left ({named})" if left else "every score in"))
-    if progress.judge_cap_reached:
-        lines.append("  the judge's cap stopped it before every packet: the result will be "
-                     "inconclusive")
-    lines.append("Every score is in: open the seal with --open" if progress.complete
-                 else "The seal opens only once every score is in")
+        if rater == RATER and progress.judge_cap_reached:
+            # Its batch is over, but not every packet has its score.
+            lines.append(f"  {rater}: stopped by its cap, {len(progress.never_judged)} packets "
+                         "never judged: the result will be inconclusive")
+        else:
+            lines.append(f"  {rater}: "
+                         + (f"{len(left)} left ({named})" if left else "every score in"))
+    if not progress.complete:
+        lines.append("The seal opens only once every score is in")
+    elif progress.judge_cap_reached:
+        lines.append("Scoring is over: open the seal with --open")
+    else:
+        lines.append("Every score is in: open the seal with --open")
     return "\n".join(lines) + "\n"
 
 
@@ -76,7 +85,7 @@ def summary(result: Mapping[str, Any]) -> str:
     for arm, figures in result["arms"].items():
         lines += _arm_words(arm, figures)
     lines += ["", "Each meeting:"]
-    lines += [f"  {m['series']} {m['arm']} {m['meeting']}: {_meeting_words(m)}"
+    lines += [f"  {m['series']} {m['arm']} {m['meeting']}: {meeting_words(m)}"
               for m in result["meetings"]]
     return "\n".join(lines) + "\n"
 
@@ -136,8 +145,16 @@ def _arm_words(arm: str, f: Mapping[str, Any]) -> list[str]:
     ]
 
 
-def _meeting_words(m: Mapping[str, Any]) -> str:
-    words = [f"closed by {m['closed_by']}" if m["closed_by"] else "one call"]
+def meeting_words(m: Mapping[str, Any]) -> str:
+    """One meeting's finished try in plain words: what closed its
+    discussion, and what it left. Only arm A's meeting is one call; a
+    channel arm's with nothing to close it never closed, or left no record."""
+    if not m["recorded"]:
+        words = ["no record"]
+    elif m["closed_by"]:
+        words = [f"closed by {m['closed_by']}"]
+    else:
+        words = ["one call" if m["arm"] == ARM_A else "never closed"]
     if m["energy"]:
         words.append("energy " + ", ".join(
             f"{adviser} {'none' if level is None else f'{level:.2f}'}"
@@ -147,6 +164,9 @@ def _meeting_words(m: Mapping[str, Any]) -> str:
         words.append(f"{m['minutes']:.1f} minutes")
     if m["cut"]:
         words.append(f"memo cut at 400 of {m['words']} words")
+    if m["answered"] is False:  # None at a briefing, which asks for no answer
+        words.append("no reply, every answer wrong" if m["kind"] == "recall"
+                     else "no memo, scored 0")
     return "; ".join(words)
 
 

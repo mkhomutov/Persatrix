@@ -1,7 +1,7 @@
 # EXP-001 — The harness, third part: scoring
 
 > **Status**: 🚧 **In Progress** — PR 6d ([#1091](https://github.com/mkhomutov/Persatrix/pull/1091)), the scoring, is the last harness PR; its choices freeze when it merges.
-> **Last updated**: 2026-11-07
+> **Last updated**: 2026-11-10
 > **Part of**: the [EXP-001 harness](EXP-001-harness.md), whose first part lists every harness PR; the [second part](EXP-001-harness-run.md) holds the judge, the practice run and the scored run
 
 The [second part](EXP-001-harness-run.md) reached its size limit, so PR
@@ -59,27 +59,55 @@ earlier facts, which is a control plan, every criterion on a recall reply,
 and every question on a memo. A packet with a cell still empty is not yet
 scored. Anything else that is not a score, a mark on a cell with a dash, a
 packet the person was not given, one listed twice or one left out is
-refused with its row, never guessed at. A spreadsheet can turn a packet ID
-such as `12e45678` into a number. That ID is then refused, so the sheet is
-opened again with the packet column as text.
+refused with its row, never guessed at. So is a row whose `number` or
+`kind` is no longer its packet's. Sorting one column apart from the rest
+moves IDs to other rows, and only those two cells can tell.
+
+A spreadsheet can turn a packet ID such as `12e45678` into a number, or
+drop the zeros an ID begins with. About one ID in a hundred is at risk, so
+a scored run's sheet is more likely than not to hold one. That ID is then
+refused, and the refusal names the ID the row's number points to. The
+person puts it back, and keeps the packet column as text whenever a
+spreadsheet opens the sheet.
+
+A sheet is read however a spreadsheet saves it, as long as every cell is
+kept: with a byte order mark, with any line ends, and with semicolons or
+tabs between the cells where a spreadsheet writes those instead of commas.
+It must be UTF-8. One saved in another encoding is refused, and the refusal
+says how to save it.
 
 ## Opening the seal
 
 Every score is in when each person's sheet scores every packet they were
 given and the judge's batch is over: every packet answered, or the judge's
-$25 cap reached. The judge's answers are read as they were kept, asking
-nothing. An answer asked with another prompt, or one the harness cannot
-read, is a harness fault, as it was when the batch was judged.
+$25 cap reached. A judge its cap stopped is shown as stopped, with the
+number of packets it never judged, not as every score in. The judge's
+answers are read as they were kept, asking nothing. An answer asked with
+another prompt, or one the harness cannot read, is a harness fault, as it
+was when the batch was judged.
 
 When the seal opens and the result is worked out, the harness keeps
-`opened.json` beside the packets: the moment, a SHA-256 of each person's
-scores, and one of each file the harness wrote that the result reads. A
-sheet saved again with the same scores still reads. That moment is when
-scoring finished, so scoring is on time when it falls within 21 days of the
-last scored meeting's end, the date the scored run's report gives and
-scoring repeats each time: the seal is opened by then. A score or file that
-changes after it is refused, since no score may change once the arms are
-known.
+`opened.json` beside the packets. It holds the moment, and a SHA-256 of:
+
+- each person's scores, so a sheet saved again with the same scores still
+  reads;
+- the judge's answers and calls, the packets and the seal;
+- the result itself.
+
+That moment is when scoring finished, so scoring is on time when it falls
+within 21 days of the last scored meeting's end, the date the scored run's
+report gives and scoring repeats each time: the seal is opened by then.
+
+No score may change once the arms are known. So every later look works the
+result out again and compares it with the one kept:
+
+- A changed score, or a change to one of the files named above, is refused
+  by name.
+- Anything else that changes the result is refused too. That covers each
+  arm's calls and records, which its dollars and minutes come from, and the
+  run's own state, which holds the due date.
+- A run that holds `scores.json` but no `opened.json` is refused as well.
+  Its seal was opened before, and it is not opened a second time.
 
 A scored run is scored only when its report would call it complete: its
 last window is closed by no fault and holds the packets of four series or
@@ -94,7 +122,7 @@ the run's directory:
 
 - **The rule that fires**, or why none does: an incomplete run, the raters'
   agreement below 0.4, scoring finished late, or the judge's cap reached
-  (part 2 §4 to §6).
+  (part 2 §4 to §6). Every cause that holds is named, not only the first.
 - **Agreement**: each pair of raters' per-plan rank correlation, averaged
   over the plans, with the plans used and skipped, the same correlation
   over every memo at once, and the three pairs' average (§4).
@@ -114,7 +142,9 @@ the run's directory:
   never written scoring 0; and each recall answer's marks.
 - **Each meeting**: what closed the discussion, each adviser's energy at the
   memo turn, whether the memo was cut at 400 words, and a plan's minutes
-  from the operator's message to the finished memo (§7).
+  from the operator's message to the finished memo (§7). A discussion that
+  never closed, a try that left no record and an answer never written each
+  say so.
 
 If the judge's cap stops it before every packet, the judge's scores cannot
 be averaged in, so the result is inconclusive and every figure is the two

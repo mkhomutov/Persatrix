@@ -178,3 +178,91 @@ class TestReadingASheet:
     def test_a_sheet_that_is_missing_is_refused(self, tmp_path: Path) -> None:
         with pytest.raises(SheetError, match="no score sheet"):
             read_sheet(sheet_path(tmp_path, "person-1"), _drawn(), "person-1")
+
+    def test_a_changed_id_names_the_id_its_rows_number_points_to(self, sheet: Path) -> None:
+        rows = _rows(sheet)
+        rows[2][1] = "1.2E+46"  # the second row: p1, which a spreadsheet read as a number
+        with sheet.open("w", newline="") as out:
+            csv.writer(out).writerows(rows)
+        with pytest.raises(SheetError, match=r"Number 2 of person-1's packets is p1: put that ID"):
+            read_sheet(sheet, _drawn(), "person-1")
+        rows[2][0] = ""  # and with its number gone too, the person's packet file has it
+        with sheet.open("w", newline="") as out:
+            csv.writer(out).writerows(rows)
+        with pytest.raises(SheetError, match=r"heading in person-1\.txt"):
+            read_sheet(sheet, _drawn(), "person-1")
+
+    @pytest.mark.parametrize(("column", "cell", "match"), [
+        (0, "3", r"p3 is number 1 of person-1's packets and a recall.*number '3'"),
+        (2, "memo", r"p3 is number 1 of person-1's packets and a recall.*kind 'memo'"),
+    ])
+    def test_a_row_whose_number_or_kind_is_another_packets_is_refused(
+        self, sheet: Path, column: int, cell: str, match: str,
+    ) -> None:
+        _fill(sheet, _FULL)
+        rows = _rows(sheet)
+        rows[1][column] = cell
+        with sheet.open("w", newline="") as out:
+            csv.writer(out).writerows(rows)
+        with pytest.raises(SheetError, match=match):
+            read_sheet(sheet, _drawn(), "person-1")
+
+    def test_ids_moved_between_rows_of_one_shape_are_refused(self, tmp_path: Path) -> None:
+        # Sorting the packet column apart from its rows moves IDs between
+        # rows; two plan memos' rows take the same cells, so only each
+        # row's number can tell.
+        counter = itertools.count(1)
+        blinded = blind(
+            [PRACTICE],
+            {MemoRef("B", PRACTICE.id, PLAN.id): "## Recommendation\nA.",
+             MemoRef("C", PRACTICE.id, PLAN.id): "## Recommendation\nB."},
+            {}, (), new_id=lambda: f"p{next(counter)}",
+        )
+        order = ["p1", "p2"]
+        drawn = Drawn({p.id: p for p in blinded.memo_packets},
+                      {"person-1": order, "person-2": order, "judge": order})
+        write_blank_sheets(tmp_path, drawn)
+        sheet = sheet_path(tmp_path, "person-1")
+        _fill(sheet, {"p1": _FULL["p1"], "p2": {**_FULL["p1"], "C1": "0"}})
+        assert read_sheet(sheet, drawn, "person-1").memos["p1"]["C1"] == 2
+        rows = _rows(sheet)
+        rows[1][1], rows[2][1] = rows[2][1], rows[1][1]
+        with sheet.open("w", newline="") as out:
+            csv.writer(out).writerows(rows)
+        with pytest.raises(SheetError, match="an ID has moved from its row"):
+            read_sheet(sheet, drawn, "person-1")
+
+    def test_a_number_or_kind_a_spreadsheet_respelled_or_emptied_still_reads(
+        self, sheet: Path,
+    ) -> None:
+        _fill(sheet, _FULL)
+        rows = _rows(sheet)
+        rows[1][0], rows[1][2] = "1.0", " Recall "
+        rows[2][0], rows[2][2] = "", ""
+        with sheet.open("w", newline="") as out:
+            csv.writer(out).writerows(rows)
+        assert read_sheet(sheet, _drawn(), "person-1").left == ()
+
+    @pytest.mark.parametrize("delimiter", [";", "\t"])
+    def test_semicolons_or_tabs_between_cells_read_as_commas_do(
+        self, sheet: Path, delimiter: str,
+    ) -> None:
+        # What a spreadsheet saves where the comma is the decimal mark, or as text.
+        _fill(sheet, _FULL)
+        as_given = read_sheet(sheet, _drawn(), "person-1")
+        rows = _rows(sheet)
+        with sheet.open("w", newline="") as out:
+            csv.writer(out, delimiter=delimiter).writerows(rows)
+        assert read_sheet(sheet, _drawn(), "person-1") == as_given
+
+    @pytest.mark.parametrize("saved_as", ["utf-16", "one byte a letter"])
+    def test_a_sheet_not_saved_as_utf_8_is_refused_saying_how_to_save_it(
+        self, sheet: Path, saved_as: str,
+    ) -> None:
+        _fill(sheet, _FULL)
+        if saved_as == "utf-16":
+            sheet.write_bytes(sheet.read_text().encode("utf-16"))
+        else:  # a note beyond the columns, its accented letter saved as one byte
+            sheet.write_bytes(sheet.read_bytes().rstrip() + b",caf" + bytes([0xE9]) + b"\r\n")
+        with pytest.raises(SheetError, match="not saved as UTF-8.*CSV UTF-8"):
+            read_sheet(sheet, _drawn(), "person-1")

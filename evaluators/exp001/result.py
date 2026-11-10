@@ -147,16 +147,21 @@ def _totals(
 def _why(
     decision: Decision, kept: Sequence[str], agreed: Agreement, conditions: Mapping[str, bool],
 ) -> str | None:
-    """Why no rule fires, in the order :func:`decide` asks; None when one does."""
+    """Why no rule fires, None when one does: an incomplete run's reason,
+    or every cause that makes the scores inconclusive, in the order
+    :func:`decide` asks."""
     if decision.outcome is Outcome.INCOMPLETE:
         return "fewer than four series" if len(kept) < MIN_SERIES else "the run is incomplete"
     if decision.outcome is not Outcome.INCONCLUSIVE:
         return None
+    causes = []
     if not agreed.sufficient:
-        return f"the raters' agreement is below {AGREEMENT_FLOOR}"
+        causes.append(f"the raters' agreement is below {AGREEMENT_FLOOR}")
     if not conditions["scoring_on_time"]:
-        return "scoring finished after its 21 days"
-    return "the judge's spend reached its cap"
+        causes.append("scoring finished after its 21 days")
+    if conditions["judge_cap_reached"]:
+        causes.append("the judge's spend reached its cap")
+    return "; ".join(causes)
 
 
 def _agreement(agreed: Agreement) -> dict[str, Any]:

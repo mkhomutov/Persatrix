@@ -138,6 +138,15 @@ class TestWhenNoRuleFires:
         result = _build(run_complete=False)
         assert (result["outcome"], result["why"]) == ("incomplete", "the run is incomplete")
 
+    def test_every_cause_that_holds_is_named(self) -> None:
+        result = _build(on_time=False, judge_cap_reached=True)
+        assert (result["outcome"], result["why"]) == (
+            "inconclusive",
+            "scoring finished after its 21 days; the judge's spend reached its cap",
+        )
+        # The judge's cap does not bear on the rule on the people alone.
+        assert result["people_alone"]["why"] == "scoring finished after its 21 days"
+
     def test_the_rule_on_the_peoples_scores_alone(self) -> None:
         # The judge reads the table upside down: three raters cannot agree,
         # but the two people do, and alone they fire the table's rule.

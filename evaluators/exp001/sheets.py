@@ -17,13 +17,21 @@ with one row per packet in the person's order:
 A cell that does not apply to the packet holds a dash. The harness reads a
 sheet at any time: a packet with a cell still empty is not yet scored, and
 is left. Anything else that is not a score is refused, as is a packet the
-person was not given, one listed twice or one left out, so a sheet a
-spreadsheet changed is never read as other scores than its person gave.
+person was not given, one listed twice or one left out. A row's ``number``
+and ``kind`` must still be its packet's, so an ID that moved to another
+row, as sorting one column apart from the rest moves it, is refused too.
+That is how the harness keeps from reading a sheet a spreadsheet changed as
+other scores than its person gave.
+
+A spreadsheet saves the sheet in its own ways, and those that keep every
+cell are read: a byte order mark, any line ends, semicolons or tabs between
+the cells, and blank rows or columns at the end. The file must be UTF-8.
 """
 
 from __future__ import annotations
 
 import csv
+import io
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -39,6 +47,10 @@ NOT_SCORED = "-"
 _FIXED = ("number", "packet", "kind")
 _SCALE = {"0": 0, "1": 1, "2": 2}
 _MARKS = {"right": True, "wrong": False}
+# What a spreadsheet may put between the cells: the comma the harness writes,
+# a semicolon where the comma is the decimal mark, or a tab.
+_DELIMITERS = (",", ";", "\t")
+_WHOLE = re.compile(r"(\d+)(?:\.0+)?")  # a row's number, as a spreadsheet may respell it
 
 
 class SheetError(ValueError):
@@ -77,8 +89,7 @@ def write_blank_sheets(directory: Path, drawn: Drawn) -> tuple[str, ...]:
         rows = [header]
         for number, packet in enumerate(drawn.order(person), start=1):
             applies = _applies(packet)
-            kind = "memo" if isinstance(packet, MemoPacket) else "recall"
-            rows.append([str(number), packet.id, kind,
+            rows.append([str(number), packet.id, _kind(packet),
                          *("" if c in applies else NOT_SCORED for c in header[len(_FIXED):])])
         with path.open("x", newline="") as sheet:
             csv.writer(sheet).writerows(rows)
@@ -109,35 +120,78 @@ def _cells(
     path: Path, header: list[str], order: Sequence[Packet], person: str,
 ) -> dict[str, dict[str, str]]:
     """Each packet's row, as its score columns' cells; a row for a packet
-    the person was not given, a packet listed twice or one left out is refused."""
-    try:
-        # A spreadsheet may begin the file with a byte order mark.
-        with path.open(newline="", encoding="utf-8-sig") as sheet:
-            rows = list(csv.reader(sheet))
-    except FileNotFoundError:
-        raise SheetError(f"{path}: no score sheet for {person}") from None
-    if not rows or _trimmed(rows[0]) != header:
-        raise SheetError(f"{path}: the columns are not {', '.join(header)}")
-    mine = {p.id for p in order}
+    the person was not given, a packet listed twice or one left out is
+    refused, and so is a row whose number or kind is not its packet's."""
+    rows = _rows(path, header, person)
+    places = {p.id: place for place, p in enumerate(order, start=1)}
     cells: dict[str, dict[str, str]] = {}
     for number, row in enumerate(rows[1:], start=2):
         if not any(cell.strip() for cell in row):
             continue  # a blank row a spreadsheet left
-        packet = row[1].strip() if len(row) > 1 else ""
-        if packet not in mine:
+        given, packet, kind = (row[i].strip() if i < len(row) else "" for i in range(len(_FIXED)))
+        if packet not in places:
             raise SheetError(
                 f"{path}:{number}: packet {packet!r} is not one of {person}'s packets; a "
-                "spreadsheet can change an ID it reads as a number, so open the sheet with "
-                "the packet column as text",
+                "spreadsheet can change an ID it reads as a number. "
+                f"{_put_back(given, order, person)}, and keep the packet column as text "
+                "whenever a spreadsheet opens the sheet",
             )
         if packet in cells:
             raise SheetError(f"{path}:{number}: {packet} is listed twice")
+        place, is_a = places[packet], _kind(order[places[packet] - 1])
+        if (given and _whole(given) != place) or (kind and kind.lower() != is_a):
+            raise SheetError(
+                f"{path}:{number}: {packet} is number {place} of {person}'s packets and a "
+                f"{is_a}, but its row gives number {given!r} and kind {kind!r}: an ID has "
+                "moved from its row, as sorting the packet column apart from the others does",
+            )
         cells[packet] = {c: (row[i].strip() if i < len(row) else "")
                          for i, c in enumerate(header) if i >= len(_FIXED)}
     absent = [p.id for p in order if p.id not in cells]
     if absent:
         raise SheetError(f"{path}: no row for {', '.join(absent)}")
     return cells
+
+
+def _rows(path: Path, header: list[str], person: str) -> list[list[str]]:
+    """The sheet's rows, whichever of the ways a spreadsheet saves it."""
+    try:
+        # A spreadsheet may begin the file with a byte order mark.
+        text = path.read_bytes().decode("utf-8-sig")
+    except FileNotFoundError:
+        raise SheetError(f"{path}: no score sheet for {person}") from None
+    except UnicodeDecodeError:
+        raise SheetError(
+            f'{path}: the sheet is not saved as UTF-8; save it again as CSV in UTF-8 ("CSV UTF-8 '
+            '(Comma delimited)" in Excel)',
+        ) from None
+    for delimiter in _DELIMITERS:
+        try:
+            rows = list(csv.reader(io.StringIO(text, newline=""), delimiter=delimiter))
+        except csv.Error as exc:
+            raise SheetError(f"{path}: not a sheet a spreadsheet saves as CSV ({exc})") from None
+        if rows and _trimmed(rows[0]) == header:
+            return rows
+    raise SheetError(f"{path}: the columns are not {', '.join(header)}")
+
+
+def _put_back(given: str, order: Sequence[Packet], person: str) -> str:
+    """Which ID a row that lost its own should hold, by the row's number;
+    without a number that is one of the person's, where to find it."""
+    place = _whole(given)
+    if place is None or not 1 <= place <= len(order):
+        return f"Put back the ID from that packet's heading in {person}.txt"
+    return f"Number {place} of {person}'s packets is {order[place - 1].id}: put that ID back"
+
+
+def _whole(cell: str) -> int | None:
+    """A row's number as a whole number, None when the cell holds no such thing."""
+    found = _WHOLE.fullmatch(cell)
+    return int(found.group(1)) if found else None
+
+
+def _kind(packet: Packet) -> str:
+    return "memo" if isinstance(packet, MemoPacket) else "recall"
 
 
 def _given(path: Path, packet: Packet, cells: Mapping[str, str]) -> dict[str, str]:

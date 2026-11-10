@@ -17,6 +17,7 @@ raters score by a table (``_exp001_scores_test_helpers.py``).
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import datetime as dt
 import json
 import os
@@ -28,6 +29,7 @@ from typing import Any
 import pytest
 
 from evaluators.exp001 import scoring_run
+from evaluators.exp001.attempts import Held
 from evaluators.exp001.materials import Materials, load_materials
 from evaluators.exp001.result_report import progress_words
 from evaluators.exp001.scoring_run import (
@@ -41,7 +43,8 @@ from evaluators.exp001.scoring_run import (
 from evaluators.exp001.sheets import Sheet, read_sheet, sheet_path
 
 from ._exp001_judge_test_helpers import PROMPTS
-from ._exp001_run_test_helpers import EXP, T0
+from ._exp001_run_test_helpers import EXP, SCORED, T0, channel_meeting
+from ._exp001_scored_test_helpers import _Holds, _scored
 from ._exp001_scores_test_helpers import (
     LONG_MEMO,
     MISSING_MEMO,
@@ -192,6 +195,53 @@ class TestOpeningTheSeal:
         with pytest.raises(ScoringRefused, match="person-2's sheet changed"):
             _score(run)
 
+    def test_a_pairs_call_log_changed_once_open_is_refused(self, run: Path) -> None:
+        # A memo's value is its quality less its arm's dollars, so an arm's
+        # calls bear on every verdict; the result as first worked out is kept.
+        result = _opened(run)
+        assert len(json.loads((run / "window-1" / OPENED).read_text())["result"]) == 64
+        for log in (run / "window-1" / "pairs" / "series-2" / "D").rglob("calls.jsonl"):
+            lines = [json.loads(line) for line in log.read_text().splitlines()]
+            log.write_text("".join(
+                json.dumps({**line, "output_tokens": line["output_tokens"] * 400}) + "\n"
+                for line in lines
+            ))
+        with pytest.raises(ScoringRefused, match="result worked out now differs"):
+            _score(run)
+        assert json.loads((run / RESULT).read_text()) == result
+
+    def test_the_last_scored_meeting_moved_once_open_is_refused(self, run: Path) -> None:
+        result = _opened(run)
+        state = json.loads((run / "run.json").read_text())
+        moved = (T0 - dt.timedelta(days=60)).isoformat()
+        state["windows"][-1]["ended"]["last_scored_meeting_at"] = moved
+        (run / "run.json").write_text(json.dumps(state))
+        with pytest.raises(ScoringRefused, match="result worked out now differs"):
+            _score(run)
+        assert json.loads((run / RESULT).read_text()) == result
+
+    def test_an_opening_kept_with_no_result_is_refused(self, run: Path) -> None:
+        _opened(run)
+        kept = run / "window-1" / OPENED
+        opened = json.loads(kept.read_text())
+        del opened["result"]
+        kept.write_text(json.dumps(opened))
+        with pytest.raises(ScoringRefused, match="keeps no result"):
+            _score(run)
+
+    def test_a_result_whose_opening_is_no_longer_kept_is_never_opened_again(
+        self, run: Path,
+    ) -> None:
+        result = _opened(run)
+        (run / "window-1" / OPENED).unlink()
+        sheet = sheet_path(run / "window-1", "person-2")
+        sheet.write_text(sheet.read_text().replace(",2,", ",1,", 1))
+        for asked in (False, True):
+            with pytest.raises(ScoringRefused, match="the seal was opened before"):
+                _score(run, open_seal=asked)
+        assert not (run / "window-1" / OPENED).exists()
+        assert json.loads((run / RESULT).read_text()) == result
+
     def test_the_rule_the_table_fires_and_the_checks_it_read(self, run: Path) -> None:
         result = _opened(run)
         assert (result["outcome"], result["why"]) == ("rule 4", None)
@@ -261,6 +311,9 @@ class TestWhatCannotBeScored:
     ) -> None:
         # Each judge call costs $5.02, so its fifth reaches the $25 cap.
         await build_scored(tmp_path, judge=ArmJudge(output=200_000))
+        progress = _score(tmp_path)
+        assert progress.judge_cap_reached and len(progress.never_judged) == 119
+        assert "judge: stopped by its cap, 119 packets never judged" in progress_words(progress)
         result = _opened(tmp_path)
         assert result["judge_cap_reached"] is True
         assert result["raters"] == ["person-1", "person-2"]
@@ -306,6 +359,31 @@ class TestWhatCannotBeScored:
     def test_a_directory_with_no_run_is_refused(self, tmp_path: Path) -> None:
         with pytest.raises(ScoringRefused, match="no run"):
             _score(tmp_path)
+
+    async def test_a_discussion_never_closed_and_a_try_with_no_record_say_so(
+        self, tmp_path: Path,
+    ) -> None:
+        open_plan, lost_plan = SCORED[1].scored_meetings[2], SCORED[3].scored_meetings[0]
+        never_closed = dataclasses.replace(
+            channel_meeting(open_plan, 1, 1, arm="C", series=SCORED[1], memo=None),
+            closed_at=None, trigger=None, closed_by=None, memo_turn=None, energy={},
+        )
+        await _scored(tmp_path, _Holds(acts={
+            ("C", SCORED[1].id, open_plan.id, 1, 1): Held(never_closed),
+            # The provider refused a request the runtime built: no record, and not held again.
+            ("B", SCORED[3].id, lost_plan.id, 1, 1): Held(None, errors=("BadRequestError",)),
+        }), ArmJudge())
+        rows = {(m["arm"], m["series"], m["meeting"]): m for m in _opened(tmp_path)["meetings"]}
+        never = rows[("C", SCORED[1].id, open_plan.id)]
+        assert (never["recorded"], never["closed_by"], never["answered"]) == (True, None, False)
+        lost = rows[("B", SCORED[3].id, lost_plan.id)]
+        assert (lost["recorded"], lost["answered"]) == (False, False)
+        briefing = rows[("C", SCORED[1].id, SCORED[1].meetings[0].id)]
+        assert (briefing["recorded"], briefing["answered"]) == (True, None)
+        text = (tmp_path / RESULT_SUMMARY).read_text()
+        assert f"{SCORED[1].id} C {open_plan.id}: never closed; no memo, scored 0\n" in text
+        assert f"{SCORED[3].id} B {lost_plan.id}: no record; no memo, scored 0\n" in text
+        assert f"{SCORED[1].id} A {open_plan.id}: one call; 0.3 minutes\n" in text
 
     async def test_a_practice_run_is_scored_but_fires_no_rule(self, tmp_path: Path) -> None:
         await build_practice(tmp_path)

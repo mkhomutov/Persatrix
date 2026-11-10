@@ -13,11 +13,15 @@ run's, does this:
   answer's arm and no meeting's record.
 - **Once every score is in, and only when asked**, it opens the seal. Once
   the result is worked out, it keeps ``opened.json`` beside the packets: the
-  moment, which is when scoring finished, a SHA-256 of each person's scores
-  as their sheet gave them, and one of each file the harness wrote that the
-  result reads. Opened, the seal stays open, and a score or file that
-  changes after it is refused, since no score may change once the arms are
-  known.
+  moment, which is when scoring finished; a SHA-256 of each person's scores
+  as their sheet gave them; one of the judge's answers and calls, the
+  packets and the seal; and one of the result itself. Opened, the seal
+  stays open, and no score may change once the arms are known. So a later
+  look works the result out again and refuses when it differs from the one
+  kept: that covers every file the result reads, each arm's calls and
+  records and the run's own state included, not only the files named. A
+  result left with no ``opened.json`` beside the packets is refused too,
+  and the seal is not opened a second time.
 - **The result.** It reads every score back through the seal and works out
   the figures of part 2 (:mod:`evaluators.exp001.result`): with them, each
   arm's dollars per plan, at the fixed table and repriced, from its calls as
@@ -89,7 +93,8 @@ from evaluators.exp001.sheets import Sheet, read_sheet, sheet_path, write_blank_
 OPENED = "opened.json"
 RESULT = "scores.json"
 RESULT_SUMMARY = "scores.txt"
-# Each file the harness wrote that the result reads, as ``opened.json`` names it.
+# The files ``opened.json`` names one by one, so a change to one is refused
+# by name. The result's own hash covers every other file the result reads.
 _PINNED = {
     "judge": "the judge's answers",
     "judge_calls": "the judge's calls",
@@ -100,8 +105,8 @@ _PINNED = {
 
 class ScoringRefused(RuntimeError):  # noqa: N818 — named for what the operator sees
     """The run in this directory cannot be scored as asked: it holds no run,
-    is not complete, holds no packets, another run holds it, or a score
-    changed once the seal was open."""
+    is not complete, holds no packets, another run holds it, or a score, a
+    file or the result itself changed once the seal was open."""
 
 
 @dataclass(frozen=True)
@@ -128,6 +133,7 @@ class Progress:
     sheets: dict[str, Path]
     judge_cap_reached: bool
     due: dt.datetime | None  # the last moment scoring finishes on time
+    never_judged: tuple[str, ...] = ()  # the packets the judge's cap left, never to be scored
 
     @property
     def complete(self) -> bool:
@@ -159,6 +165,8 @@ def score(
         except FileNotFoundError:
             raise ScoringRefused(f"{root}: no packets were drawn in this run") from None
         opened = _read_opened(place.directory)
+        if opened is None:
+            _never_opened(root, place)
         written = () if opened else write_blank_sheets(place.directory, drawn)
         sheets = {p: read_sheet(sheet_path(place.directory, p), drawn, p) for p in PEOPLE}
         judged = read_batch(drawn.order(RATER), prompts, place.judging, batch=place.batch)
@@ -173,7 +181,11 @@ def score(
         assert judged is not None  # every score was in when the seal was opened
         report = _result(place, materials, drawn, _seal(place.directory), sheets, judged, at)
         if opened is None:  # kept only once the result is, from the scores it was worked from
-            write_json(place.directory / OPENED, {"at": at.isoformat(), **_held(place, sheets)})
+            write_json(place.directory / OPENED, {
+                "at": at.isoformat(), **_held(place, sheets), "result": _result_sha256(report),
+            })
+        else:
+            _same_result(report, opened)
         write_json(root / RESULT, report)
         (root / RESULT_SUMMARY).write_text(result_report.summary(report))
         return report
@@ -215,6 +227,7 @@ def _progress(
         sheets={p: sheet_path(place.directory, p) for p in PEOPLE},
         judge_cap_reached=judged is not None and judged.cap_reached,
         due=place.due,
+        never_judged=() if judged is None else judged.left,
     )
 
 
@@ -226,9 +239,9 @@ def _seal(directory: Path) -> Seal:
 
 
 def _held(place: Place, sheets: Mapping[str, Sheet]) -> dict[str, Any]:
-    """What the result was worked from: each person's scores as their sheet
-    gave them, so the same scores saved again still read, and every file the
-    harness wrote that the result reads."""
+    """What the result was worked from, named one by one: each person's
+    scores as their sheet gave them, so the same scores saved again still
+    read, and the judge's answers and calls, the packets and the seal."""
     files = {
         "judge": place.judging / REPLIES,
         "judge_calls": place.judging / CALL_LOG,
@@ -253,11 +266,46 @@ def _sha256(path: Path) -> str | None:
         return None
 
 
+def _result_sha256(report: Mapping[str, Any]) -> str:
+    """The result as it is worked out, whatever file or record it came from."""
+    return hashlib.sha256(json.dumps(report, sort_keys=True).encode()).hexdigest()
+
+
 def _read_opened(directory: Path) -> dict[str, Any] | None:
     try:
         return dict(json.loads((directory / OPENED).read_text()))
     except FileNotFoundError:
         return None
+
+
+def _never_opened(root: Path, place: Place) -> None:
+    """Refuse a run that holds a result but no longer what opening kept: the
+    seal was opened before, so the arms are known, and opening it again
+    would let a score change after that."""
+    for name in (RESULT, RESULT_SUMMARY):
+        if (root / name).exists():
+            raise ScoringRefused(
+                f"{root / name} is here, so the seal was opened before, but "
+                f"{place.directory / OPENED} is gone; no score may change once the arms are "
+                f"known, so the seal is not opened again: put {OPENED} back as it was kept",
+            )
+
+
+def _same_result(report: Mapping[str, Any], opened: Mapping[str, Any]) -> None:
+    """Refuse once the result worked out now is not the one kept when the
+    seal was opened: something it is worked out from has changed since."""
+    kept = opened.get("result")
+    if kept is None:
+        raise ScoringRefused(
+            f"{OPENED} keeps no result, so nothing shows the result is the one the seal was "
+            f"opened on at {opened['at']}",
+        )
+    if _result_sha256(report) != kept:
+        raise ScoringRefused(
+            f"the result worked out now differs from the one kept when the seal was opened at "
+            f"{opened['at']}: a file it is worked out from has changed since, an arm's calls "
+            "or records or the run's own state, and no result may change once the arms are known",
+        )
 
 
 def _unchanged(place: Place, sheets: Mapping[str, Sheet], opened: Mapping[str, Any]) -> None:
@@ -374,7 +422,8 @@ def _meetings(
     """Each meeting's finished try, as part 2 §7 reports it: what closed
     the discussion, each adviser's energy at the memo turn, whether the memo
     was cut at 400 words, and a plan's minutes, from the operator's message
-    to the finished memo."""
+    to the finished memo. With them, whether the try left a record at all,
+    and whether the answer the meeting asked for was written."""
     rows = []
     for s in kept:
         for arm in ARMS:
@@ -389,6 +438,9 @@ def _meetings(
                 cut = seal.cuts.get(ref)
                 rows.append({
                     **ref._asdict(), "kind": meeting.kind.value,
+                    "recorded": held is not None,
+                    # A briefing asks for no answer.
+                    "answered": None if meeting.kind is MeetingKind.BRIEFING else written,
                     "closed_by": record.get("closed_by"),
                     "energy": record.get("energy"),
                     "minutes": _minutes(arm, record) if meeting.kind.scored and written else None,
