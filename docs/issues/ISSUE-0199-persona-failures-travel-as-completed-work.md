@@ -1,8 +1,8 @@
 ---
 id: ISSUE-0199
-summary: "The persona runtime reports its own failures as a completed task whose result is an English sentence. A workflow step served by a persona succeeds with the text `LLM provider error`, a persona that runs out of model calls posts that diagnostic into its channel, and a provider failure on a DM publishes nothing, so the person gets a 504."
+summary: "The persona runtime reports its own failures as a completed task whose result is an English sentence. A workflow step served by a persona succeeds with the text `LLM provider error`, a persona that runs out of model calls posts that diagnostic into its channel, and a provider failure, a cut-off reply or a time-out on a DM publishes nothing, so the person gets a 504."
 status: open
-severity: medium
+severity: high
 area: agents/persona_runtime
 created: 2026-11-10
 refs:
@@ -35,6 +35,8 @@ The failure sentences, all carried as `COMPLETE_TASK`:
 | The reply was cut off | `Response truncated: max_tokens limit reached` | `action_loop.py` |
 | The call budget ran out mid tool use | `Max LLM call budget exhausted after N iterations` | `action_loop.py` |
 | The event timed out | `Event processing timed out after Ns` | `persona_runtime/__init__.py` |
+| The provider returned nothing | `No LLM response` | `action_loop.py` |
+| The agent config names no model | `Agent config missing required 'model' field` | `action_loop.py` |
 
 What each caller then does:
 
@@ -51,12 +53,13 @@ What each caller then does:
    no `channel_id`, so it never sees the publish.
 3. **A DM.** A provider error that is not wallet back-pressure (a wrong
    API key, an unknown model, a network failure) returns before reply
-   synthesis, so nothing is published. The chat request waits out its
-   timeout and answers 504. A wallet denial on the same path publishes a
-   structured error reply
+   synthesis, so nothing is published. So do a cut-off reply and an event
+   time-out. The chat request waits out its timeout and answers 504. A
+   wallet denial on the same path publishes a structured error reply
    ([ISSUE-0065](ISSUE-0065-chat-rest-budget-denied-no-channel-reply.md),
    [ISSUE-0066](ISSUE-0066-chat-rest-resource-exhausted-no-channel-reply.md)
-   fixed those two cases only).
+   fixed those two cases only). Both were filed as high, which is why
+   this one is.
 
 ## Impact
 
@@ -69,10 +72,13 @@ What each caller then does:
 
 ## Proposed fix / investigation path
 
-Give failure its own carrier, an exception or a distinct failure action,
-so `handle` can return FAILED. Return before reply synthesis on budget
-exhaustion, as the truncation branch already does. On a DM, publish the
-same `reply_status: error` reply the wallet-denial path publishes.
+- Give failure its own carrier, an exception or a distinct failure
+  action, so `handle` can return FAILED.
+- On a DM, publish the same `reply_status: error` reply the wallet-denial
+  path publishes, for every failure in the table.
+- Only then stop the budget-exhaustion sentence from being published. On
+  a DM that sentence is what answers the chat request today, so removing
+  it first would turn that case into a 504 as well.
 
 ## Notes
 

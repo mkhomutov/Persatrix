@@ -1,8 +1,8 @@
 ---
 id: ISSUE-0231
-summary: "The file-length check counts every line, and about half the lines in the Go and Python production code are comments, so the 500-line mark is really about 250 lines of code. File lengths pile up at the mark: 31 code files sit at 499 or 500 lines and only 6 are over, although the failing limit is now 800."
+summary: "The file-length check counts every line, and about half the lines in the Go and Python production code are comments, so the 500-line mark is really about 250 lines of code. File lengths pile up at the mark: 31 code files sit at 499 or 500 lines and only 6 are over, although the failing limit is now 800. Most of that pile is older than the relaxed limit."
 status: open
-severity: medium
+severity: low
 area: scripts/checks
 created: 2026-11-10
 refs:
@@ -38,14 +38,17 @@ style sheets, YAML and TOML):
 | over 500 | 6 (the longest is 578) |
 
 Share of non-blank lines that are comments or docstrings: Python
-production code 52%, Go production code 47%, Rust 27%, web 25%.
+production code 47%, Go production code 47%, Rust about 26%, and the web
+console 20% with its tests or 27% without. The Python figure covers the 277 files under `agents/` outside tests
+and generated stubs.
 
 The release cycle already records that "a seam chosen by line count
 refills the pile"
 ([ISSUE-0143](ISSUE-0143-debt-sweep-26-files-at-size-cap.md)), and the
-rule was relaxed to a warning at 500 and a failure at 800. Files are
-still kept at or just under 500. What is new here is the reason the mark
-bites so early.
+rule was relaxed on 2026-09-12 to a warning at 500 and a failure at 800.
+Of the 31 files at 499 or 500 lines, 23 were already there that day and
+15 have not been touched since; 8 reached the mark after it. What is new
+here is the reason the mark bites so early.
 
 Signs that the mark, not the code, decides where files end:
 
@@ -63,7 +66,8 @@ Signs that the mark, not the code, decides where files end:
 Comments, which are a strength of this code base, count against the
 file that carries them. The cheapest ways to get under the mark are to
 cut a file at an arbitrary line or to trim the explanation, and the rule
-forbids the second.
+forbids the second. Nothing fails below 800 lines, so today the cost is
+a warning and the habit it keeps alive; that is why this is rated low.
 
 ## Proposed fix / investigation path
 
@@ -76,5 +80,6 @@ ruling, so it needs the maintainer's decision.
 ## Notes
 
 > 2026-11-10 — found by a whole-repository quality review of `main` at
-> `ee9cfaac`; the length counts were measured twice, the comment shares
-> once.
+> `ee9cfaac`; the length counts were measured twice. The Python comment
+> share first read 52%; a recount in review, with comments taken from
+> the tokenizer and docstrings from the syntax tree, gives 47%.

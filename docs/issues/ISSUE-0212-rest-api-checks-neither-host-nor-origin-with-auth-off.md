@@ -8,6 +8,9 @@ created: 2026-11-10
 refs:
   - internal/server/auth_middleware.go
   - internal/server/channel_convene_handlers.go
+  - internal/server/agent_handlers.go
+  - config/ui.yaml
+  - docker-compose.yaml
   - cmd/orchestrator/auth.go
   - docs/rfcs/0039-user-accounts-authentication.md
   - docs/issues/ISSUE-0196-shipped-shell-allowlist-voids-the-file-and-network-rules.md
@@ -38,12 +41,13 @@ Two ways in for a web page the operator visits while the stack runs:
   [ISSUE-0196](ISSUE-0196-shipped-shell-allowlist-voids-the-file-and-network-rules.md).
 - **A plain form post.** Routes that take no body and do not require a
   JSON content type can be called by a cross-site form with no rebinding:
-  unquarantine, session archive, and convene where channel config editing
-  is on.
+  session archive; unquarantine, unless `SECURITY_UNQUARANTINE_TOKEN` is
+  set; and convene on a channel that is already armed, where channel
+  config editing is on, as it is in the shipped `config/ui.yaml`.
 
 Recent Chrome versions ask before a public page reaches a local address,
-which reduces the first path there; other browsers do less. The security
-docs do not mention rebinding.
+which should narrow the first path in that browser; this was not tested
+here. The security docs do not mention rebinding.
 
 ## Impact
 
@@ -53,9 +57,12 @@ local setup.
 
 ## Proposed fix / investigation path
 
-In both auth modes, refuse a request whose `Host` is not an expected name
-(`localhost`, `127.0.0.1`, the configured public name), and refuse writes
-whose `Origin` or `Sec-Fetch-Site` shows another site. Add a line on this
+In both auth modes, refuse a request whose `Host` is not on a list of
+expected names, and refuse writes whose `Origin` or `Sec-Fetch-Site`
+shows another site. The list needs a new setting. The agents reach the
+orchestrator as `orchestrator:8080` on the compose network, so a fixed
+list of `localhost`, `127.0.0.1` and `[::1]` would cut off the whole
+fleet, and no setting for a public name exists today. Add a line on this
 to the auth guide.
 
 ## Notes

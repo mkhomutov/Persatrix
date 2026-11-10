@@ -1,6 +1,6 @@
 ---
 id: ISSUE-0217
-summary: "Two paths hand untrusted text to a model without the `<external_data>` envelope. `shell_exec` output is not listed as an external source, so the same file is fenced when read with `file_read` and unfenced when shown by `git diff`. A workflow step's output is pasted straight into the next step's input, where the next agent reads it as instructions."
+summary: "Two paths hand untrusted text to a model without the `<external_data>` envelope. `shell_exec` output is not listed as an external source, so the same file is wrapped when read with `file_read` and not wrapped when a shell command prints it. A workflow step's output is pasted straight into the next step's input, where the next agent reads it as instructions."
 status: open
 severity: medium
 area: security
@@ -27,9 +27,9 @@ and to be scanned for injection patterns. Two paths skip it.
 
 **Shell output.** `EXTERNAL_TOOL_SOURCES` in `agents/security.py` lists
 `http_request`, `file_read` and `recall_channel_messages`. `shell_exec`
-is not in the map. The shipped `code-writer` may run `git diff`, `python`
-and `pytest`, whose output is largely other people's text: file contents,
-test names, error messages. That output reaches the model as plain tool
+is not in the map. The shipped `code-writer` may run `python`, and
+`pytest` and `git diff` where the image carries them. Their output is
+largely other people's text: file contents, test names, error messages. That output reaches the model as plain tool
 output, on success and on a non-zero exit.
 
 **Step outputs.** `ResolveInputs` (`internal/planner/planner.go`) replaces
@@ -53,8 +53,11 @@ that path ends at a shell.
 ## Proposed fix / investigation path
 
 Add `shell_exec` to `EXTERNAL_TOOL_SOURCES`. Wrap a substituted step
-output as agent output before it is placed in the next step's input, and
-say in the workflow docs that a step's output is data.
+output as agent output before the next agent's model sees it, and say in
+the workflow docs that a step's output is data. Which side wraps is a
+decision to make first: the Go sanitizer only scans and writes no
+envelope, and the agent receives the step input as one string, so it
+cannot tell the substituted part from the workflow author's own words.
 
 ## Notes
 

@@ -30,9 +30,8 @@ a second and asserts `call_count >= 2`. The behaviour is an upper bound;
 the assertion is a lower bound.
 
 With the idle branch changed to keep calling `on_tick`, a control
-measured 9 calls where the unchanged code makes 2, and all 43 tests in
-the seven tick-related files passed, `test_bored_persona_cost.py` among
-them.
+measured 9 calls where the unchanged code makes 2, and the tick-related
+test files all passed, `test_bored_persona_cost.py` among them.
 
 **2. The main turn bills its interaction.** The persona's main model
 call passes `interaction_id=lease_interaction_id` so the wallet lease is
@@ -41,8 +40,10 @@ counted against the interaction's cost ceiling. The only guard is
 literal occurs somewhere in `action_loop.py`. The same literal now also
 appears in the later revise call in that file.
 
-With the argument removed from the main call, all 833 tests in the 71
-files that mention the wallet, a lease or an interaction id passed.
+With the argument removed from the main call, the tests stayed green in
+two runs: 833 tests in a wide selection of wallet, lease and interaction
+test files, and 47 tests in the eight files closest to the action loop.
+No test asserts the interaction id the loop passes.
 
 ## Impact
 
@@ -64,4 +65,5 @@ ceiling and the soft-budget close.
 
 > 2026-11-10 — found by a whole-repository quality review of `main` at
 > `ee9cfaac`; both mutations were applied to copies outside the
-> repository and the related test files run against them.
+> repository and the related test files run against them, once when
+> found and again in review.

@@ -1,6 +1,6 @@
 ---
 id: ISSUE-0214
-summary: "Three permission mechanisms that the docs present as working are stored and never checked: the `permissions` a custom tool declares with `@tool`, the `allowed_tools` list on a task or delegation, and the rule that a sub-agent gets no more than its parent. Only the four built-in tools check a gate, each in its own body."
+summary: "Three permission mechanisms that the docs present as working are stored and never checked: the `permissions` a custom tool declares with `@tool`, the `allowed_tools` list on a task or delegation, and the rule that a sub-agent gets no more than its parent. The framework's own nine tools each check the gate in their own body; nothing checks it on a tool's behalf."
 status: open
 severity: medium
 area: agents/tools
@@ -8,6 +8,9 @@ created: 2026-11-10
 refs:
   - agents/tools/registry.py
   - agents/tools/permissions.py
+  - agents/tools/memory_tools.py
+  - agents/tools/recall.py
+  - schemas/agent.schema.json
   - agents/task_types.py
   - agents/sub_agents/spawner.py
   - agents/sub_agents/merge.py
@@ -29,9 +32,10 @@ refs:
 
 ## Context
 
-- The built-in tools (`file_read`, `file_write`, `shell_exec`,
-  `http_request`) each call the permission gate inside their own
-  function, so they hold.
+- The framework's own nine tools each call the permission gate inside
+  their own function, so they hold: `file_read`, `file_write`,
+  `shell_exec`, `http_request`, the four note tools and
+  `recall_channel_messages`.
 - A custom tool does not. The spec's own example declares
   `permissions=["db:read"]`; such a tool runs for any agent that lists
   it, whatever that agent's `permissions` block says.
@@ -55,8 +59,11 @@ system will run without the check its declaration implies.
 ## Proposed fix / investigation path
 
 Check a tool's declared permissions in the `@tool` wrapper or in the one
-admission function both agent kinds use. Enforce `allowed_tools` in the
-tool round. Correct the spec and the two instruction lines until then,
+admission function both agent kinds use. First decide how a custom
+permission is granted: the agent schema's `permissions` block allows five
+categories and no others, so `db:read` cannot be granted today, and a
+wrapper check alone would refuse every custom tool. Enforce
+`allowed_tools` in the tool round. Correct the spec and the two instruction lines until then,
 and enforce or delete the sub-agent fields before anything calls the
 spawner.
 

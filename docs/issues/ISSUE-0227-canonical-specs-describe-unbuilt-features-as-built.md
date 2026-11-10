@@ -14,6 +14,7 @@ refs:
   - docs/observability.md
   - internal/server/server.go
   - internal/server/channel_routes.go
+  - agents/security.py
   - schemas/agent.schema.json
 ---
 
@@ -25,8 +26,10 @@ refs:
 `docs/ai-agents-orchestration-spec.md` and
 `docs/persatrix-extension-spec.md` "the canonical design specs — update
 when behavior changes". The shared assistant instructions point to them
-as the full details of the project. Neither carries a note that it is a
-design from before most of the code existed.
+as the full details of the project. Neither has a banner at its top
+saying it is a design from before most of the code existed. The
+orchestration spec has three notes inside single sections, one of them
+"Planned — not built yet"; the extension spec has none.
 
 ## Context
 
@@ -36,7 +39,7 @@ Claims checked against the code:
 |---|---|
 | §8.3 lists 42 REST routes | 25 are not registered (organizations, agent state, sub-agents, observers, evaluations, nodes, mesh, A2A, bridges, streams). About 25 real routes are missing from the list (auth, chat, members, config, convene, unquarantine, log stream). |
 | "Redaction in logs — all log output is scanned for known secret patterns and redacted" | The default log redactor is a pass-through; only the audit log and the decision log redact. `docs/observability.md` says so. |
-| An egress proxy, a chroot, `<tool_result>` tagging and audit input and output hashes protect tool use | No code refers to any of them. |
+| An egress proxy, a chroot, `<tool_result>` tagging and audit input and output hashes protect tool use | No code refers to the proxy, the chroot or the hashes. The tagging exists under another name: `agents/security.py` wraps three tools' output in `<external_data>`. |
 | `store_get` and `store_set` are tools that are always available | They do not exist. |
 | `from Persatrix.tools import tool` | The decorator lives in `agents/tools/registry.py`. |
 | The project tree has `agents/coder.py`, `reviewer.py`, `planner.py` and `internal/telemetry/` | None exist. |
@@ -57,7 +60,7 @@ Put a banner at the top of both files: a historical design, not a
 description of what is built, with links to the guides and the ROADMAP
 for current behaviour. Change the documentation guide's wording to
 match. Generate the route list from the server's route table, or delete
-it.
+it. Decide whether the notes inside sections continue beside the banner.
 
 ## Notes
 

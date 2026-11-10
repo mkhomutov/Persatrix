@@ -16,6 +16,9 @@ refs:
   - agents/defaults.py
   - internal/defaults/defaults.go
   - docs/rfcs/0040-agent-orchestrator-transport-unification.md
+  - docs/rfcs/0040-pr-plan.md
+  - ROADMAP.md
+  - docs/issues/ISSUE-0154-go-and-python-sanitizers-flag-different-text.md
   - docs/issues/ISSUE-0209-participant-id-rule-differs-between-go-and-python.md
 ---
 
@@ -25,19 +28,24 @@ refs:
 
 The same value often has to exist in two to four languages: a
 validation pattern, the list of channel settings, a default, a wire
-constant. With one exception these are separate hand-written copies.
+constant. With two exceptions these are separate hand-written copies.
 What keeps them aligned is a set of tests that open the other
 language's source file and search its text.
 
 ## Context
 
-- **The exception.** Sanitizer patterns have one source and a generator,
-  `cmd/genpatterns`, with a CI check that the generated copies are
-  current.
-- **The text-reading tests.** 22 Python unit-test files read `.go` or
-  `.rs` source, the Rust tests read Go files
-  (`channel_config_tests.rs`), and one web test does the same. They
-  work, and they fail loudly when the text they look for is missing.
+- **The exceptions.** The gRPC messages are generated from `proto/`, and
+  the sanitizer patterns have one source and a generator,
+  `cmd/genpatterns`. CI checks that both sets of generated copies are
+  current. Even a generated copy has a limit:
+  [ISSUE-0154](ISSUE-0154-go-and-python-sanitizers-flag-different-text.md)
+  records the same pattern strings being read differently by the two
+  languages' regex engines.
+- **The text-reading tests.** 20 Python unit-test files compare a value
+  with `.go` or `.rs` source (12 named `test_cross_language_*` and 8
+  others), the Rust tests read Go files (`channel_config_tests.rs`), and
+  one web test does the same. They work, and they fail loudly when the
+  text they look for is missing.
 - **Where they fall short.** A value nobody pinned drifts unnoticed:
   [ISSUE-0209](ISSUE-0209-participant-id-rule-differs-between-go-and-python.md)
   is one, and `agents/defaults.py` against
@@ -52,10 +60,12 @@ language's source file and search its text.
   against it. A comment in `channel_types.rs` says a new server field
   "requires a coordinated bump".
 - [RFC 0040](../rfcs/0040-agent-orchestrator-transport-unification.md)
-  is the plan for a typed contract. `agents/channel_payload_contract.py`
-  is labelled as that RFC's Phase 1, yet the RFC still reads proposed,
-  its PR plan shows PR 1 as not started, and its later phases have no
-  release.
+  is the plan for a typed contract. Its Phase 1 shipped in v0.3.14
+  ([#829](https://github.com/mkhomutov/Persatrix/pull/829)) as
+  `agents/channel_payload_contract.py`. The RFC stays Proposed by a
+  recorded decision, since the ROADMAP says Phase 1 does not advance its
+  status, but its PR plan still shows PR 1 as not started. Its later
+  phases have no release.
 
 ## Impact
 
@@ -66,7 +76,7 @@ grows in v0.4.0.
 
 ## Proposed fix / investigation path
 
-- Bring RFC 0040's status up to date.
+- Flip PR 1's row in RFC 0040's PR plan to merged.
 - Extend the generator approach of `cmd/genpatterns` to wire constants
   and validation patterns.
 - Serve the channel-settings registry from the orchestrator, so the CLI

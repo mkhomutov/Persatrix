@@ -1,8 +1,8 @@
 ---
 id: ISSUE-0197
-summary: "Four memory writes commit only when they changed a row. A write that changes nothing still opens a transaction, so its connection keeps the SQLite write lock, and the next write from another memory tier fails with `database is locked` after five seconds and is dropped with a warning."
+summary: "Five memory writes commit only when they changed a row. A write that changes nothing still opens a transaction, so its connection keeps the SQLite write lock until its next commit, and a write from another memory tier in that gap fails with `database is locked` after five seconds and is dropped with a warning. On shipped paths only the interaction janitor of a persona that ticks leaves the lock held."
 status: open
-severity: medium
+severity: low
 area: agents/memory
 created: 2026-11-10
 refs:
@@ -10,55 +10,68 @@ refs:
   - agents/memory/episodic_retention.py
   - agents/memory/_episodic_replay_dedup.py
   - agents/memory/relationship_mutations.py
+  - agents/persona_runtime/finalize_close.py
   - agents/persona_runtime/memory_assembly.py
-  - agents/persona_runtime/record_close.py
+  - docs/issues/ISSUE-0186-persona-memory-has-no-capacity-bound.md
+  - docs/issues/ISSUE-0198-pending-summary-janitor-never-runs-without-a-tick.md
 ---
 
-# ISSUE-0197: A write that touches no rows keeps the memory store's write lock
+# ISSUE-0197: A write that touches no rows keeps the memory database's write lock
 
 ## Summary
 
-Four functions run an `UPDATE` or `DELETE` and call `commit()` only when
+Five functions run an `UPDATE` or `DELETE` and call `commit()` only when
 the statement changed at least one row. Python's SQLite driver has by then
 opened a transaction, and it stays open until the next commit on that
-connection. The episodic, relationship and facts tiers, the commitments
-store and the timer cache each hold their own connection to the same
-`memory.db`, so the open transaction blocks every other tier's writes.
+connection. The episodic, relationship and facts tiers and the timer cache
+each hold their own connection to the same `memory.db`, so the open
+transaction blocks every other tier's writes until then.
 
 ## Context
 
-The four sites:
+The five sites:
 
-| Function | File |
-|---|---|
-| `cleanup_closing_interactions` | `agents/memory/interaction_janitor.py` |
-| `delete_old_episodes` | `agents/memory/episodic_retention.py` |
-| `clear_failed_episode_for_interaction` | `agents/memory/_episodic_replay_dedup.py` |
-| `apply_decay` | `agents/memory/relationship_mutations.py` |
+| Function | File | On a shipped path today |
+|---|---|---|
+| `cleanup_closing_interactions` | `agents/memory/interaction_janitor.py` | Yes, for a persona that ticks |
+| `clear_failed_episode_for_interaction` | `agents/memory/_episodic_replay_dedup.py` | Yes, but the close path's next write commits on the same connection at once, so the lock does not stay held |
+| `delete_old_episodes` | `agents/memory/episodic_retention.py` | No caller outside tests |
+| `summarize_old_episodes` | `agents/memory/episodic_retention.py` | No caller outside tests |
+| `apply_decay` | `agents/memory/relationship_mutations.py` | No caller outside tests |
 
-Reproduced on one temporary store with an episodic and a relationship
+[ISSUE-0186](ISSUE-0186-persona-memory-has-no-capacity-bound.md) records
+that no memory clean-up runs for a persona, which is why three of the
+five have no caller.
+
+Reproduced on one temporary database with an episodic and a relationship
 tier open:
 
 1. Run the janitor sweep with nothing to sweep. It reports 0 rows, and the
    episodic connection's `in_transaction` is `True`.
 2. Call `RelationshipMemory.record_interaction`. It raises
-   `OperationalError: database is locked` after 5.17 seconds, the driver's
-   default wait.
+   `OperationalError: database is locked` after about five seconds, the
+   driver's default wait.
 
 `delete_old_episodes` with nothing to delete gives the same result.
 
-The janitor is the last store action of a tick, and "nothing to sweep" is
-its normal case. A semi-autonomous or autonomous persona whose config has
-no `autonomy.timers` key ticks every `tick_interval_seconds`, 60 by
-default. `clear_failed_episode_for_interaction` runs on the boot replay
-path, where it also normally deletes nothing.
+Who meets it today: the interaction janitor runs at the end of a tick, at
+most once every 300 seconds, and "nothing to sweep" is its normal case. A
+semi-autonomous or autonomous persona whose config has no
+`autonomy.timers` key ticks every `tick_interval_seconds`, 60 by default.
+The three stock personas ship `timers: []` and never tick.
 
 ## Impact
 
-The next turn's fact reinforcement or close-time `record_interaction`
-waits five seconds and is then dropped. The callers catch the error and
-log one WARNING (`memory_assembly.py`, `record_close.py`), so the persona
-keeps answering while its relationship and fact records fall behind.
+For a persona that ticks, the first turn after a zero-row sweep waits five
+seconds on its fact reinforcement, which is then dropped with one WARNING
+(`memory_assembly.py`). The persona keeps answering while its fact records
+fall behind. Stock personas are not affected, and the other four sites
+leave no lock held on any path that runs today.
+
+That is why this is rated low. It becomes every persona's path if the
+sweep moves to boot or to inbound events, as
+[ISSUE-0198](ISSUE-0198-pending-summary-janitor-never-runs-without-a-tick.md)
+proposes, so this should be fixed first.
 
 ## Proposed fix / investigation path
 
@@ -70,5 +83,6 @@ a write on the other tier would pin it.
 ## Notes
 
 > 2026-11-10 — found by a whole-repository quality review of `main` at
-> `ee9cfaac`; reproduced twice with a scratch probe against a temporary
-> store.
+> `ee9cfaac`; reproduced with a scratch probe against a temporary
+> database. A second probe during review of this issue narrowed the live
+> path to the janitor.

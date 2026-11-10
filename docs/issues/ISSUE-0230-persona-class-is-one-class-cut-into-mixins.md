@@ -1,8 +1,8 @@
 ---
 id: ISSUE-0230
-summary: "The persona agent is one class of about 3,800 lines cut into mixins across twelve files. The mixins share their state through `self` and each restates the attributes it needs, so the coupling of a single large class remains but can no longer be seen in any one file, and tests reach into its private methods hundreds of times."
+summary: "The persona agent is one class cut into twelve classes across twelve files, about 2,700 lines of class body. The mixins share their state through `self` and each restates the attributes it needs, so the coupling of a single large class remains but can no longer be seen in any one file, and tests reach into its private methods hundreds of times."
 status: open
-severity: medium
+severity: low
 area: agents/persona_runtime
 created: 2026-11-10
 refs:
@@ -18,13 +18,17 @@ refs:
 ## Summary
 
 `_LLMPersonaAgent` (`agents/persona_runtime/__init__.py`) resolves to
-twelve first-party classes in twelve files, 3,785 lines in all:
+twelve first-party classes in twelve files:
 
 `_LLMPersonaAgent` → `_ActionLoopMixin` → `_ToolRoundMixin` →
 `_ConversationWindowMixin` → `_MemoryContextMixin` →
 `_PromptAssemblyMixin` → `_EpisodeRoutingMixin` → `_CloseLifecycleMixin`
 → `_StatePersistenceMixin` → `PersonaAgent` → `BaseAgent` →
 `_TaskToolRoundMixin`
+
+The twelve class bodies come to 2,731 lines; the files that hold them
+total 3,785. The last three classes are bases shared with task agents.
+The nine persona-runtime classes are 2,124 lines.
 
 ## Context
 
@@ -33,7 +37,8 @@ twelve first-party classes in twelve files, 3,785 lines in all:
   as annotations so the type checker accepts it (`episode_routing.py`
   is an example). One re-declaration exists only to silence a
   method-resolution conflict.
-- The split followed the file-length check
+- The modules' own docstrings give the file-length check as the reason
+  for the split
   ([ISSUE-0231](ISSUE-0231-size-check-counts-comment-lines.md)), not a
   division of responsibility. `EpisodicMemory`, `MemoryStore`,
   `EventLoop` and `NoteStore` are built the same way.

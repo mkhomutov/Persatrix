@@ -1,6 +1,6 @@
 ---
 id: ISSUE-0200
-summary: "A chat reply is matched to its request by channel and sender only. After one chat request times out, the persona's late answer is returned to the next chat request on that DM, and every later answer on that DM is then one question behind for as long as replies outlast the timeout."
+summary: "A chat reply is matched to its request by channel and sender only. After one chat request times out, the persona's late answer is returned to the next chat request on that DM, and every later answer on that DM is then one question behind for as long as each new question is sent before the previous answer lands."
 status: open
 severity: medium
 area: internal/channels
@@ -9,6 +9,7 @@ refs:
   - internal/channels/waiter.go
   - internal/channels/publish_and_await.go
   - internal/channels/floor_control.go
+  - internal/channels/interaction_resolver.go
   - internal/server/chat_handler.go
   - docs/issues/ISSUE-0033-chat-as-dm-single-shot-waiter-multi-message-reply.md
   - docs/issues/ISSUE-0073-cpu-local-model-chat-exceeds-default-timeout.md
@@ -33,6 +34,10 @@ A probe with a slow agent double:
 3. The agent's late "A1: Paris" arrives. Chat 2 returns it, with no error.
 4. The real answer to Q2 then finds no waiter.
 
+A comment in `publish_and_await.go` says the waiter is removed on a
+timeout "so a late-arriving reply does not leak into a future chat". It
+does leak, into the next waiter registered under the same pair.
+
 The default chat timeout is 30 seconds, and
 [ISSUE-0073](ISSUE-0073-cpu-local-model-chat-exceeds-default-timeout.md)
 already records local models that take longer. The floor-control round
@@ -44,16 +49,21 @@ messages.
 
 ## Impact
 
-A person gets a confident answer to a question they did not ask, and the
-conversation stays one answer behind until a reply beats the timeout. The
-history in the channel store is correct; only the chat responses are
-shifted.
+A person gets a confident answer to a question they did not ask. The
+conversation stays one answer behind for as long as each new question is
+sent before the previous answer lands, and recovers when a late answer
+lands while no chat is waiting. The history in the channel store is
+correct; only the chat responses are shifted.
 
 ## Proposed fix / investigation path
 
-Match on the server side: accept only a reply stored after this request's
-inbound message, stamped with the interaction it was dispatched under. A
-test that times out one request and then sends a second would pin it.
+Send the inbound message's id with the event, have the agent echo it on
+its reply, and accept only a reply that echoes this request's id. A reply
+carries no reference to the message it answers today, so this changes the
+contract on both sides. The interaction id cannot do the job: one
+interaction covers every message on a DM until the DM goes idle, and a
+late answer is also stored after the next question. A test that times
+out one request and then sends a second would pin it.
 
 ## Notes
 

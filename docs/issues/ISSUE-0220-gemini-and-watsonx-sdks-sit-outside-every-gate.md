@@ -44,11 +44,14 @@ What follows from that:
   packages only, and `THIRD_PARTY_NOTICES.md` names neither SDK.
 - **Images.** The `demo-gemini`, `demo-watsonx` and multivendor compose
   files build the agent image with `AGENT_EXTRAS` set, which installs the
-  SDKs at whatever version is newest that day.
+  SDKs at the newest version inside the declared range that day.
 
 [ISSUE-0144](ISSUE-0144-anthropic-sdk-pinned-below-1x.md) records what
-this failure looks like for an SDK that is tested: a release dropped a
-parameter and the adapter had to be pinned back.
+this failure looks like: an Anthropic SDK release dropped a parameter the
+adapter passes, the mocked tests stayed green, and the SDK is held below
+1.x. That issue already lists the Gemini provider as outside the SDK
+boundary test. This one takes that over and adds watsonx and the other
+gates.
 
 ## Impact
 

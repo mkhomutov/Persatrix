@@ -8,6 +8,7 @@ created: 2026-11-10
 refs:
   - internal/cost/config.go
   - internal/cost/cost.go
+  - internal/wallet/config.go
   - schemas/optimization.schema.json
   - config/optimization.yaml
   - agents/validate.py
@@ -33,13 +34,17 @@ Three things combine:
 
 On a scratch copy of the config with `budgets:` renamed `budgetz:`:
 
-- `agents/validate.py` printed "Validation passed (8 file(s) checked)".
+- `agents/validate.py` reported that validation passed.
 - `LoadCostConfig` returned a global, a per-workflow and a per-agent
   limit of 0.
 
+Renaming the whole block, `cost:` to `costs:`, passes validation the same
+way, because the schema's top level is open too.
+
 The wallet's lease gate uses the same budget enforcer, so every model
-call loses its cap. Channels, auth and UI config are already decoded with
-`KnownFields(true)` and refuse an unknown key.
+call loses its three dollar caps. The wallet's own per-interaction token
+ceiling is separate and stays. Channels, auth and UI config are already
+decoded with `KnownFields(true)` and refuse an unknown key.
 
 ## Impact
 
@@ -48,9 +53,16 @@ control off. The wrong key is silent at validation and at load.
 
 ## Proposed fix / investigation path
 
-Add a `cost` property to the schema with `additionalProperties: false` at
-each level. Decode the cost block with `KnownFields(true)`. Consider
-logging a warning at startup when all three limits are zero.
+- Add a `cost` property to the schema with `additionalProperties: false`
+  at each level, and close the schema's top level once it lists every key
+  the file really has, so a misspelled `cost` is caught too.
+- Decode the cost block strictly. A strict decode of the whole file would
+  refuse the sections other loaders own, and `Node.Decode` does not
+  honour `KnownFields`, so the block has to go through a strict decoder
+  of its own. `internal/wallet/config.go` reads the same file in the same
+  lenient way.
+- Treat a missing `cost.budgets` as an error, or at least log a warning
+  at startup when all three limits are zero.
 
 ## Notes
 

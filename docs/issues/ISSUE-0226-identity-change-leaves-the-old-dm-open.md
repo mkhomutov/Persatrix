@@ -2,7 +2,7 @@
 id: ISSUE-0226
 summary: "In the web console's local-testing mode, changing the `acting as` identity while a DM is open leaves the previous identity's conversation on screen. The next message is sent as the new identity into a different DM channel, and its reply never appears in the feed."
 status: open
-severity: medium
+severity: low
 area: web
 created: 2026-11-10
 refs:

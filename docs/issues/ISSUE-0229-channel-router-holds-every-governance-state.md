@@ -2,7 +2,7 @@
 id: ISSUE-0229
 summary: "`ChannelRouter` is one struct with 59 fields, 15 mutexes and 22 maps, and its 151 methods are spread over 38 files in a package that is 43% of the orchestrator's code. Each governance feature adds another map and lock to it, and the order in which locks may be taken is written only in scattered comments."
 status: open
-severity: medium
+severity: low
 area: internal/channels
 created: 2026-11-10
 refs:
@@ -22,20 +22,22 @@ Measured on `main`:
 
 | What | Value |
 |---|---|
-| `ChannelRouter` struct | 247 lines, 59 fields, 15 mutexes, 22 maps |
+| `ChannelRouter` struct | 248 lines, 59 fields, 15 mutexes, 22 maps |
 | Its methods | 151, in 38 files |
 | `internal/channels` | 93 production files, 20,750 lines, 43% of the Go production code |
 
 Floor control, reply budgets, end votes, synthesis, convening and
 standing schedules each keep their per-channel state as a map on this
-one struct, guarded by a lock of their own.
+one struct. Most have a lock of their own; synthesis shares the
+interaction lock.
 
 ## Context
 
 - The rule for which lock may be taken while holding another is written
-  in four comments in four files (`router_autonomous.go`,
-  `interaction_close_latch.go`, `standing_budget.go`,
-  `interaction_resolver.go`). Nothing checks it.
+  in comments spread over at least seven files (`router.go`,
+  `router_autonomous.go`, `interaction_close_latch.go`,
+  `standing_budget.go`, `interaction_resolver.go`, `synthesis_close.go`,
+  `synthesis_disarm.go`). Nothing checks it.
 - A text scan found no method that takes two of these locks in its own
   body, so the rule holds today. Calls from one method into another were
   not traced.
@@ -59,7 +61,9 @@ In steps, each taken when a change touches the area anyway:
 
 1. Move the 19 `sqlite*` files, which already sit behind the
    `ChannelStore` interface, into their own package.
-2. Move the `config*` files likewise.
+2. Move the `config*` files likewise, once the router methods that
+   `config_apply.go` and `config_reconcile.go` hold are lifted out of
+   them.
 3. Lift one per-channel state group at a time (reply budget, end vote,
    standing schedule) into a small type that owns its own lock.
 

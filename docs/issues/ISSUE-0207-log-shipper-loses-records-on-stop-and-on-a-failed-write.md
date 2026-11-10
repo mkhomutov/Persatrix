@@ -19,7 +19,8 @@ refs:
 the orchestrator over one gRPC stream. Its module docstring makes two
 promises that do not hold when run:
 
-- "Records enqueued during the gap stay in the queue."
+- "Records enqueued during the gap stay in the queue (subject to the
+  FIFO drop)."
 - "`Shipper.stop` drains the queue and awaits the final ack from the
   orchestrator before returning."
 
@@ -28,9 +29,10 @@ promises that do not hold when run:
 **Stop.** After `done_writing()` the `finally` block cancels the task
 that reads acknowledgements. In grpc.aio, cancelling a pending read
 cancels the whole call. Against an in-process log service that takes
-20 ms per batch, the server received 256 of 2 000 records and saw the
-stream end as cancelled, while `shipped` read 2 000 and `last_ack_seq`
-read 0. `AgentServer.stop()` relies on this path to deliver the logs of
+20 ms per batch, the server received 256 of 2 000 records in one run,
+and 0 and 1 in two later runs; how many arrive depends on timing. Each
+time it saw the stream end as cancelled, while `shipped` read 2 000 and
+`last_ack_seq` read 0. `AgentServer.stop()` relies on this path to deliver the logs of
 a shutdown. How much the Go server loses depends on how far its receive
 loop got; that was not run.
 
@@ -43,16 +45,20 @@ records vanished in three attempts over 4.5 seconds.
 
 ## Impact
 
-The records lost are the ones wanted most: the last lines before a stop
-and the lines written while the orchestrator was unreachable. The
-counters that should reveal the loss say nothing was lost.
+The orchestrator's copy of the log loses the records wanted most: the
+last lines before a stop and the lines written while the orchestrator was
+unreachable. The counters that should reveal the loss say nothing was
+lost. Every record still reaches the agent's own stderr.
 
 ## Proposed fix / investigation path
 
 On stop, wait for the acknowledgement reader to reach the end of the
 stream, bounded by the stop timeout, before cancelling it. On a failed
 write, put the batch back at the front of the queue or count it as
-dropped.
+dropped. Putting it back needs one more change: once the stop flag is
+set the reconnect wait returns at once, so a stop against an unreachable
+orchestrator would retry in a tight loop until its timeout. Count what is
+still queued as dropped at that point.
 
 ## Notes
 

@@ -40,8 +40,9 @@ A probe against an in-process server with two channels, `group:lobby`
    because `messages.thread_id` is declared `ON DELETE CASCADE`
    (`internal/channels/sqlite_schema.go`).
 
-The per-channel message cap also deletes parent messages; whether it
-cascades the same way was not run.
+The per-channel message cap deletes the same way. In a second probe with
+a cap of 3, pruning a parent message in the board removed its reply in
+the lobby.
 
 ## Impact
 
@@ -55,7 +56,8 @@ cascades the same way was not run.
 
 ## Proposed fix / investigation path
 
-Refuse a publish whose thread parent is in another channel. Answer 404 on
+Refuse a publish whose thread parent is in another channel, in the
+store's `PublishMessage` so that every caller is covered. Answer 404 on
 the thread read unless the message's `channel_id` equals the path's.
 
 ## Notes

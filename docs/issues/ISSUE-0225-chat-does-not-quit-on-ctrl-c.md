@@ -1,8 +1,8 @@
 ---
 id: ISSUE-0225
-summary: "`persatrix chat` tells the user to press Ctrl-C to quit, but at the prompt it keeps running until Enter is pressed as well, and while a reply is pending Ctrl-C does nothing until the reply or the 300-second timeout arrives."
+summary: "`persatrix chat` tells the user to press Ctrl-C to quit, but at the prompt it keeps running until Enter is pressed as well, and while a reply is pending Ctrl-C does nothing until the server answers, within 30 seconds by default, or the CLI's own 300-second timeout passes."
 status: open
-severity: medium
+severity: low
 area: cli
 created: 2026-11-10
 refs:
@@ -20,8 +20,9 @@ between it sits in a blocking `read_line`, or awaits the HTTP request,
 and neither is interrupted by the signal.
 
 A comment in the loop says SIGINT interrupts the blocking read and makes
-it return an error. It does not: the standard library retries a read
-that was interrupted by a signal.
+it return an error. It does not: the `ctrlc` crate installs its handler
+with `SA_RESTART`, so the operating system resumes the read, and the
+standard library would retry an interrupted read in any case.
 
 ## Context
 
@@ -42,9 +43,13 @@ first example uses.
 
 ## Proposed fix / investigation path
 
-Read stdin on a blocking task and `select!` it against
-`tokio::signal::ctrl_c()`. Do the same for the in-flight request, so
-Ctrl-C cancels a pending turn. Remove the incorrect comment.
+Read stdin on a dedicated `std::thread` that sends each line over a
+channel, and `select!` that channel against `tokio::signal::ctrl_c()`.
+A tokio blocking task or `tokio::io::stdin` would keep the fault: a read
+that is already waiting cannot be cancelled, and the runtime waits for it
+when `main` returns, that is, for Enter. Race the in-flight request
+against the same signal, so Ctrl-C cancels a pending turn. Remove the
+`ctrlc` handler and the incorrect comment.
 
 ## Notes
 

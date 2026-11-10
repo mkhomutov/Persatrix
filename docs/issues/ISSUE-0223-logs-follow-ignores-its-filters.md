@@ -33,7 +33,9 @@ itself filters only `--trace` and `--agent` on the client side.
   stream starts at the moment of connection.
 - `Buffer.Subscribe` (`internal/observability/logbuffer/subscribe.go`)
   has no replay. When the stream drops, the CLI reconnects and prints
-  `[reconnected]`, and whatever was logged in between is missing.
+  `[reconnected]`, and whatever was logged in between is missing. The
+  guide says that after an orchestrator restart `--follow` "resumes from
+  the warm-loaded ring"; it resumes from the moment it reconnects.
 
 ## Impact
 
@@ -46,7 +48,8 @@ wrong.
 Parse the same filters in the stream handler and apply them to each
 entry before it is sent. On connect, when `since` is given, send the
 matching entries from the buffer first. On reconnect, have the CLI ask
-for everything since the last timestamp it printed.
+for everything since the last timestamp it printed. Correct the guide's
+restart sentence if the replay is not built.
 
 ## Notes
 

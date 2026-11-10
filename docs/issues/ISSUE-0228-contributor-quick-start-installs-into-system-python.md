@@ -2,7 +2,7 @@
 id: ISSUE-0228
 summary: "CONTRIBUTING's Quick Start begins with `make build-agents`, which runs a bare `pip3 install` and never mentions a virtual environment. Passing `PYTHON=.venv/bin/python` does not help, because the recipe installs through the separate `PIP` variable."
 status: open
-severity: medium
+severity: low
 area: docs
 created: 2026-11-10
 refs:
@@ -25,9 +25,10 @@ development dependency into whatever `pip3` is first on the path.
 
 ## Context
 
-- No contributor document mentions a virtual environment. The only
-  places that name `.venv` are `CLAUDE.md` and the methodology's
-  automation catalogue.
+- `CONTRIBUTING.md` and `README.md` never mention a virtual environment.
+  `.venv` does appear in `CLAUDE.md`, the methodology's automation
+  catalogue, the manual-test guides and the release documents, and none
+  of them says how to create it.
 - `make build-agents PYTHON=.venv/bin/python` still installs through
   system `pip3`, because the recipe uses `$(PIP)`, not
   `$(PYTHON) -m pip`.

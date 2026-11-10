@@ -1,12 +1,14 @@
 ---
 id: ISSUE-0213
-summary: "Under `auth.mode: enabled` any signed-in account may read a persona's closed-interaction summaries, and the query filters by persona only. A `user` account would see summaries of other people's DMs and of restricted channels. Latent today, because no production path creates a `user` account yet."
+summary: "Under `auth.mode: enabled` any signed-in account may read a persona's closed-interaction summaries, and the query filters by persona only. A `user` account would see summaries of other people's DMs and of restricted channels. Latent today, because no production path creates a `user` account yet, and the messages behind the summaries are already readable with no account through the public channel routes (ISSUE-0117)."
 status: open
-severity: medium
+severity: low
 area: security
 created: 2026-11-10
 refs:
   - internal/server/auth_policy.go
+  - internal/channels/sqlite_messages_read.go
+  - docs/issues/ISSUE-0117-agent-ingress-close-knob.md
   - agents/closed_interactions_read.py
   - agents/memory/episodic_closed.py
   - docs/rfcs/0039-user-accounts-authentication.md
@@ -26,10 +28,17 @@ the episode rows carry all four.
 
 ## Context
 
-The sibling routes are tighter:
+Two sibling routes are tighter:
 
 - `POST /api/v1/personas/{participant_id}/recall` is `policyOperator`.
 - Chat history is served only for the caller's own verified identity.
+
+Two are looser. `GET /api/v1/channels` and
+`GET /api/v1/channels/{id}/messages` stay public under `enabled`, because
+agents hold no accounts, and the message read filters by neither caller
+nor DM. So the text behind every summary can already be read with no
+account at all.
+[ISSUE-0117](ISSUE-0117-agent-ingress-close-knob.md) tracks that opening.
 
 Account roles are `operator` and `user` (`internal/accounts`). Nothing in
 production code creates an account with the `user` role today: account
@@ -40,14 +49,17 @@ cuttable. So the gap opens on the day a `user` account can exist.
 
 Once `user` accounts exist, one person can read the persona's summaries
 of conversations with other people, and of channels classified above
-what that person may see, with the participants named.
+what that person may see, with the participants named. Today this adds
+nothing to what the public channel reads already give away; it becomes
+the remaining way in on the day those are closed.
 
 ## Proposed fix / investigation path
 
 Make the route `policyOperator` now, which costs nothing while only
-operators exist. Before account administration ships, either keep it
-operator-only or filter the read by the caller's principal and by
-protection level.
+operators exist. That closes nothing by itself while the channel reads
+stay public, so do it with ISSUE-0117's fix or before it. Before account
+administration ships, either keep it operator-only or filter the read by
+the caller's principal and by protection level.
 
 ## Notes
 

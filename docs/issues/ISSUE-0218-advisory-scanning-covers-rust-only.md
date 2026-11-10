@@ -1,8 +1,8 @@
 ---
 id: ISSUE-0218
-summary: "The weekly audit checks published security advisories for the Rust CLI only. Nothing does the same for the Go orchestrator, the Python agents, the web console or the Docker base images, no security linter runs, and Dependabot is not set up for the Docker files."
+summary: "The weekly audit checks published security advisories for the Rust CLI only. For the Go orchestrator and the web console the only other net is GitHub's Dependabot alerts, a repository setting no file pins; nothing tracked shows any net for the Python agents. The Docker base images have no update path at all, and no security linter runs."
 status: open
-severity: medium
+severity: low
 area: ci
 created: 2026-11-10
 refs:
@@ -14,6 +14,7 @@ refs:
   - Dockerfile.orchestrator
   - docker-compose.yaml
   - deny.toml
+  - docs/issues/ISSUE-0087-web-toolchain-dependabot-advisories.md
 ---
 
 # ISSUE-0218: Advisory scanning covers the Rust CLI only
@@ -24,7 +25,7 @@ refs:
 `cargo deny check`, which reads the advisory database for the CLI's Rust
 dependencies. The CLI is a thin REST client. The orchestrator and the
 agents, where the auth, sandbox and model-facing code live, have no
-equivalent.
+equivalent check in the repository.
 
 ## Context
 
@@ -51,14 +52,26 @@ update path:
 - The collector, Loki and Prometheus images in `docker-compose.yaml` are
   2024 releases.
 
-Whether GitHub's own Dependabot alerts are switched on for the repository
-was not checked; that is a repository setting, not a file.
+GitHub's own Dependabot alerts and security updates are on. The comment
+at the top of `.github/dependabot.yml` says security updates ran before
+the file existed, for Go, npm and Cargo, and
+[ISSUE-0087](ISSUE-0087-web-toolchain-dependabot-advisories.md) records
+three alerts raised on the web console's lock file. So an advisory
+against a Go, npm or Cargo dependency raises an alert and a PR. Nothing
+tracked shows the same for a Python package. This net is a repository
+setting, not a file, so nothing in the repository holds it in place.
 
 ## Impact
 
-A published advisory in a Go module, a Python package, an npm package or
-a base image reaches no gate and no scheduled job. Someone has to notice
-it by hand.
+- A published advisory in a base image or a compose image reaches
+  nothing.
+- One in a Go module or an npm package reaches a Dependabot alert, and
+  no gate or scheduled job in the repository.
+- For a Python package there is no evidence of either.
+- No check reads the project's own code for security faults.
+
+Rated low because the Dependabot net does exist for three of the four
+ecosystems.
 
 ## Proposed fix / investigation path
 

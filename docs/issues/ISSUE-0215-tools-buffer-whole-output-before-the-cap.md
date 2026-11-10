@@ -45,14 +45,18 @@ The cap limits what the model is shown, not what the agent process holds.
 ## Impact
 
 A steered or simply mistaken model can run an agent container out of
-memory, taking down every agent hosted in that process.
+memory. That takes the agent down until its container restarts; each
+agent runs in a process of its own.
 
 ## Proposed fix / investigation path
 
-Read streams and files up to the cap plus one byte, then stop reading
-and, for a command, end the process. Do file I/O in a worker thread with
-a size check first. Add memory and process limits to the agent services
-in the compose files.
+- Keep streams and files only up to the cap plus one byte. For a
+  command, go on reading and throw the rest away until it ends or its
+  time limit passes, so its exit code is still reported.
+- Do file I/O in a worker thread, and first refuse anything that is not
+  a regular file; a size check alone does not catch a named pipe.
+- Add memory and process limits to the agent services in the compose
+  files.
 
 ## Notes
 
