@@ -77,8 +77,9 @@ first.
   the AI-scored figures, the first strategy review after the result treats
   it as it would the registered rule, with this deviation and its limit
   (§4) stated beside it. The weight it gives does not depend on which rule
-  fired. Any decision it changes is ratified by a sequencing amendment, as
-  usual.
+  fired. The maintainer decided this on 2026-11-10, before any rater read
+  a scored packet. Any decision it changes is ratified by a sequencing
+  amendment, as usual.
 - **Who read what, and when.** Part 2 §2 asks the result to say this, and it
   now covers both AI raters' runs and the sessions that brief them (§6).
 
