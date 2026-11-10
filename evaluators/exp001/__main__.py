@@ -180,7 +180,7 @@ def _rater(args: argparse.Namespace) -> int:
             ):
                 print(path)
         elif args.command == "rater-enter":
-            entered = ai_raters.enter(args.directory, args.person, args.prompt, args.answer,
+            entered = ai_raters.enter(args.directory, args.person, args.prompt, args.record,
                                       model=args.model)
             print(f"entered {len(entered)} packets from {args.prompt.stem}")
         else:
@@ -249,13 +249,14 @@ def _parser() -> argparse.ArgumentParser:
     batches.add_argument("--notes", type=Path,
                          help="the notes agreed in practice; none for the practice itself")
     entering = commands.add_parser(
-        "rater-enter", help="enter an AI rater's answer into its sheet, exactly as given",
+        "rater-enter", help="enter an AI rater's answer, read from its run's record",
     )
     entering.add_argument("directory", type=Path,
                           help="the folder holding the packets and the raters' files")
     entering.add_argument("person", choices=PEOPLE, help="whose sheet the rater fills")
     entering.add_argument("prompt", type=Path, help="the batch's prompt")
-    entering.add_argument("answer", type=Path, help="the run's answer to it")
+    entering.add_argument("record", type=Path,
+                          help="the run's own record, which holds its answer")
     entering.add_argument("--model", required=True,
                           help="the exact model ID the rater runs on; any other is refused")
     compared = commands.add_parser(

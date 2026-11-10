@@ -180,16 +180,17 @@ and never reads a packet itself. For rater 1, on the scored run:
 
 ```bash
 python -m evaluators.exp001 rater-batches ~/exp001/scored/window-1 person-1 OUT --notes NOTES
-python -m evaluators.exp001 rater-enter ~/exp001/scored/window-1 person-1 OUT/batch-01.md ANSWER --model MODEL
+python -m evaluators.exp001 rater-enter ~/exp001/scored/window-1 person-1 OUT/batch-01.md RECORD --model MODEL
 ```
 
 `rater-batches` splits the rater's packet file into prompts of eight
 packets each, in the rater's order. Each prompt holds the rubric, the notes
 agreed in practice, and the cells to score for each packet, taken from the
-rater's blank sheet. A fresh run answers one prompt. `rater-enter` enters
-that answer in the sheet exactly as given. It refuses an answer from
-another model, or one that does not give exactly the cells asked for, and
-it never scores a cell twice. On a practice run,
+rater's blank sheet. A fresh run answers one prompt. `rater-enter` reads
+the answer from the run's own record and enters it in the sheet exactly as
+given. It refuses a record that shows another model, or a tool call other
+than one Read of the prompt, and an answer that does not give exactly the
+cells asked for. It never scores a cell twice. On a practice run,
 `python -m evaluators.exp001 rater-differences ROOT` lists the cells the two
 raters scored differently, so they can agree on how the anchors apply.
 

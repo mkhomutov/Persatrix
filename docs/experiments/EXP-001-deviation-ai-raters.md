@@ -94,9 +94,11 @@ harness's [`ai_raters`](../../evaluators/exp001/ai_raters.py) commands hold
 each rater's session to them.
 
 1. **The model.** Both raters run on Fable 5.2, the maintainer's choice. It
-   is neither the judge's model nor the arms'. Each run gives its exact
-   model ID on its answer's first line. `rater-enter` refuses an answer
-   from any other model, and the result records the ID.
+   is neither the judge's model nor the arms'. A run is given no model of
+   its own, so it runs on its session's. Each run gives its exact model ID
+   on its answer's first line, and its record must show replies from that
+   model alone. `rater-enter` refuses any other, and the result records the
+   ID.
 2. **One session per rater.** Each rater has its own Claude Code session on
    that model, which briefs that rater and no other:
    - `rater-batches` writes the rater's packets as prompts;
@@ -113,9 +115,12 @@ each rater's session to them.
    - eight packets in the rater's own order, or fewer in the last batch,
      each followed by the cells to score.
 
-   The run reads its prompt file and calls no other tool. A run whose
-   record shows any other tool call is discarded and held again whole.
-4. **Off limits.** Neither a run nor a rater's session reads:
+   The run reads its prompt file, calls no other tool, and hands its answer
+   back. `rater-enter` takes the answer from the run's own record, which
+   Claude Code keeps for every run, and refuses a record that shows any
+   other tool call. That run is discarded and held again whole.
+4. **Off limits.** Neither a run nor a rater's session reads, from the
+   scored run:
    - the seal, `sealed/`;
    - the judge's answers and calls, `judging/`;
    - the meetings' transcripts, `pairs/`;
@@ -123,7 +128,9 @@ each rater's session to them.
    - the run's report;
    - the other rater's packet file or sheet.
 
-   A run reads nothing but its prompt.
+   A run reads nothing but its prompt. In practice the raters compare
+   their scores, as rule 7 says, but the scored run's two sheets are never
+   compared before the seal opens.
 5. **Scores as given.** `rater-enter` refuses an answer that does not give
    exactly the cells asked for, with 0, 1 or 2 for a criterion and right or
    wrong for a recall question. It never changes a cell already scored, and
@@ -132,7 +139,7 @@ each rater's session to them.
    The result lists every run held again, and why.
 6. **Everything is kept.** These stay outside the repository until every
    score is in, then are published with the result:
-   - each run's prompt, answer and record;
+   - each run's prompt, record and answer;
    - each session's log of what it entered, `entered.jsonl`.
 7. **Practice first.** As part 2 §2 has the people do, both raters first
    score the practice run's packets, the same way but with no notes yet.

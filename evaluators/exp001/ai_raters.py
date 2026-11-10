@@ -12,11 +12,14 @@ rater's own session briefs it with this module, never reading a packet:
   the batch's packets, and the cells to score for each, taken from the
   rater's blank sheet. Beside it a small JSON file records what it asks.
   A fresh run reads one prompt and answers it.
-- :func:`enter` reads that answer into the rater's sheet exactly as given.
-  An answer that does not name its model, or does not score exactly the
-  cells its prompt asked for with 0, 1 or 2, or right or wrong, is refused
-  and enters nothing, so the run is held again whole. A cell already scored
-  is never scored again, and nothing is entered once the seal is open.
+- :func:`enter` reads that answer from the run's own record, as Claude Code
+  keeps it, and enters it in the rater's sheet exactly as given. The record
+  must show replies from the rater's model alone, and no tool call but one
+  Read of the prompt and the hand-back of the answer. An answer that does
+  not name that model, or does not score exactly the cells its prompt asked
+  for with 0, 1 or 2, or right or wrong, is refused and enters nothing, so
+  the run is held again whole. A cell already scored is never scored again,
+  and nothing is entered once the seal is open.
 - :func:`differences` lists the cells two raters scored differently, on a
   practice run only, so they can agree how the anchors apply.
 """
@@ -48,6 +51,7 @@ _HEADING = re.compile(r"^=== Packet (\S+), (\d+) of (\d+) ===$", re.M)
 _MODEL = re.compile(r"\A\s*model:\s*(\S+)\s*$", re.M)
 _JSON = re.compile(r"```json\s*\n(.*?)```", re.S)
 _NO_NOTES = "None yet: this is the practice."
+_HANDBACK = "SubagentHandback"  # the tool a subagent hands its answer back with
 
 _PROMPT = """\
 You are one of two raters scoring answers written for fictional
@@ -160,20 +164,23 @@ def write_batches(
 
 
 def enter(
-    directory: Path, person: str, prompt: Path, answer: Path, *, model: str | None = None,
+    directory: Path, person: str, prompt: Path, record: Path, *, model: str,
     now: Callable[[], dt.datetime] = lambda: dt.datetime.now(dt.UTC),
 ) -> tuple[str, ...]:
-    """Enter the run's *answer* to *prompt* into *person*'s sheet in *directory*,
-    exactly as given; the packets entered. *model*, when given, is the only
-    model an answer may come from."""
+    """Enter the answer to *prompt* that the run's *record* holds into
+    *person*'s sheet in *directory*, exactly as given; the packets entered.
+    The answer is kept beside the record. *model* is the only model the run
+    may have replied with."""
     if (directory / OPENED).exists():
         raise RaterRefused("the seal is open, so no score may be entered")
     asked = json.loads(prompt.with_suffix(".json").read_text())
     if asked["person"] != person or _sha256(prompt.read_bytes()) != asked["prompt_sha256"]:
         raise RaterRefused(f"{prompt} changed after it was written, or is not {person}'s")
-    text = answer.read_text()
+    text = _ran(record, prompt, model)
+    answer = record.with_suffix(".answer.md")
+    answer.write_text(text)
     ran_on = _model(text)
-    if model is not None and ran_on != model:
+    if ran_on != model:
         raise RaterRefused(f"the run says it ran on {ran_on}, not {model}")
     given = _scores(text, asked["cells"])
     header, rows = _read_sheet(directory, person)
@@ -191,6 +198,7 @@ def enter(
         log.write(json.dumps({
             "batch": asked["batch"], "model": ran_on, "packets": asked["packets"],
             "prompt_sha256": asked["prompt_sha256"],
+            "record": record.name, "record_sha256": _sha256(record.read_bytes()),
             "answer": answer.name, "answer_sha256": _sha256(answer.read_bytes()),
             "at": now().isoformat(),
         }) + "\n")
@@ -211,6 +219,41 @@ def differences(root: Path) -> list[str]:
             if column >= _FIXED and one not in ("", NOT_SCORED) and two != one and two:
                 listed.append(f"{row[1]} {header[column]}: {first} {one}, {second} {two}")
     return listed
+
+
+def _ran(record: Path, prompt: Path, model: str) -> str:
+    """The answer in a run's *record*, once the record shows the run replied
+    with *model* alone and read its *prompt* and nothing else."""
+    replies = []
+    for line in record.read_text().splitlines():
+        try:
+            entry = json.loads(line) if line.strip() else {}
+        except json.JSONDecodeError:
+            raise RaterRefused(f"{record}: a line of the run's record cannot be read") from None
+        if entry.get("type") in ("assistant", "user"):
+            replies.append(entry)
+    models = {e["message"].get("model") for e in replies if e["type"] == "assistant"}
+    if models != {model}:
+        raise RaterRefused(f"the run's record shows replies from {', '.join(map(str, models))}"
+                           f", not {model} alone")
+    calls = [block for e in replies if e["type"] == "assistant"
+             for block in _blocks(e) if block.get("type") == "tool_use"]
+    handback = [c for c in calls if c.get("name") == _HANDBACK]
+    read = [c for c in calls if c.get("name") != _HANDBACK]
+    if (len(read) != 1 or read[0].get("name") != "Read" or len(handback) > 1
+            or Path(str(read[0].get("input", {}).get("file_path"))).resolve() != prompt.resolve()):
+        raise RaterRefused("the run's record shows a tool call other than one Read of its "
+                           "prompt and the hand-back of its answer")
+    if handback:
+        return str(handback[0].get("input", {}).get("message", ""))
+    last_said = max(i for i, e in enumerate(replies) if e["type"] == "user")
+    return "".join(block.get("text", "") for e in replies[last_said + 1:]
+                   for block in _blocks(e) if block.get("type") == "text")
+
+
+def _blocks(entry: dict[str, Any]) -> list[dict[str, Any]]:
+    content = entry["message"].get("content")
+    return [b for b in content if isinstance(b, dict)] if isinstance(content, list) else []
 
 
 def _model(text: str) -> str:

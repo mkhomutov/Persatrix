@@ -6,7 +6,9 @@ rater's own session briefs it with :mod:`evaluators.exp001.ai_raters`: it
 splits the rater's packet file into batches, each written as one prompt
 with the rubric, the practice notes and the batch's packets, without the
 session reading a packet; then it enters each run's answer into the
-rater's sheet exactly as given, refusing anything else.
+rater's sheet exactly as given, refusing anything else. The answer is read
+from the run's own record, which must show replies from the rater's model
+alone and no tool call but one Read of the prompt and the hand-back.
 
 These tests use a practice run, whose packets anyone may read.
 """
@@ -81,18 +83,51 @@ def _given(packet: str, cell: str) -> int | str:
     return "right" if cell.startswith("R") else 2
 
 
+def _record(
+    prompt: Path, text: str, *, model: str = MODEL,
+    calls: list[tuple[str, dict[str, Any]]] | None = None, handback: bool = True,
+) -> Path:
+    """A run's record as Claude Code keeps it: one line per message or block."""
+    def said(content: Any, role: str = "assistant") -> dict[str, Any]:
+        message = {"role": role, "content": content, **({"model": model} if role != "user"
+                                                          else {})}
+        return {"type": role, "message": message}
+
+    lines = [said("Read the file and do what it says.", "user")]
+    for n, (name, given) in enumerate(
+        [("Read", {"file_path": str(prompt)})] if calls is None else calls,
+    ):
+        lines += [said([{"type": "tool_use", "id": f"t{n}", "name": name, "input": given}]),
+                  said([{"type": "tool_result", "tool_use_id": f"t{n}", "content": "…"}],
+                       "user")]
+    if handback:
+        lines += [said([{"type": "tool_use", "id": "h", "name": "SubagentHandback",
+                         "input": {"message": text}}]),
+                  said([{"type": "tool_result", "tool_use_id": "h", "content": "ok"}], "user")]
+    else:
+        lines.append(said([{"type": "text", "text": text}]))
+    tries = len(list(prompt.parent.glob(f"{prompt.stem}.try-*.jsonl")))
+    path = prompt.parent / f"{prompt.stem}.try-{tries + 1}.jsonl"
+    path.write_text("".join(json.dumps(line) + "\n" for line in lines))
+    return path
+
+
 def _answer(
     prompt: Path, *, model: str = MODEL, value: Callable[[str, str], Any] = _given,
-    edit: Callable[[dict[str, dict[str, Any]]], None] | None = None,
+    edit: Callable[[dict[str, dict[str, Any]]], None] | None = None, **record: Any,
 ) -> Path:
+    """A run that read *prompt* and answered it, as its record."""
     asked = _sidecar(prompt)["cells"]
     scores = {p: {c: value(p, c) for c in cells} for p, cells in asked.items()}
     if edit is not None:
         edit(scores)
-    path = prompt.with_suffix(".answer.md")
-    path.write_text(f"model: {model}\n\nEvery packet, with a reason each.\n\n"
-                    f"```json\n{json.dumps(scores)}\n```\n")
-    return path
+    text = (f"model: {model}\n\nEvery packet, with a reason each.\n\n"
+            f"```json\n{json.dumps(scores)}\n```\n")
+    return _record(prompt, text, model=model, **record)
+
+
+def _enter(run: Path, person: str, prompt: Path, record: Path) -> tuple[str, ...]:
+    return enter(run, person, prompt, record, model=MODEL)
 
 
 def _first_memo(scores: dict[str, dict[str, Any]]) -> dict[str, Any]:
@@ -159,7 +194,7 @@ class TestWritingTheBatches:
 
     def test_a_sheet_that_already_holds_scores_is_refused(self, run: Path, notes: Path) -> None:
         first = _batches(run, notes)[0]
-        enter(run, "person-1", first, _answer(first))
+        _enter(run, "person-1", first, _answer(first))
         shutil.rmtree(first.parent)
         with pytest.raises(RaterRefused, match="already holds scores"):
             _batches(run, notes)
@@ -171,7 +206,7 @@ class TestEnteringAnAnswer:
         def value(packet: str, cell: str) -> int | str:
             return "wrong" if cell == "R1" else 1 if cell == "C4" else _given(packet, cell)
 
-        entered = enter(run, "person-1", prompt, _answer(prompt, value=value), model=MODEL)
+        entered = _enter(run, "person-1", prompt, _answer(prompt, value=value))
         asked = _sidecar(prompt)["cells"]
         assert entered == tuple(asked)
         sheet = read_sheet(sheet_path(run, "person-1"), read_packets(run), "person-1")
@@ -185,12 +220,29 @@ class TestEnteringAnAnswer:
 
     def test_each_entry_is_logged_with_its_model_and_hashes(self, run: Path, notes: Path) -> None:
         prompt = _batches(run, notes)[0]
-        enter(run, "person-1", prompt, _answer(prompt))
+        run_record = _answer(prompt)
+        _enter(run, "person-1", prompt, run_record)
         log = (prompt.parent / ENTERED).read_text().splitlines()
         (record,) = [json.loads(line) for line in log]
         assert (record["batch"], record["model"]) == ("batch-01", MODEL)
         assert record["packets"] == _sidecar(prompt)["packets"]
-        assert len(record["answer_sha256"]) == len(record["prompt_sha256"]) == 64
+        assert record["record"] == run_record.name
+        assert all(len(record[f"{k}_sha256"]) == 64 for k in ("prompt", "record", "answer"))
+
+    def test_the_answer_is_kept_beside_the_record_it_was_read_from(
+        self, run: Path, notes: Path,
+    ) -> None:
+        prompt = _batches(run, notes)[0]
+        run_record = _answer(prompt)
+        _enter(run, "person-1", prompt, run_record)
+        kept = run_record.with_suffix(".answer.md").read_text()
+        assert kept.startswith(f"model: {MODEL}\n") and "```json" in kept
+
+    def test_an_answer_given_as_the_runs_last_words_is_read_too(
+        self, run: Path, notes: Path,
+    ) -> None:
+        prompt = _batches(run, notes)[0]
+        assert _enter(run, "person-1", prompt, _answer(prompt, handback=False))
 
     @pytest.mark.parametrize(("edit", "why"), [
         (lambda s: s.popitem(), "every packet"),
@@ -206,7 +258,7 @@ class TestEnteringAnAnswer:
         prompt = _batches(run, notes)[0]
         before = sheet_path(run, "person-1").read_bytes()
         with pytest.raises(RaterRefused, match=why):
-            enter(run, "person-1", prompt, _answer(prompt, edit=edit))
+            _enter(run, "person-1", prompt, _answer(prompt, edit=edit))
         assert sheet_path(run, "person-1").read_bytes() == before
         assert not (prompt.parent / ENTERED).exists()
 
@@ -218,8 +270,8 @@ class TestEnteringAnAnswer:
             if recall:
                 break
         with pytest.raises(RaterRefused, match="not right or wrong"):
-            enter(run, "person-1", prompt,
-                  _answer(prompt, edit=lambda s: s[recall[0]].update(R1="partly")))
+            _enter(run, "person-1", prompt,
+                   _answer(prompt, edit=lambda s: s[recall[0]].update(R1="partly")))
 
     @pytest.mark.parametrize("text", [
         "Scores below.\n```json\n{}\n```\n",
@@ -230,41 +282,65 @@ class TestEnteringAnAnswer:
         self, run: Path, notes: Path, text: str,
     ) -> None:
         prompt = _batches(run, notes)[0]
-        answer = prompt.with_suffix(".answer.md")
-        answer.write_text(text)
         with pytest.raises(RaterRefused):
-            enter(run, "person-1", prompt, answer)
+            _enter(run, "person-1", prompt, _record(prompt, text))
 
     def test_a_run_on_another_model_is_refused(self, run: Path, notes: Path) -> None:
         prompt = _batches(run, notes)[0]
         with pytest.raises(RaterRefused, match="claude-other-1"):
-            enter(run, "person-1", prompt, _answer(prompt, model="claude-other-1"), model=MODEL)
+            _enter(run, "person-1", prompt, _answer(prompt, model="claude-other-1"))
+
+    def test_a_run_that_only_says_it_ran_on_the_model_is_refused(
+        self, run: Path, notes: Path,
+    ) -> None:
+        prompt = _batches(run, notes)[0]
+        claimed = _answer(prompt)
+        claimed.write_text(claimed.read_text().replace(f'"model": "{MODEL}"',
+                                                       '"model": "claude-fable-5-1"', 1))
+        with pytest.raises(RaterRefused, match="claude-fable-5-1"):
+            _enter(run, "person-1", prompt, claimed)
+
+    @pytest.mark.parametrize("calls", [
+        [],
+        [("Read", {"file_path": "/elsewhere/seal.json"})],
+        [("Read", {"file_path": "PROMPT"}), ("Bash", {"command": "ls"})],
+        [("Read", {"file_path": "PROMPT"}), ("Read", {"file_path": "PROMPT"})],
+    ])
+    def test_a_run_that_did_anything_but_read_its_prompt_is_refused(
+        self, run: Path, notes: Path, calls: list[tuple[str, dict[str, Any]]],
+    ) -> None:
+        prompt = _batches(run, notes)[0]
+        made = [(name, {k: str(prompt) if v == "PROMPT" else v for k, v in given.items()})
+                for name, given in calls]
+        with pytest.raises(RaterRefused, match="tool"):
+            _enter(run, "person-1", prompt, _answer(prompt, calls=made))
+        assert not (prompt.parent / ENTERED).exists()
 
     def test_a_score_is_never_entered_twice(self, run: Path, notes: Path) -> None:
         prompt = _batches(run, notes)[0]
-        enter(run, "person-1", prompt, _answer(prompt))
+        _enter(run, "person-1", prompt, _answer(prompt))
         with pytest.raises(RaterRefused, match="already scored"):
-            enter(run, "person-1", prompt, _answer(prompt))
+            _enter(run, "person-1", prompt, _answer(prompt))
 
     def test_a_changed_prompt_is_refused(self, run: Path, notes: Path) -> None:
         prompt = _batches(run, notes)[0]
         answer = _answer(prompt)
         prompt.write_text(prompt.read_text() + "\nAnd one more thing.\n")
         with pytest.raises(RaterRefused, match="changed"):
-            enter(run, "person-1", prompt, answer)
+            _enter(run, "person-1", prompt, answer)
 
     def test_nothing_is_entered_once_the_seal_is_open(self, run: Path, notes: Path) -> None:
         prompt = _batches(run, notes)[0]
         (run / OPENED).write_text("{}")
         with pytest.raises(RaterRefused, match="seal"):
-            enter(run, "person-1", prompt, _answer(prompt))
+            _enter(run, "person-1", prompt, _answer(prompt))
 
     def test_two_raters_answers_fill_every_score_scoring_waits_for(
         self, run: Path, notes: Path,
     ) -> None:
         for person in ("person-1", "person-2"):
             for prompt in _batches(run, notes, person):
-                enter(run, person, prompt, _answer(prompt))
+                _enter(run, person, prompt, _answer(prompt))
         progress = score(run, materials=load_materials(EXP), prompts=PROMPTS)
         assert isinstance(progress, Progress) and progress.complete
 
@@ -278,7 +354,7 @@ class TestPracticeDifferences:
 
         for person, value in (("person-1", _given), ("person-2", low)):
             for prompt in _batches(run, notes, person):
-                enter(run, person, prompt, _answer(prompt, value=value))
+                _enter(run, person, prompt, _answer(prompt, value=value))
         listed = differences(run)
         memos = [p for p in read_packets(run).packets.values()
                  if not isinstance(p, RecallPacket)]
@@ -323,6 +399,6 @@ class TestFromTheCommandLine:
     ) -> None:
         for person in ("person-1", "person-2"):
             for prompt in _batches(run, None, person):
-                enter(run, person, prompt, _answer(prompt))
+                _enter(run, person, prompt, _answer(prompt))
         assert command.main(["rater-differences", str(run)]) == 0
         assert "the two raters agree on every cell" in capsys.readouterr().out
