@@ -346,7 +346,7 @@ def _result(
     return {
         "run": place.run, "window": place.window, "opened_at": opened_at.isoformat(),
         "scoring_due": None if place.due is None else place.due.isoformat(),
-        "on_time": on_time, **figures, "meetings": rows,
+        "on_time": on_time, "deviation": result_report.DEVIATION, **figures, "meetings": rows,
     }
 
 

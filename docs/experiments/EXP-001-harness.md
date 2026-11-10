@@ -1,7 +1,7 @@
 # EXP-001 — The harness
 
 > **Status**: 🚧 **In Progress** — PRs 1, 2, 3a, 3b, 4, 5a, 5b, 5c, 5d, 5e, 6a, 6b and 6c merged ([#984](https://github.com/mkhomutov/Persatrix/pull/984), [#986](https://github.com/mkhomutov/Persatrix/pull/986), [#987](https://github.com/mkhomutov/Persatrix/pull/987), [#988](https://github.com/mkhomutov/Persatrix/pull/988), [#992](https://github.com/mkhomutov/Persatrix/pull/992), [#993](https://github.com/mkhomutov/Persatrix/pull/993), [#1013](https://github.com/mkhomutov/Persatrix/pull/1013), [#1015](https://github.com/mkhomutov/Persatrix/pull/1015), [#1021](https://github.com/mkhomutov/Persatrix/pull/1021), [#1032](https://github.com/mkhomutov/Persatrix/pull/1032), [#1023](https://github.com/mkhomutov/Persatrix/pull/1023), [#1024](https://github.com/mkhomutov/Persatrix/pull/1024), [#1036](https://github.com/mkhomutov/Persatrix/pull/1036)); PR 6c, the scored run, was the last before the run, and PR 6d does the scoring ([third part](EXP-001-harness-scoring.md); [pre-registration §6](EXP-001-preregistration.md#6-from-here-to-the-result)). The practice run held on 2026-10-02 asked for PR 5e ([what it showed](EXP-001-harness-run.md#what-the-practice-run-showed)); the one held on 2026-10-16, on PR 6c's code, showed the eight checks pass and asked for no harness PR ([what it showed](EXP-001-harness-run.md#the-practice-run-on-pr-6cs-code)).
-> **Last updated**: 2026-11-07
+> **Last updated**: 2026-11-10
 > **Carries out**: the [EXP-001 pre-registration](EXP-001-preregistration.md) and its [part 2](EXP-001-preregistration-scoring.md)
 > **Code**: [`evaluators/exp001/`](../../evaluators/exp001/)
 
@@ -179,6 +179,9 @@ and PR 6d's in its seventh, [scoring](EXP-001-harness-choices-scoring.md).
 - [EXP-001 pre-registration](EXP-001-preregistration.md) — materials, arms
   and the run.
 - [Part 2: scoring and the decision](EXP-001-preregistration-scoring.md).
+- [Deviation: two AI raters](EXP-001-deviation-ai-raters.md) — the
+  maintainer's 2026-11-10 decision that two AI raters score in the two
+  people's place, and the rules they follow.
 - [The harness, second part](EXP-001-harness-run.md) — the judge, the
   practice run, what it showed, PR 5e and the scored run.
 - [The harness, third part](EXP-001-harness-scoring.md) — PR 6d, scoring

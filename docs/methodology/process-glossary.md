@@ -1,6 +1,6 @@
 # Process Glossary
 
-> **Last updated**: 2026-10-21
+> **Last updated**: 2026-11-10
 > Terms used to run the project. Product and architecture terms live in the
 > [AI glossary](../ai-glossary.md); this file covers the process vocabulary
 > that appears in plans, PR bodies, and reports. Same authoring rules: use the
@@ -54,6 +54,22 @@ sequencing amendment that ratifies it.
 A model call that scores an experiment's outputs with the same rubric, anchors
 and answer keys as the human raters, without knowing which arm produced each
 output. It is one rater among several, never the only one.
+
+### AI rater
+A model that scores an experiment's outputs in place of a person, with that
+person's packets, rubric and anchors, each batch in a fresh run that is
+given nothing else of the experiment. Unlike the LLM judge it is not a
+pre-registered rater: putting one in a person's place is a deviation,
+which the result states first. EXP-001's two people were replaced this way
+([the deviation](../experiments/EXP-001-deviation-ai-raters.md)).
+
+### Deviation
+A departure from a pre-registered experiment's merged documents, made once
+they can no longer change: from its first scored meeting on. It is written
+down in a document of its own and reviewed before the scores it touches are
+read, and the result names it in its first lines. The pre-registration
+itself stays as merged. EXP-001's AI raters are one
+([the deviation](../experiments/EXP-001-deviation-ai-raters.md)).
 
 ### Version-train gate
 The rule that work slotted for a later version does not merge while the

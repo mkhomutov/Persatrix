@@ -152,6 +152,14 @@ class TestOpeningTheSeal:
         assert json.loads((run / RESULT).read_text()) == result
         assert "rule 4" in (run / RESULT_SUMMARY).read_text()
 
+    def test_the_result_names_the_deviation_before_any_rule(self, run: Path) -> None:
+        # Two AI raters fill the people's sheets, so no rule fires as registered.
+        result = _opened(run)
+        assert result["deviation"] == "docs/experiments/EXP-001-deviation-ai-raters.md"
+        _, second, third, *_ = (run / RESULT_SUMMARY).read_text().splitlines()
+        assert "Two AI raters" in second and result["deviation"] in second
+        assert "no rule fires as registered" in second and third.startswith("Outcome:")
+
     def test_once_open_a_later_look_reads_the_same_result(self, run: Path) -> None:
         result = _opened(run)
         assert _score(run, now=lambda: _LATE) == result

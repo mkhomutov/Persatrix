@@ -20,6 +20,7 @@ from evaluators.exp001.decision import T_975
 from evaluators.exp001.materials import MeetingKind, Series, load_materials
 from evaluators.exp001.rating import PEOPLE, RATERS
 from evaluators.exp001.result import Ratings, build
+from evaluators.exp001.result_report import summary
 from evaluators.exp001.scoring import MemoRef
 
 from ._exp001_run_test_helpers import EXP
@@ -155,3 +156,8 @@ class TestWhenNoRuleFires:
         assert result["outcome"] == "inconclusive"
         alone = result["people_alone"]
         assert (alone["outcome"], alone["agreement"]) == ("rule 4", pytest.approx(1.0))
+        # Named by their sheets, since two AI raters fill them in the people's place.
+        held = {"run": "scored", "window": 1, "opened_at": "2026-11-27T00:00:00+00:00",
+                "scoring_due": None, "meetings": []}
+        text = summary({**result, **held})
+        assert "  the rule on person-1's and person-2's sheets alone: rule 4" in text

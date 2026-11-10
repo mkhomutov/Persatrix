@@ -27,6 +27,20 @@ drawn and judged (:mod:`evaluators.exp001.scoring_run`). It writes each
 person a blank score sheet the first time and says how many packets each
 rater has left; with ``--open``, once every score is in, it opens the seal
 and writes the result. It makes no model call.
+
+The ``rater-`` commands are for the AI raters who score in the two people's
+place (:mod:`evaluators.exp001.ai_raters`). A rater's session writes its
+rater's batches as prompts (``rater-batches``), gives each to a fresh run
+with the one brief ``rater-brief`` prints, and enters each run's answer
+into the rater's sheet from the run's own record (``rater-enter``). A run
+that writes the practice notes is checked and kept the same way
+(``rater-keep``). The checks before the seal opens are in
+:mod:`evaluators.exp001.ai_rater_checks`: ``rater-audit`` lists any run in
+a session's folder of run records that its logs do not name;
+``rater-same-notes`` checks both raters' scored prompts hold one set of
+notes; ``rater-ready`` checks each sheet holds what its entered runs gave.
+On a practice run, ``rater-differences`` lists the cells the two raters
+scored differently.
 """
 
 from __future__ import annotations
@@ -43,6 +57,8 @@ from agents.llm_client import LLMClient
 from agents.llm_offline import MockProvider
 from agents.llm_providers import AnthropicProvider
 from evaluators.exp001 import (
+    ai_rater_checks,
+    ai_raters,
     practice,
     practice_report,
     result_report,
@@ -57,6 +73,7 @@ from evaluators.exp001.judge import JudgePrompts, load_prompts
 from evaluators.exp001.materials import load_materials
 from evaluators.exp001.packets import load_adviser_names
 from evaluators.exp001.panel import load_panel
+from evaluators.exp001.rating import PEOPLE
 from evaluators.exp001.sheets import SheetError
 
 MATERIALS = REPO / "evaluators" / "experiments" / "EXP-001"
@@ -72,6 +89,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _scored(args)
     if args.command == "score":
         return _score(args)
+    if args.command.startswith("rater-"):
+        return _rater(args)
     arms = tuple(args.arms)
     if len(set(arms)) != len(arms):
         parser.error("name each arm once")
@@ -160,6 +179,42 @@ def _score(args: argparse.Namespace) -> int:
     return 0
 
 
+def _rater(args: argparse.Namespace) -> int:
+    """One step of an AI rater's session; what the rater rules refuse fails."""
+    try:
+        if args.command == "rater-batches":
+            for path in ai_raters.write_batches(
+                args.directory, args.person, args.out, rubric=MATERIALS / "rubric.yaml",
+                notes=args.notes,
+            ):
+                print(path)
+        elif args.command == "rater-brief":
+            print(ai_raters.briefing(args.prompt))
+        elif args.command == "rater-enter":
+            entered = ai_raters.enter(args.directory, args.person, args.prompt, args.record)
+            print(f"entered {len(entered)} packets from {args.prompt.stem}")
+        elif args.command == "rater-keep":
+            print(ai_raters.keep(args.prompt, args.record))
+        elif args.command == "rater-audit":
+            listed = ai_rater_checks.unentered(args.outs, args.records)
+            print("\n".join(listed) if listed else "every run was entered, kept or refused, "
+                  "and every logged record is here unchanged")
+            return 2 if listed else 0
+        elif args.command == "rater-same-notes":
+            print(ai_rater_checks.same_notes(args.outs))
+        elif args.command == "rater-ready":
+            for line in ai_rater_checks.ready(args.directory, args.outs):
+                print(f"the result reports: {line}")
+            print("every score is in, as its run gave it: the seal may be opened")
+        else:
+            listed = ai_rater_checks.differences(args.root)
+            print("\n".join(listed) if listed else "the two raters agree on every cell")
+    except ai_raters.RaterRefused as refused:
+        print(refused, file=sys.stderr)
+        return 2
+    return 0
+
+
 def _provider(name: str) -> tuple[LLMClient, Alias, JudgePrompts | None]:
     """The client, model alias and judge's prompts either run is held with on
     the provider *name*: offline, the mock provider's alias, and no judging."""
@@ -207,6 +262,54 @@ def _parser() -> argparse.ArgumentParser:
         "--open", dest="open_seal", action="store_true",
         help="once every score is in, open the seal and write the result",
     )
+    batches = commands.add_parser(
+        "rater-batches", help="write an AI rater's packets as one prompt per batch",
+    )
+    batches.add_argument("directory", type=Path,
+                         help="the folder holding the packets and the raters' files")
+    batches.add_argument("person", choices=PEOPLE, help="whose sheet the rater fills")
+    batches.add_argument("out", type=Path, help="where the prompts go, outside the run")
+    batches.add_argument("--notes", type=Path,
+                         help="the notes agreed in practice: always on a scored run, "
+                              "never in the practice")
+    briefing = commands.add_parser(
+        "rater-brief", help="print the one message a fresh run of a prompt is given",
+    )
+    briefing.add_argument("prompt", type=Path, help="the prompt the run answers")
+    entering = commands.add_parser(
+        "rater-enter", help="enter an AI rater's answer, read from its run's record",
+    )
+    entering.add_argument("directory", type=Path,
+                          help="the folder holding the packets and the raters' files")
+    entering.add_argument("person", choices=PEOPLE, help="whose sheet the rater fills")
+    entering.add_argument("prompt", type=Path, help="the batch's prompt")
+    entering.add_argument("record", type=Path,
+                          help="the run's own record, which holds its answer")
+    keeping = commands.add_parser(
+        "rater-keep", help="check and keep the answer of a run that writes the practice notes",
+    )
+    keeping.add_argument("prompt", type=Path, help="the notes prompt the run answered")
+    keeping.add_argument("record", type=Path, help="the run's own record")
+    audit = commands.add_parser(
+        "rater-audit", help="list what a session's run records show that its logs do not",
+    )
+    audit.add_argument("outs", type=Path, nargs="+",
+                       help="every folder of prompts the session used, each with its log")
+    audit.add_argument("records", type=Path, help="the session's folder of run records")
+    noted = commands.add_parser(
+        "rater-same-notes", help="check both raters' scored prompts hold one set of notes",
+    )
+    noted.add_argument("outs", type=Path, nargs=2, help="each rater's folder of prompts")
+    opening = commands.add_parser(
+        "rater-ready", help="check each sheet holds what its entered runs gave, before the seal",
+    )
+    opening.add_argument("directory", type=Path,
+                         help="the folder holding the packets and the raters' files")
+    opening.add_argument("outs", type=Path, nargs=2, help="each rater's folder of prompts")
+    compared = commands.add_parser(
+        "rater-differences", help="list the cells two AI raters scored differently in practice",
+    )
+    compared.add_argument("root", type=Path, help="the practice run's directory")
     return parser
 
 
