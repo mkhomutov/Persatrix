@@ -1,6 +1,6 @@
 # EXP-001 — Deviation: two AI raters in the two people's place
 
-> **Status**: 🚧 **In Progress** — fixed when it merges, before any rater reads a packet from the scored run.
+> **Status**: 🚧 **In Progress** — fixed when it merges ([#1095](https://github.com/mkhomutov/Persatrix/pull/1095)), before any rater reads a packet from the scored run.
 > **Last updated**: 2026-11-10
 > **Departs from**: [pre-registration part 2, §2](EXP-001-preregistration-scoring.md#2-raters-and-blinding) · **Decided by**: the maintainer, on 2026-11-10
 
