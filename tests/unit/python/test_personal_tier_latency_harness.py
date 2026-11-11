@@ -16,36 +16,14 @@ PR 4 addresses the two perf-harness findings from the PR 3 review of
   asserted here; it is a docstring-only decision.
 
 The harness itself is loaded by file path (it lives under ``tests/perf/``
-and is not an importable package) — same pattern as the PR 3 pin in
-``test_rfc0029_callsite_refactor.py``.
+and is not an importable package), through the loader in
+``_perf_harness_loader.py`` that the PR 3 pin in
+``test_rfc0029_callsite_refactor.py`` also uses.
 """
 
 from __future__ import annotations
 
-import importlib.util
-import sys
-from pathlib import Path
-from types import ModuleType
-
-
-def _load_perf_harness() -> ModuleType:
-    """Load ``tests/perf/personal_tier_latency.py`` as a module by path."""
-    repo_root = Path(__file__).resolve().parents[3]
-    harness_path = repo_root / "tests" / "perf" / "personal_tier_latency.py"
-    assert harness_path.is_file(), f"perf harness missing: {harness_path}"
-    spec = importlib.util.spec_from_file_location(
-        "personal_tier_latency", harness_path,
-    )
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    # Register before exec_module: dataclass (and other class-creation)
-    # machinery resolves ``cls.__module__`` through ``sys.modules`` while
-    # the class body runs, so a by-path load that skips this step crashes
-    # on the harness's ``@dataclass`` gate-verdict types (PR 5).
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
-
+from ._perf_harness_loader import load_perf_harness as _load_perf_harness
 
 # ─── warm-up is reported in the result dict ───────────────────
 
