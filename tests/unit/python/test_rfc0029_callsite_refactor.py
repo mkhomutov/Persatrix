@@ -21,13 +21,18 @@ PR 3 routes the persona-runtime / sub-agent memory call sites — and the
 
 from __future__ import annotations
 
-import importlib.util
+import dataclasses
+import sys
 import warnings
 from pathlib import Path
+
+import pytest
 
 from agents.memory.episodic import EpisodicMemory
 from agents.memory.facts import FactStore
 from agents.memory.relationship import RelationshipMemory
+
+from ._perf_harness_loader import load_perf_harness as _load_perf_harness
 
 _DIRECT_CONSTRUCTION_WARNING = "Direct construction of"
 
@@ -245,17 +250,22 @@ def test_memoryfacade_alias_is_removed_from_package_and_module() -> None:
 # ─── perf harness ships and runs (gate enforcement is PR 5) ───
 
 
-def _load_perf_harness():
-    repo_root = Path(__file__).resolve().parents[3]
-    harness_path = repo_root / "tests" / "perf" / "personal_tier_latency.py"
-    assert harness_path.is_file(), f"perf harness missing: {harness_path}"
-    spec = importlib.util.spec_from_file_location(
-        "personal_tier_latency", harness_path,
-    )
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+def test_perf_harness_loads_when_no_earlier_test_loaded_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The loader works in a process where nothing has loaded the harness yet.
+
+    The harness defines dataclasses, and ``dataclasses`` looks the class's
+    module up in ``sys.modules`` while it builds the class. A loader that
+    runs the module without registering it first fails there, unless an
+    earlier test file left an entry under the same name. This file used to
+    pass only for that reason (ISSUE-0233), so the test removes any such
+    entry before it loads.
+    """
+    monkeypatch.delitem(sys.modules, "personal_tier_latency", raising=False)
+    harness = _load_perf_harness()
+    assert sys.modules["personal_tier_latency"] is harness
+    assert dataclasses.is_dataclass(harness.GateVerdict)
 
 
 async def test_personal_tier_latency_harness_runs() -> None:

@@ -18,39 +18,20 @@ tests pin the gate's behaviour:
   is pinned, never a latency number.
 
 The harness is loaded by file path — it lives under ``tests/perf/`` and is
-not an importable package — mirroring the PR 4 pin in
-``test_personal_tier_latency_harness.py``.
+not an importable package — through the loader in
+``_perf_harness_loader.py`` that the PR 4 pin in
+``test_personal_tier_latency_harness.py`` also uses.
 """
 
 from __future__ import annotations
 
-import importlib.util
 import json
-import sys
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 
-
-def _load_perf_harness() -> ModuleType:
-    """Load ``tests/perf/personal_tier_latency.py`` as a module by path."""
-    repo_root = Path(__file__).resolve().parents[3]
-    harness_path = repo_root / "tests" / "perf" / "personal_tier_latency.py"
-    assert harness_path.is_file(), f"perf harness missing: {harness_path}"
-    spec = importlib.util.spec_from_file_location(
-        "personal_tier_latency", harness_path,
-    )
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    # Register before exec_module: dataclass (and other class-creation)
-    # machinery resolves ``cls.__module__`` through ``sys.modules`` while
-    # the class body runs, so a by-path load that skips this step crashes
-    # on the harness's ``@dataclass`` gate-verdict types.
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
-
+from ._perf_harness_loader import load_perf_harness as _load_perf_harness
 
 #: A baseline both gated metrics are measured against in the tests below.
 #: p99 limit at the default 20% tolerance is 3.6 ms; p50 limit is 1.2 ms.
