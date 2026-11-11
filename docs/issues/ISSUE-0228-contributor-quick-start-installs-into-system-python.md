@@ -62,7 +62,9 @@ and its installer.
 > the proposal above missed. The recipe changed into `agents/` first, so
 > a relative `PYTHON=.venv/bin/python` would have named a missing file;
 > it now runs from the repository root and installs `./agents[dev]`. And
-> `.gitignore` did not list `.venv/`, which Python 3.11 and 3.12 leave
-> untracked; it does now. The Quick Start was then run for real on
-> Python 3.11. The note above about externally managed Pythons is still
-> not run.
+> `.gitignore` did not list `.venv`, which Python 3.11 and 3.12 leave
+> untracked; it does now, as a folder or as a link. The Quick Start was
+> then run for real on Python 3.11. Review added one more: a Windows
+> virtual environment has no `python3`, so `PYTHON` defaults to `python`
+> there. That is read from the Makefile's dry run and not run on Windows.
+> The note above about externally managed Pythons is still not run.
