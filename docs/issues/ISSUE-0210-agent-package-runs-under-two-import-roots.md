@@ -81,7 +81,7 @@ an empty folder.
 > 2026-11-10 — found by a whole-repository quality review of `main` at
 > `ee9cfaac`; the import failure and the double load were measured with
 > the installed package.
->
+
 > 2026-11-11 — fixed. The seven lines are relative imports, a unit test
 > (`tests/unit/python/test_agents_package_imports_are_relative.py`)
 > refuses a new absolute one, and CI starts the installed package from an
