@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0228
 summary: "CONTRIBUTING's Quick Start begins with `make build-agents`, which runs a bare `pip3 install` and never mentions a virtual environment. Passing `PYTHON=.venv/bin/python` does not help, because the recipe installs through the separate `PIP` variable."
-status: open
+status: resolved
 severity: low
 area: docs
 created: 2026-11-10
+closed: 2026-11-12
+closed_pr: 1101
 refs:
   - CONTRIBUTING.md
   - Makefile
@@ -53,3 +55,16 @@ and its installer.
 > 2026-11-10 — found by a whole-repository quality review of `main` at
 > `ee9cfaac`; confirmed by reading the two files. The install was not
 > run.
+
+> 2026-11-11 — fixed. The Quick Start creates and activates `.venv`
+> before `make build-agents`. The recipe runs `$(PYTHON) -m pip`, and the
+> `PIP` variable is gone: nothing but the Makefile read it. Two things
+> the proposal above missed. The recipe changed into `agents/` first, so
+> a relative `PYTHON=.venv/bin/python` would have named a missing file;
+> it now runs from the repository root and installs `./agents[dev]`. And
+> `.gitignore` did not list `.venv`, which Python 3.11 and 3.12 leave
+> untracked; it does now, as a folder or as a link. The Quick Start was
+> then run for real on Python 3.11. Review added one more: a Windows
+> virtual environment has no `python3`, so `PYTHON` defaults to `python`
+> there. That is read from the Makefile's dry run and not run on Windows.
+> The note above about externally managed Pythons is still not run.

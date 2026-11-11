@@ -77,7 +77,7 @@ def run_pip_licenses() -> list[dict[str, str]]:
         )
     except FileNotFoundError:
         print(
-            "error: pip-licenses not installed. Run `cd agents && pip install -e \".[dev]\"`.",
+            "error: pip-licenses not installed. Run `make build-agents`.",
             file=sys.stderr,
         )
         sys.exit(2)
