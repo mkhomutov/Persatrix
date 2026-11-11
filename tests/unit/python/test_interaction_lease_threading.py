@@ -19,19 +19,27 @@ This matrix (TDD-first, written red) pins the links of the chain:
   call. This link was added later (ISSUE-0221): until then its only guard was
   a search of ``action_loop.py`` for the argument's text, which the later
   revise call in the same file also satisfies.
+* A revise round bills the same interaction: the loop hands the id to the
+  reflexion module, whose critic and rewrite calls each take a lease under
+  it. The reflexion module's own tests pass an id in and never read it back,
+  so this link is pinned here too, through the loop.
 """
 
 from __future__ import annotations
 
 import copy
+import json
 from contextlib import asynccontextmanager
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from agents.generated import wallet_pb2 as walletpb
 from agents.llm_client import LLMClient, LLMResponse
+from agents.model_aliases import use_alias_map
 from agents.persona import create_persona_agent
+from agents.persona_runtime.deliberation_plan import CompositionPlan
+from agents.persona_runtime.salience_gate import SalienceOutcome
 from agents.persona_runtime.wallet_cause import lease_interaction_id_for_event
 from agents.persona_types import ActionType, AgentEvent, EventType
 
@@ -189,6 +197,91 @@ class TestActionLoopLeasesItsTurnUnderTheInteraction:
         assert lease["cause"] == walletpb.CAUSE_CHANNEL_MESSAGE
         assert lease["agent_id"] == "ember-owl"
         assert lease["interaction_id"] == "itx-123"
+
+    @pytest.mark.asyncio
+    async def test_revise_round_leases_carry_the_events_interaction(self):
+        """One group-channel turn with a revise round, through the real action
+        loop: the turn takes three leases, for the compose call, the critic
+        and the rewrite, and each names the interaction the message arrived
+        under. A revise round that billed no interaction would spend outside
+        that interaction's cost ceiling.
+
+        The salience seam is replaced so the turn has a plan and one revise
+        round without a bid of its own; everything after it is the real loop
+        and the real reflexion module. The critic reads the draft as weak, so
+        the rewrite runs. The compose and rewrite calls go to the persona's
+        own model and the critic to the ``fast`` alias, which is how the
+        three leases are told apart.
+        """
+        wallet = _RecordingWallet()
+        compose_and_rewrite = iter([
+            "```json\n" + json.dumps([{
+                "action_type": "send_channel_message",
+                "payload": {"channel_id": "group:planning", "content": "first draft"},
+            }]) + "\n```",
+            "revised reply",
+        ])
+
+        def _respond(**kwargs):
+            if kwargs["model"] == "mock-fast":
+                return LLMResponse(text="weak: yes\ncritique: buries the point")
+            return LLMResponse(text=next(compose_and_rewrite))
+
+        provider = AsyncMock()
+        provider.create_message = AsyncMock(side_effect=_respond)
+        provider.format_tool_definitions = MagicMock(return_value=[])
+        client = LLMClient(provider=provider, wallet=wallet)
+        agent = create_persona_agent(
+            agent_id="ember-owl", config=copy.deepcopy(_PERSONA_CONFIG), llm_client=client,
+        )
+        await agent.initialize_memory()
+        event = AgentEvent(
+            event_type=EventType.CHANNEL_MESSAGE,
+            payload={
+                "content": "Which datastore?",
+                "channel_type": "group",
+                "mentions": [],
+                "respond_policy": "always",
+            },
+            channel_id="group:planning",
+            sender_id="alice",
+            message_id="msg-1",
+            metadata={"sender_participant_type": "user", "interaction_id": "itx-123"},
+        )
+        salience = SalienceOutcome(
+            silence=False,
+            user_message="Which datastore?",
+            seed=[{"role": "user", "content": "Which datastore?"}],
+            plan=CompositionPlan(
+                intent="answer", key_points=("name one",), addressed_to="alice",
+                avoid_restating=(),
+            ),
+            revise=1,
+        )
+        fast_alias = {"fast": {
+            "provider": "mock", "model": "mock-fast",
+            "input_per_1m_tokens": 0.0, "output_per_1m_tokens": 0.0,
+        }}
+        try:
+            with use_alias_map(fast_alias), patch(
+                "agents.persona_runtime.action_loop.run_salience_gate",
+                new=AsyncMock(return_value=salience),
+            ):
+                actions = await agent.on_event(event)
+        finally:
+            await agent.close_memory()
+
+        # The round ran to its end: the reply that leaves is the rewrite.
+        sent = [a for a in actions if a.action_type is ActionType.SEND_CHANNEL_MESSAGE]
+        assert [a.payload["content"] for a in sent] == ["revised reply"]
+        # Compose, critic, rewrite, in that order, one lease each.
+        assert [lease["model"] for lease in wallet.lease_kwargs] == [
+            "test-model", "mock-fast", "test-model",
+        ]
+        assert [lease["interaction_id"] for lease in wallet.lease_kwargs] == ["itx-123"] * 3
+        assert {lease["cause"] for lease in wallet.lease_kwargs} == {
+            walletpb.CAUSE_CHANNEL_MESSAGE,
+        }
 
 
 class TestLeaseInteractionIDForEvent:
