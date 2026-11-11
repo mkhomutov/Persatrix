@@ -171,7 +171,7 @@ def main() -> None:
         # provider-handle reset rather than ``metrics.shutdown()`` (which
         # is async and requires an event loop) to keep this in the
         # synchronous startup path.
-        from agents.observability import metrics as _pmetrics
+        from .observability import metrics as _pmetrics
 
         if _pmetrics._provider is not None:
             try:

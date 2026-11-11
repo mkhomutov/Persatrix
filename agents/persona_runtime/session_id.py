@@ -29,10 +29,10 @@ import os
 import re
 from typing import Final
 
-from agents.session_id import (
+from ..session_id import (
     LEGACY_SESSION_ID as _LEGACY_SESSION_ID,
 )
-from agents.session_id import (
+from ..session_id import (
     SESSION_ID_ENV_VAR as _SESSION_ID_ENV_VAR,
 )
 
