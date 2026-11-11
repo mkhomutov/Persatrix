@@ -2,9 +2,11 @@
 
 ``tests/perf/personal_tier_latency.py`` is a script CI runs by path, not a
 module a test can import, so the tests that pin it load it by path. Three
-test files each carried their own copy of the loader, and one copy had lost
-the step that registers the module. Its file passed only when a sibling file
-had loaded the harness first (ISSUE-0233). They all use this one now.
+test files each carried their own copy of the loader. The oldest copy never
+had the step that registers the module: the step arrived with the harness's
+dataclasses, in the two newer copies only. So that file passed only when a
+sibling file had loaded the harness first (ISSUE-0233). They all use this
+one now.
 """
 
 from __future__ import annotations
