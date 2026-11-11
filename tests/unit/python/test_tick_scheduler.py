@@ -199,28 +199,78 @@ class TestTickScheduler:
         assert scheduler.is_idle
         await agent.close_memory()
 
-    async def test_idle_skip_llm_calls(self):
-        """Once idle, tick loop skips LLM calls."""
+    async def test_idle_skip_llm_calls(self, monkeypatch):
+        """Once idle, the tick loop stops calling ``on_tick``, which is the model call.
+
+        The count is exact. ``on_tick`` runs ``idle_after_ticks`` times, and
+        every later tick takes the idle branch, which only recovers energy.
+        The old form of this test slept half a second and asserted
+        ``call_count >= 2``, a lower bound on a behaviour that is an upper
+        bound: it passed with the idle branch removed (ISSUE-0221).
+
+        No real time passes. The event loop's clock is replaced by one the
+        test moves, so each step fires the scheduler's own timer once.
+        """
+        idle_after_ticks = 2
+        ticks = 10
+        interval = 0.05
         agent = await _make_agent()
-        call_count = 0
+        on_tick_calls = 0
+        idle_skips = 0
 
         async def _tracking_tick():
-            nonlocal call_count
-            call_count += 1
+            nonlocal on_tick_calls
+            on_tick_calls += 1
             return [AgentAction(ActionType.DO_NOTHING, {})]
 
-        agent.on_tick = _tracking_tick  # type: ignore[assignment]
+        def _tracking_recover():
+            nonlocal idle_skips
+            idle_skips += 1
 
-        scheduler = TickScheduler(
-            agent, interval=0.05, idle_after_ticks=2, executor=ActionExecutor(),
-        )
-        scheduler.start()
-        await asyncio.sleep(0.5)
+        agent.on_tick = _tracking_tick  # type: ignore[assignment]
+        agent.recover_idle_energy = _tracking_recover  # type: ignore[method-assign]
+
+        loop = asyncio.get_running_loop()
+        # The hand-moved clock starts at zero, not at the loop's real time.
+        # Each step makes a timer due exactly "now", and asyncio fires it
+        # only because it adds its clock resolution to "now" first. On a
+        # host that has been up for months that sum rounds back to "now" (a
+        # 1e-9 resolution is lost above 2**24 seconds), and the timer would
+        # never fire. Near zero the sum always holds.
+        now = 0.0
+        with monkeypatch.context() as clock:
+            clock.setattr(loop, "time", lambda: now)
+            scheduler = TickScheduler(
+                agent,
+                interval=interval,
+                idle_after_ticks=idle_after_ticks,
+                executor=ActionExecutor(),
+            )
+            scheduler.start()
+            for tick in range(1, ticks + 1):
+                handled = on_tick_calls + idle_skips
+                now += interval
+                # Yield until the scheduler has handled the tick this step
+                # fired. The bound is a count of yields, not time: a tick
+                # that never arrives fails here instead of hanging.
+                for _ in range(100):
+                    await asyncio.sleep(0)
+                    if on_tick_calls + idle_skips > handled:
+                        break
+                else:
+                    pytest.fail(
+                        f"tick {tick}: neither counter moved (on_tick has run "
+                        f"{on_tick_calls} times, recover_idle_energy {idle_skips}). Up to "
+                        f"tick {idle_after_ticks} the scheduler calls on_tick, so a miss "
+                        "there means the timer did not fire. From then on it takes the "
+                        "idle branch, which calls recover_idle_energy: a miss there "
+                        "means that branch stopped recovering energy, or the timer stopped."
+                    )
         await scheduler.stop()
 
-        # Should have stopped calling on_tick after idle threshold reached
-        # (2 ticks to become idle, then skipped)
-        assert call_count >= 2  # at least the threshold
+        assert on_tick_calls == idle_after_ticks
+        assert idle_skips == ticks - idle_after_ticks
+        assert scheduler.is_idle
         await agent.close_memory()
 
     async def test_wake_resets_idle(self):

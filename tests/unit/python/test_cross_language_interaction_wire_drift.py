@@ -136,22 +136,32 @@ def test_interaction_id_metadata_key_agrees() -> None:
 # the unpack stays — would keep the suite green. Pinning the full
 # ``kwarg=value`` literal also guards the value side: passing some *other*
 # id under the kwarg would be an attribution bug the looser regex can't see.
+#
+# Each pin names how many times the literal must occur (ISSUE-0221):
+# ``action_loop.py`` passes it to the main model call and to the revise round
+# after it, and a bare "occurs somewhere" check stayed green with the main
+# call's argument dropped. The main call also has a test that runs it, in
+# ``test_interaction_lease_threading.py``.
 _LEASE_THREADING_PINS = {
-    _ACTION_LOOP_PY: "interaction_id=lease_interaction_id",
-    _SALIENCE_GATE_PY: "interaction_id=lease_interaction_id_for_event(",
+    _ACTION_LOOP_PY: ("interaction_id=lease_interaction_id", 2),
+    _SALIENCE_GATE_PY: ("interaction_id=lease_interaction_id_for_event(", 1),
 }
 
 
 def test_lease_call_sites_thread_the_interaction() -> None:
-    """The two channel-path leased calls — the Tier C quality turn
-    (action_loop) and the Tier B salience bid (salience_gate's
+    """The channel-path leased calls — the Tier C quality turn and its revise
+    round (action_loop) and the Tier B salience bid (salience_gate's
     evaluate_salience call) — MUST pass ``interaction_id`` into their
     ``create_message``/bid invocations, or Layer 1 attribution silently
     degrades to untracked on the path it exists for."""
-    for path, pin in _LEASE_THREADING_PINS.items():
-        src = path.read_text(encoding="utf-8")
-        if pin not in src:
+    for path, (pin, expected) in _LEASE_THREADING_PINS.items():
+        found = path.read_text(encoding="utf-8").count(pin)
+        if found == 0:
             _parse_miss(f"the lease-threading literal `{pin}`", path)
+        assert found == expected, (
+            f"{path} passes `{pin}` {found} time(s), expected {expected}: a leased "
+            f"call lost it and bills no interaction, or a new one needs its own guard"
+        )
 
 
 # The RFC 0052 no-reopen claim's shared seams (PR #716 review): the executor
