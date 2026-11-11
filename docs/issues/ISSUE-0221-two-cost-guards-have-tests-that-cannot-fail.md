@@ -80,4 +80,8 @@ ceiling and the soft-budget close.
 > main call it fails. The text check now requires an exact count, two in
 > `action_loop.py`. Both faults reproduced first. One correction: tests
 > already covered the client forwarding the id to the lease and the
-> loop-side reader; only the loop's own call between them was untested.
+> loop-side reader; the loop's own call between them was untested. So was
+> the revise round, which review found: the reflexion tests pass an id in
+> and never read it back. A second new test drives a revise round through
+> the loop and asserts its compose, critic and rewrite leases all carry
+> the event's interaction id.
