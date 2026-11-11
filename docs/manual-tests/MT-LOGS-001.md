@@ -68,7 +68,8 @@ make build-cli             # → bin/persatrix(.exe)
 make build-agents          # installs Python deps into the active venv
 ```
 
-`make build-agents` does an editable install of `agents/` with its `dev` extra. **Activate
+`make build-agents` does an editable install of `agents/` with its `dev` extra, using the
+`python` on your path on Windows and the `python3` elsewhere. **Activate
 your venv first** (`./.venv/Scripts/Activate.ps1` on Windows / `source .venv/bin/activate`
 on Unix); otherwise the install lands in the system Python and `make run-agent` may still
 fail with `ModuleNotFoundError: No module named 'structlog'`.

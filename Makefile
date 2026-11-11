@@ -6,10 +6,17 @@ GO_BIN        := bin
 PROTO_DIR     := proto
 PROTO_GO_OUT  := internal/generated
 PROTO_PY_OUT  := agents/generated
-# The Python every target runs, and installs into: `make build-agents` runs
-# `$(PYTHON) -m pip`, so `PYTHON=.venv/bin/python` picks the interpreter and
-# its installer together. There is no separate pip variable (ISSUE-0228).
-PYTHON        := python3
+# The Python the targets run, and the one `make build-agents` installs into:
+# that recipe runs `$(PYTHON) -m pip`, so this one variable picks the
+# interpreter and its installer. There is no separate pip variable
+# (ISSUE-0228). Three things to know when you set it:
+# - Give a full path (PYTHON="$PWD/.venv/bin/python"). `lint-python` changes
+#   into agents/ before it runs it, and a relative path names nothing there.
+# - It picks the interpreter only. `imports-check` runs `lint-imports` from
+#   the path, so `make lint` needs the virtual environment activated.
+# - On Windows the default is `python`. A virtual environment there has
+#   python.exe and no python3.exe, so `python3` names one outside it.
+PYTHON        := $(if $(filter Windows_NT,$(OS)),python,python3)
 CARGO         := cargo
 NPM           := npm
 WEB_DIR       := web
@@ -157,8 +164,8 @@ build-cli: ## Build Rust CLI binary
 
 build-agents: ## Install Python agent dependencies at the versions CI pins (.github/python-constraints.txt)
 	@echo "→ Installing Python agent dependencies..."
-	@# Run from the repository root, not from agents/, so a relative
-	@# PYTHON (PYTHON=.venv/bin/python) still names the same file.
+	@# Run from the repository root, not from agents/, so a PYTHON given
+	@# as a relative path still names the same file in this recipe.
 	$(PYTHON) -m pip install -c $(PYTHON_CONSTRAINTS) -e "./agents[dev]"
 	@echo "✓ Agent dependencies installed"
 
