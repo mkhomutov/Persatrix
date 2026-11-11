@@ -46,8 +46,8 @@ from typing import Any
 import grpc
 from google.protobuf import struct_pb2, timestamp_pb2
 
-from agents.generated import log_service_pb2 as logpb
-from agents.generated import log_service_pb2_grpc as loggrpc
+from ..generated import log_service_pb2 as logpb
+from ..generated import log_service_pb2_grpc as loggrpc
 
 # ─── Tunables ────────────────────────────────────────────────────────────────
 

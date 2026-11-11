@@ -282,6 +282,21 @@ jobs:
       - name: Check MIT↛BUSL import direction (RFC 0045)
         run: make imports-check
 
+      # ISSUE-0210: the package installs as `persatrix_agents`, but every test
+      # imports it as `agents` from the repository root, where the folder of
+      # that name is on the import path. A module that imports a sibling as
+      # `agents.…` therefore passes every test and fails once installed. This
+      # step starts the installed package from an empty folder, with `-P` so
+      # the current folder is not on the import path, and such an import
+      # stops it with `ModuleNotFoundError: No module named 'agents'`. It sees
+      # only the imports that run at start-up;
+      # tests/unit/python/test_agents_package_imports_are_relative.py reads
+      # every import line in the package, the ones inside functions included.
+      - name: Start the installed agent package from an empty folder (ISSUE-0210)
+        run: |
+          cd "$(mktemp -d)"
+          python -P -m persatrix_agents.server --help
+
       # ISSUE-0017 + ISSUE-0023: lock agents/generated/*.py + *.pyi to
       # proto/*.proto. The .pyi gate already shipped (ISSUE-0017); the
       # broadened proto-python-check target now also catches hand-edits

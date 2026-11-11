@@ -70,3 +70,11 @@ release PR's smoke run, if that is run, or by whoever next runs a demo.
 > interpreter;
 > [ISSUE-0233](ISSUE-0233-latency-harness-test-fails-when-its-file-runs-alone.md)
 > records it.
+
+> 2026-11-11 — the fix for
+> [ISSUE-0210](ISSUE-0210-agent-package-runs-under-two-import-roots.md)
+> ([#1098](https://github.com/mkhomutov/Persatrix/pull/1098)) adds a step
+> to the Python job that starts the installed package from an empty
+> folder, so that fault no longer needs the image to show. The job's
+> install is an editable one. The image itself is still built and
+> started by no CI job, which is what this issue is about.

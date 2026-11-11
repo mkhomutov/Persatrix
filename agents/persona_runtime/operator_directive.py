@@ -20,8 +20,8 @@ from __future__ import annotations
 
 import logging
 
-from agents.prompt_loader import load_snippet
-from agents.security import CONTEXT_SOURCE_EXTERNAL, wrap_external
+from ..prompt_loader import load_snippet
+from ..security import CONTEXT_SOURCE_EXTERNAL, wrap_external
 
 # Defensive default bound (UTF-8-agnostic character count) on an operator
 # directive at the injection seam. Generous over a realistic

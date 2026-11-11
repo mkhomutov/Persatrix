@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0210
 summary: "The agent package is installed as `persatrix_agents`, but seven production lines import through `agents.`. The installed entry point fails outside a folder that has an `agents/` directory, and inside one, as in the image, most of the runtime loads twice with separate per-request state. Every test imports `agents.`, so no test can see it."
-status: open
+status: resolved
 severity: medium
 area: build/packaging
 created: 2026-11-10
+closed: 2026-11-11
+closed_pr: 1098
 refs:
   - agents/pyproject.toml
   - agents/persona_runtime/operator_directive.py
@@ -79,3 +81,12 @@ an empty folder.
 > 2026-11-10 — found by a whole-repository quality review of `main` at
 > `ee9cfaac`; the import failure and the double load were measured with
 > the installed package.
+
+> 2026-11-11 — fixed. The seven lines are relative imports, a unit test
+> (`tests/unit/python/test_agents_package_imports_are_relative.py`)
+> refuses a new absolute one, and CI starts the installed package from an
+> empty folder. Re-measured first: the seven lines, the failed start and
+> the 241 twice-loaded modules all reproduced. The ruff rule proposed
+> above does not work: ruff reads `from .x import y` inside `agents/` as
+> an import of `agents.x`, so banning `agents` flags every relative
+> import in the package. The unit test does that job instead.
