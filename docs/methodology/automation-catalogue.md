@@ -1,6 +1,6 @@
 # Automation Catalogue
 
-> **Last updated**: 2026-10-20
+> **Last updated**: 2026-11-11
 > Everything that runs without a human typing the steps: `make` targets,
 > scripts, the pre-commit hook, and the GitHub workflows — grouped by
 > purpose, with **when it runs**. `make help` is the live list of targets;
