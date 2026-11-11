@@ -231,7 +231,13 @@ class TestTickScheduler:
         agent.recover_idle_energy = _tracking_recover  # type: ignore[method-assign]
 
         loop = asyncio.get_running_loop()
-        now = loop.time()
+        # The hand-moved clock starts at zero, not at the loop's real time.
+        # Each step makes a timer due exactly "now", and asyncio fires it
+        # only because it adds its clock resolution to "now" first. On a
+        # host that has been up for months that sum rounds back to "now" (a
+        # 1e-9 resolution is lost above 2**24 seconds), and the timer would
+        # never fire. Near zero the sum always holds.
+        now = 0.0
         with monkeypatch.context() as clock:
             clock.setattr(loop, "time", lambda: now)
             scheduler = TickScheduler(
@@ -252,7 +258,14 @@ class TestTickScheduler:
                     if on_tick_calls + idle_skips > handled:
                         break
                 else:
-                    pytest.fail(f"tick {tick} was not handled")
+                    pytest.fail(
+                        f"tick {tick}: neither counter moved (on_tick has run "
+                        f"{on_tick_calls} times, recover_idle_energy {idle_skips}). Up to "
+                        f"tick {idle_after_ticks} the scheduler calls on_tick, so a miss "
+                        "there means the timer did not fire. From then on it takes the "
+                        "idle branch, which calls recover_idle_energy: a miss there "
+                        "means that branch stopped recovering energy, or the timer stopped."
+                    )
         await scheduler.stop()
 
         assert on_tick_calls == idle_after_ticks
