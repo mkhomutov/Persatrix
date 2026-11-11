@@ -10,6 +10,9 @@ node_modules/
 __pycache__/
 *.pyc
 *.egg-info/
+# The virtual environment CONTRIBUTING's Quick Start creates. Python 3.13
+# writes an ignore file inside a new one; 3.11 and 3.12 do not.
+.venv/
 .eggs/
 
 # IDE

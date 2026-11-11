@@ -6,8 +6,10 @@ GO_BIN        := bin
 PROTO_DIR     := proto
 PROTO_GO_OUT  := internal/generated
 PROTO_PY_OUT  := agents/generated
+# The Python every target runs, and installs into: `make build-agents` runs
+# `$(PYTHON) -m pip`, so `PYTHON=.venv/bin/python` picks the interpreter and
+# its installer together. There is no separate pip variable (ISSUE-0228).
 PYTHON        := python3
-PIP           := pip3
 CARGO         := cargo
 NPM           := npm
 WEB_DIR       := web
@@ -155,7 +157,9 @@ build-cli: ## Build Rust CLI binary
 
 build-agents: ## Install Python agent dependencies at the versions CI pins (.github/python-constraints.txt)
 	@echo "→ Installing Python agent dependencies..."
-	cd agents && $(PIP) install -c ../$(PYTHON_CONSTRAINTS) -e ".[dev]"
+	@# Run from the repository root, not from agents/, so a relative
+	@# PYTHON (PYTHON=.venv/bin/python) still names the same file.
+	$(PYTHON) -m pip install -c $(PYTHON_CONSTRAINTS) -e "./agents[dev]"
 	@echo "✓ Agent dependencies installed"
 
 # ─── Python constraints ─────────────────────────────────

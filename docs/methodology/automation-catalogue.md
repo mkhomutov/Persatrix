@@ -21,7 +21,7 @@ dependencies.
 | Target | Does | When |
 |--------|------|------|
 | `make all` | `proto` + `build` | Fresh checkout; after a proto change |
-| `make build` / `build-orchestrator` / `build-cli` / `build-agents` | Go binary → `bin/persatrix-server`; Rust → `cli/target/release/persatrix`; `pip install -c .github/python-constraints.txt -e ".[dev]"`, the versions CI pins, and the one command every workflow installs the Python dependencies with | Development; every CI job that needs the agents package |
+| `make build` / `build-orchestrator` / `build-cli` / `build-agents` | Go binary → `bin/persatrix-server`; Rust → `cli/target/release/persatrix`; `$(PYTHON) -m pip install -c .github/python-constraints.txt -e "./agents[dev]"`, the versions CI pins, and the one command every workflow installs the Python dependencies with | Development; every CI job that needs the agents package |
 | `make ui` / `build-orchestrator-ui` / `run-ui` | Vite bundle into `internal/ui/assets/` (overwrites the tracked placeholder `index.html` — restore it before committing); orchestrator with the bundle embedded; local console iteration | Console work; release asset lane |
 | `make run` / `run-agent AGENT= PORT=` | Run the orchestrator / one Python agent | Manual tests |
 | `make docker-build` / `docker-up` / `docker-down` / `docker-logs` / `reset` | Compose lifecycle; `reset` purges **all** named volumes (ISSUE-0051 workaround) | Live arcs start from `make reset` |
