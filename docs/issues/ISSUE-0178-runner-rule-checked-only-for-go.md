@@ -118,3 +118,10 @@ gate.
 > package, which
 > [ISSUE-0210](ISSUE-0210-agent-package-runs-under-two-import-roots.md)
 > asks for.
+
+> 2026-11-11 — the Python job now starts the installed agent package:
+> the fix for
+> [ISSUE-0210](ISSUE-0210-agent-package-runs-under-two-import-roots.md)
+> ([#1098](https://github.com/mkhomutov/Persatrix/pull/1098)) added that
+> step. The job proposed above no longer has to do it. The rest of that
+> note stands.
