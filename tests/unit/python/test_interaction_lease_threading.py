@@ -3,7 +3,7 @@
 The wallet has accepted ``interaction_id`` on ``AcquireLease`` since the
 governance-layers PR 2, but no channel-path call site passed it — the cost
 ceiling could enforce a per-interaction total it could never attribute.
-This matrix (TDD-first, written red) pins the three links of the chain:
+This matrix (TDD-first, written red) pins the links of the chain:
 
 * :meth:`agents.llm_client.LLMClient.create_message` forwards a caller
   ``interaction_id`` into ``WalletClient.lease`` (and omits nothing when
@@ -15,19 +15,27 @@ This matrix (TDD-first, written red) pins the three links of the chain:
 * :func:`agents.persona_runtime.wallet_cause.lease_interaction_id_for_event`
   is the loop-side read: the resolver-stamped id off the inbound event
   metadata, empty for untracked/legacy events and malformed values.
+* The persona's action loop passes that id into the lease of its main model
+  call. This link was added later (ISSUE-0221): until then its only guard was
+  a search of ``action_loop.py`` for the argument's text, which the later
+  revise call in the same file also satisfies.
 """
 
 from __future__ import annotations
 
+import copy
 from contextlib import asynccontextmanager
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from agents.generated import wallet_pb2 as walletpb
 from agents.llm_client import LLMClient, LLMResponse
+from agents.persona import create_persona_agent
 from agents.persona_runtime.wallet_cause import lease_interaction_id_for_event
-from agents.persona_types import AgentEvent, EventType
+from agents.persona_types import ActionType, AgentEvent, EventType
+
+from ._persona_test_helpers import _PERSONA_CONFIG
 
 
 class _RecordingWallet:
@@ -128,6 +136,59 @@ class TestSalienceBidForwardsInteractionID:
             )
 
         assert captured["interaction_id"] == "itx-123"
+
+
+class TestActionLoopLeasesItsTurnUnderTheInteraction:
+    @pytest.mark.asyncio
+    async def test_main_turn_lease_carries_the_events_interaction(self):
+        """One direct-message turn through the real action loop: the lease
+        its model call takes names the interaction the message arrived
+        under, so the wallet counts the turn against that interaction's
+        cost ceiling.
+
+        The turn makes exactly one model call. A direct message takes no
+        salience bid, and the persona's config asks for no revise round, so
+        the one lease the wallet double records is the main call's. Drop
+        ``interaction_id`` from that call in ``action_loop.py`` and the lease
+        carries the empty string, the untracked case, and this test fails.
+        """
+        wallet = _RecordingWallet()
+        provider = AsyncMock()
+        provider.create_message = AsyncMock(
+            return_value=LLMResponse(text="Hi Alice, what's on your mind?"),
+        )
+        provider.format_tool_definitions = MagicMock(return_value=[])
+        client = LLMClient(provider=provider, wallet=wallet)
+        agent = create_persona_agent(
+            agent_id="ember-owl", config=copy.deepcopy(_PERSONA_CONFIG), llm_client=client,
+        )
+        await agent.initialize_memory()
+        event = AgentEvent(
+            event_type=EventType.CHANNEL_MESSAGE,
+            payload={
+                "content": "say hi",
+                "channel_type": "dm",
+                "mentions": ["ember-owl"],
+                "respond_policy": "always",
+            },
+            channel_id="dm:alice:ember-owl",
+            sender_id="alice",
+            message_id="msg-1",
+            metadata={"sender_participant_type": "user", "interaction_id": "itx-123"},
+        )
+        try:
+            actions = await agent.on_event(event)
+        finally:
+            await agent.close_memory()
+
+        # The turn ran to a reply, on one model call.
+        assert ActionType.SEND_CHANNEL_MESSAGE in [a.action_type for a in actions]
+        assert provider.create_message.await_count == 1
+        assert len(wallet.lease_kwargs) == 1
+        lease = wallet.lease_kwargs[0]
+        assert lease["cause"] == walletpb.CAUSE_CHANNEL_MESSAGE
+        assert lease["agent_id"] == "ember-owl"
+        assert lease["interaction_id"] == "itx-123"
 
 
 class TestLeaseInteractionIDForEvent:
