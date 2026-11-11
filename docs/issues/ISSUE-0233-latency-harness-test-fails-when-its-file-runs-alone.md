@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0233
 summary: "`test_personal_tier_latency_harness_runs` passes only when another test file has already loaded the perf harness. Run alone, its file fails with an `AttributeError` inside `dataclasses`, because its loader does not register the module in `sys.modules` before running it. The suite is green only because of the order its files run in."
-status: open
+status: resolved
 severity: low
 area: tests
 created: 2026-11-11
+closed: 2026-11-11
+closed_pr: 1099
 refs:
   - tests/unit/python/test_rfc0029_callsite_refactor.py
   - tests/unit/python/test_personal_tier_latency_harness.py
@@ -59,3 +61,13 @@ have both files share one loader.
 > [ISSUE-0219](ISSUE-0219-agent-image-is-not-what-ci-tests.md), whose
 > first draft read this failure as a Python 3.12 fault. Both runs in the
 > table were reproduced.
+
+> 2026-11-11 — fixed. The three test files that load the harness (there
+> were three copies of the loader, not two:
+> `test_personal_tier_latency_gate.py` had its own) now share
+> `tests/unit/python/_perf_harness_loader.py`, which registers the module
+> before running it. A new test removes any entry an earlier file left,
+> then loads the harness, so an unregistered load fails in any file
+> order. Reproduced first: alone 1 failed, 9 passed; after the sibling
+> 14 passed; before the sibling 1 failed, 13 passed; the same error on
+> Python 3.11.
