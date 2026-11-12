@@ -27,12 +27,11 @@ classes of exception, with different downstream contracts:
   with ``error_reason="resource_exhausted"`` (ISSUE-0066).
 * :class:`grpc.aio.AioRpcError` with any other code (``INTERNAL`` /
   ``UNAVAILABLE`` / ``INVALID_ARGUMENT`` / etc.) — real provider-side
-  or wallet-side problems. Degrade to a generic
-  ``COMPLETE_TASK("LLM provider error")`` so they are not masked as
+  or wallet-side problems. A failed turn with the generic text
+  ``LLM provider error`` (ISSUE-0199), so they are not masked as
   back-pressure (dashboards split on ``error_reason``).
 * Any other :class:`Exception` — bare provider outage (network, 5xx
-  through the HTTP client, etc.). Same generic ``COMPLETE_TASK``
-  degradation as v0.2.3.
+  through the HTTP client, etc.). The same failed turn.
 
 :func:`handle_llm_call_exception` consolidates the dispatch. It
 returns the list of actions the action loop should return on
@@ -51,7 +50,14 @@ import grpc.aio
 
 from ..observability._metrics_persona_tick import tick_idle_attrs
 from ..observability.metrics import try_get_instruments
-from ..persona_types import ActionType, AgentAction, AgentEvent, EventType
+from ..persona_types import (
+    FAILURE_PROVIDER_ERROR,
+    ActionType,
+    AgentAction,
+    AgentEvent,
+    EventType,
+    failed_turn,
+)
 from ..wallet_client import BudgetExceededError
 from .cost_close import close_interaction_on_cost
 
@@ -72,19 +78,17 @@ logger = logging.getLogger("agents.persona_runtime.action_loop")
 
 
 def _generic_provider_error(agent_id: str, exc: BaseException) -> list[AgentAction]:
-    """Render the generic provider-error degradation (v0.2.3 surface).
+    """A provider failure: logged here, returned as a failed turn (ISSUE-0199).
 
-    Logged at ERROR so a real provider problem stays visible; the
-    ``COMPLETE_TASK("LLM provider error")`` action is rendered by the
-    dispatcher / chat handler as a reply text without the structured
-    error envelope. Used for non-``RESOURCE_EXHAUSTED`` gRPC codes and
-    for any non-gRPC :class:`Exception`.
+    Logged at ERROR so a real provider problem stays visible.  The turn
+    carries the fixed text ``LLM provider error`` and never the
+    exception's own, which can hold a URL or part of a key.  Each caller
+    renders it: a workflow task ends FAILED, a DM gets an error reply, a
+    tick counts as idle.  Used for non-``RESOURCE_EXHAUSTED`` gRPC codes
+    and for any non-gRPC :class:`Exception`.
     """
     logger.error("LLM provider error in agent %s: %s", agent_id, exc)
-    return [AgentAction(
-        action_type=ActionType.COMPLETE_TASK,
-        payload={"result": "LLM provider error"},
-    )]
+    return failed_turn(FAILURE_PROVIDER_ERROR, "LLM provider error")
 
 
 def _tick_idle(agent_id: str, *, idle_reason: str) -> list[AgentAction]:
@@ -117,7 +121,7 @@ def handle_llm_call_exception(
     """Dispatch an exception raised by :meth:`LLMClient.create_message`.
 
     Returns a list of actions on graceful-degradation paths (TICK
-    short-circuits, generic provider-error fallback), or :data:`None`
+    short-circuits, the provider-error failed turn), or :data:`None`
     when the action loop should re-raise so the chat / channel /
     workflow caller can render the error.
 

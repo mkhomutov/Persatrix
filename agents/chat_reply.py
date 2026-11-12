@@ -39,7 +39,8 @@ from .channel_publisher import ChannelPublisher
 from .channel_wire_metadata import DispatchContext
 from .confidentiality_tripwire import tripwire_watch_from_event
 from .generated import task_pb2
-from .persona_types import ActionType, AgentAction
+from .persona_types import ActionType, AgentAction, turn_failure
+from .response_policies import _DM_CHANNEL_PREFIX
 from .wallet_client import BudgetExceededError
 
 if TYPE_CHECKING:
@@ -85,9 +86,16 @@ def extract_chat_reply(
     3. ``COMPLETE_TASK`` result payload.
     4. Empty string (reply_status="empty").
 
+    A turn that failed (ISSUE-0199) comes first: its fixed sentence, with
+    ``reply_status="error"``.
+
     Returns ``(reply_text, reply_status)`` where ``reply_status`` is one of
-    ``"ok"``, ``"empty"``.
+    ``"ok"``, ``"empty"``, ``"error"``.
     """
+    failure = turn_failure(actions)
+    if failure is not None:
+        return failure.message, "error"
+
     def _sanitize_reply(text: str) -> str:
         """Strip internal delimiter tags that should never be visible to users.
 
@@ -392,6 +400,29 @@ async def process_inbound_channel_event(
 
     async def _decide_and_execute() -> None:
         actions = await agent.on_event(event)
+        # ISSUE-0199: a turn that failed has no actions to carry out.  The
+        # cause is logged for every channel.  A DM is also answered, with
+        # the error reply a wallet denial gets, because a DM with no reply
+        # leaves the chat request waiting until it times out; the reply
+        # says what failed in a fixed sentence, never in the provider's
+        # words.  A group channel is posted nothing: the diagnostic is the
+        # operator's to read, not a message for the room.
+        failure = turn_failure(actions)
+        if failure is not None:
+            channel_id = event.channel_id or ""
+            logger.warning(
+                "ReceiveChannelMessage turn failed for agent %s (channel %s): "
+                "cause=%s",
+                agent.agent_id, channel_id, failure.cause,
+            )
+            if channel_id.startswith(_DM_CHANNEL_PREFIX):
+                await publish_chat_error_on_channel(
+                    executor.channel_publisher, agent_id=agent.agent_id,
+                    channel_id=channel_id, inbound_sender_id=event.sender_id,
+                    reply=failure.message, reason=failure.cause,
+                    origin_interaction_id=context.origin_interaction_id,
+                )
+            return
         # RFC 0037 §G: unlike every other ``for_event`` field (wire-seeded
         # before dispatch), the tripwire watch is stamped onto the event's
         # metadata DURING the turn — the pre-turn ``context`` snapshot above

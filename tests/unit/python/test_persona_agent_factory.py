@@ -6,7 +6,13 @@ import pytest
 from agents.llm_client import LLMResponse, StopReason, ToolCall, Usage
 from agents.persona import create_persona_agent
 from agents.persona_runtime import _coerce_event_timeout, _LLMPersonaAgent, _truncate_with_ellipsis
-from agents.persona_types import ActionType, AgentEvent, EventType, PersonaState
+from agents.persona_types import (
+    ActionType,
+    AgentEvent,
+    EventType,
+    PersonaState,
+    turn_failure,
+)
 
 from ._persona_test_helpers import _PERSONA_CONFIG, _make_client
 
@@ -209,12 +215,12 @@ class TestMaxLLMCallsExhaustion:
 
         # LLM was called exactly max_calls times (loop bounded)
         assert client._provider.create_message.call_count == max_calls
-        # Should still return valid actions (parse_actions handles tool_use response)
-        assert len(actions) >= 1
-        # Review finding fix: exhaustion now produces a descriptive result
-        # instead of an empty COMPLETE_TASK
-        assert actions[0].action_type == ActionType.COMPLETE_TASK
-        assert "Max LLM call budget exhausted" in actions[0].payload["result"]
+        # ISSUE-0199: running out of calls is a failed turn.  This event has
+        # no channel; ``test_persona_turn_failure.py`` drives the same cause
+        # on a DM and on a group channel, where what is published differs.
+        failure = turn_failure(actions)
+        assert failure is not None and failure.cause == "llm_calls_exhausted"
+        assert failure.message == "Max LLM call iterations exceeded"
         await agent.close_memory()
 
 

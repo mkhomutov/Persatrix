@@ -131,6 +131,69 @@ class AgentAction:
 VOTE_CLOSE_TOKEN_KEY = "vote_close_token"
 
 
+# ─── A turn that failed (ISSUE-0199) ───────────────────────
+#
+# A persona's turn can fail before it has an answer: the provider raised,
+# the reply was cut off, the model calls ran out, the event timed out, the
+# config names no model.  The turn used to report that as a COMPLETE_TASK
+# whose result was an English sentence, which no caller could tell from a
+# real answer: a workflow step succeeded with the text "LLM provider
+# error".
+#
+# A failed turn now returns ``failed_turn(...)``: one DO_NOTHING carrying a
+# :class:`TurnFailure` under a private payload key, the same way
+# ``VOTE_CLOSE_TOKEN_KEY`` rides on a vote.  It is not a new action type
+# and never reaches the wire.  A caller that renders failure reads it with
+# :func:`turn_failure` (``PersonaAgent.handle`` returns FAILED, the channel
+# path answers a DM with an error reply); any other caller sees a turn that
+# did nothing, which is what a timed-out tick already returns.
+#
+# Kept small on purpose.  RFC 0041 Phase 1's error taxonomy would replace
+# the cause strings and this carrier with it.
+TURN_FAILURE_KEY = "_turn_failure"
+
+FAILURE_MODEL_NOT_CONFIGURED = "model_not_configured"
+FAILURE_PROVIDER_ERROR = "provider_error"
+FAILURE_RESPONSE_TRUNCATED = "response_truncated"
+FAILURE_LLM_CALLS_EXHAUSTED = "llm_calls_exhausted"
+FAILURE_EVENT_TIMEOUT = "event_timeout"
+
+
+@dataclass(frozen=True)
+class TurnFailure:
+    """Why a persona's turn produced no answer.
+
+    ``cause`` is one of the ``FAILURE_*`` names, for logs and for an
+    error reply's ``error_reason``.  ``message`` is what a failed task's
+    result or an error reply says: the sentence a task agent gives for
+    the same cause, and never the provider's own error text, which can
+    hold a URL or part of a key.
+    """
+
+    cause: str
+    message: str
+
+
+def failed_turn(cause: str, message: str) -> list[AgentAction]:
+    """The actions a turn returns when the turn itself failed."""
+    return [AgentAction(
+        ActionType.DO_NOTHING, {TURN_FAILURE_KEY: TurnFailure(cause, message)},
+    )]
+
+
+def turn_failure(actions: list[AgentAction]) -> TurnFailure | None:
+    """The failure *actions* carries, or None for a turn that ran.
+
+    Only a :class:`TurnFailure` object counts.  A model's reply is JSON,
+    so nothing it writes under the same key can be one.
+    """
+    for action in actions:
+        failure = action.payload.get(TURN_FAILURE_KEY)
+        if isinstance(failure, TurnFailure):
+            return failure
+    return None
+
+
 # ─── Sub-Agent Types ───────────────────────────────────────
 
 
