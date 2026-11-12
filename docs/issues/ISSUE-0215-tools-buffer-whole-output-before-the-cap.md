@@ -99,3 +99,9 @@ agent runs in a process of its own.
 > What remains: memory and process limits on the agent services in the
 > compose files. Sizing them needs a real compose run under load, which
 > the change above did not have.
+>
+> Two things seen beside it and left as they are. `file_write` still
+> writes on the event loop; what it writes is the model's own output,
+> so it is a pause and not a memory fault. And a response body that
+> decodes to almost no text is still read until it ends or the
+> 30-second timeout, though no longer held.
