@@ -186,10 +186,12 @@ class TestExternalToolWrapping:
         ])
         assert results[0].is_error is True
         content = results[0].content
-        assert content.startswith("Command exited with code 1\n")
+        # ISSUE-0217: that output is other people's text, so it goes inside
+        # the envelope; the framework's error line stays outside it.
+        assert content.startswith('Command exited with code 1\n<external_data source="external"')
         assert "FAILED test_x" in content
         assert "Traceback: boom" in content
-        assert "<external_data" not in content
+        assert content.endswith("</external_data>")
 
     async def test_failed_external_tool_output_wrapped(self) -> None:
         # Output that comes with a failure is still external data when the
