@@ -64,7 +64,9 @@ cannot tell the substituted part from the workflow author's own words.
 > 2026-11-10 — found by a whole-repository quality review of `main` at
 > `ee9cfaac`; confirmed by reading the code.
 
-> 2026-11-12 — **the shell half is fixed; the step-output half stays open.**
+> 2026-11-12 — **the shell half is fixed by
+> [#1103](https://github.com/mkhomutov/Persatrix/pull/1103); the step-output
+> half stays open.**
 > `shell_exec` is now in `EXTERNAL_TOOL_SOURCES`, so what a command prints
 > is scanned for injection patterns and reaches the model inside the
 > `<external_data>` envelope, on success and on a non-zero exit, where the
