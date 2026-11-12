@@ -6,7 +6,7 @@ severity: low
 area: agents/memory
 created: 2026-11-10
 closed: 2026-11-12
-closed_pr: 0
+closed_pr: 1104
 refs:
   - agents/memory/_write_boundary.py
   - agents/memory/relationship_decay.py
