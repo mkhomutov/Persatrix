@@ -6,7 +6,7 @@ severity: medium
 area: agents/persona_runtime
 created: 2026-11-10
 closed: 2026-11-12
-closed_pr: 0
+closed_pr: 1105
 refs:
   - tests/unit/python/test_action_parser_wrong_shapes.py
   - docs/issues/ISSUE-0238-action-payload-values-of-the-wrong-type-fail-after-the-parser.md
