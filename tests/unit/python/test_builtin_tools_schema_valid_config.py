@@ -18,6 +18,7 @@ block), and only then calls the tool.
 
 from __future__ import annotations
 
+import importlib
 import json
 import re
 import shlex
@@ -235,6 +236,14 @@ class TestShippedConfig:
     """``config/agents.yaml`` passes ``make validate`` in CI. Operators copy
     it, so what it grants has to be what its comments say it grants."""
 
+    @pytest.fixture(autouse=True)
+    def _registered_builtin_tools(self):
+        """An agent is offered only registered tools, and the suite's
+        conftest empties the registry before each test. Without the
+        built-in tools registered again, "is not offered" would hold
+        whatever the config lists."""
+        importlib.reload(builtin)
+
     def test_no_shipped_agent_lists_a_command_nobody_reviewed(self):
         """ISSUE-0196: a listed command is matched on its leading words and
         trusted with every argument it accepts, and it runs outside the file
@@ -268,7 +277,8 @@ class TestShippedConfig:
         gate = builtin.permission_gate
         assert gate is not None
         assert gate.check("shell:exec") is False
-        assert "shell_exec" not in [td.name for td in offered_tools("code-writer", agent)]
+        offered = [td.name for td in offered_tools("code-writer", agent)]
+        assert offered == ["file_read", "file_write"]
 
     def test_the_commented_example_turns_shell_exec_on(self, tmp_path):
         """The comment says how to turn the tool on: put ``shell_exec`` on
@@ -313,6 +323,8 @@ class TestShippedConfig:
                 offered = offered_tools(agent["id"], agent)
                 offered_when_granted[agent["id"]] = [td.name for td in offered]
         assert sorted(offered_when_granted) == ["code-reviewer", "code-writer", "planner"]
+        # Not vacuous: the tools are registered, and one agent is offered some.
+        assert "file_read" in offered_when_granted["code-writer"]
         for names in offered_when_granted.values():
             assert "http_request" not in names, offered_when_granted
 
