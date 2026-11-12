@@ -1,7 +1,7 @@
 ---
 id: ISSUE-0217
 summary: "Two paths hand untrusted text to a model without the `<external_data>` envelope. `shell_exec` output is not listed as an external source, so the same file is wrapped when read with `file_read` and not wrapped when a shell command prints it. A workflow step's output is pasted straight into the next step's input, where the next agent reads it as instructions."
-status: open
+status: in_progress
 severity: medium
 area: security
 created: 2026-11-10
@@ -63,3 +63,16 @@ cannot tell the substituted part from the workflow author's own words.
 
 > 2026-11-10 — found by a whole-repository quality review of `main` at
 > `ee9cfaac`; confirmed by reading the code.
+
+> 2026-11-12 — **the shell half is fixed; the step-output half stays open.**
+> `shell_exec` is now in `EXTERNAL_TOOL_SOURCES`, so what a command prints
+> is scanned for injection patterns and reaches the model inside the
+> `<external_data>` envelope, on success and on a non-zero exit, where the
+> framework's own error line stays outside it. Tests run the real tool
+> through both tool rounds. Before the fix, the same file came back fenced
+> from `file_read` and bare from a command that printed it.
+> **What remains:** a step's output is still pasted into the next step's
+> input as it is. That is in the workflow engine (`internal/planner`,
+> `internal/scheduler`), which ruling (x) of the
+> [v0.4.x sequencing record](../v0.4.x-sequencing-2026-10-21.md) freezes,
+> and which side wraps is still to decide. Severity is unchanged.

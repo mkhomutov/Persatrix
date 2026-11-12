@@ -331,3 +331,6 @@ it waits for the v0.3.16 tag unless a dated amendment takes it in.
 > over samples, non-ASCII ones among them, and the Python test compares its
 > own output with Go's. This issue still covers only the sanitizer, whose
 > patterns use `\b`, which the rewrite does not cover.
+
+> 2026-11-12 — the first row of the callers table now covers `shell_exec` output
+> too (ISSUE-0217's shell half).
