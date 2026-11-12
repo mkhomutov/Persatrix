@@ -5,7 +5,8 @@ Guidelines:
 - Write idiomatic, production-quality code.
 - Include type hints and docstrings where appropriate.
 - Create or update unit tests for any code you write.
-- Use the shell_exec tool to run tests and verify your changes.
+- If you are given the shell_exec tool, use it to run tests and verify your
+  changes. If you are not, say in your summary that the tests were not run.
 - Use the file_read tool to understand existing code before modifying it.
 - If a task is ambiguous, make reasonable assumptions and document them.
 - Return a concise summary of what you created or changed.

@@ -7,10 +7,25 @@ symlink resolution, and mode-based access control.
 
 import os
 import platform
+from pathlib import Path, PurePosixPath
 
 import pytest
+import yaml
 
 from agents.tools.sandbox import PathValidator
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
+# The characters ``fnmatchcase`` reads as a wildcard. A rule with none of
+# them is one exact path.
+_WILDCARDS = frozenset("*?[")
+
+# Not run on Windows by anyone: skipped there on reading, not on a failure seen.
+_posix_paths = pytest.mark.skipif(
+    platform.system() == "Windows",
+    reason="written for POSIX paths: the shipped rules ('/workspace/src/**', "
+    "'**/.env*') match no Windows path, and '?' cannot be in a Windows file name",
+)
 
 
 class TestValidateRead:
@@ -223,6 +238,217 @@ class TestCodeWriterPaths:
         v, ws = validator
         with pytest.raises(PermissionError, match="blocked by security policy"):
             v.validate(str(ws / ".git" / "config"), mode="read")
+
+
+def _allows(validator: PathValidator, path: Path, mode: str) -> bool:
+    try:
+        validator.validate(str(path), mode=mode)
+    except PermissionError:
+        return False
+    return True
+
+
+class TestHowARuleMatches:
+    """ISSUE-0216: a rule is matched against the whole resolved path with
+    ``fnmatchcase``, where ``*`` matches ``/`` too. The agent schema and the
+    spec state this rule; these pin it, so a change to the matching cannot
+    pass unnoticed."""
+
+    @pytest.mark.parametrize(
+        ("rule", "path", "matches"),
+        [
+            # A single * crosses folders: it is not a "top level only" glob.
+            ("*.py", "setup.py", True),
+            ("*.py", "deploy/hooks/post_install.py", True),
+            ("*.md", ".github/workflows/notes.md", True),
+            ("src/*", "src/a/b/c.py", True),
+            # ** means no more than *.
+            ("src/**", "src/a/b/c.py", True),
+            # Neither covers the folder's own path, nor a sibling's.
+            ("src/**", "src", False),
+            ("src/**", "srcs/x.py", False),
+            # A rule with no wildcard is one exact path.
+            ("setup.py", "setup.py", True),
+            ("setup.py", "sub/setup.py", False),
+            ("", "malicious.sh", False),
+        ],
+    )
+    def test_an_allow_rule(self, tmp_path, rule, path, matches):
+        ws = tmp_path.resolve()
+        validator = PathValidator(allow_write=[str(ws / rule)])
+        assert _allows(validator, ws / path, "write") is matches
+
+    @_posix_paths
+    @pytest.mark.parametrize(
+        ("rule", "path", "denied"),
+        [
+            # No wildcard: one literal path, not a file name at any depth.
+            ("{ws}/.env", ".env", True),
+            ("{ws}/.env", "sub/.env", False),
+            ("{ws}/.env", ".env.local", False),
+            # A leading ** reaches any depth, and the trailing * any suffix.
+            ("**/.env*", ".env", True),
+            ("**/.env*", "sub/.env", True),
+            ("**/.env*", "sub/.env.local", True),
+            # ... which is wider than "secrets files": any name starting
+            # .env, and everything under a folder so named.
+            ("**/.env*", "src/.envoy.py", True),
+            ("**/.env*", ".env/lib/site.py", True),
+            ("**/.env*", "src/env.py", False),
+            ("**/.env*", "src/my.env", False),
+        ],
+    )
+    def test_a_deny_rule(self, tmp_path, rule, path, denied):
+        ws = tmp_path.resolve()
+        validator = PathValidator(
+            allow_read=[str(ws / "**")], deny=[rule.format(ws=ws)],
+        )
+        assert _allows(validator, ws / path, "read") is not denied
+
+    @_posix_paths
+    @pytest.mark.parametrize(
+        ("rule", "path", "denied"),
+        [
+            # [...] is one character out of a set, so a rule written as a
+            # path that contains brackets does not mean that path.
+            ("{ws}/keys[1].txt", "keys[1].txt", False),
+            ("{ws}/keys[1].txt", "keys1.txt", True),
+            # ? is any one character, `/` included.
+            ("{ws}/key?.pem", "key1.pem", True),
+            ("{ws}/key?.pem", "key?.pem", True),
+            ("{ws}/key?pem", "key/pem", True),
+            ("{ws}/key?.pem", "key12.pem", False),
+            # There is no escape character. A set of one is the way to
+            # name a wildcard character itself.
+            ("{ws}/keys[[]1].txt", "keys[1].txt", True),
+            ("{ws}/keys[[]1].txt", "keys1.txt", False),
+            ("{ws}/key[?].pem", "key?.pem", True),
+            ("{ws}/key[?].pem", "key1.pem", False),
+            ("{ws}/[*].pem", "*.pem", True),
+            ("{ws}/[*].pem", "a.pem", False),
+        ],
+    )
+    def test_the_other_wildcards(self, tmp_path, rule, path, denied):
+        """``?`` and ``[...]`` are wildcards as well as ``*``."""
+        ws = tmp_path.resolve()
+        validator = PathValidator(
+            allow_read=[str(ws / "**")], deny=[rule.format(ws=ws)],
+        )
+        assert _allows(validator, ws / path, "read") is not denied
+
+
+def _shipped_file_rules() -> dict[str, dict[str, list[str]]]:
+    """Each shipped agent's file rules, for the agents that have any."""
+    config = yaml.safe_load(
+        (_REPO_ROOT / "config" / "agents.yaml").read_text(encoding="utf-8"),
+    )
+    rules = {}
+    for agent in config["agents"]:
+        fs = agent.get("permissions", {}).get("filesystem") or {}
+        if fs.get("read") or fs.get("write"):
+            rules[agent["id"]] = fs
+    return rules
+
+
+def _shipped_validator(agent_id: str, ws: Path) -> PathValidator:
+    """The agent's shipped rules, with ``/workspace`` moved to *ws*."""
+    fs = _shipped_file_rules()[agent_id]
+
+    def here(patterns: list[str]) -> list[str]:
+        return [
+            str(ws) + p.removeprefix("/workspace") if p.startswith("/workspace") else p
+            for p in patterns
+        ]
+
+    return PathValidator(
+        allow_read=here(fs.get("read", [])),
+        allow_write=here(fs.get("write", [])),
+        deny=here(fs.get("deny", [])),
+    )
+
+
+class TestShippedCodeWriterRules:
+    """The ``code-writer`` example in ``config/agents.yaml`` does what the
+    comment beside its rules says (ISSUE-0216): writes go under ``src/`` and
+    ``tests/`` and to two top-level files named exactly, and a ``.env`` file
+    is refused at any depth, with any suffix."""
+
+    @pytest.fixture()
+    def rules(self, tmp_path):
+        ws = tmp_path.resolve()
+        return _shipped_validator("code-writer", ws), ws
+
+    def test_each_write_rule_is_a_named_top_level_file_or_under_src_or_tests(self):
+        """The list itself, not samples of what it allows: a sample path
+        cannot see a rule such as ``/workspace/*.toml`` added beside it."""
+        write = _shipped_file_rules()["code-writer"]["write"]
+        assert write, "the shipped code-writer has no write rule to check"
+        for rule in write:
+            if rule.startswith(("/workspace/src/", "/workspace/tests/")):
+                continue
+            assert not _WILDCARDS & set(rule), (
+                f"{rule!r} has a wildcard and is not under src/ or tests/: "
+                "a wildcard crosses folders, so it is no top-level rule"
+            )
+            assert PurePosixPath(rule).parent == PurePosixPath("/workspace"), (
+                f"{rule!r} is neither under src/ or tests/ nor a file at the top level"
+            )
+
+    @_posix_paths
+    @pytest.mark.parametrize(
+        "path",
+        ["deploy/hooks/post_install.py", ".github/workflows/notes.md", "docs/a.md", "malicious.sh"],
+    )
+    def test_no_write_outside_the_named_folders_and_files(self, rules, path):
+        validator, ws = rules
+        assert _allows(validator, ws / path, "write") is False
+
+    @_posix_paths
+    @pytest.mark.parametrize(
+        "path", ["setup.py", "README.md", "src/pkg/mod.py", "tests/unit/test_mod.py"],
+    )
+    def test_writes_the_comment_promises(self, rules, path):
+        validator, ws = rules
+        assert _allows(validator, ws / path, "write") is True
+
+    @_posix_paths
+    def test_the_rest_of_the_workspace_is_readable(self, rules):
+        validator, ws = rules
+        assert _allows(validator, ws / "docs" / "design.md", "read") is True
+        assert _allows(validator, ws / ".github" / "workflows" / "ci.yml", "read") is True
+
+
+class TestShippedAgentsRefuseSecretsFiles:
+    """Every shipped agent that has file rules refuses a ``.env`` file and a
+    ``.git`` folder's contents, whatever else it may read or write. The
+    ``code-reviewer`` example read ``/workspace/.env`` until it was given the
+    deny rules the ``code-writer`` has."""
+
+    _AGENTS = sorted(_shipped_file_rules())
+
+    def test_the_agents_checked(self):
+        """A control: an empty list would make the cases below vanish."""
+        assert {"code-writer", "code-reviewer"} <= set(self._AGENTS)
+
+    @_posix_paths
+    @pytest.mark.parametrize("agent_id", _AGENTS)
+    @pytest.mark.parametrize(
+        "path",
+        [".env", "sub/.env", ".env.local", "src/config/.env.production", ".git/config"],
+    )
+    @pytest.mark.parametrize("mode", ["read", "write"])
+    def test_refused_at_any_depth(self, tmp_path, agent_id, path, mode):
+        ws = tmp_path.resolve()
+        with pytest.raises(PermissionError, match="blocked by security policy"):
+            _shipped_validator(agent_id, ws).validate(str(ws / path), mode=mode)
+
+    @_posix_paths
+    def test_the_code_reviewer_reads_the_rest_and_writes_nothing(self, tmp_path):
+        ws = tmp_path.resolve()
+        validator = _shipped_validator("code-reviewer", ws)
+        assert _allows(validator, ws / "src" / "pkg" / "mod.py", "read") is True
+        assert _allows(validator, ws / "docs" / "design.md", "read") is True
+        assert _allows(validator, ws / "src" / "pkg" / "mod.py", "write") is False
 
 
 class TestFollowUpFixes:

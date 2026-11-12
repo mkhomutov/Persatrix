@@ -18,6 +18,7 @@ block), and only then calls the tool.
 
 from __future__ import annotations
 
+import importlib
 import json
 import re
 import shlex
@@ -211,11 +212,63 @@ class TestFilesystem:
         assert result.error == "Permission denied: filesystem:write"
 
 
-class TestShippedConfig:
-    """``config/agents.yaml`` passes ``make validate`` in CI. Its
-    code-writer lists ``shell_exec`` and allowlists four commands."""
+#: Commands a shipped agent may list, each reviewed against the bar below.
+#: Empty: nothing has passed yet.
+_REVIEWED_COMMANDS: frozenset[str] = frozenset()
 
-    def test_code_writer_can_use_its_shell_allowlist(self, tmp_path):
+
+def _shipped_agents() -> list[dict[str, Any]]:
+    config_path = _REPO_ROOT / "config" / "agents.yaml"
+    agents: list[dict[str, Any]] = yaml.safe_load(config_path.read_text(encoding="utf-8"))["agents"]
+    return agents
+
+
+def _commented_shell_example() -> list[str]:
+    """The command list of the workspace-trusting example, which
+    ``config/agents.yaml`` shows commented out under the code-writer."""
+    lines = (_REPO_ROOT / "config" / "agents.yaml").read_text(encoding="utf-8").splitlines()
+    [line] = [ln for ln in lines if ln.startswith("        # allowed_commands:")]
+    commands: list[str] = yaml.safe_load(line.replace("# ", "", 1))["allowed_commands"]
+    return commands
+
+
+class TestShippedConfig:
+    """``config/agents.yaml`` passes ``make validate`` in CI. Operators copy
+    it, so what it grants has to be what its comments say it grants."""
+
+    @pytest.fixture(autouse=True)
+    def _registered_builtin_tools(self):
+        """An agent is offered only registered tools, and the suite's
+        conftest empties the registry before each test. Without the
+        built-in tools registered again, "is not offered" would hold
+        whatever the config lists."""
+        importlib.reload(builtin)
+
+    def test_no_shipped_agent_lists_a_command_nobody_reviewed(self):
+        """ISSUE-0196: a listed command is matched on its leading words and
+        trusted with every argument it accepts, and it runs outside the file
+        rules. So a shipped agent lists a command only once it is shown that
+        the command, whatever its arguments, can neither run code it is
+        given nor read or write a path the file rules refuse; add it to
+        ``_REVIEWED_COMMANDS`` with that evidence in the same change.
+
+        The four the code-writer used to list all fail: ``python`` runs any
+        code (``-c``), ``pytest`` runs a ``conftest.py`` the agent may write,
+        ``ruff format --diff`` and ``git diff --no-index`` print a denied
+        file, and ``ruff --output-file`` and ``git diff --output`` write
+        outside the write rules."""
+        listed = {
+            (agent["id"], command)
+            for agent in _shipped_agents()
+            for command in agent.get("permissions", {}).get("shell", {}).get("allowed_commands", [])
+        }
+        assert {pair for pair in listed if pair[1] not in _REVIEWED_COMMANDS} == set()
+
+    def test_code_writer_has_no_shell(self, tmp_path):
+        """Its command list is empty and ``shell_exec`` is off its ``tools``
+        list, so the model is not offered a tool every call to which would
+        be refused."""
+        [agent] = [a for a in _shipped_agents() if a["id"] == "code-writer"]
         with patch(
             "agents.server_persona.create_provider",
             return_value=(MagicMock(), "test-model"),
@@ -223,8 +276,29 @@ class TestShippedConfig:
             load_agent("code-writer", str(_REPO_ROOT / "config" / "agents.yaml"), str(tmp_path))
         gate = builtin.permission_gate
         assert gate is not None
+        assert gate.check("shell:exec") is False
+        offered = [td.name for td in offered_tools("code-writer", agent)]
+        assert offered == ["file_read", "file_write"]
+
+    def test_the_commented_example_turns_shell_exec_on(self, tmp_path):
+        """The comment says how to turn the tool on: put ``shell_exec`` on
+        the ``tools`` list and use the commented command list. Done to the
+        shipped block, that passes ``make validate``'s validator and grants
+        the tool (ISSUE-0150), with the shipped time limit."""
+        [agent] = [a for a in _shipped_agents() if a["id"] == "code-writer"]
+        commands = _commented_shell_example()
+        assert commands, "the commented example lists no command"
+        permissions = {
+            **agent["permissions"],
+            "shell": {**agent["permissions"]["shell"], "allowed_commands": commands},
+        }
+        _load(tmp_path, permissions, [*agent["tools"], "shell_exec"])
+        gate = builtin.permission_gate
+        assert gate is not None
         assert gate.check("shell:exec") is True
-        assert gate.is_command_allowed(["pytest", "-q"]) is True
+        for command in commands:
+            assert gate.is_command_allowed([*command.split(), "--version"]) is True
+        assert gate.is_command_allowed(["git", "push"]) is False
         assert gate.shell_time_limit() == 30
 
     def test_task_agents_granted_http_are_not_offered_it(self, tmp_path):
@@ -249,6 +323,8 @@ class TestShippedConfig:
                 offered = offered_tools(agent["id"], agent)
                 offered_when_granted[agent["id"]] = [td.name for td in offered]
         assert sorted(offered_when_granted) == ["code-reviewer", "code-writer", "planner"]
+        # Not vacuous: the tools are registered, and one agent is offered some.
+        assert "file_read" in offered_when_granted["code-writer"]
         for names in offered_when_granted.values():
             assert "http_request" not in names, offered_when_granted
 

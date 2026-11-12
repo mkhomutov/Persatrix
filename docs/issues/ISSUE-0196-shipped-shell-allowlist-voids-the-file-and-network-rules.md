@@ -1,7 +1,7 @@
 ---
 id: ISSUE-0196
-summary: "The shipped `code-writer` agent may run `python` through `shell_exec`. The shell gate checks only a command's leading words, so text that steers the model can make it read files the file rules deny, open network connections although the agent is offered no network tool, and print the provider API keys held in the tool's environment. Live on `main` since ISSUE-0150's fix; in no tagged release."
-status: open
+summary: "The shell gate checks only a command's leading words, so a listed interpreter or test runner lets text that steers the model read files the file rules deny, open network connections and print the provider API keys held in the tool's environment. The shipped `code-writer` listed `python`, `pytest`, `ruff` and `git diff`; since #1102 it lists no command and is not offered `shell_exec`, and no tagged release shipped the working list. Open until RFC 0009 Phase 4: a command an operator lists still gets the agent's whole environment, provider keys included"
+status: in_progress
 severity: high
 area: security
 created: 2026-11-10
@@ -113,3 +113,26 @@ work. The list itself was already in the shipped config.
 > `ee9cfaac`. Reproduced by calling the permission gate with the shipped
 > config; no command was run against a live agent. The older gate was
 > read at the `v0.3.16` tag.
+
+> 2026-11-12 — **the config half is fixed by [#1102](https://github.com/mkhomutov/Persatrix/pull/1102); the environment half
+> stays open.**
+> The four commands were each run through `shell_exec` in a scratch
+> workspace under the shipped rules, and none passed: `python -c` and a
+> `conftest.py` under `pytest` ran code that printed the denied `.env`;
+> `ruff format --diff .env` and `git diff --no-index /dev/null .env`
+> printed it; `ruff check --output-file` and `git diff --output=` wrote a
+> file the write rules refuse. So the shipped `code-writer` now lists no
+> command and is not offered `shell_exec`. The old list is a commented
+> second example for an agent that trusts its workspace, with what each
+> command can reach. The agent's instructions, the schema's
+> `allowed_commands` description, the spec's example and RFC 0004 (a
+> divergence note) say the same, and a test refuses a command on a shipped
+> agent that nobody has reviewed. The probe above did not cover `ruff`,
+> or that `ruff` and `git diff` write as well as read. What this file says
+> of the image was read from `Dockerfile.agent` and `agents/pyproject.toml`;
+> no image was built.
+> **What remains:** a listed command still gets the agent's environment,
+> provider API keys included, and on Linux can read
+> `/proc/<agent pid>/environ`. That is RFC 0009 Phase 4's, whose PR 16
+> files those gaps. Severity stays high for any config that lists an
+> interpreter.

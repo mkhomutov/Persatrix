@@ -63,3 +63,7 @@ agent runs in a process of its own.
 > 2026-11-10 — found by a whole-repository quality review of `main` at
 > `ee9cfaac`; the memory figures come from a scratch probe that calls
 > `shell_exec` directly.
+
+> 2026-11-12 — the shipped `code-writer` no longer lists `python` or any other
+> command (ISSUE-0196's config half). The buffering is unchanged for an
+> agent whose config lists one, and for `file_read` and `http_request`.

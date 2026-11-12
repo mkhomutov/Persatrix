@@ -67,3 +67,11 @@ it. Decide whether the notes inside sections continue beside the banner.
 > 2026-11-10 — found by a whole-repository quality review of `main` at
 > `ee9cfaac`; the rows above were checked by reading, and the persona
 > example was run through the schema.
+
+> 2026-11-12 — two more rows of the same kind, in the orchestration spec's
+> permission example (§6.2): its `shell.deny_commands` list and its whole
+> `mcp` block (`allowed_servers`, `denied_servers`) are keys
+> `schemas/agent.schema.json` refuses, so a config copied from the example
+> fails `make validate`. Seen while
+> [#1102](https://github.com/mkhomutov/Persatrix/pull/1102) corrected the
+> same example's command list; left as they are for this issue.

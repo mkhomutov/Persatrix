@@ -1223,6 +1223,13 @@ Once this RFC is accepted:
 - **Impact**: code-writer, code-reviewer and ember-owl each list `mcp:github` but get no tools from it, and nothing tells the operator. Low severity: nothing breaks, but the config names tools the agents never receive.
 - **Resolution**: Accepted divergence. The bridge itself, deferred to v0.2 in [Items Deferred to v0.2](#tool-system), has not shipped; ROADMAP now lists it as unslotted with RFC 0010 ([v0.4.0 section](../../ROADMAP.md#what-ships-in-v040)). Adding the promised warning would change behaviour, so it is out of scope for this note.
 
+### D2. The stated mitigations do not bound what a shell command opens (2026-11-12)
+
+- **RFC expectation**: [Shell Command Argument Injection](#shell-command-argument-injection-known-risk) accepts unrestricted arguments as a known risk and names two mitigations: the container's limited filesystem mounts, and the `PathValidator` deny list blocking sensitive paths. [Tool Sandboxing](#tool-sandboxing) adds that with the default network lists agents can only reach the LLM API.
+- **Current behavior**: `PathValidator` is called by `file_read` and `file_write` only. Nothing applies it to what a command started by `shell_exec` opens: with `python` listed, `python -c` reads a denied file such as `/workspace/.env` and every other file the agent's user can read. The network lists bind `http_request` alone, so the same command opens any connection. `pytest` runs a `conftest.py` the agent may write, and `ruff format --diff` and `git diff --no-index` print a denied file. The container's mounts do limit which files exist; the workspace is one of them. The argument pattern matching deferred to v0.2 was not built.
+- **Impact**: An agent that lists an interpreter or a test runner gives its model everything the agent's process can reach, whatever its file and network rules say. High severity: [ISSUE-0196](../issues/ISSUE-0196-shipped-shell-allowlist-voids-the-file-and-network-rules.md).
+- **Resolution**: Planned fix, in two halves. The shipped `code-writer` example now lists no command, and `schemas/agent.schema.json` says a listed command is trusted with every argument it accepts. Provider API keys still reach a listed command's environment; that half stays open in ISSUE-0196, for RFC 0009 Phase 4.
+
 ## Related Documentation
 
 - [ai-agents-orchestration-spec.md](../ai-agents-orchestration-spec.md) — §2.1–2.3 Agent Architecture, §3.1–3.2 gRPC Communication, §4.1 Task Agents, §5.1 Tool System
