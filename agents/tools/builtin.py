@@ -238,7 +238,7 @@ def _stop_command(proc: asyncio.subprocess.Process, *, force: bool) -> None:
         "do not work, and it gets no input on stdin. timeout is in seconds (default 30), "
         "capped at this agent's shell time limit and never above 300. A non-zero exit code "
         "is reported as a failure with the output attached. Each output stream is cut off "
-        "at 100 KB."
+        "at 100 KB. The output arrives inside an <external_data> envelope."
     ),
     permissions=["shell:exec"],
     tier="builtin",

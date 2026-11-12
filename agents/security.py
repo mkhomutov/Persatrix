@@ -331,6 +331,11 @@ EXTERNAL_TOOL_SOURCES: Final[dict[str, str]] = {
     # this envelope is that boundary, and it also fences the un-escaped
     # `sender` / `channel_id` provenance fields the per-row escape never touches.
     "recall_channel_messages": CONTEXT_SOURCE_EXTERNAL,
+    # ISSUE-0217: what a command prints is mostly other people's text (file
+    # contents, test names, error messages), on success and on a non-zero
+    # exit alike. Without this entry the same file was fenced when read with
+    # `file_read` and bare when a command printed it.
+    "shell_exec": CONTEXT_SOURCE_EXTERNAL,
 }
 
 
