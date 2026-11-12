@@ -71,7 +71,12 @@ installed hook has drifted.
 ### Quick Start
 
 ```bash
-# Install Python agent dependencies (dev mode)
+# Create a virtual environment for the project's Python packages, and switch to it
+python3 -m venv .venv
+source .venv/bin/activate
+# Windows PowerShell, for the two lines above: python -m venv .venv ; .venv\Scripts\Activate.ps1
+
+# Install Python agent dependencies into it (dev mode)
 make build-agents
 
 # Build all components
@@ -81,6 +86,10 @@ make all
 make test
 ```
 
+Create the virtual environment once, and activate it in every new shell before you run `make`. The Python targets run the `python3` on your path (`python` on Windows, where a virtual environment has no `python3`), and tools such as `ruff` and `pytest` are found the same way. With no virtual environment active, `make build-agents` installs into your system Python.
+
+To install without activating, name the interpreter by its full path: `make build-agents PYTHON="$PWD/.venv/bin/python"`. Use the full path because some targets change folder before they run it. `PYTHON` picks the interpreter only: a target that runs a tool by name, such as `make lint` with `lint-imports`, still needs the environment activated.
+
 ### Component-Specific Commands
 
 ```bash
@@ -89,7 +98,7 @@ make build-orchestrator    # → bin/persatrix-server
 make test-go               # go test ./... -v -race -cover (every Go package)
 
 # Python agents
-make build-agents          # pip install -e ".[dev]" at CI's pins (.github/python-constraints.txt)
+make build-agents          # python3 -m pip install -e "./agents[dev]" at CI's pins (.github/python-constraints.txt)
 make python-constraints    # after changing agents/pyproject.toml: re-resolve those pins
 make test-python           # pytest tests/unit/python/ -v --tb=short
 

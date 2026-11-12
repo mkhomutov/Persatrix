@@ -140,7 +140,7 @@ def test_build_agents_installs_at_the_pinned_versions() -> None:
     recipe = makefile_recipe_body("build-agents")
     install = [line for line in recipe.splitlines() if " install " in line]
     assert len(install) == 1, f"expected one pip install line in build-agents, found {install}"
-    assert "-c ../$(PYTHON_CONSTRAINTS)" in install[0], "build-agents installs without the pins"
+    assert "-c $(PYTHON_CONSTRAINTS)" in install[0], "build-agents installs without the pins"
 
 
 def test_no_workflow_installs_the_agents_package_around_the_pins() -> None:
