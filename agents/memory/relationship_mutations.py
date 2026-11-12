@@ -23,6 +23,7 @@ from ..observability.spans import RELATIONSHIP_UPDATE_SPAN
 from ..principal_id import DEFAULT_PRINCIPAL_ID
 from ..session_id import normalize_session_id
 from ._salience import emit_session_write
+from ._write_boundary import ends_transaction
 from .relationship_queries import (
     get_identity,
     truncate_field,
@@ -39,7 +40,6 @@ logger = logging.getLogger(__name__)
 _tracer = trace.get_tracer(__name__)
 
 __all__ = [
-    "apply_decay",
     "record_interaction",
     "seed_trust",
     "update_trust",
@@ -47,6 +47,7 @@ __all__ = [
 ]
 
 
+@ends_transaction
 async def update_trust(
     db: aiosqlite.Connection,
     agent_id: str,
@@ -165,6 +166,7 @@ async def update_trust(
         return new_trust
 
 
+@ends_transaction
 async def upsert_identity(
     db: aiosqlite.Connection,
     agent_id: str,
@@ -256,54 +258,7 @@ async def upsert_identity(
         return merged
 
 
-async def apply_decay(
-    db: aiosqlite.Connection,
-    agent_id: str,
-    decay_rate: float = 0.01,
-    *,
-    participant_type: str = "agent",
-    principal_id: str = DEFAULT_PRINCIPAL_ID,
-    epoch_id: str = DEFAULT_EPOCH_ID,
-) -> int:
-    """Decay all trust scores toward 0.5 (neutral).
-
-    Formula: ``new = old + decay_rate * (0.5 - old)``.
-    Rows within 0.001 of neutral are skipped.  Decays all
-    ``other_participant_type`` values uniformly (PR #120 F-5).
-
-    ``principal_id`` (ISSUE-0081 PR 3; default :data:`DEFAULT_PRINCIPAL_ID`)
-    scopes the maintenance pass to the active tenant — a decay run on one
-    tenant's request must not move another tenant's trust.  ``epoch_id``
-    (ISSUE-0085 PR 3; default :data:`DEFAULT_EPOCH_ID`) scopes it to the
-    active run/test epoch for the same reason.
-
-    Returns the number of relationships updated.
-    """
-    if math.isnan(decay_rate) or math.isinf(decay_rate) or not 0.0 < decay_rate <= 1.0:
-        raise ValueError(f"decay_rate must be in (0.0, 1.0], got {decay_rate}")
-    cursor = await db.execute(
-        """
-        UPDATE relationships
-        SET trust_score = trust_score + ? * (0.5 - trust_score)
-        WHERE participant_id = ? AND participant_type = ?
-          AND principal_id = ?
-          AND epoch_id = ?
-          AND ABS(trust_score - 0.5) > 0.001
-        """,
-        (decay_rate, agent_id, participant_type, principal_id, epoch_id),
-    )
-    updated = cursor.rowcount
-    if updated:
-        await db.commit()
-        logger.debug(
-            "Applied trust decay (rate=%.3f) to %d relationships for %s",
-            decay_rate,
-            updated,
-            agent_id,
-        )
-    return updated
-
-
+@ends_transaction
 async def record_interaction(
     db: aiosqlite.Connection,
     agent_id: str,
@@ -432,6 +387,7 @@ async def record_interaction(
     return interaction_id
 
 
+@ends_transaction
 async def seed_trust(
     db: aiosqlite.Connection,
     agent_id: str,

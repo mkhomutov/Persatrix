@@ -1,11 +1,18 @@
 ---
 id: ISSUE-0197
 summary: "Five memory writes commit only when they changed a row. A write that changes nothing still opens a transaction, so its connection keeps the SQLite write lock until its next commit, and a write from another memory tier in that gap fails with `database is locked` after five seconds and is dropped with a warning. On shipped paths only the interaction janitor of a persona that ticks leaves the lock held."
-status: open
+status: resolved
 severity: low
 area: agents/memory
 created: 2026-11-10
+closed: 2026-11-12
+closed_pr: 0
 refs:
+  - agents/memory/_write_boundary.py
+  - agents/memory/relationship_decay.py
+  - tests/unit/python/test_memory_write_releases_the_lock.py
+  - tests/unit/python/test_memory_write_boundary.py
+  - docs/issues/ISSUE-0237-a-memory-write-of-several-statements-is-not-atomic.md
   - agents/memory/interaction_janitor.py
   - agents/memory/episodic_retention.py
   - agents/memory/_episodic_replay_dedup.py
@@ -86,3 +93,32 @@ a write on the other tier would pin it.
 > `ee9cfaac`; reproduced with a scratch probe against a temporary
 > database. A second probe during review of this issue narrowed the live
 > path to the janitor.
+
+> 2026-11-12 — fixed. Reproduced first on `main` at `0f3eb3ac`: each of
+> the five writes returned 0 rows with its connection still in a
+> transaction, and `RelationshipMemory.record_interaction` on the other
+> tier then failed with `database is locked` after 5.2 seconds. Two
+> things the text above does not say: a write that raises, or whose task
+> is cancelled between its statement and its commit, keeps the lock the
+> same way, and that is every write in the package, not five; and
+> `summarize_old_episodes` reaches its zero-row update only when the
+> episode goes away while the model is writing the summary.
+>
+> Every write in `agents/memory/` now goes through
+> `agents/memory/_write_boundary.py`, which ends the transaction
+> whether the write changed a row, raised, or was cancelled. It ends it
+> with a commit on the error path too, not a rollback: a tier's
+> connection is shared by all of its persona's coroutines, and a
+> rollback would discard a statement another coroutine had run and not
+> yet committed. The migration runner and the timer cache roll back
+> instead, each being the only user of its connection while it runs;
+> the timer cache used to roll back on an error but not on a
+> cancellation. `tests/unit/python/test_memory_write_boundary.py` reads
+> the package and fails on a write statement outside the helpers.
+> `apply_decay` moved to `agents/memory/relationship_decay.py`, because
+> `relationship_mutations.py` was at the 500-line warning.
+>
+> Not fixed here: a write of several statements that stops part-way
+> still keeps its first half, now at once and before at the
+> connection's next commit. That is
+> [ISSUE-0237](ISSUE-0237-a-memory-write-of-several-statements-is-not-atomic.md).

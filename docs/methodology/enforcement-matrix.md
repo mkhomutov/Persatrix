@@ -5,6 +5,8 @@
 > that enforces it, and how hard the enforcement is. Read the **Enforcement**
 > column literally: a rule is only as strong as the weakest place it is
 > checked. Branch protection was read with `gh api` on 2026-09-15.
+> The rules for code and builds are here; those for documents and process
+> are in [enforcement-matrix-documents.md](enforcement-matrix-documents.md).
 
 ## Enforcement levels
 
@@ -49,6 +51,7 @@ the twelve, and the job is named where it is not one of the original six.
 | Go and Python protobuf stubs match `proto/*.proto`; no orphans | Makefile; ISSUE-0017/0023; CONTRIBUTING | `make proto-go && git diff --exit-code`; `make proto-python-check proto-orphans-check`; on the protoc release `.github/actions/setup-protoc` pins with its SHA-256, which `test_protoc_pin.py` holds every workflow to | Required (`Proto staleness`, `Python`) |
 | MIT-candidate primitives never import BUSL code (RFC 0045 §B) | RFC 0045; CONTRIBUTING | `make imports-check` (import-linter) | Required (`Python`) |
 | No module in the agents package imports a sibling by an absolute name, `agents.…` or `persatrix_agents.…`: the package runs under both, and an absolute import loads a second copy or none | [ISSUE-0210](../issues/ISSUE-0210-agent-package-runs-under-two-import-roots.md); the test's docstring | `test_agents_package_imports_are_relative.py` reads every `import` statement and every string import with a literal name, outside the package's tests and generated stubs; the `Python` job also starts the installed package from an empty folder with `python -P`, which stops on such an import if it runs at start-up | Required (`Python`) — since 2026-11-11; ruff's banned-import rule cannot tell a relative import from an absolute one here |
+| Every write statement in `agents/memory/` ends its transaction on every path: one that returns, raises or is cancelled without a commit keeps the database's write lock and shuts the persona's other memory tiers out | [ISSUE-0197](../issues/ISSUE-0197-zero-row-write-keeps-the-memory-write-lock.md); `agents/memory/_write_boundary.py` | `test_memory_write_boundary.py` reads the package and fails on an `INSERT`, `UPDATE`, `DELETE` or `REPLACE` run outside `execute_write`, `write_boundary` and `@ends_transaction`, and on a statement whose text it cannot read, each outside a reviewed list; `test_memory_write_releases_the_lock.py` runs the writes on two tiers of one database | Required (`Python`) — since 2026-11-12; migrations are exempt (the runner rolls back), and the check sees only statements run through a connection's `execute` family inside `agents/memory/` |
 | The CLI compiles on the oldest Rust it claims, `rust-version` in `cli/Cargo.toml` | `cli/Cargo.toml`; README | the `Rust` job's last step installs that release and runs `cargo +<rust-version> check --locked --all-targets`, so a dependency update that needs a newer Rust fails there; clippy's `incompatible_msrv` lint, under `-D warnings`, names any newer standard-library API in CLI code; `test_toolchain_minimums.py` pins the step | Required (`Rust`, `Python`) — since 2026-09-26; CI had only ever built with the newest release |
 | Rust builds; clippy clean; `cargo test` passes (incl. lockstep guards) | instructions | `cargo build`, `cargo clippy -- -D warnings`, `cargo test` | Required (`Rust`) |
 | CI builds and lints the CLI on one pinned Rust release, so a new release cannot fail every open PR at once | `cli/rust-toolchain.toml`; `.github/dependabot.yml` | every job that runs cargo installs what the file names (`rustup toolchain install` in `cli/`) and runs cargo there; Dependabot proposes each release as one PR; `test_rust_toolchain_pin.py` fails a workflow that installs or names a toolchain of its own | Required (`Rust`, `Python`) — since 2026-09-26; CI used to install whatever `stable` was that day |
@@ -71,54 +74,12 @@ the twelve, and the job is named where it is not one of the original six.
 | Dependencies bumped monthly, one grouped PR per ecosystem (Go, pip, Cargo, the Rust toolchain, npm, Actions), `chore(deps)` titles | `.github/dependabot.yml` | Dependabot; for pip, the ranges in `agents/pyproject.toml` only (CI's pins move through `python-constraints-refresh.yml`); for the Rust toolchain, the release in `cli/rust-toolchain.toml` | Scheduled (security updates run on their own cadence) |
 | Required status checks on `main` match the versioned set | `branch-protection.json` | `make branch-protection-show`; `test_branch_protection_config.py` pins the file to the CI job list | Owner applies; file is reviewed |
 
-## Size and shape
+## Size, documentation and process
 
-| Rule | Stated in | Check | Enforcement |
-|------|-----------|-------|-------------|
-| Code files ≤ 800 lines | documentation-guide §Size Limits | `file_size.py --strict` | Required (`File size check`) + Pre-commit |
-| A code file over 500 lines is warned, and split at a real seam when a change edits it for another reason — never trimmed to fit, never in a sweep (sequencing Amendment 2026-09-12, ruling (e)) | documentation-guide §Size Limits; release-cycle §The debt sweep (retired) | `file_size.py` lists it under `[WARN]` on every run; the split is review's call | Advisory output + Convention |
-| Docs ≤ 3 000 words; RFCs ≤ 8 000 words | documentation-guide | same | Required (`File size check`) + Pre-commit |
-| Grandfathered files carry a reason and an exit condition | `file_size_allowlist.py` docstring | review; `test_allowlist_has_no_dead_entries`, `test_allowlist_entries_are_not_already_excluded` | Convention + unit tests |
-| Released version-cycle docs are frozen evidence, exempt from the cap | documentation-guide §Where Documents Live | `file_size.py` excludes them once `CHANGELOG.md` has the version's dated heading (ISSUE-0139; read from the tree, not `git tag`, so a depth-1 checkout agrees with a full clone); a still-allowlisted released doc prints `[STALE-ALLOWLIST]` (advisory; the tag PR drops an open plan's last-resort entry) | Required (`Python` unit tests pin it) |
-| Near-cap notice at 3 % of each limit | `file_size.py` | `--near-cap` output on every run | Advisory output |
-| PRs under 500 changed lines | CONTRIBUTING; BRANCHING; copilot-instructions | — | **Guidance, stated as such** since the BRANCHING rewrite — a third of merges exceed it, almost all docs-heavy; code PRs split |
-| Squash merge; linear history | BRANCHING | branch protection | Required |
-| Branch naming (`feature/vNNN-…`, `docs/`, `fix/`, `ci/`) | BRANCHING; each plan's header | — | Convention |
-
-## Documentation
-
-| Rule | Stated in | Check | Enforcement |
-|------|-----------|-------|-------------|
-| No broken relative links or anchors in tracked markdown | documentation-guide; consistency checklist | `doc_links.py` | Required (`Docs hygiene`) + Pre-commit |
-| Only the standard status markers | documentation-guide §Status Markers | `doc_status_markers.py` | Required (`Docs hygiene`) + Pre-commit |
-| No leaked tool-call markup in docs | — | `doc_leaked_markup.py` | Required (`Docs hygiene`) + Pre-commit |
-| `FILEMAP.md` matches `git ls-files` | `generate_filemap.py` | `--check` (date-insensitive; on a PR it compares against the merge tree, so a PR behind a file-adding merge fails until updated) | Required (`Docs hygiene`) + Pre-commit regenerates — closed [ISSUE-0133](../issues/ISSUE-0133-no-ci-gate-on-filemap-freshness.md) |
-| Merged-PR history (`docs/merged-prs.md`) matches the squash log, allowing only the newest merges to be missing | automation-catalogue | `scripts/merged_prs.py --check` | Required (`Docs hygiene`) + Pre-commit regenerates (a shallow clone may skip) |
-| No plan row says "PR open" for a PR `docs/merged-prs.md` records, or "not started" for a merged PR | release-cycle §Phase 1 | `scripts/checks/plan_status.py` (`make plan-status-check`) | Required (`Docs hygiene`) + Pre-commit flips it, check skipped when shallow — first run found ten stale rows; judging an unlinked 🔀 row by the commit that wrote it found eight more |
-| A patch release keeps one document: no `docs/vX.Y.Z-*.md` file beside its plan but a test-findings PR plan | release-cycle §Phase 0 (sequencing Amendment 2026-09-12, ruling (e)) | `scripts/checks/plan_status.py` (`make plan-status-check`) fails one for any `X.Y.Z` after 0.3.16 with `Z` above 0, dated or not; v0.3.16 and earlier keep their files, a minor release is not judged | Required (`Docs hygiene`) + Pre-commit |
-| Every artifact the methodology names exists (documents, tools, make targets, Docs-hygiene steps) | [conformance.json](conformance.json) | `make conformance-check` | Required (`Docs hygiene`) + Pre-commit |
-| No ROADMAP Component Status row says less than the RFC it names | ROADMAP §How to Update | `scripts/checks/roadmap_status.py` (`make roadmap-status-check`) | Required (`Validate configs`) + Pre-commit — its first run found `internal/security/` still "In progress" four months after RFC 0009 closed part-way |
-| The Go, Python and Rust minimums the setup docs state are the ones the build requires: the `go` line in `go.mod`, `requires-python` in `agents/pyproject.toml`, `rust-version` in `cli/Cargo.toml` | README; CONTRIBUTING; `cli/Cargo.toml` | `test_toolchain_minimums.py` reads every "Go 1.26+"-style minimum in README (badges and quick start), CONTRIBUTING, the guides, the manual-test template and the manual tests, the bug form's example, and the CLI's Python message, and fails when a main setup doc stops stating one it can read. Records of their time (execution reports, the CHANGELOG, RFCs, issues) are left alone | Required (`Python`) — since 2026-09-26; README had said Go 1.24+ and Rust 1.80+ while the build needed 1.26 and 1.86 |
-| Unified doc audit (links + markers + sizes) | `doc_audit.py` | — | Local convenience wrapper; its three checks run individually in CI |
-| Local-only files never referenced from committed files | CLAUDE.md; copilot-instructions; review-process | review | Convention |
-| Glossary terms mandatory; new terms added in the same change | CLAUDE.md §Terminology | review | Convention |
-| Plain English; lead with the point | documentation-guide §Writing Style | review | Convention |
-| Status hygiene before and after every task | ROADMAP §How to Update; CLAUDE.md | review; ROADMAP's Component Status rows also by `roadmap_status.py` (above) | Convention; Required for the Component Status rows |
-| Every RFC has front-matter, required sections, ToC | rfcs/README checklist | `rfcs-check` (front-matter and its `**Status**` header line only) | Required for front-matter; Convention for sections |
-
-## Process
-
-| Rule | Stated in | Check | Enforcement |
-|------|-----------|-------|-------------|
-| Every PR reviewed; findings dispositioned | review-process | — | Convention (0 GitHub approvals required) |
-| Migrations land ahead of their consumer, one store per PR | release-cycle | review | Convention |
-| Scope locks change only by amendment | decisions | review | Convention |
-| Every sequencing amendment since 2026-09-12 records its external evidence | decisions rule 6 | `scripts/checks/amendment_evidence.py` (`make amendment-evidence-check`): the section and its five rows are present, filled and given once, and no heading from that date names an amendment in another form (a unit test pins the CI step and the make target, which the conformance manifest no longer does); what the amendment concludes from them is review's call | Required (`Docs hygiene`) + Pre-commit |
-| Live arc runs once, live, before the tag | release-cycle | the plan's release checklist | Convention, evidenced in the report |
-| Version strings aligned across five files | version-bump guide | `make bump-version` | Manual in the tag PR |
-| TDD for new unit-level code | CLAUDE.md §TDD | review | Convention |
-| Version-train gate | release-cycle | review | Convention |
-| PR body follows What / Why / How / Not in this PR / Gates / Review | BRANCHING §Pull requests | `.github/PULL_REQUEST_TEMPLATE.md` pre-fills it | Template (GitHub applies it to every new PR) |
+The rules about file size and shape, documents, and how work is
+planned and merged are in
+[enforcement-matrix-documents.md](enforcement-matrix-documents.md), with
+the same columns and the levels above.
 
 ---
 
@@ -131,6 +92,7 @@ The matrix's own gaps, mostly closed, are listed in
 
 - [testing-strategy.md](testing-strategy.md) — the layers the checks guard
 - [automation-catalogue.md](automation-catalogue.md) — where each check lives
+- [enforcement-matrix-documents.md](enforcement-matrix-documents.md) — the rules for size, documents and process
 - [enforcement-gaps.md](enforcement-gaps.md) — what the matrix says the project should change
 - [documentation-guide.md §Size Limits](../documentation-guide.md#size-limits)
 - [CONTRIBUTING.md §Quality Gates & CI](../../CONTRIBUTING.md#quality-gates--ci)

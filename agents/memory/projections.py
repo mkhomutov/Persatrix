@@ -39,6 +39,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Final
 
+from ._write_boundary import write_boundary
+
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
@@ -81,25 +83,25 @@ async def replace_entry_projections(
     them.
     """
     db = episodic._ensure_db()
-    await db.execute(
-        "DELETE FROM memory_projections "
-        "WHERE agent_id = ? AND entry_id = ? AND entry_tier = ?",
-        (episodic._agent_id, entry_id, entry_tier),
-    )
-    written = 0
-    for level, text in projections.items():
-        if not text.strip():
-            continue
+    async with write_boundary(db):
         await db.execute(
-            """
-            INSERT INTO memory_projections
-                (agent_id, entry_id, entry_tier, level, text, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (episodic._agent_id, entry_id, entry_tier, level, text, created_at),
+            "DELETE FROM memory_projections "
+            "WHERE agent_id = ? AND entry_id = ? AND entry_tier = ?",
+            (episodic._agent_id, entry_id, entry_tier),
         )
-        written += 1
-    await db.commit()
+        written = 0
+        for level, text in projections.items():
+            if not text.strip():
+                continue
+            await db.execute(
+                """
+                INSERT INTO memory_projections
+                    (agent_id, entry_id, entry_tier, level, text, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (episodic._agent_id, entry_id, entry_tier, level, text, created_at),
+            )
+            written += 1
     return written
 
 

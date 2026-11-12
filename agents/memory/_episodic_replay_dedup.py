@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import aiosqlite
 
+from ._write_boundary import execute_write
 from .interaction_janitor import SUMMARY_UNAVAILABLE_TEXT
 
 __all__ = [
@@ -102,12 +103,10 @@ async def clear_failed_episode_for_interaction(
     ``update_episode_summary`` depends on — it matches without a ``LIMIT``
     and reports ``rowcount``.
     """
-    cursor = await db.execute(
+    cursor = await execute_write(
+        db,
         "DELETE FROM episodes WHERE agent_id = ? AND interaction_id = ? "
         "AND summary = ?",
         (agent_id, interaction_id, SUMMARY_UNAVAILABLE_TEXT),
     )
-    deleted = cursor.rowcount or 0
-    if deleted:
-        await db.commit()
-    return deleted
+    return cursor.rowcount or 0

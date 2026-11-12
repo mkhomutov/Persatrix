@@ -25,7 +25,7 @@ from ._principal_filter import resolve_active_principal
 from ._salience import RELATIONSHIP_APPEND_SALIENCE, emit_for_tier
 from ._session_filter import _resolve_session_list
 from .migrations import _apply_migrations
-from .relationship_mutations import (
+from .relationship_decay import (
     apply_decay as _apply_decay,
 )
 from .relationship_mutations import (

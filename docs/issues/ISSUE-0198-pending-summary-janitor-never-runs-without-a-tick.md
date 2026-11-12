@@ -88,3 +88,9 @@ first, since the sweep is one of the writes that keeps the lock.
 
 > 2026-11-10 — found by a whole-repository quality review of `main` at
 > `ee9cfaac`; confirmed by reading the code, not by a live run.
+
+> 2026-11-12 — the fix for
+> [ISSUE-0197](ISSUE-0197-zero-row-write-keeps-the-memory-write-lock.md)
+> makes the sweep commit when it finds nothing, so it no longer keeps
+> the write lock and can run on the paths proposed above. This issue
+> itself is unchanged.

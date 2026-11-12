@@ -61,6 +61,7 @@ per-agent and own their cursor over the shared file.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 
@@ -206,7 +207,9 @@ class ScheduledWakesCache:
                         ],
                     )
                 await self._conn.commit()
-            except Exception:
+            except (Exception, asyncio.CancelledError):
+                # A cancelled rebuild is rolled back too, or its
+                # connection keeps the write lock (ISSUE-0197).
                 await self._conn.rollback()
                 raise
 

@@ -1,6 +1,6 @@
 # Persatrix Methodology
 
-> **Last updated**: 2026-11-08
+> **Last updated**: 2026-11-12
 
 How this project is run, written down so it can be followed, audited, and
 reused. Everything here describes practice that already exists in the
@@ -32,7 +32,7 @@ standalone blueprint later.
 | 3 | [Review process](review-process.md) | How every PR is reviewed, what a finding looks like, the four dispositions a finding can take, and the rule that review reports are never linked from committed files. |
 | 4 | [Process glossary](process-glossary.md) | The terms the other three use. |
 | 5 | [Testing strategy](testing-strategy.md) | Every test layer, what it proves, where it runs, how to add to it — and the rule that every test tree has a named runner. |
-| 6 | [Enforcement matrix](enforcement-matrix.md) | Every rule with its document, its check, and whether the check is required, advisory, or local-only. Status tables are generated or checked, not hand-kept: `docs/merged-prs.md` and `make plan-status-check`. The matrix's own gaps are in [enforcement-gaps.md](enforcement-gaps.md). |
+| 6 | [Enforcement matrix](enforcement-matrix.md) | Every rule with its document, its check, and whether the check is required, advisory, or local-only. Status tables are generated or checked, not hand-kept: `docs/merged-prs.md` and `make plan-status-check`. The rules for size, documents and process are in [enforcement-matrix-documents.md](enforcement-matrix-documents.md). The matrix's own gaps are in [enforcement-gaps.md](enforcement-gaps.md). |
 | 7 | [Automation catalogue](automation-catalogue.md) | Every `make` target, script, hook and workflow, and when each runs; the hook's steps are in [pre-commit-hook.md](pre-commit-hook.md). |
 | 8 | [Templates](../templates/README.md) | One per document kind the cycle produces: version plan (the release's one document), amendment, PR plan, execution report, manual test. `make release-doc` opens a plan or a report. |
 | 9 | [Conformance manifest](conformance.json) | The contract: every document, tool, make target and CI step the methodology consists of. `make conformance-check` (hook + CI) fails when one is missing. |

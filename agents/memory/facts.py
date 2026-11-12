@@ -45,6 +45,7 @@ from ._principal_filter import (
     resolve_write_principal,
 )
 from ._session_filter import _resolve_session_list, session_in_clause
+from ._write_boundary import execute_write
 from .fact_predicates import (
     canonicalize_subject,
     validate_predicate,
@@ -422,12 +423,12 @@ class FactStore:
         superseded rows so live facts are never silently dropped.
         """
         db = self._ensure_db()
-        cursor = await db.execute(
+        cursor = await execute_write(
+            db,
             "DELETE FROM facts WHERE agent_id = ? "
             "AND superseded_by IS NOT NULL AND asserted_at < ?",
             (self._agent_id, before),
         )
-        await db.commit()
         return cursor.rowcount
 
     async def delete_by_subject(self, subject_id: str) -> dict[str, int]:
