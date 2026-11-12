@@ -6,6 +6,7 @@ severity: medium
 area: agents/tools
 created: 2026-11-10
 closed: 2026-11-12
+closed_pr: 1102
 refs:
   - agents/tools/sandbox.py
   - config/agents.yaml
@@ -67,8 +68,8 @@ sandbox tests either way.
 > 2026-11-10 — found by a whole-repository quality review of `main` at
 > `ee9cfaac`; the matches above were run with `fnmatch.fnmatchcase`.
 
-> 2026-11-12 — **resolved by the second choice: the matching stays, and is now
-> stated.** `*` still matches `/`; nothing in `PathValidator` changed, so
+> 2026-11-12 — **resolved by [#1102](https://github.com/mkhomutov/Persatrix/pull/1102), which takes the second choice: the
+> matching stays, and is now stated.** `*` still matches `/`; nothing in `PathValidator` changed, so
 > no operator's rules change meaning. The schema's `read`, `write` and
 > `deny` descriptions and the spec's security section state the rule, and
 > `test_sandbox.py` pins it. The shipped example now does what its comment

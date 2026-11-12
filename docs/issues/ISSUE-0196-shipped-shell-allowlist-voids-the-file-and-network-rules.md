@@ -114,7 +114,8 @@ work. The list itself was already in the shipped config.
 > config; no command was run against a live agent. The older gate was
 > read at the `v0.3.16` tag.
 
-> 2026-11-12 — **the config half is fixed; the environment half stays open.**
+> 2026-11-12 — **the config half is fixed by [#1102](https://github.com/mkhomutov/Persatrix/pull/1102); the environment half
+> stays open.**
 > The four commands were each run through `shell_exec` in a scratch
 > workspace under the shipped rules, and none passed: `python -c` and a
 > `conftest.py` under `pytest` ran code that printed the denied `.env`;
