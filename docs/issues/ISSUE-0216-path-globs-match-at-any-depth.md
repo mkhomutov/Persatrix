@@ -80,3 +80,12 @@ sandbox tests either way.
 > folder whose name starts with `.env`. The maintainer has not ruled out
 > the first choice. Making `*` stop at `/` would also narrow every deny
 > rule written with one `*`, so it needs a pass over operators' configs.
+>
+> The review of that pull request added three things. `?` and `[...]` are
+> wildcards as well as `*`, so a rule that spells a path containing `[`
+> does not match that path; the same places now say so, and the tests pin
+> it. The shipped `code-reviewer` had no deny rules and read
+> `/workspace/.env`; it now has the `code-writer`'s two, and a test holds
+> every shipped agent with file rules to them. And the match is
+> case-sensitive where the file system may not be, which is
+> [ISSUE-0234](ISSUE-0234-deny-rules-miss-a-path-spelled-in-another-case.md).

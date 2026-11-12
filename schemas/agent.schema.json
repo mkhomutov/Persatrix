@@ -203,7 +203,7 @@
             "read": {
               "type": "array",
               "items": { "type": "string" },
-              "description": "Paths the file_read tool may read. Each rule is matched against the whole resolved path, case-sensitively, with Python's fnmatchcase: '*' matches any run of characters, '/' included, so it crosses folders ('/workspace/*.md' also matches '/workspace/docs/old/notes.md'); '**' means the same as '*'; a rule with no wildcard is one exact path. A match in 'deny' wins. A non-empty list is also what turns the tool on. These rules bind the file tools only, not what a shell_exec command opens."
+              "description": "Paths the file_read tool may read. Each rule is matched against the whole resolved path, case-sensitively, with Python's fnmatchcase: '*' matches any run of characters, '/' included, so it crosses folders ('/workspace/*.md' also matches '/workspace/docs/old/notes.md'); '**' means the same as '*'; '?' matches any one character and '[...]' any one of the characters listed, and there is no escape character, so write '[[]', '[?]' and '[*]' for those characters in a path; a rule with none of '*', '?' and '[' is one exact path. A match in 'deny' wins. A non-empty list is also what turns the tool on. These rules bind the file tools only, not what a shell_exec command opens."
             },
             "write": {
               "type": "array",
@@ -213,7 +213,7 @@
             "deny": {
               "type": "array",
               "items": { "type": "string" },
-              "description": "Paths neither file tool may read or write; a match here wins over 'read' and 'write'. Matched as 'read' is, so a rule with no wildcard is one exact path: '/workspace/.env' does not cover '/workspace/sub/.env' or '/workspace/.env.local'. '**/.env*' covers all three and, since '*' crosses '/', every other name that starts with '.env' and everything under a folder so named."
+              "description": "Paths neither file tool may read or write; a match here wins over 'read' and 'write'. Matched as 'read' is, so a rule with no wildcard is one exact path: '/workspace/.env' does not cover '/workspace/sub/.env' or '/workspace/.env.local'. '**/.env*' covers all three and, since '*' crosses '/', every other name that starts with '.env' ('.env.example' too) and everything under a folder so named. '[' and '?' are wildcards as well: the rule '/workspace/keys[1].txt' denies '/workspace/keys1.txt' and not the path it spells, which is written '/workspace/keys[[]1].txt'. The match is case-sensitive, so on a file system that is not (macOS and Windows by default) the same file spelled in another case, such as '.ENV', is not refused (ISSUE-0234)."
             }
           }
         },

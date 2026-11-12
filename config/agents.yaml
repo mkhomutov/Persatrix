@@ -60,9 +60,15 @@ agents:
         #   - `*` matches any run of characters, `/` included, so it crosses
         #     folders: "/workspace/*.py" also matches "/workspace/a/b/c.py".
         #     `**` means the same as `*`.
-        #   - A rule with no wildcard is one exact path. "/workspace" is the
-        #     folder's own path and none of its files; "/workspace/**" is
-        #     everything under the folder and not the folder's own path.
+        #   - `?` matches any one character and `[...]` any one of the
+        #     characters listed, so "/workspace/keys[1].txt" matches
+        #     "/workspace/keys1.txt" and not the path it spells. There is no
+        #     escape character: write `[[]` for a `[` in a path, and `[?]`
+        #     and `[*]` for the other two.
+        #   - A rule with none of `*`, `?` and `[` is one exact path.
+        #     "/workspace" is the folder's own path and none of its files;
+        #     "/workspace/**" is everything under the folder and not the
+        #     folder's own path.
         #   - `deny` wins over `read` and `write`.
         read: ["/workspace", "/workspace/**"]
         # Writes go anywhere under src/ and tests/, and to two top-level
@@ -71,10 +77,15 @@ agents:
         write: ["/workspace/src/**", "/workspace/tests/**", "/workspace/setup.py", "/workspace/README.md"]
         # Never read or written: a .env file at any depth and with any
         # suffix (.env, sub/.env, .env.local), and everything inside a .git
-        # folder. The first rule errs wide on purpose: it refuses every name
-        # that starts with ".env" (.envrc, a file called .envoy.py) and
-        # everything under a folder so named. "/workspace/.env" alone would
-        # be one literal path, and miss sub/.env and .env.local.
+        # folder. That holds where file names are case-sensitive, as in the
+        # agent's Linux container. On a file system that is not (macOS and
+        # Windows by default), ".ENV" opens the same file and no rule here
+        # refuses it —
+        # docs/issues/ISSUE-0234-deny-rules-miss-a-path-spelled-in-another-case.md
+        # The first rule errs wide on purpose: it refuses every name that
+        # starts with ".env" (.env.example, .envrc, a file called .envoy.py)
+        # and everything under a folder so named. "/workspace/.env" alone
+        # would be one literal path, and miss sub/.env and .env.local.
         deny: ["**/.env*", "**/.git/**"]
       shell:
         # shell_exec is off for this agent: this list is empty and the tool
@@ -145,8 +156,12 @@ agents:
     timeout_seconds: 180
     permissions:
       filesystem:
+        # Reads the whole workspace and writes nothing. The deny rules are
+        # the code-writer's, and its comment says how a rule matches and
+        # where these two do not hold.
         read: ["/workspace", "/workspace/**"]
         write: []
+        deny: ["**/.env*", "**/.git/**"]
       network:
         # RFC 0033 — "Any Provider": provider-neutral so the example does
         # not read as Anthropic-only. NB this list is the `http_request`

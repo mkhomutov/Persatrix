@@ -142,7 +142,7 @@ agent:
   tools:
     - file_read
     - file_write
-    - shell_exec
+    # shell_exec is left off: §6.2 gives this agent no shell command
   max_retries: 2
   timeout_seconds: 120
 ```
@@ -469,8 +469,15 @@ agent:
 >   Python's `fnmatchcase`. `*` matches any run of characters, `/` included,
 >   so it crosses folders: `/workspace/*.py` also matches
 >   `/workspace/deploy/hooks/post_install.py`, and `**` means the same as
->   `*`. A rule with no wildcard is one exact path: `/workspace/.env` does
->   not cover `/workspace/sub/.env`. `deny` wins over `read` and `write`.
+>   `*`. `?` matches any one character and `[...]` any one of the characters
+>   listed, with no escape character: `/workspace/keys[1].txt` matches
+>   `/workspace/keys1.txt` and not the path it spells, which is written
+>   `/workspace/keys[[]1].txt`. A rule with none of `*`, `?` and `[` is one
+>   exact path: `/workspace/.env` does not cover `/workspace/sub/.env`.
+>   `deny` wins over `read` and `write`. The match is case-sensitive, so
+>   where file names are not (macOS and Windows by default) a deny rule
+>   misses the same file spelled in another case
+>   ([ISSUE-0234](issues/ISSUE-0234-deny-rules-miss-a-path-spelled-in-another-case.md)).
 > - **Shell.** A command is checked on its leading words only, never on its
 >   arguments: `git diff` admits `git diff main` and not `git push`. So a
 >   listed command is trusted with every argument it accepts, and it runs

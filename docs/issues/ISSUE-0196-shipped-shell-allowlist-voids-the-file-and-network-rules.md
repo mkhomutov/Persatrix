@@ -1,6 +1,6 @@
 ---
 id: ISSUE-0196
-summary: "The shipped `code-writer` agent may run `python` through `shell_exec`. The shell gate checks only a command's leading words, so text that steers the model can make it read files the file rules deny, open network connections although the agent is offered no network tool, and print the provider API keys held in the tool's environment. Live on `main` since ISSUE-0150's fix; in no tagged release."
+summary: "The shell gate checks only a command's leading words, so a listed interpreter or test runner lets text that steers the model read files the file rules deny, open network connections and print the provider API keys held in the tool's environment. The shipped `code-writer` listed `python`, `pytest`, `ruff` and `git diff`; since #1102 it lists no command and is not offered `shell_exec`, and no tagged release shipped the working list. Open until RFC 0009 Phase 4: a command an operator lists still gets the agent's whole environment, provider keys included"
 status: in_progress
 severity: high
 area: security
