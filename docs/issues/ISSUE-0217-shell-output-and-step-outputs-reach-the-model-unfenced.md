@@ -1,6 +1,6 @@
 ---
 id: ISSUE-0217
-summary: "Two paths hand untrusted text to a model without the `<external_data>` envelope. `shell_exec` output is not listed as an external source, so the same file is wrapped when read with `file_read` and not wrapped when a shell command prints it. A workflow step's output is pasted straight into the next step's input, where the next agent reads it as instructions."
+summary: "Two paths handed untrusted text to a model without the `<external_data>` envelope. `shell_exec` output was one: the same file was wrapped when read with `file_read` and bare when a command printed it. Since #1103 a command's output is wrapped and scanned like the other tools'. Still open: a workflow step's output is pasted straight into the next step's input, where the next agent reads it as instructions"
 status: in_progress
 severity: medium
 area: security
@@ -73,8 +73,26 @@ cannot tell the substituted part from the workflow author's own words.
 > framework's own error line stays outside it. Tests run the real tool
 > through both tool rounds. Before the fix, the same file came back fenced
 > from `file_read` and bare from a command that printed it.
-> **What remains:** a step's output is still pasted into the next step's
-> input as it is. That is in the workflow engine (`internal/planner`,
-> `internal/scheduler`), which ruling (x) of the
-> [v0.4.x sequencing record](../v0.4.x-sequencing-2026-10-21.md) freezes,
-> and which side wraps is still to decide. Severity is unchanged.
+> The envelope is always there. The `flagged` mark is not: the scan reads
+> the output as JSON text, so it flags a phrase that opens stdout or
+> stderr or follows a space on its line, and misses one that follows a
+> line break or a tab, which `file_read` flags. That gap is shared with
+> `http_request` and `recall_channel_messages` and is
+> [ISSUE-0235](ISSUE-0235-injection-scan-reads-tool-output-as-json-text.md).
+> **What remains:**
+>
+> - A step's output is still pasted into the next step's input as it is.
+>   That is in the workflow engine (`internal/planner`,
+>   `internal/scheduler`), which ruling (x) of the
+>   [v0.4.x sequencing record](../v0.4.x-sequencing-2026-10-21.md) freezes,
+>   and which side wraps is still to decide.
+> - No test lists the tools whose output comes from outside and checks
+>   each is in `EXTERNAL_TOOL_SOURCES`, so the next such tool can be left
+>   off the way `shell_exec` was.
+> - A task agent's prompt says nothing about the envelope or its `flagged`
+>   mark. The text that explains them
+>   (`prompts/runtime/safety/external-data-handling.md`) is loaded only for
+>   personas, in `agents/persona_runtime/prompt_assembly.py`, and the one
+>   shipped agent that was offered `shell_exec` is a task agent.
+>
+> Severity is unchanged.

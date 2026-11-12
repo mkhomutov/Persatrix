@@ -333,4 +333,6 @@ it waits for the v0.3.16 tag unless a dated amendment takes it in.
 > patterns use `\b`, which the rewrite does not cover.
 
 > 2026-11-12 — the first row of the callers table now covers `shell_exec` output
-> too (ISSUE-0217's shell half).
+> too (ISSUE-0217's shell half). What that row's scan misses because it reads
+> JSON text is
+> [ISSUE-0235](ISSUE-0235-injection-scan-reads-tool-output-as-json-text.md).
