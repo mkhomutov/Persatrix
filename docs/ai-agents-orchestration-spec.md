@@ -442,12 +442,12 @@ agent:
     filesystem:
       read: ["/workspace/src/**", "/workspace/tests/**"]
       write: ["/workspace/src/**"]
-      deny: ["/workspace/.env", "**/.git/**", "**/node_modules/**"]
+      deny: ["**/.env*", "**/.git/**", "**/node_modules/**"]
     network:
       allow: ["api.anthropic.com", "api.openai.com"]
       deny: ["*"]                # deny-by-default for all other domains
     shell:
-      allowed_commands: ["python", "pytest", "ruff", "git diff"]
+      allowed_commands: []       # none: a listed command is trusted with every argument
       deny_commands: ["rm -rf", "curl", "wget", "sudo"]
       max_execution_seconds: 30
     mcp:
@@ -460,6 +460,24 @@ agent:
 - Path-based restrictions use glob patterns, resolved to absolute paths (no symlink traversal)
 - Shell commands are parsed and validated before execution — no raw shell passthrough
 - All permission violations are logged as security events
+
+> 2026-11-12 — how the built rules match, which the bullets above leave out
+> ([ISSUE-0196](issues/ISSUE-0196-shipped-shell-allowlist-voids-the-file-and-network-rules.md),
+> [ISSUE-0216](issues/ISSUE-0216-path-globs-match-at-any-depth.md)):
+>
+> - **Paths.** A rule is matched against the whole resolved path, with
+>   Python's `fnmatchcase`. `*` matches any run of characters, `/` included,
+>   so it crosses folders: `/workspace/*.py` also matches
+>   `/workspace/deploy/hooks/post_install.py`, and `**` means the same as
+>   `*`. A rule with no wildcard is one exact path: `/workspace/.env` does
+>   not cover `/workspace/sub/.env`. `deny` wins over `read` and `write`.
+> - **Shell.** A command is checked on its leading words only, never on its
+>   arguments: `git diff` admits `git diff main` and not `git push`. So a
+>   listed command is trusted with every argument it accepts, and it runs
+>   outside the path rules. An interpreter such as `python` can run any
+>   code, read any file the agent's user can, and open any connection. The
+>   example above lists none; `config/agents.yaml` shows a second example
+>   for an agent that trusts its workspace.
 
 ### 6.3 Sandboxing
 

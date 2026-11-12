@@ -63,3 +63,7 @@ cannot tell the substituted part from the workflow author's own words.
 
 > 2026-11-10 — found by a whole-repository quality review of `main` at
 > `ee9cfaac`; confirmed by reading the code.
+
+> 2026-11-12 — the shipped `code-writer` no longer lists `python` or any other
+> command (ISSUE-0196's config half). The shell gap is unchanged for an
+> agent whose config lists one.

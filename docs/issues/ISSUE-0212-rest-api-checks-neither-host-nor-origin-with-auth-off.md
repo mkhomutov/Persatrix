@@ -70,3 +70,7 @@ to the auth guide.
 > 2026-11-10 — found by a whole-repository quality review of `main` at
 > `ee9cfaac`; confirmed by reading the middleware. No rebinding was
 > carried out.
+
+> 2026-11-12 — the shipped `code-writer` no longer has a shell tool (ISSUE-0196's
+> config half), so a submitted run reaches one only where an operator's
+> own config lists commands; it still reaches `file_read` and `file_write`.

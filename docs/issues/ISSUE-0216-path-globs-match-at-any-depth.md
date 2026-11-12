@@ -1,10 +1,11 @@
 ---
 id: ISSUE-0216
 summary: "A tool path rule's `*` matches across folder separators, so the shipped `/workspace/*.py` rule allows a write to any `.py` file at any depth. Separately, the deny entry `/workspace/.env` is one literal path and does not cover `/workspace/sub/.env` or `/workspace/.env.local`. The comment beside the shipped rules says they cover the top level only."
-status: open
+status: resolved
 severity: medium
 area: agents/tools
 created: 2026-11-10
+closed: 2026-11-12
 refs:
   - agents/tools/sandbox.py
   - config/agents.yaml
@@ -65,3 +66,16 @@ sandbox tests either way.
 
 > 2026-11-10 — found by a whole-repository quality review of `main` at
 > `ee9cfaac`; the matches above were run with `fnmatch.fnmatchcase`.
+
+> 2026-11-12 — **resolved by the second choice: the matching stays, and is now
+> stated.** `*` still matches `/`; nothing in `PathValidator` changed, so
+> no operator's rules change meaning. The schema's `read`, `write` and
+> `deny` descriptions and the spec's security section state the rule, and
+> `test_sandbox.py` pins it. The shipped example now does what its comment
+> says: writes go under `src/` and `tests/` and to `setup.py` and
+> `README.md`, named exactly, and `**/.env*` denies a `.env` file at any
+> depth and with any suffix. That pattern is wider than secrets files: it
+> also refuses `.envrc`, a file named `.envoy.py`, and everything under a
+> folder whose name starts with `.env`. The maintainer has not ruled out
+> the first choice. Making `*` stop at `/` would also narrow every deny
+> rule written with one `*`, so it needs a pass over operators' configs.

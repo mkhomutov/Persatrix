@@ -215,7 +215,9 @@ class TestShellTimeLimit:
 
 
 class TestCodeWriterPermissions:
-    """Integration-style tests using the code-writer agent config from agents.yaml."""
+    """A gate built like the workspace-trusting example ``config/agents.yaml``
+    shows commented out under the code-writer. The shipped agent itself
+    lists no command (ISSUE-0196)."""
 
     @pytest.fixture()
     def gate(self):

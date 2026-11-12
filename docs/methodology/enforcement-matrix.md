@@ -1,6 +1,6 @@
 # Enforcement Matrix
 
-> **Last updated**: 2026-11-11
+> **Last updated**: 2026-11-12
 > Every rule the project states, with the document that states it, the check
 > that enforces it, and how hard the enforcement is. Read the **Enforcement**
 > column literally: a rule is only as strong as the weakest place it is
@@ -53,6 +53,7 @@ the twelve, and the job is named where it is not one of the original six.
 | Rust builds; clippy clean; `cargo test` passes (incl. lockstep guards) | instructions | `cargo build`, `cargo clippy -- -D warnings`, `cargo test` | Required (`Rust`) |
 | CI builds and lints the CLI on one pinned Rust release, so a new release cannot fail every open PR at once | `cli/rust-toolchain.toml`; `.github/dependabot.yml` | every job that runs cargo installs what the file names (`rustup toolchain install` in `cli/`) and runs cargo there; Dependabot proposes each release as one PR; `test_rust_toolchain_pin.py` fails a workflow that installs or names a toolchain of its own | Required (`Rust`, `Python`) — since 2026-09-26; CI used to install whatever `stable` was that day |
 | YAML configs validate against `schemas/` | CLAUDE.md; instructions | `python agents/validate.py config/` | Required (`Validate configs`) |
+| No agent in the shipped `config/agents.yaml` lists a shell command nobody has reviewed: a listed command is trusted with every argument it accepts and runs outside the path rules | [ISSUE-0196](../issues/ISSUE-0196-shipped-shell-allowlist-voids-the-file-and-network-rules.md); the comment in `config/agents.yaml` | `test_builtin_tools_schema_valid_config.py` fails on any listed command that is not in its reviewed set, which is empty; `test_sandbox.py` holds the shipped `code-writer` path rules to what their comment says | Required (`Python`) — since 2026-11-12; a commented example and an operator's own config are not read |
 | RFC and issue INDEX files fresh; front-matter valid; each RFC's `**Status**` header line agrees with its front-matter | rfcs/README, issues/README | `make rfcs-check issues-check` | Required (`Validate configs`) |
 | PR title is a Conventional Commit | CONTRIBUTING; BRANCHING | `commitlint.yml` | Required (`Validate PR Title`) |
 | Web console unit tests pass; bundle builds; orchestrator compiles with it | web-console guide | `make ui-test`, `make ui`, `go build` | Required (`Web console (build + test)`) |

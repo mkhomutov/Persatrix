@@ -64,6 +64,11 @@ _audit_logger = logging.getLogger("agents.tools.audit")
 # fnmatch.fnmatch is case-insensitive on Windows but case-sensitive on
 # Linux — agents run in Linux containers per Dockerfile.agent, so we
 # enforce case-sensitive matching everywhere.
+#
+# A rule is matched against the whole resolved path, and ``*`` matches ``/``
+# too: ``/workspace/*.py`` matches a ``.py`` file at any depth, ``**`` means
+# the same as ``*``, and a rule with no wildcard is one exact path. The agent
+# schema states this rule and ``test_sandbox.py`` pins it (ISSUE-0216).
 _fnmatch = fnmatch.fnmatchcase
 
 
