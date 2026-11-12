@@ -6,7 +6,7 @@ severity: high
 area: agents/persona_runtime
 created: 2026-11-10
 closed: 2026-11-13
-closed_pr: 0
+closed_pr: 1108
 refs:
   - agents/persona.py
   - agents/persona_runtime/action_loop.py
