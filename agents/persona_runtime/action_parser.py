@@ -22,12 +22,31 @@ __all__ = ["parse_actions"]
 logger = logging.getLogger(__name__)
 
 
+def _raw_text(text: str) -> list[AgentAction]:
+    """The fallback: one ``COMPLETE_TASK`` carrying the reply as written."""
+    return [AgentAction(
+        action_type=ActionType.COMPLETE_TASK,
+        payload={"result": text},
+    )]
+
+
 def parse_actions(response: LLMResponse) -> list[AgentAction]:
     """Parse the LLM response text into a list of ``AgentAction``.
 
-    The LLM is expected to return a JSON array of actions. Falls back to
-    a single ``COMPLETE_TASK`` with the raw text if parsing fails. Parsed
-    actions are validated per action type before returning.
+    The LLM is expected to return a JSON array of actions: a list of
+    objects, each with an ``action_type`` string and an object
+    ``payload``. Falls back to a single ``COMPLETE_TASK`` with the raw
+    text when the reply is anything else: text that is not JSON, or JSON
+    of another shape (one action object, a number, a list with no usable
+    action in it). Parsed actions are validated per action type before
+    returning. No reply text makes this function raise (ISSUE-0206).
+
+    Inside a list, an item that cannot be an action is dropped with a
+    warning and the rest are kept: an item that is not an object, one
+    whose ``action_type`` is not a known string, one whose ``payload`` is
+    not an object. Dropping it, and not standing a ``DO_NOTHING`` in for
+    it, lets a list with no usable item reach the raw-text fallback
+    instead of reading as deliberate silence.
 
     Non-empty prose surrounding a fenced ```json block whose actions
     include an ``END_INTERACTION_VOTE`` is preserved as a trailing
@@ -70,44 +89,58 @@ def parse_actions(response: LLMResponse) -> list[AgentAction]:
                 r"```json[ \t]*+\r?\n?(.*?)\r?\n?[ \t]*+```", stripped, re.DOTALL,
             )
             if m is None:
-                return [AgentAction(
-                    action_type=ActionType.COMPLETE_TASK,
-                    payload={"result": text},
-                )]
+                return _raw_text(text)
             raw_actions = json.loads(m.group(1).strip())
             prose_parts = (stripped[: m.start()], stripped[m.end():])
             surrounding_prose = "\n\n".join(
                 part.strip() for part in prose_parts if part.strip()
             )
         else:
-            return [AgentAction(
-                action_type=ActionType.COMPLETE_TASK,
-                payload={"result": text},
-            )]
+            return _raw_text(text)
+
+        if not isinstance(raw_actions, list):
+            # Valid JSON that is not a list: one action object in a fence,
+            # a number, null. Only a fenced block gets here; the same
+            # object with no fence took the ``else`` above.
+            return _raw_text(text)
 
         actions: list[AgentAction] = []
         for raw in raw_actions:
+            if not isinstance(raw, dict):
+                logger.warning(
+                    "Action is a JSON %s, not an object, skipping",
+                    type(raw).__name__,
+                )
+                continue
             try:
+                # A value that is not a string (a number, null, a list) is
+                # no member either, and raises the same ValueError.
                 action_type = ActionType(raw.get("action_type", "do_nothing"))
             except ValueError:
                 logger.warning("Unknown action_type %r, skipping", raw.get("action_type"))
+                continue
+            payload = raw.get("payload", {})
+            if not isinstance(payload, dict):
+                # The validator would stand a DO_NOTHING in for it; see the
+                # docstring for why the parser drops it.
+                logger.warning(
+                    "%s action's payload is a JSON %s, not an object, skipping",
+                    action_type.value, type(payload).__name__,
+                )
                 continue
             # Validate payload per action type (PR #54 review: unvalidated
             # LLM output). Full ActionExecutor validation deferred to PR 5b;
             # this enforces required-field constraints at parse time.
             validated = validate_action_payload(AgentAction(
                 action_type=action_type,
-                payload=raw.get("payload", {}),
+                payload=payload,
             ))
             actions.append(validated)
         if not actions:
             # Full-raw-text fallback wins over the prose seam below: with
             # every parsed action dropped, the prose alone would be a lossy
             # echo of the turn (the fence content vanishes from the record).
-            return [AgentAction(
-                action_type=ActionType.COMPLETE_TASK,
-                payload={"result": text},
-            )]
+            return _raw_text(text)
         if surrounding_prose and any(
             a.action_type is ActionType.END_INTERACTION_VOTE for a in actions
         ):
@@ -117,8 +150,6 @@ def parse_actions(response: LLMResponse) -> list[AgentAction]:
             ))
         return actions
 
-    except (json.JSONDecodeError, ValueError):
-        return [AgentAction(
-            action_type=ActionType.COMPLETE_TASK,
-            payload={"result": text},
-        )]
+    except (json.JSONDecodeError, ValueError, RecursionError):
+        # RecursionError: JSON nested deeper than the decoder will follow.
+        return _raw_text(text)

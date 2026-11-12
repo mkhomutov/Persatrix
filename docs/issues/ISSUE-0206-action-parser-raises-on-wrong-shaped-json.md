@@ -1,11 +1,15 @@
 ---
 id: ISSUE-0206
 summary: "The persona's action parser falls back to plain text only when the model's reply is not JSON. Valid JSON of the wrong shape, such as a single action object inside a json fence, a list of strings, or a payload that is a string or null, raises `AttributeError` or `TypeError`, and the turn is dropped after the model call was paid for."
-status: open
+status: resolved
 severity: medium
 area: agents/persona_runtime
 created: 2026-11-10
+closed: 2026-11-12
+closed_pr: 0
 refs:
+  - tests/unit/python/test_action_parser_wrong_shapes.py
+  - docs/issues/ISSUE-0238-action-payload-values-of-the-wrong-type-fail-after-the-parser.md
   - agents/persona_runtime/action_parser.py
   - agents/persona_runtime/action_validation.py
   - agents/persona_runtime/channel_reply.py
@@ -60,3 +64,28 @@ the docstring promises. Add the shapes above to the parser's tests.
 
 > 2026-11-10 — found by a whole-repository quality review of `main` at
 > `ee9cfaac`; reproduced with a scratch probe that calls the parser.
+
+> 2026-11-12 — fixed. Every shape listed above was reproduced on `main`
+> at `0f3eb3ac` and raised as described. Shapes this text does not
+> list raised too: a fenced `true` or a fenced JSON string; a list
+> holding a good action beside a string, a number, `null` or another
+> list; a payload that is a list or a number; `Infinity` or `1e999` in
+> a `spawn_sub_agent` limit (`OverflowError`); and JSON nested deeper
+> than the decoder follows (`RecursionError`, at 100,000 levels). An
+> `action_type` that is not a string never raised: it was already
+> skipped as unknown.
+>
+> The rule now: a reply that is not a list, or a list with no usable
+> action, becomes the raw-text `COMPLETE_TASK`. Inside a list, an item
+> that is not an object, or whose payload is not an object, is dropped
+> with a warning and the other items are kept, as an item with an
+> unknown `action_type` always was. The validator replaces a
+> non-object payload with `DO_NOTHING` for every action type, so it
+> cannot raise for another caller. One action object in a fence is not
+> wrapped into a list: the same object with no fence is raw text, and
+> a fence should not change what a reply means.
+>
+> Not fixed here: an object payload whose values have the wrong type,
+> such as a `result` that is a number. It passes the parser and fails
+> in two consumers. That is
+> [ISSUE-0238](ISSUE-0238-action-payload-values-of-the-wrong-type-fail-after-the-parser.md).
