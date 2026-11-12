@@ -5,8 +5,8 @@ Two halves:
 
 * what :mod:`agents.memory._write_boundary` does when a write changes no
   row, raises, or is cancelled;
-* a reading of ``agents/memory/`` that fails when a write statement sits
-  outside those helpers, so the next write added to the package cannot
+* a reading of ``agents/memory/`` and ``agents/participant.py`` that fails
+  when a write statement sits outside those helpers, so the next write added to the package cannot
   leave a transaction open by forgetting a commit.
 """
 
@@ -295,7 +295,8 @@ def _unguarded(source: str) -> Iterator[tuple[str, int, str]]:
 
 def _package_findings() -> dict[str, list[tuple[int, str]]]:
     found: dict[str, list[tuple[int, str]]] = {}
-    for path in sorted(_MEMORY.glob("*.py")):
+    # The user store sits outside the package and writes to the same file.
+    for path in [*sorted(_MEMORY.glob("*.py")), _MEMORY.parent / "participant.py"]:
         # A migration's statements run under the runner, which rolls back.
         if path.name.startswith("_migration_") or path.name == "_write_boundary.py":
             continue

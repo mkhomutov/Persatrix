@@ -10,6 +10,7 @@ closed_pr: 0
 refs:
   - agents/memory/_write_boundary.py
   - agents/memory/relationship_decay.py
+  - agents/participant.py
   - tests/unit/python/test_memory_write_releases_the_lock.py
   - tests/unit/python/test_memory_write_boundary.py
   - docs/issues/ISSUE-0237-a-memory-write-of-several-statements-is-not-atomic.md
@@ -113,8 +114,11 @@ a write on the other tier would pin it.
 > yet committed. The migration runner and the timer cache roll back
 > instead, each being the only user of its connection while it runs;
 > the timer cache used to roll back on an error but not on a
-> cancellation. `tests/unit/python/test_memory_write_boundary.py` reads
-> the package and fails on a write statement outside the helpers.
+> cancellation. The user store (`agents/participant.py`), a sixth
+> connection to the same file with no caller in the agent runtime, has
+> its two writes on the helper too.
+> `tests/unit/python/test_memory_write_boundary.py` reads the package
+> and that file, and fails on a write statement outside the helpers.
 > `apply_decay` moved to `agents/memory/relationship_decay.py`, because
 > `relationship_mutations.py` was at the 500-line warning.
 >

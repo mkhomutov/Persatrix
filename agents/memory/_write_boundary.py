@@ -8,14 +8,14 @@ keeps it open until that connection commits.  A write that returns without
 committing therefore keeps the write lock, and every other tier's writes
 fail with ``database is locked`` until the connection's next commit.
 
-So a write in this package goes through one of two helpers, and both end
-the transaction however the write ends:
+So a write in this package goes through one of these helpers, and each
+ends the transaction however the write ends:
 
 * :func:`execute_write` for a write that is one statement;
 * :func:`write_boundary` around a write that is several, or
   :func:`ends_transaction` on a function that is one such write.
 
-Both end it with a commit, on the error path too, and never with a
+Each ends it with a commit, on the error path too, and never with a
 rollback.  A tier's connection is shared by every coroutine of its
 persona with no lock around it (ISSUE-0055 and ISSUE-0061 are that
 sharing).  A statement another coroutine has run and not yet committed
@@ -34,8 +34,9 @@ transaction.
 The migration runner and the timer cache roll back instead: each is the
 only user of its connection while it runs.
 
-``tests/unit/python/test_memory_write_boundary.py`` reads this package
-and fails when a write statement is outside both helpers.
+``tests/unit/python/test_memory_write_boundary.py`` reads this package,
+and the user store beside it, and fails when a write statement is
+outside the helpers.
 """
 
 from __future__ import annotations
