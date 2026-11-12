@@ -31,7 +31,6 @@ from ..persona_types import (
 )
 from ..prompt_prefix import prompt_prefix
 from ..response_gate import evaluate_response_gate
-from ..response_policies import _DM_CHANNEL_PREFIX
 from .action_parser import parse_actions
 from .channel_ingest import sanitize_inbound_event
 from .channel_reply import synthesize_channel_reply
@@ -51,20 +50,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _CALLS_EXHAUSTED = "Max LLM call iterations exceeded"
-
-
-def _posts_exhaustion_sentence(event: AgentEvent) -> bool:
-    """Whether running out of model calls on *event* still posts a sentence.
-
-    On a group channel it does, as an ordinary message, exactly as before:
-    stopping that is the third step of ISSUE-0199 and is kept apart from
-    the first two.  A workflow task and a DM get a failed turn instead.
-    """
-    return (
-        event.event_type is EventType.CHANNEL_MESSAGE
-        and bool(event.channel_id)
-        and not (event.channel_id or "").startswith(_DM_CHANNEL_PREFIX)
-    )
 
 __all__ = ["_ActionLoopMixin"]
 
@@ -395,17 +380,13 @@ class _ActionLoopMixin(_ToolRoundMixin):
                 self.agent_id,
                 max_llm_calls,
             )
-            if not _posts_exhaustion_sentence(event):
-                # This turn was recorded before it counted as a failure, and
-                # still is: with no reply, where the sentence used to be.
-                await self._store_event_episode(event, [])
-                await self._persist_persona_state()
-                return failed_turn(FAILURE_LLM_CALLS_EXHAUSTED, _CALLS_EXHAUSTED)
-            response = LLMResponse(
-                text=f"Max LLM call budget exhausted after {max_llm_calls} iterations",
-                stop_reason=StopReason.END_TURN,
-                usage=response.usage,
-            )
+            # This turn was recorded before it counted as a failure, and
+            # still is: with no reply, where a sentence saying so used to be.
+            # That sentence went on to be parsed and posted, which is how a
+            # group channel got it as a message (ISSUE-0199's third step).
+            await self._store_event_episode(event, [])
+            await self._persist_persona_state()
+            return failed_turn(FAILURE_LLM_CALLS_EXHAUSTED, _CALLS_EXHAUSTED)
 
         # 4. Parse actions
         actions = self._parse_actions(response)
