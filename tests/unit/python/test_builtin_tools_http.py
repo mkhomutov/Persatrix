@@ -18,6 +18,8 @@ from agents.tools.permissions import PermissionGate
 from agents.tools.registry import clear_registry
 from agents.tools.sandbox import PathValidator
 
+from ._http_response_fakes import give_body
+
 
 @pytest.fixture(autouse=True)
 def _clean_state():
@@ -72,7 +74,7 @@ class TestHttpRequest:
         _setup_tools(tmp_path)
         mock_resp = AsyncMock()
         mock_resp.status = 200
-        mock_resp.text = AsyncMock(return_value='{"ok": true}')
+        give_body(mock_resp, '{"ok": true}')
         mock_resp.headers = {"Content-Type": "application/json"}
         mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
         mock_resp.__aexit__ = AsyncMock(return_value=False)
@@ -95,13 +97,9 @@ class TestHttpRequest:
         _setup_tools(tmp_path)
         raw = b"\x89PNG\r\n\x1a\n"
 
-        async def text(encoding: str | None = None, errors: str = "strict") -> str:
-            # Decodes the way aiohttp does: UTF-8, strict unless told otherwise.
-            return raw.decode(encoding or "utf-8", errors)
-
         mock_resp = AsyncMock()
         mock_resp.status = 301
-        mock_resp.text = text
+        give_body(mock_resp, raw)
         mock_resp.headers = {
             "Content-Type": "image/png",
             "Location": "https://api.example.com/new-logo.png",
@@ -163,7 +161,7 @@ class TestHttpRequest:
         _setup_tools(tmp_path)
         mock_resp = AsyncMock()
         mock_resp.status = 201
-        mock_resp.text = AsyncMock(return_value='{"created": true}')
+        give_body(mock_resp, '{"created": true}')
         mock_resp.headers = {"Content-Type": "application/json"}
         mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
         mock_resp.__aexit__ = AsyncMock(return_value=False)
@@ -194,7 +192,7 @@ class TestHttpRequest:
         _setup_tools(tmp_path)
         mock_resp = AsyncMock()
         mock_resp.status = 200
-        mock_resp.text = AsyncMock(return_value="ok")
+        give_body(mock_resp, "ok")
         mock_resp.headers = {}
         mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
         mock_resp.__aexit__ = AsyncMock(return_value=False)
@@ -258,7 +256,7 @@ class TestHttpRequest:
 
         mock_resp = AsyncMock()
         mock_resp.status = 200
-        mock_resp.text = AsyncMock(return_value=large_body)
+        give_body(mock_resp, large_body)
         mock_resp.headers = {"Content-Type": "text/plain"}
         mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
         mock_resp.__aexit__ = AsyncMock(return_value=False)
@@ -282,7 +280,7 @@ class TestHttpRequest:
         _setup_tools(tmp_path)
         mock_resp = AsyncMock()
         mock_resp.status = 302
-        mock_resp.text = AsyncMock(return_value="")
+        give_body(mock_resp, "")
         mock_resp.headers = {"Location": "https://evil.internal/metadata"}
         mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
         mock_resp.__aexit__ = AsyncMock(return_value=False)
@@ -306,7 +304,7 @@ class TestHttpRequest:
         _setup_tools(tmp_path)
         mock_resp = AsyncMock()
         mock_resp.status = 200
-        mock_resp.text = AsyncMock(return_value='{"updated": true}')
+        give_body(mock_resp, '{"updated": true}')
         mock_resp.headers = {"Content-Type": "application/json"}
         mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
         mock_resp.__aexit__ = AsyncMock(return_value=False)
@@ -332,7 +330,7 @@ class TestHttpRequest:
         _setup_tools(tmp_path)
         mock_resp = AsyncMock()
         mock_resp.status = 200
-        mock_resp.text = AsyncMock(return_value='{"patched": true}')
+        give_body(mock_resp, '{"patched": true}')
         mock_resp.headers = {"Content-Type": "application/json"}
         mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
         mock_resp.__aexit__ = AsyncMock(return_value=False)

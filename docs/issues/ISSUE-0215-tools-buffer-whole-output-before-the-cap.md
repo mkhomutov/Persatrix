@@ -1,7 +1,7 @@
 ---
 id: ISSUE-0215
-summary: "The shell, HTTP and file-read tools load a command's whole output, a whole response body or a whole file into memory and only then cut it to the output cap. A command that prints 300 MB took the agent from 68 MB to 1,286 MB of memory while the model was shown 4 KB. File reads also block the agent's event loop."
-status: open
+summary: "Code half fixed: the shell, HTTP and file-read tools used to load a command's whole output, a whole response body or a whole file into memory before cutting it to the output cap, and now keep no more than the cap; file reads run off the event loop and refuse a named pipe. Still open: no compose file sets a memory or process limit on the agent containers, so nothing bounds an agent's memory from outside."
+status: in_progress
 severity: medium
 area: agents/tools
 created: 2026-11-10
@@ -10,6 +10,8 @@ refs:
   - docs/rfcs/0009-security-sandboxing.md
   - docs/rfcs/0009-phases-3-4-pr-plan.md
   - docker-compose.yaml
+  - agents/tools/bounded_io.py
+  - tests/unit/python/test_tool_bounded_output.py
 ---
 
 # ISSUE-0215: Tools hold a whole output in memory before cutting it to the cap
@@ -67,3 +69,33 @@ agent runs in a process of its own.
 > 2026-11-12 — the shipped `code-writer` no longer lists `python` or any other
 > command (ISSUE-0196's config half). The buffering is unchanged for an
 > agent whose config lists one, and for `file_read` and `http_request`.
+
+> 2026-11-12 — the code half is done; the compose limits remain, so this
+> stays `in_progress`. Reproduced first on `main` at `0f3eb3ac`, one
+> tool call handling 300 MB with a 4 KB output cap, peak memory of the
+> agent process before the call and at its highest: `shell_exec` 70 MB
+> to 1,294 MB, `http_request` 71 MB to 1,292 MB, `file_read` 71 MB to
+> 671 MB. After the change: 70, 73 and 71 MB. `file_read` on a named
+> pipe waited until something wrote to it.
+>
+> What changed (`agents/tools/bounded_io.py`): a command's two streams
+> are read at once, one byte past the cap of each is kept and the rest
+> is read and dropped, so the command still ends by itself or by its
+> time or CPU limit, with its exit code; a response body is decoded as
+> it arrives and reading stops once the text is over the cap; a file is
+> read in a worker thread, one character past the cap, and only if it
+> is a regular file. A result under the cap is unchanged, and so is the
+> truncation notice.
+>
+> Two things the text above does not say. The body's bound cannot be
+> counted in the body's own bytes, nor the file's in bytes on disk: a
+> UTF-16 body is twice the size of its text, and a file with Windows
+> line endings is longer on disk than the text it reads as, so a reader
+> that stopped at the cap in raw bytes would drop the tail and add no
+> notice. And one result changes for a file over the cap: bytes that
+> are not text, far past the cap, are no longer reached, so the file is
+> returned cut where it used to be refused as binary.
+>
+> What remains: memory and process limits on the agent services in the
+> compose files. Sizing them needs a real compose run under load, which
+> the change above did not have.

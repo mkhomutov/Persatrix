@@ -37,6 +37,8 @@ from agents.tools.permissions import PermissionGate
 from agents.tools.tool_list import offered_tools
 from agents.validate import validate_config_dir
 
+from ._http_response_fakes import give_body
+
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _SCHEMAS_DIR = _REPO_ROOT / "schemas"
 _PERMISSIONS_SCHEMA: dict[str, Any] = json.loads(
@@ -100,7 +102,7 @@ def _load(tmp_path: Path, permissions: dict[str, Any], tools: list[str]) -> None
 def _mock_session() -> AsyncMock:
     resp = AsyncMock()
     resp.status = 200
-    resp.text = AsyncMock(return_value="ok")
+    give_body(resp, "ok")
     resp.headers = {}
     resp.__aenter__ = AsyncMock(return_value=resp)
     resp.__aexit__ = AsyncMock(return_value=False)
