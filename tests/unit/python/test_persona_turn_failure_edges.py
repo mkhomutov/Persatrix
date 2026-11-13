@@ -110,8 +110,9 @@ def test_the_chat_rpc_reads_a_silent_reply_with_a_null_payload_as_empty() -> Non
 # ─── A tick ──────────────────────────────────────────────────────────
 
 
+@pytest.mark.parametrize("name", ["the provider call raised", "the model calls ran out"])
 async def test_a_tick_whose_turn_failed_does_not_count_toward_idle(
-    monkeypatch: pytest.MonkeyPatch,
+    name: str, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """After ``idle_after_ticks`` idle ticks in a row a persona stops
     calling the model until a message arrives.  A tick whose model call
@@ -122,7 +123,7 @@ async def test_a_tick_whose_turn_failed_does_not_count_toward_idle(
     # Both layers hold ticks to a second apart outside tests.
     monkeypatch.setattr(TickScheduler, "_MIN_INTERVAL", 0.01)
     monkeypatch.setattr(EventLoop, "_MIN_INTERVAL", 0.01)
-    agent = await _persona(CAUSES["the provider call raised"])
+    agent = await _persona(CAUSES[name])
     calls = 0
     on_tick = agent.on_tick
 
