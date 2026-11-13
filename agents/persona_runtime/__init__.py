@@ -482,5 +482,5 @@ class _LLMPersonaAgent(
                 self._state.recover_energy()
                 span.set_attribute("actions.count", len(actions))
                 # RFC 0020 PR 4 (PR #229 Should-Fix #2): janitor sweep, best-effort.
-                await self.sweep_stuck_closes(now_monotonic)
+                await self.sweep_stuck_closes()
                 return actions

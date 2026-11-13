@@ -130,3 +130,28 @@ first, since the sweep is one of the writes that keeps the lock.
 > comes back only if a later catch-up replays the conversation, as a
 > second episode beside the marked row. A ticking persona that has gone
 > idle and gets no event is swept at its next boot.
+
+> 2026-11-14 — review of the fix. One finding changed behaviour.
+>
+> - **The new sweep could mark rows this process was still
+>   summarising.** A boot catch-up closes its replayed conversations
+>   within seconds, and their summaries are then written four at a time,
+>   each a model call of up to 30 seconds. With enough of them the queue
+>   outlasts the five-minute grace period, and the first event after
+>   that marked every row still in it; each queued summary was then
+>   written and thrown away. A ticking persona had this race before the
+>   fix; the fix gave it to the personas that never tick. The sweep now
+>   waits while the persona has a summary of its own on its way, on all
+>   three paths, and does not restart the cooldown while it waits.
+> - The tick stamped its sweep with the time the tick started, so a tick
+>   that waited for the agent's lock could be followed by an event's
+>   sweep inside one cooldown. Every path now stamps the sweep itself.
+> - Tests: the shared cooldown is now shown in both orders (an event's
+>   sweep holds back a tick's, and the reverse), the boot test checks a
+>   state only a load can bring back, the failing-sweep test checks the
+>   sweep was tried, and one test checks the sweep runs under the
+>   agent's lock.
+> - Texts: the stop-time drain's warning said a cancelled row
+>   "re-derives on the next boot"; that is the boot after the janitor
+>   has marked it, which a restart straight after a stop is not.
+>   ISSUE-0173 has a note that its "runs only on a tick" is out of date.

@@ -223,6 +223,9 @@ class TestTheSweepRunsWhenMemoryOpens:
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         path = str(tmp_path / "memory.db")
+        earlier = await _boot(path)
+        earlier.state.stress_level = 0.8  # a state only a load can bring back
+        await earlier.close_memory()
         agent = create_persona_agent(
             agent_id=AGENT, config=_config(path), llm_client=_silent_client(),
         )
@@ -233,7 +236,7 @@ class TestTheSweepRunsWhenMemoryOpens:
         with caplog.at_level(logging.WARNING):
             await agent.initialize_memory()
         try:
-            assert agent.state is not None, "the boot went on to load the state"
+            assert agent.state.stress_level == 0.8, "the boot went on to load the state"
             assert [
                 r.getMessage() for r in caplog.records
                 if r.name == "agents.persona_runtime.finalize_close"
@@ -273,22 +276,77 @@ class TestTheSweepRunsOnAnInboundEvent:
         finally:
             await agent.close_memory()
 
-    async def test_the_cooldown_is_shared_with_the_tick_path(
-        self, tmp_path: Path,
+    @pytest.mark.parametrize(
+        ("first", "then"), [("event", "tick"), ("tick", "event")],
+        ids=["an event's sweep holds back the tick's", "a tick's sweep holds back the event's"],
+    )
+    async def test_the_cooldown_is_shared_between_the_event_and_the_tick(
+        self, tmp_path: Path, first: str, then: str,
     ) -> None:
-        """An event's sweep restarts the cooldown the next event reads."""
+        """One path's sweep restarts the cooldown the other path reads."""
         agent = await _boot(str(tmp_path / "memory.db"))
+
+        async def run(path: str) -> None:
+            if path == "event":
+                await agent.on_event(_message(path))
+            else:
+                await agent.on_tick()
+
         try:
             _let_the_cooldown_pass(agent)
-            await agent.on_event(_message("first"))
+            await run(first)
             await _insert_stuck_row(agent._episodic_memory, age_sec=OLD)
 
-            await agent.on_event(_message("second"))
+            await run(then)
             assert (await _summaries(agent))[DIGEST] == SUMMARY_PENDING_TEXT
 
             _let_the_cooldown_pass(agent)
-            await agent.on_tick()
+            await run(then)
             assert (await _summaries(agent))[DIGEST] == SUMMARY_UNAVAILABLE_TEXT
+        finally:
+            await agent.close_memory()
+
+    async def test_the_cooldown_runs_from_the_sweep_not_from_the_start_of_the_tick(
+        self, tmp_path: Path,
+    ) -> None:
+        """A tick can wait a long time for its turn.  If it stamped its
+        sweep with the time it started, the next event's sweep would come
+        inside one cooldown of it."""
+        agent = await _boot(str(tmp_path / "memory.db"))
+        try:
+            _let_the_cooldown_pass(agent)
+            started = time.monotonic()
+            await agent._lock.acquire()
+            tick = asyncio.create_task(agent.on_tick())
+            await asyncio.sleep(0.2)  # the tick has started and waits for the lock
+            agent._lock.release()
+            await tick
+
+            assert agent._last_janitor_monotonic is not None
+            assert agent._last_janitor_monotonic >= started + 0.2
+        finally:
+            await agent.close_memory()
+
+    async def test_the_sweep_runs_while_the_agent_holds_its_lock(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The sweep and the turn's own close write the same rows; the
+        lock is what keeps a sweep from landing in the middle of a turn."""
+        agent = await _boot(str(tmp_path / "memory.db"))
+        seen: list[bool] = []
+
+        async def sweep(**_kwargs: Any) -> int:
+            seen.append(agent._lock.locked())
+            return 0
+
+        try:
+            monkeypatch.setattr(agent, "cleanup_closing_interactions", sweep)
+            _let_the_cooldown_pass(agent)
+            await agent.on_event(_message())
+            _let_the_cooldown_pass(agent)
+            await agent.on_tick()
+
+            assert seen == [True, True]
         finally:
             await agent.close_memory()
 
@@ -325,9 +383,81 @@ class TestTheSweepRunsOnAnInboundEvent:
 
             actions = await agent.on_event(_message())
 
+            sweep: Any = agent.cleanup_closing_interactions
+            assert sweep.await_count == 1, "the sweep was tried, and failed"
             provider: Any = client._provider
             assert provider.create_message.await_count == 1, "the turn ran"
             assert turn_failure(actions) is None, "and did not fail"
+        finally:
+            await agent.close_memory()
+
+
+@pytest.mark.asyncio
+class TestTheSweepLeavesWhatThisProcessIsStillSummarising:
+    """A boot catch-up can close many replayed conversations at once.
+
+    Their summaries are written four at a time, each a model call of up
+    to 30 seconds, so the queue can outlast the five-minute grace period.
+    A row in that queue looks stuck (pending, closed long ago) and is not:
+    its summary is on its way.  The sweep waits for the queue to empty.
+    It does not restart the cooldown when it waits, so the first event or
+    tick after the last summary sweeps.
+    """
+
+    @pytest.mark.parametrize("path", ["event", "tick"])
+    async def test_a_sweep_waits_while_a_summary_is_still_being_written(
+        self, tmp_path: Path, path: str,
+    ) -> None:
+        agent = await _boot(str(tmp_path / "memory.db"))
+        release = asyncio.Event()
+
+        async def being_written() -> None:
+            await release.wait()
+
+        summary = asyncio.create_task(being_written())
+        agent._pending_summarize_tasks.add(summary)
+
+        async def run() -> None:
+            if path == "event":
+                await agent.on_event(_message())
+            else:
+                await agent.on_tick()
+
+        try:
+            await _insert_stuck_row(agent._episodic_memory, age_sec=OLD)
+            _let_the_cooldown_pass(agent)
+            waited_since = agent._last_janitor_monotonic
+
+            await run()
+
+            assert (await _summaries(agent))[DIGEST] == SUMMARY_PENDING_TEXT
+            assert agent._last_janitor_monotonic == waited_since, "the cooldown was not restarted"
+
+            release.set()
+            await summary
+            await run()
+
+            assert (await _summaries(agent))[DIGEST] == SUMMARY_UNAVAILABLE_TEXT
+        finally:
+            release.set()
+            await agent.close_memory()
+
+    async def test_a_summary_that_has_finished_does_not_hold_the_sweep(
+        self, tmp_path: Path,
+    ) -> None:
+        """A task that is done but not yet cleared from the set is not a
+        summary on its way."""
+        agent = await _boot(str(tmp_path / "memory.db"))
+        done = asyncio.create_task(asyncio.sleep(0))
+        await done
+        agent._pending_summarize_tasks.add(done)
+        try:
+            await _insert_stuck_row(agent._episodic_memory, age_sec=OLD)
+            _let_the_cooldown_pass(agent)
+
+            await agent.on_event(_message())
+
+            assert (await _summaries(agent))[DIGEST] == SUMMARY_UNAVAILABLE_TEXT
         finally:
             await agent.close_memory()
 

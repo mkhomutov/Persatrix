@@ -188,17 +188,26 @@ class _CloseLifecycleMixin:
             db, self.agent_id, grace_sec=grace_sec, now=now,
         )
 
-    async def sweep_stuck_closes(self, now_monotonic: float | None = None) -> None:
+    async def sweep_stuck_closes(self) -> None:
         """Run the janitor unless it ran in the last five minutes.
 
         Three paths call this, so that every persona has one (ISSUE-0198):
         opening the memory at boot, an inbound event, and a tick.  They
-        share one cooldown, ``JANITOR_INTERVAL_SEC``.  A sweep that fails
-        is logged and counted by :func:`maybe_run_janitor` and never
-        raises, so it cannot cost a boot, an event or a tick.
+        share one cooldown, ``JANITOR_INTERVAL_SEC``, counted from the
+        moment of the last sweep.  A sweep that fails is logged and
+        counted by :func:`maybe_run_janitor` and never raises, so it
+        cannot cost a boot, an event or a tick.
+
+        It waits while this process is still writing a summary.  A boot
+        catch-up can close many replayed conversations at once, and their
+        summaries are written a few at a time, so the queue can outlast
+        the grace period: a row in it looks stuck and is not.  Marking it
+        would throw away the summary that is on its way.  The cooldown is
+        not restarted by a wait, so the next event or tick tries again.
         """
+        if any(not task.done() for task in self._pending_summarize_tasks):
+            return
         self._last_janitor_monotonic = await maybe_run_janitor(
             self.cleanup_closing_interactions, self._last_janitor_monotonic,
-            time.monotonic() if now_monotonic is None else now_monotonic,
-            JANITOR_INTERVAL_SEC, self.agent_id,
+            time.monotonic(), JANITOR_INTERVAL_SEC, self.agent_id,
         )

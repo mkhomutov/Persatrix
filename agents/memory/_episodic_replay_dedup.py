@@ -57,8 +57,11 @@ async def episode_exists_for_interaction(
     A ``[summary pending]`` row DOES still count.  It means either a
     Phase 2 in flight or a boot that died before one, and the two are
     indistinguishable from here — so the guard waits for the janitor to
-    convert it (``DEFAULT_CLOSING_GRACE_SEC``), which cannot race a live
-    writer.  The janitor runs when a persona's memory opens, before the
+    convert it.  The janitor leaves a row alone for
+    ``DEFAULT_CLOSING_GRACE_SEC`` after its close, and does not run while
+    this process still has a summary on its way, so it does not overtake
+    a writer here; a writer in another process has the grace period
+    alone.  The janitor runs when a persona's memory opens, before the
     boot catch-up asks this, and again on inbound events and ticks
     (ISSUE-0198).  So a row older than the grace period at boot is
     retried on that boot, and a younger one on the boot after.  Recovery

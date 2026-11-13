@@ -208,8 +208,8 @@ async def drain_pending_summary_tasks(
         return
     logger.warning(
         "Summary drain timed out after %.0fs with %d task(s) still "
-        "running; cancelling them (their rows stay pending for the "
-        "janitor and re-derive on the next boot)",
+        "running; cancelling them (their rows stay pending until the "
+        "janitor marks them, and re-derive on the first boot after that)",
         timeout, len(still_running),
     )
     for task in still_running:
