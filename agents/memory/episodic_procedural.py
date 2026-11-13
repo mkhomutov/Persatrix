@@ -32,6 +32,7 @@ from ..principal_id import DEFAULT_PRINCIPAL_ID
 from ._epoch_filter import epoch_eq_clause as _epoch_eq_clause
 from ._principal_filter import principal_eq_clause as _principal_eq_clause
 from ._session_filter import session_in_clause as _session_in_clause
+from ._write_boundary import execute_write
 from .decay import (
     DEFAULT_C_MIN,
     DEFAULT_LAMBDA_PER_DAY,
@@ -433,7 +434,8 @@ async def refresh_confidence(
     # checks the tag's exact JSON text: re-storing ``deploy`` must not
     # refresh ``Deploy`` and skip its own insert.
     scope_clause, scope_params = _scope_clause(session_list, principal_id, epoch_id)
-    cursor = await db.execute(
+    cursor = await execute_write(
+        db,
         "UPDATE episodes SET confidence = 1.0, last_validated_at = ? "
         "WHERE agent_id = ? AND tags_json LIKE ? ESCAPE '\\' "
         f"AND instr(tags_json, ?) > 0{scope_clause}",
@@ -442,7 +444,6 @@ async def refresh_confidence(
             *scope_params,
         ),
     )
-    await db.commit()
     return (cursor.rowcount or 0) > 0
 
 

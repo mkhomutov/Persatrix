@@ -19,6 +19,7 @@ from ..clock import agent_now
 from ..llm_types import LLMCallPurpose
 from ..model_aliases import resolve
 from ..prompt_loader import load_snippet
+from ._write_boundary import execute_write
 from .episodic_queries import EPISODE_SELECT, row_to_episode
 
 if TYPE_CHECKING:
@@ -155,15 +156,16 @@ async def summarize_old_episodes(
 
             now = agent_now()
             new_level = episode.compression_level + 1
-            update_cursor = await db.execute(
+            # One commit per episode, so progress survives a crash
+            # mid-batch; and whatever the row count, because the episode
+            # can go away while the model writes (ISSUE-0197).
+            update_cursor = await execute_write(
+                db,
                 "UPDATE episodes SET summary = ?, compression_level = ?, "
                 "compressed_at = ? WHERE id = ? AND agent_id = ?",
                 (summary, new_level, now, episode.id, agent_id),
             )
             if update_cursor.rowcount > 0:
-                # Commit each episode individually so that progress is
-                # durable even if the process crashes mid-batch.
-                await db.commit()
                 summarized += 1
                 logger.info(
                     "Summarized episode %s: compression_level %d → %d",
@@ -197,14 +199,14 @@ async def delete_old_episodes(
 
     cutoff = agent_now() - older_than_days * 86400.0
 
-    cursor = await db.execute(
+    cursor = await execute_write(
+        db,
         "DELETE FROM episodes "
         "WHERE agent_id = ? AND compression_level >= 1 AND created_at < ?",
         (agent_id, cutoff),
     )
     deleted = cursor.rowcount
     if deleted:
-        await db.commit()
         logger.info(
             "Deleted %d compressed episodes older than %.1f days for agent %s",
             deleted,

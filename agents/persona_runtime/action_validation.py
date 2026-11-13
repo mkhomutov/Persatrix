@@ -39,8 +39,18 @@ def validate_action_payload(action: AgentAction) -> AgentAction:
     Mutates ``action.payload`` in place to clamp out-of-range numeric
     resource fields (SPAWN_SUB_AGENT). Returns either the (possibly
     clamped) original action or a fresh ``DO_NOTHING`` replacement.
+
+    Never raises, whatever the payload holds (ISSUE-0206): a payload that
+    is not an object is replaced like any other invalid one, for every
+    action type, so it cannot travel on to a caller that reads its keys.
     """
-    p = action.payload
+    p: object = action.payload
+    if not isinstance(p, dict):
+        logger.warning(
+            "%s action's payload is a %s, not an object, replacing with DO_NOTHING",
+            action.action_type.value, type(p).__name__,
+        )
+        return AgentAction(ActionType.DO_NOTHING, {})
     match action.action_type:
         case ActionType.DELEGATE:
             agent_id = p.get("agent_id")
@@ -89,7 +99,9 @@ def validate_action_payload(action: AgentAction) -> AgentAction:
                 if field_name in p:
                     try:
                         val = int(p[field_name])
-                    except (TypeError, ValueError):
+                    # OverflowError: JSON ``Infinity``, or a number too
+                    # large for a float such as ``1e999``.
+                    except (TypeError, ValueError, OverflowError):
                         logger.warning(
                             "SPAWN_SUB_AGENT %s is not numeric (%r), removing",
                             field_name, p[field_name],

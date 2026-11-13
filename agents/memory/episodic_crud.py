@@ -23,6 +23,7 @@ from collections.abc import Sequence
 import aiosqlite
 
 from ..clock import agent_now
+from ._write_boundary import execute_write
 from .episodic_queries import EPISODE_SELECT, Episode, row_to_episode
 
 __all__ = ["count_episodes", "delete_episode", "get_episode", "reinforce_episodes"]
@@ -56,11 +57,11 @@ async def delete_episode(
     db: aiosqlite.Connection, agent_id: str, episode_id: str,
 ) -> bool:
     """Delete a single episode by ID, agent-scoped. RFC 0008 PR 3a / N5."""
-    cursor = await db.execute(
+    cursor = await execute_write(
+        db,
         "DELETE FROM episodes WHERE id = ? AND agent_id = ?",
         (episode_id, agent_id),
     )
-    await db.commit()
     return (cursor.rowcount or 0) > 0
 
 
@@ -82,10 +83,10 @@ async def reinforce_episodes(
     if not episode_ids:
         return now
     placeholders = ",".join("?" for _ in episode_ids)
-    await db.execute(
+    await execute_write(
+        db,
         f"UPDATE episodes SET access_count = access_count + 1, "
         f"last_accessed_at = ? WHERE agent_id = ? AND id IN ({placeholders})",
         [now, agent_id, *episode_ids],
     )
-    await db.commit()
     return now

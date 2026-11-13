@@ -158,6 +158,18 @@ What each caller then does:
 > where the sentence used to end its turn at once and count as the
 > round's reply. That was already so for the other five causes.
 >
+> Two more things change with the sentence, both run on the two trees.
+> On the synthesis turn that closes a discussion, a chair that ran out
+> of model calls used to post the sentence with the synthesis claim an
+> ordinary reply carries there, so the orchestrator took it for the
+> closing synthesis. It now posts nothing, and the close waits for the
+> synthesis reply timeout (120 seconds,
+> `internal/channels/synthesis_close.go`, read and not run) and then
+> closes without one. And the turn no longer drains the persona's
+> energy: energy is drained once for each action a turn ends with, the
+> sentence was one, and a failed turn ends with none, as for the other
+> five causes.
+>
 > The wallet-denial path still posts its sentence on a group channel.
 > The same ruling covers it, and
 > [ISSUE-0239](ISSUE-0239-a-wallet-denial-posts-its-error-sentence-into-a-group-channel.md)

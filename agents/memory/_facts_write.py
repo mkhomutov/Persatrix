@@ -23,6 +23,7 @@ from ..observability.metrics import try_get_instruments
 from ._facts_audit import emit_audit as _emit_audit
 from ._facts_supersede import apply_supersession as _apply_supersession
 from ._migration_protection import PROTECTION_LEVEL_DEFAULT
+from ._write_boundary import ends_transaction
 from .fact_predicates import canonicalize_subject, validate_object, validate_subject
 
 if TYPE_CHECKING:
@@ -33,6 +34,7 @@ if TYPE_CHECKING:
 __all__ = ["insert_fact"]
 
 
+@ends_transaction
 async def insert_fact(
     db: aiosqlite.Connection,
     agent_id: str,

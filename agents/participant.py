@@ -16,6 +16,8 @@ from typing import Protocol, runtime_checkable
 
 import aiosqlite
 
+from .memory._write_boundary import execute_write
+
 # Valid participant types — validated at the UserStore write boundary.
 VALID_PARTICIPANT_TYPES: frozenset[str] = frozenset({"agent", "user"})
 
@@ -124,12 +126,12 @@ class UserStore:
 
         now = time.time()
         name = display_name or participant_id
-        await db.execute(
+        await execute_write(
+            db,
             "INSERT OR IGNORE INTO users (participant_id, display_name, "
             "participant_type, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?)",
             (participant_id, name, participant_type, now, now),
         )
-        await db.commit()
 
         # Unconditional re-SELECT returns the row whether it was just
         # created or already existed.
@@ -164,11 +166,11 @@ class UserStore:
         """
         validate_participant_id(participant_id)
         db = self._ensure_db()
-        await db.execute(
+        await execute_write(
+            db,
             "UPDATE users SET last_seen_at = ? WHERE participant_id = ?",
             (time.time(), participant_id),
         )
-        await db.commit()
 
     async def get(self, participant_id: str) -> UserParticipant | None:
         """Return the user or ``None`` if not found."""

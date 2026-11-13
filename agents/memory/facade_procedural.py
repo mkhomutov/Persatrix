@@ -28,6 +28,7 @@ from ..session_id import current_session_id, normalize_session_id
 from ._epoch_filter import resolve_active_epoch
 from ._principal_filter import resolve_active_principal
 from ._session_filter import _resolve_session_list
+from ._write_boundary import execute_write
 from .episodic_procedural import (
     ProcedureRecallEntry,
 )
@@ -221,12 +222,12 @@ class ProceduralFacadeMixin:
             )
             # Stamp the dedicated confidence column on the freshly-inserted
             # row so the decay clock has a base value below 1.0 when needed.
-            await db.execute(
+            await execute_write(
+                db,
                 "UPDATE episodes SET confidence = ?, last_validated_at = ? "
                 "WHERE id = ? AND agent_id = ?",
                 (confidence, agent_now(), episode_id, self._agent_id),
             )
-            await db.commit()
 
     async def retrieve_procedures(
         self,

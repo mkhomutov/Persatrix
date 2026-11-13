@@ -21,7 +21,7 @@ from urllib.parse import urlparse
 
 import aiohttp
 
-from . import registry
+from . import bounded_io, registry
 
 # Back-compat re-export: the note-tool factory moved to
 # :mod:`agents.tools.memory_tools` (RFC 0037 PR 4 — the §C/§D notes-leg
@@ -52,7 +52,8 @@ _SAFE_RESPONSE_HEADERS = frozenset({
 
 
 # Maximum bytes returned from file reads, shell output, and HTTP responses.
-# Prevents gRPC 4 MB message size blowout and LLM context waste.
+# Prevents gRPC 4 MB message size blowout and LLM context waste. It is also
+# the most of each that is held while reading (ISSUE-0215): see ``bounded_io``.
 MAX_OUTPUT_BYTES = 102_400  # 100 KB
 
 # Module-level state set by the server at startup through :func:`configure`
@@ -144,7 +145,11 @@ async def file_read(path: str) -> ToolResult:
         return ToolResult(success=False, error=str(exc), error_type="PermissionError")
 
     try:
-        content = resolved.read_text(encoding="utf-8")
+        # In a worker thread, so a slow disk does not stop every other
+        # coroutine of the agent, and no further than the cap needs.
+        content = await asyncio.to_thread(
+            bounded_io.read_text_file, resolved, MAX_OUTPUT_BYTES,
+        )
     except FileNotFoundError:
         return ToolResult(
             success=False, error=f"File not found: {path}", error_type="FileNotFoundError"
@@ -305,15 +310,19 @@ async def shell_exec(command: str, timeout: int = 30) -> ToolResult:
             error_type="FileNotFoundError",
         )
 
+    # One byte past the cap of each stream is kept, enough to know it ran
+    # over; the rest is read and dropped, so the command never blocks on a
+    # full pipe and its own end, or one of its limits, is what stops it.
+    keep = MAX_OUTPUT_BYTES + 1
     try:
         stdout_bytes, stderr_bytes = await asyncio.wait_for(
-            proc.communicate(), timeout=timeout
+            bounded_io.communicate_bounded(proc, keep), timeout=timeout
         )
     except TimeoutError:
         # Three-phase shutdown: terminate → 5s grace period → kill → reap
         _stop_command(proc, force=False)
         try:
-            await asyncio.wait_for(proc.communicate(), timeout=5)
+            await asyncio.wait_for(bounded_io.communicate_bounded(proc, keep), timeout=5)
         except TimeoutError:
             _stop_command(proc, force=True)
             await proc.wait()
@@ -435,7 +444,8 @@ async def http_request(url: str, method: str = "GET", body: str = "") -> ToolRes
             async with session.request(**kwargs, allow_redirects=False) as resp:
                 # A binary or mislabelled body must not cost the model the
                 # status and headers, so undecodable bytes are replaced.
-                text = await resp.text(errors="replace")
+                # Read only until the text is over the cap, not to its end.
+                text = await bounded_io.read_body_text(resp, MAX_OUTPUT_BYTES)
                 # SF-02: filter to safe headers only — prevents leaking
                 # Set-Cookie, Server, X-Powered-By, etc. to the LLM.
                 safe_headers = {
