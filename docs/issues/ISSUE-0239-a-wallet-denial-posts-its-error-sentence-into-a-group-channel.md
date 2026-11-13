@@ -1,10 +1,11 @@
 ---
 id: ISSUE-0239
 summary: "When the wallet denies a persona's model call on a group channel, the agent posts the denial sentence into the channel as a message tagged `reply_status: error`, mentioning the sender. Only the chat handler reads that tag, so to the channel it is an ordinary message: stored, and able to end the speaker's turn in a floor round. A persona turn that fails for another reason is answered that way only on a DM."
-status: open
+status: resolved
 severity: medium
 area: agents/chat_reply
 created: 2026-11-12
+closed: 2026-11-13
 refs:
   - agents/chat_reply.py
   - internal/server/chat_handler.go
@@ -13,6 +14,9 @@ refs:
   - docs/issues/ISSUE-0065-chat-rest-budget-denied-no-channel-reply.md
   - docs/issues/ISSUE-0066-chat-rest-resource-exhausted-no-channel-reply.md
   - docs/issues/ISSUE-0199-persona-failures-travel-as-completed-work.md
+  - agents/persona_runtime/llm_call_errors.py
+  - tests/unit/python/test_wallet_denial_channel_reply.py
+  - docs/observability.md
 ---
 
 # ISSUE-0239: A wallet denial posts its error sentence into a group channel
@@ -78,3 +82,26 @@ path and the failed-turn path agree.
 > wallet-denial path, which still posts its sentence on a group channel
 > and is what remains to be brought in line. A DM keeps its error
 > reply: the ruling is about group channels.
+
+> 2026-11-13 — fixed as ruled. A wallet denial is answered with the error
+> reply on a DM only; on a group channel or a thread nothing is posted
+> and the denial is logged at WARNING, as it was before. That holds for
+> each way the wallet refuses a call: the budget is spent, the wallet
+> cannot be reached, or the agent is at its lease or rate limit. One
+> function in `agents/chat_reply.py` now decides it for a wallet denial
+> and for a persona's own failed turn, so the two agree by construction.
+> Reproduced first on the code as ISSUE-0199's third step left it: each
+> of the three posted its sentence to `group:planning`, to a thread and
+> to a channel id with no prefix, tagged `reply_status: error` and
+> mentioning the sender.
+>
+> The rule is "a DM, or nothing", so a thread is treated like a group
+> channel. The chat request, the one caller that waits for the reply,
+> always travels on a DM (`internal/server/chat_handler.go`).
+>
+> The cost is the one named above, read in `internal/channels/` and not
+> changed or run: in a floor-control round a denied speaker now holds
+> the floor until its turn times out (`floor_turn_timeout_seconds`, 45
+> by default), where its posted line ended the turn at once. An agent
+> over its own budget is denied on every turn, so each round it speaks
+> in pays that wait for as long as the denial lasts.

@@ -16,6 +16,10 @@ the gated ``AioRpcError(RESOURCE_EXHAUSTED)`` arm (ISSUE-0066) plus the
 generic final-boundary logger. Extracted to keep ``server_servicers.py``
 under the same line cap.
 
+ISSUE-0199 and ISSUE-0239: the error reply is sent on a DM only
+(``_error_reply_is_owed``). On any other channel a failed dispatch is
+logged and nothing is posted.
+
 RFC 0024 Phase 4 added ``process_inbound_channel_event`` — the
 fire-and-forget inbound processing body the per-agent ``EventLoop`` runs
 via its ``on_inbound`` callback (and the ``EventDispatcher.enqueue_inbound``
@@ -163,6 +167,22 @@ def extract_chat_reply(
     return "", "empty"
 
 
+def _error_reply_is_owed(channel_id: str | None) -> bool:
+    """Whether a dispatch that failed on this channel is answered there.
+
+    Only on a DM (ISSUE-0199, ISSUE-0239). The error reply exists for the
+    person waiting on a chat request, which always travels on a DM: with
+    no reply their request times out. On a group channel or a thread
+    nobody is waiting, and the reply would be an ordinary message to the
+    room: stored, mentioning the sender, and holding a budget figure or a
+    diagnostic sentence. There the cause is logged and nothing is posted.
+
+    One rule for a wallet denial and for a persona's own failed turn, so
+    the two cannot drift apart again.
+    """
+    return channel_id is not None and channel_id.startswith(_DM_CHANNEL_PREFIX)
+
+
 async def publish_chat_error_on_channel(
     publisher: ChannelPublisher | None,
     *,
@@ -174,6 +194,9 @@ async def publish_chat_error_on_channel(
     origin_interaction_id: str = "",
 ) -> None:
     """Publish a structured-error reply on a chat-bearing channel.
+
+    Whether a reply is owed at all is the caller's question, answered by
+    :func:`_error_reply_is_owed` before this is called: only on a DM.
 
     ISSUE-0065 — channel-receive arm's equivalent of
     :func:`chat_error_response`. The published message carries
@@ -270,7 +293,9 @@ async def dispatch_channel_event_with_chat_error_recovery(
     :class:`BudgetExceededError` (ISSUE-0065) and
     :class:`grpc.aio.AioRpcError` with ``code == RESOURCE_EXHAUSTED``
     (ISSUE-0066) — to a structured-error reply published on the
-    originating channel via :func:`publish_chat_error_on_channel`. Other
+    originating channel via :func:`publish_chat_error_on_channel`, when
+    that channel is a DM (ISSUE-0239, :func:`_error_reply_is_owed`); on
+    any other channel the denial is logged and nothing is posted. Other
     failures fall through to the generic final-boundary logger; silently
     turning every dispatch crash into a fake chat reply would mask
     genuine agent bugs (see the regression-guard
@@ -303,6 +328,7 @@ async def dispatch_channel_event_with_chat_error_recovery(
     CE6-lease-denial path), which is what the net was sized for. The
     warning still logs — only the publish is skipped.
     """
+    answer = _error_reply_is_owed(channel_id) and not suppress_error_reply
     try:
         try:
             await dispatch_coro
@@ -313,7 +339,7 @@ async def dispatch_channel_event_with_chat_error_recovery(
                 agent_id, channel_id,
                 exc.scope or "<none>", exc.reason, exc.message,
             )
-            if not suppress_error_reply:
+            if answer:
                 await publish_chat_error_on_channel(
                     publisher, agent_id=agent_id, channel_id=channel_id,
                     inbound_sender_id=inbound_sender_id,
@@ -328,7 +354,7 @@ async def dispatch_channel_event_with_chat_error_recovery(
                 "(channel %s): %s",
                 agent_id, channel_id, exc.details(),
             )
-            if not suppress_error_reply:
+            if answer:
                 # Fixed reply — ``exc.details()`` leaks internal jargon
                 # ("agent already holds the maximum 3 active leases").
                 await publish_chat_error_on_channel(
@@ -378,10 +404,10 @@ async def process_inbound_channel_event(
     :func:`dispatch_channel_event_with_chat_error_recovery` so a
     :class:`BudgetExceededError` (ISSUE-0065) or an
     ``AioRpcError(RESOURCE_EXHAUSTED)`` (ISSUE-0066) raised inside the
-    persona action loop still publishes a structured-error reply on the
-    originating channel, rather than being swallowed by the event-loop
-    supervisor's generic exception handler (which has no handle to reject
-    on the fire-and-forget path).
+    persona action loop is still answered with a structured-error reply
+    on a DM, and logged on any other channel, rather than being swallowed
+    by the event-loop supervisor's generic exception handler (which has
+    no handle to reject on the fire-and-forget path).
     """
     depth = event.metadata.get("cascade_depth", 0)
     if depth >= max_cascade_depth:
@@ -415,7 +441,7 @@ async def process_inbound_channel_event(
                 "cause=%s",
                 agent.agent_id, channel_id, failure.cause,
             )
-            if channel_id.startswith(_DM_CHANNEL_PREFIX):
+            if _error_reply_is_owed(channel_id):
                 await publish_chat_error_on_channel(
                     executor.channel_publisher, agent_id=agent.agent_id,
                     channel_id=channel_id, inbound_sender_id=event.sender_id,

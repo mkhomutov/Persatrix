@@ -230,7 +230,7 @@ async def test_a_group_channel_turn_that_fails_is_logged_with_its_cause(
     name: str, caplog: pytest.LogCaptureFixture,
 ) -> None:
     cause = CAUSES[name]
-    with caplog.at_level(logging.WARNING, logger="agents.chat_reply"):
+    with caplog.at_level(logging.WARNING, logger="Persatrix.agent.server"):
         await _channel_turn(cause, GROUP)
     failed = [r for r in caplog.records if "turn failed" in r.getMessage()]
     assert len(failed) == 1
