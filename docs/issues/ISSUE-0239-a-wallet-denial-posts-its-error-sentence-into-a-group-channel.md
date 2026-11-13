@@ -6,6 +6,7 @@ severity: medium
 area: agents/chat_reply
 created: 2026-11-12
 closed: 2026-11-13
+closed_pr: 1109
 refs:
   - agents/chat_reply.py
   - internal/server/chat_handler.go
