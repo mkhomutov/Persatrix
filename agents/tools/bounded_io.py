@@ -44,6 +44,12 @@ __all__ = [
 #: How much is asked of a pipe or a socket at a time.
 _CHUNK_BYTES = 64 * 1024
 
+#: The most bytes one byte of UTF-8 text takes on the wire in an encoding
+#: in ordinary use: UTF-32 spends four on a letter.  A body's own bytes
+#: are kept up to this many times the cap, so that a body under the cap
+#: can be decoded in one go; see :func:`read_body_text`.
+_WIRE_BYTES_PER_TEXT_BYTE = 4
+
 
 class NotARegularFileError(OSError):
     """The path names a pipe, a socket or a device, not a file to read."""
@@ -90,12 +96,30 @@ async def read_body_text(resp: aiohttp.ClientResponse, max_bytes: int) -> str:
     Decodes as ``resp.text(errors="replace")`` does, in the charset the
     response names, and stops reading once the text is over *max_bytes*
     of UTF-8.  The text returned is then longer than the cap by less than
-    one read, which is how the caller knows to cut it.  A body under the
-    cap comes back whole and identical to ``resp.text``'s.
+    one read, which is how the caller knows to cut it.
+
+    A body under the cap comes back identical to ``resp.text``'s, because
+    it is decoded the same way: its bytes are kept and decoded in one
+    go.  Decoding piece by piece gives another answer for some charsets
+    when the body is malformed, and fails outright on UTF-16 or UTF-32
+    with no byte-order mark, so the piece-by-piece decoder is used only
+    to measure how much text has arrived.  When it fails, the body is
+    read to the bound on kept bytes instead, which is more than any text
+    under the cap needs.  A charset that is not a text encoding
+    (``base64``, ``hex``) raises the ``LookupError`` that ``resp.text``
+    raises, and like it only for a body that is not empty.
 
     The size is counted in the decoded text, not in the body's own
     bytes, because the two differ with the charset: a UTF-16 body is
     twice the size of the text the cap is measured on.
+
+    Memory: the bytes kept are bounded at a few times the cap.  A body
+    that passes that bound with its text still under the cap (escape
+    sequences that produce nothing, say) is no longer kept: its text is
+    then the piece-by-piece decoder's, read on until it is over the cap
+    or the body ends.  That bounds what this function holds; a
+    compressed body is inflated by aiohttp before it gets here, and what
+    aiohttp holds while inflating is its own.
     """
     try:
         encoding = resp.get_encoding()
@@ -104,17 +128,48 @@ async def read_body_text(resp: aiohttp.ClientResponse, max_bytes: int) -> str:
         # fallback resolver, which needs the whole body; the default
         # resolver, the one ``http_request``'s session has, answers UTF-8.
         encoding = "utf-8"
-    decoder = codecs.getincrementaldecoder(encoding)(errors="replace")
+    wire_limit = _WIRE_BYTES_PER_TEXT_BYTE * max_bytes + _CHUNK_BYTES
+    wire = bytearray()
+    kept = True
+    # The piece-by-piece decoder only measures; see the docstring.  Some
+    # charsets have none that works (``zlib`` asserts when it is made,
+    # ``base64`` when it is used), and UTF-16 with no byte-order mark
+    # fails on its first bytes.  Measuring then stops, and the decode at
+    # the end gives ``resp.text``'s answer or its error.
+    decoder: codecs.IncrementalDecoder | None
+    try:
+        decoder = codecs.getincrementaldecoder(encoding)(errors="replace")
+    except Exception:  # noqa: BLE001 — a measuring aid must not fail the call
+        decoder = None
+    ended = False
     pieces: list[str] = []
     size = 0
     while size <= max_bytes:
         chunk = await resp.content.read(_CHUNK_BYTES)
         if not chunk:
-            pieces.append(decoder.decode(b"", final=True))
+            ended = True
             break
-        piece = decoder.decode(chunk)
-        pieces.append(piece)
-        size += len(piece.encode("utf-8", errors="replace"))
+        if kept:
+            wire += chunk
+        if decoder is not None:
+            try:
+                piece = decoder.decode(chunk)
+            except Exception:  # noqa: BLE001 — as above
+                decoder = None
+            else:
+                pieces.append(piece)
+                size += len(piece.encode("utf-8", errors="replace"))
+        if kept and len(wire) > wire_limit:
+            if decoder is None:
+                break
+            kept = False
+            wire = bytearray()
+    if kept:
+        # The whole body, or its start up to the read that took the text
+        # over the cap; either way decoded as ``resp.text`` decodes.
+        return bytes(wire).decode(encoding, errors="replace")
+    if ended and decoder is not None:
+        pieces.append(decoder.decode(b"", final=True))
     return "".join(pieces)
 
 

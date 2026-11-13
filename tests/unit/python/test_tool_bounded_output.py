@@ -15,6 +15,8 @@ These tests pin three things:
   returned, checked against that formula, with the notice in its place;
 * the limits around it: exit codes, the time limit, and both output
   streams read at once.
+
+``http_request``'s tests are in ``test_tool_bounded_http_body.py``.
 """
 
 from __future__ import annotations
@@ -26,12 +28,11 @@ import shlex
 import sys
 import threading
 import tracemalloc
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from pathlib import Path
 from typing import Any
 
 import pytest
-from aiohttp import web
 
 from agents.tools import bounded_io, builtin
 from agents.tools.builtin import MAX_OUTPUT_BYTES
@@ -164,6 +165,17 @@ async def test_a_command_that_floods_stdout_is_cut_and_keeps_its_exit_code(
     assert peak < MEMORY_BUDGET, f"the agent allocated {peak / MB:.1f} MB"
 
 
+async def test_a_command_that_closes_its_output_before_it_exits_keeps_its_exit_code() -> None:
+    """Both streams reach their end while the command is still running.
+    The tool has to wait for the command itself, or it has no exit code
+    to report."""
+    code = "import os, time\nos.close(1)\nos.close(2)\ntime.sleep(0.4)\nos._exit(3)"
+    result = await builtin.shell_exec(_python(code), timeout=15)
+    assert result.data["exit_code"] == 3
+    assert result.success is False
+    assert result.error == "Command exited with code 3"
+
+
 async def test_a_command_that_floods_stderr_is_cut_too() -> None:
     result, peak = await _measured(
         lambda: builtin.shell_exec(_printer(24, stream="stderr"), timeout=20),
@@ -228,111 +240,6 @@ async def test_the_time_limit_stops_a_command_that_never_stops_printing() -> Non
     assert result.success is False
     assert result.error == "Command timed out after 1s"
     assert peak < MEMORY_BUDGET, f"the agent allocated {peak / MB:.1f} MB"
-
-
-# ─── http_request ────────────────────────────────────────────────────
-
-Handler = Callable[[web.Request], Awaitable[web.StreamResponse]]
-
-
-@pytest.fixture
-async def serve() -> AsyncIterator[Callable[[Handler], Awaitable[str]]]:
-    """Starts a local server for one handler and returns its URL."""
-    runners: list[web.AppRunner] = []
-
-    async def start(handler: Handler) -> str:
-        app = web.Application()
-        app.router.add_get("/", handler)
-        runner = web.AppRunner(app)
-        await runner.setup()
-        site = web.TCPSite(runner, "127.0.0.1", 0)
-        await site.start()
-        runners.append(runner)
-        port = runner.addresses[0][1]
-        return f"http://127.0.0.1:{port}/"
-
-    yield start
-    for runner in runners:
-        await runner.cleanup()
-
-
-async def test_a_body_over_the_cap_is_not_read_to_its_end(serve: Any) -> None:
-    total = 48 * MB
-    sent = {"bytes": 0}
-    done = asyncio.Event()
-
-    async def handler(request: web.Request) -> web.StreamResponse:
-        response = web.StreamResponse(headers={"Content-Type": "text/plain"})
-        await response.prepare(request)
-        chunk = b"x" * MB
-        try:
-            while sent["bytes"] < total:
-                await response.write(chunk)
-                sent["bytes"] += len(chunk)
-        except (ConnectionError, RuntimeError):
-            pass
-        finally:
-            done.set()
-        return response
-
-    url = await serve(handler)
-    result, peak = await _measured(lambda: builtin.http_request(url))
-    await asyncio.wait_for(done.wait(), 30)
-
-    assert result.success is True
-    assert result.data["status"] == 200
-    assert result.data["body"] == "x" * MAX_OUTPUT_BYTES + NOTICE
-    assert result.data["headers"]["Content-Type"] == "text/plain"
-    assert sent["bytes"] < total, "the whole body was downloaded"
-    assert peak < MEMORY_BUDGET, f"the agent allocated {peak / MB:.1f} MB"
-
-
-_BODIES: dict[str, tuple[bytes, str]] = {
-    "utf-8, no charset": ("caf\u00e9 \u20ac".encode(), "text/plain"),
-    "json": (b'{"ok": true}', "application/json"),
-    "latin-1 charset": ("caf\u00e9".encode("latin-1"), "text/plain; charset=iso-8859-1"),
-    "utf-16 charset": ("caf\u00e9 \u20ac".encode("utf-16"), "text/plain; charset=utf-16"),
-    "unknown charset": (b"plain", "text/plain; charset=no-such-charset"),
-    "bytes that are not utf-8": (b"\x89PNG\r\n\x1a\n", "image/png"),
-    "a character cut short at the end": (b"abc\xe2\x82", "text/plain"),
-    "empty": (b"", "text/plain"),
-}
-
-
-@pytest.mark.parametrize("name", _BODIES)
-async def test_a_body_under_the_cap_decodes_as_aiohttp_decodes_it(
-    serve: Any, name: str,
-) -> None:
-    raw, content_type = _BODIES[name]
-    expected: dict[str, str] = {}
-
-    async def handler(request: web.Request) -> web.StreamResponse:
-        return web.Response(body=raw, headers={"Content-Type": content_type})
-
-    url = await serve(handler)
-    # What ``resp.text(errors="replace")`` gives, asked of aiohttp itself.
-    import aiohttp
-
-    async with aiohttp.ClientSession() as session, session.get(url) as resp:
-        expected["body"] = await resp.text(errors="replace")
-
-    result = await builtin.http_request(url)
-    assert result.data["body"] == expected["body"]
-
-
-async def test_a_character_split_between_two_network_reads_is_whole(serve: Any) -> None:
-    euro = "\u20ac".encode()
-
-    async def handler(request: web.Request) -> web.StreamResponse:
-        response = web.StreamResponse(headers={"Content-Type": "text/plain; charset=utf-8"})
-        await response.prepare(request)
-        for piece in (b"a" + euro[:1], euro[1:2], euro[2:] + b"b"):
-            await response.write(piece)
-            await asyncio.sleep(0.05)
-        return response
-
-    result = await builtin.http_request(await serve(handler))
-    assert result.data["body"] == "a\u20acb"
 
 
 # ─── file_read ───────────────────────────────────────────────────────

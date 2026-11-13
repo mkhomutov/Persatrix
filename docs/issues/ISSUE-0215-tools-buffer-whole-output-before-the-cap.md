@@ -1,6 +1,6 @@
 ---
 id: ISSUE-0215
-summary: "Code half fixed: the shell, HTTP and file-read tools used to load a command's whole output, a whole response body or a whole file into memory before cutting it to the output cap, and now keep no more than the cap; file reads run off the event loop and refuse a named pipe. Still open: no compose file sets a memory or process limit on the agent containers, so nothing bounds an agent's memory from outside."
+summary: "Code half fixed: the shell, HTTP and file-read tools used to load a command's whole output, a whole response body or a whole file into memory before cutting it to the output cap, and now keep no more than the cap; file reads run off the event loop and refuse a named pipe. Still open: no compose file sets a memory or process limit on the agent containers, so nothing bounds an agent's memory from outside; `file_write` still writes on the event loop; and a response body that decodes to almost no text is read to its end or to the 30-second timeout."
 status: in_progress
 severity: medium
 area: agents/tools
@@ -12,6 +12,9 @@ refs:
   - docker-compose.yaml
   - agents/tools/bounded_io.py
   - tests/unit/python/test_tool_bounded_output.py
+  - tests/unit/python/test_tool_bounded_http_body.py
+  - docs/issues/ISSUE-0242-file-tools-check-a-path-and-then-open-it-by-name.md
+  - docs/issues/ISSUE-0243-a-cancelled-shell-command-keeps-running.md
 ---
 
 # ISSUE-0215: Tools hold a whole output in memory before cutting it to the cap
@@ -60,6 +63,20 @@ agent runs in a process of its own.
 - Add memory and process limits to the agent services in the compose
   files.
 
+What remains, as of 2026-11-13 (the first two points above are done):
+
+1. Memory and process limits on the agent services in the compose
+   files. Sizing them needs a real compose run under load.
+2. `file_write` writes on the event loop. What it writes is the model's
+   own output, so it is a pause for the agent's other coroutines and
+   not a memory fault; a worker thread, as `file_read` has, ends it.
+3. A response body that decodes to almost no text (escape sequences
+   that produce nothing, say) is no longer held, but is still read
+   until it ends or the request's 30-second timeout. A bound on bytes
+   read, with the result marked as cut, ends it.
+
+This issue is not resolved until all three are done or ruled out.
+
 ## Notes
 
 > 2026-11-10 — found by a whole-repository quality review of `main` at
@@ -96,12 +113,28 @@ agent runs in a process of its own.
 > are not text, far past the cap, are no longer reached, so the file is
 > returned cut where it used to be refused as binary.
 >
-> What remains: memory and process limits on the agent services in the
-> compose files. Sizing them needs a real compose run under load, which
-> the change above did not have.
+> What remains is listed under the proposed fix above: the compose
+> limits, `file_write` on the event loop, and a body that decodes to
+> almost no text. The last two were first recorded only in this note;
+> they are in the list so the issue cannot be closed without them.
+
+> 2026-11-13 — after review of the code half. The first version decoded
+> a response body piece by piece, and that changed results under the
+> cap: a body labelled UTF-16 or UTF-32 with no byte-order mark failed
+> the whole call, where `resp.text()` reads it in the machine's byte
+> order; a charset that is a codec and not a text encoding (`base64`,
+> `hex`, `zlib`) failed with an empty message where there had been a
+> clear one; and a few malformed bodies decoded with one replacement
+> character more or fewer. A body's bytes are now kept, up to a few
+> times the cap, and decoded in one go as before; the piece-by-piece
+> decoder only measures how much text has arrived. Sixty thousand
+> generated bodies in nineteen charsets now give what `bytes.decode`
+> gives, error or text, with no difference.
 >
-> Two things seen beside it and left as they are. `file_write` still
-> writes on the event loop; what it writes is the model's own output,
-> so it is a pause and not a memory fault. And a response body that
-> decodes to almost no text is still read until it ends or the
-> 30-second timeout, though no longer held.
+> Two things found on `main` beside it are filed apart:
+> [ISSUE-0242](ISSUE-0242-file-tools-check-a-path-and-then-open-it-by-name.md)
+> and
+> [ISSUE-0243](ISSUE-0243-a-cancelled-shell-command-keeps-running.md).
+>
+> Where a memory bound is claimed above, it is this code's own. A
+> compressed body is inflated by aiohttp before the tool sees it.
