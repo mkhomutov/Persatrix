@@ -94,3 +94,10 @@ path and the failed-turn path agree.
 > 2026-11-12 — found while fixing
 > [ISSUE-0199](ISSUE-0199-persona-failures-travel-as-completed-work.md),
 > whose brief pointed at this path as the model for a group channel.
+
+> 2026-11-13 — ruled by the maintainer: a group channel is posted
+> nothing, and the cause is logged. ISSUE-0199's third step does that
+> for a persona's own failed turn. This issue stays open for the
+> wallet-denial path, which still posts its sentence on a group channel
+> and is what remains to be brought in line. A DM keeps its error
+> reply: the ruling is about group channels.

@@ -227,11 +227,7 @@ async def test_a_dm_gets_an_error_reply(name: str) -> None:
 # ─── A group channel ─────────────────────────────────────────────────
 
 
-#: On a group channel, running out of model calls is not yet a failed turn.
-_QUIET_ON_A_GROUP = [n for n in CAUSES if n != "the model calls ran out"]
-
-
-@pytest.mark.parametrize("name", _QUIET_ON_A_GROUP)
+@each_cause
 async def test_a_group_channel_turn_that_fails_is_logged_with_its_cause(
     name: str, caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -241,36 +237,39 @@ async def test_a_group_channel_turn_that_fails_is_logged_with_its_cause(
     failed = [r for r in caplog.records if "turn failed" in r.getMessage()]
     assert len(failed) == 1
     assert failed[0].levelno == logging.WARNING
+    # The logger an operator filters on; the documents name it.
+    assert failed[0].name == "Persatrix.agent.server"
     assert f"cause={cause.cause}" in failed[0].getMessage()
     assert GROUP in failed[0].getMessage() and AGENT in failed[0].getMessage()
     assert "sk-live" not in failed[0].getMessage()
 
 
-@pytest.mark.parametrize("name", _QUIET_ON_A_GROUP)
+@each_cause
 async def test_a_group_channel_gets_no_message_from_a_failed_turn(name: str) -> None:
+    """No diagnostic sentence enters the channel record, for any cause.
+
+    Running out of model calls was the one cause that posted there: its
+    sentence went out as an ordinary message, mentioning the sender, and
+    every member read it as the persona's turn.  The price of silence is
+    paid in a floor-control round, where a speaker that posts nothing
+    holds the floor until its turn times out.
+    """
     assert await _channel_turn(CAUSES[name], GROUP) == []
-
-
-async def test_running_out_of_calls_still_posts_its_sentence_to_a_group_channel() -> None:
-    """Not changed yet.  This is the third step of ISSUE-0199, kept apart
-    from the first two: the sentence is posted as an ordinary message, as
-    before, until that step stops it."""
-    (message,) = await _channel_turn(CAUSES["the model calls ran out"], GROUP)
-    assert message["content"] == "Max LLM call budget exhausted after 3 iterations"
-    assert message["mentions"] == ["user-1"]
-    assert not (message.get("metadata") or {}).get("reply_status")
 
 
 # ─── Memory ──────────────────────────────────────────────────────────
 
 
+@pytest.mark.parametrize("channel_id", [DM, GROUP], ids=["dm", "group"])
 @each_cause
-async def test_whether_a_failed_turn_is_recorded_is_as_it_was(name: str) -> None:
+async def test_whether_a_failed_turn_is_recorded_is_as_it_was(
+    name: str, channel_id: str,
+) -> None:
     """Only a turn that ran out of model calls was ever recorded, because
     only that one went on to the end of the loop.  It still is, without
     the sentence that used to stand in for the persona's reply."""
     stored: list[Any] = []
-    await _channel_turn(CAUSES[name], DM, stored=stored)
+    await _channel_turn(CAUSES[name], channel_id, stored=stored)
     assert stored == ([[]] if name == "the model calls ran out" else [])
 
 

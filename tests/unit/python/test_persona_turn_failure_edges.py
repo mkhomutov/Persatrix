@@ -32,7 +32,16 @@ from agents.persona_types import (
 from agents.tick import TickScheduler
 
 from ._persona_test_helpers import _task
-from .test_persona_turn_failure import AGENT, CAUSES, DM, Cause, _client, _persona, _Publisher
+from .test_persona_turn_failure import (
+    AGENT,
+    CAUSES,
+    DM,
+    GROUP,
+    Cause,
+    _client,
+    _persona,
+    _Publisher,
+)
 
 #: A reply that means silence, with a payload that is not an object.  The
 #: validator puts no constraint on a ``do_nothing``, so it reaches every
@@ -110,30 +119,34 @@ def test_the_chat_rpc_reads_a_silent_reply_with_a_null_payload_as_empty() -> Non
 # ─── A tick ──────────────────────────────────────────────────────────
 
 
+@pytest.mark.parametrize("name", ["the provider call raised", "the model calls ran out"])
 async def test_a_tick_whose_turn_failed_does_not_count_toward_idle(
-    monkeypatch: pytest.MonkeyPatch,
+    name: str, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """After ``idle_after_ticks`` idle ticks in a row a persona stops
     calling the model until a message arrives.  A tick whose model call
     failed is not an idle one: the persona must go on trying, and recover
     by itself when the provider does, as it did before a failed turn had
     a shape of its own.  (A tick the wallet denies is different, and
-    unchanged: it is an idle tick.)"""
+    unchanged: it is an idle tick.)
+
+    What each tick returned is checked after the scheduler has stopped.
+    A check made inside the tick would be caught by the event loop,
+    which logs a failing wake and goes on: the idle count would then
+    never be touched, and the test would pass for any return value."""
     # Both layers hold ticks to a second apart outside tests.
     monkeypatch.setattr(TickScheduler, "_MIN_INTERVAL", 0.01)
     monkeypatch.setattr(EventLoop, "_MIN_INTERVAL", 0.01)
-    agent = await _persona(CAUSES["the provider call raised"])
-    calls = 0
+    agent = await _persona(CAUSES[name])
+    returned: list[list[AgentAction]] = []
     on_tick = agent.on_tick
 
-    async def _counted() -> list[AgentAction]:
-        nonlocal calls
-        calls += 1
+    async def _recorded() -> list[AgentAction]:
         actions: list[AgentAction] = await on_tick()
-        assert turn_failure(actions) is not None, "the tick did not fail"
+        returned.append(actions)
         return actions
 
-    agent.on_tick = _counted
+    agent.on_tick = _recorded
     scheduler = TickScheduler(
         agent, interval=0.02, idle_after_ticks=2, executor=ActionExecutor(),
     )
@@ -148,7 +161,11 @@ async def test_a_tick_whose_turn_failed_does_not_count_toward_idle(
         await scheduler.stop()
     await agent.close_memory()
 
-    assert calls > 2, "the persona stopped trying after its idle limit"
+    assert len(returned) > 2, "the persona stopped trying after its idle limit"
+    failures = [turn_failure(actions) for actions in returned]
+    assert all(f is not None and f.cause == CAUSES[name].cause for f in failures), (
+        "a tick came back as something other than this failed turn"
+    )
     assert scheduler.idle_count == 0
     assert not scheduler.is_idle
 
@@ -171,8 +188,8 @@ async def test_a_dm_error_reply_claims_the_interaction_it_answers() -> None:
 async def test_a_turn_that_ran_out_of_calls_still_saves_the_personas_state(
     surface: str,
 ) -> None:
-    """That turn ran tools and spent energy before it failed; the state it
-    leaves is saved, as it was when the turn ended in a sentence."""
+    """That turn ran tools before it failed; the state it leaves is
+    saved, as it was when the turn ended in a sentence."""
     agent = await _persona(CAUSES["the model calls ran out"])
     saved = 0
     persist = agent._persist_persona_state
@@ -192,6 +209,33 @@ async def test_a_turn_that_ran_out_of_calls_still_saves_the_personas_state(
     finally:
         await agent.close_memory()
     assert saved_by_the_turn == 1
+
+
+@pytest.mark.parametrize("channel_id", [DM, GROUP], ids=["dm", "group"])
+@pytest.mark.parametrize("name", CAUSES)
+async def test_a_failed_turn_drains_no_energy(name: str, channel_id: str) -> None:
+    """Energy is drained once for each action a turn ends with, and a
+    failed turn ends with none.  Running out of model calls used to end
+    with the sentence saying so, as an action, and cost what an answer
+    costs; it now costs nothing, like the other five."""
+    agent = await _persona(CAUSES[name])
+    before = agent._state.energy
+    try:
+        await process_inbound_channel_event(
+            agent=agent,
+            executor=ActionExecutor(channel_publisher=_Publisher()),  # type: ignore[arg-type]
+            event=AgentEvent(
+                event_type=EventType.CHANNEL_MESSAGE,
+                payload={"content": "hello", "respond_policy": "always"},
+                sender_id="user-1",
+                channel_id=channel_id,
+            ),
+            max_cascade_depth=5,
+        )
+        after = agent._state.energy
+    finally:
+        await agent.close_memory()
+    assert after == before
 
 
 def test_the_agent_named_in_these_tests_is_the_one_the_dm_names() -> None:

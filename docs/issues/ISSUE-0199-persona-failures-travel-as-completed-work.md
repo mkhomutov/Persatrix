@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0199
-summary: "Two of three effects fixed: a persona turn that fails used to be reported as a completed task whose result was an English sentence. A workflow step served by a persona now ends FAILED, and a DM gets an error reply for every cause where it got nothing and the person a 504. Still open: a persona that runs out of model calls on a group channel posts that diagnostic sentence into the channel."
-status: in_progress
+summary: "The persona runtime reports its own failures as a completed task whose result is an English sentence. A workflow step served by a persona succeeds with the text `LLM provider error`, a persona that runs out of model calls posts that diagnostic into its channel, and a provider failure, a cut-off reply or a time-out on a DM publishes nothing, so the person gets a 504."
+status: resolved
 severity: high
 area: agents/persona_runtime
 created: 2026-11-10
+closed: 2026-11-13
+closed_pr: 1108
 refs:
   - agents/persona.py
   - agents/persona_runtime/action_loop.py
@@ -139,3 +141,36 @@ What each caller then does:
 > [ISSUE-0239](ISSUE-0239-a-wallet-denial-posts-its-error-sentence-into-a-group-channel.md)
 > and
 > [ISSUE-0240](ISSUE-0240-a-wallet-denial-on-a-personas-workflow-step-fails-as-internal-error.md).
+
+> 2026-11-13 — the third step, and the issue is resolved. The maintainer
+> ruled on the question the second note left open: a group channel is
+> posted nothing when a persona's turn fails. Running out of model calls
+> is now a failed turn on every surface, so the sentence it used to post
+> to a group channel is gone; the turn is logged at WARNING with its
+> cause like the other five, and is still recorded in memory, with no
+> reply. Reproduced first on the step-two code: that one cause posted
+> `Max LLM call budget exhausted after 3 iterations` to `general`,
+> mentioning the sender.
+>
+> The cost, read in `internal/channels/` and not changed: in a
+> floor-control round a speaker that posts nothing holds the floor until
+> its turn times out (`floor_turn_timeout_seconds`, 45 by default),
+> where the sentence used to end its turn at once and count as the
+> round's reply. That was already so for the other five causes.
+>
+> Two more things change with the sentence, both run on the two trees.
+> On the synthesis turn that closes a discussion, a chair that ran out
+> of model calls used to post the sentence with the synthesis claim an
+> ordinary reply carries there, so the orchestrator took it for the
+> closing synthesis. It now posts nothing, and the close waits for the
+> synthesis reply timeout (120 seconds,
+> `internal/channels/synthesis_close.go`, read and not run) and then
+> closes without one. And the turn no longer drains the persona's
+> energy: energy is drained once for each action a turn ends with, the
+> sentence was one, and a failed turn ends with none, as for the other
+> five causes.
+>
+> The wallet-denial path still posts its sentence on a group channel.
+> The same ruling covers it, and
+> [ISSUE-0239](ISSUE-0239-a-wallet-denial-posts-its-error-sentence-into-a-group-channel.md)
+> stays open for that change.
