@@ -6,6 +6,7 @@ severity: medium
 area: security
 created: 2026-11-10
 closed: 2026-11-13
+closed_pr: 1112
 refs:
   - internal/security/ratelimit.go
   - internal/security/ratelimit_anonymous_event_test.go
