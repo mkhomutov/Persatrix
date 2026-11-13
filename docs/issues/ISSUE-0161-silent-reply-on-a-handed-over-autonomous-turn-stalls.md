@@ -91,11 +91,37 @@ turn, and pin the shape in `autonomous_continuation_test.go`.
 > running out of model calls, and a wallet denial. To the orchestrator
 > each is now the silence this issue is about, so a real fleet can reach
 > it without the model choosing to stay quiet: an agent over its budget
-> is silent on every turn. In a floor-control round that silence costs
-> the speaker's turn timeout (`floor_turn_timeout_seconds`, 45 by
-> default) before the next speaker is granted the floor. Read from the
-> source; no orchestrator was run for either fix. Telling the
-> orchestrator that a turn failed, so it can move on at once, needs a
-> signal on the wire, which the typed events of
+> is silent on every turn.
+>
+> What that costs, read from the source; no orchestrator was run for
+> either fix:
+>
+> - In a floor-control round a silent speaker holds the floor for its
+>   turn timeout (`floor_turn_timeout_seconds`, 45 by default) before
+>   the next is granted it (`internal/channels/floor_control.go`).
+> - A wallet outage, a spent shared budget or a discussion at its cost
+>   ceiling denies every speaker. A round of K speakers then takes
+>   K × 45 seconds for each message, with nothing posted. The round
+>   holds the channel's floor meanwhile, so later messages wait behind
+>   it, and the console shows each speaker as thinking for up to 90
+>   seconds (`internal/channels/activity.go`).
+> - A round in which nobody replies is a stall
+>   (`internal/channels/chair_escalation.go`). Where the channel names
+>   an `escalation_chair_id`, as the shipped `config/channels.yaml`
+>   does, the discussion's one escalation goes to a forced chair turn,
+>   which the wallet denies too. Before the fixes each denial line
+>   counted as a reply, so there was no stall.
+> - On an autonomous channel a discussion continues only from a reply
+>   (`internal/channels/autonomous_continuation.go`). It used to go on
+>   from each denial line until `max_rounds` closed it. Now the stall's
+>   convener or chair turn is denied as well and nothing carries the
+>   discussion on: no bounded close, no synthesis and no close
+>   notification until another message is published. That is this
+>   issue's stall, reached by a spent budget.
+>
+> The maintainer accepted this as a known gap when ruling that a group
+> channel is posted nothing. Telling the orchestrator that a turn
+> failed, so it can move on at once, needs a signal on the wire, which
+> the typed events of
 > [RFC 0041](../rfcs/0041-typed-event-taxonomy-lifecycle-callbacks.md)
 > would carry.

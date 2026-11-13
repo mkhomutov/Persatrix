@@ -167,20 +167,32 @@ def extract_chat_reply(
     return "", "empty"
 
 
-def _error_reply_is_owed(channel_id: str | None) -> bool:
+def _error_reply_is_owed(channel_id: str | None, *, synthesis_turn: bool = False) -> bool:
     """Whether a dispatch that failed on this channel is answered there.
 
-    Only on a DM (ISSUE-0199, ISSUE-0239). The error reply exists for the
-    person waiting on a chat request, which always travels on a DM: with
-    no reply their request times out. On a group channel or a thread
-    nobody is waiting, and the reply would be an ordinary message to the
-    room: stored, mentioning the sender, and holding a budget figure or a
-    diagnostic sentence. There the cause is logged and nothing is posted.
+    Only on a DM, and never on a synthesis turn (ISSUE-0199, ISSUE-0239).
 
-    One rule for a wallet denial and for a persona's own failed turn, so
-    the two cannot drift apart again.
+    The error reply exists for the person waiting on a chat request,
+    which always travels on a DM: with no reply their request times out.
+    Anywhere else no request is waiting, and the reply would be an
+    ordinary message to the room: stored, mentioning the sender, and
+    holding a budget figure or a diagnostic sentence. There the cause is
+    logged and nothing is posted.
+
+    A synthesis turn's reply is what closes a discussion (RFC 0052 §D).
+    An error reply under the chair's name would be taken for it, so that
+    turn is never answered, whatever the channel; the orchestrator's
+    wait for the synthesis runs out instead.
+
+    One rule for a wallet denial and for a persona's own failed turn:
+    both ask it with the same two facts, so they cannot answer
+    differently.
     """
-    return channel_id is not None and channel_id.startswith(_DM_CHANNEL_PREFIX)
+    return (
+        not synthesis_turn
+        and channel_id is not None
+        and channel_id.startswith(_DM_CHANNEL_PREFIX)
+    )
 
 
 async def publish_chat_error_on_channel(
@@ -328,7 +340,7 @@ async def dispatch_channel_event_with_chat_error_recovery(
     CE6-lease-denial path), which is what the net was sized for. The
     warning still logs — only the publish is skipped.
     """
-    answer = _error_reply_is_owed(channel_id) and not suppress_error_reply
+    answer = _error_reply_is_owed(channel_id, synthesis_turn=suppress_error_reply)
     try:
         try:
             await dispatch_coro
@@ -441,7 +453,9 @@ async def process_inbound_channel_event(
                 "cause=%s",
                 agent.agent_id, channel_id, failure.cause,
             )
-            if _error_reply_is_owed(channel_id):
+            if _error_reply_is_owed(
+                channel_id, synthesis_turn=context.origin_synthesis_turn,
+            ):
                 await publish_chat_error_on_channel(
                     executor.channel_publisher, agent_id=agent.agent_id,
                     channel_id=channel_id, inbound_sender_id=event.sender_id,

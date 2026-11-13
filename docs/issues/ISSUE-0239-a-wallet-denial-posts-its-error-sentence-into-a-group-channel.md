@@ -108,24 +108,38 @@ path and the failed-turn path agree.
 > reply: the ruling is about group channels.
 
 > 2026-11-13 — fixed as ruled. A wallet denial is answered with the error
-> reply on a DM only; on a group channel or a thread nothing is posted
-> and the denial is logged at WARNING, as it was before. That holds for
-> each way the wallet refuses a call: the budget is spent, the wallet
-> cannot be reached, or the agent is at its lease or rate limit. One
-> function in `agents/chat_reply.py` now decides it for a wallet denial
-> and for a persona's own failed turn, so the two agree by construction.
-> Reproduced first on the code as ISSUE-0199's third step left it: each
-> of the three posted its sentence to `group:planning`, to a thread and
-> to a channel id with no prefix, tagged `reply_status: error` and
-> mentioning the sender.
+> reply on a DM only; anywhere else nothing is posted and the denial is
+> logged at WARNING, as it was before. That holds for each way the
+> wallet refuses a call: a budget is spent, a discussion's cost ceiling
+> is reached, the wallet cannot be reached, or the agent is at its lease
+> or rate limit. One function in `agents/chat_reply.py` now decides it
+> for a wallet denial and for a persona's own failed turn, with the same
+> two facts: the channel, and whether the turn is the synthesis turn
+> that closes a discussion, which is never answered. Reproduced first on
+> the code as ISSUE-0199's third step left it: a spent budget, an
+> unreachable wallet and a lease refusal each posted their sentence to
+> `group:planning`, to an id starting `thread:` and to a channel id with
+> no prefix, tagged `reply_status: error` and mentioning the sender. The
+> cost ceiling was added to the tests after review; it takes the same
+> path.
 >
-> The rule is "a DM, or nothing", so a thread is treated like a group
-> channel. The chat request, the one caller that waits for the reply,
-> always travels on a DM (`internal/server/chat_handler.go`).
+> The rule is "a DM, or nothing". Nothing in the orchestrator creates a
+> channel whose id starts `thread:` today: a reply in a thread carries
+> its parent channel's id, so in a thread under a DM it is still
+> answered. The chat request, the one caller that waits for the reply,
+> always travels on a DM (`internal/server/chat_handler.go`). The
+> example line in Context above is a test's; the wallet writes
+> `per_agent budget exceeded: spent=…, limit=…, estimated=…`
+> (`internal/cost/cost.go`).
 >
-> The cost is the one named above, read in `internal/channels/` and not
-> changed or run: in a floor-control round a denied speaker now holds
-> the floor until its turn times out (`floor_turn_timeout_seconds`, 45
-> by default), where its posted line ended the turn at once. An agent
-> over its own budget is denied on every turn, so each round it speaks
-> in pays that wait for as long as the denial lasts.
+> The cost, accepted by the maintainer as a known gap, read in
+> `internal/channels/` and not changed or run. In a floor-control round
+> a denied speaker now holds the floor until its turn times out
+> (`floor_turn_timeout_seconds`, 45 by default), where its posted line
+> ended the turn at once. One agent over its own budget pays that on
+> each of its turns. That is the smaller part. A wallet outage, a spent
+> shared budget or a discussion at its cost ceiling denies every
+> speaker, so a round of K speakers takes K × 45 seconds for each
+> message with nothing posted, and the rest follows from a round in
+> which nobody replies; it is set out in the note on
+> [ISSUE-0161](ISSUE-0161-silent-reply-on-a-handed-over-autonomous-turn-stalls.md).

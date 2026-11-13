@@ -4,9 +4,10 @@ When the wallet refuses a persona's model call, the agent answers the
 person who wrote with an error reply, so their chat request ends with
 ``reply_status: error`` and not a time-out (ISSUE-0065, ISSUE-0066).  A
 chat request always travels on a DM.  The agent used to send that reply on
-every channel: on a group channel or a thread the room got a line such as
-``per_agent budget exceeded for ember-owl (spent=$10.0000 limit=$10.0000)``
-as an ordinary message from the persona, mentioning whoever had written.
+every channel: anywhere but a DM the room got a line such as
+``per_agent budget exceeded: spent=10.000000, limit=10.000000,
+estimated=0.010000`` as an ordinary message from the persona, mentioning
+whoever had written.
 
 Each denial below is driven through a real persona whose model call
 raises it, and through the real executor to a publisher that records what
@@ -39,9 +40,18 @@ DM = f"dm:{AGENT}:user-1"
 #: Every kind of channel that is not a DM, and an id with no kind at all.
 NOT_A_DM = ["group:planning", "thread:group:planning:m-1", "general"]
 
-_SPENT = "per_agent budget exceeded for ember-owl (spent=$10.0000 limit=$10.0000)"
+#: The wallet's own wording for each refusal.
+_SPENT = "per_agent budget exceeded: spent=10.000000, limit=10.000000, estimated=0.010000"
+_CEILING = (
+    'interaction "itx-9" cost ceiling exceeded: '
+    "900 spent + 200 estimated > 1000 budget tokens"
+)
 _UNREACHABLE = "wallet unreachable: the model call fails closed"
+_LEASES = "agent already holds the maximum 3 active leases"
 _AT_CAPACITY = "Agent is at capacity — please retry in a moment."
+#: Where the agent logs these.  The documents name it, and anywhere but a
+#: DM the log line is the only record of the denial.
+_LOGGER = "Persatrix.agent.server"
 
 
 class Denial(NamedTuple):
@@ -49,6 +59,8 @@ class Denial(NamedTuple):
     reply: str
     reason: str
     logged_as: str
+    #: What the log line must say besides: the cause an operator needs.
+    logged: tuple[str, ...]
 
 
 DENIALS: dict[str, Denial] = {
@@ -58,18 +70,31 @@ DENIALS: dict[str, Denial] = {
             estimated_usd=0.01, reason="budget_exceeded",
         ),
         _SPENT, "budget_exceeded", "budget-denied",
+        ("scope=per_agent", "reason=budget_exceeded", _SPENT),
+    ),
+    # The cost ceiling of one discussion, set per channel.  The only
+    # refusal with a step of its own before it reaches the caller: the
+    # persona closes and summarises the discussion first.
+    "the discussion's cost ceiling is reached": Denial(
+        lambda: BudgetExceededError(
+            _CEILING, scope="per_interaction", reason="interaction_budget_exhausted",
+        ),
+        _CEILING, "interaction_budget_exhausted", "budget-denied",
+        ("scope=per_interaction", "reason=interaction_budget_exhausted", _CEILING),
     ),
     "the wallet cannot be reached": Denial(
         lambda: BudgetExceededError(_UNREACHABLE, reason="wallet_unreachable"),
         _UNREACHABLE, "wallet_unreachable", "budget-denied",
+        ("reason=wallet_unreachable", _UNREACHABLE),
     ),
     "the agent is at its lease or rate limit": Denial(
         lambda: grpc.aio.AioRpcError(
             grpc.StatusCode.RESOURCE_EXHAUSTED,
             grpc.aio.Metadata(), grpc.aio.Metadata(),
-            details="agent already holds the maximum 3 active leases",
+            details=_LEASES,
         ),
         _AT_CAPACITY, "resource_exhausted", "resource-exhausted",
+        (_LEASES,),
     ),
 }
 
@@ -143,9 +168,11 @@ async def test_a_channel_that_is_not_a_dm_gets_no_message(
 async def test_a_denial_off_a_dm_is_still_logged_with_its_cause(
     name: str, channel_id: str, caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """The operator still learns why the persona went quiet."""
+    """The operator still learns why the persona went quiet, and which
+    of the refusals it was: a spent budget and an unreachable wallet
+    share a line's first words, and only its reason tells them apart."""
     denial = DENIALS[name]
-    with caplog.at_level(logging.WARNING, logger="Persatrix.agent.server"):
+    with caplog.at_level(logging.WARNING, logger=_LOGGER):
         await _channel_turn(denial.raised(), channel_id)
     logged = [
         r for r in caplog.records
@@ -153,8 +180,12 @@ async def test_a_denial_off_a_dm_is_still_logged_with_its_cause(
     ]
     assert len(logged) == 1
     assert logged[0].levelno == logging.WARNING
-    assert AGENT in logged[0].getMessage()
-    assert channel_id in logged[0].getMessage()
+    assert logged[0].name == _LOGGER
+    line = logged[0].getMessage()
+    assert AGENT in line
+    assert channel_id in line
+    for cause in denial.logged:
+        assert cause in line
 
 
 # ─── A DM ────────────────────────────────────────────────────────────
@@ -182,6 +213,18 @@ async def test_a_synthesis_turn_is_still_never_answered(name: str) -> None:
     for channel_id in (DM, *NOT_A_DM):
         sent = await _channel_turn(
             DENIALS[name].raised(), channel_id, payload={"synthesis_turn": True},
+        )
+        assert sent == [], channel_id
+
+
+async def test_a_synthesis_turn_that_fails_is_not_answered_either() -> None:
+    """The same holds for a persona's own failed turn.  An error reply
+    under the chair's name would be as easy to take for the synthesis as
+    a wallet's, so one rule keeps both back."""
+    for channel_id in (DM, *NOT_A_DM):
+        sent = await _channel_turn(
+            RuntimeError("the provider call raised"), channel_id,
+            payload={"synthesis_turn": True},
         )
         assert sent == [], channel_id
 
