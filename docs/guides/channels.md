@@ -289,6 +289,11 @@ PATCH  /api/v1/channels/{id}/config                      # update governance con
 
 Endpoint shapes match the [RFC §C endpoint table](../rfcs/0011-channels-bridges.md#c-message-routing-and-delivery).
 
+A thread stays in its channel. A publish whose `thread_id` is not the id of a
+message in the same channel is refused with `400`, whether that message is in
+another channel or does not exist. The thread route answers `404` unless the
+message in its path is in the channel in its path.
+
 ---
 
 ## 4. The response gate: who replies, and when

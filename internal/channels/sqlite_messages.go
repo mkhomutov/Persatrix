@@ -32,8 +32,10 @@ const (
 //
 // The transaction holds:
 //  1. membership check (sender must be in the channel) — ErrNotMember on miss
-//  2. INSERT against `messages`
-//  3. cap enforcement: if the post-insert row count exceeds
+//  2. thread-parent check (a `thread_id` must name a message in this
+//     channel) — ErrThreadParentNotInChannel on miss
+//  3. INSERT against `messages`
+//  4. cap enforcement: if the post-insert row count exceeds
 //     `maxMessagesPerChannel`, delete the oldest excess rows (`thread_id`
 //     cascade prunes their replies in the same transaction)
 //
@@ -158,6 +160,9 @@ func (s *sqliteStore) PublishMessage(ctx context.Context, msg ChannelMessage) er
 	if err != nil {
 		return fmt.Errorf("channels: membership probe: %w", err)
 	}
+	if err := requireThreadParentInChannel(ctx, tx, msg); err != nil {
+		return err
+	}
 
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO messages (id, channel_id, sender_id, content, timestamp, thread_id, mentions, metadata, session_id, principal_id)
@@ -214,6 +219,36 @@ func (s *sqliteStore) PublishMessage(ctx context.Context, msg ChannelMessage) er
 		return err
 	}
 	s.recordSessionWrite(ctx, msg.SessionID)
+	return nil
+}
+
+// requireThreadParentInChannel refuses a message whose `thread_id` names a
+// message outside the channel it is published to (ISSUE-0203).
+//
+// The schema's foreign key on `thread_id` says the parent exists, not where
+// it is. A reply accepted under another channel's message was read through
+// that channel's thread route, under that channel's classification, and was
+// deleted with it: `thread_id` is `ON DELETE CASCADE`, so deleting the
+// parent's channel, or pruning the parent at the message cap, removed a
+// message from a channel the action never named.
+//
+// A parent that does not exist gets the same error as one in another
+// channel, so the refusal does not tell a caller that an id exists
+// elsewhere. Checked here, inside PublishMessage's transaction, so every
+// caller is covered: the router and the REST fallback that has no router.
+func requireThreadParentInChannel(ctx context.Context, tx *sql.Tx, msg ChannelMessage) error {
+	if msg.ThreadID == "" {
+		return nil
+	}
+	var parentChannel string
+	err := tx.QueryRowContext(ctx,
+		`SELECT channel_id FROM messages WHERE id = ?`, msg.ThreadID).Scan(&parentChannel)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("channels: lookup thread parent: %w", err)
+	}
+	if err != nil || parentChannel != msg.ChannelID {
+		return fmt.Errorf("channels: invalid thread_id %s: %w", msg.ThreadID, ErrThreadParentNotInChannel)
+	}
 	return nil
 }
 

@@ -1,12 +1,18 @@
 ---
 id: ISSUE-0203
 summary: "A message can be threaded under a message from another channel, and the thread route never checks that the message belongs to the channel in its path. A reply in a `secret` channel can be read through a `public` channel's thread route, labelled `public`, and deleting one channel can delete messages posted in another."
-status: open
+status: resolved
 severity: medium
 area: internal/server
 created: 2026-11-10
+closed: 2026-11-13
 refs:
   - internal/server/channel_handlers.go
+  - internal/server/channel_thread_handler.go
+  - internal/server/channel_errors.go
+  - internal/channels/sqlite_messages.go
+  - internal/channels/sqlite_thread_channel_test.go
+  - internal/server/channel_thread_route_test.go
   - internal/channels/sqlite_schema.go
   - internal/channels/sqlite_messages_read.go
   - docs/rfcs/0037-memory-confidentiality-channel-classification.md
@@ -65,3 +71,30 @@ the thread read unless the message's `channel_id` equals the path's.
 > 2026-11-10 — found by a whole-repository quality review of `main` at
 > `ee9cfaac`; reproduced with a throwaway Go test mapped in with
 > `go test -overlay`.
+
+> 2026-11-13 — fixed. Checked against the code at `dd006cba` first: all
+> three steps of the probe above reproduce, and one thing is wider than
+> written. A publish whose `thread_id` names no message at all answered
+> `500` with `channel store error`, because the store's foreign-key
+> error was not one the REST layer maps.
+>
+> - **Publish.** `PublishMessage` looks the parent up inside its
+>   transaction and refuses the message unless the parent is in the same
+>   channel (`ErrThreadParentNotInChannel`, a `400` over REST). A parent
+>   that does not exist gets the same error, so a refusal does not say
+>   whether an id exists in another channel. The check is in the store,
+>   so the router and the REST fallback with no router are both covered.
+> - **Read.** `handleGetThread` answers `404 message not found` unless
+>   the message's channel is the path's. It moved to
+>   `internal/server/channel_thread_handler.go`, because
+>   `channel_handlers.go` was at the 500-line warning.
+> - **Rows from before.** `GetThread` returns only the replies in the
+>   parent's own channel, so a reply an older version stored under
+>   another channel's message is not listed under that channel's label.
+>   Its query keeps reading by the thread index
+>   (`TestThreadQuery_ReadsOnlyTheThread`).
+>
+> Not repaired: such an older reply still has the other channel's
+> message as its parent, so it is still deleted with it. Nothing in the
+> agent runtime sends a `thread_id` on a publish, so only a REST or CLI
+> caller that named another channel's message can have made one.
