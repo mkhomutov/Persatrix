@@ -149,8 +149,8 @@ func (r *ChannelRouter) claimSynthesisReply(msg ChannelMessage, inboundClaim str
 }
 
 // closeOnSynthesisReply runs the commit-path close for a claimed synthesis
-// reply — the body of [ChannelRouter.publishCommit]'s claim branch: notify any
-// parked reply waiter (a closing reply must never starve a floor turn), run
+// reply — the body of [ChannelRouter.publishCommit]'s claim branch: offer the
+// reply to the reply waiter, run
 // the bounded teardown with the reply as the closing message (sole delivery —
 // redelivery=false, so no per-recipient miss ledger applies), and release the
 // arm's synthesisWG count LAST — after the teardown's notifyInteractionClose
@@ -161,9 +161,17 @@ func (r *ChannelRouter) claimSynthesisReply(msg ChannelMessage, inboundClaim str
 // panicking teardown: a leaked count would hang every later drain. A lost
 // tombstone CAS means a racing closer beat the reply — the synthesis stays
 // committed history, the 4b-i degraded artifact shape.
+//
+// The offer to the reply waiter no longer releases anything (ISSUE-0200). A
+// wait takes only a reply that names its own message, and a synthesis reply
+// names the directive, which is dispatched under an id no wait is registered
+// under. Before, a chair that had stayed silent on its own floor turn had
+// that turn released by its synthesis reply; now the turn ends at its
+// timeout, like any silent speaker's, on a discussion that has closed. The
+// offer is kept for its log line, which is how that timeout is explained.
 func (r *ChannelRouter) closeOnSynthesisReply(ctx context.Context, msg ChannelMessage, ct ChannelType, pending *pendingSynthesisClose) {
 	defer r.synthesisWG.Done()
-	r.waiter.Notify(msg)
+	r.notifyReplyWaiter(msg)
 	// The zero-value closeNotify IS this path's contract: notify the sender
 	// too, sole delivery (redelivery=false — no per-recipient miss ledger
 	// applies to a reply nobody was dispatched).

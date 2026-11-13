@@ -3,6 +3,8 @@ package channels
 import (
 	"errors"
 	"sync"
+
+	"go.uber.org/zap"
 )
 
 // ErrWaiterAlreadyRegistered is returned by [replyWaiter.Register] when
@@ -155,20 +157,75 @@ func (w *replyWaiter) Register(channelID, senderID, requestID string) (<-chan Ch
 // on the persisted history rather than the in-process waiter.
 // Tracked as `docs/issues/ISSUE-0033` for v0.4 follow-up.
 func (w *replyWaiter) Notify(msg ChannelMessage) bool {
+	return w.notify(msg) == notifyMatched
+}
+
+// notifyOutcome says what [replyWaiter.notify] did with a message.
+type notifyOutcome int
+
+const (
+	// notifyNoWaiter: no request waits for this sender on this channel.
+	notifyNoWaiter notifyOutcome = iota
+	// notifyMatched: the message answered the waiting request.
+	notifyMatched
+	// notifyNoEcho: a request waits, and the message names no message it
+	// answers. An agent older than this rule sends such replies.
+	notifyNoEcho
+	// notifyOtherRequest: a request waits, and the message answers another
+	// message: a late reply to an earlier request, usually.
+	notifyOtherRequest
+)
+
+// notify is [replyWaiter.Notify] that also says why a message was not
+// handed over, so the router can log the two cases a caller would
+// otherwise see only as a request that timed out.
+func (w *replyWaiter) notify(msg ChannelMessage) notifyOutcome {
 	key := waiterKey{channelID: msg.ChannelID, senderID: msg.SenderID}
 	inReplyTo := readInReplyTo(msg.Metadata)
 	w.mu.Lock()
-	entry, ok := w.waiters[key]
+	entry, waiting := w.waiters[key]
 	// An empty id matches nothing, on either side: a waiter registered
 	// with no request id cannot be answered by a message that echoes none.
-	ok = ok && inReplyTo != "" && inReplyTo == entry.requestID
-	if ok {
+	matched := waiting && inReplyTo != "" && inReplyTo == entry.requestID
+	if matched {
 		delete(w.waiters, key)
 	}
 	w.mu.Unlock()
-	if !ok {
-		return false
+	switch {
+	case !waiting:
+		return notifyNoWaiter
+	case matched:
+		entry.ch <- msg
+		return notifyMatched
+	case inReplyTo == "":
+		return notifyNoEcho
+	default:
+		return notifyOtherRequest
 	}
-	entry.ch <- msg
-	return true
+}
+
+// notifyReplyWaiter hands msg to the request that waits for it, if one
+// does, and logs the message a waiting request could not take.
+//
+// A reply that names no message is the mark of an agent older than the
+// orchestrator: every chat request to it times out and every floor turn
+// waits its full timeout, and without this WARN that looks exactly like a
+// slow agent. A message the awaited sender published on its own (from a
+// timer) names nothing either, so the WARN says what was seen, not why.
+func (r *ChannelRouter) notifyReplyWaiter(msg ChannelMessage) {
+	switch r.waiter.notify(msg) {
+	case notifyNoEcho:
+		r.logger.Warn("channels: a message from a sender a request is waiting for names no message it answers; it was not handed to that request",
+			zap.String("channel_id", msg.ChannelID),
+			zap.String("sender_id", msg.SenderID),
+			zap.String("message_id", msg.ID),
+			zap.String("hint", "a reply carries in_reply_to since ISSUE-0200; an agent older than the orchestrator sends none, and the two must be upgraded together"))
+	case notifyOtherRequest:
+		r.logger.Debug("channels: a message from a sender a request is waiting for answers another message; the request stays open",
+			zap.String("channel_id", msg.ChannelID),
+			zap.String("sender_id", msg.SenderID),
+			zap.String("message_id", msg.ID),
+			zap.String("in_reply_to", readInReplyTo(msg.Metadata)))
+	case notifyNoWaiter, notifyMatched:
+	}
 }

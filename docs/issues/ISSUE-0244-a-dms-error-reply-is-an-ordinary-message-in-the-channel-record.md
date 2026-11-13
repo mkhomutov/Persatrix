@@ -1,6 +1,6 @@
 ---
 id: ISSUE-0244
-summary: "The error reply a persona publishes on a DM, for a wallet denial or for its own failed turn, is an ordinary message in the channel record. It is replayed to the model as the persona's own earlier words, and one that is published after the chat request has given up (an event time-out always is, under the shipped settings) can be returned as the answer to the person's next request."
+summary: "The error reply a persona publishes on a DM, for a wallet denial or for its own failed turn, is an ordinary message in the channel record. It is replayed to the model as the persona's own earlier words. (One published after the chat request had given up could also be returned as the answer to the person's next request; the fix for ISSUE-0200 closed that half.)"
 status: open
 severity: low
 area: agents/chat_reply
@@ -92,13 +92,16 @@ request whichever way that goes.
 > any other reply (`in_reply_to`). An error reply that is published
 > after its request gave up is stored in the DM and returned to no
 > later request; one that arrives in time still answers its own
-> request with HTTP 200. Tested at the waiter, at the router and
-> through the chat route with a late `event_timeout` error reply.
+> request with HTTP 200. Tested at the router with a late reply marked
+> `reply_status: error`, and through the chat route with a late
+> `event_timeout` error reply; the waiter's own table has no error
+> reply, because the waiter does not look at that mark.
 >
 > Still open here: the first half, the error reply replayed to the
 > model as the persona's own earlier words; and the ruling the
 > proposed fix asks for, whether an error reply for a turn that ended
 > after its request stopped waiting should be published at all. It is
 > still published, and stays in the channel record. The summary in the
-> front matter still names both halves; it is left as filed until the
-> issue is resolved.
+> front matter was first left naming both halves; the review of that
+> fix changed it, because the index shows the summary and it read as
+> if the late answer could still happen.

@@ -312,7 +312,7 @@ func (r *ChannelRouter) publishCommit(ctx context.Context, msg ChannelMessage, d
 	// always reached Notify, so this preserves the waiter's pre-PR contract;
 	// FANOUT suppression, not Notify starvation, is what prevents the reopen.
 	if latched {
-		r.waiter.Notify(msg)
+		r.notifyReplyWaiter(msg)
 		r.dropPostCloseTraffic(ctx, derivedType, resolvedInteractionID)
 		return ctx, nil, nil
 	}
@@ -336,8 +336,10 @@ func (r *ChannelRouter) publishCommit(ctx context.Context, msg ChannelMessage, d
 	// its CE4 supremacy unchanged — it lands in processEndVote on its own
 	// publish and markInteractionClosed disarms the arm. The claim is
 	// side-effect-free for every non-matching publish beyond one short-held
-	// lock; the reply waiter is notified like the latch branch above, so a
-	// closing reply never starves a parked floor turn. A lost tombstone CAS
+	// lock. The reply waiter is offered the reply like the latch branch
+	// above, but since ISSUE-0200 it cannot take it: a synthesis reply names
+	// the directive it answers, and no wait is registered under a directive
+	// (see [ChannelRouter.closeOnSynthesisReply]). A lost tombstone CAS
 	// means a racing closer beat this reply — the synthesis stays committed
 	// history, the 4b-i degraded artifact shape. The claim reads the
 	// PRE-RESOLVE `inboundClaim` captured above, never the bag — the stamp at
@@ -377,7 +379,7 @@ func (r *ChannelRouter) publishCommit(ctx context.Context, msg ChannelMessage, d
 		// persisted reply the round's waiter is parked on; skipping Notify
 		// here burned the full turn timeout for that speaker and every
 		// remaining one, each mislabeled floor_turn{timeout}.
-		r.waiter.Notify(msg)
+		r.notifyReplyWaiter(msg)
 		// RFC 0052: on an armed channel a capped chain is a TERMINAL bound —
 		// no human can continue past it, and the suppressed fanout means no
 		// further stimulus ever arrives, so an open interaction would wedge
@@ -417,14 +419,16 @@ func (r *ChannelRouter) publishCommit(ctx context.Context, msg ChannelMessage, d
 	// for the fact that the inbound publish itself fires Notify before
 	// any subscriber receives — install the waiter on the OTHER
 	// participant's id, never on the publisher's.
-	r.waiter.Notify(msg)
+	r.notifyReplyWaiter(msg)
 
 	// RFC 0030 Layer 2.5 deferred fanout (amendment D1): when a serialized
 	// floor round is active on this channel and this inbound message is a
 	// reply from a speaker that round granted the floor, the round loop is the
 	// sole dispatcher. The reply has been persisted (above) and — when the
-	// speaker is still its current turn-holder — has just satisfied the loop's
-	// waiter via Notify, so the loop advances with the reply now in history.
+	// speaker is still its current turn-holder and the reply names this
+	// round's message (ISSUE-0200) — has just satisfied the loop's waiter via
+	// Notify, so the loop advances with the reply now in history. A
+	// turn-holder's reply that names another message leaves the turn open.
 	// Running fanout here would re-introduce the N-way amplification floor
 	// control exists to prevent. The set membership (not just the current
 	// turn-holder) also covers a speaker that exhausted its turn budget (D2)

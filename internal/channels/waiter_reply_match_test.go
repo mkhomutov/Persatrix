@@ -9,6 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 // A reply answers the request it echoes, and no other (ISSUE-0200).
@@ -37,7 +39,9 @@ func replyTo(channelID, sender, inReplyTo, content string) ChannelMessage {
 
 func TestReplyWaiter_AcceptsOnlyAReplyToItsOwnRequest(t *testing.T) {
 	tests := []struct {
-		name    string
+		name string
+		// request is the id the wait is registered under; "q2" when empty.
+		request string
 		reply   ChannelMessage
 		matches bool
 	}{
@@ -47,10 +51,18 @@ func TestReplyWaiter_AcceptsOnlyAReplyToItsOwnRequest(t *testing.T) {
 		{name: "a reply to this request from someone else", reply: replyTo(testDM, "iron-fox", "q2", "A2")},
 		{name: "a reply to this request in another channel", reply: replyTo("dm:bob:ember-owl", "ember-owl", "q2", "A2")},
 		{
-			name: "an echo that is not text",
+			// The request's id is "2", so an echo read as its text would match.
+			name: "an echo that is a number, not text", request: "2",
 			reply: ChannelMessage{
 				ID: "r", ChannelID: testDM, SenderID: "ember-owl",
 				Metadata: map[string]any{"in_reply_to": 2},
+			},
+		},
+		{
+			name: "an echo that is a number with a fraction, not text", request: "2",
+			reply: ChannelMessage{
+				ID: "r", ChannelID: testDM, SenderID: "ember-owl",
+				Metadata: map[string]any{"in_reply_to": float64(2)},
 			},
 		},
 		{
@@ -68,12 +80,18 @@ func TestReplyWaiter_AcceptsOnlyAReplyToItsOwnRequest(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			request := tt.request
+			if request == "" {
+				request = "q2"
+			}
 			w := newReplyWaiter()
-			ch, cancel, err := w.Register(testDM, "ember-owl", "q2")
+			ch, cancel, err := w.Register(testDM, "ember-owl", request)
 			require.NoError(t, err)
 			defer cancel()
 
-			assert.Equal(t, tt.matches, w.Notify(tt.reply))
+			// Fatal on a mismatch: a reply that was not handed over would
+			// leave the receive below waiting for ever.
+			require.Equal(t, tt.matches, w.Notify(tt.reply))
 
 			if tt.matches {
 				assert.Equal(t, tt.reply.ID, (<-ch).ID)
@@ -82,7 +100,7 @@ func TestReplyWaiter_AcceptsOnlyAReplyToItsOwnRequest(t *testing.T) {
 			assert.Empty(t, ch, "nothing was handed to the request")
 			// The request is still waiting: its own reply is accepted after
 			// the one that was not for it.
-			own := replyTo(testDM, "ember-owl", "q2", "A2")
+			own := replyTo(testDM, "ember-owl", request, "A2")
 			require.True(t, w.Notify(own), "the waiter must have stayed registered")
 			assert.Equal(t, own.ID, (<-ch).ID)
 		})
@@ -161,9 +179,17 @@ func TestPublishAndAwait_ALateAnswerIsNotReturnedToTheNextRequest(t *testing.T) 
 			}
 			own := replyTo(dm.ID, "ember-owl", q2.ID, "A2: 4")
 			go func() {
-				time.Sleep(20 * time.Millisecond)
+				// Once question 2 is stored its wait is registered (the
+				// wait comes first), so the order below does not depend on
+				// how long anything takes.
+				deadline := time.Now().Add(5 * time.Second)
+				for time.Now().Before(deadline) {
+					if _, err := store.GetMessage(ctx, q2.ID); err == nil {
+						break
+					}
+					time.Sleep(time.Millisecond)
+				}
 				_ = router.Publish(ctx, late, "")
-				time.Sleep(20 * time.Millisecond)
 				_ = router.Publish(ctx, own, "")
 			}()
 
@@ -218,6 +244,97 @@ func TestPublishAndAwait_ReturnsTheReplyToThisRequest(t *testing.T) {
 			assert.Equal(t, reply.ID, got.ID)
 			for k, v := range tt.metadata {
 				assert.Equal(t, v, got.Metadata[k])
+			}
+		})
+	}
+}
+
+// Why a message was not handed to a waiting request (the review of
+// ISSUE-0200). A reply that names no message looks, from outside, exactly
+// like a slow agent: the request times out and nothing says why.
+func TestReplyWaiter_SaysWhatItDidWithAMessage(t *testing.T) {
+	tests := []struct {
+		name  string
+		reply ChannelMessage
+		want  notifyOutcome
+	}{
+		{"a reply to the waiting request", replyTo(testDM, "ember-owl", "q2", "A2"), notifyMatched},
+		{"a message from the awaited sender that names no message", replyTo(testDM, "ember-owl", "", "A2"), notifyNoEcho},
+		{"a reply from the awaited sender to another message", replyTo(testDM, "ember-owl", "q1", "A1"), notifyOtherRequest},
+		{"a message from someone nobody waits for", replyTo(testDM, "iron-fox", "", "hello"), notifyNoWaiter},
+		{"a message on a channel nobody waits on", replyTo("dm:bob:ember-owl", "ember-owl", "q2", "A2"), notifyNoWaiter},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := newReplyWaiter()
+			_, cancel, err := w.Register(testDM, "ember-owl", "q2")
+			require.NoError(t, err)
+			defer cancel()
+
+			assert.Equal(t, tt.want, w.notify(tt.reply))
+		})
+	}
+}
+
+// The router says so in its log. An agent older than the orchestrator
+// sends no `in_reply_to`: every chat request to it would time out, and the
+// WARN below is the only thing that tells that apart from a slow agent.
+func TestPublishAndAwait_LogsAMessageItCouldNotHandToTheWaitingRequest(t *testing.T) {
+	const noEcho = "channels: a message from a sender a request is waiting for names no message it answers; it was not handed to that request"
+	const otherEcho = "channels: a message from a sender a request is waiting for answers another message; the request stays open"
+	tests := []struct {
+		name      string
+		inReplyTo func(q ChannelMessage) string
+		wantWarn  int
+		wantDebug int
+	}{
+		{"a reply that names no message", func(ChannelMessage) string { return "" }, 1, 0},
+		{"a reply to another message", func(ChannelMessage) string { return "some-earlier-question" }, 0, 1},
+		{"a reply to the request", func(q ChannelMessage) string { return q.ID }, 0, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			core, logs := observer.New(zapcore.DebugLevel)
+			store := newTestStore(t, SQLiteOptions{})
+			router := NewChannelRouter(store, &recordingDispatcher{}, zap.New(core), nil)
+			ctx := context.Background()
+			dm, err := store.GetOrCreateDM(ctx, "alice", "ember-owl")
+			require.NoError(t, err)
+			q := ChannelMessage{ID: uuid.NewString(), ChannelID: dm.ID, SenderID: "alice", Content: "Q"}
+			reply := replyTo(dm.ID, "ember-owl", tt.inReplyTo(q), "A")
+			go func() {
+				deadline := time.Now().Add(5 * time.Second)
+				for time.Now().Before(deadline) {
+					if _, err := store.GetMessage(ctx, q.ID); err == nil {
+						break
+					}
+					time.Sleep(time.Millisecond)
+				}
+				_ = router.Publish(ctx, reply, "")
+			}()
+
+			_, err = router.PublishAndAwait(ctx, q, "ember-owl", 300*time.Millisecond)
+
+			matched := tt.wantWarn == 0 && tt.wantDebug == 0
+			if matched {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, ErrChatTimeout)
+			}
+			warns := logs.FilterMessage(noEcho).All()
+			require.Len(t, warns, tt.wantWarn)
+			assert.Len(t, logs.FilterMessage(otherEcho).All(), tt.wantDebug)
+			for _, entry := range warns {
+				assert.Equal(t, zapcore.WarnLevel, entry.Level)
+				fields := entry.ContextMap()
+				assert.Equal(t, dm.ID, fields["channel_id"])
+				assert.Equal(t, "ember-owl", fields["sender_id"])
+				assert.Equal(t, reply.ID, fields["message_id"])
+			}
+			// The person's own question is from a sender nobody waits for:
+			// it is never what the log is about.
+			for _, entry := range logs.All() {
+				assert.NotEqual(t, q.ID, entry.ContextMap()["message_id"])
 			}
 		})
 	}

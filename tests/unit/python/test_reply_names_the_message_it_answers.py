@@ -28,9 +28,11 @@ import pytest
 from agents.action_executor import ActionExecutor
 from agents.chat_reply import process_inbound_channel_event
 from agents.dispatch_context import DispatchContext
+from agents.event_loop import ScheduledWake
 from agents.llm_client import LLMClient, LLMResponse
 from agents.persona import create_persona_agent
 from agents.persona_types import ActionType, AgentAction, AgentEvent, EventType
+from agents.tick import TickScheduler
 from agents.wallet_client import BudgetExceededError
 
 from ._persona_test_helpers import _PERSONA_CONFIG
@@ -154,14 +156,26 @@ class TestWhatTheAgentPublishes:
         assert _metadata(publisher) == [{}]
 
     async def test_a_message_from_a_timer_names_nothing(self) -> None:
+        """Through the real tick path: what a persona posts when a timer
+        wakes it answers no message, so it names none.  The tick builds its
+        own context; if it ever took one from an event, this fails."""
         publisher = _Publisher()
-        executor = ActionExecutor(channel_publisher=publisher)  # type: ignore[arg-type]
-        unprompted = AgentAction(
+        agent = MagicMock()
+        agent.agent_id = AGENT
+        agent.on_tick = AsyncMock(return_value=[AgentAction(
             ActionType.SEND_CHANNEL_MESSAGE, {"channel_id": DM, "content": "by the way"},
+        )])
+        scheduler = TickScheduler(
+            agent, interval=60.0, idle_after_ticks=10, register_legacy_timer=False,
+            executor=ActionExecutor(channel_publisher=publisher),  # type: ignore[arg-type]
         )
 
-        await executor.execute(AGENT, [unprompted], context=DispatchContext(cascade_depth=1))
+        await scheduler._handle_scheduled_wake(
+            ScheduledWake(timer_id="legacy_tick", callback_kind="tick"),
+        )
 
+        agent.on_tick.assert_awaited_once()
+        assert [m["content"] for m in publisher.sent] == ["by the way"]
         assert _metadata(publisher) == [{}]
 
     async def test_an_end_vote_names_the_message_it_votes_on(self) -> None:

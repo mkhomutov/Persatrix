@@ -1,4 +1,4 @@
-"""Cross-language drift pins for the reply echo (ISSUE-0200).
+"""Cross-language drift pins for ``in_reply_to`` (ISSUE-0200).
 
 The orchestrator (Go) hands an agent's reply to a waiting request only
 when the reply's ``in_reply_to`` is the id of that request's message.  The
@@ -30,8 +30,10 @@ _PUBLISH_AND_AWAIT_GO = Path("internal/channels/publish_and_await.go")
 _FLOOR_CONTROL_GO = Path("internal/channels/floor_control.go")
 _GRPC_DISPATCHER_GO = Path("internal/channels/grpc_dispatcher_proto.go")
 _DISPATCH_CONTEXT_PY = Path("agents/dispatch_context.py")
-#: The channel-message handler builds the event.  It has lived in the
-#: servicer module and in a module of its own; whichever holds it is read.
+#: The channel-message handler builds the event.  It is in the servicer
+#: module; another change moves it to a module of its own.  Whichever
+#: holds it is read, so this test does not care which of the two merges
+#: first.
 _EVENT_BUILDERS_PY = (Path("agents/channel_receive.py"), Path("agents/server_servicers.py"))
 
 
@@ -68,5 +70,5 @@ def test_python_carries_the_event_id_into_the_reply() -> None:
     builders = [p for p in _EVENT_BUILDERS_PY if p.exists()]
     lift = "message_id=request.message_id,"
     if not any(lift in p.read_text(encoding="utf-8") for p in builders):
-        _parse_miss(f"`{lift}`", builders[0])
+        _parse_miss(f"`{lift}`", builders[0] if builders else _EVENT_BUILDERS_PY[0])
     _require('origin_message_id=event.message_id or "",', _DISPATCH_CONTEXT_PY)

@@ -18,7 +18,7 @@ refs:
   - internal/channels/floor_reply_match_test.go
   - internal/server/chat_reply_match_test.go
   - tests/unit/python/test_reply_names_the_message_it_answers.py
-  - tests/unit/python/test_cross_language_reply_echo_drift.py
+  - tests/unit/python/test_cross_language_in_reply_to_drift.py
   - docs/issues/ISSUE-0244-a-dms-error-reply-is-an-ordinary-message-in-the-channel-record.md
   - internal/channels/interaction_resolver.go
   - internal/server/chat_handler.go
@@ -142,3 +142,31 @@ out one request and then sends a second would pin it.
 > [ISSUE-0033](ISSUE-0033-chat-as-dm-single-shot-waiter-multi-message-reply.md)
 > is not changed by this: a wait still ends on the first message that
 > answers it.
+
+> 2026-11-14 — review of the fix. Nothing above low. The review also ran
+> the two things the note above could not: a floor round with four real
+> persona processes (two rounds, seven turns, each reply naming its
+> round's message), and a late reply (a model slowed to three seconds
+> against a one-second request: the next request got its own answer,
+> where `main` handed it the late one).
+>
+> - **A reply that could not be matched left no trace.** A new
+>   orchestrator with an older agent looked exactly like a slow agent: a
+>   504 and nothing in the log. The orchestrator now logs a WARN for a
+>   message from a sender a request is waiting for that names no message,
+>   and a DEBUG line for one that names another message.
+> - **One behaviour changed that the note did not state.** A chair's
+>   synthesis reply names the directive it answers, and no wait is
+>   registered under a directive. So it no longer ends a floor turn the
+>   chair had stayed silent on; that turn runs to its timeout on a
+>   discussion that has closed. Bounded, and the same as any silent
+>   speaker's turn; the comments that said otherwise are corrected.
+> - `in_reply_to` is the id of the event the agent was sent. On a turn
+>   the orchestrator forces (a synthesis, convene or agenda directive, a
+>   chair escalation) that is the directive's id, which is in no
+>   channel's record. The schema and the guide say so now.
+> - Tests: a number as the echo is now checked against a request whose
+>   id is that number's text; a reply that is not handed over fails the
+>   waiter's table instead of hanging it; the timer case goes through
+>   the real tick path; the router probe no longer depends on a 20 ms
+>   sleep for its order.

@@ -936,7 +936,9 @@ For a message with ≥2 candidate responders on a floor-controlled channel:
 
 A turn ends on the speaker's reply **to this round's message**. Every message
 an agent posts in reply carries the id of the message it answers, as
-`in_reply_to` in the publish metadata; the persona runtime sets it. A reply the
+`in_reply_to` in the publish metadata; the persona runtime sets it. (On a turn
+the orchestrator forces, such as a synthesis directive, that id is the
+directive's, which is not a message in the channel.) A reply the
 speaker sends late, to an earlier round, is saved in the channel but does not
 end its turn in this round. A chat request (`POST /api/v1/agents/{id}/chat`)
 waits the same way: an answer that arrives after its request timed out is saved

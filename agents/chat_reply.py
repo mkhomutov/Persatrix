@@ -257,8 +257,8 @@ async def publish_chat_error_on_channel(
         )
         return
     metadata: dict[str, Any] = {"reply_status": "error", "error_reason": reason}
-    # The reply echo and the RFC 0052 no-reopen claim, via the context's
-    # shared rule. Deliberately NO
+    # ``in_reply_to`` (the message this could not answer) and the RFC 0052
+    # no-reopen claim, via the context's shared rule. Deliberately NO
     # ``synthesis_reply`` echo (PR #718 review), spelled with the NAMED
     # opt-out rather than implied by omission: an apology must never be
     # claimable as the §D closing artifact — and ``suppress_error_reply``
