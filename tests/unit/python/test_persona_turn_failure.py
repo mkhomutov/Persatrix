@@ -49,7 +49,9 @@ from ._persona_test_helpers import _PERSONA_CONFIG, _task
 
 AGENT = "ember-owl"
 DM = f"dm:user-1:{AGENT}"
-GROUP = "general"
+#: A real group channel id.  The memory scope, the interaction boundary and
+#: the vote close each take another branch for an id without the prefix.
+GROUP = "group:general"
 
 #: What a provider's own error can hold.  It must reach no caller.
 SECRET = "401 from https://provider.internal: bad key sk-live-123"

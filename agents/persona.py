@@ -136,8 +136,9 @@ class PersonaAgent(BaseAgent):
 
         # ISSUE-0199: a turn that failed is a failed step, with the status
         # and result text ``BaseAgent._run_llm_loop`` gives for the same
-        # cause, so the orchestrator retries it or stops, and does not feed
-        # an error sentence to the next step as this one's output.
+        # cause, so the orchestrator stops the run there (it does not retry
+        # a step an agent answered FAILED), and does not feed an error
+        # sentence to the next step as this one's output.
         failure = turn_failure(actions)
         if failure is not None:
             return TaskOutput(status=TaskStatus.FAILED, result=failure.message)
