@@ -23,6 +23,7 @@ from __future__ import annotations
 __all__ = [
     # Local public symbols
     "PersonaAgent",
+    "PersonaMemoryError",
     "create_persona_agent",
     # Re-exported from persona_types
     "ActionType",
@@ -97,6 +98,22 @@ logger = logging.getLogger(__name__)
 
 
 # ─── Persona Agent Base Class ──────────────────────────────
+
+class PersonaMemoryError(RuntimeError):
+    """A hosted persona could not open its memory (ISSUE-0205).
+
+    Raised at start-up by
+    :func:`agents.server_persona.initialize_persona_agents`.  A persona
+    reads and writes its memory on every event, so without it the persona
+    cannot serve, and the agent process stops
+    (:func:`agents.server_cli.start_or_exit`) instead of registering an
+    agent that would never reply.  The store's own error is the cause.
+    """
+
+    def __init__(self, agent_id: str) -> None:
+        super().__init__(f"Agent {agent_id} cannot open its memory")
+        self.agent_id = agent_id
+
 
 class PersonaAgent(BaseAgent):
     """

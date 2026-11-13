@@ -32,6 +32,7 @@ from .observability.metrics import shutdown as metrics_shutdown
 from .observability.tracing import init_tracing
 from .observability.tracing import shutdown as tracing_shutdown
 from .orchestrator_session import hold_enrollment_secret
+from .persona import PersonaMemoryError
 from .prompt_prefix import prefix_keepalive_seconds, prompt_prefix
 from .server import AgentServer
 from .server_persona import load_agent, setup_shared_pools
@@ -69,6 +70,29 @@ def _validate_startup_config() -> None:
         prefix_keepalive_seconds()
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
+
+
+async def start_or_exit(server: AgentServer) -> None:
+    """Start *server*, or stop the process when it cannot serve (ISSUE-0205).
+
+    A hosted persona that cannot open its memory would never reply.  The
+    server used to carry on and register it with the orchestrator, which
+    shows an agent as healthy from then on.  A process hosts one agent, so
+    there is nothing else for it to serve: it exits with status 1, which
+    is the signal a supervisor reads (a container's restart policy, the
+    exit status of ``make run-agent``).
+
+    The server is stopped first.  That closes whatever part of the
+    persona's memory did open: a database connection runs a thread that is
+    not a daemon, and the process could not end while one was alive.  At
+    this point nothing has been registered, so there is nothing to undo
+    at the orchestrator.
+    """
+    try:
+        await server.start()
+    except PersonaMemoryError as exc:
+        await server.stop()
+        raise SystemExit(f"{exc}; the agent process is stopping") from exc
 
 
 def main() -> None:
@@ -222,7 +246,7 @@ def main() -> None:
             # instead of immediate process termination.
             signal.signal(signal.SIGTERM, lambda s, f: request_shutdown())
 
-        await server.start()
+        await start_or_exit(server)
         await shutdown.wait()
         await server.stop()
         # PR-170 M2: decrement ``agent.active`` before flushing so the final

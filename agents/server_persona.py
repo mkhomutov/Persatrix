@@ -22,7 +22,7 @@ from .channel_history_fetcher import HttpChannelHistoryFetcher
 from .llm_client import LLMClient, create_provider
 from .memory.scheduled_wakes import ScheduledWakesCache
 from .optimization import model_aliases
-from .persona import create_persona_agent
+from .persona import PersonaMemoryError, create_persona_agent
 from .persona_runtime import _LLMPersonaAgent
 from .persona_runtime.channel_roster import HttpChannelRosterFetcher
 from .prompt_loader import PromptLoadError, resolve_instructions
@@ -351,11 +351,11 @@ async def initialize_persona_agents(
 ) -> None:
     """Initialize memory, dispatcher, and tick schedulers for persona agents.
 
-    Called from ``AgentServer.start()`` after the gRPC server is listening,
-    so memory failures cannot prevent non-persona agents from serving.
+    Called from ``AgentServer.start()`` after the gRPC server is listening
+    and before anything is registered with the orchestrator.
 
-    Memory failure for a given agent is logged and that agent is skipped
-    (it will NOT receive dispatched events or tick scheduling).
+    A persona whose memory does not open raises ``PersonaMemoryError``, and
+    the agent process stops (ISSUE-0205, ``server_cli.start_or_exit``).
 
     ``tick_schedulers`` is mutated in-place: started TickScheduler instances
     are inserted under their agent ID.  Non-persona agents are left untouched.
@@ -372,13 +372,13 @@ async def initialize_persona_agents(
         try:
             await agent.initialize_memory(shared_pools=shared_pools)
             logger.info("Initialized memory for persona agent %s", agent_id)
-        except Exception:
+        except Exception as exc:
             logger.exception(
                 "Failed to initialize memory for agent %s — "
-                "agent will NOT receive dispatched events or tick scheduling",
+                "the agent process stops: a persona cannot serve without it",
                 agent_id,
             )
-            continue
+            raise PersonaMemoryError(agent_id) from exc
 
         # Register with event dispatcher.
         dispatcher.register_agent(agent_id, agent)
