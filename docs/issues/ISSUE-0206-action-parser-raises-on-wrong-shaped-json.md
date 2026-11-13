@@ -9,6 +9,7 @@ closed: 2026-11-12
 closed_pr: 1105
 refs:
   - tests/unit/python/test_action_parser_wrong_shapes.py
+  - tests/unit/python/test_action_parser_json_sweep.py
   - docs/issues/ISSUE-0238-action-payload-values-of-the-wrong-type-fail-after-the-parser.md
   - agents/persona_runtime/action_parser.py
   - agents/persona_runtime/action_validation.py
