@@ -6,6 +6,7 @@ severity: medium
 area: internal/channels
 created: 2026-11-10
 closed: 2026-11-14
+closed_pr: 1116
 refs:
   - internal/channels/waiter.go
   - internal/channels/publish_and_await.go
