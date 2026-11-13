@@ -89,6 +89,13 @@ def _rename_a_price_key(doc: Doc) -> None:
     first["input_per_1m_token"] = first.pop("input_per_1m_tokens")
 
 
+def _set_a_price(key: str, value: Any) -> Callable[[Doc], None]:
+    def change(doc: Doc) -> None:
+        models = doc["cost"]["pricing"]["models"]
+        next(iter(models.values()))[key] = value
+    return change
+
+
 BUDGETS = ["cost", "budgets"]
 
 #: (what changed, the change, text the validator's message must hold)
@@ -113,7 +120,27 @@ REFUSED: list[tuple[str, Callable[[Doc], None], str]] = [
      _rename([*BUDGETS, "global"], "on_exceed", "on_exceeded"), "on_exceeded"),
     ("an extra key beside pricing and budgets", _set(["cost"], "enabled", True), "enabled"),
     ("a negative limit", _set([*BUDGETS, "global"], "max_daily_usd", -1), "-1"),
+    ("a negative per-workflow limit",
+     _set([*BUDGETS, "per_workflow"], "default_max_usd", -2), "-2"),
+    ("a negative per-agent limit", _set([*BUDGETS, "per_agent"], "default_max_usd", -3), "-3"),
+    ("a negative input price", _set_a_price("input_per_1m_tokens", -4), "-4"),
+    ("a negative output price", _set_a_price("output_per_1m_tokens", -6), "-6"),
     ("a limit written as text", _set([*BUDGETS, "per_agent"], "default_max_usd", "5"), "'5'"),
+    ("a global limit written as text", _set([*BUDGETS, "global"], "max_daily_usd", "7"), "'7'"),
+    ("a per-workflow limit written as text",
+     _set([*BUDGETS, "per_workflow"], "default_max_usd", "8"), "'8'"),
+    ("a price written as text", _set_a_price("input_per_1m_tokens", "9"), "'9'"),
+    ("an output price written as text", _set_a_price("output_per_1m_tokens", "11"), "'11'"),
+    ("alert_at_percent that is not a list",
+     _set([*BUDGETS, "global"], "alert_at_percent", "half"), "'half'"),
+    ("an alert_at_percent entry that is not a number",
+     _set([*BUDGETS, "global"], "alert_at_percent", [50, "most"]), "'most'"),
+    ("a limit that is not a number at all (.nan)",
+     _set([*BUDGETS, "global"], "max_daily_usd", float("nan")), "not a finite number"),
+    ("a limit of infinity", _set([*BUDGETS, "per_agent"], "default_max_usd", float("inf")),
+     "not a finite number"),
+    ("a price of infinity", _set_a_price("output_per_1m_tokens", float("inf")),
+     "not a finite number"),
     ("an on_exceed the orchestrator does not know",
      _set([*BUDGETS, "global"], "on_exceed", "shutdown"), "shutdown"),
     ("budgets with no value", _set(["cost"], "budgets", None), "None"),
@@ -181,6 +208,67 @@ def test_every_shipped_config_passes_validation(config_dir: Path, tmp_path: Path
     assert budgets["per_agent"]["default_max_usd"] > 0
 
 
+def _walk_for_open_levels(node: Any, where: str, open_levels: list[str]) -> None:
+    """Collect every level under *node* that takes a key it does not name.
+
+    A level is anything that can hold keys: a node typed ``object``, or
+    one with ``properties`` or ``additionalProperties`` whatever its
+    ``type`` says (a node with no ``type`` takes an object too).  Lists and
+    alternatives are walked into.
+    """
+    if not isinstance(node, dict):
+        return
+    holds_keys = (
+        node.get("type") == "object" or "properties" in node or "additionalProperties" in node
+    )
+    if holds_keys:
+        extra = node.get("additionalProperties")
+        if isinstance(extra, dict):
+            # A map keyed by a name the operator chooses (a model id): its
+            # values are checked, and are walked in turn.
+            _walk_for_open_levels(extra, f"{where}.*", open_levels)
+        elif extra is not False:
+            open_levels.append(where)
+        for name, child in node.get("properties", {}).items():
+            _walk_for_open_levels(child, f"{where}.{name}", open_levels)
+    items = node.get("items")
+    if isinstance(items, dict):
+        _walk_for_open_levels(items, f"{where}[]", open_levels)
+    for keyword in ("oneOf", "anyOf", "allOf"):
+        for n, option in enumerate(node.get(keyword, [])):
+            _walk_for_open_levels(option, f"{where}<{keyword} {n}>", open_levels)
+
+
+@pytest.mark.parametrize(
+    ("level", "want"),
+    [
+        ({"type": "object", "additionalProperties": False}, []),
+        ({"type": "object"}, ["x"]),
+        ({"properties": {"a": {"type": "number"}}}, ["x"]),
+        ({"type": "object", "additionalProperties": False,
+          "properties": {"a": {"properties": {"b": {"type": "number"}}}}}, ["x.a"]),
+        ({"type": "array", "items": {"type": "object"}}, ["x[]"]),
+        ({"type": "object", "additionalProperties": {"type": "object"}}, ["x.*"]),
+        ({"oneOf": [{"type": "number"}, {"type": "object"}]}, ["x<oneOf 1>"]),
+        ({"type": "array", "items": {"type": "number"}}, []),
+    ],
+    ids=[
+        "a closed object", "an open object", "an object with no type keyword",
+        "an untyped object one level down", "a list of open objects",
+        "a map whose values are open objects", "an alternative that is an open object",
+        "a list of numbers",
+    ],
+)
+def test_the_walk_finds_an_open_level_however_it_is_written(
+    level: dict[str, Any], want: list[str],
+) -> None:
+    found: list[str] = []
+
+    _walk_for_open_levels(level, "x", found)
+
+    assert found == want
+
+
 def test_the_cost_block_is_closed_at_every_level() -> None:
     """No level under ``cost`` takes a key the schema does not name.
 
@@ -192,20 +280,7 @@ def test_the_cost_block_is_closed_at_every_level() -> None:
     cost = schema["properties"]["cost"]
     open_levels: list[str] = []
 
-    def walk(node: dict[str, Any], where: str) -> None:
-        if node.get("type") != "object":
-            return
-        extra = node.get("additionalProperties")
-        if isinstance(extra, dict):
-            # A map keyed by a name the operator chooses (a model id): its
-            # values are checked, and are objects walked in turn.
-            walk(extra, f"{where}.*")
-        elif extra is not False:
-            open_levels.append(where)
-        for name, child in node.get("properties", {}).items():
-            walk(child, f"{where}.{name}")
-
-    walk(cost, "cost")
+    _walk_for_open_levels(cost, "cost", open_levels)
 
     assert open_levels == []
     assert schema["required"] == ["cost"]
@@ -222,3 +297,51 @@ def test_make_validate_covers_the_demo_configs() -> None:
 
     assert "agents/validate.py config/" in recipe
     assert "config/demo/*/" in recipe
+    loop = next(line for line in recipe.splitlines() if "config/demo/*/" in line)
+    assert "|| exit 1" in loop, "a demo that fails validation must stop the recipe"
+
+
+def test_ci_validates_the_demo_configs_too() -> None:
+    """CI calls the validator itself, not ``make validate``: it must walk
+    the demo folders as the recipe does."""
+    workflow = yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
+    steps = [
+        step for job in workflow["jobs"].values() for step in job.get("steps", [])
+        if step.get("name") == "Validate YAML configs"
+    ]
+    assert len(steps) == 1
+    script = steps[0]["run"]
+    assert "agents/validate.py config/" in script
+    assert "config/demo/*/" in script
+    # GitHub runs a step's script with `bash -e`, so a failing validator
+    # inside the loop fails the step; a `|| true` would hide it.
+    assert "||" not in script
+
+
+#: What an optimization.yaml with nothing in it can look like.
+EMPTY_FILES = {
+    "an empty file": "",
+    "only a comment": "# nothing configured yet\n",
+    "a null document": "~\n",
+    "a document marker and nothing else": "---\n",
+}
+
+
+@pytest.mark.parametrize("text", EMPTY_FILES.values(), ids=EMPTY_FILES.keys())
+def test_an_optimization_file_with_nothing_in_it_fails_validation(
+    tmp_path: Path, text: str,
+) -> None:
+    """The orchestrator refuses such a file (it has no ``cost.budgets``),
+    so the validator must not call it valid."""
+    (tmp_path / "optimization.yaml").write_text(text, encoding="utf-8")
+    workflows = tmp_path / "workflows"
+    workflows.mkdir()
+
+    ok, errors, checked = validate_config_dir(
+        str(tmp_path), str(SCHEMAS_DIR), workflow_dir=str(workflows),
+    )
+
+    assert checked == 1
+    assert not ok
+    assert any("'cost' is a required property" in e.message for e in errors), errors

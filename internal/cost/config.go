@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 
@@ -115,8 +116,9 @@ func DecodeOptimizationFile(data []byte, out any) error {
 // cost section (pricing table and budget thresholds). Validates that budget
 // thresholds are non-negative and on_exceed is a recognized value.
 //
-// It refuses a `cost:` block with a key it does not know, and a file with no
-// `cost.budgets` block (ISSUE-0211). A deployment that wants no spending
+// It refuses a `cost:` block with a key it does not know, a file with no
+// `cost.budgets` block, and a limit that is not a finite number (ISSUE-0211).
+// A deployment that wants no spending
 // limit says so with the block present and its limits at zero, or left out;
 // [BudgetThresholds.NoSpendingLimit] then reports it, and the orchestrator
 // warns at start-up.
@@ -139,8 +141,11 @@ func LoadCostConfig(configDir string, opts ...ConfigOption) (*CostConfig, error)
 	if raw.Cost == nil || raw.Cost.Budgets == nil {
 		// A misspelled `cost` lands here too: the top level is open, so
 		// `costs:` is one more key this loader does not own.
-		return nil, fmt.Errorf("validate cost config: cost.budgets is missing from %s; "+
-			"a limit left out or set to 0 means no limit, but the block itself must be there", path)
+		// A `budgets:` key with every line under it commented out is a
+		// key with no value, and reads the same as no key.
+		return nil, fmt.Errorf("validate cost config: cost.budgets is missing or has no value in %s; "+
+			"a limit left out or set to 0 means no limit, but the block itself must be there: "+
+			"write `budgets: {}` to set no limit at all", path)
 	}
 
 	cfg := &CostConfig{
@@ -153,7 +158,22 @@ func LoadCostConfig(configDir string, opts ...ConfigOption) (*CostConfig, error)
 		cfg.Pricing = make(map[string]ModelPricing)
 	}
 
-	// Validate budget thresholds.
+	// Validate budget thresholds. A limit must be a finite number: every
+	// comparison with NaN is false and nothing exceeds infinity, so either
+	// would cap nothing and, not being zero, would not be warned about.
+	for _, limit := range []struct {
+		name  string
+		value float64
+	}{
+		{"global max_daily_usd", cfg.Budgets.Global.MaxDailyUSD},
+		{"per_workflow default_max_usd", cfg.Budgets.PerWorkflow.DefaultMaxUSD},
+		{"per_agent default_max_usd", cfg.Budgets.PerAgent.DefaultMaxUSD},
+	} {
+		if math.IsNaN(limit.value) || math.IsInf(limit.value, 0) {
+			return nil, fmt.Errorf("validate cost config: %s must be a finite number, got %v; "+
+				"write 0, or leave it out, for no limit", limit.name, limit.value)
+		}
+	}
 	if cfg.Budgets.Global.MaxDailyUSD < 0 {
 		return nil, fmt.Errorf("validate cost config: global max_daily_usd must be >= 0, got %f", cfg.Budgets.Global.MaxDailyUSD)
 	}

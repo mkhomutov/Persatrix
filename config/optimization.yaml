@@ -119,6 +119,9 @@ cost:
   # that scope. The block itself must stay: the orchestrator refuses a file
   # with no cost.budgets, and a key under cost: it does not know, so a
   # misspelled key cannot turn a limit off. `make validate` refuses both too.
+  # To set no limit at all, write `budgets: {}`: a `budgets:` key with every
+  # line under it commented out has no value, and is refused like a missing
+  # one. The orchestrator reads this file once, when it starts.
   budgets:
     global:
       max_daily_usd: 100.00

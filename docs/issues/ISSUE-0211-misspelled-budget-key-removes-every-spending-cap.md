@@ -110,3 +110,35 @@ control off. The wrong key is silent at validation and at load.
 > so agents' model calls fail: that is
 > [ISSUE-0204](ISSUE-0204-grpc-server-starts-only-if-the-log-buffer-did.md)'s
 > second path, which this fix makes easier to reach and does not change.
+
+> 2026-11-14 — review of the fix. Nothing above low; six things changed.
+>
+> - **An empty file passed `make validate`.** The validator calls a file
+>   with nothing in it valid unless it is told the file must declare
+>   something, and `optimization.yaml` was not on that list. So an
+>   empty, comment-only or null file validated, and the orchestrator
+>   refused it. It is on the list now.
+> - **`.nan` and `.inf` limits loaded and capped nothing.** Every
+>   comparison with NaN is false and nothing exceeds infinity; neither is
+>   zero, so the no-limit warning stayed silent too. The loader refuses a
+>   limit that is not a finite number, and the validator refuses such a
+>   number anywhere in a config file (JSON Schema cannot).
+> - **`budgets:` with every line under it commented out** is a key with
+>   no value and is refused as a missing block. That is intended, but the
+>   error said "missing" and the advice said "leave the limits out". The
+>   error and the texts now name `budgets: {}`.
+> - **The extension spec's sample `cost:` block is refused** by both
+>   layers: four of its keys are design, not built. The spec has a note.
+> - The texts said model calls fail "until the file is fixed"; the file
+>   is read once, so it is until the orchestrator is restarted too.
+> - Tests: the "closed at every level" walk missed an object written
+>   without a `type` keyword and anything inside a list; each schema
+>   value rule was checked at one site only; and CI validated `config/`
+>   but not the demo folders `make validate` walks. All three are closed.
+>
+> Left as it is: the validator is stricter than the loader for a key
+> with no value under `cost` and for a negative price, both on the safe
+> side. And two slips are outside what this fix can see, because the
+> file's top level is open: `per_agent:` moved out to column 0 loads as
+> "no per-agent limit" with the other two limits still set, so without a
+> warning; and `walet:` for `wallet:` loads the wallet's defaults.

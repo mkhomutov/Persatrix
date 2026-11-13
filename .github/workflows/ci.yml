@@ -502,8 +502,12 @@ jobs:
           python -m pip install --upgrade pip
           make build-agents
 
+      # Each demo mounts its own optimization.yaml over the shipped one, so
+      # the demo folders are checked as `make validate` checks them.
       - name: Validate YAML configs
-        run: python agents/validate.py config/
+        run: |
+          python agents/validate.py config/
+          for d in config/demo/*/; do python agents/validate.py "$d"; done
 
       # `make validate` runs this after the schema pass; CI called
       # agents/validate.py directly and skipped it, so a persona whose

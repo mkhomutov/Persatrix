@@ -626,10 +626,14 @@ A limit of `0`, or one left out, means no limit at that scope. The
 `cost.budgets` block itself must be there. The orchestrator refuses an
 `optimization.yaml` without it, and one whose `cost` block holds a key it
 does not know, so a misspelled key cannot turn a limit off; `make validate`
-refuses the same files. A refused file is logged at start-up as
+refuses those files too. To set no limit at all, write `budgets: {}`: a
+`budgets:` key with nothing under it is refused like a missing one. A limit
+must be a finite number, so `.inf` is refused; `0` is how "no limit" is
+written. A refused file is logged at start-up as
 `failed to load cost config, budget enforcement disabled`, and the
 orchestrator then runs with no cost tracking and no wallet service, so
-agents' model calls fail until the file is fixed
+agents' model calls fail until the file is fixed and the orchestrator is
+restarted
 ([ISSUE-0204](../issues/ISSUE-0204-grpc-server-starts-only-if-the-log-buffer-did.md)).
 When the file loads and no limit is above zero, start-up logs the warning
 `no spending limit is set: every limit under cost.budgets is 0 or left out, so nothing caps what agents spend`.

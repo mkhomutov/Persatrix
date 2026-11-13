@@ -142,8 +142,32 @@ func TestLoadCostConfig_RefusesAFileWithNoBudgets(t *testing.T) {
 			_, err := loadCost(t, swap(t, shippedCost, tt.old, tt.new))
 
 			require.Error(t, err)
-			assert.Contains(t, err.Error(), "cost.budgets is missing")
+			assert.Contains(t, err.Error(), "cost.budgets is missing or has no value")
+			assert.Contains(t, err.Error(), "`budgets: {}`",
+				"the error says how to write a block that sets no limit")
 		})
+	}
+}
+
+// A limit that is not a finite number caps nothing: every comparison with
+// NaN is false, and nothing is greater than infinity. Such a file would
+// load, apply no limit and not even warn, so it is refused. An operator who
+// wants no limit writes 0 or leaves the limit out.
+func TestLoadCostConfig_RefusesALimitThatIsNotAFiniteNumber(t *testing.T) {
+	sites := []struct{ old, key, names string }{
+		{"max_daily_usd: 100.00", "max_daily_usd", "global max_daily_usd"},
+		{"default_max_usd: 10.00", "default_max_usd", "per_workflow default_max_usd"},
+		{"default_max_usd: 5.00", "default_max_usd", "per_agent default_max_usd"},
+	}
+	for _, site := range sites {
+		for _, value := range []string{".nan", ".inf", ".NaN", ".Inf"} {
+			t.Run(site.names+" "+value, func(t *testing.T) {
+				_, err := loadCost(t, swap(t, shippedCost, site.old, site.key+": "+value))
+
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), site.names+" must be a finite number")
+			})
+		}
 	}
 }
 
