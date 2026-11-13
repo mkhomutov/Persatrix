@@ -237,6 +237,8 @@ async def test_a_group_channel_turn_that_fails_is_logged_with_its_cause(
     failed = [r for r in caplog.records if "turn failed" in r.getMessage()]
     assert len(failed) == 1
     assert failed[0].levelno == logging.WARNING
+    # The logger an operator filters on; the documents name it.
+    assert failed[0].name == "Persatrix.agent.server"
     assert f"cause={cause.cause}" in failed[0].getMessage()
     assert GROUP in failed[0].getMessage() and AGENT in failed[0].getMessage()
     assert "sk-live" not in failed[0].getMessage()
