@@ -97,3 +97,30 @@ line. Whether the CLI should identify itself is ISSUE-0152's step 3.
 > Unchanged: the CLI still sends no agent id (the open half of
 > [ISSUE-0152](ISSUE-0152-one-quarantine-refuses-every-anonymous-caller.md)'s
 > step 3), and the audit log still has no rotation.
+
+> 2026-11-14 — review of the fix. The throttle held; what it left out
+> did not all hold.
+>
+> - **The count was lost on a stop.** It is kept in memory, so the calls
+>   since the last line went with the process. The orchestrator now
+>   writes them as one last line when it stops, before it closes the
+>   audit log (`FlushUnauthenticatedCount`). Run with the real binary:
+>   300 calls, then a stop, gave two lines that add up to 300. A process
+>   that is killed still loses the calls since its last line.
+> - **That weakens the reason given above for not moving the event out
+>   of the security class.** A batched line is at risk for a quarter of
+>   a second; this count is at risk for up to a window, and through a
+>   flood for as long as the flood lasts. What still holds: the first
+>   call with no agent id is on disk at once, one line a window instead
+>   of one a call, and no other audit writer queues behind a flood. The
+>   choice stands for those; the sentence about a crash does not.
+> - **A line that could not be written took its calls with it.** The
+>   count was cleared before the write. It is now put back when the
+>   write fails and carried by the next line, a window later; the
+>   failure is logged at WARN, where it was at DEBUG.
+> - **A count with no interval misleads.** A line said `31` beside
+>   `window_seconds: 60`, and the 31 could cover hours. Each line now
+>   has `seconds_since_last_event`.
+> - Tests: the count, not only the throttle, is now pinned across an
+>   eviction and a reset of the anonymous bucket, and a limiter with a
+>   ten-second window shows the window is the limiter's own.

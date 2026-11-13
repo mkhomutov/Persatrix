@@ -68,8 +68,9 @@ type RateLimiter struct {
 	// by lastEmitMu. Fields of the limiter, not entries of lastEmit: that map
 	// loses a key when its bucket is evicted or reset, and a flood of
 	// invented agent ids evicts the anonymous bucket at will.
-	anonLastEmit   time.Time // when the last such event was emitted; zero for never
-	anonCallsSince int       // calls with no agent id since that event
+	anonLastEmit   time.Time // when such an event was last attempted; zero for never
+	anonCountFrom  time.Time // when the last one was written; zero for never
+	anonCallsSince int       // calls with no agent id since anonCountFrom
 }
 
 type agentRing struct {
@@ -159,18 +160,8 @@ func (rl *RateLimiter) Allow(ctx context.Context, agentID string) bool {
 	}
 
 	if anon {
-		if calls, ok := rl.shouldEmitAnonymous(now); ok {
-			rl.emit(ctx, AuditEvent{
-				EventType: AuditRateLimitUnauthenticatedCall,
-				AgentID:   resolved,
-				Action:    "rate_limit.check",
-				Resource:  resolved,
-				Outcome:   "warn",
-				Detail: map[string]any{
-					"calls_since_last_event": calls,
-					"window_seconds":         rl.cfg.WindowSeconds,
-				},
-			})
+		if calls, from, ok := rl.shouldEmitAnonymous(now); ok {
+			rl.emitAnonymous(ctx, now, resolved, calls, from)
 		}
 	}
 	if !allowed && rl.shouldEmitViolation(resolved, now) {
@@ -323,20 +314,94 @@ func (rl *RateLimiter) shouldEmitViolation(agentID string, now time.Time) bool {
 // shouldEmitAnonymous throttles `rate_limit.unauthenticated_caller` to at
 // most one event per window, as [RateLimiter.shouldEmitViolation] does for
 // a violation, and counts every call it is asked about. When it says to
-// emit, the count is the number of calls with no agent id since the last
-// event, this one included: so the lines of a log add up to the calls made,
-// short only of those after the last line.
-func (rl *RateLimiter) shouldEmitAnonymous(now time.Time) (int, bool) {
+// emit, it hands out the number of calls with no agent id since the last
+// event that was written, this one included, and when that event was
+// written (zero for none yet). So the lines of a log add up to the calls
+// made, short only of those after the last line: a stop writes those
+// ([RateLimiter.FlushUnauthenticatedCount]), a crash loses them.
+func (rl *RateLimiter) shouldEmitAnonymous(now time.Time) (int, time.Time, bool) {
 	rl.lastEmitMu.Lock()
 	defer rl.lastEmitMu.Unlock()
 	rl.anonCallsSince++
 	if !rl.anonLastEmit.IsZero() && now.Sub(rl.anonLastEmit) < time.Duration(rl.cfg.WindowSeconds)*time.Second {
-		return 0, false
+		return 0, time.Time{}, false
 	}
-	calls := rl.anonCallsSince
+	calls, from := rl.takeAnonymousCountLocked(now)
+	return calls, from, true
+}
+
+// takeAnonymousCountLocked hands out the count and the time it runs from,
+// and starts a new count at now. The caller holds lastEmitMu.
+func (rl *RateLimiter) takeAnonymousCountLocked(now time.Time) (int, time.Time) {
+	calls, from := rl.anonCallsSince, rl.anonCountFrom
 	rl.anonLastEmit = now
+	rl.anonCountFrom = now
 	rl.anonCallsSince = 0
-	return calls, true
+	return calls, from
+}
+
+// emitAnonymous writes one `rate_limit.unauthenticated_caller` event that
+// stands for calls calls made since from.
+//
+// `seconds_since_last_event` says how long the count covers, which is not
+// the window: a caller that comes back after two hours gets a line for
+// everything since the last one. The first line after a start has no
+// earlier line to measure from and leaves the field out.
+//
+// A line that cannot be written keeps its count: the calls go back into
+// the running count and the next line carries them. The throttle is not
+// rewound, so the next attempt is a window away and not on the next call;
+// an audit log that cannot be written is no reason to try once a request.
+func (rl *RateLimiter) emitAnonymous(ctx context.Context, now time.Time, agentID string, calls int, from time.Time) {
+	detail := map[string]any{
+		"calls_since_last_event": calls,
+		"window_seconds":         rl.cfg.WindowSeconds,
+	}
+	if !from.IsZero() {
+		detail["seconds_since_last_event"] = int(now.Sub(from) / time.Second)
+	}
+	err := rl.emitErr(ctx, AuditEvent{
+		EventType: AuditRateLimitUnauthenticatedCall,
+		AgentID:   agentID,
+		Action:    "rate_limit.check",
+		Resource:  agentID,
+		Outcome:   "warn",
+		Detail:    detail,
+	})
+	if err == nil {
+		return
+	}
+	rl.lastEmitMu.Lock()
+	rl.anonCallsSince += calls
+	rl.anonCountFrom = from
+	rl.lastEmitMu.Unlock()
+	rl.cfg.Logger.Warn("rate limiter could not write the unauthenticated-caller audit line; its count is kept for the next one",
+		zap.Int("calls_since_last_event", calls),
+		zap.Error(err),
+	)
+}
+
+// FlushUnauthenticatedCount writes the calls counted since the last
+// `rate_limit.unauthenticated_caller` event as one last event, if there are
+// any. The orchestrator calls it when it stops, before it closes the audit
+// log: the count is held in memory, so without this a stop would drop the
+// calls made since the last line, a refused flood's among them. A process
+// that is killed still loses them. Safe on a nil limiter, which is what the
+// orchestrator has when rate limiting is turned off.
+func (rl *RateLimiter) FlushUnauthenticatedCount(ctx context.Context) {
+	if rl == nil || !rl.cfg.Enabled {
+		return
+	}
+	now := rl.cfg.Now()
+	rl.lastEmitMu.Lock()
+	if rl.anonCallsSince == 0 {
+		rl.lastEmitMu.Unlock()
+		return
+	}
+	calls, from := rl.takeAnonymousCountLocked(now)
+	rl.lastEmitMu.Unlock()
+	resolved, _ := rl.resolveAgentID("")
+	rl.emitAnonymous(ctx, now, resolved, calls, from)
 }
 
 // emit forwards ev to the configured auditor, detaching the parent ctx
@@ -349,21 +414,26 @@ func (rl *RateLimiter) shouldEmitAnonymous(now time.Time) (int, bool) {
 // non-request paths (e.g. background eviction sweeps, tests) must not
 // be forced to synthesise a ctx purely to call into emit.
 func (rl *RateLimiter) emit(ctx context.Context, ev AuditEvent) {
-	if rl.cfg.Auditor == nil {
-		return
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	} else {
-		ctx = context.WithoutCancel(ctx)
-	}
-	if err := rl.cfg.Auditor.Emit(ctx, ev); err != nil {
+	if err := rl.emitErr(ctx, ev); err != nil {
 		rl.cfg.Logger.Debug("rate limiter audit emit failed",
 			zap.String("event_type", string(ev.EventType)),
 			zap.String("agent_id", ev.AgentID),
 			zap.Error(err),
 		)
 	}
+}
+
+// emitErr is [RateLimiter.emit] for a caller that acts on a failed write.
+func (rl *RateLimiter) emitErr(ctx context.Context, ev AuditEvent) error {
+	if rl.cfg.Auditor == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	} else {
+		ctx = context.WithoutCancel(ctx)
+	}
+	return rl.cfg.Auditor.Emit(ctx, ev)
 }
 
 func (r *agentRing) append(t time.Time) {

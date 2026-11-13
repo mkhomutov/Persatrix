@@ -346,9 +346,10 @@ func TestRegistration_UnderEnabledSpendsItsAddressesBudget(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, register("agent-5", "198.51.100.10:5000"))
 
 	// The limiter reports callers with no account once a window, with the
-	// number of calls since its last line (ISSUE-0208). The ten calls above
-	// wrote the first line; one more call a window later writes the second,
-	// which must count those ten and none of the seven registrations.
+	// number of calls since its last line (ISSUE-0208). The first of the ten
+	// calls above wrote the first line; one more call a window later writes
+	// the second, which counts the other nine and itself, and none of the
+	// seven registrations.
 	now = now.Add(61 * time.Second)
 	doRequestWithHeaders(th.h, http.MethodGet, "/api/v1/channels", nil, nil)
 	lines := auditsOf(limiterAudit, security.AuditRateLimitUnauthenticatedCall)
