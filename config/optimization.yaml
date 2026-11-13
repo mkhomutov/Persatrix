@@ -115,6 +115,10 @@ cost:
         input_per_1m_tokens: 0
         output_per_1m_tokens: 0
 
+  # Spending limits in USD. A limit of 0, or one left out, means no limit at
+  # that scope. The block itself must stay: the orchestrator refuses a file
+  # with no cost.budgets, and a key under cost: it does not know, so a
+  # misspelled key cannot turn a limit off. `make validate` refuses both too.
   budgets:
     global:
       max_daily_usd: 100.00

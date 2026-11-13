@@ -1,7 +1,10 @@
 package cost
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -20,6 +23,13 @@ type BudgetThresholds struct {
 	Global      GlobalBudget      `yaml:"global"`
 	PerWorkflow PerWorkflowBudget `yaml:"per_workflow"`
 	PerAgent    PerAgentBudget    `yaml:"per_agent"`
+}
+
+// NoSpendingLimit reports whether no scope has a limit. A limit of zero
+// means no limit ([BudgetEnforcer.CheckBudget] applies one only when it is
+// greater than zero), so with all three at zero nothing caps spending.
+func (b BudgetThresholds) NoSpendingLimit() bool {
+	return b.Global.MaxDailyUSD <= 0 && b.PerWorkflow.DefaultMaxUSD <= 0 && b.PerAgent.DefaultMaxUSD <= 0
 }
 
 // GlobalBudget configures the global daily spending limit.
@@ -53,23 +63,63 @@ var validOnExceedValues = map[string]bool{
 	"":                true, // empty means not configured; defaults to "fail" at enforcement time
 }
 
-// rawOptimizationFile mirrors the top-level structure of optimization.yaml for parsing.
+// rawOptimizationFile is optimization.yaml as this loader reads it: the
+// `cost:` block, and every other top-level key kept unread in Other.
+//
+// The file is decoded strictly ([DecodeOptimizationFile]), so a key the
+// `cost:` block does not have is an error. Other is what makes that possible
+// for one block of a shared file: the top level also holds the blocks other
+// loaders own and one block per profile, under names the operator chooses,
+// and an inline map takes every key no field claims before the strict check
+// can refuse it. Its values are raw nodes, so nothing inside them is checked
+// here.
+//
+// Cost and Budgets are pointers so that a block that is absent can be told
+// from one that is present and empty.
 type rawOptimizationFile struct {
-	Cost rawCostSection `yaml:"cost"`
+	Cost  *rawCostSection      `yaml:"cost"`
+	Other map[string]yaml.Node `yaml:",inline"`
 }
 
 type rawCostSection struct {
 	Pricing rawPricingSection `yaml:"pricing"`
-	Budgets BudgetThresholds  `yaml:"budgets"`
+	Budgets *BudgetThresholds `yaml:"budgets"`
 }
 
 type rawPricingSection struct {
 	Models map[string]ModelPricing `yaml:"models"`
 }
 
+// DecodeOptimizationFile decodes optimization.yaml into out and refuses any
+// key out's fields do not name (ISSUE-0211). The plain decoder drops such a
+// key, and in this file a dropped key reads as zero, which for a spending
+// limit means no limit: `budgetz:` for `budgets:` used to load every cap as
+// unlimited.
+//
+// out is a struct that names the one block its loader owns and takes the
+// rest of the top level in an inline `map[string]yaml.Node`, as
+// [rawOptimizationFile] does. An empty file decodes to the zero value.
+//
+// Exported for internal/wallet, which reads the `wallet:` block of the same
+// file.
+func DecodeOptimizationFile(data []byte, out any) error {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(out); err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	return nil
+}
+
 // LoadCostConfig reads the optimization.yaml file from configDir and parses the
 // cost section (pricing table and budget thresholds). Validates that budget
 // thresholds are non-negative and on_exceed is a recognized value.
+//
+// It refuses a `cost:` block with a key it does not know, and a file with no
+// `cost.budgets` block (ISSUE-0211). A deployment that wants no spending
+// limit says so with the block present and its limits at zero, or left out;
+// [BudgetThresholds.NoSpendingLimit] then reports it, and the orchestrator
+// warns at start-up.
 func LoadCostConfig(configDir string, opts ...ConfigOption) (*CostConfig, error) {
 	o := configOptions{logger: zap.NewNop()}
 	for _, opt := range opts {
@@ -83,13 +133,19 @@ func LoadCostConfig(configDir string, opts ...ConfigOption) (*CostConfig, error)
 	}
 
 	var raw rawOptimizationFile
-	if err := yaml.Unmarshal(data, &raw); err != nil {
+	if err := DecodeOptimizationFile(data, &raw); err != nil {
 		return nil, fmt.Errorf("parse optimization config: %w", err)
+	}
+	if raw.Cost == nil || raw.Cost.Budgets == nil {
+		// A misspelled `cost` lands here too: the top level is open, so
+		// `costs:` is one more key this loader does not own.
+		return nil, fmt.Errorf("validate cost config: cost.budgets is missing from %s; "+
+			"a limit left out or set to 0 means no limit, but the block itself must be there", path)
 	}
 
 	cfg := &CostConfig{
 		Pricing: raw.Cost.Pricing.Models,
-		Budgets: raw.Cost.Budgets,
+		Budgets: *raw.Cost.Budgets,
 		logger:  o.logger,
 	}
 

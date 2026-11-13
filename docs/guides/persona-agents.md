@@ -622,6 +622,18 @@ cost:
       default_max_usd: 5.00
 ```
 
+A limit of `0`, or one left out, means no limit at that scope. The
+`cost.budgets` block itself must be there. The orchestrator refuses an
+`optimization.yaml` without it, and one whose `cost` block holds a key it
+does not know, so a misspelled key cannot turn a limit off; `make validate`
+refuses the same files. A refused file is logged at start-up as
+`failed to load cost config, budget enforcement disabled`, and the
+orchestrator then runs with no cost tracking and no wallet service, so
+agents' model calls fail until the file is fixed
+([ISSUE-0204](../issues/ISSUE-0204-grpc-server-starts-only-if-the-log-buffer-did.md)).
+When the file loads and no limit is above zero, start-up logs the warning
+`no spending limit is set: every limit under cost.budgets is 0 or left out, so nothing caps what agents spend`.
+
 Before every gRPC dispatch the orchestrator calls
 `BudgetEnforcer.CheckBudget` with a worst-case cost estimate (pricing table
 × estimated output tokens). All three scopes are read in a single atomic

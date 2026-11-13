@@ -26,6 +26,10 @@ _SCHEMA = json.loads(
 def _errors(provider_config: dict[str, Any]) -> list[str]:
     doc = {
         "schema_version": "0.3",
+        # The schema requires the cost block (ISSUE-0211).  Without it every
+        # document here would fail, and the bad-value cases below would pass
+        # whatever the settings were.
+        "cost": {"budgets": {}},
         "models": {"aliases": {"quality": {
             "provider": "anthropic", "model": "m",
             "input_per_1m_tokens": 1, "output_per_1m_tokens": 1,

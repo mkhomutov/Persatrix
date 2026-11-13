@@ -1,12 +1,18 @@
 ---
 id: ISSUE-0211
 summary: "The optimization schema has no `cost` section and the Go loader ignores unknown keys, and a limit of zero means no limit. So a misspelled `budgets` key passes `make validate` and loads all three spending caps as unlimited, with one startup log line as the only sign."
-status: open
+status: resolved
 severity: medium
 area: cost
 created: 2026-11-10
+closed: 2026-11-13
 refs:
   - internal/cost/config.go
+  - cmd/orchestrator/cost.go
+  - internal/cost/cost_config_strict_test.go
+  - internal/wallet/config_strict_test.go
+  - tests/unit/python/test_optimization_cost_schema.py
+  - Makefile
   - internal/cost/cost.go
   - internal/wallet/config.go
   - schemas/optimization.schema.json
@@ -68,3 +74,38 @@ control off. The wrong key is silent at validation and at load.
 
 > 2026-11-10 — found by a whole-repository quality review of `main` at
 > `ee9cfaac`; reproduced on a scratch copy of the config folder.
+
+> 2026-11-13 — fixed. Checked against the code at `dd006cba` first: both
+> renames (`budgets` to `budgetz`, `cost` to `costs`) pass validation and
+> load all three limits as 0 there. Two things in the proposed fix did
+> not hold as written:
+>
+> - **The schema's top level cannot be closed.** Besides `active_profile`
+>   it holds one block per optimization profile, under names the operator
+>   chooses (`agents/optimization.py` reads `cfg[<active_profile>]`), so a
+>   closed list would refuse a profile. The schema requires `cost`
+>   instead: a misspelled `cost` reads as one more profile, and the
+>   missing block gives it away.
+> - **The whole file can be decoded strictly after all.** The loader's
+>   struct takes every top-level key it does not own in an inline map,
+>   which the strict check leaves alone, so only the `cost` block is
+>   checked. Error lines are the file's own.
+>
+> What changed:
+>
+> - `LoadCostConfig` refuses a key under `cost` it does not know, and a
+>   file with no `cost.budgets`. The wallet loader refuses an unknown key
+>   under `wallet` the same way.
+> - The schema describes `cost`, closed at every level, and requires it
+>   and `cost.budgets`.
+> - Both options for a missing or empty limit were taken, one each: a
+>   missing `cost.budgets` is an error, and limits that are present and
+>   all zero (the way to say "no limit" on purpose, which the EXP-001
+>   harness does) get a start-up warning.
+> - `make validate` runs over each demo folder as well. All eight
+>   shipped files pass unchanged.
+>
+> A refused cost config leaves the orchestrator running with no wallet,
+> so agents' model calls fail: that is
+> [ISSUE-0204](ISSUE-0204-grpc-server-starts-only-if-the-log-buffer-did.md)'s
+> second path, which this fix makes easier to reach and does not change.
