@@ -34,6 +34,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from ._write_boundary import execute_write
 from .episodic import EpisodicMemory
 
 logger = logging.getLogger(__name__)
@@ -348,9 +349,9 @@ class SharedMemoryPool:
         #740): ``created_at`` ties would else leave the kept set impl-defined
         and, via ``idx_episodes_created``, invert FIFO. ``episodes.id`` uuid4.
         """
-        db = self._episodic._ensure_db()  # noqa: SLF001 — RFC 0008 PR 5
         pool_agent = _pool_agent_id(self._config.name)
-        cursor = await db.execute(
+        cursor = await execute_write(
+            self._episodic._ensure_db(),  # noqa: SLF001 — RFC 0008 PR 5
             """
             DELETE FROM episodes
             WHERE agent_id = ?
@@ -364,7 +365,6 @@ class SharedMemoryPool:
             (pool_agent, pool_agent, self._config.max_entries),
         )
         evicted = cursor.rowcount or 0
-        await db.commit()
         if evicted > 0:
             _record_evictions(self._config.name, evicted)
 

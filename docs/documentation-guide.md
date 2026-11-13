@@ -207,4 +207,4 @@ cap when the gate was introduced are listed in
 condition; execution reports, checklists, generated indexes, and the
 notices file are excluded by pattern because their length is data, not prose.
 Which of these rules are enforced, and where, is in the
-[enforcement matrix](methodology/enforcement-matrix.md).
+[enforcement matrix's documents half](methodology/enforcement-matrix-documents.md).

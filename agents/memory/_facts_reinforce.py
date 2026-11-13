@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 
 from ..clock import agent_now
 from ._facts_audit import emit_audit as _emit_audit
+from ._write_boundary import write_boundary
 
 if TYPE_CHECKING:
     import aiosqlite
@@ -115,15 +116,15 @@ async def mark_recalled_for_agent(
     if not ids:
         return
     timestamp = at if at is not None else agent_now()
-    for chunk in _chunked(ids, _MAX_IDS_PER_UPDATE):
-        placeholders = ",".join("?" for _ in chunk)
-        await db.execute(
-            f"UPDATE facts "  # noqa: S608 — placeholders are literal '?'.
-            f"SET last_recalled_at = MAX(COALESCE(last_recalled_at, 0), ?) "
-            f"WHERE agent_id = ? AND fact_id IN ({placeholders})",
-            (timestamp, agent_id, *chunk),
-        )
-    await db.commit()
+    async with write_boundary(db):
+        for chunk in _chunked(ids, _MAX_IDS_PER_UPDATE):
+            placeholders = ",".join("?" for _ in chunk)
+            await db.execute(
+                f"UPDATE facts "  # noqa: S608 — placeholders are literal '?'.
+                f"SET last_recalled_at = MAX(COALESCE(last_recalled_at, 0), ?) "
+                f"WHERE agent_id = ? AND fact_id IN ({placeholders})",
+                (timestamp, agent_id, *chunk),
+            )
 
     # RFC 0026 §G audit emission — after commit so the log cannot
     # record a write that did not happen.  One record per call (the

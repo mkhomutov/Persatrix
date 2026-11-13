@@ -32,6 +32,7 @@ from ._notes_recall import (
 from ._principal_filter import resolve_active_principal
 from ._salience import NOTES_APPEND_SALIENCE, emit_for_tier, emit_session_write
 from ._session_filter import _resolve_session_list
+from ._write_boundary import execute_write, write_boundary
 from .note_types import (  # noqa: F401 — re-export
     _MAX_NOTE_CONTENT_BYTES,
     _NOTE_COLS,
@@ -167,33 +168,33 @@ class NoteStore(_NoteMutationsMixin):
         # run-b / tenant-b / epoch-b write cannot evict a run-a row.
         # Trade-off is per-(session, principal, epoch) capacity; see
         # :meth:`_prune_notes`.
-        await self._prune_notes(max_notes, session_id, principal_id, epoch_id)
+        async with write_boundary(self._db):
+            await self._prune_notes(max_notes, session_id, principal_id, epoch_id)
 
-        note_id = str(uuid.uuid4())
-        now = agent_now()
-        await self._db.execute(
-            """
-            INSERT INTO notes
-                (id, agent_id, topic, content, tags_json,
-                 access_count, created_at, updated_at, session_id,
-                 principal_id, epoch_id, protection_level)
-            VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                note_id,
-                self._agent_id,
-                topic.strip(),
-                content,
-                json.dumps(tags or []),
-                now,
-                now,
-                session_id,
-                principal_id,
-                epoch_id,
-                protection_level,
-            ),
-        )
-        await self._db.commit()
+            note_id = str(uuid.uuid4())
+            now = agent_now()
+            await self._db.execute(
+                """
+                INSERT INTO notes
+                    (id, agent_id, topic, content, tags_json,
+                     access_count, created_at, updated_at, session_id,
+                     principal_id, epoch_id, protection_level)
+                VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    note_id,
+                    self._agent_id,
+                    topic.strip(),
+                    content,
+                    json.dumps(tags or []),
+                    now,
+                    now,
+                    session_id,
+                    principal_id,
+                    epoch_id,
+                    protection_level,
+                ),
+            )
         # RFC 0031 Phase 2 PR 1 review F2 — increment the per-session write
         # counter via the shared shim.  ``surface="note"`` so dashboards can
         # split the notes tier from the other persona-memory write surfaces
@@ -309,12 +310,12 @@ class NoteStore(_NoteMutationsMixin):
         if notes:
             ids = [n.id for n in notes]
             placeholders = ",".join("?" for _ in ids)
-            await self._db.execute(
+            await execute_write(
+                self._db,
                 f"UPDATE notes SET access_count = access_count + 1 "
                 f"WHERE id IN ({placeholders})",
                 ids,
             )
-            await self._db.commit()
             for note in notes:
                 note.access_count += 1
 

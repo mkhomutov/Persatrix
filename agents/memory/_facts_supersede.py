@@ -124,6 +124,7 @@ from typing import TYPE_CHECKING, NamedTuple
 
 from ..session_id import LEGACY_SESSION_ID
 from ._facts_audit import emit_audit
+from ._write_boundary import execute_write
 from .fact_predicates import SINGLE_VALUED_PREDICATES
 
 if TYPE_CHECKING:
@@ -336,7 +337,8 @@ async def retract_fact(
     :func:`agents.memory._facts_reinforce.mark_recalled_for_agent`.
     Returns ``True`` iff a live row was updated.
     """
-    cursor = await db.execute(
+    cursor = await execute_write(
+        db,
         "UPDATE facts SET superseded_by = ? "
         "WHERE fact_id = ? AND agent_id = ? "
         "AND superseded_by IS NULL "
@@ -344,7 +346,6 @@ async def retract_fact(
         "AND epoch_id = ?",
         (by_fact_id, fact_id, agent_id, principal_id, epoch_id),
     )
-    await db.commit()
     retracted = (cursor.rowcount or 0) > 0
     if retracted:
         emit_audit(

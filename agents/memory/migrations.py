@@ -23,6 +23,7 @@ this module.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import aiosqlite
@@ -174,7 +175,29 @@ END;
 
 
 async def _apply_migrations(db: aiosqlite.Connection) -> None:
-    """Apply all pending schema migrations."""
+    """Apply all pending schema migrations.
+
+    A migration that raises, or a boot cancelled part-way, is rolled
+    back, so the connection is not left holding the database's write
+    lock with half a migration waiting to be committed (ISSUE-0197).
+    A rollback is safe here and not in a tier's own writes (see
+    :mod:`._write_boundary`): migrations run while a tier opens, before
+    anything else uses its connection.  Statements run by
+    ``executescript`` commit themselves and are not undone.
+    """
+    try:
+        await _apply_pending_migrations(db)
+    except (Exception, asyncio.CancelledError):
+        try:
+            await db.rollback()
+        except Exception:
+            logger.warning(
+                "A failed migration could not be rolled back", exc_info=True,
+            )
+        raise
+
+
+async def _apply_pending_migrations(db: aiosqlite.Connection) -> None:
     await db.execute(
         "CREATE TABLE IF NOT EXISTS schema_version "
         "(version INTEGER PRIMARY KEY, applied_at REAL NOT NULL, description TEXT)"

@@ -74,6 +74,7 @@ from ._session_filter import (
     resolve_active_session,
     session_in_clause,
 )
+from ._write_boundary import execute_write
 from .migrations import _apply_migrations
 
 __all__ = [
@@ -352,8 +353,8 @@ class CommitmentStore:
         epoch, epoch_params = epoch_eq_clause(epoch_id, column="epoch_id")
         commitment_id = str(uuid.uuid4())
         now = float(self._clock.now())
-        cursor = await db.execute(
-            _INSERT_UNDER_CAP.format(epoch=epoch),
+        cursor = await execute_write(
+            db, _INSERT_UNDER_CAP.format(epoch=epoch),
             (
                 commitment_id, self._agent_id, description_scan.content,
                 due, target_scan.content if target_scan else None,
@@ -364,7 +365,6 @@ class CommitmentStore:
                 MAX_OPEN_COMMITMENTS,
             ),
         )
-        await db.commit()
         if cursor.rowcount != 1:
             # The rows it counts are mostly ones this turn cannot see.
             raise CommitmentCapError(
@@ -519,12 +519,12 @@ class CommitmentStore:
         fulfilled_at = now if state == "fulfilled" else None
         # The update decides; the read after it only says why it did not.
         # Nothing reopens a row, so the read cannot disagree with it.
-        cursor = await db.execute(
+        cursor = await execute_write(
+            db,
             "UPDATE commitments SET state = ?, fulfilled_at = ? "
             f"WHERE id = ? AND state = 'open' AND {where}",
             (state, fulfilled_at, commitment_id, *params),
         )
-        await db.commit()
         commitment = await self.get(commitment_id)
         if commitment is None:
             raise CommitmentNotFoundError(f"no commitment {commitment_id!r}")

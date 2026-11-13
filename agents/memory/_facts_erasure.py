@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ._write_boundary import write_boundary
 from .fact_predicates import canonicalize_subject
 
 if TYPE_CHECKING:
@@ -93,20 +94,20 @@ async def delete_by_subject(
     strings).  Empty subjects are rejected at the ``FactStore`` boundary
     via :func:`canonicalize_subject`'s value check.
     """
-    cursor = await db.execute(
-        "DELETE FROM facts WHERE agent_id = ? AND subject = ? "
-        "AND principal_id = ?",
-        (agent_id, canonicalize_subject(subject_id), principal_id),
-    )
-    by_subject = cursor.rowcount
-    cursor = await db.execute(
-        "DELETE FROM facts WHERE agent_id = ? "
-        "AND source_interaction_id = ? "
-        "AND principal_id = ?",
-        (agent_id, subject_id, principal_id),
-    )
-    by_source = cursor.rowcount
-    await db.commit()
+    async with write_boundary(db):
+        cursor = await db.execute(
+            "DELETE FROM facts WHERE agent_id = ? AND subject = ? "
+            "AND principal_id = ?",
+            (agent_id, canonicalize_subject(subject_id), principal_id),
+        )
+        by_subject = cursor.rowcount
+        cursor = await db.execute(
+            "DELETE FROM facts WHERE agent_id = ? "
+            "AND source_interaction_id = ? "
+            "AND principal_id = ?",
+            (agent_id, subject_id, principal_id),
+        )
+        by_source = cursor.rowcount
     return {
         "facts_deleted_by_subject": by_subject,
         "facts_deleted_by_source_interaction": by_source,
