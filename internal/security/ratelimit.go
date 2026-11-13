@@ -64,6 +64,12 @@ type RateLimiter struct {
 	lru        *list.List               // front = MRU, back = LRU
 	lastEmitMu sync.Mutex
 	lastEmit   map[string]time.Time // throttles `rate_limit.violated` per agent
+	// Throttle of `rate_limit.unauthenticated_caller` (ISSUE-0208), guarded
+	// by lastEmitMu. Fields of the limiter, not entries of lastEmit: that map
+	// loses a key when its bucket is evicted or reset, and a flood of
+	// invented agent ids evicts the anonymous bucket at will.
+	anonLastEmit   time.Time // when the last such event was emitted; zero for never
+	anonCallsSince int       // calls with no agent id since that event
 }
 
 type agentRing struct {
@@ -109,9 +115,11 @@ func NewRateLimiter(cfg RateLimitConfig) (*RateLimiter, error) {
 // the admission timestamp on success.
 //
 // An empty agentID is treated as the anonymous bucket so unauthenticated
-// callers cannot bypass the limiter; an `rate_limit.unauthenticated_caller`
-// audit event is emitted (security-class, fsync'd) so operators can
-// detect flooding attempts.
+// callers cannot bypass the limiter. Such calls are reported by a
+// `rate_limit.unauthenticated_caller` audit event (security-class, fsync'd),
+// at most one per WindowSeconds; each carries the number of calls it stands
+// for, refused ones included (ISSUE-0208). One event per call made a flood
+// the limiter refused cost one disk sync per request all the same.
 //
 // On deny, an `rate_limit.violated` event is emitted (throttled per
 // agent to one event per WindowSeconds to avoid amplifying the very
@@ -151,13 +159,19 @@ func (rl *RateLimiter) Allow(ctx context.Context, agentID string) bool {
 	}
 
 	if anon {
-		rl.emit(ctx, AuditEvent{
-			EventType: AuditRateLimitUnauthenticatedCall,
-			AgentID:   resolved,
-			Action:    "rate_limit.check",
-			Resource:  resolved,
-			Outcome:   "warn",
-		})
+		if calls, ok := rl.shouldEmitAnonymous(now); ok {
+			rl.emit(ctx, AuditEvent{
+				EventType: AuditRateLimitUnauthenticatedCall,
+				AgentID:   resolved,
+				Action:    "rate_limit.check",
+				Resource:  resolved,
+				Outcome:   "warn",
+				Detail: map[string]any{
+					"calls_since_last_event": calls,
+					"window_seconds":         rl.cfg.WindowSeconds,
+				},
+			})
+		}
 	}
 	if !allowed && rl.shouldEmitViolation(resolved, now) {
 		rl.emit(ctx, AuditEvent{
@@ -304,6 +318,25 @@ func (rl *RateLimiter) shouldEmitViolation(agentID string, now time.Time) bool {
 	}
 	rl.lastEmit[agentID] = now
 	return true
+}
+
+// shouldEmitAnonymous throttles `rate_limit.unauthenticated_caller` to at
+// most one event per window, as [RateLimiter.shouldEmitViolation] does for
+// a violation, and counts every call it is asked about. When it says to
+// emit, the count is the number of calls with no agent id since the last
+// event, this one included: so the lines of a log add up to the calls made,
+// short only of those after the last line.
+func (rl *RateLimiter) shouldEmitAnonymous(now time.Time) (int, bool) {
+	rl.lastEmitMu.Lock()
+	defer rl.lastEmitMu.Unlock()
+	rl.anonCallsSince++
+	if !rl.anonLastEmit.IsZero() && now.Sub(rl.anonLastEmit) < time.Duration(rl.cfg.WindowSeconds)*time.Second {
+		return 0, false
+	}
+	calls := rl.anonCallsSince
+	rl.anonLastEmit = now
+	rl.anonCallsSince = 0
+	return calls, true
 }
 
 // emit forwards ev to the configured auditor, detaching the parent ctx

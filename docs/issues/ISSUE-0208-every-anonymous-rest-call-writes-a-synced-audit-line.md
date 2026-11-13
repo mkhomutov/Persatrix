@@ -1,12 +1,14 @@
 ---
 id: ISSUE-0208
 summary: "Under the default `auth.mode: disabled`, every REST call with no agent id writes one audit line that is flushed to disk before the call continues, including calls the rate limiter then refuses. A flood the limiter rejects still costs one disk flush per request, and the first-party CLI, which sends no agent id, adds thousands of lines a day to a log that is never rotated."
-status: open
+status: resolved
 severity: medium
 area: security
 created: 2026-11-10
+closed: 2026-11-13
 refs:
   - internal/security/ratelimit.go
+  - internal/security/ratelimit_anonymous_event_test.go
   - internal/security/audit_event.go
   - internal/security/audit.go
   - internal/security/middleware.go
@@ -66,3 +68,31 @@ line. Whether the CLI should identify itself is ISSUE-0152's step 3.
 > 2026-11-10 — found by a whole-repository quality review of `main` at
 > `ee9cfaac`; the counts come from a throwaway Go test against the
 > middleware.
+
+> 2026-11-13 — fixed by throttling. Checked against the code at
+> `dd006cba` first: the Summary and Context hold as written, and the
+> measurement reproduces (500 calls, 60 served, 440 refused, 500 lines in
+> a real audit file).
+>
+> The limiter now writes at most one `rate_limit.unauthenticated_caller`
+> line per window, as it does for `rate_limit.violated`. Each line
+> carries `calls_since_last_event`: the calls with no agent id since the
+> line before it, refused ones and this one included. So a refused flood
+> costs one disk sync a window, and the lines still add up to the calls
+> made, short of those after the last line.
+>
+> The other option, moving the event out of the security class, was not
+> taken. It would have ended the sync per call, but kept one line per
+> call: a log with no rotation would still gain about 17 000 lines a day
+> from one `persatrix channel watch`, and every audit writer would still
+> queue behind them. It would also have given up the reason the event
+> is synced at all, which is that a flood is when a batched line is most
+> likely to be lost in a crash.
+>
+> The throttle's state belongs to the limiter, not to the per-agent maps:
+> those lose a key when its bucket is evicted or reset, and a flood of
+> invented agent ids evicts the anonymous bucket at will.
+>
+> Unchanged: the CLI still sends no agent id (the open half of
+> [ISSUE-0152](ISSUE-0152-one-quarantine-refuses-every-anonymous-caller.md)'s
+> step 3), and the audit log still has no rotation.

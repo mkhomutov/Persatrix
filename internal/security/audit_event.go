@@ -183,8 +183,10 @@ func AllAuditEventTypes() []AuditEventType {
 //     boundaries an operator must be able to detect after the fact.
 //   - Unauthenticated-caller rate-limit hits (PR #232 review SF-6) are emitted
 //     under flooding attack conditions exactly when batched events are most
-//     likely to be lost on crash; per-event fsync cost is bounded by the
-//     rate limit itself.
+//     likely to be lost on crash. The limiter emits at most one per window
+//     (ISSUE-0208), which is what bounds the per-event fsync cost: it used
+//     to emit one per call, refused calls included, so the rate limit did
+//     not bound it.
 //
 // Everything else (`tool.invoked`, `memory.read`, etc.) is telemetry-class
 // and may be batched.

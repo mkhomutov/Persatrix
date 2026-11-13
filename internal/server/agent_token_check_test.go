@@ -322,8 +322,10 @@ func TestRegistration_UnderEnabledSpendsItsAddressesBudget(t *testing.T) {
 	// budget kept every agent from registering (PR 8 review F-2); it is
 	// counted by its address, as the registration limiter counts it.
 	limiterAudit := &recordingAuditor{}
+	now := time.Now()
 	rl, err := security.NewRateLimiter(security.RateLimitConfig{
 		CallsPerWindow: 5, WindowSeconds: 60, Enabled: true, Logger: zap.NewNop(), Auditor: limiterAudit,
+		Now: func() time.Time { return now },
 	})
 	require.NoError(t, err)
 	_, cb := productionShapedLimiter(t, &recordingAuditor{})
@@ -336,13 +338,21 @@ func TestRegistration_UnderEnabledSpendsItsAddressesBudget(t *testing.T) {
 			registerBody(id, "localhost:50051"), remote, asAgent(id, "")).Code
 	}
 
-	anonymous := len(auditsOf(limiterAudit, security.AuditRateLimitUnauthenticatedCall))
 	for i := 0; i < 5; i++ {
 		require.Equal(t, http.StatusCreated, register(fmt.Sprintf("agent-%d", i), "198.51.100.9:5000"), i)
 	}
-	assert.Len(t, auditsOf(limiterAudit, security.AuditRateLimitUnauthenticatedCall), anonymous,
-		"a registration is not counted as a caller with no account")
 	assert.Equal(t, http.StatusTooManyRequests, register("agent-5", "198.51.100.9:5001"),
 		"one address shares one budget")
 	assert.Equal(t, http.StatusCreated, register("agent-5", "198.51.100.10:5000"))
+
+	// The limiter reports callers with no account once a window, with the
+	// number of calls since its last line (ISSUE-0208). The ten calls above
+	// wrote the first line; one more call a window later writes the second,
+	// which must count those ten and none of the seven registrations.
+	now = now.Add(61 * time.Second)
+	doRequestWithHeaders(th.h, http.MethodGet, "/api/v1/channels", nil, nil)
+	lines := auditsOf(limiterAudit, security.AuditRateLimitUnauthenticatedCall)
+	require.Len(t, lines, 2)
+	assert.Equal(t, 10, lines[1].Detail["calls_since_last_event"],
+		"a registration is not counted as a caller with no account")
 }
