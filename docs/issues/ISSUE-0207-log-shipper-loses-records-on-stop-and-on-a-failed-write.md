@@ -112,3 +112,39 @@ still queued as dropped at that point.
 > The record-to-wire conversion moved to
 > `agents/observability/log_record_proto.py`, to keep `log_shipper.py`
 > under the 500-line warning.
+
+> 2026-11-14 — review of the fix. One finding was a new cost of the
+> fix itself.
+>
+> - **Memory grew through an outage.** Each failed attempt logs a
+>   warning with its traceback, and the agent's logging chain hands
+>   that record to the shipper like any other. The traceback holds the
+>   frame of the failed attempt, and so the whole batch it had encoded.
+>   Before the fix such a record was lost with the next failed batch;
+>   with batches going back to the queue they piled up, one batch kept
+>   alive per attempt. A queued record no longer keeps `exc_info` or the
+>   logging record; neither was ever sent. Run with the real logging
+>   chain against a closed port, 256 queued records of about 500 bytes
+>   and 400 failed attempts: 400 batches alive and 162 MiB before, one
+>   batch and 78 MiB after.
+> - **"Shipped or dropped" did not hold on three paths**: a record
+>   handed over after the stop, one arriving from another thread while
+>   the stop ran, and a stop before any start. A stopped shipper now
+>   counts a late record as dropped, and a stop that was never started
+>   counts what was queued.
+> - **The shipper counted its own stop warning.** The line it logs when
+>   a stream fails during a stop was queued into the shipper that was
+>   stopping, so three undelivered records were reported as "4 of 4".
+>   The process-wide handle is now cleared before the stop does anything
+>   else.
+> - **"Not delivered" said too much.** The count is records the
+>   orchestrator did not acknowledge; it acknowledges every 32, so some
+>   of them arrived. The warning and the texts say "not acknowledged".
+> - The stop's one attempt uses the connection as it is. Straight after
+>   an outage the connection is still waiting to retry, the attempt
+>   fails at once, and what was queued through the outage is not sent.
+>   Left as it is, and now stated: waiting for the connection would hold
+>   every stop for the full timeout whenever the orchestrator is down.
+> - [ISSUE-0246](ISSUE-0246-the-log-shippers-counters-reach-no-metric.md)
+>   said no metric instrument for dropped records existed. One does and
+>   is never recorded; that issue is corrected.

@@ -26,7 +26,10 @@ Key invariants
 * **Every record is counted** (ISSUE-0207): a record is *shipped* once
   the orchestrator has acknowledged it, and *dropped* when it leaves the
   shipper any other way.  After ``stop()``,
-  ``enqueued == shipped + dropped``.
+  ``enqueued == shipped + dropped``, and a record handed to a stopped
+  shipper is counted as dropped.  "Dropped" means not acknowledged: the
+  orchestrator may have received a record it had not yet acknowledged
+  when the stream ended.
 
 The record → wire conversion is :mod:`.log_record_proto`.
 """
@@ -54,6 +57,15 @@ from .log_record_proto import record_to_proto
 #: the LLM context buffers but enough headroom to absorb a multi-second
 #: orchestrator hiccup.  Override via PERSATRIX_LOG_SHIPPER_QUEUE.
 MAX_QUEUE = 5000
+
+#: Keys a queued record does not keep.  Neither reaches the wire
+#: (``record_to_proto`` leaves them out), and both hold live objects: a
+#: traceback keeps every frame it passed through alive, and a frame of
+#: this module holds the batch it was sending.  The shipper's own
+#: "stream error" warning is queued with such a traceback on every failed
+#: attempt, so through an outage each one would keep a whole batch alive,
+#: and the estimate above would not hold.
+_NOT_QUEUED = ("exc_info", "_record")
 
 #: Maximum entries per outgoing :class:`LogBatch`.  Must stay at or under
 #: the orchestrator-side cap (``maxEntriesPerBatch``, 1024, in
@@ -138,6 +150,9 @@ class Shipper:
         # (PR #173 review Must-Fix #3.)
         self._queue: deque[dict[str, Any]] = deque()
         self._queue_lock = threading.Lock()
+        # Set, under the lock, once stop() has counted what was left: a
+        # record that arrives after that has nobody to send it.
+        self._closed = False
         self._wake = asyncio.Event()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._stopping = asyncio.Event()
@@ -174,12 +189,19 @@ class Shipper:
         a non-loop thread mutated the deque and ``Event`` directly,
         which is undefined and could wedge the drain task.)
         """
+        if any(key in record for key in _NOT_QUEUED):
+            record = {k: v for k, v in record.items() if k not in _NOT_QUEUED}
         with self._queue_lock:
+            self.enqueued += 1
+            if self._closed:
+                # Stopped: a caller on another thread, or one that still
+                # holds the shipper.  Counted, so the counters add up.
+                self.dropped += 1
+                return
             if len(self._queue) >= self.max_queue:
                 self._queue.popleft()
                 self.dropped += 1
             self._queue.append(record)
-            self.enqueued += 1
         # Wake the drain task.  When called from the loop thread the
         # direct .set() is fine; from another thread we must hop onto
         # the loop because asyncio.Event is not thread-safe.  start()
@@ -219,33 +241,43 @@ class Shipper:
         orchestrator does not hold up agent shutdown indefinitely.
         Whatever was not acknowledged by then, and whatever is still
         queued, is counted as dropped (ISSUE-0207), and a WARNING says how
-        many records that was.
+        many records that was.  The orchestrator may have received some of
+        them: it acknowledges every few records, and nothing says which
+        arrived after its last acknowledgement.
+
+        The process-wide handle is cleared first.  From here on a log line
+        goes to the process's own log output only: the lines this stop
+        itself logs must not be queued into the shipper that is stopping,
+        where they would be counted as records it failed to deliver.
+
+        Safe to call again, and before :meth:`start`: a shipper that never
+        started still counts what was queued.
         """
-        if self._task is None:
-            return
-        self._stopping.set()
-        self._wake.set()
-        try:
-            await asyncio.wait_for(self._task, timeout=timeout)
-        except TimeoutError:
-            self._task.cancel()
-            with contextlib.suppress(BaseException):
-                await self._task
-        self._task = None
+        task, self._task = self._task, None
+        with self._queue_lock:
+            if task is None and self._closed:
+                return
+        set_active_shipper(None)
+        if task is not None:
+            self._stopping.set()
+            self._wake.set()
+            try:
+                await asyncio.wait_for(task, timeout=timeout)
+            except TimeoutError:
+                task.cancel()
+                with contextlib.suppress(BaseException):
+                    await task
         self._drop_queued()
         # Close the channel only when the shipper opened it — an
         # externally-supplied channel is closed by its owner (RFC 0023).
         if self._channel is not None and not self._external_channel:
             await self._channel.close()
         self._channel = None
-        set_active_shipper(None)
-        # After the handle is cleared, so this line goes to the process's
-        # own log output and not into a shipper that has stopped.
         if self.dropped:
             logger.warning(
-                "log shipper stopped: %d of %d record(s) were not delivered "
-                "to the orchestrator (every record is in this process's own "
-                "log output)",
+                "log shipper stopped: %d of %d record(s) were not acknowledged "
+                "by the orchestrator (some may have arrived; every record is "
+                "in this process's own log output)",
                 self.dropped, self.enqueued,
             )
 
@@ -292,10 +324,12 @@ class Shipper:
                 backoff = min(backoff * 2.0, RECONNECT_BACKOFF_CAP_SEC)
 
     def _drop_queued(self) -> None:
-        """Count every record still queued as dropped, and empty the queue."""
+        """Count every record still queued as dropped, empty the queue,
+        and close it: :meth:`enqueue` counts a later record as dropped."""
         with self._queue_lock:
             self.dropped += len(self._queue)
             self._queue.clear()
+            self._closed = True
 
     def _requeue(self, records: list[dict[str, Any]]) -> None:
         """Put *records* back at the front of the queue, oldest first.

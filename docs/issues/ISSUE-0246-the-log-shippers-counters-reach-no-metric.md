@@ -1,6 +1,6 @@
 ---
 id: ISSUE-0246
-summary: "The agent's log shipper counts the records it enqueues, delivers and drops, and nothing reads the counts: they are attributes of an object, not a metric. RFC 0018 names a `logs_shipped_dropped_total` counter that was never added, so an operator learns of lost log records only from one WARNING when the agent stops."
+summary: "The agent's log shipper counts the records it enqueues, delivers and drops, and nothing reads the counts: they are attributes of an object, not a metric. The counter the docs say is exported for dropped log records (`agent.observability.logs.dropped`) exists and is never recorded, so an operator learns of lost log records only from one WARNING when the agent stops."
 status: open
 severity: low
 area: agents/observability
@@ -18,10 +18,13 @@ refs:
 
 `Shipper` (`agents/observability/log_shipper.py`) keeps four counters:
 `enqueued`, `shipped`, `dropped` and `last_ack_seq`. Its own comment
-says they are "surfaced for tests and (future) metric instruments". No
-instrument exists. RFC 0018's design says an overflow "increments
-`logs_shipped_dropped_total`"; `agents/observability/metrics.py`
-defines no such counter and nothing reads `Shipper.dropped`.
+says they are "surfaced for tests and (future) metric instruments".
+Nothing reads `Shipper.dropped`. The instrument for it exists and is
+never recorded: `agents/observability/metrics.py` defines
+`logs_dropped` (`agent.observability.logs.dropped`, "Reserved here;
+emitted by RFC 0018 PR 5"), and only a test ever adds to it.
+`docs/observability.md` and RFC 0019 list it as an exported drop
+counter with a `reason` attribute, which is not true yet.
 
 ## Context
 
@@ -47,8 +50,10 @@ proposed here, not ruled.
 
 ## Proposed fix / investigation path
 
-Add counters for enqueued, shipped and dropped records to the agents'
-metric instruments, and record them from the shipper. The shipper's
+Record the existing `logs_dropped` counter from the shipper, with the
+`reason` the docs name (a full queue, an unacknowledged write, a stop,
+a record that cannot be encoded), and do not add a second drop counter.
+Counters for enqueued and shipped records would be new. The shipper's
 counters only go up, so they map onto monotonic counters as they are.
 `enqueue()` runs on any thread and must not block: record from the
 drain task, by the difference since the last record, not from the hot
@@ -59,3 +64,7 @@ path.
 > 2026-11-13 — noticed while fixing
 > [ISSUE-0207](ISSUE-0207-log-shipper-loses-records-on-stop-and-on-a-failed-write.md),
 > which says the counters "should reveal the loss".
+
+> 2026-11-14 — corrected in review of the ISSUE-0207 fix. This issue
+> first said no instrument existed. One does, `logs_dropped`; it is
+> never recorded, and two docs say it is exported.

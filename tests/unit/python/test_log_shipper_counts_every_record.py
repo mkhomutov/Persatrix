@@ -361,7 +361,7 @@ class TestStop:
         assert [(r.name, r.levelno) for r in stopped] == [
             ("Persatrix.agent.log_shipper", logging.WARNING),
         ]
-        assert "3 of 3 record(s) were not delivered" in stopped[0].getMessage()
+        assert "3 of 3 record(s) were not acknowledged" in stopped[0].getMessage()
 
     async def test_it_says_nothing_when_all_were_delivered(
         self, connect: Any, caplog: pytest.LogCaptureFixture,

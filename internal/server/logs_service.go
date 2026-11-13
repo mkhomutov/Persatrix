@@ -3,8 +3,10 @@
 // Receives streamed log batches from agents (and any other LogService
 // client), validates each entry, and admits it to the orchestrator's
 // per-execution ring buffer.  Sends periodic LogAck messages so the
-// shipper can advance its in-memory high-water mark and free already-
-// acked entries.
+// shipper knows how many of the entries it wrote have arrived: an entry
+// counts as shipped there once an ack covers it (ISSUE-0207).  The
+// shipper's queue is not what an ack frees; an entry leaves that queue
+// when it is written.
 package server
 
 import (
@@ -27,9 +29,11 @@ import (
 const maxEntriesPerBatch = 1024
 
 // ackEveryN is the LogAck cadence: send one ack per N admitted
-// entries.  Keeps the bidi stream lively (the shipper uses the ack to
-// free its in-memory queue) without flooding it.  RFC 0018 § E does not
-// pin the value; 32 matches typical batched-shipper sizing.
+// entries.  Keeps the bidi stream lively (the shipper counts an entry as
+// shipped once an ack covers it) without flooding it.  So when a stream
+// breaks, up to N-1 entries that did arrive are unacknowledged, and the
+// shipper counts them as dropped.  RFC 0018 § E does not pin the value;
+// 32 matches typical batched-shipper sizing.
 const ackEveryN = 32
 
 // LogServiceServer is the gRPC LogService implementation registered on

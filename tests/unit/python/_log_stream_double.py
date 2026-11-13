@@ -26,6 +26,9 @@ class Stream:
 
     #: The write (counted from 0) that fails, as when nothing listens.
     fail_write_at: int | None = None
+    #: The failing write's batch reached the orchestrator all the same, and
+    #: its acknowledgement is on the way when the write reports the failure.
+    failed_write_arrived: bool = False
     #: When the orchestrator acknowledges: after each batch; after each
     #: batch but arriving only as the next write starts ("late"); only once
     #: it has read the whole stream; or never.
@@ -68,6 +71,10 @@ class Call:
             self._acks.append(self._count)
             self._changed.set()
         if self._script.fail_write_at == index:
+            if self._script.failed_write_arrived:
+                self._orchestrator.received.extend(e.message for e in batch.entries)
+                self._count += len(batch.entries)
+                self._acks.append(self._count)
             # A call whose write fails is over: its reader ends too.
             self._broken = True
             self._changed.set()

@@ -5,7 +5,8 @@ words to :func:`assert_absent`, which fails if any of them appears. For a
 record it reads everything on the record that a log sink could write,
 because the sinks write more than the message: the JSON renderer
 (``agents/observability/logging.py``) writes a record's ``extra`` fields
-under their own names, and it and the log shipper (``log_shipper._coerce``)
+under their own names, and it and the log shipper
+(``log_record_proto._coerce``)
 write a value that is not plain JSON as its ``repr()``, which can say more
 than its ``str()``. What the renderer adds from outside the record, such as
 bound structlog context or a pretty traceback's local variables, is only on
