@@ -29,6 +29,8 @@ from agents.tools.registry import ToolDefinition, ToolResult, clear_registry, ge
 from agents.tools.sandbox import PathValidator
 from agents.tools.tool_list import AdmittedCall, admit_call
 
+from ._http_response_fakes import give_body
+
 _OFF_TYPE: list[Any] = [30, 30.0, True, ["x"], {"k": "v"}, None]
 
 # Each narrowed built-in parameter, with arguments the tool runs on; a note id
@@ -85,7 +87,7 @@ async def _admit_and_run(name: str, arguments: dict[str, Any]) -> ToolResult | L
 
 def _ok_http_session() -> MagicMock:
     resp = AsyncMock(status=200, headers={})
-    resp.text = AsyncMock(return_value="ok")
+    give_body(resp, "ok")
     resp.__aenter__ = AsyncMock(return_value=resp)
     session = AsyncMock()
     session.request = MagicMock(return_value=resp)
