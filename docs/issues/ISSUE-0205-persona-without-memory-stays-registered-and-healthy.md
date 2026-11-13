@@ -6,6 +6,7 @@ severity: medium
 area: agents
 created: 2026-11-10
 closed: 2026-11-13
+closed_pr: 1114
 refs:
   - agents/server_persona.py
   - agents/server_cli.py
