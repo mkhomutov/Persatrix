@@ -291,8 +291,10 @@ Endpoint shapes match the [RFC §C endpoint table](../rfcs/0011-channels-bridges
 
 A thread stays in its channel. A publish whose `thread_id` is not the id of a
 message in the same channel is refused with `400`, whether that message is in
-another channel or does not exist. The thread route answers `404` unless the
-message in its path is in the channel in its path.
+another channel or does not exist. So is a reply under a message whose own
+thread leads into another channel, which only a store written to before this
+rule can hold. The thread route answers `404` unless the message in its path
+is in the channel in its path.
 
 ---
 

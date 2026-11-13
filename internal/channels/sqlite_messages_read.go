@@ -152,10 +152,10 @@ func (s *sqliteStore) GetThread(ctx context.Context, threadID string, limit int)
 // channel's classification.
 //
 // The `+` in front of `channel_id` keeps that term out of index selection.
-// Without it the planner may walk the whole channel in `idx_messages_channel_ts`
-// order, which also gives the ORDER BY for free, and filter on `thread_id`:
-// a read as long as the channel, where `idx_messages_thread` reads only the
-// thread.
+// Without it a store that has gathered no statistics yet walks the whole
+// channel in `idx_messages_channel_time` order, which also gives the ORDER BY
+// for free, and filters on `thread_id`: a read as long as the channel, where
+// `idx_messages_thread` reads only the thread.
 func threadQuery(threadID string, limit int) (string, []any) {
 	q := `SELECT ` + messageColumns + `
 	        FROM messages

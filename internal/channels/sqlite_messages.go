@@ -33,7 +33,8 @@ const (
 // The transaction holds:
 //  1. membership check (sender must be in the channel) — ErrNotMember on miss
 //  2. thread-parent check (a `thread_id` must name a message in this
-//     channel) — ErrThreadParentNotInChannel on miss
+//     channel whose own thread stays in it) — ErrThreadParentNotInChannel
+//     on miss
 //  3. INSERT against `messages`
 //  4. cap enforcement: if the post-insert row count exceeds
 //     `maxMessagesPerChannel`, delete the oldest excess rows (`thread_id`
@@ -173,25 +174,20 @@ func (s *sqliteStore) PublishMessage(ctx context.Context, msg ChannelMessage) er
 			return fmt.Errorf("channels: duplicate message id %s", msg.ID)
 		}
 		if isForeignKeyViolation(err) {
-			// The INSERT touches two FK columns: `channel_id` and (when set)
-			// `thread_id`. modernc.org/sqlite reports both with the same
-			// `SQLITE_CONSTRAINT_FOREIGNKEY` extended code, so we
-			// disambiguate by re-probing the channel row inside the same
-			// transaction (see PR #231 review-2 Nice-to-Have #1):
+			// The INSERT has two foreign keys, `channel_id` and `thread_id`,
+			// and modernc.org/sqlite reports both with the same
+			// `SQLITE_CONSTRAINT_FOREIGNKEY` extended code. `thread_id`
+			// cannot be the one that fired: requireThreadParentInChannel
+			// found the parent a moment ago, in this transaction, on the
+			// store's one connection. So the channel row is probed again
+			// (see PR #231 review-2 Nice-to-Have #1):
 			//
 			//   * channel row missing → ErrChannelNotFound (the channel was
 			//     dropped between the membership probe and this INSERT;
 			//     memberships cascade-delete with the channel, so the probe
 			//     could still have read its own snapshot).
-			//   * channel row present, ThreadID set → the violation must be
-			//     on `thread_id`; surface as "invalid thread_id".
-			//   * channel row present, ThreadID empty → only `channel_id`
-			//     could violate; reaching this branch means the channel
-			//     vanished between probe and re-probe (rare but possible).
-			//
-			// Round 1 only handled the ThreadID == "" path; round 2 widens
-			// the disambiguation so a non-empty ThreadID with a concurrent
-			// channel deletion no longer surfaces as "invalid thread_id".
+			//   * channel row present → nothing explains the violation;
+			//     it is surfaced raw.
 			var chCount int
 			if probeErr := tx.QueryRowContext(ctx,
 				`SELECT COUNT(1) FROM channels WHERE id = ?`, msg.ChannelID).Scan(&chCount); probeErr != nil {
@@ -201,12 +197,6 @@ func (s *sqliteStore) PublishMessage(ctx context.Context, msg ChannelMessage) er
 				return fmt.Errorf("%w: %s (deleted concurrently)",
 					ErrChannelNotFound, msg.ChannelID)
 			}
-			if msg.ThreadID == "" {
-				// Channel still present yet the FK fired with no thread_id
-				// supplied — this is unexpected; surface raw.
-				return fmt.Errorf("channels: insert message: %w", err)
-			}
-			return fmt.Errorf("channels: invalid thread_id %s: %w", msg.ThreadID, err)
 		}
 		return fmt.Errorf("channels: insert message: %w", err)
 	}
@@ -222,8 +212,24 @@ func (s *sqliteStore) PublishMessage(ctx context.Context, msg ChannelMessage) er
 	return nil
 }
 
+// threadAncestrySQL walks from a message up its thread: the message, the one
+// it replies to, and so on to the thread's first message. Arguments: the
+// other channel's id to count against, then the message's id. It returns how
+// many rows the walk met and how many of them are outside that channel. Each
+// step finds one row by its primary key. `UNION`, not `UNION ALL`, so a
+// chain that loops back on itself still ends.
+const threadAncestrySQL = `
+	WITH RECURSIVE ancestry(id, channel_id, thread_id) AS (
+	    SELECT id, channel_id, thread_id FROM messages WHERE id = ?2
+	    UNION
+	    SELECT m.id, m.channel_id, m.thread_id
+	      FROM ancestry a JOIN messages m ON m.id = a.thread_id
+	)
+	SELECT COUNT(*), COALESCE(SUM(channel_id <> ?1), 0) FROM ancestry`
+
 // requireThreadParentInChannel refuses a message whose `thread_id` names a
-// message outside the channel it is published to (ISSUE-0203).
+// message outside the channel it is published to, or a message whose own
+// thread leads outside it (ISSUE-0203).
 //
 // The schema's foreign key on `thread_id` says the parent exists, not where
 // it is. A reply accepted under another channel's message was read through
@@ -232,21 +238,28 @@ func (s *sqliteStore) PublishMessage(ctx context.Context, msg ChannelMessage) er
 // parent's channel, or pruning the parent at the message cap, removed a
 // message from a channel the action never named.
 //
+// The cascade runs down the whole thread, so the parent's channel alone is
+// not enough. A store written to before this rule can hold a reply under
+// another channel's message, and a new reply under that one (or under a
+// reply to it) would go with the other channel's message all the same. The
+// walk therefore covers the parent and everything above it.
+//
 // A parent that does not exist gets the same error as one in another
 // channel, so the refusal does not tell a caller that an id exists
-// elsewhere. Checked here, inside PublishMessage's transaction, so every
-// caller is covered: the router and the REST fallback that has no router.
+// elsewhere. Checked here, inside PublishMessage's transaction and after its
+// membership rule, so every caller is covered (the router, and the REST
+// fallback that has no router) and a sender outside the channel learns
+// nothing from a thread id.
 func requireThreadParentInChannel(ctx context.Context, tx *sql.Tx, msg ChannelMessage) error {
 	if msg.ThreadID == "" {
 		return nil
 	}
-	var parentChannel string
-	err := tx.QueryRowContext(ctx,
-		`SELECT channel_id FROM messages WHERE id = ?`, msg.ThreadID).Scan(&parentChannel)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	var found, elsewhere int
+	if err := tx.QueryRowContext(ctx, threadAncestrySQL, msg.ChannelID, msg.ThreadID).
+		Scan(&found, &elsewhere); err != nil {
 		return fmt.Errorf("channels: lookup thread parent: %w", err)
 	}
-	if err != nil || parentChannel != msg.ChannelID {
+	if found == 0 || elsewhere > 0 {
 		return fmt.Errorf("channels: invalid thread_id %s: %w", msg.ThreadID, ErrThreadParentNotInChannel)
 	}
 	return nil
@@ -340,9 +353,8 @@ func isUniqueViolation(err error) bool {
 }
 
 // isForeignKeyViolation reports whether err signals a SQLite FOREIGN KEY
-// constraint failure (e.g., AddMember against a missing channel id, or
-// PublishMessage with a non-existent thread_id). Same typed-first /
-// substring-fallback strategy as [isUniqueViolation].
+// constraint failure (e.g., AddMember against a missing channel id). Same
+// typed-first / substring-fallback strategy as [isUniqueViolation].
 func isForeignKeyViolation(err error) bool {
 	if err == nil {
 		return false

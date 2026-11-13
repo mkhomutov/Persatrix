@@ -99,3 +99,31 @@ the thread read unless the message's `channel_id` equals the path's.
 > message as its parent, so it is still deleted with it. Nothing in the
 > agent runtime sends a `thread_id` on a publish, so only a REST or CLI
 > caller that named another channel's message can have made one.
+
+> 2026-11-14 — review of the fix. One gap was found and closed, and one
+> thing the note above says is wider than written.
+>
+> - **A new reply could still be lost.** The check looked at the
+>   parent's channel only. An older reply that sits in this channel under
+>   another channel's message passed it, so a new reply under that one
+>   was accepted and then deleted with the other channel's message: the
+>   cascade runs down the whole thread. The check now walks from the
+>   parent to the top of its thread and refuses the reply if any message
+>   on the way is in another channel
+>   (`TestSQLiteStore_PublishMessage_RefusesAReplyUnderAThreadThatLeavesTheChannel`).
+>   No message published since the fix can be removed by an action on
+>   another channel.
+> - **Still not repaired.** An older crossing reply, and every reply
+>   stored below it before the fix, is deleted with the other channel's
+>   message. `SELECT r.id FROM messages r JOIN messages p ON p.id =
+>   r.thread_id WHERE p.channel_id <> r.channel_id` lists the crossing
+>   replies.
+> - The membership rule runs before the thread check, so a sender
+>   outside the channel gets the same refusal whatever the thread id
+>   names. That order is now pinned by a test.
+> - The store's old foreign-key branch for a `thread_id` that names no
+>   message can no longer be reached and was removed with its test; the
+>   new table covers the case.
+> - Found on the way, in code this fix did not change: a reply to a full
+>   channel's oldest message is deleted by its own publish
+>   ([ISSUE-0247](ISSUE-0247-reply-to-a-full-channels-oldest-message-is-deleted-by-its-own-publish.md)).

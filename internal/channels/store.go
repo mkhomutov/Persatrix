@@ -131,7 +131,11 @@ type ChannelStore interface {
 	//
 	// Returns [ErrNotMember] if `msg.SenderID` is not a member of
 	// `msg.ChannelID`, [ErrChannelNotFound] if the target channel does not
-	// exist. On success, oldest-first pruning runs in the same transaction
+	// exist, and [ErrThreadParentNotInChannel] if `msg.ThreadID` names a
+	// message that is not in `msg.ChannelID`, does not exist, or sits in a
+	// thread that leads into another channel (ISSUE-0203). The membership
+	// rule is checked first, so a sender outside the channel learns nothing
+	// from a thread id. On success, oldest-first pruning runs in the same transaction
 	// when the post-insert row count exceeds the cap; the message-with-
 	// thread-replies case cascades correctly through the `thread_id` FK.
 	//
@@ -178,8 +182,11 @@ type ChannelStore interface {
 	// transcript, which always carries it.
 	GetHistoryScoped(ctx context.Context, channelID, participantID string, limit int, before time.Time) ([]ChannelMessage, error)
 
-	// GetThread returns all messages whose `thread_id` equals `threadID`,
-	// ordered by `timestamp` ascending. Capped at `limit`; pass 0 for no cap.
+	// GetThread returns the messages whose `thread_id` equals `threadID` and
+	// that are in the same channel as the message `threadID` names, ordered
+	// by `timestamp` ascending. Capped at `limit`; pass 0 for no cap. A
+	// reply stored in another channel before ISSUE-0203 is left out, so one
+	// channel's classification is true for everything returned.
 	GetThread(ctx context.Context, threadID string, limit int) ([]ChannelMessage, error)
 
 	// RecallMessages searches the verbatim text of stored messages, scoped to
