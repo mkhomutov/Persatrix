@@ -8,8 +8,8 @@ was built by ``SendChatMessage`` (discriminated by a ``chat_session_id``
 metadata key — set by :meth:`AgentServiceServicer.SendChatMessage`,
 absent on receiver-side channel events), and must let
 :class:`BudgetExceededError` propagate so the chat handler can surface it
-as ``ChatResponse.reply_status="error"`` instead of swallowing it into a
-generic ``COMPLETE_TASK("LLM provider error")``.
+as ``ChatResponse.reply_status="error"`` instead of swallowing it into
+the generic provider failure (``LLM provider error``).
 
 The receiver-side channel-message origin flips to
 ``CAUSE_CHANNEL_MESSAGE`` in PR 6 — dedicated coverage lives in
@@ -37,7 +37,7 @@ from agents.llm_client import LLMClient, LLMResponse, StopReason, Usage
 from agents.persona import create_persona_agent
 from agents.persona_runtime import _LLMPersonaAgent
 from agents.persona_runtime.memory_context import MemoryInjectionResult
-from agents.persona_types import ActionType, AgentEvent, EventType
+from agents.persona_types import AgentEvent, EventType, turn_failure
 from agents.wallet_client import BudgetExceededError
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -253,12 +253,13 @@ class TestChatPathBudgetErrorPropagation:
         assert "budget exceeded" in str(excinfo.value).lower()
 
     @pytest.mark.asyncio
-    async def test_generic_provider_error_still_caught_as_complete_task(self) -> None:
+    async def test_generic_provider_error_is_still_caught(self) -> None:
         """Non-budget exceptions still degrade gracefully — PR 4 must not break that.
 
-        A bare provider outage (network, 5xx, etc.) should still produce a
-        ``COMPLETE_TASK`` action so the dispatcher / chat handler can render
-        a generic error reply, exactly as in v0.2.3. Only
+        A bare provider outage (network, 5xx, etc.) is still caught in the
+        action loop and returned as the generic provider failure, which
+        since ISSUE-0199 is a failed turn each caller renders, not a
+        ``COMPLETE_TASK`` carrying the sentence. Only
         :class:`BudgetExceededError` is newly distinguished.
         """
         provider = AsyncMock()
@@ -274,6 +275,6 @@ class TestChatPathBudgetErrorPropagation:
         ):
             actions = await agent.on_event(_chat_event())
 
-        assert len(actions) == 1
-        assert actions[0].action_type == ActionType.COMPLETE_TASK
-        assert "LLM provider error" in actions[0].payload.get("result", "")
+        failure = turn_failure(actions)
+        assert failure is not None
+        assert (failure.cause, failure.message) == ("provider_error", "LLM provider error")

@@ -290,8 +290,8 @@ class TestChannelBudgetDenialPropagates:
     a channel-message has the channel itself as the failure surface: the
     recipient ``BaseAgent.on_event`` handler reports the failure, and the
     orchestrator-side router records the denial — but the agent must not
-    swallow it into a ``COMPLETE_TASK("LLM provider error")`` which would
-    look like a normal provider outage.
+    swallow it into the generic provider failure (``LLM provider error``),
+    which would look like a normal provider outage.
     """
 
     @pytest.mark.asyncio

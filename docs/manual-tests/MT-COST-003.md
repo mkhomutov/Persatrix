@@ -255,9 +255,13 @@ succeeded.
 **Scenario**: Wallet grants the lease, but the LLM provider returns a 5xx / connection error.
 
 **Expected Behavior**: The persona action loop's generic `except Exception` arm catches the
-provider error and surfaces it as a `COMPLETE_TASK` action with `result="LLM provider error"`,
-which the chat-reply extractor maps to `reply_status="ok"` with `reply="LLM provider error"`.
-*This is the pre-PR 4 behaviour and is unchanged* — PR 4 distinguishes only budget denials.
+provider error and returns a failed turn. The agent answers on the DM with an error reply, so
+the chat request returns HTTP 200 with `reply_status="error"` and `reply="LLM provider error"`.
+The provider's own error text is never in the reply.
+(Corrected 2026-11-12 with the fix for
+[ISSUE-0199](../issues/ISSUE-0199-persona-failures-travel-as-completed-work.md). This step
+used to expect `reply_status="ok"` with the same text, which is what the unused gRPC chat RPC
+returned; on the REST chat path the agent published nothing and the request ended in a 504.)
 The wallet's provisional charge is reconciled at settle-at-granted on the lease's context
 exit (RFC 0023 § F), so the provider outage does not silently leak free spend.
 

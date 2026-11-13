@@ -1,7 +1,7 @@
 ---
 id: ISSUE-0199
-summary: "The persona runtime reports its own failures as a completed task whose result is an English sentence. A workflow step served by a persona succeeds with the text `LLM provider error`, a persona that runs out of model calls posts that diagnostic into its channel, and a provider failure, a cut-off reply or a time-out on a DM publishes nothing, so the person gets a 504."
-status: open
+summary: "Two of three effects fixed: a persona turn that fails used to be reported as a completed task whose result was an English sentence. A workflow step served by a persona now ends FAILED, and a DM gets an error reply for every cause where it got nothing and the person a 504. Still open: a persona that runs out of model calls on a group channel posts that diagnostic sentence into the channel."
+status: in_progress
 severity: high
 area: agents/persona_runtime
 created: 2026-11-10
@@ -15,6 +15,15 @@ refs:
   - tests/unit/python/test_persona_agent_factory.py
   - docs/issues/ISSUE-0065-chat-rest-budget-denied-no-channel-reply.md
   - docs/issues/ISSUE-0066-chat-rest-resource-exhausted-no-channel-reply.md
+  - agents/persona_types.py
+  - tests/unit/python/test_persona_turn_failure.py
+  - internal/server/chat_handler.go
+  - internal/channels/floor_control.go
+  - docs/issues/ISSUE-0239-a-wallet-denial-posts-its-error-sentence-into-a-group-channel.md
+  - docs/issues/ISSUE-0240-a-wallet-denial-on-a-personas-workflow-step-fails-as-internal-error.md
+  - docs/issues/ISSUE-0244-a-dms-error-reply-is-an-ordinary-message-in-the-channel-record.md
+  - agents/tick.py
+  - tests/unit/python/test_persona_turn_failure_edges.py
 ---
 
 # ISSUE-0199: A persona's own failures travel as completed work
@@ -85,3 +94,48 @@ What each caller then does:
 > 2026-11-10 — found by a whole-repository quality review of `main` at
 > `ee9cfaac`; all three effects reproduced with scratch probes that drive
 > the persona with a failing or looping model double.
+
+> 2026-11-12 — the first two steps of the fix. All three effects were
+> reproduced first on `main` at `0f3eb3ac`, on events that carry a
+> `channel_id`: every cause in the table ended a workflow step
+> `COMPLETED` with its sentence; a DM got nothing for five causes and
+> the sentence as an ordinary reply for the sixth; a group channel got
+> that sentence, mentioning the sender, when the model calls ran out.
+>
+> One row of the table is wrong. `No LLM response` is not "the provider
+> returned nothing": a provider call returns a response or raises. It
+> is what a persona with `max_llm_calls: 0` returns, having made no
+> call. A task agent in that state says `Max LLM call iterations
+> exceeded`, and so does the persona now.
+>
+> What changed. A failed turn returns one `DO_NOTHING` that carries the
+> cause and a fixed sentence under a private payload key
+> (`agents/persona_types.py`); it is not a new action type and never
+> reaches the wire. `PersonaAgent.handle` returns `FAILED` with the
+> result text `BaseAgent._run_llm_loop` gives for the same cause, which
+> changes two of the sentences. On a DM the channel path publishes the
+> `reply_status: error` reply a wallet denial gets, with the cause as
+> its `error_reason`; the orchestrator's chat handler
+> (`internal/server/chat_handler.go`, read and not changed) then answers
+> HTTP 200 with `reply_status: "error"` where it answered 504. That
+> holds for five of the six causes. For an event time-out the request
+> still ends in a 504 under the shipped settings, because the persona's
+> time-out (300 seconds) is never shorter than the request's wait (30
+> by default, 300 at most), and the error reply is published after it
+> ([ISSUE-0244](ISSUE-0244-a-dms-error-reply-is-an-ordinary-message-in-the-channel-record.md)).
+> A tick whose turn failed is not an idle tick, as before, so a persona
+> goes on trying through a provider outage; a tick that times out, or
+> that the wallet denies, was already an idle one and still is. Whether
+> a failed turn is recorded in memory is as it was: only one that ran
+> out of model calls is, and now without the sentence standing in for a
+> reply.
+>
+> What remains is the third step: on a group channel a persona that
+> runs out of model calls still posts `Max LLM call budget exhausted
+> after N iterations` as an ordinary message. The other five causes post
+> nothing there, as before, and each now logs a WARNING with its cause.
+>
+> Two things seen beside it and filed:
+> [ISSUE-0239](ISSUE-0239-a-wallet-denial-posts-its-error-sentence-into-a-group-channel.md)
+> and
+> [ISSUE-0240](ISSUE-0240-a-wallet-denial-on-a-personas-workflow-step-fails-as-internal-error.md).

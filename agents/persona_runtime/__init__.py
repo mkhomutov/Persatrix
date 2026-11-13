@@ -58,11 +58,13 @@ from ..observability.metrics import (
 from ..observability.spans import PERSONA_EVENT_SPAN, PERSONA_TICK_SPAN
 from ..persona import PersonaAgent
 from ..persona_types import (
+    FAILURE_EVENT_TIMEOUT,
     ActionType,
     AgentAction,
     AgentEvent,
     EventType,
     PersonaState,
+    failed_turn,
 )
 from ..request_scope import request_scope_from_metadata
 from ..tools.registry import ToolDefinition
@@ -395,12 +397,10 @@ class _LLMPersonaAgent(
                         "completed",
                         attributes={"event.outcome": "timeout"},
                     )
-                    return [AgentAction(
-                        action_type=ActionType.COMPLETE_TASK,
-                        payload={
-                            "result": f"Event processing timed out after {timeout:.0f}s",
-                        },
-                    )]
+                    return failed_turn(
+                        FAILURE_EVENT_TIMEOUT,
+                        f"Event processing timed out after {timeout:.0f}s",
+                    )
 
     async def on_tick(self) -> list[AgentAction]:
         """Autonomous tick — recovers energy, then decides on actions.

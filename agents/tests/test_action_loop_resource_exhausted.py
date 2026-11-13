@@ -45,7 +45,7 @@ from agents.llm_client import LLMClient
 from agents.persona import create_persona_agent
 from agents.persona_runtime import _LLMPersonaAgent
 from agents.persona_runtime.memory_context import MemoryInjectionResult
-from agents.persona_types import ActionType, AgentEvent, EventType
+from agents.persona_types import ActionType, AgentEvent, EventType, turn_failure
 
 # ─── Fixtures (mirror test_action_loop_tick_lease.py / _chat_lease.py) ───────
 
@@ -333,10 +333,10 @@ class TestResourceExhaustedTickShortCircuit:
 class TestNonResourceExhaustedGrpcCodes:
     """Only ``RESOURCE_EXHAUSTED`` is back-pressure.  Other gRPC codes
     (``INTERNAL`` / ``UNAVAILABLE`` / ``INVALID_ARGUMENT``) indicate
-    real provider-side problems and must still degrade to the
-    ``COMPLETE_TASK("LLM provider error")`` generic surface so the
-    chat handler / dispatcher renders a generic error reply rather
-    than masking the failure as fake back-pressure.
+    real provider-side problems and must still be the generic provider
+    failure (a failed turn with the text ``LLM provider error``, since
+    ISSUE-0199; a ``COMPLETE_TASK`` carrying that text before) rather
+    than be masked as fake back-pressure.
 
     Same rationale as the dispatcher-layer
     ``test_resource_exhausted_other_grpc_codes_fall_through`` regression
@@ -345,7 +345,7 @@ class TestNonResourceExhaustedGrpcCodes:
     """
 
     @pytest.mark.asyncio
-    async def test_internal_falls_through_to_complete_task(self) -> None:
+    async def test_internal_is_a_provider_failure(self) -> None:
         client = _make_client_raising(
             _rpc_error(grpc.StatusCode.INTERNAL, details="provider 500"),
         )
@@ -356,18 +356,18 @@ class TestNonResourceExhaustedGrpcCodes:
             ):
                 actions = await agent.on_event(_channel_event())
 
-            assert len(actions) == 1
-            assert actions[0].action_type == ActionType.COMPLETE_TASK, (
+            failure = turn_failure(actions)
+            assert failure is not None, (
                 "ISSUE-0066: non-RESOURCE_EXHAUSTED gRPC errors must still "
-                "degrade to COMPLETE_TASK so they are not masked as "
+                "be a provider failure so they are not masked as "
                 "back-pressure"
             )
-            assert "LLM provider error" in actions[0].payload.get("result", "")
+            assert (failure.cause, failure.message) == ("provider_error", "LLM provider error")
         finally:
             await agent.close_memory()
 
     @pytest.mark.asyncio
-    async def test_unavailable_falls_through_to_complete_task(self) -> None:
+    async def test_unavailable_is_a_provider_failure(self) -> None:
         client = _make_client_raising(
             _rpc_error(grpc.StatusCode.UNAVAILABLE, details="provider down"),
         )
@@ -378,17 +378,18 @@ class TestNonResourceExhaustedGrpcCodes:
             ):
                 actions = await agent.on_event(_channel_event())
 
-            assert actions[0].action_type == ActionType.COMPLETE_TASK
+            failure = turn_failure(actions)
+            assert failure is not None and failure.cause == "provider_error"
         finally:
             await agent.close_memory()
 
 
-# ─── Non-gRPC exceptions still degrade to COMPLETE_TASK ─────────────────────
+# ─── Non-gRPC exceptions are still the generic provider failure ─────────────
 
 
 class TestGenericExceptionStillCaught:
     """A bare provider outage (network, 5xx through HTTP client, etc.)
-    still degrades to ``COMPLETE_TASK`` exactly as in pre-fix v0.3.2.
+    is still the generic provider failure, as it was before ISSUE-0066.
     The narrow RESOURCE_EXHAUSTED arm must not regress this generic
     path or the dispatcher's
     ``test_generic_exception_does_not_publish_error_reply`` regression
@@ -396,7 +397,7 @@ class TestGenericExceptionStillCaught:
     """
 
     @pytest.mark.asyncio
-    async def test_runtime_error_falls_through_to_complete_task(self) -> None:
+    async def test_runtime_error_is_a_provider_failure(self) -> None:
         client = _make_client_raising(RuntimeError("provider 503"))
         agent = await _make_agent(client)
         try:
@@ -405,8 +406,8 @@ class TestGenericExceptionStillCaught:
             ):
                 actions = await agent.on_event(_channel_event())
 
-            assert len(actions) == 1
-            assert actions[0].action_type == ActionType.COMPLETE_TASK
-            assert "LLM provider error" in actions[0].payload.get("result", "")
+            failure = turn_failure(actions)
+            assert failure is not None
+            assert (failure.cause, failure.message) == ("provider_error", "LLM provider error")
         finally:
             await agent.close_memory()

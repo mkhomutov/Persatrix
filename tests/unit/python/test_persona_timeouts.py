@@ -9,7 +9,13 @@ import pytest
 from agents.llm_client import LLMClient, LLMResponse
 from agents.persona import create_persona_agent
 from agents.persona_runtime.memory_context import MemoryInjectionResult
-from agents.persona_types import ActionType, AgentEvent, EventType, PersonaState
+from agents.persona_types import (
+    ActionType,
+    AgentEvent,
+    EventType,
+    PersonaState,
+    turn_failure,
+)
 
 from ._persona_test_helpers import _PERSONA_CONFIG, _make_client, _task
 
@@ -45,9 +51,10 @@ class TestEventTimeout:
             payload={"content": "hello"},
         )
         actions = await agent.on_event(event)
-        assert len(actions) == 1
-        assert actions[0].action_type == ActionType.COMPLETE_TASK
-        assert "timed out" in actions[0].payload["result"].lower()
+        # ISSUE-0199: a failed turn, not a completed task with a sentence.
+        failure = turn_failure(actions)
+        assert failure is not None and failure.cause == "event_timeout"
+        assert "timed out" in failure.message.lower()
         await agent.close_memory()
 
     async def test_normal_event_within_timeout(self):

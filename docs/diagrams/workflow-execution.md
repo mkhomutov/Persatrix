@@ -164,6 +164,8 @@ sequenceDiagram
     else lease refused (spending limit or lease cap)
         Wallet-->>Agent: refused
         Agent->>Srv: POST /api/v1/channels/{id}/messages<br/>(refusal text · reply_status=error)
+    else the turn fails (provider error · reply cut off · model calls run out)
+        Agent->>Srv: POST /api/v1/channels/{id}/messages<br/>(a fixed sentence · reply_status=error)
     end
     Srv->>Router: PublishAsync(reply)
     Router->>Router: store the reply · wake the waiter
@@ -213,6 +215,13 @@ How the pieces fit:
   holds too many leases — the agent posts the refusal as its reply, marked
   `reply_status="error"`. The handler then returns HTTP 200 with
   `reply_status="error"` and the refusal text in `reply`.
+- **A turn that fails is answered the same way.** If the provider call
+  raises, the reply is cut off at `max_tokens`, or the model calls run out,
+  the agent posts a fixed sentence such as `LLM provider error` as its reply,
+  marked `reply_status="error"`, and never the provider's own error text. A
+  turn that times out is answered too, but by default only after this request
+  has returned 504
+  ([ISSUE-0244](../issues/ISSUE-0244-a-dms-error-reply-is-an-ordinary-message-in-the-channel-record.md)).
 - **Memory is written once per conversation.** Each turn joins the open DM
   conversation, which the agent keeps in its own process. Once the DM has
   been quiet for `interaction_idle_timeout_sec` (600 s by default), the agent

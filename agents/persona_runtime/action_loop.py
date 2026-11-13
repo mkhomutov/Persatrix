@@ -19,14 +19,19 @@ from ..memory.working import WorkingMemory
 from ..observability._metrics_persona_tick import tick_idle_attrs
 from ..observability.metrics import replay_attrs, try_get_instruments
 from ..persona_types import (
+    FAILURE_LLM_CALLS_EXHAUSTED,
+    FAILURE_MODEL_NOT_CONFIGURED,
+    FAILURE_RESPONSE_TRUNCATED,
     ActionType,
     AgentAction,
     AgentEvent,
     EventType,
     PersonaState,
+    failed_turn,
 )
 from ..prompt_prefix import prompt_prefix
 from ..response_gate import evaluate_response_gate
+from ..response_policies import _DM_CHANNEL_PREFIX
 from .action_parser import parse_actions
 from .channel_ingest import sanitize_inbound_event
 from .channel_reply import synthesize_channel_reply
@@ -44,6 +49,22 @@ if TYPE_CHECKING:
     from .memory_context import MemoryInjectionResult
 
 logger = logging.getLogger(__name__)
+
+_CALLS_EXHAUSTED = "Max LLM call iterations exceeded"
+
+
+def _posts_exhaustion_sentence(event: AgentEvent) -> bool:
+    """Whether running out of model calls on *event* still posts a sentence.
+
+    On a group channel it does, as an ordinary message, exactly as before:
+    stopping that is the third step of ISSUE-0199 and is kept apart from
+    the first two.  A workflow task and a DM get a failed turn instead.
+    """
+    return (
+        event.event_type is EventType.CHANNEL_MESSAGE
+        and bool(event.channel_id)
+        and not (event.channel_id or "").startswith(_DM_CHANNEL_PREFIX)
+    )
 
 __all__ = ["_ActionLoopMixin"]
 
@@ -154,10 +175,9 @@ class _ActionLoopMixin(_ToolRoundMixin):
         # self.config["model"] deep inside the LLM call produces an
         # unclear traceback.  Matches BaseAgent._run_llm_loop() SF2 pattern.
         if "model" not in self.config:
-            return [AgentAction(
-                action_type=ActionType.COMPLETE_TASK,
-                payload={"result": "Agent config missing required 'model' field"},
-            )]
+            return failed_turn(
+                FAILURE_MODEL_NOT_CONFIGURED, "Agent config missing required 'model' field",
+            )
 
         # RFC 0011 PR 5: ingest sanitization — apply ``sanitize`` once
         # at the runtime boundary so downstream consumers (LLM prompt,
@@ -191,7 +211,7 @@ class _ActionLoopMixin(_ToolRoundMixin):
         # RFC 0011 PR 4b: response gate — see agents/response_gate.py.
         # Gate runs *after* the LLM-client / model-config checks above on
         # purpose: a misconfigured agent surfaces the misconfig as a
-        # COMPLETE_TASK("…") result rather than silently swallowing
+        # failed turn (ISSUE-0199) rather than silently swallowing
         # channel traffic. Reordering would cost an operator hours of
         # "why is this agent quiet?" — see Q-1 in the PR #252 review.
         decision = evaluate_response_gate(event, agent_id=self.agent_id)
@@ -347,37 +367,40 @@ class _ActionLoopMixin(_ToolRoundMixin):
             # END_TURN or MAX_TOKENS — break out
             break
 
+        # The three ways the loop ends with no answer are failed turns
+        # (ISSUE-0199), each with the result text ``BaseAgent._run_llm_loop``
+        # gives for the same cause.
         if response is None:
-            return [AgentAction(
-                action_type=ActionType.COMPLETE_TASK,
-                payload={"result": "No LLM response"},
-            )]
+            # ``max_llm_calls`` allowed no call at all.
+            return failed_turn(FAILURE_LLM_CALLS_EXHAUSTED, _CALLS_EXHAUSTED)
 
         # 3a. Handle MAX_TOKENS — the LLM truncated its response before
         # completing.  Parsing truncated text as actions would produce
         # malformed JSON that silently falls back to COMPLETE_TASK with
-        # garbage content.  Return a descriptive action instead, consistent
-        # with BaseAgent._run_llm_loop() which returns FAILED for MAX_TOKENS.
+        # garbage content.
         if response.stop_reason == StopReason.MAX_TOKENS:
             logger.warning(
                 "Agent %s response truncated (max_tokens)", self.agent_id,
             )
-            return [AgentAction(
-                action_type=ActionType.COMPLETE_TASK,
-                payload={"result": "Response truncated: max_tokens limit reached"},
-            )]
+            return failed_turn(
+                FAILURE_RESPONSE_TRUNCATED, "LLM response truncated: max_tokens limit reached",
+            )
 
-        # 3b. Detect max_llm_calls exhaustion: if the loop ended while
-        # the LLM was still requesting tool use, the budget was hit
-        # without a natural stop. Log a warning and set a descriptive
-        # fallback so callers can distinguish this from a normal empty
-        # completion (review finding: silent budget exhaustion).
+        # 3b. Detect max_llm_calls exhaustion: the loop ended while the LLM
+        # was still requesting tool use, so the budget was hit without a
+        # natural stop.
         if response.stop_reason == StopReason.TOOL_USE:
             logger.warning(
                 "Agent %s exhausted max_llm_calls=%d without natural stop",
                 self.agent_id,
                 max_llm_calls,
             )
+            if not _posts_exhaustion_sentence(event):
+                # This turn was recorded before it counted as a failure, and
+                # still is: with no reply, where the sentence used to be.
+                await self._store_event_episode(event, [])
+                await self._persist_persona_state()
+                return failed_turn(FAILURE_LLM_CALLS_EXHAUSTED, _CALLS_EXHAUSTED)
             response = LLMResponse(
                 text=f"Max LLM call budget exhausted after {max_llm_calls} iterations",
                 stop_reason=StopReason.END_TURN,

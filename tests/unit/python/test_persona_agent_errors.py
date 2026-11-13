@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 from agents.llm_client import LLMResponse, StopReason, ToolCall
 from agents.persona import create_persona_agent
-from agents.persona_types import ActionType, AgentEvent, EventType, Mood
+from agents.persona_types import ActionType, AgentEvent, EventType, Mood, turn_failure
 
 from ._persona_test_helpers import _PERSONA_CONFIG, _make_client, _task
 
@@ -131,10 +131,10 @@ class TestMaxTokensStopReason:
         event = AgentEvent(event_type=EventType.TASK_ASSIGNED, payload={"task": _task()})
         actions = await agent.on_event(event)
 
-        assert len(actions) == 1
-        assert actions[0].action_type == ActionType.COMPLETE_TASK
-        assert "truncated" in actions[0].payload["result"].lower()
-        assert "max_tokens" in actions[0].payload["result"]
+        # ISSUE-0199: a failed turn, with the task agent's text for it.
+        failure = turn_failure(actions)
+        assert failure is not None and failure.cause == "response_truncated"
+        assert failure.message == "LLM response truncated: max_tokens limit reached"
         await agent.close_memory()
 
     async def test_max_tokens_after_tool_use_round(self):
@@ -159,9 +159,8 @@ class TestMaxTokensStopReason:
         event = AgentEvent(event_type=EventType.TASK_ASSIGNED, payload={"task": _task()})
         actions = await agent.on_event(event)
 
-        assert len(actions) == 1
-        assert actions[0].action_type == ActionType.COMPLETE_TASK
-        assert "truncated" in actions[0].payload["result"].lower()
+        failure = turn_failure(actions)
+        assert failure is not None and failure.cause == "response_truncated"
         await agent.close_memory()
 
 
@@ -190,9 +189,9 @@ class TestMissingModelConfig:
         event = AgentEvent(event_type=EventType.TASK_ASSIGNED, payload={"task": _task()})
         actions = await agent.on_event(event)
 
-        assert len(actions) == 1
-        assert actions[0].action_type == ActionType.COMPLETE_TASK
-        assert "model" in actions[0].payload["result"].lower()
+        failure = turn_failure(actions)
+        assert failure is not None and failure.cause == "model_not_configured"
+        assert "model" in failure.message.lower()
         await agent.close_memory()
 
 
