@@ -21,6 +21,9 @@ refs:
   - internal/channels/floor_control.go
   - docs/issues/ISSUE-0239-a-wallet-denial-posts-its-error-sentence-into-a-group-channel.md
   - docs/issues/ISSUE-0240-a-wallet-denial-on-a-personas-workflow-step-fails-as-internal-error.md
+  - docs/issues/ISSUE-0244-a-dms-error-reply-is-an-ordinary-message-in-the-channel-record.md
+  - agents/tick.py
+  - tests/unit/python/test_persona_turn_failure_edges.py
 ---
 
 # ISSUE-0199: A persona's own failures travel as completed work
@@ -114,10 +117,18 @@ What each caller then does:
 > `reply_status: error` reply a wallet denial gets, with the cause as
 > its `error_reason`; the orchestrator's chat handler
 > (`internal/server/chat_handler.go`, read and not changed) then answers
-> HTTP 200 with `reply_status: "error"` where it answered 504. A failed
-> tick counts as idle, as a timed-out tick already did. Whether a failed
-> turn is recorded in memory is as it was: only one that ran out of
-> model calls is, and now without the sentence standing in for a reply.
+> HTTP 200 with `reply_status: "error"` where it answered 504. That
+> holds for five of the six causes. For an event time-out the request
+> still ends in a 504 under the shipped settings, because the persona's
+> time-out (300 seconds) is never shorter than the request's wait (30
+> by default, 300 at most), and the error reply is published after it
+> ([ISSUE-0244](ISSUE-0244-a-dms-error-reply-is-an-ordinary-message-in-the-channel-record.md)).
+> A tick whose turn failed is not an idle tick, as before, so a persona
+> goes on trying through a provider outage; a tick that times out, or
+> that the wallet denies, was already an idle one and still is. Whether
+> a failed turn is recorded in memory is as it was: only one that ran
+> out of model calls is, and now without the sentence standing in for a
+> reply.
 >
 > What remains is the third step: on a group channel a persona that
 > runs out of model calls still posts `Max LLM call budget exhausted

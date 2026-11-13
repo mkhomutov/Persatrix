@@ -11,6 +11,8 @@ refs:
   - agents/server_servicers.py
   - agents/persona_runtime/llm_call_errors.py
   - docs/issues/ISSUE-0199-persona-failures-travel-as-completed-work.md
+  - docs/observability.md
+  - docs/guides/persona-agents.md
 ---
 
 # ISSUE-0240: A wallet denial on a persona's workflow step fails as `Internal error`
@@ -37,6 +39,14 @@ Reproduced on `main` at `0f3eb3ac` with a model double that raises
 `BaseAgent._run_llm_loop` (`agents/base.py`) catches the denial and
 builds that result, with `budget_scope` and `budget_reason` beside the
 `error_type`.
+
+The wallet's other refusal takes the same path: when the agent is at its
+lease or rate limit the call raises `RESOURCE_EXHAUSTED`, which the
+persona's loop re-raises too, and the step ends as `Internal error`. Two
+documents promise `error_type=budget_exceeded` for a workflow task
+denied by the wallet (`docs/observability.md`,
+`docs/guides/persona-agents.md`); for a step served by a persona that is
+not what happens.
 
 ## Impact
 

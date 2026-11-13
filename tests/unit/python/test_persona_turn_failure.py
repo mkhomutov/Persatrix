@@ -49,7 +49,9 @@ from ._persona_test_helpers import _PERSONA_CONFIG, _task
 
 AGENT = "ember-owl"
 DM = f"dm:user-1:{AGENT}"
-GROUP = "general"
+#: A real group channel id.  The memory scope, the interaction boundary and
+#: the vote close each take another branch for an id without the prefix.
+GROUP = "group:general"
 
 #: What a provider's own error can hold.  It must reach no caller.
 SECRET = "401 from https://provider.internal: bad key sk-live-123"
@@ -234,7 +236,7 @@ async def test_a_group_channel_turn_that_fails_is_logged_with_its_cause(
     name: str, caplog: pytest.LogCaptureFixture,
 ) -> None:
     cause = CAUSES[name]
-    with caplog.at_level(logging.WARNING, logger="agents.chat_reply"):
+    with caplog.at_level(logging.WARNING, logger="Persatrix.agent.server"):
         await _channel_turn(cause, GROUP)
     failed = [r for r in caplog.records if "turn failed" in r.getMessage()]
     assert len(failed) == 1
