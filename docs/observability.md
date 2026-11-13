@@ -439,7 +439,7 @@ operator-visible outcome:
 | Autonomous TICK | Action loop short-circuits to `DO_NOTHING`; `agent.persona.tick.idle{idle_reason="budget_denied"}` counter increments. No `agent.llm.call` span is emitted. |
 | Workflow task | Step fails with `error_type=budget_exceeded`; the orchestrator surfaces it through the workflow-run APIs and OTEL spans. |
 | Sub-agent spawn | Spawn aborts; the parent persona observes the failure on its turn. |
-| Channel-message reply | Reply suppressed; the persona posts a chat-error envelope on the channel under its own `agent.id` ([ISSUE-0065](issues/ISSUE-0065-chat-rest-budget-denied-no-channel-reply.md), [ISSUE-0066](issues/ISSUE-0066-chat-rest-resource-exhausted-no-channel-reply.md)). |
+| Channel-message reply | No reply is composed. On a DM the persona posts an error reply under its own `agent.id`, tagged `reply_status: error` ([ISSUE-0065](issues/ISSUE-0065-chat-rest-budget-denied-no-channel-reply.md), [ISSUE-0066](issues/ISSUE-0066-chat-rest-resource-exhausted-no-channel-reply.md)). Anywhere but a DM it posts nothing; the agent log has `ReceiveChannelMessage budget-denied` (its `reason=` says which refusal) or `ReceiveChannelMessage resource-exhausted` at `WARNING` ([ISSUE-0239](issues/ISSUE-0239-a-wallet-denial-posts-its-error-sentence-into-a-group-channel.md)). |
 
 **Lifecycle log messages — finalised by [RFC 0023 PR 7](https://github.com/mkhomutov/Persatrix/pull/391).**
 Emitted by [`internal/wallet/wallet.go`](../internal/wallet/wallet.go);
