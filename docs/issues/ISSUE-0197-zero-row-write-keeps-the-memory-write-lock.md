@@ -123,6 +123,9 @@ a write on the other tier would pin it.
 > `relationship_mutations.py` was at the 500-line warning.
 >
 > Not fixed here: a write of several statements that stops part-way
-> still keeps its first half, now at once and before at the
-> connection's next commit. That is
+> keeps its first half. Before, the half was kept when the connection
+> committed again and discarded when it closed first; now it is kept
+> at once, on both paths. So on a persona's stop path, which cancels
+> unfinished work and then closes the tiers, a half-write that used to
+> be discarded is now saved. That is
 > [ISSUE-0237](ISSUE-0237-a-memory-write-of-several-statements-is-not-atomic.md).

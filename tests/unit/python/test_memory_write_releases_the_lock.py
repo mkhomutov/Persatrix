@@ -15,6 +15,7 @@ lock fails the test at once.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import sqlite3
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -193,13 +194,70 @@ async def test_a_cancelled_single_statement_write_releases_the_lock(
     await _assert_lock_released(db, tiers)
 
 
+# A real cancellation differs from the double above in one way that
+# matters: the task stops waiting at once, while its statement may still
+# be in the connection's queue and run a moment later.
+
+
+async def _cancel_for_real(write: Awaitable[Any], *, after_turns: int) -> None:
+    task = asyncio.ensure_future(write)
+    for _ in range(after_turns):
+        await asyncio.sleep(0)
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+
+
+@pytest.mark.parametrize("after_turns", range(8))
+@pytest.mark.parametrize("write", ["one statement", "two statements"])
+async def test_a_write_cancelled_at_any_point_releases_the_lock(
+    tiers: Tiers, write: str, after_turns: int,
+) -> None:
+    """``task.cancel()`` on a running write, after each number of turns
+    of the event loop from none (the write never starts) to more than
+    either write needs to finish."""
+    if write == "one statement":
+        db = tiers[0]._ensure_db()
+        running: Awaitable[Any] = cleanup_closing_interactions(db, AGENT)
+    else:
+        db = tiers[1]._ensure_db()
+        running = record_interaction(db, AGENT, "peer", "chat")
+    await _cancel_for_real(running, after_turns=after_turns)
+    await _assert_lock_released(db, tiers)
+
+
+async def test_a_write_cancelled_while_its_statement_is_still_queued_releases_the_lock(
+    tiers: Tiers,
+) -> None:
+    """The case a look at ``in_transaction`` gets wrong.  The connection
+    is busy with an earlier query when the write is cancelled, so the
+    write's statement has not run yet and no transaction is open.  The
+    statement runs afterwards and opens one; the boundary's commit has
+    to be queued behind it."""
+    db = tiers[0]._ensure_db()
+    await db.create_function("pause", 1, time.sleep)
+    earlier = asyncio.ensure_future(db.execute("SELECT pause(0.1)"))
+    await asyncio.sleep(0)
+    task = asyncio.ensure_future(cleanup_closing_interactions(db, AGENT))
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert not db.in_transaction, "the write's statement ran before the cancellation"
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    await (await earlier).close()
+    await (await db.execute("SELECT 1")).close()  # the queue has drained
+    await _assert_lock_released(db, tiers)
+
+
 async def test_a_write_that_fails_part_way_releases_the_lock(
     tiers: Tiers,
 ) -> None:
     """``record_interaction`` runs two statements.  When the second fails
-    the first is kept, as it is today at the connection's next commit:
-    rolling back could discard a statement another coroutine has pending
-    on this same connection (see the boundary's own tests)."""
+    the first is kept (ISSUE-0237): rolling back could discard a statement
+    another coroutine has pending on this same connection (see the
+    boundary's own tests).  Before the boundary the first was kept too
+    once the connection committed again, and lost if it closed first."""
     db = tiers[1]._ensure_db()
     broken = _InterruptedAfter(db, nth=2, error=sqlite3.OperationalError("boom"))
     with pytest.raises(sqlite3.OperationalError, match="boom"):

@@ -1,6 +1,6 @@
 # Persatrix Methodology
 
-> **Last updated**: 2026-11-12
+> **Last updated**: 2026-11-13
 
 How this project is run, written down so it can be followed, audited, and
 reused. Everything here describes practice that already exists in the
@@ -46,7 +46,7 @@ standalone blueprint later.
 | [BRANCHING.md](../BRANCHING.md) | Branch naming, commit convention, PR shape and size, tags. Rewritten 2026-09-06 to match practice (no release branches; tags from `main`); the [release cycle](release-cycle.md) owns how a release is made. |
 | [CONTRIBUTING.md](../../CONTRIBUTING.md) | Setup, quality gates, PR checklist. Accurate. |
 | [rfcs/README.md](../rfcs/README.md), [issues/README.md](../issues/README.md), [manual-tests/README.md](../manual-tests/README.md) | The three sub-systems the cycle draws on. Accurate and unchanged. |
-| [documentation-guide.md](../documentation-guide.md) | Writing style, size caps, ownership map, where documents live and when they freeze. The [enforcement matrix](enforcement-matrix.md) says which of its rules are checked. |
+| [documentation-guide.md](../documentation-guide.md) | Writing style, size caps, ownership map, where documents live and when they freeze. The [enforcement matrix's documents half](enforcement-matrix-documents.md) says which of its rules are checked. |
 | [ROADMAP.md §How to Update This File](../../ROADMAP.md#how-to-update-this-file) | The status-hygiene recipe. Unchanged. |
 
 ## Ground rules that apply to every document here

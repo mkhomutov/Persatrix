@@ -107,7 +107,8 @@ async def test_a_statement_that_raises_ends_its_transaction(pair: Any) -> None:
 
 async def test_a_cancelled_statement_is_committed_after_it_runs(pair: Any) -> None:
     """The statement reached SQLite before the cancellation, so it is
-    kept: that is what the connection's next commit does to it today."""
+    kept.  Before the boundary the connection's next commit kept it too;
+    a connection that closed first discarded it."""
     first, second = pair
     spy = _Spy(first, raise_after_execute=asyncio.CancelledError())
     with pytest.raises(asyncio.CancelledError):

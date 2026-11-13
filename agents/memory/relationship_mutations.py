@@ -1,7 +1,8 @@
 """
 Write/mutation helpers for RelationshipMemory.
 
-Contains trust updates, decay, interaction recording, and trust seeding.
+Contains trust updates, interaction recording, and trust seeding; decay is
+in ``relationship_decay.py``.
 All functions accept an open ``aiosqlite.Connection`` and an ``agent_id``
 string; they carry no object state and are safe to call from any async context.
 """

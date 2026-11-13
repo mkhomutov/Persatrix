@@ -23,9 +23,13 @@ sits in the same transaction, and a rollback here would discard it: its
 own commit would then succeed and save nothing.  That is easiest to hit
 exactly when the lock is contended, because a statement waiting for the
 lock holds up the connection's queue and other coroutines' statements
-line up behind it.  A commit discards nothing.  What it can keep is the
-first half of a write that failed part-way, which is what happens today
-at the connection's next commit, only sooner (ISSUE-0237).
+line up behind it.  A commit discards nothing.  What it keeps is the
+first half of a write that stopped part-way (ISSUE-0237).  Without the
+boundary that half was kept too whenever the connection committed again,
+which a running persona's next write does.  It was lost only when the
+connection closed first: a persona that is stopping cancels its
+unfinished work and closes its tiers, and the half went with the close.
+Now it is kept there as well.
 
 A statement that raised changed nothing itself (SQLite undoes a failed
 statement), so for a one-statement write the commit only ends the
@@ -82,8 +86,7 @@ async def write_boundary(db: aiosqlite.Connection) -> AsyncIterator[None]:
         except Exception:
             logger.warning(
                 "A memory write failed and its transaction could not be "
-                "ended; the connection keeps the write lock until its "
-                "next commit",
+                "ended: the commit that ends it failed too",
                 exc_info=True,
             )
         raise
