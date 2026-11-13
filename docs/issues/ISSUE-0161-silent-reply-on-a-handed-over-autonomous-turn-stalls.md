@@ -80,3 +80,22 @@ turn, and pin the shape in `autonomous_continuation_test.go`.
 > boards an issue only when a phase that boards fixes it, and none does. The
 > plan's goal audit proposes it for a later amendment, since a stalled
 > autonomous turn stops a society that is meant to keep working.
+
+> 2026-11-13 — more turns are silent on a group channel now. Since the
+> fixes for
+> [ISSUE-0199](ISSUE-0199-persona-failures-travel-as-completed-work.md) and
+> [ISSUE-0239](ISSUE-0239-a-wallet-denial-posts-its-error-sentence-into-a-group-channel.md),
+> a persona whose turn fails, or whose model call the wallet refuses,
+> posts nothing there and the cause is only logged. Two of those cases
+> used to post a sentence that the round took for the speaker's reply:
+> running out of model calls, and a wallet denial. To the orchestrator
+> each is now the silence this issue is about, so a real fleet can reach
+> it without the model choosing to stay quiet: an agent over its budget
+> is silent on every turn. In a floor-control round that silence costs
+> the speaker's turn timeout (`floor_turn_timeout_seconds`, 45 by
+> default) before the next speaker is granted the floor. Read from the
+> source; no orchestrator was run for either fix. Telling the
+> orchestrator that a turn failed, so it can move on at once, needs a
+> signal on the wire, which the typed events of
+> [RFC 0041](../rfcs/0041-typed-event-taxonomy-lifecycle-callbacks.md)
+> would carry.
