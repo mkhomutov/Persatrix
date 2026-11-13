@@ -186,9 +186,16 @@ def turn_failure(actions: list[AgentAction]) -> TurnFailure | None:
 
     Only a :class:`TurnFailure` object counts.  A model's reply is JSON,
     so nothing it writes under the same key can be one.
+
+    A payload that is not an object carries no failure and is skipped: a
+    model can write ``"payload": null`` on an action the validator puts
+    no constraint on, and this is asked of every turn's actions.
     """
     for action in actions:
-        failure = action.payload.get(TURN_FAILURE_KEY)
+        payload: object = action.payload
+        if not isinstance(payload, dict):
+            continue
+        failure = payload.get(TURN_FAILURE_KEY)
         if isinstance(failure, TurnFailure):
             return failure
     return None

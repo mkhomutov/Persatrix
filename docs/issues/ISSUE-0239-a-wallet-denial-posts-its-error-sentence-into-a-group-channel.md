@@ -13,6 +13,8 @@ refs:
   - docs/issues/ISSUE-0065-chat-rest-budget-denied-no-channel-reply.md
   - docs/issues/ISSUE-0066-chat-rest-resource-exhausted-no-channel-reply.md
   - docs/issues/ISSUE-0199-persona-failures-travel-as-completed-work.md
+  - docs/issues/ISSUE-0161-silent-reply-on-a-handed-over-autonomous-turn-stalls.md
+  - docs/experiments/EXP-001-preregistration.md
 ---
 
 # ISSUE-0239: A wallet denial posts its error sentence into a group channel
@@ -58,6 +60,27 @@ its turn timeout (45 seconds by default).
 
 Rated medium by likeness to ISSUE-0199's second effect; the severity is
 the maintainer's to set.
+
+Four more things bear on the ruling:
+
+- The error reply is published at cascade depth 0 and mentions whoever
+  sent the message. To the router that is a new message addressed to a
+  member, not the end of a chain: the depth cap that stops a runaway
+  exchange starts again from it (`agents/chat_reply.py`,
+  `internal/channels/router_publish_async.go`).
+- Silence has a known cost of its own on an autonomous channel:
+  [ISSUE-0161](ISSUE-0161-silent-reply-on-a-handed-over-autonomous-turn-stalls.md)
+  records a discussion that stopped after a silent turn.
+- The wallet's error reply cannot be taken for a chair's synthesis: it
+  is withheld on a synthesis turn and published without the synthesis
+  claim. A sentence posted as an ordinary reply has no such guard. That
+  was the case for the sentence a persona posted when it ran out of
+  model calls, for as long as it was posted.
+- EXP-001's pre-registration relies on a persona turn that ends in a
+  provider error publishing nothing to a group channel
+  (`docs/experiments/EXP-001-preregistration.md`, "Attempts and
+  failures"). A ruling that posts a notice there changes what its
+  meetings look like.
 
 ## Proposed fix / investigation path
 
