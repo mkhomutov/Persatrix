@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 
 from ..clock import agent_now
 from ..observability.metrics import current_agent_id, try_get_instruments
+from ._write_boundary import execute_write
 from .boundary_detectors import DEFAULT_CLOSING_GRACE_SEC
 
 if TYPE_CHECKING:
@@ -76,7 +77,10 @@ async def cleanup_closing_interactions(
     """
     ts = now if now is not None else agent_now()
     cutoff = ts - grace_sec
-    cursor = await db.execute(
+    # The sweep commits whatever it found: "nothing to sweep" is its
+    # normal case, and that update still opens a transaction (ISSUE-0197).
+    cursor = await execute_write(
+        db,
         "UPDATE episodes SET summary = ? "
         "WHERE agent_id = ? AND summary = ? AND closed_at IS NOT NULL "
         "AND closed_at < ?",
@@ -84,7 +88,6 @@ async def cleanup_closing_interactions(
     )
     updated = cursor.rowcount or 0
     if updated > 0:
-        await db.commit()
         inst = try_get_instruments()
         if inst is not None:
             # PR #229 review nice-to-have #2: a single ``add(updated,

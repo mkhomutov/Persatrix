@@ -21,6 +21,7 @@ from __future__ import annotations
 import aiosqlite
 
 from ..clock import agent_now
+from ._write_boundary import execute_write, write_boundary
 
 __all__ = [
     "get_interaction_count",
@@ -54,18 +55,18 @@ async def increment_interaction_count(
     Requires SQLite >= 3.35 (Python 3.11+ ships >= 3.39).
     """
     now = agent_now()
-    rows = list(await db.execute_fetchall(
-        """
-        INSERT INTO agent_state (agent_id, interaction_count, updated_at)
-        VALUES (?, 1, ?)
-        ON CONFLICT(agent_id) DO UPDATE
-            SET interaction_count = interaction_count + 1,
-                updated_at = ?
-        RETURNING interaction_count
-        """,
-        (agent_id, now, now),
-    ))
-    await db.commit()
+    async with write_boundary(db):
+        rows = list(await db.execute_fetchall(
+            """
+            INSERT INTO agent_state (agent_id, interaction_count, updated_at)
+            VALUES (?, 1, ?)
+            ON CONFLICT(agent_id) DO UPDATE
+                SET interaction_count = interaction_count + 1,
+                    updated_at = ?
+            RETURNING interaction_count
+            """,
+            (agent_id, now, now),
+        ))
     return rows[0][0] if rows else 0
 
 
@@ -74,7 +75,8 @@ async def reset_interaction_count(
 ) -> None:
     """Reset the interaction counter to zero."""
     now = agent_now()
-    await db.execute(
+    await execute_write(
+        db,
         """
         INSERT INTO agent_state (agent_id, interaction_count, updated_at)
         VALUES (?, 0, ?)
@@ -84,7 +86,6 @@ async def reset_interaction_count(
         """,
         (agent_id, now, now),
     )
-    await db.commit()
 
 
 # ─── Persona state persistence helpers ──────────────────────
@@ -100,7 +101,8 @@ async def persist_agent_state(
     Preserves interaction_count managed by the interaction counter helpers.
     """
     now = agent_now()
-    await db.execute(
+    await execute_write(
+        db,
         """
         INSERT INTO agent_state
             (agent_id, interaction_count, persona_state_json, updated_at)
@@ -111,7 +113,6 @@ async def persist_agent_state(
         """,
         (agent_id, state_json, now, state_json, now),
     )
-    await db.commit()
 
 
 async def load_agent_state(

@@ -22,6 +22,7 @@ from ..clock import agent_now
 from ._epoch_filter import epoch_eq_clause, resolve_active_epoch
 from ._principal_filter import principal_eq_clause, resolve_active_principal
 from ._session_filter import _resolve_session_list, session_in_clause
+from ._write_boundary import execute_write
 from .note_types import _check_note_content
 
 if TYPE_CHECKING:
@@ -107,7 +108,8 @@ class _NoteMutationsMixin:
             )
             restamp_params = (*restamp_below, restamp_protection_level)
         scope_sql, scope_params = _mutation_scope_clause(self)
-        cursor = await self._db.execute(
+        cursor = await execute_write(
+            self._db,
             f"UPDATE notes SET content = ?, updated_at = ?{restamp_sql} "
             f"WHERE id = ? AND agent_id = ?{scope_sql}",
             (
@@ -115,7 +117,6 @@ class _NoteMutationsMixin:
                 *scope_params,
             ),
         )
-        await self._db.commit()
         return cursor.rowcount > 0
 
     async def delete_note(self: _NoteStoreState, note_id: str) -> bool:
@@ -125,11 +126,11 @@ class _NoteMutationsMixin:
         nothing about deletes, so a turn can delete a note above its
         acting level that its recall withholds."""
         scope_sql, scope_params = _mutation_scope_clause(self)
-        cursor = await self._db.execute(
+        cursor = await execute_write(
+            self._db,
             f"DELETE FROM notes WHERE id = ? AND agent_id = ?{scope_sql}",
             (note_id, self._agent_id, *scope_params),
         )
-        await self._db.commit()
         return cursor.rowcount > 0
 
     async def count_notes(self: _NoteStoreState) -> int:

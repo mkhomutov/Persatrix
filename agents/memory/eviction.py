@@ -40,6 +40,7 @@ from dataclasses import dataclass
 import aiosqlite
 
 from ..clock import agent_now
+from ._write_boundary import execute_write
 from .decay import (
     DEFAULT_C_MIN,
     DEFAULT_LAMBDA_PER_DAY,
@@ -150,15 +151,14 @@ class EvictionPass:
         Procedure rows are excluded — see ``_NOT_PROCEDURE_PREDICATE``.
         """
         cutoff = agent_now() - self._ttl_seconds
-        cursor = await db.execute(
+        cursor = await execute_write(
+            db,
             "DELETE FROM episodes "
             "WHERE agent_id = ? AND importance < ? AND created_at < ? "
             f"AND {_NOT_PROCEDURE_PREDICATE}",
             (self._agent_id, TTL_IMPORTANCE_THRESHOLD, cutoff),
         )
-        deleted = cursor.rowcount or 0
-        await db.commit()
-        return deleted
+        return cursor.rowcount or 0
 
     # ─── Size-cap eviction ──────────────────────────────────────
 
@@ -197,11 +197,11 @@ class EvictionPass:
         # were bypassed.
         ids = [v["id"] for v in victims]
         placeholders = ",".join("?" for _ in ids)
-        await db.execute(
+        await execute_write(
+            db,
             f"DELETE FROM episodes WHERE agent_id = ? AND id IN ({placeholders})",
             (self._agent_id, *ids),
         )
-        await db.commit()
         return len(victims)
 
     # ─── Procedural-tier decay eviction (RFC 0008 PR 5) ─────
@@ -260,14 +260,13 @@ class EvictionPass:
         placeholders = ",".join("?" for _ in victims)
         # The awaits since the SELECT let a store on this shared connection
         # refresh a victim; its fresh stamp means the reuse keeps it.
-        cursor = await db.execute(
+        cursor = await execute_write(
+            db,
             f"DELETE FROM episodes WHERE agent_id = ? AND id IN ({placeholders}) "
             "AND (last_validated_at IS NULL OR last_validated_at < ?)",
             (self._agent_id, *victims, now),
         )
-        deleted = cursor.rowcount or 0
-        await db.commit()
-        return deleted
+        return cursor.rowcount or 0
 
     # ─── Helpers ────────────────────────────────────────────────
 

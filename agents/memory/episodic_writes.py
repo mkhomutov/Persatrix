@@ -21,6 +21,7 @@ from ..clock import agent_now
 from ..epoch_id import DEFAULT_EPOCH_ID
 from ..principal_id import DEFAULT_PRINCIPAL_ID
 from ._migration_protection import PROTECTION_LEVEL_DEFAULT
+from ._write_boundary import execute_write
 from .interaction_janitor import SUMMARY_PENDING_TEXT
 
 __all__ = ["insert_episode", "update_episode_summary"]
@@ -83,7 +84,8 @@ async def insert_episode(
     speaker_id = speaker_id or None
     episode_id = str(uuid.uuid4())
     now = agent_now()
-    await db.execute(
+    await execute_write(
+        db,
         """
         INSERT INTO episodes
             (id, agent_id, summary, context_json, outcome,
@@ -120,7 +122,6 @@ async def insert_episode(
             speaker_id,
         ),
     )
-    await db.commit()
     return episode_id
 
 
@@ -144,10 +145,10 @@ async def update_episode_summary(
     or :data:`SUMMARY_UNAVAILABLE_TEXT`); revalidating here was dead
     code (PR 6 review #22).
     """
-    cursor = await db.execute(
+    cursor = await execute_write(
+        db,
         "UPDATE episodes SET summary = ? "
         "WHERE agent_id = ? AND interaction_id = ? AND summary = ?",
         (summary, agent_id, interaction_id, SUMMARY_PENDING_TEXT),
     )
-    await db.commit()
     return (cursor.rowcount or 0) > 0
