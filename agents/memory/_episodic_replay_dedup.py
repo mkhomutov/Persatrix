@@ -57,9 +57,12 @@ async def episode_exists_for_interaction(
     A ``[summary pending]`` row DOES still count.  It means either a
     Phase 2 in flight or a boot that died before one, and the two are
     indistinguishable from here — so the guard waits for the janitor to
-    convert it (``DEFAULT_CLOSING_GRACE_SEC``), which costs one extra boot
-    and cannot race a live writer.  Recovery is therefore bounded and
-    automatic rather than permanent.
+    convert it (``DEFAULT_CLOSING_GRACE_SEC``), which cannot race a live
+    writer.  The janitor runs when a persona's memory opens, before the
+    boot catch-up asks this, and again on inbound events and ticks
+    (ISSUE-0198).  So a row older than the grace period at boot is
+    retried on that boot, and a younger one on the boot after.  Recovery
+    is therefore bounded and automatic rather than permanent.
 
     Indexed by ``idx_episodes_interaction`` on
     ``(agent_id, interaction_id)`` — migration 19, added by the PR B2

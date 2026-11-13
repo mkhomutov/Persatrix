@@ -73,7 +73,6 @@ from .conversation_seed import _ConversationWindowMixin
 from .conversation_window import ConversationWindowConfig, build_conversation_messages
 from .episode_routing import _EpisodeRoutingMixin
 from .event_timeout import _coerce_event_timeout  # noqa: F401 — re-exported (ISSUE-0053 extraction)
-from .finalize_close import JANITOR_INTERVAL_SEC, maybe_run_janitor
 from .memory_context import _MemoryContextMixin, _truncate_with_ellipsis  # noqa: F401
 from .prompt_assembly import _PromptAssemblyMixin
 from .state_persistence import _StatePersistenceMixin
@@ -370,6 +369,10 @@ class _LLMPersonaAgent(
             span.add_event("received")
             async with self._lock:
                 span.add_event("queued")
+                # ISSUE-0198: the janitor sweep, on the path a persona with
+                # no tick has.  Before the turn, so a turn that times out
+                # or raises does not skip it; cooldown shared with the tick.
+                await self.sweep_stuck_closes()
                 # ISSUE-0081 PR 2/3 · ISSUE-0085 PR 4: bind the per-request session,
                 # tenant AND epoch for the handler's lifetime (``wait_for``'s child
                 # task copies these scopes; see ``request_scope_from_metadata``).
@@ -479,8 +482,5 @@ class _LLMPersonaAgent(
                 self._state.recover_energy()
                 span.set_attribute("actions.count", len(actions))
                 # RFC 0020 PR 4 (PR #229 Should-Fix #2): janitor sweep, best-effort.
-                self._last_janitor_monotonic = await maybe_run_janitor(
-                    self.cleanup_closing_interactions, self._last_janitor_monotonic,
-                    now_monotonic, JANITOR_INTERVAL_SEC, self.agent_id,
-                )
+                await self.sweep_stuck_closes(now_monotonic)
                 return actions

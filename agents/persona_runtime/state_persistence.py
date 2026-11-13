@@ -136,6 +136,12 @@ class _StatePersistenceMixin:
         # the close-path teardown sequence below.
         if self._fact_store is not None:
             await self._fact_store.initialize()
+        # ISSUE-0198: mark the rows the last process left at
+        # ``[summary pending]`` before anything reads the store.  The boot
+        # catch-up runs after this and asks whether a replayed span was
+        # already derived; a pending row answers yes, a marked one no.
+        # ``sweep_stuck_closes`` is provided by ``_CloseLifecycleMixin``.
+        await self.sweep_stuck_closes()  # type: ignore[attr-defined]
         self._state = await self._load_persona_state()
 
     async def close_memory(self, *, write_open: bool = False) -> None:
