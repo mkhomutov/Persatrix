@@ -6,6 +6,7 @@ severity: medium
 area: agents/memory
 created: 2026-11-10
 closed: 2026-11-13
+closed_pr: 1111
 refs:
   - agents/persona_runtime/__init__.py
   - agents/persona_runtime/close_lifecycle.py
