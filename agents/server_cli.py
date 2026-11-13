@@ -35,7 +35,8 @@ from .orchestrator_session import hold_enrollment_secret
 from .persona import PersonaMemoryError
 from .prompt_prefix import prefix_keepalive_seconds, prompt_prefix
 from .server import AgentServer
-from .server_persona import load_agent, setup_shared_pools
+from .server_persona import load_agent
+from .server_pools import setup_shared_pools
 
 logger = logging.getLogger("Persatrix.agent.server")
 
@@ -84,15 +85,26 @@ async def start_or_exit(server: AgentServer) -> None:
 
     The server is stopped first.  That closes whatever part of the
     persona's memory did open: a database connection runs a thread that is
-    not a daemon, and the process could not end while one was alive.  At
-    this point nothing has been registered, so there is nothing to undo
-    at the orchestrator.
+    not a daemon, and the process could not end while one was alive.
+    Nothing has been registered by this run at that point.  A registration
+    an earlier run left behind (one that was killed before it could take
+    it back) is not removed here: this run has not opened its connection
+    to the orchestrator yet, so the orchestrator goes on showing that
+    agent (ISSUE-0146).
+
+    Any other failure to start is raised as it is, after the same stop.
+    Left running, the server would hold its port, so a health check that
+    only connects would pass, and its database threads, so the process
+    would never end: neither serving nor gone.
     """
     try:
         await server.start()
     except PersonaMemoryError as exc:
         await server.stop()
         raise SystemExit(f"{exc}; the agent process is stopping") from exc
+    except Exception:
+        await server.stop()
+        raise
 
 
 def main() -> None:

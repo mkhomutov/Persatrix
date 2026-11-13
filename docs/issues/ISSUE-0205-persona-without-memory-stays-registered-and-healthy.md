@@ -12,6 +12,9 @@ refs:
   - agents/server_cli.py
   - agents/persona.py
   - agents/channel_receive.py
+  - agents/server_pools.py
+  - agents/memory/shared_pool.py
+  - agents/persona_runtime/state_persistence.py
   - tests/unit/python/test_persona_without_memory_stops_the_agent.py
   - agents/server.py
   - agents/base.py
@@ -108,3 +111,37 @@ as "not serving" would have no reader today. Give the dispatcher's
 > skipped and the next one starts) and now pin the new one. With more
 > than one agent in a process, which is not supported, one persona's
 > failure stops them all.
+
+> 2026-11-14 — review of the fix. Two findings were more than wording.
+>
+> - **The process did not always end.** `config/agents.yaml` declares a
+>   shared memory pool. A pool keeps its rows in the persona's own
+>   database file and opens it first, through a connection of its own.
+>   When the file opened and its first statement failed (a corrupt or a
+>   locked store), the pool was dropped with that connection still open,
+>   out of reach of the stop, and its thread kept the process alive: it
+>   printed that it was stopping and stayed. A failing pool is now
+>   closed before it is dropped (`agents/server_pools.py`). Run with the
+>   shipped config: status 1 after 0.4 s on a file that is not a
+>   database and after 10.8 s on a locked one, where the first fix was
+>   still alive after 25 s. The real-process test now covers that store
+>   with the shipped pool block; it used a folder, which leaves no
+>   thread behind.
+> - **The stop wrote default state over saved state.** Stopping the
+>   server saves each persona's state, and the state is read from the
+>   store on the last step of opening the memory. A start that failed
+>   before that step wrote a new persona's defaults over what an earlier
+>   run had saved. The state is now saved only once it was loaded. On
+>   `main` the same overwrite happened at the next ordinary stop.
+>
+> Smaller ones: any other failure to start now stops the server before
+> it is raised, so that process ends too; the agent's own log has a
+> WARNING for a message refused for want of a dispatch target; the
+> `receiver overloaded` text is also what an agent whose event loop is
+> stopping answers, and the texts now say so; the cost-regression job's
+> list of wake-path files names `agents/channel_receive.py`.
+>
+> Not changed: a registration left by an earlier run that was killed is
+> not removed by a start that fails (ISSUE-0146), and the exit path does
+> not take the agent out of the `agent.active` count before the last
+> metrics export, as the exit for a port that cannot be bound never did.

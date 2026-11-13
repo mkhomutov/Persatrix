@@ -13,15 +13,16 @@ anything.  An agent process hosts one agent, so a persona without its
 memory leaves a process that serves nothing, and an exit is the one
 signal every supervisor already reads.
 
-The second half of the issue is the refusal text: a channel message for
-an agent that has no dispatch target on this server (a task agent, say)
-is refused as that, not as an overloaded receiver.
+The second half of the issue is the refusal text, which
+``test_channel_refusal_names_its_cause.py`` covers.
 """
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -34,19 +35,19 @@ import grpc
 import pytest
 import yaml
 
-from agents.channel_receive import NO_DISPATCH_TARGET, RECEIVER_OVERLOADED
 from agents.dispatch import EventDispatcher
 from agents.llm_client import LLMClient, LLMResponse
+from agents.memory.shared_pool import SharedMemoryPool, SharedPoolConfig, SharedPoolRegistry
 from agents.persona import PersonaMemoryError, create_persona_agent
 from agents.persona_runtime import _LLMPersonaAgent
 from agents.server import AgentServer
 from agents.server_cli import start_or_exit
 from agents.server_persona import initialize_persona_agents
-from agents.server_servicers import AgentServiceServicer
+from agents.server_pools import start_shared_pools
 from agents.tick import TickScheduler
 from agents.tools.registry import clear_registry
 
-from ._receive_channel_message_helpers import StubAgent, channel_event
+from ._receive_channel_message_helpers import StubAgent
 
 AGENT = "ember-owl"
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -174,6 +175,64 @@ async def new_server() -> AsyncIterator[Callable[[], AgentServer]]:
             await server.stop()
 
 
+async def _nothing_listens_on(port: int) -> bool:
+    """True when a gRPC channel to *port* does not become ready."""
+    channel = grpc.aio.insecure_channel(f"127.0.0.1:{port}")
+    try:
+        await asyncio.wait_for(channel.channel_ready(), timeout=1.0)
+    except TimeoutError:
+        return True
+    finally:
+        await channel.close()
+    return False
+
+
+def _saved_state(db_path: str) -> str:
+    """The persona's state row, read with a connection of the test's own."""
+    connection = sqlite3.connect(db_path)
+    try:
+        row = connection.execute(
+            "SELECT persona_state_json FROM agent_state WHERE agent_id = ?", (AGENT,),
+        ).fetchone()
+    finally:
+        connection.close()
+    assert row is not None, "no state was ever saved"
+    return str(row[0])
+
+
+@pytest.mark.asyncio
+class TestASharedPoolThatFailsToOpen:
+    """A shared pool keeps its rows in the persona's own database file and
+    opens it first, through a connection of its own."""
+
+    async def test_it_is_closed_before_it_is_dropped(self, tmp_path: Path) -> None:
+        before = _non_daemon_threads()
+        pool = SharedMemoryPool(
+            SharedPoolConfig(
+                name="team-knowledge", readers=frozenset({AGENT}), writers=frozenset({AGENT}),
+            ),
+            # The file opens; the first statement on it fails.
+            db_path=_not_a_database(tmp_path),
+        )
+        registry = SharedPoolRegistry({"team-knowledge": pool})
+
+        await start_shared_pools(registry)
+
+        assert registry.names() == ()
+        assert pool._episodic._db is None, "the connection that was made is closed"
+        assert _non_daemon_threads() <= before, "and its thread has ended"
+
+    async def test_a_listening_server_is_what_the_probe_below_tells_apart(
+        self, new_server: Callable[[], AgentServer],
+    ) -> None:
+        """The control for ``_nothing_listens_on``: a started server answers."""
+        server = new_server()
+        server._self_register = AsyncMock(return_value=False)  # type: ignore[method-assign]
+        await server.start()
+
+        assert not await _nothing_listens_on(server.port)
+
+
 @pytest.mark.asyncio
 class TestStartOrExit:
     @pytest.mark.parametrize("broken", BROKEN_STORES, ids=lambda f: f.__name__.lstrip("_"))
@@ -220,22 +279,96 @@ class TestStartOrExit:
         assert agent._episodic_memory._db is None, "the tier that opened was closed"
         assert _non_daemon_threads() <= before, "no database thread is left to hold the exit"
         assert server.port != port_before_start, "the server had started, and was stopped"
-        channel = grpc.aio.insecure_channel(f"127.0.0.1:{server.port}")
-        try:
-            assert channel.get_state() is not grpc.ChannelConnectivity.READY
-        finally:
-            await channel.close()
+        assert await _nothing_listens_on(server.port)
 
-    async def test_another_start_up_error_is_not_turned_into_this_exit(self) -> None:
-        """Only the memory failure is this exit; anything else is raised as it is."""
-        server = MagicMock(spec=AgentServer)
-        server.start = AsyncMock(side_effect=RuntimeError("boom"))
-        server.stop = AsyncMock()
+    async def test_a_failed_start_leaves_the_saved_state_as_it_was(
+        self, tmp_path: Path, new_server: Callable[[], AgentServer],
+    ) -> None:
+        """Stopping the server writes each persona's state to its store.
 
-        with pytest.raises(RuntimeError, match="boom"):
+        The state is read from the store on the last step of opening the
+        memory.  A start that fails before that step holds the defaults a
+        new persona begins with, and must not write them over what an
+        earlier run saved.
+        """
+        db_path = str(tmp_path / "memory.db")
+        earlier = _persona(db_path)
+        await earlier.initialize_memory()
+        earlier.state.stress_level = 0.8
+        earlier.state.energy = 0.2
+        earlier.state.goal_progress = {"ship v0.4.0": 0.7}
+        await earlier.close_memory()
+        saved = _saved_state(db_path)
+        assert '"stress_level": 0.8' in saved, saved
+
+        agent = _persona(db_path)
+        agent._relationship_memory.initialize = AsyncMock(  # type: ignore[method-assign]
+            side_effect=RuntimeError("migration 19 failed"),
+        )
+        server = new_server()
+        server.register_agent(agent)
+        with pytest.raises(SystemExit):
             await start_or_exit(server)
 
-        server.stop.assert_not_awaited()
+        assert _saved_state(db_path) == saved
+
+    async def test_a_persona_that_started_still_saves_its_state_on_stop(
+        self, tmp_path: Path, new_server: Callable[[], AgentServer],
+    ) -> None:
+        db_path = str(tmp_path / "memory.db")
+        agent = _persona(db_path)
+        server = new_server()
+        server.register_agent(agent)
+        server._self_register = AsyncMock(return_value=False)  # type: ignore[method-assign]
+        await start_or_exit(server)
+        agent.state.stress_level = 0.6
+
+        await server.stop()
+
+        assert '"stress_level": 0.6' in _saved_state(db_path)
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            RuntimeError("boom"), OSError("boom"), ValueError("boom"),
+            sqlite3.OperationalError("boom"),
+        ],
+        ids=lambda e: type(e).__name__,
+    )
+    async def test_another_start_up_error_stops_the_server_and_is_raised_as_it_is(
+        self, error: Exception,
+    ) -> None:
+        """Only the memory failure gets this exit's message.  Any other
+        failure to start is raised as it is, after the server is stopped:
+        left running, it would hold its port and its database threads, and
+        the process would neither serve nor end."""
+        server = MagicMock(spec=AgentServer)
+        server.start = AsyncMock(side_effect=error)
+        server.stop = AsyncMock()
+
+        with pytest.raises(type(error), match="boom") as raised:
+            await start_or_exit(server)
+
+        assert raised.value is error
+        server.stop.assert_awaited_once()
+
+    async def test_a_start_that_fails_after_the_memory_opened_leaves_nothing_running(
+        self, tmp_path: Path, new_server: Callable[[], AgentServer],
+    ) -> None:
+        before = _non_daemon_threads()
+        agent = _persona(str(tmp_path / "memory.db"))
+        server = new_server()
+        server.register_agent(agent)
+        server._self_register = AsyncMock(  # type: ignore[method-assign]
+            side_effect=RuntimeError("the start-up tail failed"),
+        )
+
+        with pytest.raises(RuntimeError, match="the start-up tail failed"):
+            await start_or_exit(server)
+
+        assert agent._episodic_memory._db is None, "the memory that opened was closed"
+        assert _non_daemon_threads() <= before, "no database thread is left to hold the exit"
+        assert await _nothing_listens_on(server.port)
 
     async def test_a_server_whose_persona_has_its_memory_starts(
         self, tmp_path: Path, new_server: Callable[[], AgentServer],
@@ -251,26 +384,52 @@ class TestStartOrExit:
         assert server._dispatcher.get_agent(AGENT) is agent
 
 
-def test_the_real_process_exits_with_status_one(tmp_path: Path) -> None:
+def _store_is_a_folder(tmp_path: Path) -> str:
+    store = tmp_path / "store"
+    store.mkdir()
+    return str(store)
+
+
+def _store_is_not_a_database(tmp_path: Path) -> str:
+    return _not_a_database(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "broken", [_store_is_a_folder, _store_is_not_a_database],
+    ids=["a folder where the file should be", "a file that is not a database"],
+)
+@pytest.mark.parametrize(
+    "shared_pool", [False, True], ids=["no shared pool", "the shipped shared pool"],
+)
+def test_the_real_process_exits_with_status_one(
+    tmp_path: Path, broken: Callable[[Path], str], shared_pool: bool,
+) -> None:
     """The whole path, in a real process: ``python -m agents.server``.
 
     Asserts the exit status a supervisor sees, and that the process ends
-    by itself instead of waiting on a database thread.
+    by itself instead of waiting on a database thread.  The second is what
+    the two parameters are for.  A connection that cannot be made leaves no
+    thread (the folder), one that is made and then fails does (the file
+    that is not a database).  And a shared pool keeps its rows in the
+    persona's own file, through a connection of its own that is opened
+    first: ``config/agents.yaml`` ships one.
     """
-    store = tmp_path / "store"
-    store.mkdir()
-    config = tmp_path / "agents.yaml"
-    config.write_text(yaml.safe_dump({
+    document: dict[str, Any] = {
         "schema_version": "0.2",
         "agents": [{
             "id": AGENT, "type": "persona", "name": "Ember Owl", "role": "test persona",
             "model": "quality", "max_llm_calls": 3, "tools": [],
             "persona": {"name": "Ember Owl", "background": "ISSUE-0205 test persona."},
             "autonomy": {"level": "reactive", "timers": []},
-            # A folder where the database file should be.
-            "memory": {"db_path": str(store)},
+            "memory": {"db_path": broken(tmp_path)},
         }],
-    }), encoding="utf-8")
+    }
+    if shared_pool:
+        shipped = yaml.safe_load((REPO_ROOT / "config" / "agents.yaml").read_text(encoding="utf-8"))
+        document["shared_memory_pools"] = shipped["shared_memory_pools"]
+        assert document["shared_memory_pools"], "the shipped config declares a shared pool"
+    config = tmp_path / "agents.yaml"
+    config.write_text(yaml.safe_dump(document), encoding="utf-8")
 
     done = subprocess.run(
         [
@@ -279,7 +438,8 @@ def test_the_real_process_exits_with_status_one(tmp_path: Path) -> None:
             # Nothing listens here; the process must not get as far as calling it.
             "--orchestrator-url", "http://127.0.0.1:1", "--shutdown-grace", "1",
         ],
-        cwd=REPO_ROOT, capture_output=True, text=True, timeout=60, check=False,
+        # A process that does not end is killed here, and the test fails.
+        cwd=REPO_ROOT, capture_output=True, text=True, timeout=30, check=False,
         env={
             "PATH": "/usr/bin:/bin",
             # The offline demo config: a mock provider, so no key is needed.
@@ -292,88 +452,3 @@ def test_the_real_process_exits_with_status_one(tmp_path: Path) -> None:
     assert done.returncode == 1, done.stderr[-2000:]
     assert f"Agent {AGENT} cannot open its memory" in done.stderr
     assert "Could not reach orchestrator" not in done.stderr, "it never tried to register"
-
-
-# ─── The refusal text ────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-class TestRefusalNamesTheCause:
-    @pytest.mark.parametrize(
-        ("has_target", "enqueue_accepts", "want"),
-        [
-            (False, True, NO_DISPATCH_TARGET.format(agent_id=AGENT)),
-            (True, False, RECEIVER_OVERLOADED),
-            (True, True, ""),
-        ],
-        ids=["no dispatch target", "target with a full queue", "accepted"],
-    )
-    async def test_each_refusal_has_its_own_text(
-        self, has_target: bool, enqueue_accepts: bool, want: str,
-    ) -> None:
-        agent = StubAgent(agent_id=AGENT, config={"model": "test"})
-        dispatcher = MagicMock(spec=EventDispatcher)
-        dispatcher.has_inbound_target = MagicMock(return_value=has_target)
-        dispatcher.enqueue_inbound = MagicMock(return_value=enqueue_accepts)
-        servicer = AgentServiceServicer({AGENT: agent}, dispatcher)
-
-        ack = await servicer.ReceiveChannelMessage(
-            channel_event(), MagicMock(spec=grpc.aio.ServicerContext),
-        )
-
-        assert ack.error_message == want
-        assert ack.success is (want == "")
-        assert dispatcher.enqueue_inbound.called is has_target
-
-    @pytest.mark.parametrize(
-        ("registered", "loop", "want"),
-        [
-            (False, None, False),
-            (True, None, True),
-            (False, "running", True),
-            (False, "stopped", False),
-            (True, "stopped", True),
-        ],
-        ids=[
-            "nothing registered",
-            "a registered agent",
-            "a running event loop",
-            "an event loop that is not running",
-            "a registered agent whose loop is not running",
-        ],
-    )
-    async def test_what_counts_as_a_dispatch_target(
-        self, registered: bool, loop: str | None, want: bool,
-    ) -> None:
-        """The dispatcher's own rule: the two places an inbound event can go."""
-        dispatcher = EventDispatcher()
-        if registered:
-            dispatcher.register_agent(AGENT, MagicMock(spec=_LLMPersonaAgent))
-        if loop is not None:
-            scheduler = MagicMock(spec=TickScheduler)
-            scheduler.is_running = loop == "running"
-            dispatcher.register_tick_scheduler(AGENT, scheduler)
-
-        assert dispatcher.has_inbound_target(AGENT) is want
-        assert dispatcher.has_inbound_target("someone-else") is False
-
-    async def test_a_task_agent_is_not_an_overloaded_receiver(self) -> None:
-        """The real dispatcher, hosting nothing: what a task agent's server has."""
-        agent = StubAgent(agent_id="planner", config={"model": "test"})
-        servicer = AgentServiceServicer({"planner": agent}, EventDispatcher())
-
-        ack = await servicer.ReceiveChannelMessage(
-            channel_event(channel_id="group:general"), MagicMock(spec=grpc.aio.ServicerContext),
-        )
-
-        assert ack.success is False
-        assert ack.error_message == NO_DISPATCH_TARGET.format(agent_id="planner")
-        assert "planner" in ack.error_message
-        assert "overloaded" not in ack.error_message
-        assert "queue" not in ack.error_message
-
-
-def test_the_two_texts_cannot_be_mistaken_for_each_other() -> None:
-    assert "overloaded" in RECEIVER_OVERLOADED
-    assert "overloaded" not in NO_DISPATCH_TARGET
-    assert "{agent_id}" in NO_DISPATCH_TARGET

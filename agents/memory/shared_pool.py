@@ -192,8 +192,8 @@ class SharedMemoryPool:
         )
 
     async def close(self) -> None:
-        if not self._initialized:
-            return
+        # Also for a pool whose start failed part-way: its store may hold
+        # a connection, whose thread keeps the process alive (ISSUE-0205).
         await self._episodic.close()
         self._initialized = False
 

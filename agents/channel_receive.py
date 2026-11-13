@@ -1,11 +1,11 @@
 """Channel-message receive handler (RFC 0011 PR 4a, RFC 0024 Phase 4).
 
 Houses the body of ``AgentServiceServicer.ReceiveChannelMessage`` as a
-free function so ``agents/server_servicers.py`` stays under the 500-line
-review cap enforced by ``scripts/checks/file_size.py --strict`` — the
-same extraction as :mod:`agents.closed_interactions_read`.  Moved when
-ISSUE-0205 gave the handler a second refusal; the servicer was already
-over the cap.
+free function so ``agents/server_servicers.py`` shrinks towards the 500
+lines at which ``scripts/checks/file_size.py`` warns (it fails a file over
+800) — the same extraction as :mod:`agents.closed_interactions_read`.
+Moved when ISSUE-0205 gave the handler a second refusal; the servicer was
+already over 500.
 
 The handler refuses a message in a ``TaskAck`` body, never with a gRPC
 status code, and each refusal says its own cause.  The orchestrator does
@@ -13,6 +13,8 @@ not retry on a ``TaskAck``; it logs the text.
 """
 
 from __future__ import annotations
+
+import logging
 
 import grpc
 import grpc.aio
@@ -35,7 +37,12 @@ from .session_metadata import (
 
 __all__ = ["NO_DISPATCH_TARGET", "RECEIVER_OVERLOADED", "handle_receive_channel_message"]
 
-#: The target's event queue is full (discard-not-block, RFC 0024 Decided §1).
+logger = logging.getLogger("Persatrix.agent.channel_receive")
+
+#: The target did not take the event: its event queue is full
+#: (discard-not-block, RFC 0024 Decided §1), or its event loop is stopping
+#: and takes nothing more.  The text names the first; the second is seen
+#: only while an agent shuts down.
 RECEIVER_OVERLOADED = (
     "receiver overloaded: agent event-loop queue full "
     "(discard-not-block backpressure)"
@@ -159,6 +166,11 @@ async def handle_receive_channel_message(
     # both.  A task agent is the case that remains; a persona whose memory
     # did not open no longer gets this far (the process stops at start-up).
     if not dispatcher.has_inbound_target(target_agent_id):
+        logger.warning(
+            "Refused a channel message on %s for %s: "
+            "the agent has no event dispatch target on this server",
+            request.channel_id, target_agent_id,
+        )
         return task_pb2.TaskAck(
             success=False,
             error_message=NO_DISPATCH_TARGET.format(agent_id=target_agent_id),
@@ -167,8 +179,9 @@ async def handle_receive_channel_message(
     # Fire-and-forget: enqueue onto the agent's EventLoop and return
     # immediately. The loop owns decide → execute → recover when it
     # drains (RFC 0024 Phase 4). With a target, ``enqueue_inbound``
-    # returns ``False`` only when the receiver is full: the loop's bounded
-    # queue, or the in-flight set of an agent with no loop (discard-not-block).
+    # returns ``False`` when the receiver is full (the loop's bounded queue,
+    # or the in-flight set of an agent with no loop: discard-not-block) and
+    # when the agent's event loop is stopping.
     accepted = dispatcher.enqueue_inbound(target_agent_id, event)
 
     # ``context`` is read above for the session header but is never

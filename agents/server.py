@@ -33,11 +33,11 @@ from .prefix_keepalive import start_prefix_keepalive
 from .server_persona import (
     default_grpc_target,
     initialize_persona_agents,
-    stop_shared_pools,
     wire_history_fetchers,
     wire_wallet_client,
 )
 from .server_persona_timers import wire_convene_clients
+from .server_pools import stop_shared_pools
 from .server_reregister import AgentTokenKeeper, ReregistrationWatcher
 from .server_servicers import (  # noqa: F401
     AgentServiceServicer,
