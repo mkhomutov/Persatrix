@@ -17,18 +17,18 @@ Key invariants
   orchestrator must never back-pressure the agent's hot path.
 * **Reconnect with exponential backoff**: when the stream errors the
   shipper retries with backoff (1s → 2s → 4s → … → 30s cap).  Records
-  enqueued during the gap stay in the queue (subject to the FIFO drop).
-* **Graceful flush**: :meth:`Shipper.stop` drains the queue and awaits
-  the final ack from the orchestrator before returning, so a clean
-  ``server.stop()`` does not lose tail records.
+  enqueued during the gap stay in the queue (subject to the FIFO drop),
+  and a batch whose write failed goes back to the front of it.
+* **Graceful flush**: :meth:`Shipper.stop` sends what is queued and
+  waits, up to its timeout, for the orchestrator to read the stream to
+  its end and acknowledge it, so a clean ``server.stop()`` does not lose
+  tail records.
+* **Every record is counted** (ISSUE-0207): a record is *shipped* once
+  the orchestrator has acknowledged it, and *dropped* when it leaves the
+  shipper any other way.  After ``stop()``,
+  ``enqueued == shipped + dropped``.
 
-Wire-format conversion
-----------------------
-The shipper accepts plain ``dict`` records (the ``event_dict`` produced
-by the structlog chain after :func:`_reorder_keys`) and maps them onto
-``persatrix.v1.LogEntry`` proto messages.  Unknown keys go into the
-``attributes`` ``Struct`` so the downstream JSON line layer still
-surfaces them.
+The record → wire conversion is :mod:`.log_record_proto`.
 """
 
 from __future__ import annotations
@@ -39,15 +39,13 @@ import logging as _stdlib_logging
 import os
 import threading
 from collections import deque
-from collections.abc import Iterable
-from datetime import UTC, datetime
 from typing import Any
 
 import grpc
-from google.protobuf import struct_pb2, timestamp_pb2
 
 from ..generated import log_service_pb2 as logpb
 from ..generated import log_service_pb2_grpc as loggrpc
+from .log_record_proto import record_to_proto
 
 # ─── Tunables ────────────────────────────────────────────────────────────────
 
@@ -57,10 +55,10 @@ from ..generated import log_service_pb2_grpc as loggrpc
 #: orchestrator hiccup.  Override via PERSATRIX_LOG_SHIPPER_QUEUE.
 MAX_QUEUE = 5000
 
-#: Maximum entries per outgoing :class:`LogBatch`.  Mirrors the
-#: orchestrator-side cap (``maxEntriesPerBatch`` in ``logs_service.go``);
-#: keeping these in lockstep avoids InvalidArgument flapping if the
-#: shipper occasionally fills its window.
+#: Maximum entries per outgoing :class:`LogBatch`.  Must stay at or under
+#: the orchestrator-side cap (``maxEntriesPerBatch``, 1024, in
+#: ``internal/server/logs_service.go``): a larger batch ends the stream
+#: with InvalidArgument.
 BATCH_MAX = 256
 
 #: Maximum wait between batch flushes when the queue is non-empty but
@@ -68,46 +66,16 @@ BATCH_MAX = 256
 #: would otherwise sit on a single record indefinitely.
 FLUSH_INTERVAL_SEC = 0.5
 
+#: How long a broken stream's acknowledgement reader is given to end.  A
+#: stream that breaks ends its reader by itself, after any acknowledgement
+#: that had already arrived; this only bounds the wait for one that does
+#: not.
+ACK_SETTLE_SEC = 0.5
+
 #: Backoff schedule used when the gRPC stream errors.  Doubles up to
 #: the cap so an orchestrator restart settles within a single 30s slot.
 RECONNECT_BACKOFF_INITIAL_SEC = 1.0
 RECONNECT_BACKOFF_CAP_SEC = 30.0
-
-#: Reserved keys lifted directly onto the proto's typed fields rather
-#: than packed into the attributes Struct.  Order is irrelevant — the
-#: lookup is by name.
-_RESERVED_KEYS: frozenset[str] = frozenset({
-    "schema_version",
-    "timestamp",
-    "level",
-    "service.kind",
-    "service.instance",
-    "service.role",
-    "message",
-    "execution_id",
-    "step_id",
-    "agent_id",
-    "request_id",
-    "trace_id",
-    "span_id",
-    "source",
-})
-
-#: structlog / stdlib-logging bookkeeping keys that should never reach
-#: the orchestrator's attributes Struct.  ``_record`` is structlog's
-#: stdlib LogRecord shim; ``_from_structlog`` flags records that
-#: round-tripped through the stdlib bridge; ``logger``/``stack_info``/
-#: ``exc_info`` are stdlib LogRecord internals.  Filtering by exact
-#: name keeps the contract stable; the additional ``_``-prefix sweep
-#: in ``record_to_proto`` covers ad-hoc bookkeeping keys added by
-#: third-party processors.  (PR #173 review nice-to-have #1.)
-_BOOKKEEPING_KEYS: frozenset[str] = frozenset({
-    "_record",
-    "_from_structlog",
-    "logger",
-    "stack_info",
-    "exc_info",
-})
 
 logger = _stdlib_logging.getLogger("Persatrix.agent.log_shipper")
 
@@ -177,9 +145,19 @@ class Shipper:
         self._channel: grpc.aio.Channel | None = channel
 
         # Counters surfaced for tests and (future) metric instruments.
+        # None of them ever goes down, and after stop():
+        # enqueued == shipped + dropped (ISSUE-0207).
+        #: Records handed to enqueue().
         self.enqueued: int = 0
+        #: Records that did not reach the orchestrator, or are not known to
+        #: have: evicted from a full queue, impossible to encode, written to
+        #: a stream that ended before they were acknowledged, or still
+        #: queued when a stop could not deliver them.
         self.dropped: int = 0
+        #: Records the orchestrator has acknowledged.
         self.shipped: int = 0
+        #: The highest acknowledgement seen.  The orchestrator counts from
+        #: zero on every stream, so this is not a total.
         self.last_ack_seq: int = 0
 
     # ── Public surface ──────────────────────────────────────────────
@@ -234,10 +212,14 @@ class Shipper:
         self._task = asyncio.create_task(self._run(), name="log-shipper")
 
     async def stop(self, *, timeout: float = 5.0) -> None:
-        """Drain the queue, close the stream, and shut the channel down.
+        """Send what is queued, close the stream, and shut the channel down.
 
-        ``timeout`` caps the drain wait so a wedged orchestrator does
-        not hold up agent shutdown indefinitely.
+        Waits for the orchestrator to read the stream to its end and
+        acknowledge it.  ``timeout`` caps that wait so a wedged
+        orchestrator does not hold up agent shutdown indefinitely.
+        Whatever was not acknowledged by then, and whatever is still
+        queued, is counted as dropped (ISSUE-0207), and a WARNING says how
+        many records that was.
         """
         if self._task is None:
             return
@@ -250,12 +232,22 @@ class Shipper:
             with contextlib.suppress(BaseException):
                 await self._task
         self._task = None
+        self._drop_queued()
         # Close the channel only when the shipper opened it — an
         # externally-supplied channel is closed by its owner (RFC 0023).
         if self._channel is not None and not self._external_channel:
             await self._channel.close()
         self._channel = None
         set_active_shipper(None)
+        # After the handle is cleared, so this line goes to the process's
+        # own log output and not into a shipper that has stopped.
+        if self.dropped:
+            logger.warning(
+                "log shipper stopped: %d of %d record(s) were not delivered "
+                "to the orchestrator (every record is in this process's own "
+                "log output)",
+                self.dropped, self.enqueued,
+            )
 
     # ── Internals ───────────────────────────────────────────────────
 
@@ -276,6 +268,18 @@ class Shipper:
             except asyncio.CancelledError:
                 raise
             except Exception:  # noqa: BLE001 — reconnect-with-backoff is the contract.
+                if self._stopping.is_set():
+                    # ISSUE-0207: one attempt on the way out, no reconnect.
+                    # A batch whose write fails goes back to the queue, and
+                    # once stopping the wait below returns at once, so
+                    # against an unreachable orchestrator this loop would
+                    # turn as fast as it can until stop()'s timeout.
+                    # stop() counts what is still queued as dropped.
+                    logger.warning(
+                        "log shipper stream error while stopping, not reconnecting",
+                        exc_info=True,
+                    )
+                    return
                 logger.warning(
                     "log shipper stream error, reconnecting in %.1fs",
                     backoff,
@@ -287,164 +291,136 @@ class Shipper:
                     pass
                 backoff = min(backoff * 2.0, RECONNECT_BACKOFF_CAP_SEC)
 
+    def _drop_queued(self) -> None:
+        """Count every record still queued as dropped, and empty the queue."""
+        with self._queue_lock:
+            self.dropped += len(self._queue)
+            self._queue.clear()
+
+    def _requeue(self, records: list[dict[str, Any]]) -> None:
+        """Put *records* back at the front of the queue, oldest first.
+
+        The queue keeps its bound: when records arrived meanwhile and it
+        is over ``max_queue``, the oldest are evicted and counted as
+        dropped, as :meth:`enqueue` does.
+        """
+        with self._queue_lock:
+            self._queue.extendleft(reversed(records))
+            while len(self._queue) > self.max_queue:
+                self._queue.popleft()
+                self.dropped += 1
+
+    async def _next_batch(self) -> list[dict[str, Any]] | None:
+        """The next records to send; ``None`` once stopping with nothing queued."""
+        while True:
+            # The lock keeps the popleft loop consistent with cross-thread
+            # enqueue() callers (PR #173 review Must-Fix #3).
+            with self._queue_lock:
+                count = min(len(self._queue), self.batch_max)
+                records = [self._queue.popleft() for _ in range(count)]
+            if records:
+                return records
+            if self._stopping.is_set():
+                return None
+            # Wait for either a wake or a flush-interval tick.
+            self._wake.clear()
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(self._wake.wait(), timeout=FLUSH_INTERVAL_SEC)
+
+    def _encode(self, records: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], logpb.LogBatch]:
+        """Encode *records* as one batch; return the records that are in it.
+
+        A record that cannot be encoded can never be sent.  It is counted
+        as dropped here and left out: put back in the queue with the rest
+        of a failed batch, it would fail every stream after this one.
+        """
+        sendable: list[dict[str, Any]] = []
+        entries: list[logpb.LogEntry] = []
+        for record in records:
+            try:
+                entries.append(record_to_proto(record))
+            except Exception:  # noqa: BLE001 — whatever a record holds, the stream goes on.
+                with self._queue_lock:
+                    self.dropped += 1
+                continue
+            sendable.append(record)
+        return sendable, logpb.LogBatch(entries=entries, agent_id=self.agent_id)
+
     async def _stream_once(self) -> None:
-        """Single bidi stream lifetime; returns on EOF, raises on error."""
+        """Single bidi stream lifetime; returns on EOF, raises on error.
+
+        How records are counted (ISSUE-0207).  The orchestrator
+        acknowledges how many records it has received on this stream, and
+        a record is *shipped* when an acknowledgement covers it.  When the
+        stream ends, however it ends:
+
+        * a batch whose write did not return goes back to the front of
+          the queue;
+        * records written and never acknowledged are counted as dropped.
+          The orchestrator may have received some of them (it acknowledges
+          every few records), but nothing says so.
+
+        On a stop the stream is half-closed and this waits for the reader
+        to reach the end of it: the orchestrator answers a half-close with
+        a last acknowledgement once it has read everything.  The reader
+        used to be cancelled right after the half-close, and cancelling a
+        pending read cancels the whole call, so the orchestrator lost
+        whatever it had not read yet.  The wait is bounded by stop()'s
+        timeout, which cancels this task.
+        """
         if self._channel is None:  # pragma: no cover — start() guards this.
             return
         stub = loggrpc.LogServiceStub(self._channel)
         call = stub.StreamLogs()
-
-        async def request_iter() -> Any:
-            while True:
-                # Drain to a batch.  The lock keeps the popleft loop
-                # consistent with cross-thread enqueue() callers
-                # (PR #173 review Must-Fix #3).
-                batch_records: list[dict[str, Any]] = []
-                with self._queue_lock:
-                    while self._queue and len(batch_records) < self.batch_max:
-                        batch_records.append(self._queue.popleft())
-                if batch_records:
-                    yield self._batch_proto(batch_records)
-                    self.shipped += len(batch_records)
-                    continue
-                if self._stopping.is_set():
-                    return
-                # Wait for either a wake or a flush-interval tick.
-                self._wake.clear()
-                with contextlib.suppress(TimeoutError):
-                    await asyncio.wait_for(
-                        self._wake.wait(), timeout=FLUSH_INTERVAL_SEC,
-                    )
+        written = 0  # records handed to this stream
+        acked = 0  # of those, how many the orchestrator has acknowledged
+        in_flight: list[dict[str, Any]] = []  # the batch whose write has not returned
 
         # Consume acks concurrently so the high-water mark advances
         # even when we are waiting on the request iterator.
         async def ack_consumer() -> None:
+            nonlocal acked
             async for ack in call:
-                self.last_ack_seq = max(self.last_ack_seq, int(ack.received_through_seq))
+                through = int(ack.received_through_seq)
+                self.last_ack_seq = max(self.last_ack_seq, through)
+                newly = min(through, written) - acked
+                if newly > 0:
+                    acked += newly
+                    self.shipped += newly
 
         ack_task = asyncio.create_task(ack_consumer(), name="log-shipper-acks")
         try:
-            async for batch in request_iter():
+            while (records := await self._next_batch()) is not None:
+                in_flight, batch = self._encode(records)
+                if not in_flight:
+                    continue
+                # Counted before the write: its acknowledgement can arrive
+                # before the write returns.
+                written += len(in_flight)
                 await call.write(batch)
+                in_flight = []
             await call.done_writing()
+            await ack_task
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # The stream broke.  Let its reader take in what had already
+            # arrived, so a record the orchestrator did acknowledge is not
+            # counted as dropped because the write after it failed first.
+            await asyncio.wait({ack_task}, timeout=ACK_SETTLE_SEC)
+            raise
         finally:
             ack_task.cancel()
             with contextlib.suppress(BaseException):
                 await ack_task
-
-    def _batch_proto(self, records: Iterable[dict[str, Any]]) -> logpb.LogBatch:
-        return logpb.LogBatch(
-            entries=[record_to_proto(r) for r in records],
-            agent_id=self.agent_id,
-        )
-
-
-# ─── Record → proto conversion ──────────────────────────────────────────────
-
-
-def record_to_proto(record: dict[str, Any]) -> logpb.LogEntry:
-    """Convert a structlog event dict to ``persatrix.v1.LogEntry``."""
-    e = logpb.LogEntry(
-        schema_version=str(record.get("schema_version", "")),
-        level=str(record.get("level", "")),
-        service_kind=str(record.get("service.kind", "")),
-        service_instance=str(record.get("service.instance", "")),
-        service_role=str(record.get("service.role", "")),
-        message=str(record.get("message", "")),
-        execution_id=str(record.get("execution_id", "")),
-        step_id=str(record.get("step_id", "")),
-        agent_id=str(record.get("agent_id", "")),
-        request_id=str(record.get("request_id", "")),
-        trace_id=str(record.get("trace_id", "")),
-        span_id=str(record.get("span_id", "")),
-    )
-    ts_parse_error = False
-    if (ts := record.get("timestamp")) is not None:
-        proto_ts, ts_parse_error = _to_timestamp(ts)
-        e.timestamp.CopyFrom(proto_ts)
-    if (src := record.get("source")) is not None and isinstance(src, dict):
-        e.source.CopyFrom(logpb.LogEntry.Source(
-            file=str(src.get("file", "")),
-            line=int(src.get("line", 0)),
-            function=str(src.get("function", "")),
-        ))
-    extras = {
-        k: v
-        for k, v in record.items()
-        if k not in _RESERVED_KEYS
-        and k not in _BOOKKEEPING_KEYS
-        and not k.startswith("_")
-    }
-    if ts_parse_error and "timestamp_parse_error" not in extras:
-        # Issue #179 Should-Fix #2: surface malformed-timestamp inputs
-        # rather than silently emitting an epoch-zero entry that would
-        # sort to the front of every chronological merge in the
-        # orchestrator's handleListLogs / SSE broadcast path.
-        #
-        # Guard: if a producer record already carries its own
-        # `timestamp_parse_error` key (unlikely but possible for
-        # pass-through / replay logs), preserve the user value rather
-        # than silently overwriting it.  The shipper's flag is a
-        # best-effort signal; an explicit producer value takes
-        # precedence.  (PR #182 review Should-Fix #1.)
-        extras["timestamp_parse_error"] = True
-    if extras:
-        e.attributes.CopyFrom(_dict_to_struct(extras))
-    return e
-
-
-def _to_timestamp(ts: Any) -> tuple[timestamp_pb2.Timestamp, bool]:
-    """Convert a record timestamp to a proto Timestamp.
-
-    Returns ``(timestamp, parse_error)``.  ``parse_error`` is ``True``
-    only for string inputs that failed RFC 3339 parsing; callers
-    surface this as a ``timestamp_parse_error=true`` attribute so the
-    downstream merge path can distinguish stamped-now entries from
-    well-formed ones.  Issue #179 Should-Fix #2.
-    """
-    out = timestamp_pb2.Timestamp()
-    if isinstance(ts, datetime):
-        out.FromDatetime(ts)
-        return out, False
-    if isinstance(ts, (int, float)):
-        # Preserve sub-second precision for float epoch inputs; the
-        # previous FromSeconds(int(ts)) silently truncated milliseconds
-        # so SSE / chronological merges across log sources lost
-        # ordering information for entries within the same second.
-        # (PR #173 review nice-to-have #5.)
-        out.FromNanoseconds(int(ts * 1_000_000_000))
-        return out, False
-    if isinstance(ts, str):
-        # Best-effort RFC 3339 parse.  On failure stamp the current
-        # wall clock and flag the entry so it still sorts into the
-        # vicinity of its siblings rather than collapsing the whole
-        # merged view onto 1970-01-01.
-        try:
-            out.FromDatetime(datetime.fromisoformat(ts.replace("Z", "+00:00")))
-            return out, False
-        except ValueError:
-            out.FromDatetime(datetime.now(UTC))
-            return out, True
-    # Unknown type: stamp now to keep the entry chronologically sane.
-    out.FromDatetime(datetime.now(UTC))
-    return out, True
-
-
-def _dict_to_struct(d: dict[str, Any]) -> struct_pb2.Struct:
-    s = struct_pb2.Struct()
-    s.update({k: _coerce(v) for k, v in d.items()})
-    return s
-
-
-def _coerce(v: Any) -> Any:
-    """Coerce arbitrary Python values into Struct-compatible types."""
-    if v is None or isinstance(v, (str, int, float, bool)):
-        return v
-    if isinstance(v, dict):
-        return {str(k): _coerce(val) for k, val in v.items()}
-    if isinstance(v, (list, tuple, set)):
-        return [_coerce(item) for item in v]
-    return repr(v)
+            if in_flight:
+                # Put back what no acknowledgement covers.
+                confirmed = max(0, acked - (written - len(in_flight)))
+                written -= len(in_flight) - confirmed
+                self._requeue(in_flight[confirmed:])
+            if written > acked:
+                with self._queue_lock:
+                    self.dropped += written - acked
 
 
 # ─── Env helpers ────────────────────────────────────────────────────────────
