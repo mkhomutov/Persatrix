@@ -43,7 +43,7 @@ from .cascade_depth_defaults import DEFAULT_MAX_CASCADE_DEPTH
 from .channel_wire_metadata import DispatchContext
 from .convene_timer import STANDING_CONVENE_KIND, parse_standing_convene_timer_id
 from .event_loop import EventLoop, ScheduledWake
-from .persona_types import ActionType
+from .persona_types import ActionType, turn_failure
 
 if TYPE_CHECKING:
     from .convene_client import ConveneClient
@@ -283,7 +283,13 @@ class TickScheduler:
         actions = await self._agent.on_tick()
         actions = actions[: self._max_actions_per_tick]
 
-        all_do_nothing = all(
+        # A tick whose turn failed (ISSUE-0199) is carried as a DO_NOTHING
+        # and is not an idle tick: counting it would stop a persona's
+        # ticks after ``idle_after_ticks`` provider errors, where it has
+        # always gone on trying and recovered when the provider did.  A
+        # tick the wallet denies comes back as a plain DO_NOTHING and
+        # does count, as before.
+        all_do_nothing = turn_failure(actions) is None and all(
             a.action_type == ActionType.DO_NOTHING for a in actions
         )
         if all_do_nothing:

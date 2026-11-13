@@ -41,8 +41,9 @@ models:
     # The quality role keeps the model's default thinking (`medium`), since
     # quality is the role we WANT to reason, and relies on its `max_tokens`
     # (agents.yaml, 4096) leaving headroom over the thinking reserve. A
-    # thinking-heavy prompt can still truncate (MAX_TOKENS) — the action loop
-    # degrades to a "Response truncated" turn rather than crashing. Lower it
+    # thinking-heavy prompt can still truncate (MAX_TOKENS) — the turn then
+    # fails with "LLM response truncated: max_tokens limit reached" rather
+    # than crashing (a DM gets that as an error reply). Lower it
     # with `provider_config.thinking_level: low` if truncation shows up
     # (gemini-3.8-flash rejects `minimal`).
     # PRICE CHANGE: $0.75 / $3.75 is the introductory rate through 2026-12-31;

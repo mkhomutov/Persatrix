@@ -225,8 +225,9 @@ disabling the budget gate. Every shipped demo alias is priced.
 - **Model lifecycle (2026-07-12):** Google retired `gemini-2.5-pro` / `gemini-2.5-flash`
   for new API users (`generateContent` → `404 … no longer available to new users`,
   even though `models.list()` still advertises them). The demo config was repointed
-  to `gemini-3.5-flash` for all three aliases. If this smoke ever regresses to
-  `DEADLINE_EXCEEDED` with a 404 in the agent logs, re-check the alias models against
+  to `gemini-3.5-flash` for all three aliases. If this smoke ever comes back with
+  `reply_status: "error"` and the reply `LLM provider error` (`DEADLINE_EXCEEDED`
+  before the ISSUE-0199 fix) and a 404 in the agent logs, re-check the alias models against
   Google's currently-available list and repoint `config/demo/gemini/optimization.yaml`.
 - **Model lifecycle (2026-10-05):** `gemini-3.5-flash` became a legacy model, and Google
   recommends `gemini-3.8-flash` (chat and agent work) and `gemini-3.5-flash-lite`

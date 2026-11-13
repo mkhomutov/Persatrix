@@ -87,6 +87,7 @@ from .persona_types import (
     SubAgentRequest,
     SubAgentResult,
     SubAgentStatus,  # noqa: F401 — re-exported for backward compatibility (F-64-01)
+    turn_failure,
 )
 from .tick import TickScheduler  # noqa: F401
 from .tools.builtin import create_memory_tools
@@ -132,6 +133,15 @@ class PersonaAgent(BaseAgent):
             payload={"task": task},
         )
         actions = await self.on_event(event)
+
+        # ISSUE-0199: a turn that failed is a failed step, with the status
+        # and result text ``BaseAgent._run_llm_loop`` gives for the same
+        # cause, so the orchestrator stops the run there (it does not retry
+        # a step an agent answered FAILED), and does not feed an error
+        # sentence to the next step as this one's output.
+        failure = turn_failure(actions)
+        if failure is not None:
+            return TaskOutput(status=TaskStatus.FAILED, result=failure.message)
 
         for action in actions:
             if action.action_type == ActionType.COMPLETE_TASK:

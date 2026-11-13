@@ -11,7 +11,7 @@ from agents.llm_client import LLMClient, LLMResponse, StopReason, ToolCall, Usag
 from agents.persona import create_persona_agent
 from agents.persona_runtime import _LLMPersonaAgent
 from agents.persona_runtime.memory_context import MemoryInjectionResult
-from agents.persona_types import ActionType, AgentEvent, EventType, Mood
+from agents.persona_types import ActionType, AgentEvent, EventType, Mood, turn_failure
 
 from ._persona_test_helpers import _PERSONA_CONFIG, _make_client, _task
 
@@ -292,9 +292,11 @@ class TestLLMPersonaAgent:
             payload={"content": "test"},
         )
         actions = await agent.on_event(event)
-        assert len(actions) == 1
-        assert actions[0].action_type == ActionType.COMPLETE_TASK
-        assert "LLM provider error" in actions[0].payload["result"]
+        # ISSUE-0199: a failed turn, not a completed task with a sentence.
+        failure = turn_failure(actions)
+        assert failure is not None
+        assert (failure.cause, failure.message) == ("provider_error", "LLM provider error")
+        assert [a.action_type for a in actions] == [ActionType.DO_NOTHING]
 
     def test_persona_runtime_mixins_require_non_none_llm_client(self):
         """RFC 0020 PR 6 slice 7 — ``_llm_client`` annotation tightened
