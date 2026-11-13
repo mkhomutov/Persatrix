@@ -6,6 +6,7 @@ severity: medium
 area: agents
 created: 2026-11-10
 closed: 2026-11-13
+closed_pr: 1115
 refs:
   - agents/observability/log_shipper.py
   - agents/observability/log_record_proto.py
