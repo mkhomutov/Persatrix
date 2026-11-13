@@ -14,7 +14,9 @@ The rule these tests pin:
   ``COMPLETE_TASK``;
 * in a list, an item that is not an object, or whose payload is not an
   object, is dropped and the others are kept, the same way an item with
-  an unknown ``action_type`` always was.
+  an unknown ``action_type`` always was;
+* an explicit ``do_nothing`` is the one exception: it means silence
+  whatever its payload holds, as it always did.
 """
 
 from __future__ import annotations
@@ -103,16 +105,54 @@ def test_a_reply_of_the_wrong_shape_becomes_the_raw_text(text: str) -> None:
     _assert_raw_text(text)
 
 
+_NOT_SILENCE = [t for t in ActionType if t is not ActionType.DO_NOTHING]
+
+
 @pytest.mark.parametrize("payload", BAD_PAYLOADS, ids=repr)
-@pytest.mark.parametrize("action_type", list(ActionType), ids=lambda t: t.value)
+@pytest.mark.parametrize("action_type", _NOT_SILENCE, ids=lambda t: t.value)
 def test_a_payload_that_is_not_an_object_becomes_the_raw_text(
     action_type: ActionType, payload: Any,
 ) -> None:
-    """Every action type, not only the three whose fields the validator
-    reads: for the others the bad payload used to travel on and fail in
-    reply synthesis."""
+    """Every action type but ``do_nothing``.  Five of them used to raise:
+    three in the validator, which reads their fields, and
+    ``complete_task`` and ``end_interaction_vote`` later, in reply
+    synthesis.  The tool and approval types did not raise: the bad
+    payload travelled on and the turn did nothing.  All nine are now an
+    unusable item, so a reply holding nothing else is its own text."""
     _assert_raw_text(json.dumps([{"action_type": action_type.value, "payload": payload}]))
     _assert_raw_text(_fenced([{"action_type": action_type.value, "payload": payload}]))
+
+
+@pytest.mark.parametrize("payload", BAD_PAYLOADS, ids=repr)
+def test_an_explicit_do_nothing_is_silence_whatever_its_payload(payload: Any) -> None:
+    """The model said to stay silent.  Its payload carries nothing the
+    runtime reads, so a wrong one must not turn the silence into the raw
+    JSON posted to the channel."""
+    for text in (
+        json.dumps([{"action_type": "do_nothing", "payload": payload}]),
+        _fenced([{"action_type": "do_nothing", "payload": payload}]),
+    ):
+        assert [(a.action_type, a.payload) for a in _parse(text)] == [
+            (ActionType.DO_NOTHING, {}),
+        ]
+
+
+@pytest.mark.parametrize("payload", BAD_PAYLOADS, ids=repr)
+def test_an_item_that_names_no_action_and_has_a_bad_payload_is_not_silence(
+    payload: Any,
+) -> None:
+    """Only a ``do_nothing`` the model wrote out is kept.  An item with
+    no ``action_type`` reads as ``do_nothing`` when its payload is an
+    object or absent; with a payload that is not an object it is one
+    more unusable item."""
+    _assert_raw_text(json.dumps([{"payload": payload}]))
+
+
+def test_an_explicit_do_nothing_with_a_bad_payload_keeps_the_good_items() -> None:
+    actions = _parse(json.dumps([{"action_type": "do_nothing", "payload": None}, GOOD]))
+    assert [a.action_type for a in actions] == [
+        ActionType.DO_NOTHING, ActionType.COMPLETE_TASK,
+    ]
 
 
 # ─── One bad item among good ones: the good ones are kept ────────────
@@ -145,6 +185,69 @@ def test_a_bad_item_is_dropped_and_the_good_ones_are_kept_in_order(
         (ActionType.COMPLETE_TASK, GOOD["payload"]),
     ]
     assert caplog.records, "a dropped item is logged"
+
+
+def _warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [
+        r.getMessage() for r in caplog.records
+        if r.levelno == logging.WARNING and r.name.endswith("action_parser")
+    ]
+
+
+def test_dropped_items_are_logged_once_per_reply_with_their_counts(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A model can return thousands of items; the log gets one line."""
+    items: list[Any] = ["a string"] * 5_000
+    items += [None, 7, {"action_type": "fly", "payload": {}}]
+    items += [{"action_type": "delegate", "payload": None}, GOOD]
+    with caplog.at_level(logging.WARNING):
+        actions = _parse(json.dumps(items))
+    assert [a.action_type for a in actions] == [ActionType.COMPLETE_TASK]
+    (line,) = _warnings(caplog)
+    assert "5004 of 5005" in line
+    assert "5000" in line and "a string" in line
+    assert "null" in line and "a number" in line
+    assert "'fly'" in line
+    assert "delegate" in line
+    assert "NoneType" not in line, "a Python type name is not a JSON kind"
+
+
+def test_many_unknown_action_types_do_not_make_the_log_line_long(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    items = [{"action_type": f"made-up-{n}-{'x' * 200}", "payload": {}} for n in range(500)]
+    with caplog.at_level(logging.WARNING):
+        _parse(json.dumps(items))
+    (line,) = _warnings(caplog)
+    assert "500 of 500" in line
+    assert len(line) < 600
+
+
+@pytest.mark.parametrize(
+    ("value", "kind"),
+    [(GOOD, "an object"), (None, "null"), (5, "a number"), (True, "a boolean"),
+     ('"just text"', "a string")],
+    ids=["object", "null", "number", "boolean", "string"],
+)
+def test_a_fenced_value_that_is_not_a_list_is_logged(
+    value: Any, kind: str, caplog: pytest.LogCaptureFixture,
+) -> None:
+    """One action object in a fence used to end in an error with a
+    traceback at the dispatch boundary.  It is the raw text now, and the
+    operator still needs a line saying the reply was not read as
+    actions."""
+    with caplog.at_level(logging.WARNING):
+        _assert_raw_text(_fenced(value))
+    (line,) = _warnings(caplog)
+    assert kind in line
+    assert "not a list" in line
+
+
+def test_a_reply_read_in_full_logs_nothing(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.WARNING):
+        _parse(json.dumps([GOOD_SEND, GOOD, {"action_type": "do_nothing", "payload": None}]))
+    assert _warnings(caplog) == []
 
 
 def test_a_dropped_item_does_not_become_a_silent_do_nothing() -> None:
@@ -260,6 +363,37 @@ async def test_a_dm_turn_with_a_wrong_shaped_reply_publishes_its_text() -> None:
     assert sends[0].payload["channel_id"] == "dm:user-1:ember-owl"
 
 
+@pytest.mark.parametrize(
+    ("channel_id", "posted"),
+    [("group:eng", []), ("dm:user-1:ember-owl", ["\u2026"])],
+    ids=["group", "dm"],
+)
+@pytest.mark.parametrize("payload", [None, "x"], ids=repr)
+async def test_a_do_nothing_with_a_bad_payload_is_still_silence_on_a_channel(
+    payload: Any, channel_id: str, posted: list[str],
+) -> None:
+    """A group channel gets nothing and a DM gets the placeholder, the
+    same as for a well-formed ``do_nothing``; neither gets the raw JSON."""
+    text = json.dumps([{"action_type": "do_nothing", "payload": payload}])
+    agent = create_persona_agent(
+        agent_id="ember-owl",
+        config=_PERSONA_CONFIG,
+        llm_client=_make_client([LLMResponse(text=text)]),
+    )
+    await agent.initialize_memory()
+    try:
+        actions = await agent.on_event(AgentEvent(
+            event_type=EventType.CHANNEL_MESSAGE,
+            payload={"content": "hello", "respond_policy": "always"},
+            sender_id="user-1",
+            channel_id=channel_id,
+        ))
+    finally:
+        await agent.close_memory()
+    sends = [a for a in actions if a.action_type is ActionType.SEND_CHANNEL_MESSAGE]
+    assert [a.payload["content"] for a in sends] == posted
+
+
 # ─── Any JSON value at all ───────────────────────────────────────────
 
 _ACTION_TYPES: list[Any] = [t.value for t in ActionType] + [
@@ -288,8 +422,24 @@ def _value(rng: random.Random, depth: int = 0) -> Any:
     }
 
 
+_CHANNELS = ("dm:user-1:ember-owl", "group:eng")
+
+
 def _action_like(rng: random.Random) -> Any:
-    """Something close to an action, wrong in one or more places."""
+    """Something close to an action, wrong in one or more places, or now
+    and then a well-formed message or vote, so that the code behind a
+    usable action runs too."""
+    roll = rng.random()
+    if roll < 0.12:
+        return {"action_type": "send_channel_message", "payload": {
+            "channel_id": rng.choice(_CHANNELS), "content": "hello",
+            "mentions": _value(rng, 3),
+        }}
+    if roll < 0.24:
+        return {"action_type": "end_interaction_vote", "payload": (
+            {f: _value(rng, 3) for f in rng.sample(["content", "channel_id", "x"], 2)}
+            if rng.random() < 0.7 else _value(rng, 2)
+        )}
     action: dict[str, Any] = {}
     if rng.random() < 0.9:
         action["action_type"] = rng.choice(_ACTION_TYPES)
@@ -331,6 +481,9 @@ def test_no_json_value_makes_the_parser_or_reply_synthesis_raise() -> None:
     seeded sweep: every reply is valid JSON, most are wrong somewhere.
     Each must parse to at least one action with an object payload, and
     reply synthesis must accept the result on a DM and on a group channel.
+    The group channel's id starts ``group:``, which is what the code that
+    folds prose into an end vote looks for; the counts at the end fail
+    the test if the sweep stops reaching that code.
     """
     rng = random.Random(206)
     events = [
@@ -338,8 +491,9 @@ def test_no_json_value_makes_the_parser_or_reply_synthesis_raise() -> None:
             event_type=EventType.CHANNEL_MESSAGE, payload={"content": "hello"},
             sender_id="user-1", channel_id=channel_id,
         )
-        for channel_id in ("dm:user-1:ember-owl", "general")
+        for channel_id in _CHANNELS
     ]
+    votes_with_prose = sends = 0
     for _ in range(5_000):
         text = _reply(rng)
         try:
@@ -352,3 +506,10 @@ def test_no_json_value_makes_the_parser_or_reply_synthesis_raise() -> None:
         for action in actions:
             assert isinstance(action.action_type, ActionType), text
             assert isinstance(action.payload, dict), text
+        kinds = {a.action_type for a in actions}
+        sends += ActionType.SEND_CHANNEL_MESSAGE in kinds
+        votes_with_prose += {
+            ActionType.END_INTERACTION_VOTE, ActionType.COMPLETE_TASK,
+        } <= kinds
+    assert sends >= 100, sends
+    assert votes_with_prose >= 20, votes_with_prose
