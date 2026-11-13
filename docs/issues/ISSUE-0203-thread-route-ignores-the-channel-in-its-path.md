@@ -6,6 +6,7 @@ severity: medium
 area: internal/server
 created: 2026-11-10
 closed: 2026-11-13
+closed_pr: 1110
 refs:
   - internal/server/channel_handlers.go
   - internal/server/channel_thread_handler.go
