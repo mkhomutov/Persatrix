@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0239
 summary: "When the wallet denies a persona's model call on a group channel, the agent posts the denial sentence into the channel as a message tagged `reply_status: error`, mentioning the sender. Only the chat handler reads that tag, so to the channel it is an ordinary message: stored, and able to end the speaker's turn in a floor round. A persona turn that fails for another reason is answered that way only on a DM."
-status: open
+status: resolved
 severity: medium
 area: agents/chat_reply
 created: 2026-11-12
+closed: 2026-11-13
+closed_pr: 1109
 refs:
   - agents/chat_reply.py
   - internal/server/chat_handler.go
@@ -13,6 +15,9 @@ refs:
   - docs/issues/ISSUE-0065-chat-rest-budget-denied-no-channel-reply.md
   - docs/issues/ISSUE-0066-chat-rest-resource-exhausted-no-channel-reply.md
   - docs/issues/ISSUE-0199-persona-failures-travel-as-completed-work.md
+  - agents/persona_runtime/llm_call_errors.py
+  - tests/unit/python/test_wallet_denial_channel_reply.py
+  - docs/observability.md
   - docs/issues/ISSUE-0161-silent-reply-on-a-handed-over-autonomous-turn-stalls.md
   - docs/experiments/EXP-001-preregistration.md
 ---
@@ -101,3 +106,40 @@ path and the failed-turn path agree.
 > wallet-denial path, which still posts its sentence on a group channel
 > and is what remains to be brought in line. A DM keeps its error
 > reply: the ruling is about group channels.
+
+> 2026-11-13 — fixed as ruled. A wallet denial is answered with the error
+> reply on a DM only; anywhere else nothing is posted and the denial is
+> logged at WARNING, as it was before. That holds for each way the
+> wallet refuses a call: a budget is spent, a discussion's cost ceiling
+> is reached, the wallet cannot be reached, or the agent is at its lease
+> or rate limit. One function in `agents/chat_reply.py` now decides it
+> for a wallet denial and for a persona's own failed turn, with the same
+> two facts: the channel, and whether the turn is the synthesis turn
+> that closes a discussion, which is never answered. Reproduced first on
+> the code as ISSUE-0199's third step left it: a spent budget, an
+> unreachable wallet and a lease refusal each posted their sentence to
+> `group:planning`, to an id starting `thread:` and to a channel id with
+> no prefix, tagged `reply_status: error` and mentioning the sender. The
+> cost ceiling was added to the tests after review; it takes the same
+> path.
+>
+> The rule is "a DM, or nothing". Nothing in the orchestrator creates a
+> channel whose id starts `thread:` today: a reply in a thread carries
+> its parent channel's id, so in a thread under a DM it is still
+> answered. The chat request, the one caller that waits for the reply,
+> always travels on a DM (`internal/server/chat_handler.go`). The
+> example line in Context above is a test's; the wallet writes
+> `per_agent budget exceeded: spent=…, limit=…, estimated=…`
+> (`internal/cost/cost.go`).
+>
+> The cost, accepted by the maintainer as a known gap, read in
+> `internal/channels/` and not changed or run. In a floor-control round
+> a denied speaker now holds the floor until its turn times out
+> (`floor_turn_timeout_seconds`, 45 by default), where its posted line
+> ended the turn at once. One agent over its own budget pays that on
+> each of its turns. That is the smaller part. A wallet outage, a spent
+> shared budget or a discussion at its cost ceiling denies every
+> speaker, so a round of K speakers takes K × 45 seconds for each
+> message with nothing posted, and the rest follows from a round in
+> which nobody replies; it is set out in the note on
+> [ISSUE-0161](ISSUE-0161-silent-reply-on-a-handed-over-autonomous-turn-stalls.md).

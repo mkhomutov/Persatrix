@@ -91,7 +91,8 @@ class ActionExecutor:
         ISSUE-0065 — exposed so the inbound channel-event processing path
         (:func:`agents.chat_reply.process_inbound_channel_event`, run by the
         event loop's ``on_inbound`` callback) can publish a structured-error
-        reply on the originating channel when the persona action loop raises
+        reply on the originating channel, when that channel is a DM
+        (ISSUE-0239), after the persona action loop raises
         :class:`BudgetExceededError`, without reaching into the executor's
         private attribute.
         """

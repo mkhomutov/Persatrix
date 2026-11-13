@@ -24,7 +24,8 @@ classes of exception, with different downstream contracts:
   TICK-vs-other-event split. The chat / channel path's published
   error reply is built by
   :func:`agents.chat_reply.dispatch_channel_event_with_chat_error_recovery`
-  with ``error_reason="resource_exhausted"`` (ISSUE-0066).
+  with ``error_reason="resource_exhausted"`` (ISSUE-0066), and is sent
+  on a DM only (ISSUE-0239).
 * :class:`grpc.aio.AioRpcError` with any other code (``INTERNAL`` /
   ``UNAVAILABLE`` / ``INVALID_ARGUMENT`` / etc.) — real provider-side
   or wallet-side problems. A failed turn with the generic text
@@ -160,9 +161,11 @@ def handle_llm_call_exception(
         # dispatcher's ``error_reason``); chat / channel re-raise so
         # the dispatcher's
         # :func:`agents.chat_reply.dispatch_channel_event_with_chat_error_recovery`
-        # wrapper publishes the structured error reply (the unit-
-        # level contract is pinned by
-        # ``agents/tests/test_chat_path_resource_exhausted.py``).
+        # wrapper answers a DM with the structured error reply and
+        # logs the denial on any other channel (the unit-level
+        # contract is pinned by
+        # ``agents/tests/test_chat_path_resource_exhausted.py`` and
+        # ``tests/unit/python/test_wallet_denial_channel_reply.py``).
         # Other gRPC codes indicate real provider-side problems and
         # must degrade to the generic surface — not masked as
         # back-pressure.
