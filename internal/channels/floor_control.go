@@ -375,6 +375,8 @@ func (r *ChannelRouter) recordFloorRound(ctx context.Context, ct ChannelType, d 
 // race, mirroring [ChannelRouter.PublishAndAwait]), dispatches the stimulus
 // to that speaker alone, then waits for the speaker's reply to be persisted
 // or for the per-turn timeout (D2) before returning so the loop advances.
+// The reply is the one that echoes this round's message id: a reply the
+// speaker sends late to an earlier round does not end the turn (ISSUE-0200).
 //
 // Per-message turn boundary: the turn advances on the *first* reply the speaker
 // publishes, because the waiter is single-shot ([replyWaiter.Notify]). An agent
@@ -408,7 +410,7 @@ func (r *ChannelRouter) runFloorTurn(
 	// for its own turn rather than dropping it mid-queue. See activity.go.
 	r.markActivity(msg.ChannelID, []string{speaker.ParticipantID})
 
-	replyCh, cancel, err := r.waiter.Register(msg.ChannelID, speaker.ParticipantID)
+	replyCh, cancel, err := r.waiter.Register(msg.ChannelID, speaker.ParticipantID, msg.ID)
 	if err != nil {
 		// A waiter for this (channel, speaker) already exists — e.g. a
 		// re-entrant round, or a chat PublishAndAwait sharing the key space.

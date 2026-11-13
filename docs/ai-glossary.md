@@ -603,7 +603,8 @@ Process vocabulary (scope lock, cuttable, live arc, finding, …) lives in the
   (`dm:<a>:<b>`, IDs sorted) in the channel store. The
   `POST /api/v1/agents/{id}/chat` REST endpoint and the `persatrix chat`
   REPL are preserved as synchronous-reply façades — they publish on the
-  DM channel, await one `SEND_CHANNEL_MESSAGE` reply there, and return it
+  DM channel, await the `SEND_CHANNEL_MESSAGE` reply to that message there
+  (the reply names it in its `in_reply_to` metadata), and return it
   to the caller. Eliminates the parallel chat transport that v0.2.1
   introduced and is the reason `EventType.MESSAGE_RECEIVED` /
   `ActionType.SEND_MESSAGE` were renamed (not just superseded) to

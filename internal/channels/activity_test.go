@@ -210,6 +210,8 @@ func (p *floorActivityProbe) Dispatch(_ context.Context, env DispatchEnvelope, m
 	go func() {
 		_ = p.router.Publish(context.Background(), ChannelMessage{
 			ID: uuid.NewString(), ChannelID: msg.ChannelID, SenderID: rid, Content: rid + " reply",
+			// As an agent does: the reply names the message it answers.
+			Metadata: map[string]any{replyToMetadataKey: msg.ID},
 		}, "")
 	}()
 	return nil

@@ -83,3 +83,22 @@ request whichever way that goes.
 > [ISSUE-0199](ISSUE-0199-persona-failures-travel-as-completed-work.md),
 > whose texts said every cause now answers HTTP 200. Filed apart from
 > that issue because its third step resolves it.
+
+> 2026-11-14 — the fix for
+> [ISSUE-0200](ISSUE-0200-late-chat-reply-answers-the-next-question.md)
+> closes the second half of the Context, "a late one can answer the
+> wrong request". A reply is now matched to the request it answers by
+> the id of the request's message, which the error reply echoes like
+> any other reply (`in_reply_to`). An error reply that is published
+> after its request gave up is stored in the DM and returned to no
+> later request; one that arrives in time still answers its own
+> request with HTTP 200. Tested at the waiter, at the router and
+> through the chat route with a late `event_timeout` error reply.
+>
+> Still open here: the first half, the error reply replayed to the
+> model as the persona's own earlier words; and the ruling the
+> proposed fix asks for, whether an error reply for a turn that ended
+> after its request stopped waiting should be published at all. It is
+> still published, and stays in the channel record. The summary in the
+> front matter still names both halves; it is left as filed until the
+> issue is resolved.

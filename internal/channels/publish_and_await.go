@@ -22,15 +22,16 @@ var ErrChatTimeout = errors.New("channels: chat reply timed out")
 
 // PublishAndAwait powers the chat-as-DM façade (RFC 0011 amendment).
 // The chat REST handler calls this with the user's inbound
-// CHANNEL_MESSAGE; the call returns when the agent's reply
-// (`SEND_CHANNEL_MESSAGE` published from `awaitFromAgentID` on the same
-// DM channel) arrives, or when `timeout` elapses.
+// CHANNEL_MESSAGE; the call returns when the agent's reply to that
+// message (a `SEND_CHANNEL_MESSAGE` published from `awaitFromAgentID` on
+// the same DM channel that echoes `msg.ID`) arrives, or when `timeout`
+// elapses.
 //
 // Sequence:
 //
-//  1. Register a waiter for `(msg.ChannelID, awaitFromAgentID)` BEFORE
-//     publishing — closes the race where the agent replies faster than
-//     the handler can install the waiter.
+//  1. Register a waiter for `(msg.ChannelID, awaitFromAgentID)` under
+//     `msg.ID` BEFORE publishing — closes the race where the agent
+//     replies faster than the handler can install the waiter.
 //  2. Call [Publish] (persistence + fanout via gRPC). The agent's
 //     `ReceiveChannelMessage` is invoked downstream.
 //  3. Block on the waiter chan until either:
@@ -39,7 +40,9 @@ var ErrChatTimeout = errors.New("channels: chat reply timed out")
 //     - the caller's context is cancelled (e.g. client disconnect).
 //
 // On any non-happy-path exit, the waiter is removed via the deferred
-// cancel so a late-arriving reply does not leak into a future chat.
+// cancel. A reply that arrives after that is stored in the channel and
+// answers no request: the next request on this DM waits under its own
+// message's id, which the late reply does not echo (ISSUE-0200).
 //
 // Auth: this entry point assumes the caller (HTTP handler) has already
 // validated the user is permitted to address the agent. The DM-creation
@@ -76,7 +79,7 @@ func (r *ChannelRouter) PublishAndAwait(
 			ErrInvalidParticipantID, msg.SenderID,
 		)
 	}
-	replyCh, cancel, err := r.waiter.Register(msg.ChannelID, awaitFromAgentID)
+	replyCh, cancel, err := r.waiter.Register(msg.ChannelID, awaitFromAgentID, msg.ID)
 	if err != nil {
 		return ChannelMessage{}, fmt.Errorf("channels: PublishAndAwait register: %w", err)
 	}

@@ -133,6 +133,12 @@ class ChannelPublisher(Protocol):
         * ``error_reason`` — informational only; not consumed by the
           chat handler today, but published alongside ``reply_status``
           for log forensics on the underlying ``ChannelMessage``.
+        * ``in_reply_to`` — the id of the message this publish answers
+          (ISSUE-0200).  The orchestrator hands a reply to a waiting
+          chat request, or counts it as a floor speaker's turn, only
+          when this is the id of that request's own message
+          (``internal/channels/waiter.go``).  Stamped by
+          ``DispatchContext.same_channel_claim``, not by callers.
         """
         ...
 

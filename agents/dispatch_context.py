@@ -138,6 +138,12 @@ class DispatchContext:
     cascade_depth: int = DEFAULT_MAX_CASCADE_DEPTH
     origin_channel_id: str = ""
     origin_interaction_id: str = ""
+    # ISSUE-0200: the id of the message this dispatch delivered.  A reply
+    # on the same channel names it (``in_reply_to``), which is how the
+    # orchestrator tells the reply to this request from a late reply to
+    # the one before.  "" for a context with no event behind it (a timer):
+    # what the agent then publishes answers nothing and names nothing.
+    origin_message_id: str = ""
     origin_synthesis_turn: bool = False
     # RFC 0037 §G (PR 7): the turn's tripwire watch — §D-withheld entries'
     # span fingerprints, stamped by ``_inject_memory_context`` and lifted
@@ -171,6 +177,7 @@ class DispatchContext:
             cascade_depth=cascade_depth,
             origin_channel_id=event.channel_id or "",
             origin_interaction_id=wire_interaction_id(event),
+            origin_message_id=event.message_id or "",
             origin_synthesis_turn=(event.payload or {}).get("synthesis_turn") is True,
             origin_tripwire_watch=tripwire_watch_from_event(event),
             origin_epoch_id=epoch_id_from_metadata(event.metadata) or "",
@@ -258,10 +265,24 @@ class DispatchContext:
         error-reply apology (``chat_reply.publish_chat_error_on_channel``) —
         so the withhold is spelled at the seam instead of implied by an
         omitted kwarg.
+
+        ``in_reply_to`` (ISSUE-0200) names the message this publish
+        answers: :attr:`origin_message_id`, on a same-channel publish.  The
+        orchestrator hands a reply to a waiting chat request, or counts it
+        as a floor speaker's turn, only when this id is that request's own
+        (``replyToMetadataKey``, internal/channels/waiter.go).  It does not
+        depend on the interaction id: a DM's reply is matched whether or
+        not the channel is tracked.  Every same-channel publish carries it,
+        the error reply included, since a request may be waiting for any of
+        them.
         """
-        if self.origin_interaction_id and target_channel == self.origin_channel_id:
-            claim: dict[str, object] = {"interaction_id": self.origin_interaction_id}
+        if not target_channel or target_channel != self.origin_channel_id:
+            return None
+        claim: dict[str, object] = {}
+        if self.origin_message_id:
+            claim["in_reply_to"] = self.origin_message_id
+        if self.origin_interaction_id:
+            claim["interaction_id"] = self.origin_interaction_id
             if claim_synthesis_reply and self.origin_synthesis_turn:
                 claim["synthesis_reply"] = True
-            return claim
-        return None
+        return claim or None

@@ -126,6 +126,8 @@ The floor loop reuses this verbatim: for responder `r` it `Register(channel, r)`
 
 Single-shot semantics (a persona emitting `tool_call → final_answer` as two publishes — `waiter.go` `Notify` docstring, ISSUE-0033) are acceptable here: the **first** reply is a sufficient turn-completion edge, and the timeout backstops the no-reply case.
 
+> **Changed since (2026-11-14, [ISSUE-0200](../issues/ISSUE-0200-late-chat-reply-answers-the-next-question.md)).** `Register` also takes the id of the round's message, and the waiter accepts only a reply that echoes it (`in_reply_to` in the publish metadata, one metadata key more than this section expected). A reply a speaker sends late, to an earlier round, no longer ends its turn in this round.
+
 ## Nested-reply handling — the central decision
 
 A responder's reply re-enters `Publish` → which today calls `fanout` again. If left unchanged, each floor-turn reply would spawn its **own** competing fanout *while the round is still running* — re-introducing the very concurrency this amendment removes.

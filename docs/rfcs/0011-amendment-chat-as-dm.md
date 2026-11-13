@@ -31,6 +31,8 @@ A user–agent chat is a `dm` channel between a `UserParticipant` and a persona 
 | `ActionType.SEND_MESSAGE` (chat reply) | `ActionType.SEND_CHANNEL_MESSAGE`; reply-extraction (RFC 0016 OQ 5) reformulated as: `SEND_CHANNEL_MESSAGE` whose `channel_id` matches the inbound DM and whose `mentions` includes the user → any `SEND_CHANNEL_MESSAGE` on the same DM → `COMPLETE_TASK` → empty string. |
 | `RelationshipMemory.record_interaction(other_participant_type="user")` | Unchanged — runs on the same code path; the unification does not alter when relationship updates fire. |
 
+> **Changed since (2026-11-14, [ISSUE-0200](../issues/ISSUE-0200-late-chat-reply-answers-the-next-question.md)).** The handler awaits the reply *to the message it published*, not the next reply on the DM: the agent echoes that message's id as `in_reply_to` in its publish metadata, and a reply that echoes another id, or none, answers no request.
+
 ### DM gate-bypass
 
 The RFC 0011 §D response gate is implicitly `always` for the non-sender on DM channels: the user implicitly mentions the agent by addressing the DM, and the chat caller is blocked waiting for a reply. The `respond` policy on a DM-channel membership is therefore not consulted. Group-channel gating semantics in §D are unchanged.

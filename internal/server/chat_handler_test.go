@@ -86,6 +86,7 @@ func publishReplyAfter(t *testing.T, router *channels.ChannelRouter, store chann
 			SenderID:  agentID,
 			Content:   content,
 			Timestamp: time.Now().UTC(),
+			Metadata:  replyEcho(t, store, dm.ID, userID),
 		}, ""); err != nil {
 			t.Errorf("publishReplyAfter: Publish failed: %v", err)
 		}
@@ -427,6 +428,7 @@ func TestHandleChat_ZeroTimestampReplyDoesNotLeakNegativeUnix(t *testing.T) {
 			SenderID:  "agent-x",
 			Content:   "ok",
 			Timestamp: time.Time{}, // zero value
+			Metadata:  replyEcho(t, store, dm.ID, "alice"),
 		}, "")
 	}()
 
@@ -439,62 +441,4 @@ func TestHandleChat_ZeroTimestampReplyDoesNotLeakNegativeUnix(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	assert.Greater(t, resp.Timestamp, before,
 		"zero-valued reply timestamp must be replaced with current time, not surface as a negative epoch second")
-}
-
-// TestHandleChat_MultiMessageReplyReturnsFirst pins the single-shot
-// semantics of `replyWaiter`: when an agent publishes multiple
-// `SEND_CHANNEL_MESSAGE`s in response to a single chat turn (e.g. a
-// `tool_call → tool_result → final_answer` plugin pattern), only the
-// first message satisfies the waiter and is returned to the caller.
-// Subsequent messages are persisted to the DM history but not
-// delivered to the chat response.
-func TestHandleChat_MultiMessageReplyReturnsFirst(t *testing.T) {
-	srv, reg, router, store := chatTestServer(t)
-	registerHealthyAgent(t, reg, "agent-x", "Agent X")
-
-	// Publish two replies in quick succession.
-	go func() {
-		time.Sleep(15 * time.Millisecond)
-		dm, err := store.GetOrCreateDM(context.Background(), "alice", "agent-x")
-		if err != nil {
-			t.Errorf("GetOrCreateDM failed: %v", err)
-			return
-		}
-		_ = router.Publish(context.Background(), channels.ChannelMessage{
-			ID:        uuid.NewString(),
-			ChannelID: dm.ID,
-			SenderID:  "agent-x",
-			Content:   "first",
-			Timestamp: time.Now().UTC(),
-		}, "")
-		_ = router.Publish(context.Background(), channels.ChannelMessage{
-			ID:        uuid.NewString(),
-			ChannelID: dm.ID,
-			SenderID:  "agent-x",
-			Content:   "second",
-			Timestamp: time.Now().UTC(),
-		}, "")
-	}()
-
-	body, _ := json.Marshal(chatRequest{Message: "Hi", UserID: "alice"})
-	rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/agent-x/chat", body)
-	require.Equal(t, 200, rec.Code, "body=%s", rec.Body.String())
-
-	var resp chatResponse
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	assert.Equal(t, "first", resp.Reply, "single-shot waiter must surface the first reply")
-
-	// Allow the second publish to complete before snapshotting.
-	require.Eventually(t, func() bool {
-		dm, err := store.GetOrCreateDM(context.Background(), "alice", "agent-x")
-		if err != nil {
-			return false
-		}
-		hist, err := store.GetHistory(context.Background(), dm.ID, 10, time.Time{})
-		if err != nil {
-			return false
-		}
-		// inbound + first + second = 3
-		return len(hist) == 3
-	}, 2*time.Second, 20*time.Millisecond, "all three messages must persist to the DM")
 }

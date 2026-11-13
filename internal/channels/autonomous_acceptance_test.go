@@ -300,20 +300,20 @@ func (d *adversarialDispatcher) Dispatch(_ context.Context, env DispatchEnvelope
 
 	recipient := env.Recipient.ParticipantID
 	claim := readInteractionID(msg.Metadata)
+	// As an agent does: every reply names the message it answers.
 	reply := ChannelMessage{ID: uuid.NewString(), ChannelID: msg.ChannelID, SenderID: recipient}
+	reply.Metadata = map[string]any{replyToMetadataKey: msg.ID}
 	switch {
 	case env.Convene:
 		reply.Content = "Opening the floor: let us work the topic."
 	case env.SynthesisTurn:
 		reply.Content = "Synthesis: the roster converged."
-		reply.Metadata = map[string]any{
-			interactionIDMetadataKey:  claim,
-			synthesisReplyMetadataKey: true,
-		}
+		reply.Metadata[interactionIDMetadataKey] = claim
+		reply.Metadata[synthesisReplyMetadataKey] = true
 	default:
 		reply.Content = "I have more to add."
 		if claim != "" {
-			reply.Metadata = map[string]any{interactionIDMetadataKey: claim}
+			reply.Metadata[interactionIDMetadataKey] = claim
 		}
 	}
 	d.wg.Add(1)

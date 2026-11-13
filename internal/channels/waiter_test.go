@@ -15,11 +15,14 @@ import (
 // message. RFC 0011 PR 4a-ii-β-2 — chat-as-DM publish-and-await.
 func TestReplyWaiter_RegisterAndNotify(t *testing.T) {
 	w := newReplyWaiter()
-	ch, cancel, err := w.Register("dm:user:agent-x", "agent-x")
+	ch, cancel, err := w.Register("dm:user:agent-x", "agent-x", "q1")
 	require.NoError(t, err)
 	defer cancel()
 
-	msg := ChannelMessage{ID: "m1", ChannelID: "dm:user:agent-x", SenderID: "agent-x", Content: "hi"}
+	msg := ChannelMessage{
+		ID: "m1", ChannelID: "dm:user:agent-x", SenderID: "agent-x", Content: "hi",
+		Metadata: map[string]any{"in_reply_to": "q1"},
+	}
 	delivered := w.Notify(msg)
 	assert.True(t, delivered, "matching publish must satisfy the waiter")
 
@@ -47,11 +50,14 @@ func TestReplyWaiter_NotifyNoMatch(t *testing.T) {
 // message).
 func TestReplyWaiter_NotifySenderMismatch(t *testing.T) {
 	w := newReplyWaiter()
-	ch, cancel, err := w.Register("dm:user:agent-x", "agent-x")
+	ch, cancel, err := w.Register("dm:user:agent-x", "agent-x", "q1")
 	require.NoError(t, err)
 	defer cancel()
 
-	delivered := w.Notify(ChannelMessage{ChannelID: "dm:user:agent-x", SenderID: "user", Content: "echo"})
+	delivered := w.Notify(ChannelMessage{
+		ChannelID: "dm:user:agent-x", SenderID: "user", Content: "echo",
+		Metadata: map[string]any{"in_reply_to": "q1"},
+	})
 	assert.False(t, delivered)
 
 	select {
@@ -69,11 +75,11 @@ func TestReplyWaiter_NotifySenderMismatch(t *testing.T) {
 // silently dropping the second waiter.
 func TestReplyWaiter_DuplicateRegisterRejected(t *testing.T) {
 	w := newReplyWaiter()
-	_, cancel1, err := w.Register("dm:user:agent-x", "agent-x")
+	_, cancel1, err := w.Register("dm:user:agent-x", "agent-x", "q1")
 	require.NoError(t, err)
 	defer cancel1()
 
-	_, _, err = w.Register("dm:user:agent-x", "agent-x")
+	_, _, err = w.Register("dm:user:agent-x", "agent-x", "q1")
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrWaiterAlreadyRegistered)
 }
@@ -83,11 +89,11 @@ func TestReplyWaiter_DuplicateRegisterRejected(t *testing.T) {
 // next chat call after a timeout).
 func TestReplyWaiter_CancelClearsRegistration(t *testing.T) {
 	w := newReplyWaiter()
-	_, cancel, err := w.Register("dm:user:agent-x", "agent-x")
+	_, cancel, err := w.Register("dm:user:agent-x", "agent-x", "q1")
 	require.NoError(t, err)
 	cancel()
 
-	_, cancel2, err := w.Register("dm:user:agent-x", "agent-x")
+	_, cancel2, err := w.Register("dm:user:agent-x", "agent-x", "q1")
 	require.NoError(t, err)
 	defer cancel2()
 }
@@ -97,11 +103,14 @@ func TestReplyWaiter_CancelClearsRegistration(t *testing.T) {
 // closed channel and returns false.
 func TestReplyWaiter_NotifyAfterCancelNoOp(t *testing.T) {
 	w := newReplyWaiter()
-	_, cancel, err := w.Register("dm:user:agent-x", "agent-x")
+	_, cancel, err := w.Register("dm:user:agent-x", "agent-x", "q1")
 	require.NoError(t, err)
 	cancel()
 
-	delivered := w.Notify(ChannelMessage{ChannelID: "dm:user:agent-x", SenderID: "agent-x"})
+	delivered := w.Notify(ChannelMessage{
+		ChannelID: "dm:user:agent-x", SenderID: "agent-x",
+		Metadata: map[string]any{"in_reply_to": "q1"},
+	})
 	assert.False(t, delivered, "post-cancel notify must be a no-op")
 }
 
@@ -109,10 +118,10 @@ func TestReplyWaiter_NotifyAfterCancelNoOp(t *testing.T) {
 // interfere; a publish for one waiter must not fire the other.
 func TestReplyWaiter_ConcurrentDistinctKeys(t *testing.T) {
 	w := newReplyWaiter()
-	chA, cancelA, err := w.Register("dm:user-a:agent-x", "agent-x")
+	chA, cancelA, err := w.Register("dm:user-a:agent-x", "agent-x", "q1")
 	require.NoError(t, err)
 	defer cancelA()
-	chB, cancelB, err := w.Register("dm:user-b:agent-x", "agent-x")
+	chB, cancelB, err := w.Register("dm:user-b:agent-x", "agent-x", "q1")
 	require.NoError(t, err)
 	defer cancelB()
 
@@ -120,7 +129,10 @@ func TestReplyWaiter_ConcurrentDistinctKeys(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		w.Notify(ChannelMessage{ID: "mA", ChannelID: "dm:user-a:agent-x", SenderID: "agent-x"})
+		w.Notify(ChannelMessage{
+			ID: "mA", ChannelID: "dm:user-a:agent-x", SenderID: "agent-x",
+			Metadata: map[string]any{"in_reply_to": "q1"},
+		})
 	}()
 	wg.Wait()
 
@@ -167,7 +179,7 @@ func TestReplyWaiter_ConcurrentSameKeyStressNoLeak(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < iterations; j++ {
-				_, cancel, err := w.Register(channelID, senderID)
+				_, cancel, err := w.Register(channelID, senderID, "q1")
 				if err != nil {
 					// Concurrent worker holds the slot; back off
 					// briefly. Either we'll get the slot on retry
@@ -179,7 +191,10 @@ func TestReplyWaiter_ConcurrentSameKeyStressNoLeak(t *testing.T) {
 				// 50/50 mix of Notify-vs-cancel-resolves the
 				// waiter. Both must be safe.
 				if j%2 == 0 {
-					w.Notify(ChannelMessage{ChannelID: channelID, SenderID: senderID, ID: "stress"})
+					w.Notify(ChannelMessage{
+						ChannelID: channelID, SenderID: senderID, ID: "stress",
+						Metadata: map[string]any{"in_reply_to": "q1"},
+					})
 				}
 				cancel()
 			}

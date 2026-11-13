@@ -406,7 +406,9 @@ func (r *ChannelRouter) publishCommit(ctx context.Context, msg ChannelMessage, d
 	// blocking buffered send and a no-op when no waiter is registered,
 	// so the hot path stays cheap when no chat is in flight.
 	//
-	// Notify runs on EVERY publish — keyed by `(channelID, senderID)`.
+	// Notify runs on EVERY publish — keyed by `(channelID, senderID)`,
+	// and it resolves the waiter only when the publish echoes the id of
+	// the message that waiter was registered for (ISSUE-0200).
 	// The chat handler registers waiters keyed by
 	// `(dm.ID, awaitFromAgentID)`, so an inbound user→agent publish
 	// (sender = user) cannot satisfy the waiter parked for the agent's
