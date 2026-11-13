@@ -6,6 +6,7 @@ severity: medium
 area: cost
 created: 2026-11-10
 closed: 2026-11-13
+closed_pr: 1113
 refs:
   - internal/cost/config.go
   - cmd/orchestrator/cost.go
