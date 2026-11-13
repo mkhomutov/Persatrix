@@ -304,15 +304,27 @@ async def test_a_body_that_decodes_to_little_text_is_not_held_in_memory(serve: A
     """A body can be megabytes on the wire and almost no text: here every
     three bytes are an escape sequence that produces nothing.  Its bytes
     are let go once there are more of them than any text under the cap
-    could need, and the text is still right."""
-    escape = "\u65e5".encode("iso2022_jp")[:3]
-    raw = escape * (8 * MB // 3) + b"end"
+    could need, and the text is still right.
+
+    The server sends the body in pieces and waits for the client between
+    them.  It runs in this process, so a body handed over whole would sit
+    in the server's own send buffer and be counted here."""
+    to_kanji = "\u65e5".encode("iso2022_jp")[:3]
+    to_ascii = "\u65e5".encode("iso2022_jp")[-3:]
+    piece = to_kanji * (64 * 1024 // 3)
+    pieces = 8 * MB // len(piece)
 
     async def handler(request: web.Request) -> web.StreamResponse:
-        return web.Response(body=raw, headers={"Content-Type": "text/plain; charset=iso2022_jp"})
+        response = web.StreamResponse(
+            headers={"Content-Type": "text/plain; charset=iso2022_jp"},
+        )
+        await response.prepare(request)
+        for _ in range(pieces):
+            await response.write(piece)
+        await response.write(to_ascii + b"end")
+        return response
 
     url = await serve(handler)
     result, peak = await _measured(lambda: builtin.http_request(url))
-    assert result.data["body"] == raw.decode("iso2022_jp", errors="replace")
+    assert result.data["body"] == "end"
     assert peak < MEMORY_BUDGET, f"the agent allocated {peak / MB:.1f} MB"
-
