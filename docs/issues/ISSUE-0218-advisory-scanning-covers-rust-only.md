@@ -6,6 +6,7 @@ severity: low
 area: ci
 created: 2026-11-10
 closed: 2026-11-14
+closed_pr: 1117
 refs:
   - tests/unit/python/test_scheduled_audit.py
   - docs/issues/ISSUE-0249-no-security-linter-reads-the-projects-own-code.md
