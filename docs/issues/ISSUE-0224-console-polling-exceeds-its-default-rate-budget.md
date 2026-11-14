@@ -6,6 +6,7 @@ severity: low
 area: web
 created: 2026-11-10
 closed: 2026-11-15
+closed_pr: 1130
 refs:
   - web/src/panels/InteractionSummary.budget.test.js
   - web/src/panels/ChannelTimeline.budget.test.js
