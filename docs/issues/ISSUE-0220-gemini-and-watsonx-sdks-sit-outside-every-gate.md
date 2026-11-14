@@ -79,7 +79,8 @@ extend the SDK boundary test to the two adapters.
 > `ee9cfaac`; confirmed by reading the Makefile, the manifests and the
 > test helpers.
 
-> 2026-11-14 — in progress: every gate but one is in place. What changed:
+> 2026-11-14 — in progress: every gate but one is in place
+> ([#1118](https://github.com/mkhomutov/Persatrix/pull/1118)). What changed:
 >
 > - **Pinned.** `make python-constraints` writes a second file,
 >   `.github/python-constraints-providers.txt`, with the same uv and flags
