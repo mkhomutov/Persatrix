@@ -5,7 +5,7 @@ status: resolved
 severity: medium
 area: ci
 created: 2026-11-10
-closed: 2026-11-14
+closed: 2026-11-15
 closed_pr: 1118
 refs:
   - .github/python-constraints-providers.txt
