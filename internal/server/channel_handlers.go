@@ -428,45 +428,6 @@ func (s *Server) handleGetChannelHistory(w http.ResponseWriter, r *http.Request)
 	}, http.StatusOK)
 }
 
-// handleGetThread handles GET /api/v1/channels/{id}/messages/{msg_id}/thread.
-func (s *Server) handleGetThread(w http.ResponseWriter, r *http.Request) {
-	if s.channelStore == nil {
-		writeError(w, "UNAVAILABLE", "channel store not configured", http.StatusServiceUnavailable)
-		return
-	}
-	chID := r.PathValue("id")
-	msgID := r.PathValue("msg_id")
-	ch, err := s.channelStore.GetChannel(r.Context(), chID)
-	if err != nil {
-		s.writeChannelError(w, err)
-		return
-	}
-	if _, err := s.channelStore.GetMessage(r.Context(), msgID); err != nil {
-		s.writeChannelError(w, err)
-		return
-	}
-	limit, err := parseLimit(r, channelDefaultThreadLimit)
-	if err != nil {
-		writeError(w, "BAD_REQUEST", err.Error(), http.StatusBadRequest)
-		return
-	}
-	msgs, err := s.channelStore.GetThread(r.Context(), msgID, limit)
-	if err != nil {
-		s.logger.Error("channels: thread failed",
-			zap.String("channel_id", chID),
-			zap.String("message_id", msgID),
-			zap.Error(err))
-		writeError(w, "INTERNAL", "failed to load thread", http.StatusInternalServerError)
-		return
-	}
-	// RFC 0037 §B/§H: a thread is never more or less confidential than the
-	// channel it forks from — the parent channel's level, like history.
-	writeJSON(w, historyResponse{
-		Messages:       messagesToResponse(msgs),
-		Classification: string(ch.Classification),
-	}, http.StatusOK)
-}
-
 // handleAddChannelMember handles POST /api/v1/channels/{id}/members.
 func (s *Server) handleAddChannelMember(w http.ResponseWriter, r *http.Request) {
 	if s.channelStore == nil {
@@ -496,5 +457,6 @@ func (s *Server) handleAddChannelMember(w http.ResponseWriter, r *http.Request) 
 // channel_response_builders.go (moved when RFC 0037 PR 2's classification
 // threading pushed this file past the 500-line review cap).
 // writeChannelError lives in channel_errors.go.
+// handleGetThread lives in channel_thread_handler.go.
 // parseLimit + parseBefore live in channel_query_params.go.
 // validateRequestCascadeDepth lives in channel_cascade_depth.go.
