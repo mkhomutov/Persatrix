@@ -30,18 +30,21 @@ either:
 * **Response side** — the SDK's own parsed model carries the fields
   ``_normalize`` reads. A renamed response field fails here.
 
-Not covered: the Gemini provider. ``google-genai`` is an optional extra that
-CI does not install, so a test here would skip in CI and imply coverage that
-does not exist. ISSUE-0144 records it.
+The Gemini and watsonx providers have the same tests in
+``test_llm_sdk_boundary_gemini.py`` and ``test_llm_sdk_boundary_watsonx.py``.
+Their SDKs are an optional extra, so those tests skip wherever the extra is
+not installed and are required to run in the one CI step that installs it
+(ISSUE-0220).
 """
 
 import importlib
-import json
 from typing import Any
 
 import pytest
 
 from agents.llm_client import AnthropicProvider, OpenAIProvider, StopReason
+
+from ._sdk_boundary_helpers import TOOLS, Recorder
 
 # ─── Canned wire bodies ─────────────────────────────────────
 #
@@ -123,44 +126,7 @@ _OPENAI_TOOL_BODY = {
     "usage": {"prompt_tokens": 13, "completion_tokens": 9, "total_tokens": 22},
 }
 
-_TOOLS = [
-    {
-        "name": "lookup",
-        "description": "Look something up.",
-        "parameters": {
-            "type": "object",
-            "properties": {"query": {"type": "string"}},
-            "required": ["query"],
-        },
-    }
-]
-
-
-class _Recorder:
-    """Answers one canned body and keeps the request the SDK actually built.
-
-    ``hx`` is the httpx module the SDK itself uses — see the module docstring.
-    """
-
-    def __init__(self, body: dict[str, Any], hx: Any):
-        self._body = body
-        self._hx = hx
-        self.request: Any = None
-
-    def transport(self) -> Any:
-        def handle(request: Any) -> Any:
-            self.request = request
-            return self._hx.Response(200, json=self._body)
-
-        return self._hx.MockTransport(handle)
-
-    @property
-    def sent(self) -> dict[str, Any]:
-        assert self.request is not None, "the SDK never issued a request"
-        return json.loads(self.request.content)
-
-
-def _intercept(sdk_client: Any, body: dict[str, Any]) -> _Recorder:
+def _intercept(sdk_client: Any, body: dict[str, Any]) -> Recorder:
     """Point the SDK's own http client at a canned response.
 
     ``sdk_client._client`` is the http client the SDK constructed — a subclass
@@ -173,12 +139,12 @@ def _intercept(sdk_client: Any, body: dict[str, Any]) -> _Recorder:
         f"expected an httpx-based transport, got {flavour} — the SDK changed "
         "its HTTP layer and this harness needs rechecking"
     )
-    recorder = _Recorder(body, importlib.import_module(flavour))
+    recorder = Recorder(body, importlib.import_module(flavour))
     inner._transport = recorder.transport()
     return recorder
 
 
-def _anthropic_against(body: dict[str, Any]) -> tuple[AnthropicProvider, _Recorder]:
+def _anthropic_against(body: dict[str, Any]) -> tuple[AnthropicProvider, Recorder]:
     """A provider whose real SDK client answers from a mock transport."""
     import anthropic
 
@@ -187,7 +153,7 @@ def _anthropic_against(body: dict[str, Any]) -> tuple[AnthropicProvider, _Record
     return provider, _intercept(provider._client, body)
 
 
-def _openai_against(body: dict[str, Any]) -> tuple[OpenAIProvider, _Recorder]:
+def _openai_against(body: dict[str, Any]) -> tuple[OpenAIProvider, Recorder]:
     import openai
 
     provider = OpenAIProvider(api_key="not-a-real-key")
@@ -213,7 +179,7 @@ async def test_anthropic_request_kwargs_survive_the_real_sdk() -> None:
         model="claude-sonnet-4-5",
         messages=[{"role": "user", "content": "hi"}],
         system="be brief",
-        tools=provider.format_tool_definitions(_TOOLS),
+        tools=provider.format_tool_definitions(TOOLS),
         max_tokens=64,
         temperature=0.4,
     )
@@ -258,7 +224,7 @@ async def test_anthropic_normalizes_a_real_tool_use_response() -> None:
         model="claude-sonnet-4-5",
         messages=[{"role": "user", "content": "look it up"}],
         system="",
-        tools=provider.format_tool_definitions(_TOOLS),
+        tools=provider.format_tool_definitions(TOOLS),
         max_tokens=64,
         temperature=0.0,
     )
@@ -289,7 +255,7 @@ async def test_openai_request_kwargs_survive_the_real_sdk() -> None:
         model="gpt-4o",
         messages=[{"role": "user", "content": "hi"}],
         system="be brief",
-        tools=provider.format_tool_definitions(_TOOLS),
+        tools=provider.format_tool_definitions(TOOLS),
         max_tokens=64,
         temperature=0.4,
         provider_config={"reasoning_effort": "none"},
@@ -336,7 +302,7 @@ async def test_openai_normalizes_a_real_tool_call_response() -> None:
         model="gpt-4o",
         messages=[{"role": "user", "content": "look it up"}],
         system="",
-        tools=provider.format_tool_definitions(_TOOLS),
+        tools=provider.format_tool_definitions(TOOLS),
         max_tokens=64,
         temperature=0.0,
     )
@@ -383,7 +349,7 @@ async def test_anthropic_request_settings_survive_the_real_sdk() -> None:
         model="claude-sonnet-5-5",
         messages=[{"role": "user", "content": "hi"}],
         system="be brief",
-        tools=provider.format_tool_definitions(_TOOLS),
+        tools=provider.format_tool_definitions(TOOLS),
         max_tokens=64,
         temperature=0.4,
         provider_config={"thinking": "adaptive", "effort": "low", "prompt_cache": True},
@@ -418,7 +384,7 @@ async def test_anthropic_thinking_blocks_round_trip_through_the_real_sdk() -> No
         model="claude-sonnet-5-5",
         messages=[{"role": "user", "content": "look it up"}],
         system="",
-        tools=provider.format_tool_definitions(_TOOLS),
+        tools=provider.format_tool_definitions(TOOLS),
         max_tokens=64,
         temperature=0.0,
     )

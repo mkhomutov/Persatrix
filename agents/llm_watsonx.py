@@ -160,12 +160,12 @@ class WatsonxProvider:
     ) -> None:
         # Eager import so a missing SDK is a startup SystemExit at the factory
         # (which catches ImportError); the per-model *client* is built lazily
-        # below. Both names are optional-extra imports (RFC 0053 OQ #4),
-        # unresolved in the type-check env — suppress the missing-import probe.
-        from ibm_watsonx_ai import Credentials  # type: ignore[import-not-found]
-        from ibm_watsonx_ai.foundation_models import (  # type: ignore[import-not-found]
-            ModelInference,
-        )
+        # below. Both names are optional-extra imports (RFC 0053 OQ #4). Where
+        # the SDK is not installed, the mypy configs say not to report it
+        # missing; ``make lint-providers`` checks this file against the real
+        # SDK (ISSUE-0220).
+        from ibm_watsonx_ai import Credentials
+        from ibm_watsonx_ai.foundation_models import ModelInference
 
         self._Credentials = Credentials
         self._ModelInference = ModelInference

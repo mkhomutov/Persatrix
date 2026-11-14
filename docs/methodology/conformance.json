@@ -13,6 +13,7 @@
     "docs/methodology/enforcement-gaps.md",
     "docs/methodology/automation-catalogue.md",
     "docs/methodology/pre-commit-hook.md",
+    "docs/methodology/github-workflows.md",
     "docs/methodology/branch-protection.json",
     "docs/documentation-guide.md",
     "docs/BRANCHING.md",

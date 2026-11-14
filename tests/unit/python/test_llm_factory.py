@@ -67,7 +67,7 @@ def _mock_openai_module() -> MagicMock:
 def _mock_genai_modules() -> tuple[MagicMock, MagicMock]:
     """Return stand-in ``google`` / ``google.genai`` modules for GeminiProvider.
 
-    ``from google import genai`` resolves ``genai`` as an attribute of the
+    ``import google.genai as genai`` reads ``genai`` as an attribute of the
     ``google`` package, so the fake ``google`` module carries a ``genai``
     attribute whose ``Client`` returns a client double.
     """
@@ -358,7 +358,7 @@ class TestCreateProviderGemini:
         """A missing google-genai SDK is a loud, actionable SystemExit at factory
         time (the shared ImportError→SystemExit install-hint pattern)."""
         monkeypatch.setenv("GEMINI_API_KEY", "k")
-        # ``google`` mapped to None makes ``from google import genai`` raise
+        # ``google`` mapped to None makes ``import google.genai`` raise
         # ImportError deterministically, regardless of what is installed.
         with use_alias_map(self._ALIAS), patch.dict(sys.modules, {"google": None}):
             with pytest.raises(SystemExit) as exc:

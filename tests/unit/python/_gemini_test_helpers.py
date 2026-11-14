@@ -23,7 +23,7 @@ from agents.llm_gemini import GeminiProvider
 def _mock_genai_modules() -> tuple[MagicMock, MagicMock, MagicMock]:
     """Return stand-in ``google`` / ``google.genai`` modules + the client double.
 
-    ``from google import genai`` resolves ``genai`` as an attribute of the
+    ``import google.genai as genai`` reads ``genai`` as an attribute of the
     ``google`` package, so the fake ``google`` module carries a ``genai``
     attribute pointing at the fake ``genai`` module whose ``Client`` returns
     the client double.

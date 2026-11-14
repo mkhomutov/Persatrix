@@ -84,3 +84,14 @@ this PR"; no other issue tracks it, and the steps below do not reach it.
    that, since older pip still passes it to the build. Pinning pip
    itself would also close the other gap #1003 lists: the `--upgrade pip` step
    takes the newest pip.
+
+## Notes
+
+> 2026-11-14 — the same gap now reaches three third-party packages. The
+> provider SDK install added for ISSUE-0220 builds `ibm-cos-sdk`,
+> `ibm-cos-sdk-core` and `ibm-cos-sdk-s3transfer` from source in the
+> required Python job, each with the newest setuptools
+> ([ISSUE-0254](ISSUE-0254-the-python-job-builds-three-ibm-packages-with-an-unpinned-build-tool.md)).
+> Measured there on pip 26.3: `PIP_CONSTRAINT` does not reach the build,
+> `--build-constraint` does.
+
