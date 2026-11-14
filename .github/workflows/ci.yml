@@ -409,6 +409,7 @@ jobs:
               - 'agents/memory/**'
               - 'agents/server_persona.py'
               - 'agents/server_servicers.py'
+              - 'agents/channel_receive.py'
               - 'agents/observability/metrics.py'
               - 'agents/observability/_metrics_wakes.py'
               - 'tests/integration/test_bored_persona_cost.py'

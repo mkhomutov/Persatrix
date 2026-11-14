@@ -109,6 +109,18 @@ class EventDispatcher:
         """Register a tick scheduler to wake on incoming events."""
         self._tick_schedulers[agent_id] = scheduler
 
+    def has_inbound_target(self, target_id: str) -> bool:
+        """Whether an inbound event for *target_id* has anywhere to go.
+
+        It has when the agent has a running event loop or is registered
+        here: the two places :meth:`enqueue_inbound` delivers to.  That
+        method answers ``False`` for an agent with neither, as it does for
+        a full queue, so a caller that must tell the two apart asks this
+        first (ISSUE-0205).
+        """
+        scheduler = self._tick_schedulers.get(target_id)
+        return (scheduler is not None and scheduler.is_running) or target_id in self._agents
+
     def has_tick_scheduler(self, agent_id: str) -> bool:
         """Whether ``agent_id`` has a tick scheduler registered.
 
