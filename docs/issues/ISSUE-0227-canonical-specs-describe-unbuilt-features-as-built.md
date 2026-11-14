@@ -6,6 +6,7 @@ severity: medium
 area: docs
 created: 2026-11-10
 closed: 2026-11-14
+closed_pr: 1119
 refs:
   - CLAUDE.md
   - docs/issues/ISSUE-0202-workflow-condition-and-approval-validate-then-do-nothing.md
