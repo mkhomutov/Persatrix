@@ -58,6 +58,8 @@ func (s *Server) writeChannelError(w http.ResponseWriter, err error) {
 		writeError(w, "FORBIDDEN", "sender is not a member of the channel", http.StatusForbidden)
 	case errors.Is(err, channels.ErrMemberNotFound): // RFC 0050 member-config PATCH target missing
 		writeError(w, "NOT_FOUND", "member not found", http.StatusNotFound)
+	case errors.Is(err, channels.ErrThreadParentNotInChannel): // ISSUE-0203 — a thread stays in its channel
+		writeError(w, "BAD_REQUEST", err.Error(), http.StatusBadRequest)
 	case errors.Is(err, channels.ErrInvalidChannelType),
 		errors.Is(err, channels.ErrInvalidParticipantID),
 		errors.Is(err, channels.ErrInvalidRespondPolicy),

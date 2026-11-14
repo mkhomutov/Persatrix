@@ -134,21 +134,40 @@ func scopedHistoryQuery(channelID, participantID string, limit int, before time.
 
 // GetThread implements [ChannelStore.GetThread].
 func (s *sqliteStore) GetThread(ctx context.Context, threadID string, limit int) ([]ChannelMessage, error) {
-	q := `SELECT ` + messageColumns + `
-	        FROM messages
-	       WHERE thread_id = ?
-	       ORDER BY timestamp ASC`
-	args := []any{threadID}
-	if limit > 0 {
-		q += " LIMIT ?"
-		args = append(args, limit)
-	}
+	q, args := threadQuery(threadID, limit)
 	rows, err := s.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("channels: thread query: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	return scanMessageRows(rows)
+}
+
+// threadQuery is [sqliteStore.GetThread]'s SQL and arguments, its own
+// function so the query-plan test explains the statement the store runs.
+//
+// It returns the replies that are in the parent's own channel. PublishMessage
+// has refused any other reply since ISSUE-0203, but a store written to before
+// that can hold one, and the caller labels the whole thread with the parent
+// channel's classification.
+//
+// The `+` in front of `channel_id` keeps that term out of index selection.
+// Without it a store that has gathered no statistics yet walks the whole
+// channel in `idx_messages_channel_time` order, which also gives the ORDER BY
+// for free, and filters on `thread_id`: a read as long as the channel, where
+// `idx_messages_thread` reads only the thread.
+func threadQuery(threadID string, limit int) (string, []any) {
+	q := `SELECT ` + messageColumns + `
+	        FROM messages
+	       WHERE thread_id = ?
+	         AND +channel_id = (SELECT channel_id FROM messages WHERE id = ?)
+	       ORDER BY timestamp ASC`
+	args := []any{threadID, threadID}
+	if limit > 0 {
+		q += " LIMIT ?"
+		args = append(args, limit)
+	}
+	return q, args
 }
 
 // messageColumns is the `messages` projection every unaliased read in this

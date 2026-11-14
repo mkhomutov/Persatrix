@@ -328,6 +328,12 @@ var (
 	// from ErrChannelNotFound so callers (and the future REST layer) can map
 	// 404-on-message vs. 404-on-channel without re-parsing error strings.
 	ErrMessageNotFound = errors.New("channels: message not found")
+	// ErrThreadParentNotInChannel — PublishMessage named a thread parent
+	// (`thread_id`) that is not a message in the channel being published to:
+	// it is in another channel, or it does not exist. One error for both, so
+	// a refusal does not say whether the id exists elsewhere (ISSUE-0203).
+	// The REST layer surfaces this as 400.
+	ErrThreadParentNotInChannel = errors.New("channels: thread parent is not a message in this channel")
 	// ErrChannelExists — CreateChannel collided with an existing name (group)
 	// or canonical DM id.
 	ErrChannelExists = errors.New("channels: channel already exists")
