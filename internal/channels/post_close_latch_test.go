@@ -292,14 +292,14 @@ func TestPostCloseLatch_LatchedReplyStillNotifiesFloorWaiter(t *testing.T) {
 
 	// The mid-flight round awaits ember-owl's reply, exactly as runFloorTurn
 	// registers it.
-	replyCh, cancel, err := router.waiter.Register(ch, "ember-owl")
+	replyCh, cancel, err := router.waiter.Register(ch, "ember-owl", "stimulus-1")
 	require.NoError(t, err)
 	defer cancel()
 
 	// The awaited reply arrives echoing the now-closed id: it latches.
 	require.NoError(t, router.Publish(context.Background(), ChannelMessage{
 		ID: uuid.NewString(), ChannelID: ch, SenderID: "ember-owl", Content: "late reply",
-		Metadata: map[string]any{interactionIDMetadataKey: closedID},
+		Metadata: map[string]any{interactionIDMetadataKey: closedID, replyToMetadataKey: "stimulus-1"},
 	}, ""))
 
 	select {

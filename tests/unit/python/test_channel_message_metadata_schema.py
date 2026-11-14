@@ -228,3 +228,32 @@ def test_previous_interaction_id_over_max_length_rejected():
             "previous_interaction_id": "x" * 129,
             "previous_interaction_close_trigger": "idle",
         })
+
+
+# ISSUE-0200 — the optional ``metadata.in_reply_to`` key: the id of the
+# message a publish answers.  The orchestrator matches a reply to the chat
+# request or floor turn that is waiting for it by this id, so the key is
+# written down beside the other keys with a meaning at the receiver.  Same
+# documentary posture as ``interaction_id``: the Go reader
+# (``readInReplyTo``) is tolerant and treats a non-string as absent.
+
+
+def test_in_reply_to_is_optional():
+    """A message the publisher sends on its own answers nothing."""
+    _validate({})
+    _validate({"cascade_depth": 0})
+
+
+def test_in_reply_to_is_a_message_id():
+    _validate({"in_reply_to": "4e2b7c9a-1f3d-4a6b-8c2e-9d0f1a2b3c4d"})
+    _validate({
+        "in_reply_to": "4e2b7c9a-1f3d-4a6b-8c2e-9d0f1a2b3c4d",
+        "interaction_id": "0b5c7a0e-1f3d-4a6b-8c2e-9d0f1a2b3c4d",
+        "cascade_depth": 1,
+    })
+
+
+def test_in_reply_to_non_string_rejected():
+    """A non-string value violates ``type: string``."""
+    with pytest.raises(jsonschema.ValidationError):
+        _validate({"in_reply_to": 1234})

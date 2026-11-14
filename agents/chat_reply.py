@@ -203,7 +203,7 @@ async def publish_chat_error_on_channel(
     inbound_sender_id: str | None,
     reply: str,
     reason: str,
-    origin_interaction_id: str = "",
+    origin: DispatchContext | None = None,
 ) -> None:
     """Publish a structured-error reply on a chat-bearing channel.
 
@@ -218,17 +218,20 @@ async def publish_chat_error_on_channel(
     ``replyWaiter`` (keyed on ``(channelID, awaitFromAgentID)``);
     ``cascade_depth=0`` because this is a chat reply, not a fanout.
 
-    ``origin_interaction_id`` — the interaction id the FAILED dispatch was
-    delivered under, echoed as the wire ``interaction_id`` claim via the
+    ``origin`` — the context of the FAILED dispatch.  Its message id is
+    echoed as ``in_reply_to`` (ISSUE-0200): the orchestrator hands this
+    reply to the chat request that is waiting for an answer to that
+    message, and to no other, so an error reply that arrives late cannot
+    answer the person's next request.  Its interaction id is
+    echoed as the wire ``interaction_id`` claim via the
     shared rule (PR #716 review: this third same-channel publish path was
     missed when the reply and end-vote publishes were stamped, so a
     budget-denied member's error reply landing after a bounded close —
     exactly the spend pressure that fires the cost trigger — bypassed the
     no-reopen latch, minted a FRESH interaction, and re-fanned into the
     terminated discussion, drawing the whole roster back in). The publish
-    below targets the originating channel by construction, so the claim is
-    definitionally same-channel; "" (a non-channel or pre-producer event)
-    claims nothing, the untracked posture.
+    below targets the originating channel, so the claim is same-channel;
+    ``None`` (a caller with no dispatch behind it) claims nothing.
 
     ``channel_id`` / ``inbound_sender_id`` are typed ``Optional`` to
     match ``AgentEvent``'s declared shape; a ``None`` ``channel_id`` is
@@ -254,19 +257,15 @@ async def publish_chat_error_on_channel(
         )
         return
     metadata: dict[str, Any] = {"reply_status": "error", "error_reason": reason}
-    # The RFC 0052 no-reopen claim, via the context's shared rule — the
-    # origin posture constructed explicitly, the event-less-caller idiom the
-    # DispatchContext docstring names (this helper receives the origin pair
-    # as plain strings, not a threaded context). Deliberately NO
+    # ``in_reply_to`` (the message this could not answer) and the RFC 0052
+    # no-reopen claim, via the context's shared rule. Deliberately NO
     # ``synthesis_reply`` echo (PR #718 review), spelled with the NAMED
     # opt-out rather than implied by omission: an apology must never be
     # claimable as the §D closing artifact — and ``suppress_error_reply``
     # already makes this path unreachable for a synthesis turn, so the
     # opt-out is belt-and-suspenders that also survives a future caller
     # threading a synthesis-marked context here.
-    origin = DispatchContext(
-        origin_channel_id=channel_id, origin_interaction_id=origin_interaction_id,
-    )
+    origin = origin or DispatchContext()
     claim = origin.same_channel_claim(channel_id, claim_synthesis_reply=False)
     if claim:
         metadata.update(claim)
@@ -293,7 +292,7 @@ async def dispatch_channel_event_with_chat_error_recovery(
     agent_id: str,
     channel_id: str | None,
     inbound_sender_id: str | None,
-    origin_interaction_id: str = "",
+    origin: DispatchContext | None = None,
     suppress_error_reply: bool = False,
 ) -> None:
     """ISSUE-0065 / ISSUE-0066 — chat-error recovery wrapper for the
@@ -322,9 +321,9 @@ async def dispatch_channel_event_with_chat_error_recovery(
     deliberately stays uniform across the BudgetExceededError /
     AioRpcError / generic arms so it can be relied on later.)
 
-    ``origin_interaction_id`` rides into both error-reply arms so the
-    recovery publish carries the RFC 0052 no-reopen claim of the dispatch
-    it recovers (PR #716 review; see
+    ``origin`` rides into both error-reply arms so the recovery publish
+    names the message it answers (ISSUE-0200) and carries the RFC 0052
+    no-reopen claim of the dispatch it recovers (PR #716 review; see
     :func:`publish_chat_error_on_channel`).
 
     ``suppress_error_reply`` (PR #718 review) drops BOTH error-reply
@@ -356,7 +355,7 @@ async def dispatch_channel_event_with_chat_error_recovery(
                     publisher, agent_id=agent_id, channel_id=channel_id,
                     inbound_sender_id=inbound_sender_id,
                     reply=exc.message, reason=exc.reason,
-                    origin_interaction_id=origin_interaction_id,
+                    origin=origin,
                 )
         except grpc.aio.AioRpcError as exc:
             if exc.code() != grpc.StatusCode.RESOURCE_EXHAUSTED:
@@ -374,7 +373,7 @@ async def dispatch_channel_event_with_chat_error_recovery(
                     inbound_sender_id=inbound_sender_id,
                     reply="Agent is at capacity — please retry in a moment.",
                     reason="resource_exhausted",
-                    origin_interaction_id=origin_interaction_id,
+                    origin=origin,
                 )
     except Exception as exc:  # noqa: BLE001 — final boundary
         logger.exception(
@@ -460,7 +459,7 @@ async def process_inbound_channel_event(
                     executor.channel_publisher, agent_id=agent.agent_id,
                     channel_id=channel_id, inbound_sender_id=event.sender_id,
                     reply=failure.message, reason=failure.cause,
-                    origin_interaction_id=context.origin_interaction_id,
+                    origin=context,
                 )
             return
         # RFC 0037 §G: unlike every other ``for_event`` field (wire-seeded
@@ -490,6 +489,6 @@ async def process_inbound_channel_event(
         agent_id=agent.agent_id,
         channel_id=event.channel_id,
         inbound_sender_id=event.sender_id,
-        origin_interaction_id=context.origin_interaction_id,
+        origin=context,
         suppress_error_reply=context.origin_synthesis_turn,
     )

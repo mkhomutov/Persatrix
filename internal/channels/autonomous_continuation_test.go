@@ -52,7 +52,8 @@ func (d *continuationDispatcher) Dispatch(_ context.Context, env DispatchEnvelop
 			ChannelID: msg.ChannelID,
 			SenderID:  rid,
 			Content:   rid + " reply",
-			Metadata:  map[string]any{cascadeDepthMetadataKey: depth},
+			// As an agent does: the reply names the message it answers.
+			Metadata: map[string]any{cascadeDepthMetadataKey: depth, replyToMetadataKey: msg.ID},
 		}, "")
 	}()
 	return nil

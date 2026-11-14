@@ -305,6 +305,7 @@ class TestSynthesisReplyEcho:
         named ``claim_synthesis_reply=False`` opt-out at the seam."""
         from unittest.mock import AsyncMock
 
+        from agents.channel_wire_metadata import DispatchContext
         from agents.chat_reply import publish_chat_error_on_channel
 
         publisher = AsyncMock()
@@ -313,7 +314,12 @@ class TestSynthesisReplyEcho:
         await publish_chat_error_on_channel(
             publisher, agent_id="quartz-heron", channel_id="group:planning",
             inbound_sender_id="iron-fox", reply="over budget",
-            reason="budget_exceeded", origin_interaction_id="int-1",
+            reason="budget_exceeded",
+            # A synthesis-marked origin: the echo must be withheld all the same.
+            origin=DispatchContext(
+                origin_channel_id="group:planning", origin_interaction_id="int-1",
+                origin_synthesis_turn=True,
+            ),
         )
 
         metadata = publisher.publish.await_args.kwargs["metadata"]

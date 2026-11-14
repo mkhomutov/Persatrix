@@ -329,6 +329,7 @@ func TestChannelRouter_PublishAndAwait_ReturnsAgentReply(t *testing.T) {
 	}
 	reply := ChannelMessage{
 		ID: uuid.NewString(), ChannelID: dm.ID, SenderID: "agent-x", Content: "hello back",
+		Metadata: map[string]any{replyToMetadataKey: inbound.ID},
 	}
 
 	// Simulate the agent's REST publish landing ~10ms after our publish.

@@ -29,7 +29,8 @@ Captured during the PR #251 deep review. The single-shot semantics are
 documented in [`internal/channels/waiter.go`](../../internal/channels/waiter.go)
 on the `Notify` doc-comment and pinned by
 `TestHandleChat_MultiMessageReplyReturnsFirst` in
-[`internal/server/chat_handler_test.go`](../../internal/server/chat_handler_test.go).
+[`internal/server/chat_reply_match_test.go`](../../internal/server/chat_reply_match_test.go)
+(it moved there from `chat_handler_test.go` with the fix for ISSUE-0200).
 The persona-runtime in v0.3.0 always emits a single
 `SEND_CHANNEL_MESSAGE` per chat turn, so the constraint is invisible
 today. It becomes user-visible the moment any agent adopts a

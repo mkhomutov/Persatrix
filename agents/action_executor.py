@@ -139,6 +139,10 @@ class ActionExecutor:
           minted fresh and REOPENED the closed discussion). The resolver
           stays authoritative (IP2); an origin-less context stamps nothing
           (IP8 re-convene).
+        * ``origin_message_id``: the id of the message the event
+          delivered.  A SAME-channel publish echoes it as ``in_reply_to``,
+          which is how the orchestrator matches a reply to the request
+          that is waiting for it (ISSUE-0200).
         * ``origin_epoch_id`` / ``origin_session_id`` / the dormant
           ``origin_principal_id`` (ISSUE-0118; PR #809 review finding 4):
           the per-request scope axes,

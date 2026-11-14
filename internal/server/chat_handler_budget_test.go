@@ -48,16 +48,17 @@ func TestHandleChat_ReplyMetadataReplyStatusErrorSurfacedAs200(t *testing.T) {
 			t.Errorf("publishErrorReply: GetOrCreateDM failed: %v", err)
 			return
 		}
+		// The error reply answers the person's message, like any reply.
+		metadata := replyEcho(t, store, dm.ID, "alice")
+		metadata["reply_status"] = "error"
+		metadata["error_reason"] = "budget_exceeded"
 		if err := router.Publish(context.Background(), channels.ChannelMessage{
 			ID:        uuid.NewString(),
 			ChannelID: dm.ID,
 			SenderID:  "ember-owl",
 			Content:   denialMsg,
 			Timestamp: time.Now().UTC(),
-			Metadata: map[string]any{
-				"reply_status": "error",
-				"error_reason": "budget_exceeded",
-			},
+			Metadata:  metadata,
 		}, ""); err != nil {
 			t.Errorf("publishErrorReply: Publish failed: %v", err)
 		}
@@ -94,13 +95,15 @@ func TestHandleChat_ReplyMetadataUnsetDefaultsToReplyStatusOK(t *testing.T) {
 			t.Errorf("GetOrCreateDM failed: %v", err)
 			return
 		}
+		metadata := replyEcho(t, store, dm.ID, "alice")
+		metadata["some_other_key"] = "value"
 		_ = router.Publish(context.Background(), channels.ChannelMessage{
 			ID:        uuid.NewString(),
 			ChannelID: dm.ID,
 			SenderID:  "ember-owl",
 			Content:   "Hello",
 			Timestamp: time.Now().UTC(),
-			Metadata:  map[string]any{"some_other_key": "value"},
+			Metadata:  metadata,
 		}, "")
 	}()
 

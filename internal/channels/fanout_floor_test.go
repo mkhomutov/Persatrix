@@ -91,6 +91,8 @@ func (d *floorDispatcher) Dispatch(ctx context.Context, env DispatchEnvelope, ms
 				ChannelID: msg.ChannelID,
 				SenderID:  rid,
 				Content:   rid + " reply",
+				// As an agent does: the reply names the message it answers.
+				Metadata: map[string]any{replyToMetadataKey: msg.ID},
 			}, "")
 		}
 		if d.syncReplies {
@@ -410,6 +412,7 @@ func (d *lateReplyDispatcher) Dispatch(_ context.Context, env DispatchEnvelope, 
 			ChannelID: msg.ChannelID,
 			SenderID:  "a",
 			Content:   "a late reply",
+			Metadata:  map[string]any{replyToMetadataKey: msg.ID},
 		}, "")
 	}
 	return nil
