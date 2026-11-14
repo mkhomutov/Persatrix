@@ -398,6 +398,12 @@ jobs:
       - name: Run the Gemini and watsonx adapters against their SDKs
         run: make test-providers
 
+      # The license job reads the plain install, so it never saw the SDKs or
+      # the 20 packages they bring in. This is the same check, run where
+      # they are installed.
+      - name: Check the licenses of what the provider SDKs install
+        run: make check-licenses-python
+
   cost-regression-gate:
     # RFC 0024 §Test Strategy — the "bored persona" cost-regression gate is
     # *the* v0.3.3 "Idle Truly Idle" acceptance. It is a release-blocker, not

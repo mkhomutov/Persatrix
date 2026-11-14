@@ -36,6 +36,13 @@ CDLA-Permissive-2.0
 # compatible with BUSL-1.1 distribution. Transitively pulled in by `regex`
 # which is dual-licensed Apache-2.0 AND CNRI-Python.
 CNRI-Python
+# MIT No Attribution: the MIT license without the condition that the notice
+# travel with copies, so it asks less than MIT above. Covers `cffi` from
+# 2.1, which the optional Gemini SDK (`google-genai`) brings in through
+# `google-auth` and `cryptography`. Allowed by the maintainer on 2026-11-14
+# (ISSUE-0220). Python only, so deny.toml does not mirror it, as it does not
+# mirror CNRI-Python: no Rust crate uses either.
+MIT-0
 
 # Python package metadata sometimes reports these non-SPDX forms. They map
 # to SPDX identifiers above but need to be accepted literally because

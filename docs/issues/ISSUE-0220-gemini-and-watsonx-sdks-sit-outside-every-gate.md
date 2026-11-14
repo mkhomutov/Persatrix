@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0220
 summary: "The Gemini and watsonx SDKs are optional extras that no CI job installs. They are not pinned in the constraints file, not type-checked, not licence-checked and not in the notices file, and their adapters are tested only against stand-in modules. The demo images install them unpinned at build time."
-status: in_progress
+status: resolved
 severity: medium
 area: ci
 created: 2026-11-10
+closed: 2026-11-14
+closed_pr: 1118
 refs:
   - .github/python-constraints-providers.txt
   - .github/workflows/ci.yml
@@ -129,3 +131,20 @@ extend the SDK boundary test to the two adapters.
 >   [ISSUE-0219](ISSUE-0219-agent-image-is-not-what-ci-tests.md), which
 >   holds the choices about the image; the second constraints file is
 >   there for its install to use.
+
+> 2026-11-14 — resolved. The maintainer allowed `MIT-0`, so the one gate
+> that was missing is in place:
+>
+> - `MIT-0` is on `scripts/checks/allowed_licenses.txt`, with its reason.
+>   It is the MIT license without the condition that the notice travel
+>   with copies. `deny.toml` does not mirror it: no Rust crate uses it,
+>   as with `CNRI-Python`.
+> - A fourth step after `make test-providers`, in CI's Python job and in
+>   the weekly refresh, runs `make check-licenses-python` where the SDKs
+>   are installed: 100 packages, all on the allow-list. Before the choice
+>   the same command failed on `cffi` alone.
+> - The notices file no longer marks the `cffi` row.
+>
+> The "What remains" list in the note above is now down to the demo
+> images, which stay with
+> [ISSUE-0219](ISSUE-0219-agent-image-is-not-what-ci-tests.md).

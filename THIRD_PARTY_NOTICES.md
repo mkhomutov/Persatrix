@@ -86,7 +86,7 @@ Collected via `pip-licenses --from=mixed` from an install of the `agents` packag
 | `attrs` | 26.1.0 | MIT | [link](https://www.attrs.org/en/stable/changelog.html) |
 | `cachetools` | 8.0.0 | MIT | [link](https://github.com/tkem/cachetools/) |
 | `certifi` | 2026.10.23 | Mozilla Public License 2.0 (MPL 2.0) | [link](https://github.com/certifi/python-certifi) |
-| `cffi` | 2.1.1 | !MIT-0 | [link](https://cffi.readthedocs.io/en/latest/whatsnew.html) |
+| `cffi` | 2.1.1 | MIT-0 | [link](https://cffi.readthedocs.io/en/latest/whatsnew.html) |
 | `charset-normalizer` | 3.5.2 | MIT | [link](https://github.com/jawah/charset_normalizer/blob/master/CHANGELOG.md) |
 | `click` | 8.5.0 | BSD-3-Clause | [link](https://github.com/pallets/click/) |
 | `cryptography` | 50.0.2 | Apache-2.0 OR BSD-3-Clause | [link](https://github.com/pyca/cryptography) |

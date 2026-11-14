@@ -103,10 +103,11 @@ jobs:
       # The Python job's checks, through the Make targets its steps mirror,
       # plus the Python halves of the license and config jobs. Every check
       # runs even after another fails, so the issue names all of them. The
-      # last three are the Python job's last three: they add the optional
-      # provider SDKs at their new pins, then check the two adapters against
-      # them. They come last because the install changes the environment the
-      # checks before them must see.
+      # last four are the Python job's last four: they add the optional
+      # provider SDKs at their new pins, check the two adapters against them,
+      # and run the license check again, now over what the SDKs brought in.
+      # They come last because the install changes the environment the checks
+      # before them must see.
       - name: Run the Python checks on the new pins
         id: checks
         if: steps.install.outcome == 'success'
@@ -115,7 +116,8 @@ jobs:
           for target in lint-python proto-python-check "eval-replay TIER=stable" \
                         test-python test-agents test-integration \
                         check-licenses-python validate \
-                        build-agents-providers lint-providers test-providers; do
+                        build-agents-providers lint-providers test-providers \
+                        check-licenses-python; do
             echo "::group::make $target"
             # Names the check that was running if the job times out or is cancelled.
             echo "make $target" > "$RUNNER_TEMP/check.running"

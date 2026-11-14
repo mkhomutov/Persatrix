@@ -10,8 +10,8 @@ the parts that changed that:
 - the three constraints targets cover both files;
 - the required Python job installs the extra from that file, after every
   check of the plain install has run, then type-checks the two adapters
-  against the real SDKs and runs their boundary tests with skipping turned
-  into failing;
+  against the real SDKs, runs their boundary tests with skipping turned into
+  failing, and checks the licenses of everything the SDKs brought in;
 - the weekly refresh moves, tries and commits both files.
 """
 
@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import configparser
 import re
+import shlex
 import subprocess
 import tomllib
 from pathlib import Path
@@ -42,8 +43,15 @@ BOUNDARY_TESTS = (
     "tests/unit/python/test_llm_sdk_boundary_gemini.py",
     "tests/unit/python/test_llm_sdk_boundary_watsonx.py",
 )
-# The targets that need the SDKs installed, in the order they run.
-PROVIDER_TARGETS = ("build-agents-providers", "lint-providers", "test-providers")
+# The targets that need the SDKs installed, in the order they run. The last
+# is the plain install's own license check, run again: it reads whatever is
+# installed, so here it reads the SDKs and what they pulled in.
+PROVIDER_TARGETS = (
+    "build-agents-providers",
+    "lint-providers",
+    "test-providers",
+    "check-licenses-python",
+)
 
 # A pin line with its marker, as uv writes it: `name==1.2.3 ; marker`.
 PIN_LINE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*==\S+(?: ;.*)?$", re.M)
@@ -252,11 +260,26 @@ def _refresh_steps() -> dict[str, str]:
     return {s["id"]: str(s.get("run", "")) for s in doc["jobs"]["refresh"]["steps"] if "id" in s}
 
 
+def _refresh_targets() -> list[str]:
+    """The Make targets the refresh's check loop runs, in order."""
+    script = " ".join(_refresh_steps()["checks"].replace("\\\n", " ").split())
+    listed = re.search(r"for target in (.+?); do", script)
+    assert listed, "the refresh's checks step has no `for target in …; do` loop"
+    return shlex.split(listed.group(1))
+
+
 def test_the_weekly_refresh_moves_tries_and_commits_both_files() -> None:
     steps = _refresh_steps()
     for step in ("resolve", "push"):
         for path in (BASE_ARG, PROVIDERS_ARG):
             assert path in steps[step], f"the refresh's `{step}` step leaves out {path}"
-    checks = " ".join(steps["checks"].replace("\\\n", " ").split())
-    order = [checks.index(f" {target}") for target in ("test-python", *PROVIDER_TARGETS)]
-    assert order == sorted(order), "the refresh must try the SDKs after the plain install's checks"
+    targets = _refresh_targets()
+    tail = len(PROVIDER_TARGETS)
+    assert targets[-tail:] == list(PROVIDER_TARGETS), (
+        f"the refresh must end with the provider targets, in order: {targets}"
+    )
+    plain = targets[:-tail]
+    # The plain install is tried first and whole, its own license check
+    # included; no provider target may run before the SDKs are installed.
+    assert "test-python" in plain and "check-licenses-python" in plain, plain
+    assert not set(plain) & set(PROVIDER_TARGETS[:-1]), plain
