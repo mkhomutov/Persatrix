@@ -15,10 +15,12 @@
   import { getChannelHistory, getChannelActivity } from "../lib/api.js";
   import { participantAgentIds } from "../lib/interactions.js";
   import { GRACE_MS } from "../lib/presence.js";
-  import { dayLabelAt, isCompact, justAfter } from "../lib/timeline.js";
+  import { dayLabelAt, isCompact } from "../lib/timeline.js";
+  import { createBackfill } from "../lib/backfill.svelte.js";
   import ChannelMessage from "./ChannelMessage.svelte";
   import InteractionSummary from "./InteractionSummary.svelte";
   import PresenceBar from "./PresenceBar.svelte";
+  import TimelineGap from "./TimelineGap.svelte";
   import Icon from "../ui/Icon.svelte";
   import { createPresence } from "../lib/presence.svelte.js";
 
@@ -91,17 +93,27 @@
   let historyError = $state("");
   let historyLoaded = $state(false);
   let pollError = $state("");
-  // Paging backwards: a full first page means older rows may exist; a short
-  // page (initial or older) means the channel's start has been reached.
-  let hasOlder = $state(false);
-  let loadingOlder = $state(false);
-  let olderError = $state("");
 
   let seenIds = new Set();
   let pollTimer = null;
   let backoffMs = POLL_INTERVAL_MS;
   let polling = false;
   let loadToken = 0;
+
+  // Reading back into history — the older-messages page and the holes a busy
+  // channel leaves between two polls — lives in lib/backfill.svelte.js; this
+  // is what it needs from the feed.
+  const backfill = createBackfill(
+    {
+      fetchPage: (before, limit) =>
+        getChannelHistory(channelId, { limit, before }).then((r) => r.messages),
+      rows: () => messages,
+      isHeld: (id) => seenIds.has(id),
+      token: () => loadToken,
+      insert,
+    },
+    { pageLimit: HISTORY_LIMIT },
+  );
 
   function clearPoll() {
     if (pollTimer !== null) {
@@ -148,6 +160,13 @@
         return;
       }
       const fresh = head.filter((m) => !seenIds.has(m.id));
+      // A full head page with no row the feed has seen: more than a page
+      // arrived since the last read (ISSUE-0222). With rows on screen that
+      // leaves a hole under this page; with none, older rows exist after all,
+      // and the control at the top pages back to them.
+      const missed = head.length >= HEAD_LIMIT && fresh.length === head.length;
+      const gap = missed && messages.length > 0 ? backfill.openGap(fresh.at(-1)) : null;
+      if (missed && !gap) backfill.offerOlder();
       if (fresh.length > 0) {
         fresh.forEach((m) => seenIds.add(m.id));
         messages = [...fresh, ...messages];
@@ -161,8 +180,16 @@
       // replies — pruneFrom bridges the gap before the next /activity read
       // drops a freshly-replied agent server-side.
       await activityRead;
+      if (token !== loadToken) return;
       if (fresh.length > 0) {
         presence.pruneFrom(fresh);
+      }
+      // Read the hole inside this tick, so a failed page backs the loop off
+      // like a failed head read (the catch below) and no second tick starts
+      // meanwhile. Bounded: what is left after it waits behind a marker.
+      if (gap) {
+        await backfill.fill(gap);
+        if (token !== loadToken) return;
       }
       pollError = "";
       backoffMs = POLL_INTERVAL_MS;
@@ -175,7 +202,8 @@
       backoffMs = Math.min(backoffMs * 2, MAX_BACKOFF_MS);
       scheduleNext(backoffMs);
     } finally {
-      polling = false;
+      // A tick that outlived a channel switch leaves the new channel's flag be.
+      if (token === loadToken) polling = false;
     }
   }
 
@@ -226,9 +254,7 @@
     seenIds = new Set();
     backoffMs = POLL_INTERVAL_MS;
     polling = false;
-    hasOlder = false;
-    loadingOlder = false;
-    olderError = "";
+    backfill.reset();
     pinnedToBottom = true;
     unseen = 0;
     return getChannelHistory(channel, { limit: HISTORY_LIMIT })
@@ -236,7 +262,7 @@
         if (token !== loadToken) return;
         messages = history;
         history.forEach((m) => seenIds.add(m.id));
-        hasOlder = history.length >= HISTORY_LIMIT;
+        if (history.length >= HISTORY_LIMIT) backfill.offerOlder();
         // Surface an already-in-flight round the moment a group opens (a reload
         // or a tab switch), rather than waiting for the first poll tick.
         pollActivity(channel, token);
@@ -260,41 +286,28 @@
     }
   }
 
-  // loadOlder extends the timeline backwards one page, from just after the
-  // oldest shown message's timestamp (justAfter — so rows sharing it are not
-  // skipped; the ones already shown are dropped by id), and keeps the reader's
-  // place: the view is re-anchored so the rows already on screen stay where
-  // they were. A full page that brings nothing new (a run of rows sharing one
-  // instant) ends the paging rather than offering the same page forever.
-  async function loadOlder() {
-    const channel = channelId;
-    const token = loadToken;
-    const oldest = messages.at(-1);
-    if (!channel || !oldest || loadingOlder) {
-      return;
-    }
-    loadingOlder = true;
-    olderError = "";
-    try {
-      const { messages: older } = await getChannelHistory(channel, {
-        limit: HISTORY_LIMIT,
-        before: justAfter(oldest.timestamp),
-      });
-      if (token !== loadToken) return;
-      const unseenOlder = older.filter((m) => !seenIds.has(m.id));
-      unseenOlder.forEach((m) => seenIds.add(m.id));
-      const before = timelineEl ? timelineEl.scrollHeight - timelineEl.scrollTop : 0;
-      messages = [...messages, ...unseenOlder];
-      hasOlder = older.length >= HISTORY_LIMIT && unseenOlder.length > 0;
-      await tick();
-      if (timelineEl && before) {
-        timelineEl.scrollTop = timelineEl.scrollHeight - before;
-      }
-    } catch (err) {
-      if (token !== loadToken) return;
-      olderError = `Could not load older messages: ${err.message}`;
-    } finally {
-      if (token === loadToken) loadingOlder = false;
+  // insert puts rows read back from history into the timeline — under the row
+  // `afterId`, or at the oldest end without one — and keeps the reader's place:
+  //   "rows" — the rows on screen stay where they were (an older page grows
+  //            above them);
+  //   "top"  — the view is put back where it was, so rows loaded from a
+  //            marker run on downwards from it, and a view at the newest
+  //            message is not pulled down past them;
+  //   ""     — nothing is held: the rows arrived on a poll, and count toward
+  //            the jump-to-latest control for a reader who has scrolled up.
+  async function insert(rows, { afterId = "", keep = "" } = {}) {
+    rows.forEach((m) => seenIds.add(m.id));
+    const el = timelineEl;
+    const top = el ? el.scrollTop : 0;
+    const fromBottom = el ? el.scrollHeight - top : 0;
+    if (!keep && !pinnedToBottom) unseen += rows.length;
+    const at = afterId ? messages.findIndex((m) => m.id === afterId) + 1 : messages.length;
+    messages = [...messages.slice(0, at), ...rows, ...messages.slice(at)];
+    await tick();
+    if (el && keep === "rows" && fromBottom) el.scrollTop = el.scrollHeight - fromBottom;
+    if (el && keep === "top") {
+      el.scrollTop = top;
+      onTimelineScroll();
     }
   }
 
@@ -428,13 +441,13 @@
   </div>
 {:else}
   <div class="timeline-scroll" bind:this={timelineEl} onscroll={onTimelineScroll}>
-    {#if hasOlder || loadingOlder || olderError}
+    {#if backfill.hasOlder || backfill.loadingOlder || backfill.olderError}
       <div class="older">
-        {#if olderError}
-          <p class="poll-error" role="status">{olderError}</p>
+        {#if backfill.olderError}
+          <p class="poll-error" role="status">{backfill.olderError}</p>
         {/if}
-        <button type="button" class="btn-sm btn-ghost" onclick={loadOlder} disabled={loadingOlder}>
-          <Icon name="arrow-up" size={14} />{loadingOlder ? "Loading older messages…" : "Show older messages"}
+        <button type="button" class="btn-sm btn-ghost" onclick={backfill.loadOlder} disabled={backfill.loadingOlder}>
+          <Icon name="arrow-up" size={14} />{backfill.loadingOlder ? "Loading older messages…" : "Show older messages"}
         </button>
       </div>
     {:else}
@@ -443,7 +456,10 @@
     <ol class="timeline" aria-label="Channel messages">
       {#each displayMessages as message, i (message.id)}
         {@const dayLabel = dayLabelAt(displayMessages, i)}
-        <ChannelMessage {message} {userId} {agentsById} {dayLabel} compact={!dayLabel && isCompact(displayMessages, i)} />
+        {@const gap = backfill.gapAbove(message.id)}
+        <ChannelMessage {message} {userId} {agentsById} {dayLabel} compact={!dayLabel && !gap && isCompact(displayMessages, i)}>
+          {#if gap}<TimelineGap {gap} onLoad={() => backfill.fill(gap, { byClick: true })} />{/if}
+        </ChannelMessage>
       {/each}
     </ol>
   </div>
