@@ -74,3 +74,11 @@ process keeps running or stops:
 
 > 2026-09-28 — captured in the review of the ISSUE-0172 fix
 > ([#1014](https://github.com/mkhomutov/Persatrix/pull/1014)).
+
+> 2026-11-14 — one sentence above is out of date. The janitor that
+> sweeps stuck summaries no longer "runs only on a tick": since the fix
+> for
+> [ISSUE-0198](ISSUE-0198-pending-summary-janitor-never-runs-without-a-tick.md)
+> it also runs when a persona's memory opens and before an inbound
+> event. It still only sweeps stuck summaries; the idle sweep this
+> issue asks for does not exist.

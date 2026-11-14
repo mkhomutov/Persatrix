@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import TYPE_CHECKING, Any
 
 from ..llm_client import LLMClient
@@ -29,7 +30,12 @@ from ..memory.episodic import EpisodicMemory
 from ..memory.interactions import InteractionTracker, cleanup_closing_interactions
 from .close_fan import persist_fanned_closes
 from .close_path import persist_closed_interaction
-from .finalize_close import DRAIN_TIMEOUT_SEC, drain_pending_summary_tasks
+from .finalize_close import (
+    DRAIN_TIMEOUT_SEC,
+    JANITOR_INTERVAL_SEC,
+    drain_pending_summary_tasks,
+    maybe_run_janitor,
+)
 from .replay_sweep import close_replayed_scopes
 
 if TYPE_CHECKING:
@@ -55,6 +61,7 @@ class _CloseLifecycleMixin:
     _llm_client: LLMClient
     _memory_ns: MemoryNamespace
     _pending_summarize_tasks: set[asyncio.Task[None]]
+    _last_janitor_monotonic: float | None
 
     async def _persist_closed_interaction(self, interaction: Interaction) -> None:
         """RFC 0020 PR 4 close-path orchestrator — see
@@ -179,4 +186,28 @@ class _CloseLifecycleMixin:
         db = self._episodic_memory._ensure_db()
         return await cleanup_closing_interactions(
             db, self.agent_id, grace_sec=grace_sec, now=now,
+        )
+
+    async def sweep_stuck_closes(self) -> None:
+        """Run the janitor unless it ran in the last five minutes.
+
+        Three paths call this, so that every persona has one (ISSUE-0198):
+        opening the memory at boot, an inbound event, and a tick.  They
+        share one cooldown, ``JANITOR_INTERVAL_SEC``, counted from the
+        moment of the last sweep.  A sweep that fails is logged and
+        counted by :func:`maybe_run_janitor` and never raises, so it
+        cannot cost a boot, an event or a tick.
+
+        It waits while this process is still writing a summary.  A boot
+        catch-up can close many replayed conversations at once, and their
+        summaries are written a few at a time, so the queue can outlast
+        the grace period: a row in it looks stuck and is not.  Marking it
+        would throw away the summary that is on its way.  The cooldown is
+        not restarted by a wait, so the next event or tick tries again.
+        """
+        if any(not task.done() for task in self._pending_summarize_tasks):
+            return
+        self._last_janitor_monotonic = await maybe_run_janitor(
+            self.cleanup_closing_interactions, self._last_janitor_monotonic,
+            time.monotonic(), JANITOR_INTERVAL_SEC, self.agent_id,
         )

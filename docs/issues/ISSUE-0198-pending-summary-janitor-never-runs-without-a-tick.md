@@ -1,12 +1,18 @@
 ---
 id: ISSUE-0198
 summary: "The sweep that rescues an episode stuck at `[summary pending]` runs only at the end of a tick. Stock personas ship `timers: []` and reactive personas have no scheduler, so the sweep never runs for them and recall hides the stuck episode. An episode stuck by a replayed close is then counted as already derived on every later boot and is never retried."
-status: open
+status: resolved
 severity: medium
 area: agents/memory
 created: 2026-11-10
+closed: 2026-11-14
+closed_pr: 1111
 refs:
   - agents/persona_runtime/__init__.py
+  - agents/persona_runtime/close_lifecycle.py
+  - agents/persona_runtime/state_persistence.py
+  - agents/persona_runtime/finalize_close.py
+  - tests/unit/python/test_pending_summary_sweep_without_a_tick.py
   - agents/persona_runtime/close_path.py
   - agents/persona_runtime/replay_identity.py
   - agents/server_persona.py
@@ -94,3 +100,58 @@ first, since the sweep is one of the writes that keeps the lock.
 > makes the sweep commit when it finds nothing, so it no longer keeps
 > the write lock and can run on the paths proposed above. This issue
 > itself is unchanged.
+
+> 2026-11-13 — fixed. The sweep has one entry point,
+> `sweep_stuck_closes` (`agents/persona_runtime/close_lifecycle.py`),
+> and three callers that share its five-minute cooldown:
+>
+> - **Boot.** `initialize_memory` runs it once the memory tiers are
+>   open. The boot catch-up runs after that, so its re-derivation guard
+>   reads a store the sweep has already been over.
+> - **An inbound event.** `on_event` runs it before the turn, so a turn
+>   that times out or fails does not skip it.
+> - **A tick**, as before.
+>
+> The boot sweep keeps the sweep's own rule: it marks only a row whose
+> close is older than the grace period (five minutes). So a row left by
+> a replayed close is derived again on the same boot when the process
+> was down for longer than that, and on the boot after when it came
+> back sooner; in between, the event path marks it. Marking every
+> pending row at boot would recover on the first boot always, but it
+> would rest on one process being the only writer of an agent's rows,
+> which nothing checks.
+>
+> A sweep that fails is logged and counted, and does not stop the boot
+> or the event. Checked against the code at `dd006cba`: the Context
+> above was right as written.
+>
+> What is unchanged: a row left by a *live* close is marked, so recall
+> shows it as `[interaction summary unavailable]`, but its content
+> comes back only if a later catch-up replays the conversation, as a
+> second episode beside the marked row. A ticking persona that has gone
+> idle and gets no event is swept at its next boot.
+
+> 2026-11-14 — review of the fix. One finding changed behaviour.
+>
+> - **The new sweep could mark rows this process was still
+>   summarising.** A boot catch-up closes its replayed conversations
+>   within seconds, and their summaries are then written four at a time,
+>   each a model call of up to 30 seconds. With enough of them the queue
+>   outlasts the five-minute grace period, and the first event after
+>   that marked every row still in it; each queued summary was then
+>   written and thrown away. A ticking persona had this race before the
+>   fix; the fix gave it to the personas that never tick. The sweep now
+>   waits while the persona has a summary of its own on its way, on all
+>   three paths, and does not restart the cooldown while it waits.
+> - The tick stamped its sweep with the time the tick started, so a tick
+>   that waited for the agent's lock could be followed by an event's
+>   sweep inside one cooldown. Every path now stamps the sweep itself.
+> - Tests: the shared cooldown is now shown in both orders (an event's
+>   sweep holds back a tick's, and the reverse), the boot test checks a
+>   state only a load can bring back, the failing-sweep test checks the
+>   sweep was tried, and one test checks the sweep runs under the
+>   agent's lock.
+> - Texts: the stop-time drain's warning said a cancelled row
+>   "re-derives on the next boot"; that is the boot after the janitor
+>   has marked it, which a restart straight after a stop is not.
+>   ISSUE-0173 has a note that its "runs only on a tick" is out of date.

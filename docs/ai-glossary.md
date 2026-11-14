@@ -999,8 +999,10 @@ Terms from [RFC 0020](rfcs/0020-interaction-lifecycle.md) PR 4.
 - **Disallowed:** "garbage collector".
 - **Definition:** `cleanup_closing_interactions` — idempotent `UPDATE`
   rewriting closing-state rows past `grace_sec` to the
-  summary-unavailable sentinel. Invoked from `on_tick` at most once
-  per `JANITOR_INTERVAL_SEC` (default 300 s).
+  summary-unavailable sentinel. Invoked when a persona's memory opens
+  at boot, on an inbound event and on a tick, at most once per
+  `JANITOR_INTERVAL_SEC` (default 300 s) across the three, and not
+  while the persona is still writing a summary of its own.
 
 ## ISSUE-0123 / ISSUE-0131 — Per-speaker interaction records (v0.3.15)
 
