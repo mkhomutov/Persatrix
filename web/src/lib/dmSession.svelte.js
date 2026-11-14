@@ -28,6 +28,10 @@ export class DmSession {
 
   #token = 0;
   #controller = null;
+  // Counts the identity changes (reidentify). A turn sent under an earlier
+  // count was sent as someone the console has stopped acting as: when its
+  // answer arrives, it leaves everything here alone.
+  #acting = 0;
   #ctx;
   // Unsent drafts per persona (this page load): leaving a DM parks its draft
   // and opening one brings back its own.
@@ -90,6 +94,32 @@ export class DmSession {
     this.sendError = "";
   }
 
+  // reidentify is called when the identity the console acts as has changed
+  // (the shell's "acting as" control, local testing only). A DM belongs to one
+  // person and one persona, so the open one is looked up again for the new
+  // identity. Until that answers the channel id is "", which empties the
+  // feed: one person's history is never shown under another's name.
+  //
+  // A turn still on its way was sent as the old identity. Its request is left
+  // to finish — the reply belongs in that identity's conversation and is
+  // there when the tester changes back — but it is cut loose from this view:
+  // the composer is free at once, and the late answer, or its error, changes
+  // nothing here. The draft box is not touched: it holds what the person at
+  // the keyboard typed, whoever they act as (after a turn was cut loose it
+  // still holds that turn's text, as it does after a Cancel).
+  reidentify() {
+    if (!this.agent) return;
+    this.#acting++;
+    if (this.sending) {
+      this.sending = false;
+      this.#controller = null;
+      this.#ctx.feed()?.clearThinking([this.agent]);
+    }
+    this.sendError = "";
+    this.channelId = "";
+    return this.resolve(this.agent);
+  }
+
   // #park keeps the open DM's unsent draft for when it is opened again.
   #park() {
     if (this.agent) {
@@ -123,21 +153,27 @@ export class DmSession {
     const agentAtSend = this.agent;
     const hadChannel = Boolean(this.channelId);
     const feed = () => this.#ctx.feed();
+    const acting = this.#acting;
+    const controller = new AbortController();
     this.sending = true;
-    this.#controller = new AbortController();
+    this.#controller = controller;
     // The synchronous turn IS the DM's "thinking" signal (cleared below/finally).
     feed()?.markThinking([agentAtSend]);
     try {
       const payload = {
         message: text,
         userId: this.#ctx.userId(),
-        signal: this.#controller.signal,
+        signal: controller.signal,
       };
       const usedSession = this.sessionId.trim();
       const usedEpoch = this.epochId.trim();
       if (usedSession) payload.sessionId = usedSession;
       if (usedEpoch) payload.epochId = usedEpoch;
       await sendChat(agentAtSend, payload);
+      // Sent as an identity the console no longer acts as (reidentify).
+      if (acting !== this.#acting) {
+        return;
+      }
       // The draft parked for this persona, if the DM was left mid-turn, is
       // this very message — it has been sent.
       this.#drafts.delete(agentAtSend);
@@ -153,9 +189,12 @@ export class DmSession {
         this.resolve(agentAtSend);
       }
     } catch (err) {
+      if (acting !== this.#acting) {
+        return;
+      }
       // A user cancel surfaces as an AbortError (status-0 ApiError wrapping it):
       // not a failure — drop it silently rather than alarming over an own cancel.
-      if (this.#controller?.signal.aborted || err?.cause?.name === "AbortError") {
+      if (controller.signal.aborted || err?.cause?.name === "AbortError") {
         // intentionally no sendError
       } else {
         this.sendError =
@@ -164,10 +203,14 @@ export class DmSession {
             : `The message could not be sent: ${err.message}`;
       }
     } finally {
-      this.sending = false;
-      this.#controller = null;
-      // Backstop for cancel/error/mid-turn switch — clears with no idle flash.
-      feed()?.clearThinking([agentAtSend]);
+      // Not for a turn cut loose by reidentify: by now `sending` and the
+      // "thinking" line may be the new identity's own turn.
+      if (acting === this.#acting) {
+        this.sending = false;
+        this.#controller = null;
+        // Backstop for cancel/error/mid-turn switch — clears with no idle flash.
+        feed()?.clearThinking([agentAtSend]);
+      }
     }
   }
 

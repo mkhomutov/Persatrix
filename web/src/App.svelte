@@ -37,11 +37,13 @@
   let authenticated = $state(false);
   // `actingAs` is the *committed* override that drives the effective identity;
   // `actingAsDraft` is what's in the box. The draft commits to `actingAs` only
-  // on `change` (blur/Enter), never per-keystroke — persistence is keyed on
-  // (user, agent) and the panels reseed history when the identity changes, so a
-  // per-keystroke commit would blank+refetch the transcript for every
-  // intermediate value ("b", "bo", "bob"). Deferring the commit reseeds once,
-  // on the value the tester actually meant.
+  // on `change` (blur/Enter), never per-keystroke — a DM is keyed on (user,
+  // persona), and the conversation panel opens an open DM again for the new
+  // identity (lib/dmSession.svelte.js `reidentify`), so a per-keystroke commit
+  // would blank and refetch the transcript for every intermediate value ("b",
+  // "bo", "bob"). Deferring the commit does that once, on the value the tester
+  // actually meant. A group channel is not reloaded: it is the same channel
+  // whoever watches it.
   let actingAs = $state("");
   let actingAsDraft = $state("");
   const userId = $derived(
@@ -352,10 +354,11 @@
           title="Local testing only — defaults to the principal and is ignored once authenticated"
         >
           acting as
-          <!-- Commit on `change` (blur/Enter), not per-keystroke, so the panels
-               reseed once on the intended value. The placeholder echoes the
-               principal so a cleared box reads as "acting as the principal"
-               (the userId derivation falls back to it) rather than no identity. -->
+          <!-- Commit on `change` (blur/Enter), not per-keystroke, so an open DM
+               is opened again once, on the intended value. The placeholder
+               echoes the principal so a cleared box reads as "acting as the
+               principal" (the userId derivation falls back to it) rather than
+               no identity. -->
           <input
             name="acting_as"
             bind:value={actingAsDraft}

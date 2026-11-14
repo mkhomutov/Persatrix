@@ -66,7 +66,10 @@ topbar shows an **acting as** box beside the principal. It starts out holding
 the principal; type another user id and press Enter, and the console acts as
 that user: chat, channel posts, and your membership in a channel you create all
 use it. That is how a tester shows a persona remembering each user separately —
-greet it as one user, switch, and it no longer knows you. The box grants no new
+greet it as one user, switch, and it no longer knows you. With a DM open, the
+switch opens that persona's DM again as the new user: the other user's messages
+leave the screen, and are back when you switch back. A group channel stays as
+it is. The box grants no new
 access, because with auth disabled the REST API already accepts any `user_id`,
 and it disappears once you sign in, so a verified identity can never be
 overridden from the browser. It is the one deliberate exception to the §F rule
