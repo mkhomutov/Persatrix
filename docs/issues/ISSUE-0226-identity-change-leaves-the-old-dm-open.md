@@ -6,6 +6,7 @@ severity: low
 area: web
 created: 2026-11-10
 closed: 2026-11-15
+closed_pr: 1129
 refs:
   - web/src/panels/ChannelTimeline.identity.test.js
   - docs/issues/ISSUE-0258-feed-says-no-messages-while-a-dm-is-still-being-opened.md

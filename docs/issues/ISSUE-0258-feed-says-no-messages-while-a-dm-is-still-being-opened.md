@@ -6,6 +6,7 @@ severity: low
 area: web
 created: 2026-11-15
 refs:
+  - https://github.com/mkhomutov/Persatrix/pull/1129
   - web/src/panels/ConversationFeed.svelte
   - web/src/panels/ChannelTimeline.svelte
   - web/src/lib/dmSession.svelte.js
