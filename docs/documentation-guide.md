@@ -122,7 +122,7 @@ One canonical document per topic. Link to it; do not copy from it.
 | PR review | `docs/methodology/review-process.md` |
 | Testing layers and rules | `docs/methodology/testing-strategy.md` |
 | Which rules are enforced, and how | `docs/methodology/enforcement-matrix.md` |
-| Make targets, scripts, hooks, workflows | `docs/methodology/automation-catalogue.md`; the hook's steps in `docs/methodology/pre-commit-hook.md` |
+| Make targets, scripts, hooks, workflows | `docs/methodology/automation-catalogue.md`; the hook's steps in `docs/methodology/pre-commit-hook.md`, the workflows in `docs/methodology/github-workflows.md` |
 | RFC-level lifecycle | `docs/development-workflow.md` |
 | RFC format and lifecycle; live RFC table | `docs/rfcs/README.md`; `docs/rfcs/INDEX.md` (generated) |
 | Internal issue tracker; live issue table | `docs/issues/README.md`; `docs/issues/INDEX.md` (generated) |

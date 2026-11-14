@@ -35,6 +35,7 @@ from agents.llm_watsonx import WatsonxProvider
 from ._watsonx_test_helpers import (
     _make_watsonx_provider,
     _mock_watsonx_modules,
+    _model_inference_class,
     _watsonx_response,
     _watsonx_tool_call,
 )
@@ -103,7 +104,7 @@ def test_get_model_caches_per_model_id() -> None:
     m3 = provider._get_model("ibm/granite-3-8b-instruct")
     assert m1 is m2
     # Two distinct model ids → two ModelInference constructions.
-    assert provider._ModelInference.call_count == 2
+    assert _model_inference_class(provider).call_count == 2
     assert m3 is not None
 
 
@@ -382,7 +383,8 @@ async def test_create_message_routes_to_the_requested_model() -> None:
         system="", tools=[], max_tokens=64, temperature=0.0,
     )
     assert resp.text == "granite"
-    assert provider._ModelInference.call_args.kwargs["model_id"] == "ibm/granite-3-8b-instruct"
+    built_with = _model_inference_class(provider).call_args.kwargs
+    assert built_with["model_id"] == "ibm/granite-3-8b-instruct"
 
 
 # ─── append_tool_round (multi-round tool loop, OpenAI-shaped) ──

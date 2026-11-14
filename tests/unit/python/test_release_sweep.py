@@ -74,3 +74,13 @@ def test_select_rejects_an_unknown_gate_name() -> None:
     import pytest
     with pytest.raises(ValueError, match="unknown gate"):
         select(GATES, only=["make tset"], skip=None, include_optional=False)
+
+
+def test_the_notices_gate_says_which_python_it_needs() -> None:
+    """The sweep runs its gates on the repository's own virtual environment.
+    The notices are written from Python 3.11 with every extra installed, so
+    on any other install that gate stops; the listing has to say why."""
+    (gate,) = [g for g in GATES if g.name == "notices"]
+
+    assert "Python 3.11" in gate.note
+    assert "make build-agents-providers" in gate.note

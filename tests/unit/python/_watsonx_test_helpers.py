@@ -14,7 +14,7 @@ optional ``ibm-watsonx-ai`` extra is installed.
 from __future__ import annotations
 
 import sys
-from typing import Any
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 from agents.llm_watsonx import WatsonxProvider
@@ -57,6 +57,15 @@ def _make_watsonx_provider(
             space_id=space_id,
         )
     return p, model_inference
+
+
+def _model_inference_class(provider: WatsonxProvider) -> MagicMock:
+    """The stand-in ``ModelInference`` class a provider was built with.
+
+    Returned as the mock it is. Where the real SDK is installed, mypy knows
+    the attribute as the SDK's own class, which has no ``call_count``.
+    """
+    return cast(MagicMock, provider._ModelInference)
 
 
 def _watsonx_tool_call(

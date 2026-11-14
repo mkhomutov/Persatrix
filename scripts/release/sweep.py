@@ -95,7 +95,13 @@ GATES: tuple[Gate, ...] = (
     ),
     Gate("eval-replay", "make eval-replay", "all recipes must replay green"),
     Gate("licenses", "make check-licenses"),
-    Gate("notices", "make notices-check", "a delta is expected when deps changed since the tag"),
+    Gate(
+        "notices",
+        "make notices-check",
+        "a delta is expected when deps changed since the tag; stops unless run on"
+        " Python 3.11 with every extra (make build-agents-providers), so on another"
+        " .venv run it by hand with PYTHON= that install",
+    ),
     Gate("file size", "python scripts/checks/file_size.py --strict"),
     Gate(
         "doc gates",

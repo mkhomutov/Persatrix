@@ -244,6 +244,16 @@ python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 
+# The Gemini and watsonx SDKs are an optional extra, absent from the plain
+# install this config is read under, so mypy is told not to report them
+# missing. This is not where the two adapters are checked against the SDKs:
+# `make lint-providers` does that, with the extra installed and no config
+# read, so there a missing SDK is an error (ISSUE-0220). mypy.ini carries the
+# same two sections for the tests/ tree, which imports the adapters.
+[[tool.mypy.overrides]]
+module = ["google.genai", "ibm_watsonx_ai", "ibm_watsonx_ai.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 # testpaths is not set here because test paths are specified explicitly

@@ -29,6 +29,8 @@ if TYPE_CHECKING:
     from fractions import Fraction  # only for an annotation that cannot be resolved
 from agents.tools.registry import ToolDefinition, ToolResult, clear_registry, get_tool, tool
 
+from ._sdk_boundary_helpers import provider_sdk
+
 
 @pytest.fixture(autouse=True)
 def _clean_registry():
@@ -315,7 +317,9 @@ class TestNarrowing:
         ) == NARROWING_KEYWORDS
 
     def test_every_keyword_passes_gemini_schema_validation(self) -> None:
-        types = pytest.importorskip("google.genai.types")
+        # The real SDK is an optional extra. `make test-providers` runs this
+        # test where it is installed, and there a missing SDK fails.
+        types = provider_sdk("google.genai.types")
 
         @tool(name="every", narrow={
             "n": {"minimum": 1, "maximum": 9},
