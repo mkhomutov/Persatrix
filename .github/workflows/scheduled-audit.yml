@@ -4,12 +4,19 @@ name: Scheduled Dependency Audit
 # the Rust CLI's crates, the Go modules, CI's Python pins and the web console's
 # npm packages. Until 2026-11 it read them for the Rust CLI only (ISSUE-0218).
 #
-# One audit failing does not stop the others: every step after the checkout
-# runs unless the run is cancelled (`if: !cancelled()`), so one Monday shows
-# all four results. A failed step still fails the job, and that is what makes
-# the last step open or update the "Scheduled Dependency Audit Failure" issue,
-# which names the audits that failed and the command each one ran.
-# tests/unit/python/test_scheduled_audit.py holds all of this.
+# One audit failing does not stop the others: no step after the checkout
+# waits for the steps before it to pass (`!cancelled()` in every `if`), so one
+# Monday shows all four results. A failed step still fails the job, and that
+# is what makes the last step open or update the "Scheduled Dependency Audit
+# Failure" issue, which names the audits that failed and the command each one
+# ran.
+#
+# An audit does wait for one thing: the steps that install what it runs with.
+# If one of those fails, the audit is skipped and the issue says it did not
+# run, and why. Without that, the audit ran with whatever the runner had (its
+# own Go, or no uv at all), failed, and the issue blamed a dependency.
+# tests/unit/python/test_scheduled_audit.py holds the steps, and
+# test_scheduled_audit_issue.py beside it the text of the issue.
 #
 # A finding is fixed by a change of its own, never in this workflow.
 
@@ -31,18 +38,20 @@ jobs:
       issues: write
     steps:
       - uses: actions/checkout@v7
+        id: checkout
 
       # ─── Rust CLI: cargo-deny ───────────────────────────────
       # The toolchain CI uses, from cli/rust-toolchain.toml. Run in cli/,
       # `rustup toolchain install` with no name installs what that file names.
       - name: Install the Rust toolchain pinned in cli/rust-toolchain.toml
-        if: ${{ !cancelled() }}
+        id: setup-rust
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         working-directory: cli
         run: rustup toolchain install --no-self-update
 
       - name: Cache cargo-deny
         id: cache-cargo-deny
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         uses: actions/cache@v6
         with:
           path: |
@@ -51,9 +60,11 @@ jobs:
             ~/.cargo/.crates2.json
           key: ${{ runner.os }}-cargo-deny-0.19.0
 
-      # From cli/, so rustup builds it with the pinned toolchain.
+      # From cli/, so rustup builds it with the pinned toolchain. Skipped
+      # when the cache already holds it.
       - name: Install cargo-deny
-        if: ${{ !cancelled() && steps.cache-cargo-deny.outputs.cache-hit != 'true' }}
+        id: setup-cargo-deny
+        if: ${{ !cancelled() && steps.setup-rust.outcome == 'success' && steps.cache-cargo-deny.outputs.cache-hit != 'true' }}
         working-directory: cli
         run: cargo install cargo-deny --locked --version 0.19.0
 
@@ -64,7 +75,7 @@ jobs:
       # was noticed only when other advisories failed the run (#1043).
       - name: Audit the Rust CLI's crates (cargo-deny)
         id: audit-rust
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.setup-rust.outcome == 'success' && (steps.setup-cargo-deny.outcome == 'success' || steps.cache-cargo-deny.outputs.cache-hit == 'true') }}
         working-directory: cli
         run: cargo deny check -D advisory-not-detected advisories bans sources licenses
 
@@ -78,14 +89,15 @@ jobs:
       # shipped since (37 on 2026-11-14), and no dependency bump clears one.
       - name: Read the Go line the orchestrator image builds with
         id: go-line
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: |
           line=$(sed -n 's/^FROM golang:\([0-9][0-9]*\.[0-9][0-9]*\).* AS builder.*/\1/p' Dockerfile.orchestrator)
           test -n "$line"
           echo "line=$line" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-go@v7
-        if: ${{ !cancelled() }}
+        id: setup-go
+        if: ${{ !cancelled() && steps.go-line.outcome == 'success' }}
         with:
           go-version: ${{ steps.go-line.outputs.line }}
           check-latest: true
@@ -97,28 +109,34 @@ jobs:
       # bump or not at all.
       - name: Audit the Go modules (govulncheck)
         id: audit-go
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.setup-go.outcome == 'success' }}
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
       # ─── Python pins: pip-audit ─────────────────────────────
       # pip-audit reads the pins as they are written: `--no-deps` resolves
       # nothing and needs every line pinned with `==`, which is how uv writes
       # the file, and `--disable-pip` builds no environment. So it audits what
-      # CI installs, on the Python CI runs. A pin whose marker names another
-      # platform (colorama, on Windows) is skipped. The loop takes in every
-      # constraints file, and goes on to the next one after a finding.
+      # CI installs, on the Python CI runs. It says nothing about a pin whose
+      # marker is false there, and drops it without a word: a pin for another
+      # platform (colorama, on Windows) and a pin for another Python (one
+      # written `python_full_version >= '3.12'`). Auditing the other Pythons
+      # goes with the choice of which Python the agent image runs
+      # (ISSUE-0219). The loop takes in every constraints file, and goes on to
+      # the next one after a finding.
       - uses: actions/setup-python@v7
-        if: ${{ !cancelled() }}
+        id: setup-python
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         with:
           python-version: "3.11"
 
       - name: Install the pinned uv
-        if: ${{ !cancelled() }}
+        id: setup-uv
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: make uv-install
 
       - name: Audit the Python pins (pip-audit)
         id: audit-python
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.setup-python.outcome == 'success' && steps.setup-uv.outcome == 'success' }}
         run: |
           status=0
           for file in .github/python-constraints*.txt; do
@@ -139,13 +157,14 @@ jobs:
       # every Monday red with nothing to do about it. The Node release, and so
       # the npm, is the one CI's web-console job installs.
       - uses: actions/setup-node@v7
-        if: ${{ !cancelled() }}
+        id: setup-node
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         with:
           node-version: "22.22.2"
 
       - name: Audit the web console's packages (npm audit)
         id: audit-web
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.setup-node.outcome == 'success' }}
         working-directory: web
         run: npm audit --package-lock-only --audit-level=moderate
 
@@ -158,6 +177,14 @@ jobs:
           AUDIT_GO: ${{ steps.audit-go.outcome }}
           AUDIT_PYTHON: ${{ steps.audit-python.outcome }}
           AUDIT_WEB: ${{ steps.audit-web.outcome }}
+          SETUP_CHECKOUT: ${{ steps.checkout.outcome }}
+          SETUP_RUST: ${{ steps.setup-rust.outcome }}
+          SETUP_CARGO_DENY: ${{ steps.setup-cargo-deny.outcome }}
+          SETUP_GO_LINE: ${{ steps.go-line.outcome }}
+          SETUP_GO: ${{ steps.setup-go.outcome }}
+          SETUP_PYTHON: ${{ steps.setup-python.outcome }}
+          SETUP_UV: ${{ steps.setup-uv.outcome }}
+          SETUP_NODE: ${{ steps.setup-node.outcome }}
         with:
           script: |
             const title = 'Scheduled Dependency Audit Failure';
@@ -183,7 +210,7 @@ jobs:
                 name: 'Python pins (pip-audit)',
                 outcome: process.env.AUDIT_PYTHON,
                 rerun: 'for file in .github/python-constraints*.txt; do uv tool run --python 3.11 --from pip-audit==2.10.1 pip-audit --no-deps --disable-pip -r "$file"; done',
-                fix: 'Move the pin with `make python-constraints-upgrade`, or merge the weekly constraints refresh if it already offers the fixed release. If a range in `agents/pyproject.toml` rules that release out, widen the range first.',
+                fix: 'Raise the floor of the affected package in `agents/pyproject.toml` to the fixed release, then run `make python-constraints`: it moves that package and what must move with it, and keeps every other pin. `make python-constraints-upgrade` and the weekly constraints refresh move every pin at once, so they are held whenever any check fails on the newest releases. If a range in `agents/pyproject.toml` rules the fixed release out, widen the range first.',
               },
               {
                 name: 'Web console packages (npm audit)',
@@ -193,13 +220,29 @@ jobs:
               },
             ];
 
+            // The steps that install what the audits run with. An audit
+            // whose set-up failed is skipped, so it shows below as not run.
+            const setups = [
+              { name: 'the checkout', outcome: process.env.SETUP_CHECKOUT },
+              { name: 'the Rust toolchain', outcome: process.env.SETUP_RUST },
+              { name: 'cargo-deny', outcome: process.env.SETUP_CARGO_DENY },
+              { name: 'the Go line read from `Dockerfile.orchestrator`', outcome: process.env.SETUP_GO_LINE },
+              { name: 'Go', outcome: process.env.SETUP_GO },
+              { name: 'Python', outcome: process.env.SETUP_PYTHON },
+              { name: 'uv', outcome: process.env.SETUP_UV },
+              { name: 'Node', outcome: process.env.SETUP_NODE },
+            ];
+
             const word = (outcome) =>
-              outcome === 'success' ? 'passed' : outcome === 'failure' ? '**FAILED**' : `did not run (${outcome || 'no result'})`;
+              outcome === 'success' ? 'passed' : outcome === 'failure' ? '**FAILED**' : 'did not run';
             const failed = audits.filter((a) => a.outcome === 'failure');
+            const brokenSetups = setups.filter((s) => s.outcome === 'failure');
 
             let summary = audits.map((a) => `- ${a.name}: ${word(a.outcome)}`).join('\n');
-            if (failed.length === 0) {
-              summary += '\n\nNo audit step failed, so a set-up step did: a toolchain or a tool was not installed. An audit after it may have run with the wrong tool. Read the log.';
+            if (brokenSetups.length > 0) {
+              summary += `\n\n**Set-up failed: ${brokenSetups.map((s) => s.name).join(', ')}.** An audit shown above as "did not run" was not judged: that is a fault of the run, not a finding in a dependency. Read the log, then run the workflow again from the Actions tab.`;
+            } else if (failed.length === 0) {
+              summary += '\n\nNo audit and no set-up step failed, so another step did (the cargo-deny cache, or this report). Read the log.';
             }
             const details = failed
               .map((a) => `### ${a.name}\n\nRe-run it locally from the repository root:\n\n\`\`\`sh\n${a.rerun}\n\`\`\`\n\n${a.fix}`)

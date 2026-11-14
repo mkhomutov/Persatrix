@@ -1,20 +1,22 @@
-"""Hold the weekly dependency audit, and Dependabot's image entries, to what they promise.
+"""Hold the weekly dependency audit to what it promises.
 
-The weekly audit read published security advisories for the Rust CLI only,
-and Dependabot had no entry for a Dockerfile or a compose file, so a base
-image had no update path at all (ISSUE-0218). These tests keep four things
-true of `.github/workflows/scheduled-audit.yml`:
+The weekly audit read published security advisories for the Rust CLI only
+(ISSUE-0218). These tests keep five things true of
+`.github/workflows/scheduled-audit.yml`:
 
 - it audits all four ecosystems, each with a tool at an exact version;
 - one audit failing does not stop the others, and still fails the job, which
   is what makes the last step open the failure issue;
+- an audit runs only when its own set-up steps succeeded, so it never runs
+  with whatever tool the runner happens to have, and the issue then says the
+  audit did not run instead of blaming a dependency;
 - the Python audit reads every `.github/python-constraints*.txt`, so a second
   constraints file is audited the week it lands;
-- the failure issue names every audit and gives the command that audit ran.
+- the report step is told how every audit and every set-up step ended.
 
-And two of `.github/dependabot.yml`: every directory that holds a Dockerfile
-or a compose file has an entry, and Dependabot is kept from the two image
-tags that must not move on their own.
+`test_scheduled_audit_issue.py` holds the text of the issue the report step
+opens, and `test_dependabot_image_entries.py` the Dependabot half of the same
+issue.
 """
 
 from __future__ import annotations
@@ -24,78 +26,32 @@ import re
 import stat
 import subprocess
 from pathlib import Path
-from typing import Any
 
 import pytest
-import yaml
 from _test_infra import REPO_ROOT, ci_job_steps
 
-AUDIT_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "scheduled-audit.yml"
-DEPENDABOT = REPO_ROOT / ".github" / "dependabot.yml"
-
-# Step id -> the words its command must hold. A step whose id starts with
-# "audit-" is an audit; these four are the ones the issue asked for.
-AUDIT_TOOLS = {
-    "audit-rust": "cargo deny check",
-    "audit-go": "govulncheck",
-    "audit-python": "pip-audit",
-    "audit-web": "npm audit",
-}
-
-# The file names Dependabot's two image updaters read in a directory, copied
-# from dependabot-core (docker/lib/dependabot/docker/file_fetcher.rb and
-# docker/lib/dependabot/docker_compose/file_fetcher.rb) as of 2026-11-14.
-DOCKERFILE_NAME = re.compile(r"dockerfile|containerfile", re.IGNORECASE)
-COMPOSE_NAME = re.compile(r"(docker-)?compose(-[\w]+)?(\.[\w-]+)?\.ya?ml", re.IGNORECASE)
-# The names are loose (a test called test_dockerfile_….py matches the first),
-# so a file counts only if it also has the line that makes it one.
-DOCKERFILE_LINE = re.compile(r"^FROM[ \t]+\S", re.MULTILINE)
-COMPOSE_LINE = re.compile(r"^services:", re.MULTILINE)
-
-
-def _steps() -> list[dict[str, Any]]:
-    workflow = yaml.safe_load(AUDIT_WORKFLOW.read_text(encoding="utf-8"))
-    jobs = workflow["jobs"]
-    assert list(jobs) == ["dependency-audit"], (
-        "the audit is one job, so one failure issue covers it"
-    )
-    return list(jobs["dependency-audit"]["steps"])
-
-
-def _audit_steps() -> dict[str, dict[str, Any]]:
-    return {s["id"]: s for s in _steps() if str(s.get("id", "")).startswith("audit-")}
-
-
-def _issue_step() -> dict[str, Any]:
-    last = _steps()[-1]
-    assert str(last.get("uses", "")).startswith("actions/github-script@"), (
-        "the last step is the one that opens the failure issue"
-    )
-    return last
-
-
-def _command(step: dict[str, Any], tool: str) -> str:
-    """The one line of a step's script that runs its audit tool, without shell plumbing."""
-    lines = [
-        ln.strip()
-        for ln in str(step["run"]).splitlines()
-        if tool in ln and not ln.strip().startswith("echo")
-    ]
-    assert len(lines) == 1, (
-        f"step {step['id']!r} should run {tool!r} on exactly one line, found {lines}"
-    )
-    return lines[0].split(" || ")[0]
+from ._scheduled_audit_helpers import (
+    AUDIT_TOOLS,
+    AUDIT_WORKFLOW,
+    SETUP_FOR,
+    SETUP_STEPS,
+    audit_steps,
+    issue_step,
+    tool_command,
+    walk,
+    workflow_steps,
+)
 
 
 def test_the_weekly_audit_reads_all_four_ecosystems() -> None:
-    audits = _audit_steps()
+    audits = audit_steps()
     for step_id, tool in AUDIT_TOOLS.items():
         assert step_id in audits, f"the weekly audit has no {step_id!r} step"
         assert tool in audits[step_id]["run"], f"step {step_id!r} does not run {tool!r}"
 
 
 def test_each_audit_tool_is_pinned_to_an_exact_version() -> None:
-    audits = _audit_steps()
+    audits = audit_steps()
     text = AUDIT_WORKFLOW.read_text(encoding="utf-8")
     exact = r"\d+\.\d+\.\d+"
     assert re.search(rf"cargo install cargo-deny --locked --version {exact}\s", text)
@@ -104,7 +60,7 @@ def test_each_audit_tool_is_pinned_to_an_exact_version() -> None:
     # npm comes with Node, so the Node release is npm's pin. It is the release
     # CI's web-console job installs, which test_web_node_engines_floor.py
     # holds to the lowest one web/package.json admits.
-    node = [s for s in _steps() if str(s.get("uses", "")).startswith("actions/setup-node@")]
+    node = [s for s in workflow_steps() if str(s.get("uses", "")).startswith("actions/setup-node@")]
     assert len(node) == 1
     ci_node = [
         s
@@ -115,8 +71,21 @@ def test_each_audit_tool_is_pinned_to_an_exact_version() -> None:
     assert re.fullmatch(exact, str(node[0]["with"]["node-version"]))
 
 
+def test_the_web_audit_counts_development_packages_and_fails_from_moderate() -> None:
+    """Both choices are in the command, not only in the comment above it.
+
+    The console has only development dependencies, so `--omit=dev` would
+    audit nothing and could never fail. "moderate" is the lowest level of
+    any advisory ISSUE-0087 recorded.
+    """
+    words = tool_command(audit_steps()["audit-web"], "npm audit").split()
+    assert not [w for w in words if w.startswith("--omit")], words
+    assert not [w for w in words if w.startswith("--include")], words
+    assert [w for w in words if w.startswith("--audit-level")] == ["--audit-level=moderate"]
+
+
 def test_one_failing_audit_does_not_stop_the_others_and_still_fails_the_job() -> None:
-    steps = _steps()
+    steps = workflow_steps()
     assert str(steps[0].get("uses", "")).startswith("actions/checkout@")
     for step in steps[1:-1]:
         label = step.get("name") or step.get("uses")
@@ -130,12 +99,52 @@ def test_one_failing_audit_does_not_stop_the_others_and_still_fails_the_job() ->
         # continue-on-error would let the job pass with a failed audit, and
         # the issue step below runs only when the job has failed.
         assert "continue-on-error" not in step, f"step {label!r} would not fail the job"
-    assert _issue_step().get("if") == "failure()"
+    assert issue_step().get("if") == "failure()"
+
+
+# ─── A failed set-up step ───────────────────────────────────
+
+
+def test_every_set_up_step_belongs_to_an_audit() -> None:
+    steps = workflow_steps()
+    ids = [s.get("id") for s in steps]
+    assert ids[0] == "checkout"
+    for audit, setups in SETUP_FOR.items():
+        for setup in setups:
+            assert setup in ids, f"the workflow has no {setup!r} step"
+            assert ids.index(setup) < ids.index(audit), f"{setup!r} must come before {audit!r}"
+    # A step added later that installs a tool must be tied to its audit here,
+    # or that audit could run without it.
+    known = {"checkout", "cache-cargo-deny", *SETUP_STEPS, *SETUP_FOR}
+    assert {i for i in ids[:-1] if i is not None} == known
+    assert all(s.get("id") for s in steps[:-1]), "every step before the report has an id"
+
+
+def test_with_nothing_failing_every_audit_runs() -> None:
+    for cache_hit in (False, True):
+        outcomes = walk(None, cache_hit=cache_hit)
+        assert {a: outcomes[a] for a in SETUP_FOR} == dict.fromkeys(SETUP_FOR, "success")
+    # On a cache hit cargo-deny is not installed again, and the audit still runs.
+    assert walk(None, cache_hit=True)["setup-cargo-deny"] == "skipped"
+
+
+@pytest.mark.parametrize("failing", SETUP_STEPS)
+def test_an_audit_does_not_run_when_its_set_up_step_failed(failing: str) -> None:
+    outcomes = walk(failing)
+    for audit, setups in SETUP_FOR.items():
+        expected = "skipped" if failing in setups else "success"
+        assert outcomes[audit] == expected, f"{failing} failed and {audit} ended {outcomes[audit]}"
+
+
+def test_no_audit_runs_when_the_checkout_failed() -> None:
+    outcomes = walk("checkout")
+    assert {outcomes[a] for a in SETUP_FOR} == {"skipped"}
+    assert {outcomes[s] for s in SETUP_STEPS} == {"skipped"}
 
 
 def _read_go_line(folder: Path) -> subprocess.CompletedProcess[str]:
     """Run the step that picks the audit's Go line in `folder`; it writes to `folder/output`."""
-    (reader,) = [s for s in _steps() if s.get("id") == "go-line"]
+    (reader,) = [s for s in workflow_steps() if s.get("id") == "go-line"]
     (folder / "output").touch()
     return subprocess.run(
         ["bash", "-e", "-c", reader["run"]],
@@ -163,7 +172,7 @@ def test_the_go_audit_runs_on_the_go_line_the_orchestrator_image_builds_with(
     assert done.returncode == 0, done.stderr
     assert (tmp_path / "output").read_text(encoding="utf-8") == "line=9.87\n"
 
-    steps = _steps()
+    steps = workflow_steps()
     (reader,) = [s for s in steps if s.get("id") == "go-line"]
     (setup,) = [s for s in steps if str(s.get("uses", "")).startswith("actions/setup-go@")]
     # A two-part version takes the newest patch release of that line, and
@@ -172,15 +181,19 @@ def test_the_go_audit_runs_on_the_go_line_the_orchestrator_image_builds_with(
         "go-version": "${{ steps.go-line.outputs.line }}",
         "check-latest": True,
     }
-    assert steps.index(reader) < steps.index(setup) < steps.index(_audit_steps()["audit-go"])
+    assert steps.index(reader) < steps.index(setup) < steps.index(audit_steps()["audit-go"])
 
 
 def test_the_go_line_step_fails_when_the_dockerfile_names_no_go_line(tmp_path: Path) -> None:
-    # An empty answer would let setup-go fall back to whatever Go the runner has.
+    # With an empty answer setup-go would install some other Go. The step
+    # fails instead, and the Go audit then does not run at all.
     (tmp_path / "Dockerfile.orchestrator").write_text("FROM alpine:3.20\n", encoding="utf-8")
     done = _read_go_line(tmp_path)
     assert done.returncode != 0
     assert (tmp_path / "output").read_text(encoding="utf-8") == ""
+
+
+# ─── The Python audit's loop ────────────────────────────────
 
 
 def _run_python_audit(tmp_path: Path, files: list[str], failing: set[str]) -> tuple[int, list[str]]:
@@ -210,7 +223,7 @@ def _run_python_audit(tmp_path: Path, files: list[str], failing: set[str]) -> tu
     }
     # GitHub runs a `run:` script with `bash -e`.
     done = subprocess.run(
-        ["bash", "-e", "-c", _audit_steps()["audit-python"]["run"]],
+        ["bash", "-e", "-c", audit_steps()["audit-python"]["run"]],
         cwd=tmp_path,
         env=env,
         capture_output=True,
@@ -241,7 +254,7 @@ def test_a_finding_in_one_constraints_file_fails_the_step_after_both_are_read(
 
 
 def test_the_python_audit_resolves_nothing_and_runs_on_ci_python() -> None:
-    command = _command(_audit_steps()["audit-python"], "pip-audit")
+    command = tool_command(audit_steps()["audit-python"], "pip-audit")
     # --no-deps audits the pins as written; --disable-pip builds no environment.
     assert "--no-deps" in command and "--disable-pip" in command
     ci_python = [
@@ -250,85 +263,3 @@ def test_the_python_audit_resolves_nothing_and_runs_on_ci_python() -> None:
         if str(s.get("uses", "")).startswith("actions/setup-python@")
     ]
     assert f"--python {ci_python[0]['with']['python-version']} " in command
-
-
-def test_the_failure_issue_names_every_audit_and_the_command_it_ran() -> None:
-    issue = _issue_step()
-    script = str(issue["with"]["script"])
-    passed_in = " ".join(str(v) for v in issue.get("env", {}).values())
-    audits = _audit_steps()
-    assert set(AUDIT_TOOLS) <= set(audits)
-    for step_id, step in audits.items():
-        # Every audit step, the four above and any added later.
-        assert f"steps.{step_id}.outcome" in passed_in, (
-            f"the issue is not told how {step_id!r} ended"
-        )
-        tool = AUDIT_TOOLS.get(step_id, "")
-        command = _command(step, tool) if tool else str(step["run"]).strip()
-        where = step.get("working-directory")
-        local = f"cd {where} && {command}" if where else command
-        assert local in script, f"the issue does not give {step_id!r}'s command: {local}"
-    assert ".github/python-constraints*.txt" in script
-
-
-def _tracked_files() -> list[str]:
-    done = subprocess.run(
-        ["git", "ls-files"], cwd=REPO_ROOT, capture_output=True, text=True, check=True
-    )
-    return done.stdout.splitlines()
-
-
-def _dependabot_entries(ecosystem: str) -> list[dict[str, Any]]:
-    config = yaml.safe_load(DEPENDABOT.read_text(encoding="utf-8"))
-    return [u for u in config["updates"] if u["package-ecosystem"] == ecosystem]
-
-
-def _directories(entries: list[dict[str, Any]]) -> set[str]:
-    return {str(e["directory"]).strip("/") for e in entries}
-
-
-@pytest.mark.parametrize(
-    ("ecosystem", "name_re", "line_re"),
-    [("docker", DOCKERFILE_NAME, DOCKERFILE_LINE), ("docker-compose", COMPOSE_NAME, COMPOSE_LINE)],
-    ids=["docker", "docker-compose"],
-)
-def test_dependabot_reads_every_directory_that_holds_an_image_reference(
-    ecosystem: str, name_re: re.Pattern[str], line_re: re.Pattern[str]
-) -> None:
-    holding = {
-        str(Path(f).parent).strip(".")
-        for f in _tracked_files()
-        if name_re.search(Path(f).name)
-        and line_re.search((REPO_ROOT / f).read_text(encoding="utf-8"))
-    }
-    assert holding, f"no tracked file matches the {ecosystem} updater's file names"
-    missing = holding - _directories(_dependabot_entries(ecosystem))
-    assert not missing, (
-        f"Dependabot has no {ecosystem} entry for: {sorted(d or '/' for d in missing)}"
-    )
-
-
-@pytest.mark.parametrize("ecosystem", ["docker", "docker-compose"])
-def test_the_image_entries_follow_the_files_conventions(ecosystem: str) -> None:
-    entries = _dependabot_entries(ecosystem)
-    assert entries, f"Dependabot has no {ecosystem} entry"
-    for entry in entries:
-        assert entry["schedule"] == {"interval": "monthly"}
-        assert entry["commit-message"]["prefix"] == "chore(deps)"
-        assert [g["patterns"] for g in entry["groups"].values()] == [["*"]], (
-            "one grouped PR per ecosystem"
-        )
-
-
-def test_dependabot_offers_no_move_of_the_agent_images_python_or_the_node_floor() -> None:
-    (entry,) = _dependabot_entries("docker")
-    rules = {r["dependency-name"]: r for r in entry["ignore"]}
-    # `python:3.12-slim` has no patch part, so minor and major are every move
-    # there is; which Python the image runs is an open choice (ISSUE-0219).
-    assert set(rules["python"]["update-types"]) == {
-        "version-update:semver-major",
-        "version-update:semver-minor",
-    }
-    # A rule with a name alone ignores every version. The Node tag is held to
-    # the engines floor by test_web_node_engines_floor.py.
-    assert set(rules["node"]) == {"dependency-name"}

@@ -52,7 +52,8 @@ What is exposed:
 
 - A build from source (`make build`, the path the README offers beside
   Docker) uses whatever Go the builder has, down to 1.26.0, and nothing
-  says that release is unpatched.
+  says that release is unpatched. A builder with an older Go gets exactly
+  1.26.0: the `go` command fetches the release the `go` line names.
 - A fault that only a newer patch release shows is not seen by CI. This
   is the Go side of
   [ISSUE-0219](ISSUE-0219-agent-image-is-not-what-ci-tests.md), which
@@ -73,7 +74,12 @@ A choice for the maintainer, between two that both work:
    a Go security release says so (`go 1.26.11`). Every build then uses a
    patched toolchain or a newer one, since the `go` command fetches the
    release `go.mod` asks for. The docs' "Go 1.26+" stays true:
-   `test_toolchain_minimums.py` compares major and minor only.
+   `test_toolchain_minimums.py` compares major and minor only. One cost:
+   the image build does not fetch a toolchain (`GOTOOLCHAIN=local` in the
+   `golang` image), so a machine holding an older cached
+   `golang:1.26-alpine` layer would refuse to build until the layer is
+   pulled again, and `test_dockerfile_go_toolchain.py` would not see it,
+   since it too compares major and minor only.
 2. **Keep `go 1.26.0` as the oldest accepted release and have CI use the
    newest patch release** of the line, with one step that still compiles
    on exactly 1.26.0, the way the Rust job checks the CLI's oldest Rust.

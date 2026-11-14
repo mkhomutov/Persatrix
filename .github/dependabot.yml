@@ -139,8 +139,13 @@ updates:
   # `<major>.<minor>`, `golang:1.26-alpine` to another `<major>.<minor>-alpine`.
   # No CI job builds an image (ISSUE-0219), so green checks on one of these PRs
   # say nothing about the image: build it and start a demo before merging.
-  # tests/unit/python/test_scheduled_audit.py fails when a Dockerfile lands in
-  # a directory with no entry here.
+  # GitHub offers no security update for this ecosystem, so this monthly PR is
+  # the only update path a base image has. One copy of a tag is read by no
+  # entry and moves by hand: the `FROM alpine:` line that
+  # scripts/checks/dockerignore_context.py writes into its probe Dockerfile.
+  # tests/unit/python/test_dependabot_image_entries.py fails when a Dockerfile
+  # lands in a directory no entry reads, and holds every `docker` entry to the
+  # two rules below.
   - package-ecosystem: docker
     directory: /
     schedule:
@@ -174,9 +179,12 @@ updates:
   # log services in docker-compose.yaml and Ollama in
   # docker-compose.ollama.yaml. The updater reads every compose file in the
   # directory named, docker-compose.yaml and each docker-compose.<name>.yaml
-  # overlay. GitHub raises no security alert and no security update for this
-  # ecosystem, so this monthly PR is the only update path these images have.
-  # As above, CI starts none of them: run the stack before merging.
+  # overlay. As for the base images above, GitHub offers no security update
+  # for this ecosystem, so this monthly PR is the only update path these
+  # images have, and CI starts none of them: run the stack before merging.
+  # One move is known to need a change of its own: Loki's image has had no
+  # `wget` since 3.6, and the health check in docker-compose.yaml calls it, so
+  # a newer Loki would run and be reported unhealthy for good.
   - package-ecosystem: docker-compose
     directory: /
     schedule:

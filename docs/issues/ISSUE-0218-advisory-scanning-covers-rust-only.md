@@ -9,6 +9,8 @@ closed: 2026-11-14
 closed_pr: 1117
 refs:
   - tests/unit/python/test_scheduled_audit.py
+  - tests/unit/python/test_scheduled_audit_issue.py
+  - tests/unit/python/test_dependabot_image_entries.py
   - docs/issues/ISSUE-0249-no-security-linter-reads-the-projects-own-code.md
   - docs/issues/ISSUE-0250-ci-builds-and-tests-on-a-go-release-with-known-vulnerabilities.md
   - docs/issues/ISSUE-0251-the-compose-file-runs-a-jaeger-line-that-has-ended.md
@@ -136,3 +138,29 @@ Dependabot.
 >   on here: a stricter linter ships with the fixes for what it finds.
 >   That half, with counts, is
 >   [ISSUE-0249](ISSUE-0249-no-security-linter-reads-the-projects-own-code.md).
+
+> 2026-11-14 — four corrections from the review of the fix:
+>
+> - **One line of the Impact section is still true after the fix**: "a
+>   published advisory in a base image or a compose image reaches
+>   nothing". GitHub offers security updates for neither the `docker` nor
+>   the `docker-compose` ecosystem, and no advisory audit reads an image.
+>   What the fix gives the images is the monthly version update, and that
+>   is their only update path.
+> - **pip-audit says nothing about a pin whose marker is false on the
+>   Python it runs on**, and drops it without a word. That covers a pin
+>   for another platform and a pin for another Python version. The audit
+>   runs on Python 3.11, as CI does, so a pin written for Python 3.12 and
+>   up is audited by no run. The agent image runs 3.12 and does not
+>   install from the pins at all. Auditing other Pythons goes with the
+>   choice of which Python the image runs
+>   ([ISSUE-0219](ISSUE-0219-agent-image-is-not-what-ci-tests.md)).
+> - **An audit now waits for its own set-up steps.** As first written,
+>   an audit ran even after the step that installs its tool had failed,
+>   with whatever the runner had, and the opened issue then blamed a
+>   dependency. It is skipped now, and the issue says the set-up failed.
+> - **The advice for a Python finding names a route that works**: raise
+>   the package's floor in `agents/pyproject.toml`, then `make
+>   python-constraints`. The first text pointed to the two moves of every
+>   pin at once, which are held while any check fails on the newest
+>   releases.

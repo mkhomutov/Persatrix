@@ -32,8 +32,9 @@ pins and their default rules. Nothing was changed and no finding was read
 closely, so these are counts of reports, not of faults.
 
 **Go: `gosec`, through golangci-lint 2.13.2** (`golangci-lint run
---enable-only gosec ./...`): 103 findings, 39 in product code and 64 in
-tests.
+--enable-only gosec --max-issues-per-linter 0 --max-same-issues 0 ./...`):
+103 findings, 39 in product code and 64 in tests. Without the two
+`--max-…` flags the tool stops at its default caps and prints 43.
 
 | Rule | Count | What it reports |
 |---|---|---|
