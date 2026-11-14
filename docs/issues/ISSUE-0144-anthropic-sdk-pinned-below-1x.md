@@ -137,3 +137,13 @@ installing the provider extras in CI or accepting the gap explicitly.
 > does not take it in: its [ruling (q)](../v0.4.x-sequencing.md#rulings)
 > boards an issue only when a phase in the release is its fix. No v0.4.0 phase
 > needs a feature the 1.x line gates. Re-decide when one does, by amendment.
+
+> 2026-11-14 — the Gemini provider is no longer outside the SDK boundary
+> test. The fix for
+> [ISSUE-0220](ISSUE-0220-gemini-and-watsonx-sdks-sit-outside-every-gate.md)
+> pins `google-genai` in a second constraints file, installs it in the
+> last steps of CI's Python job, and runs the Gemini adapter (and the
+> watsonx one) against the real SDK there, in
+> `tests/unit/python/test_llm_sdk_boundary_gemini.py`. The "Still
+> uncovered" paragraph above describes the state before that. What is
+> left of this issue is the port to the Anthropic 1.x SDK.
