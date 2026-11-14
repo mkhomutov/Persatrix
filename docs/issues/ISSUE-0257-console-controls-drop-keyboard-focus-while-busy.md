@@ -6,6 +6,7 @@ severity: low
 area: web
 created: 2026-11-15
 refs:
+  - https://github.com/mkhomutov/Persatrix/pull/1128
   - web/src/panels/PublishComposer.svelte
   - web/src/panels/DmComposer.svelte
   - web/src/panels/ConversationFeed.svelte

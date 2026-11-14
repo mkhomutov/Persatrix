@@ -6,6 +6,7 @@ severity: medium
 area: web
 created: 2026-11-10
 closed: 2026-11-15
+closed_pr: 1128
 refs:
   - web/src/panels/ConversationFeed.svelte
   - web/src/lib/backfill.svelte.js
