@@ -130,6 +130,72 @@ updates:
       prefix-development: "chore(deps)"
     open-pull-requests-limit: 2
 
+  # The base images of the two Dockerfiles. Until 2026-11 nothing proposed a
+  # newer one, and `alpine:3.20` stayed in Dockerfile.orchestrator seven months
+  # after Alpine stopped supporting it (ISSUE-0218). In the directory named,
+  # the updater reads every file with "dockerfile" in its name, so both
+  # Dockerfile.agent and Dockerfile.orchestrator are found at /. It moves a tag
+  # only to a newer one of the same shape: `alpine:3.20` to another
+  # `<major>.<minor>`, `golang:1.26-alpine` to another `<major>.<minor>-alpine`.
+  # No CI job builds an image (ISSUE-0219), so green checks on one of these PRs
+  # say nothing about the image: build it and start a demo before merging.
+  # GitHub offers no security update for this ecosystem, so this monthly PR is
+  # the only update path a base image has. One copy of a tag is read by no
+  # entry and moves by hand: the `FROM alpine:` line that
+  # scripts/checks/dockerignore_context.py writes into its probe Dockerfile.
+  # tests/unit/python/test_dependabot_image_entries.py fails when a Dockerfile
+  # lands in a directory no entry reads, and holds every `docker` entry to the
+  # two rules below.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      docker:
+        patterns: ["*"]
+    commit-message:
+      prefix: "chore(deps)"
+    open-pull-requests-limit: 2
+    ignore:
+      # The agent image's Python. The tag `3.12-slim` has no patch part, so the
+      # only move Dependabot could offer is to another minor (`3.13-slim`), and
+      # which Python the image and CI share is a choice not yet made: CI tests
+      # 3.11 and the image runs 3.12
+      # (docs/issues/ISSUE-0219-agent-image-is-not-what-ci-tests.md). Until it
+      # is made, no move is offered. Drop this rule in the change that makes
+      # the choice.
+      - dependency-name: "python"
+        update-types:
+          ["version-update:semver-major", "version-update:semver-minor"]
+      # The Node that builds the web console inside the image is pinned to the
+      # lowest release web/package.json's engines range admits, the one CI's
+      # web-console job installs, and
+      # tests/unit/python/test_web_node_engines_floor.py fails on any other
+      # tag. It moves by hand, when that range moves. A rule with a name alone
+      # ignores every version.
+      - dependency-name: "node"
+
+  # The images the compose files run as published: the tracing, metrics and
+  # log services in docker-compose.yaml and Ollama in
+  # docker-compose.ollama.yaml. The updater reads every compose file in the
+  # directory named, docker-compose.yaml and each docker-compose.<name>.yaml
+  # overlay. As for the base images above, GitHub offers no security update
+  # for this ecosystem, so this monthly PR is the only update path these
+  # images have, and CI starts none of them: run the stack before merging.
+  # One move is known to need a change of its own: Loki's image has had no
+  # `wget` since 3.6, and the health check in docker-compose.yaml calls it, so
+  # a newer Loki would run and be reported unhealthy for good.
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      compose:
+        patterns: ["*"]
+    commit-message:
+      prefix: "chore(deps)"
+    open-pull-requests-limit: 2
+
   - package-ecosystem: github-actions
     directory: /
     schedule:

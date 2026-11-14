@@ -1,6 +1,6 @@
 # Enforcement Matrix
 
-> **Last updated**: 2026-11-12
+> **Last updated**: 2026-11-14
 > Every rule the project states, with the document that states it, the check
 > that enforces it, and how hard the enforcement is. Read the **Enforcement**
 > column literally: a rule is only as strong as the weakest place it is
@@ -70,8 +70,8 @@ the twelve, and the job is named where it is not one of the original six.
 | `THIRD_PARTY_NOTICES.md` matches the dependency graphs | Makefile | `make notices-check`, with go-licenses and cargo-license at the Makefile pins | Make-only — deliberately: the notices file is regenerated in the tag PR, so it is legitimately stale between a dependency bump and the next release (it is stale today) |
 | `agents.yaml` `instructions_file` references resolve | prompt-organization | `scripts/checks/prompt_refs.py` | Required (`Validate configs`) |
 | Personal-tier recall latency within 20 % of baseline | RFC 0029 | `tests/perf/personal_tier_latency.py` | Required job, **informational** until a baseline exists |
-| Weekly Rust advisory / bans / sources audit | CONTRIBUTING | `scheduled-audit.yml` (cargo-deny, Mondays; files an issue on failure) | Scheduled |
-| Dependencies bumped monthly, one grouped PR per ecosystem (Go, pip, Cargo, the Rust toolchain, npm, Actions), `chore(deps)` titles | `.github/dependabot.yml` | Dependabot; for pip, the ranges in `agents/pyproject.toml` only (CI's pins move through `python-constraints-refresh.yml`); for the Rust toolchain, the release in `cli/rust-toolchain.toml` | Scheduled (security updates run on their own cadence) |
+| Weekly advisory audit of the Rust crates, the Go modules, CI's Python pins and the web console's npm packages | CONTRIBUTING | `scheduled-audit.yml` (cargo-deny with bans and sources, govulncheck, pip-audit, npm audit; Mondays; each runs even when another fails; files an issue naming the ones that failed) | Scheduled |
+| Dependencies bumped monthly, one grouped PR per ecosystem (Go, pip, Cargo, the Rust toolchain, npm, Docker base images, compose images, Actions), `chore(deps)` titles | `.github/dependabot.yml` | Dependabot; for pip, the ranges in `agents/pyproject.toml` only (CI's pins move through `python-constraints-refresh.yml`); for the Rust toolchain, the release in `cli/rust-toolchain.toml` | Scheduled (security updates run on their own cadence) |
 | Required status checks on `main` match the versioned set | `branch-protection.json` | `make branch-protection-show`; `test_branch_protection_config.py` pins the file to the CI job list | Owner applies; file is reviewed |
 
 ## Size, documentation and process
