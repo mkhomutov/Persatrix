@@ -1,12 +1,15 @@
 ---
 id: ISSUE-0208
 summary: "Under the default `auth.mode: disabled`, every REST call with no agent id writes one audit line that is flushed to disk before the call continues, including calls the rate limiter then refuses. A flood the limiter rejects still costs one disk flush per request, and the first-party CLI, which sends no agent id, adds thousands of lines a day to a log that is never rotated."
-status: open
+status: resolved
 severity: medium
 area: security
 created: 2026-11-10
+closed: 2026-11-14
+closed_pr: 1112
 refs:
   - internal/security/ratelimit.go
+  - internal/security/ratelimit_anonymous_event_test.go
   - internal/security/audit_event.go
   - internal/security/audit.go
   - internal/security/middleware.go
@@ -66,3 +69,58 @@ line. Whether the CLI should identify itself is ISSUE-0152's step 3.
 > 2026-11-10 — found by a whole-repository quality review of `main` at
 > `ee9cfaac`; the counts come from a throwaway Go test against the
 > middleware.
+
+> 2026-11-13 — fixed by throttling. Checked against the code at
+> `dd006cba` first: the Summary and Context hold as written, and the
+> measurement reproduces (500 calls, 60 served, 440 refused, 500 lines in
+> a real audit file).
+>
+> The limiter now writes at most one `rate_limit.unauthenticated_caller`
+> line per window, as it does for `rate_limit.violated`. Each line
+> carries `calls_since_last_event`: the calls with no agent id since the
+> line before it, refused ones and this one included. So a refused flood
+> costs one disk sync a window, and the lines still add up to the calls
+> made, short of those after the last line.
+>
+> The other option, moving the event out of the security class, was not
+> taken. It would have ended the sync per call, but kept one line per
+> call: a log with no rotation would still gain about 17 000 lines a day
+> from one `persatrix channel watch`, and every audit writer would still
+> queue behind them. It would also have given up the reason the event
+> is synced at all, which is that a flood is when a batched line is most
+> likely to be lost in a crash.
+>
+> The throttle's state belongs to the limiter, not to the per-agent maps:
+> those lose a key when its bucket is evicted or reset, and a flood of
+> invented agent ids evicts the anonymous bucket at will.
+>
+> Unchanged: the CLI still sends no agent id (the open half of
+> [ISSUE-0152](ISSUE-0152-one-quarantine-refuses-every-anonymous-caller.md)'s
+> step 3), and the audit log still has no rotation.
+
+> 2026-11-14 — review of the fix. The throttle held; what it left out
+> did not all hold.
+>
+> - **The count was lost on a stop.** It is kept in memory, so the calls
+>   since the last line went with the process. The orchestrator now
+>   writes them as one last line when it stops, before it closes the
+>   audit log (`FlushUnauthenticatedCount`). Run with the real binary:
+>   300 calls, then a stop, gave two lines that add up to 300. A process
+>   that is killed still loses the calls since its last line.
+> - **That weakens the reason given above for not moving the event out
+>   of the security class.** A batched line is at risk for a quarter of
+>   a second; this count is at risk for up to a window, and through a
+>   flood for as long as the flood lasts. What still holds: the first
+>   call with no agent id is on disk at once, one line a window instead
+>   of one a call, and no other audit writer queues behind a flood. The
+>   choice stands for those; the sentence about a crash does not.
+> - **A line that could not be written took its calls with it.** The
+>   count was cleared before the write. It is now put back when the
+>   write fails and carried by the next line, a window later; the
+>   failure is logged at WARN, where it was at DEBUG.
+> - **A count with no interval misleads.** A line said `31` beside
+>   `window_seconds: 60`, and the 31 could cover hours. Each line now
+>   has `seconds_since_last_event`.
+> - Tests: the count, not only the throttle, is now pinned across an
+>   eviction and a reset of the anonymous bucket, and a limiter with a
+>   ten-second window shows the window is the limiter's own.

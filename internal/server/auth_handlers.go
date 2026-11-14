@@ -178,10 +178,12 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 
 // usernameThrottleKey resolves the §B per-username limiter key. An
 // empty (or all-whitespace) username folds to "", which the limiter
-// would resolve to its shared "anonymous" bucket — a bucket that emits
+// would resolve to its shared "anonymous" bucket — a bucket reported by
 // the agent-surface `rate_limit.unauthenticated_caller` security-class
-// (fsync'd) audit event on EVERY call, unthrottled. The sentinel keeps
-// empty-username probes in an ordinary tracked bucket instead. It can
+// (fsync'd) audit event, which says a caller named no agent and is the
+// wrong line for a login with no username. (That event is written once
+// a window since ISSUE-0208; it was written on every call.) The sentinel
+// keeps empty-username probes in an ordinary tracked bucket instead. It can
 // never collide with a real account: validateUsername rejects
 // whitespace, so no stored username contains a space.
 func usernameThrottleKey(username string) string {

@@ -201,6 +201,7 @@ func main() {
 	if err != nil {
 		logger.Fatal("failed to initialize rate limiter", zap.Error(err))
 	}
+	defer rateLimiter.FlushUnauthenticatedCount(context.Background()) // runs before the audit log closes (deferred above)
 
 	// 6. Initialize agent registry
 	reg := registry.NewInMemoryRegistry(logger)

@@ -348,9 +348,10 @@ func TestUsernameThrottleKey(t *testing.T) {
 
 func TestEmptyUsernameThrottlesUnderSentinelNotAnonymousBucket(t *testing.T) {
 	// Review follow-up: an empty username folds to "", which the limiter
-	// resolves to its shared "anonymous" bucket — and that bucket emits
-	// the agent-surface `rate_limit.unauthenticated_caller`
-	// security-class event on EVERY call, unthrottled. The sentinel key
+	// resolves to its shared "anonymous" bucket — one bucket for every
+	// empty key, reported by the agent-surface
+	// `rate_limit.unauthenticated_caller` security-class event (once a
+	// window since ISSUE-0208; on every call before it). The sentinel key
 	// keeps empty-username probes in an ordinary tracked bucket.
 	auditor := &recordingAuditor{}
 	cfg := DefaultAuthConfig()
