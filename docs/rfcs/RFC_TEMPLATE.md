@@ -132,7 +132,11 @@ target: ""
 
 ## Related Documentation
 
-<!-- Links to canonical docs affected by or relevant to this RFC. -->
+<!-- Links to the docs this RFC changes or leans on: the guide for the
+     feature, other RFCs, source files. The two specs below are the April
+     2026 design, a record and not a description of what is built. Keep a
+     link to one only where this RFC departs from that design. -->
 
-- [Architecture Spec](../ai-agents-orchestration-spec.md)
-- [Extension Spec](../persatrix-extension-spec.md)
+- [Documentation guide: where each kind of text lives](../documentation-guide.md#ownership-map)
+- [April 2026 design, core](../ai-agents-orchestration-spec.md)
+- [April 2026 design, extension](../persatrix-extension-spec.md)

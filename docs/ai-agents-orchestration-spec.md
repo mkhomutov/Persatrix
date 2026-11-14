@@ -7,6 +7,11 @@
 > includes security controls, so do not use it to judge what protects a
 > deployment.
 >
+> To judge what protects a deployment, read
+> [SECURITY.md](../SECURITY.md#security-design) and the package comment of
+> [`internal/security/security.go`](../internal/security/security.go), which
+> lists what is built, what is built and not called, and the known gaps.
+>
 > For what Persatrix does today, read the guides
 > ([channels](guides/channels.md), [persona agents](guides/persona-agents.md),
 > [authentication](guides/auth.md), [model providers](guides/model-providers.md)),
@@ -213,6 +218,17 @@ agent:
       trust_level: 0.9
 ```
 
+> 2026-11-14 — the persona half of this example is the April shape and
+> fails `make validate` today
+> ([ISSUE-0227](issues/ISSUE-0227-canonical-specs-describe-unbuilt-features-as-built.md)).
+> [`schemas/agent.schema.json`](../schemas/agent.schema.json) requires
+> `type` on the agent and `behavior` inside `persona`, and refuses
+> `persona.personality`. The file also holds a list under `agents:`, not one
+> `agent:`. And `autonomy.requires_approval_for` passes the schema but
+> nothing reads it: no action waits for an approval.
+> [RFC 0028](rfcs/0028-agent-decision-policy-engine.md) is building that
+> control. `config/agents.yaml` shows a persona that loads.
+
 **Compatibility rule**: if `persona` is absent, the agent is a task agent and
 uses the synchronous `handle()` interface. If `persona` is present, the agent
 is a persona agent and uses the async event-driven interface (see §8).
@@ -318,7 +334,8 @@ Bundled with the framework, always available:
 > 2026-11-14 — what is built: the first four exist
 > ([`agents/tools/builtin.py`](../agents/tools/builtin.py)). `store_get` and
 > `store_set` do not, and nothing takes their place. None is "always
-> available": an agent runs only the tools on its `tools` list, and each
+> available": an agent runs only the tools on its `tools` list (a persona
+> is also given its memory tools and `recall_channel_messages`), and each
 > needs its permission. For "sandboxed", see the note under
 > [6.3](#63-sandboxing).
 
@@ -520,16 +537,21 @@ agent:
 >   example above lists none; `config/agents.yaml` shows a second example
 >   for an agent that trusts its workspace.
 
-> 2026-11-14 — two more corrections to this section
+> 2026-11-14 — three more corrections to this section
 > ([ISSUE-0227](issues/ISSUE-0227-canonical-specs-describe-unbuilt-features-as-built.md)):
 >
 > - **Two parts of the example are not built**, and a config copied from it
 >   fails `make validate`: `shell.deny_commands` and the whole `mcp` block
 >   are keys [`schemas/agent.schema.json`](../schemas/agent.schema.json)
 >   refuses.
-> - **A refused permission is not a security event.** The agent writes a
->   warning to its own log and tells the model the call was denied. Nothing
->   is written to the audit log ([6.6](#66-audit-trail)).
+> - **A refused permission is not a security event.** A refused file path
+>   writes a warning to the agent's own log. Any other refusal (a
+>   permission the agent lacks, a shell command off its list, a host off
+>   its list) writes only a debug line, which an agent does not print at
+>   its default log level. Either way the model is told the call was
+>   denied and the call is counted as a failed tool call in traces and
+>   metrics. Nothing is written to the audit log
+>   ([6.6](#66-audit-trail)).
 > - **Not every tool passes through the gate.** Each built-in tool checks
 >   the gate in its own code. Nothing checks it for a custom tool, whatever
 >   permissions that tool declares ([ISSUE-0214](issues/ISSUE-0214-declared-tool-permissions-are-never-enforced.md)).
@@ -570,7 +592,9 @@ resource_limits:
 >
 > - **Process isolation**: built. Each agent is its own process, and in the
 >   shipped compose stack its own container.
-> - **Filesystem sandbox**: there is no `chroot` and no bind-mount limit.
+> - **Filesystem sandbox**: there is no `chroot`, and the framework sets
+>   no mount limit. (The shipped compose stack mounts the workspace
+>   read-only for four of its agents; that is that stack's choice.)
 >   The two file tools check each path against the agent's `filesystem`
 >   rules ([6.2](#62-permission-system)). A shell command runs outside those
 >   rules and can read whatever the agent's user can.
@@ -678,16 +702,23 @@ Every action is logged to an append-only audit log:
 - All permission denials generate alerts
 - Audit logs are separate from application logs and tamper-resistant
 
-> 2026-11-14 — what is built is narrower
-> ([Observability §13](observability.md#13-security-audit-log-rfc-0009-pr-1b)).
+> 2026-11-14 — what is built is narrower.
+> [Observability §13](observability.md#13-security-audit-log-rfc-0009-pr-1b)
+> describes the file, and
+> [`internal/security/audit_event.go`](../internal/security/audit_event.go)
+> lists the events.
 > The orchestrator keeps one audit log: a file of JSON lines, each carrying
 > a checksum of the line before it. It records agent registrations and
 > tokens, logins and refused requests, rate-limit violations and
 > quarantines, and one line for each task the orchestrator sends to an
 > agent. It does **not** record the tool calls an agent makes, it has no
 > `input_hash` or `output_hash`, and a refused tool permission writes
-> nothing to it. No event raises an alert. The checksums make a changed line
-> detectable, but nothing outside the tests checks the whole chain.
+> nothing to it: the `tool.denied` event is defined and no code emits it.
+> No alert rule ships. Observability §13.1 gives rule templates an operator
+> can load, and none of them fires on a denial. The checksums make a
+> changed line detectable, but nothing outside the tests checks the whole
+> chain
+> ([ISSUE-0256](issues/ISSUE-0256-nothing-verifies-the-audit-chain-and-tool-denied-is-never-emitted.md)).
 
 ### 6.7 Error Handling & Resilience
 
@@ -783,15 +814,22 @@ rate_limits:
     log_as: "security_event"
 ```
 
-> 2026-11-14 — what is built is one limit, not this block. The orchestrator
-> counts the calls each agent makes to it, 60 a minute by default
-> (`SECURITY_RATE_LIMIT_CALLS`, `SECURITY_RATE_LIMIT_WINDOW_SECONDS`),
-> refuses the calls over the cap, records the violation in the audit log,
-> and quarantines an agent that keeps hitting the cap
-> ([`cmd/orchestrator/ratelimit.go`](../cmd/orchestrator/ratelimit.go)).
-> Logins are throttled separately
+> 2026-11-14 — what is built is not this block. The orchestrator counts
+> the calls each agent makes to it and refuses those over a cap, 60 a
+> minute by default (`SECURITY_RATE_LIMIT_CALLS`,
+> `SECURITY_RATE_LIMIT_WINDOW_SECONDS`;
+> [`cmd/orchestrator/ratelimit.go`](../cmd/orchestrator/ratelimit.go)).
+> Each agent has two budgets of that size: one for its REST calls and one
+> for its wallet calls over gRPC. A call over a cap is recorded in the
+> audit log. Only refused wallet calls count toward a quarantine
+> ([ISSUE-0187](issues/ISSUE-0187-agent-rest-bursts-count-toward-its-own-quarantine.md)).
+> "Agent" here means the ID the caller sends. On gRPC nothing checks it,
+> and on REST a token proves it only under `auth.mode: enabled`
+> ([ISSUE-0152](issues/ISSUE-0152-one-quarantine-refuses-every-anonymous-caller.md)).
+> Registrations and refused agent tokens are limited by the caller's
+> address, and logins are throttled separately
 > ([authentication guide](guides/auth.md#login-throttling)). No
-> `rate_limits:` block is read, and a call over the cap is refused, not
+> `rate_limits:` block is read, and a call over a cap is refused, not
 > queued.
 
 ### 6.9 External Input Sanitization
@@ -1072,11 +1110,12 @@ class PersonaAgent(BaseAgent):
 
 > 2026-11-14 — the route list that stood here is removed
 > ([ISSUE-0227](issues/ISSUE-0227-canonical-specs-describe-unbuilt-features-as-built.md)).
-> It was written as a plan. Of its 42 routes the orchestrator serves 17,
-> and it serves 23 others the list never had: login, chat, channel members
-> and settings, threads, convene, unquarantine and the log stream among
-> them. No list is kept in its place, because one written by hand goes out
-> of date the same way.
+> It was written as a plan. Counted on 2026-11-14, the orchestrator serves
+> 17 of its 42 routes and not the other 25. It also serves 24 routes under
+> `/api/v1` (and `/healthz`) that the list never had: login, chat, channel
+> members and settings, threads, convene, unquarantine and the log stream
+> among them. No list is kept in its place, because one written by hand
+> goes out of date the same way.
 
 Where the routes are:
 
@@ -1086,6 +1125,13 @@ Where the routes are:
 - **Who may call each**:
   [`internal/server/auth_policy.go`](../internal/server/auth_policy.go),
   explained in the [authentication guide](guides/auth.md#the-role-gate).
+  That policy applies only under `auth.mode: enabled`, which is off by
+  default: with it off, no route asks who is calling. With it on, channel
+  lists and message histories are still readable without a login
+  ([what stays open](guides/auth.md#what-stays-open-under-enabled--the-agent-ingress),
+  [ISSUE-0117](issues/ISSUE-0117-agent-ingress-close-knob.md)), and any
+  signed-in account can read a persona's closed-interaction summaries
+  ([ISSUE-0213](issues/ISSUE-0213-closed-interaction-summaries-open-to-any-account.md)).
 - **How to use them**: the [channels guide](guides/channels.md) for
   channels, messages and members; the
   [persona agents guide](guides/persona-agents.md) for chat;
@@ -1363,9 +1409,11 @@ Log levels: `DEBUG` (full content capture), `INFO` (operations), `WARN`
 (degraded performance, retries), `ERROR` (failures), `SECURITY` (permission
 denials, blocked messages, rate limit hits).
 
-> 2026-11-14 — there is no `SECURITY` log level. A refused permission and a
-> flagged message are ordinary warnings in the agent's log; a rate-limit
-> violation is written to the audit log ([6.6](#66-audit-trail)).
+> 2026-11-14 — there is no `SECURITY` log level. A refused file path and a
+> flagged message are ordinary warnings in the agent's log. Any other
+> refused permission is a debug line, which an agent does not print at its
+> default level ([6.2](#62-permission-system)). A rate-limit violation is
+> written to the audit log ([6.6](#66-audit-trail)).
 
 ### 12.5 Testing Framework
 
@@ -1467,6 +1515,12 @@ Non-reloadable fields (require restart): agent ID, gRPC address, node assignment
 
 The framework preserves the agent's working memory and conversation history
 across reloads.
+
+> 2026-11-14 — not built
+> ([ISSUE-0227](issues/ISSUE-0227-canonical-specs-describe-unbuilt-features-as-built.md)).
+> `persatrix agent reload` prints "not yet implemented", and no agent
+> reloads its configuration: it reads it when its process starts. So a
+> changed permission, tool list or prompt takes effect at the next start.
 
 ### 12.8 State Persistence & Export
 
@@ -1571,5 +1625,9 @@ persatrix restore --checkpoint "2026-04-08-1200" # restore from checkpoint
 > Two of them are security claims that do not hold today: 9 (ordinary logs
 > are not redacted, and a shell command can show provider keys to the
 > model; see [6.4](#64-secrets-management)) and 10 (the audit log does not
-> record an agent's tool calls; see [6.6](#66-audit-trail)). Criterion 7's
-> MCP tools are not built ([5.2](#52-mcp-model-context-protocol-support)).
+> record an agent's tool calls; see [6.6](#66-audit-trail)). A third holds
+> only in part: 8 (a built-in tool refuses a path, command or host outside
+> its agent's rules, a custom tool is not checked, and a shell command the
+> rules allow runs outside the path rules; see
+> [6.2](#62-permission-system)). Criterion 7's MCP tools are not built
+> ([5.2](#52-mcp-model-context-protocol-support)).

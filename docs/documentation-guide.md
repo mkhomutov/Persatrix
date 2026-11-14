@@ -57,9 +57,12 @@ When updating:
   linking the guide or source file that shows it. A reader may land in the
   middle of the file and never see the banner
 - Security claims come first: a control the spec describes and the code
-  lacks must carry a note
+  lacks gets a note when it is found. The specs have not been swept line
+  by line, so a claim with no note is unchecked, not confirmed
 - Leave the design text as written; the audit doc compares the two specs
-  with each other, not with the code
+  with each other, not with the code. A plan written before this rule that
+  schedules an edit to the design text adds a dated note at the claim
+  instead
 
 ### Architecture Documentation
 **Files**: `docs/diagrams/`, the Architecture section of
@@ -110,7 +113,7 @@ One canonical document per topic. Link to it; do not copy from it.
 |-------|-------------------|
 | The April 2026 design: a record, not a description of what is built | `docs/ai-agents-orchestration-spec.md` (core), `docs/persatrix-extension-spec.md` (personas, memory, channels, mesh); `docs/persatrix-spec-audit.md` compares the two with each other |
 | How personas, memory and channels work today | `docs/guides/persona-agents.md`, `docs/guides/channels.md`, and the RFC that built each feature |
-| REST routes | the code: `internal/server/server.go` and `channel_routes.go` register them, `auth_policy.go` says who may call each; no list is kept by hand |
+| REST routes | the code: `server.go`, `channel_routes.go`, `auth_handlers.go` and `ui.go` in `internal/server/` register them, and `auth_policy.go` says who may call each under `auth.mode: enabled`; no list is kept by hand |
 | Architecture diagrams | `docs/diagrams/` (one file per diagram; conventions in [development-workflow.md §Phase 7](development-workflow.md#phase-7--documentation--diagrams)) |
 | Terminology — product | `docs/ai-glossary.md` |
 | Terminology — process | `docs/methodology/process-glossary.md` |

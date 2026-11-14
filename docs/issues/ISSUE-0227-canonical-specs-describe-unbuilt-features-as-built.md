@@ -108,7 +108,9 @@ it. Decide whether the notes inside sections continue beside the banner.
 > were out of date or incomplete:
 >
 > - **Routes**: of the 42 listed, 17 are served and 25 are not, as the row
->   says. The orchestrator serves 23 that the list lacked, not "about 25".
+>   says. The orchestrator also serves 24 routes under `/api/v1` (and
+>   `/healthz`) that the list lacked; with the web console's page and the
+>   handler for every other path, 26.
 > - **`<external_data>`**: four tools' output is wrapped now, not three;
 >   `shell_exec` joined them on 2026-11-12
 >   ([ISSUE-0217](ISSUE-0217-shell-output-and-step-outputs-reach-the-model-unfenced.md)).
@@ -119,8 +121,9 @@ it. Decide whether the notes inside sections continue beside the banner.
 > The sweep of both specs for other security claims found these, each now
 > with a note:
 >
-> - A refused permission is not "logged as a security event": it is a
->   warning in the agent's log.
+> - A refused permission is not "logged as a security event": a refused
+>   file path is a warning in the agent's log, and any other refusal is a
+>   debug line the agent does not print at its default level.
 > - Not "every tool invocation passes through a permission gate": a custom
 >   tool's declared permissions are never checked
 >   ([ISSUE-0214](ISSUE-0214-declared-tool-permissions-are-never-enforced.md)),
@@ -133,20 +136,56 @@ it. Decide whether the notes inside sections continue beside the banner.
 >   ([ISSUE-0202](ISSUE-0202-workflow-condition-and-approval-validate-then-do-nothing.md)),
 >   nor output validation or field filtering.
 > - The audit log records security events and one line for each task sent
->   to an agent, not each tool call; no event raises an alert; nothing
->   outside the tests checks the checksum chain.
-> - Rate limiting is one per-agent call limit and a login throttle, not the
->   block of limits the spec lists.
+>   to an agent, not each tool call; no alert rule ships; nothing outside
+>   the tests checks the checksum chain
+>   ([ISSUE-0256](ISSUE-0256-nothing-verifies-the-audit-chain-and-tool-denied-is-never-emitted.md)).
+> - Rate limiting is two per-agent call budgets, limits by address on
+>   registrations and refused tokens, and a login throttle, not the block
+>   of limits the spec lists. The "agent" is the ID the caller sends.
 > - Bridges, the mesh, A2A and observer mode are not built, so none of
 >   their safeguards exists: no bridge approval or audit, no mutual TLS, no
 >   node admission, no trust domains, no encryption of messages, no
 >   observer consent levels. The orchestrator and its agents talk over gRPC
->   without TLS.
+>   without TLS
+>   ([ISSUE-0255](ISSUE-0255-grpc-between-the-orchestrator-and-its-agents-has-no-tls.md)).
 >
 > Authentication, which the orchestration spec lists as out of scope, has
 > been built since; its line now points to the authentication guide.
 >
 > Both specs stay on the size check's allow-list and grew: the
-> orchestration spec from 3,612 to 5,072 words by the checker's count, the
-> extension spec from 4,260 to 4,907. The removed route list sat in code
+> orchestration spec from 3,612 to 5,561 words by the checker's count, the
+> extension spec from 4,260 to 5,272. The removed route list sat in code
 > blocks, which the checker does not count.
+
+> 2026-11-14 — after the review of #1119. The notes above are corrected in
+> place where a sentence was wrong: the count of routes the list lacked,
+> how a refused permission is logged, and what the rate limiter counts.
+> What else the review changed:
+>
+> - **Two notes overstated what protects a deployment.** The agent token
+>   is checked on REST only and only under `auth.mode: enabled`, which is
+>   off by default, and a registration that shows no enrollment secret is
+>   still admitted. Accounts and roles decide who may read what only under
+>   `enabled`, and even there channel histories stay readable without a
+>   login. Both notes now say so.
+> - **Seven more present-tense claims have a note**: approval lists in both
+>   persona examples, the sub-agent lifecycle, authority rules, the
+>   permission-denial metric, four rows of the decisions table, hot
+>   reload, and the orchestration spec's own persona example.
+> - **The banners say where to judge protection**, not only where not to:
+>   `SECURITY.md` and the package comment of the security package.
+> - **Two gaps the first pass called accepted have issues now**:
+>   ISSUE-0255 (gRPC without TLS, and no guide says to keep it private)
+>   and ISSUE-0256 (the audit chain is never verified; `tool.denied` is
+>   never emitted).
+> - **The rule in the documentation guide is narrower**: a missing control
+>   gets a note when it is found. The specs were not swept line by line,
+>   so a claim with no note is unchecked, not confirmed.
+> - **Two texts outside the specs still sent authors to them** as current:
+>   Phase 7 of the development workflow and the RFC template. Both are
+>   reworded.
+>
+> Not done here: RFC 0028's plan schedules an edit of the approval
+> examples in both specs, which the new rule would make a dated note
+> instead. The plan is left as written; the two examples carry the note
+> already.

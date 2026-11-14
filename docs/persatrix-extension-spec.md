@@ -8,6 +8,11 @@
 > deployment. The [orchestration spec](ai-agents-orchestration-spec.md) it
 > extends carries the same warning.
 >
+> To judge what protects a deployment, read
+> [SECURITY.md](../SECURITY.md#security-design) and the package comment of
+> [`internal/security/security.go`](../internal/security/security.go), which
+> lists what is built, what is built and not called, and the known gaps.
+>
 > For what Persatrix does today, read the guides
 > ([channels](guides/channels.md), [persona agents](guides/persona-agents.md),
 > [authentication](guides/auth.md), [model providers](guides/model-providers.md)),
@@ -126,7 +131,11 @@ agent:
 > today. [`schemas/agent.schema.json`](../schemas/agent.schema.json)
 > requires `type` and `role` on the agent and `behavior` inside `persona`,
 > and refuses `persona.personality` and `autonomy.can_refuse_tasks`. The
-> file also holds a list under `agents:`, not one `agent:`. The
+> file also holds a list under `agents:`, not one `agent:`. And
+> `autonomy.requires_approval_for` passes the schema but nothing reads it:
+> no action waits for an approval.
+> [RFC 0028](rfcs/0028-agent-decision-policy-engine.md) is building that
+> control. The
 > [persona agents guide](guides/persona-agents.md) and `config/agents.yaml`
 > show a persona that loads.
 
@@ -518,6 +527,11 @@ reviewer's sub-agents share from that 50k. This prevents unbounded cost growth.
 9. Parent incorporates result into its own reasoning
 ```
 
+> 2026-11-14 — none of these steps is built. No code spawns a sub-agent,
+> so the orchestrator validates nothing in step 3: no permission, depth,
+> concurrency or budget check exists
+> ([ISSUE-0214](issues/ISSUE-0214-declared-tool-permissions-are-never-enforced.md)).
+
 #### E3.2.8 Sub-Agents vs. Delegation
 
 The framework supports two ways an agent can get help. They serve different
@@ -625,6 +639,13 @@ authority:
       limit: 5000
       above_limit_escalate_to: "ceo"
 ```
+
+> 2026-11-14 — not built
+> ([ISSUE-0227](issues/ISSUE-0227-canonical-specs-describe-unbuilt-features-as-built.md)).
+> No `authority:` rules block is read, and no code asks for an approval,
+> escalates, or caps spending by role. The organization file
+> ([E4.1](#e41-topology-types)) lets a reporting line carry an authority
+> level, which `make validate` checks and nothing acts on yet.
 
 ---
 
@@ -751,8 +772,9 @@ message Attachment {
 
 > 2026-11-14 — the `Visibility` values above are not built. No message is
 > encrypted, in transit or stored: `proto/` has no such field, and the
-> orchestrator and its agents talk over gRPC without TLS. Keep that traffic
-> on one host or a private network. The
+> orchestrator and its agents talk over gRPC without TLS
+> ([ISSUE-0255](issues/ISSUE-0255-grpc-between-the-orchestrator-and-its-agents-has-no-tls.md)).
+> Keep that traffic on one host or a private network. The
 > [authentication guide](guides/auth.md#https-is-required-beyond-localhost)
 > says what the REST side needs beyond localhost.
 
@@ -1198,11 +1220,22 @@ mesh:
 
 > **Status:** 📋 **Planned** — not built yet. None of the controls in this
 > section exists: no mutual TLS, no node admission, no trust domains, no
-> data-residency rules and no end-to-end encryption. What is built: the
-> orchestrator and its agents talk over gRPC without TLS; agents can be made
-> to show a fleet enrollment secret and are then given a token that proves
-> which agent is calling; people sign in with accounts and roles. The
-> [authentication guide](guides/auth.md) describes both.
+> data-residency rules and no end-to-end encryption. What is built is much
+> less:
+>
+> - The orchestrator and its agents talk over gRPC without TLS
+>   ([ISSUE-0255](issues/ISSUE-0255-grpc-between-the-orchestrator-and-its-agents-has-no-tls.md)),
+>   and on gRPC an agent's ID is whatever the caller sends.
+> - Registration gives an agent a token. The orchestrator checks it only
+>   on REST calls, and only under `auth.mode: enabled`. The shipped default
+>   is `disabled`, where every agent ID is taken on trust.
+> - A fleet enrollment secret can be set, but a registration that shows no
+>   secret is still admitted. So anyone who can reach the orchestrator can
+>   register under a persona's ID and post as it.
+> - People sign in with accounts and roles under `enabled` only.
+>
+> The authentication guide says
+> [what stays open under `enabled`](guides/auth.md#what-stays-open-under-enabled--the-agent-ingress).
 
 Distribution multiplies the attack surface. New threats and mitigations:
 
@@ -1696,6 +1729,13 @@ metrics:
   Persatrix.mesh.queue.depth:              # gauge
     dimensions: [node_id]                  # messages queued for offline nodes
 ```
+
+> 2026-11-14 — the two `Persatrix.permission.*` metrics under "Security"
+> are not built, so there is no denial count to alert on
+> ([ISSUE-0227](issues/ISSUE-0227-canonical-specs-describe-unbuilt-features-as-built.md)).
+> A refused tool call is counted with every other failed tool call
+> (`agent.tool.invocations`). [Observability](observability.md) lists the
+> metrics that exist.
 
 ### E8.4 Session Replay & Time-Travel Debugging
 
@@ -2755,8 +2795,13 @@ simulation:
 > no disclosure text is added to a prompt, no export is anonymized, and
 > there are no consent levels. (A channel member set to `observer` is a
 > different thing: a member that never speaks.) Who may read what today is
-> decided by accounts and roles
-> ([authentication guide](guides/auth.md#the-role-gate)).
+> decided by accounts and roles only under `auth.mode: enabled`
+> ([the role gate](guides/auth.md#the-role-gate)), which is off by default:
+> with it off, no route asks who is calling. With it on, channel lists and
+> message histories are still readable without a login
+> ([ISSUE-0117](issues/ISSUE-0117-agent-ingress-close-knob.md)), and any
+> signed-in account can read a persona's closed-interaction summaries
+> ([ISSUE-0213](issues/ISSUE-0213-closed-interaction-summaries-open-to-any-account.md)).
 
 For research and social experiments, ethical observation requires informed
 consent and data protection:
@@ -3141,3 +3186,11 @@ Also includes foundational observability:
 | Optimization profiles | Preset configs selectable per workflow | Users shouldn't need to tune 50 knobs to get started |
 | Cache deterministic calls only | Only temp=0 calls are cacheable | Non-deterministic calls should not return stale results |
 | Three-stage MVP | v0.1 engine → v0.2 society → v0.3 mesh+interop | Each stage is independently useful; observability ships from day one |
+
+> 2026-11-14 — four rows of this table are security decisions that are not
+> built
+> ([ISSUE-0227](issues/ISSUE-0227-canonical-specs-describe-unbuilt-features-as-built.md)):
+> outbound approval (no bridge exists, [E5.4](#e54-external-communication-bridges)),
+> "child ≤ parent" for sub-agent permissions
+> ([ISSUE-0214](issues/ISSUE-0214-declared-tool-permissions-are-never-enforced.md)),
+> and mutual TLS and trust domains ([E6.5](#e65-distributed-security)).

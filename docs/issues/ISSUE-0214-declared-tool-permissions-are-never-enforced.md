@@ -75,7 +75,9 @@ spawner.
 > 2026-11-14 — the spec half of "correct the spec and the two instruction
 > lines" is done by the fix for
 > [ISSUE-0227](ISSUE-0227-canonical-specs-describe-unbuilt-features-as-built.md):
-> both specs now carry a note at the custom-tool example, at the
-> permission gate's "every tool invocation" claim and at the sub-agent
-> rule, each saying it is not enforced and linking here. The two
-> instruction lines are unchanged and still part of this issue.
+> the orchestration spec now carries a note at the custom-tool example, at
+> the permission gate's "every tool invocation" claim and at its sub-agent
+> rule, and the extension spec at its own sub-agent rule (E3.2.4), the
+> sub-agent lifecycle (E3.2.7) and the decisions table (E14). Each says
+> the check is not enforced and links here. The two instruction lines are
+> unchanged and still part of this issue.
