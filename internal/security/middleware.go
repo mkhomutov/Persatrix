@@ -82,8 +82,9 @@ func validAgentID(id string) bool {
 // breaker quarantine on inbound HTTP requests. Calls without an
 // `X-Agent-ID` header are bucketed against the limiter's
 // `UnauthenticatedID` (so a malicious caller cannot bypass the limiter
-// by omitting the header) and emit `rate_limit.unauthenticated_caller`
-// security-class audit events via the limiter.
+// by omitting the header) and are reported by the limiter's
+// `rate_limit.unauthenticated_caller` security-class audit event, at
+// most one per window (ISSUE-0208).
 //
 // An agent's REST calls spend a budget of their own, apart from its wallet
 // calls through [GRPCRateLimitInterceptor] on the same limiter, and a REST

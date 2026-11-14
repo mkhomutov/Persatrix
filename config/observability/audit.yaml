@@ -34,6 +34,12 @@ audit:
   # chain.recovered, rate_limit.unauthenticated_caller) bypass the batch
   # and fsync per-event so an attacker cannot mask probing activity by
   # crashing the process inside the 250 ms window.
+  #
+  # One exception to "cannot mask": rate_limit.unauthenticated_caller is
+  # written once per rate-limit window with a count (ISSUE-0208). The
+  # first call with no agent ID is on disk at once, but the calls counted
+  # since the last line are held in memory until the next line or an
+  # orderly stop, so a crash loses that count.
   batch:
     size: 64
     interval_ms: 250
