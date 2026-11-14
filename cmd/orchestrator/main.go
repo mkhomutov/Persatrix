@@ -230,14 +230,9 @@ func main() {
 		executor.WithAuditLogger(auditor),
 	}
 
-	// 9. Initialize cost tracker
-	costCfg, err := cost.LoadCostConfig(*configDir, cost.WithLogger(logger))
-	if err != nil {
-		logger.Warn("failed to load cost config, budget enforcement disabled",
-			zap.String("configDir", *configDir),
-			zap.Error(err),
-		)
-	}
+	// 9. Initialize cost tracker. nil when the config did not load; the
+	// loader's refusals and the no-limit warning are in loadCostConfig.
+	costCfg := loadCostConfig(logger, *configDir)
 
 	// TODO(v0.2): Wire reporter.ResetDaily() to a midnight timer so daily budget
 	// limits actually reset and the CostReporter.perWorkflowSteps map doesn't grow

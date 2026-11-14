@@ -2,8 +2,9 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://persatrix.dev/schemas/optimization.schema.json",
   "title": "Persatrix Optimization Configuration",
-  "description": "Schema for config/optimization.yaml. RFC 0034 Phase 1 PR 2 introduced this schema scoped to the top-level `conversation_window` block; RFC 0023 PR 2 adds the top-level `wallet` block (LLM-call leasing lease-lifecycle tuning); RFC 0033 Phase 1 PR 1 adds the top-level `models.aliases` block (provider-agnostic model alias map). The Go orchestrator owns the model-routing / caching / cost-budget surface end-to-end, so those keys are intentionally left unconstrained (top-level additionalProperties defaults to true) rather than duplicating the orchestrator's optimisation schema in two places. Future RFCs may grow this schema.",
+  "description": "Schema for config/optimization.yaml. RFC 0034 Phase 1 PR 2 introduced this schema scoped to the top-level `conversation_window` block; RFC 0023 PR 2 adds the top-level `wallet` block (LLM-call leasing lease-lifecycle tuning); RFC 0033 Phase 1 PR 1 adds the top-level `models.aliases` block (provider-agnostic model alias map). ISSUE-0211 adds the top-level `cost` block (pricing and spending limits) and requires it. The top level itself stays open (additionalProperties defaults to true): besides `active_profile` it holds one block per optimization profile, under names the operator chooses (`default` in the shipped file), so a closed list would refuse a profile. That is also why `cost` is required: a misspelled `cost` key reads as one more profile, and only the missing block gives it away. The profile blocks (model routing, caching, context management) are left unconstrained. Future RFCs may grow this schema.",
   "type": "object",
+  "required": ["cost"],
   "properties": {
     "schema_version": {
       "type": "string",
@@ -82,6 +83,91 @@
               "notes": {
                 "type": "string",
                 "description": "Free-text annotation — e.g. the local-pricing decision for a $0-real entry. Documentation only."
+              }
+            }
+          }
+        }
+      }
+    },
+    "cost": {
+      "type": "object",
+      "description": "ISSUE-0211 — model prices and spending limits, read by the Go orchestrator (internal/cost). Closed at every level: a limit of 0 means no limit, so a misspelled key that was dropped used to turn a limit off. The orchestrator's loader refuses the same keys this schema does.",
+      "additionalProperties": false,
+      "required": ["budgets"],
+      "properties": {
+        "pricing": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "models": {
+              "type": "object",
+              "description": "Price of each model, keyed by the model id a provider is called with. Derived from `models.aliases`: one entry per model an alias names.",
+              "additionalProperties": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "input_per_1m_tokens": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "USD per one million input tokens."
+                  },
+                  "output_per_1m_tokens": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "USD per one million output tokens."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "budgets": {
+          "type": "object",
+          "description": "Spending limits in USD. The block must be present. A limit set to 0, or left out, means no limit at that scope; with no limit above 0 the orchestrator warns at start-up that nothing caps spending.",
+          "additionalProperties": false,
+          "properties": {
+            "global": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "max_daily_usd": {
+                  "type": "number",
+                  "minimum": 0,
+                  "description": "Most the whole deployment may spend in a day. 0 means no limit."
+                },
+                "alert_at_percent": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "description": "Shares of the daily limit, in percent, at which an alert is raised."
+                },
+                "on_exceed": {
+                  "enum": ["fail", "pause_and_alert", ""],
+                  "description": "What happens when the daily limit is reached. Empty means not set, which the orchestrator treats as `fail`."
+                }
+              }
+            },
+            "per_workflow": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "default_max_usd": {
+                  "type": "number",
+                  "minimum": 0,
+                  "description": "Most one workflow run may spend. 0 means no limit."
+                }
+              }
+            },
+            "per_agent": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "default_max_usd": {
+                  "type": "number",
+                  "minimum": 0,
+                  "description": "Most one agent may spend. 0 means no limit."
+                }
               }
             }
           }

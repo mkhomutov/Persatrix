@@ -462,6 +462,9 @@ notices-check: go-licenses-pinned cargo-license-pinned ## Fail if THIRD_PARTY_NO
 validate: ## Validate all YAML configs against JSON schemas
 	@echo "→ Validating configuration..."
 	$(PYTHON) agents/validate.py config/
+	@# Each demo mounts its own optimization.yaml over the shipped one
+	@# (ISSUE-0211): check those files too.
+	@for d in config/demo/*/; do $(PYTHON) agents/validate.py $$d || exit 1; done
 	@echo "→ Checking instructions_file references resolve..."
 	$(PYTHON) scripts/checks/prompt_refs.py
 	@echo "✓ All configs valid"

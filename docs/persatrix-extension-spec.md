@@ -1972,6 +1972,16 @@ cost:
     export_path: "/workspace/cost_reports/"
 ```
 
+> **Not all of this sample loads today.** The orchestrator reads
+> `pricing.models` and the three limits under `budgets`, and refuses a
+> `cost` block that holds any other key
+> ([ISSUE-0211](issues/ISSUE-0211-misspelled-budget-key-removes-every-spending-cap.md)),
+> so that a misspelled key cannot turn a limit off. Four keys above are
+> design, not yet built, and a file that has them is refused:
+> `pricing.source`, `per_workflow.overrides`, `per_agent.overrides` and
+> `attribution`. `on_exceed` takes `pause_and_alert` or `fail`. The block
+> the repository ships is in `config/optimization.yaml`.
+
 ### E8.9 AgentOps Lifecycle Integration
 
 The framework maps cleanly to the four-phase AgentOps lifecycle:

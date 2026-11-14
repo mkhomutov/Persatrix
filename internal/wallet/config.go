@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/mkhomutov/persatrix/internal/cost"
 )
 
 // RFC 0023 — LLM Call Leasing: lease-lifecycle defaults. Both the TTL and
@@ -63,9 +65,11 @@ func DefaultConfig() Config {
 // rawOptimizationFile mirrors the top-level structure of optimization.yaml
 // for parsing the `wallet:` block only. The `cost:` block is parsed
 // separately by internal/cost — each package owns its own slice of the
-// shared file.
+// shared file. Every other top-level key is kept unread in Other, which is
+// what lets the file be decoded strictly: see [cost.DecodeOptimizationFile].
 type rawOptimizationFile struct {
-	Wallet rawWalletSection `yaml:"wallet"`
+	Wallet rawWalletSection     `yaml:"wallet"`
+	Other  map[string]yaml.Node `yaml:",inline"`
 }
 
 // rawWalletSection mirrors the `wallet:` block. The fields are *int, not
@@ -85,7 +89,9 @@ type rawWalletSection struct {
 // and at most the per-key maximum (a fat-finger guard; for ttl_seconds it
 // also keeps the value within the int32 the LeaseGrant advertises on the
 // wire). Out-of-range values are rejected, so the schema (`make validate`)
-// and the loader agree on both ends of the range.
+// and the loader agree on both ends of the range. A key the block does not
+// have is rejected too (ISSUE-0211): the plain decoder dropped it, so a
+// misspelled key silently left its setting at the default.
 func LoadConfig(configDir string) (Config, error) {
 	path := filepath.Join(configDir, "optimization.yaml")
 	data, err := os.ReadFile(path)
@@ -94,7 +100,7 @@ func LoadConfig(configDir string) (Config, error) {
 	}
 
 	var raw rawOptimizationFile
-	if err := yaml.Unmarshal(data, &raw); err != nil {
+	if err := cost.DecodeOptimizationFile(data, &raw); err != nil {
 		return Config{}, fmt.Errorf("parse optimization config: %w", err)
 	}
 
