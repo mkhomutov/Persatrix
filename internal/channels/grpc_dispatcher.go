@@ -89,9 +89,10 @@ type dialFunc func(target string, opts ...grpc.DialOption) (*grpc.ClientConn, er
 //     dashboards message after message).
 //   - A receiver ack with `success=false` is returned as an error for the
 //     same reason: the agent servicer's queue-full discard-not-block
-//     backpressure and its pre-ingest validation both ack the RPC while
-//     refusing the event (agents/server_servicers.py), so a transport-level
-//     nil is NOT a delivery.
+//     backpressure, its pre-ingest validation and its refusal for an agent
+//     with no dispatch target all ack the RPC while refusing the event
+//     (agents/channel_receive.py), so a transport-level nil is NOT a
+//     delivery.
 //   - Offline / degraded agents: the registry pre-filters to `StatusHealthy`.
 //     Anything else returns an error wrapped around [ErrAgentNotReady] so
 //     the router metrics record `status="error"` without retrying.
@@ -193,8 +194,9 @@ var ErrAgentNotReady = errors.New("channels: agent not ready")
 
 // ErrDeliveryRefused is returned (wrapped) when the receiver ACKED the RPC but
 // REFUSED the event — the agent servicer's queue-full discard-not-block
-// backpressure and its pre-ingest validation both take this shape (see the
-// struct doc). A sentinel, not a bare fmt.Errorf, so the one synchronous
+// backpressure, its pre-ingest validation and its refusal for an agent with
+// no dispatch target all take this shape (see the struct doc). A sentinel,
+// not a bare fmt.Errorf, so the one synchronous
 // dispatch-returning endpoint (POST /convene) can map this routine,
 // retryable miss to a truthful 503 instead of the default 500 "channel store
 // error" + Error-level "unexpected error" log (PR #718 review) — the fanout
@@ -421,9 +423,10 @@ func (d *GRPCMessageDispatcher) Dispatch(ctx context.Context, env DispatchEnvelo
 	}
 	if !ack.GetSuccess() {
 		// The receiver ACKED the RPC but REFUSED the event — the agent
-		// servicer's queue-full discard-not-block backpressure and its
-		// pre-ingest validation both take this shape
-		// (agents/server_servicers.py). Discarding the ack body made those
+		// servicer's queue-full discard-not-block backpressure, its
+		// pre-ingest validation and its refusal for an agent with no
+		// dispatch target all take this shape
+		// (agents/channel_receive.py). Discarding the ack body made those
 		// misses indistinguishable from deliveries, so the undelivered
 		// ledger under-recorded them (the same closing-turn loss as the
 		// unregistered branch above — PR #718 review). GetSuccess is

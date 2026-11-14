@@ -13,7 +13,7 @@ import pytest
 
 from agents.dispatch import EventDispatcher
 from agents.llm_client import LLMClient, LLMResponse
-from agents.persona import create_persona_agent
+from agents.persona import PersonaMemoryError, create_persona_agent
 from agents.persona_runtime import _LLMPersonaAgent
 from agents.server import AgentServer
 from agents.server_persona import _resolve_agent_type
@@ -254,13 +254,15 @@ class TestAgentServerPersonaLifecycle:
         await server.stop()
         assert len(server._tick_schedulers) == 0
 
-    async def test_memory_init_failure_skips_dispatch_registration(self):
-        """If initialize_memory() fails, agent is NOT registered with dispatcher or scheduler.
+    async def test_memory_init_failure_stops_the_start(self):
+        """If initialize_memory() fails, the start fails and nothing is registered.
 
         An agent whose memory initialization fails would crash on the first
-        dispatched event (store_episode() on unopened DB).  The server must
-        skip dispatcher and tick scheduler registration for such agents.
-        (PR #55 review: memory init failure should prevent dispatch registration.)
+        dispatched event (store_episode() on unopened DB), so it gets no
+        dispatcher target and no tick scheduler (PR #55 review).  Since
+        ISSUE-0205 the server does not carry on either: it used to go on to
+        register the agent with the orchestrator, which then showed it as
+        healthy.  ``start()`` raises, and the entry point stops the process.
         """
         config = {
             **_PERSONA_CONFIG,
@@ -283,18 +285,25 @@ class TestAgentServerPersonaLifecycle:
             side_effect=RuntimeError("DB connection failed"),
         )
 
-        with patch.object(server, '_self_register', new_callable=AsyncMock):
+        with patch.object(server, '_self_register', new_callable=AsyncMock) as register:
             mock_grpc = AsyncMock()
             mock_grpc.add_insecure_port = MagicMock(return_value=50051)
             server._server = mock_grpc
-            await server.start()
+            with pytest.raises(PersonaMemoryError):
+                await server.start()
 
-        # Agent should NOT be registered with dispatcher
-        assert "ember-owl" not in server._dispatcher._agents
-        # Agent should NOT have a tick scheduler
-        assert "ember-owl" not in server._tick_schedulers
-
-        await server.stop()
+        # Stopped whether or not the checks pass: start() has replaced the
+        # mock with a real server, and a test process cannot exit while one
+        # is left running.
+        try:
+            # Agent should NOT be registered with dispatcher
+            assert "ember-owl" not in server._dispatcher._agents
+            # Agent should NOT have a tick scheduler
+            assert "ember-owl" not in server._tick_schedulers
+            # Nor with the orchestrator (ISSUE-0205)
+            register.assert_not_awaited()
+        finally:
+            await server.stop()
 
 
 # ─── Direct tests for initialize_persona_agents ─────────────
@@ -366,12 +375,13 @@ class TestInitializePersonaAgents:
         finally:
             await agent.close_memory()
 
-    async def test_memory_failure_skips_agent_but_others_continue(self):
-        """A memory init failure on one agent does not prevent others from initializing.
+    async def test_memory_failure_stops_the_startup_for_every_agent(self):
+        """A memory init failure on one persona stops the start-up (ISSUE-0205).
 
-        The indirect AgentServer tests only exercise single-agent failure.
-        This test verifies the multi-agent case: the failing agent is skipped
-        and the next agent in the dict is still initialized correctly.
+        It used to skip the failing agent and carry on with the next.  The
+        process now stops, so the next agent in the dict is not started: a
+        process hosts one agent, and one that keeps running while a persona
+        it hosts cannot serve is what the issue is about.
         """
         from agents.server_persona import initialize_persona_agents
 
@@ -391,11 +401,13 @@ class TestInitializePersonaAgents:
         dispatcher = EventDispatcher()
         schedulers: dict = {}
 
-        await initialize_persona_agents(agents, dispatcher, schedulers)
+        with pytest.raises(PersonaMemoryError) as raised:
+            await initialize_persona_agents(agents, dispatcher, schedulers)
 
+        assert raised.value.agent_id == "ember-owl"
         assert "ember-owl" not in dispatcher._agents
         assert "ember-owl" not in schedulers
-        assert "iron-fox" in dispatcher._agents
+        assert "iron-fox" not in dispatcher._agents
         await ok_agent.close_memory()
 
     async def test_tick_schedulers_dict_mutated_in_place(self, caplog):

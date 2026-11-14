@@ -61,6 +61,11 @@ class _StatePersistenceMixin:
     # RFC 0031 Phase 1: resolved from PERSATRIX_SESSION_ID in
     # PersonaAgent.__init__ (see agents/persona.py).
     _session_id: str
+    # True once ``initialize_memory`` has read the saved state.  Until then
+    # ``_state`` holds the defaults a new persona begins with, and closing
+    # the memory must not write them over what an earlier run saved
+    # (ISSUE-0205: a start that fails part-way is closed too).
+    _state_loaded: bool = False
 
     # ─── State persistence ─────────────────────────────
 
@@ -143,6 +148,7 @@ class _StatePersistenceMixin:
         # ``sweep_stuck_closes`` is provided by ``_CloseLifecycleMixin``.
         await self.sweep_stuck_closes()  # type: ignore[attr-defined]
         self._state = await self._load_persona_state()
+        self._state_loaded = True
 
     async def close_memory(self, *, write_open: bool = False) -> None:
         """Close all memory tiers, awaiting in-flight operations.
@@ -162,7 +168,8 @@ class _StatePersistenceMixin:
         :class:`~agents.persona_runtime.episode_routing._EpisodeRoutingMixin`.
         """
         async with self._lock:
-            await self._persist_persona_state()
+            if self._state_loaded:
+                await self._persist_persona_state()
             errors: list[Exception] = []
             if write_open:
                 try:

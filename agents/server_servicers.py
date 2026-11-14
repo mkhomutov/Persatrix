@@ -22,15 +22,10 @@ import grpc
 import grpc.aio
 
 from .base import BaseAgent, TaskInput, TaskInputConfig, TaskOutput, TaskStatus
-from .channel_validation import validate_channel_message_event
-from .channel_wire_metadata import (
-    DispatchContext,
-    channel_event_payload,
-    seed_wire_metadata,
-)
+from .channel_receive import handle_receive_channel_message
+from .channel_wire_metadata import DispatchContext
 from .chat_reply import chat_error_response as _chat_error_response
 from .chat_reply import extract_chat_reply as _extract_chat_reply
-from .clock import to_agent_time
 from .closed_interactions_read import handle_get_closed_interactions
 from .dispatch import EventDispatcher
 from .epoch_id import EVENT_EPOCH_METADATA_KEY
@@ -372,119 +367,15 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
         with a taxonomised reason so operators reading the wire trace can
         locate the failure class. A full event-loop queue likewise returns
         ``success=False`` (discard-not-block backpressure, RFC 0024
-        Decided §1). The orchestrator does not retry per ``TaskAck``
-        semantics.
+        Decided §1), and so does an agent with no dispatch target, under a
+        text of its own (ISSUE-0205). The orchestrator does not retry per
+        ``TaskAck`` semantics.
+
+        Thin seam over ``channel_receive.handle_receive_channel_message``.
         """
-        # ─── Validation (defence-in-depth; mirrors proto/task.proto bounds) ──
-        # Validator returns ``(error, parsed_timestamp)`` so the RFC 3339
-        # parse happens exactly once. PR #248 deep review M finding
-        # (single-source-of-truth + assert-stripped-under-O elimination).
-        err, publish_ts = validate_channel_message_event(request)
-        if err is not None:
-            return task_pb2.TaskAck(success=False, error_message=err)
-        if publish_ts is None:
-            # Defensive: the validator's tuple contract guarantees that a
-            # ``None`` error implies a parsed timestamp. This branch is
-            # unreachable barring an internal contract violation, but is
-            # an explicit guard rather than a bare ``assert`` so the
-            # invariant survives ``python -O`` (which strips asserts).
-            return task_pb2.TaskAck(
-                success=False,
-                error_message="internal: validator returned no timestamp",
-            )
-
-        # ─── Target agent resolution (single-agent-per-process in v0.3.0) ──
-        if not self._agents:
-            return task_pb2.TaskAck(
-                success=False,
-                error_message="no agents registered on this server",
-            )
-        if len(self._agents) > 1:
-            # `ChannelMessageEvent` carries no recipient_id; multi-agent
-            # disambiguation requires an additive proto field landing
-            # alongside the chat-path migration in RFC 0011 PR 4a-ii
-            # (see docs/rfcs/0011-pr-plan.md). Until then a multi-agent
-            # server cannot route channel messages unambiguously and MUST
-            # reject rather than broadcast.
-            return task_pb2.TaskAck(
-                success=False,
-                error_message=(
-                    "multi-agent server: ChannelMessageEvent has no "
-                    "recipient_id field; deferred to RFC 0011 PR 4a-ii"
-                ),
-            )
-        target_agent_id = next(iter(self._agents))
-
-        # ─── Build AgentEvent and enqueue fire-and-forget ───────────────
-        # Propagate the orchestrator-authored RFC 3339 ``timestamp`` rather
-        # than re-stamping with ``time.time()`` — preserves publish-time
-        # ordering for cross-agent correlation and replay. ``publish_ts``
-        # is the validator's parsed value; the validator's tuple-return
-        # contract pins "validation succeeded ⇒ timestamp is float" in
-        # the type system, so no runtime assert is needed (asserts are
-        # stripped under ``python -O``).
-        event = AgentEvent(
-            event_type=EventType.CHANNEL_MESSAGE,
-            # Gate + salience-bid + (v0.3.8) floor-mentions decision inputs,
-            # lifted off the wire shape in the carve-out module — see
-            # ``channel_wire_metadata.channel_event_payload``.
-            payload=channel_event_payload(request),
-            channel_id=request.channel_id,
-            sender_id=request.sender_id,
-            message_id=request.message_id,
-            thread_id=request.thread_id or None,
-            # Moved into agent time, which memory reads (agents.clock).
-            timestamp=to_agent_time(publish_ts),
-            # Seed cascade_depth from the typed proto field (RFC 0011
-            # cascade-depth wire-propagation amendment, PR 3) so the dispatcher
-            # sees the wire value instead of resetting to zero on every hop.
-            # Receiver-side advisory: the Go orchestrator clamps on outbound.
-            metadata={"cascade_depth": request.cascade_depth},
+        return await handle_receive_channel_message(
+            self._agents, self._dispatcher, request, context,
         )
-
-        # Lift the typed wire fields (sender peer type — ISSUE-0068, which has
-        # a real producer; RFC 0020 interaction_id — RFC 0030 governance layers
-        # PR 1, no producer yet) onto the event-metadata keys the downstream
-        # read paths consume. See ``channel_wire_metadata.seed_wire_metadata``.
-        seed_wire_metadata(event, request)
-
-        # ISSUE-0081 PR 2: carry the per-request session through to the
-        # deferred EventLoop drain.  The fire-and-forget path processes the
-        # event in a different (boot-created) task, so the scope cannot ride
-        # a ContextVar set here — it must travel on the event envelope and
-        # be re-entered inside ``on_event`` when the loop drains.
-        request_session = _session_from_context(context)
-        if request_session is not None:
-            event.metadata[EVENT_SESSION_METADATA_KEY] = request_session
-        # ISSUE-0081 PR 3: the tenant/principal rides the same envelope.
-        request_principal = _principal_from_context(context)
-        if request_principal is not None:
-            event.metadata[EVENT_PRINCIPAL_METADATA_KEY] = request_principal
-        # ISSUE-0085 PR 4: the per-process epoch rides the same envelope so
-        # the deferred EventLoop drain re-enters the run-isolation scope.
-        request_epoch = _epoch_from_context(context)
-        if request_epoch is not None:
-            event.metadata[EVENT_EPOCH_METADATA_KEY] = request_epoch
-
-        # Fire-and-forget: enqueue onto the agent's EventLoop and return
-        # immediately. The loop owns decide → execute → recover when it
-        # drains (RFC 0024 Phase 4). ``enqueue_inbound`` returns ``False``
-        # only when the loop's bounded queue is full (discard-not-block).
-        accepted = self._dispatcher.enqueue_inbound(target_agent_id, event)
-
-        # ``context`` is read above for the session header but is never
-        # used to set a gRPC status code: the ack is conveyed in the
-        # ``TaskAck`` body, never via a status code. Other rejection
-        # branches above also do not touch ``context``.
-        if not accepted:
-            return task_pb2.TaskAck(
-                success=False,
-                error_message=(
-                    "receiver overloaded: agent event-loop queue full "
-                    "(discard-not-block backpressure)"
-                ),
-            )
-        return task_pb2.TaskAck(success=True)
 
     async def GetClosedInteractions(
         self,
