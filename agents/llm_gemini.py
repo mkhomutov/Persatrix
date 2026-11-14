@@ -103,10 +103,13 @@ class GeminiProvider:
     ) -> None:
         # Eager import so a missing SDK is a startup SystemExit at the factory
         # (which catches ImportError); the *client* is built lazily below.
-        # ``google-genai`` is an optional extra (RFC 0053 OQ #4), unresolved in
-        # the type-check env, so the ``google`` namespace (from protobuf) has no
-        # ``genai`` attribute to mypy — suppress that one attr-defined probe.
-        from google import genai  # type: ignore[attr-defined]
+        # ``google-genai`` is an optional extra (RFC 0053 OQ #4). Where it is
+        # not installed, the mypy configs say not to report ``google.genai``
+        # missing; ``make lint-providers`` checks this file against the real
+        # SDK (ISSUE-0220). Written as a module import, not ``from google
+        # import genai``: mypy reads that form as a missing attribute of the
+        # ``google`` package, which no config setting excuses.
+        import google.genai as genai
 
         self._genai = genai
         self._api_key = api_key

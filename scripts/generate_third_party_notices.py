@@ -15,6 +15,13 @@ The script does not fail the build on disallowed licenses — that is the
 existing ``check-licenses-*`` targets' job. This script's job is to produce
 the notices document.
 
+The Python table lists what is installed in the Python that runs this script.
+So the script first checks that install has every package
+``agents/pyproject.toml`` can install, the optional extras included, and
+stops if one is missing: written from the usual install, the file named
+neither optional provider SDK (ISSUE-0220). ``make build-agents-providers``
+installs them all, at the versions CI pins.
+
 Usage::
 
     python scripts/generate_third_party_notices.py               # write file
@@ -25,16 +32,19 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import importlib.metadata
 import json
 import os
 import re
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ALLOWED_FILE = REPO_ROOT / "scripts" / "checks" / "allowed_licenses.txt"
 DEFAULT_OUTPUT = REPO_ROOT / "THIRD_PARTY_NOTICES.md"
+AGENTS_MANIFEST = REPO_ROOT / "agents" / "pyproject.toml"
 
 # Packages that ARE Persatrix itself — skip in the notices file.
 SELF_NAMES = {
@@ -174,7 +184,65 @@ def collect_go() -> list[dict[str, str]]:
     return rows
 
 
+_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+def _canonical(name: str) -> str:
+    """One spelling for a package name: `ibm_watsonx_ai` and `ibm-watsonx-ai` are one."""
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+class MissingPythonPackagesError(Exception):
+    """The Python running this script lacks a package the manifest can install."""
+
+
+def declared_python_packages() -> dict[str, str]:
+    """Every package ``agents/pyproject.toml`` can install, and where it is declared.
+
+    The base dependencies and every extra. The project's own name is left
+    out: the ``providers`` extra names it to pull in the other extras. So is
+    a requirement with a marker, which may not apply to this platform.
+    """
+    project = tomllib.loads(AGENTS_MANIFEST.read_text(encoding="utf-8"))["project"]
+    groups: dict[str, list[str]] = {"the base dependencies": project.get("dependencies", [])}
+    for extra, specs in project.get("optional-dependencies", {}).items():
+        groups[f"the `{extra}` extra"] = specs
+    declared: dict[str, str] = {}
+    for where, specs in groups.items():
+        for spec in specs:
+            match = _NAME_RE.match(spec.strip())
+            if match is None or ";" in spec:
+                continue
+            name = _canonical(match.group(0))
+            if name not in SELF_NAMES:
+                declared.setdefault(name, where)
+    return declared
+
+
+def installed_python_packages() -> set[str]:
+    """The packages installed in the Python running this script."""
+    return {_canonical(dist.metadata["Name"]) for dist in importlib.metadata.distributions()}
+
+
+def check_python_install() -> None:
+    """Refuse an install that would leave a declared package out of the notices."""
+    installed = installed_python_packages()
+    missing = [
+        f"{name} ({where})"
+        for name, where in declared_python_packages().items()
+        if name not in installed
+    ]
+    if missing:
+        raise MissingPythonPackagesError(
+            f"{sys.executable} does not have every package agents/pyproject.toml can "
+            f"install, so the notices would leave out: {', '.join(sorted(missing))}. "
+            "Run `make build-agents-providers` in a fresh virtual environment, then "
+            "`make notices` with that Python."
+        )
+
+
 def collect_python() -> list[dict[str, str]]:
+    check_python_install()
     out = _run(
         [
             sys.executable,
@@ -298,8 +366,9 @@ def build_document(
         "\n",
         "## Python dependencies\n",
         "\n",
-        f"Collected via `pip-licenses --from=mixed` against the `agents` extras"
-        f" ({len(py_rows)} packages).\n",
+        "Collected via `pip-licenses --from=mixed` from an install of the `agents` package"
+        " with every extra, the optional provider SDKs included"
+        f" (`make build-agents-providers`; {len(py_rows)} packages).\n",
         "\n",
         render_table(py_rows, allowed, include_version=True),
         "\n",
@@ -334,6 +403,9 @@ def main() -> int:
         go_rows = collect_go()
         py_rows = collect_python()
         rs_rows = collect_rust()
+    except MissingPythonPackagesError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     except FileNotFoundError as exc:
         print(
             f"error: required tool not on PATH ({exc.filename}). "

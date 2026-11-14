@@ -78,3 +78,26 @@ release PR's smoke run, if that is run, or by whoever next runs a demo.
 > folder, so that fault no longer needs the image to show. The job's
 > install is an editable one. The image itself is still built and
 > started by no CI job, which is what this issue is about.
+
+> 2026-11-14 — a constraints file for the image install now exists. The
+> fix for
+> [ISSUE-0220](ISSUE-0220-gemini-and-watsonx-sdks-sit-outside-every-gate.md)
+> adds `.github/python-constraints-providers.txt`: the pins of
+> `.github/python-constraints.txt` plus the optional provider SDKs
+> (`google-genai`, `ibm-watsonx-ai`) and what only they need. It is
+> resolved for Python 3.11 and later on every platform, so the image's
+> Python 3.12 can install from it, and since it holds every pin of the
+> first file one `-c` serves an image built with or without
+> `AGENT_EXTRAS`. Nothing here was changed to use it: `Dockerfile.agent`
+> still installs the newest release in each range, and the demo images
+> that set `AGENT_EXTRAS` still take the SDKs unpinned. That half of
+> ISSUE-0220 is left with this issue.
+>
+> Two things to know when the image does install from it. The file pins
+> two packages differently by Python version: `numpy` 2.4.6 below Python
+> 3.12 and 2.5.4 from 3.12, `pandas` 2.3.3 below 3.14 and 3.1.1 from
+> 3.14. CI's Python 3.11 installs the first of each and the image's 3.12
+> would install the second `numpy`, so the two still differ by that one
+> package. And the weekly advisory audit reads a constraints file as
+> Python 3.11 sees it, so the 3.12 pins are not audited until the audit
+> also runs on the image's Python.

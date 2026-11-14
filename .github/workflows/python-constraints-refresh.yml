@@ -2,17 +2,20 @@
 #
 # CI installs the agents' Python dependencies at the versions in
 # .github/python-constraints.txt (`make build-agents` passes the file to pip
-# with -c), so a release on PyPI no longer fails every open PR the minute it
+# with -c), and the optional provider SDKs at the versions in
+# .github/python-constraints-providers.txt (`make build-agents-providers`),
+# so a release on PyPI no longer fails every open PR the minute it
 # is published, as OpenTelemetry 1.45.0 did on 2026-09-25 (#1002). Pinning
 # costs two things: the pins age, and nothing in CI tries the newest releases
 # that a fresh install or a new agent image gets. This workflow covers both.
 # Once a week, and whenever a change to agents/pyproject.toml reaches main,
-# it re-resolves the newest versions agents/pyproject.toml allows, installs
-# them, runs the Python checks on them, and reports in one issue, "CI Python
-# constraints: weekly refresh":
+# it re-resolves both files to the newest versions agents/pyproject.toml
+# allows, installs them, runs the Python checks on them (the plain install
+# first, then the checks that need the provider SDKs), and reports in one
+# issue, "CI Python constraints: weekly refresh":
 #
 #   - nothing moved: it closes the issue if one is open.
-#   - the checks pass: it pushes the new file to chore/python-constraints-refresh
+#   - the checks pass: it pushes the new files to chore/python-constraints-refresh
 #     and puts a link in the issue that opens the PR.
 #   - a check fails: it leaves the pins alone and names every failing check,
 #     so a breaking release is fixed once instead of failing every PR.
@@ -83,8 +86,9 @@ jobs:
         run: |
           make python-constraints-upgrade
           # Pin lines only: a `# via` comment can change while no version does.
-          git diff -U0 -- .github/python-constraints.txt \
-            | grep -E '^[-+][A-Za-z0-9]' > "$RUNNER_TEMP/pins.diff" || true
+          # Both files; a pin the two share moves in both, and is listed once.
+          git diff -U0 -- .github/python-constraints.txt .github/python-constraints-providers.txt \
+            | grep -E '^[-+][A-Za-z0-9]' | awk '!seen[$0]++' > "$RUNNER_TEMP/pins.diff" || true
           if [ -s "$RUNNER_TEMP/pins.diff" ]; then moved=true; else moved=false; fi
           echo "moved=$moved" >> "$GITHUB_OUTPUT"
           cat "$RUNNER_TEMP/pins.diff"
@@ -98,7 +102,11 @@ jobs:
 
       # The Python job's checks, through the Make targets its steps mirror,
       # plus the Python halves of the license and config jobs. Every check
-      # runs even after another fails, so the issue names all of them.
+      # runs even after another fails, so the issue names all of them. The
+      # last three are the Python job's last three: they add the optional
+      # provider SDKs at their new pins, then check the two adapters against
+      # them. They come last because the install changes the environment the
+      # checks before them must see.
       - name: Run the Python checks on the new pins
         id: checks
         if: steps.install.outcome == 'success'
@@ -106,7 +114,8 @@ jobs:
           failed=""
           for target in lint-python proto-python-check "eval-replay TIER=stable" \
                         test-python test-agents test-integration \
-                        check-licenses-python validate; do
+                        check-licenses-python validate \
+                        build-agents-providers lint-providers test-providers; do
             echo "::group::make $target"
             # Names the check that was running if the job times out or is cancelled.
             echo "make $target" > "$RUNNER_TEMP/check.running"
@@ -132,7 +141,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch -C "$BRANCH"
-          git commit -q -m "chore(deps): refresh the CI Python constraints" -- .github/python-constraints.txt
+          git commit -q -m "chore(deps): refresh the CI Python constraints" -- \
+            .github/python-constraints.txt .github/python-constraints-providers.txt
           git push --force origin "$BRANCH"
 
       - name: Report in the tracking issue
@@ -152,7 +162,7 @@ jobs:
             const { owner, repo } = context.repo;
             const base = `${context.serverUrl}/${owner}/${repo}`;
             const run = `[run ${context.runId}](${base}/actions/runs/${context.runId})`;
-            const file = '`.github/python-constraints.txt`';
+            const file = '`.github/python-constraints.txt` and `.github/python-constraints-providers.txt`';
 
             let pins = '';
             try {

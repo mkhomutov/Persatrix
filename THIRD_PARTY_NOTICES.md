@@ -23,137 +23,162 @@ Policy:
 
 ## Go dependencies
 
-Collected via `go-licenses report ./cmd/... ./internal/...` (40 packages).
+Collected via `go-licenses report ./cmd/... ./internal/...` (41 packages).
 
 | Package | License | Source |
 | --- | --- | --- |
 | `github.com/cenkalti/backoff/v5` | MIT | [link](https://github.com/cenkalti/backoff/blob/v5.0.3/LICENSE) |
 | `github.com/cespare/xxhash/v2` | MIT | [link](https://github.com/cespare/xxhash/blob/v2.3.0/LICENSE.txt) |
-| `github.com/dustin/go-humanize` | MIT | [link](https://github.com/dustin/go-humanize/blob/v1.0.1/LICENSE) |
+| `github.com/dustin/go-humanize` | MIT | [link](https://github.com/dustin/go-humanize/blob/v1.1.0/LICENSE) |
 | `github.com/felixge/httpsnoop` | MIT | [link](https://github.com/felixge/httpsnoop/blob/v1.1.0/LICENSE.txt) |
 | `github.com/go-logr/logr` | Apache-2.0 | [link](https://github.com/go-logr/logr/blob/v1.4.4/LICENSE) |
 | `github.com/go-logr/stdr` | Apache-2.0 | [link](https://github.com/go-logr/stdr/blob/v1.2.2/LICENSE) |
 | `github.com/google/uuid` | BSD-3-Clause | [link](https://github.com/google/uuid/blob/v1.6.0/LICENSE) |
 | `github.com/grpc-ecosystem/grpc-gateway/v2` | BSD-3-Clause | [link](https://github.com/grpc-ecosystem/grpc-gateway/blob/v2.30.0/LICENSE) |
 | `github.com/mattn/go-isatty` | MIT | [link](https://github.com/mattn/go-isatty/blob/v0.0.24/LICENSE) |
-| `github.com/ncruces/go-strftime` | MIT | [link](https://github.com/ncruces/go-strftime/blob/v1.0.0/LICENSE) |
+| `github.com/ncruces/go-strftime` | MIT | [link](https://github.com/ncruces/go-strftime/blob/v1.1.0/LICENSE) |
 | `github.com/oklog/ulid/v2` | Apache-2.0 | [link](https://github.com/oklog/ulid/blob/v2.1.2/LICENSE) |
 | `github.com/remyoudompheng/bigfft` | BSD-3-Clause | [link](https://github.com/remyoudompheng/bigfft/blob/24d4a6f8daec/LICENSE) |
 | `go.opentelemetry.io/auto/sdk` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go-instrumentation/blob/sdk/v1.2.1/sdk/LICENSE) |
-| `go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go-contrib/blob/instrumentation/google.golang.org/grpc/otelgrpc/v0.71.0/instrumentation/google.golang.org/grpc/otelgrpc/LICENSE) |
-| `go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go-contrib/blob/instrumentation/net/http/otelhttp/v0.71.0/instrumentation/net/http/otelhttp/LICENSE) |
-| `go.opentelemetry.io/otel` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go/blob/v1.46.0/LICENSE) |
-| `go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlpmetric/otlpmetrichttp/v1.46.0/exporters/otlp/otlpmetric/otlpmetrichttp/LICENSE) |
-| `go.opentelemetry.io/otel/exporters/otlp/otlptrace` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlptrace/v1.46.0/exporters/otlp/otlptrace/LICENSE) |
-| `go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlptrace/otlptracehttp/v1.46.0/exporters/otlp/otlptrace/otlptracehttp/LICENSE) |
-| `go.opentelemetry.io/otel/metric` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go/blob/metric/v1.46.0/metric/LICENSE) |
-| `go.opentelemetry.io/otel/sdk` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go/blob/sdk/v1.46.0/sdk/LICENSE) |
-| `go.opentelemetry.io/otel/sdk/metric` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go/blob/sdk/metric/v1.46.0/sdk/metric/LICENSE) |
-| `go.opentelemetry.io/otel/trace` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go/blob/trace/v1.46.0/trace/LICENSE) |
+| `go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go-contrib/blob/instrumentation/google.golang.org/grpc/otelgrpc/v0.72.0/instrumentation/google.golang.org/grpc/otelgrpc/LICENSE) |
+| `go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go-contrib/blob/instrumentation/net/http/otelhttp/v0.72.0/instrumentation/net/http/otelhttp/LICENSE) |
+| `go.opentelemetry.io/otel` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go/blob/v1.47.0/LICENSE) |
+| `go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlpmetric/otlpmetrichttp/v1.47.0/exporters/otlp/otlpmetric/otlpmetrichttp/LICENSE) |
+| `go.opentelemetry.io/otel/exporters/otlp/otlptrace` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlptrace/v1.47.0/exporters/otlp/otlptrace/LICENSE) |
+| `go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlptrace/otlptracehttp/v1.47.0/exporters/otlp/otlptrace/otlptracehttp/LICENSE) |
+| `go.opentelemetry.io/otel/log` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go/blob/log/v1.47.0/log/LICENSE) |
+| `go.opentelemetry.io/otel/metric` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go/blob/metric/v1.47.0/metric/LICENSE) |
+| `go.opentelemetry.io/otel/sdk` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go/blob/sdk/v1.47.0/sdk/LICENSE) |
+| `go.opentelemetry.io/otel/sdk/metric` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go/blob/sdk/metric/v1.47.0/sdk/metric/LICENSE) |
+| `go.opentelemetry.io/otel/trace` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-go/blob/trace/v1.47.0/trace/LICENSE) |
 | `go.opentelemetry.io/proto/otlp` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-proto-go/blob/otlp/v1.11.0/otlp/LICENSE) |
 | `go.uber.org/multierr` | MIT | [link](https://github.com/uber-go/multierr/blob/v1.10.0/LICENSE.txt) |
 | `go.uber.org/zap` | MIT | [link](https://github.com/uber-go/zap/blob/v1.28.0/LICENSE) |
-| `golang.org/x/crypto` | BSD-3-Clause | [link](https://cs.opensource.google/go/x/crypto/+/v0.56.0:LICENSE) |
-| `golang.org/x/net` | BSD-3-Clause | [link](https://cs.opensource.google/go/x/net/+/v0.58.0:LICENSE) |
-| `golang.org/x/sys/unix` | BSD-3-Clause | [link](https://cs.opensource.google/go/x/sys/+/v0.47.0:LICENSE) |
-| `golang.org/x/term` | BSD-3-Clause | [link](https://cs.opensource.google/go/x/term/+/v0.45.0:LICENSE) |
-| `golang.org/x/text` | BSD-3-Clause | [link](https://cs.opensource.google/go/x/text/+/v0.41.0:LICENSE) |
-| `google.golang.org/genproto/googleapis/api/httpbody` | Apache-2.0 | [link](https://github.com/googleapis/go-genproto/blob/08b0e4226688/googleapis/api/LICENSE) |
-| `google.golang.org/genproto/googleapis/rpc/status` | Apache-2.0 | [link](https://github.com/googleapis/go-genproto/blob/da73d73af1c5/googleapis/rpc/LICENSE) |
-| `google.golang.org/grpc` | Apache-2.0 | [link](https://github.com/grpc/grpc-go/blob/v1.83.2/LICENSE) |
+| `golang.org/x/crypto` | BSD-3-Clause | [link](https://cs.opensource.google/go/x/crypto/+/v0.58.0:LICENSE) |
+| `golang.org/x/net` | BSD-3-Clause | [link](https://cs.opensource.google/go/x/net/+/v0.60.0:LICENSE) |
+| `golang.org/x/sys` | BSD-3-Clause | [link](https://cs.opensource.google/go/x/sys/+/v0.49.0:LICENSE) |
+| `golang.org/x/term` | BSD-3-Clause | [link](https://cs.opensource.google/go/x/term/+/v0.47.0:LICENSE) |
+| `golang.org/x/text` | BSD-3-Clause | [link](https://cs.opensource.google/go/x/text/+/v0.43.0:LICENSE) |
+| `google.golang.org/genproto/googleapis/api/httpbody` | Apache-2.0 | [link](https://github.com/googleapis/go-genproto/blob/8a89bd6388cc/googleapis/api/LICENSE) |
+| `google.golang.org/genproto/googleapis/rpc/status` | Apache-2.0 | [link](https://github.com/googleapis/go-genproto/blob/8a89bd6388cc/googleapis/rpc/LICENSE) |
+| `google.golang.org/grpc` | Apache-2.0 | [link](https://github.com/grpc/grpc-go/blob/v1.85.0/LICENSE) |
 | `google.golang.org/protobuf` | BSD-3-Clause | [link](https://github.com/protocolbuffers/protobuf-go/blob/v1.36.12/LICENSE) |
 | `gopkg.in/yaml.v3` | MIT | [link](https://github.com/go-yaml/yaml/blob/v3.0.1/LICENSE) |
-| `modernc.org/libc` | MIT | [link](https://gitlab.com/cznic/libc/blob/v1.75.6/LICENSE-3RD-PARTY.md) |
+| `modernc.org/libc` | MIT | [link](https://gitlab.com/cznic/libc/blob/v1.79.0/LICENSE-3RD-PARTY.md) |
 | `modernc.org/mathutil` | !Unknown | Unknown |
 | `modernc.org/memory` | BSD-3-Clause | [link](https://gitlab.com/cznic/memory/blob/v1.12.1/LICENSE-GO) |
-| `modernc.org/sqlite` | BSD-3-Clause | [link](https://gitlab.com/cznic/sqlite/blob/v1.58.0/LICENSE) |
+| `modernc.org/sqlite` | BSD-3-Clause | [link](https://gitlab.com/cznic/sqlite/blob/v1.61.0/LICENSE) |
 
 ## Python dependencies
 
-Collected via `pip-licenses --from=mixed` against the `agents` extras (76 packages).
+Collected via `pip-licenses --from=mixed` from an install of the `agents` package with every extra, the optional provider SDKs included (`make build-agents-providers`; 100 packages).
 
 | Package | Version | License | Source |
 | --- | --- | --- | --- |
-| `aiohappyeyeballs` | 2.6.2 | Python Software Foundation License | [link](https://github.com/aio-libs/aiohappyeyeballs) |
-| `aiohttp` | 3.13.5 | Apache-2.0 AND MIT | [link](https://github.com/aio-libs/aiohttp) |
+| `aiohappyeyeballs` | 2.7.1 | Python Software Foundation License | [link](https://github.com/aio-libs/aiohappyeyeballs) |
+| `aiohttp` | 3.14.5 | Apache-2.0 AND MIT | [link](https://github.com/aio-libs/aiohttp) |
 | `aiosignal` | 1.4.0 | Apache Software License | [link](https://github.com/aio-libs/aiosignal) |
 | `aiosqlite` | 0.22.1 | MIT License | [link](https://aiosqlite.omnilib.dev) |
-| `annotated-types` | 0.7.0 | MIT License | [link](https://github.com/annotated-types/annotated-types) |
-| `anthropic` | 0.105.2 | MIT License | [link](https://github.com/anthropics/anthropic-sdk-python) |
-| `anyio` | 4.13.0 | MIT | [link](https://anyio.readthedocs.io/en/stable/versionhistory.html) |
-| `ast_serialize` | 0.5.0 | MIT | [link](https://github.com/mypyc/ast_serialize) |
+| `annotated-types` | 0.8.0 | MIT | [link](https://github.com/annotated-types/annotated-types) |
+| `anthropic` | 0.125.0 | MIT License | [link](https://github.com/anthropics/anthropic-sdk-python) |
+| `anyio` | 4.15.1 | MIT | [link](https://anyio.readthedocs.io/en/stable/versionhistory.html) |
+| `ast_serialize` | 0.13.1 | MIT | [link](https://github.com/mypyc/ast_serialize) |
 | `attrs` | 26.1.0 | MIT | [link](https://www.attrs.org/en/stable/changelog.html) |
-| `certifi` | 2026.5.20 | Mozilla Public License 2.0 (MPL 2.0) | [link](https://github.com/certifi/python-certifi) |
-| `charset-normalizer` | 3.4.7 | MIT | [link](https://github.com/jawah/charset_normalizer/blob/master/CHANGELOG.md) |
-| `click` | 8.4.2 | BSD-3-Clause | [link](https://github.com/pallets/click/) |
-| `coverage` | 7.15.1 | Apache-2.0 | [link](https://github.com/coveragepy/coveragepy) |
+| `cachetools` | 8.0.0 | MIT | [link](https://github.com/tkem/cachetools/) |
+| `certifi` | 2026.10.23 | Mozilla Public License 2.0 (MPL 2.0) | [link](https://github.com/certifi/python-certifi) |
+| `cffi` | 2.1.1 | !MIT-0 | [link](https://cffi.readthedocs.io/en/latest/whatsnew.html) |
+| `charset-normalizer` | 3.5.2 | MIT | [link](https://github.com/jawah/charset_normalizer/blob/master/CHANGELOG.md) |
+| `click` | 8.5.0 | BSD-3-Clause | [link](https://github.com/pallets/click/) |
+| `cryptography` | 50.0.2 | Apache-2.0 OR BSD-3-Clause | [link](https://github.com/pyca/cryptography) |
 | `distro` | 1.9.0 | Apache Software License | [link](https://github.com/python-distro/distro) |
 | `docstring_parser` | 0.18.0 | MIT License | [link](https://github.com/rr-/docstring_parser) |
 | `frozenlist` | 1.8.0 | Apache-2.0 | [link](https://github.com/aio-libs/frozenlist) |
+| `google-auth` | 2.62.2 | Apache Software License | [link](https://github.com/googleapis/google-cloud-python/tree/main/packages/google-auth) |
+| `google-genai` | 2.34.0 | Apache-2.0 | [link](https://github.com/googleapis/python-genai) |
 | `googleapis-common-protos` | 1.75.0 | Apache Software License | [link](https://github.com/googleapis/google-cloud-python/tree/main/packages/googleapis-common-protos) |
-| `grimp` | 3.14 | BSD License | [link](https://grimp.readthedocs.io/) |
-| `grpcio` | 1.80.0 | Apache-2.0 | [link](https://grpc.io) |
+| `grimp` | 3.17 | BSD License | [link](https://grimp.readthedocs.io/) |
+| `grpcio` | 1.84.1 | Apache-2.0 | [link](https://grpc.io) |
 | `grpcio-tools` | 1.71.2 | Apache Software License | [link](https://grpc.io) |
 | `h11` | 0.16.0 | MIT License | [link](https://github.com/python-hyper/h11) |
 | `httpcore` | 1.0.9 | BSD-3-Clause | [link](https://www.encode.io/httpcore/) |
+| `httpcore2` | 2.16.0 | BSD-3-Clause | [link](https://github.com/pydantic/httpx2) |
 | `httpx` | 0.28.1 | BSD License | [link](https://github.com/encode/httpx) |
-| `idna` | 3.17 | BSD-3-Clause | [link](https://github.com/kjd/idna) |
-| `import-linter` | 2.12 | BSD License | [link](https://import-linter.readthedocs.io/) |
-| `iniconfig` | 2.3.0 | MIT | [link](https://github.com/pytest-dev/iniconfig) |
-| `jiter` | 0.15.0 | MIT | [link](https://github.com/pydantic/jiter/) |
+| `httpx2` | 2.16.0 | BSD-3-Clause | [link](https://github.com/pydantic/httpx2) |
+| `ibm-cos-sdk` | 2.14.3 | Apache Software License | [link](https://github.com/ibm/ibm-cos-sdk-python) |
+| `ibm-cos-sdk-core` | 2.14.3 | Apache Software License | [link](https://github.com/ibm/ibm-cos-sdk-python-core) |
+| `ibm-cos-sdk-s3transfer` | 2.14.3 | Apache Software License | [link](https://github.com/IBM/ibm-cos-sdk-python-s3transfer) |
+| `ibm_watsonx_ai` | 1.9.1 | BSD License | [link](https://ibm.github.io/watsonx-ai-python-sdk/changelog.html) |
+| `idna` | 3.20 | BSD-3-Clause | [link](https://github.com/kjd/idna) |
+| `import-linter` | 2.15 | BSD License | [link](https://import-linter.readthedocs.io/) |
+| `iniconfig` | 2.3.1 | MIT | [link](https://github.com/pytest-dev/iniconfig) |
+| `jiter` | 0.18.0 | MIT | [link](https://github.com/pydantic/jiter/) |
+| `jmespath` | 1.0.1 | MIT License | [link](https://github.com/jmespath/jmespath.py) |
 | `jsonschema` | 4.26.0 | MIT | [link](https://github.com/python-jsonschema/jsonschema) |
 | `jsonschema-specifications` | 2025.9.1 | MIT | [link](https://github.com/python-jsonschema/jsonschema-specifications) |
-| `librt` | 0.11.0 | MIT | [link](https://github.com/mypyc/librt) |
+| `librt` | 0.16.0 | MIT | [link](https://github.com/mypyc/librt) |
+| `lomond` | 0.3.3 | BSD License | [link](https://github.com/wildfoundry/dataplicity-lomond) |
 | `markdown-it-py` | 4.2.0 | MIT License | [link](https://github.com/executablebooks/markdown-it-py) |
 | `mdurl` | 0.1.2 | MIT License | [link](https://github.com/executablebooks/mdurl) |
-| `multidict` | 6.7.1 | Apache License 2.0 | [link](https://github.com/aio-libs/multidict) |
-| `mypy` | 2.1.0 | MIT | [link](https://www.mypy-lang.org/) |
+| `multidict` | 7.2.1 | Apache-2.0 | [link](https://github.com/aio-libs/multidict) |
+| `mypy` | 2.4.0 | MIT | [link](https://www.mypy-lang.org/) |
 | `mypy-protobuf` | 3.6.0 | Apache License 2.0 | [link](https://github.com/nipunn1313/mypy-protobuf) |
 | `mypy_extensions` | 1.1.0 | MIT | [link](https://github.com/python/mypy_extensions) |
-| `openai` | 1.109.1 | Apache Software License | [link](https://github.com/openai/openai-python) |
-| `opentelemetry-api` | 1.42.1 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/opentelemetry-api) |
-| `opentelemetry-exporter-otlp-proto-common` | 1.42.1 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/exporter/opentelemetry-exporter-otlp-proto-common) |
-| `opentelemetry-exporter-otlp-proto-http` | 1.42.1 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/exporter/opentelemetry-exporter-otlp-proto-http) |
-| `opentelemetry-instrumentation` | 0.63b1 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python-contrib/tree/main/opentelemetry-instrumentation) |
-| `opentelemetry-instrumentation-grpc` | 0.63b1 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python-contrib/tree/main/instrumentation/opentelemetry-instrumentation-grpc) |
-| `opentelemetry-proto` | 1.42.1 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/opentelemetry-proto) |
-| `opentelemetry-sdk` | 1.42.1 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/opentelemetry-sdk) |
-| `opentelemetry-semantic-conventions` | 0.63b1 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/opentelemetry-semantic-conventions) |
-| `packaging` | 26.2 | Apache-2.0 OR BSD-2-Clause | [link](https://github.com/pypa/packaging) |
+| `numpy` | 2.4.6 | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 | [link](https://numpy.org) |
+| `openai` | 3.37.0 | Apache-2.0 | [link](https://github.com/openai/openai-python) |
+| `opentelemetry-api` | 1.45.1 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/opentelemetry-api) |
+| `opentelemetry-exporter-http-transport` | 0.66b1 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/exporter/opentelemetry-exporter-http-transport) |
+| `opentelemetry-exporter-otlp-common` | 0.66b1 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/exporter/opentelemetry-exporter-otlp-common) |
+| `opentelemetry-exporter-otlp-proto-common` | 1.45.1 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/exporter/opentelemetry-exporter-otlp-proto-common) |
+| `opentelemetry-exporter-otlp-proto-http` | 1.45.1 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/exporter/opentelemetry-exporter-otlp-proto-http) |
+| `opentelemetry-instrumentation` | 0.66b1 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python-contrib/tree/main/opentelemetry-instrumentation) |
+| `opentelemetry-instrumentation-grpc` | 0.66b1 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python-contrib/tree/main/instrumentation/opentelemetry-instrumentation-grpc) |
+| `opentelemetry-proto` | 1.45.1 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/opentelemetry-proto) |
+| `opentelemetry-sdk` | 1.45.1 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/opentelemetry-sdk) |
+| `opentelemetry-semantic-conventions` | 0.66b1 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/opentelemetry-semantic-conventions) |
+| `packaging` | 26.3 | Apache-2.0 OR BSD-2-Clause | [link](https://github.com/pypa/packaging) |
+| `pandas` | 2.3.3 | BSD License | [link](https://pandas.pydata.org) |
 | `pathspec` | 1.1.1 | Mozilla Public License 2.0 (MPL 2.0) | [link](https://python-path-specification.readthedocs.io/en/latest/index.html) |
-| `pluggy` | 1.6.0 | MIT License | UNKNOWN |
-| `propcache` | 0.5.2 | Apache Software License | [link](https://github.com/aio-libs/propcache) |
+| `pluggy` | 1.7.0 | MIT License | [link](https://github.com/pytest-dev/pluggy) |
+| `propcache` | 0.5.4 | Apache-2.0 | [link](https://github.com/aio-libs/propcache) |
 | `protobuf` | 5.29.6 | 3-Clause BSD License | [link](https://developers.google.com/protocol-buffers/) |
-| `pydantic` | 2.13.4 | MIT | [link](https://github.com/pydantic/pydantic) |
-| `pydantic_core` | 2.46.4 | MIT | [link](https://github.com/pydantic) |
-| `Pygments` | 2.20.0 | BSD-2-Clause | [link](https://pygments.org) |
-| `pytest` | 9.0.3 | MIT | [link](https://docs.pytest.org/en/latest/) |
-| `pytest-asyncio` | 1.4.0 | Apache-2.0 | [link](https://github.com/pytest-dev/pytest-asyncio) |
-| `pytest-timeout` | 2.4.0 | !DFSG approved; MIT License | [link](https://github.com/pytest-dev/pytest-timeout) |
+| `pyasn1` | 0.6.5 | BSD-2-Clause | [link](https://github.com/pyasn1/pyasn1) |
+| `pyasn1_modules` | 0.4.2 | BSD License | [link](https://github.com/pyasn1/pyasn1-modules) |
+| `pycparser` | 3.12 | BSD-3-Clause | [link](https://github.com/eliben/pycparser) |
+| `pydantic` | 2.14.1 | MIT | [link](https://github.com/pydantic/pydantic) |
+| `pydantic_core` | 2.50.1 | MIT | [link](https://github.com/pydantic) |
+| `Pygments` | 2.21.0 | BSD-2-Clause | [link](https://pygments.org) |
+| `pytest` | 9.1.1 | MIT | [link](https://docs.pytest.org/en/latest/) |
+| `pytest-asyncio` | 1.4.1 | Apache-2.0 | [link](https://github.com/pytest-dev/pytest-asyncio) |
+| `python-dateutil` | 2.9.0.post0 | Apache Software License; BSD License | [link](https://github.com/dateutil/dateutil) |
+| `pytz` | 2026.6 | MIT License | [link](http://pythonhosted.org/pytz) |
 | `PyYAML` | 6.0.3 | MIT License | [link](https://pyyaml.org/) |
 | `referencing` | 0.37.0 | MIT | [link](https://github.com/python-jsonschema/referencing) |
-| `regex` | 2026.5.9 | Apache-2.0 AND CNRI-Python | [link](https://github.com/mrabarnett/mrab-regex) |
+| `regex` | 2026.9.29 | Apache-2.0 AND CNRI-Python | [link](https://github.com/mrabarnett/mrab-regex) |
 | `requests` | 2.34.2 | Apache Software License | [link](https://github.com/psf/requests) |
 | `rich` | 15.0.0 | MIT License | [link](https://github.com/Textualize/rich) |
-| `rpds-py` | 2026.5.1 | MIT | [link](https://github.com/crate-py/rpds) |
-| `ruff` | 0.15.15 | MIT | [link](https://docs.astral.sh/ruff) |
+| `rpds-py` | 2026.9.1 | MIT | [link](https://github.com/crate-py/rpds) |
+| `ruff` | 0.17.2 | MIT | [link](https://docs.astral.sh/ruff) |
+| `six` | 1.17.0 | MIT License | [link](https://github.com/benjaminp/six) |
 | `sniffio` | 1.3.1 | Apache Software License; MIT License | [link](https://github.com/python-trio/sniffio) |
-| `structlog` | 25.5.0 | MIT OR Apache-2.0 | [link](https://github.com/hynek/structlog/blob/main/CHANGELOG.md) |
-| `tiktoken` | 0.13.0 | MIT License | [link](https://github.com/openai/tiktoken) |
-| `tqdm` | 4.67.3 | MPL-2.0 AND MIT | [link](https://tqdm.github.io) |
-| `types-grpcio` | 1.0.0.20260518 | Apache-2.0 | [link](https://github.com/python/typeshed) |
-| `types-protobuf` | 7.34.1.20260518 | Apache-2.0 | [link](https://github.com/python/typeshed) |
-| `types-PyYAML` | 6.0.12.20260518 | Apache-2.0 | [link](https://github.com/python/typeshed) |
-| `typing-inspection` | 0.4.2 | MIT | [link](https://github.com/pydantic/typing-inspection) |
-| `typing_extensions` | 4.15.0 | PSF-2.0 | [link](https://github.com/python/typing_extensions) |
-| `tzdata` | 2026.2 | Apache-2.0 | [link](https://github.com/python/tzdata) |
-| `urllib3` | 2.7.0 | MIT | [link](https://github.com/urllib3/urllib3/blob/main/CHANGES.rst) |
-| `wrapt` | 2.2.1 | BSD-2-Clause | [link](https://github.com/GrahamDumpleton/wrapt) |
-| `yarl` | 1.24.2 | Apache-2.0 | [link](https://github.com/aio-libs/yarl) |
+| `structlog` | 26.1.0 | MIT OR Apache-2.0 | [link](https://github.com/hynek/structlog/blob/main/CHANGELOG.md) |
+| `tabulate` | 0.10.0 | MIT | [link](https://github.com/astanin/python-tabulate) |
+| `tenacity` | 9.1.4 | Apache Software License | [link](https://github.com/jd/tenacity) |
+| `tiktoken` | 0.14.0 | MIT License | [link](https://github.com/openai/tiktoken) |
+| `truststore` | 0.10.5 | MIT | [link](https://github.com/sethmlarson/truststore) |
+| `types-grpcio` | 1.84.0.20261021 | Apache-2.0 | [link](https://github.com/python/typeshed) |
+| `types-protobuf` | 7.35.1.20260906 | Apache-2.0 | [link](https://github.com/python/typeshed) |
+| `types-PyYAML` | 6.0.12.20260906 | Apache-2.0 | [link](https://github.com/python/typeshed) |
+| `typing-inspection` | 0.4.4 | MIT | [link](https://github.com/pydantic/typing-inspection) |
+| `typing_extensions` | 4.16.0 | PSF-2.0 | [link](https://github.com/python/typing_extensions) |
+| `tzdata` | 2026.5 | Apache-2.0 | [link](https://github.com/python/tzdata) |
+| `urllib3` | 2.8.0 | MIT | [link](https://github.com/urllib3/urllib3/blob/main/CHANGES.rst) |
+| `websockets` | 17.4 | BSD-3-Clause | [link](https://github.com/python-websockets/websockets) |
+| `wrapt` | 2.5.1 | BSD-2-Clause | [link](https://github.com/GrahamDumpleton/wrapt) |
+| `yarl` | 1.25.1 | Apache-2.0 | [link](https://github.com/aio-libs/yarl) |
 
 ## Rust dependencies
 
-Collected via `cargo license --json` inside `cli/` (241 crates).
+Collected via `cargo license --json` inside `cli/` (240 crates).
 
 | Package | Version | License | Source |
 | --- | --- | --- | --- |
@@ -167,6 +192,7 @@ Collected via `cargo license --json` inside `cli/` (241 crates).
 | `aws-lc-rs` | 1.18.1 | (Apache-2.0 OR ISC) AND ISC | [link](https://github.com/aws/aws-lc-rs) |
 | `aws-lc-sys` | 0.45.0 | (Apache-2.0 OR ISC OR MIT) AND (Apache-2.0 OR ISC OR MIT-0) AND (Apache-2.0 OR ISC) AND Apache-2.0 AND BSD-3-Clause AND ISC AND MIT | [link](https://github.com/aws/aws-lc-rs) |
 | `base64` | 0.22.1 | Apache-2.0 OR MIT | [link](https://github.com/marshallpierce/rust-base64) |
+| `base64` | 0.23.1 | Apache-2.0 OR MIT | [link](https://github.com/marshallpierce/rust-base64) |
 | `bitflags` | 2.11.0 | Apache-2.0 OR MIT | [link](https://github.com/bitflags/bitflags) |
 | `block2` | 0.6.2 | MIT | [link](https://github.com/madsmtm/objc2) |
 | `bumpalo` | 3.20.2 | Apache-2.0 OR MIT | [link](https://github.com/fitzgen/bumpalo) |
@@ -176,9 +202,9 @@ Collected via `cargo license --json` inside `cli/` (241 crates).
 | `cfg-if` | 1.0.4 | Apache-2.0 OR MIT | [link](https://github.com/rust-lang/cfg-if) |
 | `cfg_aliases` | 0.2.1 | MIT | [link](https://github.com/katharostech/cfg_aliases) |
 | `chacha20` | 0.10.2 | Apache-2.0 OR MIT | [link](https://github.com/RustCrypto/stream-ciphers) |
-| `clap` | 4.6.6 | Apache-2.0 OR MIT | [link](https://github.com/clap-rs/clap) |
-| `clap_builder` | 4.6.6 | Apache-2.0 OR MIT | [link](https://github.com/clap-rs/clap) |
-| `clap_derive` | 4.6.4 | Apache-2.0 OR MIT | [link](https://github.com/clap-rs/clap) |
+| `clap` | 4.6.7 | Apache-2.0 OR MIT | [link](https://github.com/clap-rs/clap) |
+| `clap_builder` | 4.6.7 | Apache-2.0 OR MIT | [link](https://github.com/clap-rs/clap) |
+| `clap_derive` | 4.6.7 | Apache-2.0 OR MIT | [link](https://github.com/clap-rs/clap) |
 | `clap_lex` | 1.1.0 | Apache-2.0 OR MIT | [link](https://github.com/clap-rs/clap) |
 | `cmake` | 0.1.58 | Apache-2.0 OR MIT | [link](https://github.com/rust-lang/cmake-rs) |
 | `colorchoice` | 1.0.5 | Apache-2.0 OR MIT | [link](https://github.com/rust-cli/anstyle.git) |
@@ -189,7 +215,7 @@ Collected via `cargo license --json` inside `cli/` (241 crates).
 | `core-foundation-sys` | 0.8.7 | Apache-2.0 OR MIT | [link](https://github.com/servo/core-foundation-rs) |
 | `cpufeatures` | 0.3.1 | Apache-2.0 OR MIT | [link](https://github.com/RustCrypto/utils) |
 | `ctrlc` | 3.5.2 | Apache-2.0 OR MIT | [link](https://github.com/Detegr/rust-ctrlc.git) |
-| `dirs` | 6.0.0 | Apache-2.0 OR MIT | [link](https://github.com/soc/dirs-rs) |
+| `dirs` | 7.0.0 | Apache-2.0 OR MIT | [link](https://codeberg.org/dirs/dirs-rs) |
 | `dirs-sys` | 0.5.0 | Apache-2.0 OR MIT | [link](https://github.com/dirs-dev/dirs-sys-rs) |
 | `dispatch2` | 0.3.1 | Apache-2.0 OR MIT OR Zlib | [link](https://github.com/madsmtm/objc2) |
 | `displaydoc` | 0.2.5 | Apache-2.0 OR MIT | [link](https://github.com/yaahc/displaydoc) |
@@ -267,8 +293,6 @@ Collected via `cargo license --json` inside `cli/` (241 crates).
 | `pkg-config` | 0.3.32 | Apache-2.0 OR MIT | [link](https://github.com/rust-lang/pkg-config-rs) |
 | `potential_utf` | 0.1.5 | Unicode-3.0 | [link](https://github.com/unicode-org/icu4x) |
 | `prettyplease` | 0.2.37 | Apache-2.0 OR MIT | [link](https://github.com/dtolnay/prettyplease) |
-| `proc-macro-error-attr2` | 2.0.0 | Apache-2.0 OR MIT | [link](https://github.com/GnomedDev/proc-macro-error-2) |
-| `proc-macro-error2` | 2.0.1 | Apache-2.0 OR MIT | [link](https://github.com/GnomedDev/proc-macro-error-2) |
 | `proc-macro2` | 1.0.106 | Apache-2.0 OR MIT | [link](https://github.com/dtolnay/proc-macro2) |
 | `quinn` | 0.11.11 | Apache-2.0 OR MIT | [link](https://github.com/quinn-rs/quinn) |
 | `quinn-proto` | 0.11.17 | Apache-2.0 OR MIT | [link](https://github.com/quinn-rs/quinn) |
@@ -279,19 +303,19 @@ Collected via `cargo license --json` inside `cli/` (241 crates).
 | `rand_core` | 0.10.1 | Apache-2.0 OR MIT | [link](https://github.com/rust-random/rand_core) |
 | `rand_pcg` | 0.10.2 | Apache-2.0 OR MIT | [link](https://github.com/rust-random/rngs) |
 | `redox_users` | 0.5.2 | MIT | [link](https://gitlab.redox-os.org/redox-os/users) |
-| `reqwest` | 0.13.4 | Apache-2.0 OR MIT | [link](https://github.com/seanmonstar/reqwest) |
+| `reqwest` | 0.13.5 | Apache-2.0 OR MIT | [link](https://github.com/seanmonstar/reqwest) |
 | `ring` | 0.17.14 | Apache-2.0 AND ISC | [link](https://github.com/briansmith/ring) |
 | `rpassword` | 7.5.4 | Apache-2.0 | [link](https://github.com/conradkleinespel/rpassword) |
 | `rtoolbox` | 0.0.5 | Apache-2.0 | [link](https://github.com/conradkleinespel/rtoolbox) |
 | `rustc-hash` | 2.1.3 | Apache-2.0 OR MIT | [link](https://github.com/rust-lang/rustc-hash) |
 | `rustc_version` | 0.4.1 | Apache-2.0 OR MIT | [link](https://github.com/djc/rustc-version-rs) |
 | `rustix` | 1.1.4 | Apache-2.0 OR Apache-2.0 WITH LLVM-exception OR MIT | [link](https://github.com/bytecodealliance/rustix) |
-| `rustls` | 0.23.37 | Apache-2.0 OR ISC OR MIT | [link](https://github.com/rustls/rustls) |
+| `rustls` | 0.23.46 | Apache-2.0 OR ISC OR MIT | [link](https://github.com/rustls/rustls) |
 | `rustls-native-certs` | 0.8.4 | Apache-2.0 OR ISC OR MIT | [link](https://github.com/rustls/rustls-native-certs) |
 | `rustls-pki-types` | 1.14.0 | Apache-2.0 OR MIT | [link](https://github.com/rustls/pki-types) |
 | `rustls-platform-verifier` | 0.7.0 | Apache-2.0 OR MIT | [link](https://github.com/rustls/rustls-platform-verifier) |
 | `rustls-platform-verifier-android` | 0.1.1 | Apache-2.0 OR MIT | [link](https://github.com/rustls/rustls-platform-verifier) |
-| `rustls-webpki` | 0.103.13 | ISC | [link](https://github.com/rustls/webpki) |
+| `rustls-webpki` | 0.103.16 | ISC | [link](https://github.com/rustls/webpki) |
 | `rustversion` | 1.0.22 | Apache-2.0 OR MIT | [link](https://github.com/dtolnay/rustversion) |
 | `ryu` | 1.0.23 | Apache-2.0 OR BSL-1.0 | [link](https://github.com/dtolnay/ryu) |
 | `same-file` | 1.0.6 | MIT OR Unlicense | [link](https://github.com/BurntSushi/same-file) |
@@ -302,7 +326,7 @@ Collected via `cargo license --json` inside `cli/` (241 crates).
 | `serde` | 1.0.229 | Apache-2.0 OR MIT | [link](https://github.com/serde-rs/serde) |
 | `serde_core` | 1.0.229 | Apache-2.0 OR MIT | [link](https://github.com/serde-rs/serde) |
 | `serde_derive` | 1.0.229 | Apache-2.0 OR MIT | [link](https://github.com/serde-rs/serde) |
-| `serde_json` | 1.0.151 | Apache-2.0 OR MIT | [link](https://github.com/serde-rs/json) |
+| `serde_json` | 1.0.154 | Apache-2.0 OR MIT | [link](https://github.com/serde-rs/json) |
 | `serde_yaml_ng` | 0.10.0 | MIT | [link](https://github.com/acatton/serde-yaml-ng) |
 | `shlex` | 1.3.0 | Apache-2.0 OR MIT | [link](https://github.com/comex/rust-shlex) |
 | `signal-hook-registry` | 1.4.8 | Apache-2.0 OR MIT | [link](https://github.com/vorner/signal-hook) |
@@ -320,8 +344,8 @@ Collected via `cargo license --json` inside `cli/` (241 crates).
 | `synstructure` | 0.13.2 | MIT | [link](https://github.com/mystor/synstructure) |
 | `system-configuration` | 0.7.0 | Apache-2.0 OR MIT | [link](https://github.com/mullvad/system-configuration-rs) |
 | `system-configuration-sys` | 0.6.0 | Apache-2.0 OR MIT | [link](https://github.com/mullvad/system-configuration-rs) |
-| `tabled` | 0.21.0 | MIT | [link](https://github.com/zhiburt/tabled) |
-| `tabled_derive` | 0.11.0 | MIT | [link](https://github.com/zhiburt/tabled) |
+| `tabled` | 0.22.0 | MIT | [link](https://github.com/zhiburt/tabled) |
+| `tabled_derive` | 0.12.0 | MIT | [link](https://github.com/zhiburt/tabled) |
 | `tempfile` | 3.27.0 | Apache-2.0 OR MIT | [link](https://github.com/Stebalien/tempfile) |
 | `testing_table` | 0.3.0 | MIT | [link](https://github.com/zhiburt/tabled) |
 | `thiserror` | 2.0.20 | Apache-2.0 OR MIT | [link](https://github.com/dtolnay/thiserror) |
@@ -329,7 +353,7 @@ Collected via `cargo license --json` inside `cli/` (241 crates).
 | `tinystr` | 0.8.3 | Unicode-3.0 | [link](https://github.com/unicode-org/icu4x) |
 | `tinyvec` | 1.13.2 | Apache-2.0 OR MIT OR Zlib | [link](https://github.com/Lokathor/tinyvec) |
 | `tinyvec_macros` | 0.1.1 | Apache-2.0 OR MIT OR Zlib | [link](https://github.com/Soveu/tinyvec_macros) |
-| `tokio` | 1.53.1 | MIT | [link](https://github.com/tokio-rs/tokio) |
+| `tokio` | 1.54.1 | MIT | [link](https://github.com/tokio-rs/tokio) |
 | `tokio-macros` | 2.7.0 | MIT | [link](https://github.com/tokio-rs/tokio) |
 | `tokio-rustls` | 0.26.4 | Apache-2.0 OR MIT | [link](https://github.com/rustls/tokio-rustls) |
 | `tokio-util` | 0.7.18 | MIT | [link](https://github.com/tokio-rs/tokio) |
@@ -364,7 +388,7 @@ Collected via `cargo license --json` inside `cli/` (241 crates).
 | `wasmparser` | 0.244.0 | Apache-2.0 OR Apache-2.0 WITH LLVM-exception OR MIT | [link](https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wasmparser) |
 | `web-sys` | 0.3.94 | Apache-2.0 OR MIT | [link](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/web-sys) |
 | `web-time` | 1.1.0 | Apache-2.0 OR MIT | [link](https://github.com/daxpedda/web-time) |
-| `webpki-root-certs` | 1.0.9 | CDLA-Permissive-2.0 | [link](https://github.com/rustls/webpki-roots) |
+| `webpki-root-certs` | 1.0.11 | CDLA-Permissive-2.0 | [link](https://github.com/rustls/webpki-roots) |
 | `winapi-util` | 0.1.11 | MIT OR Unlicense | [link](https://github.com/BurntSushi/winapi-util) |
 | `windows-link` | 0.2.1 | Apache-2.0 OR MIT | [link](https://github.com/microsoft/windows-rs) |
 | `windows-registry` | 0.6.1 | Apache-2.0 OR MIT | [link](https://github.com/microsoft/windows-rs) |
