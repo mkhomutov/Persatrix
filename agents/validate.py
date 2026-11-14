@@ -12,6 +12,7 @@ import importlib
 import importlib.util
 import io
 import json
+import math
 import re
 import sys
 from collections.abc import Iterator
@@ -24,10 +25,10 @@ import yaml
 
 # Map config filenames to their schema files.
 # Only files with a known schema are validated; unknown YAML files are skipped.
-# optimization.schema.json (RFC 0034 Phase 1 PR 2) is scoped to the
-# conversation_window block only — the Go orchestrator owns the rest of
-# the optimisation surface, so the schema leaves unknown top-level keys
-# unconstrained.
+# optimization.schema.json describes the blocks of optimization.yaml that
+# have a fixed shape, `cost` among them (ISSUE-0211), and requires `cost`.
+# It leaves unknown top-level keys unconstrained: the top level also holds
+# one block per optimization profile, under names the operator chooses.
 # TODO: Add bridges.yaml, mcp-servers.yaml when JSON schemas are created
 #       for them.
 _SCHEMA_MAP: dict[str, str] = {
@@ -42,8 +43,10 @@ _SCHEMA_MAP: dict[str, str] = {
 # Config files that may not be empty, blank, comment-only or null. Every
 # other file may be: it then sets nothing. An empty organizations.yaml
 # would pass without the `organizations` list its schema requires; a file
-# declares no organization with `organizations: []` (RFC 0012 §B).
-_MUST_DECLARE = frozenset({"organizations.yaml"})
+# declares no organization with `organizations: []` (RFC 0012 §B). An empty
+# optimization.yaml would pass without the `cost` block its schema requires,
+# and the orchestrator refuses a file with no `cost.budgets` (ISSUE-0211).
+_MUST_DECLARE = frozenset({"organizations.yaml", "optimization.yaml"})
 
 # Workflow files live in a separate directory and share one schema.
 _WORKFLOW_SCHEMA = "workflow.schema.json"
@@ -209,6 +212,14 @@ def _validate_yaml_against_schema(
         # schema names the key the file must have.
         content = {}
 
+    # JSON Schema cannot refuse these: `minimum` passes NaN, and nothing is
+    # greater than infinity. No setting means anything as either, and a
+    # spending limit written so caps nothing (ISSUE-0211).
+    for json_path, value in _non_finite_numbers(content, ""):
+        errors.append(ValidationError(
+            str(yaml_path), f"{value!r} is not a finite number", json_path,
+        ))
+
     validator = _Validator(schema)
     for error in sorted(validator.iter_errors(content), key=lambda e: list(e.absolute_path)):
         json_path = ".".join(str(p) for p in error.absolute_path)
@@ -218,6 +229,20 @@ def _validate_yaml_against_schema(
         errors.append(ValidationError(str(yaml_path), refusal or error.message, json_path))
 
     return content, errors
+
+
+def _non_finite_numbers(node: Any, where: str) -> list[tuple[str, float]]:
+    """Every ``.nan`` and ``.inf`` in a loaded document, with its path."""
+    if isinstance(node, float) and not math.isfinite(node):
+        return [(where, node)]
+    found: list[tuple[str, float]] = []
+    if isinstance(node, dict):
+        for key, value in node.items():
+            found += _non_finite_numbers(value, f"{where}.{key}" if where else str(key))
+    elif isinstance(node, list):
+        for index, value in enumerate(node):
+            found += _non_finite_numbers(value, f"{where}.{index}" if where else str(index))
+    return found
 
 
 def validate_config_dir(

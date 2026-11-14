@@ -60,16 +60,25 @@ func TestLoadCostConfig_InvalidYAML(t *testing.T) {
 	assert.Contains(t, err.Error(), "parse optimization config")
 }
 
+// A file with no `cost:` block used to load, with every spending limit at
+// zero, which means no limit. It is refused since ISSUE-0211: a misspelled
+// `cost` key leaves exactly this file.
 func TestLoadCostConfig_EmptyCostSection(t *testing.T) {
-	dir := t.TempDir()
-	data := `schema_version: "0.1"
-`
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "optimization.yaml"), []byte(data), 0o644))
+	for name, data := range map[string]string{
+		"no cost block": "schema_version: \"0.1\"\n",
+		"an empty file": "",
+		"only comments": "# nothing set\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "optimization.yaml"), []byte(data), 0o644))
 
-	cfg, err := LoadCostConfig(dir)
-	require.NoError(t, err)
-	assert.NotNil(t, cfg.Pricing)
-	assert.Empty(t, cfg.Pricing)
+			_, err := LoadCostConfig(dir)
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "cost.budgets is missing")
+		})
+	}
 }
 
 // --- BudgetError ---

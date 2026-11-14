@@ -72,3 +72,12 @@ agent-facing listener or a missing wallet.
 
 > 2026-11-10 — found by a whole-repository quality review of `main` at
 > `ee9cfaac`; reproduced with a scratch-built orchestrator binary.
+
+> 2026-11-13 — the fix for
+> [ISSUE-0211](ISSUE-0211-misspelled-budget-key-removes-every-spending-cap.md)
+> makes the cost-config path above easier to reach: a key the `cost`
+> block does not have, and a file with no `cost.budgets`, are now load
+> errors, where they used to load as "no limit". Such a file leaves the
+> orchestrator running with no wallet service. That is the safe side of
+> the old behaviour, and it is still this issue's half-working state.
+> This issue itself is unchanged.

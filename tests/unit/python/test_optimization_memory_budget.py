@@ -187,6 +187,9 @@ class TestShippedConfigAndSchema:
         self, tmp_path: Path, body: str, valid: bool,
     ) -> None:
         """Through the validator ``make validate`` runs, not a private copy."""
+        # The schema requires the cost block (ISSUE-0211); without it the
+        # invalid cases would fail for that reason and prove nothing.
+        body = "cost:\n  budgets: {}\n" + body
         _write(tmp_path / "optimization.yaml", body)
         assert yaml.safe_load(body)  # the body is a real document
         ok, errors, checked = validate_config_dir(str(tmp_path), str(SCHEMAS_DIR))

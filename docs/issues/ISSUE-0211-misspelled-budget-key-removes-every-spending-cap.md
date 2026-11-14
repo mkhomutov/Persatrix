@@ -1,12 +1,19 @@
 ---
 id: ISSUE-0211
 summary: "The optimization schema has no `cost` section and the Go loader ignores unknown keys, and a limit of zero means no limit. So a misspelled `budgets` key passes `make validate` and loads all three spending caps as unlimited, with one startup log line as the only sign."
-status: open
+status: resolved
 severity: medium
 area: cost
 created: 2026-11-10
+closed: 2026-11-14
+closed_pr: 1113
 refs:
   - internal/cost/config.go
+  - cmd/orchestrator/cost.go
+  - internal/cost/cost_config_strict_test.go
+  - internal/wallet/config_strict_test.go
+  - tests/unit/python/test_optimization_cost_schema.py
+  - Makefile
   - internal/cost/cost.go
   - internal/wallet/config.go
   - schemas/optimization.schema.json
@@ -68,3 +75,70 @@ control off. The wrong key is silent at validation and at load.
 
 > 2026-11-10 — found by a whole-repository quality review of `main` at
 > `ee9cfaac`; reproduced on a scratch copy of the config folder.
+
+> 2026-11-13 — fixed. Checked against the code at `dd006cba` first: both
+> renames (`budgets` to `budgetz`, `cost` to `costs`) pass validation and
+> load all three limits as 0 there. Two things in the proposed fix did
+> not hold as written:
+>
+> - **The schema's top level cannot be closed.** Besides `active_profile`
+>   it holds one block per optimization profile, under names the operator
+>   chooses (`agents/optimization.py` reads `cfg[<active_profile>]`), so a
+>   closed list would refuse a profile. The schema requires `cost`
+>   instead: a misspelled `cost` reads as one more profile, and the
+>   missing block gives it away.
+> - **The whole file can be decoded strictly after all.** The loader's
+>   struct takes every top-level key it does not own in an inline map,
+>   which the strict check leaves alone, so only the `cost` block is
+>   checked. Error lines are the file's own.
+>
+> What changed:
+>
+> - `LoadCostConfig` refuses a key under `cost` it does not know, and a
+>   file with no `cost.budgets`. The wallet loader refuses an unknown key
+>   under `wallet` the same way.
+> - The schema describes `cost`, closed at every level, and requires it
+>   and `cost.budgets`.
+> - Both options for a missing or empty limit were taken, one each: a
+>   missing `cost.budgets` is an error, and limits that are present and
+>   all zero (the way to say "no limit" on purpose, which the EXP-001
+>   harness does) get a start-up warning.
+> - `make validate` runs over each demo folder as well. All eight
+>   shipped files pass unchanged.
+>
+> A refused cost config leaves the orchestrator running with no wallet,
+> so agents' model calls fail: that is
+> [ISSUE-0204](ISSUE-0204-grpc-server-starts-only-if-the-log-buffer-did.md)'s
+> second path, which this fix makes easier to reach and does not change.
+
+> 2026-11-14 — review of the fix. Nothing above low; six things changed.
+>
+> - **An empty file passed `make validate`.** The validator calls a file
+>   with nothing in it valid unless it is told the file must declare
+>   something, and `optimization.yaml` was not on that list. So an
+>   empty, comment-only or null file validated, and the orchestrator
+>   refused it. It is on the list now.
+> - **`.nan` and `.inf` limits loaded and capped nothing.** Every
+>   comparison with NaN is false and nothing exceeds infinity; neither is
+>   zero, so the no-limit warning stayed silent too. The loader refuses a
+>   limit that is not a finite number, and the validator refuses such a
+>   number anywhere in a config file (JSON Schema cannot).
+> - **`budgets:` with every line under it commented out** is a key with
+>   no value and is refused as a missing block. That is intended, but the
+>   error said "missing" and the advice said "leave the limits out". The
+>   error and the texts now name `budgets: {}`.
+> - **The extension spec's sample `cost:` block is refused** by both
+>   layers: four of its keys are design, not built. The spec has a note.
+> - The texts said model calls fail "until the file is fixed"; the file
+>   is read once, so it is until the orchestrator is restarted too.
+> - Tests: the "closed at every level" walk missed an object written
+>   without a `type` keyword and anything inside a list; each schema
+>   value rule was checked at one site only; and CI validated `config/`
+>   but not the demo folders `make validate` walks. All three are closed.
+>
+> Left as it is: the validator is stricter than the loader for a key
+> with no value under `cost` and for a negative price, both on the safe
+> side. And two slips are outside what this fix can see, because the
+> file's top level is open: `per_agent:` moved out to column 0 loads as
+> "no per-agent limit" with the other two limits still set, so without a
+> warning; and `walet:` for `wallet:` loads the wallet's defaults.
