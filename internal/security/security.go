@@ -19,6 +19,18 @@
 //     gets one reply. The login routes use two RateLimiters of their own.
 //   - [GRPCRecoveryInterceptor] and [GRPCStreamRecoveryInterceptor]: stop a
 //     panic in a gRPC handler from crashing the orchestrator.
+//   - [AgentEnrollment], made by [NewAgentEnrollment]: registers an agent
+//     and issues its token as one step, and deregisters it and revokes its
+//     tokens as one step (RFC 0009 Phase 4). The REST server's registration
+//     and deregistration routes go through it under either `auth.mode`.
+//   - [AgentTokenIssuer], made by [NewAgentTokenIssuer]: issues each agent a
+//     signed token that names it, checks a token and revokes an agent's
+//     tokens (RFC 0009 Phase 4). Registration answers with a token under
+//     either mode. Tokens are checked in one place only: on REST calls
+//     under `auth.mode: enabled`. There a call that shows a token is
+//     refused unless the token is good and names the same agent as the
+//     X-Agent-ID beside it, when the call sends one. Registration, which
+//     is how an agent gets a token, checks none.
 //
 // The rate limiter has gaps. Agent IDs are self-reported on gRPC, and on
 // REST under `auth.mode: disabled`, so a caller can invent one to get a
@@ -33,6 +45,19 @@
 // carries agents' logs to the orchestrator skips both checks.
 // And a quarantine does not stop the orchestrator sending the agent tasks,
 // though RFC 0009 says it should.
+//
+// Agent tokens have gaps too. `auth.mode` is `disabled` as shipped, and
+// then no token is checked. Under `enabled` the REST server goes by the
+// agent a token proves for the rate limit, the quarantine and the sender
+// of a channel message, but the routes the agents use need no credential:
+// a caller that shows none can read channel lists and histories, and
+// register or deregister an agent. Only a publish is bound to its caller:
+// its sender must be the agent a token proves, or the signed-in account's
+// own participant. No gRPC call checks a token under either mode. And a
+// token proves less than it should: registration admits a caller that
+// shows no fleet enrollment secret even when one is set (only a wrong
+// secret is refused), and deregistration is open, so anyone who can reach
+// the server can register under an agent's ID and be given a token for it.
 //
 // Built but not called by the orchestrator yet:
 //
@@ -50,17 +75,14 @@
 //   - [VerifyChain], which checks an audit log's checksum chain and reports
 //     the first break. Only tests call it: neither the orchestrator nor the
 //     CLI checks the chain.
-//   - [AgentTokenIssuer], made by [NewAgentTokenIssuer]: issues each agent a
-//     signed token that names it, checks a token and revokes an agent's
-//     tokens (RFC 0009 Phase 4). Registration hands tokens out, but no call
-//     is checked against one yet.
-//   - [AgentEnrollment], made by [NewAgentEnrollment]: registers an agent
-//     and issues its token as one step, and deregisters it and revokes its
-//     tokens as one step, for every server that registers agents.
 //
-// Planned: checking agent tokens on the agents' calls, so the orchestrator
-// knows which agent is calling (RFC 0009 Phase 4). Until then, the agent ID
-// a caller sends is taken on trust. ROADMAP.md has the target release.
+// Planned for agent identity (RFC 0009 Phase 4), all under `enabled`:
+// closing the agents' routes to a caller with no credential, requiring the
+// enrollment secret at registration, binding deregistration to the agent
+// itself or an operator, and checking tokens on the wallet's gRPC calls.
+// Until then an agent's ID is proved only where the list above says a
+// token is checked, and is taken on trust everywhere else. ROADMAP.md has
+// the target release.
 //
 // Tool permissions are checked in the Python agents: PermissionGate in
 // agents/tools/permissions.py (deny-by-default) and PathValidator in

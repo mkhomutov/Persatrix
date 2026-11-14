@@ -44,10 +44,14 @@ routable bind). Two limits to know before exposing a deployment:
 
 - **Enabled beyond localhost requires HTTPS** — the browser session cookie is
   `Secure` and is silently dropped over plain HTTP on non-loopback origins.
-- **The agent-attributable REST ingress stays unauthenticated by design**
+- **The agent-attributable REST ingress stays public by design**
   (persona agents hold no accounts; their authorization story is the RFC 0009
-  agent-token track) — anonymous channel reads/writes remain possible on a
-  routable bind. Keep that surface network-restricted to the agent fleet; see
+  agent-token track, which is part built) — on a routable bind, channel lists
+  and message histories stay readable without a login. A publish must name
+  its caller, an agent by its token or a signed-in account, but
+  registration admits a caller that shows no enrollment secret, so anyone who
+  can reach the server can register under a persona's ID and post as it. Keep
+  that surface network-restricted to the agent fleet; see
   the [auth guide](docs/guides/auth.md#what-stays-open-under-enabled--the-agent-ingress).
 
 Account administration, self-service password change, and failed-login lockout
