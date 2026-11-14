@@ -207,7 +207,6 @@ func New(addr, workflowsDir string, store state.Store, reg registry.Registry, pl
 // registerRoutes sets up all HTTP routes on the server's mux.
 func (s *Server) registerRoutes() {
 	// TODO(v0.2): rename /api/v1/workflows to /api/v1/workflows/runs when definition endpoints are added
-	// TODO(spec-sync): update ai-agents-orchestration-spec.md §8.3 to include GET /api/v1/workflows and DELETE /api/v1/workflows/{id}
 
 	// Workflow run endpoints (Phase 1)
 	s.mux.HandleFunc("POST /api/v1/workflows/run", s.handleSubmitWorkflowRun)

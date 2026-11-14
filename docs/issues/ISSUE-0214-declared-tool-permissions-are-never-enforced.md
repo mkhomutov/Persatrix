@@ -71,3 +71,11 @@ spawner.
 
 > 2026-11-10 — found by a whole-repository quality review of `main` at
 > `ee9cfaac`; confirmed by reading the code.
+
+> 2026-11-14 — the spec half of "correct the spec and the two instruction
+> lines" is done by the fix for
+> [ISSUE-0227](ISSUE-0227-canonical-specs-describe-unbuilt-features-as-built.md):
+> both specs now carry a note at the custom-tool example, at the
+> permission gate's "every tool invocation" claim and at the sub-agent
+> rule, each saying it is not enforced and linking here. The two
+> instruction lines are unchanged and still part of this issue.

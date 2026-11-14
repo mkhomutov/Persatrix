@@ -89,7 +89,7 @@ Per-language details are in `.github/instructions/`. Key rules:
 | `docs/issues/` | Deferred/cross-cutting findings (`make issues` to list) |
 | `workflows/` | Workflow DAG definitions |
 
-Full details: [ai-agents-orchestration-spec.md](../docs/ai-agents-orchestration-spec.md), [persatrix-extension-spec.md](../docs/persatrix-extension-spec.md).
+How things work today: the guides in `docs/guides/`, [observability.md](../docs/observability.md) and [ROADMAP.md](../ROADMAP.md). The two specs, [ai-agents-orchestration-spec.md](../docs/ai-agents-orchestration-spec.md) and [persatrix-extension-spec.md](../docs/persatrix-extension-spec.md), are the April 2026 design, written before most of the code. Read them for intent, never as a description of what is built, and never to judge what protects a deployment.
 
 ## Terminology
 

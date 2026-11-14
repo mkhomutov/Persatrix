@@ -1,5 +1,24 @@
 # Persatrix — Extension: Agent Societies, Communication & Organizational Modeling
 
+> **Read this first: an April 2026 design, not a description of what is built.**
+> This document was written before most of the code existed and has not been
+> kept in step with it. Much of what it says in the present tense was never
+> built, was built differently, or arrived later under another name. That
+> includes security controls, so do not use it to judge what protects a
+> deployment. The [orchestration spec](ai-agents-orchestration-spec.md) it
+> extends carries the same warning.
+>
+> For what Persatrix does today, read the guides
+> ([channels](guides/channels.md), [persona agents](guides/persona-agents.md),
+> [authentication](guides/auth.md), [model providers](guides/model-providers.md)),
+> [Observability](observability.md), and [ROADMAP.md](../ROADMAP.md), which
+> says of each component whether it is built. [FILEMAP.md](../FILEMAP.md)
+> lists the files that exist.
+>
+> Notes inside the sections below, marked "Planned" or dated, correct the
+> claims that matter most, the security ones first. A section with no note
+> has not been checked against the code.
+
 > This document extends the core MVP specification with support for rich agent
 > personas, organizational structures, multi-channel communication (including
 > external services like email and messengers), and autonomous agent behavior.
@@ -102,6 +121,14 @@ agent:
   tools: [...]
   permissions: {... }
 ```
+
+> 2026-11-14 — this example is the April shape and fails `make validate`
+> today. [`schemas/agent.schema.json`](../schemas/agent.schema.json)
+> requires `type` and `role` on the agent and `behavior` inside `persona`,
+> and refuses `persona.personality` and `autonomy.can_refuse_tasks`. The
+> file also holds a list under `agents:`, not one `agent:`. The
+> [persona agents guide](guides/persona-agents.md) and `config/agents.yaml`
+> show a persona that loads.
 
 ### E2.2 Persona Composition
 
@@ -363,6 +390,11 @@ either — even if explicitly requested. The orchestrator enforces this.
 # The sub-agent can READ code and use GitHub MCP, but cannot
 # write files or run shell commands. Perfect for a read-only review.
 ```
+
+> **Status:** 📋 **Planned** — the "iron rule" above is not enforced. No
+> code spawns a sub-agent yet, and the check that a sub-agent gets no more
+> than its parent is not written
+> ([ISSUE-0214](issues/ISSUE-0214-declared-tool-permissions-are-never-enforced.md)). The orchestrator has no part in it.
 
 #### E3.2.5 Sub-Agent Patterns
 
@@ -717,7 +749,21 @@ message Attachment {
 }
 ```
 
+> 2026-11-14 — the `Visibility` values above are not built. No message is
+> encrypted, in transit or stored: `proto/` has no such field, and the
+> orchestrator and its agents talk over gRPC without TLS. Keep that traffic
+> on one host or a private network. The
+> [authentication guide](guides/auth.md#https-is-required-beyond-localhost)
+> says what the REST side needs beyond localhost.
+
 ### E5.4 External Communication Bridges
+
+> **Status:** 📋 **Planned** — not built yet; this section is the design. No
+> bridge exists, nothing reads `config/bridges.yaml`, and
+> [`internal/bridges`](../internal/bridges/bridges.go) is a placeholder. So
+> none of the safeguards under "Bridge Security Model" below exists either:
+> no outbound approval, no bridge rate limit, no content filter and no
+> bridge audit.
 
 Bridges connect the internal message bus to real-world communication platforms.
 Each bridge is a **bidirectional adapter**: it can send messages out and receive
@@ -940,6 +986,11 @@ protocols:
 
 ## E6. Distributed Agent Mesh
 
+> **Status:** 📋 **Planned** — not built yet; all of E6 is the design.
+> [`internal/mesh`](../internal/mesh/mesh.go) is a placeholder. Today one
+> orchestrator talks to the agents that register with it, with no nodes, no
+> node admission and no trust domains.
+
 The framework does not assume agents run on the same machine — or even in the
 same network. A persona is a **network-addressable service** that can be
 deployed anywhere: a local process, a container in the cloud, a Raspberry Pi in
@@ -1144,6 +1195,14 @@ mesh:
 ```
 
 ### E6.5 Distributed Security
+
+> **Status:** 📋 **Planned** — not built yet. None of the controls in this
+> section exists: no mutual TLS, no node admission, no trust domains, no
+> data-residency rules and no end-to-end encryption. What is built: the
+> orchestrator and its agents talk over gRPC without TLS; agents can be made
+> to show a fleet enrollment secret and are then given a token that proves
+> which agent is calling; people sign in with accounts and roles. The
+> [authentication guide](guides/auth.md) describes both.
 
 Distribution multiplies the attack surface. New threats and mitigations:
 
@@ -1731,6 +1790,11 @@ evaluations:
 ```
 
 ### E8.6 A2A Protocol Compatibility
+
+> **Status:** 📋 **Planned** — not built yet; this section is the design.
+> [`internal/a2a`](../internal/a2a/a2a.go) is a placeholder: the
+> orchestrator serves no Agent Card and no A2A route, so the bearer and
+> OAuth settings and the `trust_level` rules below protect nothing yet.
 
 The **Agent2Agent (A2A) protocol**, launched by Google and now under the Linux
 Foundation, is the emerging standard for inter-agent communication across
@@ -2686,6 +2750,14 @@ simulation:
 
 ### E10.3 Observer Privacy & Consent
 
+> **Status:** 📋 **Planned** — not built yet. The observer mode of E10 does
+> not exist and no `observation:` block is read, so nothing here is applied:
+> no disclosure text is added to a prompt, no export is anonymized, and
+> there are no consent levels. (A channel member set to `observer` is a
+> different thing: a member that never speaks.) Who may read what today is
+> decided by accounts and roles
+> ([authentication guide](guides/auth.md#the-role-gate)).
+
 For research and social experiments, ethical observation requires informed
 consent and data protection:
 
@@ -2886,6 +2958,9 @@ v0.3 Distribution (depends on Channels + Registry):
 > checkpoint portability. The state backend is abstracted behind interfaces so
 > it can be upgraded to PostgreSQL or a distributed store without changing
 > agent code.
+
+> 2026-11-14 — the audit log is not in SQLite. It is one file of JSON lines
+> ([Observability §13](observability.md#13-security-audit-log-rfc-0009-pr-1b)).
 
 ### MVP v0.1 — Core Engine (original scope, Weeks 1–8)
 Everything in the current spec: orchestrator, workflows, tools, MCP, security,

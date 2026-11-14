@@ -77,4 +77,4 @@ ROADMAP header's latest-changes note short.
 - Branching and commits: `docs/BRANCHING.md`
 - RFCs: `docs/rfcs/README.md`, live list `docs/rfcs/INDEX.md` (`make rfcs`)
 - Issues: `docs/issues/README.md`, live list `docs/issues/INDEX.md` (`make issues`)
-- Specs: `docs/ai-agents-orchestration-spec.md`, `docs/persatrix-extension-spec.md`
+- Specs, the April 2026 design and not a description of what is built (for that: `docs/guides/`, `ROADMAP.md`): `docs/ai-agents-orchestration-spec.md`, `docs/persatrix-extension-spec.md`

@@ -1,5 +1,23 @@
 # Persatrix — AI Agents Orchestration Framework — MVP Specification
 
+> **Read this first: an April 2026 design, not a description of what is built.**
+> This document was written before most of the code existed and has not been
+> kept in step with it. Much of what it says in the present tense was never
+> built, was built differently, or arrived later under another name. That
+> includes security controls, so do not use it to judge what protects a
+> deployment.
+>
+> For what Persatrix does today, read the guides
+> ([channels](guides/channels.md), [persona agents](guides/persona-agents.md),
+> [authentication](guides/auth.md), [model providers](guides/model-providers.md)),
+> [Observability](observability.md), and [ROADMAP.md](../ROADMAP.md), which
+> says of each component whether it is built. [FILEMAP.md](../FILEMAP.md)
+> lists the files that exist.
+>
+> Notes inside the sections below, marked "Planned" or dated, correct the
+> claims that matter most, the security ones first. A section with no note
+> has not been checked against the code.
+
 ## 1. Vision
 
 A general-purpose **agent society engine** — a runtime for creating, connecting,
@@ -297,6 +315,13 @@ Bundled with the framework, always available:
 | `store_get`   | Read from key-value execution context          |
 | `store_set`   | Write to key-value execution context           |
 
+> 2026-11-14 — what is built: the first four exist
+> ([`agents/tools/builtin.py`](../agents/tools/builtin.py)). `store_get` and
+> `store_set` do not, and nothing takes their place. None is "always
+> available": an agent runs only the tools on its `tools` list, and each
+> needs its permission. For "sandboxed", see the note under
+> [6.3](#63-sandboxing).
+
 #### Tier 2: Custom Tools
 User-defined tools registered via Python functions:
 
@@ -312,6 +337,15 @@ def query_database(query: str, database: str = "main") -> ToolResult:
     # implementation
     return ToolResult(success=True, data=rows)
 ```
+
+> 2026-11-14 — two corrections to this example. The import is not the real
+> one: the decorator and `ToolResult` are in
+> [`agents/tools/registry.py`](../agents/tools/registry.py), and the package
+> installs as `persatrix_agents`
+> (`from persatrix_agents.tools.registry import tool, ToolResult`). And
+> `permissions=["db:read"]` protects nothing: a custom tool's declared
+> permissions are stored and never checked, so the tool runs for any agent
+> that lists it ([ISSUE-0214](issues/ISSUE-0214-declared-tool-permissions-are-never-enforced.md)).
 
 #### Tier 3: MCP Tools (External Servers)
 Tools exposed by external MCP-compatible servers (see 5.2).
@@ -486,6 +520,20 @@ agent:
 >   example above lists none; `config/agents.yaml` shows a second example
 >   for an agent that trusts its workspace.
 
+> 2026-11-14 — two more corrections to this section
+> ([ISSUE-0227](issues/ISSUE-0227-canonical-specs-describe-unbuilt-features-as-built.md)):
+>
+> - **Two parts of the example are not built**, and a config copied from it
+>   fails `make validate`: `shell.deny_commands` and the whole `mcp` block
+>   are keys [`schemas/agent.schema.json`](../schemas/agent.schema.json)
+>   refuses.
+> - **A refused permission is not a security event.** The agent writes a
+>   warning to its own log and tells the model the call was denied. Nothing
+>   is written to the audit log ([6.6](#66-audit-trail)).
+> - **Not every tool passes through the gate.** Each built-in tool checks
+>   the gate in its own code. Nothing checks it for a custom tool, whatever
+>   permissions that tool declares ([ISSUE-0214](issues/ISSUE-0214-declared-tool-permissions-are-never-enforced.md)).
+
 ### 6.3 Sandboxing
 
 | Layer               | Mechanism                                              |
@@ -518,6 +566,21 @@ resource_limits:
 > and a cap on any tool's output (`tool_output_bytes`), each off until set;
 > `schemas/agent.schema.json` has the ranges.
 
+> 2026-11-14 — what is built of the table at the top of this section:
+>
+> - **Process isolation**: built. Each agent is its own process, and in the
+>   shipped compose stack its own container.
+> - **Filesystem sandbox**: there is no `chroot` and no bind-mount limit.
+>   The two file tools check each path against the agent's `filesystem`
+>   rules ([6.2](#62-permission-system)). A shell command runs outside those
+>   rules and can read whatever the agent's user can.
+> - **Network restrictions**: there is no egress proxy. `http_request` checks
+>   the host against `network.allow`; nothing limits what a shell command
+>   connects to.
+> - **Shell sandboxing**: a command is run without a shell (`shell=True` is
+>   never used) and checked on its leading words. Its arguments are not
+>   validated.
+
 ### 6.4 Secrets Management
 
 - **Never in YAML directly** — secrets use `${ENV_VAR}` references, resolved at runtime
@@ -537,6 +600,21 @@ secrets:
       - "ghp_[a-zA-Z0-9]{36}"   # GitHub tokens
       - "Bearer [a-zA-Z0-9-._~+/]+"
 ```
+
+> 2026-11-14 — what is built is less than the four bullets say:
+>
+> - **`${ENV_VAR}` references**: no config file is expanded this way, and
+>   there is no `secrets:` block. Secrets (provider API keys, the fleet
+>   enrollment secret) are read straight from environment variables.
+> - **Never in LLM context**: not enforced. A shell command's environment
+>   has the `SECURITY_*` variables taken out and keeps the provider API
+>   keys, so a command that prints its environment shows them to the model
+>   ([`agents/tools/sandbox.py`](../agents/tools/sandbox.py)).
+> - **Redaction in logs**: not for ordinary logs. By default a log record
+>   is written as it is ([Observability §7](observability.md#7-redaction-hook)).
+>   Only the security audit log and the decision log mask secrets.
+> - **MCP server isolation**: MCP is not built
+>   ([5.2](#52-mcp-model-context-protocol-support)).
 
 ### 6.5 Prompt Injection Defenses
 
@@ -561,6 +639,23 @@ secrets:
          approval_timeout: 3600       # auto-cancel after 1 hour
    ```
 
+> 2026-11-14 — what is built of the four defenses:
+>
+> 1. **Tagging**: there is no `<tool_result>` tag. The output of four tools
+>    (`file_read`, `http_request`, `shell_exec`, `recall_channel_messages`)
+>    is scanned for injection patterns and wrapped in `<external_data>`
+>    ([`agents/security.py`](../agents/security.py)). Every other tool's
+>    output reaches the model as it is.
+> 2. **Output validation**: not in use. The sub-agent spawner would check
+>    a sub-agent's result against the schema its parent asked for
+>    ([`agents/sub_agents/spawner.py`](../agents/sub_agents/spawner.py)),
+>    and nothing calls the spawner yet.
+> 3. **Field filtering**: not built.
+> 4. **Human approval gates**: not built. The workflow schema accepts
+>    `approval_required` and `approval_timeout`, and nothing reads them: a
+>    step marked this way runs without waiting for anyone
+>    ([ISSUE-0202](issues/ISSUE-0202-workflow-condition-and-approval-validate-then-do-nothing.md)).
+
 ### 6.6 Audit Trail
 
 Every action is logged to an append-only audit log:
@@ -583,7 +678,23 @@ Every action is logged to an append-only audit log:
 - All permission denials generate alerts
 - Audit logs are separate from application logs and tamper-resistant
 
+> 2026-11-14 — what is built is narrower
+> ([Observability §13](observability.md#13-security-audit-log-rfc-0009-pr-1b)).
+> The orchestrator keeps one audit log: a file of JSON lines, each carrying
+> a checksum of the line before it. It records agent registrations and
+> tokens, logins and refused requests, rate-limit violations and
+> quarantines, and one line for each task the orchestrator sends to an
+> agent. It does **not** record the tool calls an agent makes, it has no
+> `input_hash` or `output_hash`, and a refused tool permission writes
+> nothing to it. No event raises an alert. The checksums make a changed line
+> detectable, but nothing outside the tests checks the whole chain.
+
 ### 6.7 Error Handling & Resilience
+
+> **Status:** 📋 **Planned** — not built yet; no `resilience:` block is read.
+> The comment at the top of
+> [`internal/resilience/resilience.go`](../internal/resilience/resilience.go)
+> says what retrying exists today.
 
 The system must handle failures gracefully at every layer:
 
@@ -672,6 +783,17 @@ rate_limits:
     log_as: "security_event"
 ```
 
+> 2026-11-14 — what is built is one limit, not this block. The orchestrator
+> counts the calls each agent makes to it, 60 a minute by default
+> (`SECURITY_RATE_LIMIT_CALLS`, `SECURITY_RATE_LIMIT_WINDOW_SECONDS`),
+> refuses the calls over the cap, records the violation in the audit log,
+> and quarantines an agent that keeps hitting the cap
+> ([`cmd/orchestrator/ratelimit.go`](../cmd/orchestrator/ratelimit.go)).
+> Logins are throttled separately
+> ([authentication guide](guides/auth.md#login-throttling)). No
+> `rate_limits:` block is read, and a call over the cap is refused, not
+> queued.
+
 ### 6.9 External Input Sanitization
 
 All untrusted external input — inbound bridge messages, A2A task payloads,
@@ -711,6 +833,15 @@ external_input:
     max_payload_bytes: 1048576            # 1MB
 ```
 
+> 2026-11-14 — no `external_input:` block is read, and bridges, A2A and
+> webhooks are not built, so nothing arrives by those three routes. What is
+> built: an agent scans each channel message it receives, and the output of
+> four tools, for injection patterns, and wraps that tool output in
+> `<external_data>` ([`agents/security.py`](../agents/security.py)). A
+> flagged channel message is logged as a warning and passed on unchanged.
+> Nothing is held for review, and there is no HTML stripping, PII scan or
+> signature check.
+
 ---
 
 ## 7. MVP Feature Scope
@@ -719,7 +850,10 @@ external_input:
 
 > **Note:** this table is the scope v0.1 was planned with, not a record of
 > what shipped. Several rows landed in later versions and some are not built
-> yet; [ROADMAP](../ROADMAP.md) records what shipped when.
+> yet; [ROADMAP](../ROADMAP.md) records what shipped when. The security rows
+> (permissions, resource limits, rate limiting, secrets, audit logging) say
+> more than is built: the dated notes in [section 6](#6-security-model) say
+> what is.
 
 | Feature                  | Details                                              |
 |--------------------------|------------------------------------------------------|
@@ -757,7 +891,8 @@ external_input:
 - A2A protocol interoperability (v0.3)
 - Web dashboard / UI
 - Long-term memory / vector store integration
-- Authentication and multi-tenancy
+- Authentication and multi-tenancy (2026-11-14: accounts, login and roles
+  are built since; see the [authentication guide](guides/auth.md))
 - Container-level sandboxing (MVP uses process isolation)
 - MCP server hosting (MVP is client-only)
 - Plugin marketplace
@@ -929,89 +1064,37 @@ class PersonaAgent(BaseAgent):
         )
 ```
 
+> 2026-11-14 — sub-agent spawning is not in use: no code calls the spawner,
+> and the rule that a sub-agent gets no more than its parent ("child ≤
+> parent") is not enforced ([ISSUE-0214](issues/ISSUE-0214-declared-tool-permissions-are-never-enforced.md)).
+
 ### 8.3 Orchestrator API (Go)
 
-#### Core (v0.1)
-```
-POST   /api/v1/workflows/run               — execute a workflow
-GET    /api/v1/workflows/{id}/status        — poll execution status
-POST   /api/v1/agents/register              — register a new agent
-GET    /api/v1/agents                       — list all registered agents
-GET    /api/v1/agents/{id}                  — get agent details + state
-DELETE /api/v1/agents/{id}                  — unregister an agent
-GET    /api/v1/executions/{id}/logs         — retrieve execution logs
-GET    /api/v1/cost/summary                 — cost report by agent/workflow
-```
+> 2026-11-14 — the route list that stood here is removed
+> ([ISSUE-0227](issues/ISSUE-0227-canonical-specs-describe-unbuilt-features-as-built.md)).
+> It was written as a plan. Of its 42 routes the orchestrator serves 17,
+> and it serves 23 others the list never had: login, chat, channel members
+> and settings, threads, convene, unquarantine and the log stream among
+> them. No list is kept in its place, because one written by hand goes out
+> of date the same way.
 
-#### Channels & Communication (v0.2)
-```
-POST   /api/v1/channels                     — create a channel
-GET    /api/v1/channels                     — list channels
-GET    /api/v1/channels/{id}/messages       — get channel message history
-POST   /api/v1/channels/{id}/messages       — inject a message (observer/human)
-GET    /api/v1/channels/{id}/activity        — in-flight responders ("thinking" set; RFC 0048 console presence Tier 1)
-GET    /api/v1/channels/{id}/summary        — get AI-generated channel summary
-```
+Where the routes are:
 
-#### Session Registry (v0.3.5 — RFC 0031 Phase 3)
-```
-POST   /api/v1/sessions                     — create a named session (rejects the reserved `legacy` label)
-GET    /api/v1/sessions                     — list sessions (active only; ?include_archived=true widens it)
-GET    /api/v1/sessions/{id}                — resolve a session by id or label
-POST   /api/v1/sessions/{id}/archive        — archive a session (one-way; row + tagged memory preserved)
-```
+- **Registered**: in [`internal/server/`](../internal/server/server.go), by
+  `server.go`, `channel_routes.go`, `auth_handlers.go` and `ui.go`. Every
+  route the orchestrator answers is in one of the four.
+- **Who may call each**:
+  [`internal/server/auth_policy.go`](../internal/server/auth_policy.go),
+  explained in the [authentication guide](guides/auth.md#the-role-gate).
+- **How to use them**: the [channels guide](guides/channels.md) for
+  channels, messages and members; the
+  [persona agents guide](guides/persona-agents.md) for chat;
+  [Observability](observability.md) for logs.
 
-#### Organizations & Personas (v0.2)
-```
-POST   /api/v1/organizations                — create an organization
-GET    /api/v1/agents/{id}/state            — get persona dynamic state
-PUT    /api/v1/agents/{id}/state            — update persona state (observer)
-GET    /api/v1/agents/{id}/relationships    — get relationship map
-```
-
-#### Sub-Agents (v0.2)
-```
-GET    /api/v1/agents/{id}/sub-agents       — list active sub-agents for a parent
-DELETE /api/v1/sub-agents/{id}              — kill a running sub-agent
-```
-
-#### Observation & Evaluation (v0.2)
-```
-POST   /api/v1/observers                    — attach an observer
-GET    /api/v1/sessions/{id}/replay         — get session replay data
-POST   /api/v1/evaluations/run              — run offline evaluation
-GET    /api/v1/evaluations/{id}/results     — get evaluation results
-```
-
-#### Distributed Mesh (v0.3)
-```
-POST   /api/v1/nodes/register               — register a node
-GET    /api/v1/nodes                         — list nodes with health status
-POST   /api/v1/nodes/{id}/drain             — drain agents from a node
-POST   /api/v1/agents/{id}/migrate          — migrate agent to another node
-GET    /api/v1/mesh/status                   — mesh topology and health
-```
-
-#### A2A Interop (v0.3)
-```
-GET    /.well-known/agent.json              — A2A Agent Card discovery
-POST   /api/v1/a2a/tasks                    — A2A task submission (JSON-RPC)
-GET    /api/v1/a2a/tasks/{id}               — A2A task status
-```
-
-#### Bridges (v0.2+)
-```
-GET    /api/v1/bridges                       — list configured bridges
-GET    /api/v1/bridges/{id}/status           — bridge connection status
-POST   /api/v1/bridges/{id}/approve/{msg_id} — approve outbound bridge message
-```
-
-#### Real-Time Streaming (v0.2)
-```
-GET    /api/v1/stream/events                — SSE stream of all agent events
-GET    /api/v1/stream/channels/{id}         — SSE stream for a specific channel
-GET    /api/v1/stream/agents/{id}           — SSE stream for a specific agent
-```
+Not built, though the removed list had them: organizations, persona state
+and relationships, sub-agents, channel summaries, observers, session replay,
+evaluations, nodes and the mesh, A2A, bridges, and the three `/stream/`
+event streams.
 
 ---
 
@@ -1036,6 +1119,13 @@ User ──► CLI ──► Orchestrator
 ---
 
 ## 10. Project Structure
+
+> 2026-11-14 — this tree is the April plan, not the repository.
+> [FILEMAP.md](../FILEMAP.md) is generated from the tracked files and is
+> always current. Among the differences: there is no `agents/coder.py`,
+> `agents/reviewer.py` or `agents/planner.py` (agents are defined in
+> `config/agents.yaml`, not one file each) and no `internal/telemetry/`
+> (it is `internal/observability/`).
 
 ```
 Persatrix/
@@ -1273,6 +1363,10 @@ Log levels: `DEBUG` (full content capture), `INFO` (operations), `WARN`
 (degraded performance, retries), `ERROR` (failures), `SECURITY` (permission
 denials, blocked messages, rate limit hits).
 
+> 2026-11-14 — there is no `SECURITY` log level. A refused permission and a
+> flagged message are ordinary warnings in the agent's log; a rate-limit
+> violation is written to the audit log ([6.6](#66-audit-trail)).
+
 ### 12.5 Testing Framework
 
 ```yaml
@@ -1449,6 +1543,10 @@ persatrix restore --checkpoint "2026-04-08-1200" # restore from checkpoint
 | Human participants | Humans as bridge-connected agent type | Humans join channels and protocols as peers; framework waits for their input |
 | License | BUSL 1.1 | Source-available with a delayed Apache 2.0 conversion for each version |
 
+> 2026-11-14 — the rows on security posture, secrets, sandboxing, resilience
+> and rate limiting are the April intent. The dated notes in
+> [section 6](#6-security-model) say what is built.
+
 ---
 
 ## 14. Success Criteria (MVP)
@@ -1468,3 +1566,10 @@ persatrix restore --checkpoint "2026-04-08-1200" # restore from checkpoint
 13. `persatrix validate` catches invalid YAML config before any agent runs
 14. `persatrix test --workflow <name>` runs end-to-end test with mock LLM responses
 15. Agent health checks detect and restart crashed agent processes within 30 seconds
+
+> 2026-11-14 — these were the April targets, not a record of what passed.
+> Two of them are security claims that do not hold today: 9 (ordinary logs
+> are not redacted, and a shell command can show provider keys to the
+> model; see [6.4](#64-secrets-management)) and 10 (the audit log does not
+> record an agent's tool calls; see [6.6](#66-audit-trail)). Criterion 7's
+> MCP tools are not built ([5.2](#52-mcp-model-context-protocol-support)).
