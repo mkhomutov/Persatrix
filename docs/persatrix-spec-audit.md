@@ -6,6 +6,15 @@
 > `persatrix-extension-spec.md` (extension, 3059 lines). 45 findings across
 > 8 categories, all fixed. See resolution notes below each category.
 
+> **What this audit compared (note added 2026-11-14).** The two specs with
+> each other, and each with itself, in April 2026. It did not compare
+> either with the code. "Resolved" below means the spec text was changed,
+> not that anything was built: several resolutions are designs that are not
+> built or only partly built today, among them rate limiting (§6.8), input
+> sanitization (§6.9), observer privacy (E10.3) and the "30+ API
+> endpoints". Both specs now say at their top that they are the April 2026
+> design, with notes at the claims the code contradicts.
+
 ---
 
 ## Resolution Summary

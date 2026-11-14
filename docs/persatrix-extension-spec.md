@@ -1,5 +1,29 @@
 # Persatrix — Extension: Agent Societies, Communication & Organizational Modeling
 
+> **Read this first: an April 2026 design, not a description of what is built.**
+> This document was written before most of the code existed and has not been
+> kept in step with it. Much of what it says in the present tense was never
+> built, was built differently, or arrived later under another name. That
+> includes security controls, so do not use it to judge what protects a
+> deployment. The [orchestration spec](ai-agents-orchestration-spec.md) it
+> extends carries the same warning.
+>
+> To judge what protects a deployment, read
+> [SECURITY.md](../SECURITY.md#security-design) and the package comment of
+> [`internal/security/security.go`](../internal/security/security.go), which
+> lists what is built, what is built and not called, and the known gaps.
+>
+> For what Persatrix does today, read the guides
+> ([channels](guides/channels.md), [persona agents](guides/persona-agents.md),
+> [authentication](guides/auth.md), [model providers](guides/model-providers.md)),
+> [Observability](observability.md), and [ROADMAP.md](../ROADMAP.md), which
+> says of each component whether it is built. [FILEMAP.md](../FILEMAP.md)
+> lists the files that exist.
+>
+> Notes inside the sections below, marked "Planned" or dated, correct the
+> claims that matter most, the security ones first. A section with no note
+> has not been checked against the code.
+
 > This document extends the core MVP specification with support for rich agent
 > personas, organizational structures, multi-channel communication (including
 > external services like email and messengers), and autonomous agent behavior.
@@ -102,6 +126,18 @@ agent:
   tools: [...]
   permissions: {... }
 ```
+
+> 2026-11-14 — this example is the April shape and fails `make validate`
+> today. [`schemas/agent.schema.json`](../schemas/agent.schema.json)
+> requires `type` and `role` on the agent and `behavior` inside `persona`,
+> and refuses `persona.personality` and `autonomy.can_refuse_tasks`. The
+> file also holds a list under `agents:`, not one `agent:`. And
+> `autonomy.requires_approval_for` passes the schema but nothing reads it:
+> no action waits for an approval.
+> [RFC 0028](rfcs/0028-agent-decision-policy-engine.md) is building that
+> control. The
+> [persona agents guide](guides/persona-agents.md) and `config/agents.yaml`
+> show a persona that loads.
 
 ### E2.2 Persona Composition
 
@@ -364,6 +400,11 @@ either — even if explicitly requested. The orchestrator enforces this.
 # write files or run shell commands. Perfect for a read-only review.
 ```
 
+> **Status:** 📋 **Planned** — the "iron rule" above is not enforced. No
+> code spawns a sub-agent yet, and the check that a sub-agent gets no more
+> than its parent is not written
+> ([ISSUE-0214](issues/ISSUE-0214-declared-tool-permissions-are-never-enforced.md)). The orchestrator has no part in it.
+
 #### E3.2.5 Sub-Agent Patterns
 
 Common patterns that emerge in practice:
@@ -486,6 +527,11 @@ reviewer's sub-agents share from that 50k. This prevents unbounded cost growth.
 9. Parent incorporates result into its own reasoning
 ```
 
+> 2026-11-14 — none of these steps is built. No code spawns a sub-agent,
+> so the orchestrator validates nothing in step 3: no permission, depth,
+> concurrency or budget check exists
+> ([ISSUE-0214](issues/ISSUE-0214-declared-tool-permissions-are-never-enforced.md)).
+
 #### E3.2.8 Sub-Agents vs. Delegation
 
 The framework supports two ways an agent can get help. They serve different
@@ -593,6 +639,13 @@ authority:
       limit: 5000
       above_limit_escalate_to: "ceo"
 ```
+
+> 2026-11-14 — not built
+> ([ISSUE-0227](issues/ISSUE-0227-canonical-specs-describe-unbuilt-features-as-built.md)).
+> No `authority:` rules block is read, and no code asks for an approval,
+> escalates, or caps spending by role. The organization file
+> ([E4.1](#e41-topology-types)) lets a reporting line carry an authority
+> level, which `make validate` checks and nothing acts on yet.
 
 ---
 
@@ -717,7 +770,22 @@ message Attachment {
 }
 ```
 
+> 2026-11-14 — the `Visibility` values above are not built. No message is
+> encrypted, in transit or stored: `proto/` has no such field, and the
+> orchestrator and its agents talk over gRPC without TLS
+> ([ISSUE-0255](issues/ISSUE-0255-grpc-between-the-orchestrator-and-its-agents-has-no-tls.md)).
+> Keep that traffic on one host or a private network. The
+> [authentication guide](guides/auth.md#https-is-required-beyond-localhost)
+> says what the REST side needs beyond localhost.
+
 ### E5.4 External Communication Bridges
+
+> **Status:** 📋 **Planned** — not built yet; this section is the design. No
+> bridge exists, nothing reads `config/bridges.yaml`, and
+> [`internal/bridges`](../internal/bridges/bridges.go) is a placeholder. So
+> none of the safeguards under "Bridge Security Model" below exists either:
+> no outbound approval, no bridge rate limit, no content filter and no
+> bridge audit.
 
 Bridges connect the internal message bus to real-world communication platforms.
 Each bridge is a **bidirectional adapter**: it can send messages out and receive
@@ -940,6 +1008,11 @@ protocols:
 
 ## E6. Distributed Agent Mesh
 
+> **Status:** 📋 **Planned** — not built yet; all of E6 is the design.
+> [`internal/mesh`](../internal/mesh/mesh.go) is a placeholder. Today one
+> orchestrator talks to the agents that register with it, with no nodes, no
+> node admission and no trust domains.
+
 The framework does not assume agents run on the same machine — or even in the
 same network. A persona is a **network-addressable service** that can be
 deployed anywhere: a local process, a container in the cloud, a Raspberry Pi in
@@ -1144,6 +1217,25 @@ mesh:
 ```
 
 ### E6.5 Distributed Security
+
+> **Status:** 📋 **Planned** — not built yet. None of the controls in this
+> section exists: no mutual TLS, no node admission, no trust domains, no
+> data-residency rules and no end-to-end encryption. What is built is much
+> less:
+>
+> - The orchestrator and its agents talk over gRPC without TLS
+>   ([ISSUE-0255](issues/ISSUE-0255-grpc-between-the-orchestrator-and-its-agents-has-no-tls.md)),
+>   and on gRPC an agent's ID is whatever the caller sends.
+> - Registration gives an agent a token. The orchestrator checks it only
+>   on REST calls, and only under `auth.mode: enabled`. The shipped default
+>   is `disabled`, where every agent ID is taken on trust.
+> - A fleet enrollment secret can be set, but a registration that shows no
+>   secret is still admitted. So anyone who can reach the orchestrator can
+>   register under a persona's ID and post as it.
+> - People sign in with accounts and roles under `enabled` only.
+>
+> The authentication guide says
+> [what stays open under `enabled`](guides/auth.md#what-stays-open-under-enabled--the-agent-ingress).
 
 Distribution multiplies the attack surface. New threats and mitigations:
 
@@ -1638,6 +1730,13 @@ metrics:
     dimensions: [node_id]                  # messages queued for offline nodes
 ```
 
+> 2026-11-14 — the two `Persatrix.permission.*` metrics under "Security"
+> are not built, so there is no denial count to alert on
+> ([ISSUE-0227](issues/ISSUE-0227-canonical-specs-describe-unbuilt-features-as-built.md)).
+> A refused tool call is counted with every other failed tool call
+> (`agent.tool.invocations`). [Observability](observability.md) lists the
+> metrics that exist.
+
 ### E8.4 Session Replay & Time-Travel Debugging
 
 Inspired by AgentOps and similar platforms, the framework supports **session
@@ -1731,6 +1830,11 @@ evaluations:
 ```
 
 ### E8.6 A2A Protocol Compatibility
+
+> **Status:** 📋 **Planned** — not built yet; this section is the design.
+> [`internal/a2a`](../internal/a2a/a2a.go) is a placeholder: the
+> orchestrator serves no Agent Card and no A2A route, so the bearer and
+> OAuth settings and the `trust_level` rules below protect nothing yet.
 
 The **Agent2Agent (A2A) protocol**, launched by Google and now under the Linux
 Foundation, is the emerging standard for inter-agent communication across
@@ -2686,6 +2790,19 @@ simulation:
 
 ### E10.3 Observer Privacy & Consent
 
+> **Status:** 📋 **Planned** — not built yet. The observer mode of E10 does
+> not exist and no `observation:` block is read, so nothing here is applied:
+> no disclosure text is added to a prompt, no export is anonymized, and
+> there are no consent levels. (A channel member set to `observer` is a
+> different thing: a member that never speaks.) Who may read what today is
+> decided by accounts and roles only under `auth.mode: enabled`
+> ([the role gate](guides/auth.md#the-role-gate)), which is off by default:
+> with it off, no route asks who is calling. With it on, channel lists and
+> message histories are still readable without a login
+> ([ISSUE-0117](issues/ISSUE-0117-agent-ingress-close-knob.md)), and any
+> signed-in account can read a persona's closed-interaction summaries
+> ([ISSUE-0213](issues/ISSUE-0213-closed-interaction-summaries-open-to-any-account.md)).
+
 For research and social experiments, ethical observation requires informed
 consent and data protection:
 
@@ -2887,6 +3004,9 @@ v0.3 Distribution (depends on Channels + Registry):
 > it can be upgraded to PostgreSQL or a distributed store without changing
 > agent code.
 
+> 2026-11-14 — the audit log is not in SQLite. It is one file of JSON lines
+> ([Observability §13](observability.md#13-security-audit-log-rfc-0009-pr-1b)).
+
 ### MVP v0.1 — Core Engine (original scope, Weeks 1–8)
 Everything in the current spec: orchestrator, workflows, tools, MCP, security,
 resilience, testing, config validation, health checks, OTEL, cost tracking.
@@ -3066,3 +3186,11 @@ Also includes foundational observability:
 | Optimization profiles | Preset configs selectable per workflow | Users shouldn't need to tune 50 knobs to get started |
 | Cache deterministic calls only | Only temp=0 calls are cacheable | Non-deterministic calls should not return stale results |
 | Three-stage MVP | v0.1 engine → v0.2 society → v0.3 mesh+interop | Each stage is independently useful; observability ships from day one |
+
+> 2026-11-14 — four rows of this table are security decisions that are not
+> built
+> ([ISSUE-0227](issues/ISSUE-0227-canonical-specs-describe-unbuilt-features-as-built.md)):
+> outbound approval (no bridge exists, [E5.4](#e54-external-communication-bridges)),
+> "child ≤ parent" for sub-agent permissions
+> ([ISSUE-0214](issues/ISSUE-0214-declared-tool-permissions-are-never-enforced.md)),
+> and mutual TLS and trust domains ([E6.5](#e65-distributed-security)).

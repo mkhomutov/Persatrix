@@ -276,7 +276,7 @@ Code changes accumulate across many PRs, but documentation and diagrams that exp
    - **Module structure diagrams**: package/module organization after refactoring.
    - **Sequence diagrams**: key runtime flows (e.g., persona event dispatch, memory recall, tick loop).
 3. Update prose documentation where diagrams reveal gaps or stale descriptions:
-   - Architecture sections in spec docs.
+   - The area's guide or RFC, not the [design specs](documentation-guide.md#specification-documents).
    - README or CLAUDE.md if component boundaries changed.
 4. Ensure every diagram has a title and a brief caption explaining what it shows.
 5. Add the documentation PR to the PR plan with scope and checklist.

@@ -46,13 +46,29 @@ Before updating any documentation, verify:
 ### Specification Documents
 **Files**: `docs/ai-agents-orchestration-spec.md`, `docs/persatrix-extension-spec.md`
 
+These two are the April 2026 design, kept as a record. They were written
+before most of the code and do not describe what is built; each says so at
+its top. Current behaviour belongs in the guide or RFC for the feature.
+
 When updating:
-- These are the canonical design specs — update when behavior changes
-- Keep security model descriptions accurate
-- Cross-reference with audit doc for known gaps
+- Do not bring them up to date, and do not describe new behaviour in them
+- Where the code contradicts a claim, add a note at the claim: dated, or
+  `📋 **Planned**` for something not built, saying what is true today and
+  linking the guide or source file that shows it. A reader may land in the
+  middle of the file and never see the banner
+- Security claims come first: a control the spec describes and the code
+  lacks gets a note when it is found. The specs have not been swept line
+  by line, so a claim with no note is unchecked, not confirmed
+- Leave the design text as written; the audit doc compares the two specs
+  with each other, not with the code. A plan written before this rule that
+  schedules an edit to the design text adds a dated note at the claim
+  instead
 
 ### Architecture Documentation
-**Files**: `docs/ai-agents-orchestration-spec.md` (architecture sections)
+**Files**: `docs/diagrams/`, the Architecture section of
+`.github/copilot-instructions.md`, and each RFC's own design. The
+architecture sections of `docs/ai-agents-orchestration-spec.md` are the April
+2026 design, not the current one.
 
 When updating:
 - Verify component boundaries are accurately described
@@ -95,9 +111,9 @@ One canonical document per topic. Link to it; do not copy from it.
 
 | Topic | Canonical Document |
 |-------|-------------------|
-| Core architecture & API | `docs/ai-agents-orchestration-spec.md` |
-| Extension features (personas, memory, channels) | `docs/persatrix-extension-spec.md` |
-| Spec gaps & audit | `docs/persatrix-spec-audit.md` |
+| The April 2026 design: a record, not a description of what is built | `docs/ai-agents-orchestration-spec.md` (core), `docs/persatrix-extension-spec.md` (personas, memory, channels, mesh); `docs/persatrix-spec-audit.md` compares the two with each other |
+| How personas, memory and channels work today | `docs/guides/persona-agents.md`, `docs/guides/channels.md`, and the RFC that built each feature |
+| REST routes | the code: `server.go`, `channel_routes.go`, `auth_handlers.go` and `ui.go` in `internal/server/` register them, and `auth_policy.go` says who may call each under `auth.mode: enabled`; no list is kept by hand |
 | Architecture diagrams | `docs/diagrams/` (one file per diagram; conventions in [development-workflow.md §Phase 7](development-workflow.md#phase-7--documentation--diagrams)) |
 | Terminology — product | `docs/ai-glossary.md` |
 | Terminology — process | `docs/methodology/process-glossary.md` |
