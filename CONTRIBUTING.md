@@ -30,10 +30,10 @@ make validate # config validation
 
 - **[`ci.yml`](.github/workflows/ci.yml)** — Runs on every PR and push to `main`. Eleven jobs: Go build + gofmt + pinned golangci-lint (`make lint-go`) + unit and integration tests + sanitizer sync; web console build + test; Docker build-context hygiene; proto staleness; Python lint + types + three test trees + the `stable` golden-trace replay + import direction; the bored-persona cost gate; Rust build + rustfmt + clippy + test; config validation + index freshness; docs hygiene (links, markup, markers, FILEMAP); file sizes; third-party licences. Each job's comment names the incident it guards. Which jobs branch protection requires is in the [enforcement matrix](docs/methodology/enforcement-matrix.md).
 - **[`commitlint.yml`](.github/workflows/commitlint.yml)** — Enforces Conventional Commit format on PR titles (for automated changelog generation).
-- **[`scheduled-audit.yml`](.github/workflows/scheduled-audit.yml)** — Weekly dependency audit for Rust crates.
+- **[`scheduled-audit.yml`](.github/workflows/scheduled-audit.yml)** — Weekly check of published security advisories against the Rust crates, the Go modules, CI's Python pins and the web console's npm packages. A finding opens a `Scheduled Dependency Audit Failure` issue that names the audit and the command to re-run it.
 - **[`perf-baseline-capture.yml`](.github/workflows/perf-baseline-capture.yml)** — Maintainer-dispatched capture of the recall-latency baseline that arms the perf gate.
 - **[`python-constraints-refresh.yml`](.github/workflows/python-constraints-refresh.yml)** — Weekly: tries the newest Python releases on the Python checks and, when they pass, posts a link that opens the PR moving CI's pins in `.github/python-constraints.txt`.
-- **[`dependabot.yml`](.github/dependabot.yml)** — Monthly grouped dependency-update PRs per ecosystem, the Rust release in `cli/rust-toolchain.toml` among them, titled `chore(deps): …` so the title check passes.
+- **[`dependabot.yml`](.github/dependabot.yml)** — Monthly grouped dependency-update PRs per ecosystem, the Rust release in `cli/rust-toolchain.toml` and the Docker and compose images among them, titled `chore(deps): …` so the title check passes.
 
 Which CI jobs branch protection requires is versioned in [`docs/methodology/branch-protection.json`](docs/methodology/branch-protection.json); `make branch-protection-show` diffs it against the live setting.
 

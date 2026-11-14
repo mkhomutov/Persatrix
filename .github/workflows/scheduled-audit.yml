@@ -1,5 +1,18 @@
 name: Scheduled Dependency Audit
 
+# Reads the published security advisories for everything the project installs:
+# the Rust CLI's crates, the Go modules, CI's Python pins and the web console's
+# npm packages. Until 2026-11 it read them for the Rust CLI only (ISSUE-0218).
+#
+# One audit failing does not stop the others: every step after the checkout
+# runs unless the run is cancelled (`if: !cancelled()`), so one Monday shows
+# all four results. A failed step still fails the job, and that is what makes
+# the last step open or update the "Scheduled Dependency Audit Failure" issue,
+# which names the audits that failed and the command each one ran.
+# tests/unit/python/test_scheduled_audit.py holds all of this.
+#
+# A finding is fixed by a change of its own, never in this workflow.
+
 on:
   schedule:
     # Run every Monday at 06:00 UTC
@@ -19,14 +32,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # ─── Rust CLI: cargo-deny ───────────────────────────────
       # The toolchain CI uses, from cli/rust-toolchain.toml. Run in cli/,
       # `rustup toolchain install` with no name installs what that file names.
       - name: Install the Rust toolchain pinned in cli/rust-toolchain.toml
+        if: ${{ !cancelled() }}
         working-directory: cli
         run: rustup toolchain install --no-self-update
 
       - name: Cache cargo-deny
         id: cache-cargo-deny
+        if: ${{ !cancelled() }}
         uses: actions/cache@v6
         with:
           path: |
@@ -37,7 +53,7 @@ jobs:
 
       # From cli/, so rustup builds it with the pinned toolchain.
       - name: Install cargo-deny
-        if: steps.cache-cargo-deny.outputs.cache-hit != 'true'
+        if: ${{ !cancelled() && steps.cache-cargo-deny.outputs.cache-hit != 'true' }}
         working-directory: cli
         run: cargo install cargo-deny --locked --version 0.19.0
 
@@ -46,31 +62,156 @@ jobs:
       # week it goes stale. Without it that is only a warning: the RUSTSEC-2026-0173
       # ignore matched nothing from 2026-09-25 through three green runs, and
       # was noticed only when other advisories failed the run (#1043).
-      - name: Run comprehensive dependency audit
+      - name: Audit the Rust CLI's crates (cargo-deny)
+        id: audit-rust
+        if: ${{ !cancelled() }}
         working-directory: cli
         run: cargo deny check -D advisory-not-detected advisories bans sources licenses
 
+      # ─── Go modules: govulncheck ────────────────────────────
+      # govulncheck judges the standard library by the Go release it runs on,
+      # so the release decides the answer. This is the Go the orchestrator
+      # image is built with: the newest patch release of the line its base tag
+      # names (`FROM golang:<line>-alpine` in Dockerfile.orchestrator). CI's
+      # other jobs build with exactly the release go.mod names, the oldest one
+      # supported: on that one govulncheck lists every standard-library fix
+      # shipped since (37 on 2026-11-14), and no dependency bump clears one.
+      - name: Read the Go line the orchestrator image builds with
+        id: go-line
+        if: ${{ !cancelled() }}
+        run: |
+          line=$(sed -n 's/^FROM golang:\([0-9][0-9]*\.[0-9][0-9]*\).* AS builder.*/\1/p' Dockerfile.orchestrator)
+          test -n "$line"
+          echo "line=$line" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-go@v7
+        if: ${{ !cancelled() }}
+        with:
+          go-version: ${{ steps.go-line.outputs.line }}
+          check-latest: true
+
+      # It fails when the orchestrator's code reaches a vulnerable function.
+      # A vulnerability in a module the code requires and never calls is
+      # printed and does not fail the run. No `-test`: what ships, not its
+      # tests. govulncheck has no ignore list, so a finding is cleared by a
+      # bump or not at all.
+      - name: Audit the Go modules (govulncheck)
+        id: audit-go
+        if: ${{ !cancelled() }}
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
+      # ─── Python pins: pip-audit ─────────────────────────────
+      # pip-audit reads the pins as they are written: `--no-deps` resolves
+      # nothing and needs every line pinned with `==`, which is how uv writes
+      # the file, and `--disable-pip` builds no environment. So it audits what
+      # CI installs, on the Python CI runs. A pin whose marker names another
+      # platform (colorama, on Windows) is skipped. The loop takes in every
+      # constraints file, and goes on to the next one after a finding.
+      - uses: actions/setup-python@v7
+        if: ${{ !cancelled() }}
+        with:
+          python-version: "3.11"
+
+      - name: Install the pinned uv
+        if: ${{ !cancelled() }}
+        run: make uv-install
+
+      - name: Audit the Python pins (pip-audit)
+        id: audit-python
+        if: ${{ !cancelled() }}
+        run: |
+          status=0
+          for file in .github/python-constraints*.txt; do
+            echo "== pip-audit $file"
+            uv tool run --python 3.11 --from pip-audit==2.10.1 pip-audit --no-deps --disable-pip -r "$file" || status=1
+          done
+          exit "$status"
+
+      # ─── Web console packages: npm audit ────────────────────
+      # npm audit reads web/package-lock.json and asks the registry; with
+      # `--package-lock-only` nothing is installed. Development dependencies
+      # count, because the console has no others: Svelte and Vite build the
+      # bundle the orchestrator embeds, so leaving them out would audit nothing.
+      # It fails from "moderate" up. Every advisory ISSUE-0087 recorded was
+      # moderate or above and had a fix. A "low" one is printed and does not
+      # fail the run: npm audit cannot accept one advisory by name, and two
+      # with no fix available were open on 2026-11-14, which would have made
+      # every Monday red with nothing to do about it. The Node release, and so
+      # the npm, is the one CI's web-console job installs.
+      - uses: actions/setup-node@v7
+        if: ${{ !cancelled() }}
+        with:
+          node-version: "22.22.2"
+
+      - name: Audit the web console's packages (npm audit)
+        id: audit-web
+        if: ${{ !cancelled() }}
+        working-directory: web
+        run: npm audit --package-lock-only --audit-level=moderate
+
+      # ─── Report ─────────────────────────────────────────────
       - name: Create issue on failure
         if: failure()
         uses: actions/github-script@v9
+        env:
+          AUDIT_RUST: ${{ steps.audit-rust.outcome }}
+          AUDIT_GO: ${{ steps.audit-go.outcome }}
+          AUDIT_PYTHON: ${{ steps.audit-python.outcome }}
+          AUDIT_WEB: ${{ steps.audit-web.outcome }}
         with:
           script: |
             const title = 'Scheduled Dependency Audit Failure';
             const runDate = new Date().toISOString().split('T')[0];
-            const body = `The weekly dependency audit has detected issues (run date: ${runDate}).
-            
-            **Run Details:**
-            - Workflow: ${context.workflow}
-            - Run ID: ${context.runId}
-            - Run URL: https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}
-            
-            **Action Required:**
-            1. Review the workflow logs above
-            2. Check for new security advisories, license issues, or dependency problems
-            3. Update dependencies or add justified exceptions to \`deny.toml\`
-            4. Re-run the audit locally: \`cd cli && cargo deny check -D advisory-not-detected advisories bans sources licenses\`
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            // One entry per audit step. `rerun` is the command that step
+            // runs, so the same line works on a contributor's machine.
+            const audits = [
+              {
+                name: 'Rust CLI crates (cargo-deny)',
+                outcome: process.env.AUDIT_RUST,
+                rerun: 'cd cli && cargo deny check -D advisory-not-detected advisories bans sources licenses',
+                fix: 'Update the crate in `cli/Cargo.lock`, or add an ignore with its reason to `deny.toml`.',
+              },
+              {
+                name: 'Go modules (govulncheck)',
+                outcome: process.env.AUDIT_GO,
+                rerun: 'go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...',
+                fix: 'Update the module in `go.mod`; govulncheck has no ignore list. Run the command on the newest patch release of the Go line `Dockerfile.orchestrator` builds with, as this workflow does: an older Go also reports the standard-library advisories its later patch releases fixed.',
+              },
+              {
+                name: 'Python pins (pip-audit)',
+                outcome: process.env.AUDIT_PYTHON,
+                rerun: 'for file in .github/python-constraints*.txt; do uv tool run --python 3.11 --from pip-audit==2.10.1 pip-audit --no-deps --disable-pip -r "$file"; done',
+                fix: 'Move the pin with `make python-constraints-upgrade`, or merge the weekly constraints refresh if it already offers the fixed release. If a range in `agents/pyproject.toml` rules that release out, widen the range first.',
+              },
+              {
+                name: 'Web console packages (npm audit)',
+                outcome: process.env.AUDIT_WEB,
+                rerun: 'cd web && npm audit --package-lock-only --audit-level=moderate',
+                fix: 'Update the package in `web/package.json` and `web/package-lock.json`. The run fails from "moderate" up; a "low" advisory is in the log only.',
+              },
+            ];
+
+            const word = (outcome) =>
+              outcome === 'success' ? 'passed' : outcome === 'failure' ? '**FAILED**' : `did not run (${outcome || 'no result'})`;
+            const failed = audits.filter((a) => a.outcome === 'failure');
+
+            let summary = audits.map((a) => `- ${a.name}: ${word(a.outcome)}`).join('\n');
+            if (failed.length === 0) {
+              summary += '\n\nNo audit step failed, so a set-up step did: a toolchain or a tool was not installed. An audit after it may have run with the wrong tool. Read the log.';
+            }
+            const details = failed
+              .map((a) => `### ${a.name}\n\nRe-run it locally from the repository root:\n\n\`\`\`sh\n${a.rerun}\n\`\`\`\n\n${a.fix}`)
+              .join('\n\n');
+
+            const body = `The weekly dependency audit failed (run date: ${runDate}, [run ${context.runId}](${runUrl})).
+
+            ${summary}
+
+            ${details}
             `;
-            
+
             // Check if an open issue already exists with this title
             const issues = await github.rest.issues.listForRepo({
               owner: context.repo.owner,
@@ -78,19 +219,15 @@ jobs:
               state: 'open',
               labels: 'security,dependencies'
             });
-            
+
             const existingIssue = issues.data.find(issue => issue.title === title);
-            
+
             if (existingIssue) {
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: existingIssue.number,
-                body: `## New Audit Failure (${runDate})
-            
-            The dependency audit failed again in [run ${context.runId}](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}).
-            
-            Please review the logs and address any new issues.`
+                body: `## New Audit Failure (${runDate})\n\n${body}`
               });
             } else {
               await github.rest.issues.create({
