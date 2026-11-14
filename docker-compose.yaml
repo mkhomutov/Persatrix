@@ -356,7 +356,7 @@ services:
   # post-start crash. Tracked as a follow-up in
   # docs/rfcs/0019-pr-plan.md "From PR 4 review".
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.103.1
+    image: otel/opentelemetry-collector-contrib:0.165.0
     restart: unless-stopped
     command: ["--config=/etc/otelcol/otel-collector.yaml"]
     volumes:
@@ -386,7 +386,7 @@ services:
 
   # ─── Observability: Prometheus (metrics backend, dev only) ─────
   prometheus:
-    image: prom/prometheus:v2.55.0
+    image: prom/prometheus:v3.16.0
     restart: unless-stopped
     command:
       - --config.file=/etc/prometheus/prometheus.yaml
@@ -410,7 +410,7 @@ services:
 
   # ─── Observability: Loki (logs backend, dev only) ─────
   loki:
-    image: grafana/loki:3.1.0
+    image: grafana/loki:3.7.9
     restart: unless-stopped
     command: ["-config.file=/etc/loki/local-config.yaml"]
     ports:
