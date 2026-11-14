@@ -138,7 +138,7 @@ dev = [
 # The 1.56.0 floor is the first release whose ThinkingConfig takes every
 # `thinking_level` an alias can ask for (`minimal` and `medium` arrived then).
 gemini = [
-    "google-genai>=1.56.0,<3",
+    "google-genai>=1.56.0,<4",
 ]
 # watsonx.ai native SDK — the `create_provider` watsonx branch surfaces the
 # actionable `ImportError → SystemExit` install hint when this extra is absent.
