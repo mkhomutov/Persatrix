@@ -35,7 +35,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# RFC 0020 PR 4 (PR #229 Should-Fix #2): on-tick janitor cooldown.
+# RFC 0020 PR 4 (PR #229 Should-Fix #2): the janitor's cooldown.  One
+# cooldown for the three paths that run it (ISSUE-0198): a persona's
+# memory opening at boot, an inbound event, and a tick.
 JANITOR_INTERVAL_SEC: float = 300.0
 
 #: Wall-clock ceiling on the SHUTDOWN drain (v0.3.15 PR B2 review).  Two
@@ -206,8 +208,8 @@ async def drain_pending_summary_tasks(
         return
     logger.warning(
         "Summary drain timed out after %.0fs with %d task(s) still "
-        "running; cancelling them (their rows stay pending for the "
-        "janitor and re-derive on the next boot)",
+        "running; cancelling them (their rows stay pending until the "
+        "janitor marks them, and re-derive on the first boot after that)",
         timeout, len(still_running),
     )
     for task in still_running:
@@ -226,8 +228,8 @@ async def maybe_run_janitor(
 
     Returns the new ``last_monotonic`` (caller stores it on the agent).
     Best-effort: any failure is logged and swallowed so a janitor
-    hiccup never breaks the tick path.  See PR #229 review Should-Fix
-    #2.
+    hiccup never breaks the path that called it (a boot, an event or a
+    tick).  See PR #229 review Should-Fix #2.
 
     PR 6 review #24 — sweep failures increment
     ``agent.interactions.janitor.failed`` so a persistent outage
