@@ -1,5 +1,5 @@
 .PHONY: all build build-orchestrator build-orchestrator-ui ui ui-test ui-html-check build-cli build-agents uv-install python-constraints python-constraints-upgrade python-constraints-check python-constraints-uv proto proto-go proto-python proto-python-check proto-orphans-check proto-check clean reset test lint lint-go lint-python lint-rust golangci-lint-version golangci-lint-install run run-ui validate dockerignore-check help demo-autonomous demo-offline demo-ollama generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust go-licenses-install go-licenses-pinned notices notices-check cargo-license-install cargo-license-pinned bump-version issues issues-check rfcs rfcs-check imports-check eval-replay eval-record eval-record-offline eval-drift eval-verdict
-.PHONY: build-agents-providers lint-providers test-providers
+.PHONY: build-agents-providers lint-providers test-providers check-licenses-providers
 
 # ─── Config ─────────────────────────────────────────────
 GO_MODULE     := github.com/mkhomutov/persatrix
@@ -206,9 +206,12 @@ UV_COMPILE = env -u UV_CONFIG_FILE -u UV_INDEX -u UV_DEFAULT_INDEX -u UV_INDEX_U
 # `providers` extra added (ISSUE-0220). `-c` holds every package the two
 # files share to the first file's version, so the install with the SDKs
 # differs from the plain one by the SDKs and what only they need. The first
-# file is therefore always written first. If an SDK cannot live with one of
-# the first file's pins, this command fails and names the two: cap one range
-# in agents/pyproject.toml.
+# file is therefore always written first. If the newest release of an SDK
+# cannot live with one of the first file's pins, uv does not fail: it quietly
+# takes an older release of the SDK, or of something the SDK brings in, that
+# can. Only when no release fits does the command fail and name the two;
+# then cap one range in agents/pyproject.toml. So read the second file's diff
+# for a pin that stepped back.
 UV_COMPILE_PROVIDERS = $(UV_COMPILE) --extra providers -c $(PYTHON_CONSTRAINTS)
 
 uv-install: ## Install the pinned uv with pipx (CI runs this; --force replaces another version)
@@ -304,12 +307,17 @@ test-integration: ## Run integration tests
 test-agents: ## Run the agents/ unit test tree
 	$(PYTHON) -m pytest agents/tests/ -v --tb=short -c agents/pyproject.toml
 
-# Runs the Gemini and watsonx adapters against the real SDKs, with only the
-# socket replaced. In every other run these tests skip, because the SDKs are
-# an optional extra; here the variable turns a missing SDK into a failure, so
-# they cannot skip in the one run that exists to run them (ISSUE-0220).
-test-providers: ## Run the Gemini and watsonx adapters against their real SDKs (needs make build-agents-providers)
-	PERSATRIX_REQUIRE_PROVIDER_SDKS=1 $(PYTHON) -m pytest tests/unit/python/test_llm_sdk_boundary_gemini.py tests/unit/python/test_llm_sdk_boundary_watsonx.py -v --tb=short
+# Runs every test that needs a real provider SDK: the Gemini and watsonx
+# adapters against their SDKs with the network replaced, and the one test
+# that asks the Gemini SDK to accept a tool's schema. In every other run
+# these tests skip, because the SDKs are an optional extra; here the variable
+# turns a missing SDK into a failure, so they cannot skip in the one run that
+# exists to run them (ISSUE-0220). What they do not cover: the Gemini tests
+# send through the SDK's httpx client, while the product, which has aiohttp
+# installed, sends through the SDK's aiohttp one (ISSUE-0252); and neither
+# adapter is tested on an error reply or a retry (ISSUE-0253).
+test-providers: ## Run the tests that need a real provider SDK (needs make build-agents-providers)
+	PERSATRIX_REQUIRE_PROVIDER_SDKS=1 $(PYTHON) -m pytest tests/unit/python/test_llm_sdk_boundary_gemini.py tests/unit/python/test_llm_sdk_boundary_watsonx.py tests/unit/python/test_tool_arg_check.py::TestNarrowing::test_every_keyword_passes_gemini_schema_validation -v --tb=short
 
 # ─── Eval (RFC 0044 golden-trace harness) ───────────────
 # Phase 1 (v0.3.11) ships the runner; the seed recipes + `.golden.yaml`
@@ -404,6 +412,12 @@ lint-python: imports-check
 # types, is an error here. With no config, the package's two settings are
 # given as flags; tests/unit/python/test_provider_sdk_gates.py holds them to
 # [tool.mypy] in agents/pyproject.toml.
+#
+# What this sees is small: the three calls the adapters make on the SDKs' own
+# classes, `genai.Client(...)` twice and `Credentials(...)`. The adapters hold
+# the client as `Any` and build `ModelInference` from a dict, so a wrong
+# keyword on a later call is not a type error. `make test-providers` is what
+# checks those calls.
 lint-providers: ## Type-check the Gemini and watsonx adapters against their real SDKs (needs make build-agents-providers)
 	cd agents && $(PYTHON) -m mypy --config-file= --python-version 3.11 --warn-return-any llm_gemini.py llm_watsonx.py
 
@@ -471,6 +485,12 @@ check-licenses-python: ## Check Python dependency licenses against the allow-lis
 	@# reviewed exception. Added in v0.3.0 release-prep PR 4. See ISSUE-0024
 	@# for why the dep is required (pytest hangs without it).
 	@$(PYTHON) scripts/checks/python_licenses.py --exception Persatrix-agents --exception pytest-timeout
+
+# The same check under a name of its own, for the run that has the optional
+# provider SDKs installed (after `make build-agents-providers`). It reads
+# whatever is installed, so there it reads the SDKs and what they bring in.
+# The weekly refresh runs both, and a failure line then says which one failed.
+check-licenses-providers: check-licenses-python ## Check the licenses of the provider SDKs and what they install (needs make build-agents-providers)
 
 check-licenses-rust: ## Check Rust crate licenses via cargo-deny
 	@echo "→ Checking Rust dependency licenses..."

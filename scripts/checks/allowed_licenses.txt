@@ -40,8 +40,10 @@ CNRI-Python
 # travel with copies, so it asks less than MIT above. Covers `cffi` from
 # 2.1, which the optional Gemini SDK (`google-genai`) brings in through
 # `google-auth` and `cryptography`. Allowed by the maintainer on 2026-11-14
-# (ISSUE-0220). Python only, so deny.toml does not mirror it, as it does not
-# mirror CNRI-Python: no Rust crate uses either.
+# (ISSUE-0220). This list also feeds the Go check, where no module uses it.
+# deny.toml does not mirror it, because no Rust crate needs it: two
+# (`aws-lc-sys`, `dunce`) offer it as one choice beside licenses the Rust
+# list already allows.
 MIT-0
 
 # Python package metadata sometimes reports these non-SPDX forms. They map

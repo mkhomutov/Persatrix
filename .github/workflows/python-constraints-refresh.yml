@@ -18,7 +18,11 @@
 #   - the checks pass: it pushes the new files to chore/python-constraints-refresh
 #     and puts a link in the issue that opens the PR.
 #   - a check fails: it leaves the pins alone and names every failing check,
-#     so a breaking release is fixed once instead of failing every PR.
+#     so a breaking release is fixed once instead of failing every PR. Every
+#     pin stays, in both files: a check that fails only with the provider
+#     SDKs installed also holds the plain file's pins, a security fix among
+#     them. To move one package meanwhile, raise its floor in
+#     agents/pyproject.toml and run `make python-constraints`.
 #
 # A link, not a bot-opened PR: this repository does not let Actions open pull
 # requests, and a PR opened with GITHUB_TOKEN would not start CI anyway. A PR
@@ -35,7 +39,7 @@ name: Python constraints refresh
 
 on:
   schedule:
-    # Mondays 05:00 UTC, an hour before the Rust dependency audit.
+    # Mondays 05:00 UTC, an hour before the dependency audit.
     - cron: '0 5 * * 1'
   # A merged change to the ranges, such as a Dependabot widening, is tried on
   # the newest releases the same day: the PR itself ran CI on the old pins.
@@ -105,8 +109,9 @@ jobs:
       # runs even after another fails, so the issue names all of them. The
       # last four are the Python job's last four: they add the optional
       # provider SDKs at their new pins, check the two adapters against them,
-      # and run the license check again, now over what the SDKs brought in.
-      # They come last because the install changes the environment the checks
+      # and run the license check again, now over what the SDKs brought in
+      # and under its own name, so a failure line says which run failed. They
+      # come last because the install changes the environment the checks
       # before them must see.
       - name: Run the Python checks on the new pins
         id: checks
@@ -117,7 +122,7 @@ jobs:
                         test-python test-agents test-integration \
                         check-licenses-python validate \
                         build-agents-providers lint-providers test-providers \
-                        check-licenses-python; do
+                        check-licenses-providers; do
             echo "::group::make $target"
             # Names the check that was running if the job times out or is cancelled.
             echo "make $target" > "$RUNNER_TEMP/check.running"

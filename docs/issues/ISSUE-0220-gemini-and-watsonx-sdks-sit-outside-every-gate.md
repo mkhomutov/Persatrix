@@ -97,7 +97,7 @@ extend the SDK boundary test to the two adapters.
 >   `type: ignore` comments on the SDK imports are gone.
 > - **Tested against the real SDKs.** `make test-providers` runs both
 >   adapters with `google-genai` and `ibm-watsonx-ai` imported for real
->   and only the socket replaced. The tests skip where the SDKs are
+>   and the network replaced. The tests skip where the SDKs are
 >   absent and are made to fail there instead of skip.
 > - **In the notices.** `THIRD_PARTY_NOTICES.md` is regenerated from an
 >   install with every extra, and the generator refuses any other.
@@ -137,8 +137,10 @@ extend the SDK boundary test to the two adapters.
 >
 > - `MIT-0` is on `scripts/checks/allowed_licenses.txt`, with its reason.
 >   It is the MIT license without the condition that the notice travel
->   with copies. `deny.toml` does not mirror it: no Rust crate uses it,
->   as with `CNRI-Python`.
+>   with copies. `deny.toml` does not mirror it, because no Rust crate
+>   needs it: two (`aws-lc-sys`, `dunce`) offer it as one choice beside
+>   licenses the Rust list already allows. The same list feeds the Go
+>   check, where no module uses it.
 > - A fourth step after `make test-providers`, in CI's Python job and in
 >   the weekly refresh, runs `make check-licenses-python` where the SDKs
 >   are installed: 100 packages, all on the allow-list. Before the choice
@@ -148,3 +150,30 @@ extend the SDK boundary test to the two adapters.
 > The "What remains" list in the note above is now down to the demo
 > images, which stay with
 > [ISSUE-0219](ISSUE-0219-agent-image-is-not-what-ci-tests.md).
+
+> 2026-11-14 — after the review of #1118. Nothing above is undone. Three
+> statements are narrowed, three gaps have issues of their own, and three
+> things changed:
+>
+> - "Type-checked" means mypy sees three calls: the two that build a
+>   Gemini client and the one that builds the watsonx credentials. Both
+>   clients are untyped to it after that, so a wrong keyword on a later
+>   call is caught by the tests, not by mypy.
+> - "The network replaced" is not "as the product runs" for Gemini: the
+>   tests send through the SDK's httpx client and a running agent sends
+>   through aiohttp
+>   ([ISSUE-0252](ISSUE-0252-gemini-sdk-tests-do-not-run-the-aiohttp-path-the-agents-use.md)).
+> - "No fault in either adapter" is about successful calls. Neither
+>   adapter is tested on an error reply or a retry
+>   ([ISSUE-0253](ISSUE-0253-provider-sdk-errors-and-retries-are-untested.md)).
+> - The Python job now builds three source-only packages with a build
+>   tool the pins do not reach
+>   ([ISSUE-0254](ISSUE-0254-the-python-job-builds-three-ibm-packages-with-an-unpinned-build-tool.md)).
+> - Changed: a third test that needs the Gemini SDK (it asks the SDK to
+>   accept a tool's schema) skipped in every CI run. It now runs under
+>   `make test-providers`, and a test holds that every such test does.
+> - Changed: the fourth step is `make check-licenses-providers`, the same
+>   check under its own name, so a failure line says which run failed.
+> - Changed: the notices generator refuses any Python but 3.11. Some pins
+>   differ by Python version, so another version lists other releases.
+

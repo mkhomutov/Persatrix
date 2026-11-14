@@ -381,8 +381,9 @@ jobs:
       # These steps are last on purpose. Installing the extra adds packages to
       # this job's one environment, and every step above must keep seeing the
       # plain install, the one most deployments run. Nothing but provider
-      # steps may follow; tests/unit/python/test_provider_sdk_gates.py holds
-      # the order. The versions come from
+      # steps may follow, each a plain `run:` with no `if:` and no
+      # `continue-on-error:`; tests/unit/python/test_provider_sdk_gates.py
+      # holds that and the order. The versions come from
       # .github/python-constraints-providers.txt, which agrees with the plain
       # file on every package the two share.
       - name: Install the provider SDKs at their pinned versions
@@ -392,17 +393,18 @@ jobs:
       - name: Type-check the Gemini and watsonx adapters against their SDKs
         run: make lint-providers
 
-      # The real SDKs with only the socket replaced. The target turns a
-      # skipped test into a failed one: these tests skip wherever the SDKs
-      # are absent, and this is the one run that has them.
+      # The real SDKs with the network replaced. The target turns a skipped
+      # test into a failed one: these tests skip wherever the SDKs are
+      # absent, and this is the one run that has them. The Makefile comment
+      # on the target says what they do not cover.
       - name: Run the Gemini and watsonx adapters against their SDKs
         run: make test-providers
 
       # The license job reads the plain install, so it never saw the SDKs or
       # the 20 packages they bring in. This is the same check, run where
-      # they are installed.
+      # they are installed, under a name of its own.
       - name: Check the licenses of what the provider SDKs install
-        run: make check-licenses-python
+        run: make check-licenses-providers
 
   cost-regression-gate:
     # RFC 0024 §Test Strategy — the "bored persona" cost-regression gate is

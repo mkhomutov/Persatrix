@@ -6,19 +6,33 @@ so `THIRD_PARTY_NOTICES.md` named neither, nor anything they pull in
 (ISSUE-0220). The generator now reads `agents/pyproject.toml` and refuses to
 write the file from an install that is missing a package the manifest can
 install, saying which install has them all.
+
+It also refuses any Python but the one CI installs. The constraints files
+pin some packages by Python version (`numpy` is one release below Python
+3.12 and another from it), so the same pins list other releases on another
+Python, and the committed file would read as out of date there.
 """
 
 from __future__ import annotations
 
+import re
 import tomllib
 from typing import Any
 
 import pytest
+import yaml
 from _test_infra import REPO_ROOT
 
 from scripts import generate_third_party_notices as notices
 
 MANIFEST = REPO_ROOT / "agents" / "pyproject.toml"
+
+
+@pytest.fixture(autouse=True)
+def on_the_notices_python(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every test starts on the Python the notices are written from, whatever
+    runs the suite; the tests about another version say so themselves."""
+    monkeypatch.setattr(notices, "running_python", lambda: notices.NOTICES_PYTHON)
 
 
 def _project() -> dict[str, Any]:
@@ -75,6 +89,64 @@ def test_an_install_without_a_declared_package_is_refused(
     assert "make build-agents-providers" in message
 
 
+def test_the_notices_python_is_the_one_ci_installs_and_the_pins_are_resolved_for() -> None:
+    wanted = ".".join(str(part) for part in notices.NOTICES_PYTHON)
+
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+    (python_job,) = [
+        job for job in workflow["jobs"].values() if job.get("name") == "Python (lint + test)"
+    ]
+    installed = [
+        step["with"]["python-version"]
+        for step in python_job["steps"]
+        if step.get("uses", "").startswith("actions/setup-python@")
+    ]
+    assert installed == [wanted], "the notices Python is not the one CI's Python job installs"
+
+    makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+    (compile_command,) = re.findall(r"^UV_COMPILE = (?:.*\\\n)*.*", makefile, re.M)
+    assert re.findall(r"--python-version (\S+)", compile_command) == [wanted], (
+        "the notices Python is not the one the constraints files are resolved for"
+    )
+
+
+def test_the_running_python_is_read_as_major_and_minor(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.undo()
+
+    assert notices.running_python() == notices.sys.version_info[:2]
+
+
+@pytest.mark.parametrize("other", [(3, 12), (3, 10), (4, 11)])
+def test_another_python_version_is_refused(
+    monkeypatch: pytest.MonkeyPatch, other: tuple[int, int]
+) -> None:
+    monkeypatch.setattr(notices, "running_python", lambda: other)
+    # Every package is there: the version alone is what is wrong.
+    monkeypatch.setattr(
+        notices, "installed_python_packages", lambda: set(notices.declared_python_packages())
+    )
+
+    with pytest.raises(notices.WrongPythonVersionError) as raised:
+        notices.check_python_install()
+
+    message = str(raised.value)
+    assert f"is Python {other[0]}.{other[1]}" in message
+    assert "Python 3.11" in message
+    assert "make build-agents-providers PYTHON=" in message
+    assert "make notices PYTHON=" in message
+
+
+def test_a_missing_package_is_told_which_python_to_install_into(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(notices, "installed_python_packages", lambda: set())
+
+    with pytest.raises(notices.MissingPythonPackagesError) as raised:
+        notices.check_python_install()
+
+    assert "Python 3.11 virtual environment" in str(raised.value)
+
+
 def test_an_install_with_every_declared_package_is_accepted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -113,3 +185,35 @@ def test_the_generator_stops_before_it_writes_when_a_package_is_missing(
 
     assert not out.exists()
     assert "make build-agents-providers" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("flag", [[], ["--check"]])
+def test_the_generator_stops_before_it_reads_or_writes_on_another_python(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+    capsys: pytest.CaptureFixture[str],
+    flag: list[str],
+) -> None:
+    out = tmp_path / "NOTICES.md"
+    monkeypatch.setattr(notices, "running_python", lambda: (3, 12))
+    monkeypatch.setattr(
+        notices, "installed_python_packages", lambda: set(notices.declared_python_packages())
+    )
+    monkeypatch.setattr(notices, "collect_go", lambda: [])
+    monkeypatch.setattr(notices, "collect_rust", lambda: [])
+
+    def never(*args: Any, **kwargs: Any) -> str:
+        raise AssertionError("the license tool was run on a Python the notices are not for")
+
+    monkeypatch.setattr(notices, "_run", never)
+    monkeypatch.setattr("sys.argv", ["generate_third_party_notices.py", "-o", str(out), *flag])
+
+    assert notices.main() == 2
+
+    assert not out.exists()
+    err = capsys.readouterr().err
+    assert "is Python 3.12" in err
+    assert "Python 3.11" in err
+    # The message of the check itself, which would send the reader to
+    # `make notices` on the wrong Python.
+    assert "THIRD_PARTY_NOTICES out of date" not in err

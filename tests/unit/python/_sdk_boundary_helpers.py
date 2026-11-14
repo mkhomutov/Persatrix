@@ -3,7 +3,7 @@
 ``test_llm_sdk_boundary.py`` covers the two SDKs every install has (Anthropic,
 OpenAI); ``test_llm_sdk_boundary_gemini.py`` and
 ``test_llm_sdk_boundary_watsonx.py`` cover the two that come with the optional
-``providers`` extra. All run the real SDK and replace only the socket, so they
+``providers`` extra. All run the real SDK with the network replaced, so they
 share the pieces kept here. The ``_`` prefix keeps pytest from collecting
 this module.
 """
@@ -87,11 +87,25 @@ def provider_sdk(module_name: str) -> Any:
         pytest.skip(f"{module_name} is not installed (the optional `providers` extra)")
 
 
-def refuse_network(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make any attempt to open a connection fail the test instead of reaching out."""
+def refuse_network(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Refuse every name lookup and every connection, and keep a record of each try.
 
-    def refuse(*args: Any, **kwargs: Any) -> Any:
-        raise AssertionError("an SDK boundary test tried to open a network connection")
+    A test that reaches for the network gets an error at once. An SDK may
+    catch that error and carry on, so the tries are also returned: the
+    fixture that calls this fails the test at its end if the list is not
+    empty. A name lookup is refused too, since resolving the provider's host
+    is the first thing an SDK does on its way out.
+    """
+    attempts: list[str] = []
 
-    monkeypatch.setattr(socket.socket, "connect", refuse)
-    monkeypatch.setattr(socket, "create_connection", refuse)
+    def refuse(what: str) -> Any:
+        def refused(*args: Any, **kwargs: Any) -> Any:
+            attempts.append(what)
+            raise AssertionError(f"an SDK boundary test reached for the network: {what}")
+
+        return refused
+
+    monkeypatch.setattr(socket, "getaddrinfo", refuse("a name lookup"))
+    monkeypatch.setattr(socket, "create_connection", refuse("create_connection"))
+    monkeypatch.setattr(socket.socket, "connect", refuse("connect"))
+    return attempts

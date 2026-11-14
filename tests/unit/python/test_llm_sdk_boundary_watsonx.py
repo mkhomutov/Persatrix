@@ -4,8 +4,10 @@ The watsonx half of what ``test_llm_sdk_boundary_gemini.py`` describes:
 ``ibm-watsonx-ai`` comes with the optional ``providers`` extra, so these
 tests skip where it is not installed and must run under ``make
 test-providers``, which sets ``PERSATRIX_REQUIRE_PROVIDER_SDKS=1``
-(ISSUE-0220). The SDK is the real one; only the socket is replaced, and a
-guard fails any test that tries to open one.
+(ISSUE-0220). The SDK is the real one and sends as it does in the product,
+through its own httpx client. Only that client's last step, the send, is
+replaced, and a guard fails any test that looks up a name or opens a
+connection.
 
 What is covered and what is not: the SDK cannot build its client without
 three calls of its own (an IAM token, the project or space, the model list).
@@ -15,6 +17,9 @@ the reply it parses are covered. What IBM's services really answer to those
 three calls is not. Nor is what the service accepts inside a message or a
 tool: the SDK checks the names of ``chat``'s keywords and sends their
 contents on as given, so those are pinned here as they reach the wire.
+
+Not covered either: an error reply or a retry. The SDK retries some
+failures itself, in a worker thread the adapter cannot cancel (ISSUE-0253).
 """
 
 from __future__ import annotations
@@ -22,7 +27,7 @@ from __future__ import annotations
 import base64
 import importlib
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import Any
 
 import pytest
@@ -35,8 +40,10 @@ from ._sdk_boundary_helpers import TOOLS, provider_sdk, refuse_network
 
 
 @pytest.fixture(autouse=True)
-def no_network(monkeypatch: pytest.MonkeyPatch) -> None:
-    refuse_network(monkeypatch)
+def no_network(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    attempts = refuse_network(monkeypatch)
+    yield
+    assert not attempts, f"the test reached for the network, and something caught it: {attempts}"
 
 
 _WATSONX_MODEL = "meta-llama/llama-4-maverick"

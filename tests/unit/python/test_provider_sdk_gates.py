@@ -20,6 +20,7 @@ from __future__ import annotations
 import configparser
 import re
 import shlex
+import socket
 import subprocess
 import tomllib
 from pathlib import Path
@@ -31,7 +32,7 @@ from _test_infra import REPO_ROOT, ci_job_steps
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
-from ._sdk_boundary_helpers import REQUIRE_PROVIDER_SDKS_ENV, provider_sdk
+from ._sdk_boundary_helpers import REQUIRE_PROVIDER_SDKS_ENV, provider_sdk, refuse_network
 
 GITHUB = REPO_ROOT / ".github"
 BASE = GITHUB / "python-constraints.txt"
@@ -39,18 +40,23 @@ PROVIDERS = GITHUB / "python-constraints-providers.txt"
 BASE_ARG = ".github/python-constraints.txt"
 PROVIDERS_ARG = ".github/python-constraints-providers.txt"
 ADAPTERS = ("llm_gemini.py", "llm_watsonx.py")
-BOUNDARY_TESTS = (
+# What `make test-providers` runs: every test that needs a real provider SDK.
+# The third is one test of a file whose other tests need none.
+SDK_TESTS = (
     "tests/unit/python/test_llm_sdk_boundary_gemini.py",
     "tests/unit/python/test_llm_sdk_boundary_watsonx.py",
+    "tests/unit/python/test_tool_arg_check.py"
+    "::TestNarrowing::test_every_keyword_passes_gemini_schema_validation",
 )
 # The targets that need the SDKs installed, in the order they run. The last
-# is the plain install's own license check, run again: it reads whatever is
-# installed, so here it reads the SDKs and what they pulled in.
+# is the plain install's license check under a name of its own: it reads
+# whatever is installed, so here it reads the SDKs and what they pulled in,
+# and a failure line says which of the two runs failed.
 PROVIDER_TARGETS = (
     "build-agents-providers",
     "lint-providers",
     "test-providers",
-    "check-licenses-python",
+    "check-licenses-providers",
 )
 
 # A pin line with its marker, as uv writes it: `name==1.2.3 ; marker`.
@@ -154,10 +160,59 @@ def test_build_agents_providers_installs_both_extras_at_the_providers_pins() -> 
 
 def test_test_providers_turns_a_skip_into_a_failure() -> None:
     (command,) = [ln.strip() for ln in _dry_run("test-providers").splitlines() if "pytest" in ln]
-    assert command.startswith(f"{REQUIRE_PROVIDER_SDKS_ENV}=1 python -m pytest "), command
-    for path in BOUNDARY_TESTS:
-        assert path in command.split(), f"test-providers does not run {path}"
-        assert (REPO_ROOT / path).is_file()
+    # The whole command: the variable, every test that needs an SDK, and no
+    # option that could deselect one.
+    assert command == (
+        f"{REQUIRE_PROVIDER_SDKS_ENV}=1 python -m pytest {' '.join(SDK_TESTS)} -v --tb=short"
+    )
+    for test in SDK_TESTS:
+        assert (REPO_ROOT / test.split("::")[0]).is_file()
+
+
+def test_every_test_that_needs_a_provider_sdk_runs_under_test_providers() -> None:
+    """A test that needs a real SDK skips in every other run, so one that
+    `make test-providers` does not name runs nowhere. That was true of a
+    third test, which asked for the SDK with `importorskip`."""
+    named = {test.split("::")[0] for test in SDK_TESTS}
+    tests_dir = REPO_ROOT / "tests" / "unit" / "python"
+    this_file = Path(__file__).name
+    for path in sorted(tests_dir.glob("test_*.py")):
+        if path.name == this_file:
+            continue
+        source = path.read_text(encoding="utf-8")
+        rel = path.relative_to(REPO_ROOT).as_posix()
+        # A call of the helper, not a test whose name ends the same way.
+        if re.search(r"(?<![\w.])provider_sdk\(", source):
+            assert rel in named, f"{rel} needs a provider SDK and `make test-providers` skips it"
+        skipping = re.findall(r"importorskip\(\s*[\"'](google\.genai|ibm_watsonx_ai)", source)
+        assert not skipping, f"{rel} skips without the SDK in every run: use provider_sdk()"
+
+
+def _connect_a_socket() -> None:
+    with socket.socket() as sock:
+        sock.connect(("192.0.2.1", 443))
+
+
+def test_the_network_guard_refuses_a_lookup_and_a_connection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The SDK tests rest on this guard; nothing else showed that it fires."""
+    attempts = refuse_network(monkeypatch)
+    tries = {
+        "a name lookup": lambda: socket.getaddrinfo("example.invalid", 443),
+        "create_connection": lambda: socket.create_connection(("192.0.2.1", 443), timeout=1),
+        "connect": _connect_a_socket,
+    }
+    for what, attempt in tries.items():
+        with pytest.raises(AssertionError, match="network"):
+            attempt()
+        assert len(attempts) == list(tries).index(what) + 1, f"{what} was not recorded"
+    # An SDK that catches the error still leaves the record the tests check.
+    try:
+        socket.getaddrinfo("example.invalid", 443)
+    except Exception:
+        pass
+    assert len(attempts) == len(tries) + 1
 
 
 def _missing_sdk_outcome() -> str:
@@ -191,13 +246,6 @@ def test_a_missing_sdk_is_a_failure_only_where_the_run_requires_it(
 
 def test_lint_providers_checks_both_adapters_with_no_config_to_excuse_a_missing_sdk() -> None:
     (command,) = [ln.strip() for ln in _dry_run("lint-providers").splitlines() if "mypy" in ln]
-    words = command.split()
-    # An empty --config-file reads no config, so the sections that excuse a
-    # missing SDK for the plain install do not apply: here it is an error.
-    assert "--config-file=" in words
-    for adapter in ADAPTERS:
-        assert adapter in words
-        assert (REPO_ROOT / "agents" / adapter).is_file()
     # With no config, the package's settings are given as flags. A setting
     # added to [tool.mypy] has to be mirrored here, so the set is held.
     text = (REPO_ROOT / "agents" / "pyproject.toml").read_text(encoding="utf-8")
@@ -207,8 +255,25 @@ def test_lint_providers_checks_both_adapters_with_no_config_to_excuse_a_missing_
         "warn_return_any": True,
         "warn_unused_configs": True,
     }
-    assert words[words.index("--python-version") + 1] == settings["python_version"]
-    assert "--warn-return-any" in words
+    # The whole command. An empty --config-file reads no config, so the
+    # sections that excuse a missing SDK for the plain install do not apply.
+    # Nothing else may be added: `--ignore-missing-imports` or
+    # `--follow-imports=skip` would hide the SDK again and pass.
+    assert command == (
+        "cd agents && python -m mypy --config-file= "
+        f"--python-version {settings['python_version']} --warn-return-any {' '.join(ADAPTERS)}"
+    )
+    for adapter in ADAPTERS:
+        assert (REPO_ROOT / "agents" / adapter).is_file()
+
+
+def test_the_provider_license_check_is_the_plain_one_under_its_own_name() -> None:
+    def license_commands(target: str) -> list[str]:
+        return [ln.strip() for ln in _dry_run(target).splitlines() if "python_licenses.py" in ln]
+
+    plain = license_commands("check-licenses-python")
+    assert len(plain) == 1
+    assert license_commands("check-licenses-providers") == plain
 
 
 def test_the_adapters_import_their_sdks_without_a_type_ignore() -> None:
@@ -239,18 +304,24 @@ def test_both_mypy_configs_excuse_the_sdks_only_while_they_are_not_installed() -
 
 
 def test_the_python_job_checks_the_sdks_after_every_check_of_the_plain_install() -> None:
-    runs = [str(step.get("run", "")).strip() for step in ci_job_steps("python")]
+    steps = ci_job_steps("python")
+    runs = [str(step.get("run", "")).strip() for step in steps]
     wanted = [f"make {target}" for target in PROVIDER_TARGETS]
-    positions = []
     for command in wanted:
         assert runs.count(command) == 1, f"the python job must run `{command}` exactly once"
-        positions.append(runs.index(command))
-    assert positions == sorted(positions), f"the provider steps must run in this order: {wanted}"
+    install = runs.index(wanted[0])
     # Installing the extra adds packages to the job's one environment. Every
-    # step before it saw the plain install; nothing but provider steps may
-    # come after it.
-    after = [run for run in runs[positions[0] :] if run]
-    assert after == wanted, f"steps after the SDK install must be provider steps only: {after}"
+    # step before it saw the plain install; from it on, the job is the four
+    # provider steps and nothing else, each a plain `run:`. A `uses:` step
+    # would run in the changed environment, and an `if:` or a
+    # `continue-on-error:` would let a provider step be skipped or fail
+    # without failing the job.
+    tail = steps[install:]
+    assert [str(step.get("run", "")).strip() for step in tail] == wanted, (
+        f"from the SDK install on, the job must be exactly: {wanted}"
+    )
+    for step in tail:
+        assert set(step) == {"name", "run"}, f"{step.get('name')!r} has more than a name and a run"
 
 
 def _refresh_steps() -> dict[str, str]:
@@ -282,4 +353,4 @@ def test_the_weekly_refresh_moves_tries_and_commits_both_files() -> None:
     # The plain install is tried first and whole, its own license check
     # included; no provider target may run before the SDKs are installed.
     assert "test-python" in plain and "check-licenses-python" in plain, plain
-    assert not set(plain) & set(PROVIDER_TARGETS[:-1]), plain
+    assert not set(plain) & set(PROVIDER_TARGETS), plain

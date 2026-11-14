@@ -98,6 +98,8 @@ release PR's smoke run, if that is run, or by whoever next runs a demo.
 > 3.12 and 2.5.4 from 3.12, `pandas` 2.3.3 below 3.14 and 3.1.1 from
 > 3.14. CI's Python 3.11 installs the first of each and the image's 3.12
 > would install the second `numpy`, so the two still differ by that one
-> package. And the weekly advisory audit reads a constraints file as
-> Python 3.11 sees it, so the 3.12 pins are not audited until the audit
-> also runs on the image's Python.
+> package. And an advisory audit run on CI's Python 3.11 reads the file
+> as that Python sees it, so it would not see the 3.12 pins: they stay
+> unaudited until an audit also runs on the image's Python
+> ([ISSUE-0218](ISSUE-0218-advisory-scanning-covers-rust-only.md) tracks
+> the weekly audit).
