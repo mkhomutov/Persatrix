@@ -142,7 +142,20 @@ terminated brainstorm hands back a readable synthesis, not just a stop.
 It is **additive and self-fetching** — the affordance appears only at close
 (reading `GET /api/v1/agents/{id}/interactions/closed`, merged across the
 channel's participants); a failed on-close summariser shows an honest
-"summary unavailable" state. The same summary is readable from the terminal
+"summary unavailable" state. The console reads it when the conversation is
+opened, and then asks each persona once every ten seconds per persona in the
+conversation: every 30 seconds on a channel with three personas, every 10
+seconds in a DM. A summary shows within that time of being stored, as long as
+the console's reads are served. The console's requests are counted against a
+budget (see [Troubleshooting](web-console.md#troubleshooting)); when a summary
+read is refused because the budget is spent, the console doubles its wait
+before asking again, up to five minutes, and nothing on screen says that the
+summary is behind: "Live updates paused" is the timeline's notice. That pace
+keeps these reads at six requests a minute on average, whatever the size of
+the channel. One round's reads are sent together, so on a channel with more
+than 20 personas a round no longer fits beside the timeline's own reads, and
+part of it is refused every time. The same summary is
+readable from the terminal
 via `persatrix agent interactions <agent>` (see
 [channels.md §"The interaction-summary surface"](channels.md#the-interaction-summary-surface-rfc-0020--v038)).
 
