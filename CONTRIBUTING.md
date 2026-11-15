@@ -230,6 +230,6 @@ CLI (Rust)  ←──REST──→  Orchestrator (Go)  ←──gRPC──→  A
 ### Component Boundaries
 
 - **Go orchestrator** owns workflow execution, scheduling, agent registry, cost tracking, telemetry, security gates. No LLM call logic.
-- **Python agents** own LLM interaction, tool execution, persona behavior, memory, sub-agent spawning. Each agent is a gRPC service.
+- **Python agents** own LLM interaction, tool execution, persona behavior, memory, and the sub-agent code, which only tests call so far. Each agent is a gRPC service.
 - **Rust CLI** is a thin client for the orchestrator's REST API. All business logic lives server-side.
 - **Protos** define the gRPC contract — change carefully.

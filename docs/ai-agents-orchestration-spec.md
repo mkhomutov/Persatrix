@@ -94,7 +94,9 @@ A directed acyclic graph (DAG) of tasks. Supports:
 - Conditional branching (if result X → path A, else → path B)
 - Loops with exit conditions (retry up to N times)
 
-> 2026-11-15 — the last two are not built. A workflow runs its steps in
+> 2026-11-15 — the last two are not built: no branch on a result and no
+> loop in the graph. (A failed step is retried; that is built, in the
+> executor.) A workflow runs its steps in
 > sequence or in parallel and skips none of them on a condition: a step's
 > `condition` passes the schema and is then ignored
 > ([ISSUE-0202](issues/ISSUE-0202-workflow-condition-and-approval-validate-then-do-nothing.md));
@@ -278,12 +280,18 @@ workflow:
       condition: "{{ steps.review.output.approved == false }}"
 ```
 
-> 2026-11-15 — the `condition` on `revise` does nothing. The planner reads
-> the key and the scheduler never looks at it, so `revise` runs on every
-> run, also when the review approved. The shipped
-> [`workflows/feature-builder.yaml`](../workflows/feature-builder.yaml)
-> carries the same line and behaves the same way
+> 2026-11-15 — the `condition` on `revise` does nothing: the planner reads
+> the key and the scheduler never looks at it
 > ([ISSUE-0202](issues/ISSUE-0202-workflow-condition-and-approval-validate-then-do-nothing.md)).
+> This example does not get as far as `revise`. It has no `schema_version`,
+> which a workflow file must carry, and with one added the run fails at
+> `review`: a step's output is stored under its `output_key`, so
+> `steps.implement.output` does not resolve
+> ([ISSUE-0201](issues/ISSUE-0201-step-output-stored-under-output-key-not-step-id.md)).
+> The shipped
+> [`workflows/feature-builder.yaml`](../workflows/feature-builder.yaml)
+> carries the same `condition`, does run, and runs `revise` every time,
+> also when the review approved.
 
 ### 4.3 Message Schemas (Protobuf)
 

@@ -94,8 +94,8 @@ do not wait for that.
 > Workflow entry, which listed conditional and looped steps as
 > supported; three dated notes in the orchestration spec (at the
 > orchestrator's "conditional" order, at the workflow's conditional
-> branching and loops, and at the example's `condition`; the approval
-> gate already had its note); and a comment at the `revise` step of
+> branching and loops, and at the example's `condition`; the step's
+> approval keys already had their note); and a comment at the `revise` step of
 > `workflows/feature-builder.yaml`. No behaviour changes: no warning, no
 > refusal, nothing in the schema.
 >
@@ -104,3 +104,17 @@ do not wait for that.
 > records, so it needs a decision, and either one changes the workflow
 > engine, which is frozen. The schema gives the three keys no
 > `description`, so there was nothing to correct in it.
+
+> 2026-11-16 — two corrections after the review of [#1133](https://github.com/mkhomutov/Persatrix/pull/1133).
+> The note under the spec's workflow example said that its `revise`
+> runs on every run. That example does not get that far: it has no
+> `schema_version`, and with one added the run fails at `review` on an
+> unresolved reference
+> ([ISSUE-0201](ISSUE-0201-step-output-stored-under-output-key-not-step-id.md)).
+> Only the shipped `workflows/feature-builder.yaml` runs `revise`, on
+> every run; the note now says both. And the pull request's title spoke
+> of "approval gates" for the step's `approval_required` and
+> `approval_timeout` keys. The glossary's Approval Gate is another
+> thing, a step of RFC 0028's decision pipeline, and that step exists
+> in the code (`agents/decision/pipeline.py`); the title and the
+> glossary entry now keep the two apart.
