@@ -314,8 +314,13 @@ func TestSubscribe_KeepIsAskedBeforeAnEntryIsQueued(t *testing.T) {
 // length steady from one CPU to eight; it does not make it equally sharp.
 // A broken seam shows only when a writer is stopped between its ring
 // write and its fan-out, which on one CPU is up to the scheduler: with
-// the seam broken on purpose, in three ways, the test failed in 30 of 36
-// runs on one CPU and in every run on two, four and eight.
+// the seam broken on purpose, in three ways, the test failed in 9 of 36
+// runs on one CPU and in all 27 on two, four and eight.
+//
+// It asserts nothing about entries the subscriber loses. A reader as
+// slow as a test under the race detector falls behind eight writers,
+// and what the channel drops after the entries checked here says
+// nothing about the seam.
 func TestSubscribeWithBacklog_MeetsTheLiveEntriesExactly(t *testing.T) {
 	const (
 		executions   = 4
@@ -325,9 +330,10 @@ func TestSubscribeWithBacklog_MeetsTheLiveEntriesExactly(t *testing.T) {
 	)
 	b := newTestBuffer(t, Config{PerExecution: 512, MaxExecutions: executions, MaxSubscribers: 8})
 
-	// While a subscriber empties its hold the writers slow down, so that
-	// the hold can run dry; they do not stop, so entries still arrive
-	// while it ends and the channel takes over.
+	// The writers write at full speed while a subscriber registers and
+	// while it empties its hold, so entries arrive as the hold ends and
+	// the channel takes over.  Should a hold not run dry that way, they
+	// are slowed until it has; they never stop.
 	var stop, slow atomic.Bool
 	var writers sync.WaitGroup
 	for ex := range executions {
@@ -377,6 +383,29 @@ func TestSubscribeWithBacklog_MeetsTheLiveEntriesExactly(t *testing.T) {
 		slow.Store(false)
 		sub, err := b.SubscribeWithBacklog(id, nil, testHold)
 		require.NoError(t, err)
+
+		// The live entries, taken as a caller takes them: what waited in
+		// the hold, until a call finds it empty, and then the channel.
+		// They are only collected here, which is quicker than the writers
+		// write, and checked once the subscriber is gone.
+		var live []Entry
+		for held, rounds := sub.Held(), 0; len(held) > 0; held, rounds = sub.Held(), rounds+1 {
+			live = append(live, held...)
+			if rounds == 64 {
+				slow.Store(true)
+			}
+		}
+		inHold := len(live)
+		// The channel was empty when the hold ended, so the first
+		// SubscribeBuffer entries it gives are the first it was offered,
+		// whatever it loses after them to a reader as slow as this one.
+		for range SubscribeBuffer {
+			live = append(live, receive(t, sub.Live))
+		}
+		sub.Cancel()
+		// The writers idle while the entries are checked, and wake one by
+		// one into the next registration: on one CPU that is what stops
+		// some of them between their ring write and their fan-out.
 		slow.Store(true)
 
 		last := map[string]int{}
@@ -387,39 +416,30 @@ func TestSubscribeWithBacklog_MeetsTheLiveEntriesExactly(t *testing.T) {
 			}
 			last[writer] = seq
 		}
-		// What waited in the hold, until a call finds it empty, and then
-		// the first entries of the channel: every one of them was taken,
-		// so each writer's entries go on one by one from its backlog.
-		live := map[string]bool{}
-		follow := func(e Entry, from string) {
+		// Every live entry was taken, so each writer's entries go on one
+		// by one from its backlog, through the hold and into the channel.
+		met := map[string]bool{}
+		for n, e := range live {
+			where := "in the hold"
+			if n >= inHold {
+				where = "on the channel"
+			}
 			writer, seq := parse(e)
 			prev, seen := last[writer]
 			last[writer] = seq
 			if !seen {
 				// The ring had wrapped past this writer's entries, or it
 				// had not written yet: nothing to meet.
-				live[writer] = true
-				return
+				met[writer] = true
+				continue
 			}
-			if !live[writer] {
-				live[writer] = true
+			if !met[writer] {
+				met[writer] = true
 				straddled++
 			}
 			require.Equal(t, prev+1, seq,
-				"subscription %d: %s goes from %d to %d %s", i, writer, prev, seq, from)
+				"subscription %d: %s goes from %d to %d %s", i, writer, prev, seq, where)
 		}
-		for held := sub.Held(); len(held) > 0; held = sub.Held() {
-			for _, e := range held {
-				follow(e, "in the hold")
-			}
-		}
-		// The channel was empty when the hold ended and takes
-		// SubscribeBuffer entries before it can overflow.
-		for range SubscribeBuffer {
-			follow(receive(t, sub.Live), "on the channel")
-		}
-		require.Zero(t, sub.Dropped(), "subscription %d", i)
-		sub.Cancel()
 	}
 	require.GreaterOrEqual(t, straddled, tooFew, "too few writers were caught on both sides to prove anything")
 }
