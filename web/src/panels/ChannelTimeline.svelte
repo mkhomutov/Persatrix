@@ -110,6 +110,15 @@
     persona: (id) => agentsById[id] ?? null,
   });
 
+  // The open DM belongs to the identity it was opened as: when `userId`
+  // changes (the shell's "acting as", local testing only), open it again as
+  // the new one. A group channel needs nothing: it is the same channel, with
+  // the same history, whoever watches it. (No DM is open on the first run.)
+  $effect(() => {
+    void userId;
+    untrack(() => dm.reidentify());
+  });
+
   const isDM = $derived(Boolean(dm.agent));
   // activeChannel is the id the feed renders: the resolved DM in DM mode, else the
   // group channel. A fresh DM is "" until its first send creates the channel.
