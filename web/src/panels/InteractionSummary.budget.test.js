@@ -6,9 +6,11 @@ import InteractionSummary from "./InteractionSummary.svelte";
 // every read counts toward the console's request budget: 60 calls per 60
 // seconds by default, one bucket for every console window while sign-in is
 // off. The summary changes only when an interaction closes, so each persona is
-// asked once every ten seconds per persona asked: six requests a minute
-// whatever the size of the channel. These cases pin that count, so a change
-// that adds a read to a refresh, or shortens the wait, fails here.
+// asked once every ten seconds per persona asked: six requests a minute on
+// average, whatever the size of the channel. It is an average: a round's
+// reads go out together, ten at once every 100 seconds for ten personas.
+// These cases pin that count, so a change that adds a read to a refresh, or
+// shortens the wait, fails here.
 vi.mock("../lib/api.js", () => ({
   getClosedInteractions: vi.fn(),
 }));
@@ -143,12 +145,93 @@ describe("InteractionSummary — requests per minute", () => {
     expect(getClosedInteractions).toHaveBeenCalledTimes(1); // the read on the change
     getClosedInteractions.mockClear();
 
-    // The round that was already timed for three still comes at its time;
-    // from then on the one persona is asked every ten seconds.
-    await vi.advanceTimersByTimeAsync(30000);
+    // The rounds are timed afresh from the change: the one persona is asked
+    // every ten seconds, and the round timed for three does not come.
+    await vi.advanceTimersByTimeAsync(9999);
+    expect(getClosedInteractions).toHaveBeenCalledTimes(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(getClosedInteractions).toHaveBeenCalledTimes(1);
     getClosedInteractions.mockClear();
     await vi.advanceTimersByTimeAsync(MINUTE);
     expect(getClosedInteractions).toHaveBeenCalledTimes(6);
+  });
+});
+
+describe("InteractionSummary — another conversation is opened", () => {
+  // The wait belongs to the conversation it was timed for. Opening another
+  // one reads it at once and times its rounds from that moment.
+  const refused = () =>
+    Promise.reject(Object.assign(new Error("rate limit exceeded"), { status: 429 }));
+
+  it("times a smaller channel's first round from the switch, not from the larger channel left", async () => {
+    const view = await watch(10); // a round every 100 seconds
+    await vi.advanceTimersByTimeAsync(1000);
+
+    await view.rerender({ scope: "group:roundtable", agentIds: personas(3) });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(getClosedInteractions).toHaveBeenCalledTimes(3); // read on opening
+    getClosedInteractions.mockClear();
+
+    await vi.advanceTimersByTimeAsync(29999);
+    expect(getClosedInteractions).toHaveBeenCalledTimes(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(getClosedInteractions).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not ask a large channel a second time within its round after a DM", async () => {
+    const view = await watch(1, { scope: "dm:ada:local" }); // a round every 10 seconds
+    await vi.advanceTimersByTimeAsync(1000);
+
+    await view.rerender({ scope: "group:assembly", agentIds: personas(10) });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(getClosedInteractions).toHaveBeenCalledTimes(10); // read on opening
+    getClosedInteractions.mockClear();
+
+    // The DM's round, nine seconds away when it was left, does not come.
+    await vi.advanceTimersByTimeAsync(99999);
+    expect(getClosedInteractions).toHaveBeenCalledTimes(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(getClosedInteractions).toHaveBeenCalledTimes(10);
+  });
+
+  it("keeps to one round at a time when a round is still out as another conversation is opened", async () => {
+    const view = await watch(3);
+    // A round goes out and is not answered yet.
+    const held = [];
+    getClosedInteractions.mockImplementation(() => new Promise((resolve) => held.push(resolve)));
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(held).toHaveLength(3);
+
+    getClosedInteractions.mockImplementation(() => Promise.resolve({ interactions: [] }));
+    await view.rerender({ scope: "group:roundtable", agentIds: personas(3) });
+    await vi.advanceTimersByTimeAsync(0);
+    held.forEach((answer) => answer({ interactions: [] })); // the old round answers now
+    await vi.advanceTimersByTimeAsync(0);
+    getClosedInteractions.mockClear();
+
+    // The conversation left does not go on asking beside the new one.
+    await vi.advanceTimersByTimeAsync(MINUTE);
+    expect(getClosedInteractions).toHaveBeenCalledTimes(6);
+  });
+
+  it("reads a conversation again one round after a refused read on opening, whatever wait the one left had reached", async () => {
+    const view = await watch(3);
+    getClosedInteractions.mockImplementation(refused);
+    // Four refused rounds: the next one is five minutes away.
+    await vi.advanceTimersByTimeAsync(30000 + 60000 + 120000 + 240000);
+    getClosedInteractions.mockClear();
+
+    await view.rerender({ scope: "group:roundtable", agentIds: personas(3) });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(getClosedInteractions).toHaveBeenCalledTimes(3); // read on opening, refused
+    getClosedInteractions.mockImplementation(() => Promise.resolve({ interactions: [record()] }));
+    getClosedInteractions.mockClear();
+
+    await vi.advanceTimersByTimeAsync(29999);
+    expect(getClosedInteractions).toHaveBeenCalledTimes(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(getClosedInteractions).toHaveBeenCalledTimes(3);
+    expect(screen.getByRole("status", { name: /interaction summary/i })).toBeTruthy();
   });
 });
 
@@ -176,9 +259,11 @@ describe("InteractionSummary — a hidden tab", () => {
   it("does not read more often when the tab is hidden and shown again and again", async () => {
     await watch(3);
 
-    // Away and back every four seconds for a minute.
+    // Away and back every four seconds for a minute, with the event the
+    // browser fires each time: a read on that event would show here.
     for (let t = 0; t < MINUTE; t += 4000) {
       hidden.mockReturnValue((t / 4000) % 2 === 0);
+      document.dispatchEvent(new Event("visibilitychange"));
       await vi.advanceTimersByTimeAsync(4000);
     }
 
@@ -211,6 +296,22 @@ describe("InteractionSummary — a refused read", () => {
     expect(getClosedInteractions).toHaveBeenCalledTimes(6);
   });
 
+  it("stretches its wait when one read of three is refused", async () => {
+    // The usual shape of a full budget: the round's reads go out together
+    // and the limiter serves some of them.
+    await watch(3);
+    getClosedInteractions.mockImplementation((id) =>
+      id === "persona-2" ? refused() : Promise.resolve({ interactions: [] }),
+    );
+    await vi.advanceTimersByTimeAsync(30000); // the round with one refusal
+    getClosedInteractions.mockClear();
+
+    await vi.advanceTimersByTimeAsync(59999);
+    expect(getClosedInteractions).toHaveBeenCalledTimes(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(getClosedInteractions).toHaveBeenCalledTimes(3);
+  });
+
   it("keeps its pace after a read that failed for another reason", async () => {
     // One flaky persona is no sign of a full budget: the others still answer,
     // and the round comes at its ordinary time.
@@ -227,14 +328,22 @@ describe("InteractionSummary — a refused read", () => {
   });
 
   it("does not wait less than a larger channel's pace when the channel grew while refused", async () => {
-    // Watching one persona, the wait is ten seconds. The channel then has
-    // three, and every read is refused: the next wait doubles from thirty
-    // seconds, not from ten.
+    // Watching one persona, the wait is ten seconds, and one refused round
+    // stretches it to twenty. The channel then has three, and every read is
+    // still refused: the waits double from thirty seconds, not from twenty.
     const view = await watch(1);
     getClosedInteractions.mockImplementation(refused);
+    await vi.advanceTimersByTimeAsync(10000); // a refused round: 20 s
     await view.rerender({ agentIds: personas(3) });
     await vi.advanceTimersByTimeAsync(0); // the read on the change, refused: 60 s
-    await vi.advanceTimersByTimeAsync(10000); // the round timed before: 120 s
+    getClosedInteractions.mockClear();
+
+    // The first round comes one ordinary wait after the change, refused
+    // again: 120 s.
+    await vi.advanceTimersByTimeAsync(29999);
+    expect(getClosedInteractions).toHaveBeenCalledTimes(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(getClosedInteractions).toHaveBeenCalledTimes(3);
     getClosedInteractions.mockClear();
 
     await vi.advanceTimersByTimeAsync(119999);
@@ -243,12 +352,17 @@ describe("InteractionSummary — a refused read", () => {
     expect(getClosedInteractions).toHaveBeenCalledTimes(3);
   });
 
-  it("is back at its pace when the personas left during a stretched wait and came back", async () => {
+  it("drops a stretched wait when the personas leave, and is back at its pace when they return", async () => {
     const view = await watch(1);
     getClosedInteractions.mockImplementation(refused);
     await vi.advanceTimersByTimeAsync(10000 + 20000 + 40000); // three refused rounds: 80 s next
     await view.rerender({ agentIds: [] });
-    await vi.advanceTimersByTimeAsync(80000); // that round finds nobody to ask
+    await vi.advanceTimersByTimeAsync(0);
+    // Nobody to ask: it looks again at the ordinary wait, not the stretched one.
+    const armed = vi.spyOn(globalThis, "setTimeout");
+    await vi.advanceTimersByTimeAsync(MINUTE);
+    expect(armed).toHaveBeenCalledTimes(6);
+    expect(getClosedInteractions).toHaveBeenCalledTimes(3);
 
     getClosedInteractions.mockImplementation(() => Promise.resolve({ interactions: [] }));
     await view.rerender({ agentIds: personas(1) });
