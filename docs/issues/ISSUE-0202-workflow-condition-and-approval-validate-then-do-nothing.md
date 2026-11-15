@@ -78,8 +78,9 @@ do not wait for that.
 > 2026-11-10 — found by a whole-repository quality review of `main` at
 > `ee9cfaac`; the `revise` run was reproduced with a throwaway Go test.
 
-> 2026-11-15 — the doc half is done; the code half remains, so this stays
-> `in_progress`. Checked again on `main` at `111b041d` with a throwaway
+> 2026-11-15 — the doc half is done in
+> [#1133](https://github.com/mkhomutov/Persatrix/pull/1133); the code half
+> remains, so this stays `in_progress`. Checked again on `main` at `111b041d` with a throwaway
 > Go test that runs the shipped `feature-builder` through the scheduler
 > with a reviewer that answers `{"approved": true}`: four steps are
 > dispatched, `revise` among them, and the run completes. With

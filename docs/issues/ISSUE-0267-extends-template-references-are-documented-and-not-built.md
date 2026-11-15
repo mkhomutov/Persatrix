@@ -65,7 +65,8 @@ project layout.
 
 ## Notes
 
-> 2026-11-15 — found while correcting the instruction files for
+> 2026-11-15 — found in [#1133](https://github.com/mkhomutov/Persatrix/pull/1133)
+> while correcting the instruction files for
 > [ISSUE-0202](ISSUE-0202-workflow-condition-and-approval-validate-then-do-nothing.md)
 > and
 > [ISSUE-0214](ISSUE-0214-declared-tool-permissions-are-never-enforced.md).

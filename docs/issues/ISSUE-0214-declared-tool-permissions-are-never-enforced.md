@@ -85,8 +85,9 @@ spawner.
 > the check is not enforced and links here. The two instruction lines are
 > unchanged and still part of this issue.
 
-> 2026-11-15 — the doc half is done; the code half remains, so this stays
-> `in_progress`. Each mechanism was checked against `main` at `111b041d`
+> 2026-11-15 — the doc half is done in
+> [#1133](https://github.com/mkhomutov/Persatrix/pull/1133); the code half
+> remains, so this stays `in_progress`. Each mechanism was checked against `main` at `111b041d`
 > first. `@tool` stores `permissions` on the tool's definition and its
 > wrapper still carries the `TODO`; no code reads the stored list.
 > `allowed_tools` is copied from the wire into the task's config and
