@@ -117,7 +117,15 @@ user-visible message, not a crashed panel.
    **de-dupes** by polling the head against the last-seen message id rather than
    re-rendering the whole history each tick — so an idle tab does not hammer the
    localhost surface. While you read further up, new messages do not pull the
-   view down; a **Jump to latest** button counts them instead.
+   view down; a **Jump to latest** button counts them instead. When more than
+   50 messages arrived between two reads (the tab was in the background, or
+   the channel was very busy), the console reads back, 200 messages a request,
+   until it meets a message it has already read. After three such requests it
+   stops: a **Load missing messages** marker then shows in the timeline where
+   messages are still missing, and reads the next three pages on a click. A
+   message you posted yourself is drawn at once, before the console has read
+   it; if it lies among the messages still missing, it waits behind the marker
+   with them and comes back in its place.
 4. **Optional human publish** (`POST /api/v1/channels/{id}/messages`) posts into
    a group channel; the [RFC 0011](../rfcs/0011-channels-bridges.md) mention
    fan-out surfaces the agent replies on the next poll.

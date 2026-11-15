@@ -13,7 +13,9 @@
   // in the accessible tree (sr-only) so attribution survives for AT users; the
   // time shows in the gutter on hover instead. `dayLabel` (the first message of
   // a calendar day) draws the day divider above the row — inside the list item,
-  // so the timeline's items stay one per message.
+  // so the timeline's items stay one per message. `children`, when given, is
+  // drawn above both: the marker for a hole in the timeline just over this row
+  // (TimelineGap).
   import {
     formatTime,
     formatTimestamp,
@@ -23,7 +25,14 @@
   } from "../lib/format.js";
   import { segmentMentions } from "../lib/mentions.js";
 
-  let { message, userId, agentsById, compact = false, dayLabel = "" } = $props();
+  let {
+    message,
+    userId,
+    agentsById,
+    compact = false,
+    dayLabel = "",
+    children,
+  } = $props();
 
   const segments = $derived(
     segmentMentions(message.content, message.mentions ?? []),
@@ -45,6 +54,7 @@
   class:from-self={message.sender_id === userId}
   class:compact
 >
+  {@render children?.()}
   {#if dayLabel}
     <div class="day-divider" role="separator" aria-label={dayLabel}>
       <span aria-hidden="true">{dayLabel}</span>
