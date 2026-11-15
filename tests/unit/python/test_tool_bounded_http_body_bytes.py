@@ -9,8 +9,10 @@ the model the status and the headers too.  Reading now also stops once
 the model is shown says that it was not read to its end.
 
 These tests pin the stop, what the model is told, where exactly the
-bound lies, and that it never cuts a body that is text from end to end,
-whichever charset it is in.  What a body under the bound gives is in
+bound lies, that it does not cut a page of text whose characters are
+each spelt once, in the costliest spelling any charset has, and what a
+body gets that repeats sequences which add no text.  What a body under
+the bound gives is in
 ``test_tool_bounded_http_body.py``, whose local server and set-up are
 used here.
 """
@@ -117,8 +119,9 @@ async def test_the_bound_on_bytes_read_is_exact(serve: Any, over: int, ends_with
 
 
 #: A page of text, exactly the cap, spelt in the most bytes each charset
-#: allows.  The last is the costliest spelling any charset Python decodes
-#: has: 79 bytes on the wire for a letter that is two bytes of UTF-8.
+#: allows for a character spelt once.  The last is the costliest such
+#: spelling any charset Python decodes has: 79 bytes on the wire for a
+#: letter that is two bytes of UTF-8.
 _LONGEST_NAME = "ARABIC LETTER BEH WITH THREE DOTS POINTING UPWARDS BELOW AND TWO DOTS ABOVE"
 _WASTEFUL_PAGES: dict[str, tuple[str, bytes, str]] = {
     "utf-32, four bytes a letter": ("utf-32", "x".encode("utf-32-le"), "x"),
@@ -138,10 +141,10 @@ async def test_a_page_of_text_is_never_cut_by_the_bound_on_bytes(
     serve: Any, name: str, extra: int,
 ) -> None:
     """The bound is on the body's own bytes, the cap on its text.  However
-    many bytes a charset spends on a character, a body that is text from
-    end to end fills the page before it reaches the bound: a full page
-    comes back whole, and one character more is cut by the cap, with the
-    cap's notice and not the other one."""
+    many bytes a charset spends on a character spelt once, a body that is
+    text from end to end fills the page before it reaches the bound: a
+    full page comes back whole, and one character more is cut by the cap,
+    with the cap's notice and not the other one."""
     charset, spelling, letter = _WASTEFUL_PAGES[name]
     assert spelling.decode(charset) == letter
     letters = MAX_OUTPUT_BYTES // len(letter.encode()) + extra
@@ -249,3 +252,47 @@ async def test_a_character_half_read_at_the_stop_adds_nothing() -> None:
     reads = _reads_up_to(bound - 2, kanji + kanji[:1])
     body = await bounded_io.read_body_text(_FakeResponse(reads, "iso2022_jp"), cap)  # type: ignore[arg-type]
     assert body == bounded_io.BodyText("\u65e5", bound)
+
+
+async def test_a_text_exactly_at_the_cap_is_still_stopped_at_the_bound_on_bytes() -> None:
+    """The stop on bytes is for a text that has not passed the cap, and a
+    text of exactly the cap has not.  A body that fills the page and then
+    goes on with bytes that add nothing is stopped at the bound like any
+    other; it is not read on until something does add text."""
+    cap = 1_000
+    bound = 40 * cap + 64 * 1024
+    page = TO_ASCII + b"x" * cap
+    reads = [page, *_reads_up_to(bound - 2, TO_ASCII + b"never read")]
+    body = await bounded_io.read_body_text(_FakeResponse(reads, "iso2022_jp"), cap)  # type: ignore[arg-type]
+    assert body == bounded_io.BodyText("x" * cap, bound)
+
+
+def test_a_full_page_from_a_body_not_read_to_its_end_says_so() -> None:
+    """The notice goes on every text the cap did not cut, the one that
+    fills the page to its last byte included: there too the model would
+    take the page for the whole response."""
+    page = "x" * MAX_OUTPUT_BYTES
+    assert builtin._shown_body(bounded_io.BodyText(page, READ_BOUND)) == page + BYTES_NOTICE
+    assert builtin._shown_body(bounded_io.BodyText(page, None)) == page
+    assert builtin._shown_body(bounded_io.BodyText(page + "y", READ_BOUND)) == page + NOTICE
+
+
+
+async def test_a_page_spelt_with_repeated_empty_sequences_is_cut_short_and_says_so() -> None:
+    """Forty covers a character spelt once.  Some charsets let a sequence
+    that adds no text be repeated as often as the sender likes; with
+    fourteen ``ESC ( B`` after each letter, ``iso2022_jp`` spends 43 bytes
+    on one.  Such a body reaches the bound before it has filled the page:
+    it comes back with what was read, less than a page, and says that it
+    was not read to its end."""
+    letter = b"a" + b"\x1b(B" * 14
+    assert (len(letter), letter.decode("iso2022_jp")) == (43, "a")
+    one_read = letter * 1_500
+    reads = [one_read] * 80
+    body = await bounded_io.read_body_text(
+        _FakeResponse(reads, "iso2022_jp"), MAX_OUTPUT_BYTES,  # type: ignore[arg-type]
+    )
+    read_before_the_stop = READ_BOUND // len(one_read) + 1
+    assert body == bounded_io.BodyText("a" * 1_500 * read_before_the_stop, READ_BOUND)
+    assert len(body.text) < MAX_OUTPUT_BYTES
+    assert builtin._shown_body(body) == body.text + BYTES_NOTICE

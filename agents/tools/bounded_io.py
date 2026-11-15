@@ -28,6 +28,7 @@ import codecs
 import errno
 import os
 import stat
+import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
@@ -55,15 +56,27 @@ _WIRE_BYTES_PER_TEXT_BYTE = 4
 
 #: A body is read no further than this many times the cap in its own
 #: bytes while its text is still under the cap.  It is the first whole
-#: number above the most bytes any charset Python decodes can spend on
-#: one byte of UTF-8 text: 39.5, a two-byte Arabic letter spelt as the
-#: 79 bytes of ``\N{ARABIC LETTER BEH WITH THREE DOTS POINTING UPWARDS
-#: BELOW AND TWO DOTS ABOVE}`` in ``unicode_escape``.  (A charset's own
-#: encoder spends 4 at most, UTF-32's; one UTF-7 shift sequence for each
-#: character spends 5, ``\U0000007e`` spends 10.)  So a body that is
-#: text from end to end fills the cap before it reaches this bound,
-#: whatever its charset, and only a body most of whose bytes produce no
-#: text is stopped by it.
+#: number above the most bytes a charset Python decodes spends on one
+#: byte of UTF-8 text when each character is spelt once: 39.5, a
+#: two-byte Arabic letter spelt as the 79 bytes of ``\N{ARABIC LETTER
+#: BEH WITH THREE DOTS POINTING UPWARDS BELOW AND TWO DOTS ABOVE}`` in
+#: ``unicode_escape``.  (A charset's own encoder spends 4 at most,
+#: UTF-32's; one UTF-7 shift sequence for each character spends 5,
+#: ``\U0000007e`` spends 10.)  So a body that is text from end to end,
+#: spelt that way, fills the cap before it reaches this bound, and a
+#: body stopped by it has spent most of its bytes on something that
+#: adds no text.
+#:
+#: Two limits of that.  Some charsets let a sequence that adds no text
+#: be repeated as often as the sender likes (an ISO-2022 escape, HZ's
+#: ``~{~}``, a backslash and a newline in ``unicode_escape``), so for
+#: them there is no most: a letter followed by fourteen ``ESC ( B``
+#: costs 43 bytes in ``iso2022_jp``.  A body spelt like that is stopped
+#: here with less than a full page, and says so.  And the bound ends an
+#: endless body only when it arrives faster than the bound divided by
+#: the request's time-out, about 135 KB a second with ``http_request``'s
+#: 30 seconds; a slower one still ends as a time-out, with no status
+#: and no headers.
 _READ_BYTES_PER_TEXT_BYTE = 40
 
 
@@ -253,11 +266,46 @@ def read_text_file(path: Path, max_bytes: int) -> str:
         os.close(fd)
 
 
+class _PathLock:
+    """The lock for one path, and how many writes hold or want it."""
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.wanted = 0
+
+
+#: One lock for each path a write is under way on or waiting for.  An
+#: entry is dropped when no write wants it any more, so the table holds
+#: no path at rest.
+_path_locks: dict[Path, _PathLock] = {}
+_path_locks_guard = threading.Lock()
+
+
 def write_text_file(path: Path, content: str) -> None:
     """Write *content* to *path* as UTF-8, making the folders above it.
 
     Blocking; call it in a worker thread.  Replaces the whole file, as
     ``Path.write_text`` does.
+
+    Writes to one path happen one at a time, in the order their threads
+    get here.  Without that, two calls that overlap could leave a file
+    that is neither text; and a call cancelled while its thread still
+    writes, which a thread cannot be, could finish after its retry and
+    replace it.  A write waits for the lock for as long as the write
+    before it takes: one stuck for good (a named pipe nobody reads)
+    keeps every later write to that path waiting, each in a thread of
+    its own.  Two spellings that resolve to one file through the file
+    system (a hard link, another letter case) are two paths here.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+    with _path_locks_guard:
+        entry = _path_locks.setdefault(path, _PathLock())
+        entry.wanted += 1
+    try:
+        with entry.lock:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+    finally:
+        with _path_locks_guard:
+            entry.wanted -= 1
+            if not entry.wanted:
+                del _path_locks[path]
