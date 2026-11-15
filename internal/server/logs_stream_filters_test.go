@@ -42,6 +42,23 @@ func openSSE(ctx context.Context, t *testing.T, hs *httptest.Server, path string
 	return &sseStream{t: t, reader: bufio.NewReader(resp.Body)}
 }
 
+// closeServer closes hs. A handler that is still running some seconds
+// after its client has gone fails the test and does not hang it.
+func closeServer(t *testing.T, hs *httptest.Server) {
+	t.Helper()
+	closed := make(chan struct{})
+	go func() {
+		defer close(closed)
+		hs.CloseClientConnections()
+		hs.Close()
+	}()
+	select {
+	case <-closed:
+	case <-time.After(10 * time.Second):
+		t.Error("a handler was still running after its client had gone")
+	}
+}
+
 // messagesUntil reads data frames until one carries the message last and
 // returns every message read, last included. A stream that ends or runs
 // into the test's deadline first fails the test with what had arrived.
@@ -52,7 +69,7 @@ func (s *sseStream) messagesUntil(last string) []string {
 		line, err := s.reader.ReadString('\n')
 		if err != nil {
 			require.FailNow(s.t, "stream ended before the last entry",
-				"waiting for %q, got %v (%v)", last, got, err)
+				"waiting for %q, got %d messages ending with %v (%v)", last, len(got), tail(got, 5), err)
 		}
 		payload, isData := strings.CutPrefix(line, "data: ")
 		if !isData {
@@ -177,16 +194,76 @@ func TestSSE_AppliesTheSnapshotRouteFilters(t *testing.T) {
 			},
 			want: []string{"old", "recent-info", "end"},
 		},
+		{
+			name: "an entry stamped exactly at since is inside it, buffered or live",
+			query: func(now time.Time) string {
+				return "?since=" + url.QueryEscape(now.Add(-2*minute).Format(time.RFC3339))
+			},
+			live: []logLine{
+				{level: "INFO", msg: "live-at-since", age: 2 * minute},
+				{level: "INFO", msg: "end"},
+			},
+			want: []string{"recent-info", "recent-error", "live-at-since", "end"},
+		},
+		{
+			name: "since as a timestamp holds for live entries too",
+			query: func(now time.Time) string {
+				return "?since=" + url.QueryEscape(now.Add(-90*time.Second).Format(time.RFC3339))
+			},
+			live: []logLine{
+				{level: "INFO", msg: "late-arrival", age: 10 * minute},
+				{level: "INFO", msg: "end"},
+			},
+			want: []string{"recent-error", "end"},
+		},
+		{
+			name:  "a level stored in another letter case still matches",
+			query: func(time.Time) string { return "?level=ERROR" },
+			live: []logLine{
+				{level: "error", msg: "lower"}, {level: "WARN", msg: "w"},
+				{level: "Error", msg: "end"},
+			},
+			want: []string{"lower", "end"},
+		},
+		{
+			name:  "and with since, where the live entries wait in the hold first",
+			query: func(time.Time) string { return "?since=5m&level=ERROR" },
+			live: []logLine{
+				{level: "error", msg: "lower"}, {level: "WARN", msg: "w"},
+				{level: "Error", msg: "end"},
+			},
+			want: []string{"recent-error", "lower", "end"},
+		},
+		{
+			name:  "workflow is the whole name, not its beginning",
+			query: func(time.Time) string { return "?since=15m&workflow=code" },
+			live: []logLine{
+				{level: "INFO", msg: "longer", workflow: "code-review"},
+				{level: "INFO", msg: "end", workflow: "code"},
+			},
+			want: []string{"end"},
+		},
+		{
+			name:  "since with workflow: the buffered entries are filtered as well",
+			query: func(time.Time) string { return "?since=15m&workflow=deploy" },
+			live: []logLine{
+				{level: "INFO", msg: "other", workflow: "code-review"},
+				{level: "INFO", msg: "end", workflow: "deploy"},
+			},
+			want: []string{"recent-error", "end"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			srv, buf := testServerWithBuffer(t)
 			hs := httptest.NewServer(srv.Handler())
-			defer hs.Close()
+			defer closeServer(t, hs)
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
-			now := time.Now().UTC()
+			// On a whole second, so that a `since` written as a timestamp
+			// can name an entry's own instant.
+			now := time.Now().UTC().Truncate(time.Second)
 			for _, l := range buffered {
 				require.Equal(t, logbuffer.DropNone, buf.Append(l.entry(now)))
 			}
@@ -205,7 +282,7 @@ func TestSSE_AppliesTheSnapshotRouteFilters(t *testing.T) {
 func TestSSE_SinceOnTheMergedViewCoversEveryExecution(t *testing.T) {
 	srv, buf := testServerWithBuffer(t)
 	hs := httptest.NewServer(srv.Handler())
-	defer hs.Close()
+	defer closeServer(t, hs)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -237,7 +314,7 @@ func TestSSE_RefusesTheValuesTheSnapshotRouteRefuses(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			srv, buf := testServerWithBuffer(t)
 			hs := httptest.NewServer(srv.Handler())
-			defer hs.Close()
+			defer closeServer(t, hs)
 
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -271,7 +348,7 @@ func TestSSE_RefusesTheValuesTheSnapshotRouteRefuses(t *testing.T) {
 func TestSSE_LimitIsStillNotRead(t *testing.T) {
 	srv, buf := testServerWithBuffer(t)
 	hs := httptest.NewServer(srv.Handler())
-	defer hs.Close()
+	defer closeServer(t, hs)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 

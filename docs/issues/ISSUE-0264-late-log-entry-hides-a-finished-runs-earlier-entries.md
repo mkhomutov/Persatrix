@@ -69,6 +69,22 @@ the warm load does for a run it reads back. A late entry then follows
 the path it already has for a sealed ring in memory: it is appended and
 a seal is scheduled, which writes it to a further file.
 
+One thing the fix must not do. A subscriber that asks for buffered
+entries (`SubscribeWithBacklog`) copies the rings under a lock and
+reads the runs with no ring from disk after releasing it. A late entry
+for such a run that arrives during that read goes to the subscriber
+live. Today it never reaches disk, so the read cannot return it as
+well. Once this fix writes it to disk within the seal's delay, a read
+that is still going can pick it up, and the subscriber gets the entry
+twice. On the merged view the read lasts as long as the disk store
+takes to read, seconds when it is full
+([ISSUE-0265](ISSUE-0265-merged-log-view-reads-every-finished-run-from-disk.md)),
+so every late entry of a run that has left memory would be sent twice
+to a stream that is opening. The fix has to keep the read from
+returning what the subscriber already has live: for example by loading
+the run into its ring under the same lock, so that the subscriber's
+copy and the late entry come from one place.
+
 ## Notes
 
 > 2026-11-15 — noticed while fixing the server half of

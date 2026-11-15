@@ -101,10 +101,18 @@ func (s *Server) handleListLogs(w http.ResponseWriter, r *http.Request) {
 // selectEntries returns the entries of in that pass req's filters,
 // oldest first, cut to the newest req.limit.  The stream route sends the
 // same selection as its backlog, so the two routes cannot drift apart.
+//
+// Entries with one timestamp come by execution id, and within an
+// execution as they stand in in (the order it logged them).  The order,
+// and so which entries the limit keeps, then does not depend on the
+// order in which the caller gathered the executions.
 func selectEntries(in []logbuffer.Entry, req logsRequest) []logbuffer.Entry {
 	entries := filterEntries(in, req.logsFilter)
 	sort.SliceStable(entries, func(i, j int) bool {
-		return entries[i].Timestamp.Before(entries[j].Timestamp)
+		if !entries[i].Timestamp.Equal(entries[j].Timestamp) {
+			return entries[i].Timestamp.Before(entries[j].Timestamp)
+		}
+		return entries[i].ExecutionID < entries[j].ExecutionID
 	})
 	if len(entries) > req.limit {
 		entries = entries[len(entries)-req.limit:]

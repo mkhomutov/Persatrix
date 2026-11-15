@@ -33,7 +33,7 @@ import (
 func TestSSE_SinceSendsWhatTheSnapshotRouteReturns(t *testing.T) {
 	srv, buf := testServerWithRing(t, defaultLogsLimit+200)
 	hs := httptest.NewServer(srv.Handler())
-	defer hs.Close()
+	defer closeServer(t, hs)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
@@ -137,7 +137,7 @@ func TestSSE_SinceMeetsTheLiveStreamWithNoLossAndNoRepeat(t *testing.T) {
 			require.Zero(t, first, "round %d: %d entries were written and the stream starts at %d", round, n, first)
 		}
 		cancel()
-		hs.Close()
+		closeServer(t, hs)
 	}
 }
 
@@ -147,7 +147,7 @@ func TestSSE_SinceMeetsTheLiveStreamWithNoLossAndNoRepeat(t *testing.T) {
 func TestSSE_AReplayToAStalledClientDoesNotBlockTheBuffer(t *testing.T) {
 	srv, buf := testServerWithBuffer(t)
 	hs := httptest.NewServer(srv.Handler())
-	defer hs.Close()
+	defer closeServer(t, hs)
 
 	// About 13 MB of buffered entries: more than the socket buffers of
 	// both ends hold, so the handler's writes stall.
