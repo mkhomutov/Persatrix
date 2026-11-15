@@ -5,6 +5,12 @@
 // fan-out channel and emits one `data: <json>\n\n` SSE frame per new
 // entry.  Heartbeats every 15s keep idle connections alive across
 // proxies.  Subscriber cap exhaustion returns 429 Too Many Requests.
+//
+// The route reads the snapshot route's `since`, `workflow` and `level`
+// (parseLogsFilter) and sends only entries that pass them.  With `since`
+// it first sends the buffered entries the snapshot route would return
+// for the same filters, then the live ones; without it the stream starts
+// at the moment of connection.  `limit` is not read here.
 package server
 
 import (
@@ -68,6 +74,10 @@ func (s *Server) handleStreamLogs(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "BAD_REQUEST", "execution_id is required", http.StatusBadRequest)
 		return
 	}
+	filter, ok := parseLogsFilter(w, r.URL.Query())
+	if !ok {
+		return
+	}
 	// Translate the documented `_` wildcard into the buffer's
 	// empty-string subscription convention.  Any other malformed ID is
 	// rejected at Subscribe via ErrInvalidExecutionID below.
@@ -86,7 +96,21 @@ func (s *Server) handleStreamLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ch, cancel, err := s.logBuffer.Subscribe(subID)
+	// With `since` the buffered entries come with the subscription, taken
+	// at the same moment, so none is missed or sent twice where the two
+	// meet.  They are a copy: no buffer lock is held while they are
+	// written to the client below.
+	var (
+		backlog []logbuffer.Entry
+		ch      <-chan logbuffer.Entry
+		cancel  func()
+		err     error
+	)
+	if filter.since.IsZero() {
+		ch, cancel, err = s.logBuffer.Subscribe(subID)
+	} else {
+		backlog, ch, cancel, err = s.logBuffer.SubscribeWithBacklog(subID)
+	}
 	if err != nil {
 		switch {
 		case errors.Is(err, logbuffer.ErrSubscriberCapExceeded):
@@ -114,6 +138,30 @@ func (s *Server) handleStreamLogs(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	rc := http.NewResponseController(w)
 
+	// writeEntry sends one entry as an SSE frame under the write
+	// deadline and reports whether the stream is still usable.
+	writeEntry := func(entry logbuffer.Entry) bool {
+		data, err := json.Marshal(entry)
+		if err != nil {
+			s.logger.Warn("sse: marshal entry failed", zap.Error(err))
+			return true
+		}
+		for _, chunk := range [][]byte{[]byte("data: "), data, []byte("\n\n")} {
+			if err := sseWrite(rc, w, chunk); err != nil {
+				return false
+			}
+		}
+		flusher.Flush()
+		return true
+	}
+
+	// The same selection the snapshot route returns with no `limit`.
+	for _, entry := range selectEntries(backlog, logsRequest{logsFilter: filter, limit: defaultLogsLimit}) {
+		if ctx.Err() != nil || !writeEntry(entry) {
+			return
+		}
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -132,21 +180,12 @@ func (s *Server) handleStreamLogs(w http.ResponseWriter, r *http.Request) {
 				// Subscription closed by buffer shutdown.
 				return
 			}
-			data, err := json.Marshal(entry)
-			if err != nil {
-				s.logger.Warn("sse: marshal entry failed", zap.Error(err))
+			if !filter.matches(entry) {
 				continue
 			}
-			if err := sseWrite(rc, w, []byte("data: ")); err != nil {
+			if !writeEntry(entry) {
 				return
 			}
-			if err := sseWrite(rc, w, data); err != nil {
-				return
-			}
-			if err := sseWrite(rc, w, []byte("\n\n")); err != nil {
-				return
-			}
-			flusher.Flush()
 		}
 	}
 }

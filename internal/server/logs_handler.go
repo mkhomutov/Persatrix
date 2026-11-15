@@ -14,6 +14,7 @@ package server
 import (
 	"errors"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -40,12 +41,19 @@ const maxLogsLimit = 5000
 // in-memory snapshot for a single execution.
 const defaultLogsLimit = 1000
 
-// logsRequest holds the parsed + validated query params.
-type logsRequest struct {
+// logsFilter holds the three filters both log routes read: the snapshot
+// route (handleListLogs) and the stream route (handleStreamLogs).
+type logsFilter struct {
 	since    time.Time // zero ⇒ no lower bound
 	workflow string    // "" ⇒ no filter (matched against attributes["workflow"])
 	level    string    // "" ⇒ no filter; uppercase
-	limit    int
+}
+
+// logsRequest holds the parsed + validated query params of the snapshot
+// route: the shared filters and its own `limit`.
+type logsRequest struct {
+	logsFilter
+	limit int
 }
 
 // handleListLogs serves GET /api/v1/executions/{id}/logs.
@@ -87,14 +95,21 @@ func (s *Server) handleListLogs(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	entries = filterEntries(entries, req)
+	writeJSON(w, selectEntries(entries, req), http.StatusOK)
+}
+
+// selectEntries returns the entries of in that pass req's filters,
+// oldest first, cut to the newest req.limit.  The stream route sends the
+// same selection as its backlog, so the two routes cannot drift apart.
+func selectEntries(in []logbuffer.Entry, req logsRequest) []logbuffer.Entry {
+	entries := filterEntries(in, req.logsFilter)
 	sort.SliceStable(entries, func(i, j int) bool {
 		return entries[i].Timestamp.Before(entries[j].Timestamp)
 	})
 	if len(entries) > req.limit {
 		entries = entries[len(entries)-req.limit:]
 	}
-	writeJSON(w, entries, http.StatusOK)
+	return entries
 }
 
 // collectAllEntries gathers entries from every known execution for the
@@ -114,25 +129,11 @@ func parseLogsRequest(w http.ResponseWriter, r *http.Request) (logsRequest, bool
 	q := r.URL.Query()
 	req := logsRequest{limit: defaultLogsLimit}
 
-	if raw := q.Get("since"); raw != "" {
-		t, err := parseSince(raw, time.Now())
-		if err != nil {
-			writeError(w, "BAD_REQUEST", "invalid since: "+err.Error(), http.StatusBadRequest)
-			return req, false
-		}
-		req.since = t
+	filter, ok := parseLogsFilter(w, q)
+	if !ok {
+		return req, false
 	}
-	req.workflow = q.Get("workflow")
-	if raw := q.Get("level"); raw != "" {
-		up := strings.ToUpper(raw)
-		switch up {
-		case "DEBUG", "INFO", "WARN", "ERROR":
-			req.level = up
-		default:
-			writeError(w, "BAD_REQUEST", "invalid level (DEBUG|INFO|WARN|ERROR)", http.StatusBadRequest)
-			return req, false
-		}
-	}
+	req.logsFilter = filter
 	if raw := q.Get("limit"); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n <= 0 {
@@ -145,6 +146,34 @@ func parseLogsRequest(w http.ResponseWriter, r *http.Request) (logsRequest, bool
 		req.limit = n
 	}
 	return req, true
+}
+
+// parseLogsFilter validates `since`, `workflow` and `level` and writes a
+// 400 on a malformed value.  Both log routes call it, so a value one
+// refuses the other refuses with the same message.  A relative `since`
+// is resolved against the clock here, once per request.
+func parseLogsFilter(w http.ResponseWriter, q url.Values) (logsFilter, bool) {
+	var f logsFilter
+	if raw := q.Get("since"); raw != "" {
+		t, err := parseSince(raw, time.Now())
+		if err != nil {
+			writeError(w, "BAD_REQUEST", "invalid since: "+err.Error(), http.StatusBadRequest)
+			return f, false
+		}
+		f.since = t
+	}
+	f.workflow = q.Get("workflow")
+	if raw := q.Get("level"); raw != "" {
+		up := strings.ToUpper(raw)
+		switch up {
+		case "DEBUG", "INFO", "WARN", "ERROR":
+			f.level = up
+		default:
+			writeError(w, "BAD_REQUEST", "invalid level (DEBUG|INFO|WARN|ERROR)", http.StatusBadRequest)
+			return f, false
+		}
+	}
+	return f, true
 }
 
 // parseSince accepts either a Go duration ("5m", "1h30m") interpreted
@@ -179,23 +208,30 @@ func parseSince(raw string, now time.Time) (time.Time, error) {
 // filterEntries applies the parsed request filters in-place semantics.
 // Returns a fresh slice so the caller can mutate (sort / truncate)
 // without aliasing the buffer's snapshot.
-func filterEntries(in []logbuffer.Entry, req logsRequest) []logbuffer.Entry {
+func filterEntries(in []logbuffer.Entry, f logsFilter) []logbuffer.Entry {
 	out := make([]logbuffer.Entry, 0, len(in))
 	for _, e := range in {
-		if !req.since.IsZero() && e.Timestamp.Before(req.since) {
-			continue
+		if f.matches(e) {
+			out = append(out, e)
 		}
-		if req.level != "" && !levelMatch(e.Level, req.level) {
-			continue
-		}
-		if req.workflow != "" {
-			if v, ok := e.Attributes["workflow"]; !ok || asString(v) != req.workflow {
-				continue
-			}
-		}
-		out = append(out, e)
 	}
 	return out
+}
+
+// matches reports whether e passes every filter that is set.
+func (f logsFilter) matches(e logbuffer.Entry) bool {
+	if !f.since.IsZero() && e.Timestamp.Before(f.since) {
+		return false
+	}
+	if f.level != "" && !levelMatch(e.Level, f.level) {
+		return false
+	}
+	if f.workflow != "" {
+		if v, ok := e.Attributes["workflow"]; !ok || asString(v) != f.workflow {
+			return false
+		}
+	}
+	return true
 }
 
 // levelMatch is a simple equality check — the API documents the filter

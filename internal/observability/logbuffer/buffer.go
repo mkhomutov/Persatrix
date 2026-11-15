@@ -329,15 +329,26 @@ func (b *Buffer) Append(entry Entry) DropReason {
 		b.warnRateOnce(entry.ExecutionID)
 		return DropRateLimit
 	}
-	if ring.append(entry) {
-		// A late entry for a finished execution: write it to disk too.
-		b.scheduleSeal(entry.ExecutionID)
-	}
 	// Fan out to live-tail subscribers AFTER successful admit so the
 	// SSE stream order matches the on-disk order.  Non-blocking; a
 	// slow subscriber drops entries rather than back-pressuring Append
 	// (see subscribe.go).
-	b.broadcast(entry)
+	//
+	// The ring write and the fan-out share one read lock.  A subscriber
+	// that asks for the buffered entries as it registers
+	// (SubscribeWithBacklog) takes the write lock, so it never lands
+	// between the two and finds each entry in exactly one place: the
+	// backlog or its channel.
+	b.subMu.RLock()
+	sealed := ring.append(entry)
+	b.broadcastLocked(entry)
+	b.subMu.RUnlock()
+	if sealed {
+		// A late entry for a finished execution: write it to disk too.
+		// Outside the lock: after Close this seals at once, which writes
+		// to disk and may log.
+		b.scheduleSeal(entry.ExecutionID)
+	}
 	return DropNone
 }
 
