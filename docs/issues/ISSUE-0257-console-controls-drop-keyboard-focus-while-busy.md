@@ -30,7 +30,9 @@ stand-in API:
 1. **The message box of a group channel.** Type a message and press
    **Enter**. The message is posted and the box is emptied, but it is no
    longer focused (`document.activeElement` is the page body). The next
-   message cannot be typed until the box is clicked.
+   message cannot be typed until the box is clicked. This is not an
+   edge case: it happens on every post, for every operator, whether
+   they send with **Enter** or with the button.
 2. **Show older messages.** Focus the button and press **Enter**. The
    older page loads and the button is still there, offering the next
    page, but focus is on the page body.
@@ -53,10 +55,15 @@ stand-in API:
 
 ## Impact
 
-An operator who posts several messages in a row has to click the message
-box before each one. A keyboard-only operator has to tab back to it from
-the top of the page. Paging far back through a long channel by keyboard
-means finding the button again after every page.
+The two halves differ in how many people they reach.
+
+- **The message box: everyone, on every post.** An operator who posts
+  several messages in a row has to click the message box before each
+  one. A keyboard-only operator has to tab back to it from the top of
+  the page. Posting is the main thing the box is for.
+- **The two buttons: keyboard users, while paging.** Paging far back
+  through a long channel by keyboard means finding the button again
+  after every page. A mouse user does not notice.
 
 ## Proposed fix / investigation path
 
@@ -73,3 +80,10 @@ that the message box is still the focused element after a post.
 > the marker's button lost focus on a failed load although it had not
 > moved. The message box and **Show older messages** were then tried on
 > `main` and behave the same.
+
+> 2026-11-15 — the review of that fix saw the same in Chrome on `main`:
+> after **Enter** and the post, focus is on the page body, and both
+> buttons lose it the same way. Severity `low` is proposed, not ruled.
+> `low` fits the two buttons. The message box is the open question: it
+> touches every post by every operator, which is an argument for
+> `medium`.

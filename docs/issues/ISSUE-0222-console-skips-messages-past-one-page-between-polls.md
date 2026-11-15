@@ -12,7 +12,11 @@ refs:
   - web/src/lib/backfill.svelte.js
   - web/src/panels/TimelineGap.svelte
   - web/src/panels/ChannelTimeline.catchup.test.js
+  - web/src/panels/ChannelTimeline.catchup.post.test.js
   - docs/issues/ISSUE-0257-console-controls-drop-keyboard-focus-while-busy.md
+  - docs/issues/ISSUE-0260-console-draws-a-post-above-a-message-written-before-it.md
+  - docs/issues/ISSUE-0261-console-cannot-read-the-rate-limiters-error-body.md
+  - docs/issues/ISSUE-0262-console-paging-cannot-pass-messages-that-share-a-timestamp.md
   - docs/rfcs/0048-operator-tester-web-console.md
 ---
 
@@ -94,3 +98,45 @@ page of fresh rows.
 > each message when it is published, so such a run is not expected.
 > Found on the way and filed:
 > [ISSUE-0257](ISSUE-0257-console-controls-drop-keyboard-focus-while-busy.md).
+
+> 2026-11-15 — the review of the fix found a hole it had left, and it
+> is closed in the same pull request. A message the operator posts is
+> drawn the moment the server stores it, without a read. The catch-up
+> took it for "a message already shown", although it says nothing about
+> the messages under it: another member may have written between the
+> console's last read and the post. Reproduced as tests against the
+> first version of the fix:
+>
+> | Case | Shown | Marker |
+> |---|---|---|
+> | One message arrives, the operator posts and hides the tab, 120 arrive | 124 of 125 | none |
+> | 30 arrive, the operator posts, 30 more arrive, all in one poll interval | 53 of 64 | none |
+> | 30 arrive, the operator posts, 60 more arrive | 64 of 94 | none |
+>
+> `main` lost more in each (71, 11 and 40), so this was no regression,
+> but it was the silent hole this issue is about. Now:
+>
+> - **A post is not proof.** Until a read has returned it, the
+>   operator's post does not count as a message already shown. A full
+>   page that holds only new messages and such posts is a miss like any
+>   other.
+> - **The post goes back to its place.** On a miss the console takes
+>   its unread posts off the screen and reads back to a message a read
+>   returned; the pages bring the posts back where the store has them.
+>   All three cases above then show every message, in the store's
+>   order.
+> - **What an operator can see of it.** If the page that carries the
+>   post fails, the post waits behind the **Load missing messages**
+>   marker with the rest. If the post was stored while a full page of
+>   unread messages was being read, it is off the screen until the next
+>   poll returns it.
+>
+> The limits for messages that share a timestamp, named in the note
+> above, are now tracked as
+> [ISSUE-0262](ISSUE-0262-console-paging-cannot-pass-messages-that-share-a-timestamp.md).
+> Two more faults found in the review are on `main` too and are filed,
+> not fixed here: a message written before the operator's post but read
+> after it is drawn below the post
+> ([ISSUE-0260](ISSUE-0260-console-draws-a-post-above-a-message-written-before-it.md)),
+> and the console cannot read the rate limiter's error text
+> ([ISSUE-0261](ISSUE-0261-console-cannot-read-the-rate-limiters-error-body.md)).

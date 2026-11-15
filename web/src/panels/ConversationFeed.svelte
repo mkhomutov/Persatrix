@@ -109,6 +109,10 @@
         getChannelHistory(channelId, { limit, before }).then((r) => r.messages),
       rows: () => messages,
       isHeld: (id) => seenIds.has(id),
+      drop: (ids) => {
+        ids.forEach((id) => seenIds.delete(id));
+        messages = messages.filter((m) => seenIds.has(m.id));
+      },
       token: () => loadToken,
       insert,
     },
@@ -159,14 +163,11 @@
       if (token !== loadToken) {
         return;
       }
+      // More than a page since the last read (ISSUE-0222) leaves a hole under
+      // this one. Asked first: it can take the operator's unread posts off the
+      // screen, and what the page then brings as new includes them.
+      const gap = backfill.headRead(head, HEAD_LIMIT);
       const fresh = head.filter((m) => !seenIds.has(m.id));
-      // A full head page with no row the feed has seen: more than a page
-      // arrived since the last read (ISSUE-0222). With rows on screen that
-      // leaves a hole under this page; with none, older rows exist after all,
-      // and the control at the top pages back to them.
-      const missed = head.length >= HEAD_LIMIT && fresh.length === head.length;
-      const gap = missed && messages.length > 0 ? backfill.openGap(fresh.at(-1)) : null;
-      if (missed && !gap) backfill.offerOlder();
       if (fresh.length > 0) {
         fresh.forEach((m) => seenIds.add(m.id));
         messages = [...fresh, ...messages];
@@ -351,10 +352,12 @@
   }
 
   // echo appends a just-published message immediately and seeds its id so the next
-  // poll won't re-add it (the group-mode publish path).
+  // poll won't re-add it (the group-mode publish path). No read returned it,
+  // so the catch-up is told: the row proves nothing about the rows under it.
   export function echo(stored) {
     if (stored && stored.id && !seenIds.has(stored.id)) {
       seenIds.add(stored.id);
+      backfill.shownUnread(stored.id);
       // The operator just posted: bring the view down to their message.
       pinnedToBottom = true;
       unseen = 0;

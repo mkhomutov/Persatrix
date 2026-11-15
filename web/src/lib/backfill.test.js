@@ -6,12 +6,14 @@ import {
   MAX_CATCHUP_PAGES,
 } from "./backfill.svelte.js";
 import { justAfter } from "./timeline.js";
-import { fakeHistory, rows } from "../test-history.js";
+import { fakeHistory, fakeFeed, rows } from "../test-history.js";
 
 // The paging behind the conversation feed's catch-up (ISSUE-0222), without a
 // component: pageBack is the loop that reads one missing span, createBackfill
-// the controller that holds the holes and the older-messages control. The
-// panel-level cases are in panels/ChannelTimeline.catchup.test.js.
+// the controller that holds the holes and the older-messages control. What
+// the controller makes of a head page, and the older-messages page, are in
+// backfill.head.test.js; the panel-level cases in
+// panels/ChannelTimeline.catchup*.test.js.
 
 const T = "2026-06-02T12:00:00Z";
 
@@ -218,35 +220,6 @@ describe("pageBack — reading one missing span", () => {
   });
 });
 
-// A feed for the controller: rows newest first, read from the same stand-in
-// for the history endpoint the panel tests use.
-function fakeFeed(server, shown) {
-  const feed = {
-    list: [...shown],
-    seen: new Set(shown.map((m) => m.id)),
-    version: 0,
-    inserts: [],
-    fetchPage: (before, limit) =>
-      server.read("general", { limit, before }).then((r) => r.messages),
-    rows: () => feed.list,
-    isHeld: (id) => feed.seen.has(id),
-    token: () => feed.version,
-    insert: (list, { afterId = "", keep = "" } = {}) => {
-      feed.inserts.push({ ids: list.map((m) => m.id), afterId, keep });
-      list.forEach((m) => feed.seen.add(m.id));
-      const at = afterId ? feed.list.findIndex((m) => m.id === afterId) + 1 : feed.list.length;
-      feed.list = [...feed.list.slice(0, at), ...list, ...feed.list.slice(at)];
-      return Promise.resolve();
-    },
-    // What the feed does with a head page whose rows are all new.
-    takeHead(head) {
-      head.forEach((m) => feed.seen.add(m.id));
-      feed.list = [...head, ...feed.list];
-    },
-  };
-  return feed;
-}
-
 // A feed showing three old rows, a server that has since taken `count` new
 // ones, and the hole a full head page of new rows leaves.
 function holeAfter(count) {
@@ -256,7 +229,7 @@ function holeAfter(count) {
   const backfill = createBackfill(feed, { pageLimit: 50 });
   server.add(rows("new", count, T));
   const head = server.all("general").slice(0, 50);
-  const gap = backfill.openGap(head.at(-1));
+  const gap = backfill.headRead(head, 50);
   feed.takeHead(head);
   server.calls.length = 0;
   return { server, feed, backfill, gap, head };
@@ -366,9 +339,12 @@ describe("createBackfill — the holes in a timeline", () => {
     expect(server.calls).toHaveLength(1);
   });
 
-  it("says so, and keeps the marker, when a page of one timestamp cannot be passed", async () => {
+  it.each([
+    ["the first written listed first, as the store lists them", false],
+    ["the last written listed first", true],
+  ])("says so, and keeps the marker, when a page of one timestamp cannot be passed (%s)", async (_, tiesLastWrittenFirst) => {
     const old = rows("old", 3, "2026-06-01T09:00:00Z");
-    const server = fakeHistory(old);
+    const server = fakeHistory(old, { tiesLastWrittenFirst });
     const feed = fakeFeed(server, old);
     const backfill = createBackfill(feed, { pageLimit: 50 });
     // 250 rows written in one instant: the head page takes 50 of them, the
@@ -376,7 +352,7 @@ describe("createBackfill — the holes in a timeline", () => {
     const burst = rows("new", 250, T).map((m) => ({ ...m, timestamp: T }));
     server.add(burst);
     const head = server.all("general").slice(0, 50);
-    const gap = backfill.openGap(head.at(-1));
+    const gap = backfill.headRead(head, 50);
     feed.takeHead(head);
     server.calls.length = 0;
 
@@ -425,42 +401,5 @@ describe("createBackfill — the holes in a timeline", () => {
 
     expect(backfill.gapAbove(head.at(-1).id)).toBeUndefined();
     expect(backfill.hasOlder).toBe(false);
-  });
-});
-
-describe("createBackfill — the older-messages page", () => {
-  it("reads one page from just after the oldest row shown and puts it at the far end", async () => {
-    const all = rows("m", 80, T);
-    const server = fakeHistory(all);
-    const feed = fakeFeed(server, all.slice(0, 50));
-    const backfill = createBackfill(feed, { pageLimit: 50 });
-    backfill.offerOlder();
-
-    await backfill.loadOlder();
-
-    expect(server.calls).toEqual([
-      { id: "general", limit: 50, before: justAfter(all[49].timestamp) },
-    ]);
-    expect(feed.inserts).toEqual([
-      { ids: all.slice(50).map((m) => m.id), afterId: "", keep: "rows" },
-    ]);
-    expect(backfill.hasOlder).toBe(false); // the page was short
-    expect(backfill.loadingOlder).toBe(false);
-  });
-
-  it("keeps the offer after a full page, and reports a failure", async () => {
-    const all = rows("m", 200, T);
-    const server = fakeHistory(all);
-    const feed = fakeFeed(server, all.slice(0, 50));
-    const backfill = createBackfill(feed, { pageLimit: 50 });
-    backfill.offerOlder();
-
-    await backfill.loadOlder();
-    expect(backfill.hasOlder).toBe(true);
-
-    server.fail = () => new Error("backend down");
-    await backfill.loadOlder();
-    expect(backfill.olderError).toBe("Could not load older messages: backend down");
-    expect(backfill.loadingOlder).toBe(false);
   });
 });

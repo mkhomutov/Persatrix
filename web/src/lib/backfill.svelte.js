@@ -80,6 +80,8 @@ export async function pageBack({
 //       newest first; rejects as the API client does;
 //   rows()     — the rows the feed holds, newest first;
 //   isHeld(id) — whether the feed already shows that row;
+//   drop(ids)  — takes rows off the screen and forgets them, so that a read
+//       can bring them back in their place;
 //   token()    — a value that changes when the feed moves to another channel;
 //   insert(rows, { afterId, keep }) — puts rows read back from history in
 //       place and resolves once they are drawn (ConversationFeed's `insert`).
@@ -95,6 +97,12 @@ export function createBackfill(feed, { pageLimit }) {
   // its marker over that row. `before` is the cursor its next page starts at.
   let gaps = $state([]);
   const gapByRow = $derived(new Map(gaps.map((g) => [g.rowId, g])));
+  // Rows on screen that no read has returned: the operator's own posts, drawn
+  // the moment the server stores them. Such a row says nothing about the rows
+  // under it — another member may have written between the feed's last read
+  // and the post — so it never passes for a row that ties a page to what is
+  // already loaded (headRead below).
+  let unread = new Set();
 
   // loadOlder extends the timeline backwards one page, from just after the
   // oldest shown message's timestamp (justAfter — so rows sharing it are not
@@ -187,15 +195,42 @@ export function createBackfill(feed, { pageLimit }) {
       loadingOlder = false;
       olderError = "";
       gaps = [];
+      unread = new Set();
     },
     // offerOlder: rows older than the oldest one shown may exist — a first
-    // page was full, or a head page was and nothing older is on screen.
+    // page was full.
     offerOlder() {
       hasOlder = true;
     },
-    // openGap records a hole under `row` — the oldest row of a head page that
-    // brought nothing the feed had seen — and returns it for fill().
-    openGap(row) {
+    // shownUnread: the feed drew this row without reading it (its `echo`).
+    shownUnread(id) {
+      unread.add(id);
+    },
+    // headRead looks at one head page of `limit` rows before the feed sorts
+    // it into new and known rows, and returns the hole the page leaves under
+    // it, for fill() — or null. A full page with no row a read has returned
+    // means more than a page arrived since the last read (ISSUE-0222). The
+    // operator's unread posts are then taken off the screen: they prove
+    // nothing about the rows around them, and the page or the reads below it
+    // return them in their place. With rows on screen that leaves a hole
+    // under the page; with none, older rows exist after all, and the control
+    // at the top pages back to them. Any other page reaches a row a read
+    // returned, or the channel's first message, so a post on it has been
+    // read with everything around it.
+    headRead(head, limit) {
+      const read = (m) => feed.isHeld(m.id) && !unread.has(m.id);
+      if (head.length < limit || head.some(read)) {
+        head.forEach((m) => unread.delete(m.id));
+        return null;
+      }
+      const shown = feed.rows().length > 0;
+      if (unread.size > 0) feed.drop(unread);
+      unread = new Set();
+      if (!shown) {
+        hasOlder = true;
+        return null;
+      }
+      const row = head.at(-1);
       gaps.push({
         rowId: row.id,
         before: justAfter(row.timestamp),

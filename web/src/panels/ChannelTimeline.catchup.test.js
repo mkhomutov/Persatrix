@@ -80,8 +80,8 @@ const marker = () =>
 // The history requests that carried a cursor: the catch-up's own.
 const pagedCalls = () => server.calls.filter((c) => c.before);
 
-async function mount(initial) {
-  server = fakeHistory(initial);
+async function mount(initial, options) {
+  server = fakeHistory(initial, options);
   getChannelHistory.mockImplementation(server.read);
   render(ChannelTimeline, { props: { userId: "local" } });
   // Flush the mount's reads (channels, agents, the first history page).
@@ -151,6 +151,20 @@ describe("Channels panel — more than one page between two polls", () => {
     expect(marker()).toBeNull();
   });
 
+  it("reads nothing back when a full head page holds one message already shown, and only one", async () => {
+    await mount(rows("old", 3, OLD));
+    // 49 arrive: the page's oldest row is the newest message on screen, so
+    // the page reaches what is loaded and nothing lies between.
+    server.add(rows("new", 49, NEW));
+
+    await vi.advanceTimersByTimeAsync(POLL_MS);
+
+    expect(shownIds()).toEqual(storedIds());
+    expect(shownIds()).toHaveLength(52);
+    expect(pagedCalls()).toHaveLength(0);
+    expect(marker()).toBeNull();
+  });
+
   it("stops after three pages, marks the hole, and loads the rest on a click", async () => {
     await mount(rows("old", 3, NEAR));
     // 50 on the head page, 597 on three catch-up pages, 43 beyond the bound.
@@ -168,6 +182,8 @@ describe("Channels panel — more than one page between two polls", () => {
     const items = screen.getAllByRole("listitem");
     const below = items[3];
     expect(within(below).getByRole("button", { name: "Load missing messages" })).toBeTruthy();
+    // Beside the button, a line that says what the hole is.
+    expect(within(below).getByText("Some messages here are not loaded yet.")).toBeTruthy();
     expect(below.querySelector(".content").textContent).toBe("new 646");
     // That row shows its sender although the row above it has the same one
     // within five minutes: across a hole a row is never a continuation.
@@ -188,11 +204,16 @@ describe("Channels panel — more than one page between two polls", () => {
     expect(marker()).toBeNull();
   });
 
-  it("keeps messages that share a timestamp across a page boundary, once each", async () => {
+  // Tied rows in the order the store lists them, and the other way round:
+  // the store's query does not promise an order among them.
+  it.each([
+    ["the first written listed first, as the store lists them", false],
+    ["the last written listed first", true],
+  ])("keeps messages that share a timestamp across a page boundary, once each (%s)", async (_, tiesLastWrittenFirst) => {
     // Rows either side of the head page's edge share one instant, and so do
     // the newest old row and the two oldest new ones (the join).
     const old = rows("old", 3, OLD);
-    await mount(old);
+    await mount(old, { tiesLastWrittenFirst });
     const fresh = rows("new", 120, NEW);
     // The head page ends after row 49: rows 48 to 51 share one instant, so
     // two of them are on the head page and two are cut off behind it.
@@ -213,16 +234,21 @@ describe("Channels panel — more than one page between two polls", () => {
     await mount(rows("old", 3, OLD));
     server.add(rows("new", 350, NEW)); // head 50, a page of 199, then the rest
     // The second catch-up page is refused, as the rate limiter refuses it.
-    server.fail = (call) =>
-      call.before && pagedCalls().length === 2
-        ? new ApiError("rate limit exceeded", 429)
-        : null;
+    // The text is the one the client makes of that refusal today: it cannot
+    // read the limiter's nested error body, so it names the request.
+    let refused;
+    server.fail = (call) => {
+      if (!call.before || pagedCalls().length !== 2) return null;
+      const query = new URLSearchParams({ limit: call.limit, before: call.before });
+      refused = `/api/v1/channels/general/messages?${query} responded 429`;
+      return new ApiError(refused, 429);
+    };
 
     await vi.advanceTimersByTimeAsync(POLL_MS);
 
     expect(shownIds()).toHaveLength(3 + 249);
     expect(marker()).not.toBeNull();
-    expect(screen.getByText("Live updates paused: rate limit exceeded")).toBeTruthy();
+    expect(screen.getByText(`Live updates paused: ${refused}`)).toBeTruthy();
 
     // Backed off as a failed poll is: nothing at the base interval, the next
     // read at twice it — and that read is a head read, not a retried page.
@@ -252,9 +278,9 @@ describe("Channels panel — more than one page between two polls", () => {
     await fireEvent.click(marker());
     await vi.advanceTimersByTimeAsync(0);
 
-    expect(
-      screen.getByText("Could not load the missing messages: backend down"),
-    ).toBeTruthy();
+    // Announced to a screen reader as the poll's own notice is.
+    const failure = screen.getByText("Could not load the missing messages: backend down");
+    expect(screen.getAllByRole("status")).toContain(failure);
     // A failed click is not a failed poll: live updates carry on.
     expect(screen.queryByText(/Live updates paused/)).toBeNull();
     expect(shownIds()).toHaveLength(3 + 647);
