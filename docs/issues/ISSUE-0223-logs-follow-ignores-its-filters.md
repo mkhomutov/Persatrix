@@ -78,8 +78,9 @@ CLI is frozen, so it waits for that freeze to lift.
 > 2026-11-10 — found by a whole-repository quality review of `main` at
 > `ee9cfaac`; confirmed by reading both handlers and the CLI.
 
-> 2026-11-15 — the server half is done; the CLI's reconnect remains, so
-> this stays `in_progress`. Reproduced first on `main` at `111b041d`
+> 2026-11-15 — the server half is done in
+> [#1131](https://github.com/mkhomutov/Persatrix/pull/1131); the CLI's
+> reconnect remains, so this stays `in_progress`. Reproduced first on `main` at `111b041d`
 > with a test per filter on the stream route: `level=INFO` sent the
 > DEBUG, WARN and ERROR entries as well, `workflow=code-review` sent
 > every workflow, `since=5m` sent nothing from the buffer, and

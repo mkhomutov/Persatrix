@@ -72,6 +72,7 @@ a seal is scheduled, which writes it to a further file.
 ## Notes
 
 > 2026-11-15 — noticed while fixing the server half of
-> [ISSUE-0223](ISSUE-0223-logs-follow-ignores-its-filters.md): the
+> [ISSUE-0223](ISSUE-0223-logs-follow-ignores-its-filters.md) in
+> [#1131](https://github.com/mkhomutov/Persatrix/pull/1131): the
 > buffered entries a stream sends for `since` are what `Snapshot`
 > returns, so they inherit this.

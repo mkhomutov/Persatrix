@@ -70,6 +70,7 @@ routes get it.
 ## Notes
 
 > 2026-11-15 — noticed while fixing the server half of
-> [ISSUE-0223](ISSUE-0223-logs-follow-ignores-its-filters.md), which
+> [ISSUE-0223](ISSUE-0223-logs-follow-ignores-its-filters.md) in
+> [#1131](https://github.com/mkhomutov/Persatrix/pull/1131), which
 > gave the stream route the snapshot route's selection for `since` and
 > with it this cost on `_`.
