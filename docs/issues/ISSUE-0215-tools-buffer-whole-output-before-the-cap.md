@@ -141,8 +141,9 @@ out.
 > Where a memory bound is claimed above, it is this code's own. A
 > compressed body is inflated by aiohttp before the tool sees it.
 
-> 2026-11-15 — points 2 and 3 of the list of 2026-11-13 are done; the
-> compose limits remain, so this stays `in_progress`.
+> 2026-11-15 — points 2 and 3 of the list of 2026-11-13 are done in
+> [#1132](https://github.com/mkhomutov/Persatrix/pull/1132); the compose
+> limits remain, so this stays `in_progress`.
 >
 > `file_write` now writes, and makes the folders above the file, in a
 > worker thread, as `file_read` reads. On `main` at `111b041d` a write

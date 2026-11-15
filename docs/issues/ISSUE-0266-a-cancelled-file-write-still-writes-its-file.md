@@ -63,4 +63,5 @@ behaviour for the write, without the paused agent.
 ## Notes
 
 > 2026-11-15 — noticed while moving `file_write` off the event loop for
-> [ISSUE-0215](ISSUE-0215-tools-buffer-whole-output-before-the-cap.md).
+> [ISSUE-0215](ISSUE-0215-tools-buffer-whole-output-before-the-cap.md) in
+> [#1132](https://github.com/mkhomutov/Persatrix/pull/1132).
