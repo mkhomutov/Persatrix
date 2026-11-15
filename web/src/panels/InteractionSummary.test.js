@@ -297,7 +297,10 @@ describe("InteractionSummary", () => {
     });
 
     holderFails = true;
-    await vi.advanceTimersByTimeAsync(5000);
+    // Two agents are asked once every 20 seconds (ten per agent asked).
+    const before = fetchMock.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(20000);
+    expect(fetchMock.mock.calls.length).toBe(before + 2); // the poll did run
 
     expect(
       screen.getByRole("status", { name: /interaction summary/i }).textContent,
@@ -324,7 +327,8 @@ describe("InteractionSummary", () => {
     });
 
     closed = false;
-    await vi.advanceTimersByTimeAsync(5000);
+    // One agent is asked every ten seconds.
+    await vi.advanceTimersByTimeAsync(10000);
 
     expect(
       screen.queryByRole("status", { name: /interaction summary/i }),
@@ -334,9 +338,10 @@ describe("InteractionSummary", () => {
   it("fans out one request per participant on each poll tick", async () => {
     // The summary refresh queries each candidate agent's latest closed
     // interaction independently (the read API is per-agent), so a tick issues
-    // exactly N requests for N participants. This multiplicative load is the
-    // reason the fan-out — not the message head-poll — dominates the console's
-    // shared rate-limit budget and is what the 429 backoff exists to relieve.
+    // exactly N requests for N participants. That is why the wait between two
+    // ticks grows with N (ten seconds per agent asked: 30 for these three), and
+    // what the 429 backoff relieves further. The count per minute is pinned in
+    // InteractionSummary.budget.test.js.
     vi.useFakeTimers();
     const fetchMock = vi.fn(() =>
       Promise.resolve(jsonResponse({ interactions: [record()] })),
@@ -351,16 +356,16 @@ describe("InteractionSummary", () => {
 
     // A subsequent poll tick fans out the same per-participant request set.
     fetchMock.mockClear();
-    await vi.advanceTimersByTimeAsync(5000);
+    await vi.advanceTimersByTimeAsync(30000);
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it("backs off its poll cadence after a 429 instead of hammering the shared bucket", async () => {
-    // The per-participant fan-out is the dominant load on the console's shared
-    // anonymous rate-limit budget. A 429 must stretch the next poll (doubling
-    // toward the cap) rather than keep firing every REFRESH_MS — otherwise the
-    // summary refresh keeps the bucket saturated while the message feed is
-    // already backing off, so the "Live updates paused" banner never clears.
+    // Every summary read counts toward the console's shared rate-limit budget.
+    // A 429 must stretch the next poll (doubling toward the cap) rather than
+    // keep firing at the ordinary pace — otherwise the summary refresh keeps
+    // loading the bucket while the message feed is already backing off, and the
+    // "Live updates paused" banner clears later than it could.
     vi.useFakeTimers();
     let rateLimited = false;
     // A real 429 is a RESOLVED non-ok response (api.js getJSON →
@@ -388,22 +393,22 @@ describe("InteractionSummary", () => {
     });
 
     // Settle to a clean baseline: the mount refresh succeeded, so the chain is
-    // at the base 5s cadence. Clear the counter and start failing.
+    // at one agent's ordinary 10s cadence. Clear the counter and start failing.
     fetchMock.mockClear();
     rateLimited = true;
 
-    // Window 1 (next 5s): the pending tick fires once and hits the 429, which
-    // doubles the cadence to 10s.
-    await vi.advanceTimersByTimeAsync(5000);
+    // Window 1 (next 10s): the pending tick fires once and hits the 429, which
+    // doubles the cadence to 20s.
+    await vi.advanceTimersByTimeAsync(10000);
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
-    // Window 2 (the following 5s): NO poll — the backoff stretched the next
-    // delay to 10s. On the old fixed setInterval this window would have fired.
-    await vi.advanceTimersByTimeAsync(5000);
+    // Window 2 (the following 10s): NO poll — the backoff stretched the next
+    // delay to 20s. On the old fixed setInterval this window would have fired.
+    await vi.advanceTimersByTimeAsync(10000);
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
-    // Window 3: at the 10s mark the backed-off poll fires.
-    await vi.advanceTimersByTimeAsync(5000);
+    // Window 3: at the 20s mark the backed-off poll fires.
+    await vi.advanceTimersByTimeAsync(10000);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

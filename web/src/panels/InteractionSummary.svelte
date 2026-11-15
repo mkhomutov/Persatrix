@@ -38,21 +38,42 @@
   // feed already head-polls messages; this is the parallel summary refresh,
   // paused while the tab is backgrounded.
   //
-  // This refresh is the dominant load on the operator console's shared rate-
-  // limit budget: each tick fans out one request PER participant agent (the
-  // `ids.map` below), so a group channel issues N requests every REFRESH_MS.
-  // Left unbounded it kept saturating the bucket even while the message feed
-  // was already backing off a 429, so the "Live updates paused" banner never
-  // cleared. The backoff below borrows ConversationFeed's shape — double toward
-  // MAX_BACKOFF_MS, reset to REFRESH_MS on success — but narrows the *trigger*:
-  // it backs off only on a 429, not on any error as ConversationFeed does. That
-  // feed issues a single request, so any failure can fairly slow it; this
-  // refresh fans out N requests and already holds-vs-shows on a partial failure
-  // (see `refresh`), so a lone flaky agent must not slow the whole set. Only a
-  // 429 — actual bucket saturation — should stretch the cadence and relieve the
-  // pressure instead of amplifying it.
-  const REFRESH_MS = 5000;
-  const MAX_BACKOFF_MS = 30000;
+  // Every read counts toward the console's request budget: 60 calls per 60
+  // seconds by default, one bucket for every console window while sign-in is
+  // off. A refresh fans out one request PER participant agent (the `ids.map`
+  // below), and the feed beside it already spends 40 a minute on a group
+  // channel. Refreshing every five seconds, as this once did, took a channel
+  // of three personas to 76 a minute, and the "Live updates paused" notice
+  // came and went during ordinary watching (ISSUE-0224).
+  //
+  // The summary changes only when an interaction closes, so it is read at a
+  // pace that costs the same on average whatever the channel's size: each
+  // agent is asked once every PER_AGENT_MS per agent asked — a round every 30
+  // seconds for three personas, every 10 seconds for a DM's one — which is
+  // six requests a minute on average. A round's reads go out together, and
+  // the limiter counts a sliding 60 seconds: beside the feed's 40 a minute a
+  // round of more than 20 does not fit, so a channel of more than 20 personas
+  // has part of every round refused (asking one persona at a time would mend
+  // that: an option in ISSUE-0259). A summary shows within one round of being
+  // stored while its reads are served; it is also read at once whenever the
+  // conversation is opened or its members change.
+  //
+  // A refused read stretches the wait, up to MAX_BACKOFF_MS, and nothing on
+  // screen says that the summary is behind: "Live updates paused" is the
+  // feed's notice. The backoff borrows ConversationFeed's
+  // shape — double toward MAX_BACKOFF_MS, back to the ordinary pace on success
+  // — but narrows the *trigger*: it backs off only on a 429, not on any error
+  // as ConversationFeed does. That feed issues a single request, so any
+  // failure can fairly slow it; this refresh fans out N requests and already
+  // holds-vs-shows on a partial failure (see `refresh`), so a lone flaky agent
+  // must not slow the whole set. Only a 429 — actual bucket saturation —
+  // should stretch the cadence and relieve the pressure instead of amplifying
+  // it.
+  const PER_AGENT_MS = 10000;
+  const MAX_BACKOFF_MS = 300000;
+  // While the tab is hidden nothing is read; the timer looks again this often,
+  // so a return to the tab is followed by a read within that time.
+  const HIDDEN_RECHECK_MS = 5000;
   // Single newest closed interaction per agent — the surface only shows one.
   const PER_AGENT_LIMIT = 1;
   // Skip the degenerate single-turn rows (per-event tick/task envelopes) the
@@ -61,9 +82,15 @@
 
   let record = $state(null);
   let loadToken = 0;
-  // Current inter-poll delay; doubles on a rate-limited refresh, resets on a
-  // clean one. Read by the rescheduling timer below.
-  let backoffMs = REFRESH_MS;
+
+  // roundMs is the ordinary wait between two rounds for the agents asked now.
+  function roundMs() {
+    return PER_AGENT_MS * Math.max(1, (agentIds ?? []).filter(Boolean).length);
+  }
+
+  // Current inter-poll delay; doubles on a rate-limited refresh, returns to
+  // roundMs() on a clean one. Read by the rescheduling timer below.
+  let backoffMs = PER_AGENT_MS;
 
   // refresh fetches each candidate agent's latest closed interaction for the
   // scope and keeps the newest. A token guards against a stale resolution
@@ -83,7 +110,7 @@
     const ids = (agentIds ?? []).filter(Boolean);
     if (!scope || ids.length === 0) {
       record = null;
-      backoffMs = REFRESH_MS;
+      backoffMs = roundMs();
       return;
     }
     if (reset) {
@@ -105,13 +132,17 @@
     // Back off only on a rate-limit (429) — the bucket is saturated, so doubling
     // the cadence relieves it. Any other partial failure keeps the base cadence
     // and falls through to the existing hold-vs-show logic. ApiError carries the
-    // HTTP status (api.js), so inspect the rejection reasons for a 429.
+    // HTTP status (api.js), so inspect the rejection reasons for a 429. The
+    // doubling starts from this channel's own pace, never from a shorter one
+    // left by a smaller channel, and the cap never brings the wait below that
+    // pace (a channel of more than 30 agents already waits longer than the cap).
     const rateLimited = settled.some(
       (r) => r.status === "rejected" && r.reason?.status === 429,
     );
+    const pace = roundMs();
     backoffMs = rateLimited
-      ? Math.min(backoffMs * 2, MAX_BACKOFF_MS)
-      : REFRESH_MS;
+      ? Math.max(pace, Math.min(Math.max(backoffMs, pace) * 2, MAX_BACKOFF_MS))
+      : pace;
     const fulfilled = settled.filter((r) => r.status === "fulfilled");
     const records = fulfilled.flatMap((r) => r.value?.interactions ?? []);
     const next = pickLatestClosed(records);
@@ -125,21 +156,26 @@
     record = next;
   }
 
-  // Re-fetch whenever the scope or the candidate agent set changes (a channel
-  // switch). Reading both props here registers them as effect dependencies; the
-  // async fetch itself is launched fire-and-forget.
+  // One conversation at a time: whenever the scope or the candidate agent set
+  // changes (a channel switch, a member added), read it at once and time its
+  // rounds from that moment. Reading both props here registers them as effect
+  // dependencies; the read itself is launched fire-and-forget.
+  //
+  // The rounds catch a close that happens while the conversation stays open.
+  // A self-rescheduling timer (not a fixed setInterval), so each refresh sets
+  // the next delay via backoffMs: the conversation's ordinary round, or a
+  // stretched one after a refused read. A backgrounded tab skips the fetch
+  // and looks again every HIDDEN_RECHECK_MS; a refresh is always followed by
+  // a full round, so hiding and showing the tab cannot make it read more
+  // often. The chain ends with the conversation it was started for, so the
+  // wait one conversation had reached — a large channel's long round, or a
+  // wait stretched by refusals — is never served out in the next one, and
+  // the round a small one had coming is not added to the read made on
+  // opening a large one.
   $effect(() => {
     void scope;
     void agentIds;
     refresh({ reset: true });
-  });
-
-  // Catch a close that happens while the conversation stays open. A
-  // self-rescheduling timer (not a fixed setInterval) so a rate-limited refresh
-  // can stretch the next delay via backoffMs; a backgrounded tab skips the
-  // fetch and rechecks at the base cadence. One chain for the component
-  // lifetime, reading the current props at fire time.
-  $effect(() => {
     if (typeof window === "undefined") {
       return;
     }
@@ -150,7 +186,7 @@
     }
     async function tick() {
       if (typeof document !== "undefined" && document.hidden) {
-        arm(REFRESH_MS);
+        arm(HIDDEN_RECHECK_MS);
         return;
       }
       await refresh();
@@ -159,7 +195,9 @@
       }
       arm(backoffMs);
     }
-    arm(REFRESH_MS);
+    // The first round comes one ordinary wait after the read made on opening,
+    // also when that read was refused.
+    arm(roundMs());
     return () => {
       cancelled = true;
       if (timer !== null) {
