@@ -70,6 +70,9 @@ The central coordinator that:
 - Manages execution order (sequential, parallel, or conditional)
 - Aggregates results and handles failures
 
+> 2026-11-15 — conditional order is not built; see the note under
+> [2.5](#25-workflow).
+
 ### 2.3 Task
 A unit of work with:
 - Input payload (text, structured data, files)
@@ -90,6 +93,14 @@ A directed acyclic graph (DAG) of tasks. Supports:
 - Parallel fan-out / fan-in (A → [B, C, D] → E)
 - Conditional branching (if result X → path A, else → path B)
 - Loops with exit conditions (retry up to N times)
+
+> 2026-11-15 — the last two are not built. A workflow runs its steps in
+> sequence or in parallel and skips none of them on a condition: a step's
+> `condition` passes the schema and is then ignored
+> ([ISSUE-0202](issues/ISSUE-0202-workflow-condition-and-approval-validate-then-do-nothing.md));
+> conditions and loops are the design of
+> [RFC 0007](rfcs/0007-conditional-looped-workflow-control-flow.md), which
+> is not scheduled.
 
 ---
 
@@ -266,6 +277,13 @@ workflow:
       depends_on: ["review"]
       condition: "{{ steps.review.output.approved == false }}"
 ```
+
+> 2026-11-15 — the `condition` on `revise` does nothing. The planner reads
+> the key and the scheduler never looks at it, so `revise` runs on every
+> run, also when the review approved. The shipped
+> [`workflows/feature-builder.yaml`](../workflows/feature-builder.yaml)
+> carries the same line and behaves the same way
+> ([ISSUE-0202](issues/ISSUE-0202-workflow-condition-and-approval-validate-then-do-nothing.md)).
 
 ### 4.3 Message Schemas (Protobuf)
 

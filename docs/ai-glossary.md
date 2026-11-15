@@ -70,8 +70,10 @@ Process vocabulary (scope lock, cuttable, live arc, finding, …) lives in the
 ### Sub-agent
 - **Aliases:** —
 - **Disallowed:** "child agent", "spawned agent", "sub_agent" (in prose)
-- **Definition:** An ephemeral task agent spawned by a persona agent for atomic
-  work. Inherits a restricted permission set.
+- **Definition:** An ephemeral task agent that a persona agent would spawn for
+  atomic work, with no more permissions than its parent. A design, not built:
+  nothing spawns one today, and the permission rule is not enforced
+  ([ISSUE-0214](issues/ISSUE-0214-declared-tool-permissions-are-never-enforced.md)).
 - **Example:** "The persona spawns a sub-agent to summarize a long document."
 
 ### Workflow
@@ -81,7 +83,10 @@ Process vocabulary (scope lock, cuttable, live arc, finding, …) lives in the
   planner→scheduler→executor orchestration pipeline as in RFC 0001 — just not
   as a synonym for a workflow definition.)
 - **Definition:** A directed acyclic graph (DAG) of tasks defined in YAML under
-  `workflows/`, supporting sequential, parallel, conditional, and looped steps.
+  `workflows/`, run in sequence or in parallel. Conditional and looped steps are
+  designed ([RFC 0007](rfcs/0007-conditional-looped-workflow-control-flow.md))
+  and not built: a step's `condition` is accepted and ignored, so the step
+  always runs ([ISSUE-0202](issues/ISSUE-0202-workflow-condition-and-approval-validate-then-do-nothing.md)).
   ("DAG" describes the structure of a workflow, not a synonym for the workflow itself.)
 - **Example:** "The workflow fans out three review tasks before aggregation."
 
@@ -97,8 +102,11 @@ Process vocabulary (scope lock, cuttable, live arc, finding, …) lives in the
 - **Disallowed:** "function", "skill" (see the **Skill** entry below — RFC 0014
   reserves "skill" for a higher-level concept), "plugin"
 - **Definition:** A typed callable an agent can invoke, declared with the
-  `@tool(name=..., permissions=[...])` decorator in `agents/tools/`.
-- **Example:** "The `file_read` tool requires the `fs.read` permission."
+  `@tool(name=...)` decorator in `agents/tools/`. The `permissions=[...]` a
+  tool declares there are stored and not checked; each built-in tool checks
+  the permission gate in its own body
+  ([ISSUE-0214](issues/ISSUE-0214-declared-tool-permissions-are-never-enforced.md)).
+- **Example:** "The `file_read` tool checks the `filesystem:read` permission."
 
 ### Argument Check
 - **Aliases:** "argument validation"
@@ -154,7 +162,7 @@ Process vocabulary (scope lock, cuttable, live arc, finding, …) lives in the
 - **Disallowed:** "scope", "ACL entry", "right"
 - **Definition:** A whitelisted capability granted to an agent in
   `config/agents.yaml`. The model is deny-by-default.
-- **Example:** "Add `net.http` to the agent's permissions to allow outbound HTTP."
+- **Example:** "List the domain under `network.allow` in the agent's permissions to allow outbound HTTP to it."
 
 ### Channel
 - **Aliases:** —
