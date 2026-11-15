@@ -116,6 +116,23 @@ def _truncate(text: str) -> str:
     return truncate_text(text, MAX_OUTPUT_BYTES)
 
 
+def _shown_body(body: bounded_io.BodyText) -> str:
+    """A response body as the model is shown it.
+
+    A text over the cap is cut with the cap's notice.  A text under it
+    that comes from a body not read to its end (reading stopped on the
+    body's own bytes) gets a notice saying so, or the model would take
+    the short text for the whole response.
+    """
+    shown = _truncate(body.text)
+    if body.stopped_at_bytes is not None and shown == body.text:
+        shown += (
+            "\n... [truncated: the response was not read past "
+            f"{body.stopped_at_bytes // 1024} KB]"
+        )
+    return shown
+
+
 @tool(
     name="file_read",
     description=(
@@ -190,8 +207,9 @@ async def file_write(path: str, content: str) -> ToolResult:
         return ToolResult(success=False, error=str(exc), error_type="PermissionError")
 
     try:
-        resolved.parent.mkdir(parents=True, exist_ok=True)
-        resolved.write_text(content, encoding="utf-8")
+        # In a worker thread, as file_read reads: a large or slow write
+        # must not stop every other coroutine of the agent.
+        await asyncio.to_thread(bounded_io.write_text_file, resolved, content)
     except OSError as exc:
         return ToolResult(success=False, error=str(exc), error_type="OSError")
 
@@ -444,8 +462,9 @@ async def http_request(url: str, method: str = "GET", body: str = "") -> ToolRes
             async with session.request(**kwargs, allow_redirects=False) as resp:
                 # A binary or mislabelled body must not cost the model the
                 # status and headers, so undecodable bytes are replaced.
-                # Read only until the text is over the cap, not to its end.
-                text = await bounded_io.read_body_text(resp, MAX_OUTPUT_BYTES)
+                # Read only until the text is over the cap, not to its end,
+                # and no further than a bound on the body's own bytes.
+                body_text = await bounded_io.read_body_text(resp, MAX_OUTPUT_BYTES)
                 # SF-02: filter to safe headers only — prevents leaking
                 # Set-Cookie, Server, X-Powered-By, etc. to the LLM.
                 safe_headers = {
@@ -456,7 +475,7 @@ async def http_request(url: str, method: str = "GET", body: str = "") -> ToolRes
                     success=True,
                     data={
                         "status": resp.status,
-                        "body": _truncate(text),
+                        "body": _shown_body(body_text),
                         "headers": safe_headers,
                     },
                 )

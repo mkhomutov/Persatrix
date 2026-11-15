@@ -16,8 +16,9 @@ output under the cap is unchanged, byte for byte.
   the command is never blocked on a full pipe and still ends by itself,
   by its time limit or by its CPU limit, with its exit code.
 * A response body is read only until the text is known to be over the
-  cap.
+  cap, and no further than a bound on its own bytes.
 * A file is read in a worker thread, and only if it is a regular file.
+  A file is written in one too (:func:`write_text_file`).
 """
 
 from __future__ import annotations
@@ -28,17 +29,19 @@ import errno
 import os
 import stat
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 if TYPE_CHECKING:
     import aiohttp
 
 __all__ = [
+    "BodyText",
     "NotARegularFileError",
     "communicate_bounded",
     "drain_stream",
     "read_body_text",
     "read_text_file",
+    "write_text_file",
 ]
 
 #: How much is asked of a pipe or a socket at a time.
@@ -49,6 +52,19 @@ _CHUNK_BYTES = 64 * 1024
 #: are kept up to this many times the cap, so that a body under the cap
 #: can be decoded in one go; see :func:`read_body_text`.
 _WIRE_BYTES_PER_TEXT_BYTE = 4
+
+#: A body is read no further than this many times the cap in its own
+#: bytes while its text is still under the cap.  It is the first whole
+#: number above the most bytes any charset Python decodes can spend on
+#: one byte of UTF-8 text: 39.5, a two-byte Arabic letter spelt as the
+#: 79 bytes of ``\N{ARABIC LETTER BEH WITH THREE DOTS POINTING UPWARDS
+#: BELOW AND TWO DOTS ABOVE}`` in ``unicode_escape``.  (A charset's own
+#: encoder spends 4 at most, UTF-32's; one UTF-7 shift sequence for each
+#: character spends 5, ``\U0000007e`` spends 10.)  So a body that is
+#: text from end to end fills the cap before it reaches this bound,
+#: whatever its charset, and only a body most of whose bytes produce no
+#: text is stopped by it.
+_READ_BYTES_PER_TEXT_BYTE = 40
 
 
 class NotARegularFileError(OSError):
@@ -90,13 +106,35 @@ async def communicate_bounded(
     return stdout, stderr
 
 
-async def read_body_text(resp: aiohttp.ClientResponse, max_bytes: int) -> str:
+class BodyText(NamedTuple):
+    """A response body's text, and whether reading stopped on its bytes."""
+
+    text: str
+    #: ``None`` when the body was read to its end or until its text was
+    #: over the cap.  Otherwise the bound on bytes at which reading
+    #: stopped: the body may go on, ``text`` is what the bytes read gave,
+    #: and the caller has to say so, because a text under the cap gets no
+    #: truncation notice by itself.
+    stopped_at_bytes: int | None = None
+
+
+async def read_body_text(resp: aiohttp.ClientResponse, max_bytes: int) -> BodyText:
     """The response body as text, read no further than *max_bytes* needs.
 
     Decodes as ``resp.text(errors="replace")`` does, in the charset the
     response names, and stops reading once the text is over *max_bytes*
     of UTF-8.  The text returned is then longer than the cap by less than
     one read, which is how the caller knows to cut it.
+
+    Reading also stops on the body's own bytes, with the text still under
+    the cap, in two cases, and the result then names the bound it stopped
+    at.  One: more than ``_READ_BYTES_PER_TEXT_BYTE`` times the cap has
+    been read.  A body can go on for ever and decode to almost nothing
+    (escape sequences, say), and used to be read until it ended or the
+    request timed out.  Two: the text cannot be measured as it arrives
+    (see below) and the bound on kept bytes is passed.  A body of exactly
+    a bound is read to its end; one byte more stops the read, even if
+    that byte was the body's last.
 
     A body under the cap comes back identical to ``resp.text``'s, because
     it is decoded the same way: its bytes are kept and decoded in one
@@ -116,10 +154,11 @@ async def read_body_text(resp: aiohttp.ClientResponse, max_bytes: int) -> str:
     Memory: the bytes kept are bounded at a few times the cap.  A body
     that passes that bound with its text still under the cap (escape
     sequences that produce nothing, say) is no longer kept: its text is
-    then the piece-by-piece decoder's, read on until it is over the cap
-    or the body ends.  That bounds what this function holds; a
-    compressed body is inflated by aiohttp before it gets here, and what
-    aiohttp holds while inflating is its own.
+    then the piece-by-piece decoder's, read on until it is over the cap,
+    the body ends or the bound on bytes read is passed.  That bounds
+    what this function holds; a compressed body is inflated by aiohttp
+    before it gets here, and what aiohttp holds while inflating is its
+    own.
     """
     try:
         encoding = resp.get_encoding()
@@ -129,6 +168,9 @@ async def read_body_text(resp: aiohttp.ClientResponse, max_bytes: int) -> str:
         # resolver, the one ``http_request``'s session has, answers UTF-8.
         encoding = "utf-8"
     wire_limit = _WIRE_BYTES_PER_TEXT_BYTE * max_bytes + _CHUNK_BYTES
+    read_limit = _READ_BYTES_PER_TEXT_BYTE * max_bytes + _CHUNK_BYTES
+    read = 0
+    stopped_at: int | None = None
     wire = bytearray()
     kept = True
     # The piece-by-piece decoder only measures; see the docstring.  Some
@@ -149,6 +191,7 @@ async def read_body_text(resp: aiohttp.ClientResponse, max_bytes: int) -> str:
         if not chunk:
             ended = True
             break
+        read += len(chunk)
         if kept:
             wire += chunk
         if decoder is not None:
@@ -161,16 +204,20 @@ async def read_body_text(resp: aiohttp.ClientResponse, max_bytes: int) -> str:
                 size += len(piece.encode("utf-8", errors="replace"))
         if kept and len(wire) > wire_limit:
             if decoder is None:
+                stopped_at = wire_limit
                 break
             kept = False
             wire = bytearray()
+        if read > read_limit and size <= max_bytes:
+            stopped_at = read_limit
+            break
     if kept:
         # The whole body, or its start up to the read that took the text
         # over the cap; either way decoded as ``resp.text`` decodes.
-        return bytes(wire).decode(encoding, errors="replace")
+        return BodyText(bytes(wire).decode(encoding, errors="replace"), stopped_at)
     if ended and decoder is not None:
         pieces.append(decoder.decode(b"", final=True))
-    return "".join(pieces)
+    return BodyText("".join(pieces), stopped_at)
 
 
 def read_text_file(path: Path, max_bytes: int) -> str:
@@ -204,3 +251,13 @@ def read_text_file(path: Path, max_bytes: int) -> str:
             return handle.read(max_bytes + 1)
     finally:
         os.close(fd)
+
+
+def write_text_file(path: Path, content: str) -> None:
+    """Write *content* to *path* as UTF-8, making the folders above it.
+
+    Blocking; call it in a worker thread.  Replaces the whole file, as
+    ``Path.write_text`` does.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")

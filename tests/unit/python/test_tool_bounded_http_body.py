@@ -29,9 +29,18 @@ from agents.tools.registry import ToolResult, clear_registry
 MB = 1024 * 1024
 NOTICE = "\n... [truncated at 100 KB]"
 
+#: The most of a body's own bytes that are read while its text is still
+#: under the cap (ISSUE-0215, point 3).  What happens at it is in
+#: ``test_tool_bounded_http_body_bytes.py``.
+READ_BOUND = 40 * MAX_OUTPUT_BYTES + 64 * 1024
+
 #: The most a call may allocate in the agent while it handles a body far
 #: over the cap.  The fixed code peaks near 1 MB.
 MEMORY_BUDGET = 6 * MB
+
+#: The same for a body just under the bound on bytes read, which is about
+#: 4 MB: holding it whole would take more than this.
+LOW_TEXT_MEMORY_BUDGET = 2 * MB
 
 
 @pytest.fixture(autouse=True)
@@ -300,19 +309,24 @@ async def test_a_body_of_exactly_the_cap_is_whole(serve: Any) -> None:
     assert result.data["body"] == "x" * MAX_OUTPUT_BYTES
 
 
+#: Three bytes that switch an ISO-2022-JP body to kanji and produce no
+#: text, and the three that switch it back.
+TO_KANJI = "\u65e5".encode("iso2022_jp")[:3]
+TO_ASCII = "\u65e5".encode("iso2022_jp")[-3:]
+
+
 async def test_a_body_that_decodes_to_little_text_is_not_held_in_memory(serve: Any) -> None:
     """A body can be megabytes on the wire and almost no text: here every
     three bytes are an escape sequence that produces nothing.  Its bytes
     are let go once there are more of them than any text under the cap
-    could need, and the text is still right.
+    could need, and the text is still right.  The body stays under the
+    bound on bytes read, which is the next tests' subject.
 
     The server sends the body in pieces and waits for the client between
     them.  It runs in this process, so a body handed over whole would sit
     in the server's own send buffer and be counted here."""
-    to_kanji = "\u65e5".encode("iso2022_jp")[:3]
-    to_ascii = "\u65e5".encode("iso2022_jp")[-3:]
-    piece = to_kanji * (64 * 1024 // 3)
-    pieces = 8 * MB // len(piece)
+    piece = TO_KANJI * (64 * 1024 // 3)
+    pieces = (READ_BOUND - 64 * 1024) // len(piece)
 
     async def handler(request: web.Request) -> web.StreamResponse:
         response = web.StreamResponse(
@@ -321,10 +335,11 @@ async def test_a_body_that_decodes_to_little_text_is_not_held_in_memory(serve: A
         await response.prepare(request)
         for _ in range(pieces):
             await response.write(piece)
-        await response.write(to_ascii + b"end")
+        await response.write(TO_ASCII + b"end")
         return response
 
     url = await serve(handler)
     result, peak = await _measured(lambda: builtin.http_request(url))
     assert result.data["body"] == "end"
-    assert peak < MEMORY_BUDGET, f"the agent allocated {peak / MB:.1f} MB"
+    assert pieces * len(piece) > 3 * MB, "the body must be far larger than the budget"
+    assert peak < LOW_TEXT_MEMORY_BUDGET, f"the agent allocated {peak / MB:.1f} MB"
