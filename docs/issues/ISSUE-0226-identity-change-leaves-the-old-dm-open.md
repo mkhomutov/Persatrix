@@ -10,6 +10,7 @@ closed_pr: 1129
 refs:
   - web/src/panels/ChannelTimeline.identity.test.js
   - docs/issues/ISSUE-0258-feed-says-no-messages-while-a-dm-is-still-being-opened.md
+  - docs/issues/ISSUE-0263-changing-back-to-an-identity-does-not-pick-its-turn-up-again.md
   - web/src/lib/dmSession.svelte.js
   - web/src/panels/ChannelTimeline.svelte
   - web/src/App.svelte
@@ -97,3 +98,24 @@ with a DM open.
 >
 > Found on the way and filed:
 > [ISSUE-0258](ISSUE-0258-feed-says-no-messages-while-a-dm-is-still-being-opened.md).
+
+> 2026-11-15 — after the review of the fix. No row of one identity
+> showed under another's name in any ordering the review built. What
+> it found, and where each went:
+>
+> - **The box after a change mid-turn.** It holds a message that was
+>   already sent as the earlier identity, and **Send** is live: one
+>   click sends the same text as the new identity. The behaviour
+>   stays, on the maintainer's word; the guide and the changelog now
+>   say it in those words.
+> - **Changing back before the reply lands** does not show the turn as
+>   in flight again. Filed as
+>   [ISSUE-0263](ISSUE-0263-changing-back-to-an-identity-does-not-pick-its-turn-up-again.md).
+> - **"Waiting for you"** of the old identity's finished turn stays on
+>   screen for up to four seconds under the new one. Added to
+>   ISSUE-0258: the fix is in the feed, which this pull request does
+>   not touch.
+> - **Tests added** for what was stated and not pinned: a lookup of
+>   the old identity that fails after the change, the session and
+>   epoch overrides, a draft parked for another persona, and a draft
+>   parked while a cut-loose turn was still out.

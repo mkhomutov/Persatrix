@@ -41,11 +41,13 @@ import {
   getChannelHistory,
   getChatHistory,
   sendChat,
+  listSessions,
   ApiError,
 } from "../lib/api.js";
 import { selection } from "../lib/selection.svelte.js";
 
 const AGENTS = [{ id: "ada", name: "Ada", role: "Researcher", status: "healthy" }];
+const BEA = { id: "bea", name: "Bea", role: "Writer", status: "healthy" };
 const CHANNELS = [{ id: "general", name: "General", channel_type: "group" }];
 const dmOf = (user) => `dm:ada:${user}`;
 
@@ -105,6 +107,8 @@ beforeEach(() => {
   // the next test: start these two from nothing.
   getChatHistory.mockReset();
   sendChat.mockReset();
+  listSessions.mockReset();
+  listSessions.mockImplementation(() => Promise.resolve({ sessions: [] }));
   // The DM is looked up for one person and one persona, without creating it.
   getChatHistory.mockImplementation((agent, { userId }) =>
     Promise.resolve(newestFirst(dmOf(userId))),
@@ -201,6 +205,67 @@ describe("Channels panel — the identity changes while a DM is open", () => {
 
     expect(texts()).toEqual(["hello from bob"]);
     expect(getChannelHistory).not.toHaveBeenCalledWith(dmOf("local"), expect.anything());
+  });
+
+  it("drops a failed lookup of the old identity that answers after the change", async () => {
+    say(dmOf("bob"), "bob", "hello from bob");
+    const first = deferred();
+    getChatHistory.mockImplementationOnce(() => first.promise);
+    const view = await openDm(render(ChannelTimeline, { props: { userId: "local" } }));
+
+    await view.rerender({ userId: "bob" });
+    await waitFor(() => expect(texts()).toEqual(["hello from bob"]));
+
+    first.reject(new ApiError("backend down", 503));
+    await first.promise.catch(() => {});
+    await new Promise((r) => setTimeout(r, 0));
+
+    // The failure was the old identity's: it says nothing under the new one
+    // and does not close the new one's conversation.
+    expect(screen.queryByText(/Could not open the conversation/)).toBeNull();
+    expect(texts()).toEqual(["hello from bob"]);
+  });
+
+  it("leaves the session and epoch overrides as they are", async () => {
+    // They are the tester's choice of scope, like the draft: not the old
+    // identity's property. (Without a session registry the session is a
+    // free-text box, which a test can fill like the epoch.)
+    listSessions.mockImplementation(() => Promise.reject(new ApiError("not wired", 503)));
+    const view = await openDm(render(ChannelTimeline, { props: { userId: "local" } }));
+    const epoch = () => screen.getByRole("textbox", { name: /epoch/i });
+    const session = () => screen.getByRole("textbox", { name: /session id/i });
+    await screen.findByRole("textbox", { name: /session id/i });
+    await fireEvent.input(epoch(), { target: { value: "ep-1" } });
+    await fireEvent.input(session(), { target: { value: "sess-1" } });
+
+    await view.rerender({ userId: "bob" });
+    await waitFor(() => expect(getChatHistory).toHaveBeenLastCalledWith("ada", { userId: "bob" }));
+
+    expect(epoch().value).toBe("ep-1");
+    expect(session().value).toBe("sess-1");
+    await type("scoped");
+    await send();
+    await waitFor(() => expect(sendChat).toHaveBeenCalledTimes(1));
+    expect(sendChat.mock.calls[0][1]).toMatchObject({
+      userId: "bob",
+      epochId: "ep-1",
+      sessionId: "sess-1",
+    });
+  });
+
+  it("keeps the draft parked for another persona", async () => {
+    listAgents.mockResolvedValue([...AGENTS, BEA]);
+    const view = await openDm(render(ChannelTimeline, { props: { userId: "local" } }));
+    await type("for Ada, later");
+    await fireEvent.click(screen.getByRole("option", { name: /^Bea\b/ }));
+    await screen.findByRole("heading", { name: "Bea" });
+
+    await view.rerender({ userId: "bob" });
+    await waitFor(() => expect(getChatHistory).toHaveBeenLastCalledWith("bea", { userId: "bob" }));
+
+    await fireEvent.click(screen.getByRole("option", { name: /^Ada\b/ }));
+    await screen.findByRole("heading", { name: "Ada" });
+    expect(box().value).toBe("for Ada, later");
   });
 
   it("keeps an unsent draft in the box, and sends it as the new identity", async () => {
@@ -302,6 +367,30 @@ describe("Channels panel — a reply still on its way for the old identity", () 
     await waitFor(() => expect(texts()).toEqual(["for bob", "reply to bob"]));
     expect(screen.queryByText(/ada is thinking/i)).toBeNull();
     expect(box().value).toBe("");
+  });
+
+  it("keeps a draft parked meanwhile when the old identity's answer arrives", async () => {
+    listAgents.mockResolvedValue([...AGENTS, BEA]);
+    const view = await openDm(render(ChannelTimeline, { props: { userId: "local" } }));
+    const turn = await sendAsLocalAndHold(view);
+
+    await view.rerender({ userId: "bob" });
+    await waitFor(() => expect(getChatHistory).toHaveBeenLastCalledWith("ada", { userId: "bob" }));
+    // As bob: a new draft for Ada, parked by opening another persona's DM.
+    await type("bob's half thought");
+    await fireEvent.click(screen.getByRole("option", { name: /^Bea\b/ }));
+    await screen.findByRole("heading", { name: "Bea" });
+
+    turn.resolve({ reply: "reply to local" });
+    await turn.promise;
+    await new Promise((r) => setTimeout(r, 0));
+
+    // A turn that ends normally drops the draft parked for its persona,
+    // because that draft is the message it sent. This one was cut loose: the
+    // parked draft is bob's, and stays.
+    await fireEvent.click(screen.getByRole("option", { name: /^Ada\b/ }));
+    await screen.findByRole("heading", { name: "Ada" });
+    expect(box().value).toBe("bob's half thought");
   });
 
   it("takes an error of the old identity's send off the screen", async () => {

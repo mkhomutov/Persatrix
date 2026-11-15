@@ -40,6 +40,15 @@ conversation: it shows the empty state, "No messages yet." with the hint
   "acting as" with a DM open looks the DM up again.
 - The feed cannot tell "no channel yet" from "not known yet": both
   arrive as an empty channel id.
+- **The same moment keeps a line of the old identity on screen.** When
+  a reply has just arrived, the line above the message box says
+  "Waiting for you" for four seconds. Changing "acting as" inside those
+  seconds leaves it there under the new identity, over a conversation
+  in which nobody is waiting. `DmSession.reidentify` clears that line
+  only while a send is still out, and the feed starts it afresh when
+  the persona changes (its key is `dm:<persona>`), which is the same
+  for both identities. Seen as a test against a stand-in: shown after
+  the reply, still shown after the change, gone four seconds later.
 
 ## Impact
 
@@ -53,8 +62,17 @@ the channel id), and show the loading placeholder it already has for a
 history load. After a failed lookup, show neither the empty state nor
 the hint.
 
+For the "Waiting for you" line: let the feed start its presence afresh
+when the identity changes too, by putting the user id into the key it
+already keeps for the conversation. That is one line in
+`ConversationFeed.svelte`.
+
 ## Notes
 
 > 2026-11-15 — found while checking the fix for ISSUE-0226 in a browser.
 > Not fixed there: the text is in `ConversationFeed.svelte`, which the
 > pull request for ISSUE-0222 changes at the same time.
+
+> 2026-11-15 — the review of the fix for ISSUE-0226 added the "Waiting
+> for you" line. It is the same moment and the same file, so it is
+> recorded here and not fixed in that pull request either.
