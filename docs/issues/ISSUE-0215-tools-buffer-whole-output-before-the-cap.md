@@ -209,9 +209,9 @@ out.
 > bytes in `iso2022_jp`; ten `~{~}` or twenty backslash-newlines cost
 > 41. A body spelt like that is stopped at the bound with less than a
 > full page, and carries the notice. The figure stays 40 (the
-> coordinating session recommended it and the maintainer accepted):
-> a smaller one would cut bodies spelt once in UTF-7 or with escapes,
-> and no figure covers a sequence that can be repeated without end.
+> maintainer's decision after the review): a smaller one would cut
+> bodies spelt once in UTF-7 or with escapes, and no figure covers a
+> sequence that can be repeated without end.
 >
 > What the bound does not do. It is 4,161,536 bytes and the request's
 > timeout is 30 seconds, so it ends an endless body only when the body
