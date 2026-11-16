@@ -70,16 +70,18 @@ func (r *ChannelRouter) recordSynthesisTurn(ctx context.Context, ct ChannelType,
 // same clamped reserve, so gating on `cost` would hide half the failures.
 //
 // Silent on an uncapped interaction (nothing to carve, so nothing to clamp), on
-// an unclamped one (the raw sizing was held back in full), and on a fleet with
+// an unclamped one (the raw sizing was held back in full), and on a router with
 // NO WALLET. That last gate is the [ChannelRouter.recordInteractionClosedMetric]
 // posture applied here: `r.spend` nil means no wallet was wired
 // ([ChannelRouter.SetInteractionSpender] is skipped in cmd/orchestrator when
-// `walletSvc == nil`), so no close-path lease is ever drawn and none can be
-// denied — while `interaction_budget_tokens` is set by CHANNEL CONFIG, which is
-// independent of the wallet and MANDATORY on an autonomous channel. Without the
-// gate, the documented no-cost-config deployment running a bundled autonomous
-// blueprint reports a clamped close on every close, at a rate against
-// `interaction_closed` of exactly 1.0, for a failure it cannot have.
+// `walletSvc == nil`, which only a test passes), so no close-path lease is
+// ever drawn and none can be denied — while `interaction_budget_tokens` is set
+// by CHANNEL CONFIG, which is independent of the wallet and MANDATORY on an
+// autonomous channel. Without the gate, a router with no wallet on an
+// autonomous channel would report a clamped close on every close, at a rate
+// against `interaction_closed` of exactly 1.0, for a failure it cannot have.
+// No running orchestrator is in that state since ISSUE-0204: it refuses to
+// start without the cost config the wallet is built from.
 //
 // The COUNTER fires on every qualifying close — that is the ISSUE-0138 rate's
 // contract. The WARN does not: the clamp is a function of the room size and the

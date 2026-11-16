@@ -65,8 +65,9 @@ import (
 // [ChannelRouter.SetInteractionSpender] at server startup — the router→wallet
 // direction, the mirror of the wallet's own
 // [wallet.WalletService.SetInteractionBudgetResolver] read of the router. nil
-// when no wallet is wired (a $0/mock fleet, or a unit test), in which case the
-// soft-budget trigger is inert and `max_rounds` alone bounds the close.
+// when no wallet is wired, which only a unit test does (the orchestrator does
+// not start without a wallet, ISSUE-0204); the soft-budget trigger is then
+// inert and `max_rounds` alone bounds the close.
 // *wallet.WalletService satisfies it.
 type interactionSpender interface {
 	InteractionSpend(interactionID string) int64
@@ -99,7 +100,7 @@ func isBoundedCloseTrigger(trigger string) bool {
 // RFC 0052 bounded-close soft-budget trigger. MUST run at startup before any
 // [ChannelRouter.Publish] — the field is unsynchronised, like maxCascadeDepth. A
 // nil `s` leaves the soft-budget trigger inert (max_rounds still bounds the
-// close), the posture for a fleet with no wallet.
+// close), the posture of a router that was given no wallet.
 func (r *ChannelRouter) SetInteractionSpender(s interactionSpender) {
 	r.spend = s
 }

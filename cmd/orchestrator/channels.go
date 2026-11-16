@@ -202,16 +202,15 @@ func initChannels(
 	// RFC 0050 amendment (interaction-budget enforcement): make the channel
 	// router the authority for the wallet's per-interaction cost ceiling. The
 	// wallet was constructed before this point (it has no channels dependency),
-	// so the resolver is injected here, where the router is born. Nil-safe: a
-	// deployment without cost config has no wallet, so the budget stays its
-	// pre-amendment self (the wallet falls back to the request field, which no
-	// producer stamps — i.e. uncapped).
+	// so the resolver is injected here, where the router is born. Nil-safe for
+	// the tests that pass no wallet: main() always has one, since it refuses to
+	// start without the cost config the wallet is built from (ISSUE-0204).
 	if walletSvc != nil {
 		walletSvc.SetInteractionBudgetResolver(router.ResolveInteractionBudgetForInteraction)
 		// RFC 0052 (v0.3.11) PR 4b: the reverse read — the router's bounded-close
 		// soft-budget trigger reads the wallet's per-interaction running total, so
 		// an autonomous discussion synthesize-and-closes before the hard cap denies
-		// the close-path leases. Nil-safe: a deployment with no wallet leaves the
+		// the close-path leases. A router given no wallet (a test) leaves the
 		// soft-budget trigger inert (max_rounds still bounds the close).
 		router.SetInteractionSpender(walletSvc)
 	}

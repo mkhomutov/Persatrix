@@ -19,7 +19,7 @@ package channels
 // count): a restart resets it, it does NOT reset on disarm/re-arm within a
 // process (the conservative aggregate-safety posture), and a channel DELETE
 // clears it (no map leak). It is folded from the wallet's per-interaction running
-// total at close, so a $0/mock fleet with no wallet wired leaves the gate inert.
+// total at close, so a router with no wallet wired leaves the gate inert.
 
 import (
 	"context"
@@ -140,8 +140,8 @@ func TestMarkInteractionClosed_FoldsStandingSpend(t *testing.T) {
 	assert.EqualValues(t, 4_200, router.StandingSpend(ch), "a stale re-close does not double-fold")
 }
 
-// TestMarkInteractionClosed_NilSpenderFoldsNothing — with no wallet wired (a
-// $0/mock fleet, or a unit fleet), the close folds nothing and the standing gate
+// TestMarkInteractionClosed_NilSpenderFoldsNothing — with no wallet wired (only
+// a test builds such a router), the close folds nothing and the standing gate
 // stays inert — the same posture as the bounded-close soft-budget trigger.
 func TestMarkInteractionClosed_NilSpenderFoldsNothing(t *testing.T) {
 	router, ch := conveningHarness(t, &messageRecordingDispatcher{}, standingArmedBudget(0))

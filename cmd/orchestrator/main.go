@@ -6,7 +6,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -51,7 +50,7 @@ var (
 	httpBind  = flag.String("http-bind", "127.0.0.1", "HTTP server bind address")
 	// PR #173 review (Must-Fix #2): mirror --http-bind's loopback default
 	// so the security posture is consistent across both server surfaces.
-	grpcBind     = flag.String("grpc-bind", "127.0.0.1", "gRPC server bind address (LogService); set to 0.0.0.0 for container deployments where shippers connect across the network")
+	grpcBind     = flag.String("grpc-bind", "127.0.0.1", "gRPC server bind address (WalletService, LogService); set to 0.0.0.0 for container deployments where agents connect across the network")
 	workflowsDir = flag.String("workflows-dir", "workflows/", "Path to workflow YAML directory")
 	env          = flag.String("env", "development", "Environment: development|staging|production")
 	deadlineMode = flag.String("deadline-mode", "", "Deadline mode: derived|static (default: inferred from --env)")
@@ -111,11 +110,11 @@ func main() {
 	// stderr and `persatrix logs <execution_id>` would return [] for
 	// orchestrator-emitted lines (the merged `_` view too).  Failure to
 	// construct the buffer is non-fatal — log endpoints fall back to
-	// 501 NOT_IMPLEMENTED and the logger keeps writing to stderr only.
+	// 501 NOT_IMPLEMENTED, the logger keeps writing to stderr only, and
+	// agents are served without it (ISSUE-0204, listenForAgents).
 	logBuf, err := logbuffer.New(logbuffer.ConfigFromEnv(), logger)
 	if err != nil {
-		logger.Warn("failed to initialize log buffer; log endpoints disabled",
-			zap.Error(err))
+		logger.Warn(logBufferMissingWarning, zap.Error(err))
 		logBuf = nil
 	} else {
 		logger = attachBufferTee(logger, logBuf, *env)
@@ -179,6 +178,17 @@ func main() {
 		"env", *env,
 	)
 
+	// Load the cost config before the audit log, the stores and the two
+	// ports are opened, and refuse to start without it (ISSUE-0204,
+	// loadCostConfig): the wallet is built from it, and no agent calls a
+	// model without the wallet. A refused start leaves none of them behind;
+	// the log buffer, tracing and metrics started above, so its log folder
+	// is there, empty.
+	costCfg, err := loadCostConfig(logger, *configDir)
+	if err != nil {
+		logger.Fatal(costConfigRefusal, zap.Error(err))
+	}
+
 	// 3. Initialize state store (config load/validate TODO precedes)
 	store := state.NewInMemoryStore(logger)
 	logger.Info("state store initialized", zap.String("type", "in-memory"))
@@ -230,10 +240,8 @@ func main() {
 		executor.WithAuditLogger(auditor),
 	}
 
-	// 9. Initialize cost tracker. nil when the config did not load; the
-	// loader's refusals and the no-limit warning are in loadCostConfig.
-	costCfg := loadCostConfig(logger, *configDir)
-
+	// 9. Initialize cost tracker, from the cost config loaded above.
+	//
 	// TODO(v0.2): Wire reporter.ResetDaily() to a midnight timer so daily budget
 	// limits actually reset and the CostReporter.perWorkflowSteps map doesn't grow
 	// unboundedly in long-running processes. Until then, ResetDaily() is only
@@ -241,48 +249,42 @@ func main() {
 	// See RFC 0006 PR 5 review follow-ups for tracking.
 	var schedOpts []scheduler.Option
 	var srvOpts []server.ServerOption
-	// RFC 0023 — the WalletService, built only when the cost config loaded
-	// (it composes the budget enforcer + token counter). Registered on the
-	// agent-facing gRPC server below; its TTL reaper is started alongside
-	// that listener.
-	var walletSvc *wallet.WalletService
-	if costCfg != nil {
-		tokenCounter := cost.NewTokenCounter(costCfg, logger)
-		budgetEnforcer := cost.NewBudgetEnforcer(tokenCounter, costCfg, logger)
-		costReporter := cost.NewCostReporter(tokenCounter, costCfg, logger)
-		schedOpts = append(schedOpts, scheduler.WithCostComponents(tokenCounter, budgetEnforcer, costReporter))
-		srvOpts = append(srvOpts, server.WithCostReporter(costReporter))
+	tokenCounter := cost.NewTokenCounter(costCfg, logger)
+	budgetEnforcer := cost.NewBudgetEnforcer(tokenCounter, costCfg, logger)
+	costReporter := cost.NewCostReporter(tokenCounter, costCfg, logger)
+	schedOpts = append(schedOpts, scheduler.WithCostComponents(tokenCounter, budgetEnforcer, costReporter))
+	srvOpts = append(srvOpts, server.WithCostReporter(costReporter))
 
-		// Initialize response cache from optimization.yaml caching config.
-		responseCache := cost.NewResponseCache(10000, time.Hour, logger)
-		execOpts = append(execOpts, executor.WithResponseCache(responseCache))
+	// Initialize response cache from optimization.yaml caching config.
+	responseCache := cost.NewResponseCache(10000, time.Hour, logger)
+	execOpts = append(execOpts, executor.WithResponseCache(responseCache))
 
-		// RFC 0023 — LLM Call Leasing: wallet lease-lifecycle tuning. Loaded
-		// inside the cost-config guard — the wallet composes the budget
-		// enforcer, so with no cost config there is no WalletService to
-		// configure. A malformed block is non-fatal: log and use defaults.
-		walletCfg, err := wallet.LoadConfig(*configDir)
-		if err != nil {
-			logger.Warn("failed to load wallet config, using defaults",
-				zap.String("configDir", *configDir),
-				zap.Error(err),
-			)
-			walletCfg = wallet.DefaultConfig()
-		}
-
-		walletSvc = wallet.NewWalletService(tokenCounter, budgetEnforcer, walletCfg, logger)
-
-		logger.Info("cost tracking initialized",
-			zap.Float64("globalDailyBudget", costCfg.Budgets.Global.MaxDailyUSD),
-			zap.Float64("perWorkflowBudget", costCfg.Budgets.PerWorkflow.DefaultMaxUSD),
-			zap.Float64("perAgentBudget", costCfg.Budgets.PerAgent.DefaultMaxUSD),
+	// RFC 0023 — LLM Call Leasing: wallet lease-lifecycle tuning. A
+	// malformed block is non-fatal: log and use defaults.
+	walletCfg, err := wallet.LoadConfig(*configDir)
+	if err != nil {
+		logger.Warn("failed to load wallet config, using defaults",
+			zap.String("configDir", *configDir),
+			zap.Error(err),
 		)
-		logger.Info("wallet lease enforcement initialized",
-			zap.Duration("leaseTTL", walletCfg.TTL),
-			zap.Duration("reaperInterval", walletCfg.ReaperInterval),
-			zap.Int("maxActiveLeases", walletCfg.MaxActiveLeases),
-		)
+		walletCfg = wallet.DefaultConfig()
 	}
+
+	// RFC 0023 — the WalletService composes the budget enforcer + token
+	// counter. It is served on the agent-facing gRPC server below, and its
+	// TTL reaper is started alongside that listener.
+	walletSvc := wallet.NewWalletService(tokenCounter, budgetEnforcer, walletCfg, logger)
+
+	logger.Info("cost tracking initialized",
+		zap.Float64("globalDailyBudget", costCfg.Budgets.Global.MaxDailyUSD),
+		zap.Float64("perWorkflowBudget", costCfg.Budgets.PerWorkflow.DefaultMaxUSD),
+		zap.Float64("perAgentBudget", costCfg.Budgets.PerAgent.DefaultMaxUSD),
+	)
+	logger.Info("wallet lease enforcement initialized",
+		zap.Duration("leaseTTL", walletCfg.TTL),
+		zap.Duration("reaperInterval", walletCfg.ReaperInterval),
+		zap.Int("maxActiveLeases", walletCfg.MaxActiveLeases),
+	)
 
 	exec := executor.NewGRPCExecutor(reg, logger, execOpts...)
 	defer exec.Close() //nolint:errcheck // no-op in v0.1; wired for connection pooling forward compatibility
@@ -368,26 +370,14 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// 10. Start gRPC server (agent → orchestrator LogService +
-	// WalletService).  Bound on --grpc-bind:--port; defaults to loopback
-	// to mirror --http-bind so a fresh install does not expose the
-	// unauthenticated LogService on every interface (PR #173 review
-	// Must-Fix #2; auth lands in RFC 0009).  Wired only when the buffer
-	// initialised — otherwise the agent shipper simply retries on
-	// RECONNECT and the (currently disabled) endpoints stay 501.  The
-	// server itself (resource budget, interceptor chain, service
-	// registration) is built by newAgentGRPCServer in grpcserver.go.
-	var grpcServer *grpc.Server
-	var grpcListener net.Listener
-	if logBuf != nil {
-		grpcAddr := fmt.Sprintf("%s:%d", *grpcBind, *port)
-		lis, err := net.Listen("tcp", grpcAddr)
-		if err != nil {
-			logger.Fatal("failed to listen on gRPC port",
-				zap.String("addr", grpcAddr), zap.Error(err))
-		}
-		grpcListener = lis
-		grpcServer = newAgentGRPCServer(logBuf, rateLimiter, circuitBreaker, walletSvc, logger)
+	// 10. Open the agent-facing gRPC port on --grpc-bind:--port: the
+	// WalletService, and LogService when the log buffer started
+	// (listenForAgents in grpcserver.go).
+	grpcAddr := fmt.Sprintf("%s:%d", *grpcBind, *port)
+	grpcServer, grpcListener, err := listenForAgents(grpcAddr, logBuf, rateLimiter, circuitBreaker, walletSvc, logger)
+	if err != nil {
+		logger.Fatal("failed to listen on gRPC port",
+			zap.String("addr", grpcAddr), zap.Error(err))
 	}
 
 	// 11. Start HTTP server (REST API + SSE streaming)
@@ -401,23 +391,19 @@ func main() {
 
 	// Serve the agent-facing gRPC server. It is not part of the drain below:
 	// the deferred stopAgentGRPC stops it after the drains (ISSUE-0176).
-	if grpcServer != nil {
-		stopAgentGRPC = runAgentGRPC(grpcServer, grpcListener, grpcStopGrace, logger, func(err error) {
-			logger.Error("gRPC server terminated with error", zap.Error(err))
-			cancel()
-		})
-		logger.Info("gRPC server listening", zap.String("addr", grpcListener.Addr().String()))
+	stopAgentGRPC = runAgentGRPC(grpcServer, grpcListener, grpcStopGrace, logger, func(err error) {
+		logger.Error("gRPC server terminated with error", zap.Error(err))
+		cancel()
+	})
+	logger.Info("gRPC server listening", zap.String("addr", grpcListener.Addr().String()))
 
-		// RFC 0023 — run the wallet's TTL reaper alongside the listener
-		// that serves the WalletService. It drains on root-context cancel.
-		if walletSvc != nil {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				walletSvc.RunReaper(ctx)
-			}()
-		}
-	}
+	// RFC 0023 — run the wallet's TTL reaper alongside the listener that
+	// serves the WalletService. It drains on root-context cancel.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		walletSvc.RunReaper(ctx)
+	}()
 
 	// TODO(v0.2): propagate Start error via errCh for non-zero exit code
 	wg.Add(1)

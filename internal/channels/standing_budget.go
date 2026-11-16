@@ -84,8 +84,8 @@ func (r *ChannelRouter) recordStandingSpend(channelID string, tokens int64) {
 // channelID's standing spend. Called from [ChannelRouter.markInteractionClosed] on
 // the open→retired transition (exactly once per closed interaction), OUTSIDE
 // interactionMu so the wallet read never inverts the router→wallet lock order the
-// budget resolver relies on. A nil spender (a $0/mock fleet, or a unit test with
-// no wallet wired) folds nothing — the standing gate is then inert, the same
+// budget resolver relies on. A nil spender (a unit test with no wallet wired;
+// the orchestrator always wires one) folds nothing — the standing gate is then inert, the same
 // posture as the bounded-close soft-budget trigger (bounded_close.go). The
 // InteractionSpend read is fully evaluated before [recordStandingSpend] takes
 // standingMu, so the wallet lock and standingMu are never held simultaneously.

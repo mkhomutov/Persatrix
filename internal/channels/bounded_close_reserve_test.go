@@ -300,16 +300,17 @@ func TestBoundedClose_ClampedReserveIsReportedOnTheTimeoutClose(t *testing.T) {
 		"the timeout net closed without the artifact")
 }
 
-// TestBoundedClose_NoWalletNeverReportsAClamp: a fleet with no wallet draws no
+// TestBoundedClose_NoWalletNeverReportsAClamp: a router with no wallet draws no
 // close-path lease, so no summary can be denied and there is nothing to report
 // — even though the channel carries a cap.
 //
-// The combination is not hypothetical. `interaction_budget_tokens` is CHANNEL
-// config (RFC 0050) and MANDATORY on an autonomous channel, while the wallet is
-// wired only when the deployment has cost config at all — cmd/orchestrator
-// skips SetInteractionSpender when `walletSvc == nil`. Without the gate the
-// documented no-cost-config deployment running a bundled autonomous blueprint
-// would report a clamped close on EVERY close, at a rate against
+// The combination was a real deployment before ISSUE-0204:
+// `interaction_budget_tokens` is CHANNEL config (RFC 0050) and MANDATORY on an
+// autonomous channel, while the wallet was wired only when the cost config
+// loaded. An orchestrator now refuses to start without that config, so only a
+// test builds a router with no wallet (cmd/orchestrator skips
+// SetInteractionSpender when `walletSvc == nil`). The gate stays: without it
+// such a router would report a clamped close on EVERY close, at a rate against
 // `interaction_closed` of exactly 1.0, which is the one number ISSUE-0138 reads.
 func TestBoundedClose_NoWalletNeverReportsAClamp(t *testing.T) {
 	const budget = int64(60_000) // the clamped cap of the tests above
@@ -318,7 +319,7 @@ func TestBoundedClose_NoWalletNeverReportsAClamp(t *testing.T) {
 
 	router, ch, reader := reserveHarness(t, 2)
 	router.SetInteractionBudgetTokens(ch, budget)
-	// No SetInteractionSpender: this fleet has no wallet.
+	// No SetInteractionSpender: this router has no wallet.
 
 	tick(t, router, ch)
 	tick(t, router, ch)
