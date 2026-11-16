@@ -37,8 +37,8 @@ const logBufferMissingWarning = "the log buffer did not start, so the orchestrat
 // folder the process could not create into a fleet that answered nothing,
 // behind a health check that said ok. Without the buffer the port carries
 // the wallet alone: an agent's log shipper is told the log service is not
-// implemented, keeps its records in its own log output, and tries again
-// every 30 seconds at most.
+// implemented, keeps its records in its own log output, and tries again at
+// a pace that slows to once every 30 seconds.
 //
 // The default bind is loopback, to mirror --http-bind, so a fresh install
 // does not expose the unauthenticated LogService on every interface (PR

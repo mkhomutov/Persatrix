@@ -133,10 +133,11 @@ agent-facing listener or a missing wallet.
 > accepted, and the failure shows only when the next record is written.
 > The shipper then logs one warning to the agent's own output, waits (1
 > second, doubling to 30, never reset by a failed try) and opens a new
-> stream. So an agent that keeps logging writes at most one warning each
-> 30 seconds, and a quiet agent writes none. No turn waits on it: a log
-> call only appends to a queue of at most 5,000 records. The records are
-> lost to the orchestrator and stay in the agent's own output.
+> stream. So an agent that keeps logging writes six warnings in the first
+> half minute and then one each 30 seconds, and a quiet agent writes
+> none. No turn waits on it: a log call only appends to a queue of at
+> most 5,000 records. The records are lost to the orchestrator and stay
+> in the agent's own output.
 > [ISSUE-0273](ISSUE-0273-log-shipper-treats-a-missing-log-service-as-an-outage.md)
 > records what that leaves to improve.
 >
