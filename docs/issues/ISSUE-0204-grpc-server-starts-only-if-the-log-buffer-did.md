@@ -5,7 +5,7 @@ status: resolved
 severity: medium
 area: cmd/orchestrator
 created: 2026-11-10
-closed: 2026-11-16
+closed: 2026-11-17
 closed_pr: 1135
 refs:
   - cmd/orchestrator/main.go
