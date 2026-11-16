@@ -6,6 +6,7 @@ severity: medium
 area: cmd/orchestrator
 created: 2026-11-10
 closed: 2026-11-16
+closed_pr: 1135
 refs:
   - cmd/orchestrator/main.go
   - cmd/orchestrator/grpcserver.go
@@ -90,7 +91,8 @@ agent-facing listener or a missing wallet.
 > the old behaviour, and it is still this issue's half-working state.
 > This issue itself is unchanged.
 
-> 2026-11-16 — resolved, on the maintainer's three choices.
+> 2026-11-16 — resolved by [#1135](https://github.com/mkhomutov/Persatrix/pull/1135), on the maintainer's three
+> choices.
 >
 > **The log buffer cannot start: the orchestrator keeps going without
 > logs.** The agent-facing gRPC port opens whether or not the buffer

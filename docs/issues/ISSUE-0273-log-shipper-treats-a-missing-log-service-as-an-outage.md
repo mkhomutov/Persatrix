@@ -11,6 +11,7 @@ refs:
   - cmd/orchestrator/grpcserver.go
   - docs/issues/ISSUE-0204-grpc-server-starts-only-if-the-log-buffer-did.md
   - docs/issues/ISSUE-0246-the-log-shippers-counters-reach-no-metric.md
+  - https://github.com/mkhomutov/Persatrix/pull/1135
 ---
 
 # ISSUE-0273: The log shipper treats a missing log service as an outage
@@ -77,7 +78,8 @@ written into a stream that has ended.
 ## Notes
 
 > 2026-11-16 — found while fixing
-> [ISSUE-0204](ISSUE-0204-grpc-server-starts-only-if-the-log-buffer-did.md).
+> [ISSUE-0204](ISSUE-0204-grpc-server-starts-only-if-the-log-buffer-did.md)
+> ([#1135](https://github.com/mkhomutov/Persatrix/pull/1135)).
 > Severity proposed from the tracker's precedent
 > ([ISSUE-0246](ISSUE-0246-the-log-shippers-counters-reach-no-metric.md),
 > low); not ruled by the maintainer. Before that fix the same state left

@@ -8,6 +8,7 @@ created: 2026-11-16
 refs:
   - evaluators/exp001/processes.py
   - docs/issues/ISSUE-0204-grpc-server-starts-only-if-the-log-buffer-did.md
+  - https://github.com/mkhomutov/Persatrix/pull/1135
 ---
 
 # ISSUE-0274: An EXP-001 harness comment says "no wallet" without the log buffer
@@ -46,6 +47,7 @@ keeps the deployment's logs in its own folder.
 ## Notes
 
 > 2026-11-16 — filed with the fix for
-> [ISSUE-0204](ISSUE-0204-grpc-server-starts-only-if-the-log-buffer-did.md).
+> [ISSUE-0204](ISSUE-0204-grpc-server-starts-only-if-the-log-buffer-did.md)
+> ([#1135](https://github.com/mkhomutov/Persatrix/pull/1135)).
 > Severity proposed from the tracker's precedent for a stale comment
 > (low); not ruled by the maintainer.
