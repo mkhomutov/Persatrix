@@ -6,6 +6,7 @@ severity: medium
 area: channels
 created: 2026-11-10
 closed: 2026-11-16
+closed_pr: 1136
 refs:
   - internal/channels/identifiers.go
   - internal/channels/legacy_participant_ids.go
@@ -71,7 +72,8 @@ part again.
 > 2026-11-10 — found by a whole-repository quality review of `main` at
 > `ee9cfaac`; reproduced by calling the Python validator directly.
 
-> 2026-11-16 — resolved, on the maintainer's two choices.
+> 2026-11-16 — resolved by [#1136](https://github.com/mkhomutov/Persatrix/pull/1136), on the maintainer's two
+> choices.
 >
 > **The strict rule everywhere.** The channels package and the four places
 > of the channel schema now hold `^[a-z0-9][a-z0-9-]*[a-z0-9]$`, as the

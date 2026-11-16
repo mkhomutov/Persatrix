@@ -11,6 +11,7 @@ refs:
   - agents/channel_validation.py
   - agents/channel_catchup.py
   - docs/issues/ISSUE-0209-participant-id-rule-differs-between-go-and-python.md
+  - https://github.com/mkhomutov/Persatrix/pull/1136
 ---
 
 # ISSUE-0275: Old messages from a loose id still reach agents
@@ -99,7 +100,8 @@ from an agent's publish and store the rest, or keep the refusal.
 ## Notes
 
 > 2026-11-16 — found while fixing
-> [ISSUE-0209](ISSUE-0209-participant-id-rule-differs-between-go-and-python.md).
+> [ISSUE-0209](ISSUE-0209-participant-id-rule-differs-between-go-and-python.md)
+> ([#1136](https://github.com/mkhomutov/Persatrix/pull/1136)).
 > Left open on purpose: the maintainer's choices for that fix were to
 > refuse at the door and to warn at start, and this needs a third thing.
 > Severity proposed (low: it needs a store from before the fix and a

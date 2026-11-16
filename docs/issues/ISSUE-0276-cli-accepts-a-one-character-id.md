@@ -10,6 +10,7 @@ refs:
   - cli/src/user_id.rs
   - internal/channels/identifiers.go
   - docs/issues/ISSUE-0209-participant-id-rule-differs-between-go-and-python.md
+  - https://github.com/mkhomutov/Persatrix/pull/1136
 ---
 
 # ISSUE-0276: The CLI accepts a one-character id
@@ -59,6 +60,7 @@ empty one.
 
 > 2026-11-16 — found while checking the CLI against the participant id
 > rule for
-> [ISSUE-0209](ISSUE-0209-participant-id-rule-differs-between-go-and-python.md).
+> [ISSUE-0209](ISSUE-0209-participant-id-rule-differs-between-go-and-python.md)
+> ([#1136](https://github.com/mkhomutov/Persatrix/pull/1136)).
 > Waits for the CLI freeze to end. Severity proposed (low); not ruled by
 > the maintainer.
