@@ -121,3 +121,7 @@ part again.
 > closing them needs more than refusing at the door and warning at
 > start, so they are left for a decision:
 > [ISSUE-0275](ISSUE-0275-old-messages-from-a-loose-id-still-reach-agents.md).
+
+> 2026-11-16 — decided for the thread, the first of the two: it is left
+> as it is. [ISSUE-0275](ISSUE-0275-old-messages-from-a-loose-id-still-reach-agents.md)
+> records the decision and stays open as the known gap.

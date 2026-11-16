@@ -106,3 +106,12 @@ from an agent's publish and store the rest, or keep the refusal.
 > refuse at the door and to warn at start, and this needs a third thing.
 > Severity proposed (low: it needs a store from before the fix and a
 > reply under one of its old messages); not ruled by the maintainer.
+
+> 2026-11-16 — the maintainer's decision for the thread: leave it as it
+> is (option 3). A reply in a thread under an old message from such an
+> id stays stored and unanswered, and the channels guide says so
+> ("Participant ids"). Options 1 and 2 are not taken, and nothing in the
+> orchestrator changes for it. This issue stays open as the record of
+> that known gap. The decision was about the thread: the rows a persona
+> drops at catch-up, and a persona's reply that mentions such an id,
+> stay as described above, with no choice made for them.
