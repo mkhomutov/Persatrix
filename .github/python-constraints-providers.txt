@@ -211,7 +211,7 @@ openai==3.37.0
     # via
     #   -c .github/python-constraints.txt
     #   persatrix-agents (agents/pyproject.toml)
-opentelemetry-api==1.45.1
+opentelemetry-api==1.45.2
     # via
     #   -c .github/python-constraints.txt
     #   persatrix-agents (agents/pyproject.toml)
@@ -237,11 +237,11 @@ opentelemetry-exporter-otlp-proto-http==1.45.1
     # via
     #   -c .github/python-constraints.txt
     #   persatrix-agents (agents/pyproject.toml)
-opentelemetry-instrumentation==0.66b1
+opentelemetry-instrumentation==0.66b2
     # via
     #   -c .github/python-constraints.txt
     #   opentelemetry-instrumentation-grpc
-opentelemetry-instrumentation-grpc==0.66b1
+opentelemetry-instrumentation-grpc==0.66b2
     # via
     #   -c .github/python-constraints.txt
     #   persatrix-agents (agents/pyproject.toml)
@@ -250,13 +250,13 @@ opentelemetry-proto==1.45.1
     #   -c .github/python-constraints.txt
     #   opentelemetry-exporter-otlp-proto-common
     #   opentelemetry-exporter-otlp-proto-http
-opentelemetry-sdk==1.45.1
+opentelemetry-sdk==1.45.2
     # via
     #   -c .github/python-constraints.txt
     #   persatrix-agents (agents/pyproject.toml)
     #   opentelemetry-exporter-otlp-common
     #   opentelemetry-exporter-otlp-proto-http
-opentelemetry-semantic-conventions==0.66b1
+opentelemetry-semantic-conventions==0.66b2
     # via
     #   -c .github/python-constraints.txt
     #   persatrix-agents (agents/pyproject.toml)

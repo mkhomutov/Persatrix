@@ -68,7 +68,10 @@ dependencies = [
     # The 1.58.0 floor is the first release that takes `reasoning_effort`,
     # which an alias can ask for (ISSUE-0169); older ones raise a TypeError.
     "openai>=1.58.0,<4",
-    "opentelemetry-api>=1.28.0,<2",
+    # The 1.45.2 floor is the first release that reads a `traceparent`
+    # value safely: every earlier one can be kept busy for seconds by one
+    # long, malformed value (CVE-2026-126360).
+    "opentelemetry-api>=1.45.2,<2",
     "opentelemetry-sdk>=1.28.0,<2",
     "opentelemetry-exporter-otlp-proto-http>=1.28.0,<2",
     "opentelemetry-instrumentation-grpc>=0.49b0,<1",
