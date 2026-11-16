@@ -19,6 +19,7 @@ import (
 
 	"github.com/mkhomutov/persatrix/internal/cost"
 	"github.com/mkhomutov/persatrix/internal/generated/logpb"
+	"github.com/mkhomutov/persatrix/internal/generated/walletpb"
 	"github.com/mkhomutov/persatrix/internal/observability/logbuffer"
 	"github.com/mkhomutov/persatrix/internal/wallet"
 )
@@ -42,34 +43,48 @@ func testWalletService(t *testing.T) *wallet.WalletService {
 	return wallet.NewWalletService(counter, enforcer, wallet.DefaultConfig(), zap.NewNop())
 }
 
-// TestNewAgentGRPCServer confirms the extracted agent-facing gRPC server
-// builder registers the right services: LogService always, and the
-// RFC 0023 WalletService only when a wallet was built (i.e. the cost config
-// loaded). The recovery + rate-limit interceptor behaviour itself is
-// covered in internal/security; this test pins the wiring extracted from
-// main() (ISSUE-0059 / ISSUE-0008).
+// TestNewAgentGRPCServer confirms the agent-facing gRPC server builder
+// registers the right services: the RFC 0023 WalletService when a wallet was
+// built, and LogService when the log buffer started. Each is registered on
+// its own: the wallet does not wait for the buffer (ISSUE-0204). The
+// recovery + rate-limit interceptor behaviour itself is covered in
+// internal/security; this test pins the wiring extracted from main()
+// (ISSUE-0059 / ISSUE-0008).
 func TestNewAgentGRPCServer(t *testing.T) {
 	buf, err := logbuffer.New(logbuffer.Config{Dir: t.TempDir()}, zap.NewNop())
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = buf.Close() })
+	const (
+		logService    = "persatrix.v1.LogService"
+		walletService = "persatrix.v1.WalletService"
+	)
+	require.Equal(t, logService, logpb.LogService_ServiceDesc.ServiceName)
+	require.Equal(t, walletService, walletpb.WalletService_ServiceDesc.ServiceName)
 
 	tests := []struct {
-		name       string
-		walletSvc  *wallet.WalletService
-		wantSvcLen int
+		name      string
+		logBuf    *logbuffer.Buffer
+		walletSvc *wallet.WalletService
+		want      []string
 	}{
-		{"with wallet", testWalletService(t), 2},
-		{"without wallet (cost config absent)", nil, 1},
+		{"log buffer and wallet", buf, testWalletService(t), []string{logService, walletService}},
+		// main() always has a wallet: it does not start without the cost
+		// config the wallet is built from. Only tests pass nil.
+		{"log buffer, no wallet", buf, nil, []string{logService}},
+		{"wallet, the log buffer did not start", nil, testWalletService(t), []string{walletService}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// nil rate limiter + breaker: GRPCRateLimitInterceptor is
 			// nil-safe, so the interceptor chain still composes.
-			srv := newAgentGRPCServer(buf, nil, nil, tc.walletSvc, zap.NewNop())
+			srv := newAgentGRPCServer(tc.logBuf, nil, nil, tc.walletSvc, zap.NewNop())
 			require.NotNil(t, srv)
 			t.Cleanup(srv.Stop)
-			assert.Len(t, srv.GetServiceInfo(), tc.wantSvcLen,
-				"LogService is always registered; WalletService only with a wallet")
+			var got []string
+			for name := range srv.GetServiceInfo() {
+				got = append(got, name)
+			}
+			assert.ElementsMatch(t, tc.want, got)
 		})
 	}
 }

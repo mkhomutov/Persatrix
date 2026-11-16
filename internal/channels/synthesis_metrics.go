@@ -70,11 +70,11 @@ func (r *ChannelRouter) recordSynthesisTurn(ctx context.Context, ct ChannelType,
 // same clamped reserve, so gating on `cost` would hide half the failures.
 //
 // Silent on an uncapped interaction (nothing to carve, so nothing to clamp), on
-// an unclamped one (the raw sizing was held back in full), and on a fleet with
+// an unclamped one (the raw sizing was held back in full), and on a router with
 // NO WALLET. That last gate is the [ChannelRouter.recordInteractionClosedMetric]
 // posture applied here: `r.spend` nil means no wallet was wired
 // ([ChannelRouter.SetInteractionSpender] is skipped in cmd/orchestrator when
-// `walletSvc == nil`), so no close-path lease is ever drawn and none can be
+// `walletSvc == nil`, which only a test passes), so no close-path lease is ever drawn and none can be
 // denied — while `interaction_budget_tokens` is set by CHANNEL CONFIG, which is
 // independent of the wallet and MANDATORY on an autonomous channel. Without the
 // gate, the documented no-cost-config deployment running a bundled autonomous

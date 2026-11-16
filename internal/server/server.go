@@ -403,7 +403,30 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 }
 
-// handleHealthz returns a minimal 200 OK with {"status": "ok"}.
+// healthzBody is what GET /healthz answers.
+//
+// Missing names the parts this orchestrator runs without (ISSUE-0204). The
+// one name today is "log_buffer": the buffer did not start, so the log
+// routes answer 501 and logs that agents ship are refused. With nothing
+// missing the key is left out, and the body is `{"status":"ok"}`, as it
+// always was.
+type healthzBody struct {
+	Status  string   `json:"status"`
+	Missing []string `json:"missing,omitempty"`
+}
+
+// handleHealthz answers 200 with status "ok", and names what is missing.
+//
+// It stays 200 and "ok" with a part missing: the route is a liveness probe
+// (docker-compose.yaml's healthcheck, a Kubernetes probe), a probe that
+// failed would restart the process into the same state, and agents are
+// served without the log buffer. A process that could not serve agents does
+// not get here: the orchestrator refuses to start without the cost config
+// its wallet is built from, and without its agent-facing port.
 func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, map[string]string{"status": "ok"}, http.StatusOK)
+	body := healthzBody{Status: "ok"}
+	if s.logBuffer == nil {
+		body.Missing = append(body.Missing, "log_buffer")
+	}
+	writeJSON(w, body, http.StatusOK)
 }

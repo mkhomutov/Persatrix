@@ -629,12 +629,14 @@ does not know, so a misspelled key cannot turn a limit off; `make validate`
 refuses those files too. To set no limit at all, write `budgets: {}`: a
 `budgets:` key with nothing under it is refused like a missing one. A limit
 must be a finite number, so `.inf` is refused; `0` is how "no limit" is
-written. A refused file is logged at start-up as
-`failed to load cost config, budget enforcement disabled`, and the
-orchestrator then runs with no cost tracking and no wallet service, so
-agents' model calls fail until the file is fixed and the orchestrator is
-restarted
-([ISSUE-0204](../issues/ISSUE-0204-grpc-server-starts-only-if-the-log-buffer-did.md)).
+written. The orchestrator does not start on a refused file, nor on a config
+folder with no `optimization.yaml` in it: it logs
+`refusing to start: the cost config did not load, and without it there is no wallet, so no agent could call a model`
+at `FATAL`, with the file and the reason in the line's `error` field, and
+exits with status 1. Until that fix
+([ISSUE-0204](../issues/ISSUE-0204-grpc-server-starts-only-if-the-log-buffer-did.md))
+it logged a warning and ran on with no wallet service, so every agent's
+model call failed behind a health check that said ok.
 When the file loads and no limit is above zero, start-up logs the warning
 `no spending limit is set: every limit under cost.budgets is 0 or left out, so nothing caps what agents spend`.
 

@@ -599,6 +599,13 @@ Defaults pinned in [RFC 0018 § Resolved Decisions](rfcs/0018-structured-logging
 
 Layout: one dir per execution, one append-only `<sequence>.jsonl` per sealed flush; dir `0o700`, file `0o600`.
 
+**When the log buffer cannot start.** The buffer fails to start only when `PERSATRIX_LOGBUFFER_DIR` cannot be created or listed: a missing folder under a parent the process may not write to, a folder it may not open, or a file at that path. The orchestrator then runs without it, and says so twice:
+
+- At start-up it logs, at `WARN`, `the log buffer did not start, so the orchestrator runs without it: the log routes answer 501 and logs that agents ship are refused; agents are served all the same, the wallet included`, with the cause in the line's `error` field.
+- `GET /healthz` still answers 200, with `{"status":"ok","missing":["log_buffer"]}`. With nothing missing the body is `{"status":"ok"}` and has no `missing` key. The status stays 200 on purpose: the route is the liveness probe (`docker-compose.yaml`'s healthcheck), and a probe that failed would restart the orchestrator into the same state.
+
+What is lost is the logs and nothing else. `persatrix logs` and both log routes answer `501`; the orchestrator's own lines and each agent's lines are still in that process's own output. Agents register, take wallet leases and answer as usual. An agent's log shipper is told the log service is not there; an agent that keeps logging writes one `log shipper stream error, reconnecting in …` warning to its own output per try, at most one each 30 seconds, and a quiet agent writes none. Fix the folder and restart the orchestrator to get the logs back. Until [ISSUE-0204](issues/ISSUE-0204-grpc-server-starts-only-if-the-log-buffer-did.md) was fixed, a buffer that did not start also kept the gRPC port closed, so no agent could reach the wallet and every model call was refused.
+
 ### 12.3 Tailing a live workflow
 
 ```shell

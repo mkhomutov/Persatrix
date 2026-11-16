@@ -281,9 +281,7 @@ taught about the knobs:
   accompanies it **once per channel per configuration**, not once per close —
   the clamp is a property of the room and the cap, so the counter is the
   per-close surface and the log line is the explanation. Neither says anything
-  about the unclamped rows above, which is why they get their own table. On a
-  fleet with no wallet (no cost config) nothing is reported at all: no
-  close-path lease is drawn, so none can be denied.
+  about the unclamped rows above, which is why they get their own table.
 
 ### Try it offline — `make demo-autonomous`
 

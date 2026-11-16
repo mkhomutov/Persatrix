@@ -19,15 +19,55 @@ import (
 	"github.com/mkhomutov/persatrix/internal/wallet"
 )
 
-// newAgentGRPCServer builds the agent-facing gRPC server — the listener
-// that hosts LogService and, when the cost config loaded, the RFC 0023
-// WalletService. Extracted from main() so the orchestrator entry point
-// stays within the file-size budget (cf. ISSUE-0008); net.Listen stays in
-// main(), and runAgentGRPC below runs Serve and the stop.
+// logBufferMissingWarning is what main() logs when the log buffer did not
+// start. It says what is lost and what is not, because the second half used
+// to be false: the agent-facing port stayed closed with the buffer
+// (ISSUE-0204).
+const logBufferMissingWarning = "the log buffer did not start, so the orchestrator runs without it: " +
+	"the log routes answer 501 and logs that agents ship are refused; " +
+	"agents are served all the same, the wallet included"
+
+// listenForAgents opens the agent-facing gRPC port on addr and builds the
+// server it carries (newAgentGRPCServer). runAgentGRPC below runs Serve and
+// the stop.
 //
-// walletSvc is nil when the cost config failed to load — the wallet
-// composes the budget enforcer, so without it budget enforcement is
-// disabled and no WalletService is registered.
+// The port opens whether or not the log buffer started (ISSUE-0204). It
+// carries the wallet, and an agent that cannot reach the wallet refuses
+// every model call, so a port that waited for the buffer turned a log
+// folder the process could not create into a fleet that answered nothing,
+// behind a health check that said ok. Without the buffer the port carries
+// the wallet alone: an agent's log shipper is told the log service is not
+// implemented, keeps its records in its own log output, and tries again
+// every 30 seconds at most.
+//
+// The default bind is loopback, to mirror --http-bind, so a fresh install
+// does not expose the unauthenticated LogService on every interface (PR
+// #173 review Must-Fix #2; auth lands in RFC 0009).
+func listenForAgents(
+	addr string,
+	logBuf *logbuffer.Buffer,
+	rateLimiter *security.RateLimiter,
+	circuitBreaker *security.CircuitBreaker,
+	walletSvc *wallet.WalletService,
+	logger *zap.Logger,
+) (*grpc.Server, net.Listener, error) {
+	lis, err := net.Listen("tcp", addr)
+	if err != nil {
+		return nil, nil, err
+	}
+	return newAgentGRPCServer(logBuf, rateLimiter, circuitBreaker, walletSvc, logger), lis, nil
+}
+
+// newAgentGRPCServer builds the agent-facing gRPC server: the RFC 0023
+// WalletService, and LogService when the log buffer started. Extracted from
+// main() so the orchestrator entry point stays within the file-size budget
+// (cf. ISSUE-0008).
+//
+// logBuf is nil when the log buffer did not start; no LogService is
+// registered then, and the wallet is served as usual (ISSUE-0204).
+//
+// walletSvc is nil only in tests. main() refuses to start when the cost
+// config the wallet is built from did not load (loadCostConfig).
 //
 // PR #173 review Should-Fix #3 — the per-stream + per-server resource
 // budget bounds a single misbehaving (or, until RFC 0009 auth lands,
@@ -84,10 +124,13 @@ func newAgentGRPCServer(
 			security.GRPCStreamRecoveryInterceptor(logger),
 		),
 	)
-	logpb.RegisterLogServiceServer(srv, server.NewLogServiceServer(logBuf, logger))
+	// Each service is registered on its own account (ISSUE-0204): the log
+	// service needs the buffer it writes to, the wallet does not.
+	if logBuf != nil {
+		logpb.RegisterLogServiceServer(srv, server.NewLogServiceServer(logBuf, logger))
+	}
 	// RFC 0023 — the enforcing WalletService shares the agent-facing
-	// listener with LogService. Registered only when the cost config
-	// loaded; nil ⇒ budget enforcement is disabled and no wallet is served.
+	// listener with LogService.
 	if walletSvc != nil {
 		walletpb.RegisterWalletServiceServer(srv, walletSvc)
 	}

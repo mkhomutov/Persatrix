@@ -112,6 +112,9 @@ func DecodeOptimizationFile(data []byte, out any) error {
 	return nil
 }
 
+// ConfigFile is the file in a config folder that [LoadCostConfig] reads.
+const ConfigFile = "optimization.yaml"
+
 // LoadCostConfig reads the optimization.yaml file from configDir and parses the
 // cost section (pricing table and budget thresholds). Validates that budget
 // thresholds are non-negative and on_exceed is a recognized value.
@@ -128,7 +131,7 @@ func LoadCostConfig(configDir string, opts ...ConfigOption) (*CostConfig, error)
 		opt(&o)
 	}
 
-	path := filepath.Join(configDir, "optimization.yaml")
+	path := filepath.Join(configDir, ConfigFile)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read optimization config: %w", err)

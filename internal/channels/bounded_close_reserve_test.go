@@ -300,7 +300,7 @@ func TestBoundedClose_ClampedReserveIsReportedOnTheTimeoutClose(t *testing.T) {
 		"the timeout net closed without the artifact")
 }
 
-// TestBoundedClose_NoWalletNeverReportsAClamp: a fleet with no wallet draws no
+// TestBoundedClose_NoWalletNeverReportsAClamp: a router with no wallet draws no
 // close-path lease, so no summary can be denied and there is nothing to report
 // — even though the channel carries a cap.
 //

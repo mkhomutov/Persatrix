@@ -64,7 +64,7 @@ type RouterMetrics struct {
 	// [ChannelRouter.boundedClose], beside that counter's own bump and behind the
 	// same tombstone CAS, so a crossed bound that the fresh-config re-check
 	// refuses, or that loses its arm/tombstone race, contributes to neither.
-	// A fleet with no wallet contributes to neither either — it draws no
+	// A router with no wallet (a test) contributes to neither either — it draws no
 	// close-path lease, so it cannot suffer the failure (see that method).
 	//
 	// The attribution (channel, interaction, room size, record count, cap,
