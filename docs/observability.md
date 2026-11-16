@@ -563,7 +563,7 @@ Forking `config/observability/otel-collector.yaml` is encouraged; the file is ch
 
 ## 12. Operations: `persatrix logs` (RFC 0018 PR 6)
 
-Thin REST/SSE client over the PR 5 endpoints; server-side filtering lives in [`internal/observability/logbuffer`](../internal/observability/logbuffer).
+Thin REST/SSE client over the PR 5 endpoints. The entries are held in [`internal/observability/logbuffer`](../internal/observability/logbuffer); the orchestrator filters them in [`internal/server/logs_handler.go`](../internal/server/logs_handler.go), by one set of rules for both modes.
 
 ### 12.1 Snapshot vs follow
 
@@ -579,6 +579,10 @@ persatrix logs <execution_id> --workflow code-review --agent reviewer-1 --verbos
 - `--follow` reconnects with exponential backoff (500 ms → 15 s) and prints `[reconnected]` on resume.
 - `--verbose` appends `execution_id=… step_id=… trace_id=… attributes={…}`; default render is `<ts> <LEVEL> [<agent>] <message>` with ANSI colour on TTYs.
 - `--level` accepts `DEBUG`/`INFO`/`WARN`/`ERROR`, validated by clap before any network call.
+- `--level`, `--workflow` and `--since` are applied by the orchestrator, to a snapshot and to a followed log alike. `--level` keeps that level and no other: `--level INFO` shows no `WARN` or `ERROR` line. `--workflow` keeps entries whose `workflow` attribute is that value. `--since` takes a duration (`5m`) or an RFC 3339 time and keeps entries stamped at or after it. A value the orchestrator refuses (a negative duration, a time in the future, text that is neither) ends either mode with its `400` message.
+- `--follow --since 5m` first prints what the snapshot prints for the same flags, the newest 1,000 matching entries at most, and then each new entry as it arrives. Without `--since` a followed log starts at the moment it connects.
+- **A reader that falls behind loses lines, and the orchestrator's log says so.** Only entries that pass the filters are queued for a followed log: 256 at a time once it is live, and up to 5,000 while the first, buffered lines of `--follow --since` are still being read and sent. An entry that arrives when the queue is full is not sent. The followed log shows no sign of it; the orchestrator logs `sse: a log stream lost entries, its reader is too slow` at `WARN`, with the execution id as `stream` and the number lost as `dropped`, at the next heartbeat (15 s) at the latest. `persatrix logs <id>` without `--follow` still returns those entries.
+- **On a reconnect the CLI sends the same flags again.** Without `--since`, entries logged while it was disconnected are not shown. With `--since` they are, as long as the buffer still holds them, and so is the rest of the window: `--since 5m` prints again every entry of the five minutes before the reconnect, lines already on screen included, and an RFC 3339 `--since` prints again everything since that time. The repeats come after the `[reconnected]` line, which goes to standard error, so a pipe on standard output cannot see where they start. Asking only for what was missed is the CLI's half of [ISSUE-0223](issues/ISSUE-0223-logs-follow-ignores-its-filters.md), not built yet.
 
 ### 12.2 Server-side env var knobs
 
@@ -599,11 +603,11 @@ Layout: one dir per execution, one append-only `<sequence>.jsonl` per sealed flu
 
 ```shell
 persatrix workflows submit code-review.yaml
-persatrix logs exec-7f2a1 --follow --level INFO
+persatrix logs exec-7f2a1 --follow --level INFO     # INFO lines only, as they arrive
 persatrix logs _ --trace abc123 --verbose
 ```
 
-Across an orchestrator restart, `--follow` prints `[reconnected]` and resumes from the warm-loaded ring; entries flushed to disk before the restart remain queryable via the snapshot path. A run's entries are flushed two seconds after it ends (completed or failed), which puts agent entries still in the shipper's 0.5 s batch in the same file; entries that arrive later are kept and flushed to a further file, and stopping the orchestrator inside that window flushes the run at once. A run still going when the orchestrator stops is failed by the stop, and is flushed only if that failure is recorded before the process exits.
+Across an orchestrator restart, `--follow` prints `[reconnected]` and carries on from the moment it reconnects: nothing logged before that is shown. With `--since` it first prints, a second time for lines it had already shown, the entries of that window that the restarted orchestrator holds for the run: the ring it loaded back from disk. That ring is filled from the run's oldest entry and holds 1,000 (`PERSATRIX_LOGBUFFER_PER_EXEC`), so for a run with more than that on disk, which is one that filled its ring and then got entries after it had ended, the latest lines are missing from both a snapshot and a followed log until 50 newer runs have pushed it out of memory ([ISSUE-0268](issues/ISSUE-0268-a-reloaded-log-ring-keeps-a-runs-oldest-entries.md)). For every other run, entries flushed to disk before the restart remain queryable via the snapshot path. A run's entries are flushed two seconds after it ends (completed or failed), which puts agent entries still in the shipper's 0.5 s batch in the same file; entries that arrive later are kept and flushed to a further file, and stopping the orchestrator inside that window flushes the run at once. A run still going when the orchestrator stops is failed by the stop, and is flushed only if that failure is recorded before the process exits.
 
 ### 12.4 End-to-end coverage
 

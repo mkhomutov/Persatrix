@@ -52,6 +52,9 @@ type Server struct {
 	// Log buffer (optional — nil-safe).  Wired in RFC 0018 PR 5.
 	// When unset, the log REST + SSE endpoints return 501 NOT_IMPLEMENTED.
 	logBuffer *logbuffer.Buffer
+	// sseHeartbeat overrides sseHeartbeatInterval when above zero.  Tests
+	// set it; nothing else does.
+	sseHeartbeat time.Duration
 
 	// Audit logger (optional — nil-safe).  Wired in RFC 0009 PR 1b
 	// (security audit log).  When nil, audit emit sites no-op so unit
