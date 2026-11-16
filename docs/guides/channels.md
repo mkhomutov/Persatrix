@@ -100,7 +100,8 @@ letter or digit: the rule an agent id has. `alice` and `user-1` fit;
 
 The orchestrator refuses an id that does not fit wherever one enters. A
 publish (its `sender_id` and each of its `mentions`), a new member, a new
-channel's members and a new DM are answered `400`, with the id and the rule
+channel's members, a new DM, and a settings edit that newly names the id as
+escalation chair or convener are answered `400`, with the id and the rule
 in the message, and `make validate` refuses the id in `channels.yaml`.
 
 **Members stored before the rule.** Until
@@ -113,7 +114,13 @@ them. A store written then can still hold such members. They keep loading:
   number of channels it is a member of:
   `channels: stored members have an id the participant id rule refuses; …`.
 - They cannot post, be mentioned or be added again. `@User_1` written in a
-  message's text stays text.
+  message's text stays text: neither the orchestrator nor the web console's
+  composer turns it into a mention, and the composer's menu does not offer
+  such a member.
+- A channel whose stored settings name such a member as escalation chair or
+  convener keeps loading, and its other settings can still be edited. The
+  role itself never worked, since no agent has such an id: point it at a
+  member whose id fits the rule (`PATCH /api/v1/channels/{id}/config`).
 - A channel declared in `channels.yaml` with such a member still loads while
   the store holds that channel. A channel the store does not hold yet is not
   created with such a member: the orchestrator stops at start-up with
@@ -122,10 +129,20 @@ them. A store written then can still hold such members. They keep loading:
 
 To rename a member, remove it and add it under a new id
 (`DELETE /api/v1/channels/{id}/members/User_1`, then
-`POST /api/v1/channels/{id}/members` with `{"id": "user-1"}`), and for a
-channel declared in `channels.yaml` change the id there too before the next
-start, or the start fails on the difference between file and store. Old
-messages keep the old id as their sender. A DM cannot be renamed, because
+`POST /api/v1/channels/{id}/members` with
+`{"id": "user-1", "respond": "never"}`). Give `respond` the value the member
+had: left out, the new member is `when_mentioned` whatever the old one was.
+A salience threshold, where one was set, is put back with
+`PATCH /api/v1/channels/{id}/members/user-1`.
+
+For a channel declared in `channels.yaml` the order matters. Rename over
+REST first, then change the id in the file before the next start. With the
+file changed first, the start stops with
+`channels: config-vs-store membership divergence`, because the store still
+holds the old id. The way out is to put the old id back in the file, start,
+rename over REST, change the file and restart.
+
+Old messages keep the old id as their sender. A DM cannot be renamed, because
 its address is the two ids: its history stays readable under the old id, the
 person starts a new DM under the new one, and the start-up warning names the
 old id until that DM is deleted.

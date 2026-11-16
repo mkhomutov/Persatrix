@@ -8,6 +8,8 @@ created: 2026-11-16
 refs:
   - cli/src/validation.rs
   - cli/src/user_id.rs
+  - cli/src/commands/channel.rs
+  - cli/src/commands/channel_tests.rs
   - internal/channels/identifiers.go
   - docs/issues/ISSUE-0209-participant-id-rule-differs-between-go-and-python.md
   - https://github.com/mkhomutov/Persatrix/pull/1136
@@ -43,6 +45,15 @@ why, and `--as` or `--user` with a longer id works.
 Read, not run: the CLI is not changed while its freeze holds, and it
 was compared with the rule by reading the function and its tests.
 
+Three comments in the CLI describe the orchestrator's rule as it was
+before that fix, and wait for the same freeze: the doc comment of
+`validate_send_inputs` in `cli/src/commands/channel.rs` ("The server's
+`participantIDPattern` is broader"), and two in
+`cli/src/commands/channel_tests.rs` ("Server's participantIDPattern
+accepts uppercase", "Underscores pass the server regex"). The
+orchestrator now holds the rule the CLI holds, so none of the three is
+true any more. The tests under them still assert the right thing.
+
 ## Impact
 
 Small. A one-character user name, or a one-character id typed on
@@ -54,7 +65,7 @@ have given its own before sending.
 Refuse a value shorter than two characters in `validate_resource_id`,
 change the unit test that accepts `a`, and have `normalize_user_id`
 fall back to `local` for a one-character result, as it does for an
-empty one.
+empty one. Correct the three comments in the same change.
 
 ## Notes
 
@@ -64,3 +75,6 @@ empty one.
 > ([#1136](https://github.com/mkhomutov/Persatrix/pull/1136)).
 > Waits for the CLI freeze to end. Severity proposed (low); not ruled by
 > the maintainer.
+
+> 2026-11-16 — the three stale comments were added to this issue after
+> the review of pull request 1136 found them.

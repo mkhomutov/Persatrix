@@ -199,3 +199,40 @@ func TestChannels_TextThatNamesAStoredLooseIDIsNotLiftedIntoAMention(t *testing.
 		"the member whose id fits the rule is lifted as before; the loose one stays text")
 	assert.Equal(t, "thanks @User_1 and @ember-owl, noted", stored.Content)
 }
+
+// Four more things the guide promises for a member stored with a loose id,
+// each of which had no test: the member's own view of the history is read,
+// its disposition can be edited, a DM whose address holds the id can be
+// deleted, and a structured mention of it is refused although it is a member.
+func TestChannels_AStoredLooseParticipantIDKeepsItsOtherRoutes(t *testing.T) {
+	srv, _, store := earlierStoreServer(t)
+	h := srv.Handler()
+	ctx := context.Background()
+
+	rec := doRequest(h, http.MethodGet, "/api/v1/channels/group:ops/messages?as_participant=User_1", nil)
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+	assert.Contains(t, rec.Body.String(), `"id":"old-1"`, "the history as that member sees it is still read")
+
+	rec = doRequest(h, http.MethodPatch, "/api/v1/channels/group:ops/members/User_1", []byte(`{"respond":"when_mentioned"}`))
+	require.Equal(t, http.StatusNoContent, rec.Code, "the member's disposition can be edited: %s", rec.Body.String())
+	members, err := store.GetMembers(ctx, "group:ops")
+	require.NoError(t, err)
+	for _, m := range members {
+		if m.ParticipantID == "User_1" {
+			assert.Equal(t, channels.RespondWhenMentioned, m.RespondPolicy.Normalize(), "and the edit is stored")
+		}
+	}
+
+	raw, err := json.Marshal(publishMessageRequest{SenderID: "alice", Content: "over to you", Mentions: []string{"User_1"}})
+	require.NoError(t, err)
+	rec = doRequest(h, http.MethodPost, "/api/v1/channels/group:ops/messages", raw)
+	requireRefusedByTheRule(t, rec.Code, rec.Body.String(), "User_1")
+	history, err := store.GetHistory(ctx, "group:ops", 10, time.Time{})
+	require.NoError(t, err)
+	assert.Len(t, history, 1, "the message that mentions a stored member with a loose id is not stored")
+
+	rec = doRequest(h, http.MethodDelete, "/api/v1/channels/dm:User_1:ember-owl", nil)
+	require.Equal(t, http.StatusNoContent, rec.Code, "a DM whose address holds the id can be deleted: %s", rec.Body.String())
+	rec = doRequest(h, http.MethodGet, "/api/v1/channels/dm:User_1:ember-owl", nil)
+	assert.Equal(t, http.StatusNotFound, rec.Code, "and it is gone")
+}

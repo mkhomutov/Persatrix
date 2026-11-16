@@ -345,8 +345,11 @@ var (
 	// ErrNotMember (a publish-time sender-authorization guard surfaced as 403):
 	// this is a missing PATCH target, surfaced as 404.
 	ErrMemberNotFound = errors.New("channels: member not found")
-	// ErrInvalidParticipantID — participant id violated the registration-time
-	// constraints (no `:`, no whitespace, ASCII only) per RFC 0011 §A.
+	// ErrInvalidParticipantID — a participant id does not fit the participant
+	// id rule ([ValidateParticipantID], ISSUE-0209): lowercase letters, digits
+	// and hyphens, at least two characters, a letter or digit first and last.
+	// RFC 0011 §A asked only for no `:`, no whitespace and ASCII; the rule is
+	// narrower, and is the one an agent id has.
 	ErrInvalidParticipantID = errors.New("channels: invalid participant id")
 	// ErrInvalidChannelType — a Channel or ChannelMessage was supplied with a
 	// `channel_type` outside the canonical vocabulary.

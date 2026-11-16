@@ -14,9 +14,10 @@ import (
 // `ChannelMessage.Mentions` must round-trip through `ValidateParticipantID`
 // before INSERT. Without this check, the wire boundary's mentions cap is
 // the only filter and junk values (whitespace, ":", non-ASCII) would
-// reach the response gate in PR 4b. The contract is the same regex used
-// for sender/member ids (`^[A-Za-z0-9][A-Za-z0-9_-]*$`), so the new
-// check is purely additive.
+// reach the response gate in PR 4b. The contract is the participant id
+// rule, the one a sender and a member are held to
+// (`^[a-z0-9][a-z0-9-]*[a-z0-9]$` since ISSUE-0209; it was
+// `^[A-Za-z0-9][A-Za-z0-9_-]*$` when this test was written).
 func TestSQLiteStore_PublishMessage_RejectsInvalidMention(t *testing.T) {
 	store := newTestStore(t, SQLiteOptions{})
 	ctx := context.Background()

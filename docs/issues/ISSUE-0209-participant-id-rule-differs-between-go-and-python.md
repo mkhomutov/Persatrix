@@ -78,7 +78,8 @@ part again.
 > **The strict rule everywhere.** The channels package and the four places
 > of the channel schema now hold `^[a-z0-9][a-z0-9-]*[a-z0-9]$`, as the
 > agents, the accounts package and the agent schema did. A drift test
-> compares the nine copies
+> compares the copies, nine at this point and ten since the review (the
+> note below)
 > (`tests/unit/python/test_cross_language_participant_id_drift.py`). The
 > orchestrator refuses an id that does not fit where it enters: a
 > publish's sender and mentions, a new member, a new channel's members
@@ -125,3 +126,36 @@ part again.
 > 2026-11-16 — decided for the thread, the first of the two: it is left
 > as it is. [ISSUE-0275](ISSUE-0275-old-messages-from-a-loose-id-still-reach-agents.md)
 > records the decision and stays open as the known gap.
+
+> 2026-11-16 — changes after the review of pull request 1136, on the
+> maintainer's decisions.
+>
+> **Two more doors.** A settings edit could still write an id outside
+> the rule as a channel's escalation chair or convener. It now refuses
+> one that the edit newly sets, with the rule in the message. A value
+> the channel already holds is left alone, so a channel whose stored
+> settings name such a member stays editable and can be pointed at
+> another member. And the web console's composer turned `@User_1` into a
+> mention itself and offered the member in its menu, so its send was
+> refused; it now leaves such a member as text and out of the menu. The
+> console's copy of the rule is the tenth the drift test compares.
+>
+> **One more reason for the looser rule.** RFC 0011 gave another reason
+> beside a person's casing: a tight pattern "would foreclose future ULID
+> identifiers". The strict rule does that at the door: a ULID in its
+> usual upper-case form is refused, and in lower case it fits. RFC 0043,
+> a draft, still quotes the earlier pattern for a channel member. Neither
+> RFC is changed here.
+>
+> **What the review found that this fix leaves open:** the agents'
+> checks accept an id that ends in a line break
+> ([ISSUE-0280](ISSUE-0280-agents-accept-a-participant-id-that-ends-in-a-line-break.md)),
+> the rule sets no length
+> ([ISSUE-0281](ISSUE-0281-participant-id-rule-has-no-length-bound.md)),
+> and the refusal of an agent's registration names another pattern than
+> the one it checks
+> ([ISSUE-0282](ISSUE-0282-agent-registration-refusal-names-a-pattern-the-check-does-not-hold.md)).
+> The config loader still takes a chair or convener of the earlier shape
+> from `channels.yaml`, as it takes such a member: it cannot tell a new
+> value from one an earlier start ran with, and `make validate` refuses
+> the file.

@@ -386,9 +386,18 @@ def test_escalation_chair_id_accepts_member_style_ids(chair_id: str):
 def test_escalation_chair_id_refuses_what_the_member_id_rule_refuses(chair_id: str):
     """ISSUE-0209: a capital, an underscore or a single character is no longer
     a member id, so it is not a chair either. Until then the member pattern
-    admitted both, and so did this one."""
-    with pytest.raises(jsonschema.ValidationError):
-        _validate(_with_chair(chair_id))
+    admitted both, and so did this one.
+
+    The chair is kept out of ``members`` here. The schema does not ask that a
+    chair be a member (the Go loader does), so the only thing that can refuse
+    this file is the chair's own pattern. With the id among the members as
+    well, the member pattern refused the file and this test could not fail
+    for the chair's."""
+    instance = _with_chair(chair_id)
+    instance["channels"][0]["members"] = [{"id": "bea"}, {"id": "ada"}]
+    with pytest.raises(jsonschema.ValidationError) as refused:
+        _validate(instance)
+    assert list(refused.value.absolute_path) == ["channels", 0, "escalation_chair_id"]
 
 
 # ── RFC 0037 (v0.3.12) classification fields ──────────────────────────────

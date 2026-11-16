@@ -57,22 +57,40 @@ reads. It was so before the fix too. Read, not run.
 A third path is closed already: a message's text that names `@User_1` is
 no longer turned into a mention.
 
-**A persona that mentions such an id.** One more effect runs the other
-way. A persona never received a message from `User_1`, so it does not
-know the id from the sender of anything. It can still read the id in
-another member's text ("thanks @User_1") and put it in the `mentions` of
-its own reply. The orchestrator now refuses that reply with `400`, as it
-refuses any message that mentions such an id, and the reply is not
-posted; the agent logs the failed publish. Before the fix the reply was
-stored, people in the channel saw it, and the other personas refused it.
-Read, not run: no model was called.
+**A persona that mentions an id outside the rule.** One more effect runs
+the other way, and it does not need an old store. A persona learns ids
+from more than the sender of an event. The roster section of each turn's
+prompt lists every member of the channel
+(`agents/persona_runtime/channel_roster.py`), a stored member such as
+`User_1` among them. The conversation window replays old messages with
+lighter checks than catch-up applies
+(`agents/persona_runtime/conversation_window.py`), so an old message
+from `User_1` is in it with its sender. And a model can write any id it
+likes. When a persona sends a message of its own making, the list of
+mentions the model gave is sent as it is (`agents/action_executor.py`).
+If one of them does not fit the rule, the orchestrator refuses the whole
+message with `400`, the message is not posted, and the action's result
+is `failed`. Before the fix the message was stored,
+people in the channel saw it, and the other personas refused it.
+
+An ordinary reply is not affected. The reply a persona gives to a
+message mentions only that message's sender
+(`agents/persona_runtime/channel_reply.py`), and an event from a sender
+outside the rule never reaches that code. Read, not run: no model was
+called.
 
 ## Impact
 
-Bounded to a store that already holds messages from such ids. A thread
-under one of them is a dead end that looks alive: replies are accepted
-and never answered. The catch-up warnings are noise that never ends by
-itself.
+The thread and the catch-up rows need a store that already holds
+messages from such ids. A thread under one of them is a dead end that
+looks alive: replies are accepted and never answered. The catch-up
+warnings are noise that never ends by itself.
+
+The refused message of a persona needs no such store: it takes a model
+that puts an id outside the rule in the mentions of a message it sends
+by its own action, which the roster of an old store makes more likely
+and nothing rules out elsewhere. The message is lost, and the send is
+recorded as failed.
 
 ## Proposed fix / investigation path
 
@@ -115,3 +133,13 @@ from an agent's publish and store the rest, or keep the refusal.
 > that known gap. The decision was about the thread: the rows a persona
 > drops at catch-up, and a persona's reply that mentions such an id,
 > stay as described above, with no choice made for them.
+
+> 2026-11-16 — corrected after the review of pull request 1136. The
+> first text said a persona "does not know the id" of such a member
+> except from another member's text, and that the effects were bounded
+> to a store that already holds messages from such ids. Neither holds
+> for a persona's own message that mentions an id outside the rule: the
+> roster and the conversation window both show a persona such ids, and a
+> model can write one in any deployment. The section above and the
+> impact now say so. Severity stays as proposed: an ordinary reply
+> mentions only the sender it answers.

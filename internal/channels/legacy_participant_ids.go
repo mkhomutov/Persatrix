@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"sort"
+	"strings"
 
 	"go.uber.org/zap"
 )
@@ -20,8 +21,13 @@ import (
 
 // maxLegacyIDsNamed bounds how many ids one warning names, so a store with
 // very many of them still logs one line a log pipeline will take whole. The
-// warning carries the full count beside the names.
+// warning carries the full count beside the names. With [maxLegacyIDShown]
+// the names come to about 40 kB at most.
 const maxLegacyIDsNamed = 500
+
+// maxLegacyIDShown bounds how many bytes of one id the warning shows. The
+// earlier rule set no length, so a stored id can be of any size.
+const maxLegacyIDShown = 64
 
 // legacyMemberIDsWarning is the line a store logs, once, when it opens with
 // members whose id the participant id rule refuses.
@@ -63,6 +69,16 @@ func legacyMembers(ctx context.Context, db *sql.DB) ([]LegacyMember, error) {
 	return out, nil
 }
 
+// shownLegacyID is the id as the warning shows it: whole when it is within
+// [maxLegacyIDShown] bytes, and otherwise its start, marked as cut.
+func shownLegacyID(id string) string {
+	if len(id) <= maxLegacyIDShown {
+		return id
+	}
+	// A cut may fall inside a character of a row no rule ever checked.
+	return strings.ToValidUTF8(id[:maxLegacyIDShown], "") + "…"
+}
+
 // warnLegacyMembers logs [legacyMemberIDsWarning] when the store holds
 // members whose id the rule refuses, naming each with its number of
 // channels. It logs nothing for a store with none, and a failed read is
@@ -82,7 +98,7 @@ func warnLegacyMembers(ctx context.Context, db *sql.DB, logger *zap.Logger) {
 	}
 	names := make([]string, len(named))
 	for i, m := range named {
-		names[i] = fmt.Sprintf("%s (%d)", m.ParticipantID, m.Channels)
+		names[i] = fmt.Sprintf("%s (%d)", shownLegacyID(m.ParticipantID), m.Channels)
 	}
 	logger.Warn(legacyMemberIDsWarning,
 		zap.Int("count", len(members)),

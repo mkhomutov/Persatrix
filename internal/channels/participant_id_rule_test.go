@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -48,6 +49,7 @@ func TestValidateParticipantID_IsTheOneRule(t *testing.T) {
 		{"", false},
 		{"a:b", false},
 		{"a b", false},
+		{"ab\n", false}, // ends in a line break: Go's `$` is the end of the text
 		{MentionEveryone, false},
 	}
 	for _, tt := range tests {
@@ -291,6 +293,39 @@ func TestWarnLegacyMembers_BoundsTheNamesInOneLine(t *testing.T) {
 	assert.EqualValues(t, maxLegacyIDsNamed+8, fields["count"], "every one is counted")
 	assert.Len(t, fields["members"], maxLegacyIDsNamed)
 	assert.EqualValues(t, 8, fields["not_named"])
+}
+
+// The earlier rule set no length, so a stored id can be of any size. The
+// warning shows the start of a long one, enough to find it, so that one id
+// cannot make the line too large for a log pipeline to take.
+func TestWarnLegacyMembers_BoundsHowMuchOfOneIDItShows(t *testing.T) {
+	path := earlierStore(t)
+	db, err := sql.Open("sqlite", buildDSN(path))
+	require.NoError(t, err)
+	defer db.Close() //nolint:errcheck
+	long := "Long_" + strings.Repeat("x", 200_000)
+	_, err = db.Exec(`INSERT INTO memberships (channel_id, participant_id, respond_policy, joined_at) VALUES ('group:ops', ?, 'never', ?)`,
+		long, time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC))
+	require.NoError(t, err)
+	core, logs := observer.New(zap.WarnLevel)
+
+	warnLegacyMembers(context.Background(), db, zap.New(core))
+
+	warnings := logs.FilterMessage(legacyMemberIDsWarning).All()
+	require.Len(t, warnings, 1)
+	fields := warnings[0].ContextMap()
+	assert.EqualValues(t, 2, fields["count"])
+	assert.Equal(t, []any{long[:maxLegacyIDShown] + "… (1)", "User_1 (2)"}, fields["members"],
+		"a long id is cut, and marked as cut; an id within the bound is shown whole")
+}
+
+func TestShownLegacyID(t *testing.T) {
+	atTheBound := strings.Repeat("x", maxLegacyIDShown)
+	assert.Equal(t, "User_1", shownLegacyID("User_1"))
+	assert.Equal(t, atTheBound, shownLegacyID(atTheBound), "an id of exactly the bound is whole")
+	assert.Equal(t, atTheBound+"…", shownLegacyID(atTheBound+"y"), "one byte more is cut")
+	// A cut inside a character leaves no broken half behind.
+	assert.Equal(t, strings.Repeat("x", maxLegacyIDShown-1)+"…", shownLegacyID(strings.Repeat("x", maxLegacyIDShown-1)+"é!"))
 }
 
 // The config loader reads what may already be stored, so a declared member
