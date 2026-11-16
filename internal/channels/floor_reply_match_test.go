@@ -56,9 +56,9 @@ func (d *staleReplyDispatcher) Dispatch(ctx context.Context, env DispatchEnvelop
 	}
 
 	switch {
-	case rid == "a" && round1:
+	case rid == "aa" && round1:
 		// Silent: the turn times out.
-	case rid == "a":
+	case rid == "aa":
 		late := ""
 		if d.lateEchoesRound1 {
 			late = round1ID
@@ -68,7 +68,7 @@ func (d *staleReplyDispatcher) Dispatch(ctx context.Context, env DispatchEnvelop
 			time.Sleep(60 * time.Millisecond)
 			say("a: answer to round 2", msg.ID)
 		}()
-	case rid == "b" && !round1:
+	case rid == "bb" && !round1:
 		hist, _ := d.store.GetHistory(ctx, msg.ChannelID, 100, time.Time{})
 		d.mu.Lock()
 		for _, m := range hist {
@@ -99,8 +99,8 @@ func TestFloorRound_ALateReplyToAnEarlierRoundDoesNotEndTheTurn(t *testing.T) {
 			router := NewChannelRouter(store, disp, zap.NewNop(), nil)
 			disp.router = router
 			id := mustCreateGroupWithPolicies(t, store, "planning", map[string]RespondPolicy{
-				"user": RespondNever, "a": RespondAlways, "b": RespondAlways,
-			}, "user", "a", "b")
+				"user": RespondNever, "aa": RespondAlways, "bb": RespondAlways,
+			}, "user", "aa", "bb")
 			// Round 1: a is silent, so its turn runs to this timeout.
 			router.SetFloorControl(id, true, 150*time.Millisecond)
 			ask := func(text string) {

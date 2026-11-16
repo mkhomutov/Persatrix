@@ -14,9 +14,10 @@ import (
 // `ChannelMessage.Mentions` must round-trip through `ValidateParticipantID`
 // before INSERT. Without this check, the wire boundary's mentions cap is
 // the only filter and junk values (whitespace, ":", non-ASCII) would
-// reach the response gate in PR 4b. The contract is the same regex used
-// for sender/member ids (`^[A-Za-z0-9][A-Za-z0-9_-]*$`), so the new
-// check is purely additive.
+// reach the response gate in PR 4b. The contract is the participant id
+// rule, the one a sender and a member are held to
+// (`^[a-z0-9][a-z0-9-]*[a-z0-9]$` since ISSUE-0209; it was
+// `^[A-Za-z0-9][A-Za-z0-9_-]*$` when this test was written).
 func TestSQLiteStore_PublishMessage_RejectsInvalidMention(t *testing.T) {
 	store := newTestStore(t, SQLiteOptions{})
 	ctx := context.Background()
@@ -53,18 +54,18 @@ func TestSQLiteStore_PublishMessage_RejectsInvalidMention(t *testing.T) {
 func TestSQLiteStore_PublishMessage_AcceptsValidMentions(t *testing.T) {
 	store := newTestStore(t, SQLiteOptions{})
 	ctx := context.Background()
-	id := mustCreateGroup(t, store, "planning", "alice", "bob", "User_1")
+	id := mustCreateGroup(t, store, "planning", "alice", "bob", "user-1")
 
 	require.NoError(t, store.PublishMessage(ctx, ChannelMessage{
 		ID: uuid.NewString(), ChannelID: id, SenderID: "alice",
 		Content:  "hi",
-		Mentions: []string{"bob", "User_1"},
+		Mentions: []string{"bob", "user-1"},
 	}))
 
 	hist, err := store.GetHistory(ctx, id, 10, time.Time{})
 	require.NoError(t, err)
 	require.Len(t, hist, 1)
-	assert.Equal(t, []string{"bob", "User_1"}, hist[0].Mentions)
+	assert.Equal(t, []string{"bob", "user-1"}, hist[0].Mentions)
 }
 
 // RFC 0030 relevance amendment Tier A (v0.3.7): the broadcast sentinel

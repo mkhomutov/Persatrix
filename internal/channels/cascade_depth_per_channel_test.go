@@ -31,10 +31,10 @@ channels:
   - name: deliberative
     max_cascade_depth: 3
     members:
-      - {id: a, respond: participant}
+      - {id: aa, respond: participant}
   - name: ordinary
     members:
-      - {id: b, respond: participant}
+      - {id: bb, respond: participant}
 `
 	cfg, err := LoadConfig(writeYAML(t, body))
 	require.NoError(t, err)
@@ -66,7 +66,7 @@ channels:
   - name: planning
     max_cascade_depth: -1
     members:
-      - {id: a, respond: participant}
+      - {id: aa, respond: participant}
 `
 	_, err := LoadConfig(writeYAML(t, body))
 	require.Error(t, err)
@@ -85,7 +85,7 @@ channels:
   - name: planning
     max_cascade_depth: 6
     members:
-      - {id: a, respond: participant}
+      - {id: aa, respond: participant}
 `
 	_, err := LoadConfig(writeYAML(t, overDefault))
 	require.Error(t, err, "6 > the defaulted fleet cap 5 must be rejected")
@@ -97,7 +97,7 @@ channels:
   - name: planning
     max_cascade_depth: 9
     members:
-      - {id: a, respond: participant}
+      - {id: aa, respond: participant}
 `
 	_, err = LoadConfig(writeYAML(t, overExplicit))
 	require.Error(t, err, "9 > the explicit fleet cap 8 must be rejected")
@@ -109,7 +109,7 @@ channels:
   - name: planning
     max_cascade_depth: 8
     members:
-      - {id: a, respond: participant}
+      - {id: aa, respond: participant}
 `
 	_, err = LoadConfig(writeYAML(t, atFleet))
 	assert.NoError(t, err, "a per-channel cap equal to the fleet cap is legal")

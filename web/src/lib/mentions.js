@@ -15,9 +15,25 @@ export const MAX_MENTIONS = 10;
 // unbounded menu — the operator narrows with a few keystrokes, not by scrolling.
 export const MAX_CANDIDATES = 8;
 
-// A participant id (validateParticipantID in the store) is an ASCII
-// letter/digit start then letters/digits/`-`/`_` — persona ids like `ember-owl`,
-// `nova-sparrow`. The token regex anchors `@` to a boundary (start-of-string or
+// PARTICIPANT_ID_RE is the participant id rule (ValidateParticipantID in the
+// store): lowercase letters, digits and hyphens, at least two characters, a
+// letter or digit first and last — persona ids like `ember-owl`, `nova-sparrow`.
+// The orchestrator answers a message that mentions any other id with 400, so
+// the composer neither lifts nor offers a member whose id is outside the rule
+// (extractMentions, mentionCandidates): `@User_1` typed in a message stays text,
+// as it does for a message sent over REST or by the CLI. The cross-language
+// drift test reads this line (test_cross_language_participant_id_drift.py).
+const PARTICIPANT_ID_RE = /^[a-z0-9][a-z0-9-]*[a-z0-9]$/;
+
+function fitsParticipantIDRule(id) {
+  return typeof id === "string" && PARTICIPANT_ID_RE.test(id);
+}
+
+// The token below is wider than the rule on purpose (capitals and `_` too): a
+// store written before ISSUE-0209 can hold members such as `User_1` and old
+// messages that mention them, and a token must end where such an id ends, both
+// to leave it whole as text and to highlight it in an old message
+// (segmentMentions). The token regex anchors `@` to a boundary (start-of-string or
 // whitespace) so an email's `@` or a mid-word `@` never reads as a mention. The
 // boundary is captured separately (group 1) so callers can keep it as plain text.
 //
@@ -43,7 +59,8 @@ function idSet(members) {
 // de-duplicated, capped at MAX_MENTIONS. A token that matches no member (a typo,
 // or `@everyone`) is left as plain text rather than sent: the server would
 // reject an unknown participant, and silently dropping it keeps the human prose
-// intact while only the resolvable mentions drive the fan-out gate. `exclude`
+// intact while only the resolvable mentions drive the fan-out gate. So is a
+// member whose id is outside the participant id rule (PARTICIPANT_ID_RE). `exclude`
 // drops one id (the sender's) so a hand-typed `@<self>` is not lifted — symmetric
 // with the typeahead never offering the operator's own id (mentionCandidates).
 export function extractMentions(content, members, { exclude } = {}) {
@@ -54,7 +71,12 @@ export function extractMentions(content, members, { exclude } = {}) {
   let m;
   while ((m = TOKEN_RE.exec(content ?? "")) !== null) {
     const id = m[2];
-    if (id !== exclude && valid.has(id) && !seen.has(id)) {
+    if (
+      id !== exclude &&
+      valid.has(id) &&
+      fitsParticipantIDRule(id) &&
+      !seen.has(id)
+    ) {
       seen.add(id);
       out.push(id);
       if (out.length >= MAX_MENTIONS) {
@@ -113,13 +135,14 @@ export function applyMention(text, start, caret, id) {
 // insensitive match of `query` against the member id or its display name, the
 // operator's own id excluded (you don't @-mention yourself), decorated with the
 // agent's name/role for a readable row and capped at MAX_CANDIDATES. An empty
-// query (just-typed `@`) offers the whole roster.
+// query (just-typed `@`) offers the whole roster, less any member whose id is
+// outside the participant id rule: a mention of it cannot be sent.
 export function mentionCandidates(query, members, { agentsById = {}, exclude } = {}) {
   const q = (query ?? "").toLowerCase();
   const out = [];
   for (const member of members ?? []) {
     const id = typeof member === "string" ? member : member.id;
-    if (!id || id === exclude) {
+    if (!id || id === exclude || !fitsParticipantIDRule(id)) {
       continue;
     }
     const agent = agentsById[id];

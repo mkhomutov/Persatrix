@@ -224,11 +224,14 @@ or an LLM error.
 
 ### Edge Case 2: Mention typo silently ignored
 
-`channel send … --mention ember_owl` (underscore) does not raise an error —
+`channel send … --mention ember-ow` (a letter short) does not raise an error —
 mentions are routing hints, not membership constraints
 ([MT-CHANNEL-002 Edge Case 2](MT-CHANNEL-002.md#edge-case-2-mention-id-that-is-not-a-channel-member)).
 The agent will not reply because the gate compares ids exactly. If the test
 agent fails to reply, double-check the `--mention` value before re-running.
+A typo that breaks the participant id rule, such as `ember_owl` with an
+underscore, is caught: the CLI refuses it before sending, and a direct REST
+publish gets `400` with the rule in the message.
 
 ---
 

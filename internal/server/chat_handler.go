@@ -299,7 +299,9 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 			s.logger.Warn("chat: GetOrCreateDM rejected request",
 				zap.String("user_id", userID), zap.String("agent_id", agentID), zap.Error(err),
 			)
-			writeError(w, "BAD_REQUEST", "invalid participant id", http.StatusBadRequest)
+			// The store's own message: it names the id and the rule it
+			// breaks (ISSUE-0209), which is all a caller can act on.
+			writeError(w, "BAD_REQUEST", err.Error(), http.StatusBadRequest)
 		default:
 			s.logger.Error("chat: GetOrCreateDM failed",
 				zap.String("user_id", userID), zap.String("agent_id", agentID), zap.Error(err),
@@ -370,6 +372,12 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, channels.ErrChatTimeout):
 			writeError(w, "DEADLINE_EXCEEDED", "agent did not respond in time", http.StatusGatewayTimeout)
+		case errors.Is(err, channels.ErrInvalidParticipantID):
+			// ISSUE-0209: the DM exists from before the participant id rule
+			// was tightened, so GetOrCreateDM found it, and the store then
+			// refused the new message from that id. The caller's id is at
+			// fault, not the server: 400, with the rule in the message.
+			writeError(w, "BAD_REQUEST", err.Error(), http.StatusBadRequest)
 		case errors.Is(err, channels.ErrNotMember):
 			// Should be unreachable — `GetOrCreateDM` adds both
 			// participants — but surface as 5xx if it fires; would

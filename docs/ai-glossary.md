@@ -527,14 +527,17 @@ Process vocabulary (scope lock, cuttable, live arc, finding, …) lives in the
 - **Aliases:** —
 - **Disallowed:** "user id" (when meaning a channel participant), "member id"
 - **Definition:** The identifier of a channel participant — either an **Agent
-  ID** or a non-agent participant such as a CLI user (`User_1`). Matches
-  `^[A-Za-z0-9][A-Za-z0-9_-]*$` (RFC 0011 §A; enforced by the JSON Schema,
-  the loader, and the channel store). The pattern is intentionally looser
-  than the **Agent ID** pattern so non-agent participants can keep their
-  upstream casing (e.g. CLI usernames). Reserved characters: `:` (canonical
-  address separator) and any whitespace.
+  ID** or the id of a person, such as `alice`. One rule holds for both:
+  `^[a-z0-9][a-z0-9-]*[a-z0-9]$`, that is lowercase letters, digits and
+  hyphens, at least two characters, starting and ending with a letter or
+  digit. It is the **Agent ID** pattern, and the channel store, the channel
+  schema, the accounts and the agents hold the same one. Until
+  [ISSUE-0209](issues/ISSUE-0209-participant-id-rule-differs-between-go-and-python.md)
+  was fixed, the channel store and schema took a looser shape (`User_1`),
+  which no persona answered. A member stored in that time still loads and
+  can be read, and cannot post.
 - **Example:** "The membership row carries both the agent's `Participant ID`
-  `code-writer` and the human user's `Participant ID` `User_1`."
+  `code-writer` and the human user's `Participant ID` `alice`."
 
 ### Channel Type
 - **Aliases:** —

@@ -13,20 +13,36 @@ import (
 	"strings"
 )
 
-// participantIDPattern is the single source of truth for legal participant
-// ids across all three RFC 0011 validation surfaces:
+// participantIDPattern is the one rule for a participant id (ISSUE-0209):
+// lowercase letters, digits and hyphens, at least two characters, and a
+// letter or digit first and last. It is the rule an agent id has always had
+// (`schemas/agent.schema.json`), and the one the agents' own check
+// (`agents/channel_validation.py`, `agents/participant.py`), the accounts
+// package and the CLI hold. A drift test keeps the copies equal
+// (`tests/unit/python/test_cross_language_participant_id_drift.py`).
 //
-//   - schemas/channel.schema.json (config-time validation via `make validate`)
-//   - LoadConfig→Validate (loader-time, calls ValidateParticipantID below)
-//   - the runtime store guards (PublishMessage, CanonicalDMID, AddMember)
+// Every write goes through it ([ValidateParticipantID]): a message's sender
+// and mentions, a new member, a new channel's members, a new DM.
 //
-// Keeping the schema, loader, and runtime in lock-step closes the
-// PR-#231-review gap where the three layers had drifted apart. The pattern
-// matches schemas/channel.schema.json `definitions.member` and accepts both
-// agent ids (e.g. `code-writer`) and human/CLI participants (e.g. `User_1`)
-// while excluding the `:` reserved by the canonical-address grammar and any
-// whitespace.
-var participantIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
+// Until ISSUE-0209 this package held a looser rule
+// ([legacyParticipantIDPattern]), so that a person could keep an id such as
+// `User_1`. The orchestrator then stored a message from such a member and
+// sent it to every persona, and each persona refused it, because the agents
+// never held the looser rule. The id is now refused where it enters.
+var participantIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*[a-z0-9]$`)
+
+// participantIDRule is [participantIDPattern] in words, for the message a
+// caller is shown when an id is refused.
+const participantIDRule = "lowercase letters, digits and hyphens, at least two characters, starting and ending with a letter or digit"
+
+// legacyParticipantIDPattern is the rule this package held until ISSUE-0209.
+// Nothing is written under it any more. It is kept for one purpose: a store
+// written by an earlier orchestrator can hold members and DMs with such an
+// id, and those must stay readable. So the paths that only read what is
+// stored accept it ([validateStoredParticipantID]): the config loader, whose
+// channel may already be in the store, and the DM address, which a history
+// read derives.
+var legacyParticipantIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
 
 // channelNamePattern mirrors `schemas/channel.schema.json` →
 // `definitions.channel.properties.name.pattern`. Compiled here so the loader
@@ -40,9 +56,11 @@ var participantIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
 // shape used for agent ids in `schemas/agent.schema.json`.
 var channelNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*[a-z0-9]$`)
 
-// ValidateParticipantID enforces the runtime half of the §A constraint set.
-// The other half lives at config-load and registration boundaries; both now
-// share `participantIDPattern` so a value that passes one passes all three.
+// ValidateParticipantID refuses an id that does not fit the participant id
+// rule. It guards every write: [ChannelStore.PublishMessage] (the sender and
+// each mention), [ChannelStore.AddMember], the create paths, and the create
+// half of [ChannelStore.GetOrCreateDM]. The error names the rule, and the
+// REST layer shows it to the caller with a 400.
 // Exported for the REST wire boundary (the create handler's member
 // translation, resolveMemberRequests), which judges member identity
 // alongside the respond policy before the store transaction opens — so a
@@ -53,10 +71,27 @@ func ValidateParticipantID(id string) error {
 		return fmt.Errorf("%w: empty", ErrInvalidParticipantID)
 	}
 	if !participantIDPattern.MatchString(id) {
-		return fmt.Errorf("%w: %q does not match %s",
-			ErrInvalidParticipantID, id, participantIDPattern.String())
+		return fmt.Errorf("%w: %q does not match %s (%s)",
+			ErrInvalidParticipantID, id, participantIDPattern.String(), participantIDRule)
 	}
 	return nil
+}
+
+// IsLegacyParticipantID reports whether id fits only the rule held before
+// ISSUE-0209: an id an earlier orchestrator stored and this one would refuse.
+func IsLegacyParticipantID(id string) bool {
+	return !participantIDPattern.MatchString(id) && legacyParticipantIDPattern.MatchString(id)
+}
+
+// validateStoredParticipantID is the check for a path that reads what may
+// already be stored: it accepts an id that fits the rule, and one that fits
+// only the earlier rule ([legacyParticipantIDPattern]). It never guards a
+// write.
+func validateStoredParticipantID(id string) error {
+	if IsLegacyParticipantID(id) {
+		return nil
+	}
+	return ValidateParticipantID(id)
 }
 
 // CanonicalDMID returns the canonical address for a DM between a and b.
@@ -66,11 +101,16 @@ func ValidateParticipantID(id string) error {
 // "agent-b")` both produce `dm:agent-a:agent-b`. Callers should never
 // build DM ids by hand — the store's `GetOrCreateDM` is the single source
 // of truth and routes through here.
+//
+// It only names an address, so it accepts an id of the earlier, looser shape
+// too ([validateStoredParticipantID]): the DM an earlier orchestrator stored
+// for `User_1` must still be found, to read its history. Creating a DM is a
+// write, and [ChannelStore.GetOrCreateDM] holds the pair to the rule itself.
 func CanonicalDMID(a, b string) (string, error) {
-	if err := ValidateParticipantID(a); err != nil {
+	if err := validateStoredParticipantID(a); err != nil {
 		return "", err
 	}
-	if err := ValidateParticipantID(b); err != nil {
+	if err := validateStoredParticipantID(b); err != nil {
 		return "", err
 	}
 	if a == b {

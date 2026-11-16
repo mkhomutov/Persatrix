@@ -145,7 +145,7 @@ func TestReplyBudget_UntrackedInteractionUncapped(t *testing.T) {
 // governance.exempt_principals.
 func TestReplyBudget_HumanPrincipalExempt(t *testing.T) {
 	router, _, store := newRouterTest(t)
-	id := mustCreateGroup(t, store, "planning", "alice", "User_1")
+	id := mustCreateGroup(t, store, "planning", "alice", "user-1")
 	router.SetReplyBudget(id, 1)
 	router.SetExemptPrincipals([]string{"human"})
 
@@ -155,7 +155,7 @@ func TestReplyBudget_HumanPrincipalExempt(t *testing.T) {
 
 	// A human principal publishes well past the cap unimpeded.
 	for i := 0; i < 4; i++ {
-		require.NoError(t, publishReply(t, router, id, "User_1", "int-1", "user"))
+		require.NoError(t, publishReply(t, router, id, "user-1", "int-1", "user"))
 	}
 }
 

@@ -15,6 +15,15 @@ const MEMBERS = [
   { id: "nova-sparrow" },
 ];
 
+// A channel as a store from before ISSUE-0209 can hold it: each of the five
+// ids of the issue is a member, beside one whose id fits the participant id
+// rule. The orchestrator refuses a message that mentions any of the five.
+const LOOSE_IDS = ["User_1", "alice_b", "a", "Bob", "ops-"];
+const MEMBERS_WITH_LOOSE = [
+  ...LOOSE_IDS.map((id) => ({ id })),
+  { id: "ember-owl" },
+];
+
 describe("extractMentions", () => {
   it("lifts @id tokens that resolve to a member", () => {
     const out = extractMentions(
@@ -74,6 +83,26 @@ describe("extractMentions", () => {
         exclude: "ember-owl",
       }),
     ).toEqual(["iron-fox"]);
+  });
+
+  it("leaves a member whose id is outside the participant id rule as text", () => {
+    // Lifting it would send a mention the orchestrator answers with 400, and
+    // the whole message would be refused for naming an old member in passing.
+    expect(
+      extractMentions(
+        "thanks @User_1 @alice_b @a @Bob @ops- and @ember-owl",
+        MEMBERS_WITH_LOOSE,
+      ),
+    ).toEqual(["ember-owl"]);
+  });
+
+  it("lifts every member whose id fits the rule (the control)", () => {
+    const members = ["ember-owl", "user-1", "a1", "0a", "ab"].map((id) => ({
+      id,
+    }));
+    expect(
+      extractMentions("@ember-owl @user-1 @a1 @0a @ab", members),
+    ).toEqual(["ember-owl", "user-1", "a1", "0a", "ab"]);
   });
 });
 
@@ -165,6 +194,17 @@ describe("mentionCandidates", () => {
     });
     expect(out.map((c) => c.id)).not.toContain("ember-owl");
   });
+
+  it("does not offer a member whose id is outside the participant id rule", () => {
+    // Picking it would put `@User_1` in the text for the lift above to skip:
+    // the menu must not promise a mention that cannot be sent.
+    expect(
+      mentionCandidates("", MEMBERS_WITH_LOOSE, { agentsById }).map((c) => c.id),
+    ).toEqual(["ember-owl"]);
+    expect(mentionCandidates("user", MEMBERS_WITH_LOOSE, { agentsById })).toEqual(
+      [],
+    );
+  });
 });
 
 describe("buildPublishPayload", () => {
@@ -205,6 +245,23 @@ describe("buildPublishPayload", () => {
     ).toEqual({
       senderId: "operator",
       content: "note to @operator self",
+    });
+  });
+
+  it("sends no mention of a member whose id is outside the rule", () => {
+    expect(
+      buildPublishPayload("local", "thanks @User_1", MEMBERS_WITH_LOOSE),
+    ).toEqual({ senderId: "local", content: "thanks @User_1" });
+    expect(
+      buildPublishPayload(
+        "local",
+        "thanks @User_1 and @ember-owl",
+        MEMBERS_WITH_LOOSE,
+      ),
+    ).toEqual({
+      senderId: "local",
+      content: "thanks @User_1 and @ember-owl",
+      mentions: ["ember-owl"],
     });
   });
 });

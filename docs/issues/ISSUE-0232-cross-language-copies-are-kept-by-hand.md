@@ -89,3 +89,32 @@ grows in v0.4.0.
 > 2026-11-10 — found by a whole-repository quality review of `main` at
 > `ee9cfaac`; the file counts were measured, the rest confirmed by
 > reading.
+
+> 2026-11-16 — two statements above are out of date, and one limit of
+> the text-reading tests is now recorded.
+>
+> [ISSUE-0209](ISSUE-0209-participant-id-rule-differs-between-go-and-python.md)
+> is no longer an unpinned value. Its fix
+> ([#1136](https://github.com/mkhomutov/Persatrix/pull/1136)) added a
+> drift test that compares ten copies of the participant id rule: two in
+> Go, two in Python, one in the web console, the agent schema's agent id
+> and four places of the channel schema. `agents/defaults.py` against
+> `internal/defaults/defaults.go` is still the example of a value nobody
+> pinned.
+>
+> The count of Python files named `test_cross_language_*` was 12 when
+> this was measured. It is 13 on `main` on this date and 14 with that
+> pull request.
+>
+> The limit: such a test sees the places on its list and no others. The
+> participant id drift test now also walks every `pattern` in the
+> channel schema, so a new one there cannot be added unseen. It does not
+> see a second pattern added in Go, and it does not compare three places
+> that hold the same text for an agent id or an organization id
+> (`internal/planner/planner.go`, `internal/security/middleware.go`,
+> `schemas/organization.schema.json`), nor the CLI's hand-written check
+> ([ISSUE-0276](ISSUE-0276-cli-accepts-a-one-character-id.md)). The
+> same text is also not the same behaviour in every engine: Python
+> accepts an id that ends in a line break where Go refuses it
+> ([ISSUE-0280](ISSUE-0280-agents-accept-a-participant-id-that-ends-in-a-line-break.md)).
+> A generated copy, this issue's proposal, would close the first two.

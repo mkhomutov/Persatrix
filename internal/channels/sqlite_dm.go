@@ -44,6 +44,14 @@ func (s *sqliteStore) GetOrCreateDM(ctx context.Context, a, b string) (Channel, 
 	if !errors.Is(err, ErrChannelNotFound) {
 		return Channel{}, err
 	}
+	// From here on this is a write: a new DM. CanonicalDMID let an id of the
+	// earlier, looser shape through so that a stored DM is still found
+	// (ISSUE-0209); a new one is held to the rule.
+	for _, id := range []string{a, b} {
+		if err := ValidateParticipantID(id); err != nil {
+			return Channel{}, err
+		}
+	}
 
 	// Lexicographically sort once to mirror CanonicalDMID's ordering for the
 	// membership inserts.
