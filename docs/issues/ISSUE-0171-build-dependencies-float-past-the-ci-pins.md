@@ -96,7 +96,8 @@ this PR"; no other issue tracks it, and the steps below do not reach it.
 > `--build-constraint` does.
 
 > 2026-11-16 — the agent image now installs from the pins
-> ([ISSUE-0219](ISSUE-0219-agent-image-is-not-what-ci-tests.md)):
+> ([ISSUE-0219](ISSUE-0219-agent-image-is-not-what-ci-tests.md),
+> [#1137](https://github.com/mkhomutov/Persatrix/pull/1137)):
 > `Dockerfile.agent` passes `.github/python-constraints-providers.txt`
 > with `-c`. That closes the wider half of the image's gap described
 > above: every package in the image is at its pin. This issue's own half

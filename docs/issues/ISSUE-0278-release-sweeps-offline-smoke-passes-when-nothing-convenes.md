@@ -11,6 +11,7 @@ refs:
   - scripts/checks/offline_smoke.py
   - docs/methodology/release-cycle.md
   - docs/issues/ISSUE-0219-agent-image-is-not-what-ci-tests.md
+  - https://github.com/mkhomutov/Persatrix/pull/1137
 ---
 
 # ISSUE-0278: The release sweep's offline smoke passes when nothing convenes
@@ -52,6 +53,7 @@ and the release cycle's sentence and the testing strategy's row with it.
 ## Notes
 
 > 2026-11-16 — found while giving the offline demo a verdict for
-> [ISSUE-0219](ISSUE-0219-agent-image-is-not-what-ci-tests.md). Left as
+> [ISSUE-0219](ISSUE-0219-agent-image-is-not-what-ci-tests.md)
+> ([#1137](https://github.com/mkhomutov/Persatrix/pull/1137)). Left as
 > it is there: the release tooling is the release process's to change.
 > Severity proposed (low); not ruled by the maintainer.

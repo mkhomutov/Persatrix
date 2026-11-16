@@ -12,6 +12,7 @@ refs:
   - scripts/checks/image_pins.py
   - docs/issues/ISSUE-0219-agent-image-is-not-what-ci-tests.md
   - docs/issues/ISSUE-0218-advisory-scanning-covers-rust-only.md
+  - https://github.com/mkhomutov/Persatrix/pull/1137
 ---
 
 # ISSUE-0277: The advisory audit does not read the pins of the image's Python
@@ -56,6 +57,7 @@ opens then names which Python a finding is on.
 ## Notes
 
 > 2026-11-16 — left by the fix for
-> [ISSUE-0219](ISSUE-0219-agent-image-is-not-what-ci-tests.md), which
+> [ISSUE-0219](ISSUE-0219-agent-image-is-not-what-ci-tests.md)
+> ([#1137](https://github.com/mkhomutov/Persatrix/pull/1137)), which
 > names it as what remains. Severity proposed from the tracker's
 > precedent for the audit's gaps (low); not ruled by the maintainer.

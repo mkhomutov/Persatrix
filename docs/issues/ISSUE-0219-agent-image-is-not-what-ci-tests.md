@@ -6,6 +6,7 @@ severity: medium
 area: ci
 created: 2026-11-10
 closed: 2026-11-16
+closed_pr: 1137
 refs:
   - Dockerfile.agent
   - Dockerfile.orchestrator
@@ -112,7 +113,8 @@ release PR's smoke run, if that is run, or by whoever next runs a demo.
 > ([ISSUE-0218](ISSUE-0218-advisory-scanning-covers-rust-only.md) tracks
 > the weekly audit).
 
-> 2026-11-16 — resolved, on the maintainer's three choices.
+> 2026-11-16 — resolved by [#1137](https://github.com/mkhomutov/Persatrix/pull/1137), on the maintainer's three
+> choices.
 >
 > **A weekly run on `main`, plus a manual trigger.**
 > `.github/workflows/scheduled-image-smoke.yml` builds the product images
