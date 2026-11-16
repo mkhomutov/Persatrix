@@ -24,6 +24,9 @@ workflow:
       output_key: "review"
       depends_on: ["implement"]
 
+    # This step runs on every run, also when the review approved: a step's
+    # `condition` is accepted and then ignored (ISSUE-0202). The line stays
+    # as the design's example of a conditional step.
     - id: "revise"
       agent: "code-writer"
       input: "{{ steps.code.output }}\nFeedback: {{ steps.review.output }}"

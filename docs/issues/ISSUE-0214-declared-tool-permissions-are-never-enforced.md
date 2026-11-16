@@ -1,7 +1,7 @@
 ---
 id: ISSUE-0214
-summary: "Three permission mechanisms that the docs present as working are stored and never checked: the `permissions` a custom tool declares with `@tool`, the `allowed_tools` list on a task or delegation, and the rule that a sub-agent gets no more than its parent. The framework's own nine tools each check the gate in their own body; nothing checks it on a tool's behalf."
-status: open
+summary: "Three permission mechanisms that the docs present as working are stored and never checked: the `permissions` a custom tool declares with `@tool`, the `allowed_tools` list on a task or delegation, and the rule that a sub-agent gets no more than its parent. The framework's own nine tools each check the gate in their own body; nothing checks it on a tool's behalf. The assistant instructions, three glossary entries and the spec's notes now say so, other texts still do not (ISSUE-0272), and nothing is enforced yet."
+status: in_progress
 severity: medium
 area: agents/tools
 created: 2026-11-10
@@ -18,6 +18,9 @@ refs:
   - .github/copilot-instructions.md
   - .github/instructions/python-agents.instructions.md
   - docs/issues/ISSUE-0151-task-agents-run-tools-missing-from-their-list.md
+  - docs/ai-glossary.md
+  - agents/persona.py
+  - agents/action_executor.py
 ---
 
 # ISSUE-0214: Declared tool permissions are never enforced
@@ -81,3 +84,54 @@ spawner.
 > sub-agent lifecycle (E3.2.7) and the decisions table (E14). Each says
 > the check is not enforced and links here. The two instruction lines are
 > unchanged and still part of this issue.
+
+> 2026-11-15 — the doc half is done in
+> [#1133](https://github.com/mkhomutov/Persatrix/pull/1133); the code half
+> remains, so this stays `in_progress`. Each mechanism was checked against `main` at `111b041d`
+> first. `@tool` stores `permissions` on the tool's definition and its
+> wrapper still carries the `TODO`; no code reads the stored list.
+> `allowed_tools` is copied from the wire into the task's config and
+> from a delegation request into the spawner, and no tool round reads
+> it. The parent rule is still a `TODO` in `agents/tools/permissions.py`.
+> And no sub-agent can be spawned at all: `PersonaAgent.spawn_sub_agent`
+> forwards to a client that nothing provides, the `spawn_sub_agent`
+> action answers `not_implemented`, and the spawner has no caller
+> outside tests.
+>
+> What now says so: the two instruction lines (the shared assistant
+> instructions and the Python instructions), each with what to do
+> instead, which is to check the permission gate in the tool's own body
+> as the built-in tools do; and the glossary's Sub-agent and Tool
+> entries. Two glossary examples also named permissions that do not
+> exist (`fs.read`, `net.http`); the gate's names are `filesystem:read`
+> and, for outbound HTTP, the `network.allow` list.
+>
+> What remains: the proposed fix above, which starts with a decision on
+> how a custom permission is granted. Two texts in the code still
+> describe the checks as made and belong to that half: the module
+> docstring of `agents/tools/permissions.py` ("Checks every tool
+> invocation") and the docstring of `PersonaAgent.spawn_sub_agent`
+> ("The framework handles: Permission validation (child ≤ parent)").
+
+> 2026-11-16 — corrections after the review of [#1133](https://github.com/mkhomutov/Persatrix/pull/1133).
+>
+> "Sub-agents are not built" said too much. An in-process spawner
+> exists (`agents/sub_agents/spawner.py`) and tests run it; what is true
+> is that nothing a persona or the orchestrator does reaches it. The
+> instruction lines and the glossary's Sub-agent entry now say "not in
+> use", as the spec's note of 2026-11-14 did.
+>
+> "Check the permission gate in the tool's own body" cannot be followed
+> for a permission of the tool's own. The agent schema has five
+> permission categories (`filesystem`, `network`, `shell`, `memory`,
+> `channels`) and allows no other key, so a new name could never be
+> granted. The lines now say so, and name the gate by its class,
+> `PermissionGate`. This is the first thing the code half has to
+> decide.
+>
+> The summary said the spec, the instructions and the glossary now say
+> so. That holds for the instruction files, the glossary's Sub-agent,
+> Tool and Permission entries and the spec's dated notes. Eight other
+> places still present delegation, sub-agent spawns or tool permission
+> checks as working; they are listed in
+> [ISSUE-0272](ISSUE-0272-other-docs-still-present-delegation-and-permission-checks-as-working.md).
