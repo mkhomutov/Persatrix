@@ -64,6 +64,17 @@ func (s *Server) liftContentMentions(ctx context.Context, channelID, senderID, c
 	// A registry miss (no registry, lookup error) leaves names empty, which the
 	// resolver treats as "id-only" for that member — an in-text *id* still lifts,
 	// only display *names* fall back to today's no-lift behaviour.
+	// A member whose stored id the participant id rule refuses (ISSUE-0209)
+	// is left out: the store refuses a message that mentions such an id, so
+	// lifting `@User_1` out of the text would turn a message that names an
+	// old member in passing into a refused one. The text stays as written.
+	liftable := members[:0:0]
+	for _, m := range members {
+		if channels.ValidateParticipantID(m.ParticipantID) == nil {
+			liftable = append(liftable, m)
+		}
+	}
+	members = liftable
 	memberIDs := make([]string, len(members))
 	for i, m := range members {
 		memberIDs[i] = m.ParticipantID

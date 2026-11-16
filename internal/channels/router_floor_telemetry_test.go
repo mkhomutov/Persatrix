@@ -33,7 +33,7 @@ func TestFloorRound_Telemetry(t *testing.T) {
 	// on the per-turn timeout. `a` replies inline (syncReplies) so its reply is
 	// waiting before its turn timer starts — an async reply could land after
 	// the 200ms timer on a slow -race CI runner and be counted as a timeout.
-	disp := newFloorDispatcher(store, "a")
+	disp := newFloorDispatcher(store, "aa")
 	disp.syncReplies = true
 	router := NewChannelRouter(store, disp, zap.NewNop(), &RouterMetrics{
 		FloorTurn:          floorTurn,
@@ -42,8 +42,8 @@ func TestFloorRound_Telemetry(t *testing.T) {
 	disp.router = router
 
 	id := mustCreateGroupWithPolicies(t, store, "planning", map[string]RespondPolicy{
-		"user": RespondNever, "a": RespondAlways, "b": RespondAlways,
-	}, "user", "a", "b")
+		"user": RespondNever, "aa": RespondAlways, "bb": RespondAlways,
+	}, "user", "aa", "bb")
 	router.SetFloorControl(id, true, 200*time.Millisecond)
 
 	require.NoError(t, router.Publish(context.Background(), ChannelMessage{
@@ -78,13 +78,13 @@ func TestFloorRound_Telemetry(t *testing.T) {
 // RouterMetrics for unit tests and minimal deployments).
 func TestFloorRound_Telemetry_NilMetricsSafe(t *testing.T) {
 	store := newTestStore(t, SQLiteOptions{})
-	disp := newFloorDispatcher(store, "a", "b")
+	disp := newFloorDispatcher(store, "aa", "bb")
 	router := NewChannelRouter(store, disp, zap.NewNop(), nil)
 	disp.router = router
 
 	id := mustCreateGroupWithPolicies(t, store, "planning", map[string]RespondPolicy{
-		"user": RespondNever, "a": RespondAlways, "b": RespondAlways,
-	}, "user", "a", "b")
+		"user": RespondNever, "aa": RespondAlways, "bb": RespondAlways,
+	}, "user", "aa", "bb")
 	router.SetFloorControl(id, true, 2*time.Second)
 
 	require.NoError(t, router.Publish(context.Background(), ChannelMessage{

@@ -314,29 +314,23 @@ try {
 
 ## Edge Cases & Error Scenarios
 
-### Edge Case 1: Case-sensitive participant ids — `Alice` vs `alice` are distinct
+### Edge Case 1: A participant id with a capital letter is refused — `Alice` is not `alice`
 
-The participant-id pattern is permissive on case:
-`participantIDPattern = ^[A-Za-z0-9][A-Za-z0-9_-]*$`
-([identifiers.go:29](../../internal/channels/identifiers.go#L29)). Both `Alice`
-and `alice` pass `validateParticipantID`, so a chat from `user_id: "Alice"`
-materialises a **separate** DM row at `dm:Alice:alice` — capital letters
-sort before lowercase in ASCII (`A` = 0x41 < `a` = 0x61), so `Alice` is
-the canonical `min`.
+One rule holds for every participant id:
+`participantIDPattern = ^[a-z0-9][a-z0-9-]*[a-z0-9]$`
+([identifiers.go](../../internal/channels/identifiers.go)): lowercase
+letters, digits and hyphens, at least two characters, starting and ending
+with a letter or digit. A chat from `user_id: "Alice"` is answered
+`400 BAD_REQUEST`, with the id and the rule in the message, and no DM is
+created. `alice` is accepted.
 
-This is by design: there is no case-folding logic in `CanonicalDMID`
-([identifiers.go:69-83](../../internal/channels/identifiers.go#L69-L83)), and
-`participantIDPattern` is the single source of truth across schema, loader,
-and runtime ([identifiers.go:16-29](../../internal/channels/identifiers.go#L16-L29)).
-The `^[a-z0-9][a-z0-9-]*[a-z0-9]$` pattern that *is* lowercase-only is
-`channelNamePattern` ([identifiers.go:41](../../internal/channels/identifiers.go#L41))
-— that one applies to group-channel **names** (`group:<name>`), not to
-participant ids.
-
-Operators choosing user ids should treat case as significant: `Alice` and
-`alice` produce distinct chat histories, distinct relationship-memory rows,
-and distinct DM channels. If accidental drift is a concern, normalise at
-the caller before posting.
+Until
+[ISSUE-0209](../issues/ISSUE-0209-participant-id-rule-differs-between-go-and-python.md)
+was fixed, the orchestrator took `Alice` and created a separate DM at
+`dm:Alice:alice`. The agents never accepted such an id, so no persona
+answered there. A DM stored in that time can still be read
+(`GET /api/v1/agents/{id}/chat/history?user_id=Alice`); a new message to it
+is refused with the same `400`.
 
 ### Edge Case 2: Stale DM channels from prior runs
 

@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/mkhomutov/persatrix/internal/channels"
 )
@@ -118,6 +119,9 @@ func mergeConfigPatch(current channels.ChannelConfigOverrides, patch map[string]
 			if err != nil {
 				return out, err
 			}
+			if err := refuseNewLooseParticipantID(key, v, out.EscalationChairID); err != nil {
+				return out, err
+			}
 			out.EscalationChairID = &v
 		case "interaction_idle_timeout_seconds":
 			if isNull {
@@ -150,6 +154,26 @@ func mergeConfigPatch(current channels.ChannelConfigOverrides, patch map[string]
 		}
 	}
 	return out, nil
+}
+
+// refuseNewLooseParticipantID refuses a participant id that a patch newly
+// sets on a knob (the escalation chair, the autonomous convener) when the id
+// does not fit the participant id rule (ISSUE-0209). The error names the rule
+// and the handler answers 400 with it.
+//
+// Only a new value is judged. `held` is what the merge base holds for the
+// knob, and a value equal to it is let through: a store written before the
+// rule can name a member such as `User_1` as chair, and that channel's other
+// settings must stay editable, also by a client that sends the whole config
+// back. An empty value clears the knob and is not an id.
+func refuseNewLooseParticipantID(key, value string, held *string) error {
+	if value == "" || (held != nil && *held == value) {
+		return nil
+	}
+	if err := channels.ValidateParticipantID(value); err != nil {
+		return fmt.Errorf("%s: %w", key, err)
+	}
+	return nil
 }
 
 // isJSONNull reports whether a raw JSON value is the literal `null` (ignoring

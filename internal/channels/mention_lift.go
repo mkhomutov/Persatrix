@@ -190,9 +190,10 @@ func matchDisplayNameAt(content string, start int, name string) int {
 	return ti
 }
 
-// isMentionIDChar reports whether b is a participant-id body character —
-// `participantIDPattern`'s `[A-Za-z0-9_-]`. Doubles as the word-boundary test
-// for the end of a display-name match.
+// isMentionIDChar reports whether b is a character an id can hold: the
+// `[A-Za-z0-9_-]` of the participant id rule held before ISSUE-0209, which is
+// wider than today's rule and so still ends a token where an older id would.
+// Doubles as the word-boundary test for the end of a display-name match.
 func isMentionIDChar(b byte) bool {
 	return b >= 'A' && b <= 'Z' ||
 		b >= 'a' && b <= 'z' ||

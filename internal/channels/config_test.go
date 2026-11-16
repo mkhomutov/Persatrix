@@ -171,11 +171,11 @@ func TestLoadConfig_LegacyVocabularyPassesThroughUnchanged(t *testing.T) {
 channels:
   - name: planning
     members:
-      - id: a
+      - id: aa
         respond: always
-      - id: b
+      - id: bb
         respond: when_mentioned
-      - id: c
+      - id: cc
         respond: never
 `
 	cfg, err := LoadConfig(writeYAML(t, body))

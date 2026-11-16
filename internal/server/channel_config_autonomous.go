@@ -79,6 +79,9 @@ func mergeAutonomousPatch(base *channels.AutonomousOverrides, raw json.RawMessag
 			if err != nil {
 				return nil, err
 			}
+			if err := refuseNewLooseParticipantID("autonomous.convener", v, out.Convener); err != nil {
+				return nil, err
+			}
 			out.Convener = &v
 		case "goal":
 			if isNull {
