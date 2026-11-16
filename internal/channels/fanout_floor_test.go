@@ -175,9 +175,9 @@ func TestResolveFloorControl_ConfigAndStoreResident(t *testing.T) {
 	optOut := false
 	cfg := &Config{Channels: []ChannelConfig{
 		{Name: "planning", FloorTurnTimeoutSeconds: DefaultFloorTurnTimeoutSeconds,
-			Members: []MemberConfig{{ID: "a", RespondPolicy: RespondAlways}}},
+			Members: []MemberConfig{{ID: "aa", RespondPolicy: RespondAlways}}},
 		{Name: "muted", FloorControl: &optOut, FloorTurnTimeoutSeconds: 30,
-			Members: []MemberConfig{{ID: "a", RespondPolicy: RespondAlways}}},
+			Members: []MemberConfig{{ID: "aa", RespondPolicy: RespondAlways}}},
 	}}
 
 	require.NoError(t, router.ResolveFloorControl(ctx, cfg))
@@ -210,13 +210,13 @@ func TestResolveFloorControl_ConfigAndStoreResident(t *testing.T) {
 // (the whole point of the amendment — no more N mutually-blind replies).
 func TestFloorRound_SerializesResponders_MutualVisibility(t *testing.T) {
 	store := newTestStore(t, SQLiteOptions{})
-	disp := newFloorDispatcher(store, "a", "b", "c")
+	disp := newFloorDispatcher(store, "aa", "bb", "cc")
 	router := NewChannelRouter(store, disp, zap.NewNop(), nil)
 	disp.router = router
 
 	id := mustCreateGroupWithPolicies(t, store, "planning", map[string]RespondPolicy{
-		"user": RespondNever, "a": RespondAlways, "b": RespondAlways, "c": RespondAlways,
-	}, "user", "a", "b", "c")
+		"user": RespondNever, "aa": RespondAlways, "bb": RespondAlways, "cc": RespondAlways,
+	}, "user", "aa", "bb", "cc")
 	router.SetFloorControl(id, true, 2*time.Second)
 
 	require.NoError(t, router.Publish(context.Background(), ChannelMessage{
@@ -224,14 +224,14 @@ func TestFloorRound_SerializesResponders_MutualVisibility(t *testing.T) {
 	}, ""))
 
 	order, peak, history := disp.snapshot()
-	require.Equal(t, []string{"a", "b", "c"}, order, "responders dispatched in member order, one at a time")
+	require.Equal(t, []string{"aa", "bb", "cc"}, order, "responders dispatched in member order, one at a time")
 	assert.Equal(t, 1, peak, "at most one responder dispatch in flight at a time")
 
 	// a saw only the kickoff; b also saw a's reply; c saw a's and b's.
-	assert.False(t, containsSender(history["a"], "a"))
-	assert.True(t, containsSender(history["b"], "a"), "b must read a's reply")
-	assert.True(t, containsSender(history["c"], "a"), "c must read a's reply")
-	assert.True(t, containsSender(history["c"], "b"), "c must read b's reply")
+	assert.False(t, containsSender(history["aa"], "aa"))
+	assert.True(t, containsSender(history["bb"], "aa"), "b must read a's reply")
+	assert.True(t, containsSender(history["cc"], "aa"), "c must read a's reply")
+	assert.True(t, containsSender(history["cc"], "bb"), "c must read b's reply")
 }
 
 // TestFloorRound_MentionedFirst pins amendment D3's mentioned-first ordering:
@@ -243,22 +243,22 @@ func TestFloorRound_SerializesResponders_MutualVisibility(t *testing.T) {
 // keeps all three in the round, which is what the ordering exercises.
 func TestFloorRound_MentionedFirst(t *testing.T) {
 	store := newTestStore(t, SQLiteOptions{})
-	disp := newFloorDispatcher(store, "a", "b", "c")
+	disp := newFloorDispatcher(store, "aa", "bb", "cc")
 	router := NewChannelRouter(store, disp, zap.NewNop(), nil)
 	disp.router = router
 
 	id := mustCreateGroupWithPolicies(t, store, "planning", map[string]RespondPolicy{
-		"user": RespondNever, "a": RespondAlways, "b": RespondAlways, "c": RespondAlways,
-	}, "user", "a", "b", "c")
+		"user": RespondNever, "aa": RespondAlways, "bb": RespondAlways, "cc": RespondAlways,
+	}, "user", "aa", "bb", "cc")
 	router.SetFloorControl(id, true, 2*time.Second)
 
 	require.NoError(t, router.Publish(context.Background(), ChannelMessage{
 		ID: uuid.NewString(), ChannelID: id, SenderID: "user", Content: "hey @everyone, esp @c",
-		Mentions: []string{MentionEveryone, "c"},
+		Mentions: []string{MentionEveryone, "cc"},
 	}, ""))
 
 	order, _, _ := disp.snapshot()
-	require.Equal(t, []string{"c", "a", "b"}, order, "mentioned responder takes the floor first")
+	require.Equal(t, []string{"cc", "aa", "bb"}, order, "mentioned responder takes the floor first")
 }
 
 // TestFloorRound_DeferredFanout pins amendment D1: a floor-turn reply is
@@ -268,13 +268,13 @@ func TestFloorRound_MentionedFirst(t *testing.T) {
 // responder); a re-fanout regression would balloon this.
 func TestFloorRound_DeferredFanout(t *testing.T) {
 	store := newTestStore(t, SQLiteOptions{})
-	disp := newFloorDispatcher(store, "a", "b", "c")
+	disp := newFloorDispatcher(store, "aa", "bb", "cc")
 	router := NewChannelRouter(store, disp, zap.NewNop(), nil)
 	disp.router = router
 
 	id := mustCreateGroupWithPolicies(t, store, "planning", map[string]RespondPolicy{
-		"user": RespondNever, "a": RespondAlways, "b": RespondAlways, "c": RespondAlways,
-	}, "user", "a", "b", "c")
+		"user": RespondNever, "aa": RespondAlways, "bb": RespondAlways, "cc": RespondAlways,
+	}, "user", "aa", "bb", "cc")
 	router.SetFloorControl(id, true, 2*time.Second)
 
 	require.NoError(t, router.Publish(context.Background(), ChannelMessage{
@@ -292,7 +292,7 @@ func TestFloorRound_DeferredFanout(t *testing.T) {
 	for _, m := range hist {
 		got[m.SenderID] = true
 	}
-	assert.True(t, got["a"] && got["b"] && got["c"], "all three floor-turn replies persisted")
+	assert.True(t, got["aa"] && got["bb"] && got["cc"], "all three floor-turn replies persisted")
 }
 
 // TestFloorRound_TimeoutAdvances pins amendment D2: a responder that never
@@ -300,14 +300,14 @@ func TestFloorRound_DeferredFanout(t *testing.T) {
 // timeout and the next responder still takes the floor.
 func TestFloorRound_TimeoutAdvances(t *testing.T) {
 	store := newTestStore(t, SQLiteOptions{})
-	// Only "b" replies; "a" stays silent and must time out.
-	disp := newFloorDispatcher(store, "b")
+	// Only "bb" replies; "aa" stays silent and must time out.
+	disp := newFloorDispatcher(store, "bb")
 	router := NewChannelRouter(store, disp, zap.NewNop(), nil)
 	disp.router = router
 
 	id := mustCreateGroupWithPolicies(t, store, "planning", map[string]RespondPolicy{
-		"user": RespondNever, "a": RespondAlways, "b": RespondAlways,
-	}, "user", "a", "b")
+		"user": RespondNever, "aa": RespondAlways, "bb": RespondAlways,
+	}, "user", "aa", "bb")
 	router.SetFloorControl(id, true, 120*time.Millisecond)
 
 	start := time.Now()
@@ -317,7 +317,7 @@ func TestFloorRound_TimeoutAdvances(t *testing.T) {
 	elapsed := time.Since(start)
 
 	order, _, _ := disp.snapshot()
-	require.Equal(t, []string{"a", "b"}, order, "loop advances past the silent responder")
+	require.Equal(t, []string{"aa", "bb"}, order, "loop advances past the silent responder")
 	assert.GreaterOrEqual(t, elapsed, 120*time.Millisecond, "a's turn must wait out the per-turn timeout")
 	assert.Less(t, elapsed, 2*time.Second, "round must not hang far beyond a single timeout")
 }
@@ -332,8 +332,8 @@ func TestFloorRound_SingleResponder_ConcurrentPath(t *testing.T) {
 	disp.router = router
 
 	id := mustCreateGroupWithPolicies(t, store, "planning", map[string]RespondPolicy{
-		"user": RespondNever, "a": RespondAlways,
-	}, "user", "a")
+		"user": RespondNever, "aa": RespondAlways,
+	}, "user", "aa")
 	router.SetFloorControl(id, true, 5*time.Second)
 
 	start := time.Now()
@@ -343,7 +343,7 @@ func TestFloorRound_SingleResponder_ConcurrentPath(t *testing.T) {
 	elapsed := time.Since(start)
 
 	order, _, _ := disp.snapshot()
-	require.Equal(t, []string{"a"}, order)
+	require.Equal(t, []string{"aa"}, order)
 	assert.Less(t, elapsed, 1*time.Second, "single responder must not wait on a floor turn")
 }
 
@@ -357,8 +357,8 @@ func TestFanout_FloorOff_ConcurrentDispatch(t *testing.T) {
 	disp.router = router
 
 	id := mustCreateGroupWithPolicies(t, store, "planning", map[string]RespondPolicy{
-		"user": RespondNever, "a": RespondAlways, "b": RespondAlways, "c": RespondAlways,
-	}, "user", "a", "b", "c")
+		"user": RespondNever, "aa": RespondAlways, "bb": RespondAlways, "cc": RespondAlways,
+	}, "user", "aa", "bb", "cc")
 	// SetFloorControl intentionally NOT called.
 
 	require.NoError(t, router.Publish(context.Background(), ChannelMessage{
@@ -366,13 +366,13 @@ func TestFanout_FloorOff_ConcurrentDispatch(t *testing.T) {
 	}, ""))
 
 	order, _, _ := disp.snapshot()
-	assert.ElementsMatch(t, []string{"a", "b", "c"}, order, "all responders dispatched on the concurrent path")
+	assert.ElementsMatch(t, []string{"aa", "bb", "cc"}, order, "all responders dispatched on the concurrent path")
 }
 
 // lateReplyDispatcher reproduces the in-round late-reply window for amendment
-// D1's re-fanout guard. Recipient "a" stays silent through its floor turn so
-// the loop advances on the per-turn timeout (D2); then, the moment "b" is
-// granted the floor, "a" publishes its reply *synchronously* — modelling a
+// D1's re-fanout guard. Recipient "aa" stays silent through its floor turn so
+// the loop advances on the per-turn timeout (D2); then, the moment "bb" is
+// granted the floor, "aa" publishes its reply *synchronously* — modelling a
 // slow agent whose REST publish lands while a later speaker still holds the
 // floor and the round is still in flight.
 //
@@ -394,10 +394,10 @@ func (d *lateReplyDispatcher) Dispatch(_ context.Context, env DispatchEnvelope, 
 	d.mu.Lock()
 	d.order = append(d.order, rid)
 	// Latch the flag BEFORE publishing, not via sync.Once: in the regression
-	// case a's reply re-fanouts straight back into Dispatch("b") on this same
+	// case a's reply re-fanouts straight back into Dispatch("bb") on this same
 	// goroutine, and a sync.Once re-entered from within its own f deadlocks.
 	// Setting aReplied first makes that re-entrant call a no-op instead.
-	publishLate := rid == "b" && !d.aReplied
+	publishLate := rid == "bb" && !d.aReplied
 	if publishLate {
 		d.aReplied = true
 	}
@@ -410,7 +410,7 @@ func (d *lateReplyDispatcher) Dispatch(_ context.Context, env DispatchEnvelope, 
 		_ = d.router.Publish(context.Background(), ChannelMessage{
 			ID:        uuid.NewString(),
 			ChannelID: msg.ChannelID,
-			SenderID:  "a",
+			SenderID:  "aa",
 			Content:   "a late reply",
 			Metadata:  map[string]any{replyToMetadataKey: msg.ID},
 		}, "")
@@ -425,9 +425,9 @@ func (d *lateReplyDispatcher) snapshot() []string {
 }
 
 // TestFloorRound_LateReplyFromTimedOutSpeaker_NoReFanout pins the guard for a
-// timed-out speaker's late reply (amendment D1 + D2 interaction): "a" misses
-// its turn budget and replies only after the loop has advanced to "b". Because
-// "a" was granted the floor in this round, its late reply must be suppressed
+// timed-out speaker's late reply (amendment D1 + D2 interaction): "aa" misses
+// its turn budget and replies only after the loop has advanced to "bb". Because
+// "aa" was granted the floor in this round, its late reply must be suppressed
 // (persisted, but no competing fanout) — so b is dispatched exactly once, not
 // re-dispatched by a's reply.
 func TestFloorRound_LateReplyFromTimedOutSpeaker_NoReFanout(t *testing.T) {
@@ -437,8 +437,8 @@ func TestFloorRound_LateReplyFromTimedOutSpeaker_NoReFanout(t *testing.T) {
 	disp.router = router
 
 	id := mustCreateGroupWithPolicies(t, store, "planning", map[string]RespondPolicy{
-		"user": RespondNever, "a": RespondAlways, "b": RespondAlways,
-	}, "user", "a", "b")
+		"user": RespondNever, "aa": RespondAlways, "bb": RespondAlways,
+	}, "user", "aa", "bb")
 	router.SetFloorControl(id, true, 100*time.Millisecond)
 
 	require.NoError(t, router.Publish(context.Background(), ChannelMessage{
@@ -446,7 +446,7 @@ func TestFloorRound_LateReplyFromTimedOutSpeaker_NoReFanout(t *testing.T) {
 	}, ""))
 
 	order := disp.snapshot()
-	require.Equal(t, []string{"a", "b"}, order,
+	require.Equal(t, []string{"aa", "bb"}, order,
 		"a's late reply must not re-fanout — b is dispatched once, by the round only")
 
 	// The late reply is still durably persisted and visible to history readers
@@ -455,7 +455,7 @@ func TestFloorRound_LateReplyFromTimedOutSpeaker_NoReFanout(t *testing.T) {
 	require.NoError(t, err)
 	var sawA bool
 	for _, m := range hist {
-		if m.SenderID == "a" {
+		if m.SenderID == "aa" {
 			sawA = true
 		}
 	}

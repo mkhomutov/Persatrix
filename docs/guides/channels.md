@@ -90,6 +90,50 @@ Run `make validate` after any edit. The schema is
 top-level disclaimer: *"Internal-only schema until v1.0; `$id` may break across
 v0.x bumps without notice."*
 
+### Participant ids
+
+Every member, sender and mention is a participant id, and one rule holds for
+all of them: `^[a-z0-9][a-z0-9-]*[a-z0-9]$`. That is lowercase letters,
+digits and hyphens, at least two characters, starting and ending with a
+letter or digit: the rule an agent id has. `alice` and `user-1` fit;
+`User_1`, `alice_b`, `a`, `Bob` and `ops-` do not.
+
+The orchestrator refuses an id that does not fit wherever one enters. A
+publish (its `sender_id` and each of its `mentions`), a new member, a new
+channel's members and a new DM are answered `400`, with the id and the rule
+in the message, and `make validate` refuses the id in `channels.yaml`.
+
+**Members stored before the rule.** Until
+[ISSUE-0209](../issues/ISSUE-0209-participant-id-rule-differs-between-go-and-python.md)
+was fixed the orchestrator took the ids above, and no persona ever answered
+them. A store written then can still hold such members. They keep loading:
+
+- Their channels, DMs and histories are listed and read as before.
+- At start-up the orchestrator logs one warning that names each, with the
+  number of channels it is a member of:
+  `channels: stored members have an id the participant id rule refuses; …`.
+- They cannot post, be mentioned or be added again. `@User_1` written in a
+  message's text stays text.
+- A channel declared in `channels.yaml` with such a member still loads while
+  the store holds that channel. A channel the store does not hold yet is not
+  created with such a member: the orchestrator stops at start-up with
+  `channels: config-vs-store reconcile failed` and the id and the rule in
+  the error.
+
+To rename a member, remove it and add it under a new id
+(`DELETE /api/v1/channels/{id}/members/User_1`, then
+`POST /api/v1/channels/{id}/members` with `{"id": "user-1"}`), and for a
+channel declared in `channels.yaml` change the id there too before the next
+start, or the start fails on the difference between file and store. Old
+messages keep the old id as their sender. A DM cannot be renamed, because
+its address is the two ids: its history stays readable under the old id, the
+person starts a new DM under the new one, and the start-up warning names the
+old id until that DM is deleted.
+
+One gap remains: a reply in a thread under an old message from such a member
+is stored, and no persona answers it
+([ISSUE-0275](../issues/ISSUE-0275-old-messages-from-a-loose-id-still-reach-agents.md)).
+
 ### Per-membership `respond` dispositions
 
 The response gate fires per-event in the persona runtime (RFC 0011 §D). As of

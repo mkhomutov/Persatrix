@@ -14,7 +14,8 @@ import (
 
 // Validate enforces the cross-field invariants the JSON Schema cannot
 // express alone:
-//   - participant ids satisfy `ValidateParticipantID` (no `:`, no whitespace)
+//   - participant ids fit the participant id rule, or the looser one held
+//     before ISSUE-0209 (see the member loop)
 //   - declared `members` entries are unique within a channel
 //   - declared channel names are unique across the file
 //   - the declared channel count does not exceed `MaxChannels`
@@ -316,7 +317,14 @@ func (c *Config) Validate() error {
 		}
 		seenMember := make(map[string]bool, len(ch.Members))
 		for j, m := range ch.Members {
-			if err := ValidateParticipantID(m.ID); err != nil {
+			// An id of the earlier, looser shape still loads (ISSUE-0209):
+			// the channel may already be in the store with that member, and
+			// refusing the file here would turn every channel route into a
+			// 503. Whether it is a write is settled where the store is known:
+			// ReconcileConfig creates a channel the store lacks through the
+			// strict check, so a new channel with such a member is refused
+			// there. `make validate` refuses the id in the file either way.
+			if err := validateStoredParticipantID(m.ID); err != nil {
 				return fmt.Errorf("channels[%d=%s].members[%d]: %w", i, ch.Name, j, err)
 			}
 			if seenMember[m.ID] {

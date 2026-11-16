@@ -15,9 +15,11 @@ export const MAX_MENTIONS = 10;
 // unbounded menu — the operator narrows with a few keystrokes, not by scrolling.
 export const MAX_CANDIDATES = 8;
 
-// A participant id (validateParticipantID in the store) is an ASCII
-// letter/digit start then letters/digits/`-`/`_` — persona ids like `ember-owl`,
-// `nova-sparrow`. The token regex anchors `@` to a boundary (start-of-string or
+// A participant id (ValidateParticipantID in the store) is lowercase letters,
+// digits and hyphens — persona ids like `ember-owl`, `nova-sparrow`. The token
+// below is wider on purpose (capitals and `_` too): a store written before
+// ISSUE-0209 can hold members such as `User_1`, and a token must end where
+// such an id ends. The token regex anchors `@` to a boundary (start-of-string or
 // whitespace) so an email's `@` or a mid-word `@` never reads as a mention. The
 // boundary is captured separately (group 1) so callers can keep it as plain text.
 //

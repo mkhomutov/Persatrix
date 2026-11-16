@@ -94,9 +94,9 @@ func TestSQLiteStore_CreateChannelWithMembers_NormalizesDisposition(t *testing.T
 	ctx := context.Background()
 	ch := Channel{ID: "group:planning", Name: "planning", Type: ChannelTypeGroup}
 	members := []Member{
-		{ParticipantID: "p", RespondPolicy: RespondParticipant},
-		{ParticipantID: "a", RespondPolicy: RespondAddressed},
-		{ParticipantID: "o", RespondPolicy: RespondObserver},
+		{ParticipantID: "pp", RespondPolicy: RespondParticipant},
+		{ParticipantID: "aa", RespondPolicy: RespondAddressed},
+		{ParticipantID: "oo", RespondPolicy: RespondObserver},
 	}
 	require.NoError(t, store.CreateChannelWithMembers(ctx, ch, members),
 		"CreateChannelWithMembers (the REST create path) must normalize disposition members")
@@ -107,7 +107,7 @@ func TestSQLiteStore_CreateChannelWithMembers_NormalizesDisposition(t *testing.T
 	for _, m := range got {
 		byID[m.ParticipantID] = m.RespondPolicy
 	}
-	assert.Equal(t, RespondAlways, byID["p"], "participant → always")
-	assert.Equal(t, RespondWhenMentioned, byID["a"], "addressed → when_mentioned")
-	assert.Equal(t, RespondNever, byID["o"], "observer → never")
+	assert.Equal(t, RespondAlways, byID["pp"], "participant → always")
+	assert.Equal(t, RespondWhenMentioned, byID["aa"], "addressed → when_mentioned")
+	assert.Equal(t, RespondNever, byID["oo"], "observer → never")
 }

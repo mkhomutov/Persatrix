@@ -133,7 +133,7 @@
         },
         "escalation_chair_id": {
           "type": "string",
-          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$",
+          "pattern": "^[a-z0-9][a-z0-9-]*[a-z0-9]$",
           "description": "The chair-stall-escalation amendment (RFC 0030 minimal Layer 5 slice, v0.3.8): the member who receives ONE forced turn after a stalled floor round (zero replies across ≥1 granted turns on the channel's open interaction) — prompted to synthesize and cast its end-of-discussion vote, or to call on the member best placed to continue. Must be one of this channel's declared members, not an `observer`, and the channel must not set `floor_control: false` (the loader rejects all three loudly — an observer's gate suppresses every turn, so it could never speak, and stall detection runs only at the floor round's tail, so without floor control the knob would be silently inert); it need not be declared `chair`. The pattern is the member `id` pattern, verbatim: the knob's domain is this channel's member ids. Closing still requires the Layer 4 vote quorum — the chair proposes, the quorum disposes. Absent (the default) disables escalation; deliberately distinct from the v0.4.0 moderator's `moderator_agent_id` (a non-participant trusted closer)."
         },
         "interaction_idle_timeout_seconds": {
@@ -194,7 +194,7 @@
             },
             "convener": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$",
+              "pattern": "^[a-z0-9][a-z0-9-]*[a-z0-9]$",
               "description": "Agent id of the persona that authors the opening turn and advances the agenda. Must be one of this channel's declared members, must NOT be an `observer` (respond: never) — its receiver gate would suppress the opening turn before any LLM, exactly as for the escalation chair — and must be DISTINCT from `escalation_chair_id` (RFC 0052 OQ #1: the convener owns the agenda lifecycle; the chair keeps its shipped synthesis/close role). Same id vocabulary as `escalation_chair_id`."
             },
             "goal": {
@@ -240,7 +240,7 @@
         {
           "type": "string",
           "description": "Shorthand: equivalent to {id: <string>, respond: addressed}.",
-          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$"
+          "pattern": "^[a-z0-9][a-z0-9-]*[a-z0-9]$"
         },
         {
           "type": "object",
@@ -249,7 +249,7 @@
           "properties": {
             "id": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$"
+              "pattern": "^[a-z0-9][a-z0-9-]*[a-z0-9]$"
             },
             "respond": {
               "type": "string",

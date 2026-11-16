@@ -220,6 +220,9 @@ func NewSQLiteStore(path string, opts SQLiteOptions) (ChannelStore, error) {
 	// run migration v10. Cached so recall never re-probes `sqlite_master` per
 	// call against the single pinned connection. See [sqliteStore.probeMessagesFTS].
 	store.ftsAvailable = store.probeMessagesFTS()
+	// ISSUE-0209: say once which stored members the participant id rule now
+	// refuses. They keep loading; see legacy_participant_ids.go.
+	warnLegacyMembers(context.Background(), db, logger)
 	store.startRefreshLoop(opts.statisticsSeam)
 	return store, nil
 }

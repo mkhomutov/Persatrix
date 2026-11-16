@@ -340,14 +340,13 @@ def test_unknown_root_key_still_rejected():
 def test_escalation_chair_id_pattern_matches_member_id_pattern():
     """``escalation_chair_id``'s pattern IS the member-id pattern — drift pin.
 
-    PR #609 deep review: the knob shipped with the channel-*name* pattern
-    (lowercase-only, no underscore, minimum two chars), so a perfectly legal
-    member id (``Iron_Fox``, ``x``) could never be named as escalation chair —
-    schema validation rejected a config the Go loader (membership check in
-    ``Config.Validate``) accepts. The knob's domain is "one of this channel's
-    member ids", so its pattern must be the member ``id`` pattern, verbatim.
-    This compares the two pattern strings directly so the contract cannot
-    drift apart silently again.
+    PR #609 deep review: the knob shipped with a pattern of its own, so a
+    member id the member pattern admitted could not be named as escalation
+    chair — schema validation rejected a config the Go loader (membership
+    check in ``Config.Validate``) accepts. The knob's domain is "one of this
+    channel's member ids", so its pattern must be the member ``id`` pattern,
+    verbatim. This compares the two pattern strings directly so the contract
+    cannot drift apart silently again.
     """
     schema = _root_schema()
     member_pattern = schema["definitions"]["member"]["oneOf"][1]["properties"]["id"][
@@ -359,26 +358,37 @@ def test_escalation_chair_id_pattern_matches_member_id_pattern():
     assert chair_pattern == member_pattern
 
 
-@pytest.mark.parametrize("chair_id", ["Iron_Fox", "x", "ada-7"])
+def _with_chair(chair_id: str) -> dict:
+    return {
+        "max_channels": 50,
+        "channels": [
+            {
+                "name": "planning",
+                "escalation_chair_id": chair_id,
+                "members": [{"id": chair_id}, {"id": "ada"}],
+            }
+        ],
+    }
+
+
+@pytest.mark.parametrize("chair_id", ["iron-fox", "x7", "ada-7"])
 def test_escalation_chair_id_accepts_member_style_ids(chair_id: str):
     """Any id the member ``id`` pattern admits is a legal chair value.
 
     The Go loader requires the chair to be a declared member; the schema's
-    only job is the wire shape, so every member-legal spelling (uppercase,
-    underscore, single char) must validate here too.
+    only job is the wire shape, so every member-legal spelling must validate
+    here too.
     """
-    _validate(
-        {
-            "max_channels": 50,
-            "channels": [
-                {
-                    "name": "planning",
-                    "escalation_chair_id": chair_id,
-                    "members": [{"id": chair_id}, {"id": "ada"}],
-                }
-            ],
-        }
-    )
+    _validate(_with_chair(chair_id))
+
+
+@pytest.mark.parametrize("chair_id", ["Iron_Fox", "x"])
+def test_escalation_chair_id_refuses_what_the_member_id_rule_refuses(chair_id: str):
+    """ISSUE-0209: a capital, an underscore or a single character is no longer
+    a member id, so it is not a chair either. Until then the member pattern
+    admitted both, and so did this one."""
+    with pytest.raises(jsonschema.ValidationError):
+        _validate(_with_chair(chair_id))
 
 
 # ── RFC 0037 (v0.3.12) classification fields ──────────────────────────────

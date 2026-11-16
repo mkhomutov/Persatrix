@@ -142,9 +142,9 @@ func TestChannels_CreateChannel_AcceptsDispositionVocabulary(t *testing.T) {
 	body, _ := json.Marshal(createChannelRequest{
 		Name: "planning",
 		Members: []channelMemberRequest{
-			{ID: "p", Respond: "participant"},
-			{ID: "a", Respond: "addressed"},
-			{ID: "o", Respond: "observer"},
+			{ID: "pp", Respond: "participant"},
+			{ID: "aa", Respond: "addressed"},
+			{ID: "oo", Respond: "observer"},
 		},
 	})
 	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/channels", body)
@@ -157,9 +157,9 @@ func TestChannels_CreateChannel_AcceptsDispositionVocabulary(t *testing.T) {
 	for _, m := range members {
 		got[m.ParticipantID] = m.RespondPolicy
 	}
-	assert.Equal(t, channels.RespondAlways, got["p"], "participant → always")
-	assert.Equal(t, channels.RespondWhenMentioned, got["a"], "addressed → when_mentioned")
-	assert.Equal(t, channels.RespondNever, got["o"], "observer → never")
+	assert.Equal(t, channels.RespondAlways, got["pp"], "participant → always")
+	assert.Equal(t, channels.RespondWhenMentioned, got["aa"], "addressed → when_mentioned")
+	assert.Equal(t, channels.RespondNever, got["oo"], "observer → never")
 }
 
 // TestChannels_AddMember_AcceptsDispositionVocabulary pins the same

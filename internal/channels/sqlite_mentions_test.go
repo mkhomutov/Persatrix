@@ -53,18 +53,18 @@ func TestSQLiteStore_PublishMessage_RejectsInvalidMention(t *testing.T) {
 func TestSQLiteStore_PublishMessage_AcceptsValidMentions(t *testing.T) {
 	store := newTestStore(t, SQLiteOptions{})
 	ctx := context.Background()
-	id := mustCreateGroup(t, store, "planning", "alice", "bob", "User_1")
+	id := mustCreateGroup(t, store, "planning", "alice", "bob", "user-1")
 
 	require.NoError(t, store.PublishMessage(ctx, ChannelMessage{
 		ID: uuid.NewString(), ChannelID: id, SenderID: "alice",
 		Content:  "hi",
-		Mentions: []string{"bob", "User_1"},
+		Mentions: []string{"bob", "user-1"},
 	}))
 
 	hist, err := store.GetHistory(ctx, id, 10, time.Time{})
 	require.NoError(t, err)
 	require.Len(t, hist, 1)
-	assert.Equal(t, []string{"bob", "User_1"}, hist[0].Mentions)
+	assert.Equal(t, []string{"bob", "user-1"}, hist[0].Mentions)
 }
 
 // RFC 0030 relevance amendment Tier A (v0.3.7): the broadcast sentinel
