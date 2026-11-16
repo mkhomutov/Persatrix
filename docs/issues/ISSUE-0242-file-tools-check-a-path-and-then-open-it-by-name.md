@@ -72,3 +72,13 @@ the reproduction did, by wrapping the validator.
 > 2026-11-13 — found by an independent review of the fix for
 > [ISSUE-0215](ISSUE-0215-tools-buffer-whole-output-before-the-cap.md).
 > On `main` already; that fix neither caused nor closed it.
+
+> 2026-11-16 — the gap is wider for `file_write` since
+> [#1132](https://github.com/mkhomutov/Persatrix/pull/1132) moved the
+> write to a worker thread: the open now waits for a thread to start.
+> Measured over 500 writes, from the path check's answer to the open:
+> a median of 5 microseconds on `main` and 20 with the change (its
+> review measured 71 on another machine). It has no upper limit when
+> every worker thread is busy, or while an earlier write to the same
+> path is still going, because the write then waits for its turn after
+> the check has been made.
