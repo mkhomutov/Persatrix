@@ -119,10 +119,10 @@ jobs:
       # CI installs, on the Python CI runs. It says nothing about a pin whose
       # marker is false there, and drops it without a word: a pin for another
       # platform (colorama, on Windows) and a pin for another Python (one
-      # written `python_full_version >= '3.12'`). Auditing the other Pythons
-      # goes with the choice of which Python the agent image runs
-      # (ISSUE-0219). The loop takes in every constraints file, and goes on to
-      # the next one after a finding.
+      # written `python_full_version >= '3.12'`). The agent image runs 3.12,
+      # so the pins that apply only there are not audited yet (ISSUE-0277).
+      # The loop takes in every constraints file, and goes on to the next one
+      # after a finding.
       - uses: actions/setup-python@v7
         id: setup-python
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}

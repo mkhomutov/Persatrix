@@ -26,6 +26,8 @@ dependencies.
 | `make run` / `run-agent AGENT= PORT=` | Run the orchestrator / one Python agent | Manual tests |
 | `make docker-build` / `docker-up` / `docker-down` / `docker-logs` / `reset` | Compose lifecycle; `reset` purges **all** named volumes (ISSUE-0051 workaround) | Live arcs start from `make reset` |
 | `make demo-offline` / `demo-autonomous` / `demo-ollama` / `demo-anthropic` / `demo-openai` / `demo-gemini` / `demo-watsonx` | The demo society on one provider via a per-provider alias overlay; the first two spend $0 | `demo-autonomous` is the offline smoke in the last implementation PR and the tag PR |
+| `make smoke-offline` / `smoke-offline-logs` (`scripts/checks/offline_smoke.py`) | `demo-autonomous` with a verdict: fails unless at least two of the roundtable's agents post three messages; the second prints each service's last log lines | The weekly image run; by hand with Docker |
+| `make image-pins-check` (`scripts/checks/image_pins.py`) | Builds the agent image with and without the provider SDKs and fails if a package in either is not at the version in `.github/python-constraints-providers.txt`; the comparison runs inside the image, on its Python | The weekly image run; after a change to `Dockerfile.agent` or the pins |
 | `make clean` | Remove build artifacts | — |
 
 ## Code generation and sync gates

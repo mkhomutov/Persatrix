@@ -6,9 +6,11 @@
 # to main.
 #
 # Scope: Go build+test, Go proto staleness check, Python lint+test,
+# the Python unit suite again on the agent image's Python (ISSUE-0219),
 # Rust build+clippy+test, config validation, docs hygiene, and a lightweight
 # Docker build-context hygiene probe (ISSUE-0104). Full Docker product-image
-# builds are excluded.
+# builds are excluded: the weekly scheduled-image-smoke.yml builds the images
+# and runs the offline demo on them.
 #
 # 2026-09-06 (methodology series): every check that used to run only in the
 # local pre-commit hook or a bare `make` target now has a CI step — gofmt,
@@ -405,6 +407,41 @@ jobs:
       # they are installed, under a name of its own.
       - name: Check the licenses of what the provider SDKs install
         run: make check-licenses-providers
+
+  python-312:
+    # ISSUE-0219 — the agent image runs Python 3.12 (`FROM python:3.12-slim`
+    # in Dockerfile.agent), and every other job here runs 3.11, the oldest
+    # Python the package supports (`requires-python` in agents/pyproject.toml).
+    # So no check ran the agents' code on the Python that ships. This job runs
+    # the unit suite on 3.12, installed from the same pins by the same `make
+    # build-agents`; where a package needs another version on 3.12 (numpy, in
+    # the provider SDKs' file), the pins file carries both.
+    #
+    # It is the unit suite only. Lint, types, the generated-stub checks, the
+    # other test trees and the provider SDK steps run once, on 3.11, in the
+    # job above. 3.11 stays the Python of every other job, so the floor the
+    # package declares keeps being tested.
+    #
+    # It is not a required check. Which checks `main` requires is the owner's
+    # setting; docs/methodology/branch-protection.json names this job under
+    # `not_required`, with the reason, so that it is a recorded choice and
+    # not an oversight. tests/unit/python/test_python_312_job.py pins the job.
+    name: Python 3.12 (unit tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          make build-agents
+
+      - name: Run unit tests (the same target as `make test-python`)
+        run: make test-python
 
   cost-regression-gate:
     # RFC 0024 §Test Strategy — the "bored persona" cost-regression gate is

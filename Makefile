@@ -1,4 +1,4 @@
-.PHONY: all build build-orchestrator build-orchestrator-ui ui ui-test ui-html-check build-cli build-agents uv-install python-constraints python-constraints-upgrade python-constraints-check python-constraints-uv proto proto-go proto-python proto-python-check proto-orphans-check proto-check clean reset test lint lint-go lint-python lint-rust golangci-lint-version golangci-lint-install run run-ui validate dockerignore-check help demo-autonomous demo-offline demo-ollama generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust go-licenses-install go-licenses-pinned notices notices-check cargo-license-install cargo-license-pinned bump-version issues issues-check rfcs rfcs-check imports-check eval-replay eval-record eval-record-offline eval-drift eval-verdict
+.PHONY: all build build-orchestrator build-orchestrator-ui ui ui-test ui-html-check build-cli build-agents uv-install python-constraints python-constraints-upgrade python-constraints-check python-constraints-uv proto proto-go proto-python proto-python-check proto-orphans-check proto-check clean reset test lint lint-go lint-python lint-rust golangci-lint-version golangci-lint-install run run-ui validate dockerignore-check image-pins-check smoke-offline smoke-offline-logs help demo-autonomous demo-offline demo-ollama generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust go-licenses-install go-licenses-pinned notices notices-check cargo-license-install cargo-license-pinned bump-version issues issues-check rfcs rfcs-check imports-check eval-replay eval-record eval-record-offline eval-drift eval-verdict
 .PHONY: build-agents-providers lint-providers test-providers check-licenses-providers
 
 # ─── Config ─────────────────────────────────────────────
@@ -544,6 +544,28 @@ docker-build: ## Build Docker images
 
 dockerignore-check: ## Fail if .dockerignore lets nested web/node_modules leak into the build context (ISSUE-0104, CI)
 	$(PYTHON) scripts/checks/dockerignore_context.py --strict
+
+# ISSUE-0219 — the agent image is what CI tests. Dockerfile.agent installs
+# from PYTHON_CONSTRAINTS_PROVIDERS, and this target proves it of a fresh
+# build: the image without extras and the one with both provider SDKs, each
+# compared with the pins inside its own Python (the file pins some packages
+# by Python version, so the image's Python has to do the reading). The weekly
+# image run (.github/workflows/scheduled-image-smoke.yml) runs this target
+# and the next one; they are the same commands here.
+AGENT_PINS_IMAGE := persatrix-agent-pins
+image-pins-check: ## Build the agent image with and without the provider SDKs; fail if a package in it is not at its pin (ISSUE-0219)
+	docker build -f Dockerfile.agent -t $(AGENT_PINS_IMAGE):plain .
+	docker build -f Dockerfile.agent --build-arg AGENT_EXTRAS=providers -t $(AGENT_PINS_IMAGE):providers .
+	$(PYTHON) scripts/checks/image_pins.py $(AGENT_PINS_IMAGE):plain $(AGENT_PINS_IMAGE):providers
+
+# `demo-autonomous` builds both product images and starts the stack, and only
+# warns when the convening does not land. This adds the verdict: it fails
+# unless the roundtable's agents have posted. No key, no provider call.
+smoke-offline: demo-autonomous ## The offline demo with a verdict: fail unless the roundtable's agents post (builds the images; no key, no spend)
+	$(PYTHON) scripts/checks/offline_smoke.py
+
+smoke-offline-logs: ## Print the last log lines of each service of the offline stack (after a failed smoke-offline)
+	docker compose -f docker-compose.yaml -f docker-compose.offline.yaml logs --no-color --tail=120
 
 docker-up: ## Start all services
 	docker compose up -d

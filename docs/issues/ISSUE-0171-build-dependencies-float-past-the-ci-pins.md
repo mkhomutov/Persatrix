@@ -95,3 +95,14 @@ this PR"; no other issue tracks it, and the steps below do not reach it.
 > Measured there on pip 26.3: `PIP_CONSTRAINT` does not reach the build,
 > `--build-constraint` does.
 
+> 2026-11-16 — the agent image now installs from the pins
+> ([ISSUE-0219](ISSUE-0219-agent-image-is-not-what-ci-tests.md)):
+> `Dockerfile.agent` passes `.github/python-constraints-providers.txt`
+> with `-c`. That closes the wider half of the image's gap described
+> above: every package in the image is at its pin. This issue's own half
+> is unchanged there. The image's pip is the base image's (25.0.1 on
+> `python:3.12-slim` that day), `-c` does not reach the environment a
+> package is built in, and with the provider SDKs the image builds the
+> three `ibm-cos-sdk` packages from source as CI does. The setuptools
+> that ends up installed in the image is the pinned one; the setuptools
+> that builds the agents package and those three is whatever is newest.

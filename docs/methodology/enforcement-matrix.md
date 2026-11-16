@@ -20,15 +20,19 @@
 
 Branch protection on `main` today: linear history required, force-push
 blocked, **0 approving reviews required**, and **twelve required contexts** —
-every CI job, exactly the set versioned in
+every CI job but one, exactly the set versioned in
 [`branch-protection.json`](branch-protection.json): `Go (build + test)`,
 `Proto staleness check`, `Python (lint + test)`, `Rust (build + clippy)`,
 `Validate configs`, `Validate PR Title`, `File size check`, `Third-party
 license check`, `Web console (build + test)`, `Dockerignore context hygiene`,
 `Cost regression gate (bored persona)` and `Docs hygiene` (`make
-branch-protection-show` reported no diff on 2026-09-15). No CI job is
-advisory any more: where a row below says Required, it rides inside one of
-the twelve, and the job is named where it is not one of the original six.
+branch-protection-show` reported no diff on 2026-09-15). One CI job is not
+required: `Python 3.12 (unit tests)`, new with
+[ISSUE-0219](../issues/ISSUE-0219-agent-image-is-not-what-ci-tests.md); the
+same file names it under `not_required`, with the reason, and requiring it
+is the owner's change to make. Where a row below says Required, it rides
+inside one of the twelve, and the job is named where it is not one of the
+original six.
 
 ---
 
@@ -44,6 +48,7 @@ the twelve, and the job is named where it is not one of the original six.
 | Python types (mypy) — `agents/`, `tests/` | instructions; ISSUE-0062 | `mypy` ×2 | Required (`Python`) |
 | Python lint + types — `scripts/`, `evaluators/` | Makefile `lint-python`; ISSUE-0134 | `ruff check scripts/ evaluators/`; `mypy scripts/ evaluators/` | Required (`Python`) — since the CI-promotion PR |
 | Python unit + agents + integration suites pass | testing-strategy | three `pytest` steps | Required (`Python`) |
+| The Python unit suite passes on the Python the agent image runs ([ISSUE-0219](../issues/ISSUE-0219-agent-image-is-not-what-ci-tests.md)) | `Dockerfile.agent`; `ci.yml` | the `Python 3.12 (unit tests)` job: `make build-agents`, then `make test-python`; `test_python_312_job.py` holds it to the image's Python and every other job to 3.11 | CI on every PR, **not required** |
 | CI installs the Python dependencies at the committed pins, not the newest release of the minute ([#1002](https://github.com/mkhomutov/Persatrix/pull/1002) failed every open PR at once) | Makefile §Python constraints; `ci.yml` | every workflow installs through `make build-agents`, which passes `.github/python-constraints.txt` with `-c`; `test_ci_python_constraints.py` fails any workflow step that installs the agents package around it | Required (`Python`) |
 | The optional provider SDKs (Gemini, watsonx) are pinned, type-checked, license-checked and run against their adapters ([ISSUE-0220](../issues/ISSUE-0220-gemini-and-watsonx-sdks-sit-outside-every-gate.md)) | Makefile §Python constraints; `ci.yml` | the Python job's last four steps: `make build-agents-providers` (from `.github/python-constraints-providers.txt`, which agrees with the first file on every shared package), `make lint-providers` (mypy with no config, so a missing or untyped SDK is an error; it sees three calls, the two that build a Gemini client and the one that builds the watsonx credentials, and no later call into an SDK), `make test-providers` (the real SDKs with the network replaced; a skipped test fails there; not covered: the SDK's aiohttp path, which the agents use, [ISSUE-0252](../issues/ISSUE-0252-gemini-sdk-tests-do-not-run-the-aiohttp-path-the-agents-use.md), and errors and retries, [ISSUE-0253](../issues/ISSUE-0253-provider-sdk-errors-and-retries-are-untested.md)), `make check-licenses-providers` (the license check again, over what the SDKs brought in); `test_provider_sdk_gates.py` holds the steps, their order and both files | Required (`Python`) |
 | The pins match `agents/pyproject.toml`: every declared dependency pinned, inside its range | Makefile §Python constraints; `agents/pyproject.toml` | `make python-constraints-check` (the pinned uv re-resolves each of the two files into a copy and diffs it); `test_ci_python_constraints.py` and `test_provider_sdk_gates.py` check the same offline | Required (`Python`) |
@@ -71,9 +76,10 @@ the twelve, and the job is named where it is not one of the original six.
 | `THIRD_PARTY_NOTICES.md` matches the dependency graphs | Makefile | `make notices-check`, with go-licenses and cargo-license at the Makefile pins, run with Python 3.11 and every extra installed (`make build-agents-providers`); the script stops on another Python version, where some pins list other releases, and on an install that lacks a declared package | Make-only — deliberately: the notices file is regenerated in the tag PR, so it is legitimately stale between a dependency bump and the next release (regenerated 2026-11-14 with the provider SDKs) |
 | `agents.yaml` `instructions_file` references resolve | prompt-organization | `scripts/checks/prompt_refs.py` | Required (`Validate configs`) |
 | Personal-tier recall latency within 20 % of baseline | RFC 0029 | `tests/perf/personal_tier_latency.py` | Required job, **informational** until a baseline exists |
+| The agent image holds every package at the version CI pins, and the product images build and run the offline demo ([ISSUE-0219](../issues/ISSUE-0219-agent-image-is-not-what-ci-tests.md)) | `Dockerfile.agent`; Makefile §Docker | `scheduled-image-smoke.yml`: `make image-pins-check` and `make smoke-offline` (Mondays; each runs even when the other fails; files an issue naming the one that failed); `test_agent_image_pins.py` holds the Dockerfile's install line to the pins on every PR | Scheduled; the install line Required (`Python`) |
 | Weekly advisory audit of the Rust crates, the Go modules, CI's Python pins and the web console's npm packages | CONTRIBUTING | `scheduled-audit.yml` (cargo-deny with bans and sources, govulncheck, pip-audit, npm audit; Mondays; each runs even when another fails; files an issue naming the ones that failed) | Scheduled |
 | Dependencies bumped monthly, one grouped PR per ecosystem (Go, pip, Cargo, the Rust toolchain, npm, Docker base images, compose images, Actions), `chore(deps)` titles | `.github/dependabot.yml` | Dependabot; for pip, the ranges in `agents/pyproject.toml` only (CI's pins move through `python-constraints-refresh.yml`); for the Rust toolchain, the release in `cli/rust-toolchain.toml` | Scheduled (security updates run on their own cadence) |
-| Required status checks on `main` match the versioned set | `branch-protection.json` | `make branch-protection-show`; `test_branch_protection_config.py` pins the file to the CI job list | Owner applies; file is reviewed |
+| Required status checks on `main` match the versioned set | `branch-protection.json` | `make branch-protection-show`; `test_branch_protection_config.py` pins the file to the CI job list: every job is required or named there as not required | Owner applies; file is reviewed |
 
 ## Size, documentation and process
 
