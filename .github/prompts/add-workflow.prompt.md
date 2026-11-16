@@ -11,5 +11,5 @@ Create a new workflow called `${{workflow_name}}` that `${{purpose}}`.
 1. Create `workflows/${{workflow_name}}.yaml` following the pattern in `workflows/feature-builder.yaml`.
 2. Define steps as a DAG with `depends_on` edges. Use `{{ variable }}` templating for inputs.
 3. Assign each step to an agent defined in `config/agents.yaml`.
-4. Add conditions and approval gates where needed.
+4. Do not add `condition`, `approval_required` or `approval_timeout`: the schema accepts them and the scheduler ignores them, so the step would run every time, with no pause ([ISSUE-0202](../../docs/issues/ISSUE-0202-workflow-condition-and-approval-validate-then-do-nothing.md)). `workflows/feature-builder.yaml` carries one such `condition`; do not copy it.
 5. Run `make validate` to check against `schemas/workflow.schema.json`.

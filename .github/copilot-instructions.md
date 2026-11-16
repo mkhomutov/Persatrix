@@ -31,7 +31,7 @@ CLI (Rust)  ←──REST──→  Orchestrator (Go)  ←──gRPC──→  A
 
 Component boundaries:
 - **Go orchestrator** (`internal/`): scheduling, registry, security, cost, telemetry. No LLM logic.
-- **Python agents** (`agents/`): LLM calls, tools, persona behavior, memory, sub-agent spawning.
+- **Python agents** (`agents/`): LLM calls, tools, persona behavior, memory, and the sub-agent code (`agents/sub_agents/`), which only tests call so far.
 - **Rust CLI** (`cli/`): thin REST client; all business logic is server-side.
 - **Protos** (`proto/`): cross-language gRPC contract — change carefully.
 
@@ -59,9 +59,15 @@ Language-specific rules live in the instruction files under `.github/instruction
 - **Persona names:** nickname-style, not human-like (e.g. `ember-owl`). Use `make generate-persona-nickname COUNT=5`.
 - **Permissions:** deny-by-default. Whitelist explicitly in `config/agents.yaml`.
 - **Config YAML:** always run `make validate` after editing. Schemas in `schemas/`.
-- **Workflow templating:** `{{ variable }}` syntax (Jinja2-like) in step `input` and `condition` fields.
+- **Workflow templating:** `{{ variable }}` syntax (Jinja2-like) in a step's `input`.
+- **Workflow steps always run.** A step's `condition`, `approval_required` and `approval_timeout` pass `make validate` and are then ignored: the step runs, without a pause ([ISSUE-0202](../docs/issues/ISSUE-0202-workflow-condition-and-approval-validate-then-do-nothing.md)). Leave them out of a new workflow.
 
-Key patterns: `@tool(name=..., permissions=[...])` auto-generates schemas; sub-agents inherit restricted permissions; three-tier memory (Episodic/Relationship/Working); optimization profiles in `config/optimization.yaml`.
+Key patterns: `@tool(name=...)` auto-generates a tool's parameter schema; three-tier memory (Episodic/Relationship/Working); optimization profiles in `config/optimization.yaml`.
+
+Two permission rules are not enforced ([ISSUE-0214](../docs/issues/ISSUE-0214-declared-tool-permissions-are-never-enforced.md)), so do not rely on them:
+
+- The `permissions=[...]` a tool declares with `@tool` are stored and never checked. A tool must ask the agent's `PermissionGate` in its own body, as each built-in tool does (`gate.check("filesystem:read")` in `agents/tools/builtin.py`). It can ask only about the five categories an agent's config grants (`filesystem`, `network`, `shell`, `memory`, `channels`): the agent schema allows no other, so a permission of the tool's own could never be granted.
+- Sub-agents are not in use. A spawner that runs one inside the agent's own process exists (`agents/sub_agents/spawner.py`) and tests run it, but nothing a persona or the orchestrator does reaches it. No permission is inherited or narrowed, and a task's `allowed_tools` list is carried and never checked.
 
 ## TDD
 
@@ -83,7 +89,7 @@ Per-language details are in `.github/instructions/`. Key rules:
 |------|---------|
 | `config/agents.yaml` | Agent definitions |
 | `config/optimization.yaml` | Model routing, caching, budgets |
-| `templates/personas.yaml` | Reusable persona archetypes |
+| `templates/personas.yaml` | Persona archetypes that the blueprints name with `extends:`; nothing applies them yet ([ISSUE-0267](../docs/issues/ISSUE-0267-extends-template-references-are-documented-and-not-built.md)) |
 | `schemas/` | JSON Schema for validation |
 | `docs/` | Specs, RFCs, guides |
 | `docs/issues/` | Deferred/cross-cutting findings (`make issues` to list) |
