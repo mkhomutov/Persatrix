@@ -57,3 +57,12 @@ and the release cycle's sentence and the testing strategy's row with it.
 > ([#1137](https://github.com/mkhomutov/Persatrix/pull/1137)). Left as
 > it is there: the release tooling is the release process's to change.
 > Severity proposed (low); not ruled by the maintainer.
+
+> 2026-11-16 — the review of pull request 1137 found that `make
+> smoke-offline` itself passed on an earlier run's messages: the
+> roundtable's history is on a volume that `make docker-down` keeps, and
+> the check read all of it. That is fixed in the same pull request. The
+> check now marks which messages the channel holds after the stack is up
+> and before the convening, and counts only the others. So the fix
+> proposed above is sound on a checkout that has run the demo before,
+> which is where a release sweep runs.

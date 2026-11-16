@@ -14,9 +14,11 @@ name: Scheduled Image Build and Offline Smoke
 #                           is not at the version CI pins;
 #   make smoke-offline      builds both product images, starts the whole
 #                           stack on the mock provider, convenes the
-#                           roundtable and fails unless its agents post.
+#                           roundtable and fails unless its agents post in
+#                           this run: messages that were there before the
+#                           convening do not count.
 #
-# No key, no provider call, nothing spent.
+# No key, no provider call, nothing spent: the workflow reads no secret.
 #
 # It is weekly and not a job on every pull request on purpose: ci.yml leaves
 # full image builds out, and a build of both images and a start of the stack
@@ -26,6 +28,12 @@ name: Scheduled Image Build and Offline Smoke
 # "Scheduled Image Smoke Failure" issue, which names what failed and the
 # command to run. tests/unit/python/test_scheduled_image_smoke.py holds the
 # steps and the issue's text.
+#
+# Each step that can hang has a time limit of its own, and together they are
+# shorter than the job's. A step over its limit fails as a step, so the logs
+# and the issue still follow. A job that reaches its own limit is cancelled
+# instead, and a cancelled job reports nothing. This is how GitHub documents
+# the two limits; no run of this workflow has shown it yet.
 #
 # A finding is fixed by a change of its own, never in this workflow.
 
@@ -56,6 +64,7 @@ jobs:
       - name: Build the agent image both ways and check each package is at its pin
         id: image-pins
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        timeout-minutes: 15
         run: make image-pins-check
 
       # ─── The offline smoke ──────────────────────────────────
@@ -65,22 +74,26 @@ jobs:
       - name: Install the Rust toolchain pinned in cli/rust-toolchain.toml
         id: setup-rust
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        timeout-minutes: 5
         working-directory: cli
         run: rustup toolchain install --no-self-update
 
       - name: Build the product images, start the offline stack and check the roundtable talks
         id: smoke
         if: ${{ !cancelled() && steps.setup-rust.outcome == 'success' }}
+        timeout-minutes: 30
         run: make smoke-offline
 
       - name: Show the last log lines of the stack
         id: smoke-logs
         if: ${{ !cancelled() && steps.smoke.outcome == 'failure' }}
+        timeout-minutes: 2
         run: make smoke-offline-logs
 
       - name: Stop the stack
         id: stop
         if: ${{ always() && steps.checkout.outcome == 'success' }}
+        timeout-minutes: 5
         run: make docker-down
 
       # ─── Report ─────────────────────────────────────────────
@@ -105,13 +118,13 @@ jobs:
                 name: 'The agent image against the pins',
                 outcome: process.env.CHECK_IMAGE_PINS,
                 rerun: 'make image-pins-check',
-                fix: 'A package in the image is not at the version in `.github/python-constraints-providers.txt`, or the image did not build from the pins. The run log names each package. If a pin no longer installs on the image\'s Python, move it with `make python-constraints` after raising the floor in `agents/pyproject.toml`; if `Dockerfile.agent` lost its `-c`, restore it.',
+                fix: 'A package in the image is not at the version in `.github/python-constraints-providers.txt`, is installed more than once, or the image did not build from the pins; a step that ran out of its time fails the same way. The run log names each package. If a pin no longer installs on the image\'s Python, move it with `make python-constraints` after raising the floor in `agents/pyproject.toml`; if `Dockerfile.agent` lost its `-c`, restore it.',
               },
               {
                 name: 'The offline smoke',
                 outcome: process.env.CHECK_SMOKE,
                 rerun: 'make smoke-offline',
-                fix: 'An image did not build, the stack did not start, or the roundtable\'s agents did not post on the mock provider. The step after it printed the last log lines of each service (`make smoke-offline-logs`). Stop the stack with `make docker-down`.',
+                fix: 'An image did not build, the stack did not start, the roundtable\'s agents did not post on the mock provider in this run (messages from an earlier run do not count), or the step ran out of its time. The step after it printed the last log lines of each service (`make smoke-offline-logs`). Stop the stack with `make docker-down`.',
               },
             ];
 

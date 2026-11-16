@@ -61,3 +61,8 @@ opens then names which Python a finding is on.
 > ([#1137](https://github.com/mkhomutov/Persatrix/pull/1137)), which
 > names it as what remains. Severity proposed from the tracker's
 > precedent for the audit's gaps (low); not ruled by the maintainer.
+
+> 2026-11-16 — the same gap in another check:
+> [ISSUE-0283](ISSUE-0283-provider-sdks-are-run-on-python-311-only.md).
+> The tests that run the provider SDKs run on Python 3.11 only, so the
+> `numpy` pin this issue names is neither audited nor run on 3.12.

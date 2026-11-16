@@ -1,6 +1,6 @@
 # Enforcement Gaps
 
-> **Last updated**: 2026-11-08
+> **Last updated**: 2026-11-16
 > What the [enforcement matrix](enforcement-matrix.md) says the project
 > should change. Split out of the matrix, which keeps every rule with its
 > check and how hard the check is.
@@ -11,7 +11,9 @@ Listed here so the matrix is honest about its own gaps.
 
 1. ~~Make the six advisory CI jobs required.~~ Done: the owner applied the
    set versioned in [`branch-protection.json`](branch-protection.json) (all
-   twelve contexts; a test keeps it equal to the CI job list), and
+   twelve contexts; a test keeps every CI job either in that set or named in
+   the file as not required, which one job is since
+   [ISSUE-0219](../issues/ISSUE-0219-agent-image-is-not-what-ci-tests.md)), and
    `make branch-protection-show` reported the live setting equal to the
    file on 2026-09-15. It stays the one step in this list that is run by
    hand, because it needs the owner's admin token.

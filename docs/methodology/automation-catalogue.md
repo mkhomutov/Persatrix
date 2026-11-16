@@ -1,6 +1,6 @@
 # Automation Catalogue
 
-> **Last updated**: 2026-11-14
+> **Last updated**: 2026-11-16
 > Everything that runs without a human typing the steps: `make` targets,
 > scripts, the pre-commit hook, and the GitHub workflows — grouped by
 > purpose, with **when it runs**. `make help` is the live list of targets;
@@ -25,8 +25,8 @@ dependencies.
 | `make ui` / `build-orchestrator-ui` / `run-ui` | Vite bundle into `internal/ui/assets/` (overwrites the tracked placeholder `index.html` — restore it before committing); orchestrator with the bundle embedded; local console iteration | Console work; release asset lane |
 | `make run` / `run-agent AGENT= PORT=` | Run the orchestrator / one Python agent | Manual tests |
 | `make docker-build` / `docker-up` / `docker-down` / `docker-logs` / `reset` | Compose lifecycle; `reset` purges **all** named volumes (ISSUE-0051 workaround) | Live arcs start from `make reset` |
-| `make demo-offline` / `demo-autonomous` / `demo-ollama` / `demo-anthropic` / `demo-openai` / `demo-gemini` / `demo-watsonx` | The demo society on one provider via a per-provider alias overlay; the first two spend $0 | `demo-autonomous` is the offline smoke in the last implementation PR and the tag PR |
-| `make smoke-offline` / `smoke-offline-logs` (`scripts/checks/offline_smoke.py`) | `demo-autonomous` with a verdict: fails unless at least two of the roundtable's agents post three messages; the second prints each service's last log lines | The weekly image run; by hand with Docker |
+| `make demo-offline` / `demo-autonomous` (its two halves: `demo-autonomous-start`, `demo-autonomous-convene`) / `demo-ollama` / `demo-anthropic` / `demo-openai` / `demo-gemini` / `demo-watsonx` | The demo society on one provider via a per-provider alias overlay; the first two spend $0 | `demo-autonomous` is the offline smoke in the last implementation PR and the tag PR |
+| `make smoke-offline` / `smoke-offline-logs` (`scripts/checks/offline_smoke.py`) | `demo-autonomous` with a verdict: fails unless at least two of the roundtable's agents post three messages in this run. It marks which messages the channel holds after the stack is up and before the convening, and counts only the others, so an earlier run's messages on the kept volume earn nothing. The second prints each service's last log lines | The weekly image run; by hand with Docker |
 | `make image-pins-check` (`scripts/checks/image_pins.py`) | Builds the agent image with and without the provider SDKs and fails if a package in either is not at the version in `.github/python-constraints-providers.txt`; the comparison runs inside the image, on its Python | The weekly image run; after a change to `Dockerfile.agent` or the pins |
 | `make clean` | Remove build artifacts | — |
 
@@ -74,7 +74,7 @@ dependencies.
 | `make imports-check` | import-linter forbidden contract, MIT↛BUSL (RFC 0045 §B) | CI (`Python`) |
 | `make validate` | `agents/validate.py config/` + `scripts/checks/prompt_refs.py` | CI (`Validate configs`) runs both |
 | `make ui-html-check` (`scripts/checks/ui_html_directive.py`) | Reject `{@html}` under `web/src` | CI (`Web console`) |
-| `make dockerignore-check` (`scripts/checks/dockerignore_context.py`) | Seed a sentinel, run a real `docker build`, prove the context excludes nested `node_modules` | CI (`Dockerignore`) |
+| `make dockerignore-check` (`scripts/checks/dockerignore_context.py`) | Seed a sentinel, run a real `docker build`, prove the context excludes nested `node_modules`; a second build proves the context holds the pins file the agent image copies | CI (`Dockerignore`) |
 | `make check-licenses` (`-go`/`-python`/`-rust`) | go-licenses at the Makefile pin (the Go leg refuses any other version), `scripts/checks/python_licenses.py`, cargo-deny against `scripts/checks/allowed_licenses.txt` / `deny.toml` | CI (`Third-party license check`) |
 | `scripts/checks/file_size.py [--strict] [--near-cap]` | Code ≤ 800 lines, with a code file over 500 listed as a warning that never fails; docs ≤ 3 000 words, RFCs ≤ 8 000; allowlist in `file_size_allowlist.py`; near-cap band 3 % of each limit; version-cycle docs of released versions (dated CHANGELOG heading) excluded (ISSUE-0139) | CI (`File size check`) + pre-commit |
 | `scripts/checks/doc_links.py` | Relative links and `#anchors` in every tracked `.md` | CI (`Docs hygiene`) + pre-commit |

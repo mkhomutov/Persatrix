@@ -1,4 +1,4 @@
-.PHONY: all build build-orchestrator build-orchestrator-ui ui ui-test ui-html-check build-cli build-agents uv-install python-constraints python-constraints-upgrade python-constraints-check python-constraints-uv proto proto-go proto-python proto-python-check proto-orphans-check proto-check clean reset test lint lint-go lint-python lint-rust golangci-lint-version golangci-lint-install run run-ui validate dockerignore-check image-pins-check smoke-offline smoke-offline-logs help demo-autonomous demo-offline demo-ollama generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust go-licenses-install go-licenses-pinned notices notices-check cargo-license-install cargo-license-pinned bump-version issues issues-check rfcs rfcs-check imports-check eval-replay eval-record eval-record-offline eval-drift eval-verdict
+.PHONY: all build build-orchestrator build-orchestrator-ui ui ui-test ui-html-check build-cli build-agents uv-install python-constraints python-constraints-upgrade python-constraints-check python-constraints-uv proto proto-go proto-python proto-python-check proto-orphans-check proto-check clean reset test lint lint-go lint-python lint-rust golangci-lint-version golangci-lint-install run run-ui validate dockerignore-check image-pins-check smoke-offline smoke-offline-logs help demo-autonomous demo-autonomous-start demo-autonomous-convene demo-offline demo-ollama generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust go-licenses-install go-licenses-pinned notices notices-check cargo-license-install cargo-license-pinned bump-version issues issues-check rfcs rfcs-check imports-check eval-replay eval-record eval-record-offline eval-drift eval-verdict
 .PHONY: build-agents-providers lint-providers test-providers check-licenses-providers
 
 # ─── Config ─────────────────────────────────────────────
@@ -542,7 +542,7 @@ validate: ## Validate all YAML configs against JSON schemas
 docker-build: ## Build Docker images
 	docker compose build
 
-dockerignore-check: ## Fail if .dockerignore lets nested web/node_modules leak into the build context (ISSUE-0104, CI)
+dockerignore-check: ## Fail if .dockerignore lets nested web/node_modules leak into the build context (ISSUE-0104, CI), or keeps the agent image's pins file out of it (ISSUE-0219)
 	$(PYTHON) scripts/checks/dockerignore_context.py --strict
 
 # ISSUE-0219 — the agent image is what CI tests. Dockerfile.agent installs
@@ -560,9 +560,20 @@ image-pins-check: ## Build the agent image with and without the provider SDKs; f
 
 # `demo-autonomous` builds both product images and starts the stack, and only
 # warns when the convening does not land. This adds the verdict: it fails
-# unless the roundtable's agents have posted. No key, no provider call.
-smoke-offline: demo-autonomous ## The offline demo with a verdict: fail unless the roundtable's agents post (builds the images; no key, no spend)
-	$(PYTHON) scripts/checks/offline_smoke.py
+# unless the roundtable's agents post in this run. No key, no provider call.
+#
+# "In this run" needs a mark. The channel's history is on a volume that
+# `make docker-down` keeps, so a checkout that has run the demo before holds
+# an earlier run's messages, and those once earned a pass for a run in which
+# nobody spoke. So the check writes down which messages are there when the
+# stack is up and nothing is convened yet, and counts only the others. The
+# mark is a list of message ids as the orchestrator reports them: no clock is
+# compared, since the host and the containers do not share one.
+SMOKE_MARK := $(GO_BIN)/offline-smoke-mark.json
+smoke-offline: demo-autonomous-start ## The offline demo with a verdict: fail unless the roundtable's agents post in this run (builds the images; no key, no spend)
+	$(PYTHON) scripts/checks/offline_smoke.py --mark $(SMOKE_MARK)
+	@$(MAKE) --no-print-directory demo-autonomous-convene
+	$(PYTHON) scripts/checks/offline_smoke.py --since $(SMOKE_MARK)
 
 smoke-offline-logs: ## Print the last log lines of each service of the offline stack (after a failed smoke-offline)
 	docker compose -f docker-compose.yaml -f docker-compose.offline.yaml logs --no-color --tail=120
@@ -587,7 +598,12 @@ demo-anthropic: ## Run the demo society on Anthropic (Claude) — needs ANTHROPI
 	@echo "✓ Anthropic society up. Try:  ./bin/persatrix chat ember-owl"
 	@echo "  Stop with: make docker-down"
 
-demo-autonomous: build-cli ## Run the RFC 0052 offline autonomous brainstorm — the `roundtable` roster convenes ITSELF on the mock provider (zero keys, zero spend, no human turn)
+# The demo is two halves, so that `smoke-offline` can look at the roundtable
+# between them: the start (build, boot, arm) and the convening.
+demo-autonomous: demo-autonomous-start ## Run the RFC 0052 offline autonomous brainstorm — the `roundtable` roster convenes ITSELF on the mock provider (zero keys, zero spend, no human turn)
+	@$(MAKE) --no-print-directory demo-autonomous-convene
+
+demo-autonomous-start: build-cli ## The first half of demo-autonomous: build the images, start the offline stack and arm the roundtable, without convening it
 	@echo "→ Starting the offline autonomous brainstorm (RFC 0052) — mock provider, no API key, no spend."
 	@# Reuses the offline overlay: config/demo/offline/optimization.yaml points
 	@# every alias at `provider: mock`, and PERSATRIX_OFFLINE_RESPONSES feeds the
@@ -595,9 +611,10 @@ demo-autonomous: build-cli ## Run the RFC 0052 offline autonomous brainstorm —
 	@# roundtable scenario). The `roundtable` channel ships DISARMED in
 	@# config/channels.yaml (a default-deploy safety posture — an armed channel is
 	@# convenable, and would spend, on any default boot); this target arms it at
-	@# RUNTIME and convenes it, so the bundled config stays safe at rest. This is
-	@# the exact MT-AUTONOMOUS-001 operator flow (arm via CLI → convene via CLI),
-	@# just on the mock provider. --build matches the other demos.
+	@# RUNTIME and demo-autonomous-convene convenes it, so the bundled config
+	@# stays safe at rest. Together they are the exact MT-AUTONOMOUS-001 operator
+	@# flow (arm via CLI → convene via CLI), just on the mock provider. --build
+	@# matches the other demos.
 	docker compose -f docker-compose.yaml -f docker-compose.offline.yaml up -d --build
 	@echo "→ Waiting for the orchestrator to become healthy..."
 	@t=120; while ! curl -sf http://localhost:8080/healthz >/dev/null 2>&1; do \
@@ -608,12 +625,14 @@ demo-autonomous: build-cli ## Run the RFC 0052 offline autonomous brainstorm —
 	@echo "→ Arming group:roundtable (nova-sparrow convenes; ember-owl chairs the synthesis)..."
 	@# /healthz can go green a beat before the config-edit REST surface is ready,
 	@# so retry the arm a few times rather than aborting the whole demo on a
-	@# transient miss (the convene step below retries for the same reason).
+	@# transient miss (demo-autonomous-convene retries for the same reason).
 	@for i in $$(seq 1 10); do \
 		if $(GO_BIN)/persatrix channel config set group:roundtable autonomous.enabled=true; then break; fi; \
 		if [ $$i -eq 10 ]; then echo "✗ could not arm group:roundtable — is config editing enabled on the orchestrator?"; exit 1; fi; \
 		sleep 2; \
 	done
+
+demo-autonomous-convene: ## The second half of demo-autonomous: convene the armed roundtable (the stack must be up)
 	@echo "→ Convening — retrying while the persona agents finish registering..."
 	@for i in $$(seq 1 20); do \
 		if $(GO_BIN)/persatrix channel convene group:roundtable --json 2>/dev/null; then \

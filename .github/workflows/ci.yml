@@ -165,6 +165,12 @@ jobs:
     # web/node_modules to leak, so the probe seeds a sentinel first — which is
     # exactly why the original break never tripped CI. ubuntu-latest ships
     # Docker preinstalled, so this is a few-second probe, not a product build.
+    #
+    # A second probe goes the other way (ISSUE-0219): Dockerfile.agent copies
+    # .github/python-constraints-providers.txt into the image and installs
+    # from it, and no pull request builds that image. The probe copies the
+    # file out of the context, so a `.dockerignore` rule that hides it fails
+    # here, however the rule is spelled.
     name: Dockerignore context hygiene
     runs-on: ubuntu-latest
     steps:
@@ -174,7 +180,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Assert .dockerignore excludes nested node_modules
+      - name: Assert .dockerignore excludes nested node_modules and keeps the agent image's pins file
         run: make dockerignore-check
 
   proto-staleness:

@@ -20,9 +20,15 @@ only, and the copy inside does the reading (``--inside``). The copy inside
 uses the standard library and the ``packaging`` that pip carries, nothing
 the image would have to install.
 
-It fails on a package that has no pin, and on one whose version is not its
-pin. ``pip`` comes with the base image and the agents package is the thing
+It fails on a package that has no pin, on one whose version is not its pin,
+and on one that is installed more than once: with two copies on the path
+Python imports one of them, and the other could be the one at its pin.
+``pip`` comes with the base image and the agents package is the thing
 installed, so neither is expected to have a pin.
+
+With several images it checks each one, whatever the one before it said, and
+passes only when every run inside an image ended with 0. A run that was
+killed, or an image Docker could not start, is a failure like any other.
 """
 
 from __future__ import annotations
@@ -111,17 +117,32 @@ def compare(installed: dict[str, str], pins: dict[str, str]) -> list[str]:
     return problems
 
 
-def installed_here() -> dict[str, str]:
-    """Every distribution installed for the Python running this."""
-    return {canonical(dist.metadata["Name"]): dist.version for dist in metadata.distributions()}
+def installed_here() -> dict[str, list[str]]:
+    """Every distribution installed for the Python running this, each name
+    with every version found of it: more than one when the path holds two
+    copies."""
+    found: dict[str, list[str]] = {}
+    for dist in metadata.distributions():
+        found.setdefault(canonical(dist.metadata["Name"]), []).append(dist.version)
+    return found
+
+
+def more_than_once(found: dict[str, list[str]]) -> list[str]:
+    """One line for each package that is installed more than once."""
+    return [
+        f"{name} is installed more than once: {', '.join(versions)}"
+        for name, versions in sorted(found.items())
+        if len(versions) > 1
+    ]
 
 
 def check_inside(constraints: Path) -> int:
     """The half that runs in the image. Prints its findings; 1 when there are any."""
-    installed = installed_here()
+    found = installed_here()
+    installed = {name: versions[0] for name, versions in found.items() if len(versions) == 1}
     pins = applicable_pins(constraints.read_text(encoding="utf-8").splitlines())
-    problems = compare(installed, pins)
-    checked = len([name for name in installed if name not in NOT_PINNED_ON_PURPOSE])
+    problems = more_than_once(found) + compare(installed, pins)
+    checked = len([name for name in found if name not in NOT_PINNED_ON_PURPOSE])
     version = ".".join(str(part) for part in sys.version_info[:3])
     if problems:
         print(f"[FAIL] Python {version}: {len(problems)} of {checked} installed packages "
@@ -157,7 +178,9 @@ def main(argv: list[str] | None = None) -> int:
         return check_inside(Path(args.inside))
     if not args.images:
         parser.error("name at least one image")
-    return max(check_image(image) for image in args.images)
+    # A list, not a generator: every image is run before any verdict is read.
+    ends = [check_image(image) for image in args.images]
+    return 0 if all(end == 0 for end in ends) else 1
 
 
 if __name__ == "__main__":

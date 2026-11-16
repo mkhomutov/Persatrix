@@ -1,6 +1,6 @@
 # Enforcement Matrix
 
-> **Last updated**: 2026-11-14
+> **Last updated**: 2026-11-16
 > Every rule the project states, with the document that states it, the check
 > that enforces it, and how hard the enforcement is. Read the **Enforcement**
 > column literally: a rule is only as strong as the weakest place it is
@@ -13,7 +13,7 @@
 | Level | Meaning |
 |-------|---------|
 | **Required** | A CI status check branch protection requires. A red check blocks the merge. |
-| **CI-advisory** | Runs in CI on every PR, but branch protection does not require it. A red check is visible and mergeable. No row uses it since 2026-09-15 (every job is required); kept for the next job added before it is made required. |
+| **CI-advisory** | Runs in CI on every PR, but branch protection does not require it. A red check is visible and mergeable. One row uses it: the `Python 3.12 (unit tests)` job, added in 2026-11 and not required by the maintainer's choice ([ISSUE-0219](../issues/ISSUE-0219-agent-image-is-not-what-ci-tests.md)); [`branch-protection.json`](branch-protection.json) names it under `not_required`. From 2026-09-15 until then every job was required and no row used the level. |
 | **Pre-commit** | Runs only in the local hook (`scripts/pre_commit.py`). Skipped by any contributor without the hook installed, and by `--no-verify`. |
 | **Make-only** | A `make` target exists; nothing calls it automatically. |
 | **Convention** | Stated in a document; no check. |
@@ -48,7 +48,7 @@ original six.
 | Python types (mypy) — `agents/`, `tests/` | instructions; ISSUE-0062 | `mypy` ×2 | Required (`Python`) |
 | Python lint + types — `scripts/`, `evaluators/` | Makefile `lint-python`; ISSUE-0134 | `ruff check scripts/ evaluators/`; `mypy scripts/ evaluators/` | Required (`Python`) — since the CI-promotion PR |
 | Python unit + agents + integration suites pass | testing-strategy | three `pytest` steps | Required (`Python`) |
-| The Python unit suite passes on the Python the agent image runs ([ISSUE-0219](../issues/ISSUE-0219-agent-image-is-not-what-ci-tests.md)) | `Dockerfile.agent`; `ci.yml` | the `Python 3.12 (unit tests)` job: `make build-agents`, then `make test-python`; `test_python_312_job.py` holds it to the image's Python and every other job to 3.11 | CI on every PR, **not required** |
+| The Python unit suite passes on the Python the agent image runs ([ISSUE-0219](../issues/ISSUE-0219-agent-image-is-not-what-ci-tests.md)) | `Dockerfile.agent`; `ci.yml` | the `Python 3.12 (unit tests)` job: `make build-agents`, then `make test-python`; `test_python_312_job.py` holds it to the image's Python and every other job to 3.11 | CI-advisory (`Python 3.12 (unit tests)`) |
 | CI installs the Python dependencies at the committed pins, not the newest release of the minute ([#1002](https://github.com/mkhomutov/Persatrix/pull/1002) failed every open PR at once) | Makefile §Python constraints; `ci.yml` | every workflow installs through `make build-agents`, which passes `.github/python-constraints.txt` with `-c`; `test_ci_python_constraints.py` fails any workflow step that installs the agents package around it | Required (`Python`) |
 | The optional provider SDKs (Gemini, watsonx) are pinned, type-checked, license-checked and run against their adapters ([ISSUE-0220](../issues/ISSUE-0220-gemini-and-watsonx-sdks-sit-outside-every-gate.md)) | Makefile §Python constraints; `ci.yml` | the Python job's last four steps: `make build-agents-providers` (from `.github/python-constraints-providers.txt`, which agrees with the first file on every shared package), `make lint-providers` (mypy with no config, so a missing or untyped SDK is an error; it sees three calls, the two that build a Gemini client and the one that builds the watsonx credentials, and no later call into an SDK), `make test-providers` (the real SDKs with the network replaced; a skipped test fails there; not covered: the SDK's aiohttp path, which the agents use, [ISSUE-0252](../issues/ISSUE-0252-gemini-sdk-tests-do-not-run-the-aiohttp-path-the-agents-use.md), and errors and retries, [ISSUE-0253](../issues/ISSUE-0253-provider-sdk-errors-and-retries-are-untested.md)), `make check-licenses-providers` (the license check again, over what the SDKs brought in); `test_provider_sdk_gates.py` holds the steps, their order and both files | Required (`Python`) |
 | The pins match `agents/pyproject.toml`: every declared dependency pinned, inside its range | Makefile §Python constraints; `agents/pyproject.toml` | `make python-constraints-check` (the pinned uv re-resolves each of the two files into a copy and diffs it); `test_ci_python_constraints.py` and `test_provider_sdk_gates.py` check the same offline | Required (`Python`) |
@@ -68,7 +68,7 @@ original six.
 | PR title is a Conventional Commit | CONTRIBUTING; BRANCHING | `commitlint.yml` | Required (`Validate PR Title`) |
 | Web console unit tests pass; bundle builds; orchestrator compiles with it | web-console guide | `make ui-test`, `make ui`, `go build` | Required (`Web console (build + test)`) |
 | No `{@html}` under `web/src` (session-riding XSS) | RFC 0039 amendment §A3 | `make ui-html-check` | Required (`Web console (build + test)`) |
-| `.dockerignore` excludes nested `node_modules` | ISSUE-0104 | `make dockerignore-check` | Required (`Dockerignore context hygiene`) |
+| `.dockerignore` excludes nested `node_modules`, and does not hide the pins file the agent image copies | ISSUE-0104; [ISSUE-0219](../issues/ISSUE-0219-agent-image-is-not-what-ci-tests.md) | `make dockerignore-check`: two real `docker build`s of a probe | Required (`Dockerignore context hygiene`) |
 | Third-party licences on the allow-list (Go, Python, Rust) | Makefile; `allowed_licenses.txt`; `deny.toml` | `make check-licenses`, with go-licenses at the Makefile pin (`GO_LICENSES_VERSION`: the target refuses any other version, and CI installs it with `make go-licenses-install`) | Required (`Third-party license check`) — go-licenses pinned since 2026-09-26; was `@latest` |
 | Idle persona spends nothing (RFC 0024) | RFC 0024 §Test Strategy | `test_bored_persona_cost.py`, path-filtered | Required (`Cost regression gate (bored persona)`) |
 | `gofmt` / `cargo fmt` clean | instructions | `gofmt -l` over every tracked `.go` file; `cargo fmt -- --check` | Required (`Go`, `Rust`) + Pre-commit (hook covers `internal/`, `cmd/` only) |
