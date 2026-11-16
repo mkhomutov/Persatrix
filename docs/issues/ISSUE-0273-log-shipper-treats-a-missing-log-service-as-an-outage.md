@@ -1,6 +1,6 @@
 ---
 id: ISSUE-0273
-summary: "An orchestrator whose log buffer did not start serves agents without the log service. An agent's log shipper cannot tell that from an outage: it retries for as long as the orchestrator runs, writes a warning with a full traceback to the agent's own log on each failed try, and the records it writes in between are accepted and lost without a line."
+summary: "An orchestrator whose log buffer did not start serves agents without the log service. An agent's log shipper cannot tell that from an outage: it retries for as long as the orchestrator runs, writes a warning to the agent's own log on each failed try, and the records it writes in between are accepted and lost without a line."
 status: open
 severity: low
 area: agents/observability
@@ -42,11 +42,18 @@ a real orchestrator started with a log folder it could not create:
   task that reads acknowledgements, which nothing looks at until the
   stream is torn down.
 - On the failure the shipper logs `log shipper stream error,
-  reconnecting in …` at `WARNING`, with the full traceback, waits and
-  opens a new stream. The wait starts at 1 second and doubles to 30. A
-  failed try never resets it.
-- An agent that keeps logging therefore writes one such warning, with
-  its traceback, every 30 seconds for as long as the orchestrator runs.
+  reconnecting in …` at `WARNING`, with the exception attached, waits
+  and opens a new stream. The wait starts at 1 second and doubles to 30.
+  A failed try never resets it.
+- How much each warning writes depends on the agent's log format,
+  measured with logging set up as an agent sets it up. In the default
+  JSON format it is one line of about 350 bytes: the exception's class
+  and message, and no stack frames
+  ([ISSUE-0279](ISSUE-0279-agent-json-log-line-carries-no-traceback.md)).
+  With `PERSATRIX_LOG_FORMAT=pretty` it carries the whole traceback, 160
+  lines and more.
+- An agent that keeps logging therefore writes one such warning every 30
+  seconds for as long as the orchestrator runs.
   An agent with nothing to log writes none. Measured against a real
   orchestrator with ten records a second: warnings at 0, 1, 3, 7, 15 and
   31 seconds, then one each 30 seconds; the slowest log call took 0.12
@@ -61,14 +68,15 @@ Noise, and a missing explanation. The warning names a stream error and a
 reconnect, which reads as an orchestrator that is restarting. Nothing on
 the agent's side says that the orchestrator is up and has no log
 service, or that the cure is on the orchestrator (its log folder). The
-orchestrator says so itself, at start-up and in `GET /healthz`. The
-traceback adds about twenty lines to each warning.
+orchestrator says so itself, at start-up and in `GET /healthz`. In the
+`pretty` log format each warning also fills the screen with a traceback
+that says nothing about the cause.
 
 ## Proposed fix / investigation path
 
 Tell the cause apart: look at how the acknowledgement reader ended
 before reporting a failed write. When it ended with `UNIMPLEMENTED`, log
-one line without a traceback that says the orchestrator has no log
+one line with no exception attached that says the orchestrator has no log
 service and that records stay in this process's own output, then keep
 trying at the longest wait without a line per try, so that an
 orchestrator restarted with a working buffer is still picked up. Noticing
@@ -85,3 +93,10 @@ written into a stream that has ended.
 > low); not ruled by the maintainer. Before that fix the same state left
 > the gRPC port closed, and the shipper logged the same warning at the
 > same pace for a refused connection, so the fix did not add the noise.
+>
+> 2026-11-16 — corrected after the review of pull request 1135. The first
+> text said each warning carried "the full traceback" of "about twenty
+> lines". That is what a bare script prints, not an agent: with the
+> agent's logging the warning is one JSON line with no stack frames, or
+> 160 lines and more in the `pretty` format. The pace, and that no agent
+> stops or waits, were measured and stand.

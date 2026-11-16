@@ -178,9 +178,12 @@ func main() {
 		"env", *env,
 	)
 
-	// Load the cost config before anything else is opened, and refuse to
-	// start without it (ISSUE-0204, loadCostConfig): the wallet is built
-	// from it, and no agent calls a model without the wallet.
+	// Load the cost config before the audit log, the stores and the two
+	// ports are opened, and refuse to start without it (ISSUE-0204,
+	// loadCostConfig): the wallet is built from it, and no agent calls a
+	// model without the wallet. A refused start leaves none of them behind;
+	// the log buffer, tracing and metrics started above, so its log folder
+	// is there, empty.
 	costCfg, err := loadCostConfig(logger, *configDir)
 	if err != nil {
 		logger.Fatal(costConfigRefusal, zap.Error(err))

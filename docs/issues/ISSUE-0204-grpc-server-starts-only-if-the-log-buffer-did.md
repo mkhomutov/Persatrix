@@ -107,7 +107,10 @@ agent-facing listener or a missing wallet.
 > It logs `refusing to start: the cost config did not load, and without
 > it there is no wallet, so no agent could call a model` at `FATAL`, with
 > the file and the loader's reason in the `error` field, and exits with
-> status 1, before it opens anything else. "Fails to load" covers a
+> status 1. The refusal comes before the audit log, the stores and the
+> two ports are opened, so it leaves no audit log, no store and no port
+> behind. The log buffer, tracing and metrics start before it: the log
+> folder is made, and stays empty. "Fails to load" covers a
 > config folder with no `optimization.yaml`, a file that cannot be read,
 > one that is not YAML, a `cost` block with a key the loader does not
 > know or with no `budgets`, and a limit or an `on_exceed` value the

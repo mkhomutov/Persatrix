@@ -125,3 +125,16 @@ gate.
 > ([#1098](https://github.com/mkhomutov/Persatrix/pull/1098)) added that
 > step. The job proposed above no longer has to do it. The rest of that
 > note stands.
+
+> 2026-11-16 — two sentences of the 2026-11-10 note no longer hold. The
+> fix for
+> [ISSUE-0204](ISSUE-0204-grpc-server-starts-only-if-the-log-buffer-did.md)
+> ([#1135](https://github.com/mkhomutov/Persatrix/pull/1135)) added Go
+> tests that run `main()` in a real process
+> (`cmd/orchestrator/process_test.go`: the test binary starts itself and
+> runs `main()` in place of its tests), in `make test-go` and so in CI.
+> One of them starts the orchestrator with a log-buffer path it cannot
+> create, which is the test that note asked for. `initRateLimiter`,
+> `initAuditLogger` and `buildLogger` are run by those starts and still
+> have no unit test of their own. This issue's open half, the 16 opt-in
+> tests that no gate runs, is unchanged.

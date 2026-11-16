@@ -73,6 +73,7 @@ type orchestratorProcess struct {
 	cmd      *exec.Cmd
 	httpAddr string // the REST API
 	grpcAddr string // the port agents call
+	dataDir  string // where it runs and keeps its audit log and its stores
 	output   *lockedBuffer
 	exited   chan struct{} // closed once the process has exited
 }
@@ -100,17 +101,25 @@ func freeLoopbackPort(t *testing.T) int {
 // test if it is still running.
 func startOrchestrator(t *testing.T, configDir, logBufferDir string) *orchestratorProcess {
 	t.Helper()
+	return startOrchestratorOn(t, configDir, logBufferDir, freeLoopbackPort(t))
+}
+
+// startOrchestratorOn is startOrchestrator with the agent-facing port chosen
+// by the caller, for the test that keeps that port taken.
+func startOrchestratorOn(t *testing.T, configDir, logBufferDir string, grpcPort int) *orchestratorProcess {
+	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("stops the process with SIGTERM, which Windows does not have")
 	}
 	exe, err := os.Executable()
 	require.NoError(t, err)
 	data := t.TempDir()
-	httpPort, grpcPort := freeLoopbackPort(t), freeLoopbackPort(t)
+	httpPort := freeLoopbackPort(t)
 	p := &orchestratorProcess{
 		t:        t,
 		httpAddr: fmt.Sprintf("127.0.0.1:%d", httpPort),
 		grpcAddr: fmt.Sprintf("127.0.0.1:%d", grpcPort),
+		dataDir:  data,
 		output:   &lockedBuffer{},
 		exited:   make(chan struct{}),
 	}
@@ -236,7 +245,9 @@ func aFolderThatCannotBeMade(t *testing.T) string {
 
 // TestOrchestratorProcess_ServesAgents: the agent-facing port is open and the
 // wallet answers on it whether or not the log buffer started, and the health
-// check, still 200 with status "ok", names the buffer when it did not.
+// check, still 200 with status "ok", names the buffer when it did not. The
+// wallet's reaper runs in both cases: without it a lease an agent never
+// settles is held for good, and the agent's budget fills up with them.
 //
 // Before ISSUE-0204's fix the second case answered `{"status":"ok"}` with
 // nothing listening on the gRPC port, so every agent's model call was
@@ -281,16 +292,27 @@ func TestOrchestratorProcess_ServesAgents(t *testing.T) {
 
 			assert.Equal(t, 0, p.stop(), "a stop on request is a clean exit\n%s", p.output)
 			out := p.output.String()
-			for _, want := range append(tt.wantInOutput, "wallet lease enforcement initialized", "gRPC server listening") {
+			for _, want := range append(tt.wantInOutput,
+				"wallet lease enforcement initialized", "gRPC server listening", "wallet: reaper started") {
 				assert.Contains(t, out, want)
+			}
+			// Where a served start keeps its audit log and its channel store:
+			// a refused start must leave neither behind (the test below).
+			for _, kept := range startedFiles {
+				assert.FileExists(t, filepath.Join(p.dataDir, kept))
 			}
 		})
 	}
 }
 
+// startedFiles are what a start that got past the cost config leaves in its
+// data folder: the audit log and the channel store.
+var startedFiles = []string{"audit.jsonl", "channels.db"}
+
 // TestOrchestratorProcess_RefusesToStartWithoutACostConfig: a cost config
 // that does not load ends the start with exit status 1 and one line that
-// names the file and the fault. Nothing is served first.
+// names the file and the fault. Nothing is served first, and no audit log
+// and no store is left behind.
 //
 // Before ISSUE-0204's fix the process logged a warning and ran on with no
 // wallet: healthy to a probe, and of no use to any agent.
@@ -353,6 +375,29 @@ func TestOrchestratorProcess_RefusesToStartWithoutACostConfig(t *testing.T) {
 			_, err := net.DialTimeout("tcp", p.httpAddr, time.Second)
 			var refused *net.OpError
 			assert.True(t, errors.As(err, &refused), "nothing listens on the REST port afterwards: %v", err)
+			for _, kept := range startedFiles {
+				assert.NoFileExists(t, filepath.Join(p.dataDir, kept), "the refusal comes before this is opened")
+			}
 		})
 	}
+}
+
+// TestOrchestratorProcess_RefusesToStartWhenTheAgentPortIsTaken: agents reach
+// the wallet on one port, so an orchestrator that cannot open it does not
+// start. It exits with status 1 and a line that names the address.
+func TestOrchestratorProcess_RefusesToStartWhenTheAgentPortIsTaken(t *testing.T) {
+	taken, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer taken.Close() //nolint:errcheck
+	port := taken.Addr().(*net.TCPAddr).Port
+
+	p := startOrchestratorOn(t, shippedConfig(t), filepath.Join(t.TempDir(), "logs"), port)
+
+	exitStatus := p.waitExit()
+
+	out := p.output.String()
+	assert.Equal(t, 1, exitStatus, "a refused start is exit status 1\n%s", out)
+	assert.Contains(t, out, "failed to listen on gRPC port")
+	assert.Contains(t, out, taken.Addr().String(), "the line names the address")
+	assert.NotContains(t, out, "HTTP server starting", "nothing is served before the refusal")
 }
