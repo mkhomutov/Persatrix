@@ -125,16 +125,16 @@ Collected via `pip-licenses --from=mixed` from an install of the `agents` packag
 | `mypy_extensions` | 1.1.0 | MIT | [link](https://github.com/python/mypy_extensions) |
 | `numpy` | 2.4.6 | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 | [link](https://numpy.org) |
 | `openai` | 3.37.0 | Apache-2.0 | [link](https://github.com/openai/openai-python) |
-| `opentelemetry-api` | 1.45.1 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/opentelemetry-api) |
+| `opentelemetry-api` | 1.45.2 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/opentelemetry-api) |
 | `opentelemetry-exporter-http-transport` | 0.66b1 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/exporter/opentelemetry-exporter-http-transport) |
 | `opentelemetry-exporter-otlp-common` | 0.66b1 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/exporter/opentelemetry-exporter-otlp-common) |
 | `opentelemetry-exporter-otlp-proto-common` | 1.45.1 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/exporter/opentelemetry-exporter-otlp-proto-common) |
 | `opentelemetry-exporter-otlp-proto-http` | 1.45.1 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/exporter/opentelemetry-exporter-otlp-proto-http) |
-| `opentelemetry-instrumentation` | 0.66b1 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python-contrib/tree/main/opentelemetry-instrumentation) |
-| `opentelemetry-instrumentation-grpc` | 0.66b1 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python-contrib/tree/main/instrumentation/opentelemetry-instrumentation-grpc) |
+| `opentelemetry-instrumentation` | 0.66b2 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python-contrib/tree/main/opentelemetry-instrumentation) |
+| `opentelemetry-instrumentation-grpc` | 0.66b2 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python-contrib/tree/main/instrumentation/opentelemetry-instrumentation-grpc) |
 | `opentelemetry-proto` | 1.45.1 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/opentelemetry-proto) |
-| `opentelemetry-sdk` | 1.45.1 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/opentelemetry-sdk) |
-| `opentelemetry-semantic-conventions` | 0.66b1 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/opentelemetry-semantic-conventions) |
+| `opentelemetry-sdk` | 1.45.2 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/opentelemetry-sdk) |
+| `opentelemetry-semantic-conventions` | 0.66b2 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/opentelemetry-semantic-conventions) |
 | `packaging` | 26.3 | Apache-2.0 OR BSD-2-Clause | [link](https://github.com/pypa/packaging) |
 | `pandas` | 2.3.3 | BSD License | [link](https://pandas.pydata.org) |
 | `pathspec` | 1.1.1 | Mozilla Public License 2.0 (MPL 2.0) | [link](https://python-path-specification.readthedocs.io/en/latest/index.html) |
