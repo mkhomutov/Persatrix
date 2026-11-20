@@ -2,6 +2,12 @@
 
 > Owning RFC: [0041-typed-event-taxonomy-lifecycle-callbacks.md](0041-typed-event-taxonomy-lifecycle-callbacks.md) · Target: **v0.4.0** (no version-plan doc exists yet — this plan is authored ahead of the v0.4.0 plan and slots into it when that lands). Reciprocal gate: [RFC 0044 PR 4b](0044-pr-plan.md) consumes the typed events PR 7 emits.
 
+> **Paused since 2026-11-07** with v0.4.0, until the next strategy review: no
+> PR from this plan starts or merges before then, and the drafts
+> [#754](https://github.com/mkhomutov/Persatrix/pull/754) and
+> [#755](https://github.com/mkhomutov/Persatrix/pull/755) wait with it
+> ([why](../v0.4.0-plan.md#paused-until-the-strategy-review)).
+
 ## Overview
 
 RFC 0041 Phase 1 is **vocabulary + adapter**: ship the event taxonomy, the callback Protocol + dispatcher, and the bounded in-process stream, then wrap today's cross-cutting concerns (wallet lease, sanitizer/redactor, F-3 recall filter) as callbacks — **with no user-visible behaviour change**. Phase 1 is **entirely in-process Python**: no transport surface, no proto change, no Go-orchestrator work (that is Phase 2, gated on [RFC 0040](0040-agent-orchestrator-transport-unification.md)).

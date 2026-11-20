@@ -8,6 +8,10 @@
 **Merge strategy**: Squash merge per [BRANCHING.md](../BRANCHING.md)
 **Spawned from**: row R2 of the [v0.4.0 plan](../v0.4.0-plan.md#progress); its row A2 is this plan's phase. Phase 1 is in the [v0.3.0 plan](0021-pr-plan.md).
 
+> **Paused since 2026-11-07** with v0.4.0, until the next strategy review: no
+> PR from this plan starts or merges before then
+> ([why](../v0.4.0-plan.md#paused-until-the-strategy-review)).
+
 > Sizes are calibrated (1.7× naive, the v0.1 factor). Every PR stays under 500
 > changed lines and writes its failing test first.
 
