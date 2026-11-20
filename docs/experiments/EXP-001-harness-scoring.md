@@ -225,16 +225,19 @@ Five more commands check the rest:
   raters scored differently, so they can agree on how the anchors apply.
 
 The practice was the harness's first real use, and its first runs were
-refused. On 2026-11-20 both raters' first practice runs, held from their
-empty folders, had been given Claude Code's commit and pull-request
-attribution lines. Claude Code gives every run outside a repository those
-lines, and the four runs the list of kinds came from had all run inside
-this one. As rule 7 of the deviation provides, the harness was corrected
-before any rater read a scored packet. It now knows that kind, and one more
-that Claude Code 2.1.321 and 2.1.325 often give a run after a tool call: a
-record of how the call's input was sent. Neither holds any session's words.
-The two refused runs stay in their logs, and their batches are held again
-whole.
+refused. On 2026-11-20 (UTC) both raters' first practice runs, held from
+their empty folders, had been given Claude Code's commit and pull-request
+attribution lines. Claude Code gives a run those lines unless its settings
+turn them off, as they are in the maintainer's checkout of this
+repository, and the four runs the list of kinds came from had all run
+there. As rule 7 of the deviation provides, the harness was corrected
+before any rater read a scored packet. It now knows that kind. It enters a
+run given it only when the lines are Claude Code's own for Fable 5.2,
+unchanged, since a settings file can put any words there and the run is
+shown them. From then on the raters' sessions run the commands from the
+commit that merged the correction, not the one rule 2 names, and each log
+line records the commit. The two refused runs stay in their logs, and
+their batches are held again whole.
 
 ## What PR 6d leaves
 
