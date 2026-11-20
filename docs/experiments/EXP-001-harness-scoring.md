@@ -1,7 +1,7 @@
 # EXP-001 — The harness, third part: scoring
 
 > **Status**: 🚧 **In Progress** — PR 6d ([#1091](https://github.com/mkhomutov/Persatrix/pull/1091)), the scoring, is the last harness PR; its choices freeze when it merges.
-> **Last updated**: 2026-11-10
+> **Last updated**: 2026-11-21
 > **Part of**: the [EXP-001 harness](EXP-001-harness.md), whose first part lists every harness PR; the [second part](EXP-001-harness-run.md) holds the judge, the practice run and the scored run
 
 The [second part](EXP-001-harness-run.md) reached its size limit, so PR
@@ -223,6 +223,18 @@ Five more commands check the rest:
   set-ups, for the result;
 - on a practice run, `rater-differences ROOT` lists the cells the two
   raters scored differently, so they can agree on how the anchors apply.
+
+The practice was the harness's first real use, and its first runs were
+refused. On 2026-11-20 both raters' first practice runs, held from their
+empty folders, had been given Claude Code's commit and pull-request
+attribution lines. Claude Code gives every run outside a repository those
+lines, and the four runs the list of kinds came from had all run inside
+this one. As rule 7 of the deviation provides, the harness was corrected
+before any rater read a scored packet. It now knows that kind, and one more
+that Claude Code 2.1.321 and 2.1.325 often give a run after a tool call: a
+record of how the call's input was sent. Neither holds any session's words.
+The two refused runs stay in their logs, and their batches are held again
+whole.
 
 ## What PR 6d leaves
 

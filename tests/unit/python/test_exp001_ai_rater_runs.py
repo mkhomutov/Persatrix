@@ -111,6 +111,34 @@ class TestARunsRecord:
         with pytest.raises(RaterRefused, match=kind):
             _enter(window, "person-1", prompt, _answer(prompt, extra=[hint]))
 
+    def test_a_run_given_the_attribution_lines_outside_a_repository_is_entered(
+        self, window: Path, notes: Path,
+    ) -> None:
+        # Both raters' first practice runs, on 2026-11-20 from their empty
+        # folders, were given Claude Code's commit and pull-request
+        # attribution lines, which it gives every run outside this repository.
+        prompt = _batches(window, notes)[0]
+        lines = attached(
+            "remote_session_change", url=None,
+            commit="Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>",
+            pr="Generated with [Claude Code](https://claude.com/claude-code)",
+            sendUserFileHint=False, managedCommit=False, managedPr=False,
+        )
+        assert _enter(window, "person-1", prompt, _answer(prompt, extra=[lines]))
+        (logged,) = _runs(prompt.parent)
+        assert "remote_session_change" in logged["given"]["kinds"]
+
+    def test_a_run_given_how_its_tool_calls_were_sent_is_entered(
+        self, window: Path, notes: Path,
+    ) -> None:
+        # Claude Code 2.1.321 and 2.1.325 give many runs this after a tool call.
+        prompt = _batches(window, notes)[0]
+        sent = attached("deferred_tools_record", entries=[],
+                        toolInputCopies=[{"id": "t0", "copy": "wire"}])
+        assert _enter(window, "person-1", prompt, _answer(prompt, extra=[sent]))
+        (logged,) = _runs(prompt.parent)
+        assert "deferred_tools_record" in logged["given"]["kinds"]
+
     def test_a_run_given_any_session_context_is_refused(self, window: Path, notes: Path) -> None:
         prompt = _batches(window, notes)[0]
         with pytest.raises(RaterRefused, match="session context"):

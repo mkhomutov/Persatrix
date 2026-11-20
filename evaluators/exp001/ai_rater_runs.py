@@ -49,10 +49,15 @@ _REFUSED = {  # what Claude Code adds to a record when a run is not as briefed
 }
 # Each kind of thing Claude Code 2.1 gives every run besides its brief, as
 # four real runs' records show. None of them carries a session's own words.
+# Two more came later. Outside any repository, as a rater's session is,
+# Claude Code gives every run its commit and pull-request attribution lines
+# (remote_session_change): both raters' first practice runs were refused for
+# them on 2026-11-20. After a tool call, Claude Code 2.1.321 and 2.1.325 often
+# record how the call's input was sent (deferred_tools_record).
 _GIVEN = frozenset({
     "agent_listing_delta", "auto_mode", "credential_org", "date", "deferred_tools_delta",
-    "environment", "instructions", "mcp_instructions_delta", "model", "prompt_snapshot",
-    "session_context", "skill_listing",
+    "deferred_tools_record", "environment", "instructions", "mcp_instructions_delta", "model",
+    "prompt_snapshot", "remote_session_change", "session_context", "skill_listing",
 })
 _SAID = frozenset({"text", "thinking", "redacted_thinking", "tool_use"})  # a reply's blocks
 _MODEL_LINE = re.compile(r"\A\s*model:\s*(\S+)\s*$", re.M)
