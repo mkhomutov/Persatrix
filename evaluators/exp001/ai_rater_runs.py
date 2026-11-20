@@ -49,11 +49,23 @@ _REFUSED = {  # what Claude Code adds to a record when a run is not as briefed
 }
 # Each kind of thing Claude Code 2.1 gives every run besides its brief, as
 # four real runs' records show. None of them carries a session's own words.
+# One more came later. Claude Code gives a run its commit and pull-request
+# attribution lines (remote_session_change) unless its settings turn them
+# off, as they are in the checkout of this repository where those four runs
+# were held. Both raters' first practice runs were refused for them on
+# 2026-11-20 (UTC). A settings file decides what the lines say, and the run
+# is shown them, so they are entered only as :data:`_ATTRIBUTION` holds them.
 _GIVEN = frozenset({
     "agent_listing_delta", "auto_mode", "credential_org", "date", "deferred_tools_delta",
     "environment", "instructions", "mcp_instructions_delta", "model", "prompt_snapshot",
-    "session_context", "skill_listing",
+    "remote_session_change", "session_context", "skill_listing",
 })
+_ATTRIBUTION = {  # Claude Code's own lines for a run of MODEL, as both raters' runs held them
+    "type": "remote_session_change", "url": None,
+    "commit": "Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>",
+    "pr": f"{chr(0x1F916)} Generated with [Claude Code](https://claude.com/claude-code)",
+    "sendUserFileHint": False, "managedCommit": False, "managedPr": False,
+}
 _SAID = frozenset({"text", "thinking", "redacted_thinking", "tool_use"})  # a reply's blocks
 _MODEL_LINE = re.compile(r"\A\s*model:\s*(\S+)\s*$", re.M)
 _NUMBERED = re.compile(r"(\d+)\t(.*)", re.S)
@@ -242,6 +254,10 @@ def _given(lines: list[dict[str, Any]]) -> tuple[dict[str, str], ...]:
         if kind not in _GIVEN:
             raise RaterRefused(f"the run's record shows it was given {kind}, which is not a "
                                "kind of thing Claude Code is known to give every run")
+        if kind == "remote_session_change" and attachment != _ATTRIBUTION:
+            raise RaterRefused("the run was given attribution lines that are not Claude Code's "
+                               f"own for {MODEL}; a settings file can put any words there, and "
+                               "the run is shown them")
         context = attachment.get("context") if kind == "session_context" else None
         if isinstance(context, dict) and context.get("gitStatus"):
             raise RaterRefused("the run was given a git status: a rater's session runs from "
