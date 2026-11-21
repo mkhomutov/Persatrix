@@ -181,8 +181,8 @@ def _tag_faults(config: dict[str, Any]) -> list[str]:
         where = entry.get("directory", entry.get("directories"))
         rules = {r["dependency-name"]: r for r in entry.get("ignore", [])}
         # `python:3.12-slim` has no patch part, so minor and major are every
-        # move there is; which Python the image runs is an open choice
-        # (ISSUE-0219).
+        # move there is; which Python the image runs is a choice made by
+        # hand, with the CI job that tests it (ISSUE-0219).
         if set(rules.get("python", {}).get("update-types", [])) != {
             "version-update:semver-major",
             "version-update:semver-minor",
