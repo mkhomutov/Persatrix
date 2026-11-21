@@ -5,7 +5,7 @@ status: resolved
 severity: medium
 area: ci
 created: 2026-11-10
-closed: 2026-11-16
+closed: 2026-11-21
 closed_pr: 1137
 refs:
   - Dockerfile.agent
@@ -208,3 +208,10 @@ release PR's smoke run, if that is run, or by whoever next runs a demo.
 > [ISSUE-0283](ISSUE-0283-provider-sdks-are-run-on-python-311-only.md).
 > Whether the job becomes a required check after some green runs on
 > `main` is the maintainer's setting.
+
+> 2026-11-21 — the item about `opentelemetry-api` in "What remains", in
+> the first note of 2026-11-16, no longer applies. The pin moved from
+> 1.45.1 to 1.45.2 in
+> [#1138](https://github.com/mkhomutov/Persatrix/pull/1138), which merged
+> on this day, before this fix did, and GitHub issue 1134 is closed. An
+> image built from the pins holds 1.45.2.
