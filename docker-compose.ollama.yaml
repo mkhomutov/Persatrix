@@ -45,7 +45,7 @@ x-ollama-pull-gate: &ollama-pull-gate
 services:
   # ─── Local model server (Ollama) ────────────────
   ollama:
-    image: ollama/ollama:0.24.0
+    image: ollama/ollama:0.40.16
     restart: unless-stopped
     volumes:
       - ollama-models:/root/.ollama
@@ -78,7 +78,7 @@ services:
   # against the `ollama` service (OLLAMA_HOST), then exits. `restart: "no"` so
   # it does not loop; the agents gate on its successful completion.
   ollama-pull:
-    image: ollama/ollama:0.24.0
+    image: ollama/ollama:0.40.16
     depends_on:
       ollama:
         condition: service_healthy
