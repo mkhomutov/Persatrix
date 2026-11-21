@@ -8,6 +8,10 @@
 **Merge strategy**: Squash merge per [BRANCHING.md](../BRANCHING.md)
 **Spawned from**: row R2 of the [v0.4.0 plan](../v0.4.0-plan.md#progress); its rows A3 and A4 are this plan's two phases. Phases 1–2 are in the [v0.3.0 plan](0009-pr-plan.md).
 
+> **Paused since 2026-11-07** with v0.4.0, until the next strategy review: no
+> PR from this plan starts or merges before then
+> ([why](../v0.4.0-plan.md#paused-until-the-strategy-review)).
+
 > Sizes are calibrated at 3.5× naive, the factor the
 > [Phases 1–2 plan](0009-pr-plan.md) recommends after every security PR there
 > landed above twice its estimate. Every PR stays under 500 changed lines and

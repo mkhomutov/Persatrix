@@ -114,6 +114,8 @@ default in outputs, edits, plans, and reviews.
 
 How releases are planned, reviewed, and shipped: [docs/methodology/README.md](../docs/methodology/README.md) — the release cycle (Phases 0–2: one version plan, implementation PRs, the tag PR), scope locks / cuttable items / amendments, the review process, and the process glossary. The RFC-level sub-cycle stays in [docs/development-workflow.md](../docs/development-workflow.md).
 
+**v0.4.0 is paused** since 2026-11-07 until the next strategy review: start no PR from its plan's remaining rows. Quality-review fixes (ISSUE-0196 onward), EXP-001's own work, and dependency and CI upkeep still land ([v0.4.0 plan](../docs/v0.4.0-plan.md#paused-until-the-strategy-review)).
+
 ## Status Hygiene
 
 Follow [Status Hygiene rules](../docs/development-workflow.md#status-hygiene). In brief:
