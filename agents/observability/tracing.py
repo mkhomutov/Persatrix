@@ -58,7 +58,7 @@ from ._env import env_str as _env
 _BAGGAGE_PROPAGATOR: TextMapPropagator = W3CBaggagePropagator()
 
 # W3CBaggagePropagator has been part of opentelemetry-api since 1.0.0 and
-# ``agents/pyproject.toml`` pins ``opentelemetry-api>=1.28.0,<2``, so this
+# ``agents/pyproject.toml`` asks for a far later release, so this
 # import is guaranteed to succeed.  An earlier draft of this module had a
 # ``try/except ImportError`` fallback to ``B3Format`` here, but B3 is a
 # *trace context* propagator (not a baggage propagator) so that fallback
