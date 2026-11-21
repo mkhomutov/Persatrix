@@ -76,8 +76,6 @@ exporters:
   prometheus:
     endpoint: 0.0.0.0:8889
     # Enable exemplars so histogram samples carry the originating trace_id.
-    # None reach Prometheus today: this exporter receives them and writes
-    # none out (docs/issues/ISSUE-0285-exemplars-never-reach-prometheus.md).
     # NOTE: exemplar passthrough only reaches Prometheus query results when
     # the upstream Prometheus is started with `--enable-feature=exemplar-storage`
     # (the dev compose stack already does — see docker-compose.yaml `prometheus`

@@ -405,8 +405,7 @@ Once RFC 0018 PR 3 lands the log↔trace enricher, the operator workflow is:
    across all participating processes.
 4. The same `trace_id` keys an exemplar on the histogram metric (RFC 0019
    PR 3), so a p99-latency spike on the dashboard is one click to the
-   trace and to the logs. (Not today: no exemplar reaches
-   Prometheus, [ISSUE-0285](issues/ISSUE-0285-exemplars-never-reach-prometheus.md).)
+   trace and to the logs.
 
 The `agent.persona.event` → `agent.persona.tick` Link (§ 10.3) means an
 autonomous tick that produced the slow LLM call is already linked back to
@@ -495,7 +494,7 @@ Configuration lives at [config/observability/otel-collector.yaml](../config/obse
 | Service | URL | Purpose |
 |---------|-----|---------|
 | Jaeger UI | http://localhost:16686 | Browse traces, follow Span Links |
-| Prometheus UI | http://localhost:9091 | Query metrics (exemplars do not arrive today, [ISSUE-0285](issues/ISSUE-0285-exemplars-never-reach-prometheus.md)) |
+| Prometheus UI | http://localhost:9091 | Query metrics, click exemplars to jump to traces |
 | Loki HTTP API | http://localhost:3100 | LogQL queries (e.g. `{trace_id="<id>"}`) |
 | OTEL Collector | localhost:4317 (gRPC), 4318 (HTTP) | OTLP ingest |
 
@@ -534,7 +533,7 @@ The RFC 0030 Tier-B salience bid (the dynamic no-pile-on layer downstream of the
 
 The RFC 0034 persona conversation window emits a `conversation_window.*` family (module-owned in `agents/observability/_metrics_conversation_window.py`; like the RFC 0051 `deliberation.*` / `reflexion.*` blocks it is deliberately *not* under the `agent.persona.*` umbrella — `metrics.py` is at the file-size cap, so the instruments live in a helper module). `conversation_window.cache_access{result=hit|miss}` is the per-turn fetch-cache look-up; hit rate is `hit / (hit + miss)` over *consulted* look-ups (a turn whose event carries no `message_id` consults neither, so the denominator stays honest). `conversation_window.cache_evictions` is the bounded-LRU eviction count — a sustained rate means the cache bound (`_WINDOW_CACHE` capacity, default 256) is undersized for the live channel count and thrashing. `conversation_window.fetch_duration` (ms histogram) is the cost of one real history fetch the cache exists to avoid; it is recorded on a **successful** fetch only, so a failed fetch's latency (a timeout is the worst case) never skews the steady-state cost the `max_turns` / `max_tokens` retune reads. `conversation_window.fallback{reason=fetch_failed|fetch_none}` is the §F silent-degradation signal — the window fell back to current-event-only despite an enabled config on a channel turn; a sustained rate is a history-endpoint outage masquerading as the feature working, so alert on it, not on a low hit rate.
 
-Histogram queries surface exemplars (`--enable-feature=exemplar-storage` is on by default in the dev compose). A p99 LLM-latency spike on the `agent_llm_duration_milliseconds` histogram exposes the originating `trace_id` next to the bucket sample; clicking it opens the trace in Jaeger. Today none arrive: the Collector receives the agents' exemplars and its Prometheus exporter writes none out, so there is nothing to click ([ISSUE-0285](issues/ISSUE-0285-exemplars-never-reach-prometheus.md)).
+Histogram queries surface exemplars (`--enable-feature=exemplar-storage` is on by default in the dev compose). A p99 LLM-latency spike on the `agent_llm_duration_milliseconds` histogram exposes the originating `trace_id` next to the bucket sample; clicking it opens the trace in Jaeger.
 
 ### 11.4 Correlated debugging from a trace ID
 

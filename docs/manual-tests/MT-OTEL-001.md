@@ -205,11 +205,6 @@ Service names are set via `OTEL_SERVICE_NAME`. The orchestrator ships as `persat
   their own Prometheus must enable the feature flag — the requirement is also restated next
   to the `prometheus` exporter in [config/observability/otel-collector.yaml](../../config/observability/otel-collector.yaml)).
 
-> **Known gap — no exemplars reach Prometheus
-> ([ISSUE-0285](../issues/ISSUE-0285-exemplars-never-reach-prometheus.md))**: the agents attach
-> exemplars and the Collector receives them, but its Prometheus exporter writes none out. Seen on
-> Collector 0.103.1 and 0.165.0 alike. Until that is fixed this step fails at its first check.
-
 **Verification**:
 - [ ] At least one exemplar is visible on the histogram quantile query
 - [ ] Pasting the exemplar `trace_id` into Jaeger opens the same workflow trace
