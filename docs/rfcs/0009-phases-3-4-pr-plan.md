@@ -10,7 +10,10 @@
 
 > **Paused since 2026-11-07** with v0.4.0, until the next strategy review: no
 > PR from this plan starts or merges before then
-> ([why](../v0.4.0-plan.md#paused-until-the-strategy-review)).
+> ([why](../v0.4.0-plan.md#paused-until-the-strategy-review)). The open half
+> of [ISSUE-0196](../issues/ISSUE-0196-shipped-shell-allowlist-voids-the-file-and-network-rules.md),
+> the environment a listed shell command inherits, waits with PR 16, which
+> files it.
 
 > Sizes are calibrated at 3.5× naive, the factor the
 > [Phases 1–2 plan](0009-pr-plan.md) recommends after every security PR there

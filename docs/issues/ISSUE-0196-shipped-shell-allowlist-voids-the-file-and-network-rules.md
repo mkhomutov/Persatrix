@@ -136,3 +136,9 @@ work. The list itself was already in the shipped config.
 > `/proc/<agent pid>/environ`. That is RFC 0009 Phase 4's, whose PR 16
 > files those gaps. Severity stays high for any config that lists an
 > interpreter.
+
+> 2026-11-21 — **the environment half waits with the v0.4.0 pause**, by the
+> maintainer's ruling. It belongs to RFC 0009 Phase 4 (row A4), whose PR 16
+> files it, and that row is paused until the next strategy review
+> ([v0.4.0 plan](../v0.4.0-plan.md#paused-until-the-strategy-review)). The
+> config half stays fixed.
