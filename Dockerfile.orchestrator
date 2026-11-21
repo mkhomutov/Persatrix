@@ -29,7 +29,7 @@ COPY web/ ./
 RUN npm run build
 
 # ─── Stage 2: Go orchestrator ───────────────────────────────
-FROM golang:1.26-alpine AS builder
+FROM golang:1.27-alpine AS builder
 WORKDIR /build
 COPY go.mod go.sum ./
 RUN go mod download
@@ -43,7 +43,7 @@ RUN rm -rf internal/ui/assets
 COPY --from=ui-builder /build/internal/ui/assets/ internal/ui/assets/
 RUN CGO_ENABLED=0 go build -o persatrix-server ./cmd/orchestrator
 
-FROM alpine:3.20
+FROM alpine:3.24
 RUN apk --no-cache add ca-certificates wget
 COPY --from=builder /build/persatrix-server /usr/local/bin/
 
