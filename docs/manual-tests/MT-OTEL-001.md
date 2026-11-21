@@ -2,9 +2,9 @@
 
 **Test ID**: `MT-OTEL-001`
 **Feature Area**: Observability (traces + metrics)
-**Version**: 1.1
+**Version**: 1.2
 **Created**: 2026-04-24
-**Last Updated**: 2026-04-24
+**Last Updated**: 2026-11-21
 **Status**: Active
 
 ---
@@ -92,13 +92,16 @@ docker compose ps
 - All compose services listed: `orchestrator`, `agent-planner`, `agent-coder`, `agent-reviewer`,
   `jaeger`, `prometheus`, `loki`, `otel-collector` (container names are project-prefixed, e.g.
   `persatrix-orchestrator-1`).
-- `orchestrator`, agent services, `prometheus`, and `loki` report `(healthy)`. `otel-collector`
-  reports `Up …` (no healthcheck — the upstream `otel/opentelemetry-collector-contrib` image is
-  distroless and ships no probe binary; this is documented as a deferred item in the RFC 0019
-  closeout).
+- `orchestrator`, agent services and `prometheus` report `(healthy)`. `otel-collector` and `loki`
+  report `Up …`: neither has a healthcheck, because neither image has a shell or a program a
+  check could run (the Collector's is a deferred item in the RFC 0019 closeout; Loki's went when
+  its image dropped `wget` in 3.7). Ask Loki from the host instead:
+  <http://localhost:3100/ready> answers `ready` once the ingester has started, and 503 for about
+  a minute after a cold start.
 
 **Verification**:
 - [ ] All compose services running
+- [ ] Loki answers `ready` at <http://localhost:3100/ready>
 - [ ] Jaeger UI reachable at <http://localhost:16686>
 - [ ] Prometheus UI reachable at <http://localhost:9091>
 
@@ -201,6 +204,11 @@ Service names are set via `OTEL_SERVICE_NAME`. The orchestrator ships as `persat
   in [docker-compose.yaml](../../docker-compose.yaml) already enables it; forks pointing at
   their own Prometheus must enable the feature flag — the requirement is also restated next
   to the `prometheus` exporter in [config/observability/otel-collector.yaml](../../config/observability/otel-collector.yaml)).
+
+> **Known gap — no exemplars reach Prometheus
+> ([ISSUE-0285](../issues/ISSUE-0285-exemplars-never-reach-prometheus.md))**: the agents attach
+> exemplars and the Collector receives them, but its Prometheus exporter writes none out. Seen on
+> Collector 0.103.1 and 0.165.0 alike. Until that is fixed this step fails at its first check.
 
 **Verification**:
 - [ ] At least one exemplar is visible on the histogram quantile query
