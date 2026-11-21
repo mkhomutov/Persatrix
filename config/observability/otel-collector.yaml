@@ -64,8 +64,12 @@ processors:
 
 exporters:
   # Traces -> Jaeger (OTLP gRPC ingest enabled in docker-compose.yaml via
-  # COLLECTOR_OTLP_ENABLED=true).
-  otlp/jaeger:
+  # COLLECTOR_OTLP_ENABLED=true). The type names `otlp_grpc` and `otlp_http`
+  # replace the older `otlp` and `otlphttp`, which Collector 0.165 still
+  # accepts with a deprecation warning. An older Collector may refuse the
+  # new names (0.103.1 does, with `unknown type`); a fork can check its own
+  # with `otelcol-contrib validate --config=<this file>`.
+  otlp_grpc/jaeger:
     endpoint: jaeger:4317
     tls:
       insecure: true
@@ -82,7 +86,7 @@ exporters:
     enable_open_metrics: true
 
   # Logs -> Loki via the OTLP HTTP push endpoint.
-  otlphttp/loki:
+  otlp_http/loki:
     endpoint: http://loki:3100/otlp
     tls:
       insecure: true
@@ -110,7 +114,7 @@ service:
     traces:
       receivers: [otlp]
       processors: [tail_sampling, batch]
-      exporters: [otlp/jaeger]
+      exporters: [otlp_grpc/jaeger]
     metrics:
       receivers: [otlp]
       processors: [batch]
@@ -118,4 +122,4 @@ service:
     logs:
       receivers: [otlp]
       processors: [batch]
-      exporters: [otlphttp/loki]
+      exporters: [otlp_http/loki]
