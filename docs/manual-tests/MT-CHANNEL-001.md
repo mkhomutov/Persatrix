@@ -57,7 +57,8 @@ no `channel create` CLI subcommand exists in v0.3.0; the test does the create vi
 - ☐ All local ports free: 8080, 9090, 4317/4318, 8889, 16686, 3100, 9091 (the agents publish none)
 - ☐ CLI built: `make build-cli` → `bin/persatrix(.exe)`
 - ☐ Compose stack up and healthy: `docker compose up -d --build` then
-  `docker compose ps` shows every service `Up … (healthy)`
+  `docker compose ps` shows the orchestrator, the agents and `prometheus` as `Up … (healthy)`,
+  and `otel-collector`, `jaeger` and `loki` as `Up` (they have no healthcheck)
 
 ### Stack-up procedure (shared with MT-CHANNEL-002 / MT-CHANNEL-003)
 

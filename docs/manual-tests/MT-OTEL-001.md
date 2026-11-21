@@ -46,6 +46,7 @@ RFC 0019 closeout follow-up issue's Loki query-path item); per-agent dashboard /
 - `agents/tests/test_observability_tracing.py`
 - `agents/tests/test_observability_metrics.py`
 - `internal/observability/telemetry_test.go`, `metrics_test.go`
+- `tests/unit/python/test_observability_stack_config.py` (no healthcheck runs a program in the Loki or Collector image; the Collector config uses current exporter names)
 
 ---
 
@@ -94,8 +95,8 @@ docker compose ps
   `persatrix-orchestrator-1`).
 - `orchestrator`, agent services and `prometheus` report `(healthy)`. `otel-collector` and `loki`
   report `Up …`: neither has a healthcheck, because neither image has a shell or a program a
-  check could run (the Collector's is a deferred item in the RFC 0019 closeout; Loki's went when
-  its image dropped `wget` in 3.7). Ask Loki from the host instead:
+  check could run (the Collector's is a deferred item in the RFC 0019 closeout; Loki's went because
+  the `grafana/loki:3.7.10` image compose pins has no `wget`). Ask Loki from the host instead:
   <http://localhost:3100/ready> answers `ready` once the ingester has started, and 503 for about
   a minute after a cold start.
 

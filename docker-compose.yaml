@@ -415,8 +415,8 @@ services:
     command: ["-config.file=/etc/loki/local-config.yaml"]
     ports:
       - "127.0.0.1:3100:3100"   # Loki HTTP API (push + query)
-    # No healthcheck: since Loki 3.7 the image has no shell and no `wget`,
-    # and Loki has no health flag of its own, so a check run inside the
+    # No healthcheck: the 3.7.10 image pinned above has no shell and no
+    # `wget`, and Loki has no health flag of its own, so a check run inside the
     # container could never pass and Loki would show `unhealthy` while it
     # works. The Collector has none for the same reason. To see whether Loki
     # is ready, ask it from the host: http://localhost:3100/ready answers 200

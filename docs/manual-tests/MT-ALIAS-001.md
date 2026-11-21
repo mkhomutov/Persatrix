@@ -87,7 +87,8 @@ automated `cost-attribution gate` (`internal/server/cost_alias_gate_test.go` +
 
 - ☐ Stack up via `make demo-anthropic`
   (`docker compose -f docker-compose.yaml -f docker-compose.anthropic.yaml up -d --build` —
-  orchestrator + agents + collector + jaeger + prometheus), all services healthy. The overlay
+  orchestrator + agents + collector + jaeger + prometheus), the orchestrator, agents and Prometheus
+  `(healthy)` and the rest `Up` (the Collector, Jaeger and Loki have no healthcheck). The overlay
   mounts [`config/demo/anthropic/optimization.yaml`](../../config/demo/anthropic/optimization.yaml),
   which configures `quality` → `anthropic` / `claude-sonnet-5-5` (priced `2.00` / `10.00`).
 - ☐ `make validate` exits 0 (base config valid; `schema_version: "0.2"`).
