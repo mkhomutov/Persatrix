@@ -65,3 +65,9 @@ the caller's principal and by protection level.
 
 > 2026-11-10 — found by a whole-repository quality review of `main` at
 > `ee9cfaac`; confirmed by reading the route policy and the query.
+
+> 2026-11-21 — **waits with the v0.4.0 pause**, by the maintainer's ruling.
+> The route change goes with ISSUE-0117's fix, which row A4 carries, and the
+> gap opens only when account administration (RFC 0039 Phase 3, row D3)
+> ships; both rows are paused until the next strategy review
+> ([v0.4.0 plan](../v0.4.0-plan.md#paused-until-the-strategy-review)).

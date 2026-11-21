@@ -9,6 +9,9 @@
 > [v0.4.0 plan](v0.4.0-plan.md) opening.
 > **Next review**: the first after EXP-001's result is published, or
 > 2026-12-15, whichever comes first — see [§10](#10-review-cadence-and-log).
+> v0.4.0 is paused until then, by the maintainer's decision of 2026-11-07
+> ([v0.4.0 plan](v0.4.0-plan.md#paused-until-the-strategy-review)), and by
+> a ruling of 2026-11-21 this document's rewrite waits for that review too.
 > **Supersedes**: the four September 2026 strategy reviews,
 > [#895](https://github.com/mkhomutov/Persatrix/pull/895),
 > [#896](https://github.com/mkhomutov/Persatrix/pull/896),

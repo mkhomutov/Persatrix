@@ -1,6 +1,12 @@
 # RFC 0041 — PR Implementation Plan (Phase 1 — vocabulary + adapter)
 
-> Owning RFC: [0041-typed-event-taxonomy-lifecycle-callbacks.md](0041-typed-event-taxonomy-lifecycle-callbacks.md) · Target: **v0.4.0** (no version-plan doc exists yet — this plan is authored ahead of the v0.4.0 plan and slots into it when that lands). Reciprocal gate: [RFC 0044 PR 4b](0044-pr-plan.md) consumes the typed events PR 7 emits.
+> Owning RFC: [0041-typed-event-taxonomy-lifecycle-callbacks.md](0041-typed-event-taxonomy-lifecycle-callbacks.md) · Target: **v0.4.0**, as the cuttable row D4 of the [v0.4.0 plan](../v0.4.0-plan.md#progress). Reciprocal gate: [RFC 0044 PR 4b](0044-pr-plan.md) consumes the typed events PR 7 emits.
+
+> **Paused since 2026-11-07** with v0.4.0, until the next strategy review: no
+> PR from this plan starts or merges before then, and the drafts
+> [#754](https://github.com/mkhomutov/Persatrix/pull/754) and
+> [#755](https://github.com/mkhomutov/Persatrix/pull/755) wait with it
+> ([why](../v0.4.0-plan.md#paused-until-the-strategy-review)).
 
 ## Overview
 
