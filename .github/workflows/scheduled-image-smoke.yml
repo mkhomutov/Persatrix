@@ -1,0 +1,185 @@
+name: Scheduled Image Build and Offline Smoke
+
+# Builds the product images from `main` once a week and runs the offline
+# demo on them, with a verdict. Until 2026-11 no workflow built an image at
+# all: the first step that did was an opt-in gate of the release sweep, run
+# once per release, so a fault that only the image has could sit on `main`
+# for a whole release (ISSUE-0219).
+#
+# Two checks, each a `make` target, so a run on a contributor's machine is
+# the same commands:
+#
+#   make image-pins-check   builds the agent image with and without the
+#                           provider SDKs and fails if a package in either
+#                           is not at the version CI pins;
+#   make smoke-offline      builds both product images, starts the whole
+#                           stack on the mock provider, convenes the
+#                           roundtable and fails unless its agents post in
+#                           this run: messages that were there before the
+#                           convening do not count.
+#
+# No key, no provider call, nothing spent: the workflow reads no secret.
+#
+# It is weekly and not a job on every pull request on purpose: ci.yml leaves
+# full image builds out, and a build of both images and a start of the stack
+# takes several minutes. One check failing does not stop the other
+# (`!cancelled()` in each `if`), so one Monday shows both results. A failed
+# step fails the job, and that makes the last step open or update the
+# "Scheduled Image Smoke Failure" issue, which names what failed and the
+# command to run. tests/unit/python/test_scheduled_image_smoke.py holds the
+# steps and the issue's text.
+#
+# Each step that can hang has a time limit of its own, and together they are
+# shorter than the job's. A step over its limit fails as a step, so the logs
+# and the issue still follow. A job that reaches its own limit is cancelled
+# instead, and a cancelled job reports nothing. This is how GitHub documents
+# the two limits; no run of this workflow has shown it yet.
+#
+# A finding is fixed by a change of its own, never in this workflow.
+
+on:
+  schedule:
+    # Mondays at 07:00 UTC, an hour after the dependency audit
+    - cron: '0 7 * * 1'
+  workflow_dispatch: # Allow manual trigger
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  image-smoke:
+    name: Weekly Image Build and Offline Smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v7
+        id: checkout
+
+      # ─── The agent image against the pins ───────────────────
+      # Needs Docker and the runner's own python3 only: the comparison runs
+      # inside the image, on the image's Python.
+      - name: Build the agent image both ways and check each package is at its pin
+        id: image-pins
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        timeout-minutes: 15
+        run: make image-pins-check
+
+      # ─── The offline smoke ──────────────────────────────────
+      # The smoke arms and convenes the roundtable through the CLI, which
+      # `make smoke-offline` builds first. The toolchain is the one CI uses,
+      # from cli/rust-toolchain.toml.
+      - name: Install the Rust toolchain pinned in cli/rust-toolchain.toml
+        id: setup-rust
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        timeout-minutes: 5
+        working-directory: cli
+        run: rustup toolchain install --no-self-update
+
+      - name: Build the product images, start the offline stack and check the roundtable talks
+        id: smoke
+        if: ${{ !cancelled() && steps.setup-rust.outcome == 'success' }}
+        timeout-minutes: 30
+        run: make smoke-offline
+
+      - name: Show the last log lines of the stack
+        id: smoke-logs
+        if: ${{ !cancelled() && steps.smoke.outcome == 'failure' }}
+        timeout-minutes: 2
+        run: make smoke-offline-logs
+
+      - name: Stop the stack
+        id: stop
+        if: ${{ always() && steps.checkout.outcome == 'success' }}
+        timeout-minutes: 5
+        run: make docker-down
+
+      # ─── Report ─────────────────────────────────────────────
+      - name: Create issue on failure
+        if: failure()
+        uses: actions/github-script@v9
+        env:
+          CHECK_IMAGE_PINS: ${{ steps.image-pins.outcome }}
+          CHECK_SMOKE: ${{ steps.smoke.outcome }}
+          SETUP_CHECKOUT: ${{ steps.checkout.outcome }}
+          SETUP_RUST: ${{ steps.setup-rust.outcome }}
+        with:
+          script: |
+            const title = 'Scheduled Image Smoke Failure';
+            const runDate = new Date().toISOString().split('T')[0];
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            // One entry per check. `rerun` is the command its step runs, so
+            // the same line works on a contributor's machine with Docker.
+            const checks = [
+              {
+                name: 'The agent image against the pins',
+                outcome: process.env.CHECK_IMAGE_PINS,
+                rerun: 'make image-pins-check',
+                fix: 'A package in the image is not at the version in `.github/python-constraints-providers.txt`, is installed more than once, or the image did not build from the pins; a step that ran out of its time fails the same way. The run log names each package. If a pin no longer installs on the image\'s Python, move it with `make python-constraints` after raising the floor in `agents/pyproject.toml`; if `Dockerfile.agent` lost its `-c`, restore it.',
+              },
+              {
+                name: 'The offline smoke',
+                outcome: process.env.CHECK_SMOKE,
+                rerun: 'make smoke-offline',
+                fix: 'An image did not build, the stack did not start, the roundtable\'s agents did not post on the mock provider in this run (messages from an earlier run do not count), or the step ran out of its time. The step after it printed the last log lines of each service (`make smoke-offline-logs`). Stop the stack with `make docker-down`.',
+              },
+            ];
+
+            // The steps a check waits for. A check whose set-up failed is
+            // skipped, so it shows below as not run.
+            const setups = [
+              { name: 'the checkout', outcome: process.env.SETUP_CHECKOUT },
+              { name: 'the Rust toolchain', outcome: process.env.SETUP_RUST },
+            ];
+
+            const word = (outcome) =>
+              outcome === 'success' ? 'passed' : outcome === 'failure' ? '**FAILED**' : 'did not run';
+            const failed = checks.filter((c) => c.outcome === 'failure');
+            const brokenSetups = setups.filter((s) => s.outcome === 'failure');
+
+            let summary = checks.map((c) => `- ${c.name}: ${word(c.outcome)}`).join('\n');
+            if (brokenSetups.length > 0) {
+              summary += `\n\n**Set-up failed: ${brokenSetups.map((s) => s.name).join(', ')}.** A check shown above as "did not run" was not judged: that is a fault of the run, not of an image. Read the log, then run the workflow again from the Actions tab.`;
+            } else if (failed.length === 0) {
+              summary += '\n\nNeither check and no set-up step failed, so another step did (stopping the stack, or this report). Read the log.';
+            }
+            const details = failed
+              .map((c) => `### ${c.name}\n\nRe-run it locally from the repository root (it needs Docker):\n\n\`\`\`sh\n${c.rerun}\n\`\`\`\n\n${c.fix}`)
+              .join('\n\n');
+
+            const body = `The weekly image build and offline smoke failed (run date: ${runDate}, [run ${context.runId}](${runUrl})).
+
+            ${summary}
+
+            ${details}
+            `;
+
+            // Check if an open issue already exists with this title
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'docker,automated'
+            });
+
+            const existingIssue = issues.data.find(issue => issue.title === title);
+
+            if (existingIssue) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existingIssue.number,
+                body: `## New Image Smoke Failure (${runDate})\n\n${body}`
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: title,
+                body: body,
+                labels: ['docker', 'automated']
+              });
+            }

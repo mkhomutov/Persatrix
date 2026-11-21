@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Docker build-context hygiene — prove `.dockerignore` excludes nested node_modules.
+"""Docker build-context hygiene — prove `.dockerignore` excludes nested node_modules
+and lets through the one file the agent image copies from `.github/`.
 
 `Dockerfile.orchestrator` runs a clean `npm ci` inside the image and then does
 `COPY web/ ./`. If `.dockerignore` fails to exclude the host's `web/node_modules`,
@@ -20,6 +21,14 @@ so `COPY web/ ./` copies nothing and the probe passes vacuously even with the
 buggy pattern — this is exactly why the original break was invisible to CI. We
 therefore plant a sentinel under `web/node_modules/` before probing and assert
 it does NOT reach the image.
+
+The second probe is the other direction (ISSUE-0219): `Dockerfile.agent`
+copies `.github/python-constraints-providers.txt` into the image and installs
+from it, so a `.dockerignore` rule that hides that file breaks the image
+build, and no pull request builds the image. The probe copies the file out of
+the context in a build of its own. It needs real Docker for the same reason
+as the first: a rule such as `.git*` or `**/*.txt` hides the file, and only
+Docker's own matcher says so for every spelling.
 
 Usage::
 
@@ -61,6 +70,18 @@ RUN if [ -e node_modules/{SENTINEL_NAME} ]; then \\
     else \\
         echo "clean: web/node_modules excluded from the build context"; \\
     fi
+"""
+
+
+# The file `Dockerfile.agent` copies into the image and installs from, and a
+# throwaway build that copies it the same way. A context without the file
+# fails at the COPY.
+PINS_FILE = ".github/python-constraints-providers.txt"
+PINS_PROBE_IMAGE_TAG = "persatrix-dockerignore-pins-probe:check"
+PINS_PROBE_DOCKERFILE = f"""\
+FROM alpine:3.20
+COPY {PINS_FILE} /pins.txt
+RUN test -s /pins.txt
 """
 
 
@@ -122,6 +143,43 @@ def run_probe() -> int:
         )
 
 
+def run_pins_probe() -> int:
+    """Return 0 if the agent image's pins file reaches the build context, else 1."""
+    try:
+        proc = subprocess.run(
+            ["docker", "build", "--no-cache", "-f", "-", "-t", PINS_PROBE_IMAGE_TAG, "."],
+            cwd=REPO_ROOT,
+            input=PINS_PROBE_DOCKERFILE,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+        if proc.returncode != 0:
+            print(proc.stdout, end="")
+            print(
+                f"\nFAIL: {PINS_FILE} did not reach the Docker build context.\n"
+                "      `Dockerfile.agent` copies it into the image and installs from it, so\n"
+                "      no rule of `.dockerignore` may hide it. See\n"
+                "      docs/issues/ISSUE-0219-agent-image-is-not-what-ci-tests.md.",
+            )
+            return 1
+        print(f"OK: the build context holds {PINS_FILE}, which the agent image copies.")
+        return 0
+    finally:
+        subprocess.run(
+            ["docker", "image", "rm", "-f", PINS_PROBE_IMAGE_TAG],
+            cwd=REPO_ROOT,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+
+def run_probes() -> int:
+    """Run both probes, whatever the first says; 0 only when both pass."""
+    ends = [run_probe(), run_pins_probe()]
+    return 0 if all(end == 0 for end in ends) else 1
+
+
 def main() -> int:
     ensure_utf8_stdout()
     parser = argparse.ArgumentParser(description=__doc__)
@@ -140,7 +198,7 @@ def main() -> int:
         print(f"SKIP: {msg}; skipping build-context hygiene check (pass --strict to require it).")
         return 0
 
-    return run_probe()
+    return run_probes()
 
 
 if __name__ == "__main__":

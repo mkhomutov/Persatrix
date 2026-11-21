@@ -27,10 +27,21 @@ ENV PERSATRIX_OPTIMIZATION_CONFIG=/app/config/optimization.yaml
 # single-provider deployment stays lean. AGENT_EXTRAS lets a provider demo
 # overlay install its extra at build time (e.g. docker-compose.gemini.yaml sets
 # `AGENT_EXTRAS: gemini` → `pip install "./agents[gemini]"`, pulling in
-# google-genai). Default empty → `pip install "./agents"`, byte-for-byte the
-# same closure every non-extra image ships today.
+# google-genai). Default empty → `pip install "./agents"`, the same packages
+# every non-extra image ships.
+#
+# ISSUE-0219 — the install is pinned. `-c` holds every package to the version
+# in .github/python-constraints-providers.txt, the file CI's jobs install
+# from (it holds every pin of .github/python-constraints.txt, plus the
+# provider SDKs' and what only they need, so the one file serves an image
+# built with or without AGENT_EXTRAS). Without it this line took the newest
+# release of each dependency on the day of the build, so the image could run
+# versions no check had ever seen. The versions in an image now move only
+# when the pins move. `make image-pins-check` builds the image both ways and
+# fails on a package that is not at its pin.
 ARG AGENT_EXTRAS=""
-RUN pip install --no-cache-dir "./agents${AGENT_EXTRAS:+[$AGENT_EXTRAS]}"
+COPY .github/python-constraints-providers.txt /tmp/python-constraints.txt
+RUN pip install --no-cache-dir -c /tmp/python-constraints.txt "./agents${AGENT_EXTRAS:+[$AGENT_EXTRAS]}"
 
 # RFC 0009 PR 1b: copy prompts into site-packages where the installed package
 # looks for them. The package resolves prompts relative to

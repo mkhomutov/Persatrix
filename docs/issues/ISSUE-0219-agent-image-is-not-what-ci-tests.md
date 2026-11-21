@@ -1,15 +1,24 @@
 ---
 id: ISSUE-0219
 summary: "No CI job builds the product images. The agent image runs Python 3.12 and installs the newest allowed version of every dependency, while every CI job tests Python 3.11 at pinned versions. Nothing shows a fault that only the image has before merge; the first step that builds the images is an opt-in smoke run in the release PR."
-status: open
+status: resolved
 severity: medium
 area: ci
 created: 2026-11-10
+closed: 2026-11-21
+closed_pr: 1137
 refs:
   - Dockerfile.agent
   - Dockerfile.orchestrator
   - .github/workflows/ci.yml
+  - .github/workflows/scheduled-image-smoke.yml
   - .github/python-constraints.txt
+  - .github/python-constraints-providers.txt
+  - scripts/checks/image_pins.py
+  - scripts/checks/offline_smoke.py
+  - docs/methodology/branch-protection.json
+  - docs/issues/ISSUE-0277-advisory-audit-does-not-read-the-pins-of-the-images-python.md
+  - docs/issues/ISSUE-0278-release-sweeps-offline-smoke-passes-when-nothing-convenes.md
   - scripts/release/sweep.py
   - Makefile
   - docs/methodology/release-cycle.md
@@ -103,3 +112,106 @@ release PR's smoke run, if that is run, or by whoever next runs a demo.
 > unaudited until an audit also runs on the image's Python
 > ([ISSUE-0218](ISSUE-0218-advisory-scanning-covers-rust-only.md) tracks
 > the weekly audit).
+
+> 2026-11-16 — resolved by [#1137](https://github.com/mkhomutov/Persatrix/pull/1137), on the maintainer's three
+> choices.
+>
+> **A weekly run on `main`, plus a manual trigger.**
+> `.github/workflows/scheduled-image-smoke.yml` builds the product images
+> every Monday and runs two checks, each a `make` target: `make
+> image-pins-check` and `make smoke-offline`. A failure opens or updates
+> one GitHub issue that names the check and its command. No job on a pull
+> request builds an image, as before. `make smoke-offline` is the offline
+> demo with a verdict: `make demo-autonomous` only warns when the
+> convening does not land, so the new target fails unless at least two of
+> the roundtable's agents have posted three messages.
+>
+> **The image's install is pinned.** `Dockerfile.agent` passes
+> `.github/python-constraints-providers.txt` to its `pip install`, with
+> and without `AGENT_EXTRAS`. Built from `main` on this day, the image
+> held 22 of 58 packages at another version than the pins (23 of 80 with
+> both provider SDKs): `openai` 3.51.0 for the pinned 3.37.0, `grpcio`
+> 1.85.1 for 1.84.1, the OpenTelemetry packages a patch release on. Built
+> from the changed file, all 58, and all 80, are at their pin. The
+> comparison runs inside the image, on its own Python, because the file
+> pins `numpy` differently from Python 3.12.
+>
+> **Both Python versions are tested in CI.** A new job, `Python 3.12
+> (unit tests)`, runs the unit suite on the image's Python, installed
+> from the same pins. Every other job stays on 3.11, the oldest Python
+> the package supports. Run here on both from the pins, on macOS: 8,912
+> passed and 19 skipped on each, with the same outcome for every one of
+> the 8,931 tests. The job is not required: which checks `main` requires
+> is the owner's setting, and `docs/methodology/branch-protection.json`
+> now names the job under `not_required`, so that a job outside the
+> required set is a recorded choice. The image stays on
+> `python:3.12-slim`; a move to another minor is made by hand, with the
+> job.
+>
+> What remains after this, none of it this issue's:
+>
+> - The weekly advisory audit reads the pins as Python 3.11 reads them,
+>   so the pins that apply only on the image's 3.12 are not audited
+>   ([ISSUE-0277](ISSUE-0277-advisory-audit-does-not-read-the-pins-of-the-images-python.md)).
+>   Today that is one package, `numpy` 2.5.4.
+> - Nothing runs the two optional provider SDKs on the image's Python:
+>   their 17 tests run on 3.11, and the 3.12 job installs no SDK
+>   ([ISSUE-0283](ISSUE-0283-provider-sdks-are-run-on-python-311-only.md)).
+> - The tools that build a package during the install are still not
+>   pinned, in the image as in CI
+>   ([ISSUE-0171](ISSUE-0171-build-dependencies-float-past-the-ci-pins.md)).
+> - Pinning the image holds it at the pinned `opentelemetry-api` 1.45.1,
+>   the release the weekly dependency audit reported an advisory against
+>   on 2026-11-16 (CVE-2026-126360, fixed in 1.45.2;
+>   [GitHub issue 1134](https://github.com/mkhomutov/Persatrix/issues/1134));
+>   an unpinned build had moved to 1.45.2. The image follows when that
+>   pin moves, and whether it moves before this fix merges is the
+>   maintainer's decision.
+> - The release sweep's own "offline smoke" gate still runs `make
+>   demo-autonomous`, without the verdict
+>   ([ISSUE-0278](ISSUE-0278-release-sweeps-offline-smoke-passes-when-nothing-convenes.md)).
+> - The weekly workflow has not run: a scheduled workflow runs only from
+>   `main`. Its two targets were run by hand with Docker, and tests hold
+>   its steps and the text of the issue it opens. Its first run needs a
+>   manual trigger after the merge.
+
+> 2026-11-16 — changes after the review of pull request 1137, on the
+> maintainer's decisions.
+>
+> **The smoke counts only what its own run posted.** `make smoke-offline`
+> passed on an earlier run's messages: the roundtable's history is on a
+> volume that `make docker-down` keeps, the check read all of it, and the
+> demo ends with a warning when the convening does not land. A stack
+> that came up and convened nothing therefore passed on a checkout that
+> had run the demo before. The check now writes down which messages the
+> channel holds after the stack is up and before the convening, and
+> counts only the others. It goes by message ids as the orchestrator
+> reports them, so no clock is compared; the host and the containers do
+> not share one. For this the demo target is two halves, the start and
+> the convening, and the smoke takes its mark between them. The other
+> way, giving the smoke volumes of its own, was not taken: it would have
+> needed a second compose project on the same ports, with its own stop
+> and clean-up.
+>
+> **Smaller ones.** The pin check fails when any image's run does not
+> end with a pass (a run killed by a signal counted as one), and when a
+> package is installed twice. The build-context job, which is required
+> on every pull request, now also proves with a real build that
+> `.dockerignore` does not hide the pins file the image copies. Each
+> step of the weekly workflow has a time limit of its own, so a check
+> that hangs fails and is reported, where a job cancelled at its own
+> limit reports nothing. Tests hold that the workflow reads no secret,
+> and that no step of `ci.yml` runs a make target that runs Docker.
+>
+> **Left as chosen.** The 3.12 job runs the unit suite and installs no
+> provider SDK. What that leaves untested is
+> [ISSUE-0283](ISSUE-0283-provider-sdks-are-run-on-python-311-only.md).
+> Whether the job becomes a required check after some green runs on
+> `main` is the maintainer's setting.
+
+> 2026-11-21 — the item about `opentelemetry-api` in "What remains", in
+> the first note of 2026-11-16, no longer applies. The pin moved from
+> 1.45.1 to 1.45.2 in
+> [#1138](https://github.com/mkhomutov/Persatrix/pull/1138), which merged
+> on this day, before this fix did, and GitHub issue 1134 is closed. An
+> image built from the pins holds 1.45.2.
