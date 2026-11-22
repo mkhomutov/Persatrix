@@ -67,8 +67,9 @@ exporters:
   # COLLECTOR_OTLP_ENABLED=true). The type names `otlp_grpc` and `otlp_http`
   # replace the older `otlp` and `otlphttp`, which Collector 0.165 still
   # accepts with a deprecation warning. An older Collector may refuse the
-  # new names (0.103.1 does, with `unknown type`); a fork can check its own
-  # with `otelcol-contrib validate --config=<this file>`.
+  # new names (0.103.1 does, with an `unknown type` error that names
+  # `otlp_grpc` or `otlp_http`); a fork can check its own with
+  # `otelcol-contrib validate --config=<this file>`.
   otlp_grpc/jaeger:
     endpoint: jaeger:4317
     tls:

@@ -554,7 +554,7 @@ The log-trace correlation contract is locked in by the `test_log_trace_correlati
 
 The dev compose images are conveniences for local debugging and for the schema-parity / E2E tests in CI. Production operators are expected to:
 
-- Run their own OpenTelemetry Collector (or accept Persatrix's reference config and pin the image tag). The reference config names its exporters `otlp_grpc/jaeger` and `otlp_http/loki`, which an older Collector refuses (0.103.1 does). Check it on yours first with `otelcol-contrib validate --config=otel-collector.yaml`: an `unknown type` error means that Collector needs the old names, `otlp` and `otlphttp`.
+- Run their own OpenTelemetry Collector (or accept Persatrix's reference config and pin the image tag). The reference config names its exporters `otlp_grpc/jaeger` and `otlp_http/loki`, which an older Collector refuses (0.103.1 does). Check it on yours first with `otelcol-contrib validate --config=otel-collector.yaml`: an `unknown type` error that names `otlp_grpc` or `otlp_http` means that Collector needs the old names, `otlp` and `otlphttp`.
 - Point the Collector at their own Jaeger / Tempo / Datadog / etc. trace backend, their own Prometheus, and their own Loki / Elasticsearch / etc. log store.
 - Apply auth at the OTLP exporter endpoint (Persatrix sends OTLP HTTP unauthenticated by default, consistent with how the Go orchestrator already behaves).
 - Override the Collector's policies to match their own retention, sampling, and PII budgets.

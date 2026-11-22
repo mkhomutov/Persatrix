@@ -4,7 +4,7 @@
 **Feature Area**: Observability (traces + metrics)
 **Version**: 1.2
 **Created**: 2026-04-24
-**Last Updated**: 2026-11-21
+**Last Updated**: 2026-11-22
 **Status**: Active
 
 ---
