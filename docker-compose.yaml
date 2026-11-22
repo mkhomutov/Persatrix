@@ -415,15 +415,13 @@ services:
     command: ["-config.file=/etc/loki/local-config.yaml"]
     ports:
       - "127.0.0.1:3100:3100"   # Loki HTTP API (push + query)
-    # NOTE(review-PR171, Should-Fix #1): probe Loki's `/ready` so dependent
-    # tests / log-shippers do not race ingester startup. `wget` is bundled
-    # in the upstream `grafana/loki` image (BusyBox base).
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3100/ready"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
+    # No healthcheck: the 3.7.10 image pinned above has no shell and no
+    # `wget`, and Loki has no health flag of its own, so a check run inside the
+    # container could never pass and Loki would show `unhealthy` while it
+    # works. The Collector has none for the same reason. To see whether Loki
+    # is ready, ask it from the host: http://localhost:3100/ready answers 503
+    # for the first 15 to 20 seconds after a cold start (Loki waits 15 seconds
+    # once its ingester is up), then 200.
 
 volumes:
   workspace:

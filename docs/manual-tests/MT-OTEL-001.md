@@ -2,9 +2,9 @@
 
 **Test ID**: `MT-OTEL-001`
 **Feature Area**: Observability (traces + metrics)
-**Version**: 1.1
+**Version**: 1.2
 **Created**: 2026-04-24
-**Last Updated**: 2026-04-24
+**Last Updated**: 2026-11-22
 **Status**: Active
 
 ---
@@ -46,6 +46,7 @@ RFC 0019 closeout follow-up issue's Loki query-path item); per-agent dashboard /
 - `agents/tests/test_observability_tracing.py`
 - `agents/tests/test_observability_metrics.py`
 - `internal/observability/telemetry_test.go`, `metrics_test.go`
+- `tests/unit/python/test_observability_stack_config.py` (no healthcheck runs a program in the Loki or Collector image; the Collector config uses current exporter names)
 
 ---
 
@@ -92,13 +93,17 @@ docker compose ps
 - All compose services listed: `orchestrator`, `agent-planner`, `agent-coder`, `agent-reviewer`,
   `jaeger`, `prometheus`, `loki`, `otel-collector` (container names are project-prefixed, e.g.
   `persatrix-orchestrator-1`).
-- `orchestrator`, agent services, `prometheus`, and `loki` report `(healthy)`. `otel-collector`
-  reports `Up …` (no healthcheck — the upstream `otel/opentelemetry-collector-contrib` image is
-  distroless and ships no probe binary; this is documented as a deferred item in the RFC 0019
-  closeout).
+- `orchestrator`, agent services and `prometheus` report `(healthy)`. `jaeger`, `otel-collector`
+  and `loki` report `Up …`, because none of them has a healthcheck. The Collector and Loki images
+  have no shell or program a check could run (the Collector's is a deferred item in the RFC 0019
+  closeout; Loki's went because the `grafana/loki:3.7.10` image compose pins has no `wget`). Ask
+  Loki from the host instead: <http://localhost:3100/ready> answers 503 (`Ingester not ready:
+  waiting for 15s after being ready`) for the first 15 to 20 seconds after a cold start, then
+  `ready`.
 
 **Verification**:
 - [ ] All compose services running
+- [ ] Loki answers `ready` at <http://localhost:3100/ready>
 - [ ] Jaeger UI reachable at <http://localhost:16686>
 - [ ] Prometheus UI reachable at <http://localhost:9091>
 

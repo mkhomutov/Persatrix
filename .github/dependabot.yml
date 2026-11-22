@@ -185,9 +185,11 @@ updates:
   # overlay. As for the base images above, GitHub offers no security update
   # for this ecosystem, so this monthly PR is the only update path these
   # images have, and CI starts none of them: run the stack before merging.
-  # One move is known to need a change of its own: Loki's image has had no
-  # `wget` since 3.6, and the health check in docker-compose.yaml calls it, so
-  # a newer Loki would run and be reported unhealthy for good.
+  # The Loki image (checked on 3.7.10) and the Collector image have no shell
+  # and no `wget`, so neither service has a healthcheck, and
+  # tests/unit/python/test_observability_stack_config.py fails if one is added
+  # back. A Collector bump can also mark an exporter name the config uses as
+  # old: read the Collector's start-up log when you run the stack.
   - package-ecosystem: docker-compose
     directory: /
     schedule:
