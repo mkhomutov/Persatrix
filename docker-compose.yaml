@@ -419,9 +419,9 @@ services:
     # `wget`, and Loki has no health flag of its own, so a check run inside the
     # container could never pass and Loki would show `unhealthy` while it
     # works. The Collector has none for the same reason. To see whether Loki
-    # is ready, ask it from the host: http://localhost:3100/ready answers 200
-    # once the ingester has started, and 503 while it warms up (about a
-    # minute after a cold start).
+    # is ready, ask it from the host: http://localhost:3100/ready answers 503
+    # for the first 15 to 20 seconds after a cold start (Loki waits 15 seconds
+    # once its ingester is up), then 200.
 
 volumes:
   workspace:

@@ -3,10 +3,10 @@
 Two things broke quietly when Dependabot moved these images forward, and
 nothing in CI starts the stack, so only these checks catch them:
 
-* Loki 3.7 and the OpenTelemetry Collector images carry no shell and no
-  ``wget``. A healthcheck that runs a program inside one of them can never
-  pass, so the service shows ``unhealthy`` for as long as it runs, while it
-  works fine. Checked by hand on 2026-11-21: ``docker run --entrypoint sh``
+* The ``grafana/loki:3.7.10`` image and the OpenTelemetry Collector image
+  carry no shell and no ``wget``. A healthcheck that runs a program inside
+  one of them can never pass, so the service shows ``unhealthy`` for as long
+  as it runs, while it works fine. Checked by hand on 2026-11-21: ``docker run --entrypoint sh``
   fails on both, and Loki's healthcheck said ``exec: "wget": executable file
   not found``. Loki has no health flag of its own to call instead.
 * Collector 0.165 warns at start-up that two exporter type names are old
@@ -28,9 +28,11 @@ COMPOSE_FILES = sorted(REPO_ROOT.glob("docker-compose*.yaml"))
 COLLECTOR_CONFIG = REPO_ROOT / "config" / "observability" / "otel-collector.yaml"
 
 # Images with no shell and no wget: a healthcheck has nothing to run in them.
-# Matched by repository, whatever registry, tag or digest names it, and by the
-# service names the base file gives them, since an overlay file can add a
-# healthcheck to a service without restating its image.
+# Matched by repository, whatever registry, tag or digest names it. A service
+# the base file gives one of these images is also matched by its name when it
+# names no image and no build, since an overlay file can add a healthcheck to
+# it without restating the image; one that names its own image or build is
+# judged by that image.
 NO_SHELL_REPOSITORIES = {"grafana/loki", "otel/opentelemetry-collector-contrib"}
 NO_SHELL_SERVICES = {"loki", "otel-collector"}
 
@@ -60,16 +62,18 @@ def _repository(image: str) -> str:
     return "/".join(parts)
 
 
+def _runs_a_no_shell_image(name: str, service: dict[str, Any]) -> bool:
+    if "image" in service:
+        return _repository(str(service["image"])) in NO_SHELL_REPOSITORIES
+    return "build" not in service and name in NO_SHELL_SERVICES
+
+
 def _broken_healthchecks(compose: dict[str, Any]) -> dict[str, str]:
     services = compose.get("services") or {}
     return {
         name: str(service.get("image", "(image set in another file)"))
         for name, service in services.items()
-        if (
-            name in NO_SHELL_SERVICES
-            or _repository(str(service.get("image", ""))) in NO_SHELL_REPOSITORIES
-        )
-        and _runs_a_program(service.get("healthcheck"))
+        if _runs_a_no_shell_image(name, service) and _runs_a_program(service.get("healthcheck"))
     }
 
 
@@ -82,6 +86,7 @@ def test_the_base_stack_runs_loki_and_the_collector() -> None:
 
 
 _WGET = {"test": ["CMD", "wget", "-q", "--spider", "http://localhost:3100/ready"]}
+_COLLECTOR_WITH_WGET = "persatrix/otel-collector-wget:0.165.0"
 
 
 @pytest.mark.parametrize(
@@ -97,6 +102,11 @@ _WGET = {"test": ["CMD", "wget", "-q", "--spider", "http://localhost:3100/ready"
         ({"prometheus": {"image": "prom/prometheus:v3.16.0", "healthcheck": _WGET}}, set()),
         ({"loki": {"healthcheck": {"test": ["NONE"]}}}, set()),
         ({"loki": {"healthcheck": {**_WGET, "disable": True}}}, set()),
+        # A service that keeps its name but runs an image of its own, such as
+        # the Collector image with wget added that RFC 0019's PR plan lists as
+        # a follow-up, named or built here.
+        ({"otel-collector": {"image": _COLLECTOR_WITH_WGET, "healthcheck": _WGET}}, set()),
+        ({"otel-collector": {"build": "./docker/otel-collector", "healthcheck": _WGET}}, set()),
     ],
     ids=[
         "digest",
@@ -107,6 +117,8 @@ _WGET = {"test": ["CMD", "wget", "-q", "--spider", "http://localhost:3100/ready"
         "wget-image",
         "none",
         "disabled",
+        "own-image",
+        "own-build",
     ],
 )
 def test_the_guard_sees_every_way_of_naming_the_image(

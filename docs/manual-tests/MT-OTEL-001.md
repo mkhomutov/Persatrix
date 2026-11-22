@@ -93,12 +93,13 @@ docker compose ps
 - All compose services listed: `orchestrator`, `agent-planner`, `agent-coder`, `agent-reviewer`,
   `jaeger`, `prometheus`, `loki`, `otel-collector` (container names are project-prefixed, e.g.
   `persatrix-orchestrator-1`).
-- `orchestrator`, agent services and `prometheus` report `(healthy)`. `otel-collector` and `loki`
-  report `Up …`: neither has a healthcheck, because neither image has a shell or a program a
-  check could run (the Collector's is a deferred item in the RFC 0019 closeout; Loki's went because
-  the `grafana/loki:3.7.10` image compose pins has no `wget`). Ask Loki from the host instead:
-  <http://localhost:3100/ready> answers `ready` once the ingester has started, and 503 for about
-  a minute after a cold start.
+- `orchestrator`, agent services and `prometheus` report `(healthy)`. `jaeger`, `otel-collector`
+  and `loki` report `Up …`, because none of them has a healthcheck. The Collector and Loki images
+  have no shell or program a check could run (the Collector's is a deferred item in the RFC 0019
+  closeout; Loki's went because the `grafana/loki:3.7.10` image compose pins has no `wget`). Ask
+  Loki from the host instead: <http://localhost:3100/ready> answers 503 (`Ingester not ready:
+  waiting for 15s after being ready`) for the first 15 to 20 seconds after a cold start, then
+  `ready`.
 
 **Verification**:
 - [ ] All compose services running
