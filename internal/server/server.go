@@ -138,6 +138,12 @@ type Server struct {
 	// nil-safe — see WithAuth in auth_middleware.go). Nil → no auth
 	// route registers and every request resolves anonymous.
 	auth *authRuntime
+
+	// allowedHosts holds the names a request's Host may carry, each in the
+	// spelling canonicalHost gives (ISSUE-0212, request_origin.go). Nil,
+	// the default for a bare server, means neither origin check runs; the
+	// orchestrator always sets it, through WithAllowedHosts.
+	allowedHosts map[string]struct{}
 }
 
 // New validates that workflowsDir is accessible and returns a configured Server.
@@ -264,8 +270,8 @@ func (s *Server) registerRoutes() {
 // Execution order (outermost first):
 //
 //	handlerWrapper (optional, e.g. otelhttp) → recovery → requestID →
-//	logging → auth identity (RFC 0039, non-enforcing) → routeMux →
-//	(rate-limit + circuit-breaker for /api/v1/*) → mux
+//	logging → origin checks (ISSUE-0212) → auth identity (RFC 0039) →
+//	routeMux → (rate-limit + circuit-breaker for /api/v1/*) → mux
 //
 // requestID must run before logging so the request ID is present in r.Context()
 // when the logging middleware reads it after next.ServeHTTP returns.
@@ -313,7 +319,8 @@ func (s *Server) Handler() http.Handler {
 	root.Handle("/", apiH)
 
 	var h http.Handler = root
-	h = s.authMiddleware(h) // RFC 0039 §E identity resolution + policy enforcement (enforcing under `auth.mode: enabled`)
+	h = s.authMiddleware(h)   // RFC 0039 §E identity resolution + policy enforcement (enforcing under `auth.mode: enabled`)
+	h = s.originMiddleware(h) // ISSUE-0212: an unexpected Host and a cross-origin write are refused, in both auth modes
 	h = loggingMiddleware(s.logger, h)
 	h = requestIDMiddleware(h)
 	h = recoveryMiddleware(s.logger, h)

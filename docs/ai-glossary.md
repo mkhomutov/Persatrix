@@ -525,6 +525,21 @@ Process vocabulary (scope lock, cuttable, live arc, finding, …) lives in the
 - **Example:** "Set the fleet enrollment secret on the orchestrator and on
   every agent before you turn auth on."
 
+### Allowed Host
+- **Aliases:** "expected host name" (the wording of the refusal)
+- **Disallowed:** "trusted host", "whitelisted host", "CORS origin"
+- **Definition:** A host name or IP address the orchestrator's REST API and
+  web console answer to. A request whose `Host` header carries any other name
+  is refused with `403`, whether sign-in is on or off, on every route but
+  `/healthz` (`auth.allowed_hosts` in `config/security.yaml`,
+  `internal/server/request_origin.go`). The default is `localhost`,
+  `127.0.0.1` and `[::1]`; the compose stack adds `orchestrator` with
+  `--http-extra-allowed-hosts`. It stops a web page whose own name was
+  re-pointed at the orchestrator (DNS rebinding), not a client that is not a
+  browser. See [where a request may come from](guides/request-origin-checks.md).
+- **Example:** "The agents could not register under the new service name
+  until it was added as an allowed host."
+
 ### Participant ID
 - **Aliases:** —
 - **Disallowed:** "user id" (when meaning a channel participant), "member id"

@@ -347,6 +347,9 @@ LLM's reply landing back. Diagrams in
   response policies
 - [Accounts & auth guide](docs/guides/auth.md) — `auth.mode: enabled`,
   first-operator bootstrap, roles, the console login (v0.3.12)
+- [Where a request may come from](docs/guides/request-origin-checks.md) —
+  the host names the orchestrator answers to, and why a web page on another
+  site cannot call it
 - [v0.3.0 demo walkthrough](docs/guides/v0.3.0-demo.md) — three pre-defined
   personas + one channel, plain-English step-by-step
 - [Architecture diagrams](docs/diagrams/README.md) — system overview,
