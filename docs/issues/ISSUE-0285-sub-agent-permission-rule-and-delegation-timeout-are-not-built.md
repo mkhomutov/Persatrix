@@ -16,6 +16,7 @@ refs:
   - docs/persatrix-extension-spec.md
   - docs/issues/ISSUE-0214-declared-tool-permissions-are-never-enforced.md
   - docs/issues/ISSUE-0272-other-docs-still-present-delegation-and-permission-checks-as-working.md
+  - https://github.com/mkhomutov/Persatrix/pull/1148
 ---
 
 # ISSUE-0285: The sub-agent permission rule and a delegation's time limit are not built
@@ -90,7 +91,9 @@ The docs that still present delegation as working are listed in
 
 ## Notes
 
-> 2026-11-26 — filed when ISSUE-0214 was resolved. The two docstrings that
+> 2026-11-26 — filed by
+> [#1148](https://github.com/mkhomutov/Persatrix/pull/1148), which
+> resolves ISSUE-0214. In that pull request the two docstrings that
 > said the rule was enforced (`agents/tools/permissions.py`,
 > `PersonaAgent.spawn_sub_agent`) now say it is not built and name this
 > issue.

@@ -14,6 +14,7 @@ refs:
   - internal/executor/dispatch.go
   - proto/task.proto
   - docs/issues/ISSUE-0214-declared-tool-permissions-are-never-enforced.md
+  - https://github.com/mkhomutov/Persatrix/pull/1148
 ---
 
 # ISSUE-0287: A persona ignores a workflow step's call and token limits
@@ -76,5 +77,6 @@ side.
 
 ## Notes
 
-> 2026-11-26 — filed from the fix for ISSUE-0214, where it was noticed
-> and left alone.
+> 2026-11-26 — filed by
+> [#1148](https://github.com/mkhomutov/Persatrix/pull/1148), the fix for
+> ISSUE-0214, where it was noticed and left alone.

@@ -108,7 +108,8 @@ The severity is proposed here, not ruled.
 > because the agent's config lacks a permission the tool declares is now
 > refused in one place for both agent kinds, `admit_call` in
 > `agents/tools/tool_list.py`
-> ([ISSUE-0214](ISSUE-0214-declared-tool-permissions-are-never-enforced.md)),
+> ([ISSUE-0214](ISSUE-0214-declared-tool-permissions-are-never-enforced.md),
+> [#1148](https://github.com/mkhomutov/Persatrix/pull/1148)),
 > which writes a warning to the agent's log and counts a failed tool call.
 > It still writes no `tool.denied` line, so both parts of this issue stand.
 > That function is where such a line would be written.

@@ -271,6 +271,7 @@ after `wire_recall_tools`.
 > every time) is unchanged in what the model sees and no longer silent for
 > the operator. Since the fix for
 > [ISSUE-0214](ISSUE-0214-declared-tool-permissions-are-never-enforced.md)
+> ([#1148](https://github.com/mkhomutov/Persatrix/pull/1148))
 > such a call is refused before the tool runs, with the same words, and
 > each refusal is a warning in the agent's log that names the agent, the
 > tool and the permission. The three shipped personas still list

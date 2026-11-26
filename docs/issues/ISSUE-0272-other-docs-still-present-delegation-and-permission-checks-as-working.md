@@ -84,7 +84,8 @@ changed by another open pull request when this was filed, which is why
 
 > 2026-11-26 — one of the eight is settled by the code, not by a
 > correction. The fix for
-> [ISSUE-0214](ISSUE-0214-declared-tool-permissions-are-never-enforced.md)
+> [ISSUE-0214](ISSUE-0214-declared-tool-permissions-are-never-enforced.md),
+> [#1148](https://github.com/mkhomutov/Persatrix/pull/1148),
 > checks a tool's declared permissions before the tool runs, so the
 > security policy's line on tool permission checks now holds as written.
 > The other seven are about delegation and sub-agent spawns and are

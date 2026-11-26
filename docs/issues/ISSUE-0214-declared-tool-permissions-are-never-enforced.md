@@ -6,6 +6,7 @@ severity: medium
 area: agents/tools
 created: 2026-11-10
 closed: 2026-11-26
+closed_pr: 1148
 refs:
   - agents/tools/registry.py
   - agents/tools/permissions.py
@@ -149,7 +150,9 @@ spawner.
 > checks as working; they are listed in
 > [ISSUE-0272](ISSUE-0272-other-docs-still-present-delegation-and-permission-checks-as-working.md).
 
-> 2026-11-26 — resolved, on the maintainer's three choices.
+> 2026-11-26 — resolved by
+> [#1148](https://github.com/mkhomutov/Persatrix/pull/1148), on the
+> maintainer's three choices.
 >
 > Both faults were first shown on `main`: a tool that declared
 > `filesystem:read` ran for a task agent and for a persona with no
