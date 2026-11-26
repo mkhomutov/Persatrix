@@ -19,7 +19,7 @@ The model is mocked at the ``LLMClient`` boundary; no network.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -37,6 +37,7 @@ from agents.llm_client import (
     Usage,
 )
 from agents.persona import create_persona_agent
+from agents.persona_runtime.tool_round import allowed_tools_of
 from agents.persona_types import AgentEvent, EventType
 from agents.server_servicers import AgentServiceServicer
 from agents.sub_agents.delegation import DelegationRequest
@@ -70,18 +71,25 @@ def _register(ran: list[str], *names: str) -> None:
 
 
 class _Scripted:
-    """A real ``LLMClient`` over a mocked provider that records each round."""
+    """A real ``LLMClient`` over a mocked provider that records each round.
 
-    def __init__(self, *calls: str) -> None:
+    The model asks for *calls* in its first reply, for each list of *then*
+    in a further reply of its own, and then ends the turn.
+    """
+
+    def __init__(self, *calls: str, then: Sequence[Sequence[str]] = ()) -> None:
         self.rounds: list[list[LLMToolResult]] = []
         responses = [
             LLMResponse(
                 text=None,
-                tool_calls=[ToolCall(id=f"tc{i}", name=n, input={}) for i, n in enumerate(calls)],
+                tool_calls=[ToolCall(id=f"tc{i}", name=n, input={}) for i, n in enumerate(names)],
                 stop_reason=StopReason.TOOL_USE, usage=Usage(10, 10),
-            ),
-            LLMResponse(text="done", stop_reason=StopReason.END_TURN, usage=Usage(10, 10)),
+            )
+            for names in (calls, *then)
         ]
+        responses.append(
+            LLMResponse(text="done", stop_reason=StopReason.END_TURN, usage=Usage(10, 10)),
+        )
 
         def _append(
             msgs: list[dict[str, Any]], _resp: LLMResponse, results: list[LLMToolResult],
@@ -102,8 +110,11 @@ class _Scripted:
         return [d["name"] for d in tools]
 
     def answers(self) -> list[tuple[str, bool]]:
-        [results] = self.rounds
-        return [(r.content, r.is_error) for r in results]
+        [results] = self.answers_by_round()
+        return results
+
+    def answers_by_round(self) -> list[list[tuple[str, bool]]]:
+        return [[(r.content, r.is_error) for r in results] for results in self.rounds]
 
 
 def _task(*allowed: str) -> TaskInput:
@@ -179,6 +190,27 @@ class TestTaskAgent:
         assert script.answers() == [("Unknown tool: alpha", True)]
         assert ran == []
 
+    async def test_the_list_holds_every_tool_round_of_the_turn(self) -> None:
+        # Not only the first: a model that is refused a tool often asks again.
+        ran: list[str] = []
+        _register(ran, "alpha", "beta")
+        script = _Scripted("alpha", then=[["beta"], ["beta", "alpha"]])
+
+        output = await _task_agent(script, "alpha", "beta").handle(_task("alpha"))
+
+        assert output.status == TaskStatus.COMPLETED
+        assert script.answers_by_round() == [
+            [("alpha ran", False)],
+            [("Unknown tool: beta", True)],
+            [("Unknown tool: beta", True), ("alpha ran", False)],
+        ]
+        assert ran == ["alpha", "alpha"]
+        # Control: the same three rounds with no list run every call.
+        ran.clear()
+        free = _Scripted("alpha", then=[["beta"], ["beta", "alpha"]])
+        await _task_agent(free, "alpha", "beta").handle(_task())
+        assert ran == ["alpha", "beta", "beta", "alpha"]
+
     async def test_the_refusal_is_logged_with_its_reason(
         self, caplog: pytest.LogCaptureFixture,
     ) -> None:
@@ -227,6 +259,38 @@ class TestPersona:
         assert script.offered() == ["alpha", "beta", *_NOTE_TOOLS]
         assert script.answers() == [("beta ran", False), ("alpha ran", False)]
         assert ran == ["beta", "alpha"]
+
+    async def test_the_list_holds_every_tool_round_of_the_turn(self) -> None:
+        ran: list[str] = []
+        _register(ran, "alpha", "beta")
+        script = _Scripted("alpha", then=[["beta", "store_note"], ["beta", "alpha"]])
+        agent = await _persona(script, "alpha", "beta")
+        try:
+            output = await agent.handle(_task("alpha"))
+        finally:
+            await agent.close_memory()
+
+        assert output.status == TaskStatus.COMPLETED
+        assert script.answers_by_round() == [
+            [("alpha ran", False)],
+            [("Unknown tool: beta", True), ("Unknown tool: store_note", True)],
+            [("Unknown tool: beta", True), ("alpha ran", False)],
+        ]
+        assert ran == ["alpha", "alpha"]
+
+    def test_only_a_task_event_carries_a_list(self) -> None:
+        # A task object found on any other event is not that event's task.
+        task = _task("alpha")
+
+        assert allowed_tools_of(
+            AgentEvent(event_type=EventType.TASK_ASSIGNED, payload={"task": task}),
+        ) == ["alpha"]
+        for other in (EventType.CHANNEL_MESSAGE, EventType.TICK):
+            assert allowed_tools_of(AgentEvent(event_type=other, payload={"task": task})) == ()
+        not_a_task = {"task": {"allowed_tools": ["alpha"]}}
+        assert allowed_tools_of(
+            AgentEvent(event_type=EventType.TASK_ASSIGNED, payload=not_a_task),
+        ) == ()
 
     async def test_an_event_that_is_not_a_task_is_not_narrowed(self) -> None:
         # Only a task carries the list; a channel message has none to apply.
@@ -299,6 +363,15 @@ class TestFromTheWire:
         assert script.offered() == ["alpha"]
         assert script.answers() == [("Unknown tool: beta", True), ("alpha ran", False)]
         assert ran == ["alpha"]
+        # Control: a delegation that names no tool restricts nothing, as an
+        # empty list does anywhere. Whether it should is open (ISSUE-0285).
+        ran.clear()
+        free = _Scripted("beta", "alpha")
+        await SubAgentSpawner("ember-owl").dispatch(
+            _task_agent(free, "alpha", "beta"), DelegationRequest(objective="do it"),
+        )
+        assert free.offered() == ["alpha", "beta"]
+        assert ran == ["beta", "alpha"]
 
 
 class TestTheRule:
@@ -312,6 +385,11 @@ class TestTheRule:
             (["alpha"], "alpha", True),
             (["alpha"], "beta", False),
             (["alpha"], "alph", False),
+            # The name as it is spelt: letter case and spaces count.
+            (["ALPHA"], "alpha", False),
+            (["alpha"], "Alpha", False),
+            (["alpha "], "alpha", False),
+            (["Alpha", "alpha"], "alpha", True),
             (["alpha", 7, None], "alpha", True),
             (["alpha", 7, None], "7", False),
             # A bare name is that one tool, never a set of letters to search.

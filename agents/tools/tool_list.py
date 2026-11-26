@@ -200,8 +200,11 @@ def admit_call(
     hand the coming pre-tool seat a value the check never saw. A check that
     itself fails refuses the call.
 
-    *permissions* and *allowed_tools* have no default, so no caller can run
-    a tool without saying whose config and which task the call is held to.
+    *permissions* and *allowed_tools* have no default, so this function
+    cannot be called without saying whose config and which task the call is
+    held to. That holds here and no further out: each agent kind's tool
+    round takes the task's list as a parameter that defaults to "no list",
+    and it is tests that pin that the two turn loops pass the task's own.
     """
     tool_def = tools.get(call.name)
     if tool_def is None or tool_def.func is None:

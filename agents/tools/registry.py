@@ -14,7 +14,7 @@ import inspect
 import logging
 import time
 import warnings
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from typing import Any, get_type_hints
 
@@ -212,8 +212,14 @@ def tool(
     def decorator(func: Callable) -> Callable:
         tool_name = name or func.__name__
         # A name no agent's config can grant is refused here, before the
-        # tool is registered (ISSUE-0214).
-        declared: list[str] = [] if permissions is None else permissions
+        # tool is registered (ISSUE-0214). One copy of the names is taken,
+        # and that copy is checked and stored: a generator read once for
+        # the check would be stored as nothing, and the tool would run for
+        # every agent that lists it. A value that is no list of names goes
+        # to the check as it is, to be refused in words.
+        declared: Any = [] if permissions is None else permissions
+        if not isinstance(declared, str) and isinstance(declared, Iterable):
+            declared = list(declared)
         if (problem := declared_permissions_error(tool_name, declared)) is not None:
             raise ValueError(problem)
         sig = inspect.signature(func)
@@ -277,7 +283,7 @@ def tool(
             name=tool_name,
             description=description or func.__doc__ or "",
             parameters=params,
-            permissions=list(declared),
+            permissions=declared,
             tier=tier,
             func=func,  # replaced with wrapper below
             argument_spec=spec,

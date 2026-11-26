@@ -38,7 +38,7 @@ from agents.tools.tool_list import AdmittedCall, admit_call
 
 from ._persona_test_helpers import _PERSONA_CONFIG, _make_client
 
-Run = Callable[[list[ToolCall]], Awaitable[list[LLMToolResult]]]
+Run = Callable[..., Awaitable[list[LLMToolResult]]]
 MakeRun = Callable[[dict[str, Any] | None], Awaitable[Run]]
 
 _READ = {"filesystem": {"read": ["/workspace/**"]}}
@@ -198,6 +198,27 @@ class TestOrder:
         assert "tool_argument_validation_error" in checked.content
         assert ran == []
 
+    async def test_the_tasks_list_is_asked_before_the_permission(
+        self, make_run: MakeRun, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # A tool the task did not give the agent stays unknown even when the
+        # agent also lacks its permission: the model is not told which
+        # permission a tool it was not given would need.
+        ran: list[str] = []
+        _register(ran, "filesystem:read")
+        run = await make_run({})
+
+        with caplog.at_level(logging.WARNING, logger="agents.tools.tool_list"):
+            [off_the_list] = await run([_call()], ["second"])
+
+        assert (off_the_list.content, off_the_list.is_error) == ("Unknown tool: probe", True)
+        [message] = [r.getMessage() for r in caplog.records]
+        assert "allowed_tools" in message and "filesystem:read" not in message
+        # Control: on the task's list, the same call reaches the permission check.
+        [on_the_list] = await run([_call()], ["probe"])
+        assert on_the_list.content == "Permission denied: filesystem:read"
+        assert ran == []
+
     async def test_a_tool_off_the_agents_list_stays_unknown(
         self, make_run: MakeRun,
     ) -> None:
@@ -210,6 +231,37 @@ class TestOrder:
 
         assert result.content == "Unknown tool: unlisted"
         assert ran == []
+
+
+class TestDeclaredWithAOneShotIterable:
+    @pytest.mark.parametrize(
+        "one_shot",
+        [lambda names: (name for name in names), iter, lambda names: map(str, names)],
+        ids=["generator", "iter", "map"],
+    )
+    async def test_the_tool_is_still_held_to_what_it_declared(
+        self, make_run: MakeRun, one_shot: Callable[[list[str]], Any],
+    ) -> None:
+        # ``@tool`` reads the names once to check them. An iterable that can
+        # be read only once was then stored as an empty list, and the tool
+        # ran for every agent that listed it.
+        ran: list[str] = []
+
+        @tool(name="probe", description="probe", permissions=one_shot(["filesystem:read"]))
+        async def _probe() -> ToolResult:
+            ran.append("probe")
+            return ToolResult(success=True, data="probe ran")
+
+        [refused] = await (await make_run({}))([_call()])
+        assert (refused.content, refused.is_error) == (
+            "Permission denied: filesystem:read", True,
+        )
+        assert ran == []
+        registered = get_tool("probe")
+        assert registered is not None and registered.permissions == ["filesystem:read"]
+        # Positive control: the agent whose config grants it runs the tool.
+        [granted] = await (await make_run(_READ))([_call()])
+        assert (granted.content, ran) == ("probe ran", ["probe"])
 
 
 class TestOperatorSignals:
@@ -336,10 +388,13 @@ class TestFailsClosed:
 
 
 class TestOnePlaceForBothAgentKinds:
-    def test_no_caller_can_leave_the_permissions_or_the_task_list_out(self) -> None:
-        # Both are keyword-only and have no default: a third caller of
-        # ``admit_call`` cannot run a tool without saying whose config and
-        # which task list the call is held to.
+    def test_admit_call_cannot_be_called_without_the_permissions_or_the_task_list(
+        self,
+    ) -> None:
+        # Both are keyword-only and have no default, so ``admit_call`` itself
+        # cannot be called without them. The two tool rounds that call it
+        # default the task's list to none; ``test_task_allowed_tools.py``
+        # pins that each turn loop passes the task's own.
         parameters = inspect.signature(admit_call).parameters
 
         for name in ("permissions", "allowed_tools"):

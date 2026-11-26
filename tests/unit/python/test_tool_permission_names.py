@@ -140,6 +140,52 @@ class TestWhatAToolMayDeclare:
 
         assert get_tool("probe") is None
 
+    @pytest.mark.parametrize(
+        "shape",
+        [
+            lambda names: (name for name in names), iter, lambda names: map(str, names),
+            tuple, dict.fromkeys, lambda names: dict.fromkeys(names).keys(),
+        ],
+        ids=["generator", "iter", "map", "tuple", "dict", "dict-keys"],
+    )
+    def test_names_given_in_any_iterable_are_stored_as_a_list(self, shape: Any) -> None:
+        # One copy is taken, checked and stored: an iterable that can be read
+        # only once must not be stored as nothing after the check has read it.
+        @tool(name="probe", permissions=shape(["filesystem:read", "memory:write"]))
+        async def _probe() -> ToolResult:
+            return ToolResult(success=True)
+
+        registered = get_tool("probe")
+        assert registered is not None
+        assert registered.permissions == ["filesystem:read", "memory:write"]
+        assert type(registered.permissions) is list
+
+    @pytest.mark.parametrize(
+        "shape", [lambda names: (name for name in names), iter], ids=["generator", "iter"],
+    )
+    def test_a_bad_name_in_a_one_shot_iterable_is_still_an_error(self, shape: Any) -> None:
+        with pytest.raises(ValueError, match="'db:read'"):
+            @tool(name="probe", permissions=shape(["filesystem:read", "db:read"]))
+            async def _probe() -> ToolResult:
+                return ToolResult(success=True)
+
+        assert get_tool("probe") is None
+
+    def test_a_list_changed_after_the_tool_is_defined_changes_nothing(self) -> None:
+        # The definition holds its own copy, not the author's list.
+        mine = ["filesystem:read"]
+
+        @tool(name="probe", permissions=mine)
+        async def _probe() -> ToolResult:
+            return ToolResult(success=True)
+
+        mine.clear()
+        mine.append("memory:write")
+
+        registered = get_tool("probe")
+        assert registered is not None and registered.permissions == ["filesystem:read"]
+        assert registered.permissions is not mine
+
     def test_a_refused_tool_does_not_replace_the_one_registered_before(self) -> None:
         _declare("memory:read")
         before = get_tool("probe")
@@ -182,6 +228,8 @@ class TestWhatTheGateAnswers:
         assert gate.missing(["filesystem:read", "memory:read"]) is None
         assert gate.missing(["filesystem:read", "memory:write", "shell:exec"]) == "memory:write"
         assert gate.missing(["db:read"]) == "db:read"
+        # An entry that is not text is named, not raised on.
+        assert gate.missing(["filesystem:read", 7]) == "7"  # type: ignore[list-item]
 
 
 class TestTheBuiltInToolsDeclareWhatTheyAsk:

@@ -90,8 +90,10 @@ class _ToolRoundMixin:
         does not allow, and one that declares a permission this agent's
         config does not grant; a memory tool is held to both as well.
         """
-        # Offered registry tools, then memory tools (always allowed) shadowing
-        # any of the same name, exactly as _build_tool_definitions() offers them.
+        # Offered registry tools, then memory tools (which need no entry on
+        # the agent's ``tools`` list) shadowing any of the same name, exactly
+        # as _build_tool_definitions() offers them. admit_call holds both
+        # kinds to the task's list and to the agent's permissions.
         tool_map = {td.name: td for td in offered_tools(self.agent_id, self.config)}
         tool_map.update({td.name: td for td in self._memory_tools})
         results: list[LLMToolResult] = []

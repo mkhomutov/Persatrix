@@ -1685,3 +1685,8 @@ persatrix restore --checkpoint "2026-04-08-1200" # restore from checkpoint
 > rules allow runs outside the path rules; see
 > [6.2](#62-permission-system)). Criterion 7's MCP tools are not built
 > ([5.2](#52-mcp-model-context-protocol-support)).
+
+> 2026-11-26 — criterion 8 holds a little further now. The permission a
+> custom tool declares is checked before the tool runs, as a built-in
+> tool's is ([6.2](#62-permission-system)). Its path, command or host is
+> still not checked, unless the tool asks in its own code.

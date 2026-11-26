@@ -30,13 +30,15 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # Each permission an agent's config can grant, with the key of its category
-# that grants it: a non-empty list or ``true``. ``shell_exec`` and
-# ``http_request`` ask for ``shell:exec`` and ``network:http``, but the
-# agent schema has no ``exec`` or ``http`` key, so their grant is the list
-# that scopes them (ISSUE-0150). The keys left out (``filesystem.deny``,
-# ``network.deny``, ``shell.max_execution_seconds``) scope a tool and turn
-# nothing on. ``tests/unit/python/test_tool_permission_names.py`` holds this
-# table to the schema.
+# that grants it: in a config the schema accepts, a non-empty list or
+# ``true`` (``PermissionGate.check`` says what any other value does).
+# ``shell_exec`` and ``http_request`` ask for ``shell:exec`` and
+# ``network:http``, but the agent schema has no ``exec`` or ``http`` key,
+# so their grant is the list that scopes them (ISSUE-0150). The keys left
+# out (``filesystem.deny``, ``network.deny``,
+# ``shell.max_execution_seconds``) scope a tool and turn nothing on.
+# ``tests/unit/python/test_tool_permission_names.py`` holds this table to
+# the schema.
 _GRANTED_BY: dict[str, str] = {
     "filesystem:read": "read",
     "filesystem:write": "write",
@@ -112,7 +114,10 @@ class PermissionGate:
         Format: ``"category:action"`` (e.g. ``"filesystem:read"``).
         Returns True only for one of :data:`GRANTABLE_PERMISSIONS` whose
         category is in the config and whose granting key holds a truthy
-        value (a non-empty list or True). Any other name is denied whatever
+        value. The agent schema allows a list or ``true`` there, and a
+        non-empty list or ``true`` grants. So does any other truthy value,
+        which the schema refuses and nothing checks at start-up: the text
+        ``"false"`` grants (ISSUE-0289). Any other name is denied whatever
         the config holds: ``network:deny`` is not granted by a deny list.
         """
         parts = permission.split(":", 1)

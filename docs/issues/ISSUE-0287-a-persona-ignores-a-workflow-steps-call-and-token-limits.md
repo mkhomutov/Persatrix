@@ -1,6 +1,6 @@
 ---
 id: ISSUE-0287
-summary: "A persona that serves a workflow step does not read the step's `max_llm_calls` and `max_tokens`. The orchestrator sends both with every task, and a task agent holds its turn to them; a persona's turn uses the limits in its own config and never looks at the task's. Read in the code, not run."
+summary: "A persona that serves a workflow step does not read the step's `max_llm_calls` and `max_tokens`. The orchestrator sends both with every task, and a task agent holds its turn to them; a persona's turn uses the limits in its own config and never looks at the task's. Read in the code, not run. Its system prompt is not told the task's tool list either, so it asks the model for a note tool the task left out (run)."
 status: open
 severity: low
 area: agents/persona_runtime
@@ -49,6 +49,19 @@ This was read in the code on 2026-11-26 and not run: no persona was
 given a task with a limit lower than its own config's. Where the
 orchestrator takes the limits from was not traced past the dispatch.
 
+One more thing a persona does not take from a task, of the same kind.
+A persona's system prompt tells the model to call its note tools
+(`store_note`, `recall_notes`, `update_note`, `delete_note`) whenever
+the persona has them, and is not told the task's `allowed_tools` list
+(`_build_system_prompt` in `agents/persona_runtime/prompt_assembly.py`,
+the `memory-tool-usage` snippet). A task whose list leaves the note
+tools out is therefore not offered them, and a call to one answers
+`Unknown tool`, while the prompt still asks for the call. Latent: the
+orchestrator never sets the list. This part was run on 2026-11-26: a
+persona given a task that allows one other tool was offered that tool
+alone, `recall_notes` answered `Unknown tool: recall_notes`, and the
+system prompt of the same call named `store_note` and `recall_notes`.
+
 ## Impact
 
 Proposed low. A persona still stops: its own config bounds the calls of
@@ -79,4 +92,6 @@ side.
 
 > 2026-11-26 — filed by
 > [#1148](https://github.com/mkhomutov/Persatrix/pull/1148), the fix for
-> ISSUE-0214, where it was noticed and left alone.
+> ISSUE-0214, where it was noticed and left alone. The paragraph on the
+> note tools and a task's `allowed_tools` was added the same day, after
+> that pull request's review.

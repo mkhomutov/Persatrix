@@ -209,7 +209,9 @@ spawner.
 > the recall tool for the two personas without `channels.recall`
 > ([ISSUE-0147](ISSUE-0147-unregistered-agent-tools-dropped-silently.md)
 > records that gap). `tests/unit/python/test_shipped_agents_tool_admission.py`
-> holds this, and passes unchanged before and after the change.
+> holds this, and passes unchanged before and after the change. One
+> answer does change for them: a call with wrong arguments to such a tool
+> now gets that refusal, where it got the argument error.
 >
 > Not done here: a refused call still writes no `tool.denied` audit line
 > ([ISSUE-0256](ISSUE-0256-nothing-verifies-the-audit-chain-and-tool-denied-is-never-emitted.md)).

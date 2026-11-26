@@ -108,14 +108,14 @@ class AgentServer:
 
     def register_agent(self, agent: BaseAgent) -> None:
         """Register an agent instance with the server."""
-        # S-03: v0.1 uses module-level state for tool permissions
-        # (builtin.permission_gate, builtin.path_validator), so loading
-        # multiple agents silently overwrites the first agent's security
-        # config.  Warn until per-agent DI is added in v0.2.
+        # S-03: the built-in tools' own checks read module-level state
+        # (builtin.permission_gate, builtin.path_validator), so a second
+        # agent overwrites the first one's rules there; only the declared-
+        # permission check (tool_list.admit_call) reads each agent's own.
         if self.agents:
             logger.warning(
-                "v0.1 supports single-agent-per-process; tool permissions "
-                "apply to the last-loaded agent only"
+                "v0.1 supports single-agent-per-process; the built-in tools' "
+                "own checks and path rules are the last-loaded agent's"
             )
         self.agents[agent.agent_id] = agent
         logger.info("Registered agent: %s (%s)", agent.agent_id, agent.name)
