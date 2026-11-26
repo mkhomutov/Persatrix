@@ -234,9 +234,11 @@ class TestOrderAndAudit:
         class _Reenter(logging.Handler):
             def emit(self, record: logging.LogRecord) -> None:
                 if record.levelno == logging.WARNING:
-                    admit_call("ember-owl", {"probe": _probe()}, ToolCall(
-                        id="c2", name="probe", input={"cmd": "ls"},
-                    ))
+                    admit_call(
+                        "ember-owl", {"probe": _probe()},
+                        ToolCall(id="c2", name="probe", input={"cmd": "ls"}),
+                        permissions=None, allowed_tools=(),
+                    )
 
         _register([])
         obs_logging.set_redactor(_Boom())

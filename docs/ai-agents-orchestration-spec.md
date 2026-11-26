@@ -390,6 +390,15 @@ def query_database(query: str, database: str = "main") -> ToolResult:
 > permissions are stored and never checked, so the tool runs for any agent
 > that lists it ([ISSUE-0214](issues/ISSUE-0214-declared-tool-permissions-are-never-enforced.md)).
 
+> 2026-11-26 — the last sentence no longer holds. A tool's declared
+> permissions are checked before it runs: a model's call is refused for an
+> agent whose config does not grant every one. And this example now fails
+> when the tool is defined: `db:read` is not a permission an agent's config
+> can grant, so `@tool` raises `ValueError`. A tool can declare only
+> `filesystem:read`, `filesystem:write`, `network:http`, `shell:exec`,
+> `memory:read`, `memory:write` and `channels:recall`; it cannot have a
+> permission of its own yet.
+
 #### Tier 3: MCP Tools (External Servers)
 Tools exposed by external MCP-compatible servers (see 5.2).
 
@@ -581,6 +590,19 @@ agent:
 > - **Not every tool passes through the gate.** Each built-in tool checks
 >   the gate in its own code. Nothing checks it for a custom tool, whatever
 >   permissions that tool declares ([ISSUE-0214](issues/ISSUE-0214-declared-tool-permissions-are-never-enforced.md)).
+
+> 2026-11-26 — two of those three corrections have changed:
+>
+> - **Every tool a model calls now passes through the gate** for the
+>   permissions it declares, before it runs, on both agent kinds. Each
+>   built-in tool still checks again in its own code, where it also checks
+>   the path, the command or the domain. A tool that declares no permission
+>   is held only by the agent's `tools` list.
+> - **A call refused for a permission the agent lacks now writes a
+>   warning** to the agent's own log, naming the agent, the tool and the
+>   permission. A shell command or a host off its list still writes only a
+>   debug line. Still nothing is written to the audit log
+>   ([ISSUE-0256](issues/ISSUE-0256-nothing-verifies-the-audit-chain-and-tool-denied-is-never-emitted.md)).
 
 ### 6.3 Sandboxing
 
@@ -1132,6 +1154,9 @@ class PersonaAgent(BaseAgent):
 > and the rule that a sub-agent gets no more than its parent ("child ≤
 > parent") is not enforced ([ISSUE-0214](issues/ISSUE-0214-declared-tool-permissions-are-never-enforced.md)).
 
+> 2026-11-26 — still so. The rule is now tracked in
+> [ISSUE-0285](issues/ISSUE-0285-sub-agent-permission-rule-and-delegation-timeout-are-not-built.md).
+
 ### 8.3 Orchestrator API (Go)
 
 > 2026-11-14 — the route list that stood here is removed
@@ -1440,6 +1465,9 @@ denials, blocked messages, rate limit hits).
 > refused permission is a debug line, which an agent does not print at its
 > default level ([6.2](#62-permission-system)). A rate-limit violation is
 > written to the audit log ([6.6](#66-audit-trail)).
+
+> 2026-11-26 — a call refused because the agent's config lacks a permission
+> the tool declares is now a warning too ([6.2](#62-permission-system)).
 
 ### 12.5 Testing Framework
 

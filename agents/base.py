@@ -282,8 +282,10 @@ class BaseAgent(_TaskToolRoundMixin, ABC):
         # orchestrator's _context_package.budget_memory_tokens (PR 1 emits
         # 0; the facade's budget_to_limit() falls back to a small default).
         system_prompt = await self._inject_memories(system_prompt, task)
+        # The task's own tool list narrows what is offered and what runs.
+        allowed_tools = task.config.allowed_tools
         tool_defs = self._llm_client.format_tool_definitions(
-            self._build_tool_definitions()
+            self._build_tool_definitions(allowed_tools)
         )
         total_tokens = 0
         tool_calls_count = 0
@@ -395,7 +397,7 @@ class BaseAgent(_TaskToolRoundMixin, ABC):
                 )
 
             if response.stop_reason == StopReason.TOOL_USE:
-                tool_results = await self._execute_tools(response.tool_calls)
+                tool_results = await self._execute_tools(response.tool_calls, allowed_tools)
                 tool_calls_count += len(tool_results)
                 messages = self._llm_client.append_tool_round(
                     messages, response, tool_results

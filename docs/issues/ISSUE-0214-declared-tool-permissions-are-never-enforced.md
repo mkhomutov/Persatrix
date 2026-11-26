@@ -1,13 +1,17 @@
 ---
 id: ISSUE-0214
 summary: "Three permission mechanisms that the docs present as working are stored and never checked: the `permissions` a custom tool declares with `@tool`, the `allowed_tools` list on a task or delegation, and the rule that a sub-agent gets no more than its parent. The framework's own nine tools each check the gate in their own body; nothing checks it on a tool's behalf. The assistant instructions, three glossary entries and the spec's notes now say so, other texts still do not (ISSUE-0272), and nothing is enforced yet."
-status: in_progress
+status: resolved
 severity: medium
 area: agents/tools
 created: 2026-11-10
+closed: 2026-11-26
 refs:
   - agents/tools/registry.py
   - agents/tools/permissions.py
+  - agents/tools/tool_list.py
+  - agents/task_tool_round.py
+  - agents/persona_runtime/tool_round.py
   - agents/tools/memory_tools.py
   - agents/tools/recall.py
   - schemas/agent.schema.json
@@ -21,6 +25,15 @@ refs:
   - docs/ai-glossary.md
   - agents/persona.py
   - agents/action_executor.py
+  - agents/sub_agents/delegation.py
+  - tests/unit/python/test_declared_tool_permissions.py
+  - tests/unit/python/test_tool_permission_names.py
+  - tests/unit/python/test_task_allowed_tools.py
+  - tests/unit/python/test_builtin_tools_declared_permissions.py
+  - tests/unit/python/test_shipped_agents_tool_admission.py
+  - docs/issues/ISSUE-0285-sub-agent-permission-rule-and-delegation-timeout-are-not-built.md
+  - docs/issues/ISSUE-0147-unregistered-agent-tools-dropped-silently.md
+  - docs/issues/ISSUE-0256-nothing-verifies-the-audit-chain-and-tool-denied-is-never-emitted.md
 ---
 
 # ISSUE-0214: Declared tool permissions are never enforced
@@ -135,3 +148,65 @@ spawner.
 > places still present delegation, sub-agent spawns or tool permission
 > checks as working; they are listed in
 > [ISSUE-0272](ISSUE-0272-other-docs-still-present-delegation-and-permission-checks-as-working.md).
+
+> 2026-11-26 — resolved, on the maintainer's three choices.
+>
+> Both faults were first shown on `main`: a tool that declared
+> `filesystem:read` ran for a task agent and for a persona with no
+> `filesystem` block, and a task whose `allowed_tools` named one tool was
+> offered, and ran, every tool on its agent's list.
+>
+> **1. What can be granted today is enforced.** `admit_call`
+> (`agents/tools/tool_list.py`), the one function through which both agent
+> kinds run a tool, refuses a model's call unless the agent's own
+> `permissions` block grants every permission the tool declares. The model
+> is told `Permission denied: <permission>`, the words each built-in tool
+> already gave from its own body; the operator gets a warning; the call
+> counts as a failed tool call. The check sits there, and not in the
+> `@tool` wrapper, because only the tool round knows which agent is
+> calling. The nine built-in tools keep their own checks.
+>
+> A tool can declare seven permissions, the ones an agent's config can
+> grant: `filesystem:read`, `filesystem:write`, `network:http`,
+> `shell:exec`, `memory:read`, `memory:write` and `channels:recall`. Any
+> other name raises `ValueError` when the tool is defined. For a name
+> outside the schema's five categories the message says that a tool cannot
+> have a permission of its own yet. The agent schema was not opened for
+> custom names: that was considered and not taken. A name inside the five
+> categories that no key grants, such as `filesystem:deny`, is refused the
+> same way, and the gate now answers "denied" for it: before, it read the
+> config key of that name, so `network:deny` was granted by a deny list.
+>
+> A tool that declares no permission is held only by the agent's `tools`
+> list, as before. A tool function called directly from Python, not by a
+> model, passes no check but its own.
+>
+> **2. A task's `allowed_tools` is enforced** in both tool rounds
+> (`task_allows`): a tool the list does not name is not offered, and a
+> call to it gets `Unknown tool`. An empty list is no restriction from this
+> field: the wire cannot tell an empty list from an unset one, and the
+> orchestrator never sets it, so no shipped run changes. The list narrows
+> the agent's own `tools` list and never adds to it. A delegation's list
+> reaches its sub-agent the same way, as the task's.
+>
+> **3. The sub-agent rule is deferred** to
+> [ISSUE-0285](ISSUE-0285-sub-agent-permission-rule-and-delegation-timeout-are-not-built.md),
+> with the delegation's unread `budget.timeout_seconds`. Nothing reaches
+> the spawner. The two docstrings that said the rule was enforced are
+> corrected.
+>
+> The smaller fault is fixed too: a result entry whose `tags` are not text
+> is rejected alone (`schema_invalid`), where it raised out of
+> `merge_result`; and a `tags` value that is not a list no longer raises
+> while the result is read.
+>
+> No shipped agent loses a tool. The check refuses a shipped agent only
+> where the tool's own body already did, with the same words: `file_read`
+> for the three personas, which list it without a `filesystem` block, and
+> the recall tool for the two personas without `channels.recall`
+> ([ISSUE-0147](ISSUE-0147-unregistered-agent-tools-dropped-silently.md)
+> records that gap). `tests/unit/python/test_shipped_agents_tool_admission.py`
+> holds this, and passes unchanged before and after the change.
+>
+> Not done here: a refused call still writes no `tool.denied` audit line
+> ([ISSUE-0256](ISSUE-0256-nothing-verifies-the-audit-chain-and-tool-denied-is-never-emitted.md)).

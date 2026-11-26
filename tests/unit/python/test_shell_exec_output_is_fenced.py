@@ -79,8 +79,12 @@ def _builtin_tools(tmp_path: Path) -> Any:
 
 
 @pytest.fixture(params=[_TaskRound, _PersonaRound], ids=["task-round", "persona-round"])
-def tool_round(request: pytest.FixtureRequest) -> Any:
-    return request.param()
+def tool_round(request: pytest.FixtureRequest, tmp_path: Path) -> Any:
+    # As ``load_agent`` does it: the agent and its built-in tools read one
+    # ``permissions`` block. The tool round asks the agent's own (ISSUE-0214).
+    agent = request.param()
+    agent.config["permissions"] = _permissions(tmp_path)
+    return agent
 
 
 async def _call(tool_round: Any, name: str, **arguments: str) -> LLMToolResult:

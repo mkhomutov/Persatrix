@@ -266,3 +266,12 @@ after `wire_recall_tools`.
 > shape](../v0.4.x-sequencing.md#amendment-2026-10-18--v040s-shape-its-prerequisites-its-cuts-and-the-end-of-the-v03x-line)
 > does not take it in: its [ruling (q)](../v0.4.x-sequencing.md#rulings)
 > boards an issue only when a phase in the release is its fix.
+
+> 2026-11-26 — the related gap above (a tool offered and then refused
+> every time) is unchanged in what the model sees and no longer silent for
+> the operator. Since the fix for
+> [ISSUE-0214](ISSUE-0214-declared-tool-permissions-are-never-enforced.md)
+> such a call is refused before the tool runs, with the same words, and
+> each refusal is a warning in the agent's log that names the agent, the
+> tool and the permission. The three shipped personas still list
+> `file_read` with no `filesystem` block, and nothing warns at start-up.

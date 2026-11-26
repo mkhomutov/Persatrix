@@ -13,30 +13,53 @@ A refused call is logged as a WARNING for the operator: the model learns only
 ``Unknown tool``, and a refused tool never runs, so no tool span or metric
 would otherwise record that the model reached for a tool it was not given.
 
-Both kinds of agent run a call only once :func:`admit_call` admits it: the
-tool is one they offer, and its arguments pass the check in
-:mod:`agents.tools.arg_check` (RFC 0009 Phase 3). A call whose arguments are
-refused gets a structured ``tool_argument_validation_error`` instead, and is
-recorded as a failed tool call (span and metrics) and in a
-``tool.arg_invalid`` audit line. As the RFC 0009 Phases 3–4 plan's G-4 says,
-that line is a structured log record on ``agents.tools.audit``: it reaches
-the orchestrator's log stream but not its checksummed audit chain. What the
-tool receives is the checked arguments, so RFC 0028 PR 10's pre-tool seat,
-which will sit between the admission and the run, will see them too.
+Both kinds of agent run a call only once :func:`admit_call` admits it. It
+asks four things, in this order:
+
+1. The tool is one the agent offers.
+2. The task's ``allowed_tools`` list, when it names any tool, names this
+   one (:func:`task_allows`). A tool it does not name is not offered
+   either, and a call to it gets the same ``Unknown tool`` answer.
+3. The agent's ``permissions`` block grants every permission the tool
+   declares with ``@tool(permissions=[...])`` (ISSUE-0214). If not, the
+   model gets ``Permission denied: <permission>``, the answer the built-in
+   tools give from their own bodies, the operator gets a WARNING, and the
+   call is recorded as a failed tool call. Each built-in tool still asks
+   again in its own body, where it also checks paths, commands and domains.
+4. Its arguments pass the check in :mod:`agents.tools.arg_check` (RFC 0009
+   Phase 3). A call whose arguments are refused gets a structured
+   ``tool_argument_validation_error`` instead, and is recorded as a failed
+   tool call (span and metrics) and in a ``tool.arg_invalid`` audit line.
+   As the RFC 0009 Phases 3–4 plan's G-4 says, that line is a structured
+   log record on ``agents.tools.audit``: it reaches the orchestrator's log
+   stream but not its checksummed audit chain.
+
+What the tool receives is the checked arguments, so RFC 0028 PR 10's
+pre-tool seat, which will sit between the admission and the run, will see
+them too.
+
+The permission check lives here and not in the ``@tool`` wrapper because
+only the tool round knows which agent is calling: the wrapper would have to
+read one gate for the whole process, and a persona's own tools are built
+with a gate per agent. Nothing else in ``agents/`` takes a tool's function
+out of its definition to run it, so neither agent kind can run a tool past
+this function. A tool called directly as Python is not a model's call and
+passes through no check but its own.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Collection, Mapping
 from typing import Any, NamedTuple
 
 from ..llm_types import LLMToolResult, ToolCall
 from ..observability.audit_record import emit_audit_record
 from .arg_check import ArgumentRefusal, validate_arguments
+from .permissions import PermissionGate
 from .registry import ToolDefinition, ToolResult, list_tools, record_refused_call
 
-__all__ = ["AdmittedCall", "admit_call", "offered_tools", "refuse_call"]
+__all__ = ["AdmittedCall", "admit_call", "offered_tools", "refuse_call", "task_allows"]
 
 logger = logging.getLogger(__name__)
 _audit_logger = logging.getLogger("agents.tools.audit")
@@ -87,23 +110,66 @@ def offered_tools(agent_id: str, config: Mapping[str, Any]) -> list[ToolDefiniti
     return [td for td in list_tools() if td.name in names]
 
 
-def refuse_call(agent_id: str, call: ToolCall) -> LLMToolResult:
+def task_allows(allowed_tools: Collection[str] | None, name: str) -> bool:
+    """Whether a task's ``allowed_tools`` list lets its agent use the tool *name*.
+
+    An empty list is no restriction from this field: the wire cannot tell
+    an empty list from an unset one (``TaskConfig.allowed_tools``), and the
+    orchestrator never sets it. A list that names any tool allows those and
+    no other. It only narrows: the agent's own ``tools`` list and its
+    permissions still apply. Both agent kinds ask this, when they offer
+    tools and when :func:`admit_call` admits a call.
+    """
+    if not allowed_tools:
+        return True
+    if isinstance(allowed_tools, str):
+        # One name, not a run of letters to look the tool's name up in.
+        return name == allowed_tools
+    try:
+        return name in allowed_tools
+    except TypeError:
+        # A value that cannot be searched names no tool, so it allows none.
+        return False
+
+
+_NOT_OFFERED = "it offers no runnable tool by that name"
+_NOT_ON_TASK_LIST = "the task's allowed_tools list does not name it"
+
+
+def refuse_call(agent_id: str, call: ToolCall, why: str = _NOT_OFFERED) -> LLMToolResult:
     """Answer *call* as a call to a tool that does not exist, and log it.
 
     The model gets the same ``Unknown tool`` error whether the tool is missing
-    from the agent's list, not registered, or has nothing to run, so it learns
-    nothing about tools it was not given. The model chose the name, so the log
-    line quotes it with escapes (CWE-117).
+    from the agent's list, not registered, has nothing to run, or is not on
+    the task's ``allowed_tools`` list, so it learns nothing about tools it
+    was not given; *why* is for the operator's log line alone. The model
+    chose the name, so the log line quotes it with escapes (CWE-117).
     """
     logger.warning(
-        "Agent %r answered a call to tool %r with Unknown tool: "
-        "it offers no runnable tool by that name",
-        agent_id, call.name,
+        "Agent %r answered a call to tool %r with Unknown tool: %s",
+        agent_id, call.name, why,
     )
     return LLMToolResult(
         tool_call_id=call.id,
         content=f"Unknown tool: {call.name}",
         is_error=True,
+    )
+
+
+def _deny_call(agent_id: str, call: ToolCall, permission: str) -> LLMToolResult:
+    """Answer *call* as refused for *permission*, which the agent's config lacks.
+
+    The words are the ones each built-in tool gives from its own body, so
+    the model reads the same answer whichever check refused the call.
+    """
+    logger.warning(
+        "Agent %r was refused a call to tool %r: the tool declares the "
+        "permission %r and the agent's config does not grant it",
+        agent_id, call.name, permission,
+    )
+    record_refused_call(agent_id=agent_id, tool_name=call.name, reason="permission_denied")
+    return LLMToolResult(
+        tool_call_id=call.id, content=f"Permission denied: {permission}", is_error=True,
     )
 
 
@@ -115,20 +181,46 @@ class AdmittedCall(NamedTuple):
 
 
 def admit_call(
-    agent_id: str, tools: Mapping[str, ToolDefinition], call: ToolCall,
+    agent_id: str,
+    tools: Mapping[str, ToolDefinition],
+    call: ToolCall,
+    *,
+    permissions: Mapping[str, Any] | None,
+    allowed_tools: Collection[str] | None,
 ) -> AdmittedCall | LLMToolResult:
     """Admit *call* to run, or answer it with the result the model gets instead.
 
     *tools* maps each name the agent runs to the definition it runs under that
-    name, so the check reads the tool that will actually run. A call to any
-    other tool is answered by :func:`refuse_call`. A call whose arguments fail
-    the check, or that the check itself fails on, does not run: running it on
-    arguments nobody checked would hand the coming pre-tool seat a value the
-    check never saw.
+    name, so every check reads the tool that will actually run. A call to any
+    other tool, or to one the task's *allowed_tools* does not allow
+    (:func:`task_allows`), is answered by :func:`refuse_call`. A call to a
+    tool that declares a permission the agent's *permissions* block does not
+    grant is answered ``Permission denied``. A call whose arguments fail the
+    check does not run either: running it on arguments nobody checked would
+    hand the coming pre-tool seat a value the check never saw. A check that
+    itself fails refuses the call.
+
+    *permissions* and *allowed_tools* have no default, so no caller can run
+    a tool without saying whose config and which task the call is held to.
     """
     tool_def = tools.get(call.name)
     if tool_def is None or tool_def.func is None:
         return refuse_call(agent_id, call)
+    if not task_allows(allowed_tools, call.name):
+        return refuse_call(agent_id, call, _NOT_ON_TASK_LIST)
+    try:
+        missing = PermissionGate(permissions).missing(tool_def.permissions)
+    except Exception:
+        logger.exception(
+            "Agent %r could not check the permissions of a call to tool %r, "
+            "so the call did not run", agent_id, call.name,
+        )
+        record_refused_call(
+            agent_id=agent_id, tool_name=call.name, reason="permission_check_error",
+        )
+        return LLMToolResult(tool_call_id=call.id, content="Internal tool error", is_error=True)
+    if missing is not None:
+        return _deny_call(agent_id, call, missing)
     try:
         checked = validate_arguments(tool_def.argument_spec, call.input)
     except Exception:

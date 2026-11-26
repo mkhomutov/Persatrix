@@ -405,6 +405,9 @@ either — even if explicitly requested. The orchestrator enforces this.
 > than its parent is not written
 > ([ISSUE-0214](issues/ISSUE-0214-declared-tool-permissions-are-never-enforced.md)). The orchestrator has no part in it.
 
+> 2026-11-26 — still so. The rule is now tracked in
+> [ISSUE-0285](issues/ISSUE-0285-sub-agent-permission-rule-and-delegation-timeout-are-not-built.md).
+
 #### E3.2.5 Sub-Agent Patterns
 
 Common patterns that emerge in practice:
@@ -531,6 +534,9 @@ reviewer's sub-agents share from that 50k. This prevents unbounded cost growth.
 > so the orchestrator validates nothing in step 3: no permission, depth,
 > concurrency or budget check exists
 > ([ISSUE-0214](issues/ISSUE-0214-declared-tool-permissions-are-never-enforced.md)).
+
+> 2026-11-26 — still so; now tracked in
+> [ISSUE-0285](issues/ISSUE-0285-sub-agent-permission-rule-and-delegation-timeout-are-not-built.md).
 
 #### E3.2.8 Sub-Agents vs. Delegation
 
@@ -3194,3 +3200,6 @@ Also includes foundational observability:
 > "child ≤ parent" for sub-agent permissions
 > ([ISSUE-0214](issues/ISSUE-0214-declared-tool-permissions-are-never-enforced.md)),
 > and mutual TLS and trust domains ([E6.5](#e65-distributed-security)).
+
+> 2026-11-26 — still so; "child ≤ parent" is now tracked in
+> [ISSUE-0285](issues/ISSUE-0285-sub-agent-permission-rule-and-delegation-timeout-are-not-built.md).

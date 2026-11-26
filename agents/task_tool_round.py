@@ -11,12 +11,13 @@ comes first in a persona's MRO and so replaces this one. Moved out of
 from __future__ import annotations
 
 import logging
+from collections.abc import Collection
 from typing import Any
 
 from .llm_client import LLMToolResult, ToolCall
 from .security import maybe_wrap_tool_content
 from .tools.registry import shown_output
-from .tools.tool_list import admit_call, offered_tools
+from .tools.tool_list import admit_call, offered_tools, task_allows
 
 logger = logging.getLogger(__name__)
 
@@ -30,12 +31,16 @@ class _TaskToolRoundMixin:
     agent_id: str
     config: dict[str, Any]
 
-    def _build_tool_definitions(self) -> list[dict[str, Any]]:
+    def _build_tool_definitions(
+        self, allowed_tools: Collection[str] = (),
+    ) -> list[dict[str, Any]]:
         """Build normalized tool definitions from the tool registry.
 
         S-12: filters to only tools in the agent's ``tools`` config; an empty
         list exposes no tools (e.g. planner agent). The rule lives in
         :mod:`agents.tools.tool_list`, which ``_execute_tools`` shares.
+        *allowed_tools* is the task's own list (ISSUE-0214): a tool it does
+        not allow is left out. Empty, the default, leaves none out.
         """
         return [
             {
@@ -44,19 +49,28 @@ class _TaskToolRoundMixin:
                 "parameters": td.parameters,
             }
             for td in offered_tools(self.agent_id, self.config)
+            if task_allows(allowed_tools, td.name)
         ]
 
-    async def _execute_tools(self, tool_calls: list[ToolCall]) -> list[LLMToolResult]:
+    async def _execute_tools(
+        self, tool_calls: list[ToolCall], allowed_tools: Collection[str] = (),
+    ) -> list[LLMToolResult]:
         """Execute tool calls sequentially, returning LLM-facing results.
 
         ISSUE-0151: a tool the agent was not offered gets the same ``Unknown
         tool`` error as one that does not exist, as personas do; neither runs,
         nor does a call whose arguments fail ``admit_call``'s check (RFC 0009).
+        ISSUE-0214: ``admit_call`` also refuses a tool the task's
+        *allowed_tools* does not allow, and one that declares a permission
+        this agent's config does not grant.
         """
         results: list[LLMToolResult] = []
         offered = {td.name: td for td in offered_tools(self.agent_id, self.config)}
         for call in tool_calls:
-            admitted = admit_call(self.agent_id, offered, call)
+            admitted = admit_call(
+                self.agent_id, offered, call,
+                permissions=self.config.get("permissions"), allowed_tools=allowed_tools,
+            )
             if isinstance(admitted, LLMToolResult):
                 results.append(admitted)
                 continue

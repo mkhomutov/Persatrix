@@ -10,16 +10,29 @@ turn offers, and running the calls the model makes. Moved out of
 from __future__ import annotations
 
 import logging
+from collections.abc import Collection
 from typing import Any
 
 from ..llm_client import LLMToolResult, ToolCall
+from ..persona_types import AgentEvent, EventType
 from ..security import maybe_wrap_tool_content
+from ..task_types import TaskInput
 from ..tools.registry import ToolDefinition, shown_output
-from ..tools.tool_list import admit_call, offered_tools
+from ..tools.tool_list import admit_call, offered_tools, task_allows
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["_ToolRoundMixin"]
+__all__ = ["_ToolRoundMixin", "allowed_tools_of"]
+
+
+def allowed_tools_of(event: AgentEvent) -> Collection[str]:
+    """The ``allowed_tools`` list of the task *event* carries, or an empty one.
+
+    Only a workflow task carries the list (``TaskConfig.allowed_tools``); a
+    persona's turn on any other event is held to no task list.
+    """
+    task = event.payload.get("task") if event.event_type is EventType.TASK_ASSIGNED else None
+    return task.config.allowed_tools if isinstance(task, TaskInput) else ()
 
 
 class _ToolRoundMixin:
@@ -30,12 +43,17 @@ class _ToolRoundMixin:
     config: dict[str, Any]
     _memory_tools: list[ToolDefinition]
 
-    def _build_tool_definitions(self) -> list[dict[str, Any]]:
+    def _build_tool_definitions(
+        self, allowed_tools: Collection[str] = (),
+    ) -> list[dict[str, Any]]:
         """Build tool definitions including memory tools.
 
         Uses a dict keyed by tool name so memory tools take precedence
         over registry tools with the same name (F-5a-2: defense-in-depth,
         memory tools should shadow any same-named registry tools).
+        *allowed_tools* is a task's own list (ISSUE-0214): a tool it does
+        not allow is left out, a memory tool included. Empty, the default,
+        leaves none out.
         """
         # Start with agent-configured tools from the global registry, by the
         # rule task agents share (ISSUE-0151: agents.tools.tool_list).
@@ -57,15 +75,20 @@ class _ToolRoundMixin:
                 "parameters": td.parameters,
             }
 
-        return list(defs_by_name.values())
+        return [d for d in defs_by_name.values() if task_allows(allowed_tools, d["name"])]
 
-    async def _execute_tools(self, tool_calls: list[ToolCall]) -> list[LLMToolResult]:
+    async def _execute_tools(
+        self, tool_calls: list[ToolCall], allowed_tools: Collection[str] = (),
+    ) -> list[LLMToolResult]:
         """Execute tool calls, checking memory tools first then registry.
 
         Registry lookups are restricted to tools in ``config["tools"]``
         (F-5a-2: defense-in-depth against LLM hallucinating tool names
         that exist in the global registry but weren't offered to this agent),
         and a call runs only on arguments that pass the check (RFC 0009 Phase 3).
+        ISSUE-0214: ``admit_call`` also refuses a tool a task's *allowed_tools*
+        does not allow, and one that declares a permission this agent's
+        config does not grant; a memory tool is held to both as well.
         """
         # Offered registry tools, then memory tools (always allowed) shadowing
         # any of the same name, exactly as _build_tool_definitions() offers them.
@@ -74,7 +97,10 @@ class _ToolRoundMixin:
         results: list[LLMToolResult] = []
 
         for call in tool_calls:
-            admitted = admit_call(self.agent_id, tool_map, call)
+            admitted = admit_call(
+                self.agent_id, tool_map, call,
+                permissions=self.config.get("permissions"), allowed_tools=allowed_tools,
+            )
             if isinstance(admitted, LLMToolResult):
                 results.append(admitted)
                 continue

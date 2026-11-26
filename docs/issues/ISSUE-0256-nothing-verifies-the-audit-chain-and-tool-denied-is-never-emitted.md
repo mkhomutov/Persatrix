@@ -103,3 +103,12 @@ The severity is proposed here, not ruled.
 
 > 2026-11-14 — filed from the review of #1119. The orchestration spec's
 > note at §6.6 links here.
+
+> 2026-11-26 — one sentence of the Context has changed. A call refused
+> because the agent's config lacks a permission the tool declares is now
+> refused in one place for both agent kinds, `admit_call` in
+> `agents/tools/tool_list.py`
+> ([ISSUE-0214](ISSUE-0214-declared-tool-permissions-are-never-enforced.md)),
+> which writes a warning to the agent's log and counts a failed tool call.
+> It still writes no `tool.denied` line, so both parts of this issue stand.
+> That function is where such a line would be written.

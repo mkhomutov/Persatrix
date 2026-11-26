@@ -33,6 +33,16 @@ from ._http_response_fakes import give_body
 
 _OFF_TYPE: list[Any] = [30, 30.0, True, ["x"], {"k": "v"}, None]
 
+# An agent's ``permissions`` block that grants every permission the built-in
+# tools declare, so each call here passes the declared-permission check
+# (ISSUE-0214) and reaches the argument check under test.
+_GRANTED: dict[str, Any] = {
+    "filesystem": {"read": ["*"], "write": ["*"]},
+    "shell": {"allowed_commands": ["echo"]},
+    "network": {"allow": ["api.example.com"]},
+    "memory": {"read": True, "write": True},
+}
+
 # Each narrowed built-in parameter, with arguments the tool runs on; a note id
 # of None is replaced by a stored note's id before the tool runs.
 _NARROWED = [
@@ -79,7 +89,10 @@ def _def(name: str) -> ToolDefinition:
 
 async def _admit_and_run(name: str, arguments: dict[str, Any]) -> ToolResult | LLMToolResult:
     """Run *arguments* through the check, then the tool, as both paths do."""
-    admitted = admit_call("t", {name: _def(name)}, ToolCall(id="c1", name=name, input=arguments))
+    admitted = admit_call(
+        "t", {name: _def(name)}, ToolCall(id="c1", name=name, input=arguments),
+        permissions=_GRANTED, allowed_tools=(),
+    )
     if isinstance(admitted, AdmittedCall):
         return await admitted.run(**admitted.arguments)
     return admitted
@@ -135,7 +148,7 @@ class TestNarrowedValuesFailToday:
         valid = {key: "n1" if value is None else value for key, value in valid.items()}
         for value in _OFF_TYPE:
             call = ToolCall(id="c1", name=name, input={**valid, parameter: value})
-            refused = admit_call("t", {name: td}, call)
+            refused = admit_call("t", {name: td}, call, permissions=_GRANTED, allowed_tools=())
             assert isinstance(refused, LLMToolResult), (name, parameter, value)
             invalid = json.loads(refused.content)["invalid"]
             assert [i["argument"] for i in invalid] == [parameter], (name, parameter, value)
