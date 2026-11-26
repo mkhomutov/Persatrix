@@ -229,7 +229,10 @@ class PersonaAgent(BaseAgent):
         """
         Spawn an ephemeral sub-agent for atomic task execution.
 
-        The framework handles:
+        Not in use: nothing provides the orchestrator client this forwards
+        to, so every call raises ``RuntimeError``. The design gives the
+        framework four jobs here, and none is built (ISSUE-0285):
+
         - Permission validation (child ≤ parent)
         - Budget deduction from parent's pool
         - Depth/concurrency limit enforcement

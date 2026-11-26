@@ -68,13 +68,15 @@ class TestToolDecorator:
         assert "optional_arg" not in defn.parameters.get("required", [])
 
     def test_permissions_stored(self):
-        @tool(name="risky", permissions=["shell:exec", "fs:write"])
+        # Both are names an agent's config can grant; any other is refused
+        # when the tool is defined (test_tool_permission_names.py).
+        @tool(name="risky", permissions=["shell:exec", "filesystem:write"])
         async def risky() -> ToolResult:
             return ToolResult(success=True)
 
         defn = get_tool("risky")
         assert defn is not None
-        assert defn.permissions == ["shell:exec", "fs:write"]
+        assert defn.permissions == ["shell:exec", "filesystem:write"]
 
 
 class TestToolInvocation:

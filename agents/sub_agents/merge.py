@@ -370,6 +370,12 @@ class MergeEngine:
         # recall, ACL filters, etc.).  Same trust-boundary rationale as
         # the existing ``source_agent`` field check immediately above.
         for tag in entry.tags:
+            # A result arrives as JSON, so a tag can be any JSON value. One
+            # that is not text is this entry's fault alone (ISSUE-0214).
+            if not isinstance(tag, str):
+                return RejectedEntry(
+                    index=idx, reason=REASON_SCHEMA_INVALID, detail="tags must be text",
+                )
             for prefix in RESERVED_TAG_PREFIXES:
                 if tag.startswith(prefix):
                     return RejectedEntry(

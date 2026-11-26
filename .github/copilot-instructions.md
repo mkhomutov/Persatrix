@@ -64,10 +64,12 @@ Language-specific rules live in the instruction files under `.github/instruction
 
 Key patterns: `@tool(name=...)` auto-generates a tool's parameter schema; three-tier memory (Episodic/Relationship/Working); optimization profiles in `config/optimization.yaml`.
 
-Two permission rules are not enforced ([ISSUE-0214](../docs/issues/ISSUE-0214-declared-tool-permissions-are-never-enforced.md)), so do not rely on them:
+What is checked before a tool runs, and what is not:
 
-- The `permissions=[...]` a tool declares with `@tool` are stored and never checked. A tool must ask the agent's `PermissionGate` in its own body, as each built-in tool does (`gate.check("filesystem:read")` in `agents/tools/builtin.py`). It can ask only about the five categories an agent's config grants (`filesystem`, `network`, `shell`, `memory`, `channels`): the agent schema allows no other, so a permission of the tool's own could never be granted.
-- Sub-agents are not in use. A spawner that runs one inside the agent's own process exists (`agents/sub_agents/spawner.py`) and tests run it, but nothing a persona or the orchestrator does reaches it. No permission is inherited or narrowed, and a task's `allowed_tools` list is carried and never checked.
+- The `permissions=[...]` a tool declares with `@tool` are checked. A model's call is refused with `Permission denied: <name>` for an agent whose config does not grant every one (`admit_call` in `agents/tools/tool_list.py`). A tool can declare only what an agent's config can grant: `filesystem:read`, `filesystem:write`, `network:http`, `shell:exec`, `memory:read`, `memory:write` and `channels:recall`. Any other name is an error when the tool is defined: the agent schema has no place to grant it, so a tool cannot have a permission of its own yet.
+- A tool must still ask, in its own body, for anything finer than the name: which path, which command, which domain. The built-in file, shell and HTTP tools do (`PathValidator`, `is_command_allowed` and `is_domain_allowed`, called in `agents/tools/builtin.py`). A tool that declares no permission is held only by the agent's `tools` list.
+- A task's `allowed_tools` list is enforced when it names a tool: a tool it does not name is not offered and does not run. An empty list restricts nothing, and the orchestrator never sets the field.
+- Sub-agents are not in use. A spawner that runs one inside the agent's own process exists (`agents/sub_agents/spawner.py`) and tests run it, but nothing a persona or the orchestrator does reaches it. No permission is inherited or narrowed: the rule that a sub-agent gets no more than its parent is not built ([ISSUE-0285](../docs/issues/ISSUE-0285-sub-agent-permission-rule-and-delegation-timeout-are-not-built.md)).
 
 ## TDD
 

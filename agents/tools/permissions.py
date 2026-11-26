@@ -1,24 +1,96 @@
 """
-Permission gate enforcement.
+The permission gate: what an agent's config grants its tools.
 
-Checks every tool invocation against the agent's permission config.
-Deny-by-default: if a permission isn't explicitly granted, it's denied.
+Deny-by-default: a permission the agent's ``permissions`` block does not
+grant is denied. The gate is asked in two places:
+
+- Before a tool runs. :func:`agents.tools.tool_list.admit_call`, the one
+  admission function both agent kinds use, refuses a model's call unless
+  the agent's config grants every permission the tool declares with
+  ``@tool(permissions=[...])`` (ISSUE-0214).
+- Inside each built-in tool, which asks again and then asks what a declared
+  permission cannot say: which path, which command, which domain.
+
+A tool that declares no permission is held only by the agent's ``tools``
+list, and a tool function called directly as Python passes through neither
+check but its own.
+
+An agent's config can grant the seven permissions in
+:data:`GRANTABLE_PERMISSIONS` and no other: the agent schema
+(``schemas/agent.schema.json``) has five permission categories and allows
+no other key. So a tool cannot have a permission of its own yet, and
+``@tool`` refuses to register one that declares it
+(:func:`declared_permissions_error`).
 """
 
 import logging
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# A tool whose config scopes it with a list is granted by that list being
-# non-empty, as ``filesystem.read`` and ``filesystem.write`` already are
-# under their own names. ``shell_exec`` and ``http_request`` ask for
-# ``shell:exec`` and ``network:http``, but the agent schema has no ``exec``
-# or ``http`` key, so their grant is the list that scopes them (ISSUE-0150).
-_GRANTED_BY_LIST: dict[str, str] = {
-    "shell:exec": "allowed_commands",
+# Each permission an agent's config can grant, with the key of its category
+# that grants it: in a config the schema accepts, a non-empty list or
+# ``true`` (``PermissionGate.check`` says what any other value does).
+# ``shell_exec`` and ``http_request`` ask for ``shell:exec`` and
+# ``network:http``, but the agent schema has no ``exec`` or ``http`` key,
+# so their grant is the list that scopes them (ISSUE-0150). The keys left
+# out (``filesystem.deny``, ``network.deny``,
+# ``shell.max_execution_seconds``) scope a tool and turn nothing on.
+# ``tests/unit/python/test_tool_permission_names.py`` holds this table to
+# the schema.
+_GRANTED_BY: dict[str, str] = {
+    "filesystem:read": "read",
+    "filesystem:write": "write",
     "network:http": "allow",
+    "shell:exec": "allowed_commands",
+    "memory:read": "read",
+    "memory:write": "write",
+    "channels:recall": "recall",
 }
+
+#: Every permission an agent's config can grant, and so every one a tool
+#: may declare.
+GRANTABLE_PERMISSIONS: frozenset[str] = frozenset(_GRANTED_BY)
+
+#: The categories of the agent schema's ``permissions`` block.
+PERMISSION_CATEGORIES: frozenset[str] = frozenset(
+    permission.split(":", 1)[0] for permission in _GRANTED_BY
+)
+
+
+def declared_permissions_error(tool_name: str, declared: object) -> str | None:
+    """Why a tool may not declare *declared*, or None when it may.
+
+    A tool may declare only permissions an agent's config can grant. Any
+    other name could never be granted, so the tool would be refused on
+    every call; saying so when the tool is defined is kinder than that.
+    """
+    if isinstance(declared, str) or not isinstance(declared, Iterable):
+        return (
+            f"Tool {tool_name!r}: permissions must be a list of permission names, "
+            f"not {type(declared).__name__}"
+        )
+    for permission in declared:
+        if not isinstance(permission, str):
+            return (
+                f"Tool {tool_name!r}: permissions must be a list of permission names, "
+                f"and {permission!r} is not one"
+            )
+        if permission in GRANTABLE_PERMISSIONS:
+            continue
+        can_declare = ", ".join(sorted(GRANTABLE_PERMISSIONS))
+        if permission.split(":", 1)[0] in PERMISSION_CATEGORIES:
+            return (
+                f"Tool {tool_name!r} declares the permission {permission!r}, and "
+                f"no agent's config can grant it. A tool can declare: {can_declare}"
+            )
+        return (
+            f"Tool {tool_name!r} declares the permission {permission!r}: a tool "
+            "cannot have a permission of its own yet, because the agent schema "
+            f"has no place to grant one. A tool can declare: {can_declare}"
+        )
+    return None
 
 
 class PermissionGate:
@@ -29,36 +101,57 @@ class PermissionGate:
     missing — this is the deny-by-default posture.
     """
 
-    def __init__(self, permissions: dict[str, Any] | None = None) -> None:
-        self._permissions = permissions or {}
+    def __init__(self, permissions: Mapping[str, Any] | None = None) -> None:
+        # Nothing checks the agent schema at start-up, so the block can be
+        # any YAML value; one that is not a mapping grants nothing.
+        self._permissions: Mapping[str, Any] = (
+            permissions if isinstance(permissions, Mapping) else {}
+        )
 
     def check(self, permission: str) -> bool:
-        """Check if a dotted permission string is granted.
+        """Whether the agent's config grants *permission*.
 
         Format: ``"category:action"`` (e.g. ``"filesystem:read"``).
-        Returns True only if the category exists in config and the key
-        that grants the action holds a truthy value (non-empty list or
-        True). That key is the action's own name, except for the
-        list-scoped tools in ``_GRANTED_BY_LIST``.
+        Returns True only for one of :data:`GRANTABLE_PERMISSIONS` whose
+        category is in the config and whose granting key holds a truthy
+        value. The agent schema allows a list or ``true`` there, and a
+        non-empty list or ``true`` grants. So does any other truthy value,
+        which the schema refuses and nothing checks at start-up: the text
+        ``"false"`` grants (ISSUE-0289). Any other name is denied whatever
+        the config holds: ``network:deny`` is not granted by a deny list.
         """
         parts = permission.split(":", 1)
         if len(parts) != 2:
             logger.warning("Malformed permission string: %s", permission)
             return False
 
-        category, action = parts
-        cat_config = self._permissions.get(category)
-        if cat_config is None:
+        granting_key = _GRANTED_BY.get(permission)
+        if granting_key is None:
+            logger.debug("Permission denied (no config can grant it): %s", permission)
+            return False
+
+        cat_config = self._permissions.get(parts[0])
+        if not isinstance(cat_config, Mapping):
             logger.debug("Permission denied (no config for category): %s", permission)
             return False
 
-        value = cat_config.get(_GRANTED_BY_LIST.get(permission, action))
-        if not value:
+        if not cat_config.get(granting_key):
             logger.debug("Permission denied (action not configured): %s", permission)
             return False
 
         logger.debug("Permission granted: %s", permission)
         return True
+
+    def missing(self, declared: Iterable[str]) -> str | None:
+        """The first of *declared* the agent's config does not grant, or None.
+
+        *declared* is what a tool declares with ``@tool(permissions=[...])``;
+        the tool may run for this agent only when this returns None.
+        """
+        for permission in declared:
+            if not isinstance(permission, str) or not self.check(permission):
+                return str(permission)
+        return None
 
     def is_command_allowed(self, args: list[str]) -> bool:
         """Check if a command (as arg list) is in the shell allowlist.
@@ -144,5 +237,6 @@ class PermissionGate:
         return False
 
 
-# TODO: Implement sub-agent permission inheritance (child <= parent)
+# Not built: the rule that a sub-agent gets no more than its parent
+# (ISSUE-0285). Nothing reaches the sub-agent spawner yet.
 # TODO: Implement permission denial logging aggregation

@@ -74,8 +74,8 @@ Process vocabulary (scope lock, cuttable, live arc, finding, …) lives in the
   atomic work, with no more permissions than its parent. Not in use: a spawner
   that runs one inside the agent's own process exists
   (`agents/sub_agents/spawner.py`), nothing a persona or the orchestrator does
-  reaches it, and the permission rule is not enforced
-  ([ISSUE-0214](issues/ISSUE-0214-declared-tool-permissions-are-never-enforced.md)).
+  reaches it, and the permission rule is not built
+  ([ISSUE-0285](issues/ISSUE-0285-sub-agent-permission-rule-and-delegation-timeout-are-not-built.md)).
 - **Example:** "In the design, a persona spawns a sub-agent to summarize a long document."
 
 ### Workflow
@@ -105,10 +105,12 @@ Process vocabulary (scope lock, cuttable, live arc, finding, …) lives in the
   reserves "skill" for a higher-level concept), "plugin"
 - **Definition:** A typed callable an agent can invoke, declared with the
   `@tool(name=...)` decorator in `agents/tools/`. The `permissions=[...]` a
-  tool declares there are stored and not checked; each built-in tool asks the
-  agent's `PermissionGate` in its own body
-  ([ISSUE-0214](issues/ISSUE-0214-declared-tool-permissions-are-never-enforced.md)).
-- **Example:** "The `file_read` tool checks the `filesystem:read` permission."
+  tool declares there are checked before it runs: a model's call is refused
+  for an agent whose config does not grant every one. A tool can declare
+  only a permission an agent's config can grant, so it cannot have one of
+  its own yet. Anything finer (which path, which domain) the tool asks in
+  its own body.
+- **Example:** "The `file_read` tool declares the `filesystem:read` permission and checks the path itself."
 
 ### Argument Check
 - **Aliases:** "argument validation"

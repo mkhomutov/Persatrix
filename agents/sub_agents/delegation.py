@@ -301,6 +301,21 @@ class DelegationRequest:
         return req
 
 
+def _tags_as_sent(raw: Any) -> tuple[Any, ...]:
+    """An entry's ``tags`` as the sub-agent sent them, one item per tag.
+
+    A list gives its items and no value gives none. Any other value is one
+    tag: a number used to raise ``TypeError`` here, and a bare text was
+    split into its letters. The merge engine rejects an entry holding a tag
+    that is not text, so a wrong value costs that entry alone (ISSUE-0214).
+    """
+    if not raw:
+        return ()
+    if isinstance(raw, (list, tuple)):
+        return tuple(raw)
+    return (raw,)
+
+
 @dataclass(frozen=True)
 class DelegationResult:
     """Sub-agent → caller result envelope (RFC 0008 §E).
@@ -388,7 +403,7 @@ class DelegationResult:
                         if raw.get("ttl_seconds") is not None
                         else None
                     ),
-                    tags=tuple(raw.get("tags") or ()),
+                    tags=_tags_as_sent(raw.get("tags")),
                     merge_strategy=str(raw.get("merge_strategy", "replace")),
                     source_agent=raw.get("source_agent"),
                 ),

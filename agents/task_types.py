@@ -41,9 +41,14 @@ class TaskInputConfig:
 
     max_llm_calls: int = 0  # 0 means "use agent default"
     max_tokens: int = 0  # 0 means "use agent default"
-    # PR-review B2: carry allowed_tools from proto even though enforcement
-    # is deferred to v0.2, so the field is available to wire up later.
-    allowed_tools: list[str] = field(default_factory=list)  # TODO(v0.2): enforce
+    # The tools this task may use, from ``TaskConfig.allowed_tools``. Both
+    # agent kinds hold their tool round to it (ISSUE-0214,
+    # ``agents.tools.tool_list.task_allows``): a tool it does not name is
+    # not offered and does not run. Empty means no restriction from this
+    # field, since the wire cannot tell an empty list from an unset one and
+    # the orchestrator never sets it. It narrows the agent's own ``tools``
+    # list and never adds to it.
+    allowed_tools: list[str] = field(default_factory=list)
     # RFC 0023 PR 5 — sub-agent invocation marker. When non-empty, the
     # child's leased LLM call is tagged ``CAUSE_SUB_AGENT`` and the
     # lease is acquired against this parent ``agent_id`` so per-persona

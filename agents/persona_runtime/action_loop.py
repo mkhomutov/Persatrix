@@ -10,6 +10,7 @@ the calls it makes, are in :mod:`.tool_round`.
 from __future__ import annotations
 
 import logging
+from collections.abc import Collection
 from typing import TYPE_CHECKING, Any
 
 from ..llm_client import LLMClient, LLMResponse, StopReason
@@ -40,7 +41,7 @@ from .llm_call_errors import handle_llm_call_exception_with_cost_close
 from .reflexion import maybe_revise_channel_message
 from .salience_gate import run_salience_gate
 from .single_channel_turn import enforce_single_channel_turn
-from .tool_round import _ToolRoundMixin
+from .tool_round import _ToolRoundMixin, allowed_tools_of
 from .wallet_cause import lease_attribution_for_event
 
 if TYPE_CHECKING:
@@ -115,16 +116,19 @@ class _ActionLoopMixin(_ToolRoundMixin):
         def _has_active_goal_payload(self) -> bool: ...
         def _has_pending_turn(self) -> bool: ...
 
-    def _turn_request(self) -> dict[str, Any]:
+    def _turn_request(self, allowed_tools: Collection[str] = ()) -> dict[str, Any]:
         """The model, tools and temperature every call of a turn is sent with.
 
         A prompt-prefix keep-alive sends the same, so it reads the cache entry
-        the turn's calls share (:mod:`agents.prefix_keepalive`).
+        the turn's calls share (:mod:`agents.prefix_keepalive`). *allowed_tools*
+        is the list of the task the turn works on, which narrows the tools.
         """
         return {
             "model": self.config["model"],
             "model_alias": self.config.get("model_alias"),
-            "tools": self._llm_client.format_tool_definitions(self._build_tool_definitions()),
+            "tools": self._llm_client.format_tool_definitions(
+                self._build_tool_definitions(allowed_tools),
+            ),
             "temperature": self.config.get("temperature", 0.7),
         }
 
@@ -303,7 +307,9 @@ class _ActionLoopMixin(_ToolRoundMixin):
         messages = seam_seed if seam_seed is not None else (
             await self._build_seed_messages(event, user_message)
         )
-        request = self._turn_request()
+        # A task's own tool list narrows what is offered and what runs.
+        allowed_tools = allowed_tools_of(event)
+        request = self._turn_request(allowed_tools)
 
         max_llm_calls = self.config.get("max_llm_calls", _PERSONA_DEFAULT_MAX_LLM_CALLS)
         max_tokens = self.config.get("max_tokens", _PERSONA_DEFAULT_MAX_TOKENS)
@@ -343,7 +349,7 @@ class _ActionLoopMixin(_ToolRoundMixin):
                 return result
 
             if response.stop_reason == StopReason.TOOL_USE:
-                tool_results = await self._execute_tools(response.tool_calls)
+                tool_results = await self._execute_tools(response.tool_calls, allowed_tools)
                 messages = self._llm_client.append_tool_round(
                     messages, response, tool_results
                 )
