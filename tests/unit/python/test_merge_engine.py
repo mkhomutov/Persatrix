@@ -355,3 +355,81 @@ def test_reserved_tag_prefix_does_not_block_unrelated_prefixes() -> None:
     out = _engine().merge_result(res, _request(), source_agent="c")
     assert len(out.admitted) == 1
     assert out.rejected == []
+
+
+# ─── ISSUE-0214 — tags that are not text ───────────────────────
+
+
+@pytest.mark.parametrize(
+    "bad_tags",
+    [(7,), ("review:passed", None), ({"source": "x"},), (["a"],), (b"source:x",), (1.5, True)],
+    ids=["number", "none-after-text", "object", "list", "bytes", "float-and-bool"],
+)
+def test_an_entry_whose_tags_are_not_text_is_rejected_alone(bad_tags: tuple) -> None:
+    """A sub-agent's result arrives as JSON, so a tag can be any JSON value.
+    Such an entry used to raise ``AttributeError`` out of ``merge_result``
+    and take the whole result with it; it is rejected as one entry, and the
+    entries around it still merge."""
+    res = DelegationResult(
+        summary="s",
+        status="completed",
+        memory_writes=(
+            _entry(key="before", tags=("risk:low",)),
+            _entry(key="bad", tags=bad_tags),
+            _entry(key="after"),
+        ),
+    )
+    out = _engine().merge_result(res, _request(), source_agent="c")
+    assert [e.key for e in out.admitted] == ["before", "after"]
+    assert [(r.index, r.reason) for r in out.rejected] == [(1, REASON_SCHEMA_INVALID)]
+    assert out.rejected[0].detail == "tags must be text"
+
+
+def test_tags_that_are_not_text_reach_the_merge_from_the_wire() -> None:
+    """The same entry, read from the JSON a sub-agent returns."""
+    wire = (
+        '{"summary": "s", "status": "completed", "memory_writes": ['
+        '{"tier": "episodic", "key": "bad", "content": "c", "tags": [7, {"a": 1}]},'
+        '{"tier": "episodic", "key": "good", "content": "c", "tags": ["risk:low"]}]}'
+    )
+    res = DelegationResult.from_metadata_value(wire)
+    out = _engine().merge_result(res, _request(), source_agent="c")
+    assert [e.key for e in out.admitted] == ["good"]
+    assert [(r.index, r.reason) for r in out.rejected] == [(0, REASON_SCHEMA_INVALID)]
+
+
+@pytest.mark.parametrize(
+    ("tags_json", "rejected_as"),
+    [
+        ("5", REASON_SCHEMA_INVALID),
+        ("7.5", REASON_SCHEMA_INVALID),
+        ("true", REASON_SCHEMA_INVALID),
+        ('{"source": "x"}', REASON_SCHEMA_INVALID),
+        # A bare text is one tag, so the reserved-prefix rule reads it whole.
+        ('"source:legitimate"', REASON_RESERVED_TAG_PREFIX),
+        ('"risk:low"', None),
+        ("null", None),
+        ("[]", None),
+    ],
+)
+def test_tags_that_are_not_a_list_cost_that_entry_alone(
+    tags_json: str, rejected_as: str | None,
+) -> None:
+    """``"tags": 5`` used to raise ``TypeError`` while the result was read,
+    and a bare text was split into its letters, which no rule then read as
+    a reserved prefix. A value that is not a list is now one tag."""
+    wire = (
+        '{"summary": "s", "status": "completed", "memory_writes": ['
+        '{"tier": "episodic", "key": "odd", "content": "c", "tags": ' + tags_json + "},"
+        '{"tier": "episodic", "key": "good", "content": "c", "tags": ["risk:low"]}]}'
+    )
+    res = DelegationResult.from_metadata_value(wire)
+    out = _engine().merge_result(res, _request(), source_agent="c")
+    if rejected_as is None:
+        assert [e.key for e in out.admitted] == ["odd", "good"]
+        assert out.rejected == []
+        expected_tags = ("risk:low",) if tags_json == '"risk:low"' else ()
+        assert out.admitted[0].tags == expected_tags
+    else:
+        assert [e.key for e in out.admitted] == ["good"]
+        assert [(r.index, r.reason) for r in out.rejected] == [(0, rejected_as)]

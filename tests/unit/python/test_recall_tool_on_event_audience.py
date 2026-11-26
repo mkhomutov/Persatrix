@@ -59,8 +59,12 @@ async def test_on_event_binds_the_acting_channel_for_the_recall_round() -> None:
     ]
     client = _make_client(responses)
     recall = _RecordingRecallClient()
+    # The persona's own config grants the recall tool's permission, as the
+    # gate handed to the tool below does: the tool round asks the config.
+    permissions = {**_PERSONA_CONFIG["permissions"], "channels": {"recall": True}}
     agent = create_persona_agent(
-        agent_id="ember-owl", config={**_PERSONA_CONFIG}, llm_client=client,
+        agent_id="ember-owl", config={**_PERSONA_CONFIG, "permissions": permissions},
+        llm_client=client,
     )
     await agent.initialize_memory()
     try:

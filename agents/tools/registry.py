@@ -14,7 +14,7 @@ import inspect
 import logging
 import time
 import warnings
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from typing import Any, get_type_hints
 
@@ -34,6 +34,7 @@ from ..observability.spans import (
     tool_payload_capture_mode,
 )
 from .arg_check import ArgumentSpec, argument_spec
+from .permissions import declared_permissions_error
 from .sandbox import OutputSizeLimiter, emit_resource_limited, render_output
 
 logger = logging.getLogger(__name__)
@@ -173,6 +174,16 @@ def tool(
     Decorator to register a function as an agent tool.
 
     Args:
+        permissions: What an agent's config must grant before the tool runs
+              for that agent, such as ``["filesystem:read"]``. A model's
+              call is refused, before the tool runs, for an agent whose
+              ``permissions`` block does not grant every name listed
+              (:func:`agents.tools.tool_list.admit_call`). Only the seven
+              names in :data:`agents.tools.permissions.GRANTABLE_PERMISSIONS`
+              can be declared; any other raises ``ValueError`` when the
+              tool is defined, because no agent's config could grant it. A
+              rule finer than the name (which path, which domain) is the
+              tool's own to check, as the built-in tools do.
         tier: One of ``"builtin"``, ``"custom"``, ``"mcp"``. Defaults to
               ``"custom"`` for user-defined tools; framework-bundled tools
               in ``builtin.py`` pass ``tier="builtin"``.
@@ -200,6 +211,17 @@ def tool(
 
     def decorator(func: Callable) -> Callable:
         tool_name = name or func.__name__
+        # A name no agent's config can grant is refused here, before the
+        # tool is registered (ISSUE-0214). One copy of the names is taken,
+        # and that copy is checked and stored: a generator read once for
+        # the check would be stored as nothing, and the tool would run for
+        # every agent that lists it. A value that is no list of names goes
+        # to the check as it is, to be refused in words.
+        declared: Any = [] if permissions is None else permissions
+        if not isinstance(declared, str) and isinstance(declared, Iterable):
+            declared = list(declared)
+        if (problem := declared_permissions_error(tool_name, declared)) is not None:
+            raise ValueError(problem)
         sig = inspect.signature(func)
         # Resolve postponed annotations (PEP 563 / ``from __future__ import annotations``)
         # so built-in scalar types map correctly to JSON Schema.
@@ -261,7 +283,7 @@ def tool(
             name=tool_name,
             description=description or func.__doc__ or "",
             parameters=params,
-            permissions=permissions or [],
+            permissions=declared,
             tier=tier,
             func=func,  # replaced with wrapper below
             argument_spec=spec,
@@ -270,7 +292,9 @@ def tool(
 
         @functools.wraps(func)
         async def wrapper(*args: Any, **kwargs: Any) -> ToolResult:
-            # TODO: Permission check before execution
+            # The tool's declared permissions are checked before this
+            # wrapper is reached, in ``tool_list.admit_call``, which knows
+            # the agent that is calling; the wrapper does not.
             # TODO: Rate limit check
             # TODO: Audit logging
             tool_started = time.monotonic()
@@ -367,9 +391,9 @@ def tool(
                     ))
 
         # PR-review MF1: Store the wrapper (not the original function) so
-        # _execute_tools() goes through the decorator pipeline — permission
-        # checks, rate limiting, OTEL spans, and audit logging (v0.2 TODOs)
-        # are applied consistently whether calling via module name or registry.
+        # _execute_tools() goes through the decorator pipeline (the output
+        # cap, OTEL spans and metrics; rate limiting and audit logging are
+        # TODOs) whether calling via module name or registry.
         tool_def.func = wrapper
 
         return wrapper
