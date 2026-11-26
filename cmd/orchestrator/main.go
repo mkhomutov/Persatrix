@@ -355,7 +355,7 @@ func main() {
 	srvOpts = append(append(srvOpts, chanOpts...), initUI(*enableUI, *configDir, logger)...) // RFC 0048: +off-by-default web console
 
 	// RFC 0039 PR 3 — accounts/auth, inert under the default mode (auth.go).
-	authOpts, authCleanup, authErr := initAuth(*configDir, *accountsDB, *httpBind, logger)
+	authOpts, authCleanup, authErr := initAuth(*configDir, *accountsDB, *httpBind, *httpExtraAllowedHosts, logger)
 	if authErr != nil {
 		logger.Fatal("auth: init failed", zap.Error(authErr))
 	}

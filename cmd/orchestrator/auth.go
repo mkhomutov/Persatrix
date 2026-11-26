@@ -2,9 +2,11 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -18,6 +20,34 @@ import (
 // mirroring channels.go / ui.go.
 var accountsDB = flag.String("accounts-db", "data/accounts.db",
 	"SQLite path for RFC 0039 accounts & sessions")
+
+// extraAllowedHostsFlag names the flag in the messages about it.
+const extraAllowedHostsFlag = "--http-extra-allowed-hosts"
+
+// httpExtraAllowedHosts adds names to `auth.allowed_hosts` of
+// config/security.yaml for this process only (ISSUE-0212). The compose file
+// passes "orchestrator", the name its agents call the orchestrator by: the
+// name belongs to the compose network, not to the config folder, which a run
+// outside compose reads too.
+var httpExtraAllowedHosts = flag.String("http-extra-allowed-hosts", "",
+	"Comma-separated host names a request's Host header may carry, on top of auth.allowed_hosts in config/security.yaml")
+
+// expectedHosts is the list of names the REST API answers to: the configured
+// ones, then the flag's, each once. The configured names were checked when
+// the config loaded, so a fault found here is in the flag's value.
+func expectedHosts(configured []string, extra string) ([]string, error) {
+	names := append([]string{}, configured...)
+	for _, name := range strings.Split(extra, ",") {
+		if name = strings.TrimSpace(name); name != "" {
+			names = append(names, name)
+		}
+	}
+	hosts, err := server.NormalizeAllowedHosts(names)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", extraAllowedHostsFlag, err)
+	}
+	return hosts, nil
+}
 
 // initAuth wires the RFC 0039 auth subsystem (PR 3 — Phase 1, inert):
 // loads the config/security.yaml `auth:` block, opens the accounts
@@ -36,8 +66,16 @@ var accountsDB = flag.String("accounts-db", "data/accounts.db",
 // The store opens under BOTH auth modes: the login/logout/whoami
 // endpoints function under `disabled` too (Phase 1 ships the complete
 // mechanism inert — new routes only, no existing behaviour changes).
-func initAuth(cfgDir, accountsPath, httpBind string, logger *zap.Logger) ([]server.ServerOption, func(), error) {
+//
+// It also switches on the two checks of where a request came from
+// (ISSUE-0212), in both auth modes, with the names of `auth.allowed_hosts`
+// and of extraHosts, the value of --http-extra-allowed-hosts.
+func initAuth(cfgDir, accountsPath, httpBind, extraHosts string, logger *zap.Logger) ([]server.ServerOption, func(), error) {
 	authCfg, err := server.LoadSecurityConfig(filepath.Join(cfgDir, "security.yaml"))
+	if err != nil {
+		return nil, nil, err
+	}
+	hosts, err := expectedHosts(authCfg.AllowedHosts, extraHosts)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -54,9 +92,18 @@ func initAuth(cfgDir, accountsPath, httpBind string, logger *zap.Logger) ([]serv
 		return nil, nil, err
 	}
 	warnAuthPosture(logger, authCfg, httpBind)
+	if logger != nil {
+		logger.Info("auth: the REST API and the web console answer to these host names only, and a request under any other is refused "+
+			"(auth.allowed_hosts in config/security.yaml, plus "+extraAllowedHostsFlag+")",
+			zap.Strings("allowed_hosts", hosts),
+		)
+	}
 
 	authenticator := accounts.NewPasswordAuthenticator(store, authCfg.Argon)
-	opts := []server.ServerOption{server.WithAuth(store, authenticator, authCfg)}
+	opts := []server.ServerOption{
+		server.WithAuth(store, authenticator, authCfg),
+		server.WithAllowedHosts(hosts),
+	}
 	return opts, func() { _ = store.Close() }, nil
 }
 

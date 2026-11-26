@@ -87,6 +87,7 @@ becomes a verified claim instead of a body field.
 - [The verified `participant_id` claim](#the-verified-participant_id-claim)
 - [The browser session (console login)](#the-browser-session-console-login)
 - [HTTPS is required beyond localhost](#https-is-required-beyond-localhost)
+- [Where a request may come from](#where-a-request-may-come-from)
 - [What stays open under `enabled` — the agent ingress](#what-stays-open-under-enabled--the-agent-ingress)
 - [Login throttling](#login-throttling)
 - [Operational notes](#operational-notes)
@@ -100,11 +101,10 @@ becomes a verified claim instead of a body field.
 Auth is configured in [`config/security.yaml`](../../config/security.yaml)
 (validated by `make validate`; an absent file means every default below):
 
-- **`disabled`** (the shipped default) — behaviour is byte-for-byte
-  pre-RFC-0039: every request resolves to the anonymous `local` identity, no
-  route is gated, `persatrix chat` on localhost needs no login. The
-  orchestrator **WARNs at startup** on a non-loopback `--http-bind` while
-  disabled.
+- **`disabled`** (the shipped default) — every request resolves to the
+  anonymous `local` identity, no route is gated, `persatrix chat` on
+  localhost needs no login. The orchestrator **WARNs at startup** on a
+  non-loopback `--http-bind` while disabled.
 - **`enabled`** — identity resolution and the
   [§E policy matrix](../rfcs/0039-user-accounts-authentication.md#e-the-auth-middleware-and-the-role-gate)
   are live: anonymous callers get `401` on gated routes, a valid session below
@@ -230,6 +230,15 @@ token deserves TLS on a routable network just as much.
 If a TLS-terminating proxy fronts the orchestrator, also set
 `auth.trusted_proxies` so the login throttle sees real client addresses (see
 [Login throttling](#login-throttling)).
+
+## Where a request may come from
+
+A loopback bind keeps other machines out, not the web pages open in a browser
+on this one. A page's own host name can be re-pointed at `127.0.0.1` after it
+loads (DNS rebinding), and the browser then lets it read and write the API.
+So in **both** modes the orchestrator answers only to the names in
+`auth.allowed_hosts`, and refuses a write from another origin: see
+[where a request may come from](request-origin-checks.md).
 
 ## What stays open under `enabled` — the agent ingress
 

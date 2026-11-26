@@ -105,8 +105,9 @@ func startOrchestrator(t *testing.T, configDir, logBufferDir string) *orchestrat
 }
 
 // startOrchestratorOn is startOrchestrator with the agent-facing port chosen
-// by the caller, for the test that keeps that port taken.
-func startOrchestratorOn(t *testing.T, configDir, logBufferDir string, grpcPort int) *orchestratorProcess {
+// by the caller, for the test that keeps that port taken, and with any more
+// flags the caller wants on the command line.
+func startOrchestratorOn(t *testing.T, configDir, logBufferDir string, grpcPort int, moreFlags ...string) *orchestratorProcess {
 	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("stops the process with SIGTERM, which Windows does not have")
@@ -123,14 +124,14 @@ func startOrchestratorOn(t *testing.T, configDir, logBufferDir string, grpcPort 
 		output:   &lockedBuffer{},
 		exited:   make(chan struct{}),
 	}
-	p.cmd = exec.Command(exe, //nolint:gosec // the test binary itself
+	p.cmd = exec.Command(exe, append([]string{ //nolint:gosec // the test binary itself
 		"--config", configDir,
 		"--workflows-dir", filepath.Join(repoRoot(t), "workflows"),
 		"--http-port", fmt.Sprint(httpPort),
 		"--port", fmt.Sprint(grpcPort),
 		"--channels-db", filepath.Join(data, "channels.db"),
 		"--accounts-db", filepath.Join(data, "accounts.db"),
-	)
+	}, moreFlags...)...)
 	p.cmd.Dir = data
 	p.cmd.Env = []string{
 		runOrchestratorEnv + "=1",

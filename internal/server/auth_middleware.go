@@ -143,7 +143,8 @@ func (s *Server) initAuthLimiters() error {
 //
 // Under the default `auth.mode: disabled` every request is the
 // anonymous `local` identity with zero DB cost and NO policy is
-// evaluated (§H: byte-for-byte pre-RFC behaviour). Under `enabled`,
+// evaluated (§H: this middleware changes nothing; originMiddleware,
+// in front of it, runs in both modes). Under `enabled`,
 // Phase 2 enforces the §E 401/403 matrix against the auth_policy.go
 // table. The §A2 same-origin assertion is unchanged from Phase 1 —
 // CSRF defence on cookie-resolved writes, not policy, checked before

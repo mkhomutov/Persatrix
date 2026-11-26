@@ -2,9 +2,9 @@
 
 **Test ID**: `MT-AUTH-001`
 **Feature Area**: Security (human accounts & authentication — RFC 0039 Phases 1–2 + the enabled-mode exposure amendment)
-**Version**: 1.0
+**Version**: 1.1
 **Created**: 2026-07-30
-**Last Updated**: 2026-07-30
+**Last Updated**: 2026-11-26
 **Status**: Active — authored at RFC 0039 PR 6; **live execution is a v0.3.12 release-prep deliverable** (run against real binaries per [v0.3.12-plan §Acceptance](../v0.3.12-plan.md#acceptance-for-v0312)).
 
 ---
@@ -132,7 +132,21 @@ curl -s localhost:8080/api/v1/auth/whoami   # 200 — the anonymous `local` iden
 persatrix chat <agent>                       # works with no login, as pre-v0.3.12
 ```
 
-**Pass criterion**: behaviour is indistinguishable from pre-RFC-0039 (the byte-for-byte inertness contract; the full-suite half of this claim is CI's).
+**Pass criterion**: both commands work with no login, as before RFC 0039. What differs from then, in both modes, is Leg 7: where a request may come from.
+
+### Leg 7 — Where a request may come from (both modes)
+
+Added with [ISSUE-0212](../issues/ISSUE-0212-rest-api-checks-neither-host-nor-origin-with-auth-off.md); the operator's reference is [where a request may come from](../guides/request-origin-checks.md). With `auth.mode: disabled` still set:
+
+```bash
+curl -s -H 'Host: evil.example:8080' localhost:8080/api/v1/agents
+# 403 {"error":"host name \"evil.example\" is not expected: add it to auth.allowed_hosts in config/security.yaml","code":"FORBIDDEN"}
+curl -s -X POST -H 'Sec-Fetch-Site: cross-site' localhost:8080/api/v1/agents/<agent>/unquarantine
+# 403 {"error":"cross-origin write refused: the browser reports that this request comes from another origin","code":"FORBIDDEN"}
+curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: evil.example:8080' localhost:8080/healthz   # 200
+```
+
+**Pass criterion**: a request under a host name that is not in `auth.allowed_hosts` and a write marked as coming from another site are each refused with the message above, the health route answers under any `Host`, and the orchestrator logs one `WARN` for each refusal (`request refused: ...`).
 
 ---
 
@@ -146,8 +160,9 @@ persatrix chat <agent>                       # works with no login, as pre-v0.3.
 | 4 — Browser | console | cookie login; `document.cookie` empty; foreign-`Origin` write 403; logout clears | ☐ |
 | 5 — CLI logout | CLI | server-side revocation; whoami 401 + hint | ☐ |
 | 6 — Disabled | REST + CLI | anonymous `local`, chat works, no login anywhere | ☐ |
+| 7 — Request origin | REST | foreign `Host` 403 with the setting named; cross-site write 403; `/healthz` 200 | ☐ |
 
-**Overall pass**: all six legs. A Leg 2 carve-out probe answering 401 means the persona fleet is broken — file immediately. A Leg 4.3 non-empty `document.cookie` or a Leg 4.4 `200` is a security regression — release-blocking.
+**Overall pass**: all seven legs. A Leg 2 carve-out probe answering 401 means the persona fleet is broken — file immediately. A Leg 4.3 non-empty `document.cookie` or a Leg 4.4 `200` is a security regression — release-blocking.
 
 ---
 
@@ -155,7 +170,7 @@ persatrix chat <agent>                       # works with no login, as pre-v0.3.
 
 ### Edge Case 1: plain HTTP on a non-loopback origin
 
-**Scenario**: Leg 4 is attempted against `http://<lan-ip>:8080/ui`.
+**Scenario**: Leg 4 is attempted against `http://<lan-ip>:8080/ui`, with that address added to `auth.allowed_hosts` (without it every request under the address is refused with `403`, as in Leg 7).
 
 **Expected Behavior**: login answers 200 but the browser drops the `Secure` `__Host-` cookie — the login form **reappears with no error**. This is the documented HTTPS requirement ([auth guide](../guides/auth.md#https-is-required-beyond-localhost)), not a bug; run the leg on localhost or behind TLS.
 

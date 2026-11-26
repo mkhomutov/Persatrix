@@ -80,3 +80,49 @@ def test_limiter_and_ttl_bounds(tmp_path: Path) -> None:
     )
     assert _validate_content(tmp_path, "auth:\n  session_ttl: soon\n")
     assert not _validate_content(tmp_path, "auth:\n  session_ttl: 1h30m\n")
+
+
+def test_allowed_hosts_takes_names_and_addresses_only(tmp_path: Path) -> None:
+    """``auth.allowed_hosts`` (ISSUE-0212): a host name or an IP address on its
+    own. The Go loader holds the full rule; the schema refuses at authoring
+    time what could never be a name: a port after a name or after an address,
+    a scheme, a path, a wildcard, an IPv4 address in brackets, an empty entry
+    and an empty list."""
+
+    def errors_for(entry: str) -> list[str]:
+        return _validate_content(tmp_path, f"auth:\n  allowed_hosts: [{entry}]\n")
+
+    for good in (
+        "localhost",
+        "127.0.0.1",
+        '"[::1]"',
+        '"::1"',
+        "orchestrator",
+        "my_service",
+        "Persatrix.Example",
+        "persatrix.example.",
+        "192.168.1.20",
+        '"2001:db8::a"',
+        '"[2001:db8::a]"',
+        '"::ffff:127.0.0.1"',
+    ):
+        assert not errors_for(good), good
+    for bad in (
+        '"localhost:8080"',
+        '"127.0.0.1:8080"',
+        '"192.168.1.20:8080"',
+        '"[::1]:8080"',
+        '"[127.0.0.1]"',
+        '"[127.0.0.1:8080]"',
+        '"http://localhost"',
+        "localhost/ui",
+        '"*.example.com"',
+        ".example.com",
+        '"local host"',
+        '""',
+    ):
+        assert errors_for(bad), bad
+
+    assert _validate_content(tmp_path, "auth:\n  allowed_hosts: []\n")
+    assert _validate_content(tmp_path, "auth:\n  allowed_hosts: localhost\n")
+    assert _validate_content(tmp_path, "auth:\n  allowed_host: [localhost]\n")

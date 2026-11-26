@@ -11,12 +11,13 @@
 auth:
   # The rollout switch (RFC 0039 §H).
   #   disabled (default) — every request resolves to the anonymous
-  #     `local` identity; no route is enforced; behaviour is identical
-  #     to pre-RFC-0039. `persatrix chat` on localhost needs no login.
-  #   enabled — identity resolution is live (Phase 1); the §E
-  #     401/403 policy matrix enforces once Phase 2 (PR 5) lands.
+  #     `local` identity and no route asks for a login. `persatrix chat`
+  #     on localhost needs no login.
+  #   enabled — a request needs a session where the §E policy matrix
+  #     says so: 401 without one, 403 below the role a route asks for.
   # Any networked deployment MUST set `enabled` — the orchestrator
   # WARNs at startup on a non-loopback --http-bind while disabled.
+  # `allowed_hosts` below is checked in both modes.
   mode: disabled
 
   # Bearer-transport session lifetime (§D/§H) — the CLI and
@@ -59,3 +60,26 @@ auth:
   # direct bind; behind a proxy the per-source limiter degrades to a
   # global one and the orchestrator WARNs at startup under `enabled`.
   trusted_proxies: []
+
+  # The host names this orchestrator answers to (ISSUE-0212), checked in
+  # BOTH modes on every route but /healthz. A request whose Host header
+  # carries any other name is refused with 403 and the message
+  # `host name "<name>" is not expected: add it to auth.allowed_hosts in
+  # config/security.yaml`. This is what stops a web page you have open
+  # from reaching the API after its own name is re-pointed at 127.0.0.1
+  # (DNS rebinding); see docs/guides/request-origin-checks.md.
+  #
+  # Write each name as you type it in a URL, without the port: a host
+  # name, or an IP address. Quote an IPv6 address in brackets, or YAML
+  # reads it as a list. Letter case does not matter. If you reach the
+  # orchestrator under another name (a LAN address, a DNS name, the name
+  # a reverse proxy passes on), add that name here. The list replaces
+  # the default, so keep the names you still use. It cannot be empty.
+  #
+  # The compose stack's agents call the orchestrator as `orchestrator`.
+  # docker-compose.yaml adds that name with --http-extra-allowed-hosts,
+  # so it is not listed here.
+  allowed_hosts:
+    - localhost
+    - 127.0.0.1
+    - "[::1]"
