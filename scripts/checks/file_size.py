@@ -7,19 +7,22 @@ splitting opportunities.
 
 **Thresholds (defaults):**
 
-- Code files: a warning over 500 lines, a failure over 800
+- Code files: a warning over 700 lines, a failure over 800
 - Documentation files: 3 000 words (8 000 under ``docs/rfcs/``)
 
+Every line of a code file counts: code, comments, docstrings and blank
+lines alike (:func:`_code_warnings` says why).
+
 The limits are a cliff: a file one line under passes and one line over
-fails, with no signal in between.  Code gets a warning well before its
-cliff (:func:`_code_warnings`), and ``--near-cap`` signals the last few
+fails, with no signal in between.  Code gets a warning before its cliff
+(:func:`_code_warnings`), and ``--near-cap`` signals the last few
 percent under every limit — see :func:`_near_cap_notices` for why a file
 sitting exactly ON a limit is the expensive state, and for the measurement
 that motivated it.
 
 Usage::
 
-    python scripts/checks/file_size.py [--warn-code-lines 500]
+    python scripts/checks/file_size.py [--warn-code-lines 700]
         [--max-code-lines 800] [--max-doc-words 3000] [--strict] [--verbose]
         [--near-cap [PCT]]
 """
@@ -41,9 +44,11 @@ from scripts.checks.file_size_allowlist import GRANDFATHERED_FILES  # noqa: E402
 from scripts.checks.released import is_released_version_doc, released_versions  # noqa: E402
 
 #: A code file over the warning is listed and never failed; one over the
-#: limit fails ``--strict``.  Both numbers are ruling (e) of the sequencing
-#: Amendment 2026-09-12 — see :func:`_code_warnings`.
-DEFAULT_WARN_CODE_LINES = 500
+#: limit fails ``--strict``.  The limit is ruling (e) of the sequencing
+#: Amendment 2026-09-12.  The warning was 500 under that ruling and is 700
+#: by the maintainer's decision of 2026-11-21 (ISSUE-0231) — see
+#: :func:`_code_warnings`.
+DEFAULT_WARN_CODE_LINES = 700
 DEFAULT_MAX_CODE_LINES = 800
 DEFAULT_MAX_DOC_WORDS = 3000
 DEFAULT_MAX_RFC_WORDS = 8000
@@ -267,9 +272,18 @@ def _code_warnings(
     worth splitting and the limit, so files piled up on it (see
     :func:`_near_cap_notices`), and a pre-release sweep that split them
     by line count only refilled the pile.  Ruling (e) of the sequencing
-    Amendment 2026-09-12 keeps 500 as the signal and moves the failure to
+    Amendment 2026-09-12 kept 500 as the signal and moved the failure to
     800: a file listed here is split at a real seam when a change edits it
     for another reason — never trimmed to fit, never swept.
+
+    Why 700, decided on 2026-11-21 (ISSUE-0231).  Every line counts, and about
+    half the lines of the Go and Python code are comments and docstrings,
+    so the signal came at about 250 lines of code and file lengths went on
+    piling up under it: on 2026-11-10, 31 code files sat at 499 or 500
+    lines.  Counting code lines only was considered and not taken: it
+    needs a comment parser for each of five languages, and a miscount
+    would fail CI.  A split is good when the new file can be described
+    without naming the file it came from.
 
     A file over the limit is left out: it already fails, and listing it
     twice would blur passing and failing.  An allowlisted file is left out
@@ -314,7 +328,7 @@ def _near_cap_notices(
 
     The code cliff has been 800 lines since ruling (e) of the sequencing
     Amendment 2026-09-12, so the code band sits under 800.  A file at 500
-    can take a one-line fix now; past 500 it gets :func:`_code_warnings`.
+    can take a one-line fix now; past 700 it gets :func:`_code_warnings`.
 
     Grandfathered files are skipped — they are exempt from the limit, so
     "approaching" it does not apply to them.

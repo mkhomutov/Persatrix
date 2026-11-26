@@ -58,8 +58,10 @@ ROADMAP header's latest-changes note short.
   [review process](docs/methodology/review-process.md).
 - **Local-only files are never referenced** in committed files; paraphrase
   the finding instead ([the paraphrase rule](docs/methodology/review-process.md#the-paraphrase-rule)).
-- **Size caps**: a code file warns over 500 lines and fails over 800 — split
-  it at a real seam when you edit it for another reason, never in a sweep;
+- **Size caps**: a code file warns over 700 lines and fails over 800 — split
+  it at a real seam when you edit it for another reason, never in a sweep; a
+  split is good when the new file can be described without naming the file it
+  came from;
   docs ≤ 3 000 words (RFCs 8 000), split at ~2 900 — never a patch release's
   version plan ([release cycle](docs/methodology/release-cycle.md#phase-0--the-plan-pr)).
   Never trim. Measure words
