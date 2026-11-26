@@ -74,10 +74,10 @@
           "minItems": 1,
           "items": {
             "type": "string",
-            "pattern": "^(\\[[0-9A-Fa-f:.]+\\]|[0-9A-Fa-f:.]+|[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?\\.?)$"
+            "pattern": "^(\\[[0-9A-Fa-f.]*:[0-9A-Fa-f.]*:[0-9A-Fa-f:.]*\\]|[0-9A-Fa-f.]*:[0-9A-Fa-f.]*:[0-9A-Fa-f:.]*|[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?\\.?)$"
           },
           "default": ["localhost", "127.0.0.1", "[::1]"],
-          "description": "The host names the REST API and the web console answer to (ISSUE-0212), checked in both auth modes on every route but /healthz: a request whose Host header carries any other name is refused with 403. Each entry is a host name or an IP address on its own, without scheme, port, path or wildcard; an IPv6 address may be written with or without brackets. A list replaces the default and must not be empty. The orchestrator's --http-extra-allowed-hosts flag adds names for one process, which is how the compose stack adds `orchestrator`."
+          "description": "The host names the REST API and the web console answer to (ISSUE-0212), checked in both auth modes on every route but /healthz: a request whose Host header carries any other name is refused with 403. Each entry is a host name or an IP address on its own, without scheme, port, path or wildcard; an IPv6 address may be written with or without brackets. The pattern refuses the common mistakes (an entry with two or more colons is read as an IPv6 address, one with a single colon is refused as a port); the orchestrator's own check at start-up is the full rule. A list replaces the default and must not be empty. The orchestrator's --http-extra-allowed-hosts flag adds names for one process, which is how the compose stack adds `orchestrator`."
         }
       }
     }

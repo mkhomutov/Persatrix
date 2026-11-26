@@ -82,7 +82,8 @@ services:
     # name, and this value has to follow; a refused agent logs "host name ... is
     # not expected". A test in cmd/orchestrator reads this command and every
     # --orchestrator-url in every compose file, so do not set the orchestrator's
-    # command in an overlay.
+    # command in an overlay, and write each command as a list of words: the
+    # test fails on a command it cannot read.
     command: ["--config", "/app/config/", "--http-bind", "0.0.0.0", "--http-port", "8080", "--http-extra-allowed-hosts", "orchestrator", "--grpc-bind", "0.0.0.0", "--port", "9090", "--workflows-dir", "/app/workflows/", "--env", "development", "--channels-db", "/var/lib/persatrix/channels.db", "--accounts-db", "/var/lib/persatrix/accounts.db", "--enable-ui"]
     ports:
       # NOTE(review-PR187, Should-Fix S1): the gRPC LogService is currently

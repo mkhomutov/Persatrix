@@ -53,8 +53,9 @@ release a quarantined agent, or convene an armed channel.
 
 The Host check stops rebinding: the browser sends the page's own name as
 `Host`, and a page cannot change that header. The cross-origin check stops
-the form: browsers mark where a request came from, in `Sec-Fetch-Site` and,
-before that header existed, in `Origin`.
+the form: a browser marks where a write came from. It sends `Sec-Fetch-Site`
+to an address it counts as secure, which is an HTTPS address, `localhost` or
+a loopback address. To any other plain-HTTP address it sends only `Origin`.
 
 A write is judged this way:
 
@@ -64,7 +65,11 @@ A write is judged this way:
   `same-site`, which is what a browser sends from another port of the same
   name or from a sibling name of the same site.
 - With no `Sec-Fetch-Site`, an `Origin` must carry the same host and port as
-  the request's own `Host`. `Origin: null` is refused.
+  the request's own `Host`. `Origin: null` is refused. This is what decides
+  a write to a plain-HTTP name or address that is not `localhost` or a
+  loopback address: a LAN address, `orchestrator`, a public name without
+  TLS. A browser too old to send `Sec-Fetch-Site` is judged the same way
+  everywhere.
 - A request with neither header is not from a browser, and passes.
 
 Each refusal is also logged by the orchestrator at `WARN`, with the name or
@@ -97,7 +102,9 @@ auth:
 
 - Write a host name or an IP address on its own: no `http://`, no port, no
   path, no `*`. An entry that is none of these stops the orchestrator at
-  start-up with the entry in the error, and `make validate` refuses it.
+  start-up with the entry in the error. `make validate` refuses a port, a
+  scheme, a path and a wildcard before that; the check at start-up is the
+  full rule.
 - Quote an IPv6 address. Unquoted, YAML does not read `[::1]` as text.
 - A list replaces the default, so keep the names you still use.
 - The list cannot be empty, and there is no way to switch the check off.
@@ -146,28 +153,40 @@ list the name.
 ## The web console
 
 The console served by the orchestrator at `/ui` calls the API on its own
-origin, so its writes carry `Sec-Fetch-Site: same-origin` and pass. Open it
-under an allowed name: `http://localhost:8080/ui`, not a LAN address you have
-not listed.
+origin, so its writes pass: under `localhost` the browser marks them
+`same-origin`, and under a listed LAN address their `Origin` names the same
+host and port as their `Host`. Open it under an allowed name:
+`http://localhost:8080/ui`, not a LAN address you have not listed.
 
 In development (`npm run dev` in `web/`), the browser talks to the Vite
 server and Vite passes `/api` on to the orchestrator. Vite sends the name of
 its target as `Host` (`localhost:8080` by default), which is allowed, and
 passes on the browser's `Sec-Fetch-Site: same-origin`, so writes pass. If
-you point `VITE_API_TARGET` at another name, list that name. A browser too
-old to send `Sec-Fetch-Site` is refused through Vite, because its `Origin`
-names the Vite port and the `Host` names the orchestrator's.
+you point `VITE_API_TARGET` at another name, list that name. Open the Vite
+server as `localhost`. Opened by a LAN address, it gets no `Sec-Fetch-Site`
+from the browser, so each write is judged by its `Origin`, which names the
+Vite address while the `Host` names the orchestrator's, and is refused. A
+browser too old to send `Sec-Fetch-Site` is refused through Vite the same
+way.
 
 ## Behind a reverse proxy
 
 The orchestrator compares the `Host` it receives. It does not read
-`X-Forwarded-Host`, which any client can set. So list the name the proxy
-sends: the public name if the proxy passes `Host` through, the upstream name
-if it rewrites it.
+`X-Forwarded-Host` or `Forwarded`, which any client can set. So list the
+name the proxy sends: the public name if the proxy passes `Host` through,
+the upstream name if it rewrites it. That is enough for reads. Whether the
+console's writes pass depends on how browsers reach the proxy:
 
-Pass the public `Host` through where you can. A browser too old to send
-`Sec-Fetch-Site` is judged by `Origin`, which carries the public name, and
-that only matches a `Host` the proxy did not rewrite.
+| Browsers reach the proxy over | The proxy sends as `Host` | The console's writes |
+|-------------------------------|---------------------------|----------------------|
+| HTTPS | the public name or the upstream's, and it is listed | pass: the browser marks them `same-origin` |
+| plain HTTP | the public name, passed through, and it is listed | pass: their `Origin` names the same host and port as their `Host` |
+| plain HTTP | the upstream's name, such as `127.0.0.1:8080` | refused with `cross-origin write refused`: the browser sends no `Sec-Fetch-Site`, and the `Origin` names the public address while the `Host` names the upstream |
+
+So on plain HTTP, pass the browser's own `Host` through, port included, and
+list its name; or put TLS in front of the proxy. nginx sends the upstream's
+name unless told otherwise; `proxy_set_header Host $http_host;` passes the
+browser's value through.
 
 ## What the checks do not do
 
@@ -193,4 +212,6 @@ that only matches a `Host` the proxy did not rewrite.
 | The orchestrator exits at start-up with `auth.allowed_hosts: "..." is not a host name or an IP address on its own` | An entry has a port, a scheme, a path or a wildcard. Write the bare name. The same message with `--http-extra-allowed-hosts:` in front names the flag. |
 | The orchestrator exits at start-up with a YAML parse error after you added an IPv6 address | Quote it: `"[::1]"`. |
 | `403` with `cross-origin write refused` from a page you wrote | The page is on another origin, which includes another port. Serve it from the orchestrator's origin, or call the API from a server, not from the browser. |
+| Behind a reverse proxy the console loads, and every write answers `403` with `cross-origin write refused` | Browsers reach the proxy over plain HTTP and the proxy rewrites `Host` to its upstream's name. Pass the browser's `Host` through and list its name, or serve the proxy over HTTPS ([behind a reverse proxy](#behind-a-reverse-proxy)). |
+| The same `403` on every write through the Vite server | You opened Vite by a LAN address. Open it as `http://localhost:5173` ([the web console](#the-web-console)). |
 | The health check passes and everything else is `403` | The probe is exempt; the name you use is not listed. |

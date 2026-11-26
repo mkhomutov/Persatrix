@@ -49,8 +49,10 @@ as `Host`, and the page reads and writes the API.
 - An operator who adds a name of their own, such as `persatrix.example`, is
   in the same position for that name.
 - The second check does not help here: after the name is rebound the
-  browser treats the page as the orchestrator's own origin and marks its
-  writes `same-origin`.
+  browser treats the page as the orchestrator's own origin. To a plain-HTTP
+  name that is not `localhost` it sends no `Sec-Fetch-Site`, and each
+  write's `Origin` names the same host and port as its `Host`, so the write
+  passes.
 - With `auth.mode: enabled` the rebound page has no session: the operator's
   session cookie belongs to the name they signed in under, which is not the
   rebound one unless they opened the console by it, and a browser sends no
@@ -60,8 +62,10 @@ as `Host`, and the page reads and writes the API.
 
 ## Impact
 
-Proposed low, not ruled: the attacker must already control name lookups on
-the operator's network, the operator must browse while the compose stack
+Proposed low, not ruled, on the precedent of
+[ISSUE-0255](ISSUE-0255-grpc-between-the-orchestrator-and-its-agents-has-no-tls.md)
+(low): there too the attacker must already hold a place on the operator's
+network. Here the attacker must control name lookups on that network, the operator must browse while the compose stack
 runs with sign-in off, and the attacker must know or guess the port. What
 they gain is what ISSUE-0212 described: the channels and chats, a chat as
 any user, a workflow run. Before ISSUE-0212's fix any web page could do this;

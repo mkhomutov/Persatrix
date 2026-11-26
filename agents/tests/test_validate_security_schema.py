@@ -85,8 +85,9 @@ def test_limiter_and_ttl_bounds(tmp_path: Path) -> None:
 def test_allowed_hosts_takes_names_and_addresses_only(tmp_path: Path) -> None:
     """``auth.allowed_hosts`` (ISSUE-0212): a host name or an IP address on its
     own. The Go loader holds the full rule; the schema refuses at authoring
-    time what could never be a name: a port, a scheme, a path, a wildcard, an
-    empty entry and an empty list."""
+    time what could never be a name: a port after a name or after an address,
+    a scheme, a path, a wildcard, an IPv4 address in brackets, an empty entry
+    and an empty list."""
 
     def errors_for(entry: str) -> list[str]:
         return _validate_content(tmp_path, f"auth:\n  allowed_hosts: [{entry}]\n")
@@ -100,10 +101,19 @@ def test_allowed_hosts_takes_names_and_addresses_only(tmp_path: Path) -> None:
         "my_service",
         "Persatrix.Example",
         "persatrix.example.",
+        "192.168.1.20",
+        '"2001:db8::a"',
+        '"[2001:db8::a]"',
+        '"::ffff:127.0.0.1"',
     ):
         assert not errors_for(good), good
     for bad in (
         '"localhost:8080"',
+        '"127.0.0.1:8080"',
+        '"192.168.1.20:8080"',
+        '"[::1]:8080"',
+        '"[127.0.0.1]"',
+        '"[127.0.0.1:8080]"',
         '"http://localhost"',
         "localhost/ui",
         '"*.example.com"',

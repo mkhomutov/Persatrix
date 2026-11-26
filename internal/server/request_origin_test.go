@@ -136,6 +136,7 @@ func TestOriginChecks_Host(t *testing.T) {
 		{name: "a name that ends with an expected one", host: "evil.localhost:8080", refused: true, quoted: "evil.localhost"},
 		{name: "another loopback address", host: "127.0.0.2:8080", refused: true, quoted: "127.0.0.2"},
 		{name: "another IPv6 address", host: "[::2]:8080", refused: true, quoted: "[::2]"},
+		{name: "the IPv4 loopback address written as an IPv6 one", host: "[::ffff:127.0.0.1]:8080", refused: true, quoted: "[::ffff:127.0.0.1]"},
 		{name: "an expected name with a trailing dot", host: "localhost.:8080", refused: true, quoted: "localhost."},
 		{name: "an expected name with two ports", host: "localhost:80:80", refused: true, quoted: "localhost:80:80"},
 		{name: "no Host", host: "", refused: true, quoted: ""},
@@ -204,12 +205,63 @@ func TestOriginChecks_HealthRouteAnswersAnyHost(t *testing.T) {
 			{"a HEAD probe", http.MethodHead, "/healthz", "10.42.0.17:8080", http.StatusOK},
 			{"a path under it is not the health route", http.MethodGet, "/healthz/x", "evil.example", http.StatusForbidden},
 			{"a path that starts like it is not the health route", http.MethodGet, "/healthzz", "evil.example", http.StatusForbidden},
+			{"a path that ends like it is not the health route", http.MethodGet, "/api/v1/agents/healthz", "evil.example", http.StatusForbidden},
 			{"the API root is not the health route", http.MethodGet, "/api/v1/agents", "10.42.0.17:8080", http.StatusForbidden},
 		}
 		for _, tt := range tests {
 			t.Run(mode+"/"+tt.name, func(t *testing.T) {
 				rec := sendFrom(h, tt.method, tt.path, tt.host, nil)
 				assert.Equal(t, tt.want, rec.Code, "body=%s", rec.Body.String())
+			})
+		}
+	}
+}
+
+// TestOriginChecks_NothingAPageAddsExcusesAForeignHost: a rebound page's
+// script chooses the method and may add any header a script is allowed to
+// set, and the browser adds its own marks. A write from such a page carries
+// an Origin that names the page's own Host. None of that gets a foreign Host
+// past the check, and none of it is read in place of the Host.
+func TestOriginChecks_NothingAPageAddsExcusesAForeignHost(t *testing.T) {
+	const evil = "evil.example:8080"
+	browserMarks := map[string]string{"Sec-Fetch-Site": sameOrigin, "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty"}
+	tests := []struct {
+		name    string
+		method  string
+		headers map[string]string
+	}{
+		{"a write whose Origin names the page's own Host", http.MethodPost, map[string]string{"Origin": "http://" + evil}},
+		{"a write the browser marks same-origin", http.MethodPost, map[string]string{"Origin": "http://" + evil, "Sec-Fetch-Site": sameOrigin}},
+		{"a read with the marks a browser adds", http.MethodGet, browserMarks},
+		{"X-Forwarded-Host names an expected host", http.MethodGet, map[string]string{"X-Forwarded-Host": "localhost"}},
+		{"Forwarded names an expected host", http.MethodGet, map[string]string{"Forwarded": "host=localhost"}},
+		{"an Authorization header", http.MethodGet, map[string]string{"Authorization": "Bearer anything"}},
+		{"a cookie", http.MethodGet, map[string]string{"Cookie": sessionCookieName + "=anything"}},
+		{"a JSON content type", http.MethodPost, map[string]string{"Content-Type": "application/json", "Origin": "http://" + evil}},
+		{"an OPTIONS request", http.MethodOptions, nil},
+		{"a DELETE", http.MethodDelete, map[string]string{"Origin": "http://" + evil}},
+	}
+	for mode, build := range originModes(t) {
+		h := build()
+		for _, tt := range tests {
+			t.Run(mode+"/"+tt.name, func(t *testing.T) {
+				rec := sendFrom(h, tt.method, "/api/v1/agents", evil, tt.headers)
+				require.Equal(t, http.StatusForbidden, rec.Code, "body=%s", rec.Body.String())
+				assert.Equal(t, `host name "evil.example" is not expected: add it to auth.allowed_hosts in config/security.yaml`,
+					refusalOf(rec).Error)
+			})
+		}
+
+		// Control, and the other half of "not read in place of the Host":
+		// a forwarded-host header that names a foreign host does not get a
+		// request under an expected Host refused.
+		for name, headers := range map[string]map[string]string{
+			"X-Forwarded-Host names a foreign host": {"X-Forwarded-Host": "evil.example"},
+			"Forwarded names a foreign host":        {"Forwarded": "host=evil.example"},
+		} {
+			t.Run(mode+"/under an expected Host, "+name, func(t *testing.T) {
+				rec := sendFrom(h, http.MethodGet, "/api/v1/agents", "localhost:8080", headers)
+				assert.NotEqual(t, http.StatusForbidden, rec.Code, "body=%s", rec.Body.String())
 			})
 		}
 	}
@@ -315,7 +367,9 @@ func TestOriginChecks_OverARealConnection(t *testing.T) {
 
 // TestWithAllowedHosts: the option takes names as an operator writes them,
 // leaves out what is not a name, and with nothing left refuses everything but
-// a health probe. It never falls back to serving every Host.
+// a health probe. It never falls back to serving every Host: given no names
+// at all it refuses in the same way, so a caller that builds its list wrongly
+// cannot switch the checks off.
 func TestWithAllowedHosts(t *testing.T) {
 	serve := func(names ...string) http.Handler {
 		srv, _ := testServer(t)
@@ -333,29 +387,37 @@ func TestWithAllowedHosts(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, status(h, "/api/v1/agents", ""), "an empty entry allows no empty Host")
 	assert.Equal(t, http.StatusForbidden, status(h, "/api/v1/agents", "not a name"))
 
-	h = serve("", "localhost:8080")
-	assert.Equal(t, http.StatusForbidden, status(h, "/api/v1/agents", "localhost:8080"))
-	assert.Equal(t, http.StatusForbidden, status(h, "/api/v1/agents", "localhost"))
-	assert.Equal(t, http.StatusForbidden, status(h, "/api/v1/agents", ""))
-	assert.Equal(t, http.StatusOK, status(h, "/healthz", "localhost"))
+	nothingLeft := map[string]http.Handler{
+		"no entry is a name": serve("", "localhost:8080"),
+		"no names":           serve(),
+		"an empty list": func() http.Handler {
+			srv, _ := testServer(t)
+			WithAllowedHosts([]string{})(srv)
+			return srv.Handler()
+		}(),
+	}
+	for name, h := range nothingLeft {
+		t.Run(name, func(t *testing.T) {
+			assert.Equal(t, http.StatusForbidden, status(h, "/api/v1/agents", "localhost:8080"))
+			assert.Equal(t, http.StatusForbidden, status(h, "/api/v1/agents", "localhost"))
+			assert.Equal(t, http.StatusForbidden, status(h, "/api/v1/agents", "evil.example"))
+			assert.Equal(t, http.StatusForbidden, status(h, "/api/v1/agents", ""))
+			assert.Equal(t, http.StatusOK, status(h, "/healthz", "localhost"))
+			rec := sendFrom(h, http.MethodPost, "/api/v1/agents/a/unquarantine", "localhost", nil)
+			assert.Contains(t, refusalOf(rec).Error, "auth.allowed_hosts", "the refusal still names the setting")
+		})
+	}
 }
 
 // TestOriginChecks_OffWithoutTheOption: a server built without the option
-// runs neither check, as a server built without WithAuth runs no sign-in. The
-// orchestrator always passes the option (cmd/orchestrator, initAuth).
+// runs neither check, as a server built without WithAuth runs no sign-in.
+// That is the only way to have none: the option switches both on whatever it
+// is given (TestWithAllowedHosts). The orchestrator always passes the option
+// (cmd/orchestrator, initAuth).
 func TestOriginChecks_OffWithoutTheOption(t *testing.T) {
-	for name, opt := range map[string]ServerOption{
-		"the option is not given":       func(*Server) {},
-		"the option gets no names":      WithAllowedHosts(nil),
-		"the option gets an empty list": WithAllowedHosts([]string{}),
-	} {
-		t.Run(name, func(t *testing.T) {
-			srv, _ := testServer(t)
-			opt(srv)
-			h := srv.Handler()
-			assert.Equal(t, http.StatusOK, sendFrom(h, http.MethodGet, "/api/v1/agents", "evil.example", nil).Code)
-			rec := sendFrom(h, http.MethodPost, "/api/v1/agents/a/unquarantine", "localhost", formPost)
-			assert.NotEqual(t, crossOriginRefusalText, refusalOf(rec).Error)
-		})
-	}
+	srv, _ := testServer(t)
+	h := srv.Handler()
+	assert.Equal(t, http.StatusOK, sendFrom(h, http.MethodGet, "/api/v1/agents", "evil.example", nil).Code)
+	rec := sendFrom(h, http.MethodPost, "/api/v1/agents/a/unquarantine", "localhost", formPost)
+	assert.NotEqual(t, crossOriginRefusalText, refusalOf(rec).Error)
 }

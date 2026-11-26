@@ -65,6 +65,11 @@ func TestLoadSecurityConfig_AllowedHosts(t *testing.T) {
 			wantErr: `auth.allowed_hosts: "localhost:8080" is not a host name or an IP address on its own (no scheme, port, path or wildcard)`,
 		},
 		{
+			name:    "an IPv4 address with a port",
+			yaml:    "auth:\n  allowed_hosts: [\"127.0.0.1:8080\"]\n",
+			wantErr: `auth.allowed_hosts: "127.0.0.1:8080" is not a host name or an IP address on its own (no scheme, port, path or wildcard)`,
+		},
+		{
 			name:    "an address with a port",
 			yaml:    "auth:\n  allowed_hosts: [\"[::1]:8080\"]\n",
 			wantErr: `auth.allowed_hosts: "[::1]:8080" is not a host name`,

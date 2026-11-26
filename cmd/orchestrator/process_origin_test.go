@@ -6,6 +6,7 @@ package main
 // the shipped config and the shipped compose file give it.
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -65,41 +66,102 @@ func composeFile(t *testing.T, name string) map[string]any {
 	return doc
 }
 
-// serviceCommands returns each service's command line in a compose file.
-func serviceCommands(t *testing.T, doc map[string]any) map[string][]string {
-	t.Helper()
+// commandWords returns a service's command as its words. Every compose file
+// of this repository writes a command as a list of words, and that is the
+// only form read here. A command written as one string is an error, so that
+// it cannot go unread.
+func commandWords(raw any) ([]string, error) {
+	items, isList := raw.([]any)
+	if !isList {
+		return nil, fmt.Errorf("the command is a %T, not a list of words", raw)
+	}
+	words := make([]string, 0, len(items))
+	for _, item := range items {
+		word, isString := item.(string)
+		if !isString {
+			return nil, fmt.Errorf("the command word %v is a %T, not a string", item, item)
+		}
+		words = append(words, word)
+	}
+	return words, nil
+}
+
+// serviceCommands returns each service's command line in a compose file. A
+// service that sets no command is left out; one whose command cannot be
+// read is an error that names the service.
+func serviceCommands(doc map[string]any) (map[string][]string, error) {
 	out := map[string][]string{}
 	services, _ := doc["services"].(map[string]any)
 	for name, raw := range services {
 		svc, _ := raw.(map[string]any)
-		items, ok := svc["command"].([]any)
-		if !ok {
+		command, present := svc["command"]
+		if !present {
 			continue
 		}
-		for _, item := range items {
-			word, isString := item.(string)
-			require.True(t, isString, "service %s: a command word that is not a string", name)
-			out[name] = append(out[name], word)
+		words, err := commandWords(command)
+		if err != nil {
+			return nil, fmt.Errorf("service %s: %w; write it as a list of words, so that this test can read it", name, err)
 		}
+		out[name] = words
 	}
-	return out
+	return out, nil
 }
 
-// flagValue returns the word after flag in a command line, "" when absent.
+// flagValue returns the value a command line gives flag, written as two
+// words (`--flag value`) or as one (`--flag=value`); "" when absent.
 func flagValue(command []string, flag string) string {
 	for i, word := range command {
 		if word == flag && i+1 < len(command) {
 			return command[i+1]
 		}
+		if value, found := strings.CutPrefix(word, flag+"="); found {
+			return value
+		}
 	}
 	return ""
+}
+
+// TestComposeGuard_ReadsACommandOrFails: the guard at the end of this file
+// is only as good as its reading of a command line. It reads both ways of
+// writing a flag, and a command it cannot read is an error, not a skip.
+func TestComposeGuard_ReadsACommandOrFails(t *testing.T) {
+	const flag = "--orchestrator-url"
+	words, err := commandWords([]any{"--agent", "planner", flag, "http://orchestrator:8080"})
+	require.NoError(t, err)
+	assert.Equal(t, "http://orchestrator:8080", flagValue(words, flag))
+	assert.Equal(t, "http://other:8080", flagValue([]string{"--agent", "planner", flag + "=http://other:8080"}, flag))
+	assert.Equal(t, "", flagValue([]string{flag + "s", "http://other:8080"}, flag), "another flag that starts the same")
+	assert.Equal(t, "", flagValue([]string{flag}, flag), "the flag as the last word has no value")
+	assert.Equal(t, "", flagValue(nil, flag))
+
+	for name, raw := range map[string]any{
+		"a command written as one string": "--agent planner " + flag + " http://other:8080",
+		"a word that is not a string":     []any{"--port", 50051},
+		"a command with no value":         nil,
+	} {
+		_, err := commandWords(raw)
+		assert.Error(t, err, name)
+		_, err = serviceCommands(map[string]any{"services": map[string]any{
+			"agent-planner": map[string]any{"command": raw},
+		}})
+		assert.ErrorContains(t, err, "service agent-planner", name)
+	}
+
+	commands, err := serviceCommands(map[string]any{"services": map[string]any{
+		"agent-planner": map[string]any{"command": []any{"--agent", "planner"}},
+		"redis":         map[string]any{"image": "a service that sets no command"},
+	}})
+	require.NoError(t, err)
+	assert.Equal(t, map[string][]string{"agent-planner": {"--agent", "planner"}}, commands)
 }
 
 // composeExtraHosts is what the shipped compose file passes for
 // extraHostsFlag.
 func composeExtraHosts(t *testing.T) string {
 	t.Helper()
-	command := serviceCommands(t, composeFile(t, "docker-compose.yaml"))["orchestrator"]
+	commands, err := serviceCommands(composeFile(t, "docker-compose.yaml"))
+	require.NoError(t, err, "docker-compose.yaml")
+	command := commands["orchestrator"]
 	require.NotEmpty(t, command, "docker-compose.yaml gives the orchestrator a command")
 	return flagValue(command, extraHostsFlag)
 }
@@ -137,6 +199,26 @@ func TestOrchestratorProcess_RefusesAnUnexpectedHost(t *testing.T) {
 			if tt.refusedName != "" {
 				assert.Contains(t, body, strings.Replace(hostRefusalFor, "%s", tt.refusedName, 1))
 			}
+		})
+	}
+
+	// A rebound page's write carries an Origin that names the page's own
+	// Host, and its script may add headers. None of that gets it past the
+	// check, and no forwarded-host header is read in place of the Host.
+	evil := "evil.example:" + port
+	added := []struct {
+		name, method, path string
+		headers            map[string]string
+	}{
+		{"a rebound page's write, its Origin naming its own Host", http.MethodPost, "/api/v1/agents/planner/unquarantine", map[string]string{"Origin": "http://" + evil}},
+		{"a rebound page that adds X-Forwarded-Host", http.MethodGet, "/api/v1/agents", map[string]string{"X-Forwarded-Host": "localhost"}},
+		{"a rebound page that adds an Authorization header", http.MethodGet, "/api/v1/agents", map[string]string{"Authorization": "Bearer anything"}},
+	}
+	for _, tt := range added {
+		t.Run(tt.name, func(t *testing.T) {
+			status, body := p.call(tt.method, tt.path, evil, tt.headers, "")
+			assert.Equal(t, http.StatusForbidden, status, "body=%s", body)
+			assert.Contains(t, body, strings.Replace(hostRefusalFor, "%s", "evil.example", 1))
 		})
 	}
 
@@ -260,7 +342,9 @@ func TestComposeFiles_EveryAgentCallsTheOrchestratorByAnExpectedName(t *testing.
 	urls := 0
 	for _, file := range files {
 		name := filepath.Base(file)
-		for service, command := range serviceCommands(t, composeFile(t, name)) {
+		commands, err := serviceCommands(composeFile(t, name))
+		require.NoError(t, err, name)
+		for service, command := range commands {
 			if service == "orchestrator" {
 				assert.Equal(t, "docker-compose.yaml", name,
 					"only the base file may set the orchestrator's command: an overlay that sets it drops %s", extraHostsFlag)

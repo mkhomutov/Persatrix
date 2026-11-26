@@ -16,10 +16,11 @@ import (
 )
 
 // Auth mode values (RFC 0039 §H). `disabled` is the shipped default:
-// the middleware resolves every request to the anonymous `local`
-// identity and evaluates no policy, so behaviour is byte-for-byte
-// pre-RFC-0039. `enabled` turns on identity resolution now (PR 3) and
-// policy enforcement in Phase 2 (PR 5).
+// the auth middleware resolves every request to the anonymous `local`
+// identity and evaluates no policy. `enabled` turns on identity
+// resolution (PR 3) and policy enforcement (Phase 2, PR 5). The two
+// checks of where a request came from run in front of it in both modes
+// (request_origin.go, ISSUE-0212).
 const (
 	AuthModeDisabled = "disabled"
 	AuthModeEnabled  = "enabled"

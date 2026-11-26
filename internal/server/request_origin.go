@@ -14,9 +14,10 @@ package server
 //     names the operator expects is refused.
 //   - A cross-site write. A page on another site submits a form, or sends a
 //     request script may send without asking, to a route that changes
-//     something. The browser marks such a request (Sec-Fetch-Site, and
-//     Origin before that header existed). So a write the browser marks as
-//     coming from another origin is refused.
+//     something. The browser marks such a request: with Sec-Fetch-Site when
+//     it counts the address as secure (HTTPS, localhost, a loopback
+//     address), and with Origin at any address. So a write the browser
+//     marks as coming from another origin is refused.
 //
 // Both run for every caller, whether sign-in (auth.mode) is on or off. Neither
 // stops a client that is not a browser: such a client writes any header it
@@ -63,14 +64,13 @@ func DefaultAllowedHosts() []string {
 // is left out, and if none is left every request but a health probe is
 // refused: NormalizeAllowedHosts is where a caller learns of a bad name first.
 //
-// Nil-safe like WithAuth: given no names at all the option does nothing, and
-// a server built without it runs neither check. The orchestrator always
+// The option fails closed. Given no names at all, nil or an empty list, it
+// still turns the checks on and so refuses everything but a health probe: a
+// caller that builds its list wrongly cannot switch them off. Only a server
+// built without the option runs neither check. The orchestrator always
 // passes it (cmd/orchestrator, initAuth); bare servers in tests do not.
 func WithAllowedHosts(names []string) ServerOption {
 	return func(s *Server) {
-		if len(names) == 0 {
-			return
-		}
 		allowed := make(map[string]struct{}, len(names))
 		for _, name := range names {
 			if entry, err := allowedHostEntry(name); err == nil {
@@ -110,8 +110,10 @@ func (s *Server) originMiddleware(next http.Handler) http.Handler {
 		// Reads pass: a page on another site cannot read the answer, and
 		// the Host check above is what stops a rebound page. Among writes,
 		// Sec-Fetch-Site decides when the browser sent it (same-origin and
-		// none pass); without it an Origin must name this request's own
-		// Host; a request with neither header is not from a browser.
+		// none pass). Without it an Origin must name this request's own
+		// Host, port included: that is every browser write to a plain-HTTP
+		// address that is not localhost or loopback. A request with neither
+		// header is not from a browser.
 		if err := crossOrigin.Check(r); err != nil {
 			s.logger.Warn("request refused: a write that the browser marks as coming from another origin",
 				zap.String("method", r.Method),

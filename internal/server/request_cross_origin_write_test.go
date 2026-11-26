@@ -47,6 +47,12 @@ func TestOriginChecks_CrossOriginWrites(t *testing.T) {
 		{name: "no Sec-Fetch-Site, a foreign Origin", method: http.MethodPost, headers: map[string]string{"Origin": evilOrigin}, refused: true},
 		{name: "no Sec-Fetch-Site, the same name on another port", method: http.MethodPost, headers: map[string]string{"Origin": "http://localhost:5173"}, refused: true},
 		{name: "no Sec-Fetch-Site, Origin null", method: http.MethodPost, headers: map[string]string{"Origin": "null"}, refused: true},
+		// What rides with a cross-site write excuses nothing: a script can
+		// send JSON, and the browser attaches the site's cookies by itself.
+		{name: "cross-site with a JSON content type", method: http.MethodPost, headers: map[string]string{"Sec-Fetch-Site": crossSite, "Content-Type": "application/json"}, refused: true},
+		{name: "cross-site with a cookie", method: http.MethodPost, headers: map[string]string{"Sec-Fetch-Site": crossSite, "Cookie": sessionCookieName + "=anything"}, refused: true},
+		{name: "no Sec-Fetch-Site, a foreign Origin with a JSON content type", method: http.MethodPost, headers: map[string]string{"Origin": evilOrigin, "Content-Type": "application/json"}, refused: true},
+		{name: "no Sec-Fetch-Site, a foreign Origin with a cookie", method: http.MethodPost, headers: map[string]string{"Origin": evilOrigin, "Cookie": sessionCookieName + "=anything"}, refused: true},
 		{name: "a cross-site DELETE", method: http.MethodDelete, headers: map[string]string{"Sec-Fetch-Site": crossSite}, refused: true},
 		{name: "a cross-site PATCH", method: http.MethodPatch, headers: map[string]string{"Sec-Fetch-Site": crossSite}, refused: true},
 		{name: "a cross-site PUT", method: http.MethodPut, headers: map[string]string{"Sec-Fetch-Site": crossSite}, refused: true},
@@ -89,9 +95,24 @@ func TestOriginChecks_ASessionDoesNotExcuseACrossSiteWrite(t *testing.T) {
 	token := decodeLogin(t, login).Token
 	require.NotEmpty(t, token)
 
+	// The cookie is the credential a browser attaches by itself, so it is
+	// the one a page on another site would ride on.
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/auth/login",
+		strings.NewReader(`{"username":"alice","password":"s3cret","session_transport":"cookie"}`))
+	req.Host = "localhost:8080"
+	req.Header.Set("Content-Type", "application/json")
+	cookieLogin := httptest.NewRecorder()
+	h.ServeHTTP(cookieLogin, req)
+	require.Equal(t, http.StatusOK, cookieLogin.Code, "body=%s", cookieLogin.Body.String())
+	require.Len(t, cookieLogin.Result().Cookies(), 1)
+	session := cookieLogin.Result().Cookies()[0]
+	cookie := session.Name + "=" + session.Value
+
 	for name, headers := range map[string]map[string]string{
-		"no credential":  {"Sec-Fetch-Site": crossSite},
-		"a bearer token": {"Sec-Fetch-Site": crossSite, "Authorization": "Bearer " + token},
+		"no credential":      {"Sec-Fetch-Site": crossSite},
+		"a bearer token":     {"Sec-Fetch-Site": crossSite, "Authorization": "Bearer " + token},
+		"the session cookie": {"Sec-Fetch-Site": crossSite, "Cookie": cookie},
+		"the session cookie and a foreign Origin, no Sec-Fetch-Site": {"Origin": evilOrigin, "Cookie": cookie},
 	} {
 		t.Run(name, func(t *testing.T) {
 			rec := sendFrom(h, http.MethodPost, "/api/v1/sessions", "localhost:8080", headers)
@@ -104,6 +125,11 @@ func TestOriginChecks_ASessionDoesNotExcuseACrossSiteWrite(t *testing.T) {
 	// to the route (503: this server has no channel store behind sessions).
 	rec := sendFrom(h, http.MethodPost, "/api/v1/sessions", "localhost:8080",
 		map[string]string{"Authorization": "Bearer " + token})
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code, "body=%s", rec.Body.String())
+	// And the cookie on a write the browser marks same-origin, as the
+	// console's own writes are.
+	rec = sendFrom(h, http.MethodPost, "/api/v1/sessions", "localhost:8080",
+		map[string]string{"Sec-Fetch-Site": sameOrigin, "Cookie": cookie})
 	assert.Equal(t, http.StatusServiceUnavailable, rec.Code, "body=%s", rec.Body.String())
 }
 
@@ -209,4 +235,16 @@ func TestOriginChecks_ARefusedWriteIsLogged(t *testing.T) {
 	assert.Equal(t, "/api/v1/sessions/s/archive", fields["path"])
 	assert.Equal(t, evilOrigin, fields["origin"])
 	assert.Equal(t, crossSite, fields["sec_fetch_site"])
+
+	// The client chose both values, so a long one is cut as a long Host is.
+	logs.TakeAll()
+	longOrigin := "http://" + strings.Repeat("a", 300) + ".example"
+	longMark := strings.Repeat("x", 300)
+	rec = sendFrom(withOriginChecks(srv), http.MethodPost, "/api/v1/sessions/s/archive", "localhost:8080",
+		map[string]string{"Origin": longOrigin, "Sec-Fetch-Site": longMark})
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.Equal(t, 1, logs.Len())
+	fields = logs.All()[0].ContextMap()
+	assert.Equal(t, longOrigin[:64]+"…", fields["origin"])
+	assert.Equal(t, longMark[:64]+"…", fields["sec_fetch_site"])
 }

@@ -42,8 +42,15 @@ Phases 1–2; the [operator guide](docs/guides/auth.md)). The shipped default is
 `disabled` (unauthenticated, localhost-only posture, WARN'd at startup on a
 routable bind). In both modes the orchestrator answers only to the host names
 in `auth.allowed_hosts` and refuses a write that a browser marks as coming
-from another origin, so a web page open on the same machine cannot call it
-([where a request may come from](docs/guides/request-origin-checks.md)).
+from another origin. That stops a web page on another site from reading the
+API through a name re-pointed at this machine, and from writing to it
+([where a request may come from](docs/guides/request-origin-checks.md)). It
+does not stop a page when an allowed name other than `localhost` can be
+re-pointed by whoever answers this machine's DNS queries; under the compose
+stack `orchestrator` is such a name
+([ISSUE-0286](docs/issues/ISSUE-0286-an-allowed-host-that-is-not-localhost-trusts-the-operators-dns.md)).
+A read from another site is still served, and the browser keeps the answer
+from that page.
 Two limits to know before exposing a deployment:
 
 - **Enabled beyond localhost requires HTTPS** — the browser session cookie is
