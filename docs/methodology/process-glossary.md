@@ -251,10 +251,13 @@ is the exception: a release that does not fit is cut or re-scoped, or as a
 last resort allowlisted until its tag PR — not split.
 
 ### Real seam
-Where a long code file is split: a part that makes sense on its own, so the
-new file can be described without naming the file it came from. A code file
-over 700 lines is split there when a change edits it for another reason,
-never to get under a number and never in a sweep
+Where a long file is split, code or document: a part that makes sense on its
+own, so the new file can be described without naming the file it came from.
+A code file over 700 lines is split there when a change edits it for another
+reason, never to get under a number and never in a sweep. A document is
+split there before it reaches its word cap
+([Split, don't trim](#split-dont-trim)). The checker's near-cap notice uses
+the term for both
 ([documentation guide §Size Limits](../documentation-guide.md#size-limits)).
 
 ### Companion discussion document

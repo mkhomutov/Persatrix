@@ -15,6 +15,7 @@ refs:
   - docs/methodology/process-glossary.md
   - docs/methodology/review-process.md
   - CLAUDE.md
+  - docs/issues/ISSUE-0288-plans-and-the-sequencing-record-still-say-500-lines.md
   - docs/issues/ISSUE-0143-debt-sweep-26-files-at-size-cap.md
   - docs/issues/ISSUE-0229-channel-router-holds-every-governance-state.md
   - docs/issues/ISSUE-0230-persona-class-is-one-class-cut-into-mixins.md
@@ -117,22 +118,35 @@ ruling, so it needs the maintainer's decision.
 >
 > Where the decision is recorded: a dated entry in the documentation
 > guide's Size Limits, next to the sentence on ruling (e) of the
-> sequencing Amendment 2026-09-12, and this note. The sequencing record
-> is frozen, so its own text of ruling (e) still says 500. Every current
-> statement of the two numbers was changed, and a unit test now fails
-> when one of them disagrees with the checker.
+> sequencing Amendment 2026-09-12, and this note. No sequencing amendment
+> records the move yet, so ruling (e)'s own text still says 500. Every
+> current statement of the two numbers in the standing texts was changed.
+> A unit test holds a list of those sentences and fails when a listed
+> sentence stops giving the checker's numbers. It does not catch a
+> statement that is added, in a listed file or anywhere else.
 >
 > What was left as it is. No code file was split or joined. On `main`,
-> 392 lines in 353 code files name the 500-line figure as the reason for
-> a file's layout; they say why a file was cut on the day it was cut,
-> and they stay. The 28 files at 499 or 500 lines stay as they are; each
-> can now grow where it is. Plans, sequencing documents, RFCs, release
-> records, the strategy review and the changelog's earlier entries still
-> say 500, as records of their day. Two of them are read as current and
-> were not edited, because the fix edits no plan or sequencing
-> document: the v0.4.0 plan's risk row on "hot files near 500 lines", and
-> the later sequencing amendments' line that rulings (b) to (e) hold. A
-> ruling holds until a later amendment says otherwise
+> 393 places in 354 code files name the 500-line figure as the reason for
+> a file's layout, counted with line breaks folded, so that a figure at
+> the end of one comment line and "lines" at the start of the next count.
+> They say why a file was cut on the day it was cut, and they stay. One
+> of them is different: the module docstring of
+> `agents/channel_receive.py` says, in the present tense, that the check
+> warns at 500 lines, which is false once this is merged. It was not
+> edited either. The 28 files at 499 or 500 lines stay as they are. The
+> check no longer warns when one of them grows, but PR plans in progress
+> still tell their PRs to split some of them first.
+>
+> Plans, sequencing documents, RFCs, release records, the strategy review
+> and the changelog's earlier entries still say 500, as records of their
+> day. Some of them are read as current and were not edited, because the
+> fix edits no plan, sequencing document or RFC: ruling (e)'s own text and
+> the later amendments' line that rulings (b) to (e) hold, the v0.4.0
+> plan's risk row on "hot files near 500 lines", and the file-size tables
+> of PR plans whose PRs are not written yet.
+> [ISSUE-0288](ISSUE-0288-plans-and-the-sequencing-record-still-say-500-lines.md)
+> lists them with the present-tense comment and stays open until each is
+> corrected. A ruling holds until a later amendment says otherwise
 > ([decisions](../methodology/decisions.md#sequencing-amendments), rule 5),
 > so a line for the new figure in the next amendment is the maintainer's
 > to add.

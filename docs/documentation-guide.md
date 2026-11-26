@@ -206,13 +206,17 @@ to make room ("split, don't trim").
   failure.
 - **The warning moved from 500 lines to 700** by the maintainer's decision
   of 2026-11-21 on
-  [ISSUE-0231](issues/ISSUE-0231-size-check-counts-comment-lines.md). About
+  [ISSUE-0231](issues/ISSUE-0231-size-check-counts-comment-lines.md); the
+  checker changed in
+  [#1146](https://github.com/mkhomutov/Persatrix/pull/1146). About
   half the lines of the Go and Python code are comments, so the warning came
   at about 250 lines of code, and file lengths went on piling up just under
   500. Counting code lines only was considered and not taken: it needs a
   comment parser for each of five languages, and a miscount would fail CI.
-  The failure stays at 800. The sequencing record is frozen and its text of
-  ruling (e) still says 500; this entry is where the change is written down.
+  The failure stays at 800. No sequencing amendment records this yet, so
+  ruling (e)'s own text still says 500; until an amendment carries the new
+  figure, this entry is where the change is written down
+  ([ISSUE-0288](issues/ISSUE-0288-plans-and-the-sequencing-record-still-say-500-lines.md)).
 - **A document** still fails one word over its cap. Split it before the cap
   arrives — at about 2 900 words for a 3 000-word cap: a document *at* the
   cap turns every later fix into deleted context. A patch release's version

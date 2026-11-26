@@ -8,10 +8,10 @@ warning and moved the failure to 800.
 
 The maintainer's decision of 2026-11-21 moved the warning to 700
 (ISSUE-0231).  The check counts every line, and about half the lines of the
-Go and Python code are comments, so
-the warning arrived at about 250 lines of code and file lengths kept piling
-up under it.  Counting code lines only was considered and not taken: it
-needs a comment parser for five languages, and a miscount would fail CI.
+Go and Python code are comments, so the warning arrived at about 250 lines
+of code and file lengths kept piling up under it.  Counting code lines only
+was considered and not taken: it needs a comment parser for five languages,
+and a miscount would fail CI.
 
 Pinned here: the numbers, where the warning starts and where the failure
 starts, that a file between the old mark and the new one is not warned, that
@@ -20,34 +20,62 @@ and printed last, that an allowlisted file is not warned, that both numbers
 can be moved by flag and default to the rulings', that the near-cap band for
 code sits under the failure and not under the warning, that ``--verbose``
 tags each file with the list it is in, that the documentation audit reports
-the two lists the same way, and that each text which states the two marks
-gives the checker's numbers.
+the two lists the same way, and that each listed sentence which states one
+of the two marks gives the checker's numbers.
 """
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
 
 from scripts.checks import doc_audit, file_size
 
-# Where the two marks are stated today, each with the words that carry them.
-# A sentence may be reworded: then its row here changes with it.  What may
-# not happen is a mark moving in the checker and staying behind in a text.
-# Plans, sequencing documents, RFCs and release records are history and are
-# not listed: they say what held on their day.
+# The sentences that state the two marks in the standing texts, each with the
+# words that carry them: {warn} is the warning, {limit} the failure, {band}
+# the near-cap band under the failure and {pct} that band's share.  The test
+# below fails when one of these sentences stops giving the checker's numbers:
+# a number moved in the checker and not in the sentence, or the sentence was
+# removed, or reworded without its row.
+#
+# It is a list of what must be there.  It cannot see a statement that is
+# added, beside a listed sentence or in a new place, whatever number the new
+# statement gives.  So a new sentence that states a mark gets a row here in
+# the same change.
+#
+# Not listed: plans, sequencing documents, RFCs, release records and the
+# changelog, which say what held on their day; and this file's own
+# docstrings, whose tests fail first when a number moves.
 _CHECKER = "scripts/checks/file_size.py"
+_SIBLING = "tests/unit/python/test_file_size_checker.py"
 _GUIDE = "docs/documentation-guide.md"
 _METHOD = "docs/methodology/"
 _STATEMENTS_OF_THE_MARKS = [
     (_CHECKER, "- Code files: a warning over {warn} lines, a failure over {limit}"),
     (_CHECKER, "[--warn-code-lines {warn}]"),
     (_CHECKER, "[--max-code-lines {limit}]"),
+    (_CHECKER, "The warning was 500 under that ruling and is {warn}"),
+    (_CHECKER, "{band} lines of an {limit}-line code file"),
+    (_CHECKER, "{band} lines left is {pct}% of a code file's cap"),
+    (_CHECKER, "kept 500 as the signal and moved the failure to {limit}"),
+    (_CHECKER, "Why {warn}, decided on 2026-11-21"),
+    (_CHECKER, "The code cliff has been {limit} lines"),
+    (_CHECKER, "so the code band sits under {limit}"),
+    (_CHECKER, "past {warn} it gets"),
+    (_SIBLING, "three caps ({limit} lines for code,"),
+    (_SIBLING, "the warning for code past {warn} lines is pinned"),
     ("scripts/pre_commit.py", "(code: ≤{limit} lines, a warning over {warn}; docs: ≤3000 words)"),
     ("CLAUDE.md", "a code file warns over {warn} lines and fails over {limit}"),
     (_GUIDE, "**A warning over {warn} lines; fails over {limit}**"),
     (_GUIDE, "**A code file over {warn} lines**"),
+    (_GUIDE, "is listed as a warning on every run and fails only over {limit}"),
+    (_GUIDE, "Never trim it back under {warn}"),
+    (_GUIDE, "That ruling made 500 lines the warning and {limit} the failure"),
+    (_GUIDE, "**The warning moved from 500 lines to {warn}**"),
+    (_GUIDE, "The failure stays at {limit}"),
+    (_GUIDE, "for code, the last {band} lines under {limit}"),
     (
         "docs/docs-consistency-checklist.md",
         "(code: ≤{limit} lines, with a warning over {warn}; docs: ≤3000 words)",
@@ -75,31 +103,53 @@ def _code(root: Path, rel: str, lines: int) -> None:
     path.write_text("x = 1\n" * lines, encoding="utf-8")
 
 
+def _states(text: str, wanted: str) -> bool:
+    """Whether *text* holds *wanted* with no digit against either end, so a
+    phrase that ends in 800 is not found in "8000", nor one that starts with
+    24 in "124"."""
+    return re.search(r"(?<!\d)" + re.escape(wanted) + r"(?!\d)", text) is not None
+
+
 def test_the_numbers_are_the_rulings() -> None:
-    """800 is ruling (e) of the sequencing Amendment 2026-09-12.  The warning
-    was 500 under that ruling and is 700 by the maintainer's decision of
-    2026-11-21 (ISSUE-0231).  Moving either takes a decision recorded with
-    its date, not a PR alone.  Both name lines only; the word limits are
-    pinned here so that moving one is a deliberate edit."""
+    """500 and 800 are ruling (e) of the sequencing Amendment 2026-09-12:
+    changing either takes a new amendment, not a PR (decisions, rule 5).
+    The warning's move to 700 was made by the maintainer's decision of
+    2026-11-21 on ISSUE-0231, ahead of an amendment, and no amendment
+    records it yet.  The ruling names lines only; the word limits are pinned
+    here so that moving one is a deliberate edit."""
     assert file_size.DEFAULT_WARN_CODE_LINES == 700
     assert file_size.DEFAULT_MAX_CODE_LINES == 800
     assert file_size.DEFAULT_MAX_DOC_WORDS == 3000
     assert file_size.DEFAULT_MAX_RFC_WORDS == 8000
 
 
+def test_a_number_at_the_end_of_a_phrase_has_an_edge() -> None:
+    """A listed phrase that ends or starts with a number must not be found
+    inside a longer number."""
+    assert _states("it fails over 800 — split it", "fails over 800")
+    assert _states("fails over 800", "fails over 800")
+    assert not _states("it fails over 8000 — split it", "fails over 800")
+    assert not _states("the last 124 lines under 800.", "24 lines under 800")
+    assert _states("the last 24 lines under 800.", "24 lines under 800")
+
+
 @pytest.mark.parametrize(("rel", "phrase"), _STATEMENTS_OF_THE_MARKS)
-def test_each_text_that_states_the_marks_gives_the_checkers_numbers(
-    rel: str, phrase: str,
-) -> None:
+def test_each_listed_sentence_gives_the_checkers_numbers(rel: str, phrase: str) -> None:
     """The marks are written down in the instructions, the guides and the
     methodology, and a reader meets those before the checker.  Line breaks
-    are folded, so re-wrapping a paragraph changes nothing here."""
+    are folded, so re-wrapping a paragraph changes nothing here.  The band
+    is the checker's own arithmetic (``margin`` in ``_near_cap_notices``)."""
+    limit = file_size.DEFAULT_MAX_CODE_LINES
+    pct = file_size.DEFAULT_NEAR_CAP_PCT
     wanted = phrase.format(
-        warn=file_size.DEFAULT_WARN_CODE_LINES, limit=file_size.DEFAULT_MAX_CODE_LINES,
+        warn=file_size.DEFAULT_WARN_CODE_LINES,
+        limit=limit,
+        band=max(1, round(limit * pct / 100.0)),
+        pct=f"{pct:g}",
     )
     text = " ".join((file_size.REPO_ROOT / rel).read_text(encoding="utf-8").split())
 
-    if wanted not in text:
+    if not _states(text, wanted):
         raise AssertionError(
             f"{rel} does not say {wanted!r}. If a mark moved, correct the sentence; "
             "if the sentence was reworded, change its row in _STATEMENTS_OF_THE_MARKS."
