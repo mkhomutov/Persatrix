@@ -6,6 +6,7 @@ severity: low
 area: scripts/checks
 created: 2026-11-10
 closed: 2026-11-26
+closed_pr: 1146
 refs:
   - scripts/checks/file_size.py
   - tests/unit/python/test_file_size_code_warning.py
@@ -89,7 +90,8 @@ ruling, so it needs the maintainer's decision.
 > share first read 52%; a recount in review, with comments taken from
 > the tokenizer and docstrings from the syntax tree, gives 47%.
 
-> 2026-11-26 — resolved, on the maintainer's two choices of 2026-11-21.
+> 2026-11-26 — resolved by [#1146](https://github.com/mkhomutov/Persatrix/pull/1146),
+> on the maintainer's two choices of 2026-11-21.
 >
 > Measured again first, on `main` at `c409027b`. Of 1,842 tracked Go,
 > Python, Rust, JavaScript and Svelte files (generated stubs left out),
@@ -127,7 +129,7 @@ ruling, so it needs the maintainer's decision.
 > can now grow where it is. Plans, sequencing documents, RFCs, release
 > records, the strategy review and the changelog's earlier entries still
 > say 500, as records of their day. Two of them are read as current and
-> were not edited, because this change edits no plan or sequencing
+> were not edited, because the fix edits no plan or sequencing
 > document: the v0.4.0 plan's risk row on "hot files near 500 lines", and
 > the later sequencing amendments' line that rulings (b) to (e) hold. A
 > ruling holds until a later amendment says otherwise
