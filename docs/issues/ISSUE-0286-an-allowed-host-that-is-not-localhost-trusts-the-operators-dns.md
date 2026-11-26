@@ -13,6 +13,7 @@ refs:
   - docs/guides/request-origin-checks.md
   - docs/issues/ISSUE-0212-rest-api-checks-neither-host-nor-origin-with-auth-off.md
   - docs/issues/ISSUE-0117-agent-ingress-close-knob.md
+  - https://github.com/mkhomutov/Persatrix/pull/1147
 ---
 
 # ISSUE-0286: An allowed host that is not `localhost` trusts the operator's DNS
@@ -84,4 +85,5 @@ while the stack runs with sign-in off, or turn sign-in on.
 
 > 2026-11-26 — found while fixing ISSUE-0212, by reasoning about which
 > names a browser resolves by itself; no such attack was carried out. Filed
-> with that fix. The severity is proposed, not ruled.
+> with that fix, [#1147](https://github.com/mkhomutov/Persatrix/pull/1147).
+> The severity is proposed, not ruled.

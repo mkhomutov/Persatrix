@@ -6,6 +6,7 @@ severity: medium
 area: security
 created: 2026-11-10
 closed: 2026-11-26
+closed_pr: 1147
 refs:
   - internal/server/request_origin.go
   - internal/server/auth_config.go
@@ -82,9 +83,9 @@ to the auth guide.
 > config half), so a submitted run reaches one only where an operator's
 > own config lists commands; it still reaches `file_read` and `file_write`.
 
-> 2026-11-26 — resolved, on the maintainer's two choices: both checks, in
-> both sign-in modes, and the expected names as a list in
-> `config/security.yaml`.
+> 2026-11-26 — resolved by [#1147](https://github.com/mkhomutov/Persatrix/pull/1147),
+> on the maintainer's two choices: both checks, in both sign-in modes, and
+> the expected names as a list in `config/security.yaml`.
 >
 > **Reproduced first.** On `main` at `c409027b` a real orchestrator process
 > on the shipped config served `GET /api/v1/agents` and the channel list
