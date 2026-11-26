@@ -1,6 +1,6 @@
 # The Release Cycle
 
-> **Last updated**: 2026-09-29
+> **Last updated**: 2026-11-26
 > Describes the cycle a patch release follows since ruling (e) of the
 > [sequencing Amendment 2026-09-12](../v0.3.x-sequencing.md#amendment-2026-09-12--close-v0316-small-then-measure-before-any-train-opens):
 > **one document**, the plan. v0.3.0–v0.3.16 ran the same steps across five
@@ -343,7 +343,7 @@ and after its two splits 24 files were still at their cap: a seam chosen by
 line count refills the pile
 ([ISSUE-0143](../issues/ISSUE-0143-debt-sweep-26-files-at-size-cap.md)).
 
-Now a code file gets a warning over 500 lines and fails only over 800
+Now a code file gets a warning over 700 lines and fails only over 800
 ([documentation-guide §Size Limits](../documentation-guide.md#size-limits)).
 A long file is split at a real seam when a change edits it for another
 reason, never in a sweep.

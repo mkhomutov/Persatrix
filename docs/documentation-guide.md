@@ -185,7 +185,7 @@ resort at the cap, and the tag PR that dates its changelog drops it.
 
 | Scope | Limit | Rationale |
 |-------|-------|-----------|
-| **Code files** (`.go`, `.py`, `.rs`, `.js`, `.ts`, `.svelte`, `.css`, `.toml`, `.yaml`) | **A warning over 500 lines; fails over 800** | Effective code review, with no cliff at the size worth splitting |
+| **Code files** (`.go`, `.py`, `.rs`, `.js`, `.ts`, `.svelte`, `.css`, `.toml`, `.yaml`) | **A warning over 700 lines; fails over 800** | Effective code review, with no cliff at the size worth splitting |
 | **Documentation files** (`.md`) | **≤ 3 000 words** | Thorough doc review |
 | **RFCs** (`docs/rfcs/*.md`) | **≤ 8 000 words** | Design documents carry required sections the prose cap would punish |
 
@@ -193,14 +193,30 @@ When a file grows too long, **split it** into focused, single-responsibility
 modules — move a stable half to its own file rather than deleting rationale
 to make room ("split, don't trim").
 
-- **A code file over 500 lines** is listed as a warning on every run and
-  fails only over 800. Split it at a real seam — a part that makes sense on
-  its own — when a change edits it for another reason. Never trim it back
-  under 500, and never split files in a sweep before a release. Until ruling
+- **A code file over 700 lines** is listed as a warning on every run and
+  fails only over 800. Every line counts: code, comments and blank lines
+  alike. Split it at a real seam — a part that makes sense on its own — when
+  a change edits it for another reason. A split is good when the new file can
+  be described without naming the file it came from. Never trim it back
+  under 700, and never split files in a sweep before a release. Until ruling
   (e) of the [sequencing Amendment 2026-09-12](v0.3.x-sequencing.md#amendment-2026-09-12--close-v0316-small-then-measure-before-any-train-opens),
   500 lines was the failure itself: files piled up on it, every fix to one of
   them cost a split or a deleted comment, and splitting them by line count
-  only refilled the pile.
+  only refilled the pile. That ruling made 500 lines the warning and 800 the
+  failure.
+- **The warning moved from 500 lines to 700** by the maintainer's decision
+  of 2026-11-21 on
+  [ISSUE-0231](issues/ISSUE-0231-size-check-counts-comment-lines.md); the
+  checker changed in
+  [#1146](https://github.com/mkhomutov/Persatrix/pull/1146). About
+  half the lines of the Go and Python code are comments, so the warning came
+  at about 250 lines of code, and file lengths went on piling up just under
+  500. Counting code lines only was considered and not taken: it needs a
+  comment parser for each of five languages, and a miscount would fail CI.
+  The failure stays at 800. No sequencing amendment records this yet, so
+  ruling (e)'s own text still says 500; until an amendment carries the new
+  figure, this entry is where the change is written down
+  ([ISSUE-0288](issues/ISSUE-0288-plans-and-the-sequencing-record-still-say-500-lines.md)).
 - **A document** still fails one word over its cap. Split it before the cap
   arrives — at about 2 900 words for a 3 000-word cap: a document *at* the
   cap turns every later fix into deleted context. A patch release's version

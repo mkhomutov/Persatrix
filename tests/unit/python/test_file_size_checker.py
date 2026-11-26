@@ -2,7 +2,7 @@
 
 The checker enforces three caps (800 lines for code, 3 000 words for docs,
 8 000 for ``docs/rfcs/``) with two escape hatches that are easy to get
-subtly wrong, and until now had no test (the warning for code past 500
+subtly wrong, and until now had no test (the warning for code past 700
 lines is pinned in ``test_file_size_code_warning.py``):
 
     * ``GRANDFATHERED_FILES`` — an *allowlist*: the file is still scanned
