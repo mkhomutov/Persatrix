@@ -40,7 +40,11 @@ opaque revocable sessions and a coarse `user`/`operator` role gate — unmapped
 routes fail closed to `operator` ([RFC 0039](docs/rfcs/0039-user-accounts-authentication.md)
 Phases 1–2; the [operator guide](docs/guides/auth.md)). The shipped default is
 `disabled` (unauthenticated, localhost-only posture, WARN'd at startup on a
-routable bind). Two limits to know before exposing a deployment:
+routable bind). In both modes the orchestrator answers only to the host names
+in `auth.allowed_hosts` and refuses a write that a browser marks as coming
+from another origin, so a web page open on the same machine cannot call it
+([where a request may come from](docs/guides/request-origin-checks.md)).
+Two limits to know before exposing a deployment:
 
 - **Enabled beyond localhost requires HTTPS** — the browser session cookie is
   `Secure` and is silently dropped over plain HTTP on non-loopback origins.

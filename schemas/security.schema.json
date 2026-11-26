@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://persatrix.dev/schemas/security.schema.json",
   "title": "Persatrix Security Configuration (v0.3.12+)",
-  "description": "Internal-only schema until v1.0; `$id` may break across v0.x bumps without notice. The `auth:` block (RFC 0039 §H + the enabled-mode exposure amendment §A/§B) governs the REST/console authentication surface: the disabled/enabled rollout switch, session TTLs per transport, Argon2id cost, the two login limiters, and the trusted reverse proxies for per-source key resolution. The Go loader (internal/server/auth_config.go) is the semantic authority — this schema is the `make validate` authoring gate; a file that passes here can still fail the loader's cross-field checks.",
+  "description": "Internal-only schema until v1.0; `$id` may break across v0.x bumps without notice. The `auth:` block (RFC 0039 §H + the enabled-mode exposure amendment §A/§B) governs the REST/console authentication surface: the disabled/enabled rollout switch, session TTLs per transport, Argon2id cost, the two login limiters, the trusted reverse proxies for per-source key resolution, and the host names a request may be addressed to. The Go loader (internal/server/auth_config.go) is the semantic authority — this schema is the `make validate` authoring gate; a file that passes here can still fail the loader's cross-field checks.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -14,7 +14,7 @@
           "type": "string",
           "enum": ["disabled", "enabled"],
           "default": "disabled",
-          "description": "The RFC 0039 §H rollout switch. `disabled` (default): every request resolves to the anonymous `local` identity, no route enforced, pre-RFC behaviour byte-for-byte. `enabled`: identity resolution live; the §E policy matrix enforces from Phase 2. Any networked deployment MUST set enabled."
+          "description": "The RFC 0039 §H rollout switch. `disabled` (default): every request resolves to the anonymous `local` identity and no route asks for a login. `enabled`: identity resolution live; the §E policy matrix enforces from Phase 2. Any networked deployment MUST set enabled."
         },
         "session_ttl": {
           "type": "string",
@@ -68,6 +68,16 @@
           "items": { "type": "string" },
           "default": [],
           "description": "Reverse proxies (CIDRs or bare IPs) whose X-Forwarded-For is believed when resolving the per-source limiter key (amendment §B3). Empty: the TCP peer is always the source; behind a proxy the per-source limiter then degrades to a global one and the orchestrator WARNs at startup under `enabled`."
+        },
+        "allowed_hosts": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "pattern": "^(\\[[0-9A-Fa-f:.]+\\]|[0-9A-Fa-f:.]+|[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?\\.?)$"
+          },
+          "default": ["localhost", "127.0.0.1", "[::1]"],
+          "description": "The host names the REST API and the web console answer to (ISSUE-0212), checked in both auth modes on every route but /healthz: a request whose Host header carries any other name is refused with 403. Each entry is a host name or an IP address on its own, without scheme, port, path or wildcard; an IPv6 address may be written with or without brackets. A list replaces the default and must not be empty. The orchestrator's --http-extra-allowed-hosts flag adds names for one process, which is how the compose stack adds `orchestrator`."
         }
       }
     }

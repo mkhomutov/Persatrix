@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -65,6 +66,10 @@ type AuthConfig struct {
 	// when resolving the per-source limiter key (§B3). Empty = the TCP
 	// peer address is always the source.
 	TrustedProxies []*net.IPNet
+	// AllowedHosts are the names a request's Host may carry, in both auth
+	// modes (ISSUE-0212, request_origin.go). Never empty after a load: an
+	// absent key is [DefaultAllowedHosts], and an empty list is refused.
+	AllowedHosts []string
 }
 
 // DefaultAuthConfig returns the shipped defaults: auth disabled, 24h
@@ -79,6 +84,7 @@ func DefaultAuthConfig() *AuthConfig {
 		Argon:            accounts.DefaultParams,
 		LoginPerSource:   AuthLimiterConfig{CallsPerWindow: 10, WindowSeconds: 60, MaxTracked: 1000},
 		LoginPerUsername: AuthLimiterConfig{CallsPerWindow: 5, WindowSeconds: 60, MaxTracked: 1000},
+		AllowedHosts:     DefaultAllowedHosts(),
 	}
 }
 
@@ -96,6 +102,9 @@ type authFileBlock struct {
 	Password         *passwordFileBlock `yaml:"password"`
 	LoginThrottle    *throttleFileBlock `yaml:"login_throttle"`
 	TrustedProxies   []string           `yaml:"trusted_proxies"`
+	// AllowedHosts is nil when the key is absent or has no value, and an
+	// empty, non-nil list when the file says `[]`.
+	AllowedHosts []string `yaml:"allowed_hosts"`
 }
 
 type passwordFileBlock struct {
@@ -202,6 +211,19 @@ func resolveAuthConfig(b *authFileBlock) (*AuthConfig, error) {
 			return nil, fmt.Errorf("auth.trusted_proxies: %w", err)
 		}
 		cfg.TrustedProxies = append(cfg.TrustedProxies, ipnet)
+	}
+	if b.AllowedHosts != nil {
+		// There is no way to switch the Host check off, so a list that
+		// would refuse every request is a mistake to say at start-up.
+		if len(b.AllowedHosts) == 0 {
+			return nil, fmt.Errorf("auth.allowed_hosts must name at least one host; leave the key out for the default (%s)",
+				strings.Join(DefaultAllowedHosts(), ", "))
+		}
+		hosts, err := NormalizeAllowedHosts(b.AllowedHosts)
+		if err != nil {
+			return nil, fmt.Errorf("auth.allowed_hosts: %w", err)
+		}
+		cfg.AllowedHosts = hosts
 	}
 	return cfg, nil
 }

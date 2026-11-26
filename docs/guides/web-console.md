@@ -281,6 +281,7 @@ Deferred by RFC decision (2026-06-02); each is its own later slice
 |---------|-------------|
 | `/ui/` returns 404 | `--enable-ui` is off (the default), or you reached a non-existent path. Run with `--enable-ui` (or `make run-ui`). |
 | The console opens on this machine but not from another device | Expected: the binary binds `127.0.0.1`, and the Docker stack publishes `:8080` on `127.0.0.1` only. Read [§ Security](#security--exposure-beyond-localhost) before widening either — under `auth.mode: disabled` that also exposes the unauthenticated REST API. |
+| A page or an API call answers `403` with `host name "..." is not expected` | The orchestrator answers only to the names in `auth.allowed_hosts` (`localhost`, `127.0.0.1` and `[::1]` as shipped), in both auth modes. Open the console as `http://localhost:8080/ui`, or add the name you use: see [where a request may come from](request-origin-checks.md). |
 | The console shows a "run `make ui`" placeholder | The binary was built without the real bundle (`go build` / `make build-orchestrator` alone embeds the placeholder). Run `make ui` first, or use `make run-ui` / the Docker image. |
 | Every asset 404s under `/ui/` | A bundle built without Vite's `base: "/ui/"`. Use `make ui` (configured correctly); do not hand-build. |
 | The Channel-timeline panel is missing | `channel_timeline.available` is false — channels are not wired. Check the channel config; the panel hides itself when its subsystem is absent. |
