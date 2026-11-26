@@ -186,7 +186,9 @@ console's writes pass depends on how browsers reach the proxy:
 So on plain HTTP, pass the browser's own `Host` through, port included, and
 list its name; or put TLS in front of the proxy. nginx sends the upstream's
 name unless told otherwise; `proxy_set_header Host $http_host;` passes the
-browser's value through.
+browser's value through. No setting names an origin the orchestrator should
+trust instead
+([ISSUE-0290](../issues/ISSUE-0290-behind-a-plain-http-proxy-that-rewrites-host-the-consoles-writes-are-refused.md)).
 
 ## What the checks do not do
 
