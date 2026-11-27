@@ -1,7 +1,7 @@
 # EXP-001 — The harness, third part: scoring
 
-> **Status**: 🚧 **In Progress** — PR 6d ([#1091](https://github.com/mkhomutov/Persatrix/pull/1091)), the scoring, is the last harness PR; its choices freeze when it merges.
-> **Last updated**: 2026-11-21
+> **Status**: ✅ **Implemented** — PR 6d ([#1091](https://github.com/mkhomutov/Persatrix/pull/1091)), the scoring, was the last harness PR; its choices froze when it merged.
+> **Last updated**: 2026-11-27
 > **Part of**: the [EXP-001 harness](EXP-001-harness.md), whose first part lists every harness PR; the [second part](EXP-001-harness-run.md) holds the judge, the practice run and the scored run
 
 The [second part](EXP-001-harness-run.md) reached its size limit, so PR

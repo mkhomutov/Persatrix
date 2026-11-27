@@ -1,7 +1,7 @@
 # EXP-001 — The harness's frozen choices: arm D′'s transcript prefix
 
-> **Status**: 🚧 **In Progress** — PR 5d's rows froze when it merged ([#1021](https://github.com/mkhomutov/Persatrix/pull/1021)), its review's changes included; PR 5e's rows, and its changes to two of PR 5d's, froze when it merged ([#1032](https://github.com/mkhomutov/Persatrix/pull/1032)).
-> **Last updated**: 2026-10-07
+> **Status**: ✅ **Implemented** — PR 5d's rows froze when it merged ([#1021](https://github.com/mkhomutov/Persatrix/pull/1021)), its review's changes included; PR 5e's rows, and its changes to two of PR 5d's, froze when it merged ([#1032](https://github.com/mkhomutov/Persatrix/pull/1032)).
+> **Last updated**: 2026-11-27
 > **Part of**: the [EXP-001 harness](EXP-001-harness.md); the [first part](EXP-001-harness-choices.md) holds the choices of PRs 1 to 4 and the arm order, the [second part](EXP-001-harness-choices-meetings.md) those of PRs 5a to 5c, the [fourth part](EXP-001-harness-choices-judge.md) PR 6a's, the [fifth part](EXP-001-harness-choices-practice.md) PR 6b's, and the [sixth part](EXP-001-harness-choices-scored.md) PR 6c's
 
 These are the frozen choices of PR 5d, which holds arm D′: the
