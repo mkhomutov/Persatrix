@@ -52,8 +52,9 @@ day later for #969 and #1140.
   [#1030](https://github.com/mkhomutov/Persatrix/pull/1030),
   [#1034](https://github.com/mkhomutov/Persatrix/pull/1034) and
   [#1035](https://github.com/mkhomutov/Persatrix/pull/1035). Before the
-  last two, a practice run showed that arm D's memory never brought back
-  the briefing ([what each practice run showed](EXP-001-harness-run.md)).
+  last two, a practice run showed that arm D's facts tier never brought
+  back the briefing
+  ([what each practice run showed](EXP-001-harness-run.md)).
   Arm D's figures are for memory as shipped at `c6ef01d`, with those fixes
   in.
 - **The harness, after the first scored meeting.** Part 1 §5 allows no
@@ -91,8 +92,8 @@ copied byte for byte from the run's own files:
   record, with each message posted, the memo or recall reply, what closed
   the discussion and each adviser's energy.
 - **The result as the harness wrote it**: `scores.json` and `scores.txt`,
-  which the result's scores, comparisons and per-arm figures come from; the scored run's report; and
-  `opened.json`, which holds the moment the seal opened and a SHA-256 of
+  which the result's scores, comparisons and per-arm figures come from; the
+  scored run's report; and `opened.json`, which holds the moment the seal opened and a SHA-256 of
   each sheet, the judge's answers and calls, the packets, the seal and the
   result.
 - **The AI raters' records**, as
@@ -115,10 +116,10 @@ without the advisers' stores and logs, and had the harness at `ff411f9`
 score the copy again. The harness accepted every hash `opened.json` holds
 and wrote `scores.json` and `scores.txt` again, byte for byte the same.
 Every score, comparison and per-arm figure in the result is from those two
-files.
-The run's dates, spend and call counts are from its report, the arm order
-is from the transcripts' times, and the counts in
-[the result's §6](EXP-001-result.md#6-each-meeting) are tallies of the harness's per-meeting list.
+files. The run's dates, spend and call counts are from its report, the arm
+order is from the transcripts' times, and the counts in
+[the result's §6](EXP-001-result.md#6-each-meeting) are tallies of the
+harness's per-meeting list.
 
 ## Related documentation
 

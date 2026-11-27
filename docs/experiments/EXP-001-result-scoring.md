@@ -13,10 +13,10 @@ scoring went. This is that report. Times are UTC.
 
 - **Rater 1 and rater 2.** Each is a Claude Code session of its own, on
   Fable 5.2, `claude-fable-5-2`, in an empty folder outside any repository.
-  A rater's session never reads a packet. It hands each prompt to a fresh
-  run of the same model, which reads that one prompt, calls no other tool
-  and hands back its answer: the scores, with a line on each memo. Rater 1 filled person-1's sheet and rater 2
-  person-2's.
+  A rater's session never opens a packet file. It hands each prompt to a
+  fresh run of the same model, which reads that one prompt, calls no other
+  tool and hands back its answer: the scores, with a line on each memo.
+  Rater 1 filled person-1's sheet and rater 2 person-2's.
 - **The judge.** `claude-opus-5`, one pass per packet, on 2026-11-06, as
   registered. No rater saw its scores.
 - **The coordinating session.** A third session, on Opus 5.5,
@@ -49,8 +49,8 @@ a run's record did not know, so the check refused the record. As rule 7
 provides, the harness was corrected by a pull request,
 [#1140](https://github.com/mkhomutov/Persatrix/pull/1140). A session on
 `claude-fable-5-2` reviewed it, and the maintainer merged it on 2026-11-20
-at 23:26. Each batch was then held again whole by a fresh
-run, and that run was entered.
+at 23:26. Each batch was then held again whole by a fresh run, and that
+run was entered.
 
 **No scored run was refused, failed or held again.** Each of the 18 scored
 batches took one run per rater. The first scored run started on 2026-11-26
